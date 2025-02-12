@@ -1,0 +1,15 @@
+{
+    "name": "voxgig/struct",
+    "description": "Data structure manipulations",
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "JosePerigolo",
+            "email": "neto.perigolo@gmail.com"
+        }
+    ],
+    "require-dev": {
+        "phpunit/phpunit": "^10.5"
+    }
+}

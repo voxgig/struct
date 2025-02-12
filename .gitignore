@@ -42,6 +42,12 @@ build/Release
 node_modules/
 jspm_packages/
 
+# PHP Composer
+vendor/
+
+# PHPUnit
+.phpunit.result.cache
+
 # Snowpack dependency directory (https://snowpack.dev/)
 web_modules/
 
