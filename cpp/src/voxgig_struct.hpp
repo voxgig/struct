@@ -183,7 +183,7 @@ try_access:
     } else {
       json arr = json::array();
       for(int i = 0; i < val.size(); i++) {
-        arr.push_back(i);
+        arr.push_back(std::to_string(i));
       }
       return arr;
     }
@@ -319,6 +319,10 @@ try_access:
 
     json _json = S::empty;
 
+    if(args.size() == 0){
+      return S::empty;
+    }
+
     try {
       _json = val.dump();
     } catch(const json::exception&) {
@@ -453,7 +457,184 @@ try_access:
   }
 
   json walk(args_container&& args) {
-    return false;
+    // These arguments are the public interface.
+    json val = args.size() == 0 ? nullptr : std::move(args[0]);
+    json apply = args.size() < 2 ? nullptr : std::move(args[1]);
+
+    // These arguments are used for recursive state.
+    json key = args.size() < 3 ? nullptr : std::move(args[2]);
+    json parent = args.size() < 4 ? nullptr : std::move(args[3]);
+    json path = args.size() < 5 ? nullptr : std::move(args[4]);
+
+
+    // NOTE: CHEAT SINCE WE CAN'T PASS A DATA STRUCTURE LIKE THIS INTO JSON SAFELY
+    JsonFunction* _apply = reinterpret_cast<JsonFunction*>(apply.get<intptr_t>());
+
+    /*
+      Walk a data structure depth-first, calling apply at each node (after children).
+    */
+
+    if(path == nullptr) {
+      path = json::array();
+    }
+
+    if(isnode({ val })) {
+      json _items = items({ val });
+
+      for(json::iterator item = _items.begin(); item != _items.end(); item++) {
+        json value = item.value();
+        json ckey = value[0];
+        json child = value[1];
+
+        json _path = json::array();
+        for(json::iterator p = path.begin(); p != path.end(); p++) {
+          _path.push_back(p.value());
+        }
+
+        /*
+        std::cout << "_path:: " << _path << std::endl;
+        std::cout << path << std::endl;
+        std::cout << "ckey:: " << ckey << std::endl;
+        std::cout << "child:: " << child << std::endl;
+        */
+
+        try {
+          _path.push_back(ckey.get<std::string>());
+        } catch(const json::exception&) {
+          _path.push_back(ckey.dump());
+        }
+
+        // NOTE: MUST DO "val = setprop(...)" since val as an argument is deep-copied. In other words, reference counting is not supported.
+        val = setprop({ val, ckey, walk({ child, apply, ckey, val, _path})});
+
+      }
+
+    }
+
+    // Nodes are applied *after* their children.
+    // For the root node, key and parent will be UNDEF.
+    return _apply->operator()({ key, val, parent, path });
+  }
+
+  json merge(args_container&& args) {
+    /*
+      Merge a list of values into each other. Later values have
+      precedence.  Nodes override scalars. Node kinds (list or map)
+      override each other, and do *not* merge.  The first element is
+      modified.
+    */
+
+    json objs = args.size() == 0 ? nullptr : std::move(args[0]);
+
+    if(islist({objs}) == false) {
+      return objs;
+    }
+    if(objs.size() == 0) {
+      return nullptr;
+    }
+    if(objs.size() == 1) {
+      return objs[0];
+    }
+
+    json out = json::object();
+
+    for(int i = 0; i < objs.size(); i++) {
+      out.merge_patch(objs[i]);
+    }
+
+    /*
+    if(islist({objs}) == false) {
+      return objs;
+    }
+    if(objs.size() == 0) {
+      return nullptr;
+    }
+    if(objs.size() == 1) {
+      return objs[0];
+    }
+
+    // Merge a list of values.
+    json out = getprop({ objs, 0, json::object() });
+
+    for(int i = 1; i < objs.size(); i++) {
+      json& obj = objs[i];
+
+      if(isnode({ obj }) == false) {
+        out = obj;
+      } else {
+
+        // Nodes win, also over nodes of a different kind
+        if(isnode({ out }) == false || 
+            (ismap({ obj }).get<bool>() && islist({ obj }).get<bool>()) ||
+            (islist({ obj }).get<bool>() && ismap({ out }).get<bool>())) {
+          out = obj;
+        } else {
+
+          json cur = json::array({ out });
+          int cI = 0;
+
+          std::cout << "before cI: " << cI << std::endl;
+
+          JsonFunction* merger = new JsonFunction([&cur, &cI](args_container&& args) -> json {
+              
+              json key = args.size() == 0 ? nullptr : std::move(args[0]);
+              json val = args.size() < 2 ? nullptr : std::move(args[1]);
+              
+              json parent = args.size() < 3 ? nullptr : std::move(args[2]);
+              json path = args.size() < 4 ? nullptr : std::move(args[3]);
+
+
+              if(key == nullptr) {
+                return val;
+              }
+
+              int lenpath = path.size();
+              cI = lenpath - 1;
+
+              for(int i = 0; i < 1+cI-cur.size(); i++) {
+                cur.push_back(json(nullptr));
+              }
+
+              if(cur[cI] == nullptr) {
+                // cur[cI] = get
+              }
+
+              if(isnode({val}).get<bool>() && !(isempty({ val }).get<bool>())) {
+
+                for(int i = 0; i < 2+cI+cur.size(); i++) {
+                  cur.push_back(json(nullptr));
+                }
+
+                cur[cI] = setprop({ cur[cI], key, cur[cI + 1] });
+
+                cur[cI + 1] = json(nullptr);
+
+
+              } else {
+                // Scalar child.
+                cur[cI] = setprop({ cur[cI], key, val });
+              }
+
+              return val;
+          });
+
+          walk({ obj, reinterpret_cast<intptr_t>(merger) });
+
+          std::cout << "after cI: " << cI << std::endl;
+
+          delete merger;
+
+
+        }
+
+      }
+
+    }
+  */
+
+
+
+    return out;
   }
 
 

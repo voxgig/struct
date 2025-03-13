@@ -49,7 +49,12 @@ struct Struct : public Utility {
         { "stringify", stringify },
         { "clone", clone },
         { "setprop", setprop },
-        });
+
+        { "walk", walk },
+        { "merge", merge },
+
+    });
+
   }
 
   ~Struct() = default;
@@ -87,21 +92,26 @@ json walkpath(args_container&& args) {
   json path = args.size() < 4 ? nullptr : std::move(args[3]);
 
   if(val.is_string()) {
-    std::string out;
-    out = val.get<std::string>() + "~";
+    std::string out = val.get<std::string>() + "~";
 
     std::string path_joint;
 
     int i = 0;
     int size = path.size();
 
+    // std::cout << "path::: " << path << std::endl;
+
     for(json::iterator p = path.begin(); p != path.end(); p++, i++) {
       path_joint += p->get<std::string>();
 
-      if(i < size-2) {
+      if(i < size-1) {
         path_joint += '.';
       }
     }
+
+    out += path_joint;
+
+    // std::cout << "out:: " << out << std::endl;
 
 
 
@@ -205,9 +215,14 @@ int main() {
         // std::cout << "json vin: " << vin << std::endl;
         // NOTE: operator[] is not good (isn't the best lookup) for auxiliary space since it creates an empty entry if the value is not found
         if(!vin.contains("max")) {
-          return stringify({
-              vin.value("val", json(nullptr))
-              });
+          // NOTE: edge case "{ in: { }, out: '' }"
+          if(vin.contains("val")) {
+            return stringify({
+                vin.value("val", json(nullptr))
+               });
+          } else {
+            return stringify({});
+          }
         } else {
           return stringify({
               vin.value("val", json(nullptr)),
@@ -217,7 +232,7 @@ int main() {
       };
 
       // TODO: Use nullptr for now since we can't have std::function with optional arguments. Instead, we need to rewrite the entire class to implement our own closure and "operator()"
-      runset(spec["minor"]["stringify"], stringify_wrapper, nullptr);
+      runset(spec["minor"]["stringify"], stringify_wrapper, { { "fixjson", false } });
     }
 
     TEST_CASE("test_minor_clone") {
@@ -242,21 +257,34 @@ int main() {
     // walk tests
     // -------------------------------------------------
 
-    /*
     TEST_CASE("test_walk_basic") {
+      JsonFunction* _walkpath = new JsonFunction(walkpath);
 
-      JsonFunction walk_wrapper = [](args_container&& args) -> json {
+      JsonFunction walk_wrapper = [=](args_container&& args) -> json {
         json vin = args.size() == 0 ? nullptr : std::move(args[0]);
         return walk({
             std::move(vin),
-            (intptr_t)walkpath,
+            reinterpret_cast<intptr_t>(_walkpath),
             });
       };
 
       // TODO: Use nullptr for now since we can't have std::function with optional arguments. Instead, we need to rewrite the entire class to implement our own closure and "operator()"
-      runset(spec["minor"]["setprop"], walk_wrapper, nullptr);
+      runset(spec["walk"]["basic"], walk_wrapper, nullptr);
+
+      delete _walkpath;
     }
-    */
+
+    // -------------------------------------------------
+    // merge tests
+    // -------------------------------------------------
+    
+    TEST_CASE("test_merge_basic") {
+
+      json test_data = clone({ spec["merge"]["basic"] });
+      // std::cout << test_data << std::endl;
+
+      assert(merge({ test_data["in"] }) == test_data["out"]);
+    }
 
 
 
