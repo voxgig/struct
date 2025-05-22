@@ -23,6 +23,7 @@
     "test-cov": "rm -rf ./coverage && mkdir -p ./coverage && node --experimental-test-coverage --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/lcov.info --enable-source-maps --test dist-test/struct.test.js",
     "test-some": "node --enable-source-maps --test-name-pattern=\"$npm_config_pattern\" --test dist-test/struct.test.js",
     "test-direct": "node dist-test/direct.js",
+    "doc": "echo doc",
     "watch": "tsc --build src test -w",
     "build": "tsc --build src test",
     "clean": "rm -rf dist dist-test node_modules yarn.lock package-lock.json",
