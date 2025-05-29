@@ -1552,30 +1552,45 @@ const validate_ANY: Injector = (inj: Injection) => {
 // Map syntax: {'`$CHILD`': child-template }
 // List syntax: ['`$CHILD`', child-template ]
 const validate_CHILD: Injector = (inj: Injection) => {
+  console.log("\n=== validate_CHILD Entry ===")
+  console.log(`Mode: ${inj.mode}`)
+  console.log(`Key: ${inj.key}`)
+  console.log(`Parent: ${stringify(inj.parent)}`)
+  console.log(`Path: ${stringify(inj.path)}`)
+  console.log(`Current: ${stringify(inj.dparent)}`)
+  console.log(`Store: ${stringify(inj.extra)}`)
+
   const { mode, key, parent, keys, path } = inj
 
   // Setup data structures for validation by cloning child template.
 
   // Map syntax.
   if (S_MKEYPRE === mode) {
+    console.log("\nProcessing as object/map")
     const childtm = getprop(parent, key)
+    console.log(`\nChild template: ${stringify(childtm)}`)
 
     // Get corresponding current object.
     const pkey = getprop(path, path.length - 2)
-    // let tval = getprop(current, pkey)
     let tval = getprop(inj.dparent, pkey)
+    console.log(`\nTarget value to validate: ${stringify(tval)}`)
 
     if (UNDEF == tval) {
+      console.log("No target value found, using empty object")
       tval = {}
     }
     else if (!ismap(tval)) {
+      console.log("\nNot an object, type error")
       inj.errs.push(_invalidTypeMsg(
         slice(inj.path, -1), S_object, typify(tval), tval), 'V0220')
       return UNDEF
     }
 
     const ckeys = keysof(tval)
+    console.log(`\nFound ${ckeys.length} child keys to validate`)
     for (let ckey of ckeys) {
+      console.log(`\nValidating child key: ${ckey}`)
+      console.log(`Child value: ${stringify(getprop(tval, ckey))}`)
       setprop(parent, ckey, clone(childtm))
 
       // NOTE: modifying inj! This extends the child value loop in inject.
@@ -1583,53 +1598,55 @@ const validate_CHILD: Injector = (inj: Injection) => {
     }
 
     // Remove $CHILD to cleanup ouput.
+    console.log("\nRemoving $CHILD key from parent")
     inj.setval(UNDEF)
     return UNDEF
   }
 
   // List syntax.
   if (S_MVAL === mode) {
+    console.log("\nProcessing as array/list")
 
     if (!islist(parent)) {
-      // $CHILD was not inside a list.
+      console.log("\n$CHILD was not inside a list")
       inj.errs.push('Invalid $CHILD as value')
       return UNDEF
     }
 
     const childtm = getprop(parent, 1)
+    console.log(`\nChild template: ${stringify(childtm)}`)
 
-    // if (UNDEF === current) {
     if (UNDEF === inj.dparent) {
-      // Empty list as default.
+      console.log("\nNo target value found, using empty array")
       parent.length = 0
       return UNDEF
     }
 
-    //if (!islist(current)) {
     if (!islist(inj.dparent)) {
+      console.log("\nNot an array, type error")
       const msg = _invalidTypeMsg(
-        // slice(inj.path, -1), S_array, typify(current), current, 'V0230')
         slice(inj.path, -1), S_array, typify(inj.dparent), inj.dparent, 'V0230')
       inj.errs.push(msg)
       inj.keyI = parent.length
-      // return current
       return inj.dparent
     }
 
-    // Clone children abd reset inj key index.
+    console.log(`\nFound ${inj.dparent.length} array elements to validate`)
+    // Clone children and reset inj key index.
     // The inject child loop will now iterate over the cloned children,
-    // validating them againt the current list values.
-
-    // current.map((_n, i) => parent[i] = clone(childtm))
-    inj.dparent.map((_n, i) => parent[i] = clone(childtm))
-    // parent.length = current.length
+    // validating them against the current list values.
+    inj.dparent.map((_n, i) => {
+      console.log(`\nValidating array element ${i}`)
+      console.log(`Element value: ${stringify(_n)}`)
+      parent[i] = clone(childtm)
+    })
     parent.length = inj.dparent.length
     inj.keyI = 0
-    // const out = getprop(current, 0)
     const out = getprop(inj.dparent, 0)
     return out
   }
 
+  console.log("\n=== validate_CHILD Exit ===")
   return UNDEF
 }
 
