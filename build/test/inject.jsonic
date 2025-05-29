@@ -60,6 +60,16 @@ deep: {
     { in: { val: ['`0`','`1`'], store: [11,22,33] }, out: [11,22] }
 
     { in: { val:{x:'`hold.$TOP`'} , store: {hold:{'$TOP': 44}} }, out: {x:44} }
+
+
+    { in: { val: {x:1}, store: null }, out: {x:1} }
+    { in: { val: null, store: null }, out: null }
+    { in: { val: null, store: {s:1} }, out: null }
+
+    { in: { val: {x:1} }, out: {x:1} }
+    { in: { store: null }, out: null }
+    { in: { val: null }, out: null }
+    { in: { store: {x:1} }, out: null }
   ]
 }
 

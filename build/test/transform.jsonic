@@ -107,6 +107,17 @@ cmds: {
     { in: { data: {a:{b:8}}, spec: {a:'`$DELETE`'} }, out: {} }
 
     { in: { data: {}, spec: {a:'`$BT`$COPY`$BT`'} }, out: {a:'`$COPY`'} }
+
+
+    { in: { spec: {q:1} }, out: {q:1} }
+    { in: { spec: {q:'`$COPY`'} }, out: {} }
+
+    { in: { data: null, spec: {q:1} }, out: {q:1} }
+    { in: { data: null, spec: {q:'`$COPY`'} }, out: {} }
+
+    { in: { data: {q:2}, spec: null }, out: null }
+    { in: { data: {q:2} } }
+    { in: { } }
   ]
 }
 

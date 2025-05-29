@@ -162,11 +162,11 @@ function resolveTestPack(name, entry, subject, client, clients) {
     }
     return testpack;
 }
-function match(check, base, structUtils) {
-    base = structUtils.clone(base);
+function match(check, basex, structUtils) {
+    const cbase = structUtils.clone(basex);
     structUtils.walk(check, (_key, val, _parent, path) => {
         if (!structUtils.isnode(val)) {
-            let baseval = structUtils.getpath(base, path);
+            let baseval = structUtils.getpath(cbase, path);
             if (baseval === val) {
                 return val;
             }
@@ -188,8 +188,6 @@ function match(check, base, structUtils) {
     });
 }
 function matchval(check, base, structUtils) {
-    // check = NULLMARK === check || UNDEFMARK === check ? undefined : check
-    // check = NULLMARK === check ? undefined : check
     let pass = check === base;
     if (!pass) {
         if ('string' === typeof check) {

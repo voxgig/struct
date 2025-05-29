@@ -1,0 +1,214 @@
+#!/usr/bin/env node
+
+const fs = require('fs');
+const path = require('path');
+
+// Language configuration
+const languages = {
+  js: { file: 'js/src/struct.js', comment: '//' },
+  py: { file: 'py/voxgig_struct/voxgig_struct.py', comment: '#' },
+  go: { file: 'go/voxgigstruct.go', comment: '//' },
+  java: { file: 'java/src/Struct.java', comment: '//' },
+  php: { file: 'php/src/Struct.php', comment: '//' },
+  rb: { file: 'rb/voxgig_struct.rb', comment: '#' },
+  lua: { file: 'lua/src/struct.lua', comment: '--' },
+  cpp: { file: 'cpp/src/voxgig_struct.hpp', comment: '//' },
+  ts: { file: 'ts/src/struct.ts', comment: '//' }
+};
+
+// Get command line argument
+const arg = process.argv[2];
+
+if (!arg) {
+  console.log('Usage: node extract-function-comments.js <show|language>');
+  console.log('Available languages:', Object.keys(languages).join(', '));
+  process.exit(1);
+}
+
+// Read the TypeScript struct file to extract function comments
+const structPath = path.join(__dirname, '../ts/src/struct.ts');
+const sourceText = fs.readFileSync(structPath, 'utf8');
+
+function extractFunctionComments(sourceText) {
+  const lines = sourceText.split('\n');
+  const functionComments = new Map();
+  
+  let currentComment = '';
+  let inComment = false;
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    
+    // Check if this line starts a single-line comment
+    if (line.startsWith('//')) {
+      if (!inComment) {
+        currentComment = line;
+        inComment = true;
+      } else {
+        currentComment += '\n' + line;
+      }
+      continue;
+    }
+    
+    // Check if this line contains a function declaration
+    const functionMatch = line.match(/^(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\(/);
+    
+    if (functionMatch) {
+      const functionName = functionMatch[1];
+      
+      if (inComment && currentComment) {
+        // Filter out all lines starting from "NOTE:"
+        const lines = currentComment.split('\n');
+        const filteredLines = [];
+        
+        for (const line of lines) {
+          if (line.trim().startsWith('// NOTE:')) {
+            break;
+          }
+          filteredLines.push(line);
+        }
+        
+        const filteredComment = filteredLines.join('\n').trim();
+        if (filteredComment) {
+          functionComments.set(functionName, filteredComment);
+        }
+      }
+      
+      currentComment = '';
+      inComment = false;
+      continue;
+    }
+    
+    // If this line is not empty and not a comment, reset comment tracking
+    if (line !== '') {
+      currentComment = '';
+      inComment = false;
+    }
+  }
+  
+  return functionComments;
+}
+
+function showComments(functionComments) {
+  console.log('Function Comments Map:');
+  console.log('=====================');
+  
+  if (functionComments.size === 0) {
+    console.log('No functions with preceding comments found.');
+  } else {
+    for (const [functionName, comment] of functionComments) {
+      console.log(`\nFunction: ${functionName}`);
+      console.log('Comment:');
+      console.log(comment);
+      console.log('-'.repeat(50));
+    }
+  }
+  
+  console.log(`\nTotal functions with comments found: ${functionComments.size}`);
+}
+
+function insertComments(fileContent, languageConfig, functionComments) {
+  console.log(`insertComments called for ${languageConfig.comment} syntax with ${functionComments.size} comments`);
+  
+  const commentPrefix = languageConfig.comment;
+  
+  // Convert TypeScript comments to target language syntax
+  const convertComment = (tsComment) => {
+    return tsComment
+      .split('\n')
+      .map(line => line.replace(/^\/\//, commentPrefix))
+      .join('\n');
+  };
+  
+  // Escape comment prefix for regex (handle special chars like // and --)
+  const escapedPrefix = commentPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  
+  // Regular expression to match:
+  // 1. Optional whitespace/empty lines before comments
+  // 2. Comment block (excluding NOTE parts)
+  // 3. NOTE section (optional, captured separately to preserve)
+  // 4. Complete function declaration with function name and signature
+  const functionRegex = new RegExp(
+    `((?:\\s*\\n)*)` +                                    // Group 1: Leading whitespace/empty lines
+    `((?:^\\s*${escapedPrefix}(?!.*NOTE:).*\\n)*)` +      // Group 2: Non-NOTE comment lines
+    `((?:^\\s*${escapedPrefix}.*NOTE:.*\\n(?:^\\s*${escapedPrefix}.*\\n)*)?)` +  // Group 3: NOTE section
+    `(\\s*)` +                                            // Group 4: Whitespace before function
+    `(^\\s*(?:function\\s+|def\\s+|func\\s+|public\\s+(?:static\\s+)?(?:function\\s+)?)` + // Group 5: Function keywords
+    `(\\w+)` +                                            // Group 6: Function name
+    `[^{]*\\{)`,                                          // Rest of function signature up to opening brace
+    'gm'
+  );
+  
+  let result = '';
+  let lastIndex = 0;
+  let match;
+  
+  while ((match = functionRegex.exec(fileContent)) !== null) {
+    const [fullMatch, leadingWhitespace, oldComment, noteSection, preFunction, functionDeclaration, functionName] = match;
+    const matchStart = match.index;
+    
+    console.log(`Found function: ${functionName}`);
+    
+    // Add content before this match
+    result += fileContent.substring(lastIndex, matchStart);
+    
+    if (functionComments.has(functionName)) {
+      console.log(`Updating comments for function: ${functionName}`);
+      
+      // Convert the TypeScript comment to target language syntax
+      const newComment = convertComment(functionComments.get(functionName));
+      
+      // Build the replacement:
+      // leading whitespace + new comment + NOTE section + pre-function whitespace + function declaration
+      result += leadingWhitespace +
+                newComment + '\n' +
+                (noteSection || '') +
+                preFunction +
+                functionDeclaration;
+    } else {
+      // No replacement needed, keep original
+      result += fullMatch;
+    }
+    
+    lastIndex = match.index + fullMatch.length;
+  }
+  
+  // Add any remaining content after the last match
+  result += fileContent.substring(lastIndex);
+  
+  return result;
+}
+
+function updateLanguageFile(languageConfig, functionComments) {
+  const filePath = path.join(__dirname, '../', languageConfig.file);
+  
+  if (!fs.existsSync(filePath)) {
+    console.error(`File not found: ${filePath}`);
+    return;
+  }
+  
+  console.log(`Loading file: ${filePath}`);
+  const originalContent = fs.readFileSync(filePath, 'utf8');
+  
+  console.log(`Processing comments for ${languageConfig.comment} syntax...`);
+  const updatedContent = insertComments(originalContent, languageConfig, functionComments);
+  
+  console.log(`Writing updated content back to: ${filePath}`);
+  fs.writeFileSync(filePath, updatedContent);
+  
+  console.log(`Successfully updated ${filePath}`);
+}
+
+// Main execution
+const functionComments = extractFunctionComments(sourceText);
+
+if (arg === 'show') {
+  showComments(functionComments);
+} else if (languages[arg]) {
+  console.log(`Updating ${arg} implementation with TypeScript comments...`);
+  updateLanguageFile(languages[arg], functionComments);
+} else {
+  console.error(`Unknown argument: ${arg}`);
+  console.log('Available options: show, ' + Object.keys(languages).join(', '));
+  process.exit(1);
+}

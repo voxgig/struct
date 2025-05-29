@@ -227,6 +227,18 @@ invalid: set: [
   { in: { data:{b0:1,a0:'a'}, spec: {a0:11,b0:'bb'}},
     err: 'Expected field a0 to be number, but found string: a. | '+
          'Expected field b0 to be string, but found number: 1.' }
+
+  { in: { data: {a0:2}, spec: {a0:['`$EXACT`', 1]} },
+    err: 'Invalid data: Expected field a0 to be exactly equal to 1, but found number: 2.' }
+
+  { in: { data: {}, spec:{a1:['`$EXACT`', 1] } },
+    err: 'Invalid data: Expected field a1 to be exactly equal to 1, but found no value.' }
+
+  { in: { data: null, spec:{a2:['`$EXACT`', 1] } },
+    err: 'Invalid data: Expected field a2 to be exactly equal to 1, but found no value.' }
+
+  { in: { spec:{a3:['`$EXACT`', 1] } },
+    err: 'Invalid data: Expected field a3 to be exactly equal to 1, but found no value.' }
 ]
 
 
@@ -247,4 +259,8 @@ special: set: [
   { in: { data: {x13:'s13'}, spec:{x13:'`q0$=x1`' }, inj:meta:q0:x1:103 },
     err: 'Invalid data: Expected field x13 to be exactly equal to 103, but found string: s13.'}
 
+  { in: { data: {x14:104}, spec:{x14:'`q0$~x1`' }, inj:meta:q0:x1:104 }, out: {x14:104} }
+  { in: { data: {x15:204}, spec:{x15:'`q0$~x1`' }, inj:meta:q0:x1:104 }, out: {x15:204} }
+  { in: { data: {x16:'s16'}, spec:{x16:'`q0$~x1`' }, inj:meta:q0:x1:104 }
+    err: 'Invalid data: Expected field x16 to be number, but found string: s16.' }
 ]

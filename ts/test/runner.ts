@@ -282,14 +282,14 @@ function resolveTestPack(
 
 function match(
   check: any,
-  base: any,
+  basex: any,
   structUtils: Record<string, any>
 ) {
-  base = structUtils.clone(base)
+  const cbase = structUtils.clone(basex)
 
   structUtils.walk(check, (_key: any, val: any, _parent: any, path: any) => {
     if (!structUtils.isnode(val)) {
-      let baseval = structUtils.getpath(base, path)
+      let baseval = structUtils.getpath(cbase, path)
 
       if (baseval === val) {
         return val
@@ -322,9 +322,6 @@ function matchval(
   base: any,
   structUtils: Record<string, any>
 ) {
-  // check = NULLMARK === check || UNDEFMARK === check ? undefined : check
-  // check = NULLMARK === check ? undefined : check
-
   let pass = check === base
 
   if (!pass) {
