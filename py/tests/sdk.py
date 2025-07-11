@@ -1,4 +1,3 @@
-
 import voxgig_struct
 
 # class StructUtils:
@@ -21,11 +20,7 @@ class Utility:
         self.struct = voxgig_struct.StructUtility()
 
     def contextify(self, ctxmap):
-        ctx = Context()
-        meta = ctxmap.get('meta',{})
-        for k,v in meta.items():
-            ctx.meta[k] = v
-        return ctx
+        return ctxmap
             
     def check(self, ctx):
         zed = "ZED"

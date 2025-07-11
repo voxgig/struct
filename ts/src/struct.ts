@@ -746,9 +746,15 @@ function merge(val: any): any {
 function getpath(store: any, path: string | string[],
   injdef?: Partial<Injection>
 ) {
+  console.log("\n=== getpath Entry ===")
+  console.log("getpath LOG: store: "+stringify(store))
+  console.log("getpath LOG: path: "+stringify(path))
+  console.log("getpath LOG: injdef: "+stringify(injdef))
 
   // Operate on a string array.
   const parts = islist(path) ? path : S_string === typeof path ? path.split(S_DT) : UNDEF
+
+  console.log("getpath LOG: parts: "+stringify(parts))
 
 
   if (UNDEF === parts) {
@@ -761,85 +767,120 @@ function getpath(store: any, path: string | string[],
   const src = getprop(store, base, store)
   const numparts = size(parts)
   const dparent = getprop(injdef, 'dparent')
+  
+  console.log("getpath LOG: base: "+stringify(base))
+  console.log("getpath LOG: src: "+stringify(src))
+  console.log("getpath LOG: numparts: "+stringify(numparts))
+  console.log("getpath LOG: dparent: "+stringify(dparent))
+  console.log("getpath LOG: val: "+stringify(val))
 
   // An empty path (incl empty string) just finds the store.
   if (null == path || null == store || (1 === numparts && S_MT === parts[0])) {
     val = src
+    console.log("getpath LOG: Empty path case, val = src")
   }
   else if (0 < numparts) {
 
     // Check for $ACTIONs
     if (1 === numparts) {
       val = getprop(store, parts[0])
+      console.log("getpath LOG: Single part path, val = "+stringify(val))
+      console.log("getpath LOG: store : "+stringify(store))
+      console.log("getpath LOG: parts[0] : "+stringify(parts[0]))
     }
 
     if (!isfunc(val)) {
       val = src
+      console.log("getpath LOG: Not a function, val = src = "+stringify(val))
 
       const m = parts[0].match(R_META_PATH)
       if (m && injdef && injdef.meta) {
         val = getprop(injdef.meta, m[1])
         parts[0] = m[3]
+        console.log("getpath LOG: Meta path match, val = "+stringify(val)+", parts[0] = "+parts[0])
       }
 
       const dpath = getprop(injdef, 'dpath')
+      console.log("getpath LOG: dpath = "+stringify(dpath))
 
       for (let pI = 0; UNDEF !== val && pI < parts.length; pI++) {
         let part = parts[pI]
+        console.log("getpath LOG: Processing part "+pI+": "+stringify(part))
 
         if (injdef && S_DKEY === part) {
           part = getprop(injdef, S_key)
+          console.log("getpath LOG: $KEY substitution, part = "+stringify(part))
         }
         else if (injdef && part.startsWith('$GET:')) {
           // $GET:path$ -> get store value, use as path part (string)
-          part = stringify(getpath(src, part.substring(5, part.length - 1)))
+          const get_path = part.substring(5, part.length - 1)
+          const get_result = getpath(src, get_path)
+          part = stringify(get_result)
+          console.log("getpath LOG: $GET substitution, path="+get_path+", result="+stringify(get_result)+", part="+part)
         }
         else if (injdef && part.startsWith('$REF:')) {
           // $REF:refpath$ -> get spec value, use as path part (string)
-          part = stringify(getpath(getprop(store, S_DSPEC), part.substring(5, part.length - 1)))
+          const ref_path = part.substring(5, part.length - 1)
+          const spec = getprop(store, S_DSPEC)
+          const ref_result = getpath(spec, ref_path)
+          part = stringify(ref_result)
+          console.log("getpath LOG: $REF substitution, path="+ref_path+", result="+stringify(ref_result)+", part="+part)
         }
         else if (injdef && part.startsWith('$META:')) {
           // $META:metapath$ -> get meta value, use as path part (string)
-          part = stringify(getpath(getprop(injdef, 'meta'), part.substring(6, part.length - 1)))
+          const meta_path = part.substring(6, part.length - 1)
+          const meta_result = getpath(getprop(injdef, 'meta'), meta_path)
+          part = stringify(meta_result)
+          console.log("getpath LOG: $META substitution, path="+meta_path+", result="+stringify(meta_result)+", part="+part)
         }
 
         // $$ escapes $
         part = part.replace(R_DOUBLE_DOLLAR, '$')
+        console.log("getpath LOG: After dollar escape, part = "+stringify(part))
 
         if (S_MT === part) {
+          console.log("getpath LOG: Empty part, handling ascends")
 
           let ascends = 0
           while (S_MT === parts[1 + pI]) {
             ascends++
             pI++
           }
+          console.log("getpath LOG: ascends = "+ascends+", pI = "+pI)
 
           if (injdef && 0 < ascends) {
             if (pI === parts.length - 1) {
               ascends--
+              console.log("getpath LOG: At end, ascends reduced to "+ascends)
             }
 
             if (0 === ascends) {
               val = dparent
+              console.log("getpath LOG: ascends=0, val = dparent = "+stringify(val))
             }
             else {
               const fullpath = slice(dpath, 0 - ascends).concat(parts.slice(pI + 1))
+              console.log("getpath LOG: fullpath = "+stringify(fullpath))
 
               if (ascends <= size(dpath)) {
                 val = getpath(store, fullpath)
+                console.log("getpath LOG: Recursive getpath result = "+stringify(val))
               }
               else {
                 val = UNDEF
+                console.log("getpath LOG: ascends > dpath size, val = UNDEF")
               }
               break
             }
           }
           else {
             val = dparent
+            console.log("getpath LOG: No injdef or ascends=0, val = dparent = "+stringify(val))
           }
         }
         else {
           val = getprop(val, part)
+          console.log("getpath LOG: getprop(val, '"+part+"') = "+stringify(val))
         }
       }
     }
@@ -849,9 +890,12 @@ function getpath(store: any, path: string | string[],
   const handler = getprop(injdef, 'handler')
   if (null != injdef && isfunc(handler)) {
     const ref = pathify(path)
+    console.log("getpath LOG: Calling custom handler with ref = "+ref)
     val = handler(injdef, val, ref, store)
+    console.log("getpath LOG: Handler result = "+stringify(val))
   }
 
+  console.log("getpath LOG: Final result = "+stringify(val))
   return val
 }
 
@@ -985,6 +1029,9 @@ const transform_DELETE: Injector = (inj: Injection) => {
 // Copy value from source data.
 const transform_COPY: Injector = (inj: Injection, _val: any) => {
   const { mode, key } = inj
+
+  console.log("\n=== transform_COPY Entry ===")
+  console.log("COPY LOG: state: "+inj.toString())
 
   let out = key
   if (!mode.startsWith(S_MKEY)) {
@@ -1166,48 +1213,78 @@ const transform_PACK: Injector = (
   _ref: string,
   store: any
 ) => {
+  console.log("\n=== transform_PACK Entry ===")
+  console.log("PACK LOG: inj = " + inj.toString())
   const { mode, key, path, parent, nodes } = inj
+  console.log(`PACK LOG: mode = ${mode}, key = ${key}, path = ${path}, parent = ${stringify(parent)}, nodes = ${stringify(nodes)}`)
 
   // Defensive context checks.
+  console.log(`PACK LOG: mode !== S_MKEYPRE: ${mode !== S_MKEYPRE}`)
+  console.log(`PACK LOG: typeof key !== S_string: ${typeof key !== S_string}`)
+  console.log(`PACK LOG: path == null: ${path == null}`)
+  console.log(`PACK LOG: nodes == null: ${nodes == null}`)
   if (S_MKEYPRE !== mode || S_string !== typeof key || null == path || null == nodes) {
+    console.log("PACK LOG: Early return - context checks failed")
     return UNDEF
   }
 
   // Get arguments.
   const args = parent[key]
+  console.log(`PACK LOG: args = ${stringify(args)}`)
   const srcpath = args[0] // Path to source data.
   const child = clone(args[1]) // Child template.
+  console.log(`PACK LOG: srcpath = ${srcpath}`)
+  console.log(`PACK LOG: child = ${stringify(child)}`)
 
   // Find key and target node.
   const keyprop = child[S_BKEY]
+  console.log(`PACK LOG: keyprop = ${keyprop}`)
   const tkey = getelem(path, -2)
+  console.log(`PACK LOG: tkey = ${tkey}`)
   const target = nodes[path.length - 2] || nodes[path.length - 1]
+  console.log(`PACK LOG: target = ${stringify(target)}`)
 
   // Source data
   const srcstore = getprop(store, inj.base, store)
-
+  console.log(`PACK LOG: srcstore = ${stringify(srcstore)}`)
   let src = getpath(srcstore, srcpath, inj)
+  console.log(`PACK LOG: src = ${stringify(src)}`)
 
   // Prepare source as a list.
-  src = islist(src) ? src :
-    ismap(src) ? Object.entries(src)
-      .reduce((a: any[], n: any) =>
-        (n[1][S_BANNO] = { KEY: n[0] }, a.push(n[1]), a), []) :
-      UNDEF
+  if (islist(src)) {
+    console.log("PACK LOG: src is already a list")
+  } else if (ismap(src)) {
+    console.log("PACK LOG: src is a map, converting to list")
+    src = Object.entries(src)
+      .reduce((a: any[], n: any) => {
+        n[1][S_BANNO] = { KEY: n[0] }
+        a.push(n[1])
+        return a
+      }, [])
+    console.log(`PACK LOG: converted src = ${stringify(src)}`)
+  } else {
+    console.log("PACK LOG: src is not a node, setting to UNDEF")
+    src = UNDEF
+  }
 
   if (null == src) {
+    console.log("PACK LOG: src is UNDEF, returning UNDEF")
     return UNDEF
   }
 
   // Get key if specified.
   let childkey: PropKey | undefined = getprop(child, S_BKEY)
+  console.log(`PACK LOG: childkey = ${childkey}`)
   let keyname = UNDEF === childkey ? keyprop : childkey
+  console.log(`PACK LOG: keyname = ${keyname}`)
   delprop(child, S_BKEY)
 
   // Build parallel target object.
   let tval: any = {}
-  tval = src.reduce((a: any, n: any) => {
+  console.log(`PACK LOG: Building tval from ${src.length} source items`)
+  tval = src.reduce((a: any, n: any, i: number) => {
     let kn = getprop(n, keyname)
+    console.log(`PACK LOG: Item ${i}: kn = ${kn}`)
     setprop(a, kn, clone(child))
     const nchild = getprop(a, kn)
     const mval = getprop(n, S_BANNO)
@@ -1219,10 +1296,12 @@ const transform_PACK: Injector = (
     }
     return a
   }, tval)
+  console.log(`PACK LOG: tval = ${stringify(tval)}`)
 
   let rval = {}
 
   if (0 < size(tval)) {
+    console.log(`PACK LOG: Processing ${size(tval)} items`)
 
     // Build parallel source object.
     let tcur: any = {}
@@ -1233,16 +1312,23 @@ const transform_PACK: Injector = (
     }, tcur)
 
     const tpath = slice(inj.path, -1)
+    console.log(`PACK LOG: tpath = ${stringify(tpath)}`)
 
     const ckey = getelem(inj.path, -2)
+    console.log(`PACK LOG: ckey = ${ckey}`)
     const dpath = [S_DTOP, ...srcpath.split(S_DT), '$:' + ckey]
+    console.log(`PACK LOG: dpath = ${stringify(dpath)}`)
 
     tcur = { [ckey]: tcur }
+    console.log(`PACK LOG: tcur = ${stringify(tcur)}`)
 
     if (1 < tpath.length) {
       const pkey = getelem(inj.path, -3, S_DTOP)
+      console.log(`PACK LOG: pkey = ${pkey}`)
       tcur = { [pkey]: tcur }
       dpath.push('$:' + pkey)
+      console.log(`PACK LOG: tcur (after pkey) = ${stringify(tcur)}`)
+      console.log(`PACK LOG: dpath (after pkey) = ${stringify(dpath)}`)
     }
 
     const tinj = inj.child(0, [ckey])
@@ -1255,12 +1341,19 @@ const transform_PACK: Injector = (
 
     tinj.dpath = dpath
     tinj.dparent = tcur
+    console.log(`PACK LOG: About to call inject with tval = ${stringify(tval)}`)
+    console.log(`PACK LOG: tinj.dparent = ${stringify(tcur)}`)
 
     inject(tval, store, tinj)
     rval = tinj.val
+    console.log(`PACK LOG: After inject, rval = ${stringify(rval)}`)
   }
 
+  console.log(`PACK LOG: Calling _updateAncestors with target = ${stringify(target)}, tkey = ${tkey}, rval = ${stringify(rval)}`)
   _updateAncestors(inj, target, tkey, rval)
+  console.log(`PACK LOG: After _updateAncestors, target = ${stringify(target)}`)
+  console.log("PACK LOG: Returning UNDEF to drop transform key")
+  console.log("=== transform_PACK Exit ===\n")
 
   // Drop transform key.
   return UNDEF

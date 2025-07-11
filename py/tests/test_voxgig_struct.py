@@ -293,45 +293,73 @@ class TestStruct(unittest.TestCase):
 
     def test_getpath_basic(self):
         def getpath_wrapper(vin):
-            return getpath(vin.get("path"), vin.get("store"))
+            # Wrap the store with $TOP if it's empty, matching TypeScript behavior
+            store = vin.get("store")
+            if store == {}:
+                store = {"$TOP": {}}
+            return getpath(store, vin.get("path"))
         runset(spec["getpath"]["basic"], getpath_wrapper)
 
     def test_getpath_current(self):
         def getpath_wrapper(vin):
-            # Create a simple state object with dpath if provided
-            state = None
-            if "dpath" in vin:
-                state = type('State', (), {
-                    'base': None,
-                    'dpath': vin["dpath"].split(".") if isinstance(vin["dpath"], str) else vin["dpath"],
-                    'handler': None
-                })()
-            return getpath(vin["path"], vin.get("store"), vin.get("dparent"), state)
+            # Create a simple injection object with dparent if provided
+            injdef = None
+            if "dparent" in vin:
+                injdef = Injection(
+                    mode="val",
+                    full=False,
+                    keyI=0,
+                    keys=["$TOP"],
+                    key="$TOP",
+                    val="",
+                    parent={},
+                    path=["$TOP"],
+                    nodes=[{}],
+                    base=None,
+                    dparent=vin.get("dparent"),
+                    handler=None
+                )
+                # Set dpath after creation since it's not a constructor parameter
+                dpath_str = vin.get("dpath", "a.b")
+                injdef.dpath = dpath_str.split(".") if isinstance(dpath_str, str) else dpath_str
+            
+            # Wrap the store with $TOP if it's empty, matching TypeScript behavior
+            store = vin.get("store")
+            if store == {}:
+                store = {"$TOP": {}}
+            
+            return getpath(store, vin["path"], injdef)
         runset(spec["getpath"]["current"], getpath_wrapper)
 
     def test_getpath_state(self):
-        def handler_fn(state, val, _current=None, _ref=None, _store=None):
+        def handler_fn(state, val, ref, store):
             # The test expects the handler to return "foo" regardless of input
             return "foo"
 
         state = Injection(
-                meta = {"step":0},
-                handler = handler_fn,
-                mode = "val",
-                full = False,
-                keyI = 0,
-                keys = ["$TOP"],
-                key = "$TOP",
-                val = "",
-                parent = {},
-                path = ["$TOP"],
-                nodes = [{}],
-                base = "$TOP",
-                errs = [],
+                "val",              # mode
+                False,              # full
+                0,                  # keyI
+                ["$TOP"],           # keys
+                "$TOP",             # key
+                "",                 # val
+                {},                 # parent
+                ["$TOP"],           # path
+                [{}],               # nodes
+                handler_fn,         # handler
+                errs=[],            # errs
+                meta={"step":0},    # meta
+                base="$TOP",        # base
             )
 
-        runset(spec["getpath"]["state"],
-               lambda vin: getpath(vin.get("path"), vin.get("store"), vin.get("current"), state))
+        def getpath_wrapper(vin):
+            # Wrap the store with $TOP if it's empty, matching TypeScript behavior
+            store = vin.get("store")
+            if store == {}:
+                store = {"$TOP": {}}
+            return getpath(store, vin.get("path"), state)
+
+        runset(spec["getpath"]["state"], getpath_wrapper)
 
     # -------------------------------------------------
     # inject tests
@@ -349,7 +377,22 @@ class TestStruct(unittest.TestCase):
 
     def test_inject_string(self):
         def inject_wrapper(vin):
-            return inject(vin.get("val"), vin.get("store"), nullModifier, vin.get("current"))
+            # Create injection state with modify and current data
+            inj = Injection(
+                mode="val",
+                full=False,
+                keyI=0,
+                keys=["$TOP"],
+                key="$TOP",
+                val=vin.get("val"),
+                parent={"$TOP": vin.get("val")},
+                path=["$TOP"],
+                nodes=[{"$TOP": vin.get("val")}],
+                handler=lambda s, v, r, st: v,  # Default handler
+                modify=nullModifier,
+                dparent=vin.get("current")
+            )
+            return inject(vin.get("val"), vin.get("store"), inj)
         runset(spec["inject"]["string"], inject_wrapper)
 
     def test_inject_deep(self):
@@ -468,7 +511,14 @@ class TestStruct(unittest.TestCase):
 
         def integer_check(state, _val, current, _ref, _store):
             key = state.key
-            out = getprop(current, key)
+            # Use state.dparent like TypeScript version, not the complex current structure
+            if hasattr(state, 'dparent') and state.dparent is not None:
+                # Extract the actual data being validated
+                data_root = getprop(state.dparent, '$TOP', state.dparent)
+                out = getprop(data_root, key)
+            else:
+                # Fallback to trying current
+                out = getprop(current, key)
             
             if not isinstance(out, int) and not (isinstance(out, float) and out.is_integer()):
                 state.errs.append(
