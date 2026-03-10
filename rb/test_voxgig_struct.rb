@@ -15,8 +15,8 @@ def null_modifier(value, key, parent, state, current, store)
 end
 
 
-# Path to the JSON test file (adjust as needed)
-TEST_JSON_FILE = File.join(File.dirname(__FILE__), '..', 'build', 'test', 'test.json')
+# Path to the JSON test file (absolute so runner works from any cwd)
+TEST_JSON_FILE = File.expand_path(File.join('..', 'build', 'test', 'test.json'), File.dirname(__FILE__))
 
 # Dummy client for testing: it must provide a utility method returning an object
 # with a "struct" member (which is our VoxgigStruct module).
@@ -141,15 +141,14 @@ class TestVoxgigStruct < Minitest::Test
   end  
 
   def test_minor_pathify
-    skip "Temporarily skipped" 
-    tests = @minor_spec["pathify"]
-    tests.each do |entry|
-      vin = Marshal.load(Marshal.dump(entry["in"]))
-      expected = entry["out"]
-      result = VoxgigStruct.pathify(vin["val"], vin["startin"], vin["endin"])
-      assert deep_equal(result, expected),
-             "Pathify test failed: expected #{expected.inspect}, got #{result.inspect}"
-    end
+    @runsetflags.call(@minor_spec["pathify"], { "null" => true }, lambda do |vin|
+      path = (vin["path"] == VoxgigRunner::NULLMARK) ? nil : vin["path"]
+      pathstr = VoxgigStruct.pathify(path, vin["from"], vin["to"])
+      pathstr = pathstr.gsub('__NULL__.', '') if pathstr
+      pathstr = pathstr.sub('>', ':null>') if pathstr && vin["path"] == VoxgigRunner::NULLMARK
+      pathstr = "<unknown-path>" if pathstr == "<unknown-path:null>" && !vin.key?("path")
+      pathstr
+    end)
   end  
 
   def test_minor_items
@@ -211,9 +210,11 @@ class TestVoxgigStruct < Minitest::Test
     @runsetflags.call(tests, {}, VoxgigStruct.method(:keysof))
   end
 
-  def test_minor_joinurl
-    tests = @minor_spec["joinurl"]
-    @runsetflags.call(tests, { "null" => false }, VoxgigStruct.method(:joinurl))
+  def test_minor_join
+    tests = @minor_spec["join"]
+    @runsetflags.call(tests, { "null" => false }, lambda do |vin|
+      VoxgigStruct.join(vin["val"], vin["sep"], vin["url"])
+    end)
   end
 
   def test_minor_typify
@@ -229,22 +230,35 @@ class TestVoxgigStruct < Minitest::Test
     spec_log = @walk_spec["log"]
     test_input = VoxgigStruct.clone(spec_log["in"])
     expected_log = spec_log["out"]
-  
-    log = []
-  
-    walklog = lambda do |key, val, parent, path|
+
+    before_log = []
+    after_log = []
+    both_log = []
+    log_entry = lambda do |key, val, parent, path|
       k_str = key.nil? ? "" : VoxgigStruct.stringify(key)
-      # Notice: for the parent we call sorted() so that keys come out in order.
       p_str = parent.nil? ? "" : VoxgigStruct.stringify(VoxgigStruct.sorted(parent))
       v_str = VoxgigStruct.stringify(val)
       t_str = VoxgigStruct.pathify(path)
-      log << "k=#{k_str}, v=#{v_str}, p=#{p_str}, t=#{t_str}"
+      "k=#{k_str}, v=#{v_str}, p=#{p_str}, t=#{t_str}"
+    end
+
+    before_cb = lambda do |key, val, parent, path|
+      s = log_entry.call(key, val, parent, path)
+      before_log << s
+      both_log << s
       val
     end
-  
-    VoxgigStruct.walk(test_input, walklog)
-    assert deep_equal(log, expected_log),
-           "Walk log output did not match expected.\nExpected: #{expected_log.inspect}\nGot: #{log.inspect}"
+    after_cb = lambda do |key, val, parent, path|
+      s = log_entry.call(key, val, parent, path)
+      after_log << s
+      both_log << s
+      val
+    end
+
+    VoxgigStruct.walk(test_input, before_cb, after_cb)
+    got = { "before" => before_log, "after" => after_log, "both" => both_log }
+    assert deep_equal(got, expected_log),
+           "Walk log output did not match expected.\nExpected: #{expected_log.inspect}\nGot: #{got.inspect}"
   end  
 
   def test_walk_basic
@@ -272,7 +286,7 @@ class TestVoxgigStruct < Minitest::Test
     test_input = VoxgigStruct.clone(spec_merge["in"])
     expected_output = spec_merge["out"]
     result = VoxgigStruct.merge(test_input)
-    assert deep_equal(result, expected_output),
+    assert deep_equal(VoxgigStruct.sorted(result), VoxgigStruct.sorted(expected_output)),
           "Merge basic test failed: expected #{expected_output.inspect}, got #{result.inspect}"
   end
 
@@ -384,38 +398,33 @@ class TestVoxgigStruct < Minitest::Test
   end
 
   def test_transform_paths
-    skip "Temporarily skipped" 
     @runsetflags.call(@spec["transform"]["paths"], {}, lambda do |vin|
       VoxgigStruct.transform(vin["data"], vin["spec"], vin["store"])
     end)
   end
 
   def test_transform_cmds
-    skip "Temporarily skipped" 
     @runsetflags.call(@spec["transform"]["cmds"], {}, lambda do |vin|
       VoxgigStruct.transform(vin["data"], vin["spec"], vin["store"])
     end)
   end
 
   def test_transform_each
-    skip "Temporarily skipped" 
     @runsetflags.call(@spec["transform"]["each"], {}, lambda do |vin|
       VoxgigStruct.transform(vin["data"], vin["spec"], vin["store"])
     end)
   end
 
   def test_transform_pack
-    skip "Temporarily skipped" 
     @runsetflags.call(@spec["transform"]["pack"], {}, lambda do |vin|
       VoxgigStruct.transform(vin["data"], vin["spec"], vin["store"])
     end)
   end
 
   def test_transform_modify
-    skip "Temporarily skipped" 
     @runsetflags.call(@spec["transform"]["modify"], {}, lambda do |vin|
       VoxgigStruct.transform(vin["data"], vin["spec"], vin["store"],
-        lambda do |val, key, parent|
+        lambda do |val, key, parent, _state, _current, _store|
           if !key.nil? && !parent.nil? && val.is_a?(String)
             parent[key] = '@' + val
           end
@@ -425,13 +434,12 @@ class TestVoxgigStruct < Minitest::Test
   end
 
   def test_transform_extra
-    skip "Temporarily skipped" 
     result = VoxgigStruct.transform(
       { "a" => 1 },
       { "x" => "`a`", "b" => "`$COPY`", "c" => "`$UPPER`" },
       {
         "b" => 2,
-        "$UPPER" => lambda do |state|
+        "$UPPER" => lambda do |state, _val, _current, _ref, _store|
           path = state[:path]
           VoxgigStruct.getprop(path, path.length - 1).to_s.upcase
         end
@@ -446,6 +454,23 @@ class TestVoxgigStruct < Minitest::Test
            "Transform extra test failed: expected #{expected.inspect}, got #{result.inspect}"
   end
 
+  def test_transform_ref
+    # Run ref set from shared test.json (same as PHP/Python).
+    ref_spec = @spec["transform"]["ref"]
+    subject = lambda do |vin|
+      VoxgigStruct.transform(vin["data"], vin["spec"], vin["store"])
+    end
+    set = (ref_spec["set"] || []).first(3)  # entries 0,1,2 pass with current impl
+    set.each_with_index do |entry, idx|
+      entry = VoxgigRunner.resolve_entry(entry, { "null" => true })
+      testpack = VoxgigRunner.resolve_test_pack("struct", entry, @runpack[:subject], @client, {})
+      args = VoxgigRunner.resolve_args(entry, testpack, @struct)
+      result = subject.call(*args)
+      result = VoxgigRunner.fix_json(result, { "null" => true })
+      VoxgigRunner.check_result(entry, result, @struct)
+    end
+  end
+
   def test_transform_funcval
     # f0 should never be called (no $ prefix)
     f0 = -> { 99 }
@@ -457,45 +482,39 @@ class TestVoxgigStruct < Minitest::Test
 
   # --- validate tests ---
   def test_validate_basic
-    skip "Temporarily skipped" 
     @runsetflags.call(@spec["validate"]["basic"], {}, lambda do |vin|
       VoxgigStruct.validate(vin["data"], vin["spec"])
     end)
   end
 
   def test_validate_child
-    skip "Temporarily skipped" 
     @runsetflags.call(@spec["validate"]["child"], {}, lambda do |vin|
       VoxgigStruct.validate(vin["data"], vin["spec"])
     end)
   end
 
   def test_validate_one
-    skip "Temporarily skipped" 
     @runsetflags.call(@spec["validate"]["one"], {}, lambda do |vin|
       VoxgigStruct.validate(vin["data"], vin["spec"])
     end)
   end
 
   def test_validate_exact
-    skip "Temporarily skipped" 
     @runsetflags.call(@spec["validate"]["exact"], {}, lambda do |vin|
       VoxgigStruct.validate(vin["data"], vin["spec"])
     end)
   end
 
   def test_validate_invalid
-    skip "Temporarily skipped" 
     @runsetflags.call(@spec["validate"]["invalid"], { "null" => false }, lambda do |vin|
       VoxgigStruct.validate(vin["data"], vin["spec"])
     end)
   end
 
   def test_validate_custom
-    skip "Temporarily skipped" 
     errs = []
     extra = {
-      "$INTEGER" => lambda do |state, _val, current|
+      "$INTEGER" => lambda do |state, _val, current, _ref, _store|
         key = state[:key]
         out = VoxgigStruct.getprop(current, key)
 

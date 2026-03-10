@@ -38,9 +38,34 @@ module VoxgigStruct
   S_DT       = '.'      # delimiter for key paths
   S_CN       = ':'      # colon for unknown paths
   S_KEY      = 'KEY'
+  MAXDEPTH   = 32
 
   # Unique undefined marker.
   UNDEF = Object.new.freeze
+
+  # When a transform (e.g. $REF) mutates the spec and should not write back the placeholder.
+  SKIP = Object.new.freeze
+  # When inject means "remove this key" (e.g. $COPY with missing key).
+  REMOVE = Object.new.freeze
+
+  # Type bitmask constants (match PHP/TS for test.json).
+  T_any = (1 << 31) - 1
+  T_noval = 1 << 30
+  T_boolean = 1 << 29
+  T_decimal = 1 << 28
+  T_integer = 1 << 27
+  T_number = 1 << 26
+  T_string = 1 << 25
+  T_function = 1 << 24
+  T_symbol = 1 << 23
+  T_null = 1 << 22
+  T_list = 1 << 14
+  T_map = 1 << 13
+  T_instance = 1 << 12
+  T_scalar = 1 << 7
+  T_node = 1 << 6
+
+  TYPENAME = %w[any noval boolean decimal integer number string function symbol null].concat([''] * 7).concat(%w[list map instance]).concat([''] * 4).concat(%w[scalar node]).freeze
 
   # --- Utility functions ---
 
@@ -58,7 +83,7 @@ module VoxgigStruct
   end
 
   def self.clone(val)
-    return nil if val.nil?
+    return nil if val.nil? || val.equal?(UNDEF)
     if isfunc(val)
       val
     elsif islist(val)
@@ -124,7 +149,7 @@ module VoxgigStruct
   end
 
   def self.isempty(val)
-    return true if val.nil? || val == ""
+    return true if val.nil? || val.equal?(UNDEF) || val == ""
     return true if islist(val) && val.empty?
     return true if ismap(val) && val.empty?
     false
@@ -148,9 +173,9 @@ module VoxgigStruct
 
   def self.items(val)
     if ismap(val)
-      val.keys.sort.map { |k| [k, val[k]] }
+      val.keys.sort.map { |k| [k.to_s, val[k]] }
     elsif islist(val)
-      val.each_with_index.map { |v, i| [i, v] }
+      (0...val.length).map { |i| [i.to_s, val[i]] }
     else
       []
     end
@@ -189,13 +214,17 @@ module VoxgigStruct
 
   def self.stringify(val, maxlen = nil)
     return "null" if val.nil?
-    begin
-      v = val.is_a?(Hash) ? sorted(val) : val
-      json = JSON.generate(v)
-    rescue StandardError
-      json = val.to_s
+    if val.is_a?(String)
+      json = val
+    else
+      begin
+        v = val.is_a?(Hash) ? sorted(val) : val
+        json = JSON.generate(v)
+      rescue StandardError
+        json = val.to_s
+      end
+      json = json.gsub('"', '')
     end
-    json = json.gsub('"', '')
     if maxlen && json.length > maxlen
       js = json[0, maxlen]
       json = js[0, maxlen - 3] + '...'
@@ -221,6 +250,7 @@ module VoxgigStruct
 
     if path && start >= 0
       path = path[start..-end_idx-1]
+      path = [] if path.nil?
       if path.empty?
         pathstr = '<root>'
       else
@@ -238,7 +268,7 @@ module VoxgigStruct
     end
 
     if pathstr.nil?
-      pathstr = '<unknown-path' + (val.nil? ? S_MT + 'null' : S_CN + stringify(val, 47)) + '>'
+      pathstr = '<unknown-path' + (val.nil? ? S_CN + 'null' : S_CN + stringify(val, 47)) + '>'
     end
 
     pathstr
@@ -278,35 +308,76 @@ module VoxgigStruct
     !getprop(val, key).nil?
   end
 
+  # Join array of strings with sep, optionally normalizing url slashes. Matches TS join().
+  def self.join(arr, sep = nil, url = nil)
+    return S_MT unless islist(arr)
+    sepdef = sep.nil? || sep == S_MT ? ',' : sep.to_s
+    sepre = (sepdef.length == 1) ? escre(sepdef) : nil
+    filtered = items(arr).select { |_idx, v| (T_string & typify(v)) != 0 && v != S_MT }.map { |_i, v| v.to_s }
+    return S_MT if filtered.empty?
+    sarr = filtered.length
+    out = filtered.each_with_index.map do |s, i|
+      s = s.dup
+      if sepre && sepre != S_MT
+        if url && i == 0
+          s = s.sub(Regexp.new(Regexp.escape(sepre) + '+$'), S_MT)
+        else
+          s = s.sub(Regexp.new('^' + Regexp.escape(sepre) + '+'), S_MT) if i > 0
+          s = s.sub(Regexp.new(Regexp.escape(sepre) + '+$'), S_MT) if i < sarr - 1 || !url
+          s = s.gsub(Regexp.new('([^' + Regexp.escape(sepre) + '])' + Regexp.escape(sepre) + '+([^' + Regexp.escape(sepre) + '])'), "\\1#{sepdef}\\2")
+        end
+      end
+      s
+    end.reject { |s| s == S_MT }.join(sepdef)
+    out
+  end
+
   def self.joinurl(parts)
-    parts.compact.map.with_index do |s, i|
-      s = s.to_s
-      if i.zero?
-        s.sub(/\/+$/, '')
-      else
-        s.sub(/([^\/])\/+/, '\1/').sub(/^\/+/, '').sub(/\/+$/, '')
-      end
-    end.reject { |s| s.empty? }.join('/')
+    join(parts, '/', true)
   end
 
+  # Return type bitmask (same as TS/PHP for test.json).
   def self.typify(value)
-    return "null" if value.nil?
-    return "array" if islist(value)
-    return "object" if ismap(value)
-    return "boolean" if [true, false].include?(value)
-    return "function" if isfunc(value)
-    return "number" if value.is_a?(Numeric)
-    value.class.to_s.downcase
+    return T_noval if value.equal?(UNDEF)
+    return T_scalar | T_null if value.nil?
+    return T_scalar | T_boolean if [true, false].include?(value)
+    return T_scalar | T_number | T_integer if value.is_a?(Integer)
+    return T_scalar | T_number | T_decimal if value.is_a?(Float)
+    return T_scalar | T_string if value.is_a?(String)
+    return T_scalar | T_function if isfunc(value)
+    return T_node | T_list if islist(value)
+    return T_node | T_map if ismap(value)
+    # Ruby object (e.g. custom class) -> map-like
+    return T_node | T_map if value.is_a?(Object)
+    T_noval
   end
 
-  def self.walk(val, apply, key = nil, parent = nil, path = [])
-    if isnode(val)
-      items(val).each do |ckey, child|
-        new_path = path + [ckey.to_s]
-        setprop(val, ckey, walk(child, apply, ckey, val, new_path))
+  # Walk depth-first. If only one callback given, used as single apply (post-order).
+  # If before and after given, call before before descending, after after (TS-style).
+  def self.walk(val, before = nil, after = nil, maxdepth = nil, key = nil, parent = nil, path = nil)
+    path = path || []
+    if before && after
+      out = before.call(key, val, parent, path)
+      maxdepth = (maxdepth.nil? || maxdepth < 0) ? MAXDEPTH : maxdepth
+      if maxdepth > 0 && path.length < maxdepth && isnode(out)
+        items(out).each do |ckey, child|
+          new_path = path + [ckey.to_s]
+          setprop(out, ckey, walk(getprop(out, ckey), before, after, maxdepth, ckey, out, new_path))
+        end
       end
+      out = after.call(key, out, parent, path)
+      out
+    else
+      apply = before || after
+      path = path || []
+      if isnode(val)
+        items(val).each do |ckey, child|
+          new_path = path + [ckey.to_s]
+          setprop(val, ckey, walk(getprop(val, ckey), apply, nil, maxdepth, ckey, val, new_path))
+        end
+      end
+      apply.call(key, val, parent, path)
     end
-    apply.call(key, val, parent, path || [])
   end
 
   # --- Deep Merge Helpers for merge ---
@@ -349,6 +420,7 @@ module VoxgigStruct
   #
   # Accepts an array of nodes and deep merges them (later nodes override earlier ones).
   def self.merge(val)
+    return nil if val.equal?(UNDEF)
     return val unless islist(val)
     list = val
     lenlist = list.size
@@ -366,7 +438,8 @@ module VoxgigStruct
   # A path that begins with an empty string (i.e. a leading dot) is treated as relative
   # and resolved against the `current` parameter.
   # The optional state hash can provide a :base key and a :handler.
-  def self.getpath(path, store, current = nil, state = nil)
+  # When preserve_undef: true, returns UNDEF when value is missing (so inject can remove keys).
+  def self.getpath(path, store, current = nil, state = nil, preserve_undef: false)
     log("getpath: called with path=#{path.inspect}, store=#{store.inspect}, current=#{current.inspect}, state=#{state.inspect}")
     parts =
       if islist(path)
@@ -390,7 +463,7 @@ module VoxgigStruct
     log("getpath: initial root=#{root.inspect}, base=#{base.inspect}")
 
     # If there is no path (or if path consists of a single empty string)
-    if path.nil? || store.nil? || (parts.length == 1 && parts[0] == S_MT)
+    if path.nil? || store.nil? || (parts.length == 1 && (parts[0] == S_MT || parts[0].to_s.empty?))
       # When no state/base is provided, return store directly.
       if base.nil?
         val = store
@@ -434,7 +507,7 @@ module VoxgigStruct
       log("getpath: state handler returned #{val.inspect}")
     end
 
-    final = val.equal?(UNDEF) ? nil : val
+    final = (preserve_undef && val.equal?(UNDEF)) ? UNDEF : (val.equal?(UNDEF) ? nil : val)
     log("getpath: final returning #{final.inspect}")
     final
   end
@@ -447,23 +520,27 @@ module VoxgigStruct
     return S_MT unless val.is_a?(String) && val != S_MT
   
     out = val
-    m = val.match(/^`(\$[A-Z]+|[^`]+)[0-9]*`$/)
+    m = val.match(/^`(\$[A-Z]+|[^`]*)[0-9]*`$/)
     log("(_injectstr) regex match result: #{m.inspect}")
   
     if m
       state[:full] = true if state
       pathref = m[1]
-      pathref.gsub!('$BT', S_BT)
-      pathref.gsub!('$DS', S_DS)
-      out = getpath(pathref, store, current, state)
+      pathref = pathref.gsub('$BT', S_BT).gsub('$DS', S_DS) if pathref.to_s.length > 3
+      out = getpath(pathref, store, current, state, preserve_undef: true)
+      if state && state[:handler].respond_to?(:call) && isfunc(out) && pathref.to_s.start_with?(S_DS)
+        out = state[:handler].call(state, out, current, val, store)
+      end
+      return out if out == SKIP
       out = out.is_a?(String) ? out : JSON.generate(out) unless state&.dig(:full)
     else
       out = val.gsub(/`([^`]+)`/) do |match|
         ref = match[1..-2]  # remove the backticks
-        ref.gsub!('$BT', S_BT)
-        ref.gsub!('$DS', S_DS)
+        pathref = ref.to_s.length > 3 ? ref.gsub('$BT', S_BT).gsub('$DS', S_DS) : ref
         state[:full] = false if state
-        found = getpath(ref, store, current, state)
+        found = getpath(pathref, store, current, state)
+        # When store returns a callable (e.g. $BT, $DS), call it for the substitution value.
+        found = found.call if found.respond_to?(:call) && pathref.to_s.start_with?(S_DS)
         if found.nil?
           # If the key exists (even with nil), substitute "null";
           # otherwise, use an empty string.
@@ -485,7 +562,8 @@ module VoxgigStruct
         out = state[:handler].call(state, out, current, val, store)
       end
     end
-    
+
+    return SKIP if out == SKIP
     log("(_injectstr) returning #{out.inspect}")
     out
   end  
@@ -502,6 +580,7 @@ module VoxgigStruct
         key: S_DTOP,            # the key this state represents
         parent: parent,         # the parent container (virtual root)
         path: [S_DTOP],
+        dparent: store,        # data parent (for $COPY etc.: value at path is getprop(dparent, key))
         handler: method(:_injecthandler), # default injection handler
         base: S_DTOP,
         modify: modify,
@@ -515,30 +594,67 @@ module VoxgigStruct
 
     # Process based on the type of node.
     if ismap(val)
-      # For hashes, iterate over each key/value pair.
-      val.each do |k, v|
-        # Build a new state for this child based on the parent's state.
+      skip_seen = false
+      # Process $REF keys last; $MERGE keys by numeric suffix descending (higher suffix runs last and wins).
+      keys_order = val.keys.sort_by do |k|
+        v = val[k]
+        sk = k.to_s
+        merge_num = (sk.include?('$MERGE') && sk =~ /MERGE(\d+)/) ? Regexp.last_match(1).to_i : -1
+        ref_last = merge_num >= 0 ? (1000 - merge_num) : 0  # MERGE1 (1) before MERGE0 (0)
+        [(v.is_a?(Array) && v.length >= 2 && v[0].to_s == '`$REF`') ? 1 : 0, ref_last, sk]
+      end
+      keys_order.each do |k|
+        v = val[k]
+        cur_data = state[:dparent] ? getprop(state[:dparent], state[:key]) : nil
         child_state = state.merge({
           key: k.to_s,
           parent: val,
-          path: state[:path] + [k.to_s]
+          path: state[:path] + [k.to_s],
+          dparent: cur_data,
+          mode: S_MVAL
         })
-        # Recursively inject into the value.
-        val[k] = inject(v, store, modify, current, child_state, flag)
+        result = inject(v, store, modify, current, child_state, flag)
+        if result == SKIP
+          skip_seen = true
+        elsif result.equal?(REMOVE)
+          val.delete(k)  # key removed by transform (e.g. $COPY missing)
+        else
+          val[k] = result
+        end
+        # key:post phase - run key injection again so $MERGE etc. can mutate parent
+        post_state = child_state.merge({ mode: S_MKEYPOST })
+        _injectstr(k.to_s, store, current, post_state)
       end
+      return SKIP if skip_seen
     elsif islist(val)
-      # For arrays, iterate by index.
+      skip_seen = false
       val.each_with_index do |item, i|
+        cur_data = state[:dparent] ? getprop(state[:dparent], state[:key]) : nil
         child_state = state.merge({
           key: i.to_s,
           parent: val,
-          path: state[:path] + [i.to_s]
+          path: state[:path] + [i.to_s],
+          dparent: cur_data
         })
-        val[i] = inject(item, store, modify, current, child_state, flag)
+        result = inject(item, store, modify, current, child_state, flag)
+        if result == SKIP
+          skip_seen = true
+        else
+          val[i] = result
+        end
       end
+      return SKIP if skip_seen
     elsif val.is_a?(String)
       val = _injectstr(val, store, current, state)
-      setprop(state[:parent], state[:key], val) if state[:parent]      
+      return SKIP if val == SKIP
+      if state[:parent]
+        if val.equal?(UNDEF)
+          _setparentprop(state, UNDEF)  # remove key when inject returns UNDEF (e.g. $COPY missing)
+          val = REMOVE  # signal to map/list iteration to delete key
+        else
+          setprop(state[:parent], state[:key], val)
+        end
+      end
       log("+++ after setprop: parent now = #{state[:parent].inspect}")
     end
     
@@ -553,7 +669,8 @@ module VoxgigStruct
 
     log("inject: returning #{val.inspect} for key #{state[:key].inspect}")
 
-        # Return transformed value
+    # Return transformed value (REMOVE means key was removed, caller should delete)
+    return REMOVE if val.equal?(REMOVE)
     if state[:key] == S_DTOP
       getprop(state[:parent], S_DTOP)
     else
@@ -577,26 +694,64 @@ module VoxgigStruct
   # Helper to update the parent's property.
   def self._setparentprop(state, val)
     log("(_setparentprop) writing #{val.inspect} to #{state[:key]} in #{state[:parent].inspect}")
-    setprop(state[:parent], state[:key], val)
+    # UNDEF means "remove key" (match TS setval(NONE) -> delprop)
+    if val.equal?(UNDEF)
+      parent = state[:parent]
+      key = state[:key]
+      if parent.is_a?(Hash)
+        key_str = key.to_s
+        parent.delete(key_str)
+        parent.delete(key.to_sym) if key.is_a?(String)
+      elsif parent.is_a?(Array)
+        i = Integer(key) rescue nil
+        parent.delete_at(i) if i && i >= 0 && i < parent.length
+      end
+    else
+      setprop(state[:parent], state[:key], val)
+    end
   end
 
   # The transform_* functions are special command inject handlers (see Injector).
 
   # Delete a key from a map or list.
   def self.transform_delete(state, _val = nil, _current = nil, _ref = nil, _store = nil)
-    _setparentprop(state, nil)
+    _setparentprop(state, UNDEF)
     nil
+  end
+
+  # Resolve a ref path from the spec and set the result on the spec at the current key; return SKIP.
+  def self.transform_ref(state, _val = nil, _current = nil, _ref = nil, store = nil)
+    parent = state[:parent]
+    path = state[:path] || []
+    return SKIP if path.length < 2
+    spec_source = store && store['$SPEC']
+    spec = spec_source.respond_to?(:call) ? spec_source.call : nil
+    return SKIP if spec.nil?
+    refpath = getprop(parent, 1)
+    ref = getpath(refpath, spec, nil, nil)
+    key = path[1]
+    # Self-ref or unresolved: omit key (match TS/JSON output).
+    if ref.nil? || ref.equal?(UNDEF) || ref.equal?(parent)
+      spec.delete(key) if spec.is_a?(Hash)
+    else
+      setprop(spec, key, ref)
+    end
+    SKIP
   end
 
   # Copy value from source data.
   def self.transform_copy(state, _val = nil, current = nil, _ref = nil, _store = nil)
     mode = state[:mode]
     key = state[:key]
+    dparent = state[:dparent]
 
     out = key
     unless mode.start_with?('key')
-      out = getprop(current, key)
-      _setparentprop(state, out)
+      # Resolve from data parent (same path as spec) so root `$COPY` gets store[$TOP] = data.
+      src = dparent || current
+      out = src ? getprop(src, key, UNDEF) : UNDEF
+      # When key is missing in data, remove it from output; otherwise set (even if nil).
+      _setparentprop(state, out.equal?(UNDEF) ? UNDEF : out)
     end
 
     out
@@ -636,26 +791,26 @@ module VoxgigStruct
   # If the value is an array, the elements are first merged using `merge`.
   # If the value is the empty string, merge the top level store.
   # Format: { '`$MERGE`': '`source-path`' | ['`source-paths`', ...] }
-  def self.transform_merge(state, _val = nil, current = nil, _ref = nil, _store = nil)
+  def self.transform_merge(state, _val = nil, current = nil, _ref = nil, store = nil)
     mode = state[:mode]
     key = state[:key]
     parent = state[:parent]
 
-    return key if mode == 'key:pre'
+    return key if mode == S_MKEYPRE
 
     # Operate after child values have been transformed.
-    if mode == 'key:post'
+    if mode == S_MKEYPOST
       args = getprop(parent, key)
-      args = args == '' ? [current['$TOP']] : args.is_a?(Array) ? args : [args]
+      args = (args == '' || args == S_MT) ? (store && getprop(store, S_DTOP) ? [getprop(store, S_DTOP)] : []) : (args.is_a?(Array) ? args : [args])
 
       # Remove the $MERGE command from a parent map.
-      _setparentprop(state, nil)
+      _setparentprop(state, UNDEF)
 
       # Literals in the parent have precedence, but we still merge onto
-      # the parent object, so that node tree references are not changed.
+      # the parent object (match TS: merge mutates first element).
       mergelist = [parent, *args, clone(parent)]
-
-      merge(mergelist)
+      merged = merge(mergelist)
+      parent.replace(merged) if parent.is_a?(Hash) && merged.is_a?(Hash)
 
       return key
     end
@@ -723,13 +878,13 @@ module VoxgigStruct
       '$TOP' => data_clone,
 
       # Escape backtick (this also works inside backticks).
-      '$BT' => -> { S_BT },
+      '$BT' => ->(_state = nil, _val = nil, _current = nil, _ref = nil, _store = nil) { S_BT },
 
       # Escape dollar sign (this also works inside backticks).
-      '$DS' => -> { S_DS },
+      '$DS' => ->(_state = nil, _val = nil, _current = nil, _ref = nil, _store = nil) { S_DS },
 
       # Insert current date and time as an ISO string.
-      '$WHEN' => -> { Time.now.iso8601 },
+      '$WHEN' => ->(_state = nil, _val = nil, _current = nil, _ref = nil, _store = nil) { Time.now.iso8601 },
 
       '$DELETE' => method(:transform_delete),
       '$COPY' => method(:transform_copy),
@@ -738,12 +893,15 @@ module VoxgigStruct
       '$MERGE' => method(:transform_merge),
       '$EACH' => method(:transform_each),
       '$PACK' => method(:transform_pack),
+      '$SPEC' => ->(_s = nil, _v = nil, _c = nil, _r = nil, _st = nil) { spec },
+      '$REF' => method(:transform_ref),
 
       # Custom extra transforms, if any.
       **extra_transforms
     }
 
-    out = inject(spec, store, modify, store)
+    out = inject(spec, store, modify, data_clone)
+    out = spec if out == SKIP
     out
   end
 
@@ -753,14 +911,22 @@ module VoxgigStruct
     setprop(target, tkey, tval)
   end
 
+  def self._typename(type)
+    return 'any' if type.nil? || type <= 0
+    idx = (31 - Math.log2(type).floor).to_i
+    names = %w[any noval boolean decimal integer number string function symbol null] + ([''] * 7) + %w[list map instance] + ([''] * 4) + %w[scalar node]
+    names[idx] || 'any'
+  end
+
   # Build a type validation error message.
   def self._invalid_type_msg(path, needtype, vt, v, _whence = nil)
     vs = v.nil? ? 'no value' : stringify(v)
+    vt_str = vt.is_a?(Integer) ? (typename(vt) rescue vt.to_s) : vt.to_s
 
     'Expected ' +
       (path.length > 1 ? ('field ' + pathify(path, 1) + ' to be ') : '') +
-      needtype + ', but found ' +
-      (v.nil? ? '' : vt + ': ') + vs +
+      needtype.to_s + ', but found ' +
+      (v.nil? ? '' : vt_str + ': ') + vs +
       # Uncomment to help debug validation errors.
       # ' [' + _whence + ']' +
       '.'
@@ -1064,17 +1230,23 @@ module VoxgigStruct
   def self._validation(pval, key = nil, parent = nil, state = nil, current = nil, _store = nil)
     return if state.nil?
 
-    # Current val to verify.
-    cval = getprop(current, key)
+    # Current val to verify (at root, key is $TOP and current is the data itself).
+    cval = (key == S_DTOP) ? current : getprop(current, key)
 
-    return if cval.nil? || state.nil?
+    return if cval.nil? && !key.nil? && key != S_DTOP
+    return if state.nil?
 
     ptype = typify(pval)
 
     # Delete any special commands remaining.
-    return if ptype == S_string && pval.include?(S_DS)
+    return if ptype == S_string && pval.is_a?(String) && pval.include?(S_DS)
 
     ctype = typify(cval)
+
+    # When types match at a scalar leaf, output the data value (so validate returns data, not spec).
+    if ptype == ctype && !pval.nil? && parent && key && !isnode(pval) && !isnode(cval)
+      setprop(parent, key, cval)
+    end
 
     # Type mismatch.
     if ptype != ctype && !pval.nil?

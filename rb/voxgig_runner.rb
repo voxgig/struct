@@ -29,7 +29,7 @@ module VoxgigRunner
         subject = testsubject || subject
         flags = resolve_flags(flags)
         testspecmap = fix_json(testspec, flags)
-        testset = testspecmap["set"] || []
+        testset = (testspecmap && testspecmap["set"]) || []
         testset.each do |entry|
           begin
             entry = resolve_entry(entry, flags)
@@ -63,7 +63,7 @@ module VoxgigRunner
   # Loads the test JSON file and extracts the spec for the given name.
   # Follows the pattern: alltests.primary?[name] || alltests[name] || alltests.
   def self.resolve_spec(name, testfile)
-    full_path = File.join(__dir__, testfile)
+    full_path = File.expand_path(testfile, __dir__)
     all_tests = JSON.parse(File.read(full_path))
     if all_tests.key?("primary") && all_tests["primary"].key?(name)
       spec = all_tests["primary"][name]
@@ -161,10 +161,18 @@ module VoxgigRunner
 
   # Resolves arguments for the test subject.
   # By default, it passes a clone of entry["in"].
+  # When entry has no "in" key, pass struct UNDEF so typify etc. can return T_noval.
   # If entry["ctx"] or entry["args"] is provided, use that instead.
   # Also, if passing an object, inject client and utility.
   def self.resolve_args(entry, testpack, struct_utils)
-    args = [struct_utils.clone(entry["in"])]
+    first = if entry.key?("in")
+              struct_utils.clone(entry["in"])
+            elsif struct_utils.const_defined?(:UNDEF, false)
+              struct_utils.const_get(:UNDEF)
+            else
+              nil
+            end
+    args = [first]
     if entry.key?("ctx")
       args = [entry["ctx"]]
     elsif entry.key?("args")
