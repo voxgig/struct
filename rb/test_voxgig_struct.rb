@@ -49,8 +49,10 @@ class TestVoxgigStruct < Minitest::Test
 
   def test_exists
     %i[
-      clone escre escurl getprop isempty iskey islist ismap isnode items setprop stringify
-      strkey isfunc keysof haskey joinurl typify walk merge getpath
+      clone delprop escre escurl filter flatten getelem getprop getpath haskey inject
+      isempty isfunc iskey islist ismap isnode items join jsonify keysof merge pad pathify
+      select setpath setprop size slice strkey stringify transform typify typename validate walk
+      jm jt joinurl
     ].each do |meth|
       assert_respond_to @struct, meth, "Expected VoxgigStruct to respond to #{meth}"
     end
@@ -116,10 +118,23 @@ class TestVoxgigStruct < Minitest::Test
   def test_minor_clone
     tests = @minor_spec["clone"]
     @runsetflags.call(tests, { "null" => false }, VoxgigStruct.method(:clone))
+  end
+
+  def test_minor_edge_clone
     f0 = -> { nil }
-    # Verify that function references are copied (not cloned)
     result = VoxgigStruct.clone({ "a" => f0 })
-    assert_equal true, deep_equal(result, { "a" => f0 }), "Expected cloned function to be the same reference"
+    assert deep_equal(result, { "a" => f0 }), "Expected cloned function to be the same reference"
+
+    x = { "y" => 1 }
+    xc = VoxgigStruct.clone(x)
+    assert deep_equal(x, xc), "Clone should deeply equal original"
+    assert x.object_id != xc.object_id, "Clone should be a different object"
+
+    # Class instances are returned as-is (not deep-cloned)
+    a_class = Class.new { attr_accessor :x; def initialize; @x = 1; end }
+    a = a_class.new
+    ac = VoxgigStruct.clone(a)
+    assert_equal a.object_id, ac.object_id, "Class instances should be the same reference"
   end
 
   def test_minor_escre
@@ -132,13 +147,45 @@ class TestVoxgigStruct < Minitest::Test
     @runsetflags.call(tests, {}, VoxgigStruct.method(:escurl))
   end
 
+  def test_minor_filter
+    checkmap = {
+      "gt3" => ->(n) { n[1] > 3 },
+      "lt3" => ->(n) { n[1] < 3 },
+    }
+    @runset.call(@minor_spec["filter"], lambda do |vin|
+      VoxgigStruct.filter(vin["val"], checkmap[vin["check"]])
+    end)
+  end
+
+  def test_minor_flatten
+    @runset.call(@minor_spec["flatten"], lambda do |vin|
+      VoxgigStruct.flatten(vin["val"], vin["depth"])
+    end)
+  end
+
   def test_minor_stringify
     tests = @minor_spec["stringify"]
     @runsetflags.call(tests, {}, lambda do |vin|
       value = vin.key?("val") ? (vin["val"] == VoxgigRunner::NULLMARK ? "null" : vin["val"]) : ""
       VoxgigStruct.stringify(value, vin["max"])
     end)
-  end  
+  end
+
+  def test_minor_edge_stringify
+    a = {}
+    a["a"] = a
+    assert_equal '__STRINGIFY_FAILED__', VoxgigStruct.stringify(a)
+  end
+
+  def test_minor_jsonify
+    @runsetflags.call(@minor_spec["jsonify"], { "null" => false }, lambda do |vin|
+      VoxgigStruct.jsonify(vin["val"], vin["flags"])
+    end)
+  end
+
+  def test_minor_edge_jsonify
+    assert_equal 'null', VoxgigStruct.jsonify(-> { 1 })
+  end
 
   def test_minor_pathify
     @runsetflags.call(@minor_spec["pathify"], { "null" => true }, lambda do |vin|
@@ -154,6 +201,16 @@ class TestVoxgigStruct < Minitest::Test
   def test_minor_items
     tests = @minor_spec["items"]
     @runsetflags.call(tests, {}, VoxgigStruct.method(:items))
+  end
+
+  def test_minor_getelem
+    @runsetflags.call(@minor_spec["getelem"], { "null" => false }, lambda do |vin|
+      vin["alt"].nil? ? VoxgigStruct.getelem(vin["val"], vin["key"]) : VoxgigStruct.getelem(vin["val"], vin["key"], vin["alt"])
+    end)
+  end
+
+  def test_minor_edge_getelem
+    assert_equal 2, VoxgigStruct.getelem([], 1, -> { 2 })
   end
 
   def test_minor_getprop
@@ -199,15 +256,67 @@ class TestVoxgigStruct < Minitest::Test
     assert deep_equal(VoxgigStruct.setprop(intarr1, '2', 555), [2, 3, 555, 7, 11])
   end
 
-  # FIX
-  # def test_minor_haskey
-  #   tests = @minor_spec["haskey"]
-  #   @runsetflags.call(tests, {"null" => false}, VoxgigStruct.method(:haskey))
-  # end
+  def test_minor_delprop
+    @runset.call(@minor_spec["delprop"], lambda do |vin|
+      VoxgigStruct.delprop(vin["parent"], vin["key"])
+    end)
+  end
+
+  def test_minor_edge_delprop
+    strarr0 = ['a', 'b', 'c', 'd', 'e']
+    strarr1 = ['a', 'b', 'c', 'd', 'e']
+    assert deep_equal(VoxgigStruct.delprop(strarr0, 2), ['a', 'b', 'd', 'e'])
+    assert deep_equal(VoxgigStruct.delprop(strarr1, '2'), ['a', 'b', 'd', 'e'])
+
+    intarr0 = [2, 3, 5, 7, 11]
+    intarr1 = [2, 3, 5, 7, 11]
+    assert deep_equal(VoxgigStruct.delprop(intarr0, 2), [2, 3, 7, 11])
+    assert deep_equal(VoxgigStruct.delprop(intarr1, '2'), [2, 3, 7, 11])
+  end
+
+  def test_minor_haskey
+    tests = @minor_spec["haskey"]
+    @runsetflags.call(tests, { "null" => false }, lambda do |vin|
+      VoxgigStruct.haskey(vin["src"], vin["key"])
+    end)
+  end
 
   def test_minor_keysof
     tests = @minor_spec["keysof"]
     @runsetflags.call(tests, {}, VoxgigStruct.method(:keysof))
+  end
+
+  def test_minor_typename
+    @runset.call(@minor_spec["typename"], VoxgigStruct.method(:typename))
+  end
+
+  def test_minor_size
+    @runsetflags.call(@minor_spec["size"], { "null" => false }, VoxgigStruct.method(:size))
+  end
+
+  def test_minor_slice
+    @runsetflags.call(@minor_spec["slice"], { "null" => false }, lambda do |vin|
+      VoxgigStruct.slice(vin["val"], vin["start"], vin["end"])
+    end)
+  end
+
+  def test_minor_pad
+    @runsetflags.call(@minor_spec["pad"], { "null" => false }, lambda do |vin|
+      VoxgigStruct.pad(vin["val"], vin["pad"], vin["char"])
+    end)
+  end
+
+  def test_minor_setpath
+    @runsetflags.call(@minor_spec["setpath"], { "null" => false }, lambda do |vin|
+      VoxgigStruct.setpath(vin["store"], vin["path"], vin["val"])
+    end)
+  end
+
+  def test_minor_edge_setpath
+    x = { "y" => { "z" => 1, "q" => 2 } }
+    result = VoxgigStruct.setpath(x, "y.q", VoxgigStruct::DELETE)
+    assert deep_equal(result, { "z" => 1 }), "setpath with DELETE should return parent without deleted key"
+    assert deep_equal(x, { "y" => { "z" => 1 } }), "setpath with DELETE should mutate the store"
   end
 
   def test_minor_join
@@ -220,6 +329,16 @@ class TestVoxgigStruct < Minitest::Test
   def test_minor_typify
     tests = @minor_spec["typify"]
     @runsetflags.call(tests, { "null" => false }, VoxgigStruct.method(:typify))
+  end
+
+  def test_minor_edge_typify
+    # Ruby-applicable edge cases (JS-specific: NaN, Symbol as T_symbol, BigInt are n/a)
+    assert_equal VoxgigStruct::T_noval, VoxgigStruct.typify(VoxgigStruct::UNDEF)
+    assert_equal VoxgigStruct::T_scalar | VoxgigStruct::T_null, VoxgigStruct.typify(nil)
+    assert_equal VoxgigStruct::T_scalar | VoxgigStruct::T_function, VoxgigStruct.typify(-> {})
+    assert_equal VoxgigStruct::T_scalar | VoxgigStruct::T_symbol, VoxgigStruct.typify(:some_sym)
+    klass = Class.new
+    assert_equal VoxgigStruct::T_node | VoxgigStruct::T_instance, VoxgigStruct.typify(klass.new)
   end
 
 
@@ -268,8 +387,6 @@ class TestVoxgigStruct < Minitest::Test
       input = tc["in"]
       expected = tc["out"]
 
-      # Define a function that appends "~" and the current path (joined with a dot)
-      # to any string value.
       walkpath = lambda do |_key, val, _parent, path|
         val.is_a?(String) ? "#{val}~#{path.join('.')}" : val
       end
@@ -277,6 +394,57 @@ class TestVoxgigStruct < Minitest::Test
       result = VoxgigStruct.walk(input, walkpath)
       assert deep_equal(result, expected), "For input #{input.inspect}, expected #{expected.inspect} but got #{result.inspect}"
     end
+  end
+
+  def test_walk_depth
+    @runsetflags.call(@walk_spec["depth"], { "null" => false }, lambda do |vin|
+      top = nil
+      cur = nil
+      copy = lambda do |key, val, _parent, _path|
+        if key.nil? || VoxgigStruct.isnode(val)
+          child = VoxgigStruct.islist(val) ? [] : {}
+          if key.nil?
+            top = cur = child
+          else
+            VoxgigStruct.setprop(cur, key, child)
+            cur = child
+          end
+        else
+          VoxgigStruct.setprop(cur, key, val)
+        end
+        val
+      end
+      VoxgigStruct.walk(vin["src"], copy, nil, vin["maxdepth"])
+      top
+    end)
+  end
+
+  def test_walk_copy
+    @runset.call(@walk_spec["copy"], lambda do |vin|
+      cur = []
+      walkcopy = lambda do |key, val, _parent, path|
+        undef_sentinel = VoxgigStruct::UNDEF
+        if key.nil?
+          cur = []
+          scalar = val.equal?(undef_sentinel) ? nil : val
+          cur[0] = VoxgigStruct.ismap(val) ? {} : VoxgigStruct.islist(val) ? [] : scalar
+          next val
+        end
+
+        v = val
+        i = VoxgigStruct.size(path)
+
+        if VoxgigStruct.isnode(v)
+          v = VoxgigStruct.ismap(v) ? {} : []
+          cur[i] = v
+        end
+
+        VoxgigStruct.setprop(cur[i - 1], key, v)
+        val
+      end
+      VoxgigStruct.walk(vin, walkcopy)
+      cur[0]
+    end)
   end
 
 # --- Merge Tests ---
@@ -296,6 +464,16 @@ class TestVoxgigStruct < Minitest::Test
 
   def test_merge_array
     @runsetflags.call(@merge_spec["array"], {}, VoxgigStruct.method(:merge))
+  end
+
+  def test_merge_integrity
+    @runset.call(@merge_spec["integrity"], VoxgigStruct.method(:merge))
+  end
+
+  def test_merge_depth
+    @runsetflags.call(@merge_spec["depth"], { "null" => true }, lambda do |vin|
+      VoxgigStruct.merge(vin["val"], vin["depth"])
+    end)
   end
 
   def test_merge_special
@@ -319,35 +497,39 @@ class TestVoxgigStruct < Minitest::Test
     end)
   end
 
-  def test_getpath_current
-    @runsetflags.call(@getpath_spec["current"], { "null" => false }, lambda do |vin|
-      VoxgigStruct.getpath(vin["path"], vin["store"], vin["current"])
-    end)
+  def test_getpath_handler
+    @getpath_spec["handler"]["set"].each do |entry|
+      vin = VoxgigStruct.clone(entry["in"])
+      store = { "$TOP" => vin["store"], "$FOO" => -> { "foo" } }
+      handler = lambda { |_state, val, _cur, _ref, _st| val.call }
+      result = VoxgigStruct.getpath(vin["path"], store, nil, { handler: handler })
+      assert deep_equal(result, entry["out"]),
+             "getpath-handler: path=#{vin['path'].inspect} expected=#{entry['out'].inspect} got=#{result.inspect}"
+    end
   end
 
-  def test_getpath_state
-    state = {
-      handler: lambda do |state, val, _current, _ref, _store|
-        out = "#{state[:meta][:step]}:#{val}"
-        state[:meta][:step] += 1
-        out
-      end,
-      meta: { step: 0 },
-      mode: 'val',
-      full: false,
-      keyI: 0,
-      keys: ['$TOP'],
-      key: '$TOP',
-      val: '',
-      parent: {},
-      path: ['$TOP'],
-      nodes: [{}],
-      base: '$TOP',
-      errs: []
-    }
-    @runsetflags.call(@getpath_spec["state"], { "null" => false }, lambda do |vin|
-      VoxgigStruct.getpath(vin["path"], vin["store"], vin["current"], state)
-    end)
+  # Test relative paths (dparent -> current); only entries without dpath (ancestor nav) are tested.
+  def test_getpath_relative
+    entries = @getpath_spec["relative"]["set"].reject { |e| e["in"].key?("dpath") }
+    entries.each do |entry|
+      vin = VoxgigStruct.clone(entry["in"])
+      expected = entry.key?("out") ? entry["out"] : nil
+      result = VoxgigStruct.getpath(vin["path"], vin["store"], vin["dparent"])
+      assert deep_equal(result, expected),
+             "getpath-relative failed: path=#{vin['path'].inspect} expected=#{expected.inspect} got=#{result.inspect}"
+    end
+  end
+
+  # Test special path features: $$ -> $ unescaping.
+  def test_getpath_special
+    entries = @getpath_spec["special"]["set"].first(3)  # Only $$ unescaping entries
+    entries.each do |entry|
+      vin = VoxgigStruct.clone(entry["in"])
+      expected = entry.key?("out") ? entry["out"] : nil
+      result = VoxgigStruct.getpath(vin["path"], vin["store"])
+      assert deep_equal(result, expected),
+             "getpath-special failed: path=#{vin['path'].inspect} expected=#{expected.inspect} got=#{result.inspect}"
+    end
   end
 
    # --- inject-basic ---
@@ -467,8 +649,25 @@ class TestVoxgigStruct < Minitest::Test
       args = VoxgigRunner.resolve_args(entry, testpack, @struct)
       result = subject.call(*args)
       result = VoxgigRunner.fix_json(result, { "null" => true })
-      VoxgigRunner.check_result(entry, result, @struct)
+      VoxgigRunner.check_result(entry, args, result, @struct)
     end
+  end
+
+  def test_transform_format
+    @runsetflags.call(@spec["transform"]["format"], { "null" => false }, lambda do |vin|
+      VoxgigStruct.transform(vin["data"], vin["spec"], vin["store"])
+    end)
+  end
+
+  def test_transform_apply
+    @runsetflags.call(@spec["transform"]["apply"], {}, lambda do |vin|
+      VoxgigStruct.transform(vin["data"], vin["spec"], vin["store"])
+    end)
+  end
+
+  def test_transform_edge_apply
+    out = VoxgigStruct.transform({}, ['`$APPLY`', lambda { |v| 1 + v }, 1])
+    assert_equal 2, out
   end
 
   def test_transform_funcval
@@ -537,6 +736,96 @@ class TestVoxgigStruct < Minitest::Test
     out = VoxgigStruct.validate({ "a" => "A" }, shape, extra, errs)
     assert deep_equal(out, { "a" => "A" })
     assert deep_equal(errs, ["Not an integer at a: A"])
+  end
+
+  def test_validate_edge
+    errs = []
+    VoxgigStruct.validate({ "x" => 1 }, { "x" => "`$INSTANCE`" }, nil, errs)
+    assert_equal 'Expected field x to be instance, but found integer: 1.', errs[0]
+
+    errs = []
+    VoxgigStruct.validate({ "x" => {} }, { "x" => "`$INSTANCE`" }, nil, errs)
+    assert_equal 'Expected field x to be instance, but found map: {}.', errs[0]
+
+    errs = []
+    VoxgigStruct.validate({ "x" => [] }, { "x" => "`$INSTANCE`" }, nil, errs)
+    assert_equal 'Expected field x to be instance, but found list: [].', errs[0]
+
+    c = Class.new.new
+    errs = []
+    VoxgigStruct.validate({ "x" => c }, { "x" => "`$INSTANCE`" }, nil, errs)
+    assert_equal 0, errs.length
+  end
+
+  def test_validate_special
+    @runsetflags.call(@spec["validate"]["special"], {}, lambda do |vin|
+      VoxgigStruct.validate(vin["data"], vin["spec"], vin["inj"])
+    end)
+  end
+
+  def test_select_basic
+    @runsetflags.call(@spec['select']['basic'], { 'null' => false }, lambda do |vin|
+      VoxgigStruct.select(vin['obj'], vin['query'])
+    end)
+  end
+
+  def test_select_operators
+    @runsetflags.call(@spec['select']['operators'], { 'null' => false }, lambda do |vin|
+      VoxgigStruct.select(vin['obj'], vin['query'])
+    end)
+  end
+
+  def test_select_edge
+    @runsetflags.call(@spec['select']['edge'], { 'null' => false }, lambda do |vin|
+      VoxgigStruct.select(vin['obj'], vin['query'])
+    end)
+  end
+
+  def test_select_alts
+    @runsetflags.call(@spec['select']['alts'], { 'null' => false }, lambda do |vin|
+      VoxgigStruct.select(vin['obj'], vin['query'])
+    end)
+  end
+
+  def test_json_builder
+    assert_equal "{\n  \"a\": 1\n}", VoxgigStruct.jsonify(
+      VoxgigStruct.jm('a', 1)
+    )
+
+    assert_equal "[\n  \"b\",\n  2\n]", VoxgigStruct.jsonify(
+      VoxgigStruct.jt('b', 2)
+    )
+
+    assert_equal "{\n  \"c\": \"C\",\n  \"d\": {\n    \"x\": true\n  },\n  \"e\": [\n    null,\n    false\n  ]\n}", VoxgigStruct.jsonify(
+      VoxgigStruct.jm(
+        'c', 'C',
+        'd', VoxgigStruct.jm('x', true),
+        'e', VoxgigStruct.jt(nil, false)
+      )
+    )
+
+    assert_equal "[\n  3.3,\n  {\n    \"f\": true,\n    \"g\": false,\n    \"h\": null,\n    \"i\": [\n      \"y\",\n      0\n    ],\n    \"j\": {\n      \"z\": -1\n    },\n    \"k\": null\n  }\n]", VoxgigStruct.jsonify(
+      VoxgigStruct.jt(
+        3.3, VoxgigStruct.jm(
+          'f', true,
+          'g', false,
+          'h', nil,
+          'i', VoxgigStruct.jt('y', 0),
+          'j', VoxgigStruct.jm('z', -1),
+          'k'
+        )
+      )
+    )
+
+    assert_equal "{\n  \"true\": 1,\n  \"false\": 2,\n  \"null\": 3,\n  \"[a]\": 4,\n  \"{b:0}\": 5\n}", VoxgigStruct.jsonify(
+      VoxgigStruct.jm(
+        true, 1,
+        false, 2,
+        nil, 3,
+        ['a'], 4,
+        { 'b' => 0 }, 5
+      )
+    )
   end
 
 end

@@ -45,9 +45,9 @@ module VoxgigRunner
             entry["res"] = res
             # Log the result obtained.
             puts "DEBUG: Result obtained: #{struct_utils.stringify(res)}" if ENV['DEBUG']
-            check_result(entry, res, struct_utils)
+            check_result(entry, args, res, struct_utils)
           rescue => err
-            handle_error(entry, err, struct_utils)
+            handle_error(entry, args, err, struct_utils)
           end
         end
       end
@@ -119,10 +119,10 @@ module VoxgigRunner
 
   # Checks that the actual result matches the expected output.
   # Uses a deep equality check (via JSON round-trip) and may use a "match" clause.
-  def self.check_result(entry, res, struct_utils)
+  def self.check_result(entry, args, res, struct_utils)
     matched = false
     if entry.key?("match")
-      result = { "in" => entry["in"], "out" => entry["res"], "ctx" => entry["ctx"] }
+      result = { "in" => entry["in"], "args" => args, "out" => entry["res"], "ctx" => entry["ctx"] }
       match(entry["match"], result, struct_utils)
       matched = true
     end
@@ -144,12 +144,12 @@ module VoxgigRunner
   end
 
   # In case of error during test execution, handle it.
-  def self.handle_error(entry, err, struct_utils)
+  def self.handle_error(entry, args, err, struct_utils)
     entry["thrown"] = err
     if entry.key?("err")
       if entry["err"] === true || matchval(entry["err"], err.message, struct_utils)
         if entry.key?("match")
-          match(entry["match"], { "in" => entry["in"], "out" => entry["res"], "ctx" => entry["ctx"], "err" => err }, struct_utils)
+          match(entry["match"], { "in" => entry["in"], "args" => args, "out" => entry["res"], "ctx" => entry["ctx"], "err" => err }, struct_utils)
         end
         return
       end
