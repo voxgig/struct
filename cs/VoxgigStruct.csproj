@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <!-- Large TS-aligned port: suppress repetitive nullability noise in CI -->
+    <NoWarn>$(NoWarn);CS8600;CS8602;CS8604</NoWarn>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>VoxgigStruct</AssemblyName>
+    <RootNamespace>Voxgig.Struct</RootNamespace>
+    <LangVersion>12</LangVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="tests/**" />
+  </ItemGroup>
+</Project>
