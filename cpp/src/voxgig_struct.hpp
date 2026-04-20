@@ -547,6 +547,21 @@ try_access:
 
   }
 
+  /*
+    Walk a data structure depth-first, calling apply at each node (after children).
+
+    PATH REUSE CONTRACT: The `path` argument passed to the apply callback is a
+    single mutable json array per depth, shared across every callback invocation
+    for the lifetime of this top-level walk call. Callbacks that need to retain
+    the path MUST clone it (e.g. copy construct a json array). Otherwise the
+    contents will be overwritten by subsequent visits. This eliminates the
+    per-call path allocation that dominated walk() cost on large trees.
+
+    Implementation: the pool is a std::vector<json> (one slot per depth).
+    Allocated once on the top-level call; grown on demand as recursion descends.
+    A pointer to this pool is threaded through recursive calls via args[5]
+    (intptr_t), matching the same trick used for the apply callback.
+  */
   json walk(args_container&& args) {
     // These arguments are the public interface.
     json val = args.size() == 0 ? nullptr : std::move(args[0]);
@@ -555,48 +570,80 @@ try_access:
     // These arguments are used for recursive state.
     json key = args.size() < 3 ? nullptr : std::move(args[2]);
     json parent = args.size() < 4 ? nullptr : std::move(args[3]);
-    json path = args.size() < 5 ? nullptr : std::move(args[4]);
+    // args[4] (depth as integer) and args[5] (pool pointer) carry recursive state.
+    json depth_arg = args.size() < 5 ? nullptr : std::move(args[4]);
+    json pool_arg = args.size() < 6 ? nullptr : std::move(args[5]);
 
 
     // NOTE: CHEAT SINCE WE CAN'T PASS A DATA STRUCTURE LIKE THIS INTO JSON SAFELY
     JsonFunction* _apply = reinterpret_cast<JsonFunction*>(apply.get<intptr_t>());
 
-    /*
-      Walk a data structure depth-first, calling apply at each node (after children).
-    */
-
-    if(path == nullptr) {
-      path = json::array();
+    // Pool of per-depth path arrays. The top-level invocation allocates the
+    // pool on its local stack frame; recursive invocations receive a pointer
+    // via args[5] (intptr_t) and a numeric depth via args[4]. The pool is
+    // pre-reserved so push_back grows without reallocating (which would
+    // invalidate any path reference held across recursive calls).
+    std::vector<json> _owned_pool;
+    std::vector<json>* pool;
+    size_t depth;
+    if(pool_arg == nullptr) {
+      _owned_pool.reserve(64);
+      _owned_pool.push_back(json::array());
+      pool = &_owned_pool;
+      depth = 0;
+    } else {
+      pool = reinterpret_cast<std::vector<json>*>(pool_arg.get<intptr_t>());
+      depth = depth_arg.is_number() ? static_cast<size_t>(depth_arg.get<long long>()) : 0;
     }
 
     if(isnode({ val })) {
       json _items = items({ val });
+
+      const size_t childDepth = depth + 1;
+      // Grow the pool on demand. Capacity is reserved so references into
+      // earlier slots remain valid, but we only access via index here.
+      while(pool->size() <= childDepth) {
+        pool->push_back(json::array());
+      }
+
+      // Ensure (*pool)[childDepth] has exactly childDepth slots. Siblings
+      // share slots [0..depth-1] and each overwrites slot [depth].
+      {
+        json& childPath = (*pool)[childDepth];
+        while(childPath.size() < childDepth) {
+          childPath.push_back(nullptr);
+        }
+        while(childPath.size() > childDepth) {
+          childPath.erase(childPath.size() - 1);
+        }
+        // Sync prefix [0..depth-1] from the current path once.
+        const json& parentPath = (*pool)[depth];
+        for(size_t i = 0; i < depth; i++) {
+          childPath[i] = parentPath[i];
+        }
+      }
+
+      intptr_t pool_ptr = reinterpret_cast<intptr_t>(pool);
+      // Encode childDepth as a json integer for the recursive arg.
+      json child_depth_json = json(static_cast<long long>(childDepth));
 
       for(json::iterator item = _items.begin(); item != _items.end(); item++) {
         json value = item.value();
         json ckey = value[0];
         json child = value[1];
 
-        json _path = json::array();
-        for(json::iterator p = path.begin(); p != path.end(); p++) {
-          _path.push_back(p.value());
-        }
-
-        /*
-        std::cout << "_path:: " << _path << std::endl;
-        std::cout << path << std::endl;
-        std::cout << "ckey:: " << ckey << std::endl;
-        std::cout << "child:: " << child << std::endl;
-        */
-
-        try {
-          _path.push_back(ckey.get<std::string>());
-        } catch(const json::exception&) {
-          _path.push_back(ckey.dump());
+        // Overwrite slot [depth] in the shared child path (in-place mutation).
+        {
+          json& childPath = (*pool)[childDepth];
+          try {
+            childPath[depth] = ckey.get<std::string>();
+          } catch(const json::exception&) {
+            childPath[depth] = ckey.dump();
+          }
         }
 
         // NOTE: MUST DO "val = setprop(...)" since val as an argument is deep-copied. In other words, reference counting is not supported.
-        val = setprop({ val, ckey, walk({ child, apply, ckey, val, _path})});
+        val = setprop({ val, ckey, walk({ child, apply, ckey, val, child_depth_json, pool_ptr })});
 
       }
 
@@ -604,7 +651,9 @@ try_access:
 
     // Nodes are applied *after* their children.
     // For the root node, key and parent will be UNDEF.
-    return _apply->operator()({ key, val, parent, path });
+    // NOTE: pass the pool slot directly; callbacks that need to retain the
+    // path MUST clone it — see the "PATH REUSE CONTRACT" doc comment above.
+    return _apply->operator()({ key, val, parent, (*pool)[depth] });
   }
 
   json merge(args_container&& args) {

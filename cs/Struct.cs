@@ -71,6 +71,16 @@ public static class T
 }
 
 
+/// <summary>
+/// Callback invoked for each node visited by <see cref="StructUtils.Walk"/>.
+/// </summary>
+/// <remarks>
+/// The <paramref name="path"/> argument is a single mutable list per depth,
+/// shared across all callback invocations for the lifetime of the top-level
+/// Walk call. Callbacks that need to retain the path MUST clone it
+/// (e.g. <c>new List&lt;object?&gt;(path)</c> or <c>path.ToList()</c>);
+/// otherwise its contents will be overwritten by subsequent visits.
+/// </remarks>
 public delegate object? WalkApply(object? key, object? val, object? parent, List<object?> path);
 public delegate object? Modify(object? val, object? key, object? parent, object? inj, object? store);
 public delegate object? Injector(InjectState inj, object? val, string? refStr, object? store);
@@ -1082,6 +1092,12 @@ public static class StructUtils
     // key=null and parent=null at the root. path contains string keys.
     // maxdepth: null or negative → MAXDEPTH. 0 → no descent at all.
     // Stops descending when path.Count >= md (children beyond depth are not visited).
+    //
+    // The `path` argument passed to the before/after callbacks is a single
+    // mutable list per depth, shared across all callback invocations for the
+    // lifetime of this top-level Walk call. Callbacks that need to store the
+    // path MUST clone it (e.g. new List<object?>(path)); the contents will
+    // otherwise be overwritten by subsequent visits.
     public static object? Walk(
         object? val,
         WalkApply? before = null,
@@ -1089,24 +1105,63 @@ public static class StructUtils
         int? maxdepth = null,
         object? key = null,
         object? parent = null,
-        List<object?>? path = null)
+        List<object?>? path = null,
+        List<List<object?>>? pool = null)
     {
-        path ??= [];
+        if (pool == null)
+        {
+            pool = new List<List<object?>> { new List<object?>() };
+        }
+        if (path == null)
+        {
+            path = pool[0];
+        }
+
+        int depth = path.Count;
 
         object? out_ = before == null ? val : before(key, val, parent, path);
 
         int md = (maxdepth.HasValue && maxdepth.Value >= 0) ? maxdepth.Value : MAXDEPTH;
-        if (md == 0 || path.Count >= md)
+        if (md == 0 || depth >= md)
             return out_;
 
         if (IsNode(out_))
         {
+            int childDepth = depth + 1;
+
+            // Grow pool on demand so pool[childDepth] exists.
+            while (pool.Count <= childDepth)
+            {
+                pool.Add(new List<object?>(pool.Count));
+            }
+
+            List<object?> childPath = pool[childDepth];
+
+            // Ensure childPath has exactly childDepth slots (mutated in place below).
+            if (childPath.Count < childDepth)
+            {
+                while (childPath.Count < childDepth)
+                    childPath.Add(null);
+            }
+            else if (childPath.Count > childDepth)
+            {
+                childPath.RemoveRange(childDepth, childPath.Count - childDepth);
+            }
+
+            // Sync prefix [0..depth-1] from the current path. Only needed once per
+            // parent: siblings share the same prefix and will each overwrite slot
+            // [depth] below.
+            for (int i = 0; i < depth; i++)
+            {
+                childPath[i] = path[i];
+            }
+
             foreach (var item in Items(out_))
             {
                 string ckey = StrKey(item[0]) ?? S_MT;
                 object? child = item[1];
-                var childPath = new List<object?>(path) { ckey };
-                SetProp(out_, ckey, Walk(child, before, after, maxdepth, ckey, out_, childPath));
+                childPath[depth] = ckey;
+                SetProp(out_, ckey, Walk(child, before, after, maxdepth, ckey, out_, childPath, pool));
             }
         }
 

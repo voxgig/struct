@@ -105,11 +105,21 @@ public class Struct {
         S.SCALAR, S.NODE,
     };
     
+    /**
+     * Callback invoked by {@link Struct#walk} at each node and leaf.
+     *
+     * <p><b>Path-reuse contract.</b> The {@code path} argument is a single
+     * mutable list per depth, shared across all callback invocations for the
+     * lifetime of a top-level {@code walk} call. Callers that need to retain
+     * the path beyond the current invocation MUST clone it
+     * (e.g. {@code new ArrayList<>(path)}); the contents will otherwise be
+     * overwritten by subsequent visits.
+     */
     @FunctionalInterface
     public interface WalkApply {
         Object apply(String key, Object val, Object parent, List<String> path);
     }
-    
+
     @FunctionalInterface
     public interface WalkApplyOptional {
         Object apply(String key, Object val);
@@ -420,23 +430,60 @@ public class Struct {
         return parent;
     }
     
-    // Walk function (Java version)
+    // Walk a data structure depth first, applying a function to each value.
+    // The `path` argument passed to the callback is a single mutable list per
+    // depth, shared across all callback invocations for the lifetime of this
+    // top-level walk call. Callbacks that need to store the path MUST clone
+    // it (e.g. `new ArrayList<>(path)`); the contents will otherwise be
+    // overwritten by subsequent visits.
     public static Object walk(Object val, WalkApply apply, String key, Object parent, List<String> path) {
-        // Default empty path if not provided
-        path = path == null ? new ArrayList<>() : path;
-        
+        // Allocate a single pool of path arrays for this top-level call.
+        // pool.get(n) is a list of length n holding the current path at depth n.
+        List<List<String>> pool = new ArrayList<>();
+        List<String> root = path == null ? new ArrayList<>() : path;
+        pool.add(root);
+        return walk(val, apply, key, parent, root, pool);
+    }
+
+    // Internal recursive walk that reuses path lists via a pool, avoiding
+    // per-node allocation of fresh path arrays.
+    private static Object walk(
+        Object val,
+        WalkApply apply,
+        String key,
+        Object parent,
+        List<String> path,
+        List<List<String>> pool
+    ) {
+        int depth = path.size();
+
         // If the value is a node (Map or List), recursively walk through it
         if (isNode(val)) {
+            int childDepth = depth + 1;
+
+            // Grow pool on demand; allocate each slot pre-sized to its depth.
+            while (pool.size() <= childDepth) {
+                int n = pool.size();
+                pool.add(new ArrayList<>(Collections.nCopies(n, null)));
+            }
+            List<String> childPath = pool.get(childDepth);
+
+            // Sync prefix [0..depth-1] from the current path. Only needed
+            // once per parent: siblings share the same prefix and each
+            // overwrite slot [depth] below.
+            for (int i = 0; i < depth; i++) {
+                childPath.set(i, path.get(i));
+            }
+
             for (Map.Entry<Object, Object> entry : items(val)) {
                 Object child = entry.getValue();
-                String childKey = entry.getKey().toString();
+                String ckey = entry.getKey().toString();
+                childPath.set(depth, S.EMPTY + ckey);
                 // Recursively walk and update the value at each step
-                setProp(val, entry.getKey(), walk(child, apply, childKey, val, new ArrayList<>(path) {{
-                    add(S.EMPTY + childKey);
-                }}));
+                setProp(val, entry.getKey(), walk(child, apply, ckey, val, childPath, pool));
             }
         }
-        
+
         // Apply the function to the current node, after processing its children
         return apply.apply(key, val, parent, path);
     }

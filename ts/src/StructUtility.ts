@@ -208,8 +208,12 @@ type Modify = (
 
 // Function applied to each node and leaf when walking a node structure depth first.
 // For {a:{b:1}} the call sequence args will be: b, 1, {b:1}, [a,b].
+// NOTE: the `path` array passed to the callback is reused across calls during
+// a single walk (one shared array per depth). It is valid only for the
+// duration of the callback invocation. If a callback needs to retain the
+// path, it MUST clone it (e.g. `path.slice()`).
 type WalkApply = (
-  // Map keys are strings, list keys are numbers, top key is NONE 
+  // Map keys are strings, list keys are numbers, top key is NONE
   key: string | number | undefined,
   val: any,
   parent: any,
@@ -903,6 +907,11 @@ function setprop<PARENT>(parent: PARENT, key: any, val: any): PARENT {
 
 
 // Walk a data structure depth first, applying a function to each value.
+// The `path` argument passed to the before/after callbacks is a single
+// mutable array per depth, shared across all callback invocations for the
+// lifetime of this top-level walk call. Callbacks that need to store the
+// path MUST clone it (e.g. `path.slice()`); the contents will otherwise
+// be overwritten by subsequent visits.
 function walk(
   // These arguments are the public interface.
   val: any,
@@ -919,24 +928,43 @@ function walk(
   // These areguments are used for recursive state.
   key?: string | number,
   parent?: any,
-  path?: string[]
+  path?: string[],
+  pool?: string[][]
 ): any {
-  if (NONE === path) {
-    path = []
+  if (NONE === pool) {
+    pool = [[]]
   }
+  if (NONE === path) {
+    path = pool[0]
+  }
+
+  const depth = path.length
 
   let out = null == before ? val : before(key, val, parent, path)
 
   maxdepth = null != maxdepth && 0 <= maxdepth ? maxdepth : MAXDEPTH
-  if (0 === maxdepth || (null != path && 0 < maxdepth && maxdepth <= path.length)) {
+  if (0 === maxdepth || (0 < maxdepth && maxdepth <= depth)) {
     return out
   }
 
   if (isnode(out)) {
+    const childDepth = depth + 1
+    let childPath = pool[childDepth]
+    if (NONE === childPath) {
+      childPath = new Array(childDepth)
+      pool[childDepth] = childPath
+    }
+    // Sync prefix [0..depth-1] from the current path. Only needed once per
+    // parent: siblings share the same prefix and will each overwrite slot
+    // [depth] below.
+    for (let i = 0; i < depth; i++) {
+      childPath[i] = path[i]
+    }
+
     for (let [ckey, child] of items(out)) {
+      childPath[depth] = S_MT + ckey
       setprop(out, ckey, walk(
-        child, before, after, maxdepth, ckey, out,
-        flatten([getdef(path, []), S_MT + ckey])
+        child, before, after, maxdepth, ckey, out, childPath, pool
       ))
     }
   }

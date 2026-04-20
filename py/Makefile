@@ -1,4 +1,4 @@
-.PHONY: inspect build test clean reset
+.PHONY: inspect build test bench clean reset
 
 inspect:
 	@echo "Python version:"
@@ -12,6 +12,15 @@ build:
 
 test:
 	python3 -m unittest discover -s tests
+
+bench:
+	WALK_BENCH=1 python3 -m unittest discover -s tests -p 'test_walk_bench.py' -v
+
+bench-quick:
+	WALK_BENCH=1 \
+	  WALK_BENCH_VD_DEPTH=16 WALK_BENCH_RUNS_VD=3 WALK_BENCH_WARMUP=1 \
+	  WALK_BENCH_RUNS_WD=5 WALK_BENCH_RUNS_VW=5 \
+	  python3 -m unittest discover -s tests -p 'test_walk_bench.py' -v
 
 clean:
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true

@@ -1173,6 +1173,17 @@ class Struct
 
     private const MAXDEPTH = 32;
 
+    /**
+     * Walk a data structure depth first, applying callbacks to each value.
+     *
+     * The `$path` argument passed to the before/after callbacks is backed
+     * by a per-depth slot in a shared pool that lives for the duration of
+     * the top-level walk call. Read-only consumers (count/size, implode,
+     * iteration) see the current path contents without triggering a copy
+     * under PHP's copy-on-write semantics. Callbacks that need to retain
+     * the path MUST clone it (e.g. via `array_values($path)`); otherwise
+     * its contents will be overwritten by subsequent visits.
+     */
     public static function walk(
         mixed $val,
         ?callable $before = null,
@@ -1182,22 +1193,52 @@ class Struct
         mixed $parent = null,
         ?array $path = null
     ): mixed {
-        if ($path === null) {
-            $path = [];
-        }
+        $pool = [[]];
+        return self::_walk($val, $before, $after, $maxdepth, $key, $parent, $path ?? $pool[0], $pool);
+    }
+
+    /**
+     * Recursive walk helper. The pool is passed by reference so each depth
+     * reuses the same path buffer across sibling iterations, eliminating
+     * the per-node path allocation the original implementation incurred.
+     *
+     * @param array<int, array<int, string>> $pool
+     */
+    private static function _walk(
+        mixed $val,
+        ?callable $before,
+        ?callable $after,
+        ?int $maxdepth,
+        mixed $key,
+        mixed $parent,
+        array $path,
+        array &$pool
+    ): mixed {
+        $depth = count($path);
 
         $out = ($before !== null) ? $before($key, $val, $parent, $path) : $val;
 
         $md = ($maxdepth !== null && $maxdepth >= 0) ? $maxdepth : self::MAXDEPTH;
-        if (0 === $md || (count($path) > 0 && $md <= count($path))) {
+        if (0 === $md || ($depth > 0 && $md <= $depth)) {
             return $out;
         }
 
         if (self::isnode($out)) {
+            $childDepth = $depth + 1;
+            if (!array_key_exists($childDepth, $pool)) {
+                $pool[$childDepth] = [];
+            }
+            // Sync prefix [0..depth-1] into the child slot. Siblings at the
+            // same level share this prefix; only slot [$depth] differs
+            // between iterations.
+            for ($i = 0; $i < $depth; $i++) {
+                $pool[$childDepth][$i] = $path[$i];
+            }
+
             foreach (self::items($out) as [$childKey, $childVal]) {
-                $childPath = self::flatten([$path, self::S_MT . $childKey]);
-                $result = self::walk(
-                    $childVal, $before, $after, $md, $childKey, $out, $childPath
+                $pool[$childDepth][$depth] = self::S_MT . $childKey;
+                $result = self::_walk(
+                    $childVal, $before, $after, $md, $childKey, $out, $pool[$childDepth], $pool
                 );
                 if (self::ismap($out)) {
                     if (is_object($out)) {

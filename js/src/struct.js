@@ -703,28 +703,50 @@ function setprop(parent, key, val) {
     return parent
 }
 // Walk a data structure depth first, applying a function to each value.
+// The `path` argument passed to the before/after callbacks is a single
+// mutable array per depth, shared across all callback invocations for the
+// lifetime of this top-level walk call. Callbacks that need to store the
+// path MUST clone it (e.g. `path.slice()`); the contents will otherwise
+// be overwritten by subsequent visits.
 function walk(
 // These arguments are the public interface.
-val, 
+val,
 // Before descending into a node.
-before, 
+before,
 // After descending into a node.
-after, 
+after,
 // Maximum recursive depth, default: 32. Use null for infinite depth.
-maxdepth, 
+maxdepth,
 // These areguments are used for recursive state.
-key, parent, path) {
-    if (NONE === path) {
-        path = []
+key, parent, path, pool) {
+    if (NONE === pool) {
+        pool = [[]]
     }
+    if (NONE === path) {
+        path = pool[0]
+    }
+    const depth = path.length
     let out = null == before ? val : before(key, val, parent, path)
     maxdepth = null != maxdepth && 0 <= maxdepth ? maxdepth : MAXDEPTH
-    if (0 === maxdepth || (null != path && 0 < maxdepth && maxdepth <= path.length)) {
+    if (0 === maxdepth || (0 < maxdepth && maxdepth <= depth)) {
         return out
     }
     if (isnode(out)) {
+        const childDepth = depth + 1
+        let childPath = pool[childDepth]
+        if (NONE === childPath) {
+            childPath = new Array(childDepth)
+            pool[childDepth] = childPath
+        }
+        // Sync prefix [0..depth-1] from the current path. Only needed once per
+        // parent: siblings share the same prefix and will each overwrite slot
+        // [depth] below.
+        for (let i = 0; i < depth; i++) {
+            childPath[i] = path[i]
+        }
         for (let [ckey, child] of items(out)) {
-            setprop(out, ckey, walk(child, before, after, maxdepth, ckey, out, flatten([getdef(path, []), S_MT + ckey])))
+            childPath[depth] = S_MT + ckey
+            setprop(out, ckey, walk(child, before, after, maxdepth, ckey, out, childPath, pool))
         }
     }
     out = null == after ? out : after(key, out, parent, path)
