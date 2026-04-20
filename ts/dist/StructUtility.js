@@ -44,7 +44,7 @@ exports.jt = jt;
 exports.checkPlacement = checkPlacement;
 exports.injectorArgs = injectorArgs;
 exports.injectChild = injectChild;
-// VERSION: @voxgig/struct 0.0.10
+// VERSION: @voxgig/struct 0.1.0
 /* Voxgig Struct
  * =============
  *
