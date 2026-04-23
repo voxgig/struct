@@ -5,7 +5,7 @@
 #   make inspect       — show version info for all languages
 #   make clean         — clean all build artifacts
 
-LANGS = ts js py go rb php lua zig
+LANGS = ts js py go rb php lua zig java
 
 .PHONY: all inspect build test clean reset
 
