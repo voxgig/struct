@@ -630,8 +630,21 @@ module VoxgigStruct
     T_any
   end
 
-  def self.walk(val, before = nil, after = nil, maxdepth = nil, key: nil, parent: nil, path: nil)
-    path = [] if path.nil?
+  # Walk a data structure depth first, applying a function to each value.
+  # The `path` argument passed to the before/after callbacks is a single
+  # mutable array per depth, shared across all callback invocations for the
+  # lifetime of this top-level walk call. Callbacks that need to store the
+  # path MUST clone it (e.g. `path.dup`); the contents will otherwise be
+  # overwritten by subsequent visits.
+  def self.walk(val, before = nil, after = nil, maxdepth = nil, key: nil, parent: nil, path: nil, pool: nil)
+    if pool.nil?
+      pool = [[]]
+    end
+    if path.nil?
+      path = pool[0]
+    end
+
+    depth = path.length
 
     _before = before
     _after = after
@@ -639,14 +652,29 @@ module VoxgigStruct
     out = _before.nil? ? val : _before.call(key, val, parent, path)
 
     md = (maxdepth.is_a?(Numeric) && maxdepth >= 0) ? maxdepth : MAXDEPTH
-    if md == 0 || (!path.empty? && md > 0 && md <= path.length)
+    if md == 0 || (md > 0 && md <= depth)
       return out
     end
 
     if isnode(out)
+      child_depth = depth + 1
+      child_path = pool[child_depth]
+      if child_path.nil?
+        child_path = Array.new(child_depth)
+        pool[child_depth] = child_path
+      end
+      # Sync prefix [0..depth-1] from the current path. Only needed once per
+      # parent: siblings share the same prefix and will each overwrite slot
+      # [depth] below.
+      i = 0
+      while i < depth
+        child_path[i] = path[i]
+        i += 1
+      end
+
       items(out).each do |ckey, child|
-        new_path = flatten([path, ckey.to_s])
-        result = walk(child, _before, _after, md, key: ckey, parent: out, path: new_path)
+        child_path[depth] = ckey.to_s
+        result = walk(child, _before, _after, md, key: ckey, parent: out, path: child_path, pool: pool)
         if ismap(out)
           out[ckey.to_s] = result
         elsif islist(out)

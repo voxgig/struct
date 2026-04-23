@@ -1086,30 +1086,55 @@ def walk(
         before: Any = None,
         after: Any = None,
         maxdepth: Any = None,
+        pool: Any = UNDEF,
 ):
     """
     Walk a data structure depth-first.
     Supports before (pre-descent) and after (post-descent) callbacks.
     For backward compat, `apply` is treated as the after callback.
+
+    The `path` argument passed to the before/after callbacks is a single
+    mutable list per depth, shared across all callback invocations for
+    the lifetime of this top-level walk call. Callbacks that need to
+    store the path MUST clone it (e.g. ``path[:]`` or ``list(path)``);
+    the contents will otherwise be overwritten by subsequent visits.
     """
+    if pool is UNDEF:
+        pool = [[]]
     if path is UNDEF:
-        path = []
+        path = pool[0]
 
     _before = before
     _after = after if after is not None else apply
 
+    depth = len(path)
+
     out = val if _before is None else _before(key, val, parent, path)
 
     md = maxdepth if maxdepth is not None and 0 <= maxdepth else MAXDEPTH
-    if 0 == md or (path is not None and 0 < md and md <= len(path)):
+    if 0 == md or (0 < md and md <= depth):
         return out
 
     if isnode(out):
+        child_depth = depth + 1
+        # Grow pool on demand: pool[n] is a reusable path list of length n.
+        # Appending at index i creates a list of length i, matching index.
+        while len(pool) <= child_depth:
+            pool.append([None] * len(pool))
+        child_path = pool[child_depth]
+        # Sync prefix [0..depth-1] from the current path. Only needed once
+        # per parent: siblings share the same prefix and will each
+        # overwrite slot [depth] below.
+        for i in range(depth):
+            child_path[i] = path[i]
+
         for (ckey, child) in items(out):
+            child_path[depth] = str(ckey)
             result = walk(
                 child, key=ckey, parent=out,
-                path=flatten([path or [], str(ckey)]),
+                path=child_path,
                 before=_before, after=_after, maxdepth=md,
+                pool=pool,
             )
             if ismap(out):
                 out[str(ckey)] = result

@@ -1331,6 +1331,11 @@ end
 
 
 -- Walk a data structure depth first, applying a function to each value.
+-- The `path` argument passed to the before/after callbacks is a single
+-- mutable array per depth, shared across all callback invocations for the
+-- lifetime of this top-level walk call. Callbacks that need to store the
+-- path MUST clone it (e.g. via a shallow copy); the contents will otherwise
+-- be overwritten by subsequent visits.
 -- @param val (any) The value to walk
 -- @param before (function) Applied before descending into a node
 -- @param after (function) Applied after descending into a node
@@ -1338,13 +1343,21 @@ end
 -- @param key (any) Current key (for recursive calls)
 -- @param parent (table) Current parent (for recursive calls)
 -- @param path (table) Current path (for recursive calls)
+-- @param pool (table) Per-depth reusable path arrays (for recursive calls)
 -- @return (any) The transformed value
 local function walk(val, before, after, maxdepth,
-                    key, parent, path)
-  if NONE == path then
-    path = {}
-    setmetatable(path, { __jsontype = "array" })
+                    key, parent, path, pool)
+  if nil == pool then
+    pool = {}
+    local rootPath = {}
+    setmetatable(rootPath, { __jsontype = "array" })
+    pool[0] = rootPath
   end
+  if nil == path then
+    path = pool[0]
+  end
+
+  local depth = #path
 
   local out
   if nil == before then
@@ -1354,18 +1367,31 @@ local function walk(val, before, after, maxdepth,
   end
 
   maxdepth = (maxdepth ~= nil and maxdepth >= 0) and maxdepth or MAXDEPTH
-  if 0 == maxdepth or (path ~= nil and 0 < maxdepth and maxdepth <= #path) then
+  if 0 == maxdepth or (0 < maxdepth and maxdepth <= depth) then
     return out
   end
 
   if isnode(out) then
+    local childDepth = depth + 1
+    local childPath = pool[childDepth]
+    if nil == childPath then
+      childPath = {}
+      setmetatable(childPath, { __jsontype = "array" })
+      pool[childDepth] = childPath
+    end
+    -- Sync prefix [1..depth] from the current path. Only needed once per
+    -- parent: siblings share the same prefix and will each overwrite slot
+    -- [childDepth] below.
+    for i = 1, depth do
+      childPath[i] = path[i]
+    end
+
     for _, item in ipairs(items(out)) do
       local ckey, child = item[1], item[2]
 
-      local childPath = flatten({ getdef(path, {}), S_MT .. tostring(ckey) })
-      setmetatable(childPath, { __jsontype = "array" })
+      childPath[childDepth] = S_MT .. tostring(ckey)
 
-      setprop(out, ckey, walk(child, before, after, maxdepth, ckey, out, childPath))
+      setprop(out, ckey, walk(child, before, after, maxdepth, ckey, out, childPath, pool))
     end
   end
 

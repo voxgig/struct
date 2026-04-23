@@ -1,4 +1,4 @@
-.PHONY: inspect build test clean reset
+.PHONY: inspect build test bench clean reset
 
 inspect:
 	@echo "PHP version:"
@@ -12,6 +12,9 @@ build:
 
 test:
 	vendor/bin/phpunit
+
+bench:
+	WALK_BENCH=1 php -d memory_limit=512M tests/WalkBench.php
 
 clean:
 	@echo "Nothing to clean"

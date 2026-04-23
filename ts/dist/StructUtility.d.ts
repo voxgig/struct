@@ -76,7 +76,7 @@ declare function jm(...kv: any[]): Record<string, any>;
 declare function jt(...v: any[]): any[];
 declare function delprop<PARENT>(parent: PARENT, key: any): PARENT;
 declare function setprop<PARENT>(parent: PARENT, key: any, val: any): PARENT;
-declare function walk(val: any, before?: WalkApply, after?: WalkApply, maxdepth?: number, key?: string | number, parent?: any, path?: string[]): any;
+declare function walk(val: any, before?: WalkApply, after?: WalkApply, maxdepth?: number, key?: string | number, parent?: any, path?: string[], pool?: string[][]): any;
 declare function merge(val: any, maxdepth?: number): any;
 declare function setpath(store: any, path: number | string | string[], val: any, injdef?: Partial<Injection>): any;
 declare function getpath(store: any, path: number | string | string[], injdef?: Partial<Injection>): any;

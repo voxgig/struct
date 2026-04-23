@@ -364,6 +364,10 @@ func (inj *Injection) String(prefix ...string) string {
 }
 
 // Function applied to each node and leaf when walking a node structure depth first.
+// The `path` argument is a single mutable slice per depth, shared across all
+// callback invocations for the lifetime of a top-level Walk call. Callbacks
+// that need to retain the path MUST clone it (e.g. `append([]string(nil), path...)`);
+// otherwise its contents will be overwritten by subsequent visits.
 type WalkApply func(
 	// Map keys are strings, list keys are numbers, top key is nil
 	key *string,
@@ -1545,6 +1549,10 @@ func SetProp(parent any, key any, newval any) any {
 // Walk(val, before, after, maxdepth) - with maximum recursion depth.
 // Pass nil for before or after to skip that callback.
 // For backward compatibility, Walk(val, apply) applies the callback after children (post-order).
+//
+// The `path` passed to callbacks is a single mutable slice per depth, reused
+// across recursive calls. Callbacks must clone it (see WalkApply) if they want
+// to retain it beyond the invocation.
 func Walk(
 	val any,
 	apply WalkApply,
@@ -1573,17 +1581,26 @@ func Walk(
 		}
 	}
 
+	// Allocate the path-pool once per top-level Walk. pool[n] is a backing
+	// array of length n that holds the current path for depth n; it is
+	// grown on demand and mutated in place by _walkDescend.
+	pool := [][]string{nil}
+
 	if after != nil {
 		// Two-callback mode: apply is before, after is after.
-		return _walkDescend(val, apply, after, maxdepth, nil, nil, nil)
+		return _walkDescend(val, apply, after, maxdepth, nil, nil, nil, pool)
 	}
 
 	// Single-callback mode: apply is called before children (pre-order),
 	// matching the TS implementation where walk(val, before) is pre-order.
-	return _walkDescend(val, apply, nil, maxdepth, nil, nil, nil)
+	return _walkDescend(val, apply, nil, maxdepth, nil, nil, nil, pool)
 }
 
 
+// WalkDescend performs a post-order walk from an arbitrary start point
+// (with explicit key, parent, and path). Unlike Walk it does not share a
+// pool across recursive calls: it allocates per-call path arrays. Intended
+// for ad-hoc recursive descents from a non-root position.
 func WalkDescend(
 	val any,
 	apply WalkApply,
@@ -1591,11 +1608,88 @@ func WalkDescend(
 	parent any,
 	path []string,
 ) any {
-	return _walkDescend(val, nil, apply, 32, key, parent, path)
+	return _walkDescendAlloc(val, nil, apply, 32, key, parent, path)
 }
 
 
+// _walkDescend is the pool-threaded core used by Walk. The `path` slice it
+// hands to callbacks is reused across sibling visits: each recursive call
+// reuses pool[depth+1] (growing the pool on demand), writes its own key in
+// the last slot, and passes the slice down. Callbacks must clone it if they
+// want to retain it.
 func _walkDescend(
+	val any,
+	before WalkApply,
+	after WalkApply,
+	maxdepth int,
+	key *string,
+	parent any,
+	path []string,
+	pool [][]string,
+) any {
+
+	if path == nil {
+		path = pool[0]
+	}
+	depth := len(path)
+
+	out := val
+
+	// Apply before callback.
+	if nil != before {
+		out = before(key, out, parent, path)
+	}
+
+	// Check depth limit.
+	if 0 == maxdepth || (0 < maxdepth && maxdepth <= depth) {
+		return out
+	}
+
+	if IsNode(out) {
+		childDepth := depth + 1
+		// Grow pool on demand.
+		for len(pool) <= childDepth {
+			pool = append(pool, nil)
+		}
+		childPath := pool[childDepth]
+		if childPath == nil {
+			childPath = make([]string, childDepth)
+			pool[childDepth] = childPath
+		}
+		// Sync prefix [0..depth-1] from the current path. Only needed
+		// once per parent: siblings share the same prefix and will each
+		// overwrite slot [depth] below.
+		for i := 0; i < depth; i++ {
+			childPath[i] = path[i]
+		}
+
+		for _, kv := range Items(out) {
+			ckey := kv[0]
+			child := kv[1]
+			ckeyStr := StrKey(ckey)
+			childPath[depth] = ckeyStr
+			newChild := _walkDescend(child, before, after, maxdepth, &ckeyStr, out, childPath, pool)
+			out = SetProp(out, ckey, newChild)
+		}
+
+		if nil != parent && nil != key {
+			SetProp(parent, *key, out)
+		}
+	}
+
+	// Apply after callback.
+	if nil != after {
+		out = after(key, out, parent, path)
+	}
+
+	return out
+}
+
+
+// _walkDescendAlloc is the legacy per-call-allocating descent used by
+// WalkDescend, preserved for callers that enter the recursion at an
+// arbitrary point without a shared pool.
+func _walkDescendAlloc(
 	val any,
 	before WalkApply,
 	after WalkApply,
@@ -1607,12 +1701,10 @@ func _walkDescend(
 
 	out := val
 
-	// Apply before callback.
 	if nil != before {
 		out = before(key, out, parent, path)
 	}
 
-	// Check depth limit.
 	if 0 == maxdepth || (nil != path && 0 < maxdepth && maxdepth <= len(path)) {
 		return out
 	}
@@ -1625,7 +1717,7 @@ func _walkDescend(
 			newPath := make([]string, len(path)+1)
 			copy(newPath, path)
 			newPath[len(path)] = ckeyStr
-			newChild := _walkDescend(child, before, after, maxdepth, &ckeyStr, out, newPath)
+			newChild := _walkDescendAlloc(child, before, after, maxdepth, &ckeyStr, out, newPath)
 			out = SetProp(out, ckey, newChild)
 		}
 
@@ -1634,7 +1726,6 @@ func _walkDescend(
 		}
 	}
 
-	// Apply after callback.
 	if nil != after {
 		out = after(key, out, parent, path)
 	}

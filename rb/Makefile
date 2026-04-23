@@ -1,4 +1,4 @@
-.PHONY: inspect build test clean reset
+.PHONY: inspect build test walk-bench clean reset
 
 inspect:
 	@echo "Ruby version:"
@@ -12,6 +12,9 @@ build:
 
 test:
 	ruby test_voxgig_struct.rb
+
+walk-bench:
+	WALK_BENCH=1 ruby walk_bench.rb
 
 clean:
 	rm -rf pkg

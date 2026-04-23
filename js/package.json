@@ -19,6 +19,7 @@
   },
   "scripts": {
     "test": "node --enable-source-maps --test test/struct.test.js test/client.test.js",
+    "walk-bench": "node --enable-source-maps --test test/walk-bench.test.js",
     "test-cov": "rm -rf ./coverage && mkdir -p ./coverage && node --experimental-test-coverage --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/lcov.info --enable-source-maps --test test/struct.test.js",
     "test-some": "node --enable-source-maps --test-name-pattern=\"$npm_config_pattern\" --test test/struct.test.js",
     "watch": "tsc --build src test -w",

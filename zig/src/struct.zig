@@ -1293,6 +1293,46 @@ pub fn pad(allocator: Allocator, s: []const u8, padding: i64, padchar: u8) ![]co
 // Walk — depth-first tree traversal with before/after callbacks.
 // ============================================================================
 
+// Pool of path buffers — one std.ArrayList([]const u8) per depth. Allocated
+// once per top-level walk() call, grown on demand, and mutated in place as
+// siblings are visited. Avoids allocating a fresh path slice per recursive
+// call. Buffers are heap-allocated so that growing the outer list (on
+// deeper recursion) does not invalidate pointers held by shallower frames.
+const WalkPool = struct {
+    allocator: Allocator,
+    buffers: std.ArrayList(*std.ArrayList([]const u8)),
+
+    fn init(allocator: Allocator) WalkPool {
+        return .{
+            .allocator = allocator,
+            .buffers = std.ArrayList(*std.ArrayList([]const u8)).init(allocator),
+        };
+    }
+
+    fn deinit(self: *WalkPool) void {
+        for (self.buffers.items) |buf| {
+            buf.deinit();
+            self.allocator.destroy(buf);
+        }
+        self.buffers.deinit();
+    }
+
+    // Return the path buffer for the given depth, growing the pool if needed.
+    fn at(self: *WalkPool, depth: usize) !*std.ArrayList([]const u8) {
+        while (self.buffers.items.len <= depth) {
+            const buf = try self.allocator.create(std.ArrayList([]const u8));
+            buf.* = std.ArrayList([]const u8).init(self.allocator);
+            try self.buffers.append(buf);
+        }
+        return self.buffers.items[depth];
+    }
+};
+
+// Depth-first walk callback. The `path` slice is a shared, mutable buffer
+// reused across all callback invocations for the lifetime of this top-level
+// walk() call. Callbacks that need to retain the path MUST copy it
+// (e.g. `allocator.dupe([]const u8, path)`); otherwise its contents will be
+// overwritten by subsequent visits.
 pub const WalkApply = *const fn (
     allocator: Allocator,
     key: ?[]const u8,
@@ -1308,11 +1348,19 @@ pub fn walk(
     after: ?WalkApply,
     maxdepth: i32,
 ) !JsonValue {
-    return walkDescend(allocator, val, before, after, maxdepth, null, .null, &.{});
+    var pool = WalkPool.init(allocator);
+    defer pool.deinit();
+
+    // Depth 0 path buffer (empty) — the root has no path entries.
+    const root_buf = try pool.at(0);
+    root_buf.clearRetainingCapacity();
+
+    return walkDescend(allocator, &pool, val, before, after, maxdepth, null, .null, root_buf.items);
 }
 
 fn walkDescend(
     allocator: Allocator,
+    pool: *WalkPool,
     val_in: JsonValue,
     before: ?WalkApply,
     after: ?WalkApply,
@@ -1337,26 +1385,41 @@ fn walkDescend(
         // Get items (sorted key-value pairs).
         const kv_pairs = try items(allocator, out);
         if (kv_pairs == .array) {
+            const depth = path.len;
+            const child_depth = depth + 1;
+
+            // Get (or create) the shared path buffer for this child depth,
+            // and sync the prefix [0..depth] from the current path. Only
+            // needed once per parent: siblings share the same prefix and
+            // each overwrites slot [depth] below.
+            const child_buf = try pool.at(child_depth);
+            try child_buf.resize(child_depth);
+            var i: usize = 0;
+            while (i < depth) : (i += 1) {
+                child_buf.items[i] = path[i];
+            }
+
             for (kv_pairs.array.data.items) |pair| {
                 if (pair != .array or pair.array.data.items.len < 2) continue;
                 const ckey_val = pair.array.data.items[0];
                 const child = pair.array.data.items[1];
                 const ckey = if (ckey_val == .string) ckey_val.string else "";
 
-                // Build new path.
-                var new_path = try allocator.alloc([]const u8, path.len + 1);
-                @memcpy(new_path[0..path.len], path);
-                new_path[path.len] = ckey;
+                // Overwrite the last path slot for this sibling. The buffer
+                // is shared across siblings — callbacks must copy the path
+                // if they want to retain it.
+                child_buf.items[depth] = ckey;
 
                 const new_child = try walkDescend(
                     allocator,
+                    pool,
                     child,
                     before,
                     after,
                     maxdepth,
                     ckey,
                     out,
-                    new_path,
+                    child_buf.items,
                 );
 
                 // Update the output with the new child value.
