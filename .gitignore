@@ -162,3 +162,6 @@ cs/**/obj/
 .zig-cache/
 zig-cache/
 zig-out/
+
+# Java / Maven
+java/target/
