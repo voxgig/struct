@@ -165,3 +165,7 @@ zig-out/
 
 # Java / Maven
 java/target/
+
+# Kotlin / Gradle
+kotlin/build/
+kotlin/.gradle/
