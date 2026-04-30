@@ -3,7 +3,7 @@ package runner
 import (
 	"fmt"
 	
-	voxgigstruct "github.com/voxgig/struct"
+	voxgigstruct "github.com/voxgig/struct/go"
 )
 
 // SDK is a Go implementation of the TypeScript SDK class

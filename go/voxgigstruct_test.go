@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/voxgig/struct"
-	"github.com/voxgig/struct/testutil"
+	"github.com/voxgig/struct/go"
+	"github.com/voxgig/struct/go/testutil"
 )
 
 
