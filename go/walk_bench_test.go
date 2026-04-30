@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"testing"
 
-	voxgigstruct "github.com/voxgig/struct"
+	voxgigstruct "github.com/voxgig/struct/go"
 )
 
 // buildTree builds a balanced map tree of given width and depth.

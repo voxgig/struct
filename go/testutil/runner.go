@@ -5,7 +5,7 @@ package runner
 import (
 	"fmt"
 
-	"github.com/voxgig/struct"
+	"github.com/voxgig/struct/go"
 
 	"encoding/json"
 	"errors"

@@ -3,7 +3,7 @@ package runner
 import (
 	"fmt"
 	
-	voxgigstruct "github.com/voxgig/struct"
+	voxgigstruct "github.com/voxgig/struct/go"
 )
 
 // Direct is a direct testing helper for validation functions
