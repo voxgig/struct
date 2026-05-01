@@ -18,33 +18,25 @@ port.  When you call `getpath(store, 'a.b.c')` in Python, Go, PHP, or
 Lua, you get the same answer.
 
 
-## Documentation map (Diataxis)
+## Per-language documentation
 
-These docs follow the [Diataxis](https://diataxis.fr/) framework, which
-splits documentation into four quadrants by purpose:
+Each implementation directory has its own `README.md` covering
+installation, full function signatures (using that language's
+syntax), and language-specific notes:
 
-| Quadrant      | Purpose                | Where to find it                                                  |
-|---------------|------------------------|-------------------------------------------------------------------|
-| Tutorial      | Learning by doing      | [Quick start](#quick-start) below + each language's `DOCS.md`     |
-| How-to guides | Solving a task         | [Common recipes](#common-recipes) below + each language's docs    |
-| Reference     | Looking things up      | [API reference](#language-neutral-api-reference) below + per-lang |
-| Explanation   | Understanding the why  | [Motivation](#motivation) and [Concepts](#concepts) below         |
-
-Per-language docs live next to each implementation:
-
-| Language   | Status     | Docs                              |
-|------------|------------|-----------------------------------|
-| TypeScript | Canonical  | [`ts/DOCS.md`](./ts/DOCS.md)      |
-| JavaScript | Complete   | [`js/DOCS.md`](./js/DOCS.md)      |
-| Python     | Complete   | [`py/DOCS.md`](./py/DOCS.md)      |
-| Go         | Complete   | [`go/DOCS.md`](./go/DOCS.md)      |
-| PHP        | Complete   | [`php/DOCS.md`](./php/DOCS.md)    |
-| Ruby       | Complete   | [`rb/DOCS.md`](./rb/DOCS.md)      |
-| Lua        | Complete   | [`lua/DOCS.md`](./lua/DOCS.md)    |
-| C#         | In progress| [`cs/DOCS.md`](./cs/DOCS.md)      |
-| Zig        | In progress| [`zig/DOCS.md`](./zig/DOCS.md)    |
-| Java       | Partial    | [`java/DOCS.md`](./java/DOCS.md)  |
-| C++        | Partial    | [`cpp/DOCS.md`](./cpp/DOCS.md)    |
+| Language   | Status     | README                                |
+|------------|------------|---------------------------------------|
+| TypeScript | Canonical  | [`ts/README.md`](./ts/README.md)      |
+| JavaScript | Complete   | [`js/README.md`](./js/README.md)      |
+| Python     | Complete   | [`py/README.md`](./py/README.md)      |
+| Go         | Complete   | [`go/README.md`](./go/README.md)      |
+| PHP        | Complete   | [`php/README.md`](./php/README.md)    |
+| Ruby       | Complete   | [`rb/README.md`](./rb/README.md)      |
+| Lua        | Complete   | [`lua/README.md`](./lua/README.md)    |
+| C#         | In progress| [`cs/README.md`](./cs/README.md)      |
+| Zig        | In progress| [`zig/README.md`](./zig/README.md)    |
+| Java       | Partial    | [`java/README.md`](./java/README.md)  |
+| C++        | Partial    | [`cpp/README.md`](./cpp/README.md)    |
 
 The cross-language parity matrix lives in [`REPORT.md`](./REPORT.md).
 
