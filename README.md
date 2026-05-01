@@ -382,6 +382,12 @@ Quote the checker in backticks inside a `validate` spec, e.g. `` `$STRING` ``.
   language can't represent it directly.
 - **The TypeScript implementation is canonical.**  Disagreement
   between a port and the test corpus is a port bug.
+- **Zig keeps `allocator` first.**  The Zig port follows the
+  language's universal convention of putting `allocator` as the
+  first parameter, so its signatures look like
+  `getpath(allocator, path, store)` rather than the canonical
+  `getpath(store, path)`.  Argument order *after* the allocator is
+  also Zig-side; see [`zig/DOCS.md`](./zig/DOCS.md).
 
 
 ## Repository layout

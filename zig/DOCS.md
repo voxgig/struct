@@ -41,7 +41,7 @@ pub fn main() !void {
     try root.object.put("db", db);
 
     const path = struct_lib.JsonValue{ .string = "db.host" };
-    const val = try struct_lib.getpath(allocator, root, path);
+    const val = try struct_lib.getpath(allocator, path, root);
     // val == .{ .string = "localhost" }
 }
 ```
@@ -52,7 +52,7 @@ pub fn main() !void {
 ### Read a deep value safely
 
 ```zig
-const v = try struct_lib.getpath(allocator, store, path_val);
+const v = try struct_lib.getpath(allocator, path_val, store);
 const v = try struct_lib.getprop(allocator, store, key_val, alt_val);
 ```
 
@@ -122,7 +122,7 @@ are visible to every holder.  This preserves the canonical
 ```zig
 pub fn walk(allocator, node, apply, opts) anyerror!JsonValue
 pub fn merge(allocator, list, maxdepth) anyerror!JsonValue
-pub fn getpath(allocator, store, path) anyerror!JsonValue
+pub fn getpath(allocator, path, store) anyerror!JsonValue
 pub fn setpath(allocator, store, path, val) anyerror!JsonValue
 pub fn injectVal(allocator, val, store, inj_opt) anyerror!JsonValue
 pub fn transform(allocator, data, spec) anyerror!JsonValue
@@ -157,8 +157,16 @@ bridge to and from `std.json.Value` at the boundary.
 ### Allocator threaded through every call
 
 Idiomatic Zig: every function that may allocate takes an
-`Allocator`.  Callers control lifetime explicitly.  Errors propagate
-through `!` returns.
+`Allocator` as its first argument.  Callers control lifetime
+explicitly.  Errors propagate through `!` returns.
+
+### Argument-order note for `getpath`
+
+The Zig signature is `getpath(allocator, path, store)` -- `allocator`
+first as the language convention requires, then `path`, then `store`.
+The other ports use the canonical `getpath(store, path, …)`.  The
+ordering after `allocator` is a deliberate Zig-side choice; the
+function still does the same thing.
 
 ### Status
 
