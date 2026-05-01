@@ -221,78 +221,147 @@ Java).
 
 ### Minor utilities (25)
 
-```
-typename(t)                            -> string
-getdef(val, alt)                       -> any
-isnode(val) / ismap(val) / islist(val) -> bool
-iskey(key) / isempty(val) / isfunc(val)-> bool
-size(val)                              -> int
-slice(val, start?, end?, mutate?)      -> any
-pad(str, width?, char?)                -> string
-typify(val)                            -> int (bitfield)
-getelem(list, key, alt?)               -> any
-getprop(node, key, alt?)               -> any
-strkey(key)                            -> string
-keysof(node)                           -> string[]
-haskey(node, key)                      -> bool
-items(node)                            -> [key, val][]
-flatten(list, depth?)                  -> list
-filter(node, predicate)                -> list
-escre(s) / escurl(s)                   -> string
-join(arr, sep?, urlmode?)              -> string
-jsonify(val, flags?)                   -> string
-stringify(val, maxlen?)                -> string
-pathify(val, from?, to?)               -> string
-clone(val)                             -> any
-delprop(parent, key)                   -> parent
-setprop(parent, key, val)              -> parent
-```
+| Function                            | Returns         | Description                                                                 |
+|-------------------------------------|-----------------|-----------------------------------------------------------------------------|
+| `typename(t)`                       | string          | Human name (`"string"`, `"map"`, ...) for a type bit-flag from `typify`.    |
+| `getdef(val, alt)`                  | any             | Returns `val` unless it is undefined, in which case returns `alt`.          |
+| `isnode(val)`                       | bool            | True if `val` is a node -- either a map or a list.                          |
+| `ismap(val)`                        | bool            | True if `val` is a map (object with string keys).                           |
+| `islist(val)`                       | bool            | True if `val` is a list (array with integer indices).                       |
+| `iskey(key)`                        | bool            | True if `key` is a non-empty string or an integer index.                    |
+| `isempty(val)`                      | bool            | True if `val` is undefined, `null`, an empty string, list, or map.          |
+| `isfunc(val)`                       | bool            | True if `val` is a callable function.                                       |
+| `size(val)`                         | int             | Length for lists/strings; key count for maps; integer part for numbers.     |
+| `slice(val, start?, end?, mutate?)` | any             | Sub-section of a list, string, or bounded number; negative indices count from the end. |
+| `pad(str, width?, char?)`           | string          | Pad `str` to `width` with `char`; negative width pads on the left.          |
+| `typify(val)`                       | int (bitfield)  | Type bit-code (e.g. `T_scalar | T_string`) describing the value.            |
+| `getelem(list, key, alt?)`          | any             | List lookup by integer key, with `-1` counting from the end; `alt` if absent. |
+| `getprop(node, key, alt?)`          | any             | Safe property lookup on a map or list; returns `alt` if missing.            |
+| `strkey(key)`                       | string          | Coerce a key to a canonical string form (`""` for invalid keys).            |
+| `keysof(node)`                      | string[]        | Sorted list of a node's keys (string indices for lists).                    |
+| `haskey(node, key)`                 | bool            | True if the key is present and its value is defined.                        |
+| `items(node)`                       | `[key, val][]`  | Entries of a map or list as `[key, value]` pairs.                           |
+| `flatten(list, depth?)`             | list            | Concatenate nested lists down to `depth` levels.                            |
+| `filter(node, predicate)`           | list            | Keep entries for which `predicate([key, val])` is truthy.                   |
+| `escre(s)`                          | string          | Escape regex metacharacters in a string.                                    |
+| `escurl(s)`                         | string          | URL-encode a string.                                                        |
+| `join(arr, sep?, urlmode?)`         | string          | Join string parts with `sep`; in URL mode, collapse repeated separators.    |
+| `jsonify(val, flags?)`              | string          | Strict JSON serialisation of a value, optionally pretty-printed.            |
+| `stringify(val, maxlen?)`           | string          | Compact, human-friendly string form of a value, truncated to `maxlen`.      |
+| `pathify(val, from?, to?)`          | string          | Render a path (string or array) as a canonical dotted string.               |
+| `clone(val)`                        | any             | Deep copy of a JSON-shaped value.                                           |
+| `delprop(parent, key)`              | parent          | Remove a key from a map or list (returns the mutated parent).               |
+| `setprop(parent, key, val)`         | parent          | Set a key on a map or list to `val` (returns the mutated parent).           |
 
 ### Major utilities (8)
 
-```
-walk(node, apply, before?, after?, maxdepth?) -> node
-merge(list, maxdepth?)                        -> any
-setpath(store, path, val)                     -> store
-getpath(path, store)                          -> any
-inject(val, store, modify?)                   -> any
-transform(data, spec, extra?, modify?)        -> any
-validate(data, spec, extra?, collecterrs?)    -> any  (throws or collects on mismatch)
-select(query, obj)                            -> match[]
-```
+| Function                                       | Returns         | Description                                                                 |
+|------------------------------------------------|-----------------|-----------------------------------------------------------------------------|
+| `walk(node, apply, before?, after?, maxdepth?)`| node            | Depth-first walk of a tree, calling `apply` (and optional `before`/`after`) at each node and leaf, with replacement. |
+| `merge(list, maxdepth?)`                       | any             | Deep-merge a list of maps, last-wins for scalars; lists are merged by index.|
+| `getpath(path, store)`                         | any             | Look up the value at a dotted path (or array path) inside `store`.          |
+| `setpath(store, path, val)`                    | store           | Set `val` at a deep path inside `store`, creating missing parents.          |
+| `inject(val, store, modify?)`                  | any             | Substitute `` `path` `` references inside `val` with values from `store`.   |
+| `transform(data, spec, extra?, modify?)`       | any             | Build a result by example: `spec` mirrors output shape, with refs into `data`. |
+| `validate(data, spec, extra?, collecterrs?)`   | any             | Check `data` against a by-example shape; returns `data` on success, throws or collects on mismatch. |
+| `select(query, obj)`                           | match[]         | Pick records from a node whose fields match the query, with `$KEY` operators. |
 
 ### Builders (2)
 
-```
-jm(...)   // build a map (JSON object) from key/value args
-jt(...)   // build a list (JSON tuple/array) from args
-```
+| Function       | Returns | Description                                                  |
+|----------------|---------|--------------------------------------------------------------|
+| `jm(...args)`  | map     | Build a map (JSON object) from alternating key/value pairs.  |
+| `jt(...args)`  | list    | Build a list (JSON array/tuple) from positional args.        |
 
-### Sentinels and constants
+### Injection helpers (3)
 
-```
-SKIP, DELETE                              // sentinel markers
-T_any, T_noval, T_boolean, T_decimal,
-T_integer, T_number, T_string, T_function,
-T_symbol, T_null, T_list, T_map,
-T_instance, T_scalar, T_node              // 15 type bit-flags
-M_KEYPRE, M_KEYPOST, M_VAL                // walk/inject phase tags
-MODENAME                                  // human name table for modes
-```
+These are exposed for callers that write custom injectors or modify
+hooks; most users will not need them directly.
+
+| Function                                    | Description                                                                |
+|---------------------------------------------|----------------------------------------------------------------------------|
+| `checkPlacement(inj, parent, ...)`          | Validate where an injection result may be placed (root vs branch vs leaf). |
+| `injectorArgs(inj, store)`                  | Extract the argument list passed to a transform-command injector.          |
+| `injectChild(inj, store, key)`              | Recurse `inject` into a child of the current node, sharing the state.      |
+
+### Sentinels
+
+| Symbol     | Description                                                                                |
+|------------|--------------------------------------------------------------------------------------------|
+| `SKIP`     | Returned from a transform/inject step to omit the current key from the output.             |
+| `DELETE`   | Returned from a transform/inject step to delete the current key from the parent.           |
+
+### Type bit-flags (15)
+
+Returned by `typify(val)` and named by `typename(t)`.  Combine with
+bitwise operators to test composite types (e.g. `T_node | T_map`).
+
+| Constant      | Description                                                  |
+|---------------|--------------------------------------------------------------|
+| `T_any`       | Wildcard / "no constraint" type.                             |
+| `T_noval`     | Property absent / undefined; **not** a scalar.               |
+| `T_boolean`   | Boolean scalar.                                              |
+| `T_decimal`   | Non-integer numeric scalar.                                  |
+| `T_integer`   | Integer numeric scalar.                                      |
+| `T_number`    | Any numeric scalar (set together with `T_integer`/`T_decimal`). |
+| `T_string`    | String scalar.                                               |
+| `T_function`  | Callable function value.                                     |
+| `T_symbol`    | Symbolic atom (for languages that have them).                |
+| `T_null`      | The actual JSON null value (distinct from absent).           |
+| `T_list`      | List node (array).                                           |
+| `T_map`       | Map node (object).                                           |
+| `T_instance`  | Class instance (non-plain object).                           |
+| `T_scalar`    | Set on every scalar type, alongside its specific flag.       |
+| `T_node`      | Set on every node type (`T_list`, `T_map`, `T_instance`).    |
+
+### Walk / inject mode flags
+
+| Constant      | Description                                                  |
+|---------------|--------------------------------------------------------------|
+| `M_KEYPRE`    | Phase tag: about to descend into a child by key.             |
+| `M_KEYPOST`   | Phase tag: returned from descending into a child by key.     |
+| `M_VAL`       | Phase tag: visiting the value of a leaf.                     |
+| `MODENAME`    | Lookup table mapping mode flags to human-readable names.     |
 
 ### Transform commands (used inside spec strings)
 
-```
-$DELETE  $COPY  $KEY  $META  $ANNO
-$MERGE   $EACH  $PACK  $REF   $FORMAT  $APPLY
-```
+Quote the command in backticks inside a `transform` spec, e.g. `` `$COPY` ``.
+
+| Command    | Description                                                                |
+|------------|----------------------------------------------------------------------------|
+| `$DELETE`  | Remove the current key from the output.                                    |
+| `$COPY`    | Copy the matching value from `data` at the current path.                   |
+| `$KEY`     | Insert the current key under another name in the output.                   |
+| `$META`    | Attach or read metadata about the current path.                            |
+| `$ANNO`    | Annotate the current node with extra fields from the spec.                 |
+| `$MERGE`   | Deep-merge several sub-specs into the current node.                        |
+| `$EACH`    | Apply a sub-spec to every entry of a list or map.                          |
+| `$PACK`    | Repack a node by rewriting its keys / shape.                               |
+| `$REF`     | Resolve a named reference inside the spec.                                 |
+| `$FORMAT`  | Render a templated string using values from `data`.                        |
+| `$APPLY`   | Call a function (from `extra`) on the current value and substitute result. |
 
 ### Validate checkers (used inside spec strings)
 
-```
-$MAP  $LIST  $STRING  $NUMBER  $INTEGER  $DECIMAL  $BOOLEAN
-$NULL $NIL   $FUNCTION $INSTANCE $ANY $CHILD $ONE $EXACT
-```
+Quote the checker in backticks inside a `validate` spec, e.g. `` `$STRING` ``.
+
+| Checker     | Description                                                              |
+|-------------|--------------------------------------------------------------------------|
+| `$MAP`      | The value must be a map.                                                 |
+| `$LIST`     | The value must be a list.                                                |
+| `$STRING`   | The value must be a string.                                              |
+| `$NUMBER`   | The value must be a number (integer or decimal).                         |
+| `$INTEGER`  | The value must be an integer.                                            |
+| `$DECIMAL`  | The value must be a non-integer number.                                  |
+| `$BOOLEAN`  | The value must be a boolean.                                             |
+| `$NULL`     | The value must be JSON null.                                             |
+| `$NIL`      | The value must be absent or null (lenient null check).                   |
+| `$FUNCTION` | The value must be a callable function.                                   |
+| `$INSTANCE` | The value must be a class instance (non-plain object).                   |
+| `$ANY`      | The value matches anything (placeholder for "no constraint").            |
+| `$CHILD`    | Apply a sub-spec to every direct child of the current node.              |
+| `$ONE`      | The value must match exactly one of a list of alternative sub-specs.     |
+| `$EXACT`    | The value must equal a literal value exactly (no shape coercion).        |
 
 
 ## Design notes
