@@ -14,37 +14,29 @@ semantics of "the same" call become subtly different.
 implementation (TypeScript), and porting it to every language a
 Voxgig SDK runs in.  The same names, the same arguments, the same
 return values, and the same JSON-driven test corpus run against every
-port.  When you call `getpath('a.b.c', store)` in Python, Go, PHP, or
+port.  When you call `getpath(store, 'a.b.c')` in Python, Go, PHP, or
 Lua, you get the same answer.
 
 
-## Documentation map (Diataxis)
+## Per-language documentation
 
-These docs follow the [Diataxis](https://diataxis.fr/) framework, which
-splits documentation into four quadrants by purpose:
+Each implementation directory has its own `README.md` covering
+installation, full function signatures (using that language's
+syntax), and language-specific notes:
 
-| Quadrant      | Purpose                | Where to find it                                                  |
-|---------------|------------------------|-------------------------------------------------------------------|
-| Tutorial      | Learning by doing      | [Quick start](#quick-start) below + each language's `DOCS.md`     |
-| How-to guides | Solving a task         | [Common recipes](#common-recipes) below + each language's docs    |
-| Reference     | Looking things up      | [API reference](#language-neutral-api-reference) below + per-lang |
-| Explanation   | Understanding the why  | [Motivation](#motivation) and [Concepts](#concepts) below         |
-
-Per-language docs live next to each implementation:
-
-| Language   | Status     | Docs                              |
-|------------|------------|-----------------------------------|
-| TypeScript | Canonical  | [`ts/DOCS.md`](./ts/DOCS.md)      |
-| JavaScript | Complete   | [`js/DOCS.md`](./js/DOCS.md)      |
-| Python     | Complete   | [`py/DOCS.md`](./py/DOCS.md)      |
-| Go         | Complete   | [`go/DOCS.md`](./go/DOCS.md)      |
-| PHP        | Complete   | [`php/DOCS.md`](./php/DOCS.md)    |
-| Ruby       | Complete   | [`rb/DOCS.md`](./rb/DOCS.md)      |
-| Lua        | Complete   | [`lua/DOCS.md`](./lua/DOCS.md)    |
-| C#         | In progress| [`cs/DOCS.md`](./cs/DOCS.md)      |
-| Zig        | In progress| [`zig/DOCS.md`](./zig/DOCS.md)    |
-| Java       | Partial    | [`java/DOCS.md`](./java/DOCS.md)  |
-| C++        | Partial    | [`cpp/DOCS.md`](./cpp/DOCS.md)    |
+| Language   | Status     | README                                |
+|------------|------------|---------------------------------------|
+| TypeScript | Canonical  | [`ts/README.md`](./ts/README.md)      |
+| JavaScript | Complete   | [`js/README.md`](./js/README.md)      |
+| Python     | Complete   | [`py/README.md`](./py/README.md)      |
+| Go         | Complete   | [`go/README.md`](./go/README.md)      |
+| PHP        | Complete   | [`php/README.md`](./php/README.md)    |
+| Ruby       | Complete   | [`rb/README.md`](./rb/README.md)      |
+| Lua        | Complete   | [`lua/README.md`](./lua/README.md)    |
+| C#         | In progress| [`cs/README.md`](./cs/README.md)      |
+| Zig        | In progress| [`zig/README.md`](./zig/README.md)    |
+| Java       | Partial    | [`java/README.md`](./java/README.md)  |
+| C++        | Partial    | [`cpp/README.md`](./cpp/README.md)    |
 
 The cross-language parity matrix lives in [`REPORT.md`](./REPORT.md).
 
@@ -121,7 +113,7 @@ JavaScript / TypeScript:
 
 ```js
 const { getpath } = require('@voxgig/struct')
-getpath('db.host', { db: { host: 'localhost', port: 5432 } })
+getpath({ db: { host: 'localhost', port: 5432 } }, 'db.host')
 // => 'localhost'
 ```
 
@@ -129,16 +121,16 @@ Python:
 
 ```python
 from voxgig_struct import getpath
-getpath('db.host', {'db': {'host': 'localhost', 'port': 5432}})
+getpath({'db': {'host': 'localhost', 'port': 5432}}, 'db.host')
 # => 'localhost'
 ```
 
 Go:
 
 ```go
-voxgigstruct.GetPath("db.host", map[string]any{
+voxgigstruct.GetPath(map[string]any{
     "db": map[string]any{"host": "localhost", "port": 5432},
-})
+}, "db.host")
 // => "localhost"
 ```
 
@@ -178,7 +170,9 @@ validate(
 ### Walk a tree
 
 ```js
-walk(tree, (key, val, parent, path) => {
+// walk takes optional before/after callbacks; pass the same callback as
+// `after` to replace values post-descent.
+walk(tree, undefined, (key, val, parent, path) => {
   return val === null ? 'DEFAULT' : val
 })
 ```
@@ -257,14 +251,14 @@ Java).
 
 | Function                                       | Returns         | Description                                                                 |
 |------------------------------------------------|-----------------|-----------------------------------------------------------------------------|
-| `walk(node, apply, before?, after?, maxdepth?)`| node            | Depth-first walk of a tree, calling `apply` (and optional `before`/`after`) at each node and leaf, with replacement. |
+| `walk(val, before?, after?, maxdepth?)`        | node            | Depth-first walk of a tree, calling `before` on descend and `after` on ascend at each node and leaf, with replacement. |
 | `merge(list, maxdepth?)`                       | any             | Deep-merge a list of maps, last-wins for scalars; lists are merged by index.|
-| `getpath(path, store)`                         | any             | Look up the value at a dotted path (or array path) inside `store`.          |
+| `getpath(store, path, injdef?)`                | any             | Look up the value at a dotted path (or array path) inside `store`.          |
 | `setpath(store, path, val)`                    | store           | Set `val` at a deep path inside `store`, creating missing parents.          |
 | `inject(val, store, modify?)`                  | any             | Substitute `` `path` `` references inside `val` with values from `store`.   |
 | `transform(data, spec, extra?, modify?)`       | any             | Build a result by example: `spec` mirrors output shape, with refs into `data`. |
 | `validate(data, spec, extra?, collecterrs?)`   | any             | Check `data` against a by-example shape; returns `data` on success, throws or collects on mismatch. |
-| `select(query, obj)`                           | match[]         | Pick records from a node whose fields match the query, with `$KEY` operators. |
+| `select(children, query)`                      | match[]         | Pick records from a node whose fields match the query, with `$KEY` operators. |
 
 ### Builders (2)
 
@@ -380,6 +374,12 @@ Quote the checker in backticks inside a `validate` spec, e.g. `` `$STRING` ``.
   language can't represent it directly.
 - **The TypeScript implementation is canonical.**  Disagreement
   between a port and the test corpus is a port bug.
+- **Zig keeps `allocator` first.**  The Zig port follows the
+  language's universal convention of putting `allocator` as the
+  first parameter, so its signatures look like
+  `getpath(allocator, path, store)` rather than the canonical
+  `getpath(store, path)`.  Argument order *after* the allocator is
+  also Zig-side; see [`zig/DOCS.md`](./zig/DOCS.md).
 
 
 ## Repository layout

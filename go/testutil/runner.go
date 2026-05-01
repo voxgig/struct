@@ -34,7 +34,7 @@ type StructUtility struct {
 	IsNode     func(val any) bool
 	Clone      func(val any) any
 	CloneFlags func(val any, flags map[string]bool) any
-	GetPath    func(path any, store any, injdefs ...*voxgigstruct.Injection) any
+	GetPath    func(store any, path any, injdefs ...*voxgigstruct.Injection) any
 	Inject     func(val any, store any, injdefs ...*voxgigstruct.Injection) any
 	Items      func(val any) [][2]any
 	Stringify  func(val any, maxlen ...int) string
@@ -711,7 +711,7 @@ func MatchNode(
 			scalar := !structUtil.IsNode(val)
 
 			if scalar {
-				baseval := structUtil.GetPath(path, base)
+				baseval := structUtil.GetPath(base, path)
 				if !MatchScalar(val, baseval, structUtil) {
 					pass = false
 					err = fmt.Errorf(

@@ -918,7 +918,7 @@ public class StructTests
                 if (m == null) return null;
                 object? path  = m.TryGetValue("path",  out object? pv) ? pv : null;
                 object? store = m.TryGetValue("store", out object? sv) ? sv : null;
-                return StructUtils.GetPath(path, store);
+                return StructUtils.GetPath(store, path);
             });
     }
 
@@ -940,7 +940,7 @@ public class StructTests
                 if (m.TryGetValue("dpath", out object? dpv) && dpv is string dpathStr && dpathStr.Length > 0)
                     state.DPath = dpathStr.Split('.').Cast<object?>().ToList();
 
-                return StructUtils.GetPath(path, store, null, state);
+                return StructUtils.GetPath(store, path, null, state);
             });
     }
 
@@ -966,7 +966,7 @@ public class StructTests
                         state.Meta = metaMap;
                 }
 
-                return StructUtils.GetPath(path, store, null, state);
+                return StructUtils.GetPath(store, path, null, state);
             });
     }
 
@@ -993,7 +993,7 @@ public class StructTests
                 if (m == null) return null;
                 object? path  = m.TryGetValue("path",  out object? pv) ? pv : null;
                 object? store = m.TryGetValue("store", out object? sv) ? sv : null;
-                return StructUtils.GetPath(path, store, null, state);
+                return StructUtils.GetPath(store, path, null, state);
             });
     }
 
