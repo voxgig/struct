@@ -778,7 +778,7 @@ fn wrap_getpath_basic(allocator: Allocator, val: JsonValue) JsonValue {
     const m = val.object;
     const path_v = m.get("path") orelse return .null;
     const store = m.get("store") orelse return .null;
-    return voxgig_struct.getpath(allocator, path_v, store) catch return .null;
+    return voxgig_struct.getpath(allocator, store, path_v) catch return .null;
 }
 
 fn wrap_getpath_relative(allocator: Allocator, val: JsonValue) JsonValue {
@@ -820,7 +820,7 @@ fn wrap_getpath_relative(allocator: Allocator, val: JsonValue) JsonValue {
         .dpath = init_dpath,
         .errs = &errs,
     };
-    return voxgig_struct.getpathInj(allocator, path_v, store, inj) catch return .null;
+    return voxgig_struct.getpathInj(allocator, store, path_v, inj) catch return .null;
 }
 
 fn wrap_getpath_special(allocator: Allocator, val: JsonValue) JsonValue {
@@ -859,10 +859,10 @@ fn wrap_getpath_special(allocator: Allocator, val: JsonValue) JsonValue {
                 inj.meta = meta_val;
             }
         }
-        return voxgig_struct.getpathInj(allocator, path_v, store, inj) catch return .null;
+        return voxgig_struct.getpathInj(allocator, store, path_v, inj) catch return .null;
     }
 
-    return voxgig_struct.getpath(allocator, path_v, store) catch return .null;
+    return voxgig_struct.getpath(allocator, store, path_v) catch return .null;
 }
 
 test "getpath-basic" {
@@ -901,7 +901,7 @@ fn wrap_getpath_handler(allocator: Allocator, val: JsonValue) JsonValue {
     handler_store.put("$TOP", .null) catch {};
     handler_store.put("$FOO", JsonValue{ .function = fooHandler }) catch {};
 
-    return voxgig_struct.getpath(allocator, path_v, JsonValue{ .object = handler_store }) catch return .null;
+    return voxgig_struct.getpath(allocator, JsonValue{ .object = handler_store }, path_v) catch return .null;
 }
 
 test "getpath-handler" {

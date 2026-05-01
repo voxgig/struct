@@ -65,7 +65,7 @@ if err != nil {
 ### Read a deep value safely
 
 ```go
-v := voxgigstruct.GetPath("db.host", config)        // any (nil if absent)
+v := voxgigstruct.GetPath(config, "db.host")        // any (nil if absent)
 v := voxgigstruct.GetProp(node, "count", 0)         // 0 if absent
 v := voxgigstruct.GetDef(maybe, "fallback")         // maybe unless nil
 ```
@@ -99,7 +99,7 @@ voxgigstruct.Walk(tree, func(key any, val any, parent any, path []string) any {
 
 ```go
 voxgigstruct.Inject(spec, store)
-voxgigstruct.Select(map[string]any{"age": 30}, db)
+voxgigstruct.Select(db, map[string]any{"age": 30})
 ```
 
 
@@ -130,12 +130,12 @@ All other names follow the same rule.
 func Walk(node any, apply WalkApply) any
 func WalkDescend(node any, apply WalkApply, before WalkApply, after WalkApply, maxdepth int) any
 func Merge(list []any, maxdepth ...int) any
-func GetPath(path any, store any) any
+func GetPath(store any, path any, injdefs ...*Injection) any
 func SetPath(store any, path any, val any) any
 func Inject(val any, store any) any
 func Transform(data any, spec any) (any, error)
 func Validate(data any, spec any) (any, error)
-func Select(query any, obj any) []any
+func Select(children any, query any) []any
 ```
 
 ### Go-specific extras

@@ -65,7 +65,7 @@ Struct::validate($out, [
 ### Read a deep value safely
 
 ```php
-Struct::getpath('db.host', $config);
+Struct::getpath($config, 'db.host');
 Struct::getprop($node, 'count', 0);
 Struct::getdef($maybe, 'fallback');
 ```
@@ -90,7 +90,8 @@ $cfg = Struct::merge([$defaults, $file, $env]);
 ### Walk a tree
 
 ```php
-Struct::walk($tree, function ($key, $val, $parent, $path) {
+// walk takes optional before/after callbacks.
+Struct::walk($tree, null, function ($key, $val, $parent, $path) {
     return $val === null ? 'DEFAULT' : $val;
 });
 ```
@@ -99,7 +100,7 @@ Struct::walk($tree, function ($key, $val, $parent, $path) {
 
 ```php
 Struct::inject(['greeting' => 'hello `name`'], ['name' => 'Ada']);
-Struct::select(['age' => 30], $records);
+Struct::select($records, ['age' => 30]);
 ```
 
 

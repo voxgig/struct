@@ -66,7 +66,7 @@ validate(out, {
 ```python
 from voxgig_struct import getpath, getprop, getdef
 
-getpath('db.host', config)            # value or None
+getpath(config, 'db.host')            # value or None
 getprop(node, 'count', 0)             # 0 if absent
 getdef(maybe, 'fallback')             # returns maybe unless None
 ```
@@ -94,11 +94,12 @@ cfg = merge([defaults, file_config, env_overrides])
 ```python
 from voxgig_struct import walk
 
-def apply(key, val, parent, path):
+def visit(key, val, parent, path):
     return 'DEFAULT' if val is None else val
 
-walk(tree, apply)
-# Optional keyword arguments: before=, after=, maxdepth=
+# walk takes optional before/after callbacks; pass after to replace
+# values once their children have been visited.
+walk(tree, after=visit)
 ```
 
 ### Inject references into a template
@@ -119,8 +120,8 @@ inject(
 from voxgig_struct import select
 
 select(
-    {'age': 30},
     {'a': {'name': 'Alice', 'age': 30}, 'b': {'name': 'Bob', 'age': 25}},
+    {'age': 30},
 )
 # [{'name': 'Alice', 'age': 30, '$KEY': 'a'}]
 ```
@@ -162,14 +163,14 @@ from voxgig_struct import (
 ### Major functions
 
 ```python
-walk(node, apply, before=None, after=None, maxdepth=None) -> any
+walk(val, before=None, after=None, maxdepth=None) -> any
 merge(items, maxdepth=None) -> any
-getpath(path, store) -> any
+getpath(store, path, injdef=UNDEF) -> any
 setpath(store, path, val) -> store
 inject(val, store, modify=None) -> any
 transform(data, spec, extra=None, modify=None) -> any
 validate(data, spec, extra=None, collecterrs=None) -> any
-select(query, obj) -> list
+select(children, query) -> list
 ```
 
 ### Python-specific extras

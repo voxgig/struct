@@ -1548,11 +1548,11 @@ fn mergeNodes(
 // GetPath — resolve a dotted path string against a store.
 // ============================================================================
 
-pub fn getpath(allocator: Allocator, path_val: JsonValue, store: JsonValue) anyerror!JsonValue {
-    return getpathInj(allocator, path_val, store, null);
+pub fn getpath(allocator: Allocator, store: JsonValue, path_val: JsonValue) anyerror!JsonValue {
+    return getpathInj(allocator, store, path_val, null);
 }
 
-pub fn getpathInj(allocator: Allocator, path_val: JsonValue, store: JsonValue, inj: ?*Injection) anyerror!JsonValue {
+pub fn getpathInj(allocator: Allocator, store: JsonValue, path_val: JsonValue, inj: ?*Injection) anyerror!JsonValue {
     var parts_buf: [64][]const u8 = undefined;
     var numparts: usize = 0;
 
@@ -1639,7 +1639,7 @@ pub fn getpathInj(allocator: Allocator, path_val: JsonValue, store: JsonValue, i
             const subpath = part[5 .. part.len - 1];
             const spec_val = if (store == .object) store.object.get(S_DSPEC) orelse .null else .null;
             if (spec_val != .null) {
-                const result = try getpath(allocator, JsonValue{ .string = subpath }, spec_val);
+                const result = try getpath(allocator, spec_val, JsonValue{ .string = subpath });
                 const effective = try stringify(allocator, result, null);
                 val = try resolvePart(allocator, val, effective, inj);
             }
@@ -1649,7 +1649,7 @@ pub fn getpathInj(allocator: Allocator, path_val: JsonValue, store: JsonValue, i
         // Handle $GET:subpath$ — resolve subpath in store data, use result as part.
         if (inj != null and part.len > 5 and std.mem.startsWith(u8, part, "$GET:") and part[part.len - 1] == '$') {
             const subpath = part[5 .. part.len - 1];
-            const result = try getpath(allocator, JsonValue{ .string = subpath }, store);
+            const result = try getpath(allocator, store, JsonValue{ .string = subpath });
             const effective = try stringify(allocator, result, null);
             val = try resolvePart(allocator, val, effective, inj);
             continue;
@@ -1660,7 +1660,7 @@ pub fn getpathInj(allocator: Allocator, path_val: JsonValue, store: JsonValue, i
             const subpath = part[6 .. part.len - 1];
             const ij = inj.?;
             if (ij.meta != .null) {
-                const result = try getpathInj(allocator, JsonValue{ .string = subpath }, ij.meta, null);
+                const result = try getpathInj(allocator, ij.meta, JsonValue{ .string = subpath }, null);
                 const effective = try stringify(allocator, result, null);
                 val = try resolvePart(allocator, val, effective, inj);
             }
@@ -2266,11 +2266,11 @@ fn resolvePathOrCmd(allocator: Allocator, pathref: []const u8, store: JsonValue,
 
     // Relative path — use getpathInj so ancestor traversal uses dpath.
     if (pathref.len > 0 and pathref[0] == '.') {
-        return try getpathInj(allocator, JsonValue{ .string = pathref }, store, inj);
+        return try getpathInj(allocator, store, JsonValue{ .string = pathref }, inj);
     }
 
     // Absolute path from store.
-    return try getpath(allocator, JsonValue{ .string = pathref }, store);
+    return try getpath(allocator, store, JsonValue{ .string = pathref });
 }
 
 // Resolve a path reference (no command dispatch — used for partial injections).
@@ -2279,10 +2279,10 @@ fn resolvePathOnly(allocator: Allocator, pathref: []const u8, store: JsonValue, 
     if (std.mem.eql(u8, pathref, "$DS")) return JsonValue{ .string = S_DS };
 
     if (pathref.len > 0 and pathref[0] == '.') {
-        return try getpathInj(allocator, JsonValue{ .string = pathref }, store, inj);
+        return try getpathInj(allocator, store, JsonValue{ .string = pathref }, inj);
     }
 
-    return try getpath(allocator, JsonValue{ .string = pathref }, store);
+    return try getpath(allocator, store, JsonValue{ .string = pathref });
 }
 
 fn resolveRelativePath(allocator: Allocator, pathref: []const u8, dparent: JsonValue) anyerror!JsonValue {
@@ -2768,7 +2768,7 @@ fn cmdEach(allocator: Allocator, inj: *Injection, store: JsonValue) !JsonValue {
     const src = if (srcpath.len == 0)
         getpropFromStore(store)
     else
-        try getpath(allocator, JsonValue{ .string = srcpath }, store);
+        try getpath(allocator, store, JsonValue{ .string = srcpath });
 
     // Find target node and key.
     const tkey = if (inj.path.len >= 2) inj.path[inj.path.len - 2] else S_DTOP;
@@ -2868,7 +2868,7 @@ fn cmdPack(allocator: Allocator, inj: *Injection, store: JsonValue) !JsonValue {
     const src_raw = if (srcpath.len == 0)
         getpropFromStore(store)
     else
-        try getpath(allocator, JsonValue{ .string = srcpath }, store);
+        try getpath(allocator, store, JsonValue{ .string = srcpath });
 
     // Normalize source to list.
     var src_list = std.ArrayList(JsonValue).init(allocator);
@@ -2939,7 +2939,7 @@ fn cmdPack(allocator: Allocator, inj: *Injection, store: JsonValue) !JsonValue {
                 if (key_result == .string) item_key = key_result.string;
             } else {
                 // Direct property path.
-                const kval = try getpath(allocator, JsonValue{ .string = kp }, src_item);
+                const kval = try getpath(allocator, src_item, JsonValue{ .string = kp });
                 if (kval == .string) item_key = kval.string;
             }
         } else {
@@ -3051,7 +3051,7 @@ fn cmdRef(allocator: Allocator, inj: *Injection, store: JsonValue) !JsonValue {
     if (spec_val == .null) return .null;
 
     // Resolve the ref path within the spec.
-    const ref_result = try getpath(allocator, JsonValue{ .string = refpath }, spec_val);
+    const ref_result = try getpath(allocator, spec_val, JsonValue{ .string = refpath });
     if (ref_result == .null) {
         // Ref not found → delete from parent.
         const tkey = if (inj.path.len >= 2) inj.path[inj.path.len - 2] else S_DTOP;
@@ -3074,7 +3074,7 @@ fn cmdRef(allocator: Allocator, inj: *Injection, store: JsonValue) !JsonValue {
             if (pi > 0) try joined.append('.');
             try joined.appendSlice(p);
         }
-        break :blk try getpath(allocator, JsonValue{ .string = joined.items }, store);
+        break :blk try getpath(allocator, store, JsonValue{ .string = joined.items });
     } else store;
 
     // Build child injection with proper context.

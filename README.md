@@ -14,7 +14,7 @@ semantics of "the same" call become subtly different.
 implementation (TypeScript), and porting it to every language a
 Voxgig SDK runs in.  The same names, the same arguments, the same
 return values, and the same JSON-driven test corpus run against every
-port.  When you call `getpath('a.b.c', store)` in Python, Go, PHP, or
+port.  When you call `getpath(store, 'a.b.c')` in Python, Go, PHP, or
 Lua, you get the same answer.
 
 
@@ -121,7 +121,7 @@ JavaScript / TypeScript:
 
 ```js
 const { getpath } = require('@voxgig/struct')
-getpath('db.host', { db: { host: 'localhost', port: 5432 } })
+getpath({ db: { host: 'localhost', port: 5432 } }, 'db.host')
 // => 'localhost'
 ```
 
@@ -129,16 +129,16 @@ Python:
 
 ```python
 from voxgig_struct import getpath
-getpath('db.host', {'db': {'host': 'localhost', 'port': 5432}})
+getpath({'db': {'host': 'localhost', 'port': 5432}}, 'db.host')
 # => 'localhost'
 ```
 
 Go:
 
 ```go
-voxgigstruct.GetPath("db.host", map[string]any{
+voxgigstruct.GetPath(map[string]any{
     "db": map[string]any{"host": "localhost", "port": 5432},
-})
+}, "db.host")
 // => "localhost"
 ```
 
@@ -178,7 +178,9 @@ validate(
 ### Walk a tree
 
 ```js
-walk(tree, (key, val, parent, path) => {
+// walk takes optional before/after callbacks; pass the same callback as
+// `after` to replace values post-descent.
+walk(tree, undefined, (key, val, parent, path) => {
   return val === null ? 'DEFAULT' : val
 })
 ```
@@ -257,14 +259,14 @@ Java).
 
 | Function                                       | Returns         | Description                                                                 |
 |------------------------------------------------|-----------------|-----------------------------------------------------------------------------|
-| `walk(node, apply, before?, after?, maxdepth?)`| node            | Depth-first walk of a tree, calling `apply` (and optional `before`/`after`) at each node and leaf, with replacement. |
+| `walk(val, before?, after?, maxdepth?)`        | node            | Depth-first walk of a tree, calling `before` on descend and `after` on ascend at each node and leaf, with replacement. |
 | `merge(list, maxdepth?)`                       | any             | Deep-merge a list of maps, last-wins for scalars; lists are merged by index.|
-| `getpath(path, store)`                         | any             | Look up the value at a dotted path (or array path) inside `store`.          |
+| `getpath(store, path, injdef?)`                | any             | Look up the value at a dotted path (or array path) inside `store`.          |
 | `setpath(store, path, val)`                    | store           | Set `val` at a deep path inside `store`, creating missing parents.          |
 | `inject(val, store, modify?)`                  | any             | Substitute `` `path` `` references inside `val` with values from `store`.   |
 | `transform(data, spec, extra?, modify?)`       | any             | Build a result by example: `spec` mirrors output shape, with refs into `data`. |
 | `validate(data, spec, extra?, collecterrs?)`   | any             | Check `data` against a by-example shape; returns `data` on success, throws or collects on mismatch. |
-| `select(query, obj)`                           | match[]         | Pick records from a node whose fields match the query, with `$KEY` operators. |
+| `select(children, query)`                      | match[]         | Pick records from a node whose fields match the query, with `$KEY` operators. |
 
 ### Builders (2)
 

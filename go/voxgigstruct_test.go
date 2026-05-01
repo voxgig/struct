@@ -903,7 +903,7 @@ func TestStruct(t *testing.T) {
 			path := m["path"]
 			store := m["store"]
 
-			return voxgigstruct.GetPath(path, store)
+			return voxgigstruct.GetPath(store, path)
 		})
 	})
 
@@ -926,7 +926,7 @@ func TestStruct(t *testing.T) {
 				Dpath:   dpath,
 			}
 
-			return voxgigstruct.GetPath(path, store, inj)
+			return voxgigstruct.GetPath(store, path, inj)
 		})
 	})
 
@@ -949,10 +949,10 @@ func TestStruct(t *testing.T) {
 						inj.Meta = metaMap
 					}
 				}
-				return voxgigstruct.GetPath(path, store, inj)
+				return voxgigstruct.GetPath(store, path, inj)
 			}
 
-			return voxgigstruct.GetPath(path, store)
+			return voxgigstruct.GetPath(store, path)
 		})
 	})
 
@@ -1502,7 +1502,7 @@ func TestStruct(t *testing.T) {
 				},
 			}
 
-			return voxgigstruct.GetPath(path, store, inj)
+			return voxgigstruct.GetPath(store, path, inj)
 		})
 	})
 }

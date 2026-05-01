@@ -48,7 +48,7 @@ Object host = Struct.getProp(
 they land, the canonical pattern will be:
 
 ```java
-Object host = Struct.getPath("db.host", store);
+Object host = Struct.getPath(store, "db.host");
 ```
 
 

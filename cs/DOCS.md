@@ -60,7 +60,7 @@ Struct.Validate(out_, new Dictionary<string, object?> {
 ### Read a deep value safely
 
 ```csharp
-Struct.GetPath("db.host", config);
+Struct.GetPath(config, "db.host");
 Struct.GetProp(node, "count", 0);
 Struct.GetDef(maybe, "fallback");
 ```

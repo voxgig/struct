@@ -41,7 +41,7 @@ pub fn main() !void {
     try root.object.put("db", db);
 
     const path = struct_lib.JsonValue{ .string = "db.host" };
-    const val = try struct_lib.getpath(allocator, path, root);
+    const val = try struct_lib.getpath(allocator, root, path);
     // val == .{ .string = "localhost" }
 }
 ```
@@ -52,7 +52,7 @@ pub fn main() !void {
 ### Read a deep value safely
 
 ```zig
-const v = try struct_lib.getpath(allocator, path_val, store);
+const v = try struct_lib.getpath(allocator, store, path_val);
 const v = try struct_lib.getprop(allocator, store, key_val, alt_val);
 ```
 
@@ -122,7 +122,7 @@ are visible to every holder.  This preserves the canonical
 ```zig
 pub fn walk(allocator, node, apply, opts) anyerror!JsonValue
 pub fn merge(allocator, list, maxdepth) anyerror!JsonValue
-pub fn getpath(allocator, path, store) anyerror!JsonValue
+pub fn getpath(allocator, store, path) anyerror!JsonValue
 pub fn setpath(allocator, store, path, val) anyerror!JsonValue
 pub fn injectVal(allocator, val, store, inj_opt) anyerror!JsonValue
 pub fn transform(allocator, data, spec) anyerror!JsonValue

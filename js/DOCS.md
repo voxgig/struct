@@ -59,7 +59,7 @@ validate(out, {
 ```js
 const { getpath, getprop, getdef } = require('./js/src/struct.js')
 
-getpath('db.host', config)              // value or undefined
+getpath(config, 'db.host')              // value or undefined
 getprop(node, 'count', 0)               // 0 if absent
 getdef(maybe, 'fallback')               // returns maybe unless undefined
 ```
@@ -87,7 +87,8 @@ const cfg = merge([defaults, file, env])
 ```js
 const { walk } = require('./js/src/struct.js')
 
-walk(tree, (key, val, parent, path) => {
+// walk takes optional before/after callbacks.
+walk(tree, undefined, (key, val, parent, path) => {
   return val === null ? 'DEFAULT' : val
 })
 ```
@@ -112,8 +113,8 @@ inject(
 const { select } = require('./js/src/struct.js')
 
 select(
-  { age: 30 },
-  { a: { name: 'Alice', age: 30 }, b: { name: 'Bob', age: 25 } }
+  { a: { name: 'Alice', age: 30 }, b: { name: 'Bob', age: 25 } },
+  { age: 30 }
 )
 // [ { name: 'Alice', age: 30, $KEY: 'a' } ]
 ```

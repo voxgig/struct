@@ -58,7 +58,7 @@ VoxgigStruct.validate(out, {
 ### Read a deep value safely
 
 ```ruby
-VoxgigStruct.getpath('db.host', config)
+VoxgigStruct.getpath(config, 'db.host')
 VoxgigStruct.getprop(node, 'count', 0)
 VoxgigStruct.getdef(maybe, 'fallback')
 ```
@@ -80,9 +80,10 @@ cfg = VoxgigStruct.merge([defaults, file, env])
 ### Walk a tree
 
 ```ruby
-VoxgigStruct.walk(tree) do |key, val, parent, path|
-  val.nil? ? 'DEFAULT' : val
-end
+# walk takes optional before/after callbacks; pass an after lambda
+# to replace values once their children have been visited.
+after = ->(key, val, parent, path) { val.nil? ? 'DEFAULT' : val }
+VoxgigStruct.walk(tree, nil, after)
 ```
 
 ### Inject and select
@@ -93,7 +94,7 @@ VoxgigStruct.inject(
   { 'name' => 'Ada' }
 )
 
-VoxgigStruct.select({ 'age' => 30 }, records)
+VoxgigStruct.select(records, { 'age' => 30 })
 ```
 
 

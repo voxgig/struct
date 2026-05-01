@@ -58,7 +58,7 @@ struct.validate(out, {
 ### Read a deep value safely
 
 ```lua
-struct.getpath('db.host', config)
+struct.getpath(config, 'db.host')
 struct.getprop(node, 'count', 0)
 struct.getdef(maybe, 'fallback')
 ```
@@ -80,7 +80,8 @@ local cfg = struct.merge({ defaults, file, env })
 ### Walk a tree
 
 ```lua
-struct.walk(tree, function(key, val, parent, path)
+-- walk takes optional before/after callbacks.
+struct.walk(tree, nil, function(key, val, parent, path)
   if val == nil then
     return 'DEFAULT'
   end
@@ -96,7 +97,7 @@ struct.inject(
   { name = 'Ada' }
 )
 
-struct.select({ age = 30 }, records)
+struct.select(records, { age = 30 })
 ```
 
 
@@ -150,9 +151,10 @@ When you build a table from Lua literals, you can hint with
 ### 1-based versus 0-based indexing
 
 Lua arrays are 1-based natively.  The external API still presents
-0-based indexing for consistency with the canonical API: `getpath('0',
-list)` returns the first element, even though internally the list is
-stored at index 1.  The translation happens inside the port.
+0-based indexing for consistency with the canonical API:
+`getpath(list, '0')` returns the first element, even though internally
+the list is stored at index 1.  The translation happens inside the
+port.
 
 `items()` returns Lua tables of the form `{key, val}` rather than
 two-element arrays.  The keys and values match the canonical

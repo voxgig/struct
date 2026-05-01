@@ -70,8 +70,8 @@ throw -- see [Reference](#reference).
 ```ts
 import { getpath, getprop, getdef } from '@voxgig/struct'
 
-getpath('db.host', config)              // 'localhost' or undefined
-getpath(['db', 'host'], config)         // same, array form
+getpath(config, 'db.host')              // 'localhost' or undefined
+getpath(config, ['db', 'host'])         // same, array form
 
 getprop(node, 'count', 0)               // 0 if absent
 getdef(maybe, 'fallback')               // returns maybe unless undefined
@@ -102,7 +102,9 @@ Last input wins for scalars; maps deep-merge; lists merge by index.
 ```ts
 import { walk } from '@voxgig/struct'
 
-walk(tree, (key, val, parent, path) => {
+// walk takes optional before/after callbacks; pass an `after` callback
+// to replace values once their children have been visited.
+walk(tree, undefined, (key, val, parent, path) => {
   // Return a replacement value, or `val` to leave unchanged.
   return val === null ? 'DEFAULT' : val
 })
@@ -191,8 +193,7 @@ import {
 
 ```ts
 function walk(
-  node: any,
-  apply: WalkApply,
+  val: any,
   before?: WalkApply,
   after?: WalkApply,
   maxdepth?: number,
@@ -200,7 +201,7 @@ function walk(
 
 function merge(list: any[], maxdepth?: number): any
 
-function getpath(path: string | string[], store: any): any
+function getpath(store: any, path: string | string[], injdef?: Partial<Injection>): any
 function setpath(store: any, path: string | string[], val: any): any
 
 function inject(val: any, store: any, modify?: Modify): any
@@ -219,7 +220,7 @@ function validate(
   collecterrs?: string[],
 ): any
 
-function select(query: any, obj: any): any[]
+function select(children: any, query: any): any[]
 ```
 
 ### Sentinels
@@ -236,7 +237,7 @@ tests.
 ```ts
 import { StructUtility } from '@voxgig/struct'
 const su = new StructUtility()
-su.getpath('a.b', { a: { b: 1 } })   // 1
+su.getpath({ a: { b: 1 } }, 'a.b')   // 1
 ```
 
 ### Transform commands
