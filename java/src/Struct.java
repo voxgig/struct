@@ -50,7 +50,17 @@ public class Struct {
     }
   }
 
+  /**
+   * "No value" sentinel — distinct from {@code null} (which is JSON null).
+   * Mirrors TypeScript's {@code undefined} for the canonical port.
+   */
   public static final Object UNDEF = new Object();
+
+  /**
+   * Sentinel returned from a transform/inject step to delete the current key.
+   * Compared with {@code ==} identity. Step 3 will replace this with a marker
+   * map ({@code {`$DELETE`: true}}) for full TS parity.
+   */
   public static final Object DELETE = new Object();
 
   private static final String S_MT = "";
@@ -60,13 +70,51 @@ public class Struct {
   public static final String S_DKEY = "$KEY";
   private static final String S_DT = ".";
 
+  // Inject mode bitfield (TS lines 60–62).
+  public static final int M_KEYPRE = 1;
+  public static final int M_KEYPOST = 2;
+  public static final int M_VAL = 4;
+
+  // Default max recursive depth (walk, merge, etc).
+  public static final int MAXDEPTH = 32;
+
+  /** Maps mode bit to its human-readable name. */
+  public static final Map<Integer, String> MODENAME;
+
+  /** Maps mode bit to a placement label used in error messages. */
+  public static final Map<Integer, String> PLACEMENT;
+
+  static {
+    Map<Integer, String> mn = new LinkedHashMap<>();
+    mn.put(M_VAL, "val");
+    mn.put(M_KEYPRE, "key:pre");
+    mn.put(M_KEYPOST, "key:post");
+    MODENAME = Collections.unmodifiableMap(mn);
+
+    Map<Integer, String> pl = new LinkedHashMap<>();
+    pl.put(M_VAL, "value");
+    pl.put(M_KEYPRE, "key");
+    pl.put(M_KEYPOST, "key");
+    PLACEMENT = Collections.unmodifiableMap(pl);
+  }
+
   private static final Pattern R_META_PATH = Pattern.compile("^([^$]+)\\$([=~])(.+)$");
   private static final Pattern R_INJECT_FULL = Pattern.compile("^`(\\$[A-Z]+|[^`]*)[0-9]*`$");
   private static final Pattern R_INJECT_PART = Pattern.compile("`([^`]+)`");
   private static final Pattern R_CMD_KEY = Pattern.compile("^`(\\$[A-Z]+)(\\d*)`$");
-  private static final Object SKIP = new Object();
 
-  /** Root key is {@code null} in callbacks. */
+  /**
+   * Sentinel returned from a transform/inject step to omit the current key.
+   * Compared with {@code ==} identity. Step 3 will replace this with a marker
+   * map ({@code {`$SKIP`: true}}) for full TS parity.
+   */
+  public static final Object SKIP = new Object();
+
+  /**
+   * Walk callback. Root key is {@code null}; otherwise key is the property
+   * name (or list-index string) of {@code val} inside {@code parent}.
+   * {@code path} is the dotted ancestor key chain ending in {@code key}.
+   */
   @FunctionalInterface
   public interface WalkApply {
     Object apply(String key, Object val, Object parent, List<String> path);
@@ -76,6 +124,26 @@ public class Struct {
   @FunctionalInterface
   public interface PathHandler {
     Object apply(Map<String, Object> inj, Object val, String ref, Object store);
+  }
+
+  /**
+   * Inject step handler. Mirrors TS {@code Injector}.
+   * The {@code inj} parameter will be tightened to {@code Injection} once the
+   * {@code Injection} class lands (step 4); callers should pass the same value
+   * through unchanged.
+   */
+  @FunctionalInterface
+  public interface Injector {
+    Object apply(Object inj, Object val, String ref, Object store);
+  }
+
+  /**
+   * Custom modification applied during {@link #inject} / {@link #transform} / {@link #validate}.
+   * Mirrors TS {@code Modify}.
+   */
+  @FunctionalInterface
+  public interface Modify {
+    void apply(Object val, Object key, Object parent, Object inj, Object store);
   }
 
   public static final int T_any      = (1 << 31) - 1;
@@ -229,12 +297,20 @@ public class Struct {
     if (!(tValue instanceof Number n)) {
       return "any";
     }
-    int t = n.intValue();
+    return typename(n.intValue());
+  }
+
+  /**
+   * TS-canonical {@code typename(t)}: human-readable name for a type bit-flag
+   * returned by {@link #typify(Object)}. The flag with the highest set bit
+   * (lowest leading-zero count) wins.
+   */
+  public static String typename(int t) {
     if (t == 0) {
       return "any";
     }
     int idx = Integer.numberOfLeadingZeros(t);
-    if (idx < 0 || idx >= TYPENAME.length || TYPENAME[idx].isEmpty()) {
+    if (idx < 0 || idx >= TYPENAME.length) {
       return "any";
     }
     String out = TYPENAME[idx];
@@ -433,6 +509,41 @@ public class Struct {
 
   public static Object clone(Object val) {
     return cloneInner(val, new IdentityHashMap<>());
+  }
+
+  /**
+   * Build a {@link LinkedHashMap} (JSON object) from alternating key/value pairs.
+   * Mirrors TS {@code jm}. Missing trailing values become {@code null}; non-string
+   * keys are coerced via {@link #stringify(Object)}.
+   */
+  public static Map<String, Object> jm(Object... kv) {
+    Map<String, Object> out = new LinkedHashMap<>();
+    int n = kv == null ? 0 : kv.length;
+    for (int i = 0; i < n; i += 2) {
+      Object k = kv[i];
+      String sk = k instanceof String s ? s : stringify(k);
+      if (sk.isEmpty() && k != null) {
+        sk = "$KEY" + i;
+      } else if (k == null) {
+        sk = "$KEY" + i;
+      }
+      Object v = (i + 1) < n ? kv[i + 1] : null;
+      out.put(sk, v);
+    }
+    return out;
+  }
+
+  /**
+   * Build an {@link ArrayList} (JSON array) from positional args.
+   * Mirrors TS {@code jt}.
+   */
+  public static List<Object> jt(Object... v) {
+    int n = v == null ? 0 : v.length;
+    List<Object> out = new ArrayList<>(n);
+    for (int i = 0; i < n; i++) {
+      out.add(v[i]);
+    }
+    return out;
   }
 
   private static Object cloneInner(Object val, IdentityHashMap<Object, Object> seen) {

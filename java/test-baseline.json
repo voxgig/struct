@@ -1,0 +1,40 @@
+{
+  "files": {
+    "getpath.jsonic": {
+      "passed": 87,
+      "total": 87
+    },
+    "inject.jsonic": {
+      "passed": 41,
+      "total": 41
+    },
+    "merge.jsonic": {
+      "passed": 133,
+      "total": 133
+    },
+    "minor.jsonic": {
+      "passed": 502,
+      "total": 506
+    },
+    "select.jsonic": {
+      "passed": 47,
+      "total": 47
+    },
+    "transform.jsonic": {
+      "passed": 180,
+      "total": 187
+    },
+    "validate.jsonic": {
+      "passed": 128,
+      "total": 131
+    },
+    "walk.jsonic": {
+      "passed": 46,
+      "total": 46
+    }
+  },
+  "total": {
+    "passed": 1164,
+    "total": 1178
+  }
+}
