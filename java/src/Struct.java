@@ -58,10 +58,13 @@ public class Struct {
 
   /**
    * Sentinel returned from a transform/inject step to delete the current key.
-   * Compared with {@code ==} identity. Step 3 will replace this with a marker
-   * map ({@code {`$DELETE`: true}}) for full TS parity.
+   * Always compared with {@code ==} identity (never {@code .equals()}). Mirrors
+   * the TS marker {@code {`$DELETE`: true}}; declared as {@link Map} so it can
+   * survive a pass through {@link #inject(Object, Object)} without losing
+   * structural shape, while {@link #clone(Object)} short-circuits to preserve
+   * identity.
    */
-  public static final Object DELETE = new Object();
+  public static final Map<String, Object> DELETE = makeSentinelMap("`$DELETE`");
 
   private static final String S_MT = "";
 
@@ -105,10 +108,16 @@ public class Struct {
 
   /**
    * Sentinel returned from a transform/inject step to omit the current key.
-   * Compared with {@code ==} identity. Step 3 will replace this with a marker
-   * map ({@code {`$SKIP`: true}}) for full TS parity.
+   * Always compared with {@code ==} identity. See {@link #DELETE} for the
+   * marker-map rationale.
    */
-  public static final Object SKIP = new Object();
+  public static final Map<String, Object> SKIP = makeSentinelMap("`$SKIP`");
+
+  private static Map<String, Object> makeSentinelMap(String name) {
+    Map<String, Object> m = new LinkedHashMap<>();
+    m.put(name, true);
+    return Collections.unmodifiableMap(m);
+  }
 
   /**
    * Walk callback. Root key is {@code null}; otherwise key is the property
@@ -548,6 +557,12 @@ public class Struct {
 
   private static Object cloneInner(Object val, IdentityHashMap<Object, Object> seen) {
     if (val == null || val == UNDEF) {
+      return val;
+    }
+    // Preserve sentinel identity. Without this, a cloned spec containing SKIP
+    // or DELETE produces a structurally-identical map that fails `==` checks
+    // downstream and breaks transform/inject control flow.
+    if (val == SKIP || val == DELETE) {
       return val;
     }
     if (val instanceof String || val instanceof Number || val instanceof Boolean || val instanceof Function) {
@@ -2528,5 +2543,197 @@ public class Struct {
       };
     }
     return false;
+  }
+
+  // ===========================================================================
+  // Injection
+  // ===========================================================================
+
+  /**
+   * Recursive state passed through {@link #inject}, {@link #transform}, and
+   * {@link #validate}. Mirrors TS {@code class Injection} (StructUtility.ts
+   * lines 2613–2744).
+   *
+   * <h3>Sharing semantics (critical)</h3>
+   * <ul>
+   *   <li>{@link #child(int, List)} shares {@link #keys}, {@link #errs},
+   *       and {@link #meta} <em>by reference</em> with the parent. The
+   *       {@code $EACH} and {@code $PACK} injectors mutate {@code keys} during
+   *       descent — defensively copying them silently breaks those tests.</li>
+   *   <li>{@link #path}, {@link #nodes}, and {@link #dpath} are flattened
+   *       (copied) per child.</li>
+   * </ul>
+   *
+   * <p>This class is package-private to its own file and is intentionally not
+   * Gson-serializable: a circular {@link #prior} reference would stack-overflow
+   * any default serializer.
+   */
+  public static class Injection {
+    public int mode;                         // M_KEYPRE | M_KEYPOST | M_VAL
+    public boolean full;                     // injection consumed the whole key string
+    public int keyI;                         // index of current key in keys
+    public List<String> keys;                // sibling keys list (shared with prior)
+    public String key;                       // current key string
+    public Object val;                       // current child value
+    public Object parent;                    // current parent in spec
+    public List<String> path;                // ancestor key chain ending in key
+    public List<Object> nodes;               // ancestor node stack ending in parent
+    public Injector handler;                 // dispatch hook for `$NAME` references
+    public List<Object> errs;                // shared error collector
+    public Map<String, Object> meta;         // shared metadata bag (do not deep-copy)
+    public Object dparent = UNDEF;           // current data-side parent
+    public List<String> dpath;               // current data-side path
+    public String base;                      // base key in store, if any
+    public Modify modify;                    // optional value-mutation hook
+    public Injection prior;                  // calling injection (chain upwards)
+    public Object extra;                     // free-form passthrough
+
+    /** Top-level constructor: mirrors {@code new Injection(val, parent)} in TS. */
+    public Injection(Object val, Object parent) {
+      this.val = val;
+      this.parent = parent;
+      this.errs = new ArrayList<>();
+      this.dparent = UNDEF;
+      this.dpath = new ArrayList<>(List.of(S_DTOP));
+      this.mode = M_VAL;
+      this.full = false;
+      this.keyI = 0;
+      this.keys = new ArrayList<>(List.of(S_DTOP));
+      this.key = S_DTOP;
+      this.path = new ArrayList<>(List.of(S_DTOP));
+      this.nodes = new ArrayList<>();
+      this.nodes.add(parent);
+      this.handler = null; // wired in step 5a (_injecthandler)
+      this.base = S_DTOP;
+      this.meta = new LinkedHashMap<>();
+    }
+
+    /**
+     * Resolve current data-side parent for relative paths and bump depth.
+     * Mirrors TS {@code Injection.descend()}.
+     */
+    public Object descend() {
+      Object dRaw = meta.get("__d");
+      int d = dRaw instanceof Number n ? n.intValue() : 0;
+      meta.put("__d", d + 1);
+
+      Object parentkey = path.size() >= 2 ? path.get(path.size() - 2) : null;
+
+      if (dparent == UNDEF) {
+        if (size(dpath) > 1 && parentkey != null) {
+          List<String> nd = new ArrayList<>(dpath);
+          nd.add(strkey(parentkey));
+          this.dpath = nd;
+        }
+      } else {
+        if (parentkey != null) {
+          this.dparent = getprop(this.dparent, parentkey);
+          String lastpart = dpath.isEmpty() ? null : dpath.get(dpath.size() - 1);
+          String marker = "$:" + strkey(parentkey);
+          if (marker.equals(lastpart)) {
+            Object sliced = slice(this.dpath, -1, null);
+            this.dpath =
+                sliced instanceof List<?> l ? new ArrayList<>((List<String>) l) : new ArrayList<>();
+          } else {
+            List<String> nd = new ArrayList<>(dpath);
+            nd.add(strkey(parentkey));
+            this.dpath = nd;
+          }
+        }
+      }
+      return dparent;
+    }
+
+    /**
+     * Build a child injection at {@code keys[keyI]}. Sharing semantics: see
+     * class javadoc.
+     */
+    public Injection child(int keyI, List<String> keys) {
+      String key = strkey(keys.get(keyI));
+      Object val = this.val;
+
+      Injection cinj = new Injection(getprop(val, key), val);
+      cinj.keyI = keyI;
+      cinj.keys = keys;        // shared reference
+      cinj.key = key;
+
+      List<String> np = path == null ? new ArrayList<>() : new ArrayList<>(path);
+      np.add(key);
+      cinj.path = np;
+
+      List<Object> nn = nodes == null ? new ArrayList<>() : new ArrayList<>(nodes);
+      nn.add(val);
+      cinj.nodes = nn;
+
+      cinj.mode = this.mode;
+      cinj.handler = this.handler;
+      cinj.modify = this.modify;
+      cinj.base = this.base;
+      cinj.meta = this.meta;   // shared reference
+      cinj.errs = this.errs;   // shared reference
+      cinj.prior = this;
+      cinj.dpath = new ArrayList<>(this.dpath);  // flattened
+      cinj.dparent = this.dparent;
+
+      return cinj;
+    }
+
+    /** Set the current child value on the immediate parent. */
+    public Object setval(Object val) {
+      return setval(val, 0);
+    }
+
+    /**
+     * Set / delete a value on an ancestor.
+     * <ul>
+     *   <li>{@code ancestor < 2} → operate on {@link #parent} at {@link #key}.</li>
+     *   <li>{@code ancestor >= 2} → walk back to {@code nodes[-ancestor]} and
+     *       use {@code path[-ancestor]} as the key.</li>
+     * </ul>
+     * When {@code val == UNDEF}, the key is deleted via {@link Struct#delprop}.
+     */
+    public Object setval(Object val, int ancestor) {
+      Object parent;
+      if (ancestor < 2) {
+        if (val == UNDEF) {
+          parent = delprop(this.parent, this.key);
+          this.parent = parent;
+        } else {
+          parent = setprop(this.parent, this.key, val);
+        }
+      } else {
+        Object aval = getelem(this.nodes, 0 - ancestor);
+        Object akey = getelem(this.path, 0 - ancestor);
+        if (val == UNDEF) {
+          parent = delprop(aval, akey);
+        } else {
+          parent = setprop(aval, akey, val);
+        }
+      }
+      return parent;
+    }
+
+    @Override
+    public String toString() {
+      return toString(null);
+    }
+
+    public String toString(String prefix) {
+      StringBuilder sb = new StringBuilder();
+      sb.append("INJ");
+      if (prefix != null) {
+        sb.append("/").append(prefix);
+      }
+      sb.append(":").append(pathify(path, 1));
+      sb.append(":").append(MODENAME.getOrDefault(mode, "?"));
+      if (full) {
+        sb.append("/full");
+      }
+      sb.append(": key=").append(keyI).append("/").append(key);
+      sb.append(" keys=").append(keys);
+      sb.append(" parent=").append(stringify(parent, 60));
+      sb.append(" dpath=").append(dpath);
+      return sb.toString();
+    }
   }
 }
