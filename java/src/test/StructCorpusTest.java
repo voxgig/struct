@@ -103,7 +103,8 @@ class StructCorpusTest {
       return Struct.delprop(parent == Struct.UNDEF ? null : parent, key);
     });
     add(tests, "minor", "stringify", true, in -> {
-      Object val = getp(in, "val");
+      // Use UNDEF for absent val so stringify renders "" instead of "null".
+      Object val = getpDef(in, "val", Struct.UNDEF);
       Object max = getp(in, "max");
       Integer m = max instanceof Number n ? n.intValue() : null;
       return Struct.stringify(val, m);
@@ -114,7 +115,9 @@ class StructCorpusTest {
       return Struct.jsonify(val, flags);
     });
     add(tests, "minor", "pathify", true, in -> {
-      Object path = getp(in, "path");
+      // Use UNDEF for absent keys so pathify renders "<unknown-path>" instead
+      // of "<unknown-path:null>" (matches JS undefined-vs-null semantics).
+      Object path = getpDef(in, "path", Struct.UNDEF);
       Object from = getp(in, "from");
       Object to = getp(in, "to");
       return Struct.pathify(path, from, to);

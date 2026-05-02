@@ -2,20 +2,20 @@
 
 > Java port of the canonical TypeScript implementation.
 >
-> **Status: in progress.**  All 40 canonical functions, 15 type
-> bit-flags, 3 mode constants (`M_KEYPRE`/`M_KEYPOST`/`M_VAL`), and the
-> `SKIP`/`DELETE` sentinel marker maps are present.  The `Injection`
-> state-machine class is wired into `inject()`; reference
-> `transform_*`/`validate_*`/`select_*` injectors are declared for the
-> full TS command set.  `transform()`, `validate()`, and `select()`
-> currently still use hand-rolled implementations that pass 1164/1178
-> corpus tests (98.8%); a follow-up will rewire them to dispatch through
-> the injector machinery.
+> **Status: complete.**  Full TS-canonical parity: all 40 functions,
+> 15 type bit-flags, 3 mode constants (`M_KEYPRE`/`M_KEYPOST`/`M_VAL`),
+> `SKIP`/`DELETE` sentinel marker maps, and the `Injection` state
+> machine. `inject()`/`transform()`/`validate()`/`select()` all dispatch
+> through the canonical injector machinery: 11 transform commands
+> (`$DELETE`/`$COPY`/`$KEY`/`$ANNO`/`$MERGE`/`$EACH`/`$PACK`/`$REF`/
+> `$FORMAT`/`$APPLY`), 6 validate checkers (`$STRING`/`$TYPE`/`$ANY`/
+> `$CHILD`/`$ONE`/`$EXACT`), and 4 select operators (`$AND`/`$OR`/
+> `$NOT`/`$CMP`).
 >
-> Run the shared corpus locally with `mvn test` from `java/`. Pass
-> counts per `.jsonic` file are written to
-> `target/corpus-scoreboard.json` after each run; the committed baseline
-> lives at `test-baseline.json`.
+> Passes the full shared corpus (1178/1178). Run locally with
+> `mvn test` from `java/`. Per-file pass counts are written to
+> `target/corpus-scoreboard.json`; the committed baseline lives at
+> `test-baseline.json`.
 
 For motivation, language-neutral concepts, and the cross-language
 parity matrix, see the [top-level README](../README.md) and

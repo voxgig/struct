@@ -13,7 +13,7 @@
       "total": 133
     },
     "minor.jsonic": {
-      "passed": 502,
+      "passed": 506,
       "total": 506
     },
     "select.jsonic": {
@@ -21,11 +21,11 @@
       "total": 47
     },
     "transform.jsonic": {
-      "passed": 180,
+      "passed": 187,
       "total": 187
     },
     "validate.jsonic": {
-      "passed": 128,
+      "passed": 131,
       "total": 131
     },
     "walk.jsonic": {
@@ -34,7 +34,7 @@
     }
   },
   "total": {
-    "passed": 1164,
+    "passed": 1178,
     "total": 1178
   }
 }

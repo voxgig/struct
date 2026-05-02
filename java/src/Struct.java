@@ -3419,6 +3419,24 @@ public class Struct {
   // select() rewrite; until then the hand-rolled select(children, query)
   // below remains the active implementation.
 
+  /** Build the recursive validate options used by select_*: rebind $TOP to
+   *  the current point and pass through meta + the existing store as extra. */
+  private static Map<String, Object> selectRecOpts(
+      Object store, Object point, Map<String, Object> meta, List<Object> errs) {
+    Map<String, Object> vstore = new LinkedHashMap<>();
+    if (store instanceof Map<?, ?> sm) {
+      for (Map.Entry<?, ?> e : sm.entrySet()) {
+        vstore.put(Objects.toString(e.getKey()), e.getValue());
+      }
+    }
+    vstore.put(S_DTOP, point);
+    Map<String, Object> opts = new LinkedHashMap<>();
+    opts.put("errs", errs);
+    opts.put("meta", meta);
+    opts.put("extra", vstore);
+    return opts;
+  }
+
   /** $AND: require every sub-term to validate against the current point. */
   public static final Injector select_AND =
       (injObj, val, ref, store) -> {
@@ -3430,9 +3448,7 @@ public class Struct {
         Object point = getpath(store, ppath);
         for (Object term : tl) {
           List<Object> terrs = new ArrayList<>();
-          Map<String, Object> opts = new LinkedHashMap<>();
-          opts.put("errs", terrs);
-          opts.put("meta", inj.meta);
+          Map<String, Object> opts = selectRecOpts(store, point, inj.meta, terrs);
           try {
             validate(point, term, opts);
           } catch (Exception e) {
@@ -3460,9 +3476,7 @@ public class Struct {
         Object point = getpath(store, ppath);
         for (Object term : tl) {
           List<Object> terrs = new ArrayList<>();
-          Map<String, Object> opts = new LinkedHashMap<>();
-          opts.put("errs", terrs);
-          opts.put("meta", inj.meta);
+          Map<String, Object> opts = selectRecOpts(store, point, inj.meta, terrs);
           try {
             validate(point, term, opts);
           } catch (Exception e) {
@@ -3489,9 +3503,7 @@ public class Struct {
         Object ppath = slice(inj.path, -1, null);
         Object point = getpath(store, ppath);
         List<Object> terrs = new ArrayList<>();
-        Map<String, Object> opts = new LinkedHashMap<>();
-        opts.put("errs", terrs);
-        opts.put("meta", inj.meta);
+        Map<String, Object> opts = selectRecOpts(store, point, inj.meta, terrs);
         try {
           validate(point, term, opts);
         } catch (Exception e) {
@@ -4073,7 +4085,87 @@ public class Struct {
     return true;
   }
 
+  /**
+   * TS-faithful select: tag each child node with {@code $KEY}, walk the
+   * (cloned) query annotating every map with {@code `$OPEN`}, then run
+   * {@link #validate} against each child with the {@code select_*} injectors
+   * available as extras and {@code meta.`$EXACT`} = true.
+   * Mirrors TS lines 2558–2609.
+   */
   public static List<Object> select(Object children, Object query) {
+    if (!isnode(children)) {
+      return new ArrayList<>();
+    }
+
+    // Tag each node child with $KEY = original key/index; non-node children
+    // (strings/numbers/etc.) are passed through as-is — TS setprop on a
+    // non-node returns the value unchanged, so these are still selectable.
+    List<Object> childList = new ArrayList<>();
+    if (ismap(children)) {
+      for (Map.Entry<?, ?> e : ((Map<?, ?>) children).entrySet()) {
+        Object node = e.getValue();
+        if (isnode(node)) {
+          setprop(node, S_DKEY, Objects.toString(e.getKey()));
+        }
+        childList.add(node);
+      }
+    } else {
+      List<?> cl = (List<?>) children;
+      for (int i = 0; i < cl.size(); i++) {
+        Object node = cl.get(i);
+        if (isnode(node)) {
+          setprop(node, S_DKEY, (long) i);
+        }
+        childList.add(node);
+      }
+    }
+
+    // Build injdef: meta with $EXACT=true; extras for select_* operators.
+    Map<String, Object> meta = new LinkedHashMap<>();
+    meta.put("`$EXACT`", true);
+
+    Map<String, Object> extra = new LinkedHashMap<>();
+    extra.put("$AND", select_AND);
+    extra.put("$OR", select_OR);
+    extra.put("$NOT", select_NOT);
+    extra.put("$GT", select_CMP);
+    extra.put("$LT", select_CMP);
+    extra.put("$GTE", select_CMP);
+    extra.put("$LTE", select_CMP);
+    extra.put("$LIKE", select_CMP);
+
+    // Clone query and annotate every map with `$OPEN`=true.
+    Object q = clone(query);
+    walk(
+        q,
+        (k, v, p, t) -> {
+          if (ismap(v)) {
+            setprop(v, "`$OPEN`", getprop(v, "`$OPEN`", true));
+          }
+          return v;
+        });
+
+    List<Object> results = new ArrayList<>();
+    for (Object child : childList) {
+      List<Object> errs = new ArrayList<>();
+      Map<String, Object> opts = new LinkedHashMap<>();
+      opts.put("errs", errs);
+      opts.put("meta", meta);
+      opts.put("extra", extra);
+      try {
+        validate(child, clone(q), opts);
+      } catch (Exception e) {
+        errs.add(e.getMessage());
+      }
+      if (errs.isEmpty()) {
+        results.add(child);
+      }
+    }
+    return results;
+  }
+
+  /** Legacy hand-rolled select retained for fallback / debugging. */
+  static List<Object> selectLegacy(Object children, Object query) {
     if (!isnode(children)) {
       return new ArrayList<>();
     }

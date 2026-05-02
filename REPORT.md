@@ -16,22 +16,21 @@
 | **php** | 46 | 15 | 2 | 82/82 pass | Complete |
 | **rb** | 40+ | 15 | 2 | 75/75 pass | Complete |
 | **lua** | 40+ | 15 | 2 | 75/75 pass | Complete |
-| **java** | 40+ | 15 | 2 | 1164/1178 corpus | In progress |
+| **java** | 40 | 15 | 2 | 1178/1178 corpus | Complete |
 | **cpp** | 18 | 15 | 0 | untested* | Incomplete |
 
 \* C++: no standard test runner configured in environment.
 
-\*\* Java: corpus runner ported (`java/src/test/Runner.java`,
-`StructCorpusTest.java`); baseline scoreboard at `java/test-baseline.json`.
-Per-file pass counts: getpath 87/87, walk 46/46, merge 133/133, inject 41/41,
-select 47/47, minor 502/506, transform 180/187, validate 128/131. The
-`Injection` state machine, sentinels (`SKIP`/`DELETE` as marker maps),
-mode constants, and inject-substrate helpers are wired; transform/validate/
-select still use hand-rolled implementations. Reference Injector ports for
-all 11 transform commands, all 6 validate checkers, and all 4 select
-operators are declared as `transform_*`/`validate_*`/`select_*` static
-fields, awaiting a follow-up rewrite of `transform()`/`validate()`/`select()`
-to dispatch through them.
+\*\* Java: full TS-canonical parity. `Injection` state machine,
+`SKIP`/`DELETE` marker-map sentinels, mode constants, all 11 transform
+commands (`$DELETE`/`$COPY`/`$KEY`/`$ANNO`/`$MERGE`/`$EACH`/`$PACK`/`$REF`/
+`$FORMAT`/`$APPLY`), all 6 validate checkers (`$STRING`/`$TYPE`/`$ANY`/
+`$CHILD`/`$ONE`/`$EXACT`), all 4 select operators (`$AND`/`$OR`/`$NOT`/
+`$CMP`), and `_validation`/`_validatehandler`/`_injecthandler` internals
+all wired. Corpus runner at `java/src/test/Runner.java`,
+`StructCorpusTest.java`; per-file scoreboard at `java/test-baseline.json`.
+Per-file: minor 506/506, walk 46/46, merge 133/133, getpath 87/87,
+inject 41/41, transform 187/187, validate 131/131, select 47/47.
 
 
 ## TypeScript Canonical API (Reference)
