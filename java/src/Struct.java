@@ -247,7 +247,10 @@ public class Struct {
   }
 
   public static boolean isfunc(Object val) {
-    return val instanceof Function || val instanceof Supplier;
+    return val instanceof Function
+        || val instanceof Supplier
+        || val instanceof Injector
+        || val instanceof Modify;
   }
 
   public static Object getdef(Object val, Object alt) {
@@ -296,7 +299,10 @@ public class Struct {
     if (value instanceof Boolean) {
       return T_scalar | T_boolean;
     }
-    if (value instanceof Function) {
+    if (value instanceof Function
+        || value instanceof Supplier
+        || value instanceof Injector
+        || value instanceof Modify) {
       return T_scalar | T_function;
     }
     if (value instanceof List) {
@@ -571,7 +577,13 @@ public class Struct {
     if (val == SKIP || val == DELETE) {
       return val;
     }
-    if (val instanceof String || val instanceof Number || val instanceof Boolean || val instanceof Function) {
+    if (val instanceof String
+        || val instanceof Number
+        || val instanceof Boolean
+        || val instanceof Function
+        || val instanceof Supplier
+        || val instanceof Injector
+        || val instanceof Modify) {
       return val;
     }
     if (seen.containsKey(val)) {
@@ -1204,7 +1216,7 @@ public class Struct {
           parts.set(0, m0.group(3));
         }
 
-        for (int pI = 0; val != null && pI < numparts; pI++) {
+        for (int pI = 0; val != null && val != UNDEF && pI < numparts; pI++) {
           String part = parts.get(pI);
 
           if (inj != null && S_DKEY.equals(part)) {
@@ -1509,7 +1521,9 @@ public class Struct {
     }
     Map<String, Object> view = new LinkedHashMap<>();
     if (inj.base != null) view.put("base", inj.base);
-    if (inj.dparent != UNDEF) view.put("dparent", inj.dparent);
+    // Always set dparent (even UNDEF) so getpathInner distinguishes "no
+    // dparent given" from "dparent given but absent".
+    view.put("dparent", inj.dparent);
     if (inj.dpath != null) view.put("dpath", inj.dpath);
     if (inj.meta != null) view.put("meta", inj.meta);
     if (inj.key != null) view.put("key", inj.key);
@@ -1771,12 +1785,26 @@ public class Struct {
   /** Format functions used by {@link #transform_FORMAT} ($FORMAT command). */
   public static final Map<String, WalkApply> FORMATTER;
 
+  /** JS-style scalar→string: integer-valued doubles render without {@code .0}. */
+  private static String jsString(Object v) {
+    if (v == null) return "null";
+    if (v instanceof Number n) {
+      double d = n.doubleValue();
+      if (Double.isFinite(d) && Math.floor(d) == d) {
+        return Long.toString((long) d);
+      }
+      return n.toString();
+    }
+    if (v instanceof Boolean b) return b ? "true" : "false";
+    return v.toString();
+  }
+
   static {
     Map<String, WalkApply> f = new LinkedHashMap<>();
     f.put("identity", (k, v, p, t) -> v);
-    f.put("upper", (k, v, p, t) -> isnode(v) ? v : ("" + v).toUpperCase(Locale.ROOT));
-    f.put("lower", (k, v, p, t) -> isnode(v) ? v : ("" + v).toLowerCase(Locale.ROOT));
-    f.put("string", (k, v, p, t) -> isnode(v) ? v : ("" + v));
+    f.put("upper", (k, v, p, t) -> isnode(v) ? v : jsString(v).toUpperCase(Locale.ROOT));
+    f.put("lower", (k, v, p, t) -> isnode(v) ? v : jsString(v).toLowerCase(Locale.ROOT));
+    f.put("string", (k, v, p, t) -> isnode(v) ? v : jsString(v));
     f.put(
         "number",
         (k, v, p, t) -> {
@@ -1807,7 +1835,7 @@ public class Struct {
           StringBuilder sb = new StringBuilder();
           for (List<Object> item : items(v)) {
             Object x = item.get(1);
-            if (!isnode(x)) sb.append(x);
+            if (!isnode(x)) sb.append(jsString(x));
           }
           return sb.toString();
         });
@@ -1882,21 +1910,508 @@ public class Struct {
       };
 
   /**
-   * $EACH, $PACK, $REF: complex injectors deferred to follow-up commit.
-   * The hand-rolled transform()/validate() below currently handles their
-   * test cases; they will be ported during the step 9 transform() rewrite.
+   * $EACH: convert a node into a list by cloning the child template per
+   * source entry. Format: {@code ['`$EACH`', '<source-path>', child-template]}.
+   * Mirrors TS lines 1484–1571.
    */
-  public static final Injector transform_EACH = (injObj, val, ref, store) -> UNDEF;
+  public static final Injector transform_EACH =
+      (injObj, val, ref, store) -> {
+        if (!(injObj instanceof Injection inj)) return UNDEF;
+        if (!checkPlacement(M_VAL, "EACH", T_list, inj)) return UNDEF;
 
-  public static final Injector transform_PACK = (injObj, val, ref, store) -> UNDEF;
+        // Mutate inj.keys to keep only first element (prevent further key processing).
+        if (inj.keys.size() > 1) {
+          inj.keys.subList(1, inj.keys.size()).clear();
+        }
 
-  public static final Injector transform_REF = (injObj, val, ref, store) -> UNDEF;
+        // Args from parent list after [0] = $EACH marker.
+        List<Object> args = new ArrayList<>();
+        if (inj.parent instanceof List<?> pl) {
+          for (int i = 1; i < pl.size(); i++) args.add(pl.get(i));
+        }
+        Object[] checked = injectorArgs(new int[] {T_string, T_any}, args);
+        if (checked[0] != null) {
+          inj.errs.add("$EACH: " + checked[0]);
+          return UNDEF;
+        }
+        String srcpath = (String) checked[1];
+        Object child = checked[2];
+
+        // Source data via getpath against the injection's base store.
+        Object srcstore = getprop(store, inj.base, store);
+        Object src = getpath(srcstore, srcpath, inj);
+        int srctype = typify(src);
+
+        Object tkey = getelem(inj.path, -2);
+        Object target = getelem(inj.nodes, -2);
+        if (target == UNDEF) target = getelem(inj.nodes, -1);
+
+        // Build tval as cloned child templates per source entry.
+        List<Object> tval = new ArrayList<>();
+        if ((T_list & srctype) != 0 && src instanceof List<?> sl) {
+          for (int i = 0; i < sl.size(); i++) {
+            tval.add(clone(child));
+          }
+        } else if ((T_map & srctype) != 0 && src instanceof Map<?, ?> sm) {
+          for (Map.Entry<?, ?> e : sm.entrySet()) {
+            Object cloned = clone(child);
+            Map<String, Object> annoMap = new LinkedHashMap<>();
+            Map<String, Object> keyMap = new LinkedHashMap<>();
+            keyMap.put("KEY", Objects.toString(e.getKey()));
+            annoMap.put("`$ANNO`", keyMap);
+            List<Object> mergeArgs = new ArrayList<>();
+            mergeArgs.add(cloned);
+            mergeArgs.add(annoMap);
+            tval.add(merge(mergeArgs, 1));
+          }
+        }
+
+        Object rval = new ArrayList<>();
+
+        if (size(tval) > 0) {
+          // tcur: list of source values for relative ref binding.
+          Object tcur;
+          if (src instanceof List<?> sl) {
+            tcur = new ArrayList<>(sl);
+          } else if (src instanceof Map<?, ?> sm) {
+            tcur = new ArrayList<>(sm.values());
+          } else {
+            tcur = UNDEF;
+          }
+
+          Object ckey = getelem(inj.path, -2);
+          String ckeyStr = strkey(ckey);
+
+          Object tpathRaw = slice(inj.path, -1, null);
+          List<String> tpath =
+              tpathRaw instanceof List<?> tpl
+                  ? new ArrayList<>((List<String>) tpl)
+                  : new ArrayList<>();
+
+          List<String> dpath = new ArrayList<>();
+          dpath.add(S_DTOP);
+          if (srcpath != null && !srcpath.isEmpty()) {
+            for (String part : srcpath.split("\\.", -1)) dpath.add(part);
+          }
+          dpath.add("$:" + ckeyStr);
+
+          // Wrap tcur in the parent key structure so relative paths work.
+          Map<String, Object> tcurMap = new LinkedHashMap<>();
+          tcurMap.put(ckeyStr, tcur);
+          Object tcurOut = tcurMap;
+
+          if (size(tpath) > 1) {
+            Object pkey = getelem(inj.path, -3, S_DTOP);
+            String pkeyStr = strkey(pkey);
+            Map<String, Object> wrap = new LinkedHashMap<>();
+            wrap.put(pkeyStr, tcurOut);
+            tcurOut = wrap;
+            dpath.add("$:" + pkeyStr);
+          }
+
+          List<String> singleKey = new ArrayList<>();
+          singleKey.add(ckeyStr);
+          Injection tinj = inj.child(0, singleKey);
+          tinj.path = tpath;
+          Object slicedNodes = slice(inj.nodes, -1, null);
+          tinj.nodes =
+              slicedNodes instanceof List<?> snl
+                  ? new ArrayList<>((List<Object>) snl)
+                  : new ArrayList<>();
+
+          tinj.parent = getelem(tinj.nodes, -1);
+          setprop(tinj.parent, ckey, tval);
+
+          tinj.val = tval;
+          tinj.dpath = dpath;
+          tinj.dparent = tcurOut;
+
+          inject(tval, store, tinj);
+          rval = tinj.val;
+        }
+
+        setprop(target, tkey, rval);
+        return rval instanceof List<?> rl && !rl.isEmpty() ? rl.get(0) : UNDEF;
+      };
+
+  /**
+   * $PACK: convert a list/map into a keyed map. Format:
+   * {@code {'`$PACK`': ['<source-path>', child-template]}}. Mirrors TS lines 1576–1707.
+   */
+  public static final Injector transform_PACK =
+      (injObj, val, ref, store) -> {
+        if (!(injObj instanceof Injection inj)) return UNDEF;
+        if (!checkPlacement(M_KEYPRE, "PACK", T_map, inj)) return UNDEF;
+
+        Object args = getprop(inj.parent, inj.key);
+        List<Object> argList = new ArrayList<>();
+        if (args instanceof List<?> al) {
+          argList.addAll(al);
+        }
+        Object[] checked = injectorArgs(new int[] {T_string, T_any}, argList);
+        if (checked[0] != null) {
+          inj.errs.add("$PACK: " + checked[0]);
+          return UNDEF;
+        }
+        String srcpath = (String) checked[1];
+        Object origchildspec = checked[2];
+
+        Object tkey = getelem(inj.path, -2);
+        int pathsize = size(inj.path);
+        Object target = getelem(inj.nodes, pathsize - 2);
+        if (target == UNDEF) target = getelem(inj.nodes, pathsize - 1);
+
+        Object srcstore = getprop(store, inj.base, store);
+        Object src = getpath(srcstore, srcpath, inj);
+
+        // Prepare source as a list of nodes.
+        List<Object> srcList = null;
+        if (src instanceof List<?> sl) {
+          srcList = new ArrayList<>(sl);
+        } else if (src instanceof Map<?, ?> sm) {
+          srcList = new ArrayList<>();
+          for (Map.Entry<?, ?> e : sm.entrySet()) {
+            Object node = e.getValue();
+            if (isnode(node)) {
+              Map<String, Object> annoMap = new LinkedHashMap<>();
+              annoMap.put("KEY", Objects.toString(e.getKey()));
+              setprop(node, "`$ANNO`", annoMap);
+              srcList.add(node);
+            }
+          }
+        }
+
+        if (srcList == null) {
+          return UNDEF;
+        }
+
+        // Extract `$KEY` and `$VAL` from origchildspec (if it's a map).
+        Object keypath = UNDEF;
+        Object childspec = origchildspec;
+        Object child = origchildspec;
+        if (origchildspec instanceof Map<?, ?>) {
+          keypath = getprop(origchildspec, "`$KEY`", UNDEF);
+          delprop(origchildspec, "`$KEY`");
+          child = getprop(origchildspec, "`$VAL`", origchildspec);
+        }
+        // After delprop the value may have been mutated.
+        final Object keypathFinal = keypath;
+        final Object childFinal = child;
+
+        // Build parallel target object.
+        Map<String, Object> tval = new LinkedHashMap<>();
+
+        for (int i = 0; i < srcList.size(); i++) {
+          Object item = srcList.get(i);
+          // srcnode may be any value; for keypath==UNDEF, use the source index/key.
+          String outKey;
+          if (keypathFinal == UNDEF) {
+            // For list source, use the iteration index.
+            // For map source, srcList came from values() so we lost the key —
+            // fall back to the item's $KEY annotation (set during list build).
+            if (item instanceof Map<?, ?> imap2 && imap2.containsKey(S_DKEY)) {
+              outKey = Objects.toString(imap2.get(S_DKEY), "");
+            } else {
+              outKey = String.valueOf(i);
+            }
+          } else if (keypathFinal instanceof String ks && ks.startsWith("`")) {
+            // Inject the key spec against {$TOP: srcnode} merged into store.
+            List<Object> mergeList = new ArrayList<>();
+            mergeList.add(new LinkedHashMap<String, Object>());
+            mergeList.add(store);
+            Map<String, Object> topMap = new LinkedHashMap<>();
+            topMap.put(S_DTOP, item);
+            mergeList.add(topMap);
+            Object merged = merge(mergeList, 1);
+            outKey = Objects.toString(inject(keypathFinal, merged), "");
+          } else {
+            Object kv = getpath(item, keypathFinal, inj);
+            outKey = Objects.toString(kv, "");
+          }
+
+          Object tchild = clone(childFinal);
+          setprop(tval, outKey, tchild);
+
+          // Preserve $ANNO if present.
+          Object anno = getprop(item, "`$ANNO`", UNDEF);
+          if (anno == UNDEF) {
+            delprop(tchild, "`$ANNO`");
+          } else {
+            setprop(tchild, "`$ANNO`", anno);
+          }
+        }
+
+        Map<String, Object> rval = new LinkedHashMap<>();
+
+        if (!isempty(tval)) {
+          // Build parallel source map keyed by outKey for relative ref binding.
+          Map<String, Object> tsrc = new LinkedHashMap<>();
+          for (int i = 0; i < srcList.size(); i++) {
+            Object item = srcList.get(i);
+            String kn;
+            if (keypathFinal == UNDEF) {
+              kn = String.valueOf(i);
+            } else if (keypathFinal instanceof String ks && ks.startsWith("`")) {
+              List<Object> mergeList = new ArrayList<>();
+              mergeList.add(new LinkedHashMap<String, Object>());
+              mergeList.add(store);
+              Map<String, Object> topMap = new LinkedHashMap<>();
+              topMap.put(S_DTOP, item);
+              mergeList.add(topMap);
+              Object merged = merge(mergeList, 1);
+              kn = Objects.toString(inject(keypathFinal, merged), "");
+            } else {
+              Object kv = getpath(item, keypathFinal, inj);
+              kn = Objects.toString(kv, "");
+            }
+            setprop(tsrc, kn, item);
+          }
+
+          Object tpathRaw = slice(inj.path, -1, null);
+          List<String> tpath =
+              tpathRaw instanceof List<?> tpl
+                  ? new ArrayList<>((List<String>) tpl)
+                  : new ArrayList<>();
+
+          Object ckey = getelem(inj.path, -2);
+          String ckeyStr = strkey(ckey);
+
+          List<String> dpath = new ArrayList<>();
+          dpath.add(S_DTOP);
+          if (srcpath != null && !srcpath.isEmpty()) {
+            for (String part : srcpath.split("\\.", -1)) dpath.add(part);
+          }
+          dpath.add("$:" + ckeyStr);
+
+          Map<String, Object> tcur = new LinkedHashMap<>();
+          tcur.put(ckeyStr, tsrc);
+          Object tcurOut = tcur;
+
+          if (size(tpath) > 1) {
+            Object pkey = getelem(inj.path, -3, S_DTOP);
+            String pkeyStr = strkey(pkey);
+            Map<String, Object> wrap = new LinkedHashMap<>();
+            wrap.put(pkeyStr, tcurOut);
+            tcurOut = wrap;
+            dpath.add("$:" + pkeyStr);
+          }
+
+          List<String> singleKey = new ArrayList<>();
+          singleKey.add(ckeyStr);
+          Injection tinj = inj.child(0, singleKey);
+          tinj.path = tpath;
+          Object slicedNodes = slice(inj.nodes, -1, null);
+          tinj.nodes =
+              slicedNodes instanceof List<?> snl
+                  ? new ArrayList<>((List<Object>) snl)
+                  : new ArrayList<>();
+
+          tinj.parent = getelem(tinj.nodes, -1);
+          tinj.val = tval;
+          tinj.dpath = dpath;
+          tinj.dparent = tcurOut;
+
+          inject(tval, store, tinj);
+          if (tinj.val instanceof Map<?, ?> rm) {
+            rval = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> e : rm.entrySet()) {
+              rval.put(Objects.toString(e.getKey()), e.getValue());
+            }
+          }
+        }
+
+        setprop(target, tkey, rval);
+        // Drop transform key.
+        return UNDEF;
+      };
+
+  /**
+   * $REF: resolve a named reference within the original spec, enabling
+   * recursive transformations. Format: {@code ['`$REF`', '<spec-path>']}.
+   * Mirrors TS lines 1713–1785.
+   */
+  public static final Injector transform_REF =
+      (injObj, val, ref, store) -> {
+        if (!(injObj instanceof Injection inj)) return UNDEF;
+        if (inj.mode != M_VAL) return UNDEF;
+
+        Object refpath = getprop(inj.parent, 1);
+        inj.keyI = size(inj.keys);
+
+        // $SPEC is stored as a Supplier<Object> that returns the original spec.
+        Object specHolder = getprop(store, S_DSPEC);
+        Object spec;
+        if (specHolder instanceof Supplier<?> sup) {
+          spec = sup.get();
+        } else {
+          spec = specHolder;
+        }
+
+        Object dpathRaw = slice(inj.path, 1, null);
+        List<String> dpath =
+            dpathRaw instanceof List<?> dl
+                ? new ArrayList<>((List<String>) dl)
+                : new ArrayList<>();
+        Injection refInj = new Injection(null, null);
+        refInj.dpath = dpath;
+        refInj.dparent = getpath(spec, dpath);
+        refInj.handler = _injecthandler;
+        Object refResolved = getpath(spec, refpath, refInj);
+
+        Object tref = clone(refResolved);
+
+        boolean[] hasSubRef = {false};
+        if (isnode(tref)) {
+          walk(
+              tref,
+              (k, v, p, t) -> {
+                if ("`$REF`".equals(v)) hasSubRef[0] = true;
+                return v;
+              });
+        }
+
+        Object cpathRaw = slice(inj.path, -3, null);
+        List<String> cpath =
+            cpathRaw instanceof List<?> cl
+                ? new ArrayList<>((List<String>) cl)
+                : new ArrayList<>();
+        Object tpathRaw = slice(inj.path, -1, null);
+        List<String> tpath =
+            tpathRaw instanceof List<?> tpl
+                ? new ArrayList<>((List<String>) tpl)
+                : new ArrayList<>();
+        Object tval = getpath(store, tpath);
+        Object rval = UNDEF;
+
+        if (!hasSubRef[0] || tval != UNDEF) {
+          Object lastKey = getelem(tpath, -1);
+          List<String> singleKey = new ArrayList<>();
+          singleKey.add(strkey(lastKey));
+          Injection tinj = inj.child(0, singleKey);
+          tinj.path = tpath;
+          Object slicedNodes = slice(inj.nodes, -1, null);
+          tinj.nodes =
+              slicedNodes instanceof List<?> snl
+                  ? new ArrayList<>((List<Object>) snl)
+                  : new ArrayList<>();
+          tinj.parent = getelem(inj.nodes, -2);
+          tinj.val = tref;
+
+          List<String> flatCpath = new ArrayList<>(cpath);
+          tinj.dpath = flatCpath;
+          tinj.dparent = getpath(store, cpath);
+
+          inject(tref, store, tinj);
+          rval = tinj.val;
+        }
+
+        Object grandparent = inj.setval(rval, 2);
+        if (islist(grandparent) && inj.prior != null) {
+          inj.prior.keyI--;
+        }
+
+        return val;
+      };
 
   public static Object transform(Object data, Object spec) {
-    return transform(data, spec, null);
+    return transform(data, spec, (Map<String, Object>) null);
   }
 
+  /**
+   * TS-faithful transform: clone the spec and inject it against a store
+   * containing the {@code transform_*} command injectors plus {@code $TOP},
+   * {@code $SPEC}, {@code $BT}, {@code $DS}, {@code $WHEN}. Mirrors TS
+   * {@code transform} (StructUtility.ts lines 1902–1973).
+   */
   public static Object transform(Object data, Object spec, Map<String, Object> options) {
+    final Object origspec = spec;
+    Object workspec = clone(origspec);
+
+    Object extraRaw = options == null ? null : options.get("extra");
+    Object modifyRaw = options == null ? null : options.get("modify");
+    Object handlerRaw = options == null ? null : options.get("handler");
+    Object metaRaw = options == null ? null : options.get("meta");
+    Object errsRaw = options == null ? null : options.get("errs");
+
+    boolean collect = errsRaw instanceof List<?>;
+    List<Object> errs = collect ? (List<Object>) errsRaw : new ArrayList<>();
+
+    // Split extra into commands ($-keyed) and data (everything else).
+    Map<String, Object> extraTransforms = new LinkedHashMap<>();
+    Map<String, Object> extraData = new LinkedHashMap<>();
+    if (extraRaw instanceof Map<?, ?> exm) {
+      for (Map.Entry<?, ?> e : exm.entrySet()) {
+        String k = Objects.toString(e.getKey(), "");
+        if (k.startsWith("$")) extraTransforms.put(k, e.getValue());
+        else extraData.put(k, e.getValue());
+      }
+    }
+
+    List<Object> dataMergeList = new ArrayList<>();
+    if (!isempty(extraData)) dataMergeList.add(clone(extraData));
+    dataMergeList.add(clone(data));
+    Object dataClone = merge(dataMergeList);
+
+    // Build store: $TOP/data, $SPEC supplier, $BT/$DS/$WHEN escape helpers, all
+    // transform_* injectors, then merge in extraTransforms, then $ERRS.
+    Map<String, Object> baseStore = new LinkedHashMap<>();
+    baseStore.put(S_DTOP, dataClone);
+    baseStore.put(S_DSPEC, (Supplier<Object>) () -> origspec);
+    baseStore.put("$BT", (Supplier<Object>) () -> "`");
+    baseStore.put("$DS", (Supplier<Object>) () -> "$");
+    baseStore.put(
+        "$WHEN", (Supplier<Object>) () -> java.time.Instant.now().toString());
+    baseStore.put("$DELETE", transform_DELETE);
+    baseStore.put("$COPY", transform_COPY);
+    baseStore.put("$KEY", transform_KEY);
+    baseStore.put("$ANNO", transform_ANNO);
+    baseStore.put("$MERGE", transform_MERGE);
+    baseStore.put("$EACH", transform_EACH);
+    baseStore.put("$PACK", transform_PACK);
+    baseStore.put("$REF", transform_REF);
+    baseStore.put("$FORMAT", transform_FORMAT);
+    baseStore.put("$APPLY", transform_APPLY);
+
+    List<Object> storeMergeList = new ArrayList<>();
+    storeMergeList.add(baseStore);
+    if (!extraTransforms.isEmpty()) storeMergeList.add(extraTransforms);
+    Map<String, Object> errsHolder = new LinkedHashMap<>();
+    errsHolder.put(S_DERRS, errs);
+    storeMergeList.add(errsHolder);
+    Object store = merge(storeMergeList, 1);
+
+    // Build the injection definition (modify/handler/meta/errs).
+    Injection injdef = new Injection(workspec, null);
+    injdef.prior = null; // partial — inject() rebuilds top state
+    if (modifyRaw instanceof Modify mod) injdef.modify = mod;
+    else if (modifyRaw instanceof TransformModify tm) {
+      injdef.modify =
+          (v, k, p, ij, st) -> tm.apply(v, k == null ? null : k.toString(), p);
+    }
+    if (handlerRaw instanceof Injector h) injdef.handler = h;
+    if (metaRaw instanceof Map<?, ?> mm) injdef.meta = (Map<String, Object>) mm;
+    injdef.errs = errs;
+
+    Object out = inject(workspec, store, injdef);
+
+    if (!errs.isEmpty() && !collect) {
+      throw new IllegalArgumentException(String.join(" | ", errsAsStrings(errs)));
+    }
+    return out;
+  }
+
+  private static List<String> errsAsStrings(List<Object> errs) {
+    List<String> out = new ArrayList<>(errs.size());
+    for (Object e : errs) out.add(Objects.toString(e, ""));
+    return out;
+  }
+
+  /**
+   * Legacy hand-rolled transform (pre-injector). Retained as
+   * {@code transformLegacy} for fallback until corpus parity is fully
+   * confirmed against the new injector-based path.
+   */
+  static Object transformLegacy(Object data, Object spec, Map<String, Object> options) {
     Object useData = data;
     TransformModify modify = null;
     Map<String, Object> handlers = new LinkedHashMap<>();
@@ -2560,15 +3075,342 @@ public class Struct {
       };
 
   /**
-   * $CHILD, $ONE, $EXACT: complex injectors deferred to follow-up commit.
-   * The hand-rolled validate() below currently handles their test cases;
-   * they will be ported during the step 11 validate() rewrite.
+   * $CHILD: validate every direct child of the current node against a template.
+   * Map syntax: {@code {`$CHILD`: child-template}} (M_KEYPRE phase).
+   * List syntax: {@code [`$CHILD`, child-template]} (M_VAL phase).
+   * Mirrors TS lines 2028–2101.
    */
-  public static final Injector validate_CHILD = (injObj, val, ref, store) -> UNDEF;
+  public static final Injector validate_CHILD =
+      (injObj, val, ref, store) -> {
+        if (!(injObj instanceof Injection inj)) return UNDEF;
 
-  public static final Injector validate_ONE = (injObj, val, ref, store) -> UNDEF;
+        if (inj.mode == M_KEYPRE) {
+          Object childtm = getprop(inj.parent, inj.key);
+          Object pkey = getelem(inj.path, -2);
+          Object tval = getprop(inj.dparent, pkey);
 
-  public static final Injector validate_EXACT = (injObj, val, ref, store) -> UNDEF;
+          if (tval == UNDEF || tval == null) {
+            tval = new LinkedHashMap<>();
+          } else if (!ismap(tval)) {
+            Object sp = slice(inj.path, -1, null);
+            inj.errs.add(_invalidTypeMsg(sp, "object", typify(tval), tval, "V0220"));
+            return UNDEF;
+          }
+
+          List<String> ckeys = keysof(tval);
+          for (String ckey : ckeys) {
+            setprop(inj.parent, ckey, clone(childtm));
+            inj.keys.add(ckey);
+          }
+          inj.setval(UNDEF);
+          return UNDEF;
+        }
+
+        if (inj.mode == M_VAL) {
+          if (!islist(inj.parent)) {
+            inj.errs.add("Invalid $CHILD as value");
+            return UNDEF;
+          }
+          Object childtm = getprop(inj.parent, 1);
+
+          if (inj.dparent == UNDEF || inj.dparent == null) {
+            ((List<Object>) inj.parent).clear();
+            return UNDEF;
+          }
+
+          if (!islist(inj.dparent)) {
+            Object sp = slice(inj.path, -1, null);
+            inj.errs.add(
+                _invalidTypeMsg(sp, "list", typify(inj.dparent), inj.dparent, "V0230"));
+            inj.keyI = size(inj.parent);
+            return inj.dparent;
+          }
+
+          List<Object> dpl = (List<Object>) inj.dparent;
+          List<Object> pl = (List<Object>) inj.parent;
+          for (int i = 0; i < dpl.size(); i++) {
+            setprop(pl, i, clone(childtm));
+          }
+          while (pl.size() > dpl.size()) pl.remove(pl.size() - 1);
+          inj.keyI = 0;
+
+          return getprop(inj.dparent, 0);
+        }
+
+        return UNDEF;
+      };
+
+  /**
+   * $ONE: validate against any one of a list of alternative shapes.
+   * Format: {@code [`$ONE`, alt0, alt1, ...]}. Mirrors TS lines 2109–2175.
+   */
+  public static final Injector validate_ONE =
+      (injObj, val, ref, store) -> {
+        if (!(injObj instanceof Injection inj)) return UNDEF;
+        if (inj.mode != M_VAL) return UNDEF;
+
+        if (!islist(inj.parent) || inj.keyI != 0) {
+          inj.errs.add(
+              "The $ONE validator at field "
+                  + pathify(inj.path, 1, 1)
+                  + " must be the first element of an array.");
+          return UNDEF;
+        }
+
+        inj.keyI = size(inj.keys);
+        inj.setval(inj.dparent, 2);
+
+        Object slicedPath = slice(inj.path, -1, null);
+        inj.path =
+            slicedPath instanceof List<?> spl
+                ? new ArrayList<>((List<String>) spl)
+                : new ArrayList<>();
+        inj.key = strkey(getelem(inj.path, -1));
+
+        Object tvalsRaw = slice(inj.parent, 1, null);
+        List<Object> tvals =
+            tvalsRaw instanceof List<?> tl
+                ? new ArrayList<>((List<Object>) tl)
+                : new ArrayList<>();
+        if (tvals.isEmpty()) {
+          inj.errs.add(
+              "The $ONE validator at field "
+                  + pathify(inj.path, 1, 1)
+                  + " must have at least one argument.");
+          return UNDEF;
+        }
+
+        for (Object tval : tvals) {
+          List<Object> terrs = new ArrayList<>();
+          Map<String, Object> vstore = new LinkedHashMap<>();
+          if (store instanceof Map<?, ?> sm) {
+            for (Map.Entry<?, ?> e : sm.entrySet()) {
+              vstore.put(Objects.toString(e.getKey()), e.getValue());
+            }
+          }
+          vstore.put(S_DTOP, inj.dparent);
+          Map<String, Object> opts = new LinkedHashMap<>();
+          opts.put("extra", vstore);
+          opts.put("errs", terrs);
+          opts.put("meta", inj.meta);
+          Object vcurrent;
+          try {
+            vcurrent = validate(inj.dparent, tval, opts);
+          } catch (Exception e) {
+            terrs.add(e.getMessage());
+            vcurrent = inj.dparent;
+          }
+          inj.setval(vcurrent, -2);
+          if (terrs.isEmpty()) return UNDEF;
+        }
+
+        // No match; describe alternatives.
+        StringBuilder valdesc = new StringBuilder();
+        for (int i = 0; i < tvals.size(); i++) {
+          if (i > 0) valdesc.append(", ");
+          Object tv = tvals.get(i);
+          if (tv instanceof String s) {
+            Matcher m = R_TRANSFORM_NAME.matcher(s);
+            if (m.matches()) {
+              valdesc.append(m.group(1).toLowerCase(Locale.ROOT));
+              continue;
+            }
+          }
+          valdesc.append(stringify(tv));
+        }
+        inj.errs.add(
+            _invalidTypeMsg(
+                inj.path,
+                (size(tvals) > 1 ? "one of " : "") + valdesc,
+                typify(inj.dparent),
+                inj.dparent,
+                "V0210"));
+        return UNDEF;
+      };
+
+  /**
+   * $EXACT: validate against any one of a list of literal alternatives.
+   * Format: {@code [`$EXACT`, lit0, lit1, ...]}. Mirrors TS lines 2178–2237.
+   */
+  public static final Injector validate_EXACT =
+      (injObj, val, ref, store) -> {
+        if (!(injObj instanceof Injection inj)) return UNDEF;
+
+        if (inj.mode == M_VAL) {
+          if (!islist(inj.parent) || inj.keyI != 0) {
+            inj.errs.add(
+                "The $EXACT validator at field "
+                    + pathify(inj.path, 1, 1)
+                    + " must be the first element of an array.");
+            return UNDEF;
+          }
+
+          inj.keyI = size(inj.keys);
+          inj.setval(inj.dparent, 2);
+
+          Object slicedPath = slice(inj.path, 0, -1);
+          inj.path =
+              slicedPath instanceof List<?> spl
+                  ? new ArrayList<>((List<String>) spl)
+                  : new ArrayList<>();
+          inj.key = strkey(getelem(inj.path, -1));
+
+          Object tvalsRaw = slice(inj.parent, 1, null);
+          List<Object> tvals =
+              tvalsRaw instanceof List<?> tl
+                  ? new ArrayList<>((List<Object>) tl)
+                  : new ArrayList<>();
+          if (tvals.isEmpty()) {
+            inj.errs.add(
+                "The $EXACT validator at field "
+                    + pathify(inj.path, 1, 1)
+                    + " must have at least one argument.");
+            return UNDEF;
+          }
+
+          String currentstr = null;
+          for (Object tval : tvals) {
+            boolean exactmatch = Objects.equals(tval, inj.dparent);
+            if (!exactmatch && isnode(tval)) {
+              if (currentstr == null) currentstr = stringify(inj.dparent);
+              String tvalstr = stringify(tval);
+              exactmatch = tvalstr.equals(currentstr);
+            }
+            if (exactmatch) return UNDEF;
+          }
+
+          // No match.
+          StringBuilder valdesc = new StringBuilder();
+          for (int i = 0; i < tvals.size(); i++) {
+            if (i > 0) valdesc.append(", ");
+            Object tv = tvals.get(i);
+            if (tv instanceof String s) {
+              Matcher m = R_TRANSFORM_NAME.matcher(s);
+              if (m.matches()) {
+                valdesc.append(m.group(1).toLowerCase(Locale.ROOT));
+                continue;
+              }
+            }
+            valdesc.append(stringify(tv));
+          }
+          inj.errs.add(
+              _invalidTypeMsg(
+                  inj.path,
+                  (size(inj.path) > 1 ? "" : "value ")
+                      + "exactly equal to "
+                      + (size(tvals) == 1 ? "" : "one of ")
+                      + valdesc,
+                  typify(inj.dparent),
+                  inj.dparent,
+                  "V0110"));
+          return UNDEF;
+        } else {
+          delprop(inj.parent, inj.key);
+          return UNDEF;
+        }
+      };
+
+  /**
+   * Modify hook used by {@link #validate(Object, Object)}: runs after each
+   * inject step; performs type-mismatch checks, open-vs-closed map handling
+   * via {@code `$OPEN`}, exact-mode comparison, and default-value copy-over.
+   * Mirrors TS {@code _validation} (lines 2242–2333).
+   */
+  public static final Modify _validation =
+      (pval, key, parent, injObj, store) -> {
+        if (!(injObj instanceof Injection inj)) return;
+        if (pval == SKIP) return;
+
+        boolean exact = Boolean.TRUE.equals(getprop(inj.meta, "`$EXACT`", false));
+        Object cval = getprop(inj.dparent, key);
+        if (!exact && (cval == UNDEF || cval == null)) return;
+
+        int ptype = typify(pval);
+        // Skip strings containing $ (special command refs).
+        if ((T_string & ptype) != 0 && pval instanceof String ps && ps.contains("$")) {
+          return;
+        }
+
+        int ctype = typify(cval);
+        if (ptype != ctype && pval != UNDEF) {
+          inj.errs.add(_invalidTypeMsg(inj.path, typename(ptype), ctype, cval, "V0010"));
+          return;
+        }
+
+        if (ismap(cval)) {
+          if (!ismap(pval)) {
+            inj.errs.add(_invalidTypeMsg(inj.path, typename(ptype), ctype, cval, "V0020"));
+            return;
+          }
+          List<String> ckeys = keysof(cval);
+          List<String> pkeys = keysof(pval);
+
+          if (size(pkeys) > 0 && !Boolean.TRUE.equals(getprop(pval, "`$OPEN`"))) {
+            List<String> badkeys = new ArrayList<>();
+            for (String ck : ckeys) {
+              if (!haskey(pval, ck)) badkeys.add(ck);
+            }
+            if (!badkeys.isEmpty()) {
+              inj.errs.add(
+                  "Unexpected keys at field "
+                      + pathify(inj.path, 1)
+                      + ": "
+                      + String.join(", ", badkeys));
+            }
+          } else {
+            List<Object> mergeArgs = new ArrayList<>();
+            mergeArgs.add(pval);
+            mergeArgs.add(cval);
+            merge(mergeArgs);
+            if (isnode(pval)) {
+              delprop(pval, "`$OPEN`");
+            }
+          }
+        } else if (islist(cval)) {
+          if (!islist(pval)) {
+            inj.errs.add(_invalidTypeMsg(inj.path, typename(ptype), ctype, cval, "V0030"));
+          }
+        } else if (exact) {
+          if (!Objects.equals(cval, pval)) {
+            String pathmsg =
+                size(inj.path) > 1
+                    ? "at field " + pathify(inj.path, 1) + ": "
+                    : "";
+            inj.errs.add(
+                "Value " + pathmsg + jsString(cval) + " should equal " + jsString(pval) + ".");
+          }
+        } else {
+          // Spec value was a default; copy data over.
+          setprop(parent, key, cval);
+        }
+      };
+
+  /**
+   * Custom Injector used by {@link #validate(Object, Object)}: intercepts
+   * meta-path syntax ({@code `<root>$=value`}, {@code `<root>$~spec`}) before
+   * delegating to the default {@link #_injecthandler}. Mirrors TS lines 2801–2828.
+   */
+  public static final Injector _validatehandler =
+      (injObj, val, ref, store) -> {
+        if (!(injObj instanceof Injection inj)) return val;
+        if (ref != null) {
+          Matcher m = R_META_PATH.matcher(ref);
+          if (m.matches()) {
+            String op = m.group(2);
+            if ("=".equals(op)) {
+              List<Object> wrap = new ArrayList<>();
+              wrap.add("`$EXACT`");
+              wrap.add(val);
+              inj.setval(wrap);
+            } else {
+              inj.setval(val);
+            }
+            inj.keyI = -1;
+            return SKIP;
+          }
+        }
+        return _injecthandler.apply(inj, val, ref, store);
+      };
 
   // ===========================================================================
   // Select injectors (step 12) — reference declarations
@@ -2714,7 +3556,88 @@ public class Struct {
     return validate(data, spec, null);
   }
 
+  /**
+   * TS-faithful validate: build a store with validate_* injectors plus nulled
+   * transform commands, then dispatch via {@link #transform} with
+   * {@link #_validation} as modify and {@link #_validatehandler} as handler.
+   * Mirrors TS {@code validate} (StructUtility.ts lines 2347–2411).
+   */
   public static Object validate(Object data, Object spec, Map<String, Object> options) {
+    Object extraRaw = options == null ? null : options.get("extra");
+    Object errsRaw = options == null ? null : options.get("errs");
+    Object metaRaw = options == null ? null : options.get("meta");
+
+    boolean collect = errsRaw instanceof List<?>;
+    List<Object> errs = collect ? (List<Object>) errsRaw : new ArrayList<>();
+
+    // Build store: nullify transform commands, add validate_* injectors.
+    Map<String, Object> baseStore = new LinkedHashMap<>();
+    baseStore.put("$DELETE", null);
+    baseStore.put("$COPY", null);
+    baseStore.put("$KEY", null);
+    baseStore.put("$META", null);
+    baseStore.put("$MERGE", null);
+    baseStore.put("$EACH", null);
+    baseStore.put("$PACK", null);
+
+    baseStore.put("$STRING", validate_STRING);
+    baseStore.put("$NUMBER", validate_TYPE);
+    baseStore.put("$INTEGER", validate_TYPE);
+    baseStore.put("$DECIMAL", validate_TYPE);
+    baseStore.put("$BOOLEAN", validate_TYPE);
+    baseStore.put("$NULL", validate_TYPE);
+    baseStore.put("$NIL", validate_TYPE);
+    baseStore.put("$MAP", validate_TYPE);
+    baseStore.put("$LIST", validate_TYPE);
+    baseStore.put("$FUNCTION", validate_TYPE);
+    baseStore.put("$INSTANCE", validate_TYPE);
+    baseStore.put("$ANY", validate_ANY);
+    baseStore.put("$CHILD", validate_CHILD);
+    baseStore.put("$ONE", validate_ONE);
+    baseStore.put("$EXACT", validate_EXACT);
+
+    List<Object> mergeList = new ArrayList<>();
+    mergeList.add(baseStore);
+    if (extraRaw instanceof Map<?, ?> em) mergeList.add(em);
+    Map<String, Object> errsHolder = new LinkedHashMap<>();
+    errsHolder.put(S_DERRS, errs);
+    mergeList.add(errsHolder);
+    Object store = merge(mergeList, 1);
+
+    // Build meta with `$EXACT` default.
+    Map<String, Object> meta;
+    if (metaRaw instanceof Map<?, ?> mm) {
+      meta = new LinkedHashMap<>();
+      for (Map.Entry<?, ?> e : ((Map<?, ?>) mm).entrySet()) {
+        meta.put(Objects.toString(e.getKey()), e.getValue());
+      }
+    } else {
+      meta = new LinkedHashMap<>();
+    }
+    if (!meta.containsKey("`$EXACT`")) {
+      meta.put("`$EXACT`", false);
+    }
+
+    Map<String, Object> opts = new LinkedHashMap<>();
+    opts.put("meta", meta);
+    opts.put("extra", store);
+    opts.put("modify", _validation);
+    opts.put("handler", _validatehandler);
+    opts.put("errs", errs);
+
+    Object out = transform(data, spec, opts);
+
+    if (!errs.isEmpty() && !collect) {
+      throw new IllegalArgumentException(String.join(" | ", errsAsStrings(errs)));
+    }
+    return out;
+  }
+
+  /**
+   * Legacy hand-rolled validate (pre-injector). Retained as
+   * {@code validateLegacy} for fallback / debugging.
+   */
+  static Object validateLegacy(Object data, Object spec, Map<String, Object> options) {
     Map<String, Object> opts = options == null ? new LinkedHashMap<>() : new LinkedHashMap<>(options);
     boolean collect = false;
     List<String> errs;

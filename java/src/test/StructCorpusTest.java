@@ -265,12 +265,13 @@ class StructCorpusTest {
     add(tests, "transform", "pack", true, in -> Struct.transform(getp(in, "data"), getp(in, "spec")));
     add(tests, "transform", "modify", true, in -> {
       Map<String, Object> opts = new LinkedHashMap<>();
+      // Match JS test guard: only mutate string leaves.
       opts.put(
           "modify",
           (Struct.TransformModify)
               (val, key, parent) -> {
-                if (parent instanceof Map<?, ?> m && val != null) {
-                  ((Map<String, Object>) m).put(key, "@" + val);
+                if (key != null && parent instanceof Map<?, ?> m && val instanceof String s) {
+                  ((Map<String, Object>) m).put(key, "@" + s);
                 }
               });
       return Struct.transform(getp(in, "data"), getp(in, "spec"), opts);
