@@ -18,8 +18,9 @@
 | **lua** | 40+ | 15 | 2 | 75/75 pass | Complete |
 | **java** | 40 | 15 | 2 | 1178/1178 corpus | Complete |
 | **cpp** | 40 | 15 | 2 | 1178/1178 corpus | Complete |
+| **cs** | 40 | 15 | 2 | 1178/1178 corpus | Complete |
 
-\*\* Java and C++: full TS-canonical parity. `Injection` state machine,
+\*\* Java, C++ and C#: full TS-canonical parity. Injection state machine,
 `SKIP`/`DELETE` sentinels, mode constants, all 11 transform commands
 (`$DELETE`/`$COPY`/`$KEY`/`$ANNO`/`$MERGE`/`$EACH`/`$PACK`/`$REF`/
 `$FORMAT`/`$APPLY`), all 6 validate checkers (`$STRING`/`$TYPE`/`$ANY`/

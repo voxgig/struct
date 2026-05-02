@@ -299,7 +299,8 @@ public static class StructUtils
     // Value is "empty": null, empty string, empty list, or empty map.
     public static bool IsEmpty(object? val)
     {
-        if (val == null) return true;
+        // Match TS isempty: undefined/null/empty-string/empty-array/empty-object → true.
+        if (val == null || ReferenceEquals(val, NONE)) return true;
         if (val is string s) return s.Length == 0;
         if (val is List<object?> l) return l.Count == 0;
         if (val is Dictionary<string, object?> d) return d.Count == 0;
@@ -687,7 +688,8 @@ public static class StructUtils
     public static string Stringify(object? val, int? maxlen = null)
     {
         string valstr;
-        if (val == null) return S_MT;
+        // Match TS: NONE (undefined) -> "" but JSON null -> "null".
+        if (ReferenceEquals(val, NONE)) return S_MT;
 
         if (val is string s)
         {

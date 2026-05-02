@@ -172,3 +172,7 @@ cpp/smoke.out
 cpp/corpus.out
 cpp/sanitize.out
 cpp/walk_bench.out
+cs/corpus-scoreboard.json
+cs/tests/corpus-scoreboard.json
+cs/tests/bin/
+cs/tests/obj/
