@@ -2,10 +2,20 @@
 
 > Java port of the canonical TypeScript implementation.
 >
-> **Status: partial.**  Basic utilities are present; the major
-> subsystems (`inject`, `transform`, `validate`, `select`) and path
-> operations (`getpath`, `setpath`) are not yet implemented.  Use
-> the canonical TS or one of the complete ports for production work.
+> **Status: complete.**  Full TS-canonical parity: all 40 functions,
+> 15 type bit-flags, 3 mode constants (`M_KEYPRE`/`M_KEYPOST`/`M_VAL`),
+> `SKIP`/`DELETE` sentinel marker maps, and the `Injection` state
+> machine. `inject()`/`transform()`/`validate()`/`select()` all dispatch
+> through the canonical injector machinery: 11 transform commands
+> (`$DELETE`/`$COPY`/`$KEY`/`$ANNO`/`$MERGE`/`$EACH`/`$PACK`/`$REF`/
+> `$FORMAT`/`$APPLY`), 6 validate checkers (`$STRING`/`$TYPE`/`$ANY`/
+> `$CHILD`/`$ONE`/`$EXACT`), and 4 select operators (`$AND`/`$OR`/
+> `$NOT`/`$CMP`).
+>
+> Passes the full shared corpus (1178/1178). Run locally with
+> `mvn test` from `java/`. Per-file pass counts are written to
+> `target/corpus-scoreboard.json`; the committed baseline lives at
+> `test-baseline.json`.
 
 For motivation, language-neutral concepts, and the cross-language
 parity matrix, see the [top-level README](../README.md) and

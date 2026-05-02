@@ -136,6 +136,11 @@ public static class Runner
     // Deep structural equality (numbers are compared by value, ignoring int/long/double).
     public static bool DeepEqual(object? a, object? b)
     {
+        // NONE (TS undefined) compares equal to null for corpus comparison.
+        bool aNone = ReferenceEquals(a, StructUtils.NONE);
+        bool bNone = ReferenceEquals(b, StructUtils.NONE);
+        if (aNone) a = null;
+        if (bNone) b = null;
         if (a == null && b == null) return true;
         if (a == null || b == null) return false;
 
