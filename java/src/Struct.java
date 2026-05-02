@@ -71,6 +71,7 @@ public class Struct {
   public static final String S_DTOP = "$TOP";
   public static final String S_DSPEC = "$SPEC";
   public static final String S_DKEY = "$KEY";
+  public static final String S_DERRS = "$ERRS";
   private static final String S_DT = ".";
 
   // Inject mode bitfield (TS lines 60–62).
@@ -105,6 +106,11 @@ public class Struct {
   private static final Pattern R_INJECT_FULL = Pattern.compile("^`(\\$[A-Z]+|[^`]*)[0-9]*`$");
   private static final Pattern R_INJECT_PART = Pattern.compile("`([^`]+)`");
   private static final Pattern R_CMD_KEY = Pattern.compile("^`(\\$[A-Z]+)(\\d*)`$");
+  private static final Pattern R_BT_ESCAPE = Pattern.compile("\\$BT");
+  private static final Pattern R_DS_ESCAPE = Pattern.compile("\\$DS");
+  private static final Pattern R_TRANSFORM_NAME = Pattern.compile("`\\$([A-Z]+)`");
+  private static final Pattern R_DOUBLE_DOLLAR = Pattern.compile("\\$\\$");
+  private static final Pattern R_CLONE_REF = Pattern.compile("^`\\$REF:([0-9]+)`$");
 
   /**
    * Sentinel returned from a transform/inject step to omit the current key.
@@ -1111,7 +1117,7 @@ public class Struct {
   }
 
   public static Object getpath(Object store, Object path) {
-    return getpath(store, path, null);
+    return getpath(store, path, (Map<String, Object>) null);
   }
 
   public static Object getpath(Object store, Object path, Map<String, Object> inj) {
@@ -1272,36 +1278,144 @@ public class Struct {
   }
 
   public static Object inject(Object val, Object store) {
-    return inject(val, store, null);
+    return inject(val, store, (Injection) null);
   }
 
-  public static Object inject(Object val, Object store, Map<String, Object> inj) {
-    if (val == UNDEF || val == null) {
-      return null;
+  /**
+   * Map-based overload retained for back-compat with the legacy hand-rolled
+   * transform/validate paths. Builds an {@link Injection} from the map's
+   * {@code modify}, {@code extra}, {@code meta}, {@code handler}, {@code base},
+   * {@code dparent}, {@code dpath} entries and delegates to
+   * {@link #inject(Object, Object, Injection)}.
+   */
+  public static Object inject(Object val, Object store, Map<String, Object> injMap) {
+    if (injMap == null) {
+      return inject(val, store, (Injection) null);
     }
+    Injection injdef = new Injection(val, null);
+    injdef.prior = null; // partial — signals "build fresh state in inject()"
+    if (injMap.get("base") instanceof String b) injdef.base = b;
+    if (injMap.get("dparent") != null) injdef.dparent = injMap.get("dparent");
+    if (injMap.get("dpath") instanceof List<?> dp) injdef.dpath = (List<String>) dp;
+    if (injMap.get("meta") instanceof Map<?, ?> meta) injdef.meta = (Map<String, Object>) meta;
+    if (injMap.get("modify") instanceof Modify mod) injdef.modify = mod;
+    if (injMap.get("modify") instanceof TransformModify tm) {
+      injdef.modify =
+          (v, k, p, ij, st) -> tm.apply(v, k == null ? null : k.toString(), p);
+    }
+    if (injMap.get("extra") != null) injdef.extra = injMap.get("extra");
+    if (injMap.get("handler") instanceof Injector h) injdef.handler = h;
+    return inject(val, store, injdef);
+  }
 
-    if (val instanceof Map<?, ?> m) {
-      Map<String, Object> out = new LinkedHashMap<>();
-      for (Map.Entry<?, ?> e : m.entrySet()) {
-        String key = Objects.toString(e.getKey(), "");
-        out.put(key, inject(e.getValue(), store, inj));
+  /**
+   * Inject values from a {@code store} into a JSON-shaped {@code val}. Mirrors
+   * TS {@code inject} (StructUtility.ts lines 1264–1387) using the
+   * {@link Injection} state machine introduced in step 4.
+   *
+   * <p>For each map/list child the three injection phases run in order:
+   * {@link #M_KEYPRE} (key transform pre-descent), {@link #M_VAL} (recurse
+   * into the value), then {@link #M_KEYPOST} (key transform post-descent).
+   * Map keys are partitioned: non-{@code $} keys before {@code $}-prefixed
+   * keys, so transform commands run after data fields are resolved.
+   */
+  public static Object inject(Object val, Object store, Injection injdef) {
+    Injection inj;
+    boolean isInitial = injdef == null || injdef.prior == null;
+
+    if (isInitial) {
+      Map<String, Object> wrapper = new LinkedHashMap<>();
+      wrapper.put(S_DTOP, val);
+      inj = new Injection(val, wrapper);
+      inj.dparent = store;
+      Object errsRaw = getprop(store, S_DERRS, UNDEF);
+      if (errsRaw instanceof List<?> el) {
+        inj.errs = (List<Object>) el;
       }
-      return out;
-    }
+      inj.meta.put("__d", 0);
 
-    if (val instanceof List<?> l) {
-      List<Object> out = new ArrayList<>();
-      for (Object child : l) {
-        out.add(inject(child, store, inj));
+      if (injdef != null) {
+        if (injdef.modify != null) inj.modify = injdef.modify;
+        if (injdef.extra != null) inj.extra = injdef.extra;
+        if (injdef.meta != null) inj.meta = injdef.meta;
+        if (injdef.handler != null) inj.handler = injdef.handler;
+        if (injdef.base != null) inj.base = injdef.base;
+        if (injdef.dparent != UNDEF) inj.dparent = injdef.dparent;
       }
-      return out;
+      if (inj.handler == null) {
+        inj.handler = _injecthandler;
+      }
+      // Top-level wrapper participates in nodes stack so setval can climb.
+      inj.nodes.clear();
+      inj.nodes.add(wrapper);
+    } else {
+      inj = injdef;
     }
 
-    if (val instanceof String s) {
-      return injectString(s, store, inj);
+    inj.descend();
+
+    if (isnode(val)) {
+      List<String> nodekeys = keysof(val);
+
+      if (ismap(val)) {
+        // $-suffix ordering: non-$ keys first, then $ keys.
+        // Critical for transform command ordering (TS lines 1305-1310).
+        List<String> nonDollar = new ArrayList<>();
+        List<String> dollar = new ArrayList<>();
+        for (String k : nodekeys) {
+          if (k.contains("$")) {
+            dollar.add(k);
+          } else {
+            nonDollar.add(k);
+          }
+        }
+        nodekeys = new ArrayList<>(nonDollar.size() + dollar.size());
+        nodekeys.addAll(nonDollar);
+        nodekeys.addAll(dollar);
+      }
+
+      for (int nkI = 0; nkI < nodekeys.size(); nkI++) {
+        Injection childinj = inj.child(nkI, nodekeys);
+        String nodekey = childinj.key;
+        childinj.mode = M_KEYPRE;
+
+        Object prekey = _injectstr(nodekey, store, childinj);
+        nkI = childinj.keyI;
+        nodekeys = childinj.keys;
+
+        if (prekey != UNDEF) {
+          childinj.val = getprop(val, prekey);
+          childinj.mode = M_VAL;
+          inject(childinj.val, store, childinj);
+
+          nkI = childinj.keyI;
+          nodekeys = childinj.keys;
+
+          childinj.mode = M_KEYPOST;
+          _injectstr(nodekey, store, childinj);
+
+          nkI = childinj.keyI;
+          nodekeys = childinj.keys;
+        }
+      }
+    } else if (val instanceof String s) {
+      inj.mode = M_VAL;
+      Object newVal = _injectstr(s, store, inj);
+      if (newVal != SKIP) {
+        inj.setval(newVal);
+      }
+      val = newVal;
     }
 
-    return val;
+    if (inj.modify != null && val != SKIP) {
+      Object mkey = inj.key;
+      Object mparent = inj.parent;
+      Object mval = getprop(mparent, mkey);
+      inj.modify.apply(mval, mkey, mparent, inj, store);
+    }
+
+    inj.val = val;
+    return getprop(inj.parent, S_DTOP);
   }
 
   private static Object injectString(String val, Object store, Map<String, Object> inj) {
@@ -1352,6 +1466,140 @@ public class Struct {
     }
     return stringify(found);
   }
+
+  // ===========================================================================
+  // Inject substrate helpers (step 5a — declared here, wired in step 6)
+  // ===========================================================================
+
+  /**
+   * Build a type-mismatch error message for {@link #validate}.
+   * Mirrors TS {@code _invalidTypeMsg} (StructUtility.ts lines 2759–2771).
+   *
+   * @param path  ancestor key chain
+   * @param needtype expected type (human name)
+   * @param vt    actual type bit-flag
+   * @param v     actual value
+   * @param whence optional error code (currently ignored; reserved for debug)
+   */
+  static String _invalidTypeMsg(Object path, String needtype, int vt, Object v, String whence) {
+    String vs = (v == null || v == UNDEF) ? "no value" : stringify(v);
+    StringBuilder sb = new StringBuilder("Expected ");
+    if (path instanceof List<?> p && p.size() > 1) {
+      sb.append("field ").append(pathify(path, 1)).append(" to be ");
+    }
+    sb.append(needtype).append(", but found ");
+    if (v != null && v != UNDEF) {
+      sb.append(typename(vt)).append(": ");
+    }
+    sb.append(vs).append(".");
+    return sb.toString();
+  }
+
+  /**
+   * Adapter overload: dispatches {@link #getpath(Object, Object, Map)} given an
+   * {@link Injection} value. Builds a transient {@link Map} view from the
+   * injection's {@code base}, {@code dparent}, {@code dpath}, {@code meta}, and
+   * {@code key} fields. The injection's {@code handler} (an {@link Injector}) is
+   * applied <em>after</em> the path lookup so that step 6's three-phase machine
+   * can hook command dispatch.
+   */
+  public static Object getpath(Object store, Object path, Injection inj) {
+    if (inj == null) {
+      return getpath(store, path, (Map<String, Object>) null);
+    }
+    Map<String, Object> view = new LinkedHashMap<>();
+    if (inj.base != null) view.put("base", inj.base);
+    if (inj.dparent != UNDEF) view.put("dparent", inj.dparent);
+    if (inj.dpath != null) view.put("dpath", inj.dpath);
+    if (inj.meta != null) view.put("meta", inj.meta);
+    if (inj.key != null) view.put("key", inj.key);
+    Object val = getpath(store, path, view);
+    if (inj.handler != null) {
+      String ref = path == null ? "" : pathify(path);
+      val = inj.handler.apply(inj, val, ref, store);
+    }
+    return val;
+  }
+
+  /**
+   * Inject values from a data store into a string. Internal — not part of the
+   * public API. Mirrors TS {@code _injectstr} (StructUtility.ts lines 2840–2901).
+   *
+   * <p>If {@code val} is a "full" injection (whole string is a backtick path),
+   * returns the resolved value with its original type. Otherwise replaces every
+   * partial {@code `...`} reference inline, then calls {@code inj.handler} on
+   * the assembled string for command dispatch.
+   */
+  static Object _injectstr(String val, Object store, Injection inj) {
+    if (val == null || val.isEmpty()) {
+      return S_MT;
+    }
+    Matcher full = R_INJECT_FULL.matcher(val);
+    if (full.matches()) {
+      if (inj != null) {
+        inj.full = true;
+      }
+      String pathref = full.group(1);
+      if (pathref != null && pathref.length() > 3) {
+        pathref = R_BT_ESCAPE.matcher(pathref).replaceAll("`");
+        pathref = R_DS_ESCAPE.matcher(pathref).replaceAll("\\$");
+      }
+      return getpath(store, pathref, inj);
+    }
+
+    Matcher m = R_INJECT_PART.matcher(val);
+    StringBuilder out = new StringBuilder();
+    int cursor = 0;
+    while (m.find()) {
+      out.append(val, cursor, m.start());
+      String ref = m.group(1);
+      if (ref != null && ref.length() > 3) {
+        ref = R_BT_ESCAPE.matcher(ref).replaceAll("`");
+        ref = R_DS_ESCAPE.matcher(ref).replaceAll("\\$");
+      }
+      if (inj != null) {
+        inj.full = false;
+      }
+      Object found = getpath(store, ref, inj);
+      out.append(injectPartialText(found));
+      cursor = m.end();
+    }
+    out.append(val.substring(cursor));
+    Object outVal = out.toString();
+    if (inj != null && inj.handler != null) {
+      inj.full = true;
+      outVal = inj.handler.apply(inj, outVal, val, store);
+    }
+    return outVal;
+  }
+
+  /**
+   * Default {@link Injector}: when a backtick reference resolves to a function
+   * value (a {@code $NAME} command), call it. Otherwise pass-through, except
+   * that in {@link #M_VAL} mode with a "full" injection, set the resolved
+   * value back onto {@code inj.parent[inj.key]} to keep the spec tree
+   * consistent. Mirrors TS {@code _injecthandler}.
+   */
+  static final Injector _injecthandler =
+      (injObj, val, ref, store) -> {
+        if (!(injObj instanceof Injection inj)) {
+          return val;
+        }
+        Object out = val;
+        boolean iscmd = isfunc(val) && (ref == null || ref.startsWith("$"));
+        if (iscmd) {
+          if (val instanceof Injector ij) {
+            out = ij.apply(inj, val, ref, store);
+          } else if (val instanceof Function<?, ?> f) {
+            out = ((Function<Object, Object>) f).apply(inj);
+          } else if (val instanceof Supplier<?> s) {
+            out = s.get();
+          }
+        } else if (inj.mode == M_VAL && inj.full) {
+          inj.setval(val);
+        }
+        return out;
+      };
 
   public static Object transform(Object data, Object spec) {
     return transform(data, spec, null);
