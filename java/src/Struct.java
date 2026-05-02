@@ -1574,6 +1574,97 @@ public class Struct {
   }
 
   /**
+   * Validate that an injector is placed in an allowed mode and parent type.
+   * Mirrors TS {@code checkPlacement} (StructUtility.ts lines 2920–2943).
+   */
+  public static boolean checkPlacement(int modes, String ijname, int parentTypes, Injection inj) {
+    if ((modes & inj.mode) == 0) {
+      List<String> allowed = new ArrayList<>();
+      for (int m : new int[] {M_KEYPRE, M_KEYPOST, M_VAL}) {
+        if ((modes & m) != 0) {
+          allowed.add(PLACEMENT.get(m));
+        }
+      }
+      inj.errs.add(
+          "$"
+              + ijname
+              + ": invalid placement as "
+              + PLACEMENT.get(inj.mode)
+              + ", expected: "
+              + String.join(",", allowed)
+              + ".");
+      return false;
+    }
+    if (parentTypes != 0) {
+      int ptype = typify(inj.parent);
+      if ((parentTypes & ptype) == 0) {
+        inj.errs.add(
+            "$"
+                + ijname
+                + ": invalid placement in parent "
+                + typename(ptype)
+                + ", expected: "
+                + typename(parentTypes)
+                + ".");
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Validate and unpack injector argument types. Returns an array of size
+   * {@code argTypes.length + 1}: index 0 is the error message (or {@code null}),
+   * indices 1..N are the validated args. Mirrors TS {@code injectorArgs}.
+   */
+  public static Object[] injectorArgs(int[] argTypes, List<Object> args) {
+    int n = argTypes.length;
+    Object[] found = new Object[n + 1];
+    found[0] = null;
+    for (int i = 0; i < n; i++) {
+      Object arg = i < args.size() ? args.get(i) : UNDEF;
+      int argType = typify(arg);
+      if ((argTypes[i] & argType) == 0) {
+        found[0] =
+            "invalid argument: "
+                + stringify(arg, 22)
+                + " ("
+                + typename(argType)
+                + " at position "
+                + (1 + i)
+                + ") is not of type: "
+                + typename(argTypes[i])
+                + ".";
+        break;
+      }
+      found[i + 1] = arg;
+    }
+    return found;
+  }
+
+  /**
+   * Recurse {@link #inject} into a child node sharing the current injection's
+   * state stack. Used by {@code $FORMAT} / {@code $APPLY} (and other injectors
+   * that need to resolve a sub-spec). Mirrors TS {@code injectChild}.
+   */
+  public static Injection injectChild(Object child, Object store, Injection inj) {
+    Injection cinj = inj;
+    if (inj.prior != null) {
+      if (inj.prior.prior != null) {
+        cinj = inj.prior.prior.child(inj.prior.keyI, inj.prior.keys);
+        cinj.val = child;
+        setprop(cinj.parent, inj.prior.key, child);
+      } else {
+        cinj = inj.prior.child(inj.keyI, inj.keys);
+        cinj.val = child;
+        setprop(cinj.parent, inj.key, child);
+      }
+    }
+    inject(child, store, cinj);
+    return cinj;
+  }
+
+  /**
    * Default {@link Injector}: when a backtick reference resolves to a function
    * value (a {@code $NAME} command), call it. Otherwise pass-through, except
    * that in {@link #M_VAL} mode with a "full" injection, set the resolved
