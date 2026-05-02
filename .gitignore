@@ -165,3 +165,10 @@ zig-out/
 
 # Java / Maven
 java/target/
+
+# C++ build artefacts
+cpp/corpus-scoreboard.json
+cpp/smoke.out
+cpp/corpus.out
+cpp/sanitize.out
+cpp/walk_bench.out

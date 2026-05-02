@@ -17,20 +17,24 @@
 | **rb** | 40+ | 15 | 2 | 75/75 pass | Complete |
 | **lua** | 40+ | 15 | 2 | 75/75 pass | Complete |
 | **java** | 40 | 15 | 2 | 1178/1178 corpus | Complete |
-| **cpp** | 18 | 15 | 0 | untested* | Incomplete |
+| **cpp** | 40 | 15 | 2 | 1178/1178 corpus | Complete |
 
-\* C++: no standard test runner configured in environment.
-
-\*\* Java: full TS-canonical parity. `Injection` state machine,
-`SKIP`/`DELETE` marker-map sentinels, mode constants, all 11 transform
-commands (`$DELETE`/`$COPY`/`$KEY`/`$ANNO`/`$MERGE`/`$EACH`/`$PACK`/`$REF`/
+\*\* Java and C++: full TS-canonical parity. `Injection` state machine,
+`SKIP`/`DELETE` sentinels, mode constants, all 11 transform commands
+(`$DELETE`/`$COPY`/`$KEY`/`$ANNO`/`$MERGE`/`$EACH`/`$PACK`/`$REF`/
 `$FORMAT`/`$APPLY`), all 6 validate checkers (`$STRING`/`$TYPE`/`$ANY`/
 `$CHILD`/`$ONE`/`$EXACT`), all 4 select operators (`$AND`/`$OR`/`$NOT`/
 `$CMP`), and `_validation`/`_validatehandler`/`_injecthandler` internals
-all wired. Corpus runner at `java/src/test/Runner.java`,
-`StructCorpusTest.java`; per-file scoreboard at `java/test-baseline.json`.
-Per-file: minor 506/506, walk 46/46, merge 133/133, getpath 87/87,
+all wired. Per-file: minor 506/506, walk 46/46, merge 133/133, getpath 87/87,
 inject 41/41, transform 187/187, validate 131/131, select 47/47.
+
+The C++ port uses a custom `Value` class wrapping `std::variant` over
+`<monostate, nullptr_t, bool, int64_t, double, string,
+shared_ptr<List>, shared_ptr<Map>, Injector, Modify, const Sentinel*>`,
+with a custom insertion-ordered `OrderedMap`. nlohmann/json is used
+only as a JSON-text parse/serialise bridge. See
+[cpp/REFACTOR_PLAN.md](./cpp/REFACTOR_PLAN.md) for the design
+rationale.
 
 
 ## TypeScript Canonical API (Reference)
