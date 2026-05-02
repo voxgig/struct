@@ -271,10 +271,10 @@ class StructCorpusTest {
       // Match JS test guard: only mutate string leaves.
       opts.put(
           "modify",
-          (Struct.TransformModify)
-              (val, key, parent) -> {
+          (Struct.Modify)
+              (val, key, parent, inj, store) -> {
                 if (key != null && parent instanceof Map<?, ?> m && val instanceof String s) {
-                  ((Map<String, Object>) m).put(key, "@" + s);
+                  ((Map<String, Object>) m).put(Objects.toString(key), "@" + s);
                 }
               });
       return Struct.transform(getp(in, "data"), getp(in, "spec"), opts);

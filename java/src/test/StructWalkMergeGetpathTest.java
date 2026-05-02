@@ -641,7 +641,7 @@ class StructWalkMergeGetpathTest {
           Map<String, Object> inj = new LinkedHashMap<>();
           inj.put(
               "handler",
-              (Struct.PathHandler)
+              (Struct.Injector)
                   (_inj, val, _ref, _store) -> {
                     if (val instanceof Supplier<?> s) {
                       return s.get();
@@ -990,10 +990,10 @@ class StructWalkMergeGetpathTest {
     Map<String, Object> opts = new LinkedHashMap<>();
     opts.put(
         "modify",
-        (Struct.TransformModify)
-            (val, key, parent) -> {
+        (Struct.Modify)
+            (val, key, parent, inj, store) -> {
               if (key != null && parent instanceof Map<?, ?> p && val instanceof String s) {
-                ((Map<String, Object>) p).put(key, "@" + s);
+                ((Map<String, Object>) p).put(Objects.toString(key), "@" + s);
               }
             });
     Object got = Struct.transform(data, spec, opts);
