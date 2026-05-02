@@ -2,10 +2,20 @@
 
 > Java port of the canonical TypeScript implementation.
 >
-> **Status: partial.**  Basic utilities are present; the major
-> subsystems (`inject`, `transform`, `validate`, `select`) and path
-> operations (`getpath`, `setpath`) are not yet implemented.  Use
-> the canonical TS or one of the complete ports for production work.
+> **Status: in progress.**  All 40 canonical functions, 15 type
+> bit-flags, 3 mode constants (`M_KEYPRE`/`M_KEYPOST`/`M_VAL`), and the
+> `SKIP`/`DELETE` sentinel marker maps are present.  The `Injection`
+> state-machine class is wired into `inject()`; reference
+> `transform_*`/`validate_*`/`select_*` injectors are declared for the
+> full TS command set.  `transform()`, `validate()`, and `select()`
+> currently still use hand-rolled implementations that pass 1164/1178
+> corpus tests (98.8%); a follow-up will rewire them to dispatch through
+> the injector machinery.
+>
+> Run the shared corpus locally with `mvn test` from `java/`. Pass
+> counts per `.jsonic` file are written to
+> `target/corpus-scoreboard.json` after each run; the committed baseline
+> lives at `test-baseline.json`.
 
 For motivation, language-neutral concepts, and the cross-language
 parity matrix, see the [top-level README](../README.md) and

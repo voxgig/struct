@@ -1692,6 +1692,206 @@ public class Struct {
         return out;
       };
 
+  // ===========================================================================
+  // Transform injectors (step 8)
+  // ===========================================================================
+  // Reference implementations of the 11 TS transform commands. These are
+  // ported from TS lines 1393–1896 and exposed as public static Injector
+  // fields. The current public transform(data, spec, options) below remains
+  // the hand-rolled implementation — these injectors are wired in via a
+  // future step 9 transform() rewrite.
+
+  /** $DELETE: drop the current key. Mirrors TS lines 1393–1396. */
+  public static final Injector transform_DELETE =
+      (injObj, val, ref, store) -> {
+        if (injObj instanceof Injection inj) {
+          inj.setval(UNDEF);
+        }
+        return UNDEF;
+      };
+
+  /** $COPY: copy the value at the current key from {@code dparent}. */
+  public static final Injector transform_COPY =
+      (injObj, val, ref, store) -> {
+        if (!(injObj instanceof Injection inj)) return UNDEF;
+        if (!checkPlacement(M_VAL, "COPY", T_any, inj)) return UNDEF;
+        Object out = getprop(inj.dparent, inj.key);
+        inj.setval(out);
+        return out;
+      };
+
+  /** $KEY: emit the parent key, optionally renamed via {@code `$KEY`}. */
+  public static final Injector transform_KEY =
+      (injObj, val, ref, store) -> {
+        if (!(injObj instanceof Injection inj)) return UNDEF;
+        if (inj.mode != M_VAL) return UNDEF;
+        Object keyspec = getprop(inj.parent, "`$KEY`", UNDEF);
+        if (keyspec != UNDEF) {
+          delprop(inj.parent, "`$KEY`");
+          return getprop(inj.dparent, keyspec);
+        }
+        Object anno = getprop(inj.parent, "`$ANNO`", UNDEF);
+        return getprop(anno, "KEY", getelem(inj.path, -2));
+      };
+
+  /** $ANNO: drop the annotation marker. */
+  public static final Injector transform_ANNO =
+      (injObj, val, ref, store) -> {
+        if (injObj instanceof Injection inj) {
+          delprop(inj.parent, "`$ANNO`");
+        }
+        return UNDEF;
+      };
+
+  /** $MERGE: deep-merge a list of objects over the current parent. */
+  public static final Injector transform_MERGE =
+      (injObj, val, ref, store) -> {
+        if (!(injObj instanceof Injection inj)) return UNDEF;
+        if (inj.mode == M_KEYPRE) return inj.key;
+        if (inj.mode != M_KEYPOST) return UNDEF;
+
+        Object args = getprop(inj.parent, inj.key);
+        List<Object> argList;
+        if (args instanceof List<?> al) {
+          argList = (List<Object>) al;
+        } else {
+          argList = new ArrayList<>();
+          argList.add(args);
+        }
+        inj.setval(UNDEF);
+
+        List<Object> mergelist = new ArrayList<>();
+        mergelist.add(inj.parent);
+        mergelist.addAll(argList);
+        mergelist.add(clone(inj.parent));
+        merge(mergelist);
+        return inj.key;
+      };
+
+  /** Format functions used by {@link #transform_FORMAT} ($FORMAT command). */
+  public static final Map<String, WalkApply> FORMATTER;
+
+  static {
+    Map<String, WalkApply> f = new LinkedHashMap<>();
+    f.put("identity", (k, v, p, t) -> v);
+    f.put("upper", (k, v, p, t) -> isnode(v) ? v : ("" + v).toUpperCase(Locale.ROOT));
+    f.put("lower", (k, v, p, t) -> isnode(v) ? v : ("" + v).toLowerCase(Locale.ROOT));
+    f.put("string", (k, v, p, t) -> isnode(v) ? v : ("" + v));
+    f.put(
+        "number",
+        (k, v, p, t) -> {
+          if (isnode(v)) return v;
+          try {
+            double d = Double.parseDouble("" + v);
+            if (Double.isNaN(d)) return 0L;
+            if (Math.floor(d) == d) return (long) d;
+            return d;
+          } catch (Exception e) {
+            return 0L;
+          }
+        });
+    f.put(
+        "integer",
+        (k, v, p, t) -> {
+          if (isnode(v)) return v;
+          try {
+            return (long) Double.parseDouble("" + v);
+          } catch (Exception e) {
+            return 0L;
+          }
+        });
+    f.put(
+        "concat",
+        (k, v, p, t) -> {
+          if (k != null || !islist(v)) return v;
+          StringBuilder sb = new StringBuilder();
+          for (List<Object> item : items(v)) {
+            Object x = item.get(1);
+            if (!isnode(x)) sb.append(x);
+          }
+          return sb.toString();
+        });
+    FORMATTER = Collections.unmodifiableMap(f);
+  }
+
+  /** $FORMAT: walk a sub-spec applying a named formatter. */
+  public static final Injector transform_FORMAT =
+      (injObj, val, ref, store) -> {
+        if (!(injObj instanceof Injection inj)) return UNDEF;
+        if (inj.keys != null && !inj.keys.isEmpty()) {
+          // Slice keys to first one to prevent further processing.
+          List<String> keep = new ArrayList<>();
+          if (!inj.keys.isEmpty()) keep.add(inj.keys.get(0));
+          inj.keys.clear();
+          inj.keys.addAll(keep);
+        }
+        if (inj.mode != M_VAL) return UNDEF;
+
+        Object name = getprop(inj.parent, 1);
+        Object child = getprop(inj.parent, 2);
+
+        Object tkey = getelem(inj.path, -2);
+        Object target = getelem(inj.nodes, -2, getelem(inj.nodes, -1));
+
+        Injection cinj = injectChild(child, store, inj);
+        Object resolved = cinj.val;
+
+        WalkApply formatter =
+            name instanceof WalkApply wa ? wa : FORMATTER.get(Objects.toString(name, ""));
+        if (formatter == null) {
+          inj.errs.add("$FORMAT: unknown format: " + name + ".");
+          return UNDEF;
+        }
+        Object out = walk(resolved, formatter);
+        setprop(target, tkey, out);
+        return out;
+      };
+
+  /** $APPLY: call a custom function on a resolved sub-spec value. */
+  public static final Injector transform_APPLY =
+      (injObj, val, ref, store) -> {
+        if (!(injObj instanceof Injection inj)) return UNDEF;
+        if (!checkPlacement(M_VAL, "APPLY", T_list, inj)) return UNDEF;
+
+        List<Object> args = new ArrayList<>();
+        if (inj.parent instanceof List<?> pl && pl.size() > 1) {
+          for (int i = 1; i < pl.size(); i++) args.add(pl.get(i));
+        }
+        Object[] checked = injectorArgs(new int[] {T_function, T_any}, args);
+        if (checked[0] != null) {
+          inj.errs.add("$APPLY: " + checked[0]);
+          return UNDEF;
+        }
+        Object apply = checked[1];
+        Object child = checked[2];
+
+        Object tkey = getelem(inj.path, -2);
+        Object target = getelem(inj.nodes, -2, getelem(inj.nodes, -1));
+
+        Injection cinj = injectChild(child, store, inj);
+        Object resolved = cinj.val;
+
+        Object out;
+        if (apply instanceof Function<?, ?> fn) {
+          out = ((Function<Object, Object>) fn).apply(resolved);
+        } else {
+          out = UNDEF;
+        }
+        setprop(target, tkey, out);
+        return out;
+      };
+
+  /**
+   * $EACH, $PACK, $REF: complex injectors deferred to follow-up commit.
+   * The hand-rolled transform()/validate() below currently handles their
+   * test cases; they will be ported during the step 9 transform() rewrite.
+   */
+  public static final Injector transform_EACH = (injObj, val, ref, store) -> UNDEF;
+
+  public static final Injector transform_PACK = (injObj, val, ref, store) -> UNDEF;
+
+  public static final Injector transform_REF = (injObj, val, ref, store) -> UNDEF;
+
   public static Object transform(Object data, Object spec) {
     return transform(data, spec, null);
   }
@@ -2304,6 +2504,211 @@ public class Struct {
     }
     return UNDEF;
   }
+
+  // ===========================================================================
+  // Validate injectors (step 10) — reference declarations
+  // ===========================================================================
+  // Ported from TS lines 1977–2237. Wired in via a future step 11
+  // validate() rewrite; until then the hand-rolled validate(data, spec)
+  // below remains the active implementation.
+
+  /** $STRING: require a non-empty string. */
+  public static final Injector validate_STRING =
+      (injObj, val, ref, store) -> {
+        if (!(injObj instanceof Injection inj)) return UNDEF;
+        Object out = getprop(inj.dparent, inj.key);
+        int t = typify(out);
+        if ((T_string & t) == 0) {
+          inj.errs.add(_invalidTypeMsg(inj.path, "string", t, out, "V1010"));
+          return UNDEF;
+        }
+        if ("".equals(out)) {
+          inj.errs.add("Empty string at " + pathify(inj.path, 1));
+          return UNDEF;
+        }
+        return out;
+      };
+
+  /** Generic $TYPE handler: looks up the bit-flag matching {@code ref}'s name. */
+  public static final Injector validate_TYPE =
+      (injObj, val, ref, store) -> {
+        if (!(injObj instanceof Injection inj)) return UNDEF;
+        String tname = ref == null || ref.length() < 2 ? "" : ref.substring(1).toLowerCase(Locale.ROOT);
+        int idx = -1;
+        for (int i = 0; i < TYPENAME.length; i++) {
+          if (tname.equals(TYPENAME[i])) {
+            idx = i;
+            break;
+          }
+        }
+        if (idx < 0) return UNDEF;
+        int typev = 1 << (31 - idx);
+        Object out = getprop(inj.dparent, inj.key);
+        int t = typify(out);
+        if ((t & typev) == 0) {
+          inj.errs.add(_invalidTypeMsg(inj.path, tname, t, out, "V1001"));
+          return UNDEF;
+        }
+        return out;
+      };
+
+  /** $ANY: accept any value. */
+  public static final Injector validate_ANY =
+      (injObj, val, ref, store) -> {
+        if (!(injObj instanceof Injection inj)) return UNDEF;
+        return getprop(inj.dparent, inj.key);
+      };
+
+  /**
+   * $CHILD, $ONE, $EXACT: complex injectors deferred to follow-up commit.
+   * The hand-rolled validate() below currently handles their test cases;
+   * they will be ported during the step 11 validate() rewrite.
+   */
+  public static final Injector validate_CHILD = (injObj, val, ref, store) -> UNDEF;
+
+  public static final Injector validate_ONE = (injObj, val, ref, store) -> UNDEF;
+
+  public static final Injector validate_EXACT = (injObj, val, ref, store) -> UNDEF;
+
+  // ===========================================================================
+  // Select injectors (step 12) — reference declarations
+  // ===========================================================================
+  // Ported from TS lines 2414–2551. Wired in via a future step 12
+  // select() rewrite; until then the hand-rolled select(children, query)
+  // below remains the active implementation.
+
+  /** $AND: require every sub-term to validate against the current point. */
+  public static final Injector select_AND =
+      (injObj, val, ref, store) -> {
+        if (!(injObj instanceof Injection inj)) return UNDEF;
+        if (inj.mode != M_KEYPRE) return UNDEF;
+        Object terms = getprop(inj.parent, inj.key);
+        if (!(terms instanceof List<?> tl)) return UNDEF;
+        Object ppath = slice(inj.path, -1, null);
+        Object point = getpath(store, ppath);
+        for (Object term : tl) {
+          List<Object> terrs = new ArrayList<>();
+          Map<String, Object> opts = new LinkedHashMap<>();
+          opts.put("errs", terrs);
+          opts.put("meta", inj.meta);
+          try {
+            validate(point, term, opts);
+          } catch (Exception e) {
+            terrs.add(e.getMessage());
+          }
+          if (!terrs.isEmpty()) {
+            inj.errs.add(
+                "AND:" + pathify(ppath) + ": " + stringify(point) + " fail:" + stringify(terms));
+          }
+        }
+        Object gkey = getelem(inj.path, -2);
+        Object gp = getelem(inj.nodes, -2);
+        setprop(gp, gkey, point);
+        return UNDEF;
+      };
+
+  /** $OR: require at least one sub-term to validate. */
+  public static final Injector select_OR =
+      (injObj, val, ref, store) -> {
+        if (!(injObj instanceof Injection inj)) return UNDEF;
+        if (inj.mode != M_KEYPRE) return UNDEF;
+        Object terms = getprop(inj.parent, inj.key);
+        if (!(terms instanceof List<?> tl)) return UNDEF;
+        Object ppath = slice(inj.path, -1, null);
+        Object point = getpath(store, ppath);
+        for (Object term : tl) {
+          List<Object> terrs = new ArrayList<>();
+          Map<String, Object> opts = new LinkedHashMap<>();
+          opts.put("errs", terrs);
+          opts.put("meta", inj.meta);
+          try {
+            validate(point, term, opts);
+          } catch (Exception e) {
+            terrs.add(e.getMessage());
+          }
+          if (terrs.isEmpty()) {
+            Object gkey = getelem(inj.path, -2);
+            Object gp = getelem(inj.nodes, -2);
+            setprop(gp, gkey, point);
+            return UNDEF;
+          }
+        }
+        inj.errs.add(
+            "OR:" + pathify(ppath) + ": " + stringify(point) + " fail:" + stringify(terms));
+        return UNDEF;
+      };
+
+  /** $NOT: require the sub-term to fail validation. */
+  public static final Injector select_NOT =
+      (injObj, val, ref, store) -> {
+        if (!(injObj instanceof Injection inj)) return UNDEF;
+        if (inj.mode != M_KEYPRE) return UNDEF;
+        Object term = getprop(inj.parent, inj.key);
+        Object ppath = slice(inj.path, -1, null);
+        Object point = getpath(store, ppath);
+        List<Object> terrs = new ArrayList<>();
+        Map<String, Object> opts = new LinkedHashMap<>();
+        opts.put("errs", terrs);
+        opts.put("meta", inj.meta);
+        try {
+          validate(point, term, opts);
+        } catch (Exception e) {
+          terrs.add(e.getMessage());
+        }
+        if (terrs.isEmpty()) {
+          inj.errs.add(
+              "NOT:" + pathify(ppath) + ": " + stringify(point) + " fail:" + stringify(term));
+        }
+        Object gkey = getelem(inj.path, -2);
+        Object gp = getelem(inj.nodes, -2);
+        setprop(gp, gkey, point);
+        return UNDEF;
+      };
+
+  /** $GT/$LT/$GTE/$LTE/$LIKE comparators dispatched by {@code ref}. */
+  public static final Injector select_CMP =
+      (injObj, val, ref, store) -> {
+        if (!(injObj instanceof Injection inj)) return UNDEF;
+        if (inj.mode != M_KEYPRE) return UNDEF;
+        Object term = getprop(inj.parent, inj.key);
+        Object gkey = getelem(inj.path, -2);
+        Object ppath = slice(inj.path, -1, null);
+        Object point = getpath(store, ppath);
+        boolean pass = false;
+        if (point instanceof Number pn && term instanceof Number tn) {
+          double a = pn.doubleValue();
+          double b = tn.doubleValue();
+          pass =
+              switch (ref) {
+                case "$GT" -> a > b;
+                case "$LT" -> a < b;
+                case "$GTE" -> a >= b;
+                case "$LTE" -> a <= b;
+                default -> false;
+              };
+        } else if ("$LIKE".equals(ref) && term instanceof String pattern) {
+          try {
+            pass = Pattern.compile(pattern).matcher(stringify(point)).find();
+          } catch (Exception ignored) {
+            pass = false;
+          }
+        }
+        if (pass) {
+          Object gp = getelem(inj.nodes, -2);
+          setprop(gp, gkey, point);
+        } else {
+          inj.errs.add(
+              "CMP: "
+                  + pathify(ppath)
+                  + ": "
+                  + stringify(point)
+                  + " fail:"
+                  + ref
+                  + " "
+                  + stringify(term));
+        }
+        return UNDEF;
+      };
 
   public static Object validate(Object data, Object spec) {
     return validate(data, spec, null);
@@ -3073,6 +3478,126 @@ public class Struct {
       sb.append(" parent=").append(stringify(parent, 60));
       sb.append(" dpath=").append(dpath);
       return sb.toString();
+    }
+  }
+
+  // ===========================================================================
+  // StructUtility — instance-based facade
+  // ===========================================================================
+
+  /**
+   * Instance-based wrapper around the static Struct API. Mirrors TS
+   * {@code StructUtility} (StructUtility.ts lines 2991–3056) for SDK callers
+   * that prefer dependency-injected utility access. All methods delegate
+   * directly to the corresponding static; sentinels and constants are exposed
+   * as instance fields.
+   */
+  public static class StructUtility {
+    // Sentinels
+    public final Object UNDEF = Struct.UNDEF;
+    public final Map<String, Object> SKIP = Struct.SKIP;
+    public final Map<String, Object> DELETE = Struct.DELETE;
+
+    // Type bit-flags
+    public final int T_any = Struct.T_any;
+    public final int T_noval = Struct.T_noval;
+    public final int T_boolean = Struct.T_boolean;
+    public final int T_decimal = Struct.T_decimal;
+    public final int T_integer = Struct.T_integer;
+    public final int T_number = Struct.T_number;
+    public final int T_string = Struct.T_string;
+    public final int T_function = Struct.T_function;
+    public final int T_symbol = Struct.T_symbol;
+    public final int T_null = Struct.T_null;
+    public final int T_list = Struct.T_list;
+    public final int T_map = Struct.T_map;
+    public final int T_instance = Struct.T_instance;
+    public final int T_scalar = Struct.T_scalar;
+    public final int T_node = Struct.T_node;
+
+    // Mode flags
+    public final int M_KEYPRE = Struct.M_KEYPRE;
+    public final int M_KEYPOST = Struct.M_KEYPOST;
+    public final int M_VAL = Struct.M_VAL;
+    public final Map<Integer, String> MODENAME = Struct.MODENAME;
+
+    // Minor utilities
+    public boolean isnode(Object v) { return Struct.isnode(v); }
+    public boolean ismap(Object v) { return Struct.ismap(v); }
+    public boolean islist(Object v) { return Struct.islist(v); }
+    public boolean iskey(Object v) { return Struct.iskey(v); }
+    public boolean isempty(Object v) { return Struct.isempty(v); }
+    public boolean isfunc(Object v) { return Struct.isfunc(v); }
+    public Object getdef(Object v, Object alt) { return Struct.getdef(v, alt); }
+    public int size(Object v) { return Struct.size(v); }
+    public Object slice(Object v, Object s, Object e) { return Struct.slice(v, s, e); }
+    public String pad(Object v, Object p, Object c) { return Struct.pad(v, p, c); }
+    public int typify(Object v) { return Struct.typify(v); }
+    public String typename(int t) { return Struct.typename(t); }
+    public String tn(int t) { return Struct.typename(t); }
+    public Object getelem(Object v, Object k) { return Struct.getelem(v, k); }
+    public Object getelem(Object v, Object k, Object alt) { return Struct.getelem(v, k, alt); }
+    public Object getprop(Object v, Object k) { return Struct.getprop(v, k); }
+    public Object getprop(Object v, Object k, Object alt) { return Struct.getprop(v, k, alt); }
+    public String strkey(Object k) { return Struct.strkey(k); }
+    public List<String> keysof(Object v) { return Struct.keysof(v); }
+    public boolean haskey(Object v, Object k) { return Struct.haskey(v, k); }
+    public List<List<Object>> items(Object v) { return Struct.items(v); }
+    public List<Object> flatten(Object v, Integer d) { return Struct.flatten(v, d); }
+    public List<Object> filter(Object v, ItemCheck c) { return Struct.filter(v, c); }
+    public String escre(Object s) { return Struct.escre(s); }
+    public String escurl(Object s) { return Struct.escurl(s); }
+    public String join(Object a, Object s, Object u) { return Struct.join(a, s, u); }
+    public String jsonify(Object v) { return Struct.jsonify(v); }
+    public String jsonify(Object v, Object f) { return Struct.jsonify(v, f); }
+    public String stringify(Object v) { return Struct.stringify(v); }
+    public String stringify(Object v, Integer m) { return Struct.stringify(v, m); }
+    public String pathify(Object v) { return Struct.pathify(v); }
+    public String pathify(Object v, Object s, Object e) { return Struct.pathify(v, s, e); }
+    public Object clone(Object v) { return Struct.clone(v); }
+    public Map<String, Object> jm(Object... kv) { return Struct.jm(kv); }
+    public List<Object> jt(Object... v) { return Struct.jt(v); }
+    public Object delprop(Object p, Object k) { return Struct.delprop(p, k); }
+    public Object setprop(Object p, Object k, Object v) { return Struct.setprop(p, k, v); }
+
+    // Major utilities
+    public Object walk(Object v, WalkApply b) { return Struct.walk(v, b); }
+    public Object walk(Object v, WalkApply b, WalkApply a) { return Struct.walk(v, b, a); }
+    public Object walk(Object v, WalkApply b, WalkApply a, int md) {
+      return Struct.walk(v, b, a, md);
+    }
+    public Object merge(Object v) { return Struct.merge(v); }
+    public Object merge(Object v, int md) { return Struct.merge(v, md); }
+    public Object getpath(Object s, Object p) { return Struct.getpath(s, p); }
+    public Object getpath(Object s, Object p, Map<String, Object> i) {
+      return Struct.getpath(s, p, i);
+    }
+    public Object setpath(Object s, Object p, Object v) { return Struct.setpath(s, p, v); }
+    public Object inject(Object v, Object s) { return Struct.inject(v, s); }
+    public Object inject(Object v, Object s, Map<String, Object> i) {
+      return Struct.inject(v, s, i);
+    }
+    public Object transform(Object d, Object s) { return Struct.transform(d, s); }
+    public Object transform(Object d, Object s, Map<String, Object> o) {
+      return Struct.transform(d, s, o);
+    }
+    public Object validate(Object d, Object s) { return Struct.validate(d, s); }
+    public Object validate(Object d, Object s, Map<String, Object> o) {
+      return Struct.validate(d, s, o);
+    }
+    public List<Object> select(Object c, Object q) { return Struct.select(c, q); }
+
+    // Injection helpers
+    public boolean checkPlacement(int m, String n, int pt, Injection i) {
+      return Struct.checkPlacement(m, n, pt, i);
+    }
+
+    public Object[] injectorArgs(int[] argTypes, List<Object> args) {
+      return Struct.injectorArgs(argTypes, args);
+    }
+
+    public Injection injectChild(Object c, Object s, Injection i) {
+      return Struct.injectChild(c, s, i);
     }
   }
 }
