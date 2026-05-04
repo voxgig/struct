@@ -25,7 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SuppressWarnings({"unchecked", "rawtypes"})
-class StructWalkMergeGetpathTest {
+class StructTests {
   private static final Gson GSON = new Gson();
   private static final Pattern CMD_REF = Pattern.compile("`(\\$[A-Z]+[0-9]*)`");
   private static Map<String, Object> walkSpec;
@@ -707,7 +707,7 @@ class StructWalkMergeGetpathTest {
           Map<String, Object> m = (Map<String, Object>) v;
           return Struct.transform(m.get("data"), m.get("spec"));
         },
-        StructWalkMergeGetpathTest::isCopyEscapeOnlyCmdCase);
+        StructTests::isCopyEscapeOnlyCmdCase);
   }
 
   @Test
@@ -728,7 +728,7 @@ class StructWalkMergeGetpathTest {
           Map<String, Object> m = (Map<String, Object>) v;
           return Struct.transform(m.get("data"), m.get("spec"));
         },
-        StructWalkMergeGetpathTest::isEachCopyKeyOnlyCase);
+        StructTests::isEachCopyKeyOnlyCase);
   }
 
   @Test
@@ -739,7 +739,7 @@ class StructWalkMergeGetpathTest {
           Map<String, Object> m = (Map<String, Object>) v;
           return Struct.transform(m.get("data"), m.get("spec"));
         },
-        StructWalkMergeGetpathTest::isEachCommandBasicCase);
+        StructTests::isEachCommandBasicCase);
   }
 
   @Test
@@ -750,7 +750,7 @@ class StructWalkMergeGetpathTest {
           Map<String, Object> m = (Map<String, Object>) v;
           return Struct.transform(m.get("data"), m.get("spec"));
         },
-        StructWalkMergeGetpathTest::isPackBasicCase);
+        StructTests::isPackBasicCase);
   }
 
   @Test
