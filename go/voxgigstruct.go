@@ -1871,7 +1871,7 @@ func Merge(val any, maxdepths ...int) any {
 // resolved against the `current` argument, if defined.  Integer path
 // parts are used as array indexes.  The inj argument allows for
 // custom handling when called from `inject` or `transform`.
-func GetPath(path any, store any, injdefs ...*Injection) any {
+func GetPath(store any, path any, injdefs ...*Injection) any {
 	var inj *Injection
 	if len(injdefs) > 0 {
 		inj = injdefs[0]
@@ -1947,20 +1947,20 @@ func GetPath(path any, store any, injdefs ...*Injection) any {
 				} else if inj != nil && strings.HasPrefix(part, "$GET:") {
 					// $GET:path$ -> get store value, use as path part
 					subpath := part[5 : len(part)-1]
-					result := GetPath(subpath, src)
+					result := GetPath(src, subpath)
 					part = Stringify(result)
 				} else if inj != nil && strings.HasPrefix(part, "$REF:") {
 					// $REF:refpath$ -> get spec value, use as path part
 					subpath := part[5 : len(part)-1]
 					specVal := GetProp(store, S_DSPEC)
 					if specVal != nil {
-						result := GetPath(subpath, specVal)
+						result := GetPath(specVal, subpath)
 						part = Stringify(result)
 					}
 				} else if inj != nil && strings.HasPrefix(part, "$META:") {
 					// $META:metapath$ -> get meta value, use as path part
 					subpath := part[6 : len(part)-1]
-					result := GetPath(subpath, inj.Meta)
+					result := GetPath(inj.Meta, subpath)
 					part = Stringify(result)
 				}
 
@@ -1994,7 +1994,7 @@ func GetPath(path any, store any, injdefs ...*Injection) any {
 							}
 
 							if ascends <= len(dpath) {
-								val = GetPath(fullpath, store)
+								val = GetPath(store, fullpath)
 							} else {
 								val = nil
 							}
@@ -2121,7 +2121,7 @@ func _injectStr(
 		}
 
 		// Get the extracted path reference.
-		out := GetPath(pathref, store, inj)
+		out := GetPath(store, pathref, inj)
 
 		return out
 	}
@@ -2139,7 +2139,7 @@ func _injectStr(
 		if nil != inj {
 			inj.Full = false
 		}
-		found := GetPath(ref, store, inj)
+		found := GetPath(store, ref, inj)
 
 		if nil == found {
 			return S_MT
@@ -2544,7 +2544,7 @@ var Transform_EACH Injector = func(
 
 	// Source data.
 	srcstore := GetProp(store, inj.Base, store)
-	src := GetPath(srcpath, srcstore, inj)
+	src := GetPath(srcstore, srcpath, inj)
 	srctype := Typify(src)
 
 	// Create parallel data structures
@@ -2695,7 +2695,7 @@ var Transform_PACK Injector = func(
 
 	// Source data
 	srcstore := GetProp(store, inj.Base, store)
-	src := GetPath(srcpath, srcstore, inj)
+	src := GetPath(srcstore, srcpath, inj)
 
 	// Prepare source as a list.
 	if !IsList(src) {
@@ -2745,7 +2745,7 @@ var Transform_PACK Injector = func(
 				return ks
 			}
 		} else {
-			kval := GetPath(keypathStr, srcItem, inj)
+			kval := GetPath(srcItem, keypathStr, inj)
 			if ks, ok := kval.(string); ok {
 				return ks
 			}
@@ -2871,9 +2871,9 @@ var Transform_REF Injector = func(
 	if len(inj.Path.List) > 1 {
 		dpath = append(dpath, inj.Path.List[1:]...)
 	}
-	refResult := GetPath(refpath, spec, &Injection{
+	refResult := GetPath(spec, refpath, &Injection{
 		Dpath:   dpath,
-		Dparent: GetPath(dpath, spec),
+		Dparent: GetPath(spec, dpath),
 	})
 
 	hasSubRef := false
@@ -2898,8 +2898,8 @@ var Transform_REF Injector = func(
 	}
 	tpath = tpath[:len(tpath)-1]
 
-	tcur := GetPath(cpath, store)
-	tval := GetPath(tpath, store)
+	tcur := GetPath(store, cpath)
+	tval := GetPath(store, tpath)
 
 	var rval any
 
@@ -4310,7 +4310,7 @@ var select_AND Injector = func(
 
 		pathList := inj.Path.List
 		ppath := pathList[:len(pathList)-1]
-		point := GetPath(ppath, store)
+		point := GetPath(store, ppath)
 
 		vstore := Merge([]any{map[string]any{}, store})
 		SetProp(vstore, S_DTOP, point)
@@ -4346,7 +4346,7 @@ var select_OR Injector = func(
 
 		pathList := inj.Path.List
 		ppath := pathList[:len(pathList)-1]
-		point := GetPath(ppath, store)
+		point := GetPath(store, ppath)
 
 		vstore := Merge([]any{map[string]any{}, store})
 		SetProp(vstore, S_DTOP, point)
@@ -4383,7 +4383,7 @@ var select_NOT Injector = func(
 
 		pathList := inj.Path.List
 		ppath := pathList[:len(pathList)-1]
-		point := GetPath(ppath, store)
+		point := GetPath(store, ppath)
 
 		vstore := Merge([]any{map[string]any{}, store})
 		SetProp(vstore, S_DTOP, point)
@@ -4417,7 +4417,7 @@ var select_CMP Injector = func(
 
 		pathList := inj.Path.List
 		ppath := pathList[:len(pathList)-1]
-		point := GetPath(ppath, store)
+		point := GetPath(store, ppath)
 
 		pass := false
 		refStr := ""

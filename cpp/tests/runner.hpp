@@ -1,334 +1,178 @@
+// Voxgig Struct corpus runner — C++ port.
+// Mirrors java/src/test/Runner.java.
 
-#ifndef RUNNER_H
+#ifndef VOXGIG_STRUCT_RUNNER_HPP
+#define VOXGIG_STRUCT_RUNNER_HPP
 
-#define RUNNER_H
+#include <functional>
+#include <iostream>
+#include <map>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
-#define FOR(entry, OBJ) for(json::iterator entry = OBJ.begin(); entry != OBJ.end(); ++entry)
+#include "value.hpp"
+#include "value_io.hpp"
+#include "voxgig_struct.hpp"
 
-json fixJSON(const json&);
-json unfixJSON(const json&); // UNUSED
+namespace voxgig {
+namespace structlib {
+namespace runner {
 
-struct RunnerResult {
-  using Function = std::function<void(const json&, JsonFunction, json&&)>;
+inline const std::string& NULLMARK()   { static const std::string s = "__NULL__";   return s; }
+inline const std::string& UNDEFMARK()  { static const std::string s = "__UNDEF__";  return s; }
+inline const std::string& EXISTSMARK() { static const std::string s = "__EXISTS__"; return s; }
 
-  json spec;
-  Function runset;
-  // TODO: TBD: function_pointer subject
+using Subject = std::function<Value(const Value&)>;
 
-  RunnerResult() = default;
-
-  RunnerResult(json&& spec, Function&& runset) : runset{std::move(runset)} {
-    // NOTE: NEVER DO spec{...} in the constructor - it will treat it as an json::array. e.g. evaluates to [spec]
-    this->spec = std::move(spec);
-  }
+struct Result {
+  std::string name;
+  int passed = 0;
+  int total = 0;
+  std::vector<std::string> failures;
 };
 
+inline Value& corpus() {
+  static Value c = Value::undef();
+  return c;
+}
 
-class assertion_error : public std::exception {
-  public:
-    assertion_error() = default;
-    assertion_error(const std::string& message) : message{message} {}
-
-    const char* what() const noexcept override {
-      return message.c_str();
-    }
-  private:
-    std::string message;
-
-};
-
-RunnerResult runner(const std::string& name, const json& store, const std::string& testfile, const Provider& provider) {
-
-  using hash_utility = hash_table<std::string, Utility>;
-
-  Provider client = provider.test();
-
-  hash_utility utility = client.utility();
-
-  Utility _struct = utility["struct"];
-
-  function_pointer items = _struct["items"];
-  function_pointer stringify = _struct["stringify"];
-  function_pointer clone = _struct["clone"];
-
-
-  // Read and parse the test JSON file
-  std::ifstream f(testfile);
-
-  json alltests = json::parse(f);
-
-  json spec;
-
-  // TODO: Copy by reference the first two conditons
-  // Attempt to find the requested spec in the JSON
-  if(alltests.contains("primary") && alltests["primary"].contains(name)) {
-    spec = alltests["primary"][name];
+inline Value get_spec(const std::string& category, const std::string& name) {
+  if (corpus().is_undef()) {
+    corpus() = parse_json_file("../build/test/test.json");
   }
-  else if(alltests.contains(name)) {
-    spec = alltests[name];
-  } else {
-    spec = std::move(alltests);
+  Value struct_v = getprop(corpus(), Value("struct"));
+  Value cat = getprop(struct_v, Value(category));
+  return getprop(cat, Value(name));
+}
+
+// Normalise: integer-valued doubles -> int64; map keys sorted; sentinels and
+// undefined collapse to null for stable comparison.
+inline Value normalize(const Value& v) {
+  if (v.is_undef() || v.is_null()) return Value(nullptr);
+  if (v.is_double()) {
+    double d = v.as_double();
+    if (std::isfinite(d) && std::floor(d) == d) return Value(static_cast<int64_t>(d));
+    return v;
   }
+  if (v.is_list()) {
+    auto out = std::make_shared<List>();
+    for (const auto& e : *v.as_list()) out->push_back(normalize(e));
+    return Value(out);
+  }
+  if (v.is_map()) {
+    std::map<std::string, Value> sorted;
+    for (const auto& [k, e] : *v.as_map()) sorted[k] = normalize(e);
+    auto out = std::shared_ptr<Map>(new Map());
+    for (const auto& [k, e] : sorted) out->set(k, e);
+    return Value(out);
+  }
+  return v;
+}
 
-  // std::cout << "spec DEF: " << (spec["DEF"]) << std::endl;
-  /*
-  // TODO
-  hash_table<std::string, Provider> clients;
+inline bool deep_equal(const Value& a, const Value& b) {
+  return normalize(a) == normalize(b);
+}
 
-# Build up any additional clients from a DEF section, if present
-clients = {}
-if 'DEF' in spec and 'client' in spec['DEF']:
-for c_name, c_val in items(spec['DEF']['client']):
-copts = c_val.get('test', {}).get('options', {})
-if isinstance(store, dict):
-inject(copts, store)
-clients[c_name] = provider.test(copts)
+inline std::string brief(const Value& v) {
+  std::string s;
+  if (v.is_undef()) return UNDEFMARK();
+  try { s = to_njson(v).dump(); }
+  catch (...) { s = stringify(v); }
+  if (s.size() > 200) s = s.substr(0, 197) + "...";
+  return s;
+}
 
-   */
+inline Result runsetflags(const std::string& full_name, const Value& testspec,
+                          bool null_flag, const Subject& subject) {
+  Result res;
+  res.name = full_name;
+  Value set_v = getprop(testspec, Value("set"));
+  if (!set_v.is_list()) return res;
+  auto set = set_v.as_list();
+  for (size_t i = 0; i < set->size(); i++) {
+    const Value& eo = (*set)[i];
+    if (!eo.is_map()) continue;
+    bool has_in = haskey(eo, Value("in"));
+    Value in_raw = getprop(eo, Value("in"));
+    Value in = has_in ? clone(in_raw) : Value::undef();
+    bool has_out = haskey(eo, Value("out"));
+    Value expected = has_out ? getprop(eo, Value("out"))
+                              : (null_flag ? Value(nullptr) : Value::undef());
+    Value err_v = haskey(eo, Value("err")) ? getprop(eo, Value("err")) : Value::undef();
 
-  // TODO
-  // auto subject = utility[name];
-
-  // NOTE: Use std::function (instead of function_pointer) in case lambdas are being passed
-  auto runset = [=](const json& testspec, JsonFunction testsubject = nullptr, json&& flags = nullptr){
-
-    if(flags == nullptr) {
-      flags = json::object();
+    res.total++;
+    Value got;
+    bool threw = false;
+    std::string thrown_msg;
+    try {
+      got = subject(in);
+    } catch (const std::exception& e) {
+      threw = true;
+      thrown_msg = e.what();
     }
 
-    // JS: flags["fixjson"] = flags["fixjson"] || true
-    flags["fixjson"] = flags.value("fixjson", true);
-
-    /*
-    // TODO
-    if(testsubject == nullptr) {
-    testsubject = subject;
-    }
-     */
-
-
-    json set = testspec.value("set", json::array());
-
-    // Each testspec should have a "set" array of test entries
-    FOR(entry, set) {
-      try {
-        if(!entry->contains("out")) {
-          (*entry)["out"] = nullptr; // OR: entry->at("out") = nullptr;
-        }
-
-        if(flags["fixjson"] == true) {
-          *entry = fixJSON(*entry);
-        }
-
-        Provider testclient = client;
-        // TODO
-        /*
-# If a particular entry wants to use a different client:
-if 'client' in entry:
-testclient = clients[entry['client']]
-testsubject = testclient.utility()[name]
-         */
-
-        json args = json::array();
-
-        // TODO: Refactor double lookup
-        // Build up the call arguments
-        if(entry->contains("ctx")) {
-          args = json::array({ (*entry)["ctx"] });
-        } else if(entry->contains("args") && entry->at("args").is_array()) {
-          args = (*entry)["args"];
-        } else {
-          if(entry->contains("in")) {
-            // TODO: Ensure clone. However, it is still cloning by default so we double the memory
-            // args = [clone(entry['in'])] if 'in' in entry else []
-            // json in = (*entry)["in"];
-            args = json::array({ clone({ (*entry)["in"] }) });
-          } else {
-            args = json::array();
+    if (!err_v.is_undef()) {
+      // err entry: either accept any thrown error, or substring match.
+      if (threw) {
+        bool match = false;
+        if (err_v.is_bool() && err_v.as_bool()) match = true;
+        else if (err_v.is_string()) {
+          std::string es = err_v.as_string();
+          if (es.empty()) match = true;
+          else if (thrown_msg.find(es) != std::string::npos) match = true;
+          else {
+            std::string lo_msg = thrown_msg;
+            std::string lo_es = es;
+            for (auto& c : lo_msg) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            for (auto& c : lo_es)  c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (lo_msg.find(lo_es) != std::string::npos) match = true;
           }
         }
-
-        if(entry->contains("ctx") || entry->contains("args")) {
-          json first_arg;
-
-         if(args.is_null() || args.size() == 0) {
-           first_arg = nullptr;
-         } 
-
-         if(first_arg.is_object()) {
-           // Deep clone first_arg
-           first_arg = clone({ first_arg });
-         
-           args[0] = first_arg;
-           (*entry)["ctx"] = first_arg;
-
-           if(first_arg.is_object()) {
-             // first_arg["client"] = testclient;
-           }
-         
-         }
-
+        if (match) res.passed++;
+        else {
+          std::ostringstream oss;
+          oss << "[" << i << "] err mismatch: expected '" << brief(err_v)
+              << "' got '" << thrown_msg << "'";
+          res.failures.push_back(oss.str());
         }
-
-        /*
-        // TODO
-# If we have a context or arguments, we might need to patch them:
-if 'ctx' in entry or 'args' in entry:
-first_arg = None if args is None or 0 == len(args) else args[0]
-if isinstance(first_arg, dict):
-# Deep clone first_arg
-first_arg = clone(first_arg)
-args[0] = first_arg
-entry['ctx'] = first_arg
-
-if isinstance(first_arg, dict):
-first_arg["client"] = testclient
-first_arg["utility"] = testclient.utility()
-         */
-
-        // std::cout << "json::args: " << args << std::endl;
-
-        json res;
-
-        if(args.is_array()) {
-          res = testsubject(
-            std::move(args.get<std::vector<json>>())
-          );
-        } else {
-          res = testsubject({ std::move(args) });
-        }
-
-        res = fixJSON(res);
-
-
-        // NOTE: COPY ENFORCED
-        (*entry)["res"] = res;
-
-        if(!entry->contains("match") || entry->contains("out")) {
-          // Remove functions/etc. by JSON round trip - even though "json cleaned_res = res;" is good enough for C++
-          json cleaned_res = json::parse(res.dump());
-          json expected_out = entry->at("out");
-
-          // cleaned_res = false;
-          // cleaned_res[0];
-          // std::cout << "CHECK: " << (cleaned_res == expected_out) << std::endl;
-          // std::cout << cleaned_res << std::endl;
-          // std::cout << expected_out << std::endl;
-
-          if(cleaned_res != expected_out) {
-            throw assertion_error(
-                "Expected " + expected_out.dump() + " got " + cleaned_res.dump() + "\n" +
-                "Entry: " + entry->dump(2));
-          }
-
-        }
-
-        // TODO
-        /*
-# If we also need to do "match" checks
-if 'match' in entry:
-match(entry['match'], {
-'in': entry.get('in'),
-'out': entry.get('res'),
-'ctx': entry.get('ctx')
-})
-         */
-
-
-
-} /* catch(const assertion_error& err) {
-     std::cout << err.what() << std::endl; } */
-catch(const std::exception& err) {
-
-  (*entry)["thrown"] = err.what();
-  json entry_err = entry->value("err", json(nullptr));
-
-  if(entry_err != nullptr) {
-    // TODO: if entry_err is True or matchval(entry_err, str(err))
-    if(entry_err == true) {
-      // TODO
-      /*
-         if 'match' in entry:
-         match(entry['match'], {
-         'in': entry.get('in'),
-         'out': entry.get('res'),
-         'ctx': entry.get('ctx'),
-         'err': str(err)
-         })
-       */
-
+      } else {
+        std::ostringstream oss;
+        oss << "[" << i << "] expected err='" << brief(err_v)
+            << "' but call returned " << brief(got);
+        res.failures.push_back(oss.str());
+      }
       continue;
+    }
+
+    if (threw) {
+      std::ostringstream oss;
+      oss << "[" << i << "] in=" << brief(in_raw) << " threw=" << thrown_msg;
+      res.failures.push_back(oss.str());
+      continue;
+    }
+
+    if (deep_equal(got, expected)) {
+      res.passed++;
     } else {
-      throw assertion_error(
-          "ERROR MATCH: [" + stringify(entry_err).get<std::string>() + "] <=> [" + err.what() + "]\n" +
-          "Entry: " + entry->dump(2)
-      );
+      std::ostringstream oss;
+      oss << "[" << i << "] in=" << brief(in_raw)
+          << " expected=" << brief(expected)
+          << " got=" << brief(got);
+      res.failures.push_back(oss.str());
     }
-
-
-  } else {
-    throw assertion_error(
-        std::string(err.what()) + "\n\nENTRY: " + entry->dump(2));
   }
-
+  return res;
 }
 
+inline Result runset(const std::string& full_name, const Value& testspec,
+                     const Subject& subject) {
+  return runsetflags(full_name, testspec, true, subject);
 }
 
-};
+}  // namespace runner
+}  // namespace structlib
+}  // namespace voxgig
 
-
-
-
-RunnerResult out = RunnerResult(
-    std::move(spec), 
-    std::move(runset));
-
-return out;
-
-}
-
-json fixJSON(const json& obj) {
-  if(obj.is_null()) {
-    return "__NULL__";
-  } else if(obj.is_array()) {
-    json arr = json::array();
-    for(json::const_iterator item = obj.begin(); item != obj.end(); item++) {
-      arr.push_back(
-          fixJSON(item.value()));
-    }
-    return arr;
-  } else if(obj.is_object()) {
-    json _obj = json::object();
-    for(json::const_iterator item = obj.begin(); item != obj.end(); item++) {
-      _obj[item.key()] = fixJSON(item.value());
-    }
-    return _obj;
-  } else {
-    return obj;
-  }
-
-}
-
-
-
-/*
-   json unfixJSON(const json& obj) {
-   return obj;
-   }
- */
-// TODO
-/*
-   def unfixJSON(obj):
-   if "__NULL__" == obj:
-   return None
-   elif isinstance(obj, list):
-   return [unfixJSON(item) for item in obj]
-   elif isinstance(obj, dict):
-   return {k: unfixJSON(v) for k, v in obj.items()}
-else:
-return obj
- */
-
-
-#endif
+#endif  // VOXGIG_STRUCT_RUNNER_HPP

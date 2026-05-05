@@ -299,7 +299,8 @@ public static class StructUtils
     // Value is "empty": null, empty string, empty list, or empty map.
     public static bool IsEmpty(object? val)
     {
-        if (val == null) return true;
+        // Match TS isempty: undefined/null/empty-string/empty-array/empty-object → true.
+        if (val == null || ReferenceEquals(val, NONE)) return true;
         if (val is string s) return s.Length == 0;
         if (val is List<object?> l) return l.Count == 0;
         if (val is Dictionary<string, object?> d) return d.Count == 0;
@@ -687,7 +688,8 @@ public static class StructUtils
     public static string Stringify(object? val, int? maxlen = null)
     {
         string valstr;
-        if (val == null) return S_MT;
+        // Match TS: NONE (undefined) -> "" but JSON null -> "null".
+        if (ReferenceEquals(val, NONE)) return S_MT;
 
         if (val is string s)
         {
@@ -949,7 +951,7 @@ public static class StructUtils
     // path: string ("a.b.c"), List<object?>, or number.
     // state: optional InjectState providing base, dparent, dpath, meta,
     //        key, and a post-processing handler.
-    public static object? GetPath(object? path, object? store,
+    public static object? GetPath(object? store, object? path,
                                    object? current = null, InjectState? state = null)
     {
         // Resolve path to a mutable list of string parts.
@@ -1007,18 +1009,18 @@ public static class StructUtils
                     else if (state != null && part.StartsWith("$GET:"))
                     {
                         string sub = part[5..^1];
-                        part = Stringify(GetPath(sub, src));
+                        part = Stringify(GetPath(src, sub));
                     }
                     else if (state != null && part.StartsWith("$REF:"))
                     {
                         string sub     = part[5..^1];
                         object? specVal = GetProp(store, S_DSPEC);
-                        part = specVal != null ? Stringify(GetPath(sub, specVal)) : S_MT;
+                        part = specVal != null ? Stringify(GetPath(specVal, sub)) : S_MT;
                     }
                     else if (state != null && part.StartsWith("$META:"))
                     {
                         string sub = part[6..^1];
-                        part = Stringify(GetPath(sub, state.Meta));
+                        part = Stringify(GetPath(state.Meta, sub));
                     }
 
                     // $$ is an escape for a literal $.
@@ -1055,7 +1057,7 @@ public static class StructUtils
                                     fullpath.AddRange(parts.Skip(pI + 1));
 
                                 val = ascends <= dpathLen
-                                    ? GetPath(fullpath.Cast<object?>().ToList(), store)
+                                    ? GetPath(store, fullpath.Cast<object?>().ToList())
                                     : null;
                                 break;
                             }
@@ -1316,7 +1318,7 @@ public static class StructUtils
             // Unescape $BT → ` and $DS → $
             if (pathref.Length > 3)
                 pathref = pathref.Replace("$BT", S_BT).Replace("$DS", S_DS);
-            return GetPath(pathref, store, current, state);
+            return GetPath(store, pathref, current, state);
         }
 
         // Replace every embedded `ref` with its stringified resolved value.
@@ -1326,7 +1328,7 @@ public static class StructUtils
             if (ref_.Length > 3)
                 ref_ = ref_.Replace("$BT", S_BT).Replace("$DS", S_DS);
             if (state != null) state.Full = false;
-            object? found = GetPath(ref_, store, current, state);
+            object? found = GetPath(store, ref_, current, state);
             if (found == null)
             {
                 // Distinguish an explicit null value (key exists) from a
@@ -1674,7 +1676,7 @@ public static class StructUtils
 
         // Source data.
         object? srcstore = GetProp(store, inj.Base, store);
-        object? src      = GetPath(srcpath, srcstore, null, inj);
+        object? src      = GetPath(srcstore, srcpath, null, inj);
         int     srctype  = Typify(src);
 
         object? tval = null;
@@ -1782,7 +1784,7 @@ public static class StructUtils
 
         // Source data.
         object? srcstore = GetProp(store, inj.Base, store);
-        object? src      = GetPath(srcpath, srcstore, null, inj);
+        object? src      = GetPath(srcstore, srcpath, null, inj);
 
         // Normalise src to a flat list.
         if (!IsList(src))
@@ -1823,7 +1825,7 @@ public static class StructUtils
             }
             else
             {
-                var kval = GetPath(kpStr, srcItem, null, inj);
+                var kval = GetPath(srcItem, kpStr, null, inj);
                 return kval?.ToString() ?? "";
             }
         }
@@ -1919,10 +1921,10 @@ public static class StructUtils
         var dpathInj = new InjectState
         {
             DPath   = dpath,
-            DParent = GetPath(dpath.Cast<object?>().ToList(), spec)
+            DParent = GetPath(spec, dpath.Cast<object?>().ToList())
         };
 
-        object? refResult = GetPath(refpath, spec, null, dpathInj);
+        object? refResult = GetPath(spec, refpath, null, dpathInj);
 
         // Check if refResult contains sub-references.
         bool hasSubRef = false;
@@ -1943,8 +1945,8 @@ public static class StructUtils
             ? inj.Path.GetRange(0, pathLen - 1).Cast<object?>().ToList()
             : new List<object?>();
 
-        object? tcur    = GetPath(cpath, store, null, null);
-        object? tvalRef = GetPath(tpath, store, null, null);
+        object? tcur    = GetPath(store, cpath, null, null);
+        object? tvalRef = GetPath(store, tpath, null, null);
 
         if (!hasSubRef || tvalRef != null)
         {
@@ -2693,7 +2695,7 @@ public static class StructUtils
 
         var terms = GetProp(inj.Parent, inj.Key) as List<object?> ?? [];
         var ppath = (List<object?>)Slice(inj.Path, -1)!;
-        object? point = GetPath(ppath, store);
+        object? point = GetPath(store, ppath);
 
         var vstore = (Dictionary<string, object?>)Merge(
             new List<object?> { new Dictionary<string, object?>(), store }, 1)!;
@@ -2721,7 +2723,7 @@ public static class StructUtils
 
         var terms = GetProp(inj.Parent, inj.Key) as List<object?> ?? [];
         var ppath = (List<object?>)Slice(inj.Path, -1)!;
-        object? point = GetPath(ppath, store);
+        object? point = GetPath(store, ppath);
 
         var vstore = (Dictionary<string, object?>)Merge(
             new List<object?> { new Dictionary<string, object?>(), store }, 1)!;
@@ -2752,7 +2754,7 @@ public static class StructUtils
 
         object? term  = GetProp(inj.Parent, inj.Key);
         var ppath     = (List<object?>)Slice(inj.Path, -1)!;
-        object? point = GetPath(ppath, store);
+        object? point = GetPath(store, ppath);
 
         var vstore = (Dictionary<string, object?>)Merge(
             new List<object?> { new Dictionary<string, object?>(), store }, 1)!;
@@ -2779,7 +2781,7 @@ public static class StructUtils
         object? term  = GetProp(inj.Parent, inj.Key);
         object? gkey  = GetElem(inj.Path, -2);
         var ppath     = (List<object?>)Slice(inj.Path, -1)!;
-        object? point = GetPath(ppath, store);
+        object? point = GetPath(store, ppath);
 
         bool pass = false;
 

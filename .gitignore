@@ -166,6 +166,19 @@ zig-out/
 # Java / Maven
 java/target/
 
+
 # Kotlin / Gradle
-kotlin/build/
-kotlin/.gradle/
+kt/build/
+kt/.gradle/
+
+# C++ build artefacts
+cpp/corpus-scoreboard.json
+cpp/smoke.out
+cpp/corpus.out
+cpp/sanitize.out
+cpp/walk_bench.out
+cs/corpus-scoreboard.json
+cs/tests/corpus-scoreboard.json
+cs/tests/bin/
+cs/tests/obj/
+

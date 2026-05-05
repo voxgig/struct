@@ -7,7 +7,7 @@ on:
     branches: [ main, dev ]
 
 jobs:
-  test-typescript:
+  test-ts:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -29,7 +29,7 @@ jobs:
         working-directory: ./ts
         run: npm test
 
-  test-javascript:
+  test-js:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -48,7 +48,7 @@ jobs:
         working-directory: ./js
         run: npm test
 
-  test-python:
+  test-py:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -83,7 +83,7 @@ jobs:
         working-directory: ./go
         run: go test -v ./...
 
-  test-ruby:
+  test-rb:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -122,7 +122,7 @@ jobs:
         working-directory: ./php
         run: vendor/bin/phpunit
 
-  test-csharp:
+  test-cs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -137,7 +137,7 @@ jobs:
         working-directory: ./cs/tests
         run: dotnet test
 
-  test-kotlin:
+  test-kt:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -152,12 +152,29 @@ jobs:
           java-version: ${{ matrix.java-version }}
       - name: Run tests (Unix)
         if: runner.os != 'Windows'
-        working-directory: ./kotlin
+        working-directory: ./kt
         run: ./gradlew test
       - name: Run tests (Windows)
         if: runner.os == 'Windows'
-        working-directory: ./kotlin
+        working-directory: ./kt
         run: .\gradlew.bat test
+
+  test-java:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        java-version: ['17']
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup Java ${{ matrix.java-version }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java-version }}
+      - name: Run tests
+        working-directory: ./java
+        run: mvn -q test
 
   test-lua:
     runs-on: ${{ matrix.os }}
@@ -212,3 +229,20 @@ jobs:
             fi
           fi
           exit 1
+
+  test-cpp:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install nlohmann/json (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y nlohmann-json3-dev
+      - name: Install nlohmann/json (macOS)
+        if: runner.os == 'macOS'
+        run: brew install nlohmann-json
+      - name: Run tests
+        working-directory: ./cpp
+        run: make test
