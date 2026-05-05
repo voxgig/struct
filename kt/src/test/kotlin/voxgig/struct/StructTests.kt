@@ -229,10 +229,11 @@ class StructTests {
     fun getpathRelative() {
         runSet(getpathSpec["relative"] as Map<String, Any?>) { v ->
             val m = v as Map<*, *>
-            val inj = linkedMapOf<String, Any?>()
-            inj["dparent"] = m["dparent"]
-            val dpath = m["dpath"]
-            if (dpath is String && dpath.isNotEmpty()) inj["dpath"] = dpath.split(".")
+            val inj = Struct.Injection(null, null).apply {
+                dparent = m["dparent"]
+                val dp = m["dpath"]
+                if (dp is String && dp.isNotEmpty()) dpath = dp.split(".").toMutableList()
+            }
             Struct.getpath(m["store"], m["path"], inj)
         }
     }
@@ -243,8 +244,20 @@ class StructTests {
             val m = v as Map<*, *>
             val injObj = m["inj"]
             if (injObj is Map<*, *>) {
-                val inj = linkedMapOf<String, Any?>()
-                injObj.forEach { (k, vv) -> inj[k.toString()] = vv }
+                val inj = Struct.Injection(null, null).apply {
+                    if (injObj.containsKey("key")) key = injObj["key"]?.toString() ?: ""
+                    if (injObj.containsKey("dparent")) dparent = injObj["dparent"]
+                    if (injObj.containsKey("dpath")) {
+                        val dp = injObj["dpath"]
+                        if (dp is List<*>) dpath = dp.map { it?.toString() ?: "" }.toMutableList()
+                    }
+                    if (injObj.containsKey("meta")) {
+                        val mm = injObj["meta"]
+                        if (mm is Map<*, *>) {
+                            meta = linkedMapOf<String, Any?>().also { for ((k, vv) in mm) it[k.toString()] = vv }
+                        }
+                    }
+                }
                 Struct.getpath(m["store"], m["path"], inj)
             } else Struct.getpath(m["store"], m["path"])
         }
@@ -257,8 +270,8 @@ class StructTests {
             val store = linkedMapOf<String, Any?>()
             store[Struct.S_DTOP] = m["store"]
             store["\$FOO"] = Supplier { "foo" }
-            val inj = linkedMapOf<String, Any?>()
-            inj["handler"] = Struct.PathHandler { _, value, _, _ ->
+            val inj = Struct.Injection(null, null)
+            inj.handler = Struct.Injector { _, value, _, _ ->
                 if (value is Supplier<*>) value.get() else value
             }
             Struct.getpath(store, m["path"], inj)
@@ -316,39 +329,27 @@ class StructTests {
     }
 
     @Test
-    fun transformCmdsCopyEscapesSubset() {
-        runSet(
-            transformSpec["cmds"] as Map<String, Any?>,
-            { v ->
-                val m = v as Map<*, *>
-                Struct.transform(m["data"], m["spec"])
-            },
-            ::isCopyEscapeOnlyCmdCase
-        )
+    fun transformCmds() {
+        runSet(transformSpec["cmds"] as Map<String, Any?>) { v ->
+            val m = v as Map<*, *>
+            Struct.transform(m["data"], m["spec"])
+        }
     }
 
     @Test
-    fun transformEachCopyKeySubset() {
-        runSet(
-            eachSpec,
-            { v ->
-                val m = v as Map<*, *>
-                Struct.transform(m["data"], m["spec"])
-            },
-            ::isEachCopyKeyOnlyCase
-        )
+    fun transformEach() {
+        runSet(eachSpec) { v ->
+            val m = v as Map<*, *>
+            Struct.transform(m["data"], m["spec"])
+        }
     }
 
     @Test
-    fun transformPackBasicSubset() {
-        runSet(
-            packSpec,
-            { v ->
-                val m = v as Map<*, *>
-                Struct.transform(m["data"], m["spec"])
-            },
-            ::isPackBasicCase
-        )
+    fun transformPack() {
+        runSet(packSpec) { v ->
+            val m = v as Map<*, *>
+            Struct.transform(m["data"], m["spec"])
+        }
     }
 
     @Test
@@ -437,23 +438,16 @@ class StructTests {
 
     @Test
     fun validateCustom() {
-        val errs = mutableListOf<String>()
+        val errs = mutableListOf<Any?>()
         val extra = linkedMapOf<String, Any?>()
-        extra["\$INTEGER"] = java.util.function.Function<Any?, Any?> { state ->
-            if (state is Map<*, *>) {
-                val key = state["key"]
-                val dparent = state["dparent"]
-                val out = Struct.getprop(dparent, key)
-                if (out !is Number || floor(out.toDouble()) != out.toDouble()) {
-                    val path = (state["path"] as? List<*>)?.map { it.toString() } ?: emptyList()
-                    @Suppress("UNCHECKED_CAST")
-                    val localErrs = (state["errs"] as? MutableList<String>) ?: errs
-                    localErrs.add("Not an integer at ${path.joinToString(".")}: $out")
-                    return@Function null
-                }
-                return@Function out
+        // Custom $INTEGER validator using the canonical Injector signature.
+        // Returns the data value either way so the output keeps the original key.
+        extra["\$INTEGER"] = Struct.Injector { inj, _, _, _ ->
+            val v = Struct.getprop(inj.dparent, inj.key)
+            if (v !is Number || floor(v.toDouble()) != v.toDouble()) {
+                inj.errs.add("Not an integer at ${Struct.pathify(inj.path, 1)}: $v")
             }
-            null
+            v
         }
 
         val shape = mapOf("a" to "`\$INTEGER`")
@@ -466,7 +460,7 @@ class StructTests {
         errs.clear()
         out = Struct.validate(mapOf("a" to "A"), shape, opts)
         assertTrue(normalize(mapOf("a" to "A")) == normalize(out))
-        assertEquals(listOf("Not an integer at a: A"), errs)
+        assertEquals(listOf<Any?>("Not an integer at a: A"), errs)
     }
 
     @Test
@@ -516,10 +510,10 @@ class StructTests {
         val data = linkedMapOf<String, Any?>("x" to "X")
         val spec = linkedMapOf<String, Any?>("z" to "`x`")
         val opts = linkedMapOf<String, Any?>(
-            "modify" to Struct.TransformModify { value, key, parent ->
+            "modify" to Struct.Modify { value, key, parent, _, _ ->
                 if (key != null && parent is MutableMap<*, *> && value is String) {
                     @Suppress("UNCHECKED_CAST")
-                    (parent as MutableMap<String, Any?>)[key] = "@$value"
+                    (parent as MutableMap<String, Any?>)[key.toString()] = "@$value"
                 }
             }
         )
@@ -537,12 +531,8 @@ class StructTests {
         )
         val extra = linkedMapOf<String, Any?>(
             "b" to 2,
-            "\$UPPER" to Function<Any?, Any?> { state ->
-                if (state is Map<*, *>) {
-                    val path = state["path"] as? List<*>
-                    if (!path.isNullOrEmpty()) return@Function path.last().toString().uppercase()
-                }
-                ""
+            "\$UPPER" to Struct.Injector { inj, _, _, _ ->
+                if (inj.path.isNotEmpty()) inj.path.last().uppercase() else ""
             }
         )
         val opts = linkedMapOf<String, Any?>("extra" to extra)
@@ -574,6 +564,9 @@ class StructTests {
             if (eo !is Map<*, *>) continue
             if (filter != null && !filter(eo)) continue
             if (!eo.containsKey("in") || !eo.containsKey("out")) continue
+            // Cases with `err` are exercised by the StructCorpusTest corpus runner;
+            // skip here to avoid asserting the bespoke-pipeline `out` snapshot.
+            if (eo.containsKey("err")) continue
             val input = Struct.clone(eo["in"])
             val out = eo["out"]
             val got = fn(input)

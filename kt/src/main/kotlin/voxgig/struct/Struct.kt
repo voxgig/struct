@@ -34,27 +34,173 @@ object Struct {
     const val S_DSPEC: String = "\$SPEC"
     const val S_DKEY: String = "\$KEY"
 
+    const val M_KEYPRE: Int = 1
+    const val M_KEYPOST: Int = 2
+    const val M_VAL: Int = 4
+
+    val MODENAME: Map<Int, String> = mapOf(
+        M_VAL to "val",
+        M_KEYPRE to "key:pre",
+        M_KEYPOST to "key:post",
+    )
+
     private val R_META_PATH = Pattern.compile("^([^$]+)\\$([=~])(.+)$")
     private val R_INJECT_FULL = Pattern.compile("^`(\\$[A-Z]+|[^`]*)[0-9]*`$")
     private val R_INJECT_PART = Pattern.compile("`([^`]+)`")
     private val R_CMD_KEY = Pattern.compile("^`(\\$[A-Z]+)(\\d*)`$")
-    private val SKIP: Any = Any()
-    private data class MergeCmd(val order: Int, val value: Any?)
-    private data class TransformOptions(
-        val modify: TransformModify?,
-        val commandHandlers: Map<String, Any?>
-    )
+    private val R_TRANSFORM_NAME = Pattern.compile("^`(\\$[A-Z]+)`$")
+    val SKIP: Any = Any()
 
     fun interface WalkApply {
         fun apply(key: String?, value: Any?, parent: Any?, path: List<String>): Any?
     }
 
-    fun interface PathHandler {
-        fun apply(inj: MutableMap<String, Any?>, value: Any?, ref: String, store: Any?): Any?
+    /**
+     * Mirrors TS/Java Injector functional interface. Custom dispatch hook for
+     * `$NAME` references during inject/transform/validate.
+     */
+    fun interface Injector {
+        fun apply(inj: Injection, value: Any?, ref: String?, store: Any?): Any?
     }
 
-    fun interface TransformModify {
-        fun apply(value: Any?, key: String?, parent: Any?)
+    /**
+     * Mirrors TS/Java Modify functional interface. Custom value-mutation hook
+     * applied after inject finishes a node.
+     */
+    fun interface Modify {
+        fun apply(value: Any?, key: Any?, parent: Any?, inj: Injection?, store: Any?)
+    }
+
+    /**
+     * Injection state used for recursive injection into JSON-like data
+     * structures. Mirrors TS `class Injection` (StructUtility.ts:2613) and
+     * Java `static class Injection` (Struct.java:3077).
+     */
+    class Injection(value: Any?, parent: Any?) {
+        var mode: Int = M_VAL                // M_KEYPRE | M_KEYPOST | M_VAL
+        var full: Boolean = false            // injection consumed the whole key string
+        var keyI: Int = 0                    // index of current key in keys
+        var keys: MutableList<String>        // sibling keys list (shared with prior)
+        var key: String                      // current key string
+        var `val`: Any?                      // current child value
+        var parent: Any?                     // current parent in spec
+        var path: MutableList<String>        // ancestor key chain ending in key
+        var nodes: MutableList<Any?>         // ancestor node stack ending in parent
+        var handler: Injector? = null        // dispatch hook for `$NAME` references
+        var errs: MutableList<Any?>          // shared error collector
+        var meta: MutableMap<String, Any?>   // shared metadata bag (do not deep-copy)
+        var dparent: Any? = UNDEF            // current data-side parent
+        var dpath: MutableList<String>       // current data-side path
+        var base: String? = null             // base key in store, if any
+        var modify: Modify? = null           // optional value-mutation hook
+        var prior: Injection? = null         // calling injection (chain upwards)
+        var extra: Any? = null               // free-form passthrough
+
+        init {
+            this.`val` = value
+            this.parent = parent
+            this.errs = mutableListOf()
+            this.dpath = mutableListOf(S_DTOP)
+            this.keys = mutableListOf(S_DTOP)
+            this.key = S_DTOP
+            this.path = mutableListOf(S_DTOP)
+            this.nodes = mutableListOf(parent)
+            this.base = S_DTOP
+            this.meta = linkedMapOf()
+        }
+
+        /** Resolve current data-side parent for relative paths and bump depth. */
+        fun descend(): Any? {
+            val dRaw = meta["__d"]
+            val d = if (dRaw is Number) dRaw.toInt() else 0
+            meta["__d"] = d + 1
+
+            val parentkey: String? = if (path.size >= 2) path[path.size - 2] else null
+
+            if (dparent === UNDEF) {
+                if (size(dpath) > 1 && parentkey != null) {
+                    val nd = dpath.toMutableList()
+                    nd.add(strkey(parentkey))
+                    this.dpath = nd
+                }
+            } else {
+                if (parentkey != null) {
+                    this.dparent = getprop(this.dparent, parentkey)
+                    val lastpart = if (dpath.isEmpty()) null else dpath.last()
+                    val marker = "$:" + strkey(parentkey)
+                    if (marker == lastpart) {
+                        @Suppress("UNCHECKED_CAST")
+                        val sliced = slice(this.dpath, -1, null)
+                        this.dpath = if (sliced is List<*>) sliced.map { it.toString() }.toMutableList() else mutableListOf()
+                    } else {
+                        val nd = dpath.toMutableList()
+                        nd.add(strkey(parentkey))
+                        this.dpath = nd
+                    }
+                }
+            }
+            return dparent
+        }
+
+        /** Build a child injection at keys[keyI], sharing meta/errs/handler/keys. */
+        fun child(keyI: Int, keys: MutableList<String>): Injection {
+            val key = strkey(keys[keyI])
+            val v = this.`val`
+            val cinj = Injection(getprop(v, key), v)
+            cinj.keyI = keyI
+            cinj.keys = keys
+            cinj.key = key
+            val np = path.toMutableList(); np.add(key); cinj.path = np
+            val nn = nodes.toMutableList(); nn.add(v); cinj.nodes = nn
+            cinj.mode = this.mode
+            cinj.handler = this.handler
+            cinj.modify = this.modify
+            cinj.base = this.base
+            cinj.meta = this.meta            // shared
+            cinj.errs = this.errs            // shared
+            cinj.prior = this
+            cinj.dpath = this.dpath.toMutableList()
+            cinj.dparent = this.dparent
+            return cinj
+        }
+
+        /** Set the current child value on the immediate parent. */
+        fun setval(value: Any?): Any? = setval(value, 0)
+
+        /** Set/delete on parent or an ancestor at -ancestor in nodes/path. */
+        fun setval(value: Any?, ancestor: Int): Any? {
+            val out: Any?
+            if (ancestor < 2) {
+                out = if (value === UNDEF) {
+                    val p = delprop(this.parent, this.key)
+                    this.parent = p
+                    p
+                } else {
+                    setprop(this.parent, this.key, value)
+                }
+            } else {
+                val aval = getelem(this.nodes, 0 - ancestor)
+                val akey = getelem(this.path, 0 - ancestor)
+                out = if (value === UNDEF) delprop(aval, akey) else setprop(aval, akey, value)
+            }
+            return out
+        }
+
+        override fun toString(): String = toString(null)
+
+        fun toString(prefix: String?): String {
+            val sb = StringBuilder()
+            sb.append("INJ")
+            if (prefix != null) sb.append("/").append(prefix)
+            sb.append(":").append(pathify(path, 1))
+            sb.append(":").append(MODENAME[mode] ?: "?")
+            if (full) sb.append("/full")
+            sb.append(": key=").append(keyI).append("/").append(key)
+            sb.append(" keys=").append(keys)
+            sb.append(" parent=").append(stringify(parent, 60))
+            sb.append(" dpath=").append(dpath)
+            return sb.toString()
+        }
     }
 
     private val TYPE_NAMES = arrayOf(
@@ -98,7 +244,7 @@ object Struct {
     }
 
     fun isfunc(value: Any?): Boolean =
-        value is Function<*> || value is Supplier<*>
+        value is Function<*> || value is Supplier<*> || value is Injector || value is Modify || value is WalkApply
 
     fun size(value: Any?): Int {
         return when (value) {
@@ -123,7 +269,8 @@ object Struct {
             }
             is String -> T_SCALAR or T_STRING
             is Boolean -> T_SCALAR or T_BOOLEAN
-            is Function<*> -> T_SCALAR or T_FUNCTION
+            is Function<*>, is java.util.function.Function<*, *>, is Supplier<*>,
+            is Injector, is Modify, is WalkApply -> T_SCALAR or T_FUNCTION
             is List<*> -> T_NODE or T_LIST
             is Map<*, *> -> T_NODE or T_MAP
             else -> T_NODE or T_INSTANCE
@@ -267,6 +414,46 @@ object Struct {
 
     fun filter(value: Any?, check: (List<Any?>) -> Boolean): List<Any?> {
         return items(value).filter { check(it) }.map { it[1] }
+    }
+
+    fun getdef(value: Any?, alt: Any?): Any? = if (value === UNDEF) alt else value
+
+    fun jm(vararg kv: Any?): MutableMap<String, Any?> {
+        val out = linkedMapOf<String, Any?>()
+        var i = 0
+        while (i < kv.size) {
+            val raw = if (i < kv.size) kv[i] else UNDEF
+            val k = if (raw is String) raw else stringify(raw)
+            val v = if (i + 1 < kv.size) kv[i + 1] else null
+            out[k] = v
+            i += 2
+        }
+        return out
+    }
+
+    fun jt(vararg v: Any?): MutableList<Any?> {
+        val out = mutableListOf<Any?>()
+        v.forEach { out.add(it) }
+        return out
+    }
+
+    fun replace(s: Any?, from: Any?, to: Any?): String {
+        val rs = when {
+            s === UNDEF || s == null -> ""
+            s is String -> s
+            else -> stringify(s)
+        }
+        val toStr = when {
+            to === UNDEF || to == null -> ""
+            to is String -> to
+            else -> stringify(to)
+        }
+        return when (from) {
+            is Pattern -> from.matcher(rs).replaceAll(java.util.regex.Matcher.quoteReplacement(toStr))
+            is Regex -> from.replace(rs, toStr)
+            null -> rs
+            else -> rs.replace(from.toString(), toStr)
+        }
     }
 
     fun escre(s: Any?): String {
@@ -587,528 +774,772 @@ object Struct {
         return out
     }
 
-    fun getpath(store: Any?, path: Any?): Any? = getpath(store, path, null)
+    fun getpath(store: Any?, path: Any?): Any? = getpath(store, path, null as Injection?)
 
-    fun getpath(store: Any?, path: Any?, inj: MutableMap<String, Any?>?): Any? {
+    /**
+     * Injection-based getpath. Builds a transient view from inj.base/dparent/dpath/
+     * meta/key for getpathInner's special-path syntax ($KEY/$REF/$META), runs the
+     * lookup, then invokes inj.handler if set. Mirrors Java getpath(Object, Object,
+     * Injection) (Struct.java:1461).
+     */
+    fun getpath(store: Any?, path: Any?, inj: Injection?): Any? {
+        val view: MutableMap<String, Any?>? = if (inj == null) null else linkedMapOf<String, Any?>().also {
+            if (inj.base != null) it["base"] = inj.base
+            it["dparent"] = inj.dparent
+            it["dpath"] = inj.dpath
+            it["meta"] = inj.meta
+            it["key"] = inj.key
+        }
         val parts = pathParts(path)
-        var value = getpathInner(store, path, parts, inj)
-        val handler = inj?.get("handler")
-        if (handler is PathHandler) {
-            value = handler.apply(inj, value, pathifyForHandler(path), store)
+        var value = getpathInner(store, path, parts, view)
+        if (inj?.handler != null) {
+            value = inj.handler!!.apply(inj, value, pathifyForHandler(path), store)
         }
         return value
     }
 
-    fun inject(value: Any?, store: Any?): Any? = inject(value, store, null)
+    fun inject(value: Any?, store: Any?): Any? = inject(value, store, null as Injection?)
 
-    fun inject(value: Any?, store: Any?, inj: MutableMap<String, Any?>?): Any? {
-        if (value === UNDEF || value == null) return null
-        return when (value) {
-            is Map<*, *> -> {
-                val out = linkedMapOf<String, Any?>()
-                value.forEach { (k, v) -> out[k.toString()] = inject(v, store, inj) }
-                out
+    /**
+     * Canonical Injection-based inject. Mirrors TS inject (StructUtility.ts:1264)
+     * and Java inject(Object, Object, Injection) (Struct.java:1308). Drives the
+     * three-phase machine (M_KEYPRE / M_VAL / M_KEYPOST) for map/list children
+     * and dispatches `$NAME` references via inj.handler.
+     */
+    fun inject(value: Any?, store: Any?, injdef: Injection?): Any? {
+        var v = value
+        val inj: Injection
+        val isInitial = injdef == null || injdef.prior == null
+
+        if (isInitial) {
+            val wrapper = linkedMapOf<String, Any?>(S_DTOP to v)
+            inj = Injection(v, wrapper)
+            inj.dparent = store
+            val errsRaw = getprop(store, "\$ERRS", UNDEF)
+            @Suppress("UNCHECKED_CAST")
+            if (errsRaw is MutableList<*>) inj.errs = errsRaw as MutableList<Any?>
+            inj.meta["__d"] = 0
+            if (injdef != null) {
+                if (injdef.modify != null) inj.modify = injdef.modify
+                if (injdef.extra != null) inj.extra = injdef.extra
+                if (injdef.meta != null && injdef.meta.isNotEmpty()) inj.meta = injdef.meta.also { if (!it.containsKey("__d")) it["__d"] = 0 }
+                if (injdef.handler != null) inj.handler = injdef.handler
+                if (injdef.base != null) inj.base = injdef.base
+                if (injdef.dparent !== UNDEF) inj.dparent = injdef.dparent
             }
-            is List<*> -> value.map { inject(it, store, inj) }.toMutableList()
-            is String -> injectString(value, store, inj)
-            else -> value
+            if (inj.handler == null) inj.handler = _injecthandler
+            inj.nodes.clear()
+            inj.nodes.add(wrapper)
+        } else {
+            inj = injdef!!
         }
+
+        inj.descend()
+
+        if (isnode(v)) {
+            var nodekeys: MutableList<String> = keysof(v).toMutableList()
+            if (ismap(v)) {
+                // $-suffix ordering: non-$ keys first, then $ keys.
+                val nonDollar = mutableListOf<String>()
+                val dollar = mutableListOf<String>()
+                for (k in nodekeys) if (k.contains("$")) dollar.add(k) else nonDollar.add(k)
+                nodekeys = mutableListOf<String>().also { it.addAll(nonDollar); it.addAll(dollar) }
+            }
+            var nkI = 0
+            while (nkI < nodekeys.size) {
+                val childinj = inj.child(nkI, nodekeys)
+                val nodekey = childinj.key
+                childinj.mode = M_KEYPRE
+                val prekey = _injectstr(nodekey, store, childinj)
+                nkI = childinj.keyI
+                nodekeys = childinj.keys
+                if (prekey !== UNDEF) {
+                    childinj.`val` = getprop(v, prekey)
+                    childinj.mode = M_VAL
+                    inject(childinj.`val`, store, childinj)
+                    nkI = childinj.keyI
+                    nodekeys = childinj.keys
+                    childinj.mode = M_KEYPOST
+                    _injectstr(nodekey, store, childinj)
+                    nkI = childinj.keyI
+                    nodekeys = childinj.keys
+                }
+                nkI++
+            }
+        } else if (v is String) {
+            inj.mode = M_VAL
+            val newVal = _injectstr(v, store, inj)
+            if (newVal !== SKIP) inj.setval(newVal)
+            v = newVal
+        }
+
+        if (inj.modify != null && v !== SKIP) {
+            val mkey = inj.key
+            val mparent = inj.parent
+            val mval = getprop(mparent, mkey)
+            inj.modify!!.apply(mval, mkey, mparent, inj, store)
+        }
+
+        inj.`val` = v
+        return getprop(inj.parent, S_DTOP)
     }
 
-    private fun injectString(value: String, store: Any?, inj: MutableMap<String, Any?>?): Any? {
-        if (value.isEmpty()) return ""
+    /**
+     * String-injection helper. Mirrors TS _injectstr (StructUtility.ts) and Java
+     * _injectstr (Struct.java:1490). Handles full `\`...\`` patterns (whole-string
+     * match) and partial inline patterns, then invokes inj.handler on the result.
+     */
+    private fun _injectstr(value: String?, store: Any?, inj: Injection?): Any? {
+        if (value.isNullOrEmpty()) return ""
         val full = R_INJECT_FULL.matcher(value)
         if (full.matches()) {
+            inj?.full = true
             val pathref = unescapeInjectRef(full.group(1))
             return getpath(store, pathref, inj)
         }
-        val matcher = R_INJECT_PART.matcher(value)
-        val out = StringBuilder()
+        val m = R_INJECT_PART.matcher(value)
+        val sb = StringBuilder()
         var cursor = 0
-        while (matcher.find()) {
-            out.append(value, cursor, matcher.start())
-            val ref = unescapeInjectRef(matcher.group(1))
+        while (m.find()) {
+            sb.append(value, cursor, m.start())
+            val ref = unescapeInjectRef(m.group(1))
+            inj?.full = false
             val found = getpath(store, ref, inj)
-            out.append(injectPartialText(found))
-            cursor = matcher.end()
+            sb.append(injectPartialText(found))
+            cursor = m.end()
         }
-        out.append(value.substring(cursor))
-        return out.toString()
+        sb.append(value.substring(cursor))
+        var outVal: Any? = sb.toString()
+        if (inj?.handler != null) {
+            inj.full = true
+            outVal = inj.handler!!.apply(inj, outVal, value, store)
+        }
+        return outVal
     }
 
-    fun transform(data: Any?, spec: Any?): Any? = transform(data, spec, null)
-
-    fun transform(data: Any?, spec: Any?, options: Map<String, Any?>?): Any? {
-        var useData = data
-        var modify: TransformModify? = null
-        val handlers = linkedMapOf<String, Any?>()
-        if (options != null) {
-            val m = options["modify"]
-            if (m is TransformModify) modify = m
-            val extra = options["extra"] as? Map<*, *>
-            if (extra != null) {
-                val extraData = linkedMapOf<String, Any?>()
-                for ((kAny, v) in extra) {
-                    val k = kAny.toString()
-                    if (k.startsWith("$")) handlers[k] = v else extraData[k] = v
+    /**
+     * Default Injector. When a backtick reference resolves to a callable, invoke
+     * it with the Injection. In M_VAL mode with a "full" injection, set the
+     * resolved value back onto inj.parent[inj.key]. Mirrors TS _injecthandler
+     * (StructUtility.ts) and Java _injecthandler (Struct.java:1631).
+     */
+    val _injecthandler: Injector = Injector { inj, value, ref, store ->
+        var out = value
+        val iscmd = isfunc(value) && (ref == null || ref.startsWith("$"))
+        if (iscmd) {
+            out = when (value) {
+                is Injector -> value.apply(inj, value, ref, store)
+                is java.util.function.Function<*, *> -> {
+                    @Suppress("UNCHECKED_CAST")
+                    (value as java.util.function.Function<Any?, Any?>).apply(inj)
                 }
-                if (useData is Map<*, *>) {
-                    useData = merge(listOf(extraData, useData), 1)
-                } else if (extraData.isNotEmpty() && useData == null) {
-                    useData = extraData
+                is Function1<*, *> -> {
+                    @Suppress("UNCHECKED_CAST")
+                    (value as (Any?) -> Any?).invoke(inj)
                 }
+                is java.util.function.Supplier<*> -> value.get()
+                else -> value
             }
+        } else if (inj.mode == M_VAL && inj.full) {
+            inj.setval(value)
         }
-        val opts = TransformOptions(modify, handlers)
-        return transformInner(useData, spec, useData, useData, mutableListOf(), null, spec, linkedSetOf(), opts)
+        out
     }
 
-    private fun transformInner(
-        data: Any?,
-        spec: Any?,
-        currentData: Any?,
-        dparent: Any?,
-        dpath: MutableList<String>,
-        keySpec: Any?,
-        rootSpec: Any?,
-        refGuard: MutableSet<String>,
-        opts: TransformOptions?
-    ): Any? {
-        if (spec === UNDEF || spec == null) return null
-        if (spec is String) return transformString(data, spec, dparent, dpath, keySpec, opts)
-        if (spec is Map<*, *>) {
-            val out = linkedMapOf<String, Any?>()
-            val normalEntries = mutableListOf<Pair<String, Any?>>()
-            val mergeCmds = mutableListOf<MergeCmd>()
-            val packCmds = mutableListOf<Any?>()
-            var localKeySpec = keySpec
-            for ((kAny, vSpec) in spec) {
-                val key = kAny.toString()
-                val cmd = R_CMD_KEY.matcher(key)
-                if (cmd.matches()) {
-                    if (cmd.group(1) == "\$MERGE") {
-                        val suffix = cmd.group(2)
-                        val order = if (suffix.isNullOrEmpty()) 0 else suffix.toInt()
-                        mergeCmds.add(MergeCmd(order, vSpec))
-                    } else if (cmd.group(1) == "\$PACK") {
-                        packCmds.add(vSpec)
-                    } else if (cmd.group(1) == "\$KEY") {
-                        val ks = transformInner(data, vSpec, currentData, dparent, dpath, keySpec, rootSpec, refGuard, opts)
-                        if (ks !== SKIP && ks !== UNDEF && ks != null) localKeySpec = ks
-                    }
-                    continue
-                }
-                normalEntries.add(key to vSpec)
-            }
+    // Mirrors TS checkPlacement (StructUtility.ts:2920) and Java (Struct.java:1537).
+    private val PLACEMENT: Map<Int, String> = mapOf(
+        M_VAL to "value",
+        M_KEYPRE to "key",
+        M_KEYPOST to "key",
+    )
 
-            mergeCmds.sortByDescending { it.order }
-            for (mc in mergeCmds) {
-                val resolvedArg = transformInner(data, mc.value, currentData, dparent, dpath, localKeySpec, rootSpec, refGuard, opts)
-                val merged = applyMergeCommand(out, resolvedArg)
-                out.clear()
-                out.putAll(merged)
-            }
-            for (packArg in packCmds) {
-                val packed = applyPackCommand(data, packArg, localKeySpec, rootSpec, refGuard, opts)
-                out.putAll(packed)
-            }
-
-            for ((key, vSpec) in normalEntries) {
-                val childData = getprop(currentData, key, null)
-                val childPath = dpath.toMutableList().apply { add(key) }
-                val child = transformInner(data, vSpec, childData, currentData ?: dparent, childPath, localKeySpec, rootSpec, refGuard, opts)
-                if (child !== SKIP) {
-                    out[key] = child
-                    opts?.modify?.apply(out[key], key, out)
-                }
-            }
-            return out
+    fun checkPlacement(modes: Int, ijname: String, parentTypes: Int, inj: Injection): Boolean {
+        if ((modes and inj.mode) == 0) {
+            val expected = listOf(M_KEYPRE, M_KEYPOST, M_VAL)
+                .filter { (modes and it) != 0 }
+                .joinToString(",") { PLACEMENT[it] ?: "?" }
+            inj.errs.add("\$$ijname: invalid placement as ${PLACEMENT[inj.mode]}, expected: $expected.")
+            return false
         }
-        if (spec is List<*>) {
-            val eachCmd = extractFullCommand(getelem(spec, 0))
-            if (eachCmd == "\$FORMAT" && spec.size >= 3) {
-                val nameObj = transformInner(data, clone(spec[1]), currentData, dparent, dpath, keySpec, rootSpec, refGuard, opts)
-                val child = transformInner(data, clone(spec[2]), currentData, dparent, dpath, keySpec, rootSpec, refGuard, opts)
-                return applyFormatCommand(nameObj, child)
+        if (parentTypes != 0) {
+            val ptype = typify(inj.parent)
+            if ((parentTypes and ptype) == 0) {
+                inj.errs.add("\$$ijname: invalid placement in parent ${typename(ptype)}, expected: ${typename(parentTypes)}.")
+                return false
             }
-            if (eachCmd == "\$APPLY" && spec.size >= 3) {
-                val fnObj = transformInner(data, clone(spec[1]), currentData, dparent, dpath, keySpec, rootSpec, refGuard, opts)
-                val child = transformInner(data, clone(spec[2]), currentData, dparent, dpath, keySpec, rootSpec, refGuard, opts)
-                return when (fnObj) {
-                    is java.util.function.Function<*, *> -> (fnObj as java.util.function.Function<Any?, Any?>).apply(child)
-                    is Function1<*, *> -> (fnObj as (Any?) -> Any?).invoke(child)
-                    else -> SKIP
-                }
-            }
-            if (eachCmd == "\$REF" && spec.size >= 2) {
-                val refPath = spec[1]?.toString() ?: ""
-                if (currentData == null && shouldSkipRefOnMissingData(refPath, dpath)) return SKIP
-                val guardKey = "$refPath#${System.identityHashCode(currentData)}"
-                if (refGuard.contains(guardKey)) return SKIP
-                val refSpec = getpath(rootSpec, refPath)
-                if (refSpec == null || refSpec === UNDEF) return SKIP
-                refGuard.add(guardKey)
-                val out = transformInner(data, clone(refSpec), currentData, dparent, dpath, keySpec, rootSpec, refGuard, opts)
-                refGuard.remove(guardKey)
-                if (currentData == null && out is Map<*, *> && out.isEmpty()) return SKIP
-                return out
-            }
-            if (eachCmd == "\$EACH" && spec.size >= 3) {
-                val srcPathObj = spec[1]
-                val template = spec[2]
-                val srcPath = srcPathObj?.toString() ?: ""
-                val src = when {
-                    srcPath.isEmpty() -> data
-                    srcPath == "." -> currentData
-                    else -> getpath(data, srcPath)
-                }
-                val srcParts = if (srcPath.isEmpty()) mutableListOf<String>() else srcPath.split(".").toMutableList()
-                val out = mutableListOf<Any?>()
-                if (src is List<*>) {
-                    for (i in src.indices) {
-                        val item = src[i]
-                        val itemPath = srcParts.toMutableList().apply { add(strkey(i)) }
-                        val mapped = transformInner(data, clone(template), item, item, itemPath, keySpec, rootSpec, refGuard, opts)
-                        if (mapped !== SKIP) out.add(mapped)
-                    }
-                } else if (src is Map<*, *>) {
-                    for ((kAny, item) in src) {
-                        val k = kAny.toString()
-                        val itemPath = srcParts.toMutableList().apply { add(k) }
-                        val mapped = transformInner(data, clone(template), item, item, itemPath, keySpec, rootSpec, refGuard, opts)
-                        if (mapped !== SKIP) out.add(mapped)
-                    }
-                }
-                return out
-            }
-            val out = mutableListOf<Any?>()
-            for (i in spec.indices) {
-                val childData = getprop(currentData, i, null)
-                val childPath = dpath.toMutableList().apply { add(strkey(i)) }
-                val child = transformInner(data, spec[i], childData, currentData ?: dparent, childPath, keySpec, rootSpec, refGuard, opts)
-                if (child !== SKIP) {
-                    out.add(child)
-                    opts?.modify?.apply(out.last(), strkey(out.lastIndex), out)
-                }
-            }
-            return out
-        }
-        return clone(spec)
-    }
-
-    private fun shouldSkipRefOnMissingData(refPath: String, dpath: MutableList<String>?): Boolean {
-        if (refPath.isEmpty() || dpath == null || dpath.isEmpty()) return false
-        val parts = refPath.split(".")
-        if (parts.size > dpath.size) return false
-        for (i in parts.indices) {
-            if (parts[i] != dpath[i]) return false
         }
         return true
     }
 
-    private fun applyFormatCommand(nameObj: Any?, resolved: Any?): Any? {
-        if (nameObj !is String) return SKIP
-        return when (nameObj) {
-            "identity" -> resolved
-            "concat" -> formatConcat(resolved)
-            "upper" -> formatDeep(resolved, "upper")
-            "lower" -> formatDeep(resolved, "lower")
-            "string" -> formatDeep(resolved, "string")
-            "number" -> formatDeep(resolved, "number")
-            "integer" -> formatDeep(resolved, "integer")
-            else -> SKIP
+    // Mirrors TS injectorArgs (StructUtility.ts:2947). Returns [errOrUNDEF, arg1, arg2, ...].
+    fun injectorArgs(argTypes: IntArray, args: List<Any?>): Array<Any?> {
+        val numargs = argTypes.size
+        val found = arrayOfNulls<Any?>(1 + numargs)
+        found[0] = UNDEF
+        for (argI in 0 until numargs) {
+            val arg = if (argI < args.size) args[argI] else UNDEF
+            val argType = typify(arg)
+            if ((argTypes[argI] and argType) == 0) {
+                found[0] = "invalid argument: ${stringify(arg, 22)} (${typename(argType)} at position ${1 + argI}) is not of type: ${typename(argTypes[argI])}."
+                break
+            }
+            found[1 + argI] = arg
         }
+        return found
     }
 
-    private fun formatConcat(value: Any?): Any? {
-        if (value !is List<*>) return value
-        val out = StringBuilder()
-        for (item in value) {
-            if (isnode(item)) continue
-            out.append(formatStringScalar(item))
-        }
-        return out.toString()
-    }
-
-    private fun formatDeep(value: Any?, mode: String): Any? {
-        if (value is List<*>) {
-            val out = mutableListOf<Any?>()
-            for (item in value) out.add(formatDeep(item, mode))
-            return out
-        }
-        if (value is Map<*, *>) {
-            val out = linkedMapOf<String, Any?>()
-            value.forEach { (k, v) -> out[k.toString()] = formatDeep(v, mode) }
-            return out
-        }
-        return formatScalar(value, mode)
-    }
-
-    private fun formatScalar(value: Any?, mode: String): Any? {
-        val sv = formatStringScalar(value)
-        return when (mode) {
-            "upper" -> sv.uppercase(Locale.ROOT)
-            "lower" -> sv.lowercase(Locale.ROOT)
-            "string" -> sv
-            "number" -> formatNumberScalar(value, false)
-            "integer" -> formatNumberScalar(value, true)
-            else -> value
-        }
-    }
-
-    private fun formatStringScalar(value: Any?): String {
-        if (value == null || value === UNDEF) return "null"
-        if (value is String) return value
-        if (value is Number || value is Boolean) return stringify(value)
-        return value.toString()
-    }
-
-    private fun formatNumberScalar(value: Any?, integerOnly: Boolean): Any {
-        if (value is Number) {
-            val d = value.toDouble()
-            if (integerOnly) return d.toLong()
-            if (floor(d) == d) return d.toLong()
-            return d
-        }
-        if (value is String) {
-            return try {
-                val d = value.toDouble()
-                if (integerOnly || floor(d) == d) d.toLong() else d
-            } catch (_: Exception) {
-                0L
+    // Mirrors TS injectChild (StructUtility.ts:2967). Walks inj.prior/inj.prior.prior
+    // to relocate the child within a $FORMAT chain, then re-injects.
+    fun injectChild(child: Any?, store: Any?, inj: Injection): Injection {
+        var cinj: Injection = inj
+        val prior = inj.prior
+        if (prior != null) {
+            val priorPrior = prior.prior
+            if (priorPrior != null) {
+                cinj = priorPrior.child(prior.keyI, prior.keys)
+                cinj.`val` = child
+                setprop(cinj.parent, prior.key, child)
+            } else {
+                cinj = prior.child(inj.keyI, inj.keys)
+                cinj.`val` = child
+                setprop(cinj.parent, inj.key, child)
             }
         }
-        return 0L
+        inject(child, store, cinj)
+        return cinj
     }
 
-    private fun transformString(
-        data: Any?,
-        spec: String,
-        dparent: Any?,
-        dpath: MutableList<String>,
-        keySpec: Any?,
-        opts: TransformOptions?
-    ): Any? {
-        if (spec.isEmpty()) return ""
-        val store = linkedMapOf<String, Any?>(S_DTOP to data)
-        val inj = linkedMapOf<String, Any?>(
-            "base" to S_DTOP,
-            "dparent" to dparent,
-            "dpath" to dpath
-        )
-        val full = R_INJECT_FULL.matcher(spec)
-        if (full.matches()) {
-            val ref = unescapeInjectRef(full.group(1)) ?: ""
-            val custom = resolveCustomTransformCommand(ref, dparent, dpath, opts)
-            val dot = if (custom === UNDEF) resolveDotRelativeRef(ref, dparent, data) else UNDEF
-            val cmd = if (custom === UNDEF && dot === UNDEF) resolveTransformRef(ref, dparent, dpath, keySpec) else UNDEF
-            val out = when {
-                custom !== UNDEF -> custom
-                dot !== UNDEF -> dot
-                cmd !== UNDEF -> cmd
-                else -> getpath(store, ref, inj)
-            }
-            return if (out == null || out === UNDEF) SKIP else out
-        }
-        val matcher = R_INJECT_PART.matcher(spec)
-        val out = StringBuilder()
-        var cursor = 0
-        while (matcher.find()) {
-            out.append(spec, cursor, matcher.start())
-            val ref = unescapeInjectRef(matcher.group(1)) ?: ""
-            val custom = resolveCustomTransformCommand(ref, dparent, dpath, opts)
-            val dot = if (custom === UNDEF) resolveDotRelativeRef(ref, dparent, data) else UNDEF
-            val cmd = if (custom === UNDEF && dot === UNDEF) resolveTransformRef(ref, dparent, dpath, keySpec) else UNDEF
-            val found = when {
-                custom !== UNDEF -> custom
-                dot !== UNDEF -> dot
-                cmd !== UNDEF -> cmd
-                else -> getpath(store, ref, inj)
-            }
-            out.append(injectPartialText(found))
-            cursor = matcher.end()
-        }
-        out.append(spec.substring(cursor))
-        return out.toString()
+    // ===========================================================================
+    // Transform Injectors
+    // ===========================================================================
+    // Mirrors Java Struct.java:1660-2240 and TS StructUtility.ts:1393-1896.
+    // Each Injector implements one of the 11 canonical transform commands.
+
+    /** $DELETE: drop the current key. */
+    val transform_DELETE: Injector = Injector { inj, _, _, _ ->
+        inj.setval(UNDEF)
+        UNDEF
     }
 
-    private fun resolveTransformRef(ref: String, dparent: Any?, dpath: MutableList<String>, keySpec: Any?): Any? {
-        if (!ref.startsWith("$")) return UNDEF
-        if (ref.startsWith("\$BT")) return "`"
-        if (ref.startsWith("\$DS")) return "$"
-        if (ref.startsWith("\$DELETE")) return SKIP
-        if (ref.startsWith("\$COPY")) {
-            if (dpath.isEmpty()) return dparent
-            if (!isnode(dparent)) return dparent
-            val key = dpath.last()
-            return getprop(dparent, key)
-        }
-        if (ref.startsWith("\$KEY")) {
-            if (keySpec != null && keySpec !== UNDEF) {
-                return getprop(dparent, keySpec)
-            }
-            if (dpath.isEmpty()) return null
-            return if (dpath.size >= 2) dpath[dpath.size - 2] else dpath[0]
-        }
-        return UNDEF
+    /** $COPY: copy the value at the current key from dparent. */
+    val transform_COPY: Injector = Injector { inj, _, _, _ ->
+        if (!checkPlacement(M_VAL, "COPY", T_ANY, inj)) return@Injector UNDEF
+        val out = getprop(inj.dparent, inj.key)
+        inj.setval(out)
+        out
     }
 
-    private fun resolveCustomTransformCommand(
-        ref: String,
-        dparent: Any?,
-        dpath: MutableList<String>,
-        opts: TransformOptions?
-    ): Any? {
-        if (opts == null || !ref.startsWith("$")) return UNDEF
-        val handler = opts.commandHandlers[ref]
-        val state = linkedMapOf<String, Any?>("path" to dpath.toMutableList(), "dparent" to dparent)
-        return when (handler) {
-            is java.util.function.Function<*, *> -> (handler as java.util.function.Function<Any?, Any?>).apply(state)
-            is Function1<*, *> -> (handler as (Any?) -> Any?).invoke(state)
+    /** $KEY: emit the parent key, optionally renamed via `$KEY` or `$ANNO.KEY`. */
+    val transform_KEY: Injector = Injector { inj, _, _, _ ->
+        if (inj.mode != M_VAL) return@Injector UNDEF
+        val keyspec = getprop(inj.parent, "`\$KEY`", UNDEF)
+        if (keyspec !== UNDEF) {
+            delprop(inj.parent, "`\$KEY`")
+            return@Injector getprop(inj.dparent, keyspec)
+        }
+        val anno = getprop(inj.parent, "`\$ANNO`", UNDEF)
+        getprop(anno, "KEY", getelem(inj.path, -2))
+    }
+
+    /** $ANNO: drop the annotation marker. */
+    val transform_ANNO: Injector = Injector { inj, _, _, _ ->
+        delprop(inj.parent, "`\$ANNO`")
+        UNDEF
+    }
+
+    /** $MERGE: deep-merge a list of objects over the current parent. */
+    val transform_MERGE: Injector = Injector { inj, _, _, _ ->
+        if (inj.mode == M_KEYPRE) return@Injector inj.key
+        if (inj.mode != M_KEYPOST) return@Injector UNDEF
+        val args = getprop(inj.parent, inj.key)
+        val argList: MutableList<Any?> = if (args is List<*>) {
+            @Suppress("UNCHECKED_CAST") (args.toMutableList() as MutableList<Any?>)
+        } else mutableListOf<Any?>(args)
+        inj.setval(UNDEF)
+        val mergelist = mutableListOf<Any?>()
+        mergelist.add(inj.parent)
+        mergelist.addAll(argList)
+        mergelist.add(clone(inj.parent))
+        merge(mergelist)
+        inj.key
+    }
+
+    // FORMATTER: name → WalkApply for $FORMAT.
+    private fun jsString(v: Any?): String {
+        if (v == null) return "null"
+        if (v is Number) {
+            val d = v.toDouble()
+            if (d.isFinite() && floor(d) == d) return d.toLong().toString()
+            return v.toString()
+        }
+        if (v is Boolean) return if (v) "true" else "false"
+        return v.toString()
+    }
+
+    val FORMATTER: Map<String, WalkApply> = linkedMapOf(
+        "identity" to WalkApply { _, v, _, _ -> v },
+        "upper" to WalkApply { _, v, _, _ -> if (isnode(v)) v else jsString(v).uppercase(Locale.ROOT) },
+        "lower" to WalkApply { _, v, _, _ -> if (isnode(v)) v else jsString(v).lowercase(Locale.ROOT) },
+        "string" to WalkApply { _, v, _, _ -> if (isnode(v)) v else jsString(v) },
+        "number" to WalkApply { _, v, _, _ ->
+            if (isnode(v)) v else try {
+                val d = ("" + v).toDouble()
+                when {
+                    d.isNaN() -> 0L
+                    floor(d) == d -> d.toLong()
+                    else -> d
+                }
+            } catch (_: Exception) { 0L }
+        },
+        "integer" to WalkApply { _, v, _, _ ->
+            if (isnode(v)) v else try { ("" + v).toDouble().toLong() } catch (_: Exception) { 0L }
+        },
+        "concat" to WalkApply { k, v, _, _ ->
+            if (k != null || v !is List<*>) v
+            else {
+                val sb = StringBuilder()
+                for (item in items(v)) {
+                    val x = item[1]
+                    if (!isnode(x)) sb.append(jsString(x))
+                }
+                sb.toString()
+            }
+        },
+    )
+
+    /** $FORMAT: walk a sub-spec applying a named formatter. */
+    val transform_FORMAT: Injector = Injector { inj, _, _, store ->
+        if (inj.keys.size > 1) {
+            val first = inj.keys[0]
+            inj.keys.clear(); inj.keys.add(first)
+        }
+        if (inj.mode != M_VAL) return@Injector UNDEF
+
+        val name = getprop(inj.parent, 1)
+        val child = getprop(inj.parent, 2)
+
+        val tkey = getelem(inj.path, -2)
+        var target = getelem(inj.nodes, -2)
+        if (target === UNDEF) target = getelem(inj.nodes, -1)
+
+        val cinj = injectChild(child, store, inj)
+        val resolved = cinj.`val`
+
+        val formatter: WalkApply? = if (name is WalkApply) name else FORMATTER[name?.toString() ?: ""]
+        if (formatter == null) {
+            inj.errs.add("\$FORMAT: unknown format: $name.")
+            return@Injector UNDEF
+        }
+        val out = walk(resolved, formatter)
+        setprop(target, tkey, out)
+        out
+    }
+
+    /** $APPLY: call a custom function on a resolved sub-spec value. */
+    val transform_APPLY: Injector = Injector { inj, _, _, store ->
+        if (!checkPlacement(M_VAL, "APPLY", T_LIST, inj)) return@Injector UNDEF
+
+        val args = mutableListOf<Any?>()
+        val parent = inj.parent
+        if (parent is List<*> && parent.size > 1) {
+            for (i in 1 until parent.size) args.add(parent[i])
+        }
+        val checked = injectorArgs(intArrayOf(T_FUNCTION, T_ANY), args)
+        if (checked[0] !== UNDEF) {
+            inj.errs.add("\$APPLY: ${checked[0]}")
+            return@Injector UNDEF
+        }
+        val applyFn = checked[1]
+        val child = checked[2]
+
+        val tkey = getelem(inj.path, -2)
+        var target = getelem(inj.nodes, -2)
+        if (target === UNDEF) target = getelem(inj.nodes, -1)
+
+        val cinj = injectChild(child, store, inj)
+        val resolved = cinj.`val`
+
+        val out: Any? = when (applyFn) {
+            is java.util.function.Function<*, *> -> {
+                @Suppress("UNCHECKED_CAST")
+                (applyFn as java.util.function.Function<Any?, Any?>).apply(resolved)
+            }
+            is Function1<*, *> -> {
+                @Suppress("UNCHECKED_CAST")
+                (applyFn as (Any?) -> Any?).invoke(resolved)
+            }
             else -> UNDEF
         }
+        setprop(target, tkey, out)
+        out
     }
 
-    private fun resolveDotRelativeRef(ref: String, dparent: Any?, data: Any?): Any? {
-        if (ref.startsWith("...")) {
-            var rem = ref.substring(3)
-            while (rem.startsWith(".")) rem = rem.substring(1)
-            if (rem.isEmpty()) return data
-            return getpath(data, rem)
+    /** $EACH: convert a node into a list by cloning the child template per source entry. */
+    val transform_EACH: Injector = Injector { inj, _, _, store ->
+        if (!checkPlacement(M_VAL, "EACH", T_LIST, inj)) return@Injector UNDEF
+        if (inj.keys.size > 1) inj.keys.subList(1, inj.keys.size).clear()
+
+        val args = mutableListOf<Any?>()
+        val parent = inj.parent
+        if (parent is List<*>) for (i in 1 until parent.size) args.add(parent[i])
+        val checked = injectorArgs(intArrayOf(T_STRING, T_ANY), args)
+        if (checked[0] !== UNDEF) {
+            inj.errs.add("\$EACH: ${checked[0]}")
+            return@Injector UNDEF
         }
-        if (ref.startsWith("..")) {
-            var rem = ref.substring(2)
-            while (rem.startsWith(".")) rem = rem.substring(1)
-            if (rem.isEmpty()) return dparent
-            return getpath(dparent, rem)
+        val srcpath = checked[1] as String
+        val child = checked[2]
+
+        val srcstore = getprop(store, inj.base, store)
+        val src = getpath(srcstore, srcpath, inj)
+        val srctype = typify(src)
+
+        val tkey = getelem(inj.path, -2)
+        var target = getelem(inj.nodes, -2)
+        if (target === UNDEF) target = getelem(inj.nodes, -1)
+
+        val tval = mutableListOf<Any?>()
+        if ((T_LIST and srctype) != 0 && src is List<*>) {
+            for (i in src.indices) tval.add(clone(child))
+        } else if ((T_MAP and srctype) != 0 && src is Map<*, *>) {
+            for ((kAny, _) in src) {
+                val cloned = clone(child)
+                val keyMap = linkedMapOf<String, Any?>("KEY" to kAny.toString())
+                val annoMap = linkedMapOf<String, Any?>("`\$ANNO`" to keyMap)
+                val mergeArgs = mutableListOf<Any?>(cloned, annoMap)
+                tval.add(merge(mergeArgs, 1))
+            }
         }
-        return UNDEF
+
+        var rval: Any? = mutableListOf<Any?>()
+
+        if (size(tval) > 0) {
+            val tcur: Any? = when (src) {
+                is List<*> -> src.toMutableList()
+                is Map<*, *> -> src.values.toMutableList()
+                else -> UNDEF
+            }
+
+            val ckey = getelem(inj.path, -2)
+            val ckeyStr = strkey(ckey)
+
+            val tpathRaw = slice(inj.path, -1, null)
+            @Suppress("UNCHECKED_CAST")
+            val tpath: MutableList<String> = if (tpathRaw is List<*>) (tpathRaw as List<String>).toMutableList() else mutableListOf()
+
+            val dpath = mutableListOf(S_DTOP)
+            if (srcpath.isNotEmpty()) for (part in srcpath.split(".")) dpath.add(part)
+            dpath.add("\$:$ckeyStr")
+
+            val tcurMap = linkedMapOf<String, Any?>(ckeyStr to tcur)
+            var tcurOut: Any? = tcurMap
+
+            if (size(tpath) > 1) {
+                val pkey = getelem(inj.path, -3, S_DTOP)
+                val pkeyStr = strkey(pkey)
+                val wrap = linkedMapOf<String, Any?>(pkeyStr to tcurOut)
+                tcurOut = wrap
+                dpath.add("\$:$pkeyStr")
+            }
+
+            val singleKey = mutableListOf(ckeyStr)
+            val tinj = inj.child(0, singleKey)
+            tinj.path = tpath
+            val slicedNodes = slice(inj.nodes, -1, null)
+            @Suppress("UNCHECKED_CAST")
+            tinj.nodes = if (slicedNodes is List<*>) (slicedNodes as List<Any?>).toMutableList() else mutableListOf()
+
+            tinj.parent = getelem(tinj.nodes, -1)
+            setprop(tinj.parent, ckey, tval)
+
+            tinj.`val` = tval
+            tinj.dpath = dpath
+            tinj.dparent = tcurOut
+
+            inject(tval, store, tinj)
+            rval = tinj.`val`
+        }
+
+        setprop(target, tkey, rval)
+        if (rval is List<*> && rval.isNotEmpty()) rval[0] else UNDEF
     }
 
-    private fun extractFullCommand(value: Any?): String? {
-        if (value !is String) return null
-        val full = R_INJECT_FULL.matcher(value)
-        if (!full.matches()) return null
-        val ref = unescapeInjectRef(full.group(1))
-        return if (ref != null && ref.startsWith("$")) ref else null
-    }
+    /** $PACK: convert a list/map into a keyed map. */
+    val transform_PACK: Injector = Injector { inj, _, _, store ->
+        if (!checkPlacement(M_KEYPRE, "PACK", T_MAP, inj)) return@Injector UNDEF
 
-    private fun applyMergeCommand(current: LinkedHashMap<String, Any?>, resolvedArg: Any?): LinkedHashMap<String, Any?> {
-        val mergeArgs = mutableListOf<Any?>()
-        mergeArgs.add(current)
-        when (resolvedArg) {
-            is List<*> -> mergeArgs.addAll(resolvedArg)
-            null, UNDEF, SKIP -> {}
-            else -> mergeArgs.add(resolvedArg)
+        val argsRaw = getprop(inj.parent, inj.key)
+        val argList = mutableListOf<Any?>()
+        if (argsRaw is List<*>) argList.addAll(argsRaw)
+        val checked = injectorArgs(intArrayOf(T_STRING, T_ANY), argList)
+        if (checked[0] !== UNDEF) {
+            inj.errs.add("\$PACK: ${checked[0]}")
+            return@Injector UNDEF
         }
-        val merged = merge(mergeArgs)
-        if (merged is Map<*, *>) {
-            val out = linkedMapOf<String, Any?>()
-            merged.forEach { (k, v) -> out[k.toString()] = v }
-            return out
-        }
-        return current
-    }
+        val srcpath = checked[1] as String
+        val origchildspec = checked[2]
 
-    private fun applyPackCommand(
-        data: Any?,
-        packArg: Any?,
-        inheritedKeySpec: Any?,
-        rootSpec: Any?,
-        refGuard: MutableSet<String>,
-        opts: TransformOptions?
-    ): LinkedHashMap<String, Any?> {
-        if (packArg !is List<*> || packArg.size < 2) return linkedMapOf()
-        val srcPath = packArg[0]?.toString() ?: ""
-        val childSpecRaw = packArg[1]
-        val src = if (srcPath.isEmpty()) data else getpath(data, srcPath)
-        val srcParts = if (srcPath.isEmpty()) mutableListOf<String>() else srcPath.split(".").toMutableList()
+        val tkey = getelem(inj.path, -2)
+        val pathsize = size(inj.path)
+        var target = getelem(inj.nodes, pathsize - 2)
+        if (target === UNDEF) target = getelem(inj.nodes, pathsize - 1)
 
-        val childMap = childSpecRaw as? Map<*, *>
-        var packKeySpec: Any? = null
-        var valueSpec: Any? = null
-        var baseTemplate: Any? = childSpecRaw
+        val srcstore = getprop(store, inj.base, store)
+        val src = getpath(srcstore, srcpath, inj)
 
-        if (childMap != null) {
-            val template = linkedMapOf<String, Any?>()
-            childMap.forEach { (kAny, v) -> template[kAny.toString()] = v }
-            for ((k, v) in childMap) {
-                val m = R_CMD_KEY.matcher(k.toString())
-                if (!m.matches()) continue
-                if (m.group(1) == "\$KEY") {
-                    packKeySpec = v
-                    template.remove(k.toString())
-                } else if (m.group(1) == "\$VAL") {
-                    valueSpec = v
-                    template.remove(k.toString())
+        var srcList: MutableList<Any?>? = null
+        if (src is List<*>) {
+            srcList = src.toMutableList()
+        } else if (src is Map<*, *>) {
+            srcList = mutableListOf()
+            for ((kAny, node) in src) {
+                if (isnode(node)) {
+                    val annoMap = linkedMapOf<String, Any?>("KEY" to kAny.toString())
+                    setprop(node, "`\$ANNO`", annoMap)
+                    srcList.add(node)
                 }
             }
-            baseTemplate = template
+        }
+        if (srcList == null) return@Injector UNDEF
+
+        var keypath: Any? = UNDEF
+        var child: Any? = origchildspec
+        if (origchildspec is Map<*, *>) {
+            keypath = getprop(origchildspec, "`\$KEY`", UNDEF)
+            delprop(origchildspec, "`\$KEY`")
+            child = getprop(origchildspec, "`\$VAL`", origchildspec)
+        }
+        val keypathFinal = keypath
+        val childFinal = child
+
+        val tval = linkedMapOf<String, Any?>()
+        for (i in srcList.indices) {
+            val item = srcList[i]
+            val outKey: String = when {
+                keypathFinal === UNDEF -> {
+                    if (item is Map<*, *> && item.containsKey(S_DKEY)) item[S_DKEY]?.toString() ?: ""
+                    else i.toString()
+                }
+                keypathFinal is String && keypathFinal.startsWith("`") -> {
+                    val mergeList = mutableListOf<Any?>(linkedMapOf<String, Any?>(), store, linkedMapOf<String, Any?>(S_DTOP to item))
+                    val merged = merge(mergeList, 1)
+                    inject(keypathFinal, merged)?.toString() ?: ""
+                }
+                else -> getpath(item, keypathFinal, inj)?.toString() ?: ""
+            }
+
+            val tchild = clone(childFinal)
+            setprop(tval, outKey, tchild)
+
+            val anno = getprop(item, "`\$ANNO`", UNDEF)
+            if (anno === UNDEF) delprop(tchild, "`\$ANNO`")
+            else setprop(tchild, "`\$ANNO`", anno)
         }
 
-        val out = linkedMapOf<String, Any?>()
-        if (src is List<*>) {
-            for (i in src.indices) {
-                val item = src[i]
-                val itemPath = srcParts.toMutableList().apply { add(strkey(i)) }
-                putPackedItem(out, data, item, itemPath, packKeySpec, inheritedKeySpec, valueSpec, baseTemplate, strkey(i), rootSpec, refGuard, opts)
+        var rval: Map<String, Any?> = linkedMapOf()
+
+        if (!isempty(tval)) {
+            val tsrc = linkedMapOf<String, Any?>()
+            for (i in srcList.indices) {
+                val item = srcList[i]
+                val kn: String = when {
+                    keypathFinal === UNDEF -> i.toString()
+                    keypathFinal is String && keypathFinal.startsWith("`") -> {
+                        val mergeList = mutableListOf<Any?>(linkedMapOf<String, Any?>(), store, linkedMapOf<String, Any?>(S_DTOP to item))
+                        val merged = merge(mergeList, 1)
+                        inject(keypathFinal, merged)?.toString() ?: ""
+                    }
+                    else -> getpath(item, keypathFinal, inj)?.toString() ?: ""
+                }
+                setprop(tsrc, kn, item)
             }
-        } else if (src is Map<*, *>) {
-            for ((kAny, item) in src) {
+
+            val tpathRaw = slice(inj.path, -1, null)
+            @Suppress("UNCHECKED_CAST")
+            val tpath: MutableList<String> = if (tpathRaw is List<*>) (tpathRaw as List<String>).toMutableList() else mutableListOf()
+
+            val ckey = getelem(inj.path, -2)
+            val ckeyStr = strkey(ckey)
+
+            val dpath = mutableListOf(S_DTOP)
+            if (srcpath.isNotEmpty()) for (part in srcpath.split(".")) dpath.add(part)
+            dpath.add("\$:$ckeyStr")
+
+            var tcurOut: Any? = linkedMapOf<String, Any?>(ckeyStr to tsrc)
+            if (size(tpath) > 1) {
+                val pkey = getelem(inj.path, -3, S_DTOP)
+                val pkeyStr = strkey(pkey)
+                tcurOut = linkedMapOf<String, Any?>(pkeyStr to tcurOut)
+                dpath.add("\$:$pkeyStr")
+            }
+
+            val singleKey = mutableListOf(ckeyStr)
+            val tinj = inj.child(0, singleKey)
+            tinj.path = tpath
+            val slicedNodes = slice(inj.nodes, -1, null)
+            @Suppress("UNCHECKED_CAST")
+            tinj.nodes = if (slicedNodes is List<*>) (slicedNodes as List<Any?>).toMutableList() else mutableListOf()
+
+            tinj.parent = getelem(tinj.nodes, -1)
+            tinj.`val` = tval
+            tinj.dpath = dpath
+            tinj.dparent = tcurOut
+
+            inject(tval, store, tinj)
+            val tv = tinj.`val`
+            if (tv is Map<*, *>) {
+                val out = linkedMapOf<String, Any?>()
+                for ((k, vv) in tv) out[k.toString()] = vv
+                rval = out
+            }
+        }
+
+        setprop(target, tkey, rval)
+        UNDEF
+    }
+
+    /** $REF: resolve a named reference within the original spec, enabling recursive transformations. */
+    val transform_REF: Injector = Injector { inj, value, _, store ->
+        if (inj.mode != M_VAL) return@Injector UNDEF
+
+        val refpath = getprop(inj.parent, 1)
+        inj.keyI = size(inj.keys)
+
+        val specHolder = getprop(store, S_DSPEC)
+        val spec: Any? = when (specHolder) {
+            is java.util.function.Supplier<*> -> specHolder.get()
+            is Function0<*> -> specHolder.invoke()
+            else -> specHolder
+        }
+
+        val dpathRaw = slice(inj.path, 1, null)
+        @Suppress("UNCHECKED_CAST")
+        val dpath: MutableList<String> = if (dpathRaw is List<*>) (dpathRaw as List<String>).toMutableList() else mutableListOf()
+        val refInj = Injection(null, null)
+        refInj.dpath = dpath
+        refInj.dparent = getpath(spec, dpath)
+        refInj.handler = _injecthandler
+        val refResolved = getpath(spec, refpath, refInj)
+
+        val tref = clone(refResolved)
+
+        val hasSubRef = booleanArrayOf(false)
+        if (isnode(tref)) {
+            walk(tref, WalkApply { _, v, _, _ ->
+                if ("`\$REF`" == v) hasSubRef[0] = true
+                v
+            })
+        }
+
+        val cpathRaw = slice(inj.path, -3, null)
+        @Suppress("UNCHECKED_CAST")
+        val cpath: MutableList<String> = if (cpathRaw is List<*>) (cpathRaw as List<String>).toMutableList() else mutableListOf()
+        val tpathRaw = slice(inj.path, -1, null)
+        @Suppress("UNCHECKED_CAST")
+        val tpath: MutableList<String> = if (tpathRaw is List<*>) (tpathRaw as List<String>).toMutableList() else mutableListOf()
+        val tval = getpath(store, tpath)
+        var rval: Any? = UNDEF
+
+        if (!hasSubRef[0] || tval !== UNDEF) {
+            val lastKey = getelem(tpath, -1)
+            val singleKey = mutableListOf(strkey(lastKey))
+            val tinj = inj.child(0, singleKey)
+            tinj.path = tpath
+            val slicedNodes = slice(inj.nodes, -1, null)
+            @Suppress("UNCHECKED_CAST")
+            tinj.nodes = if (slicedNodes is List<*>) (slicedNodes as List<Any?>).toMutableList() else mutableListOf()
+            tinj.parent = getelem(inj.nodes, -2)
+            tinj.`val` = tref
+            tinj.dpath = cpath.toMutableList()
+            tinj.dparent = getpath(store, cpath)
+
+            inject(tref, store, tinj)
+            rval = tinj.`val`
+        }
+
+        val grandparent = inj.setval(rval, 2)
+        if (islist(grandparent) && inj.prior != null) {
+            inj.prior!!.keyI--
+        }
+        value
+    }
+
+    fun transform(data: Any?, spec: Any?): Any? = transform(data, spec, null)
+
+    /**
+     * Canonical TS-faithful transform: clone the spec, build a store with
+     * transform_* injectors registered, then call inject(workspec, store, injdef).
+     * Mirrors Java transform (Struct.java:2269) and TS transform (StructUtility.ts:1902).
+     */
+    fun transform(data: Any?, spec: Any?, options: Map<String, Any?>?): Any? {
+        val origspec = spec
+        val workspec = clone(origspec)
+
+        val extraRaw = options?.get("extra")
+        val modifyRaw = options?.get("modify")
+        val handlerRaw = options?.get("handler")
+        val metaRaw = options?.get("meta")
+        val errsRaw = options?.get("errs")
+
+        val collect = errsRaw is MutableList<*>
+        @Suppress("UNCHECKED_CAST")
+        val errs: MutableList<Any?> = if (collect) errsRaw as MutableList<Any?> else mutableListOf()
+
+        val extraTransforms = linkedMapOf<String, Any?>()
+        val extraData = linkedMapOf<String, Any?>()
+        if (extraRaw is Map<*, *>) {
+            for ((kAny, v) in extraRaw) {
                 val k = kAny.toString()
-                val itemPath = srcParts.toMutableList().apply { add(k) }
-                putPackedItem(out, data, item, itemPath, packKeySpec, inheritedKeySpec, valueSpec, baseTemplate, k, rootSpec, refGuard, opts)
+                if (k.startsWith("$")) extraTransforms[k] = v else extraData[k] = v
             }
         }
-        return out
+
+        val dataMergeList = mutableListOf<Any?>()
+        if (!isempty(extraData)) dataMergeList.add(clone(extraData))
+        dataMergeList.add(clone(data))
+        val dataClone = merge(dataMergeList)
+
+        val baseStore = linkedMapOf<String, Any?>()
+        baseStore[S_DTOP] = dataClone
+        baseStore[S_DSPEC] = java.util.function.Supplier<Any?> { origspec }
+        baseStore["\$BT"] = java.util.function.Supplier<Any?> { "`" }
+        baseStore["\$DS"] = java.util.function.Supplier<Any?> { "$" }
+        baseStore["\$WHEN"] = java.util.function.Supplier<Any?> { java.time.Instant.now().toString() }
+        baseStore["\$DELETE"] = transform_DELETE
+        baseStore["\$COPY"] = transform_COPY
+        baseStore["\$KEY"] = transform_KEY
+        baseStore["\$ANNO"] = transform_ANNO
+        baseStore["\$MERGE"] = transform_MERGE
+        baseStore["\$EACH"] = transform_EACH
+        baseStore["\$PACK"] = transform_PACK
+        baseStore["\$REF"] = transform_REF
+        baseStore["\$FORMAT"] = transform_FORMAT
+        baseStore["\$APPLY"] = transform_APPLY
+
+        val storeMergeList = mutableListOf<Any?>()
+        storeMergeList.add(baseStore)
+        if (extraTransforms.isNotEmpty()) storeMergeList.add(extraTransforms)
+        val errsHolder = linkedMapOf<String, Any?>("\$ERRS" to errs)
+        storeMergeList.add(errsHolder)
+        val store = merge(storeMergeList, 1)
+
+        val injdef = Injection(workspec, null)
+        injdef.prior = null
+        if (modifyRaw is Modify) injdef.modify = modifyRaw
+        if (handlerRaw is Injector) injdef.handler = handlerRaw
+        if (metaRaw is Map<*, *>) {
+            @Suppress("UNCHECKED_CAST")
+            injdef.meta = (metaRaw as Map<String, Any?>).toMutableMap()
+        }
+        injdef.errs = errs
+
+        val out = inject(workspec, store, injdef)
+        if (errs.isNotEmpty() && !collect) {
+            throw IllegalArgumentException(errs.joinToString(" | ") { it?.toString() ?: "" })
+        }
+        return if (out === SKIP || out === UNDEF) null else out
     }
 
-    private fun putPackedItem(
-        out: LinkedHashMap<String, Any?>,
-        data: Any?,
-        item: Any?,
-        itemPath: MutableList<String>,
-        packKeySpec: Any?,
-        inheritedKeySpec: Any?,
-        valueSpec: Any?,
-        baseTemplate: Any?,
-        fallbackKey: String,
-        rootSpec: Any?,
-        refGuard: MutableSet<String>,
-        opts: TransformOptions?
-    ) {
-        var kObj: Any? = fallbackKey
-        if (packKeySpec != null && packKeySpec !== UNDEF) {
-            if (packKeySpec is String) {
-                val full = R_INJECT_FULL.matcher(packKeySpec)
-                kObj = if (full.matches()) transformInner(data, clone(packKeySpec), item, item, itemPath, inheritedKeySpec, rootSpec, refGuard, opts)
-                else getpath(item, packKeySpec)
-            } else {
-                kObj = transformInner(data, clone(packKeySpec), item, item, itemPath, inheritedKeySpec, rootSpec, refGuard, opts)
-            }
-        }
-        val outKey = kObj?.toString() ?: ""
-        if (outKey.isEmpty()) return
-        val bodyPath = itemPath.toMutableList().also {
-            if (usesFullCopyCommand(packKeySpec) && it.isNotEmpty()) {
-                it[it.lastIndex] = outKey
-            }
-        }
-        val outVal = if (valueSpec != null) {
-            transformInner(data, clone(valueSpec), item, item, bodyPath, inheritedKeySpec, rootSpec, refGuard, opts)
-        } else {
-            transformInner(data, clone(baseTemplate), item, item, bodyPath, inheritedKeySpec, rootSpec, refGuard, opts)
-        }
-        if (outVal !== SKIP) out[outKey] = outVal
-    }
-
-    private fun usesFullCopyCommand(spec: Any?): Boolean {
-        if (spec !is String) return false
-        val m = R_INJECT_FULL.matcher(spec)
-        if (!m.matches()) return false
-        val ref = unescapeInjectRef(m.group(1))
-        return ref == "\$COPY"
-    }
 
     private fun pathifyForHandler(path: Any?): String {
         return when (path) {
@@ -1230,410 +1661,515 @@ object Struct {
         }
     }
 
+    // ===========================================================================
+    // Validate Injectors
+    // ===========================================================================
+
+    /** Build a type-mismatch error message. Mirrors Java _invalidTypeMsg (Struct.java:1439). */
+    private fun _invalidTypeMsg(path: Any?, needtype: String, vt: Int, v: Any?, @Suppress("UNUSED_PARAMETER") whence: String): String {
+        val vs = if (v == null || v === UNDEF) "no value" else stringify(v)
+        val sb = StringBuilder("Expected ")
+        if (path is List<*> && path.size > 1) sb.append("field ").append(pathify(path, 1)).append(" to be ")
+        sb.append(needtype).append(", but found ")
+        if (v != null && v !== UNDEF) sb.append(typename(vt)).append(": ")
+        sb.append(vs).append(".")
+        return sb.toString()
+    }
+
+    /** $STRING: require a non-empty string. */
+    val validate_STRING: Injector = Injector { inj, _, _, _ ->
+        val out = getprop(inj.dparent, inj.key)
+        val t = typify(out)
+        when {
+            (T_STRING and t) == 0 -> {
+                inj.errs.add(_invalidTypeMsg(inj.path, "string", t, out, "V1010"))
+                UNDEF
+            }
+            "" == out -> {
+                inj.errs.add("Empty string at " + pathify(inj.path, 1))
+                UNDEF
+            }
+            else -> out
+        }
+    }
+
+    /** Generic $TYPE handler. */
+    val validate_TYPE: Injector = Injector { inj, _, ref, _ ->
+        val tname = if (ref == null || ref.length < 2) "" else ref.substring(1).lowercase(Locale.ROOT)
+        var idx = -1
+        for (i in TYPE_NAMES.indices) {
+            if (tname == TYPE_NAMES[i]) { idx = i; break }
+        }
+        if (idx < 0) UNDEF
+        else {
+            val typev = 1 shl (31 - idx)
+            val out = getprop(inj.dparent, inj.key)
+            val t = typify(out)
+            if ((t and typev) == 0) {
+                inj.errs.add(_invalidTypeMsg(inj.path, tname, t, out, "V1001"))
+                UNDEF
+            } else out
+        }
+    }
+
+    /** $ANY: accept any value. */
+    val validate_ANY: Injector = Injector { inj, _, _, _ -> getprop(inj.dparent, inj.key) }
+
+    /** $CHILD: validate every direct child of the current node against a template. */
+    val validate_CHILD: Injector = Injector { inj, _, _, _ ->
+        when (inj.mode) {
+            M_KEYPRE -> {
+                val childtm = getprop(inj.parent, inj.key)
+                val pkey = getelem(inj.path, -2)
+                var tval: Any? = getprop(inj.dparent, pkey)
+                if (tval === UNDEF || tval == null) tval = linkedMapOf<String, Any?>()
+                else if (!ismap(tval)) {
+                    val sp = slice(inj.path, -1, null)
+                    inj.errs.add(_invalidTypeMsg(sp, "object", typify(tval), tval, "V0220"))
+                    return@Injector UNDEF
+                }
+                val ckeys = keysof(tval)
+                for (ck in ckeys) {
+                    setprop(inj.parent, ck, clone(childtm))
+                    inj.keys.add(ck)
+                }
+                inj.setval(UNDEF)
+                UNDEF
+            }
+            M_VAL -> {
+                if (!islist(inj.parent)) {
+                    inj.errs.add("Invalid \$CHILD as value")
+                    return@Injector UNDEF
+                }
+                val childtm = getprop(inj.parent, 1)
+                if (inj.dparent === UNDEF || inj.dparent == null) {
+                    @Suppress("UNCHECKED_CAST")
+                    (inj.parent as MutableList<Any?>).clear()
+                    return@Injector UNDEF
+                }
+                if (!islist(inj.dparent)) {
+                    val sp = slice(inj.path, -1, null)
+                    inj.errs.add(_invalidTypeMsg(sp, "list", typify(inj.dparent), inj.dparent, "V0230"))
+                    inj.keyI = size(inj.parent)
+                    return@Injector inj.dparent
+                }
+                @Suppress("UNCHECKED_CAST")
+                val dpl = inj.dparent as List<Any?>
+                @Suppress("UNCHECKED_CAST")
+                val pl = inj.parent as MutableList<Any?>
+                for (i in dpl.indices) setprop(pl, i, clone(childtm))
+                while (pl.size > dpl.size) pl.removeAt(pl.size - 1)
+                inj.keyI = 0
+                getprop(inj.dparent, 0)
+            }
+            else -> UNDEF
+        }
+    }
+
+    /** $ONE: validate against any one of a list of alternative shapes. */
+    val validate_ONE: Injector = Injector { inj, _, _, store ->
+        if (inj.mode != M_VAL) return@Injector UNDEF
+        if (!islist(inj.parent) || inj.keyI != 0) {
+            inj.errs.add("The \$ONE validator at field " + pathify(inj.path, 1, 1) + " must be the first element of an array.")
+            return@Injector UNDEF
+        }
+        inj.keyI = size(inj.keys)
+        inj.setval(inj.dparent, 2)
+        val sp = slice(inj.path, -1, null)
+        @Suppress("UNCHECKED_CAST")
+        inj.path = if (sp is List<*>) (sp as List<String>).toMutableList() else mutableListOf()
+        inj.key = strkey(getelem(inj.path, -1))
+
+        val tvalsRaw = slice(inj.parent, 1, null)
+        @Suppress("UNCHECKED_CAST")
+        val tvals: List<Any?> = if (tvalsRaw is List<*>) tvalsRaw as List<Any?> else listOf()
+        if (tvals.isEmpty()) {
+            inj.errs.add("The \$ONE validator at field " + pathify(inj.path, 1, 1) + " must have at least one argument.")
+            return@Injector UNDEF
+        }
+
+        for (tval in tvals) {
+            val terrs = mutableListOf<Any?>()
+            val vstore = linkedMapOf<String, Any?>()
+            if (store is Map<*, *>) for ((k, v) in store) vstore[k.toString()] = v
+            vstore[S_DTOP] = inj.dparent
+            val opts = linkedMapOf<String, Any?>(
+                "extra" to vstore,
+                "errs" to terrs,
+                "meta" to inj.meta,
+            )
+            val vcurrent: Any? = try {
+                validate(inj.dparent, tval, opts)
+            } catch (e: Exception) {
+                terrs.add(e.message)
+                inj.dparent
+            }
+            inj.setval(vcurrent, -2)
+            if (terrs.isEmpty()) return@Injector UNDEF
+        }
+
+        val valdesc = StringBuilder()
+        for (i in tvals.indices) {
+            if (i > 0) valdesc.append(", ")
+            val tv = tvals[i]
+            if (tv is String) {
+                val mm = R_TRANSFORM_NAME.matcher(tv)
+                if (mm.matches()) {
+                    valdesc.append(mm.group(1).substring(1).lowercase(Locale.ROOT))
+                    continue
+                }
+            }
+            valdesc.append(stringify(tv))
+        }
+        inj.errs.add(_invalidTypeMsg(inj.path, (if (size(tvals) > 1) "one of " else "") + valdesc, typify(inj.dparent), inj.dparent, "V0210"))
+        UNDEF
+    }
+
+    /** $EXACT: validate against any one of a list of literal alternatives. */
+    val validate_EXACT: Injector = Injector { inj, _, _, _ ->
+        if (inj.mode == M_VAL) {
+            if (!islist(inj.parent) || inj.keyI != 0) {
+                inj.errs.add("The \$EXACT validator at field " + pathify(inj.path, 1, 1) + " must be the first element of an array.")
+                return@Injector UNDEF
+            }
+            inj.keyI = size(inj.keys)
+            inj.setval(inj.dparent, 2)
+            val sp = slice(inj.path, 0, -1)
+            @Suppress("UNCHECKED_CAST")
+            inj.path = if (sp is List<*>) (sp as List<String>).toMutableList() else mutableListOf()
+            inj.key = strkey(getelem(inj.path, -1))
+
+            val tvalsRaw = slice(inj.parent, 1, null)
+            @Suppress("UNCHECKED_CAST")
+            val tvals: List<Any?> = if (tvalsRaw is List<*>) tvalsRaw as List<Any?> else listOf()
+            if (tvals.isEmpty()) {
+                inj.errs.add("The \$EXACT validator at field " + pathify(inj.path, 1, 1) + " must have at least one argument.")
+                return@Injector UNDEF
+            }
+
+            var currentstr: String? = null
+            for (tval in tvals) {
+                var exactmatch = tval == inj.dparent
+                if (!exactmatch && isnode(tval)) {
+                    if (currentstr == null) currentstr = stringify(inj.dparent)
+                    val tvalstr = stringify(tval)
+                    exactmatch = tvalstr == currentstr
+                }
+                if (exactmatch) return@Injector UNDEF
+            }
+
+            val valdesc = StringBuilder()
+            for (i in tvals.indices) {
+                if (i > 0) valdesc.append(", ")
+                val tv = tvals[i]
+                if (tv is String) {
+                    val mm = R_TRANSFORM_NAME.matcher(tv)
+                    if (mm.matches()) {
+                        valdesc.append(mm.group(1).substring(1).lowercase(Locale.ROOT))
+                        continue
+                    }
+                }
+                valdesc.append(stringify(tv))
+            }
+            inj.errs.add(_invalidTypeMsg(inj.path,
+                (if (size(inj.path) > 1) "" else "value ") + "exactly equal to " + (if (size(tvals) == 1) "" else "one of ") + valdesc,
+                typify(inj.dparent), inj.dparent, "V0110"))
+            UNDEF
+        } else {
+            delprop(inj.parent, inj.key)
+            UNDEF
+        }
+    }
+
+    /** Modify hook used by validate(): runs after each inject step. */
+    val _validation: Modify = Modify { pval, key, parent, inj, _ ->
+        if (inj == null) return@Modify
+        if (pval === SKIP) return@Modify
+        val exact = (getprop(inj.meta, "`\$EXACT`", false) == true)
+        val cval = getprop(inj.dparent, key)
+        if (!exact && (cval === UNDEF || cval == null)) return@Modify
+
+        val ptype = typify(pval)
+        if ((T_STRING and ptype) != 0 && pval is String && pval.contains("$")) return@Modify
+
+        val ctype = typify(cval)
+        if (ptype != ctype && pval !== UNDEF) {
+            inj.errs.add(_invalidTypeMsg(inj.path, typename(ptype), ctype, cval, "V0010"))
+            return@Modify
+        }
+
+        if (ismap(cval)) {
+            if (!ismap(pval)) {
+                inj.errs.add(_invalidTypeMsg(inj.path, typename(ptype), ctype, cval, "V0020"))
+                return@Modify
+            }
+            val ckeys = keysof(cval)
+            val pkeys = keysof(pval)
+            if (size(pkeys) > 0 && getprop(pval, "`\$OPEN`") != true) {
+                val badkeys = mutableListOf<String>()
+                for (ck in ckeys) if (!haskey(pval, ck)) badkeys.add(ck)
+                if (badkeys.isNotEmpty()) {
+                    inj.errs.add("Unexpected keys at field " + pathify(inj.path, 1) + ": " + badkeys.joinToString(", "))
+                }
+            } else {
+                val mergeArgs = mutableListOf<Any?>(pval, cval)
+                merge(mergeArgs)
+                if (isnode(pval)) delprop(pval, "`\$OPEN`")
+            }
+        } else if (islist(cval)) {
+            if (!islist(pval)) {
+                inj.errs.add(_invalidTypeMsg(inj.path, typename(ptype), ctype, cval, "V0030"))
+            }
+        } else if (exact) {
+            if (cval != pval) {
+                val pathmsg = if (size(inj.path) > 1) "at field " + pathify(inj.path, 1) + ": " else ""
+                inj.errs.add("Value " + pathmsg + jsString(cval) + " should equal " + jsString(pval) + ".")
+            }
+        } else {
+            setprop(parent, key, cval)
+        }
+    }
+
+    /** Custom Injector used by validate(): handles meta-path syntax `<root>$=value` / `<root>$~spec`. */
+    val _validatehandler: Injector = Injector { inj, value, ref, store ->
+        if (ref != null) {
+            val m = R_META_PATH.matcher(ref)
+            if (m.matches()) {
+                val op = m.group(2)
+                if ("=" == op) {
+                    val wrap = mutableListOf<Any?>("`\$EXACT`", value)
+                    inj.setval(wrap)
+                } else {
+                    inj.setval(value)
+                }
+                inj.keyI = -1
+                return@Injector SKIP
+            }
+        }
+        _injecthandler.apply(inj, value, ref, store)
+    }
+
     fun validate(data: Any?, spec: Any?): Any? = validate(data, spec, null)
 
+    /**
+     * Canonical TS-faithful validate. Build a store with validate_* injectors plus
+     * nulled transform commands, then dispatch via transform() with _validation as
+     * modify and _validatehandler as handler. Mirrors Java validate (Struct.java:2903)
+     * and TS validate (StructUtility.ts:2347).
+     */
     fun validate(data: Any?, spec: Any?, options: Map<String, Any?>?): Any? {
-        val opts = linkedMapOf<String, Any?>()
-        if (options != null) opts.putAll(options)
-        val errsObj = opts["errs"]
-        val collect = errsObj is MutableList<*>
+        val extraRaw = options?.get("extra")
+        val errsRaw = options?.get("errs")
+        val metaRaw = options?.get("meta")
+
+        val collect = errsRaw is MutableList<*>
         @Suppress("UNCHECKED_CAST")
-        val errs = if (errsObj is MutableList<*>) errsObj as MutableList<String> else mutableListOf()
-        if (!collect) opts["errs"] = errs
-        opts["__topdata__"] = data
-        opts["__topspec__"] = spec
-        val out = validateNode(data, spec, mutableListOf(), opts, null)
+        val errs: MutableList<Any?> = if (collect) errsRaw as MutableList<Any?> else mutableListOf()
+
+        val baseStore = linkedMapOf<String, Any?>()
+        baseStore["\$DELETE"] = null
+        baseStore["\$COPY"] = null
+        baseStore["\$KEY"] = null
+        baseStore["\$META"] = null
+        baseStore["\$MERGE"] = null
+        baseStore["\$EACH"] = null
+        baseStore["\$PACK"] = null
+
+        baseStore["\$STRING"] = validate_STRING
+        baseStore["\$NUMBER"] = validate_TYPE
+        baseStore["\$INTEGER"] = validate_TYPE
+        baseStore["\$DECIMAL"] = validate_TYPE
+        baseStore["\$BOOLEAN"] = validate_TYPE
+        baseStore["\$NULL"] = validate_TYPE
+        baseStore["\$NIL"] = validate_TYPE
+        baseStore["\$MAP"] = validate_TYPE
+        baseStore["\$LIST"] = validate_TYPE
+        baseStore["\$FUNCTION"] = validate_TYPE
+        baseStore["\$INSTANCE"] = validate_TYPE
+        baseStore["\$ANY"] = validate_ANY
+        baseStore["\$CHILD"] = validate_CHILD
+        baseStore["\$ONE"] = validate_ONE
+        baseStore["\$EXACT"] = validate_EXACT
+
+        val mergeList = mutableListOf<Any?>(baseStore)
+        if (extraRaw is Map<*, *>) mergeList.add(extraRaw)
+        val errsHolder = linkedMapOf<String, Any?>("\$ERRS" to errs)
+        mergeList.add(errsHolder)
+        val store = merge(mergeList, 1)
+
+        val meta = linkedMapOf<String, Any?>()
+        if (metaRaw is Map<*, *>) for ((k, v) in metaRaw) meta[k.toString()] = v
+        if (!meta.containsKey("`\$EXACT`")) meta["`\$EXACT`"] = false
+
+        val opts = linkedMapOf<String, Any?>(
+            "meta" to meta,
+            "extra" to store,
+            "modify" to _validation,
+            "handler" to _validatehandler,
+            "errs" to errs,
+        )
+        val out = transform(data, spec, opts)
         if (errs.isNotEmpty() && !collect) {
-            throw IllegalArgumentException(errs.joinToString(" | "))
+            throw IllegalArgumentException(errs.joinToString(" | ") { it?.toString() ?: "" })
         }
         return out
     }
 
-    private fun validateNode(
-        data: Any?,
-        spec: Any?,
-        path: MutableList<String>,
-        options: MutableMap<String, Any?>,
-        dparent: Any?
-    ): Any? {
-        @Suppress("UNCHECKED_CAST")
-        val errs = options["errs"] as MutableList<String>
-        val meta = (options["meta"] as? Map<*, *>)?.let {
-            val m = linkedMapOf<String, Any?>()
-            it.forEach { (k, v) -> m[k.toString()] = v }
-            m
-        } ?: linkedMapOf()
+    /** Legacy bespoke validate kept private for fallback / debugging if needed. */
+    @Suppress("unused")
 
-        if (spec === UNDEF) return data
-        if (spec == null) return if (data === UNDEF) null else data
+    // ===========================================================================
+    // Select Injectors
+    // ===========================================================================
 
-        if (spec is String) {
-            val cmd = extractFullCommand(spec)
-            if (cmd != null) {
-                val extra = options["extra"] as? Map<*, *>
-                if (extra != null && extra.containsKey(cmd)) {
-                    val fn = extra[cmd]
-                    val inj = linkedMapOf<String, Any?>(
-                        "key" to (if (path.isEmpty()) null else path.last()),
-                        "path" to path.toMutableList(),
-                        "dparent" to dparent,
-                        "errs" to errs
-                    )
-                    val out = when (fn) {
-                        is java.util.function.Function<*, *> -> (fn as java.util.function.Function<Any?, Any?>).apply(inj)
-                        is Function1<*, *> -> (fn as (Any?) -> Any?).invoke(inj)
-                        else -> null
-                    }
-                    return out ?: data
-                }
-
-                when (cmd) {
-                    "\$ANY" -> return data
-                    "\$STRING" -> {
-                        if (data == null || data === UNDEF || data !is String) errs.add(expectedMsg(path, "string", data))
-                        else if (data.isEmpty()) errs.add("Empty string at ${pathify(path)}")
-                        return data
-                    }
-                    "\$NUMBER" -> {
-                        if (data !is Number) errs.add(expectedMsg(path, "number", data)); return data
-                    }
-                    "\$INTEGER" -> {
-                        if (data !is Number || floor(data.toDouble()) != data.toDouble()) errs.add(expectedMsg(path, "integer", data)); return data
-                    }
-                    "\$DECIMAL" -> {
-                        if (data !is Number || floor(data.toDouble()) == data.toDouble()) errs.add(expectedMsg(path, "decimal", data)); return data
-                    }
-                    "\$BOOLEAN" -> {
-                        if (data !is Boolean) errs.add(expectedMsg(path, "boolean", data)); return data
-                    }
-                    "\$MAP", "\$OBJECT" -> {
-                        if (data !is Map<*, *>) errs.add(expectedMsg(path, "map", data)); return data
-                    }
-                    "\$LIST", "\$ARRAY" -> {
-                        if (data !is List<*>) errs.add(expectedMsg(path, "list", data)); return data
-                    }
-                    "\$NULL" -> {
-                        if (data != null) errs.add(expectedMsg(path, "null", data)); return data
-                    }
-                    "\$NIL" -> {
-                        if (!(data == null || data === UNDEF)) errs.add(expectedMsg(path, "nil", data)); return data
-                    }
-                    "\$FUNCTION" -> {
-                        if (!isfunc(data)) errs.add(expectedMsg(path, "function", data)); return data
-                    }
-                    "\$INSTANCE" -> {
-                        if (data == null || data === UNDEF || data is String || data is Number || data is Boolean || data is Map<*, *> || data is List<*> || isfunc(data)) {
-                            errs.add(expectedMsg(path, "instance", data))
-                        }
-                        return data
-                    }
-                }
-                return data
-            }
-
-            val m = Regex("^`([^`$]+)\\$(=|~)([^`]+)`$").matchEntire(spec)
-            if (m != null) {
-                val mroot = m.groupValues[1]
-                val op = m.groupValues[2]
-                val mpath = m.groupValues[3]
-                val mv = getpath(meta, "$mroot.$mpath")
-                if (op == "=") {
-                    if (!deepEqualNode(data, mv)) errs.add(expectedExactMsg(path, mv, data))
-                } else {
-                    val mt = typify(mv)
-                    val dt = typify(data)
-                    if (mt != dt) errs.add(expectedMsg(path, typename(mt), data))
-                }
-                return data
-            }
-
-            if (spec.length >= 2 && spec.startsWith("`") && spec.endsWith("`")) {
-                val raw = spec.substring(1, spec.length - 1)
-                val ref = unescapeInjectRef(raw)
-                if (ref != null && !ref.startsWith("$")) {
-                    if (data !== UNDEF) return data
-                    val store = linkedMapOf<String, Any?>(S_DTOP to options["__topdata__"])
-                    val inj = linkedMapOf<String, Any?>("base" to S_DTOP)
-                    val resolved = getpath(store, ref, inj)
-                    return if (resolved === UNDEF) spec else resolved
-                }
-            }
-
-            if (data === UNDEF) return spec
-            val exact = meta["`\$EXACT`"] == true || meta["\$EXACT"] == true
-            if (exact) {
-                if (data != spec) errs.add(valueEqualMsg(path, data, spec))
-            } else if (data !is String) {
-                errs.add(expectedMsg(path, "string", data))
-            }
-            return data
-        }
-
-        if (spec is Map<*, *>) {
-            val specMap = linkedMapOf<String, Any?>().also { spec.forEach { (k, v) -> it[k.toString()] = v } }
-            var out = if (data is Map<*, *>) {
-                linkedMapOf<String, Any?>().also { data.forEach { (k, v) -> it[k.toString()] = v } }
-            } else linkedMapOf()
-
-            var childTemplate: Any? = null
-            for ((k, v) in specMap) {
-                if (extractFullCommand(k) == "\$CHILD") childTemplate = v
-            }
-            if (childTemplate != null && data is Map<*, *>) {
-                out = linkedMapOf()
-                for ((kAny, v) in data) {
-                    val k = kAny.toString()
-                    val cpath = path.toMutableList().apply { add(k) }
-                    out[k] = validateNode(v, clone(childTemplate), cpath, options, data)
-                }
-                return out
-            }
-
-            if (data is Map<*, *> && specMap.isNotEmpty() && specMap["`\$OPEN`"] != true) {
-                for ((kAny, _) in data) {
-                    val k = kAny.toString()
-                    if (!specMap.containsKey(k) && !k.startsWith("`$")) {
-                        errs.add("Unexpected keys at field ${pathify(path)}: $k")
-                    }
-                }
-            }
-
-            for ((k, sv) in specMap) {
-                if (extractFullCommand(k) != null) continue
-                val cpath = path.toMutableList().apply { add(k) }
-                val dval = if (data is Map<*, *>) getprop(data, k, UNDEF) else UNDEF
-                if (dval === UNDEF) {
-                    if (sv is String && extractFullCommand(sv) != null) {
-                        val v = validateNode(UNDEF, sv, cpath, options, data)
-                        if (v !== UNDEF && v != null) out[k] = v
-                        continue
-                    }
-                    if (sv is List<*> && extractFullCommand(getelem(sv, 0)) == "\$CHILD") {
-                        out[k] = mutableListOf<Any?>()
-                        continue
-                    }
-                    out[k] = validateNode(UNDEF, sv, cpath, options, data)
-                } else {
-                    out[k] = validateNode(dval, sv, cpath, options, data)
-                }
-            }
-            return out
-        }
-
-        if (spec is List<*>) {
-            val cmd = extractFullCommand(getelem(spec, 0))
-            if (cmd == "\$REF" && spec.size >= 2) {
-                if (data !== UNDEF) return data
-                val rootSpec = options["__topspec__"]
-                val refSpec = getpath(rootSpec, spec[1]?.toString() ?: "")
-                if (refSpec === UNDEF) return data
-                return validateNode(UNDEF, clone(refSpec), path, options, dparent)
-            }
-            if (cmd == "\$EXACT" && spec.size >= 2) {
-                for (i in 1 until spec.size) if (deepEqualNode(data, spec[i])) return data
-                if (spec.size == 2) errs.add(expectedExactMsg(path, spec[1], data))
-                else errs.add(expectedExactDescMsg(path, "one of ${describeValues(spec.subList(1, spec.size))}", data))
-                return data
-            }
-            if (cmd == "\$ONE" && spec.size >= 2) {
-                for (i in 1 until spec.size) if (validateMatches(data, spec[i])) return data
-                errs.add(expectedMsg(path, "one of ${describeValues(spec.subList(1, spec.size))}", data))
-                return data
-            }
-            if (cmd == "\$CHILD" && spec.size >= 2) {
-                val tmpl = spec[1]
-                if (data is List<*>) {
-                    val out = mutableListOf<Any?>()
-                    for (i in data.indices) {
-                        val cpath = path.toMutableList().apply { add(strkey(i)) }
-                        out.add(validateNode(data[i], clone(tmpl), cpath, options, data))
-                    }
-                    return out
-                }
-                if (data !== UNDEF) errs.add(expectedMsg(path, "list", data))
-                return data
-            }
-            val out = if (data is List<*>) data.toMutableList() else mutableListOf()
-            for (i in spec.indices) {
-                val cpath = path.toMutableList().apply { add(strkey(i)) }
-                val dval = if (data is List<*>) getprop(data, i, UNDEF) else UNDEF
-                val sv = spec[i]
-                if (dval === UNDEF) {
-                    if (sv is String && extractFullCommand(sv) != null) continue
-                    if (i < out.size) out[i] = clone(sv) else out.add(clone(sv))
-                } else {
-                    val v = validateNode(dval, sv, cpath, options, data)
-                    if (i < out.size) out[i] = v else out.add(v)
-                }
-            }
-            return out
-        }
-
-        val exact = meta["`\$EXACT`"] == true || meta["\$EXACT"] == true
-        if (data === UNDEF) return clone(spec)
-        if (exact) {
-            if (!deepEqualNode(data, spec)) errs.add(valueEqualMsg(path, data, spec))
-            return data
-        }
-        if (typify(data) != typify(spec)) errs.add(expectedMsg(path, typename(typify(spec)), data))
-        return if (data === UNDEF) clone(spec) else data
+    /** Build the recursive validate options used by select_*. */
+    private fun selectRecOpts(store: Any?, point: Any?, meta: MutableMap<String, Any?>, errs: MutableList<Any?>): MutableMap<String, Any?> {
+        val vstore = linkedMapOf<String, Any?>()
+        if (store is Map<*, *>) for ((k, v) in store) vstore[k.toString()] = v
+        vstore[S_DTOP] = point
+        return linkedMapOf("errs" to errs, "meta" to meta, "extra" to vstore)
     }
 
-    private fun expectedMsg(path: MutableList<String>, expected: String, found: Any?): String =
-        if (path.isEmpty()) "Expected $expected, but found ${foundDesc(found)}."
-        else "Expected field ${pathify(path)} to be $expected, but found ${foundDesc(found)}."
-
-    private fun expectedExactMsg(path: MutableList<String>, expected: Any?, found: Any?): String =
-        expectedExactDescMsg(path, stringify(expected), found)
-
-    private fun expectedExactDescMsg(path: MutableList<String>, expectedDesc: String, found: Any?): String =
-        if (path.isEmpty()) "Expected value exactly equal to $expectedDesc, but found ${foundDesc(found)}."
-        else "Expected field ${pathify(path)} to be exactly equal to $expectedDesc, but found ${foundDesc(found)}."
-
-    private fun valueEqualMsg(path: MutableList<String>, data: Any?, spec: Any?): String =
-        if (path.isEmpty()) "Value ${stringify(data)} should equal ${stringify(spec)}."
-        else "Value at field ${pathify(path)}: ${stringify(data)} should equal ${stringify(spec)}."
-
-    private fun foundDesc(found: Any?): String =
-        if (found == null || found === UNDEF) "no value" else "${typename(typify(found))}: ${stringify(found)}"
-
-    private fun describeValues(vals: List<Any?>): String = vals.joinToString(", ") { v ->
-        if (v is String) {
-            val cmd = extractFullCommand(v)
-            if (cmd != null) return@joinToString cmd.substring(1).lowercase(Locale.ROOT)
-        }
-        stringify(v)
-    }
-
-    private fun deepEqualNode(a: Any?, b: Any?): Boolean = normalizeNode(a) == normalizeNode(b)
-
-    private fun normalizeNode(v: Any?): Any? = when (v) {
-        is Number -> {
-            val d = v.toDouble()
-            if (floor(d) == d) d.toLong() else d
-        }
-        is List<*> -> v.map { normalizeNode(it) }
-        is Map<*, *> -> linkedMapOf<String, Any?>().also { v.forEach { (k, vv) -> it[k.toString()] = normalizeNode(vv) } }
-        else -> v
-    }
-
-    private fun validateMatches(data: Any?, spec: Any?): Boolean {
-        if (spec == null) return data == null
-        if (spec is String) {
-            val cmd = extractFullCommand(spec) ?: return data == spec
-            return when (cmd) {
-                "\$STRING" -> data is String && data.isNotEmpty()
-                "\$NUMBER" -> data is Number
-                "\$INTEGER" -> data is Number && floor(data.toDouble()) == data.toDouble()
-                "\$DECIMAL" -> data is Number && floor(data.toDouble()) != data.toDouble()
-                "\$BOOLEAN" -> data is Boolean
-                "\$MAP", "\$OBJECT" -> data is Map<*, *>
-                "\$LIST", "\$ARRAY" -> data is List<*>
-                "\$NULL" -> data == null
-                "\$NIL" -> data == null || data === UNDEF
-                else -> true
+    /** $AND: require every sub-term to validate against the current point. */
+    val select_AND: Injector = Injector { inj, _, _, store ->
+        if (inj.mode != M_KEYPRE) return@Injector UNDEF
+        val terms = getprop(inj.parent, inj.key)
+        if (terms !is List<*>) return@Injector UNDEF
+        val ppath = slice(inj.path, -1, null)
+        val point = getpath(store, ppath)
+        for (term in terms) {
+            val terrs = mutableListOf<Any?>()
+            val opts = selectRecOpts(store, point, inj.meta, terrs)
+            try { validate(point, term, opts) } catch (e: Exception) { terrs.add(e.message) }
+            if (terrs.isNotEmpty()) {
+                inj.errs.add("AND:${pathify(ppath)}: ${stringify(point)} fail:${stringify(terms)}")
             }
         }
-        if (spec is Number || spec is Boolean) return spec == data
-        return true
+        val gkey = getelem(inj.path, -2)
+        val gp = getelem(inj.nodes, -2)
+        setprop(gp, gkey, point)
+        UNDEF
     }
 
-    fun select(children: Any?, query: Any?): MutableList<Any?> {
-        if (!isnode(children)) return mutableListOf()
-        val out = mutableListOf<Any?>()
-        when (children) {
-            is Map<*, *> -> {
-                for ((kAny, v) in children) {
-                    val key = kAny.toString()
-                    var child = clone(v)
-                    if (child is Map<*, *>) {
-                        val node = linkedMapOf<String, Any?>()
-                        child.forEach { (ck, cv) -> node[ck.toString()] = cv }
-                        node[S_DKEY] = key
-                        child = node
-                    }
-                    if (selectMatch(child, query)) out.add(child)
-                }
-            }
-            is List<*> -> {
-                for (i in children.indices) {
-                    var child = clone(children[i])
-                    if (child is Map<*, *>) {
-                        val node = linkedMapOf<String, Any?>()
-                        child.forEach { (ck, cv) -> node[ck.toString()] = cv }
-                        node[S_DKEY] = i
-                        child = node
-                    }
-                    if (selectMatch(child, query)) out.add(child)
-                }
+    /** $OR: require at least one sub-term to validate. */
+    val select_OR: Injector = Injector { inj, _, _, store ->
+        if (inj.mode != M_KEYPRE) return@Injector UNDEF
+        val terms = getprop(inj.parent, inj.key)
+        if (terms !is List<*>) return@Injector UNDEF
+        val ppath = slice(inj.path, -1, null)
+        val point = getpath(store, ppath)
+        for (term in terms) {
+            val terrs = mutableListOf<Any?>()
+            val opts = selectRecOpts(store, point, inj.meta, terrs)
+            try { validate(point, term, opts) } catch (e: Exception) { terrs.add(e.message) }
+            if (terrs.isEmpty()) {
+                val gkey = getelem(inj.path, -2)
+                val gp = getelem(inj.nodes, -2)
+                setprop(gp, gkey, point)
+                return@Injector UNDEF
             }
         }
-        return out
+        inj.errs.add("OR:${pathify(ppath)}: ${stringify(point)} fail:${stringify(terms)}")
+        UNDEF
     }
 
-    private fun selectMatch(child: Any?, query: Any?): Boolean = selectEval(child, query)
-
-    private fun selectEval(point: Any?, query: Any?): Boolean {
-        if (query !is Map<*, *>) return deepEqualNode(point, query)
-        val q = linkedMapOf<String, Any?>()
-        query.forEach { (k, v) -> q[k.toString()] = v }
-        if (q.isEmpty()) return true
-
-        for ((key, term) in q) {
-            val cmd = extractFullCommand(key)
-            if (cmd != null) {
-                if (!selectEvalCommand(point, cmd, term)) return false
-                continue
-            }
-            if (point !is Map<*, *>) return false
-            val pointMap = linkedMapOf<String, Any?>().also { point.forEach { (k, v) -> it[k.toString()] = v } }
-            if (!pointMap.containsKey(key)) return false
-            val child = pointMap[key]
-            if (!selectEval(child, term)) return false
+    /** $NOT: require the sub-term to fail validation. */
+    val select_NOT: Injector = Injector { inj, _, _, store ->
+        if (inj.mode != M_KEYPRE) return@Injector UNDEF
+        val term = getprop(inj.parent, inj.key)
+        val ppath = slice(inj.path, -1, null)
+        val point = getpath(store, ppath)
+        val terrs = mutableListOf<Any?>()
+        val opts = selectRecOpts(store, point, inj.meta, terrs)
+        try { validate(point, term, opts) } catch (e: Exception) { terrs.add(e.message) }
+        if (terrs.isEmpty()) {
+            inj.errs.add("NOT:${pathify(ppath)}: ${stringify(point)} fail:${stringify(term)}")
         }
-        return true
+        val gkey = getelem(inj.path, -2)
+        val gp = getelem(inj.nodes, -2)
+        setprop(gp, gkey, point)
+        UNDEF
     }
 
-    private fun selectEvalCommand(point: Any?, cmd: String, term: Any?): Boolean {
-        return when (cmd) {
-            "\$AND" -> {
-                if (term !is List<*>) false else term.all { selectEval(point, it) }
-            }
-            "\$OR" -> {
-                if (term !is List<*>) false else term.any { selectEval(point, it) }
-            }
-            "\$NOT" -> !selectEval(point, term)
-            "\$GT", "\$LT", "\$GTE", "\$LTE" -> selectCompare(point, term, cmd)
-            "\$LIKE" -> {
-                if (term !is String) false else Pattern.compile(term).matcher(stringify(point)).find()
-            }
-            else -> false
-        }
-    }
-
-    private fun selectCompare(point: Any?, term: Any?, op: String): Boolean {
+    /** $GT/$LT/$GTE/$LTE/$LIKE comparators dispatched by ref. */
+    val select_CMP: Injector = Injector { inj, _, ref, store ->
+        if (inj.mode != M_KEYPRE) return@Injector UNDEF
+        val term = getprop(inj.parent, inj.key)
+        val gkey = getelem(inj.path, -2)
+        val ppath = slice(inj.path, -1, null)
+        val point = getpath(store, ppath)
+        var pass = false
         if (point is Number && term is Number) {
-            val a = point.toDouble()
-            val b = term.toDouble()
-            return when (op) {
+            val a = point.toDouble(); val b = term.toDouble()
+            pass = when (ref) {
                 "\$GT" -> a > b
                 "\$LT" -> a < b
                 "\$GTE" -> a >= b
                 "\$LTE" -> a <= b
                 else -> false
             }
+        } else if ("\$LIKE" == ref && term is String) {
+            pass = try { Pattern.compile(term).matcher(stringify(point)).find() } catch (_: Exception) { false }
         }
-        if (point is Comparable<*> && term != null && point::class == term::class) {
-            @Suppress("UNCHECKED_CAST")
-            val cmp = (point as Comparable<Any?>).compareTo(term)
-            return when (op) {
-                "\$GT" -> cmp > 0
-                "\$LT" -> cmp < 0
-                "\$GTE" -> cmp >= 0
-                "\$LTE" -> cmp <= 0
-                else -> false
+        if (pass) {
+            val gp = getelem(inj.nodes, -2)
+            setprop(gp, gkey, point)
+        } else {
+            inj.errs.add("CMP: ${pathify(ppath)}: ${stringify(point)} fail:$ref ${stringify(term)}")
+        }
+        UNDEF
+    }
+
+    /**
+     * Canonical TS-faithful select. Tag each child node with $KEY, walk the
+     * (cloned) query annotating every map with `$OPEN`, then run validate
+     * against each child with the select_* injectors as extras and
+     * meta.`$EXACT` = true. Mirrors Java select (Struct.java:2981).
+     */
+    fun select(children: Any?, query: Any?): MutableList<Any?> {
+        if (!isnode(children)) return mutableListOf()
+
+        val childList = mutableListOf<Any?>()
+        if (ismap(children)) {
+            for ((kAny, node) in (children as Map<*, *>)) {
+                if (isnode(node)) setprop(node, S_DKEY, kAny.toString())
+                childList.add(node)
+            }
+        } else {
+            val cl = children as List<*>
+            for (i in cl.indices) {
+                val node = cl[i]
+                if (isnode(node)) setprop(node, S_DKEY, i.toLong())
+                childList.add(node)
             }
         }
-        return false
+
+        val meta = linkedMapOf<String, Any?>("`\$EXACT`" to true)
+
+        val extra = linkedMapOf<String, Any?>(
+            "\$AND" to select_AND,
+            "\$OR" to select_OR,
+            "\$NOT" to select_NOT,
+            "\$GT" to select_CMP,
+            "\$LT" to select_CMP,
+            "\$GTE" to select_CMP,
+            "\$LTE" to select_CMP,
+            "\$LIKE" to select_CMP,
+        )
+
+        val q = clone(query)
+        walk(q, WalkApply { _, v, _, _ ->
+            if (ismap(v)) setprop(v, "`\$OPEN`", getprop(v, "`\$OPEN`", true))
+            v
+        })
+
+        val results = mutableListOf<Any?>()
+        for (child in childList) {
+            val errs = mutableListOf<Any?>()
+            val opts = linkedMapOf<String, Any?>("errs" to errs, "meta" to meta, "extra" to extra)
+            try { validate(child, clone(q), opts) } catch (e: Exception) { errs.add(e.message) }
+            if (errs.isEmpty()) results.add(child)
+        }
+        return results
     }
 }

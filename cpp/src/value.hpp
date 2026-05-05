@@ -383,8 +383,18 @@ inline bool operator==(const Value& a, const Value& b) {
   if (a.is_injector() || a.is_modify()) {
     return false;
   }
-  // Scalars: variant value-equality.
-  return a.storage == b.storage;
+  // Scalars: compare per-alternative explicitly. We deliberately do NOT use
+  // `a.storage == b.storage` because std::variant<...>::operator== forces the
+  // compiler to instantiate operator== for every alternative — and the
+  // std::function alternatives have a deleted operator== under libc++ (C++17+),
+  // which causes a hard compile error even though those branches are unreachable
+  // here (we already short-circuited above).
+  if (a.is_undef())  return true;          // both monostate
+  if (a.is_null())   return true;          // both nullptr_t
+  if (a.is_bool())   return a.as_bool() == b.as_bool();
+  if (a.is_string()) return a.as_string() == b.as_string();
+  // Numbers were already handled by the is_number() branch above.
+  return false;
 }
 
 // ===========================================================================

@@ -654,6 +654,13 @@ public static class StructUtils
                 Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
             };
             string str = JsonSerializer.Serialize(SortKeys(val), opts);
+            // System.Text.Json on .NET 8 emits Environment.NewLine for indented
+            // output, which is "\r\n" on Windows. The TS-canonical corpus expects
+            // "\n", so normalise here. (.NET 9 adds JsonWriterOptions.NewLine.)
+            if (indent > 0)
+            {
+                str = str.Replace("\r\n", "\n");
+            }
             // System.Text.Json always uses 2 spaces per level; rescale to match TS JSON.stringify(,,indent).
             if (indent > 0 && indent != 2)
             {
