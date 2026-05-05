@@ -1,7 +1,19 @@
 # Struct for C#
 
 > C# / .NET port of the canonical TypeScript implementation.
-> Status: in progress.  See [`../REPORT.md`](../REPORT.md) for parity.
+>
+> **Status: complete.**  Full TS-canonical parity: all 40 functions,
+> 15 type bit-flags, 3 mode constants (`M.KeyPre`/`M.KeyPost`/`M.Val`),
+> `SKIP`/`DELETE` sentinels, and the `InjectState` machinery.
+> `Inject`/`Transform`/`Validate`/`Select` all dispatch through the
+> canonical injector machinery: 11 transform commands, 6 validate
+> checkers, 4 select operators.
+>
+> Passes the full shared corpus (1178/1178). The xUnit suite
+> (`StructTest.cs`, 78 tests) is the green-bar regression baseline;
+> the `CorpusScoreboard` test mirrors the Java/C++ runners and writes
+> `corpus-scoreboard.json` after each run with per-`.jsonic`-file pass
+> counts. The committed baseline lives at `test-baseline.json`.
 
 For motivation, language-neutral concepts, and the cross-language
 parity matrix, see the [top-level README](../README.md).

@@ -157,7 +157,9 @@ public class StructTests
             var m = input as Dictionary<string, object?>;
             if (m == null) return StructUtils.Stringify(input);
 
-            object? val = m.TryGetValue("val", out object? v) ? v : null;
+            // Absent "val" key -> NONE (TS undefined) so Stringify returns "".
+            // Present-but-null -> JSON null (Stringify returns "null").
+            object? val = m.ContainsKey("val") ? m["val"] : StructUtils.NONE;
             if (val is string s && s == Runner.NULLMARK) val = "null";
 
             if (m.TryGetValue("max", out object? maxObj) && maxObj != null)
@@ -320,7 +322,9 @@ public class StructTests
         Assert.Equal("1",      StructUtils.Stringify(1));
         Assert.Equal("true",   StructUtils.Stringify(true));
         Assert.Equal("hello",  StructUtils.Stringify("hello"));
-        Assert.Equal(S_MT,     StructUtils.Stringify(null));
+        // Match TS: NONE (undefined) -> ""; JSON null -> "null".
+        Assert.Equal(S_MT,     StructUtils.Stringify(StructUtils.NONE));
+        Assert.Equal("null",   StructUtils.Stringify(null));
     }
 
     private const string S_MT = "";
@@ -468,13 +472,19 @@ public class StructTests
 
         WalkApply makeWalkLog(List<object?> log)
         {
+            // TS Stringify(undefined)="" but Stringify(null)="null". The C#
+            // walk passes null at root for both key and parent — render those
+            // as empty string to match the corpus log format ("p=", "k=").
+            string Render(object? v) =>
+                v == null ? "" : StructUtils.Stringify(v);
+
             return (key, val, parent, path) =>
             {
                 string ks = key is string sk ? sk : "";
                 string entry =
                     "k=" + StructUtils.Stringify(ks) +
-                    ", v=" + StructUtils.Stringify(val) +
-                    ", p=" + StructUtils.Stringify(parent) +
+                    ", v=" + Render(val) +
+                    ", p=" + Render(parent) +
                     ", t=" + StructUtils.Pathify(path);
                 log.Add(entry);
                 return val;

@@ -2,11 +2,17 @@
 
 > C++ port of the canonical TypeScript implementation.
 >
-> **Status: partial.**  Basic type/property utilities only.  The
-> major subsystems (`inject`, `transform`, `validate`, `select`)
-> and path operations (`getpath`, `setpath`) are not yet implemented.
-> Use the canonical TS or one of the complete ports for production
-> work.
+> **Status: complete.**  Full TS-canonical parity: all 40 functions,
+> 15 type bit-flags, 3 mode constants (`M_KEYPRE`/`M_KEYPOST`/`M_VAL`),
+> `SKIP`/`DELETE` sentinels (pointer-identity), and the `Injection`
+> state machine.  `inject`/`transform`/`validate`/`select` all
+> dispatch through the canonical injector machinery: 11 transform
+> commands, 6 validate checkers, 4 select operators.
+>
+> Passes the full shared corpus (1178/1178). Run locally with
+> `make build` from `cpp/`. Per-file pass counts are written to
+> `corpus-scoreboard.json` after each run; the committed baseline
+> lives at `test-baseline.json`.
 
 For motivation, language-neutral concepts, and the cross-language
 parity matrix, see the [top-level README](../README.md) and
@@ -19,15 +25,25 @@ In the monorepo:
 
 ```bash
 cd cpp
-make build
-make test
+make build       # smoke + corpus
+make smoke       # just the smoke test
+make corpus      # just the corpus driver
+make sanitize    # build + run with ASan + UBSan
 ```
 
-The library is header-only at
-[`src/voxgig_struct.hpp`](./src/voxgig_struct.hpp), namespace
-`VoxgigStruct`.  It depends on
-[nlohmann/json](https://github.com/nlohmann/json) for the JSON
-container.
+The library is header-only across three files in `src/`:
+- [`value.hpp`](./src/value.hpp) — `Value` (std::variant), `OrderedMap`,
+  `Sentinel`, type bit-flags, predicates.
+- [`value_io.hpp`](./src/value_io.hpp) — JSON parse/serialise via the
+  `nlohmann::json` bridge.
+- [`voxgig_struct.hpp`](./src/voxgig_struct.hpp) — main API: utilities,
+  `getpath`/`setpath`/`walk`/`merge`/`inject`/`transform`/`validate`/
+  `select` plus all `transform_*`/`validate_*`/`select_*` injectors.
+
+Namespace `voxgig::structlib`.  Requires C++17 (for `std::variant` /
+structured bindings).  Depends on [nlohmann/json](https://github.com/nlohmann/json)
+only for the JSON-text parser/serialiser bridge — runtime values use
+the custom `Value` type.
 
 ```cpp
 #include "voxgig_struct.hpp"
