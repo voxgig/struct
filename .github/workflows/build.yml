@@ -122,6 +122,22 @@ jobs:
         working-directory: ./php
         run: vendor/bin/phpunit
 
+  test-rs:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build
+        working-directory: ./rs
+        run: cargo build --all-targets
+      - name: Run tests
+        working-directory: ./rs
+        run: cargo test
+
   test-cs:
     runs-on: ${{ matrix.os }}
     strategy:
