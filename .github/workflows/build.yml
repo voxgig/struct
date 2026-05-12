@@ -9,6 +9,11 @@ on:
 permissions:
   contents: read
 
+env:
+  # actions/checkout and the setup-* actions still bundle the deprecated
+  # Node 20 runtime; opt them into Node 24 now (default from 2026-06-02).
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   test-ts:
     runs-on: ${{ matrix.os }}
