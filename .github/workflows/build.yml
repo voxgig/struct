@@ -173,7 +173,7 @@ jobs:
       - name: Run tests (Windows)
         if: runner.os == 'Windows'
         working-directory: ./kt
-        shell: cmd
+        shell: pwsh
         run: .\gradlew.bat test
 
   test-java:
