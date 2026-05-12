@@ -195,9 +195,7 @@
     "cinj",
     "startin",
     "injdefs",
-    "luassert",
-    "CodeQL",
-    "codeql"
+    "luassert"
   ],
   "ignoreRegExpList": [
     "/`\\$[A-Z]+`/",
