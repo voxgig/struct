@@ -90,7 +90,12 @@ jobs:
         with:
           php-version: '8.2'
       - working-directory: ./php
+        # Use a fresh COMPOSER_HOME: setup-php intermittently writes a
+        # malformed github-oauth token to its auth.json, which makes
+        # `composer install` abort. We don't need authenticated installs here.
         run: composer install
+        env:
+          COMPOSER_HOME: ${{ runner.temp }}/composer-home
       - working-directory: ./php
         run: make lint
 

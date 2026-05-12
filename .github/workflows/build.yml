@@ -120,7 +120,11 @@ jobs:
           php-version: '8.1'
       - name: Install dependencies
         working-directory: ./php
+        # setup-php intermittently writes a malformed github-oauth token to its
+        # auth.json; a fresh COMPOSER_HOME sidesteps it (no auth needed here).
         run: composer install
+        env:
+          COMPOSER_HOME: ${{ runner.temp }}/composer-home
       - name: Run tests
         working-directory: ./php
         run: vendor/bin/phpunit

@@ -175,7 +175,11 @@ jobs:
         with:
           php-version: '8.2'
       - working-directory: ./php
+        # Fresh COMPOSER_HOME: avoids the malformed github-oauth token that
+        # setup-php intermittently writes to its auth.json.
         run: composer install && make audit
+        env:
+          COMPOSER_HOME: ${{ runner.temp }}/composer-home
 
   audit-rs:
     name: audit (rs — cargo audit)
