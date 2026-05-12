@@ -533,11 +533,130 @@ fn corpus() {
         };
         walk(vin, Some(&mut walkpath), None, None)
     });
+    // walk.log — three runs (after-only / before-only / both) of a logging callback.
+    {
+        let log_spec = vget_path(&s, &["walk", "log"]);
+        let input = clone(&vget(&log_spec, "in"));
+        let want = vget(&log_spec, "out");
+        let mk_log = |inp: &Value, before: bool, after: bool| -> Value {
+            let lines = Rc::new(RefCell::new(Vec::<Value>::new()));
+            let lc = lines.clone();
+            let mut cb = move |k: &Value, v: &Value, p: &Value, path: &[String]| -> Value {
+                lc.borrow_mut().push(Value::str(format!(
+                    "k={}, v={}, p={}, t={}",
+                    stringify(k, None, false),
+                    stringify(v, None, false),
+                    stringify(p, None, false),
+                    pathify(&Value::list(path.iter().cloned().map(Value::Str).collect()), None, None),
+                )));
+                v.clone()
+            };
+            let mut cb2 = {
+                let lc = lines.clone();
+                move |k: &Value, v: &Value, p: &Value, path: &[String]| -> Value {
+                    lc.borrow_mut().push(Value::str(format!(
+                        "k={}, v={}, p={}, t={}",
+                        stringify(k, None, false),
+                        stringify(v, None, false),
+                        stringify(p, None, false),
+                        pathify(&Value::list(path.iter().cloned().map(Value::Str).collect()), None, None),
+                    )));
+                    v.clone()
+                }
+            };
+            let _ = walk(
+                clone(inp),
+                if before { Some(&mut cb) } else { None },
+                if after { Some(&mut cb2) } else { None },
+                None,
+            );
+            let out = Value::list(lines.borrow().clone());
+            out
+        };
+        for (label, b, a) in [("after", false, true), ("before", true, false), ("both", true, true)] {
+            let got = mk_log(&input, b, a);
+            let exp = vget(&want, label);
+            if got == exp {
+                run.passed += 1;
+            } else {
+                run.failures.push(format!(
+                    "walk-log/{label}: got {}, want {}",
+                    stringify(&got, Some(220), false),
+                    stringify(&exp, Some(220), false)
+                ));
+            }
+        }
+    }
+    // walk.depth — reconstruct `src` truncated at `maxdepth`.
+    run.run_set(&set!("walk", "depth"), false, "walk-depth", |vin| {
+        let top: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::Noval));
+        let cur: Rc<RefCell<Value>> = Rc::new(RefCell::new(Value::Noval));
+        let (t, c) = (top.clone(), cur.clone());
+        let mut copy = move |k: &Value, val: &Value, _p: &Value, _path: &[String]| -> Value {
+            if k.is_noval() || matches!(val, Value::List(_) | Value::Map(_)) {
+                let child = if matches!(val, Value::List(_)) {
+                    Value::empty_list()
+                } else {
+                    Value::empty_map()
+                };
+                if k.is_noval() {
+                    *t.borrow_mut() = child.clone();
+                    *c.borrow_mut() = child;
+                } else {
+                    let curv = c.borrow().clone();
+                    set_prop(curv, k, child.clone());
+                    *c.borrow_mut() = child;
+                }
+            } else {
+                let curv = c.borrow().clone();
+                set_prop(curv, k, val.clone());
+            }
+            val.clone()
+        };
+        let _ = walk(vget(&vin, "src"), Some(&mut copy), None, as_i64_opt(&vget(&vin, "maxdepth")));
+        let r = top.borrow().clone();
+        r
+    });
+    // walk.copy — deep-copy via a depth-indexed scratch list.
+    run.run_set(&set!("walk", "copy"), true, "walk-copy", |vin| {
+        let cur: Rc<RefCell<Vec<Value>>> = Rc::new(RefCell::new(Vec::new()));
+        let c = cur.clone();
+        let mut walkcopy = move |k: &Value, val: &Value, _p: &Value, path: &[String]| -> Value {
+            if k.is_noval() {
+                let head = match val {
+                    Value::Map(_) => Value::empty_map(),
+                    Value::List(_) => Value::empty_list(),
+                    other => other.clone(),
+                };
+                *c.borrow_mut() = vec![head];
+                return val.clone();
+            }
+            let i = path.len();
+            let mut v = val.clone();
+            if matches!(val, Value::List(_) | Value::Map(_)) {
+                v = if is_map(val) { Value::empty_map() } else { Value::empty_list() };
+                let mut cb = c.borrow_mut();
+                while cb.len() <= i {
+                    cb.push(Value::Noval);
+                }
+                cb[i] = v.clone();
+            }
+            let parent_copy = c.borrow().get(i.saturating_sub(1)).cloned().unwrap_or(Value::Noval);
+            set_prop(parent_copy, k, v);
+            val.clone()
+        };
+        let _ = walk(vin, Some(&mut walkcopy), None, None);
+        let r = cur.borrow().first().cloned().unwrap_or(Value::Noval);
+        r
+    });
 
     // -------- merge --------------------------------------------------
     for name in ["cases", "array", "integrity"] {
         run.run_set(&set!("merge", name), true, &format!("merge-{name}"), |vin| merge(&vin, None));
     }
+    run.run_set(&set!("merge", "depth"), true, "merge-depth", |vin| {
+        merge(&vget(&vin, "val"), as_i64_opt(&vget(&vin, "depth")))
+    });
     // merge.basic is a single { in, out } object (not a `set`); handle inline.
     {
         let mb = vget(&s, "merge");

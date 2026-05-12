@@ -1,6 +1,6 @@
 # Rust Port — Porting Plan & Challenge Analysis
 
-> Status: **complete.** The full shared corpus passes (`cargo test` → 1122
+> Status: **complete.** The full shared corpus passes (`cargo test` → 1187
 > checks; `cargo clippy` clean): foundation (`Value` type, constants, jsnum
 > coercions), all minor utilities, `walk`, `merge`, `getpath`/`setpath`, the
 > `Injection` state machine, `inject` / `_injectstr` / `_injecthandler`,

@@ -7,7 +7,7 @@ The full challenge analysis and the original phased roadmap live in
 ## Status
 
 **Complete** against the shared corpus: all eight `struct/*` test files plus
-the top-level `primary.check` SDK-integration test pass (`cargo test` → 1122
+the top-level `primary.check` SDK-integration test pass (`cargo test` → 1187
 checks). `cargo clippy` is clean.
 
 | Subsystem | State | Corpus |
@@ -22,7 +22,7 @@ checks). `cargo clippy` is clean.
 | `validate` + all 15 checkers (`$STRING`, `$NUMBER`/`$INTEGER`/`$DECIMAL`/`$BOOLEAN`/`$NULL`/`$NIL`/`$MAP`/`$LIST`/`$FUNCTION`/`$INSTANCE` via `validate_TYPE`, `$ANY`, `$CHILD`, `$ONE`, `$EXACT`) + `_validation` (modify hook) + `_validatehandler` + `_invalidTypeMsg` + `$OPEN` open-objects | done | `validate.*` ✓ |
 | `select` + operators (`$AND`, `$OR`, `$NOT`, `$GT`, `$LT`, `$GTE`, `$LTE`, `$LIKE`) | done | `select.*` ✓ |
 | Top-level `primary.check` (mock SDK: `check(ctx)` + client options) | done | `primary.check` ✓ |
-| Corpus test runner (`tests/corpus.rs`) | covers the full `test.json` (1122 checks) | — |
+| Corpus test runner (`tests/corpus.rs`) | covers the full `test.json` (1187 checks) | — |
 
 ## Key decisions (see PLAN.md for the reasoning)
 
