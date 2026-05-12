@@ -29,8 +29,8 @@ ROOT = Path(__file__).resolve().parent.parent
 # Ports the README marks "Complete" — these must be in full parity with the
 # canonical TypeScript API.  ("ts" itself is the canonical source, so it is
 # trivially in parity and is not checked.)
-COMPLETE_PORTS = ["js", "py", "go", "php", "rb", "lua", "rs"]
-PARTIAL_PORTS = ["java", "cpp", "cs", "zig", "kt"]
+COMPLETE_PORTS = ["js", "py", "go", "php", "rb", "lua", "rs", "zig"]
+PARTIAL_PORTS = ["java", "cpp", "cs", "kt"]
 
 # Accepted, documented divergences (normalised name keys).  Anything NOT listed
 # here is treated as a parity gap and fails the check; this list should only

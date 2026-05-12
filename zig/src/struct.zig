@@ -552,6 +552,28 @@ fn flattenDepth(allocator: Allocator, arr: []const JsonValue, depth: i64) !*List
     return result;
 }
 
+// Predicate for `filter`: receives a [key, value] pair (a 2-element list).
+pub const FilterFn = *const fn (item: JsonValue) bool;
+
+// Keep entries for which `check([key, value])` is truthy; returns a list of the
+// matching values.  Mirrors TS `filter`.
+pub fn filter(allocator: Allocator, val: JsonValue, check: FilterFn) !JsonValue {
+    const all = try items(allocator, val);
+    const out = try JsonValue.makeList(allocator);
+    if (all == .array) {
+        for (all.array.data.items) |pair| {
+            if (check(pair)) {
+                const v: JsonValue = if (pair == .array and pair.array.data.items.len > 1)
+                    pair.array.data.items[1]
+                else
+                    .null;
+                try out.array.append(v);
+            }
+        }
+    }
+    return out;
+}
+
 // Deep clone a JSON value.
 pub fn clone(allocator: Allocator, val: JsonValue) !JsonValue {
     return switch (val) {
@@ -2063,7 +2085,7 @@ fn appendSlice(allocator: Allocator, comptime T: type, existing: []const T, item
 // Inject — core injection function with three-phase key processing.
 // ============================================================================
 
-pub fn injectVal(allocator: Allocator, val: JsonValue, store: JsonValue, inj_opt: ?*Injection) anyerror!JsonValue {
+pub fn inject(allocator: Allocator, val: JsonValue, store: JsonValue, inj_opt: ?*Injection) anyerror!JsonValue {
     var inj: *Injection = undefined;
 
     if (inj_opt == null or (inj_opt != null and inj_opt.?.mode == 0)) {
@@ -2170,7 +2192,7 @@ pub fn injectVal(allocator: Allocator, val: JsonValue, store: JsonValue, inj_opt
                 childinj.mode = M_VAL;
 
                 // Phase 2: VAL — inject the child value.
-                _ = try injectVal(allocator, childval, store, childinj);
+                _ = try inject(allocator, childval, store, childinj);
 
                 nkI = childinj.key_i;
                 node_keys = blk: {
@@ -2876,7 +2898,7 @@ fn cmdEach(allocator: Allocator, inj: *Injection, store: JsonValue) !JsonValue {
         }
         try each_store.put(S_DTOP, src_item);
 
-        const injected = try injectVal(allocator, child_clone, JsonValue{ .object = each_store }, null);
+        const injected = try inject(allocator, child_clone, JsonValue{ .object = each_store }, null);
         try result_lr.append(injected);
     }
 
@@ -2975,7 +2997,7 @@ fn cmdPack(allocator: Allocator, inj: *Injection, store: JsonValue) !JsonValue {
                     while (sit.next()) |kv| try key_store.put(kv.key_ptr.*, kv.value_ptr.*);
                 }
                 try key_store.put(S_DTOP, src_item);
-                const key_result = try injectVal(allocator, JsonValue{ .string = kp }, JsonValue{ .object = key_store }, null);
+                const key_result = try inject(allocator, JsonValue{ .string = kp }, JsonValue{ .object = key_store }, null);
                 if (key_result == .string) item_key = key_result.string;
             } else {
                 // Direct property path.
@@ -3057,7 +3079,7 @@ fn cmdPack(allocator: Allocator, inj: *Injection, store: JsonValue) !JsonValue {
         }
         try pack_store.put(S_DTOP, src_item);
 
-        const injected = try injectVal(allocator, child_clone, JsonValue{ .object = pack_store }, null);
+        const injected = try inject(allocator, child_clone, JsonValue{ .object = pack_store }, null);
         try result_obj.put(item_key, injected);
     }
 
@@ -3142,7 +3164,7 @@ fn cmdRef(allocator: Allocator, inj: *Injection, store: JsonValue) !JsonValue {
     };
     tinj.keys[0] = lastPath;
 
-    _ = try injectVal(allocator, tref, store, tinj);
+    _ = try inject(allocator, tref, store, tinj);
     const rval = tinj.val;
 
     // Set the result on the grandparent.
@@ -3202,6 +3224,72 @@ fn cmdApply(allocator: Allocator, inj: *Injection) !JsonValue {
 }
 
 // ============================================================================
+// Injection helpers — exposed for callers writing custom injectors.
+// ============================================================================
+
+// Human placement name for an injection mode (mirrors TS PLACEMENT).
+fn placementName(mode: i32) []const u8 {
+    return if (mode == M_VAL) "value" else "key";
+}
+
+// Validate where an injection result may be placed: the current mode must be
+// one of `modes`, and (if `parent_types` is non-zero) the parent's type must
+// match it.  Pushes a message to `inj.errs` and returns false on a violation.
+// Mirrors TS `checkPlacement`.
+pub fn checkPlacement(
+    allocator: Allocator,
+    modes: i32,
+    ijname: []const u8,
+    parent_types: i64,
+    inj: *Injection,
+) !bool {
+    if ((modes & inj.mode) == 0) {
+        var expected = std.ArrayList(u8).init(allocator);
+        var first = true;
+        for ([_]i32{ M_KEYPRE, M_KEYPOST, M_VAL }) |m| {
+            if ((modes & m) != 0) {
+                if (!first) try expected.append(',');
+                try expected.appendSlice(placementName(m));
+                first = false;
+            }
+        }
+        const msg = try std.fmt.allocPrint(allocator, "${s}: invalid placement as {s}, expected: {s}.", .{ ijname, placementName(inj.mode), expected.items });
+        try inj.errs.append(msg);
+        return false;
+    }
+    if (parent_types != 0) {
+        const ptype = typify(inj.parent);
+        if ((parent_types & ptype) == 0) {
+            const msg = try std.fmt.allocPrint(allocator, "${s}: invalid placement in parent {s}, expected: {s}.", .{ ijname, typename(ptype), typename(parent_types) });
+            try inj.errs.append(msg);
+            return false;
+        }
+    }
+    return true;
+}
+
+// Type-check the argument list passed to a transform-command injector.
+// Returns a list whose element 0 is either JSON null (all args OK) or an error
+// string, followed by the args that passed (up to the first mismatch).
+// Mirrors TS `injectorArgs`.
+pub fn injectorArgs(allocator: Allocator, arg_types: []const i64, args: []const JsonValue) !JsonValue {
+    const found = try JsonValue.makeList(allocator);
+    try found.array.append(.null);
+    for (arg_types, 0..) |at, arg_i| {
+        const arg: JsonValue = if (arg_i < args.len) args[arg_i] else .null;
+        const arg_type = typify(arg);
+        if ((at & arg_type) == 0) {
+            const arg_str = try stringify(allocator, arg, 22);
+            const msg = try std.fmt.allocPrint(allocator, "invalid argument: {s} ({s} at position {d}) is not of type: {s}.", .{ arg_str, typename(arg_type), 1 + arg_i, typename(at) });
+            found.array.data.items[0] = JsonValue{ .string = msg };
+            break;
+        }
+        try found.array.append(arg);
+    }
+    return found;
+}
+
+// ============================================================================
 // injectChild — inject a child value using the parent injection context.
 // ============================================================================
 
@@ -3219,7 +3307,7 @@ fn injectChild(allocator: Allocator, child_raw: JsonValue, store: JsonValue, inj
     // Set $TOP to the data parent so $COPY works.
     child_store.put(S_DTOP, inj.dparent) catch {};
 
-    child_clone = try injectVal(allocator, child_clone, JsonValue{ .object = child_store }, null);
+    child_clone = try inject(allocator, child_clone, JsonValue{ .object = child_store }, null);
     return child_clone;
 }
 
@@ -3242,7 +3330,7 @@ pub fn transform(allocator: Allocator, data: JsonValue, spec: JsonValue) !JsonVa
     try store.put(S_DSPEC, orig_spec);
     const store_val = JsonValue{ .object = store };
 
-    return try injectVal(allocator, spec_clone, store_val, null);
+    return try inject(allocator, spec_clone, store_val, null);
 }
 
 // Transform with a modify callback applied after each injection step.
@@ -3269,7 +3357,7 @@ pub fn transformModify(allocator: Allocator, data: JsonValue, spec: JsonValue, m
     errs.* = std.ArrayList([]const u8).init(allocator);
     inj_init.* = Injection{
         .allocator = allocator,
-        .mode = 0, // triggers root initialization in injectVal
+        .mode = 0, // triggers root initialization in inject
         .modify = modify,
         .keys = empty_keys,
         .path = empty_path,
@@ -3278,7 +3366,7 @@ pub fn transformModify(allocator: Allocator, data: JsonValue, spec: JsonValue, m
         .errs = errs,
     };
 
-    return try injectVal(allocator, spec_clone, store_val, inj_init);
+    return try inject(allocator, spec_clone, store_val, inj_init);
 }
 
 // ============================================================================
@@ -3350,7 +3438,7 @@ pub fn validate(allocator: Allocator, data: JsonValue, spec: JsonValue) anyerror
         .errs = errs,
     };
 
-    const result = try injectVal(allocator, spec_clone, store_val, inj_init);
+    const result = try inject(allocator, spec_clone, store_val, inj_init);
 
     if (errs.items.len > 0) {
         var msg = std.ArrayList(u8).init(allocator);
@@ -3776,7 +3864,7 @@ fn stdJsonEqual(a: StdJsonValue, b: StdJsonValue) bool {
 // Select — filter children matching a query.
 // ============================================================================
 
-pub fn selectFn(allocator: Allocator, children: JsonValue, query: JsonValue) anyerror!JsonValue {
+pub fn select(allocator: Allocator, children: JsonValue, query: JsonValue) anyerror!JsonValue {
     if (!isnode(children)) return try JsonValue.makeList(allocator);
 
     // Normalize children: add $KEY for map/list items.

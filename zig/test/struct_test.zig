@@ -919,7 +919,7 @@ fn wrap_inject(allocator: Allocator, val: JsonValue) JsonValue {
     const m = val.object;
     const inject_val = m.get("val") orelse return .null;
     const store = m.get("store") orelse JsonValue.makeMap(allocator) catch .null;
-    return voxgig_struct.injectVal(allocator, inject_val, store, null) catch return .null;
+    return voxgig_struct.inject(allocator, inject_val, store, null) catch return .null;
 }
 
 test "inject-string" {
@@ -1045,7 +1045,7 @@ fn wrap_select(allocator: Allocator, val: JsonValue) JsonValue {
     const m = val.object;
     const obj = m.get("obj") orelse return .null;
     const query = m.get("query") orelse return .null;
-    return voxgig_struct.selectFn(allocator, obj, query) catch return .null;
+    return voxgig_struct.select(allocator, obj, query) catch return .null;
 }
 
 test "select-basic" {
