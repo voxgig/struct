@@ -1,4 +1,4 @@
-.PHONY: inspect build test clean reset
+.PHONY: inspect build test lint clippy fmt-check clean reset
 
 inspect:
 	@echo "Rust toolchain:"
@@ -13,6 +13,15 @@ build:
 
 test:
 	cargo test
+
+# Code quality: Clippy (treat warnings as errors) + rustfmt check.
+lint: clippy fmt-check
+
+clippy:
+	cargo clippy --all-targets --all-features -- -D warnings
+
+fmt-check:
+	cargo fmt --all -- --check
 
 clean:
 	cargo clean

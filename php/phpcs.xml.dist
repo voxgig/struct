@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<ruleset name="voxgig-struct">
+    <description>PSR-12 coding standard for the PHP port.</description>
+
+    <file>src</file>
+    <file>tests</file>
+
+    <exclude-pattern>vendor/*</exclude-pattern>
+
+    <arg name="colors"/>
+    <arg value="sp"/>
+
+    <rule ref="PSR12"/>
+
+    <!-- The port mirrors the canonical TypeScript source closely, so a few
+         line-length / naming conventions are relaxed. -->
+    <rule ref="Generic.Files.LineLength">
+        <properties>
+            <property name="lineLimit" value="120"/>
+            <property name="absoluteLineLimit" value="0"/>
+        </properties>
+    </rule>
+</ruleset>

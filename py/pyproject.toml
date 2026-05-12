@@ -1,0 +1,35 @@
+# Tooling configuration for the Python port.
+# Code quality: Ruff (lint + format) and mypy (static types).
+
+# ---- Ruff: linter + formatter ----
+# https://docs.astral.sh/ruff/
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = ["build", "dist"]
+
+[tool.ruff.lint]
+# A sensible, widely used baseline:
+#   E/W  pycodestyle      F  pyflakes        I  isort
+#   B    bugbear          UP pyupgrade       C4 comprehensions
+#   SIM  simplify         RUF ruff-specific
+select = ["E", "W", "F", "I", "B", "UP", "C4", "SIM", "RUF"]
+ignore = [
+  "E501",   # line length is handled by the formatter
+  "B008",   # function call in default argument (used deliberately here)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["B011"]
+
+[tool.ruff.format]
+quote-style = "single"
+
+# ---- mypy: static type checking ----
+# https://mypy.readthedocs.io/
+[tool.mypy]
+python_version = "3.10"
+files = ["voxgig_struct"]
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true

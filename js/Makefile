@@ -1,4 +1,4 @@
-.PHONY: inspect build test clean reset
+.PHONY: inspect build test lint format-check clean reset
 
 inspect:
 	@echo "Node.js version:"
@@ -12,6 +12,14 @@ build:
 
 test:
 	npm test
+
+# Code quality: ESLint + Prettier format check.
+lint:
+	npm run lint
+	npm run format:check
+
+format-check:
+	npm run format:check
 
 clean:
 	@echo "Nothing to clean"

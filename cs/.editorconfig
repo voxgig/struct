@@ -1,0 +1,34 @@
+# EditorConfig + Roslyn analyzer configuration for the C# port.
+# https://learn.microsoft.com/dotnet/fundamentals/code-analysis/configuration-files
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+
+[*.cs]
+indent_size = 4
+max_line_length = 120
+
+# Treat .NET / C# analyzer diagnostics as warnings by default.
+dotnet_analyzer_diagnostic.category-Style.severity = warning
+dotnet_analyzer_diagnostic.category-Design.severity = warning
+dotnet_analyzer_diagnostic.category-Performance.severity = warning
+dotnet_analyzer_diagnostic.category-Reliability.severity = warning
+dotnet_analyzer_diagnostic.category-Usage.severity = warning
+
+# This is a faithful port of the canonical TypeScript source; a few rules
+# that fight the cross-language layout are relaxed.
+dotnet_diagnostic.IDE0008.severity = none   # prefer 'var' style choice
+dotnet_diagnostic.IDE0058.severity = none   # expression value never used
+dotnet_diagnostic.CA1707.severity = none    # underscores in identifiers (T_string, M_VAL, ...)
+dotnet_diagnostic.CA1822.severity = suggestion
+
+[*.{csproj,props,targets}]
+indent_size = 2
+
+[*.{json,jsonic}]
+indent_size = 2

@@ -186,3 +186,9 @@ cs/tests/obj/
 rs/target/
 rs/Cargo.lock
 
+# Lint / static-analysis caches
+.ruff_cache/
+.mypy_cache/
+.eslintcache
+.detekt/
+

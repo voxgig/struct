@@ -1,0 +1,4 @@
+# rustfmt configuration for the Rust port.
+# https://rust-lang.github.io/rustfmt/
+edition = "2021"
+max_width = 100

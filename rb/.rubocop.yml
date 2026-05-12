@@ -1,0 +1,27 @@
+# RuboCop configuration for the Ruby port.
+# https://docs.rubocop.org/
+AllCops:
+  TargetRubyVersion: 2.7
+  NewCops: enable
+  SuggestExtensions: false
+  Exclude:
+    - 'vendor/**/*'
+    - 'pkg/**/*'
+
+# This is a faithful port of the canonical TypeScript implementation, so a
+# number of "make it more Ruby-ish" cops are intentionally relaxed to keep
+# the code cross-language comparable.
+Metrics:
+  Enabled: false
+
+Style/Documentation:
+  Enabled: false
+
+Style/FrozenStringLiteralComment:
+  Enabled: false
+
+Naming/MethodParameterName:
+  Enabled: false
+
+Layout/LineLength:
+  Max: 120

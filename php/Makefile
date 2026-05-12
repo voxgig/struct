@@ -1,4 +1,4 @@
-.PHONY: inspect build test bench clean reset
+.PHONY: inspect build test lint clean reset
 
 inspect:
 	@echo "PHP version:"
@@ -12,6 +12,11 @@ build:
 
 test:
 	vendor/bin/phpunit
+
+# Code quality: PHP_CodeSniffer (PSR-12) + PHPStan static analysis.
+lint:
+	vendor/bin/phpcs
+	vendor/bin/phpstan analyse --no-progress
 
 bench:
 	WALK_BENCH=1 php -d memory_limit=512M tests/WalkBench.php

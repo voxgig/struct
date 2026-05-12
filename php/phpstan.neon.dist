@@ -1,0 +1,7 @@
+# PHPStan configuration for the PHP port.
+# https://phpstan.org/
+parameters:
+    level: 5
+    paths:
+        - src
+    treatPhpDocTypesAsCertain: false

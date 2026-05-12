@@ -401,9 +401,31 @@ Each language directory contains:
 
 - the implementation source,
 - a test runner that consumes `build/test/*.jsonic`,
-- a `Makefile` with at minimum a `make test` target,
+- a `Makefile` with at minimum `make test` and `make lint` targets,
 - a `DOCS.md` with the per-language guide,
 - `NOTES.md` and `REVIEW.md` with implementation history.
+
+`make lint` runs that language's industry-standard code-quality tooling
+(linter + formatter check):
+
+| Language   | Lint / static analysis            | Format check          |
+|------------|-----------------------------------|-----------------------|
+| TypeScript | ESLint (`typescript-eslint`)      | Prettier              |
+| JavaScript | ESLint                            | Prettier              |
+| Python     | Ruff, mypy                        | Ruff format           |
+| Go         | golangci-lint, `go vet`           | `gofmt`               |
+| Ruby       | RuboCop                           | RuboCop               |
+| PHP        | PHP_CodeSniffer (PSR-12), PHPStan | PHP_CodeSniffer       |
+| Rust       | Clippy                            | `cargo fmt`           |
+| Java       | Checkstyle, SpotBugs              | Checkstyle            |
+| C++        | clang-tidy                        | clang-format          |
+| Lua        | luacheck                          | StyLua                |
+| Zig        | `zig build` (compiler)            | `zig fmt`             |
+| C#         | Roslyn analyzers                  | `dotnet format`       |
+| Kotlin     | detekt                            | ktlint                |
+
+Run everything with `make lint` at the repo root, or one language with
+`make lint-<lang>` (e.g. `make lint-go`).
 
 
 ## License

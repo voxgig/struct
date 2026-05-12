@@ -8,6 +8,12 @@
     <AssemblyName>VoxgigStruct</AssemblyName>
     <RootNamespace>Voxgig.Struct</RootNamespace>
     <LangVersion>12</LangVersion>
+
+    <!-- Code quality: built-in Roslyn analyzers (.NET + code-style). -->
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <AnalysisMode>Recommended</AnalysisMode>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
   </PropertyGroup>
   <ItemGroup>
     <Compile Remove="tests/**" />

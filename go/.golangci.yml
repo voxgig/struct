@@ -1,0 +1,14 @@
+# golangci-lint configuration for the Go port.
+# https://golangci-lint.run/
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  # The "standard" set: errcheck, govet, ineffassign, staticcheck, unused.
+  default: standard
+
+formatters:
+  enable:
+    - gofmt

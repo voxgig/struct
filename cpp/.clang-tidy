@@ -1,0 +1,17 @@
+# clang-tidy configuration for the C++ port.
+# A pragmatic check set: bug-prone patterns, portability, performance,
+# and a subset of readability. Verbose / style-only checks are disabled.
+Checks: >
+  bugprone-*,
+  performance-*,
+  portability-*,
+  modernize-use-nullptr,
+  modernize-use-override,
+  modernize-use-using,
+  readability-misleading-indentation,
+  readability-redundant-control-flow,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions
+WarningsAsErrors: ''
+HeaderFilterRegex: 'src/.*'
+FormatStyle: file
