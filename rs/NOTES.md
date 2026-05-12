@@ -62,10 +62,24 @@ checks). `cargo clippy` is clean.
 ## Caveats
 
 - `T_symbol` / `T_instance` constants exist for parity but are never returned by
-  `typify` (no JSON-shaped Rust analog). User-supplied `$APPLY` functions and
-  user formatters in `$FORMAT` are best-effort — the corpus only exercises named
-  formatters and the `$APPLY` error paths, so the exact argument order for those
-  callables isn't pinned down.
+  `typify` — `Value` has no Symbol/Instance/BigInt variant (no JSON-shaped Rust
+  analog), so the `minor-edge-typify` assertions about those are unportable in
+  principle.
+- **Function values in data** all use one signature, `Fn(&Inj, &Value, &str,
+  &Value) -> Value` (see the table in [`README.md`](./README.md) "Function
+  values"). It's exact for transform/validate/select handlers and the thunks;
+  for `$APPLY`, a user `$FORMAT` formatter, and a callable `get_elem` `alt` it
+  differs from the dynamic TS shapes — the resolved value always arrives as the
+  `val` argument, `store` as `store`, the injection as `inj` (TS's `$APPLY`
+  passes `(value, store, inj)` positionally; a TS user formatter also gets
+  `key`/`parent`/`path`). All three paths are unit-tested (`function_values` in
+  `tests/corpus.rs`); the corpus itself can't exercise them (it's JSON).
+- `get_elem(list, key, alt)` *does* invoke a callable `alt` when the element is
+  absent (matching the canonical `alt()`). `getdef`/`getprop` don't — the
+  canonical doesn't either.
+- Number→string at extreme magnitudes and JS's integer-key reordering in
+  `JSON.stringify` (see "Key decisions") are documented JS-fidelity gaps; the
+  corpus doesn't reach them.
 - The `primary.check` SDK test uses a minimal mock SDK in `tests/corpus.rs`
   (mirroring `ts/test/sdk.ts`): `check(ctx)` returns
   `{zed: 'ZED' + (opts.foo ?? '') + '_' + (ctx.meta?.bar ?? '0')}`. There's no

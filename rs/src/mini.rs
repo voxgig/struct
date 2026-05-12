@@ -240,9 +240,22 @@ pub fn pad(s: Value, padding: Option<i64>, padchar: Option<String>) -> String {
 // ---- node accessors ---------------------------------------------------
 
 /// `getelem(list, key, alt?)` — list lookup by integer key, negative counts
-/// from the end.
+/// from the end. If the element is absent and `alt` is a callable value, it
+/// is invoked (with the uniform `(inj, val, ref, store)` shape — a fresh
+/// throwaway injection, `Noval` value/store, empty ref) and its result used,
+/// mirroring the canonical `alt()` call.
 pub fn get_elem(val: &Value, key: &Value, alt: Value) -> Value {
-    get_elem_or_else(val, key, || alt)
+    let out = get_elem_or_else(val, key, || Value::Noval);
+    if !out.is_noval() {
+        return out;
+    }
+    match &alt {
+        Value::Func(f) => {
+            let inj = crate::major::Injection::from_def(None);
+            f(&inj, &Value::Noval, "", &Value::Noval)
+        }
+        _ => alt,
+    }
 }
 
 pub fn get_elem_or_else<F: FnOnce() -> Value>(val: &Value, key: &Value, alt: F) -> Value {

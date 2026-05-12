@@ -56,6 +56,30 @@ one `Value` is visible to every holder — this is the canonical "lists are
 mutable and reference-stable" invariant. Not thread-safe (single-threaded data
 model, like the JS canonical).
 
+## Function values
+
+Callables embedded *in* the data (`Value::Func`) all use **one signature** —
+`Fn(&Inj, &Value /*val*/, &str /*ref*/, &Value /*store*/) -> Value` — created
+with `Value::func(closure)`. The TypeScript canonical is dynamically typed and
+uses a few different shapes for the same slots; the Rust port unifies them onto
+this signature, so the calling conventions differ slightly from TS:
+
+| Where | Rust call | Read for | TS canonical |
+|---|---|---|---|
+| Transform commands / validate checkers / select operators / the `handler` | `f(inj, val, ref, store)` | all four | `(inj, val, ref, store)` — same |
+| `$WHEN` / `$BT` / `$DS` / `$SPEC` thunks | `f(inj, val, ref, store)` (args ignored) | — | `()` — args ignored either way |
+| `$APPLY` (`['`$APPLY`', applyFn, child]`) | `f(inj, val, "", store)` | `val` = the resolved `child`; `store`; `inj` = the child injection | `apply(resolved, store, cinj)` — same data, different order |
+| `$FORMAT` user formatter (`['`$FORMAT`', fn, child]`) | applied to **each node** of the resolved `child`; `f(inj, val, "", store)` | `val` = the current node | `walk(resolved, formatter)` — TS's `formatter` also gets `(key, parent, path)`; the Rust form only sees `val` |
+| `get_elem(list, key, alt)` when `alt` is callable and the element is absent | `f(inj, val, "", store)` (a fresh throwaway injection, `Noval` val/store, empty ref) | — | `alt()` — args ignored either way |
+
+In short: a `Value::func` closure that reads its `val` argument (and `store` /
+`inj` if needed) behaves correctly everywhere. For `$FORMAT`, prefer the seven
+**built-in named formatters** — `identity`, `upper`, `lower`, `string`,
+`number`, `integer`, `concat` — passed as a string; a user function works but
+can't see the walk key / parent / path. (Note: callbacks passed as *parameters*
+— `walk`'s `before`/`after`, `filter`'s `check`, `InjectDef::modify` /
+`::handler` — are ordinary Rust closures and keep their full signatures.)
+
 ## Name mapping (TS canonical → Rust)
 
 The Rust API uses idiomatic `snake_case`. The repo already documents per-language

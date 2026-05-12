@@ -902,6 +902,57 @@ fn corpus() {
     eprintln!("corpus: {} checks passed", run.passed);
 }
 
+// Function values embedded in data: `get_elem` with a callable `alt`, and
+// `$APPLY` / a user `$FORMAT` formatter — see rs/README.md "Function values".
+#[test]
+fn function_values() {
+    // get_elem: absent element + callable alt -> alt is invoked
+    assert_eq!(
+        get_elem(
+            &Value::empty_list(),
+            &Value::Num(1.0),
+            Value::func(|_i: &Inj, _v: &Value, _r: &str, _s: &Value| Value::Num(2.0)),
+        ),
+        Value::Num(2.0)
+    );
+    // present element wins over the callable alt
+    assert_eq!(
+        get_elem(
+            &Value::list(vec![Value::Num(9.0)]),
+            &Value::Num(0.0),
+            Value::func(|_i: &Inj, _v: &Value, _r: &str, _s: &Value| Value::Num(2.0)),
+        ),
+        Value::Num(9.0)
+    );
+
+    // $APPLY: ['`$APPLY`', applyFn, child] — applyFn called with (inj, val=resolved, "", store)
+    let spec = Value::list(vec![
+        Value::str("`$APPLY`"),
+        Value::func(|_i: &Inj, v: &Value, _r: &str, _s: &Value| {
+            // v is the resolved child; double a number
+            match v {
+                Value::Num(n) => Value::Num(n * 2.0),
+                other => other.clone(),
+            }
+        }),
+        Value::Num(21.0),
+    ]);
+    let out = transform(&Value::empty_map(), &spec, None).unwrap();
+    assert_eq!(out, Value::Num(42.0));
+
+    // $FORMAT with a user function: applied per node, receives (inj, val, "", store)
+    let spec = Value::list(vec![
+        Value::str("`$FORMAT`"),
+        Value::func(|_i: &Inj, v: &Value, _r: &str, _s: &Value| match v {
+            Value::Str(s) => Value::str(format!("[{s}]")),
+            other => other.clone(),
+        }),
+        Value::str("hi"),
+    ]);
+    let out = transform(&Value::empty_map(), &spec, None).unwrap();
+    assert_eq!(out, Value::str("[hi]"));
+}
+
 // quiet unused-import warnings for the staged bits
 #[allow(dead_code)]
 fn _unused() {
