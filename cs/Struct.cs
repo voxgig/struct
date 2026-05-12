@@ -1012,6 +1012,30 @@ namespace Voxgig.Struct
             return val is List<object?> list ? list.Select(item => DeepClone(item, replacer, reviver)).ToList() : val;
         }
 
+        // Define a JSON object (dictionary) from alternating key/value arguments.
+        // Jm("a", 1, "b", 2) => { "a": 1, "b": 2 }. A missing trailing value is null.
+        public static Dictionary<string, object?> Jm(params object?[] kv)
+        {
+            var o = new Dictionary<string, object?>();
+            for (int i = 0; i < kv.Length; i += 2)
+            {
+                var k = kv[i];
+                var ks = k is string s ? s : Stringify(k);
+                o[ks] = i + 1 < kv.Length ? kv[i + 1] : null;
+            }
+
+            return o;
+        }
+
+        // Define a JSON array (list) from positional arguments.
+        // Jt(1, "x", true) => [1, "x", true].
+        public static List<object?> Jt(params object?[] v)
+        {
+            var a = new List<object?>(v.Length);
+            a.AddRange(v);
+            return a;
+        }
+
         // Safely set a property. Returns the (possibly modified) parent.
         public static object? SetProp(object? parent, object? key, object? val)
         {

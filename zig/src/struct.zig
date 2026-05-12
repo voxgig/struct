@@ -580,6 +580,34 @@ pub fn clone(allocator: Allocator, val: JsonValue) !JsonValue {
     };
 }
 
+// Define a JSON object from alternating key/value arguments.
+// jm(alloc, &.{ str("a"), int(1), str("b"), int(2) }) => { "a": 1, "b": 2 }.
+// A missing trailing value becomes JSON null; a non-string key is stringified.
+pub fn jm(allocator: Allocator, kv: []const JsonValue) !JsonValue {
+    const o = try JsonValue.makeMap(allocator);
+    var i: usize = 0;
+    while (i < kv.len) : (i += 2) {
+        const k = kv[i];
+        const ks = switch (k) {
+            .string => |s| s,
+            else => try stringify(allocator, k, null),
+        };
+        const v: JsonValue = if (i + 1 < kv.len) kv[i + 1] else .null;
+        try o.object.put(ks, v);
+    }
+    return o;
+}
+
+// Define a JSON array (tuple) from positional arguments.
+// jt(alloc, &.{ int(1), str("x"), .{ .bool = true } }) => [1, "x", true].
+pub fn jt(allocator: Allocator, v: []const JsonValue) !JsonValue {
+    const a = try JsonValue.makeList(allocator);
+    for (v) |item| {
+        try a.array.append(item);
+    }
+    return a;
+}
+
 // Delete a property from a map or remove an element from a list.
 pub fn delprop(allocator: Allocator, parent: JsonValue, key: JsonValue) !JsonValue {
     _ = allocator;
