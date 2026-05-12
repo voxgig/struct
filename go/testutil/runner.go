@@ -247,7 +247,7 @@ func resolveSpec(
 	testfile string,
 ) map[string]any {
 
-	data, err := os.ReadFile(filepath.Join(".", testfile))
+	data, err := os.ReadFile(filepath.Join(".", testfile)) // #nosec G304 -- fixed test-corpus path, not user input.
 	if err != nil {
 		panic(err)
 	}

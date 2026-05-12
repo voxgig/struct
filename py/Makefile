@@ -1,4 +1,4 @@
-.PHONY: inspect build test lint format-check typecheck bench clean reset
+.PHONY: inspect build test lint format-check typecheck bench clean reset audit
 
 inspect:
 	@echo "Python version:"
@@ -39,3 +39,8 @@ clean:
 	rm -rf *.egg-info dist build
 
 reset: clean
+
+# Supply-chain + security: dependency vuln scan (pip-audit) + Bandit SAST.
+audit:
+	pip-audit -r requirements-dev.txt
+	bandit -q -r voxgig_struct

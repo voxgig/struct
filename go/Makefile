@@ -1,4 +1,4 @@
-.PHONY: build test lint vet fmt fmt-check clean all
+.PHONY: build test lint vet fmt fmt-check clean all audit
 
 build:
 	go build ./...
@@ -29,3 +29,8 @@ clean:
 	go clean ./...
 
 all: fmt vet lint build test
+
+# Supply-chain + security: Go vuln DB (with reachability) + gosec SAST.
+audit:
+	govulncheck ./...
+	gosec -quiet ./...

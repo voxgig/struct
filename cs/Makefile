@@ -1,4 +1,4 @@
-.PHONY: inspect build test lint format-check clean reset
+.PHONY: inspect build test lint format-check clean reset audit
 
 inspect:
 	@echo ".NET SDK version:"
@@ -24,3 +24,10 @@ clean:
 	rm -rf bin obj tests/bin tests/obj
 
 reset: clean
+
+# Supply-chain: fail on any NuGet dependency with a known vulnerability.
+audit:
+	dotnet restore tests/VoxgigStructTest.csproj >/dev/null
+	@out=$$(dotnet list tests/VoxgigStructTest.csproj package --vulnerable --include-transitive 2>&1); \
+	echo "$$out"; \
+	if echo "$$out" | grep -q "has the following vulnerable packages"; then exit 1; fi

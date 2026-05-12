@@ -427,6 +427,31 @@ Each language directory contains:
 Run everything with `make lint` at the repo root, or one language with
 `make lint-<lang>` (e.g. `make lint-go`).
 
+Beyond linting there are two more analysis stages:
+
+- **`make audit`** — per-language dependency / supply-chain scanning:
+  `npm audit` (ts/js), `pip-audit` + Bandit (py), `govulncheck` + `gosec`
+  (go), `bundler-audit` (rb), `composer audit` (php), `cargo audit` (rs),
+  `dotnet list --vulnerable` (cs).
+- **`make scan`** — repo-wide static analysis: secret scanning
+  ([gitleaks]), SAST ([Semgrep]), known-vulnerability scanning across all
+  lockfiles ([osv-scanner]), GitHub-workflow linting ([actionlint]), shell
+  linting ([shellcheck]), spell checking ([cspell]), markdown linting
+  ([markdownlint]), and a cross-port API-parity check
+  (`tools/check_parity.py`).
+
+`make analyze` runs all three (`lint` + `audit` + `scan`).  CI runs these
+in [`.github/workflows/lint.yml`](./.github/workflows/lint.yml) and
+[`.github/workflows/security.yml`](./.github/workflows/security.yml).
+
+[gitleaks]: https://github.com/gitleaks/gitleaks
+[Semgrep]: https://semgrep.dev/
+[osv-scanner]: https://google.github.io/osv-scanner/
+[actionlint]: https://github.com/rhysd/actionlint
+[shellcheck]: https://www.shellcheck.net/
+[cspell]: https://cspell.org/
+[markdownlint]: https://github.com/DavidAnson/markdownlint
+
 
 ## License
 

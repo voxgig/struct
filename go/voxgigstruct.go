@@ -511,7 +511,7 @@ func Typename(t int) string {
 	if t <= 0 {
 		return S_any
 	}
-	idx := bits.LeadingZeros32(uint32(t))
+	idx := bits.LeadingZeros32(uint32(t)) // #nosec G115 -- t is a small type bitcode (well under 2^31).
 	if idx < len(TYPENAME) && TYPENAME[idx] != "" {
 		return TYPENAME[idx]
 	}

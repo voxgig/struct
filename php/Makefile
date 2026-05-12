@@ -1,4 +1,4 @@
-.PHONY: inspect build test lint clean reset
+.PHONY: inspect build test lint clean reset audit
 
 inspect:
 	@echo "PHP version:"
@@ -26,3 +26,7 @@ clean:
 
 reset: clean
 	rm -rf vendor
+
+# Supply-chain: scan Composer dependencies for known vulnerabilities.
+audit:
+	composer audit

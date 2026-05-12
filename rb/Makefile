@@ -1,4 +1,4 @@
-.PHONY: inspect build test lint walk-bench clean reset
+.PHONY: inspect build test lint walk-bench clean reset audit
 
 inspect:
 	@echo "Ruby version:"
@@ -25,3 +25,8 @@ clean:
 
 reset: clean
 	rm -rf vendor
+
+# Supply-chain: scan dependencies against the ruby-advisory-db.
+# Requires: gem install bundler-audit
+audit:
+	bundle-audit check --update

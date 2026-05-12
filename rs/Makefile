@@ -1,4 +1,4 @@
-.PHONY: inspect build test lint clippy fmt-check clean reset
+.PHONY: inspect build test lint clippy fmt-check clean reset audit
 
 inspect:
 	@echo "Rust toolchain:"
@@ -28,3 +28,7 @@ clean:
 
 reset: clean
 	rm -f Cargo.lock
+
+# Supply-chain: scan Cargo dependencies against the RustSec advisory DB.
+audit:
+	cargo audit

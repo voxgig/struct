@@ -1,4 +1,4 @@
-.PHONY: inspect build test lint format-check clean reset
+.PHONY: inspect build test lint format-check clean reset audit
 
 inspect:
 	@echo "Node.js version:"
@@ -26,3 +26,7 @@ clean:
 
 reset: clean
 	rm -rf node_modules
+
+# Supply-chain: scan dependencies for known vulnerabilities.
+audit:
+	npm audit --audit-level=high

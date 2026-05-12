@@ -24,18 +24,18 @@ install_lua() {
       fi
       
       # Download and install latest Lua from source
-      cd /tmp
+      cd /tmp || exit 1
       curl -L -R -O "https://www.lua.org/ftp/lua-5.4.7.tar.gz"
       tar zxf "lua-5.4.7.tar.gz"
-      cd "lua-5.4.7"
+      cd "lua-5.4.7" || exit 1
       make macosx test
       sudo make install
       
       # Download and install latest LuaRocks from source
-      cd /tmp
+      cd /tmp || exit 1
       curl -L -R -O "https://luarocks.org/releases/luarocks-3.11.1.tar.gz"
       tar zxpf "luarocks-3.11.1.tar.gz"
-      cd "luarocks-3.11.1"
+      cd "luarocks-3.11.1" || exit 1
       ./configure && make && sudo make install
     fi
   elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
@@ -57,18 +57,18 @@ install_lua() {
     fi
     
     # Download and install latest Lua from source
-    cd /tmp
+    cd /tmp || exit 1
     curl -L -R -O "https://www.lua.org/ftp/lua-5.4.7.tar.gz"  # Current latest stable
     tar zxf "lua-5.4.7.tar.gz"
-    cd "lua-5.4.7"
+    cd "lua-5.4.7" || exit 1
     make all test
     sudo make install
     
     # Download and install latest LuaRocks from source
-    cd /tmp
+    cd /tmp || exit 1
     curl -L -R -O "https://luarocks.org/releases/luarocks-3.11.1.tar.gz"
     tar zxpf "luarocks-3.11.1.tar.gz"
-    cd "luarocks-3.11.1"
+    cd "luarocks-3.11.1" || exit 1
     ./configure --with-lua-include=/usr/local/include && make && sudo make install
   else
     echo "Unsupported OS: $OSTYPE"
@@ -100,10 +100,10 @@ else
     echo "LuaRocks not found, installing only LuaRocks..."
     
     # Download and install only LuaRocks
-    cd /tmp
+    cd /tmp || exit 1
     curl -L -R -O "https://luarocks.org/releases/luarocks-3.11.1.tar.gz"
     tar zxpf "luarocks-3.11.1.tar.gz"
-    cd "luarocks-3.11.1"
+    cd "luarocks-3.11.1" || exit 1
     ./configure && make && sudo make install
   else
     echo "LuaRocks found: $(luarocks --version)"
