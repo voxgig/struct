@@ -22,7 +22,8 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # __init__.py re-exports the public API; the imports are intentional.
 "voxgig_struct/__init__.py" = ["F401"]
-"tests/**" = ["B011"]
+# Test runners use `from voxgig_struct import *` by design.
+"tests/**" = ["B011", "F403", "F405"]
 
 [tool.ruff.format]
 quote-style = "single"

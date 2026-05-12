@@ -11,7 +11,7 @@ BENCH = ENV['WALK_BENCH'] == '1'
 # Build a balanced tree of maps with given width and depth.
 # Total nodes: (width^(depth+1) - 1) / (width - 1).
 def build_tree(width, depth)
-  return 0 if depth == 0
+  return 0 if depth.zero?
 
   out = {}
   width.times do |i|
@@ -51,7 +51,7 @@ def measure(label, tree, runs)
     t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC, :nanosecond)
     VoxgigStruct.walk(tree, cb)
     t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC, :nanosecond)
-    times << (t1 - t0) / 1_000_000.0 # ms
+    times << ((t1 - t0) / 1_000_000.0) # ms
   end
 
   times.sort!

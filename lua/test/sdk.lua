@@ -5,14 +5,14 @@ local SDK = {}
 SDK.__index = SDK
 
 -- Constructor
-function SDK:new(opts)
+function SDK.new(class, initOpts)
   local _opts
   local _utility
 
   local instance = {}
-  setmetatable(instance, self)
+  setmetatable(instance, class)
 
-  _opts = opts or {}
+  _opts = initOpts or {}
   _utility = {
     struct = StructUtility:new(),
     contextify = function(ctxmap)

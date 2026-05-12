@@ -155,7 +155,6 @@ func MakeRunner(testfile string, client Client) func(name string, store any) (*R
 			testset, ok := testspecmap["set"].([]any)
 			if !ok {
 				panic(fmt.Sprintf("No test set in %v", name))
-				return
 			}
 
 			for _, entryVal := range testset {
@@ -480,11 +479,11 @@ func checkResult(
 			structUtils,
 		)
 		if err != nil {
-			t.Error(fmt.Sprintf("match error: %v", err))
+			t.Errorf("match error: %v", err)
 			return
 		}
 		if !pass {
-			t.Error(fmt.Sprintf("match fail: %v", err))
+			t.Errorf("match fail: %v", err)
 			return
 		}
 	}
@@ -547,13 +546,13 @@ func handleError(
 	}
 
 	if nil == entryErr {
-		t.Error(fmt.Sprintf("%s\n\nENTRY: %s", testerr.Error(), structUtils.Stringify(entry)))
+		t.Errorf("%s\n\nENTRY: %s", testerr.Error(), structUtils.Stringify(entry))
 		return
 	}
 
 	boolErr, hasBoolErr := entryErr.(bool)
 	if hasBoolErr && !boolErr {
-		t.Error(fmt.Sprintf("%s\n\nENTRY: %s", testerr.Error(), structUtils.Stringify(entry)))
+		t.Errorf("%s\n\nENTRY: %s", testerr.Error(), structUtils.Stringify(entry))
 		return
 	}
 
@@ -570,7 +569,7 @@ func handleError(
 	matchErr, err := MatchNode(entryErr, errStr, structUtils)
 
 	if err != nil {
-		t.Error(fmt.Sprintf("match error: %v", err))
+		t.Errorf("match error: %v", err)
 		return
 	}
 
@@ -589,20 +588,20 @@ func handleError(
 			)
 
 			if !matchErr {
-				t.Error(fmt.Sprintf("match failed: %v", matchErr))
+				t.Errorf("match failed: %v", matchErr)
 			}
 
 			if nil != err {
-				t.Error(fmt.Sprintf("match failed: %v", err))
+				t.Errorf("match failed: %v", err)
 			}
 		}
 
 	} else {
 		// If we didn't match, then fail with an error message.
-		t.Error(fmt.Sprintf("ERROR MATCH: [%s] <=> [%s]",
+		t.Errorf("ERROR MATCH: [%s] <=> [%s]",
 			structUtils.Stringify(entryErr),
 			errStr,
-		))
+		)
 	}
 }
 

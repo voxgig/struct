@@ -178,6 +178,7 @@ local _injecthandler
 local _validatehandler
 local _invalidTypeMsg
 local _validation
+local stringify
 local ismap
 local islist
 local getpath
@@ -609,7 +610,7 @@ end
 
 -- Replace a search string (all), or a pattern, in a source string.
 local function replace(s, from, to)
-  local rs = s
+  local rs
   local ts = typify(s)
   if 0 == (T_string & ts) then
     rs = stringify(s)
@@ -882,7 +883,7 @@ end
 -- @param maxlen (number) Optional maximum length for result
 -- @param pretty (boolean) Optional pretty mode with ANSI colors
 -- @return (string) String representation of the value
-local function stringify(val, maxlen, pretty)
+stringify = function(val, maxlen, pretty)
   local valstr = S_MT
   pretty = pretty and true or false
 
@@ -1430,7 +1431,7 @@ end
 -- @return (any) The merged result
 local function merge(val, maxdepth)
   local md = slice(getdef(maxdepth, MAXDEPTH), 0)
-  local out = NONE
+  local out
 
   -- Handle edge cases
   if not islist(val) then
@@ -1556,9 +1557,7 @@ getpath = function(store, path, injdef)
     if pos == 1 then
       -- Empty string
       parts = { S_MT }
-    elseif pos == len + 1 then
-      -- Normal end
-    else
+    elseif pos ~= len + 1 then
       -- Path ends with a dot
       table.insert(parts, S_MT)
     end
@@ -1591,7 +1590,7 @@ getpath = function(store, path, injdef)
       val = src
 
       -- Check for meta path syntax: field$=value or field$~value
-      local m1, m2, m3 = parts[1]:match("^([^$]+)%$([=~])(.+)$")
+      local m1, _, m3 = parts[1]:match("^([^$]+)%$([=~])(.+)$")
       if m1 and injdef and injdef.meta then
         val = getprop(injdef.meta, m1)
         parts[1] = m3
@@ -1785,7 +1784,7 @@ function Injection:child(keyI, keys)
 end
 
 function Injection:setval(val, ancestor)
-  local parent = NONE
+  local parent
   if ancestor == nil or ancestor < 2 then
     if NONE == val then
       self.parent = delprop(self.parent, self.key)
@@ -1876,10 +1875,6 @@ local function inject(val, store, injdef)
 
         -- Perform val mode injection
         inject(childinj.val, store, childinj)
-
-        -- The injection may modify child processing.
-        nkI = childinj.keyI
-        nodekeys = childinj.keys
 
         -- Perform key:post mode injection
         childinj.mode = M_KEYPOST
@@ -2037,7 +2032,7 @@ local function transform_EACH(inj, _val, _ref, store)
   local src = getpath(srcstore, srcpath, inj)
   local srctype = typify(src)
 
-  local tcur = {}
+  local tcur
   local tval = {}
   setmetatable(tval, { __jsontype = "array" })
 
@@ -2117,7 +2112,7 @@ end
 -- Convert a node to a map.
 -- Format: { '`$PACK`':['`source-path`', child-template]}
 local function transform_PACK(inj, _val, _ref, store)
-  local mode, key, path, parent, nodes = inj.mode, inj.key, inj.path, inj.parent, inj.nodes
+  local key, path, parent, nodes = inj.key, inj.path, inj.parent, inj.nodes
 
   local ijname = "EACH"
 
@@ -2366,7 +2361,7 @@ local function transform_REF(inj, val, _ref, store)
   local tpath = slice(inj.path, -1)
   local tcur = getpath(store, cpath)
   local tval = getpath(store, tpath)
-  local rval = NONE
+  local rval
 
   if not hasSubRef or NONE ~= tval then
     local tinj = inj:child(0, { getelem(tpath, -1) })
@@ -3286,7 +3281,7 @@ end
 
 -- Validate handler - intercepts meta paths for validation.
 _validatehandler = function(inj, val, ref, store)
-  local out = val
+  local out
 
   -- Check for meta path syntax: field$=value or field$~value
   local m = ref:match("^([^$]+)%$([=~])(.+)$")
@@ -3316,7 +3311,7 @@ _injectstr = function(val, store, inj)
     return S_MT
   end
 
-  local out = val
+  local out
 
   -- Full value wrapped in backticks
   -- R_INJECTION_FULL: /^`(\$[A-Z]+|[^`]*)[0-9]*`$/

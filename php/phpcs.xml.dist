@@ -12,12 +12,62 @@
 
     <rule ref="PSR12"/>
 
-    <!-- The port mirrors the canonical TypeScript source closely, so a few
-         line-length / naming conventions are relaxed. -->
+    <!--
+        This package is a deliberately faithful, line-by-line port of the
+        canonical TypeScript implementation. Several PSR-1/PSR-12 conventions
+        are relaxed so the PHP source can mirror the reference source 1:1,
+        which makes cross-language review and maintenance tractable.
+    -->
+
+    <!-- Line length is relaxed: the port keeps the TS source's expression
+         layout rather than re-wrapping (which would obscure the diff). -->
     <rule ref="Generic.Files.LineLength">
         <properties>
-            <property name="lineLimit" value="120"/>
+            <property name="lineLimit" value="160"/>
             <property name="absoluteLineLimit" value="0"/>
         </properties>
+    </rule>
+
+    <!-- The canonical source uses snake_case "namespaced" names for the
+         transform/validate/select injector handlers (e.g. transform_DELETE,
+         validate_STRING, select_AND) and a "_" prefix for internal helpers
+         (e.g. _walk, _getprop, _injectstr). These names are preserved verbatim
+         so the dispatch tables match the reference implementation. -->
+    <rule ref="PSR1.Methods.CamelCapsMethodName.NotCamelCaps">
+        <exclude-pattern>src/Struct.php</exclude-pattern>
+    </rule>
+    <rule ref="PSR2.Methods.MethodDeclaration.Underscore">
+        <exclude-pattern>src/Struct.php</exclude-pattern>
+    </rule>
+
+    <!-- The reference source defines lower-case "string tag" constants
+         (S_array, S_boolean, ...) and bit-flag type constants (T_any, T_list,
+         ...). Renaming them to UPPER_CASE would diverge from the canonical
+         names without changing behaviour. -->
+    <rule ref="Generic.NamingConventions.UpperCaseConstantName.ClassConstantNotUpperCase">
+        <exclude-pattern>src/Struct.php</exclude-pattern>
+    </rule>
+
+    <!-- The implementation, like the TS module, is a single cohesive unit:
+         the public Struct class plus the small internal Injection/ListRef
+         value objects it depends on live in one file. -->
+    <rule ref="PSR1.Classes.ClassDeclaration.MultipleClasses">
+        <exclude-pattern>src/Struct.php</exclude-pattern>
+    </rule>
+
+    <!-- Branch-label comments are kept between "}" and "elseif" to mirror the
+         reference source's inline documentation of each conditional branch. -->
+    <rule ref="Squiz.ControlStructures.ControlSignature.SpaceAfterCloseBrace">
+        <exclude-pattern>src/Struct.php</exclude-pattern>
+    </rule>
+
+    <!-- Test files follow the standard PHPUnit layout: they "require_once" the
+         code under test (a side effect) and then declare the test case class.
+         Some also intentionally live in the global namespace. -->
+    <rule ref="PSR1.Files.SideEffects.FoundWithSymbols">
+        <exclude-pattern>tests/*</exclude-pattern>
+    </rule>
+    <rule ref="PSR1.Classes.ClassDeclaration.MissingNamespace">
+        <exclude-pattern>tests/*</exclude-pattern>
     </rule>
 </ruleset>

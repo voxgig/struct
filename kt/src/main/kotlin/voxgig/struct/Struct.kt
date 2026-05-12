@@ -2339,15 +2339,17 @@ object Struct {
         return out
     }
 
-    /** Legacy bespoke validate kept private for fallback / debugging if needed. */
-    @Suppress("unused")
-
     // ===========================================================================
     // Select Injectors
     // ===========================================================================
 
     /** Build the recursive validate options used by select_*. */
-    private fun selectRecOpts(store: Any?, point: Any?, meta: MutableMap<String, Any?>, errs: MutableList<Any?>): MutableMap<String, Any?> {
+    private fun selectRecOpts(
+        store: Any?,
+        point: Any?,
+        meta: MutableMap<String, Any?>,
+        errs: MutableList<Any?>,
+    ): MutableMap<String, Any?> {
         val vstore = linkedMapOf<String, Any?>()
         if (store is Map<*, *>) for ((k, v) in store) vstore[k.toString()] = v
         vstore[S_DTOP] = point

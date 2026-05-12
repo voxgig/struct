@@ -28,9 +28,9 @@ func TestClient(t *testing.T) {
 		t.Fatalf("Failed to create runner check: %v", err)
 	}
 
-	var spec map[string]any = runnerMap.Spec
-	var runset runner.RunSet = runnerMap.RunSet
-	var subject runner.Subject = runnerMap.Subject
+	spec := runnerMap.Spec
+	runset := runnerMap.RunSet
+	subject := runnerMap.Subject
 
 	t.Run("client-check-basic", func(t *testing.T) {
 		runset(t, spec["basic"], subject)

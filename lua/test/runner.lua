@@ -301,7 +301,7 @@ end
 -- @param testpack (table) The test pack with client and utility
 -- @return (table) Array of arguments for the test
 resolveArgs = function(entry, testpack, utility, structUtils)
-  local args = {}
+  local args
 
   if entry.ctx then
     args = { entry.ctx }

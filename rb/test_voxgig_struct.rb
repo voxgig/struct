@@ -18,7 +18,7 @@ def deep_equal(a, b)
     end
   }
   JSON.generate(normalize.call(a)) == JSON.generate(normalize.call(b))
-rescue
+rescue StandardError
   a == b
 end
 
@@ -32,7 +32,7 @@ class DummyClient
     OpenStruct.new(struct: VoxgigStruct)
   end
 
-  def test(options = {})
+  def test(_options = {})
     self
   end
 end
@@ -93,14 +93,14 @@ class TestVoxgigStruct < Minitest::Test
 
   def test_minor_isfunc
     @runsetflags.call(@minor_spec['isfunc'], {}, VoxgigStruct.method(:isfunc))
-    f0 = -> { nil }
+    f0 = -> {}
     assert_equal true, VoxgigStruct.isfunc(f0)
     assert_equal false, VoxgigStruct.isfunc(123)
   end
 
   def test_minor_clone
     @runsetflags.call(@minor_spec['clone'], { 'null' => false }, VoxgigStruct.method(:clone))
-    f0 = -> { nil }
+    f0 = -> {}
     result = VoxgigStruct.clone({ 'a' => f0 })
     assert_equal true, deep_equal(result, { 'a' => f0 })
   end
@@ -152,7 +152,7 @@ class TestVoxgigStruct < Minitest::Test
   end
 
   def test_minor_edge_getprop
-    strarr = ['a', 'b', 'c', 'd', 'e']
+    strarr = %w[a b c d e]
     assert deep_equal(VoxgigStruct.getprop(strarr, 2), 'c')
     assert deep_equal(VoxgigStruct.getprop(strarr, '2'), 'c')
     intarr = [2, 3, 5, 7, 11]
@@ -177,10 +177,10 @@ class TestVoxgigStruct < Minitest::Test
   end
 
   def test_minor_edge_setprop
-    strarr0 = ['a', 'b', 'c', 'd', 'e']
-    strarr1 = ['a', 'b', 'c', 'd', 'e']
-    assert deep_equal(VoxgigStruct.setprop(strarr0, 2, 'C'), ['a', 'b', 'C', 'd', 'e'])
-    assert deep_equal(VoxgigStruct.setprop(strarr1, '2', 'CC'), ['a', 'b', 'CC', 'd', 'e'])
+    strarr0 = %w[a b c d e]
+    strarr1 = %w[a b c d e]
+    assert deep_equal(VoxgigStruct.setprop(strarr0, 2, 'C'), %w[a b C d e])
+    assert deep_equal(VoxgigStruct.setprop(strarr1, '2', 'CC'), %w[a b CC d e])
   end
 
   def test_minor_haskey
@@ -213,11 +213,11 @@ class TestVoxgigStruct < Minitest::Test
 
   def test_minor_filter
     checks = {
-      'gt3' => lambda { |item| item[1].is_a?(Numeric) && item[1] > 3 },
-      'lt3' => lambda { |item| item[1].is_a?(Numeric) && item[1] < 3 },
+      'gt3' => ->(item) { item[1].is_a?(Numeric) && item[1] > 3 },
+      'lt3' => ->(item) { item[1].is_a?(Numeric) && item[1] < 3 }
     }
     @runsetflags.call(@minor_spec['filter'], {}, lambda { |vin|
-      check = checks[vin['check']] || lambda { |_item| true }
+      check = checks[vin['check']] || ->(_item) { true }
       VoxgigStruct.filter(vin['val'], check)
     })
   end
@@ -253,7 +253,6 @@ class TestVoxgigStruct < Minitest::Test
   end
 
   def test_minor_getdef
-    -> { nil }
     assert_equal 1, VoxgigStruct.getdef(1, 2)
     assert_equal 2, VoxgigStruct.getdef(nil, 2)
     assert_equal 'a', VoxgigStruct.getdef('a', 'b')
@@ -281,21 +280,21 @@ class TestVoxgigStruct < Minitest::Test
     # after only
     VoxgigStruct.walk(test_input, nil, walklog)
     assert deep_equal(log, expected_log['after']),
-           "Walk log (after) failed.\nExpected: #{expected_log["after"].inspect}\nGot: #{log.inspect}"
+           "Walk log (after) failed.\nExpected: #{expected_log['after'].inspect}\nGot: #{log.inspect}"
 
     log = []
     test_input = VoxgigStruct.clone(spec_log['in'])
     # before only
     VoxgigStruct.walk(test_input, walklog)
     assert deep_equal(log, expected_log['before']),
-           "Walk log (before) failed.\nExpected: #{expected_log["before"].inspect}\nGot: #{log.inspect}"
+           "Walk log (before) failed.\nExpected: #{expected_log['before'].inspect}\nGot: #{log.inspect}"
 
     log = []
     test_input = VoxgigStruct.clone(spec_log['in'])
     # both
     VoxgigStruct.walk(test_input, walklog, walklog)
     assert deep_equal(log, expected_log['both']),
-           "Walk log (both) failed.\nExpected: #{expected_log["both"].inspect}\nGot: #{log.inspect}"
+           "Walk log (both) failed.\nExpected: #{expected_log['both'].inspect}\nGot: #{log.inspect}"
   end
 
   def test_walk_basic
@@ -389,7 +388,7 @@ class TestVoxgigStruct < Minitest::Test
   end
 
   def test_merge_special
-    f0 = -> { nil }
+    f0 = -> {}
     assert deep_equal(VoxgigStruct.merge([f0]), f0)
     assert deep_equal(VoxgigStruct.merge([nil, f0]), f0)
     assert deep_equal(VoxgigStruct.merge([{ 'a' => f0 }]), { 'a' => f0 })
@@ -418,10 +417,10 @@ class TestVoxgigStruct < Minitest::Test
     @runsetflags.call(@getpath_spec['handler'], { 'null' => false }, lambda { |vin|
       store = {
         '$TOP' => vin['store'],
-        '$FOO' => lambda { 'foo' }
+        '$FOO' => -> { 'foo' }
       }
       injdef = {
-        'handler' => lambda { |inj, val, ref, _store|
+        'handler' => lambda { |_inj, val, _ref, _store|
           val.respond_to?(:call) ? val.call : val
         }
       }
@@ -523,7 +522,7 @@ class TestVoxgigStruct < Minitest::Test
   end
 
   def test_transform_edge_apply
-    result = VoxgigStruct.transform({}, ['`$APPLY`', lambda { |v, _s, _i| 1 + v }, 1])
+    result = VoxgigStruct.transform({}, ['`$APPLY`', ->(v, _s, _i) { 1 + v }, 1])
     assert_equal 2, result
   end
 
@@ -534,9 +533,7 @@ class TestVoxgigStruct < Minitest::Test
         vin['spec'],
         {
           'modify' => lambda { |val, key, parent, *_rest|
-            if !key.nil? && !parent.nil? && val.is_a?(String)
-              parent[key.to_s] = '@' + val
-            end
+            parent[key.to_s] = "@#{val}" if !key.nil? && !parent.nil? && val.is_a?(String)
           }
         }
       )
@@ -623,8 +620,8 @@ class TestVoxgigStruct < Minitest::Test
         out = VoxgigStruct.getprop(inj.dparent, key)
 
         t = VoxgigStruct.typify(out)
-        if 0 == (VoxgigStruct::T_integer & t)
-          inj.errs.push("Not an integer at #{inj.path[1..-1].join('.')}: #{out}")
+        if VoxgigStruct::T_integer.nobits?(t)
+          inj.errs.push("Not an integer at #{inj.path[1..].join('.')}: #{out}")
           return nil
         end
         out
@@ -674,6 +671,6 @@ class TestVoxgigStruct < Minitest::Test
     assert deep_equal(VoxgigStruct.jm('a', 1), { 'a' => 1 })
     assert deep_equal(VoxgigStruct.jm('a', 1, 'b', 2), { 'a' => 1, 'b' => 2 })
     assert deep_equal(VoxgigStruct.jt(1, 2, 3), [1, 2, 3])
-    assert deep_equal(VoxgigStruct.jt(), [])
+    assert deep_equal(VoxgigStruct.jt, [])
   end
 end

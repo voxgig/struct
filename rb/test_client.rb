@@ -13,7 +13,7 @@ class DummyClient
     OpenStruct.new(struct: VoxgigStruct)
   end
 
-  def test(options = {})
+  def test(_options = {})
     self
   end
 end

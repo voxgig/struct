@@ -1647,9 +1647,6 @@ inline Value inject(const Value& val, const Value& store, Injection* injdef) {
         cinj->mode = M_VAL;
         inject(cinj->val, store, cinj);
 
-        nkI = cinj->keyI;
-        nodekeys = cinj->keys;
-
         cinj->mode = M_KEYPOST;
         injectstr(nodekey, store, cinj);
 

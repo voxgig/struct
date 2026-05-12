@@ -1,6 +1,5 @@
-import { validate, transform, M_KEYPRE } from '..'
+import { transform, M_KEYPRE } from '..'
 
-let out: any
 let errs: any
 
 // errs = []
@@ -73,7 +72,7 @@ const extra = {
 }
 
 const meta = { capture: {} }
-out = transform(
+const out = transform(
   { a: { b: 1, c: 2 } },
   { a: { b: { '`$CAPTURE`': 'x' }, c: { '`$CAPTURE`': 'x' } } },
   { extra, errs, meta },

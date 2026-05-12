@@ -897,7 +897,7 @@ func Items(val any) [][2]any {
 		return out
 	}
 
-	return make([][2]any, 0, 0)
+	return make([][2]any, 0)
 }
 
 // List items with an optional apply callback that maps over each [key, value] tuple.
@@ -981,7 +981,7 @@ var (
 func JoinUrl(parts []any) string {
 	var filtered []string
 	for _, p := range parts {
-		if "" != p && nil != p {
+		if p != "" && p != nil {
 			ps, ok := p.(string)
 			if !ok {
 				ps = Stringify(p)
@@ -1033,7 +1033,7 @@ func Join(arr []any, args ...any) string {
 	}
 
 	var sepre string
-	if 1 == len(sep) {
+	if len(sep) == 1 {
 		sepre = EscRe(sep)
 	}
 
@@ -1065,7 +1065,7 @@ func Join(arr []any, args ...any) string {
 			reLeading := regexp.MustCompile(`^` + sepre + `+`)
 			reInternal := regexp.MustCompile(`([^` + sepre + `])` + sepre + `+([^` + sepre + `])`)
 
-			if urlMode && 0 == idx {
+			if urlMode && idx == 0 {
 				s = reTrailing.ReplaceAllString(s, S_MT)
 			} else {
 				if 0 < idx {
@@ -1378,8 +1378,6 @@ func DelProp(parent any, key any) any {
 		if err != nil {
 			return parent
 		}
-		ki = int(math.Floor(float64(ki)))
-
 		if lr, isLR := parent.(*ListRef[any]); isLR {
 			psize := len(lr.List)
 			if 0 <= ki && ki < psize {
@@ -1554,7 +1552,7 @@ func Walk(
 	opts ...any,
 ) any {
 	var after WalkApply
-	var maxdepth int = 32
+	maxdepth := 32
 
 	if len(opts) > 0 {
 		if opts[0] != nil {
@@ -1740,7 +1738,7 @@ func Merge(val any, maxdepths ...int) any {
 		}
 	}
 
-	var out any = nil
+	var out any
 
 	if !IsList(val) {
 		return val
@@ -2278,11 +2276,6 @@ func Inject(
 				// Perform the val mode injection on the child value.
 				Inject(childval, store, childinj)
 
-				// The injection may modify child processing.
-				nkI = childinj.KeyI
-				nodekeys = childinj.Keys.List
-				val = childinj.Parent
-
 				// Perform the key:post mode injection on the child key.
 				childinj.Mode = M_KEYPOST
 				_injectStr(nodekey, store, childinj)
@@ -2600,9 +2593,7 @@ var Transform_EACH Injector = func(
 		copy(tpath, inj.Path.List[:len(inj.Path.List)-1])
 
 		dpath := []string{S_DTOP}
-		for _, p := range strings.Split(srcpath, S_DT) {
-			dpath = append(dpath, p)
-		}
+		dpath = append(dpath, strings.Split(srcpath, S_DT)...)
 		dpath = append(dpath, "$:"+ckey)
 
 		// Parent structure.
@@ -2787,9 +2778,7 @@ var Transform_PACK Injector = func(
 		}
 
 		dpath := []string{S_DTOP}
-		for _, p := range strings.Split(srcpath, S_DT) {
-			dpath = append(dpath, p)
-		}
+		dpath = append(dpath, strings.Split(srcpath, S_DT)...)
 		dpath = append(dpath, "$:"+ckey)
 
 		tcur := map[string]any{ckey: tsrc}
@@ -3200,8 +3189,7 @@ var Transform_FORMAT Injector = func(
 		return nil
 	}
 
-	var out any
-	out = Walk(resolved, formatter)
+	out := Walk(resolved, formatter)
 
 	// Set on parent output
 	if target != nil {
@@ -3264,10 +3252,6 @@ func TransformModifyHandler(
 				extraData[k] = v
 			}
 		}
-	}
-
-	if extraData == nil {
-		extraData = map[string]any{}
 	}
 
 	var dataClone any
@@ -3359,10 +3343,7 @@ func transformModifyCore(
 		}
 	}
 
-	// Create empty maps if nil
-	if extraData == nil {
-		extraData = map[string]any{}
-	}
+	// Create empty map if nil
 	if data == nil {
 		data = map[string]any{}
 	}
@@ -3475,42 +3456,6 @@ var validate_STRING Injector = func(
 	return out
 }
 
-var validate_NUMBER Injector = func(
-	inj *Injection,
-	_val any,
-	ref *string,
-	store any,
-) any {
-	out := GetProp(inj.Dparent, inj.Key)
-
-	t := Typify(out)
-	if 0 == (T_number & t) {
-		msg := _invalidTypeMsg(inj.Path.List, S_number, Typename(t), out)
-		inj.Errs.Append(msg)
-		return nil
-	}
-
-	return out
-}
-
-var validate_BOOLEAN Injector = func(
-	inj *Injection,
-	_val any,
-	ref *string,
-	store any,
-) any {
-	out := GetProp(inj.Dparent, inj.Key)
-
-	t := Typify(out)
-	if 0 == (T_boolean & t) {
-		msg := _invalidTypeMsg(inj.Path.List, S_boolean, Typename(t), out)
-		inj.Errs.Append(msg)
-		return nil
-	}
-
-	return out
-}
-
 var validate_OBJECT Injector = func(
 	inj *Injection,
 	_val any,
@@ -3542,24 +3487,6 @@ var validate_ARRAY Injector = func(
 	t := Typify(out)
 	if 0 == (T_list & t) {
 		msg := _invalidTypeMsg(inj.Path.List, S_array, Typename(t), out)
-		inj.Errs.Append(msg)
-		return nil
-	}
-
-	return out
-}
-
-var validate_FUNCTION Injector = func(
-	inj *Injection,
-	_val any,
-	ref *string,
-	store any,
-) any {
-	out := GetProp(inj.Dparent, inj.Key)
-
-	t := Typify(out)
-	if 0 == (T_function & t) {
-		msg := _invalidTypeMsg(inj.Path.List, S_function, Typename(t), out)
 		inj.Errs.Append(msg)
 		return nil
 	}
@@ -4064,8 +3991,6 @@ func makeValidation(exact bool) Modify {
 			// Spec value was a default, copy over data
 			SetProp(parent, key, cval)
 		}
-
-		return
 	}
 }
 
@@ -4079,7 +4004,7 @@ var _validatehandler Injector = func(
 	ref *string,
 	store any,
 ) any {
-	out := val
+	var out any
 
 	refStr := ""
 	if ref != nil {
@@ -4169,10 +4094,8 @@ func Validate(
 	}
 
 	// Add any extra validation commands
-	if extra != nil {
-		for k, fn := range extra {
-			store[k] = fn
-		}
+	for k, fn := range extra {
+		store[k] = fn
 	}
 
 	// A special top level value to collect errors
@@ -4504,10 +4427,8 @@ func validateCollectExact(
 		"$EXACT":    validate_EXACT,
 	}
 
-	if extra != nil {
-		for k, fn := range extra {
-			store[k] = fn
-		}
+	for k, fn := range extra {
+		store[k] = fn
 	}
 
 	store["$ERRS"] = errs
@@ -4608,14 +4529,6 @@ func (l *ListRef[T]) Prepend(elem T) {
 	l.List = append([]T{elem}, l.List...)
 }
 
-func _join(vals []any, sep string) string {
-	strVals := make([]string, len(vals))
-	for i, v := range vals {
-		strVals[i] = fmt.Sprint(v)
-	}
-	return strings.Join(strVals, sep)
-}
-
 func _invalidTypeMsg(path []string, needtype string, vt string, v any, whence ...string) string {
 	vs := "no value"
 	if v != nil {
@@ -4641,13 +4554,6 @@ func _invalidTypeMsg(path []string, needtype string, vt string, v any, whence ..
 	// }
 
 	return message + "."
-}
-
-func _getType(v any) string {
-	if nil == v {
-		return "nil"
-	}
-	return reflect.TypeOf(v).String()
 }
 
 // StrKey converts different types of keys to string representation.
@@ -4809,7 +4715,7 @@ func _toFloat64(val any) (float64, error) {
 func _parseInt(s string) (int, error) {
 	// We'll do a very simple parse:
 	var x int
-	var sign int = 1
+	sign := 1
 	for i, c := range s {
 		if c == '-' && i == 0 {
 			sign = -1
@@ -4854,95 +4760,4 @@ func _stringifyValue(v any) string {
 	default:
 		return Stringify(v)
 	}
-}
-
-// DEBUG
-
-func fdt(data any) string {
-	return fdti(data, "")
-}
-
-func fdti(data any, indent string) string {
-	result := ""
-
-	if data == nil {
-		return indent + "nil\n"
-	}
-
-	// Get a pointer for memory address
-	memoryAddr := "0x???"
-	val := reflect.ValueOf(data)
-
-	// For non-pointer types that are addressable, get their pointer
-	if val.Kind() != reflect.Ptr && val.CanAddr() {
-		ptr := val.Addr()
-		memoryAddr = fmt.Sprintf("0x%x", ptr.Pointer())
-	} else if val.Kind() == reflect.Ptr {
-		// For pointer types, use the pointer value directly
-		memoryAddr = fmt.Sprintf("0x%x", val.Pointer())
-	} else if val.Kind() == reflect.Map || val.Kind() == reflect.Slice {
-		// For maps and slices, use the pointer to internal data
-		memoryAddr = fmt.Sprintf("0x%x", val.Pointer())
-	}
-
-	switch v := data.(type) {
-	case map[string]any:
-		result += indent + fmt.Sprintf("{ @%s\n", memoryAddr)
-		for key, value := range v {
-			result += fmt.Sprintf("%s  \"%s\": %s", indent, key, fdti(value, indent+"  "))
-		}
-		result += indent + "}\n"
-
-	case []any:
-		result += indent + fmt.Sprintf("[ @%s\n", memoryAddr)
-		for _, value := range v {
-			result += fmt.Sprintf("%s  - %s", indent, fdti(value, indent+"  "))
-		}
-		result += indent + "]\n"
-
-	default:
-		// Check if it's a struct using reflection
-		typ := val.Type()
-
-		// Handle pointers by dereferencing
-		isPtr := false
-		if val.Kind() == reflect.Ptr {
-			isPtr = true
-			if val.IsNil() {
-				return indent + "nil\n"
-			}
-			val = val.Elem()
-			typ = val.Type()
-		}
-
-		if val.Kind() == reflect.Struct {
-			structName := typ.Name()
-			if isPtr {
-				structName = "*" + structName
-			}
-			result += indent + fmt.Sprintf("struct %s @%s {\n", structName, memoryAddr)
-
-			// Iterate over all fields of the struct
-			for i := 0; i < val.NumField(); i++ {
-				field := val.Field(i)
-				fieldType := typ.Field(i)
-
-				// Skip unexported fields (lowercase field names)
-				if !fieldType.IsExported() {
-					continue
-				}
-
-				fieldName := fieldType.Name
-				fieldValue := field.Interface()
-
-				result += fmt.Sprintf("%s  %s: %s", indent, fieldName, fdti(fieldValue, indent+"  "))
-			}
-			result += indent + "}\n"
-		} else {
-			// For non-struct types, just format value with its type
-			result += fmt.Sprintf("%v (%s) @%s\n", v, reflect.TypeOf(v), memoryAddr)
-		}
-	}
-
-	return result
 }

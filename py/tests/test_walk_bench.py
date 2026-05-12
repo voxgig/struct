@@ -38,7 +38,7 @@ def countNodes(val):
         return 1
     n = 1
     if isinstance(val, dict):
-        for k in val.keys():
+        for k in val:
             n += countNodes(val[k])
     else:
         for v in val:

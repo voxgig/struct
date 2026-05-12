@@ -495,7 +495,7 @@ describe("struct", function()
   test("walk-depth", function()
     runsetflags(walkSpec.depth, { null = false }, function(vin)
       local top = nil
-      local cur = nil
+      local cur
       local function copy(key, val, _parent, _path)
         if key == nil or isnode(val) then
           local child = islist(val) and array() or object()
@@ -731,7 +731,6 @@ describe("struct", function()
           -- Modify string values by adding '@' prefix
           if key ~= nil and parent ~= nil and type(val) == "string" then
             parent[key] = "@" .. val
-            val = parent[key]
           end
         end,
       })

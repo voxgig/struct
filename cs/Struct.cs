@@ -36,6 +36,7 @@
  * - Join: join parts of a string, merging sep chars as needed.
  */
 
+using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -115,7 +116,7 @@ namespace Voxgig.Struct
                 Meta["__d"] = value;
             }
 
-            Meta["__d"] = Convert.ToInt64(value) + 1L;
+            Meta["__d"] = Convert.ToInt64(value, CultureInfo.InvariantCulture) + 1L;
 
             object? parentkey = StructUtils.GetElem(Path, -2);
 
@@ -256,6 +257,18 @@ namespace Voxgig.Struct
         public const string S_CM = ",";
         public const string S_VIZ = ": ";
 
+        // Cached JSON serializer options (avoid allocating per call - CA1869).
+        private static readonly JsonSerializerOptions JSON_OPTS_COMPACT = new()
+        {
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+            WriteIndented = false,
+        };
+        private static readonly JsonSerializerOptions JSON_OPTS_INDENTED = new()
+        {
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+            WriteIndented = true,
+        };
+
         // Private markers.
         public static readonly Dictionary<string, object?> SKIP = new() { ["`$SKIP`"] = true };
         public static readonly Dictionary<string, object?> DELETE = new() { ["`$DELETE`"] = true };
@@ -275,16 +288,16 @@ namespace Voxgig.Struct
             S_scalar, S_node
         ];
 
-        // Regular expressions.
-        private static readonly Regex R_INTEGER_KEY = MyRegex();
-        private static readonly Regex R_ESCAPE_REGEXP = new(@"[.*+?^${}()|[\]\\]");
-        private static readonly Regex R_CLONE_REF = new(@"^`\$REF:([0-9]+)`$");
-        private static readonly Regex R_INJECTION_FULL = new(@"^`(\$[A-Z]+|[^`]*)[0-9]*`$");
-        private static readonly Regex R_INJECTION_PARTIAL = new(@"`([^`]+)`");
-        private static readonly Regex R_DOUBLE_DOLLAR = new(@"\$\$");
-        private static readonly Regex R_META_PATH = new(@"^([^$]+)\$([=~])(.+)$");
-        private static readonly Regex R_TRANSFORM_NAME = new(@"`\$([A-Z]+)`");
-        private static readonly Regex R_DOT = new(@"\.");
+        // Regular expressions (compile-time generated; see partial methods at end of class).
+        private static readonly Regex R_INTEGER_KEY = R_IntegerKeyGen();
+        private static readonly Regex R_ESCAPE_REGEXP = R_EscapeRegexpGen();
+        private static readonly Regex R_CLONE_REF = R_CloneRefGen();
+        private static readonly Regex R_INJECTION_FULL = R_InjectionFullGen();
+        private static readonly Regex R_INJECTION_PARTIAL = R_InjectionPartialGen();
+        private static readonly Regex R_DOUBLE_DOLLAR = R_DoubleDollarGen();
+        private static readonly Regex R_META_PATH = R_MetaPathGen();
+        private static readonly Regex R_TRANSFORM_NAME = R_TransformNameGen();
+        private static readonly Regex R_DOT = R_DotGen();
 
         public const int MAXDEPTH = 32;
 
@@ -404,7 +417,7 @@ namespace Voxgig.Struct
         {
             if (val is int or long or double or float)
             {
-                long lv = Convert.ToInt64(val);
+                long lv = Convert.ToInt64(val, CultureInfo.InvariantCulture);
                 long lo = start ?? long.MinValue;
                 long hi = end.HasValue ? (long)end.Value - 1 : long.MaxValue;
                 return Math.Min(Math.Max(lv, lo), hi);
@@ -574,8 +587,8 @@ namespace Voxgig.Struct
 
             if (0 < (T.Number & t))
             {
-                double d = Convert.ToDouble(key);
-                return ((long)Math.Floor(d)).ToString();
+                double d = Convert.ToDouble(key, CultureInfo.InvariantCulture);
+                return ((long)Math.Floor(d)).ToString(CultureInfo.InvariantCulture);
             }
             return S_MT;
         }
@@ -591,7 +604,7 @@ namespace Voxgig.Struct
             }
             return val is List<object?> list
                 ? Enumerable.Range(0, list.Count)
-                                 .Select(i => i.ToString())
+                                 .Select(i => i.ToString(CultureInfo.InvariantCulture))
                                  .ToList()
                 : (List<string>)([]);
         }
@@ -715,7 +728,7 @@ namespace Voxgig.Struct
             // Step 2: items(step1, apply sep-stripping per element).
             var step2 = Items(step1, n =>
             {
-                int i = int.Parse((string)n[0]!);
+                int i = int.Parse((string)n[0]!, CultureInfo.InvariantCulture);
                 string s = (string)n[1]!;
 
                 if (sepre is not null and not S_MT)
@@ -763,11 +776,7 @@ namespace Voxgig.Struct
 
             try
             {
-                var opts = new JsonSerializerOptions
-                {
-                    WriteIndented = indent > 0,
-                    Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-                };
+                var opts = indent > 0 ? JSON_OPTS_INDENTED : JSON_OPTS_COMPACT;
                 string str = JsonSerializer.Serialize(SortKeys(val), opts);
                 // System.Text.Json on .NET 8 emits Environment.NewLine for indented
                 // output, which is "\r\n" on Windows. The TS-canonical corpus expects
@@ -828,11 +837,7 @@ namespace Voxgig.Struct
             {
                 try
                 {
-                    valstr = JsonSerializer.Serialize(SortKeys(val),
-                        new JsonSerializerOptions
-                        {
-                            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-                        });
+                    valstr = JsonSerializer.Serialize(SortKeys(val), JSON_OPTS_COMPACT);
                     valstr = valstr.Replace("\"", S_MT);
                 }
                 catch
@@ -918,17 +923,19 @@ namespace Voxgig.Struct
                             {
                                 if (p is int pi)
                                 {
-                                    return ((long)pi).ToString();
+                                    return ((long)pi).ToString(CultureInfo.InvariantCulture);
                                 }
 
                                 if (p is long pl)
                                 {
-                                    return pl.ToString();
+                                    return pl.ToString(CultureInfo.InvariantCulture);
                                 }
 
                                 return p is double pd
-                                    ? ((long)Math.Floor(pd)).ToString()
-                                    : p is float pf ? ((long)Math.Floor(pf)).ToString() : R_DOT.Replace((string)p!, S_MT);
+                                    ? ((long)Math.Floor(pd)).ToString(CultureInfo.InvariantCulture)
+                                    : p is float pf
+                                        ? ((long)Math.Floor(pf)).ToString(CultureInfo.InvariantCulture)
+                                        : R_DOT.Replace((string)p!, S_MT);
                             })
                             .Cast<object?>()
                             .ToList();
@@ -1029,7 +1036,7 @@ namespace Voxgig.Struct
                 int keyI = (int)Math.Floor((double)keyL);
                 if (keyI >= 0)
                 {
-                    int clamped = Convert.ToInt32(Slice(keyI, 0, list.Count + 1));
+                    int clamped = Convert.ToInt32(Slice(keyI, 0, list.Count + 1), CultureInfo.InvariantCulture);
                     while (list.Count <= clamped)
                     {
                         list.Add(null);
@@ -1225,18 +1232,18 @@ namespace Voxgig.Struct
                         {
                             part = state.Key ?? S_MT;
                         }
-                        else if (state != null && part.StartsWith("$GET:"))
+                        else if (state != null && part.StartsWith("$GET:", StringComparison.Ordinal))
                         {
                             string sub = part[5..^1];
                             part = Stringify(GetPath(src, sub));
                         }
-                        else if (state != null && part.StartsWith("$REF:"))
+                        else if (state != null && part.StartsWith("$REF:", StringComparison.Ordinal))
                         {
                             string sub = part[5..^1];
                             object? specVal = GetProp(store, S_DSPEC);
                             part = specVal != null ? Stringify(GetPath(specVal, sub)) : S_MT;
                         }
-                        else if (state != null && part.StartsWith("$META:"))
+                        else if (state != null && part.StartsWith("$META:", StringComparison.Ordinal))
                         {
                             string sub = part[6..^1];
                             part = Stringify(GetPath(state.Meta, sub));
@@ -1541,7 +1548,7 @@ namespace Voxgig.Struct
         private static readonly Injector _InjectHandler = (inj, val, refStr, store) =>
         {
             object? out_ = val;
-            bool iscmd = IsFunc(val) && (refStr == null || refStr.StartsWith(S_DS));
+            bool iscmd = IsFunc(val) && (refStr == null || refStr.StartsWith(S_DS, StringComparison.Ordinal));
             if (iscmd && val is Injector injFn)
             {
                 out_ = injFn(inj, val, refStr, store);
@@ -1616,12 +1623,7 @@ namespace Voxgig.Struct
                 // Non-string, non-null → serialize as compact JSON.
                 try
                 {
-                    return JsonSerializer.Serialize(found,
-                        new JsonSerializerOptions
-                        {
-                            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-                            WriteIndented = false,
-                        });
+                    return JsonSerializer.Serialize(found, JSON_OPTS_COMPACT);
                 }
                 catch { return Stringify(found); }
             });
@@ -2153,7 +2155,7 @@ namespace Voxgig.Struct
             {
                 if (keypath == null)
                 {
-                    return idx.ToString();
+                    return idx.ToString(CultureInfo.InvariantCulture);
                 }
 
                 if (keypath is not string kpStr)
@@ -2161,7 +2163,7 @@ namespace Voxgig.Struct
                     return "";
                 }
 
-                if (kpStr.StartsWith("`"))
+                if (kpStr.StartsWith('`'))
                 {
                     // inject keypath with srcItem as $TOP
                     var ks = new Dictionary<string, object?>(store is Dictionary<string, object?> sd ? sd : []) { [S_DTOP] = srcItem };
@@ -2410,8 +2412,8 @@ namespace Voxgig.Struct
             {
                 formatter = nameStr switch
                 {
-                    "upper" => (k, v, p, path) => IsNode(v) ? v : (object?)FmtStr(v).ToUpper(),
-                    "lower" => (k, v, p, path) => IsNode(v) ? v : (object?)FmtStr(v).ToLower(),
+                    "upper" => (k, v, p, path) => IsNode(v) ? v : (object?)FmtStr(v).ToUpperInvariant(),
+                    "lower" => (k, v, p, path) => IsNode(v) ? v : (object?)FmtStr(v).ToLowerInvariant(),
                     "string" => (k, v, p, path) => IsNode(v) ? v : (object?)FmtStr(v),
                     "number" => (k, v, p, path) =>
                     {
@@ -2557,7 +2559,7 @@ namespace Voxgig.Struct
                 foreach (var kv in Items(extra))
                 {
                     string k = kv[0]?.ToString() ?? "";
-                    if (k.StartsWith(S_DS))
+                    if (k.StartsWith(S_DS, StringComparison.Ordinal))
                     {
                         extraTransforms[k] = kv[1];
                     }
@@ -2665,7 +2667,7 @@ namespace Voxgig.Struct
         // Require a value of the named type ($NUMBER, $INTEGER, etc.).
         private static readonly Injector _ValidateType = (inj, val, refStr, store) =>
         {
-            string tname = refStr != null && refStr.Length > 1 ? refStr[1..].ToLower() : "";
+            string tname = refStr != null && refStr.Length > 1 ? refStr[1..].ToLowerInvariant() : "";
             int idx = Array.IndexOf(TYPENAME, tname);
             int typev = idx >= 0 ? (1 << (31 - idx)) : 0;
 
@@ -2816,7 +2818,7 @@ namespace Voxgig.Struct
             // No match found.
             string valdesc = R_TRANSFORM_NAME.Replace(
                 Join(Items(tvals, n => (object?)Stringify(n[1])), ", "),
-                m => m.Groups[1].Value.ToLower());
+                m => m.Groups[1].Value.ToLowerInvariant());
 
             inj.Errs.Add(_InvalidTypeMsg(
                 inj.Path,
@@ -2871,7 +2873,7 @@ namespace Voxgig.Struct
 
                 string valdesc = R_TRANSFORM_NAME.Replace(
                     Join(Items(tvals, n => (object?)Stringify(n[1])), ", "),
-                    m => m.Groups[1].Value.ToLower());
+                    m => m.Groups[1].Value.ToLowerInvariant());
 
                 inj.Errs.Add(_InvalidTypeMsg(
                     inj.Path,
@@ -3156,8 +3158,8 @@ namespace Voxgig.Struct
                 long l => l,
                 double d => d,
                 float f => f,
-                _ => double.TryParse(v?.ToString(), System.Globalization.NumberStyles.Any,
-                    System.Globalization.CultureInfo.InvariantCulture, out double x)
+                _ => double.TryParse(v?.ToString(), NumberStyles.Any,
+                    CultureInfo.InvariantCulture, out double x)
                     ? x : double.NaN,
             };
         }
@@ -3412,6 +3414,22 @@ namespace Voxgig.Struct
         }
 
         [GeneratedRegex(@"^[-0-9]+$")]
-        private static partial Regex MyRegex();
+        private static partial Regex R_IntegerKeyGen();
+        [GeneratedRegex(@"[.*+?^${}()|[\]\\]")]
+        private static partial Regex R_EscapeRegexpGen();
+        [GeneratedRegex(@"^`\$REF:([0-9]+)`$")]
+        private static partial Regex R_CloneRefGen();
+        [GeneratedRegex(@"^`(\$[A-Z]+|[^`]*)[0-9]*`$")]
+        private static partial Regex R_InjectionFullGen();
+        [GeneratedRegex(@"`([^`]+)`")]
+        private static partial Regex R_InjectionPartialGen();
+        [GeneratedRegex(@"\$\$")]
+        private static partial Regex R_DoubleDollarGen();
+        [GeneratedRegex(@"^([^$]+)\$([=~])(.+)$")]
+        private static partial Regex R_MetaPathGen();
+        [GeneratedRegex(@"`\$([A-Z]+)`")]
+        private static partial Regex R_TransformNameGen();
+        [GeneratedRegex(@"\.")]
+        private static partial Regex R_DotGen();
     }
 }

@@ -3,8 +3,8 @@ require 'json'
 require 'pathname'
 
 module VoxgigRunner
-  NULLMARK = '__NULL__'    # Represents a JSON null in tests
-  UNDEFMARK = '__UNDEF__'  # Represents an undefined value
+  NULLMARK = '__NULL__'.freeze    # Represents a JSON null in tests
+  UNDEFMARK = '__UNDEF__'.freeze  # Represents an undefined value
 
   # make_runner(testfile, client)
   # Returns a lambda that accepts a name (e.g. "struct") and an optional store,
@@ -31,25 +31,23 @@ module VoxgigRunner
         testspecmap = fix_json(testspec, flags)
         testset = testspecmap['set'] || []
         testset.each do |entry|
-          
-            entry = resolve_entry(entry, flags)
-            # Log the test entry details if DEBUG is enabled.
-            puts "DEBUG: Running test entry: in=#{entry['in'].inspect} expected=#{entry['out'].inspect}" if ENV['DEBUG']
-            testpack = resolve_test_pack(name, entry, subject, client, clients)
-            args = resolve_args(entry, testpack, struct_utils)
-            # Log the arguments passed to subject.
-            puts "DEBUG: Arguments for subject: #{args.inspect}" if ENV['DEBUG']
-            # In Ruby we assume the subject is a Proc/lambda or a callable object.
-            res = testpack[:subject].call(*args)
-            entry['args'] = args
-            res = fix_json(res, flags)
-            entry['res'] = res
-            # Log the result obtained.
-            puts "DEBUG: Result obtained: #{struct_utils.stringify(res)}" if ENV['DEBUG']
-            check_result(entry, res, struct_utils)
-          rescue => err
-            handle_error(entry, err, struct_utils)
-          
+          entry = resolve_entry(entry, flags)
+          # Log the test entry details if DEBUG is enabled.
+          puts "DEBUG: Running test entry: in=#{entry['in'].inspect} expected=#{entry['out'].inspect}" if ENV['DEBUG']
+          testpack = resolve_test_pack(name, entry, subject, client, clients)
+          args = resolve_args(entry, testpack, struct_utils)
+          # Log the arguments passed to subject.
+          puts "DEBUG: Arguments for subject: #{args.inspect}" if ENV['DEBUG']
+          # In Ruby we assume the subject is a Proc/lambda or a callable object.
+          res = testpack[:subject].call(*args)
+          entry['args'] = args
+          res = fix_json(res, flags)
+          entry['res'] = res
+          # Log the result obtained.
+          puts "DEBUG: Result obtained: #{struct_utils.stringify(res)}" if ENV['DEBUG']
+          check_result(entry, res, struct_utils)
+        rescue StandardError => e
+          handle_error(entry, e, struct_utils)
         end
       end
 
@@ -67,13 +65,12 @@ module VoxgigRunner
     full_path = File.join(__dir__, testfile)
     all_tests = JSON.parse(File.read(full_path))
     if all_tests.key?('primary') && all_tests['primary'].key?(name)
-      spec = all_tests['primary'][name]
+      all_tests['primary'][name]
     elsif all_tests.key?(name)
-      spec = all_tests[name]
+      all_tests[name]
     else
-      spec = all_tests
+      all_tests
     end
-    spec
   end
 
   # If the spec contains a DEF section with client definitions, resolve them.
@@ -84,9 +81,7 @@ module VoxgigRunner
       spec['DEF']['client'].each do |cn, cdef|
         copts = (cdef['test'] && cdef['test']['options']) || {}
         # If there is an injection method defined, apply it.
-        if store.is_a?(Hash) && struct_utils.respond_to?(:inject)
-          struct_utils.inject(copts, store)
-        end
+        struct_utils.inject(copts, store) if store.is_a?(Hash) && struct_utils.respond_to?(:inject)
         clients[cn] = client.test(copts)
       end
     end
@@ -129,36 +124,32 @@ module VoxgigRunner
     end
 
     # Log expected and actual values before comparison.
-    puts "DEBUG check_result: expected=#{struct_utils.stringify(entry['out'])} actual=#{struct_utils.stringify(res)}" if ENV['DEBUG']
-
-    if entry['out'] == res
-      return
+    if ENV['DEBUG']
+      puts "DEBUG check_result: expected=#{struct_utils.stringify(entry['out'])} actual=#{struct_utils.stringify(res)}"
     end
 
-    if matched && (entry['out'] == NULLMARK || entry['out'].nil?)
-      return
-    end
+    return if entry['out'] == res
 
-    unless deep_equal?(res, entry['out'])
-      raise "Mismatch: Expected #{struct_utils.stringify(entry['out'])} but got #{struct_utils.stringify(res)}"
-    end
+    return if matched && (entry['out'] == NULLMARK || entry['out'].nil?)
+
+    return if deep_equal?(res, entry['out'])
+
+    raise "Mismatch: Expected #{struct_utils.stringify(entry['out'])} but got #{struct_utils.stringify(res)}"
   end
 
   # In case of error during test execution, handle it.
   def self.handle_error(entry, err, struct_utils)
     entry['thrown'] = err
-    if entry.key?('err')
-      if entry['err'] === true || matchval(entry['err'], err.message, struct_utils)
-        if entry.key?('match')
-          match(entry['match'], { 'in' => entry['in'], 'out' => entry['res'], 'ctx' => entry['ctx'], 'err' => err },
-                struct_utils)
-        end
-        return
+    raise err unless entry.key?('err')
+
+    if entry['err'] == true || matchval(entry['err'], err.message, struct_utils)
+      if entry.key?('match')
+        match(entry['match'], { 'in' => entry['in'], 'out' => entry['res'], 'ctx' => entry['ctx'], 'err' => err },
+              struct_utils)
       end
-      raise "ERROR MATCH: [#{struct_utils.stringify(entry['err'])}] <=> [#{err.message}]"
-    else
-      raise err
+      return
     end
+    raise "ERROR MATCH: [#{struct_utils.stringify(entry['err'])}] <=> [#{err.message}]"
   end
 
   # Resolves arguments for the test subject.
@@ -242,8 +233,8 @@ module VoxgigRunner
     unless pass
       if check.is_a?(String)
         basestr = struct_utils.stringify(base)
-        if check =~ /^\/(.+)\/$/
-          regex = Regexp.new($1)
+        if check =~ %r{^/(.+)/$}
+          regex = Regexp.new(::Regexp.last_match(1))
           pass = regex.match?(basestr)
         else
           pass = basestr.downcase.include?(struct_utils.stringify(check).downcase)
@@ -270,7 +261,7 @@ module VoxgigRunner
       end
     }
     JSON.generate(normalize.call(a)) == JSON.generate(normalize.call(b))
-  rescue
+  rescue StandardError
     a == b
   end
 
@@ -280,7 +271,7 @@ module VoxgigRunner
     return flags['null'] ? NULLMARK : val if val.equal?(VoxgigStruct::UNDEF)
 
     JSON.parse(JSON.generate(val))
-  rescue
+  rescue StandardError
     val
   end
 

@@ -216,9 +216,6 @@ exports.DELETE = DELETE;
 // Regular expression constants
 const R_INTEGER_KEY = /^[-0-9]+$/; // Match integer keys (including <0).
 const R_ESCAPE_REGEXP = /[.*+?^${}()|[\]\\]/g; // Chars that need escaping in regexp.
-const R_TRAILING_SLASH = /\/+$/; // Trailing slashes in URLs.
-const R_LEADING_TRAILING_SLASH = /([^\/])\/+/; // Multiple slashes in URL middle.
-const R_LEADING_SLASH = /^\/+/; // Leading slashes in URLs.
 const R_QUOTES = /"/g; // Double quotes for removal.
 const R_DOT = /\./g; // Dots in path strings.
 const R_CLONE_REF = /^`\$REF:([0-9]+)`$/; // Copy reference in cloning.
@@ -593,7 +590,7 @@ function jsonify(val, flags) {
                         join(items(slice(str.split('\n'), 1), (n) => pad(n[1], 0 - offset - size(n[1]))), '\n');
             }
         }
-        catch (e) {
+        catch {
             str = '__JSONIFY_FAILED__';
         }
     }
@@ -623,7 +620,7 @@ function stringify(val, maxlen, pretty) {
             });
             valstr = valstr.replace(R_QUOTES, S_MT);
         }
-        catch (err) {
+        catch {
             valstr = '__STRINGIFY_FAILED__';
         }
     }
@@ -633,7 +630,9 @@ function stringify(val, maxlen, pretty) {
     }
     if (pretty) {
         // Indicate deeper JSON levels with different terminal colors (simplistic wrt strings).
-        let c = items([81, 118, 213, 39, 208, 201, 45, 190, 129, 51, 160, 121, 226, 33, 207, 69], (n) => '\x1b[38;5;' + n[1] + 'm'), r = '\x1b[0m', d = 0, o = c[0], t = o;
+        const c = items([81, 118, 213, 39, 208, 201, 45, 190, 129, 51, 160, 121, 226, 33, 207, 69], (n) => '\x1b[38;5;' + n[1] + 'm');
+        const r = '\x1b[0m';
+        let d = 0, o = c[0], t = o;
         for (const ch of valstr) {
             if (ch === '{' || ch === '[') {
                 d++;
@@ -1276,7 +1275,7 @@ const transform_EACH = (inj, _val, _ref, store) => {
 // Convert a node to a map.
 // Format: { '`$PACK`':['source-path', child-template]}
 const transform_PACK = (inj, _val, _ref, store) => {
-    const { mode, key, path, parent, nodes } = inj;
+    const { key, path, parent, nodes } = inj;
     const ijname = 'EACH';
     if (!checkPlacement(M_KEYPRE, ijname, T_map, inj)) {
         return NONE;

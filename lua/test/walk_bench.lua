@@ -90,19 +90,13 @@ local function measure(label, tree, runs)
 end
 
 -- ~299k nodes: width=8, depth=6.
-local wideDeep = buildTree(8, 6)
-measure("wide+deep (w=8,d=6)", wideDeep, 7)
-wideDeep = nil
+measure("wide+deep (w=8,d=6)", buildTree(8, 6), 7)
 collectgarbage("collect")
 
 -- ~1M nodes, shallow.
-local wide = buildTree(1000, 2)
-measure("wide (w=1000,d=2)", wide, 7)
-wide = nil
+measure("wide (w=1000,d=2)", buildTree(1000, 2), 7)
 collectgarbage("collect")
 
 -- ~2M nodes, deep. Lua's MAXDEPTH in walk is 32, so w=2,d=20 is safe.
-local deep = buildTree(2, 20)
-measure("deep (w=2,d=20)", deep, 5)
-deep = nil
+measure("deep (w=2,d=20)", buildTree(2, 20), 5)
 collectgarbage("collect")

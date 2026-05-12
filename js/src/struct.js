@@ -151,9 +151,6 @@ const DELETE = { '`$DELETE`': true }
 // Regular expression constants
 const R_INTEGER_KEY = /^[-0-9]+$/ // Match integer keys (including <0).
 const R_ESCAPE_REGEXP = /[.*+?^${}()|[\]\\]/g // Chars that need escaping in regexp.
-const R_TRAILING_SLASH = /\/+$/ // Trailing slashes in URLs.
-const R_LEADING_TRAILING_SLASH = /([^\/])\/+/ // Multiple slashes in URL middle.
-const R_LEADING_SLASH = /^\/+/ // Leading slashes in URLs.
 const R_QUOTES = /"/g // Double quotes for removal.
 const R_DOT = /\./g // Dots in path strings.
 const R_CLONE_REF = /^`\$REF:([0-9]+)`$/ // Copy reference in cloning.
@@ -514,7 +511,7 @@ function jsonify(val, flags) {
             '\n',
           )
       }
-    } catch (e) {
+    } catch {
       str = '__JSONIFY_FAILED__'
     }
   }
@@ -542,7 +539,7 @@ function stringify(val, maxlen, pretty) {
         return val
       })
       valstr = valstr.replace(R_QUOTES, S_MT)
-    } catch (err) {
+    } catch {
       valstr = '__STRINGIFY_FAILED__'
     }
   }
@@ -1202,7 +1199,7 @@ const transform_EACH = (inj, _val, _ref, store) => {
 // Convert a node to a map.
 // Format: { '`$PACK`':['source-path', child-template]}
 const transform_PACK = (inj, _val, _ref, store) => {
-  const { mode, key, path, parent, nodes } = inj
+  const { key, path, parent, nodes } = inj
   const ijname = 'EACH'
   if (!checkPlacement(M_KEYPRE, ijname, T_map, inj)) {
     return NONE

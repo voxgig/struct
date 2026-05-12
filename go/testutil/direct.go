@@ -10,7 +10,6 @@ import (
 // Similar to the direct.ts TypeScript file, it provides a way to test validation directly
 func DirectTest() {
 	var out any
-	var errs *voxgigstruct.ListRef[any]
 
 	// Direct testing code ported from direct.ts
 
@@ -87,7 +86,7 @@ func DirectTest() {
 	*/
 
 	// This is the only uncommented test from direct.ts
-	errs = voxgigstruct.ListRefCreate[any]()
+	errs := voxgigstruct.ListRefCreate[any]()
 	out, _ = voxgigstruct.Validate(
 		map[string]any{
 			// kind: undefined

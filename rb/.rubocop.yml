@@ -25,3 +25,67 @@ Naming/MethodParameterName:
 
 Layout/LineLength:
   Max: 120
+
+# --- Cross-language naming parity -------------------------------------------
+# Variables (e.g. keyI, valI), constants (e.g. T_string, S_MT, M_VAL) and
+# method names (e.g. getprop, isnode, checkPlacement) deliberately mirror the
+# canonical TypeScript source / public API. Renaming them would break parity
+# across the language ports, so the naming cops that flag them are disabled.
+Naming/VariableName:
+  Enabled: false
+
+Naming/ConstantName:
+  Enabled: false
+
+Naming/MethodName:
+  Enabled: false
+
+Naming/BlockParameterName:
+  Enabled: false
+
+Naming/PredicateMethod:
+  # e.g. isnode/ismap/islist/isfunc/haskey/checkPlacement mirror the TS API and
+  # intentionally do not use the Ruby `?` suffix.
+  Enabled: false
+
+Lint/UnderscorePrefixedVariableName:
+  # `_`-prefixed names (e.g. _t scratch counter, callback params that mirror the
+  # TS signature) are used on purpose to mark them as "incidental"; keep as-is.
+  Enabled: false
+
+# --- Faithful-port structural patterns --------------------------------------
+Style/NestedTernaryOperator:
+  # Nested ternaries mirror nested conditional expressions in the TS source; the
+  # autocorrect also breaks syntax around `return`/modifier-if contexts here.
+  Enabled: false
+
+Lint/DuplicateBranch:
+  # Several multi-branch dispatch chains intentionally share return values to
+  # stay structurally aligned with the TS implementation.
+  Enabled: false
+
+Lint/SuppressedException:
+  # Empty `rescue StandardError` blocks mirror empty `try { } catch { }` blocks
+  # in the TS source (best-effort parsing/coercion).
+  Enabled: false
+
+Style/OptionalBooleanParameter:
+  # Trailing boolean params (e.g. slice(..., mutate = false)) mirror the TS API
+  # signatures; switching to keyword args would break cross-language parity.
+  Enabled: false
+
+# --- Test scaffolding -------------------------------------------------------
+Style/OpenStructUse:
+  # OpenStruct is used as a lightweight test double in the test files.
+  Exclude:
+    - 'test_*.rb'
+
+Style/OneClassPerFile:
+  # Test files define a dummy client class alongside the Minitest::Test class.
+  Exclude:
+    - 'test_*.rb'
+
+# printf-style format strings (e.g. in walk_bench.rb) use plain %s/%d tokens to
+# match the equivalent format strings in the other language ports.
+Style/FormatStringToken:
+  EnforcedStyle: unannotated

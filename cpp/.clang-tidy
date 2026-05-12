@@ -1,6 +1,21 @@
 # clang-tidy configuration for the C++ port.
 # A pragmatic check set: bug-prone patterns, portability, performance,
 # and a subset of readability. Verbose / style-only checks are disabled.
+#
+# A few checks are disabled because they conflict with this being a faithful,
+# line-by-line port of the canonical TypeScript implementation:
+#   - bugprone-branch-clone: several if/else dispatch chains intentionally
+#     share branch bodies to stay structurally aligned with the reference.
+#   - bugprone-exception-escape: the smoke / corpus `main()` deliberately lets
+#     exceptions propagate to the runtime (which reports them); wrapping every
+#     test entry point in try/catch adds noise without value.
+#   - performance-unnecessary-value-param / -copy-initialization: the port
+#     passes the small `Value` handle (and `std::function` callbacks) by value
+#     to mirror the reference signatures, and keeps deliberate defensive copies
+#     (e.g. the `$REF` original spec) that clang-tidy can't see are required.
+#   - performance-inefficient-string-concatenation: the URL-join / pretty-print
+#     helpers build strings in a way the reference does; the micro-optimisation
+#     isn't worth diverging from it.
 Checks: >
   bugprone-*,
   performance-*,
@@ -11,7 +26,12 @@ Checks: >
   readability-misleading-indentation,
   readability-redundant-control-flow,
   -bugprone-easily-swappable-parameters,
-  -bugprone-narrowing-conversions
+  -bugprone-narrowing-conversions,
+  -bugprone-branch-clone,
+  -bugprone-exception-escape,
+  -performance-unnecessary-value-param,
+  -performance-unnecessary-copy-initialization,
+  -performance-inefficient-string-concatenation
 WarningsAsErrors: ''
 HeaderFilterRegex: 'src/.*'
 FormatStyle: file

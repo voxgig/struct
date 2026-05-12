@@ -135,7 +135,7 @@ def check_result(entry, args, res, structUtils):
 
     try:
         cleaned_res = json.loads(json.dumps(res, default=str))
-    except:
+    except (TypeError, ValueError, RecursionError):
         # If can't be serialized just use the original
         cleaned_res = res
 
@@ -234,7 +234,7 @@ def resolve_args(entry, testpack, utility, structUtils):
     return args
 
 
-def resolve_flags(flags: dict[str, Any] = None) -> dict[str, bool]:
+def resolve_flags(flags: dict[str, Any] | None = None) -> dict[str, bool]:
     if flags is None:
         flags = {}
 
@@ -251,7 +251,9 @@ def resolve_entry(entry: dict[str, Any], flags: dict[str, bool]) -> dict[str, An
     return entry
 
 
-def fixJSON(obj, flags={}):
+def fixJSON(obj, flags=None):
+    if flags is None:
+        flags = {}
     # Handle nulls
     if obj is None:
         return NULLMARK if flags.get('null', True) else None

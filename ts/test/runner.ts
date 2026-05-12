@@ -11,11 +11,11 @@ const UNDEFMARK = '__UNDEF__' // Value is not present (thus, undefined).
 const EXISTSMARK = '__EXISTS__' // Value exists (not undefined).
 
 type Subject = (...args: any[]) => any
-type RunSet = (testspec: any, testsubject: Function) => Promise<any>
+type RunSet = (testspec: any, testsubject: Subject) => Promise<any>
 type RunSetFlags = (
   testspec: any,
   flags: Record<string, boolean>,
-  testsubject: Function,
+  testsubject: Subject,
 ) => Promise<any>
 
 type RunPack = {
@@ -55,7 +55,7 @@ async function makeRunner(testfile: string, client: Client) {
     const clients = await resolveClients(client, spec, store, structUtils)
     let subject = resolveSubject(name, utility)
 
-    const runsetflags: RunSetFlags = async (testspec: any, flags: Flags, testsubject: Function) => {
+    const runsetflags: RunSetFlags = async (testspec: any, flags: Flags, testsubject: Subject) => {
       subject = testsubject || subject
       flags = resolveFlags(flags)
       const testspecmap = fixJSON(testspec, flags)
@@ -82,7 +82,7 @@ async function makeRunner(testfile: string, client: Client) {
       }
     }
 
-    const runset: RunSet = async (testspec: any, testsubject: Function) =>
+    const runset: RunSet = async (testspec: any, testsubject: Subject) =>
       runsetflags(testspec, {}, testsubject)
 
     const runpack: RunPack = {

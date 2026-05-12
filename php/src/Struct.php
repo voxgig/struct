@@ -68,21 +68,14 @@ class Struct
      * String Constants
      * =======================
      */
-    private const S_MKEYPRE = 'key:pre';
-    private const S_MKEYPOST = 'key:post';
-    private const S_MVAL = 'val';
-    private const S_MKEY = 'key';
-
     private const S_DKEY = '`$KEY`';
     private const S_DMETA = '`$META`';
-    private const S_DANNO = '`$ANNO`';
 
     // Match TypeScript constants exactly
     private const S_BKEY = '`$KEY`';
     private const S_BANNO = '`$ANNO`';
     private const S_DTOP = '$TOP';
     private const S_DERRS = '$ERRS';
-    private const S_ERRS = '$ERRS';
 
     private const S_array = 'array';
     private const S_boolean = 'boolean';
@@ -90,7 +83,6 @@ class Struct
     private const S_number = 'number';
     private const S_object = 'object';
     private const S_string = 'string';
-    private const S_null = 'null';
     private const S_MT = '';
     private const S_BT = '`';
     private const S_DS = '$';
@@ -710,9 +702,10 @@ class Struct
     /**
      * Extract part of an array or string into a new value, from the start point to the end point.
      * If no end is specified, extract to the full length of the value. Negative arguments count
-     * from the end of the value.
+     * from the end of the value. When $mutate is true and $val is a reference-stable list
+     * (ListRef), the slice is applied in place (mirroring the canonical implementation).
      */
-    public static function slice(mixed $val, ?int $start = null, ?int $end = null): mixed
+    public static function slice(mixed $val, ?int $start = null, ?int $end = null, ?bool $mutate = null): mixed
     {
         if (is_numeric($val)) {
             $start = $start ?? PHP_INT_MIN;
@@ -754,7 +747,11 @@ class Struct
 
             if (-1 < $start && $start <= $end && $end <= $vlen) {
                 if ($val instanceof ListRef) {
-                    $val = new ListRef(array_slice($val->list, $start, $end - $start));
+                    if ($mutate) {
+                        $val->list = array_slice($val->list, $start, $end - $start);
+                    } else {
+                        $val = new ListRef(array_slice($val->list, $start, $end - $start));
+                    }
                 } elseif (self::islist($val)) {
                     $val = array_slice($val, $start, $end - $start);
                 } elseif (is_string($val)) {
@@ -762,7 +759,11 @@ class Struct
                 }
             } else {
                 if ($val instanceof ListRef) {
-                    $val = new ListRef([]);
+                    if ($mutate) {
+                        $val->list = [];
+                    } else {
+                        $val = new ListRef([]);
+                    }
                 } elseif (self::islist($val)) {
                     $val = [];
                 } elseif (is_string($val)) {
@@ -887,7 +888,7 @@ class Struct
 
         $pathstr = $UNDEF;
 
-        if ($path !== $UNDEF && $start >= 0) {
+        if ($path !== $UNDEF) {
             $len = count($path);
             $length = max(0, $len - $end - $start);
             $slice = array_slice($path, $start, $length);
@@ -1663,7 +1664,11 @@ class Struct
     ): mixed {
         $out = $val;
 
-        // Check if val is a function (command transforms)
+        // Check if val is a function (command transforms).
+        // The "undef() === $ref" guard mirrors the reference source, where the
+        // ref argument may be the absent-value sentinel; with PHP's string type
+        // hint that branch is unreachable here, hence the analyser hint.
+        // @phpstan-ignore-next-line identical.alwaysFalse
         $iscmd = self::isfunc($val) && (self::undef() === $ref || str_starts_with($ref, self::S_DS));
 
         // Only call val function if it is a special command ($NAME format).
@@ -1675,15 +1680,6 @@ class Struct
             $inj->setval($val);
         }
         return $out;
-    }
-
-    private static function _injecthandler_getpath(
-        object $state,
-        mixed $val,
-        string $ref,
-        mixed $store
-    ): mixed {
-        return self::_injecthandler($state, $val, $ref, $store);
     }
 
     /**
@@ -2260,8 +2256,8 @@ class Struct
      *
      * @param mixed $data   Source data (not mutated)
      * @param mixed $spec   Transform spec (JSON-like)
-     * @param array<mixed>|object|null $extra   extra transforms or data
-     * @param callable|null $modify  optional per-value hook
+     * @param mixed $injdef Either an injdef object ({ extra, modify, errs, meta, handler })
+     *                      or, for backward compatibility, extra transforms/data directly.
      */
     public static function transform(
         mixed $data,
@@ -2384,26 +2380,6 @@ class Struct
             return $out;
         }
         return $val;
-    }
-
-    /**
-     * Remove unresolved $REF list entries from a list spec.
-     * This handles PHP's value-type arrays where in-place mutation via references doesn't propagate.
-     */
-    private static function _cleanRefEntries(array $list): array
-    {
-        $cleaned = [];
-        foreach ($list as $item) {
-            if (self::islist($item) && count($item) >= 1 && self::_getprop($item, 0) === '`$REF`') {
-                // This is an unresolved $REF entry - remove it
-                continue;
-            }
-            if (self::islist($item)) {
-                $item = self::_cleanRefEntries($item);
-            }
-            $cleaned[] = $item;
-        }
-        return $cleaned;
     }
 
     /** @internal */
@@ -3374,9 +3350,9 @@ class Struct
         if (0 === ($modes & $inj->mode)) {
             $modeItems = array_filter(
                 [self::M_KEYPRE, self::M_KEYPOST, self::M_VAL],
-                fn($m) => $modes & $m
+                fn($m) => 0 !== ($modes & $m)
             );
-            $placementNames = array_map(fn($m) => self::PLACEMENT[$m] ?? '', $modeItems);
+            $placementNames = array_map(fn($m) => self::PLACEMENT[$m], $modeItems);
             $inj->errs[] = '$' . $ijname . ': invalid placement as ' . (self::PLACEMENT[$inj->mode] ?? '') .
                 ', expected: ' . implode(',', $placementNames) . '.';
             return false;

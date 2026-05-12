@@ -164,9 +164,6 @@ const DELETE = { '`$DELETE`': true }
 // Regular expression constants
 const R_INTEGER_KEY = /^[-0-9]+$/ // Match integer keys (including <0).
 const R_ESCAPE_REGEXP = /[.*+?^${}()|[\]\\]/g // Chars that need escaping in regexp.
-const R_TRAILING_SLASH = /\/+$/ // Trailing slashes in URLs.
-const R_LEADING_TRAILING_SLASH = /([^\/])\/+/ // Multiple slashes in URL middle.
-const R_LEADING_SLASH = /^\/+/ // Leading slashes in URLs.
 const R_QUOTES = /"/g // Double quotes for removal.
 const R_DOT = /\./g // Dots in path strings.
 const R_CLONE_REF = /^`\$REF:([0-9]+)`$/ // Copy reference in cloning.
@@ -272,7 +269,7 @@ function isempty(val: any) {
 }
 
 // Value is a function.
-function isfunc(val: any): val is Function {
+function isfunc(val: any): val is (...args: any[]) => any {
   return S_function === typeof val
 }
 
@@ -305,7 +302,7 @@ function size(val: any): number {
 // is inclusive, and end is *exclusive*.
 // NOTE: input lists are not mutated by default. Use the mutate
 // argument to mutate lists in place.
-function slice<V extends any>(val: V, start?: number, end?: number, mutate?: boolean): V {
+function slice<V>(val: V, start?: number, end?: number, mutate?: boolean): V {
   if (S_number === typeof val) {
     start = null == start || S_number !== typeof start ? Number.MIN_SAFE_INTEGER : start
     end = (null == end || S_number !== typeof end ? Number.MAX_SAFE_INTEGER : end) - 1
@@ -637,7 +634,7 @@ function jsonify(val: any, flags?: { indent?: number; offset?: number }) {
             '\n',
           )
       }
-    } catch (e: any) {
+    } catch {
       str = '__JSONIFY_FAILED__'
     }
   }
@@ -669,7 +666,7 @@ function stringify(val: any, maxlen?: number, pretty?: any): string {
         return val
       })
       valstr = valstr.replace(R_QUOTES, S_MT)
-    } catch (err: any) {
+    } catch {
       valstr = '__STRINGIFY_FAILED__'
     }
   }
@@ -681,12 +678,12 @@ function stringify(val: any, maxlen?: number, pretty?: any): string {
 
   if (pretty) {
     // Indicate deeper JSON levels with different terminal colors (simplistic wrt strings).
-    let c = items(
-        [81, 118, 213, 39, 208, 201, 45, 190, 129, 51, 160, 121, 226, 33, 207, 69],
-        (n) => '\x1b[38;5;' + n[1] + 'm',
-      ),
-      r = '\x1b[0m',
-      d = 0,
+    const c = items(
+      [81, 118, 213, 39, 208, 201, 45, 190, 129, 51, 160, 121, 226, 33, 207, 69],
+      (n) => '\x1b[38;5;' + n[1] + 'm',
+    )
+    const r = '\x1b[0m'
+    let d = 0,
       o = c[0],
       t = o
     for (const ch of valstr) {
@@ -1486,7 +1483,7 @@ const transform_EACH: Injector = (inj: Injection, _val: any, _ref: string, store
 // Convert a node to a map.
 // Format: { '`$PACK`':['source-path', child-template]}
 const transform_PACK: Injector = (inj: Injection, _val: any, _ref: string, store: any) => {
-  const { mode, key, path, parent, nodes } = inj
+  const { key, path, parent, nodes } = inj
 
   const ijname = 'EACH'
 

@@ -2,8 +2,11 @@
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
-    <!-- Large TS-aligned port: suppress repetitive nullability noise in CI -->
-    <NoWarn>$(NoWarn);CS8600;CS8602;CS8604</NoWarn>
+    <!-- Enables IDE0005 (remove unnecessary usings) when EnforceCodeStyleInBuild is on. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- Large TS-aligned port: suppress repetitive nullability noise in CI and the
+         "missing XML doc comment" flood that GenerateDocumentationFile would otherwise emit. -->
+    <NoWarn>$(NoWarn);CS8600;CS8602;CS8604;CS1591</NoWarn>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>VoxgigStruct</AssemblyName>
     <RootNamespace>Voxgig.Struct</RootNamespace>

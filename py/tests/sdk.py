@@ -52,7 +52,7 @@ class SDK:
         return SDK(opts)
 
     def tester(self, opts=None):
-        return SDK(self.opts if opts == None else opts)
+        return SDK(self.opts if opts is None else opts)
 
     def utility(self):
         return self._utility

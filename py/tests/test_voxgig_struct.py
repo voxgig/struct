@@ -6,7 +6,6 @@ import unittest
 try:
     from .runner import (
         NULLMARK,
-        UNDEFMARK,
         makeRunner,
         nullModifier,
     )

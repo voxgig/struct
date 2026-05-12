@@ -31,9 +31,9 @@ func TestStruct(t *testing.T) {
 		t.Fatalf("Failed to create runner struct: %v", err)
 	}
 
-	var spec map[string]any = runnerMap.Spec
-	var runset runner.RunSet = runnerMap.RunSet
-	var runsetFlags runner.RunSetFlags = runnerMap.RunSetFlags
+	spec := runnerMap.Spec
+	runset := runnerMap.RunSet
+	runsetFlags := runnerMap.RunSetFlags
 
 	var minorSpec = spec["minor"].(map[string]any)
 	var walkSpec = spec["walk"].(map[string]any)

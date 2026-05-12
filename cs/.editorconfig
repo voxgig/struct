@@ -27,6 +27,27 @@ dotnet_diagnostic.IDE0058.severity = none   # expression value never used
 dotnet_diagnostic.CA1707.severity = none    # underscores in identifiers (T_string, M_VAL, ...)
 dotnet_diagnostic.CA1822.severity = suggestion
 
+# IDE1006: the port intentionally uses TS-style names: T_string / M_VAL constants
+# and `_`-prefixed private helpers (_InjectHandler, _TransformPack, _ValidateType, ...)
+# that mirror the canonical source. Matches the CA1707 relaxation above.
+dotnet_diagnostic.IDE1006.severity = none
+# CA1708: S_key ("key") and S_KEY ("KEY") are deliberate, distinct cross-language
+# string constants that differ only by case.
+dotnet_diagnostic.CA1708.severity = none
+# CA1720: T.Decimal / T.Integer are type bit-flag members named to match the
+# canonical TypeScript type codes; renaming would break cross-language parity.
+dotnet_diagnostic.CA1720.severity = none
+# IDE0046/IDE0045/IDE0075: "use conditional expression" style preferences. The
+# fixer produces deeply-nested ternaries that hurt readability in this ported
+# code; keep the explicit if/return form. Purely stylistic, not correctness.
+dotnet_diagnostic.IDE0046.severity = none
+dotnet_diagnostic.IDE0045.severity = none
+dotnet_diagnostic.IDE0075.severity = none
+# IDE0060: `current` is retained on the public GetPath(store, path, current, state)
+# signature for parity with the other language ports, even though this port does
+# not consume it directly.
+dotnet_diagnostic.IDE0060.severity = none
+
 [*.{csproj,props,targets}]
 indent_size = 2
 
