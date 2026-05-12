@@ -182,3 +182,7 @@ cs/tests/corpus-scoreboard.json
 cs/tests/bin/
 cs/tests/obj/
 
+# Rust (rs port)
+rs/target/
+rs/Cargo.lock
+

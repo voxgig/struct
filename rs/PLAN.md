@@ -1,8 +1,16 @@
 # Rust Port — Porting Plan & Challenge Analysis
 
-> Status: **planning only**. No code yet. This document examines what a
-> faithful Rust port of `@voxgig/struct` involves, where the friction
-> is, and how to lay the work out. The canonical implementation is
+> Status: **implementation in progress.** The foundation (`Value` type,
+> constants, jsnum coercions), all minor utilities, `walk`, `merge`, and
+> `getpath`/`setpath` are implemented and pass their corpus slices (712
+> checks via `cargo test`). `inject` / `transform` / `validate` / `select`
+> are staged — the `Injection` state machine and plumbing are in place,
+> the bodies are `unimplemented!()` stubs pointing here. See
+> [`NOTES.md`](./NOTES.md) for the current state and [`README.md`](./README.md)
+> for the API. The rest of this document is the original challenge analysis
+> and roadmap — still the reference for the remaining work.
+>
+> The canonical implementation is
 > [`ts/src/StructUtility.ts`](../ts/src/StructUtility.ts) (~3,135 lines);
 > the contract every port must satisfy is the shared corpus in
 > [`build/test/`](../build/test/) (`test.json`, compiled from the
