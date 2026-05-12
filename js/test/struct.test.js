@@ -192,7 +192,7 @@ describe('struct', async () => {
     await runsetflags(spec.minor.pathify, { null: true }, (vin) => {
       let path = NULLMARK == vin.path ? undefined : vin.path
       let pathstr = struct.pathify(path, vin.from).replace('__NULL__.', '')
-      pathstr = NULLMARK === vin.path ? pathstr.replace('>', ':null>') : pathstr
+      pathstr = NULLMARK === vin.path ? pathstr.replace(/>/g, ':null>') : pathstr
       return pathstr
     })
   })

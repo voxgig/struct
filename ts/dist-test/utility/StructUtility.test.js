@@ -155,7 +155,7 @@ const { equal, deepEqual } = node_assert_1.default;
         await runsetflags(spec.minor.pathify, { null: true }, (vin) => {
             const path = runner_1.NULLMARK == vin.path ? undefined : vin.path;
             let pathstr = struct.pathify(path, vin.from).replace('__NULL__.', '');
-            pathstr = runner_1.NULLMARK === vin.path ? pathstr.replace('>', ':null>') : pathstr;
+            pathstr = runner_1.NULLMARK === vin.path ? pathstr.replace(/>/g, ':null>') : pathstr;
             return pathstr;
         });
     });
