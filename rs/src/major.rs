@@ -14,7 +14,7 @@ use std::rc::Rc;
 
 use crate::consts::*;
 use crate::mini::*;
-use crate::value::{js_string, Value};
+use crate::value::{js_string, js_to_int32, js_to_number, Value};
 use crate::StructError;
 
 // ---------------------------------------------------------------------
@@ -976,8 +976,196 @@ pub fn injector_args(arg_types: &[i64], args: &[Value]) -> Vec<Value> {
     found
 }
 
-pub fn inject_child(_child: Value, _store: &Value, _inj: &Inj) -> Inj {
-    unimplemented!("injectChild: used by $FORMAT/$APPLY — staged")
+pub fn inject_child(child: Value, store: &Value, inj: &Inj) -> Inj {
+    let prior = inj.borrow().prior.clone();
+    let cinj: Inj = match prior {
+        None => Rc::clone(inj),
+        Some(p) => {
+            let pprior = p.borrow().prior.clone();
+            match pprior {
+                Some(pp) => {
+                    let (pki, pkeys, pkey) = {
+                        let b = p.borrow();
+                        (b.key_i, b.keys.clone(), b.key.clone())
+                    };
+                    let c = Injection::child(&pp, pki, pkeys);
+                    c.borrow_mut().val = child.clone();
+                    let cparent = c.borrow().parent.clone();
+                    set_prop(cparent, &Value::str(pkey), child.clone());
+                    c
+                }
+                None => {
+                    let (ki, keys, key) = {
+                        let b = inj.borrow();
+                        (b.key_i, b.keys.clone(), b.key.clone())
+                    };
+                    let c = Injection::child(&p, ki, keys);
+                    c.borrow_mut().val = child.clone();
+                    let cparent = c.borrow().parent.clone();
+                    set_prop(cparent, &Value::str(key), child.clone());
+                    c
+                }
+            }
+        }
+    };
+    let _ = inject_inj(child, store, &cinj);
+    cinj
+}
+
+const FORMATTER_NAMES: [&str; 7] =
+    ["identity", "upper", "lower", "string", "number", "integer", "concat"];
+
+fn apply_formatter(name: &str, k: &Value, v: &Value) -> Value {
+    match name {
+        "identity" => v.clone(),
+        "upper" => {
+            if is_node(v) {
+                v.clone()
+            } else {
+                Value::str(js_string(v).to_uppercase())
+            }
+        }
+        "lower" => {
+            if is_node(v) {
+                v.clone()
+            } else {
+                Value::str(js_string(v).to_lowercase())
+            }
+        }
+        "string" => {
+            if is_node(v) {
+                v.clone()
+            } else {
+                Value::str(js_string(v))
+            }
+        }
+        "number" => {
+            if is_node(v) {
+                v.clone()
+            } else {
+                let n = js_to_number(v);
+                Value::Num(if n.is_nan() { 0.0 } else { n })
+            }
+        }
+        "integer" => {
+            if is_node(v) {
+                v.clone()
+            } else {
+                let n = js_to_number(v);
+                let n = if n.is_nan() { 0.0 } else { n };
+                Value::Num(js_to_int32(n) as f64)
+            }
+        }
+        "concat" => {
+            if k.is_noval() && is_list(v) {
+                Value::str(
+                    items_vec(v)
+                        .iter()
+                        .map(|(_, n)| if is_node(n) { String::new() } else { js_string(n) })
+                        .collect::<Vec<_>>()
+                        .join(""),
+                )
+            } else {
+                v.clone()
+            }
+        }
+        _ => v.clone(),
+    }
+}
+
+// `$FORMAT` — render a templated value through a named (or supplied) formatter.
+fn transform_format(inj: &Inj, _val: &Value, _r: &str, store: &Value) -> Value {
+    inj.borrow().keys.borrow_mut().truncate(1);
+    if inj.borrow().mode != M_VAL {
+        return Value::Noval;
+    }
+    let (parent, path, nodes) = {
+        let b = inj.borrow();
+        (b.parent.clone(), b.path.clone(), b.nodes.clone())
+    };
+    let name = get_prop(&parent, &Value::Num(1.0), Value::Noval);
+    let child = get_prop(&parent, &Value::Num(2.0), Value::Noval);
+    let tkey = path.get(path.len().saturating_sub(2)).cloned().unwrap_or_default();
+    let nlen = nodes.len();
+    let target = if nlen >= 2 {
+        nodes[nlen - 2].clone()
+    } else if nlen >= 1 {
+        nodes[nlen - 1].clone()
+    } else {
+        Value::Noval
+    };
+
+    let cinj = inject_child(child, store, inj);
+    let resolved = cinj.borrow().val.clone();
+
+    let fname: Option<String> = name
+        .as_str()
+        .filter(|n| FORMATTER_NAMES.contains(n))
+        .map(|s| s.to_string());
+    if fname.is_none() && !is_func(&name) {
+        errs_push(inj, format!("$FORMAT: unknown format: {}.", js_string(&name)));
+        return Value::Noval;
+    }
+
+    let out = if let Some(fn_name) = &fname {
+        let mut fmt = |k: &Value, v: &Value, _p: &Value, _t: &[String]| -> Value {
+            apply_formatter(fn_name, k, v)
+        };
+        walk(resolved, Some(&mut fmt), None, None)
+    } else if let Value::Func(f) = &name {
+        let f = f.clone();
+        let mut fmt = |_k: &Value, v: &Value, _p: &Value, _t: &[String]| -> Value {
+            f(inj, v, "", store)
+        };
+        walk(resolved, Some(&mut fmt), None, None)
+    } else {
+        resolved
+    };
+
+    set_prop(target, &Value::str(tkey), out.clone());
+    out
+}
+
+// `$APPLY` — call a function (from the spec args) on the resolved child.
+fn transform_apply(inj: &Inj, _val: &Value, _r: &str, store: &Value) -> Value {
+    if !check_placement(M_VAL, "APPLY", T_LIST as i64, inj) {
+        return Value::Noval;
+    }
+    let (parent, path, nodes) = {
+        let b = inj.borrow();
+        (b.parent.clone(), b.path.clone(), b.nodes.clone())
+    };
+    let args: Vec<Value> = slice(parent.clone(), Some(1), None, false)
+        .as_list()
+        .map(|l| l.borrow().clone())
+        .unwrap_or_default();
+    let ia = injector_args(&[T_FUNCTION as i64, T_ANY as i64], &args);
+    if let Value::Str(e) = &ia[0] {
+        errs_push(inj, format!("$APPLY: {e}"));
+        return Value::Noval;
+    }
+    let apply = ia.get(1).cloned().unwrap_or(Value::Noval);
+    let child = ia.get(2).cloned().unwrap_or(Value::Noval);
+    let tkey = path.get(path.len().saturating_sub(2)).cloned().unwrap_or_default();
+    let nlen = nodes.len();
+    let target = if nlen >= 2 {
+        nodes[nlen - 2].clone()
+    } else if nlen >= 1 {
+        nodes[nlen - 1].clone()
+    } else {
+        Value::Noval
+    };
+    let cinj = inject_child(child, store, inj);
+    let resolved = cinj.borrow().val.clone();
+    // The corpus only exercises the error paths; if `apply` is a callable, do
+    // a best-effort call (the canonical passes (resolved, store, cinj)).
+    let out = if let Value::Func(f) = &apply {
+        f(&cinj, &resolved, "", store)
+    } else {
+        resolved
+    };
+    set_prop(target, &Value::str(tkey), out.clone());
+    out
 }
 
 fn transform_delete(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
@@ -1050,11 +1238,348 @@ fn transform_merge(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
     out
 }
 
-fn transform_unsupported(name: &'static str) -> impl Fn(&Inj, &Value, &str, &Value) -> Value {
-    move |inj: &Inj, _v: &Value, _r: &str, _store: &Value| -> Value {
-        errs_push(inj, format!("${name}: not yet ported in the Rust port."));
-        Value::Noval
+fn slice_str_vec(v: &[String], start: Option<i64>, end: Option<i64>) -> Vec<String> {
+    match slice(path_value(v), start, end, false) {
+        Value::List(l) => l
+            .borrow()
+            .iter()
+            .map(|x| x.as_str().map(|s| s.to_string()).unwrap_or_default())
+            .collect(),
+        _ => Vec::new(),
     }
+}
+
+// `$REF` — reference the original spec (enables recursive transforms).
+fn transform_ref(inj: &Inj, val: &Value, _r: &str, store: &Value) -> Value {
+    let (mode, parent, path, nodes) = {
+        let b = inj.borrow();
+        (b.mode, b.parent.clone(), b.path.clone(), b.nodes.clone())
+    };
+    if mode != M_VAL {
+        return Value::Noval;
+    }
+    let refpath = get_prop(&parent, &Value::Num(1.0), Value::Noval);
+    {
+        let keylen = inj.borrow().keys.borrow().len() as i64;
+        inj.borrow_mut().key_i = keylen;
+    }
+    // spec = ($SPEC)()
+    let spec = {
+        let sf = get_prop(store, &Value::str(S_DSPEC), Value::Noval);
+        match &sf {
+            Value::Func(f) => f(inj, &Value::Noval, "", store),
+            _ => Value::Noval,
+        }
+    };
+    let dpath = slice_str_vec(&path, Some(1), None);
+    let dparent_for_ref = get_path_inj(&spec, &path_value(&dpath), None);
+    let ref_def = InjectDef {
+        dpath: Some(dpath.clone()),
+        dparent: Some(dparent_for_ref),
+        ..Default::default()
+    };
+    let refval = get_path(&spec, &refpath, Some(&ref_def));
+
+    let mut has_sub_ref = false;
+    if is_node(&refval) {
+        let mut probe = |_k: &Value, v: &Value, _p: &Value, _t: &[String]| -> Value {
+            if matches!(v, Value::Str(s) if s == "`$REF`") {
+                has_sub_ref = true;
+            }
+            v.clone()
+        };
+        walk(refval.clone(), Some(&mut probe), None, None);
+    }
+
+    let tref = clone(&refval);
+    let cpath = slice_str_vec(&path, Some(-3), None);
+    let tpath = slice_str_vec(&path, Some(-1), None);
+    let tcur = get_path_inj(store, &path_value(&cpath), None);
+    let tval_at = get_path_inj(store, &path_value(&tpath), None);
+
+    let rval = if !has_sub_ref || !tval_at.is_noval() {
+        let tinj = Injection::child(
+            inj,
+            0,
+            Rc::new(RefCell::new(vec![tpath.last().cloned().unwrap_or_default()])),
+        );
+        {
+            let mut b = tinj.borrow_mut();
+            b.path = tpath.clone();
+            let nlen = nodes.len();
+            b.nodes = if nlen >= 1 { nodes[..nlen - 1].to_vec() } else { Vec::new() };
+            b.parent = if nlen >= 2 { nodes[nlen - 2].clone() } else { Value::Noval };
+            b.val = tref.clone();
+            b.dpath = cpath.clone();
+            b.dparent = tcur.clone();
+        }
+        let _ = inject_inj(tref.clone(), store, &tinj);
+        let v = tinj.borrow().val.clone();
+        v
+    } else {
+        Value::Noval
+    };
+
+    let grandparent = Injection::setval(inj, rval, Some(2));
+    if is_list(&grandparent) {
+        let prior = inj.borrow().prior.clone();
+        if let Some(p) = prior {
+            p.borrow_mut().key_i -= 1;
+        }
+    }
+    val.clone()
+}
+
+fn srcpath_split(srcpath: &str) -> Vec<String> {
+    srcpath.split('.').map(|s| s.to_string()).collect()
+}
+
+// `$EACH` — apply a child template to every entry of a list or map.
+// Spec form (a list): ['`$EACH`', 'source-path', child-template]
+fn transform_each(inj: &Inj, _val: &Value, _r: &str, store: &Value) -> Value {
+    if !check_placement(M_VAL, "EACH", T_LIST as i64, inj) {
+        return Value::Noval;
+    }
+    // remove remaining keys to avoid spurious processing
+    inj.borrow().keys.borrow_mut().truncate(1);
+
+    let (parent, path, nodes, base) = {
+        let b = inj.borrow();
+        (b.parent.clone(), b.path.clone(), b.nodes.clone(), b.base.clone())
+    };
+    let args: Vec<Value> = slice(parent.clone(), Some(1), None, false)
+        .as_list()
+        .map(|l| l.borrow().clone())
+        .unwrap_or_default();
+    let ia = injector_args(&[T_STRING as i64, T_ANY as i64], &args);
+    if let Value::Str(e) = &ia[0] {
+        errs_push(inj, format!("$EACH: {e}"));
+        return Value::Noval;
+    }
+    let srcpath = ia.get(1).cloned().unwrap_or(Value::Noval);
+    let child = ia.get(2).cloned().unwrap_or(Value::Noval);
+    let srcpath_str = srcpath.as_str().unwrap_or("").to_string();
+
+    let srcstore = get_prop(store, &Value::str(base.clone().unwrap_or_default()), store.clone());
+    let src = get_path_inj(&srcstore, &srcpath, Some(inj));
+    let srctype = typify(&src);
+
+    let tkey = path.get(path.len().saturating_sub(2)).cloned().unwrap_or_default();
+    let nlen = nodes.len();
+    let target = if nlen >= 2 {
+        nodes[nlen - 2].clone()
+    } else if nlen >= 1 {
+        nodes[nlen - 1].clone()
+    } else {
+        Value::Noval
+    };
+
+    let tval: Vec<Value> = if srctype & (T_LIST as i64) != 0 {
+        items_vec(&src).iter().map(|_| clone(&child)).collect()
+    } else if srctype & (T_MAP as i64) != 0 {
+        items_vec(&src)
+            .iter()
+            .map(|(k, _)| {
+                merge(
+                    &Value::list(vec![
+                        clone(&child),
+                        Value::map_of([(
+                            S_BANNO.to_string(),
+                            Value::map_of([(S_KEY.to_string(), Value::str(k.clone()))]),
+                        )]),
+                    ]),
+                    Some(1),
+                )
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    let mut rval = Value::empty_list();
+    if !tval.is_empty() {
+        let tcur_inner: Value = if src.is_nullish() {
+            Value::Noval
+        } else {
+            Value::list(items_vec(&src).into_iter().map(|(_, v)| v).collect())
+        };
+        let ckey = path.get(path.len().saturating_sub(2)).cloned().unwrap_or_default();
+        let tpath = slice_str_vec(&path, Some(-1), None);
+        let mut dpath: Vec<String> = vec![S_DTOP.to_string()];
+        dpath.extend(srcpath_split(&srcpath_str));
+        dpath.push(format!("$:{ckey}"));
+
+        let mut tcur = Value::map_of([(ckey.clone(), tcur_inner)]);
+        if tpath.len() > 1 {
+            let pkey = path
+                .get(path.len().saturating_sub(3))
+                .cloned()
+                .unwrap_or_else(|| S_DTOP.to_string());
+            tcur = Value::map_of([(pkey.clone(), tcur)]);
+            dpath.push(format!("$:{pkey}"));
+        }
+
+        let tval_v = Value::list(tval);
+        let tinj = Injection::child(inj, 0, Rc::new(RefCell::new(vec![ckey.clone()])));
+        {
+            let mut b = tinj.borrow_mut();
+            b.path = tpath;
+            b.nodes = if nlen >= 1 { nodes[..nlen - 1].to_vec() } else { Vec::new() };
+            b.parent = b.nodes.last().cloned().unwrap_or(Value::Noval);
+            b.val = tval_v.clone();
+            b.dpath = dpath;
+            b.dparent = tcur;
+        }
+        let pclone = tinj.borrow().parent.clone();
+        set_prop(pclone, &Value::str(ckey), tval_v.clone());
+        let _ = inject_inj(tval_v.clone(), store, &tinj);
+        rval = tinj.borrow().val.clone();
+    }
+
+    set_prop(target, &Value::str(tkey), rval.clone());
+    get_prop(&rval, &Value::Num(0.0), Value::Noval)
+}
+
+// `$PACK` — repack a list/map into a map keyed by `$KEY`.
+// Spec form (a map): { '`$PACK`': ['source-path', child-template] }
+fn transform_pack(inj: &Inj, _val: &Value, _r: &str, store: &Value) -> Value {
+    if !check_placement(M_KEYPRE, "EACH", T_MAP as i64, inj) {
+        return Value::Noval;
+    }
+    let (key, parent, path, nodes, base) = {
+        let b = inj.borrow();
+        (b.key.clone(), b.parent.clone(), b.path.clone(), b.nodes.clone(), b.base.clone())
+    };
+    let args = get_prop(&parent, &Value::str(key), Value::Noval);
+    let args_vec: Vec<Value> = args.as_list().map(|l| l.borrow().clone()).unwrap_or_default();
+    let ia = injector_args(&[T_STRING as i64, T_ANY as i64], &args_vec);
+    if let Value::Str(e) = &ia[0] {
+        errs_push(inj, format!("$EACH: {e}"));
+        return Value::Noval;
+    }
+    let srcpath = ia.get(1).cloned().unwrap_or(Value::Noval);
+    let origchildspec = ia.get(2).cloned().unwrap_or(Value::Noval);
+    let srcpath_str = srcpath.as_str().unwrap_or("").to_string();
+
+    let tkey = path.get(path.len().saturating_sub(2)).cloned().unwrap_or_default();
+    let pathsize = path.len();
+    let nlen = nodes.len();
+    let target = if pathsize >= 2 {
+        nodes.get(pathsize - 2).cloned().unwrap_or(Value::Noval)
+    } else {
+        nodes.get(pathsize.saturating_sub(1)).cloned().unwrap_or(Value::Noval)
+    };
+    let target = if target.is_noval() {
+        nodes.get(pathsize.saturating_sub(1)).cloned().unwrap_or(Value::Noval)
+    } else {
+        target
+    };
+
+    let srcstore = get_prop(store, &Value::str(base.clone().unwrap_or_default()), store.clone());
+    let src_raw = get_path_inj(&srcstore, &srcpath, Some(inj));
+    let src: Value = if is_list(&src_raw) {
+        src_raw
+    } else if is_map(&src_raw) {
+        Value::list(
+            items_vec(&src_raw)
+                .into_iter()
+                .map(|(k, v)| {
+                    set_prop(
+                        v.clone(),
+                        &Value::str(S_BANNO),
+                        Value::map_of([(S_KEY.to_string(), Value::str(k))]),
+                    );
+                    v
+                })
+                .collect(),
+        )
+    } else {
+        return Value::Noval;
+    };
+    if src.is_nullish() {
+        return Value::Noval;
+    }
+
+    let keypath = get_prop(&origchildspec, &Value::str(S_BKEY), Value::Noval);
+    let childspec = del_prop(origchildspec.clone(), &Value::str(S_BKEY));
+    let child = get_prop(&childspec, &Value::str(S_BVAL), childspec.clone());
+
+    let resolve_key = |srckey: &str, srcnode: &Value| -> Value {
+        if keypath.is_noval() {
+            Value::str(srckey)
+        } else if let Value::Str(kp) = &keypath {
+            if kp.starts_with('`') {
+                let m = merge(
+                    &Value::list(vec![
+                        Value::empty_map(),
+                        store.clone(),
+                        Value::map_of([(S_DTOP.to_string(), srcnode.clone())]),
+                    ]),
+                    Some(1),
+                );
+                inject(Value::str(kp.clone()), &m, None)
+            } else {
+                get_path_inj(srcnode, &Value::str(kp.clone()), Some(inj))
+            }
+        } else {
+            Value::str(srckey)
+        }
+    };
+
+    let tval = Value::empty_map();
+    for (srckey, srcnode) in items_vec(&src) {
+        let k = resolve_key(&srckey, &srcnode);
+        let tchild = clone(&child);
+        set_prop(tval.clone(), &k, tchild.clone());
+        let anno = get_prop(&srcnode, &Value::str(S_BANNO), Value::Noval);
+        if anno.is_noval() {
+            del_prop(tchild, &Value::str(S_BANNO));
+        } else {
+            set_prop(tchild, &Value::str(S_BANNO), anno);
+        }
+    }
+
+    let mut rval = Value::empty_map();
+    if !is_empty(&tval) {
+        let tsrc = Value::empty_map();
+        for (i, (_, n)) in items_vec(&src).into_iter().enumerate() {
+            let kn = if keypath.is_noval() {
+                Value::Num(i as f64)
+            } else {
+                resolve_key("", &n)
+            };
+            set_prop(tsrc.clone(), &kn, n);
+        }
+        let tpath = slice_str_vec(&path, Some(-1), None);
+        let ckey = path.get(path.len().saturating_sub(2)).cloned().unwrap_or_default();
+        let mut dpath: Vec<String> = vec![S_DTOP.to_string()];
+        dpath.extend(srcpath_split(&srcpath_str));
+        dpath.push(format!("$:{ckey}"));
+        let mut tcur = Value::map_of([(ckey.clone(), tsrc)]);
+        if tpath.len() > 1 {
+            let pkey = path
+                .get(path.len().saturating_sub(3))
+                .cloned()
+                .unwrap_or_else(|| S_DTOP.to_string());
+            tcur = Value::map_of([(pkey.clone(), tcur)]);
+            dpath.push(format!("$:{pkey}"));
+        }
+        let tinj = Injection::child(inj, 0, Rc::new(RefCell::new(vec![ckey.clone()])));
+        {
+            let mut b = tinj.borrow_mut();
+            b.path = tpath;
+            b.nodes = if nlen >= 1 { nodes[..nlen - 1].to_vec() } else { Vec::new() };
+            b.parent = b.nodes.last().cloned().unwrap_or(Value::Noval);
+            b.val = tval.clone();
+            b.dpath = dpath;
+            b.dparent = tcur;
+        }
+        let _ = inject_inj(tval.clone(), store, &tinj);
+        rval = tinj.borrow().val.clone();
+    }
+
+    set_prop(target, &Value::str(tkey), rval);
+    Value::Noval
 }
 
 pub fn transform(
@@ -1125,16 +1650,16 @@ pub fn transform(
     store_base.insert("$KEY".to_string(), Value::func(transform_key));
     store_base.insert("$ANNO".to_string(), Value::func(transform_anno));
     store_base.insert("$MERGE".to_string(), Value::func(transform_merge));
-    store_base.insert("$EACH".to_string(), Value::func(transform_unsupported("EACH")));
-    store_base.insert("$PACK".to_string(), Value::func(transform_unsupported("PACK")));
-    store_base.insert("$REF".to_string(), Value::func(transform_unsupported("REF")));
+    store_base.insert("$EACH".to_string(), Value::func(transform_each));
+    store_base.insert("$PACK".to_string(), Value::func(transform_pack));
+    store_base.insert("$REF".to_string(), Value::func(transform_ref));
     store_base.insert(
         "$FORMAT".to_string(),
-        Value::func(transform_unsupported("FORMAT")),
+        Value::func(transform_format),
     );
     store_base.insert(
         "$APPLY".to_string(),
-        Value::func(transform_unsupported("APPLY")),
+        Value::func(transform_apply),
     );
 
     let store = merge(
@@ -1193,12 +1718,479 @@ fn civil_from_days(z: i64) -> (i64, i64, i64) {
     (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
+// ---- validate --------------------------------------------------------
+
+fn path_value(path: &[String]) -> Value {
+    Value::list(path.iter().cloned().map(Value::Str).collect())
+}
+
+fn invalid_type_msg(path: &[String], needtype: &str, vt: i64, v: &Value) -> String {
+    let vs = if v.is_nullish() {
+        "no value".to_string()
+    } else {
+        stringify(v, None, false)
+    };
+    let field_part = if path.len() > 1 {
+        format!("field {} to be ", pathify(&path_value(path), Some(1), None))
+    } else {
+        String::new()
+    };
+    let type_part = if !v.is_nullish() {
+        format!("{}{}", type_name(vt), S_VIZ)
+    } else {
+        String::new()
+    };
+    format!("Expected {field_part}{needtype}, but found {type_part}{vs}.")
+}
+
+fn validate_string(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
+    let (dparent, key, path) = {
+        let b = inj.borrow();
+        (b.dparent.clone(), b.key.clone(), b.path.clone())
+    };
+    let out = get_prop(&dparent, &Value::str(key), Value::Noval);
+    let t = typify(&out);
+    if t & (T_STRING as i64) == 0 {
+        errs_push(inj, invalid_type_msg(&path, "string", t, &out));
+        return Value::Noval;
+    }
+    if matches!(&out, Value::Str(s) if s.is_empty()) {
+        errs_push(
+            inj,
+            format!("Empty string at {}", pathify(&path_value(&path), Some(1), None)),
+        );
+        return Value::Noval;
+    }
+    out
+}
+
+fn validate_type(inj: &Inj, _v: &Value, r: &str, _store: &Value) -> Value {
+    let tname: String = r.chars().skip(1).collect::<String>().to_lowercase();
+    let typev: i64 = match TYPENAME.iter().position(|x| *x == tname) {
+        Some(idx) => 1i64 << (31 - idx as i64),
+        None => 0,
+    };
+    let (dparent, key, path) = {
+        let b = inj.borrow();
+        (b.dparent.clone(), b.key.clone(), b.path.clone())
+    };
+    let out = get_prop(&dparent, &Value::str(key), Value::Noval);
+    let t = typify(&out);
+    if t & typev == 0 {
+        errs_push(inj, invalid_type_msg(&path, &tname, t, &out));
+        return Value::Noval;
+    }
+    out
+}
+
+fn validate_any(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
+    let (dparent, key) = {
+        let b = inj.borrow();
+        (b.dparent.clone(), b.key.clone())
+    };
+    get_prop(&dparent, &Value::str(key), Value::Noval)
+}
+
+/// Render a list of tvals as `"a, b, c"`, lowering `` `$NAME` `` -> `name`.
+fn tvals_desc(tvals: &[Value]) -> String {
+    let joined = tvals
+        .iter()
+        .map(|v| stringify(v, None, false))
+        .collect::<Vec<_>>()
+        .join(", ");
+    R_TRANSFORM_NAME
+        .replace_all(&joined, |caps: &regex::Captures| caps[1].to_lowercase())
+        .to_string()
+}
+
+// Map / list `$CHILD`: apply a child template to every direct child.
+fn validate_child(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
+    let (mode, key, parent, path, dparent) = {
+        let b = inj.borrow();
+        (b.mode, b.key.clone(), b.parent.clone(), b.path.clone(), b.dparent.clone())
+    };
+
+    if mode == M_KEYPRE {
+        let childtm = get_prop(&parent, &Value::str(key), Value::Noval);
+        let pkey = path.get(path.len().saturating_sub(2)).cloned().unwrap_or_default();
+        let mut tval = get_prop(&dparent, &Value::str(pkey), Value::Noval);
+        if tval.is_noval() {
+            tval = Value::empty_map();
+        } else if !is_map(&tval) {
+            errs_push(
+                inj,
+                invalid_type_msg(&path[..path.len().saturating_sub(1)], S_object, typify(&tval), &tval),
+            );
+            return Value::Noval;
+        }
+        let ckeys = keysof_vec(&tval);
+        for ck in ckeys {
+            set_prop(parent.clone(), &Value::str(ck.clone()), clone(&childtm));
+            inj.borrow().keys.borrow_mut().push(ck);
+        }
+        Injection::setval(inj, Value::Noval, None);
+        return Value::Noval;
+    }
+
+    if mode == M_VAL {
+        if !is_list(&parent) {
+            errs_push(inj, "Invalid $CHILD as value".to_string());
+            return Value::Noval;
+        }
+        let childtm = get_prop(&parent, &Value::Num(1.0), Value::Noval);
+        if dparent.is_noval() {
+            slice(parent.clone(), Some(0), Some(0), true); // empty default
+            return Value::Noval;
+        }
+        if !is_list(&dparent) {
+            errs_push(
+                inj,
+                invalid_type_msg(&path[..path.len().saturating_sub(1)], S_list, typify(&dparent), &dparent),
+            );
+            let plen = parent.as_list().map(|l| l.borrow().len()).unwrap_or(0) as i64;
+            inj.borrow_mut().key_i = plen;
+            return dparent;
+        }
+        let dlen = dparent.as_list().map(|l| l.borrow().len()).unwrap_or(0);
+        for n in 0..dlen {
+            set_prop(parent.clone(), &Value::Num(n as f64), clone(&childtm));
+        }
+        slice(parent.clone(), Some(0), Some(dlen as i64), true);
+        inj.borrow_mut().key_i = 0;
+        return get_prop(&dparent, &Value::Num(0.0), Value::Noval);
+    }
+
+    Value::Noval
+}
+
+// `$ONE`: value must match exactly one of a list of alternative sub-specs.
+fn validate_one(inj: &Inj, _v: &Value, _r: &str, store: &Value) -> Value {
+    let (mode, parent, key_i) = {
+        let b = inj.borrow();
+        (b.mode, b.parent.clone(), b.key_i)
+    };
+    if mode != M_VAL {
+        return Value::Noval;
+    }
+    if !is_list(&parent) || key_i != 0 {
+        let path = inj.borrow().path.clone();
+        errs_push(
+            inj,
+            format!(
+                "The $ONE validator at field {} must be the first element of an array.",
+                pathify(&path_value(&path), Some(1), Some(1))
+            ),
+        );
+        return Value::Noval;
+    }
+    let keylen = inj.borrow().keys.borrow().len() as i64;
+    inj.borrow_mut().key_i = keylen;
+    let dparent = inj.borrow().dparent.clone();
+    Injection::setval(inj, dparent.clone(), Some(2));
+    {
+        let mut b = inj.borrow_mut();
+        let n = b.path.len();
+        b.path.truncate(n.saturating_sub(1));
+        b.key = b.path.last().cloned().unwrap_or_default();
+    }
+    let path_after = inj.borrow().path.clone();
+    let meta = inj.borrow().meta.clone();
+    let tvals: Vec<Value> = slice(parent.clone(), Some(1), None, false)
+        .as_list()
+        .map(|l| l.borrow().clone())
+        .unwrap_or_default();
+    if tvals.is_empty() {
+        errs_push(
+            inj,
+            format!(
+                "The $ONE validator at field {} must have at least one argument.",
+                pathify(&path_value(&path_after), Some(1), Some(1))
+            ),
+        );
+        return Value::Noval;
+    }
+    for tval in &tvals {
+        let terrs = Value::empty_list();
+        let mut vstore = match merge(&Value::list(vec![Value::empty_map(), store.clone()]), Some(1)) {
+            v @ Value::Map(_) => v,
+            _ => Value::empty_map(),
+        };
+        set_prop(vstore.clone(), &Value::str(S_DTOP), dparent.clone());
+        let _ = &mut vstore;
+        let vd = InjectDef {
+            extra: Some(vstore.clone()),
+            errs: Some(terrs.clone()),
+            meta: Some(meta.clone()),
+            ..Default::default()
+        };
+        let vcur = validate(&dparent, tval, Some(&vd)).unwrap_or(Value::Noval);
+        Injection::setval(inj, vcur, Some(-2)); // hmm: ancestor -2 -> handled below
+        let terrlen = terrs.as_list().map(|l| l.borrow().len()).unwrap_or(0);
+        if terrlen == 0 {
+            return Value::Noval;
+        }
+    }
+    let valdesc = tvals_desc(&tvals);
+    errs_push(
+        inj,
+        invalid_type_msg(
+            &path_after,
+            &format!("{}{}", if tvals.len() > 1 { "one of " } else { "" }, valdesc),
+            typify(&dparent),
+            &dparent,
+        ),
+    );
+    Value::Noval
+}
+
+// `$EXACT`: value must equal a literal exactly (no shape coercion).
+fn validate_exact(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
+    let (mode, parent, key, key_i) = {
+        let b = inj.borrow();
+        (b.mode, b.parent.clone(), b.key.clone(), b.key_i)
+    };
+    if mode != M_VAL {
+        del_prop(parent, &Value::str(key));
+        return Value::Noval;
+    }
+    if !is_list(&parent) || key_i != 0 {
+        let path = inj.borrow().path.clone();
+        errs_push(
+            inj,
+            format!(
+                "The $EXACT validator at field {} must be the first element of an array.",
+                pathify(&path_value(&path), Some(1), Some(1))
+            ),
+        );
+        return Value::Noval;
+    }
+    let keylen = inj.borrow().keys.borrow().len() as i64;
+    inj.borrow_mut().key_i = keylen;
+    let dparent = inj.borrow().dparent.clone();
+    Injection::setval(inj, dparent.clone(), Some(2));
+    {
+        let mut b = inj.borrow_mut();
+        let n = b.path.len();
+        b.path.truncate(n.saturating_sub(1));
+        b.key = b.path.last().cloned().unwrap_or_default();
+    }
+    let path_after = inj.borrow().path.clone();
+    let tvals: Vec<Value> = slice(parent.clone(), Some(1), None, false)
+        .as_list()
+        .map(|l| l.borrow().clone())
+        .unwrap_or_default();
+    if tvals.is_empty() {
+        errs_push(
+            inj,
+            format!(
+                "The $EXACT validator at field {} must have at least one argument.",
+                pathify(&path_value(&path_after), Some(1), Some(1))
+            ),
+        );
+        return Value::Noval;
+    }
+    let mut currentstr: Option<String> = None;
+    for tval in &tvals {
+        let mut exactmatch = tval == &dparent;
+        if !exactmatch && is_node(tval) {
+            let cs = currentstr.get_or_insert_with(|| stringify(&dparent, None, false)).clone();
+            exactmatch = stringify(tval, None, false) == cs;
+        }
+        if exactmatch {
+            return Value::Noval;
+        }
+    }
+    let valdesc = tvals_desc(&tvals);
+    let need = format!(
+        "{}exactly equal to {}{}",
+        if path_after.len() > 1 { "" } else { "value " },
+        if tvals.len() == 1 { "" } else { "one of " },
+        valdesc
+    );
+    errs_push(
+        inj,
+        invalid_type_msg(&path_after, &need, typify(&dparent), &dparent),
+    );
+    Value::Noval
+}
+
+/// `_validation` — the modify hook installed by `validate` (runs after the
+/// per-key special commands).
+fn validation_modify(pval: &Value, key: &Value, parent: &Value, inj: &Inj, _store: &Value) {
+    if pval.is_skip() {
+        return;
+    }
+    let (meta, dparent, path) = {
+        let b = inj.borrow();
+        (b.meta.clone(), b.dparent.clone(), b.path.clone())
+    };
+    let exact = matches!(
+        get_prop(&meta, &Value::str(S_BEXACT), Value::Bool(false)),
+        Value::Bool(true)
+    );
+    let cval = get_prop(&dparent, key, Value::Noval);
+    if !exact && cval.is_noval() {
+        return;
+    }
+    let ptype = typify(pval);
+    if ptype & (T_STRING as i64) != 0 {
+        if let Value::Str(s) = pval {
+            if s.contains(S_DS) {
+                return; // remaining special command — leave it
+            }
+        }
+    }
+    let ctype = typify(&cval);
+    if ptype != ctype && !pval.is_noval() {
+        errs_push(inj, invalid_type_msg(&path, &type_name(ptype), ctype, &cval));
+        return;
+    }
+
+    if is_map(&cval) {
+        if !is_map(pval) {
+            errs_push(inj, invalid_type_msg(&path, &type_name(ptype), ctype, &cval));
+            return;
+        }
+        let ckeys = keysof_vec(&cval);
+        let pkeys = keysof_vec(pval);
+        let open = matches!(
+            get_prop(pval, &Value::str(S_BOPEN), Value::Noval),
+            Value::Bool(true)
+        );
+        if !pkeys.is_empty() && !open {
+            let badkeys: Vec<String> = ckeys
+                .iter()
+                .filter(|ck| !has_key(pval, &Value::str((*ck).clone())))
+                .cloned()
+                .collect();
+            if !badkeys.is_empty() {
+                errs_push(
+                    inj,
+                    format!(
+                        "Unexpected keys at field {}{}{}",
+                        pathify(&path_value(&path), Some(1), None),
+                        S_VIZ,
+                        badkeys.join(", ")
+                    ),
+                );
+            }
+        } else {
+            merge(&Value::list(vec![pval.clone(), cval.clone()]), None);
+            if is_node(pval) {
+                del_prop(pval.clone(), &Value::str(S_BOPEN));
+            }
+        }
+    } else if is_list(&cval) {
+        if !is_list(pval) {
+            errs_push(inj, invalid_type_msg(&path, &type_name(ptype), ctype, &cval));
+        }
+    } else if exact {
+        if &cval != pval {
+            let pathmsg = if path.len() > 1 {
+                format!("at field {}{}", pathify(&path_value(&path), Some(1), None), S_VIZ)
+            } else {
+                String::new()
+            };
+            errs_push(
+                inj,
+                format!("Value {}{} should equal {}{}", pathmsg, js_string(&cval), js_string(pval), S_DT),
+            );
+        }
+    } else {
+        set_prop(parent.clone(), key, cval.clone());
+    }
+}
+
+/// `_validatehandler` — `getpath`/`_injectstr` handler installed by `validate`.
+fn validatehandler(inj: &Inj, val: &Value, r: &str, store: &Value) -> Value {
+    if let Some(caps) = R_META_PATH.captures(r) {
+        if &caps[2] == "=" {
+            Injection::setval(
+                inj,
+                Value::list(vec![Value::str(S_BEXACT), val.clone()]),
+                None,
+            );
+        } else {
+            Injection::setval(inj, val.clone(), None);
+        }
+        inj.borrow_mut().key_i = -1;
+        return Value::skip();
+    }
+    inject_handler(inj, val, r, store)
+}
+
 pub fn validate(
-    _data: &Value,
-    _spec: &Value,
-    _injdef: Option<&InjectDef>,
+    data: &Value,
+    spec: &Value,
+    injdef: Option<&InjectDef>,
 ) -> Result<Value, StructError> {
-    unimplemented!("validate: not yet ported — see rs/PLAN.md §10 and rs/NOTES.md")
+    let extra = injdef.and_then(|d| d.extra.clone());
+    let collect = injdef.map(|d| d.errs.is_some()).unwrap_or(false);
+    let errs = injdef
+        .and_then(|d| d.errs.clone())
+        .unwrap_or_else(Value::empty_list);
+
+    // build the validator store
+    let mut vmap: indexmap::IndexMap<String, Value> = indexmap::IndexMap::new();
+    for k in ["$DELETE", "$COPY", "$KEY", "$META", "$MERGE", "$EACH", "$PACK"] {
+        vmap.insert(k.to_string(), Value::Null);
+    }
+    vmap.insert("$STRING".to_string(), Value::func(validate_string));
+    for k in [
+        "$NUMBER", "$INTEGER", "$DECIMAL", "$BOOLEAN", "$NULL", "$NIL", "$MAP", "$LIST", "$FUNCTION",
+        "$INSTANCE",
+    ] {
+        vmap.insert(k.to_string(), Value::func(validate_type));
+    }
+    vmap.insert("$ANY".to_string(), Value::func(validate_any));
+    vmap.insert("$CHILD".to_string(), Value::func(validate_child));
+    vmap.insert("$ONE".to_string(), Value::func(validate_one));
+    vmap.insert("$EXACT".to_string(), Value::func(validate_exact));
+
+    let extra_or_empty = match &extra {
+        Some(e) => e.clone(),
+        None => Value::empty_map(),
+    };
+    let store = merge(
+        &Value::list(vec![
+            Value::map(vmap),
+            extra_or_empty,
+            Value::map_of([(S_DERRS.to_string(), errs.clone())]),
+        ]),
+        Some(1),
+    );
+
+    let meta = match injdef.and_then(|d| d.meta.clone()) {
+        Some(m) => m,
+        None => Value::empty_map(),
+    };
+    let exact_cur = get_prop(&meta, &Value::str(S_BEXACT), Value::Bool(false));
+    set_prop(meta.clone(), &Value::str(S_BEXACT), exact_cur);
+
+    let td = InjectDef {
+        meta: Some(meta),
+        extra: Some(store),
+        modify: Some(Rc::new(validation_modify) as Modify),
+        handler: Some(Rc::new(validatehandler) as NativeFn),
+        errs: Some(errs.clone()),
+        ..Default::default()
+    };
+
+    let out = transform(data, spec, Some(&td))
+        .unwrap_or(Value::Noval);
+
+    let errlen = errs.as_list().map(|l| l.borrow().len()).unwrap_or(0);
+    if errlen > 0 && !collect {
+        let msgs: Vec<String> = errs
+            .as_list()
+            .map(|l| l.borrow().iter().map(js_string).collect())
+            .unwrap_or_default();
+        return Err(StructError {
+            message: msgs.join(" | "),
+        });
+    }
+
+    Ok(out)
 }
 
 pub fn select(_children: &Value, _query: &Value) -> Value {

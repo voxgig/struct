@@ -222,6 +222,107 @@ impl Run {
     }
 }
 
+impl Run {
+    /// Like `run_set`, but the subject may return `Err(message)` — matched
+    /// (substring / regex, case-insensitive) against the entry's `err` field.
+    fn run_set_fallible<F>(&mut self, set: &Value, null_flag: bool, label: &str, mut subject: F)
+    where
+        F: FnMut(Value) -> Result<Value, String>,
+    {
+        let fixed = fix_json(set, null_flag);
+        let testset = vget(&fixed, "set");
+        let entries = match testset.as_list() {
+            Some(l) => l.borrow().clone(),
+            None => {
+                self.failures.push(format!("{label}: no `set` array"));
+                return;
+            }
+        };
+        for (i, entry) in entries.iter().enumerate() {
+            let out0 = vget(entry, "out");
+            let expected = if out0.is_noval() && null_flag {
+                Value::str(NULLMARK)
+            } else {
+                out0
+            };
+            let err_expected = vget(entry, "err");
+            let match_spec = vget(entry, "match");
+            let vin = clone(&vget(entry, "in"));
+            let result = subject(vin.clone());
+
+            match result {
+                Err(msg) => {
+                    if err_expected.is_noval() {
+                        self.failures.push(format!("{label}#{i}: unexpected error: {msg}"));
+                        continue;
+                    }
+                    let want = match &err_expected {
+                        Value::Bool(true) => {
+                            self.passed += 1;
+                            continue;
+                        }
+                        Value::Str(s) => s.clone(),
+                        other => stringify(other, None, false),
+                    };
+                    let ok = if let Some(rem) =
+                        want.strip_prefix('/').and_then(|s| s.strip_suffix('/'))
+                    {
+                        regex::Regex::new(rem).map(|re| re.is_match(&msg)).unwrap_or(false)
+                    } else {
+                        msg.to_lowercase().contains(&want.to_lowercase())
+                    };
+                    if ok {
+                        self.passed += 1;
+                    } else {
+                        self.failures.push(format!(
+                            "{label}#{i}: error mismatch: got [{}] want [{}]",
+                            msg, want
+                        ));
+                    }
+                }
+                Ok(v) => {
+                    if !err_expected.is_noval() {
+                        self.failures.push(format!(
+                            "{label}#{i}: expected error [{}] but got value {}",
+                            stringify(&err_expected, Some(80), false),
+                            stringify(&fix_json(&v, null_flag), Some(80), false)
+                        ));
+                        continue;
+                    }
+                    let res = fix_json(&v, null_flag);
+                    let mut matched = false;
+                    if !match_spec.is_noval() {
+                        let mut base = IndexMap::new();
+                        base.insert("in".to_string(), vget(entry, "in"));
+                        base.insert("args".to_string(), Value::list(vec![vin.clone()]));
+                        base.insert("out".to_string(), res.clone());
+                        let base = Value::map(base);
+                        if let Some(why) = match_check(&match_spec, &base) {
+                            self.failures.push(format!("{label}#{i}: match failed ({why})"));
+                            continue;
+                        }
+                        matched = true;
+                    }
+                    if res == expected
+                        || (matched
+                            && (expected == Value::str(NULLMARK)
+                                || expected.is_nullish()))
+                    {
+                        self.passed += 1;
+                    } else {
+                        self.failures.push(format!(
+                            "{label}#{i}: in={} -> got {}, want {}",
+                            stringify(&vget(entry, "in"), Some(120), false),
+                            stringify(&res, Some(120), false),
+                            stringify(&expected, Some(120), false),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Walk `check`; every leaf must equal/match `getpath(base, path)`. Returns
 /// `Some(reason)` on the first mismatch, `None` if all leaves match.
 fn match_check(check: &Value, base: &Value) -> Option<String> {
@@ -549,12 +650,17 @@ fn corpus() {
             ));
         }
     }
-    for name in ["paths", "cmds"] {
-        run.run_set(&set!("transform", name), true, &format!("transform-{name}"), |vin| {
-            match transform(&vget(&vin, "data"), &vget(&vin, "spec"), None) {
-                Ok(v) => v,
-                Err(_) => Value::Noval,
-            }
+    for (name, null_flag) in [
+        ("paths", true),
+        ("cmds", true),
+        ("ref", true),
+        ("each", true),
+        ("pack", true),
+        ("format", false),
+        ("apply", true),
+    ] {
+        run.run_set_fallible(&set!("transform", name), null_flag, &format!("transform-{name}"), |vin| {
+            transform(&vget(&vin, "data"), &vget(&vin, "spec"), None).map_err(|e| e.message)
         });
     }
     run.run_set(&set!("transform", "modify"), true, "transform-modify", |vin| {
@@ -570,6 +676,22 @@ fn corpus() {
             Ok(v) => v,
             Err(_) => Value::Noval,
         }
+    });
+
+    // -------- validate -----------------------------------------------
+    for name in ["basic", "invalid"] {
+        run.run_set_fallible(&set!("validate", name), false, &format!("validate-{name}"), |vin| {
+            validate(&vget(&vin, "data"), &vget(&vin, "spec"), None).map_err(|e| e.message)
+        });
+    }
+    for name in ["child", "one", "exact"] {
+        run.run_set_fallible(&set!("validate", name), true, &format!("validate-{name}"), |vin| {
+            validate(&vget(&vin, "data"), &vget(&vin, "spec"), None).map_err(|e| e.message)
+        });
+    }
+    run.run_set_fallible(&set!("validate", "special"), true, "validate-special", |vin| {
+        let d = inject_def_from_value(&vget(&vin, "inj"));
+        validate(&vget(&vin, "data"), &vget(&vin, "spec"), Some(&d)).map_err(|e| e.message)
     });
 
     // -------- report -------------------------------------------------
