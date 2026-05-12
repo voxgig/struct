@@ -494,17 +494,48 @@ same `Rc`, not a fresh one.
 
 ## 12. Names and constants
 
-- Rust convention is `snake_case`. **Recommendation:** rename to
-  `get_path`, `get_prop`, `is_node`, `is_map`, `is_list`, `is_key`,
-  `is_empty`, `is_func`, `keys_of`, `str_key`, `has_key`, `set_path`,
-  `set_prop`, `del_prop`, `type_name`, `get_def`, `get_elem`, `jsonify`,
-  `stringify`, `pathify`, `clone`, `escre`, `escurl`, `join`, etc.,
-  and ship a "TS name → Rust name" table in `README.md` (the repo
-  README already does this kind of cross-language casing note). Run
-  `clippy` clean. *Alternative:* keep the canonical lowercase names with
-  `#![allow(non_snake_case)]` for maximum line-by-line comparability —
-  weigh "real Rust crate" vs "diff-able against TS". Pick one and be
-  consistent.
+**Decided: idiomatic Rust `snake_case` for the public API**, with a
+"TS name → Rust name" table in `README.md` (the top-level README already
+documents per-language casing — `getpath` in JS/Py/Lua/Rb/PHP, `GetPath`
+in Go/C#, `getPath` in Java — so a fourth, Rust-idiomatic convention is
+in keeping with how the project already works; Go, the closest sibling,
+went fully idiomatic `PascalCase` rather than mimicking TS). No
+`#![allow(non_snake_case)]` escape hatch; `clippy` runs clean. The
+transcription stays "human-comparable" via the name table and matching
+*structure*, not matching *identifiers*.
+
+Note that most canonical names are already lint-clean lowercase
+(`rustc`'s `non_snake_case` lint only fires on *uppercase* letters, so
+`getpath`/`typify`/`escre` would pass as-is) — but the API guidelines'
+`snake_case` means word-separated, so we add underscores at compound
+boundaries. Coined single words stay verbatim.
+
+| TS canonical | Rust |
+|---|---|
+| `typename` | `type_name` |
+| `getdef` | `get_def` |
+| `isnode` / `ismap` / `islist` / `iskey` / `isempty` / `isfunc` | `is_node` / `is_map` / `is_list` / `is_key` / `is_empty` / `is_func` |
+| `size` / `slice` / `pad` / `typify` | `size` / `slice` / `pad` / `typify` |
+| `getelem` / `getprop` / `setprop` / `delprop` | `get_elem` / `get_prop` / `set_prop` / `del_prop` |
+| `strkey` / `keysof` / `haskey` | `str_key` / `keys_of` / `has_key` |
+| `items` / `flatten` / `filter` | `items` / `flatten` / `filter` |
+| `escre` / `escurl` | `esc_re` / `esc_url` |
+| `join` / `jsonify` / `stringify` / `pathify` / `clone` | `join` / `jsonify` / `stringify` / `pathify` / `clone` |
+| `walk` / `merge` / `inject` / `transform` / `validate` / `select` | same |
+| `getpath` / `setpath` | `get_path` / `set_path` |
+| `jm` / `jt` | `jm` / `jt` (terse builders, kept verbatim) |
+| `checkPlacement` / `injectorArgs` / `injectChild` | `check_placement` / `injector_args` / `inject_child` |
+| `SKIP` / `DELETE` | `SKIP` / `DELETE` |
+| `T_any` … `T_node` (15) | `T_ANY` … `T_NODE` (Rust const = SCREAMING_SNAKE) |
+| `M_KEYPRE` / `M_KEYPOST` / `M_VAL` / `MODENAME` | `M_KEYPRE` / `M_KEYPOST` / `M_VAL` / `MODENAME` |
+| `StructUtility` (class) | `StructUtility` (struct/impl bundling the free fns) |
+| `Injection` / `Injector` / `WalkApply` / `Modify` (types) | same |
+
+Internal `$NAME` transform/validate/select handlers (`transform_COPY`,
+`validate_STRING`, `select_AND`, …) keep their canonical names — they're
+crate-private, so casing is moot, and matching them aids the audit.
+The `$DELETE`/`$COPY`/`$STRING`/`$AND`/… *spec tokens themselves* are
+data strings, unchanged in every port.
 - Type bit-flags: `1 << 31` overflows `i32` (the C++ port hit this too),
   so the bitfield type is **`u32`** (or `i64`). Constants: `T_ANY =
   (1u32 << 31) - 1`, `T_NOVAL = 1 << 30`, … down to `T_NODE`. Rust has
@@ -646,7 +677,7 @@ the relevant corpus slice at the end of each phase.
 | 2 | `merge` walk-callbacks → two `&mut`-capturing `FnMut`s | Borrow-checker-hostile as written. | Reimplement `merge` as direct recursion (§8 Option B); document the divergence. |
 | 3 | `Injection.prior` back-pointer + `inj.prior.keyI--` in `$REF`/`injectChild` | Can't safely hold `&mut` back-references; the decrement must be visible to the in-flight parent loop. | Pass mutable child-loop state down explicitly, re-reading `childinj.keyI`/`childinj.keys` (already the pattern in `inject`); treat `$REF`/`injectChild` as the studied exceptions (§9). Fallback: `Rc<RefCell<Injection>>` throughout. |
 | 4 | `Num(f64)` vs `enum N { Int, Float }` | Affects every numeric site; `f64` is more JS-faithful but less Rust-idiomatic; `Int/Float` needs normalisation rules. | `Num(f64)` + `is_integer`/`to_int32` helpers (§4); note the alternative. |
-| 5 | `snake_case` rename vs canonical names | "Real Rust crate" + clippy vs line-by-line comparability with TS. | `snake_case` + a TS→Rust name table in `README.md` (§12). |
+| 5 | API naming | "Real Rust crate" + clippy vs line-by-line comparability with TS. | **Decided:** idiomatic `snake_case` (`get_path`, `is_node`, …), no `allow(non_snake_case)`, with a TS→Rust name table in `README.md` (§12). |
 | 6 | `Rc<RefCell>` vs `Arc<Mutex>` (thread safety) | `Send`/`Sync` would touch every access site and add lock cost. | Single-threaded `Rc<RefCell>`; document "not thread-safe, like the JS canonical". Arc variant = out of scope. |
 | 7 | Number→string and large-magnitude exponent notation | Rust `{}` on `1e21` ≠ JS `"1e+21"`; `0.0000001` likewise. | Mostly used on small integer indices, so likely a non-issue; document as a known difference unless the corpus hits it. |
 | 8 | JS object integer-key reordering in `JSON.stringify` | `jsonify` could differ from canonical for maps with numeric-string keys. | Probably accept the `IndexMap`-order behaviour; note it; emulate only if the corpus demands. |
