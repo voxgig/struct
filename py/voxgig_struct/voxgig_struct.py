@@ -34,23 +34,23 @@
 # - joinurl: join parts of a url, merging forward slashes.
 
 
-from typing import *
-from datetime import datetime
-import urllib.parse
-import json
-import re
-import math
 import inspect
+import json
+import math
+import re
+import urllib.parse
+from datetime import datetime
+from typing import Any
 
 # Regex patterns for path processing
 R_META_PATH = re.compile(r'^([^$]+)\$([=~])(.+)$')  # Meta path syntax.
-R_DOUBLE_DOLLAR = re.compile(r'\$\$')               # Double dollar escape sequence.
+R_DOUBLE_DOLLAR = re.compile(r'\$\$')  # Double dollar escape sequence.
 
 # Mode value for inject step.
-S_MKEYPRE =  'key:pre'
-S_MKEYPOST =  'key:post'
-S_MVAL =  'val'
-S_MKEY =  'key'
+S_MKEYPRE = 'key:pre'
+S_MKEYPOST = 'key:post'
+S_MVAL = 'val'
+S_MKEY = 'key'
 
 M_KEYPRE = 1
 M_KEYPOST = 2
@@ -60,18 +60,18 @@ _PLACEMENT = {M_VAL: 'value', M_KEYPRE: S_MKEY, M_KEYPOST: S_MKEY}
 MODENAME = {M_VAL: 'val', M_KEYPRE: 'key:pre', M_KEYPOST: 'key:post'}
 
 # Special keys.
-S_DKEY =  '$KEY'
-S_BANNO =  '`$ANNO`'
-S_DTOP =  '$TOP'
-S_DERRS =  '$ERRS'
-S_DSPEC =  '$SPEC'
-S_BMETA =  'meta'
-S_BEXACT =  '`$EXACT`'
+S_DKEY = '$KEY'
+S_BANNO = '`$ANNO`'
+S_DTOP = '$TOP'
+S_DERRS = '$ERRS'
+S_DSPEC = '$SPEC'
+S_BMETA = 'meta'
+S_BEXACT = '`$EXACT`'
 S_BVAL = '`$VAL`'
 S_BKEY = '`$KEY`'
 
 # General strings.
-S_array =  'array'
+S_array = 'array'
 S_integer = 'integer'
 S_decimal = 'decimal'
 S_map = 'map'
@@ -81,23 +81,23 @@ S_instance = 'instance'
 S_node = 'node'
 S_scalar = 'scalar'
 S_any = 'any'
-S_base =  'base'
-S_boolean =  'boolean'
-S_function =  'function'
-S_number =  'number'
-S_object =  'object'
-S_string =  'string'
-S_null =  'null'
-S_key =  'key'
-S_parent =  'parent'
-S_MT =  ''
-S_BT =  '`'
-S_DS =  '$'
-S_DT =  '.'
-S_CM =  ','
-S_CN =  ':'
-S_FS =  '/'
-S_KEY =  'KEY'
+S_base = 'base'
+S_boolean = 'boolean'
+S_function = 'function'
+S_number = 'number'
+S_object = 'object'
+S_string = 'string'
+S_null = 'null'
+S_key = 'key'
+S_parent = 'parent'
+S_MT = ''
+S_BT = '`'
+S_DS = '$'
+S_DT = '.'
+S_CM = ','
+S_CN = ':'
+S_FS = '/'
+S_KEY = 'KEY'
 
 
 # Type bit flags (mirroring TypeScript)
@@ -131,12 +131,20 @@ TYPENAME = [
     S_function,
     'symbol',
     S_null,
-    '', '', '',
-    '', '', '', '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
     S_list,
     S_map,
     S_instance,
-    '', '', '', '',
+    '',
+    '',
+    '',
+    '',
     S_scalar,
     S_node,
 ]
@@ -144,7 +152,7 @@ TYPENAME = [
 S_VIZ = ': '
 
 # The standard undefined value for this language.
-UNDEF = None
+UNDEF: Any = None
 SKIP = {'`$SKIP`': True}
 DELETE = {'`$DELETE`': True}
 
@@ -153,23 +161,24 @@ class Injection:
     """
     Injection state used for recursive injection into JSON-like data structures.
     """
+
     def __init__(
         self,
-        mode: str,                    # Injection mode: key:pre, val, key:post.
-        full: bool,                   # Transform escape was full key name.
-        keyI: int,                    # Index of parent key in list of parent keys.
-        keys: List[str],              # List of parent keys.
-        key: str,                     # Current parent key.
-        val: Any,                     # Current child value.
-        parent: Any,                  # Current parent (in transform specification).
-        path: List[str],              # Path to current node.
-        nodes: List[Any],             # Stack of ancestor nodes
-        handler: Any,                 # Custom handler for injections.
-        errs: List[Any] = None,       # Error collector.
-        meta: Dict[str, Any] = None,  # Custom meta data.
-        base: Optional[str] = None,   # Base key for data in store, if any. 
-        modify: Optional[Any] = None, # Modify injection output.
-        extra: Optional[Any] = None   # Extra data for injection.
+        mode: str,  # Injection mode: key:pre, val, key:post.
+        full: bool,  # Transform escape was full key name.
+        keyI: int,  # Index of parent key in list of parent keys.
+        keys: list[str],  # List of parent keys.
+        key: str,  # Current parent key.
+        val: Any,  # Current child value.
+        parent: Any,  # Current parent (in transform specification).
+        path: list[str],  # Path to current node.
+        nodes: list[Any],  # Stack of ancestor nodes
+        handler: Any,  # Custom handler for injections.
+        errs: list[Any] = UNDEF,  # Error collector.
+        meta: dict[str, Any] = UNDEF,  # Custom meta data.
+        base: str | None = None,  # Base key for data in store, if any.
+        modify: Any | None = None,  # Modify injection output.
+        extra: Any | None = None,  # Extra data for injection.
     ) -> None:
         self.mode = mode
         self.full = full
@@ -186,10 +195,12 @@ class Injection:
         self.base = base
         self.modify = modify
         self.extra = extra
-        self.prior = None
+        self.prior: Injection | None = None
         self.dparent = UNDEF
         self.dpath = [S_DTOP]
-        self.root = None  # Virtual root parent; set at top level so we can return it after transforms
+        self.root = (
+            None  # Virtual root parent; set at top level so we can return it after transforms
+        )
 
     def descend(self):
         if '__d' not in self.meta:
@@ -199,8 +210,8 @@ class Injection:
         parentkey = getelem(self.path, -2)
 
         if self.dparent is UNDEF:
-            if 1 < size(self.dpath):
-                self.dpath = self.dpath + [parentkey]
+            if size(self.dpath) > 1:
+                self.dpath = [*self.dpath, parentkey]
         else:
             if parentkey is not None:
                 self.dparent = getprop(self.dparent, parentkey)
@@ -209,15 +220,15 @@ class Injection:
                 if lastpart == '$:' + str(parentkey):
                     self.dpath = slice(self.dpath, -1)
                 else:
-                    self.dpath = self.dpath + [parentkey]
+                    self.dpath = [*self.dpath, parentkey]
 
         return self.dparent
 
-    def child(self, keyI: int, keys: List[str]) -> 'Injection':
+    def child(self, keyI: int, keys: list[str]) -> 'Injection':
         """Create a child state object with the given key index and keys."""
         key = strkey(keys[keyI])
         val = self.val
-        
+
         cinj = Injection(
             mode=self.mode,
             full=self.full,
@@ -226,23 +237,23 @@ class Injection:
             key=key,
             val=getprop(val, key),
             parent=val,
-            path=self.path + [key],
-            nodes=self.nodes + [val],
+            path=[*self.path, key],
+            nodes=[*self.nodes, val],
             handler=self.handler,
             errs=self.errs,
             meta=self.meta,
             base=self.base,
-            modify=self.modify
+            modify=self.modify,
         )
         cinj.prior = self
         cinj.dpath = self.dpath[:]
         cinj.dparent = self.dparent
         cinj.extra = self.extra  # Preserve extra (contains transform functions)
         cinj.root = getattr(self, 'root', None)
-        
+
         return cinj
 
-    def setval(self, val: Any, ancestor: Optional[int] = None) -> Any:
+    def setval(self, val: Any, ancestor: int | None = None) -> Any:
         """Set the value in the parent node at the specified ancestor level."""
         if ancestor is None or ancestor < 2:
             return setprop(self.parent, self.key, val)
@@ -281,9 +292,7 @@ def iskey(key: Any = UNDEF) -> bool:
         return False
     if isinstance(key, int):
         return True
-    if isinstance(key, float):
-        return True
-    return False
+    return isinstance(key, float)
 
 
 def size(val: Any = UNDEF) -> int:
@@ -294,7 +303,7 @@ def size(val: Any = UNDEF) -> int:
         return len(val)
     elif ismap(val):
         return len(val.keys())
-    
+
     if isinstance(val, str):
         return len(val)
     elif isinstance(val, (int, float)):
@@ -313,12 +322,10 @@ def slice(val: Any, start: int = UNDEF, end: int = UNDEF, mutate: bool = False) 
     if isinstance(val, (int, float)):
         if start is None:
             start = float('-inf')
-        if end is None:
-            end = float('inf')
-        else:
-            end = end - 1  # TypeScript uses exclusive end, so subtract 1
+        # TypeScript uses exclusive end, so subtract 1 when bounded.
+        end = float('inf') if end is None else end - 1
         return max(start, min(val, end))
-    
+
     if islist(val) or isinstance(val, str):
         vlen = size(val)
         if end is not None and start is None:
@@ -342,13 +349,13 @@ def slice(val: Any, start: int = UNDEF, end: int = UNDEF, mutate: bool = False) 
             if vlen < start:
                 start = vlen
 
-            if -1 < start and start <= end and end <= vlen:
+            if start > -1 and start <= end and end <= vlen:
                 if islist(val) and mutate:
                     j = start
                     for i in range(end - start):
                         val[i] = val[j]
                         j += 1
-                    del val[end - start:]
+                    del val[end - start :]
                     return val
                 return val[start:end]
             else:
@@ -356,7 +363,7 @@ def slice(val: Any, start: int = UNDEF, end: int = UNDEF, mutate: bool = False) 
                     if mutate:
                         del val[:]
                     return val if mutate else []
-                return ""
+                return ''
 
     # No slice performed; return original value unchanged
     return val
@@ -367,7 +374,7 @@ def pad(s: Any, padding: int = UNDEF, padchar: str = UNDEF) -> str:
     s = stringify(s)
     padding = 44 if padding is UNDEF else padding
     padchar = ' ' if padchar is UNDEF else (padchar + ' ')[0]
-    
+
     if padding > -1:
         return s.ljust(padding, padchar)
     else:
@@ -375,7 +382,7 @@ def pad(s: Any, padding: int = UNDEF, padchar: str = UNDEF) -> str:
 
 
 def strkey(key: Any = UNDEF) -> str:
-    if UNDEF == key:
+    if key == UNDEF:
         return S_MT
 
     if isinstance(key, str):
@@ -395,19 +402,16 @@ def strkey(key: Any = UNDEF) -> str:
 
 def isempty(val: Any = UNDEF) -> bool:
     "Check for an 'empty' value - None, empty string, array, object."
-    if UNDEF == val:
+    if val == UNDEF:
         return True
-    
+
     if val == S_MT:
         return True
-    
+
     if islist(val) and len(val) == 0:
         return True
-    
-    if ismap(val) and len(val) == 0:
-        return True
-    
-    return False    
+
+    return ismap(val) and len(val) == 0
 
 
 def isfunc(val: Any = UNDEF) -> bool:
@@ -439,6 +443,7 @@ def typify(value: Any = _TYPIFY_NO_ARG) -> int:
         return T_scalar | T_number | T_integer
     if isinstance(value, float):
         import math
+
         if math.isnan(value):
             return T_noval
         return T_scalar | T_number | T_decimal
@@ -460,7 +465,7 @@ def getelem(val: Any, key: Any, alt: Any = UNDEF) -> Any:
     """
     out = UNDEF
 
-    if UNDEF == val or UNDEF == key:
+    if val == UNDEF or key == UNDEF:
         return alt
 
     if islist(val):
@@ -473,8 +478,8 @@ def getelem(val: Any, key: Any, alt: Any = UNDEF) -> Any:
         except (ValueError, IndexError):
             pass
 
-    if UNDEF == out:
-        return alt() if 0 < (T_function & typify(alt)) else alt
+    if out == UNDEF:
+        return alt() if (T_function & typify(alt)) > 0 else alt
 
     return out
 
@@ -484,21 +489,21 @@ def getprop(val: Any = UNDEF, key: Any = UNDEF, alt: Any = UNDEF) -> Any:
     Safely get a property of a node. Undefined arguments return undefined.
     If the key is not found, return the alternative value.
     """
-    if UNDEF == val:
+    if val == UNDEF:
         return alt
 
-    if UNDEF == key:
+    if key == UNDEF:
         return alt
 
     out = alt
-    
+
     if ismap(val):
         out = val.get(str(key), alt)
-    
+
     elif islist(val):
         try:
             key = int(key)
-        except:
+        except (ValueError, TypeError):
             return alt
 
         if 0 <= key < len(val):
@@ -506,9 +511,9 @@ def getprop(val: Any = UNDEF, key: Any = UNDEF, alt: Any = UNDEF) -> Any:
         else:
             return alt
 
-    if UNDEF == out:
+    if out == UNDEF:
         return alt
-        
+
     return out
 
 
@@ -524,9 +529,9 @@ def keysof(val: Any = UNDEF) -> list[str]:
 
 def haskey(val: Any = UNDEF, key: Any = UNDEF) -> bool:
     "Value of property with name key in node val is defined."
-    return UNDEF != getprop(val, key)
+    return getprop(val, key) != UNDEF
 
-    
+
 def items(val: Any = UNDEF, apply=None):
     "List the keys of a map or list as an array of [key, value] tuples."
     if not isnode(val):
@@ -536,7 +541,7 @@ def items(val: Any = UNDEF, apply=None):
     if apply is not None:
         out = [apply(item) for item in out]
     return out
-    
+
 
 def flatten(lst, depth=None):
     if depth is None:
@@ -564,26 +569,26 @@ def filter(val, check):
 
 def escre(s: Any):
     "Escape regular expression."
-    if UNDEF == s:
-        s = ""
+    if s == UNDEF:
+        s = ''
     pattern = r'([.*+?^${}()|\[\]\\])'
     return re.sub(pattern, r'\\\1', s)
 
 
 def escurl(s: Any):
     "Escape URLs."
-    if UNDEF == s:
+    if s == UNDEF:
         s = S_MT
-    return urllib.parse.quote(s, safe="")
+    return urllib.parse.quote(s, safe='')
 
 
 def replace(s, from_pat, to_str):
     "Replace a search string (all), or a regexp, in a source string."
     rs = s
     ts = typify(s)
-    if 0 == (T_string & ts):
+    if (T_string & ts) == 0:
         rs = stringify(s)
-    elif 0 < ((T_noval | T_null) & ts):
+    elif ((T_noval | T_null) & ts) > 0:
         rs = S_MT
     else:
         rs = stringify(s)
@@ -597,27 +602,27 @@ def join(arr, sep=UNDEF, url=UNDEF):
     if not islist(arr):
         return S_MT
     sepdef = S_CM if sep is UNDEF or sep is None else sep
-    sepre = escre(sepdef) if 1 == size(sepdef) else UNDEF
+    sepre = escre(sepdef) if size(sepdef) == 1 else UNDEF
 
     sarr = size(arr)
-    filtered = [(i, s) for i, s in enumerate(arr)
-                if isinstance(s, str) and S_MT != s]
+    filtered = [(i, s) for i, s in enumerate(arr) if isinstance(s, str) and s != S_MT]
 
     result = []
     for idx, s in filtered:
-        if sepre is not UNDEF and S_MT != sepre:
-            if url and 0 == idx:
+        if sepre is not UNDEF and sepre != S_MT:
+            if url and idx == 0:
                 s = re.sub(sepre + '+$', S_MT, s)
                 result.append(s)
                 continue
-            if 0 < idx:
+            if idx > 0:
                 s = re.sub('^' + sepre + '+', S_MT, s)
             if idx < sarr - 1 or not url:
                 s = re.sub(sepre + '+$', S_MT, s)
-            s = re.sub('([^' + sepre + '])' + sepre + '+([^' + sepre + '])',
-                        r'\1' + sepdef + r'\2', s)
+            s = re.sub(
+                '([^' + sepre + '])' + sepre + '+([^' + sepre + '])', r'\1' + sepdef + r'\2', s
+            )
 
-        if S_MT != s:
+        if s != S_MT:
             result.append(s)
 
     return sepdef.join(result)
@@ -659,43 +664,43 @@ def delprop(parent: Any, key: Any):
     return parent
 
 
-def jsonify(val: Any = UNDEF, flags: Dict[str, Any] = None) -> str:
+def jsonify(val: Any = UNDEF, flags: dict[str, Any] = UNDEF) -> str:
     """
     Convert a value to a formatted JSON string.
     In general, the behavior of JavaScript's JSON.stringify(val, null, 2) is followed.
     """
     flags = flags or {}
-    
+
     if val is UNDEF:
         return S_null
-    
+
     indent = getprop(flags, 'indent', 2)
-    
+
     try:
         json_str = json.dumps(val, indent=indent, separators=(',', ': ') if indent else (',', ':'))
     except Exception:
         return S_null
-    
+
     if json_str is None:
         return S_null
-    
+
     offset = getprop(flags, 'offset', 0)
-    if 0 < offset:
+    if offset > 0:
         lines = json_str.split('\n')
         padded = [pad(n[1], 0 - offset - size(n[1])) for n in items(lines[1:])]
         json_str = '{\n' + '\n'.join(padded)
-    
+
     return json_str
 
 
-def jo(*kv: Any) -> Dict[str, Any]:
+def jm(*kv: Any) -> dict[str, Any]:
     """
     Define a JSON Object using function arguments.
     Arguments are treated as key-value pairs.
     """
     kvsize = len(kv)
     o = {}
-    
+
     for i in range(0, kvsize, 2):
         k = kv[i] if i < kvsize else f'$KEY{i}'
         # Handle None specially to become "null" for keys
@@ -706,30 +711,25 @@ def jo(*kv: Any) -> Dict[str, Any]:
         else:
             k = stringify(k)
         o[k] = kv[i + 1] if i + 1 < kvsize else None
-    
+
     return o
 
 
-def ja(*v: Any) -> List[Any]:
+def jt(*v: Any) -> list[Any]:
     """
     Define a JSON Array using function arguments.
     """
     vsize = len(v)
     a = [None] * vsize
-    
+
     for i in range(vsize):
         a[i] = v[i] if i < vsize else None
-    
+
     return a
 
 
-# Aliases to match TS canonical names
-jm = jo
-jt = ja
-
-
 def select_AND(state, _val, _ref, store):
-    if S_MKEYPRE == state.mode:
+    if state.mode == S_MKEYPRE:
         terms = getprop(state.parent, state.key)
         ppath = slice(state.path, -1)
         point = getpath(store, ppath)
@@ -739,15 +739,24 @@ def select_AND(state, _val, _ref, store):
 
         for term in terms:
             terrs = []
-            validate(point, term, {
-                'extra': vstore,
-                'errs': terrs,
-                'meta': state.meta,
-            })
-            if 0 != len(terrs):
+            validate(
+                point,
+                term,
+                {
+                    'extra': vstore,
+                    'errs': terrs,
+                    'meta': state.meta,
+                },
+            )
+            if len(terrs) != 0:
                 state.errs.append(
-                    'AND:' + pathify(ppath) + '\u2A2F' + stringify(point) +
-                    ' fail:' + stringify(terms))
+                    'AND:'
+                    + pathify(ppath)
+                    + '\u2a2f'
+                    + stringify(point)
+                    + ' fail:'
+                    + stringify(terms)
+                )
 
         gkey = getelem(state.path, -2)
         gp = getelem(state.nodes, -2)
@@ -757,7 +766,7 @@ def select_AND(state, _val, _ref, store):
 
 
 def select_OR(state, _val, _ref, store):
-    if S_MKEYPRE == state.mode:
+    if state.mode == S_MKEYPRE:
         terms = getprop(state.parent, state.key)
         ppath = slice(state.path, -1)
         point = getpath(store, ppath)
@@ -767,26 +776,30 @@ def select_OR(state, _val, _ref, store):
 
         for term in terms:
             terrs = []
-            validate(point, term, {
-                'extra': vstore,
-                'errs': terrs,
-                'meta': state.meta,
-            })
-            if 0 == len(terrs):
+            validate(
+                point,
+                term,
+                {
+                    'extra': vstore,
+                    'errs': terrs,
+                    'meta': state.meta,
+                },
+            )
+            if len(terrs) == 0:
                 gkey = getelem(state.path, -2)
                 gp = getelem(state.nodes, -2)
                 setprop(gp, gkey, point)
                 return UNDEF
 
         state.errs.append(
-            'OR:' + pathify(ppath) + '\u2A2F' + stringify(point) +
-            ' fail:' + stringify(terms))
+            'OR:' + pathify(ppath) + '\u2a2f' + stringify(point) + ' fail:' + stringify(terms)
+        )
 
     return UNDEF
 
 
 def select_NOT(state, _val, _ref, store):
-    if S_MKEYPRE == state.mode:
+    if state.mode == S_MKEYPRE:
         term = getprop(state.parent, state.key)
         ppath = slice(state.path, -1)
         point = getpath(store, ppath)
@@ -795,16 +808,20 @@ def select_NOT(state, _val, _ref, store):
         vstore['$TOP'] = point
 
         terrs = []
-        validate(point, term, {
-            'extra': vstore,
-            'errs': terrs,
-            'meta': state.meta,
-        })
+        validate(
+            point,
+            term,
+            {
+                'extra': vstore,
+                'errs': terrs,
+                'meta': state.meta,
+            },
+        )
 
-        if 0 == len(terrs):
+        if len(terrs) == 0:
             state.errs.append(
-                'NOT:' + pathify(ppath) + '\u2A2F' + stringify(point) +
-                ' fail:' + stringify(term))
+                'NOT:' + pathify(ppath) + '\u2a2f' + stringify(point) + ' fail:' + stringify(term)
+            )
 
         gkey = getelem(state.path, -2)
         gp = getelem(state.nodes, -2)
@@ -814,7 +831,7 @@ def select_NOT(state, _val, _ref, store):
 
 
 def select_CMP(state, _val, ref, store):
-    if S_MKEYPRE == state.mode:
+    if state.mode == S_MKEYPRE:
         term = getprop(state.parent, state.key)
         gkey = getelem(state.path, -2)
         ppath = slice(state.path, -1)
@@ -822,16 +839,16 @@ def select_CMP(state, _val, ref, store):
 
         pass_test = False
 
-        if '$GT' == ref and point > term:
+        if (
+            (ref == '$GT' and point > term)
+            or (ref == '$LT' and point < term)
+            or (ref == '$GTE' and point >= term)
+            or (ref == '$LTE' and point <= term)
+        ):
             pass_test = True
-        elif '$LT' == ref and point < term:
-            pass_test = True
-        elif '$GTE' == ref and point >= term:
-            pass_test = True
-        elif '$LTE' == ref and point <= term:
-            pass_test = True
-        elif '$LIKE' == ref:
+        elif ref == '$LIKE':
             import re as re_mod
+
             if re_mod.search(term, stringify(point)):
                 pass_test = True
 
@@ -840,13 +857,20 @@ def select_CMP(state, _val, ref, store):
             setprop(gp, gkey, point)
         else:
             state.errs.append(
-                'CMP: ' + pathify(ppath) + '\u2A2F' + stringify(point) +
-                ' fail:' + ref + ' ' + stringify(term))
+                'CMP: '
+                + pathify(ppath)
+                + '\u2a2f'
+                + stringify(point)
+                + ' fail:'
+                + ref
+                + ' '
+                + stringify(term)
+            )
 
     return UNDEF
 
 
-def select(children: Any, query: Any) -> List[Any]:
+def select(children: Any, query: Any) -> list[Any]:
     """
     Select children from a top-level object that match a MongoDB-style query.
     Supports $and, $or, and equality comparisons.
@@ -854,12 +878,12 @@ def select(children: Any, query: Any) -> List[Any]:
     """
     if not isnode(children):
         return []
-    
+
     if ismap(children):
         children = [setprop(v, S_DKEY, k) or v for k, v in items(children)]
     else:
         children = [setprop(n, S_DKEY, i) or n if ismap(n) else n for i, n in enumerate(children)]
-    
+
     results = []
     injdef = {
         'errs': [],
@@ -873,26 +897,26 @@ def select(children: Any, query: Any) -> List[Any]:
             '$GTE': select_CMP,
             '$LTE': select_CMP,
             '$LIKE': select_CMP,
-        }
+        },
     }
-    
+
     q = clone(query)
-    
+
     # Add $OPEN to all maps in the query
     def add_open(_k, v, _parent, _path):
         if ismap(v):
             setprop(v, '`$OPEN`', getprop(v, '`$OPEN`', True))
         return v
-    
+
     walk(q, add_open)
-    
+
     for child in children:
         injdef['errs'] = []
         validate(child, clone(q), injdef)
-        
+
         if size(injdef['errs']) == 0:
             results.append(child)
-    
+
     return results
 
 
@@ -902,7 +926,7 @@ def stringify(val: Any, maxlen: int = UNDEF, pretty: Any = None):
     pretty = bool(pretty)
     valstr = S_MT
 
-    if UNDEF == val:
+    if val == UNDEF:
         return '<>' if pretty else valstr
 
     if isinstance(val, str):
@@ -914,9 +938,9 @@ def stringify(val: Any, maxlen: int = UNDEF, pretty: Any = None):
         except Exception:
             valstr = '__STRINGIFY_FAILED__'
 
-    if maxlen is not UNDEF and maxlen is not None and -1 < maxlen:
+    if maxlen is not UNDEF and maxlen is not None and maxlen > -1:
         js = valstr[:maxlen]
-        valstr = (js[:maxlen - 3] + '...') if maxlen < len(valstr) else valstr
+        valstr = (js[: maxlen - 3] + '...') if maxlen < len(valstr) else valstr
 
     if pretty:
         colors = [81, 118, 213, 39, 208, 201, 45, 190, 129, 51, 160, 121, 226, 33, 207, 69]
@@ -943,29 +967,26 @@ def stringify(val: Any, maxlen: int = UNDEF, pretty: Any = None):
 
 def pathify(val: Any = UNDEF, startin: int = UNDEF, endin: int = UNDEF) -> str:
     pathstr = UNDEF
-    
+
     # Convert input to a path array
-    path = val if islist(val) else \
-        [val] if iskey(val) else \
-        UNDEF
+    path = val if islist(val) else [val] if iskey(val) else UNDEF
 
     # [val] if isinstance(val, str) else \
-        # [val] if isinstance(val, (int, float)) else \
+    # [val] if isinstance(val, (int, float)) else \
 
-    
     # Determine starting index and ending index
-    start = 0 if startin is UNDEF else startin if -1 < startin else 0
-    end = 0 if endin is UNDEF else endin if -1 < endin else 0
+    start = 0 if startin is UNDEF else startin if startin > -1 else 0
+    end = 0 if endin is UNDEF else endin if endin > -1 else 0
 
-    if UNDEF != path and 0 <= start:
-        path = path[start:len(path)-end]
+    if path != UNDEF and start >= 0:
+        path = path[start : len(path) - end]
 
-        if 0 == len(path):
-            pathstr = "<root>"
+        if len(path) == 0:
+            pathstr = '<root>'
         else:
             # Filter path parts to include only valid keys
             filtered_path = [p for p in path if iskey(p)]
-            
+
             # Map path parts: convert numbers to strings and remove any dots
             mapped_path = []
             for p in filtered_path:
@@ -973,12 +994,12 @@ def pathify(val: Any = UNDEF, startin: int = UNDEF, endin: int = UNDEF) -> str:
                     mapped_path.append(S_MT + str(int(p)))
                 else:
                     mapped_path.append(str(p).replace('.', S_MT))
-            
+
             pathstr = S_DT.join(mapped_path)
 
     # Handle the case where we couldn't create a path
-    if UNDEF == pathstr:
-        pathstr = f"<unknown-path{S_MT if UNDEF == val else S_CN+stringify(val, 47)}>"
+    if pathstr == UNDEF:
+        pathstr = f'<unknown-path{S_MT if val == UNDEF else S_CN + stringify(val, 47)}>'
 
     return pathstr
 
@@ -988,7 +1009,7 @@ def clone(val: Any = UNDEF):
     Clone a JSON-like data structure.
     NOTE: function value references are copied, *not* cloned.
     """
-    if UNDEF == val:
+    if val == UNDEF:
         return UNDEF
 
     refs = []
@@ -1004,7 +1025,7 @@ def clone(val: Any = UNDEF):
         elif hasattr(item, 'to_json'):
             return item.to_json()
         elif hasattr(item, '__dict__'):
-            return item.__dict__ 
+            return item.__dict__
         else:
             return item
 
@@ -1077,16 +1098,16 @@ MAXDEPTH = 32
 
 
 def walk(
-        val: Any,
-        apply: Any = None,
-        key: Any = UNDEF,
-        parent: Any = UNDEF,
-        path: Any = UNDEF,
-        *,
-        before: Any = None,
-        after: Any = None,
-        maxdepth: Any = None,
-        pool: Any = UNDEF,
+    val: Any,
+    apply: Any = None,
+    key: Any = UNDEF,
+    parent: Any = UNDEF,
+    path: Any = UNDEF,
+    *,
+    before: Any = None,
+    after: Any = None,
+    maxdepth: Any = None,
+    pool: Any = UNDEF,
 ):
     """
     Walk a data structure depth-first.
@@ -1111,8 +1132,8 @@ def walk(
 
     out = val if _before is None else _before(key, val, parent, path)
 
-    md = maxdepth if maxdepth is not None and 0 <= maxdepth else MAXDEPTH
-    if 0 == md or (0 < md and md <= depth):
+    md = maxdepth if maxdepth is not None and maxdepth >= 0 else MAXDEPTH
+    if md == 0 or (md > 0 and md <= depth):
         return out
 
     if isnode(out):
@@ -1128,12 +1149,16 @@ def walk(
         for i in range(depth):
             child_path[i] = path[i]
 
-        for (ckey, child) in items(out):
+        for ckey, child in items(out):
             child_path[depth] = str(ckey)
             result = walk(
-                child, key=ckey, parent=out,
+                child,
+                key=ckey,
+                parent=out,
                 path=child_path,
-                before=_before, after=_after, maxdepth=md,
+                before=_before,
+                after=_after,
+                maxdepth=md,
                 pool=pool,
             )
             if ismap(out):
@@ -1147,7 +1172,7 @@ def walk(
     return out
 
 
-def merge(objs: List[Any] = None, maxdepth: Any = None) -> Any:
+def merge(objs: list[Any] = UNDEF, maxdepth: Any = None) -> Any:
     """
     Merge a list of values into each other. Later values have
     precedence.  Nodes override scalars. Node kinds (list or map)
@@ -1162,9 +1187,9 @@ def merge(objs: List[Any] = None, maxdepth: Any = None) -> Any:
 
     lenlist = len(objs)
 
-    if 0 == lenlist:
+    if lenlist == 0:
         return UNDEF
-    if 1 == lenlist:
+    if lenlist == 1:
         return objs[0]
 
     out = getprop(objs, 0, {})
@@ -1178,7 +1203,7 @@ def merge(objs: List[Any] = None, maxdepth: Any = None) -> Any:
             cur = [out]
             dst = [out]
 
-            def before(key, val, _parent, path):
+            def before(key, val, _parent, path, cur=cur, dst=dst):
                 pI = size(path)
 
                 if md <= pI:
@@ -1204,10 +1229,10 @@ def merge(objs: List[Any] = None, maxdepth: Any = None) -> Any:
                     if pI >= cur_len:
                         cur.extend([UNDEF] * (pI + 1 - cur_len))
 
-                    dst[pI] = getprop(dst[pI - 1], key) if 0 < pI else dst[pI]
+                    dst[pI] = getprop(dst[pI - 1], key) if pI > 0 else dst[pI]
                     tval = dst[pI]
 
-                    if UNDEF == tval:
+                    if tval == UNDEF:
                         cur[pI] = [] if islist(val) else {}
                     elif (islist(val) and islist(tval)) or (ismap(val) and ismap(tval)):
                         cur[pI] = tval
@@ -1217,7 +1242,7 @@ def merge(objs: List[Any] = None, maxdepth: Any = None) -> Any:
 
                 return val
 
-            def after(key, _val, _parent, path):
+            def after(key, _val, _parent, path, cur=cur):
                 cI = size(path)
                 if cI < 1:
                     return cur[0] if len(cur) > 0 else _val
@@ -1230,7 +1255,7 @@ def merge(objs: List[Any] = None, maxdepth: Any = None) -> Any:
 
             out = walk(obj, before=before, after=after)
 
-    if 0 == md:
+    if md == 0:
         out = getprop(objs, lenlist - 1, UNDEF)
         out = [] if islist(out) else {} if ismap(out) else out
 
@@ -1251,7 +1276,7 @@ def getpath(store, path, injdef=UNDEF):
         parts = [strkey(path)]
     else:
         return UNDEF
-    
+
     val = store
     # Support both dict-style injdef and Injection instance
     if isinstance(injdef, Injection):
@@ -1269,33 +1294,31 @@ def getpath(store, path, injdef=UNDEF):
 
     src = getprop(store, base, store) if base else store
     numparts = size(parts)
-    
+
     # An empty path (incl empty string) just finds the store.
-    if path is UNDEF or store is UNDEF or (1 == numparts and parts[0] == S_MT) or numparts == 0:
+    if path is UNDEF or store is UNDEF or (numparts == 1 and parts[0] == S_MT) or numparts == 0:
         val = src
         return val
     elif numparts > 0:
-        
         # Check for $ACTIONs
-        if 1 == numparts:
+        if numparts == 1:
             val = getprop(store, parts[0])
-        
+
         if not isfunc(val):
             val = src
-            
+
             # Check for meta path syntax
             m = R_META_PATH.match(parts[0]) if parts[0] else None
             if m and inj_meta:
                 val = getprop(inj_meta, m.group(1))
                 parts[0] = m.group(3)
-            
-            
+
             for pI in range(numparts):
                 if val is UNDEF:
                     break
-                    
+
                 part = parts[pI]
-                
+
                 # Handle special path components
                 if injdef and part == S_DKEY:
                     part = inj_key if inj_key is not UNDEF else part
@@ -1308,55 +1331,52 @@ def getpath(store, path, injdef=UNDEF):
                 elif injdef and isinstance(part, str) and part.startswith('$META:'):
                     # $META:metapath$ -> get meta value, use as path part (string)
                     part = stringify(getpath(inj_meta, part[6:-1]))
-                
+
                 # $$ escapes $ (path parts can be int e.g. list indices)
-                if isinstance(part, str):
-                    part = R_DOUBLE_DOLLAR.sub('$', part)
-                else:
-                    part = strkey(part)
-                
+                part = R_DOUBLE_DOLLAR.sub('$', part) if isinstance(part, str) else strkey(part)
+
                 if part == S_MT:
                     ascends = 0
                     while pI + 1 < len(parts) and parts[pI + 1] == S_MT:
                         ascends += 1
                         pI += 1
 
-                    if injdef and 0 < ascends:
+                    if injdef and ascends > 0:
                         if pI == len(parts) - 1:
                             ascends -= 1
 
-                        if 0 == ascends:
+                        if ascends == 0:
                             val = dparent
                         else:
-                            fullpath = flatten(
-                                [slice(dpath, 0 - ascends), parts[pI + 1:]])
-                            if ascends <= size(dpath):
-                                val = getpath(store, fullpath)
-                            else:
-                                val = UNDEF
+                            fullpath = flatten([slice(dpath, 0 - ascends), parts[pI + 1 :]])
+                            val = getpath(store, fullpath) if ascends <= size(dpath) else UNDEF
                             break
                     else:
                         val = dparent
                 else:
                     val = getprop(val, part)
-    
+
     # Injdef may provide a custom handler to modify found value.
-    handler = injdef.handler if isinstance(injdef, Injection) else (getprop(injdef, 'handler') if injdef else UNDEF)
+    handler = (
+        injdef.handler
+        if isinstance(injdef, Injection)
+        else (getprop(injdef, 'handler') if injdef else UNDEF)
+    )
     if handler and isfunc(handler):
         ref = pathify(path)
         val = handler(injdef, val, ref, store)
-    
+
     return val
 
 
 def setpath(store, path, val, injdef=UNDEF):
     pathType = typify(path)
 
-    if 0 < (T_list & pathType):
+    if (T_list & pathType) > 0:
         parts = path
-    elif 0 < (T_string & pathType):
+    elif (T_string & pathType) > 0:
         parts = path.split(S_DT)
-    elif 0 < (T_number & pathType):
+    elif (T_number & pathType) > 0:
         parts = [path]
     else:
         return UNDEF
@@ -1370,7 +1390,7 @@ def setpath(store, path, val, injdef=UNDEF):
         nextParent = getprop(parent, partKey)
         if not isnode(nextParent):
             nextPart = getelem(parts, pI + 1)
-            nextParent = [] if 0 < (T_number & typify(nextPart)) else {}
+            nextParent = [] if (T_number & typify(nextPart)) > 0 else {}
             setprop(parent, partKey, nextParent)
         parent = nextParent
 
@@ -1386,8 +1406,6 @@ def inject(val, store, injdef=UNDEF):
     """
     Inject values from `store` into `val` recursively, respecting backtick syntax.
     """
-    valtype = type(val)
-
     # Reuse existing injection state during recursion; otherwise create a new one.
     if isinstance(injdef, Injection):
         inj = injdef
@@ -1410,7 +1428,7 @@ def inject(val, store, injdef=UNDEF):
             base=S_DTOP,
             modify=getprop(injdef, 'modify') if injdef else None,
             meta=getprop(injdef, 'meta', {}),
-            errs=getprop(store, S_DERRS, [])
+            errs=getprop(store, S_DERRS, []),
         )
         inj.dparent = store
         inj.dpath = [S_DTOP]
@@ -1433,9 +1451,9 @@ def inject(val, store, injdef=UNDEF):
         # Keys are sorted alphanumerically to ensure determinism.
         # Injection transforms ($FOO) are processed *after* other keys.
         if ismap(val):
-            normal_keys = [k for k in val.keys() if S_DS not in k]
+            normal_keys = [k for k in val if S_DS not in k]
             normal_keys.sort()
-            transform_keys = [k for k in val.keys() if S_DS in k]
+            transform_keys = [k for k in val if S_DS in k]
             transform_keys.sort()
             nodekeys = normal_keys + transform_keys
         else:
@@ -1498,7 +1516,11 @@ def inject(val, store, injdef=UNDEF):
     inj.val = val
 
     # Return the (possibly transform-replaced) root only at top level (prior is None).
-    if getattr(inj, 'prior', None) is None and getattr(inj, 'root', None) is not None and haskey(inj.root, S_DTOP):
+    if (
+        getattr(inj, 'prior', None) is None
+        and getattr(inj, 'root', None) is not None
+        and haskey(inj.root, S_DTOP)
+    ):
         return getprop(inj.root, S_DTOP)
     if inj.key == S_DTOP and inj.parent is not UNDEF and haskey(inj.parent, S_DTOP):
         return getprop(inj.parent, S_DTOP)
@@ -1509,7 +1531,7 @@ def inject(val, store, injdef=UNDEF):
 # call the function passing the injection state. This is how transforms operate.
 def _injecthandler(inj, val, ref, store):
     out = val
-    iscmd = isfunc(val) and (UNDEF == ref or (isinstance(ref, str) and ref.startswith(S_DS)))
+    iscmd = isfunc(val) and (ref == UNDEF or (isinstance(ref, str) and ref.startswith(S_DS)))
 
     # Only call val function if it is a special command ($NAME format).
     if iscmd:
@@ -1548,7 +1570,6 @@ def transform_COPY(inj, val, ref, store):
     """
     mode = inj.mode
     key = inj.key
-    parent = inj.parent
 
     out = UNDEF
     if mode.startswith('key'):
@@ -1648,7 +1669,7 @@ def transform_MERGE(inj, val, ref, store):
 
         # Literals in the parent have precedence, but we still merge onto
         # the parent object, so that node tree references are not changed.
-        mergelist = [parent] + args + [clone(parent)]
+        mergelist = [parent, *args, clone(parent)]
 
         merge(mergelist)
 
@@ -1691,7 +1712,7 @@ def transform_EACH(inj, val, ref, store):
     # Source data
     srcstore = getprop(store, inj.base, store)
     src = getpath(srcstore, srcpath, inj)
-    
+
     # Create parallel data structures:
     # source entries :: child templates
     tcurrent = []
@@ -1701,26 +1722,26 @@ def transform_EACH(inj, val, ref, store):
     target = nodes_[-2] if len(nodes_) >= 2 else nodes_[-1]
 
     rval = []
-    
+
     if isnode(src):
         if islist(src):
             tval = [clone(child_template) for _ in src]
         else:
             # Convert dict to a list of child templates
             tval = []
-            for k, v in src.items():
+            for k in src:
                 # Keep key in meta for usage by `$KEY`
                 copy_child = clone(child_template)
                 if ismap(copy_child):
                     setprop(copy_child, S_BANNO, {S_KEY: k})
                 tval.append(copy_child)
         tcurrent = list(src.values()) if ismap(src) else src
-        
-        if 0 < size(tval):
+
+        if size(tval) > 0:
             # Build tcurrent structure matching TypeScript approach
             ckey = getelem(path, -2) if len(path) >= 2 else UNDEF
             tpath = path[:-1] if len(path) > 0 else []
-            
+
             # Build dpath: [S_DTOP, ...srcpath parts, '$:' + ckey]
             dpath = [S_DTOP]
             if isinstance(srcpath, str) and srcpath:
@@ -1729,34 +1750,34 @@ def transform_EACH(inj, val, ref, store):
                         dpath.append(part)
             if ckey is not UNDEF:
                 dpath.append('$:' + str(ckey))
-            
+
             tcur = {ckey: tcurrent}
 
-            if 1 < size(tpath):
+            if size(tpath) > 1:
                 pkey = getelem(path, -3, S_DTOP)
                 tcur = {pkey: tcur}
                 dpath.append('$:' + str(pkey))
-            
+
             # Create child injection state
             tinj = inj.child(0, [ckey] if ckey is not UNDEF else [])
             tinj.path = tpath
             tinj.nodes = nodes_[:-1] if len(nodes_) > 0 else []
             tinj.parent = getelem(tinj.nodes, -1) if len(tinj.nodes) > 0 else UNDEF
-            
+
             if ckey is not UNDEF and tinj.parent is not UNDEF:
                 setprop(tinj.parent, ckey, tval)
-            
+
             tinj.val = tval
             tinj.dpath = dpath
             tinj.dparent = tcur
-            
+
             # Inject the entire list at once
             inject(tval, store, tinj)
             rval = tinj.val
 
     setprop(target, tkey, rval)
 
-    return rval[0] if islist(rval) and 0 < size(rval) else UNDEF
+    return rval[0] if islist(rval) and size(rval) > 0 else UNDEF
 
 
 def transform_PACK(inj, val, ref, store):
@@ -1766,7 +1787,7 @@ def transform_PACK(inj, val, ref, store):
     parent = inj.parent
     nodes_ = inj.nodes
 
-    if (mode != S_MKEYPRE or not isinstance(key, str) or path is UNDEF or nodes_ is UNDEF):
+    if mode != S_MKEYPRE or not isinstance(key, str) or path is UNDEF or nodes_ is UNDEF:
         return UNDEF
 
     args_val = getprop(parent, key)
@@ -1842,7 +1863,7 @@ def transform_PACK(inj, val, ref, store):
 
         tcur = {ckey: tsrc}
 
-        if 1 < size(tpath):
+        if size(tpath) > 1:
             pkey = getelem(inj.path, -3, S_DTOP)
             tcur = {pkey: tcur}
             dpath.append('$:' + str(pkey))
@@ -1869,7 +1890,6 @@ def transform_REF(inj, val, _ref, store):
     Format: ['`$REF`', '`spec-path`']
     """
     nodes = inj.nodes
-    modify = inj.modify
 
     if inj.mode != S_MVAL:
         return UNDEF
@@ -1888,6 +1908,7 @@ def transform_REF(inj, val, _ref, store):
     # Check if ref has another $REF inside
     hasSubRef = False
     if isnode(ref):
+
         def check_subref(k, v, parent, path):
             nonlocal hasSubRef
             if v == '`$REF`':
@@ -1898,8 +1919,8 @@ def transform_REF(inj, val, _ref, store):
 
     tref = clone(ref)
 
-    cpath = slice(inj.path, 0, len(inj.path)-3)
-    tpath = slice(inj.path, 0, len(inj.path)-1)
+    cpath = slice(inj.path, 0, len(inj.path) - 3)
+    tpath = slice(inj.path, 0, len(inj.path) - 1)
     tcur = getpath(store, cpath)
     tval = getpath(store, tpath)
     rval = UNDEF
@@ -1909,7 +1930,7 @@ def transform_REF(inj, val, _ref, store):
         # Create child state for the next level
         child_state = inj.child(0, [getelem(tpath, -1)])
         child_state.path = tpath
-        child_state.nodes = slice(inj.nodes, 0, len(inj.nodes)-1)
+        child_state.nodes = slice(inj.nodes, 0, len(inj.nodes) - 1)
         child_state.parent = getelem(nodes, -2)
         child_state.val = tref
 
@@ -1922,7 +1943,7 @@ def transform_REF(inj, val, _ref, store):
 
     # Set the value in grandparent, using setval
     inj.setval(rval, 2)
-    
+
     # Handle lists by decrementing keyI
     if islist(inj.parent) and inj.prior:
         inj.prior.keyI -= 1
@@ -1969,26 +1990,41 @@ FORMATTER = {
     'string': lambda _k, v, *_a: v if isnode(v) else _jsstr(v),
     'number': _fmt_number,
     'integer': _fmt_integer,
-    'concat': lambda k, v, *_a: join(
-        items(v, lambda n: '' if isnode(n[1]) else _jsstr(n[1])), '') if k is None and islist(v) else v,
+    'concat': lambda k, v, *_a: (
+        join(items(v, lambda n: '' if isnode(n[1]) else _jsstr(n[1])), '')
+        if k is None and islist(v)
+        else v
+    ),
 }
 
 
 def checkPlacement(modes, ijname, parentTypes, inj):
     mode_num = _MODE_TO_NUM.get(inj.mode, 0)
-    if 0 == (modes & mode_num):
+    if (modes & mode_num) == 0:
         allowed = [m for m in [M_KEYPRE, M_KEYPOST, M_VAL] if modes & m]
-        placements = join(
-            items(allowed, lambda n: _PLACEMENT.get(n[1], '')), ',')
-        inj.errs.append('$' + ijname + ': invalid placement as ' +
-                         _PLACEMENT.get(mode_num, '') +
-                         ', expected: ' + placements + '.')
+        placements = join(items(allowed, lambda n: _PLACEMENT.get(n[1], '')), ',')
+        inj.errs.append(
+            '$'
+            + ijname
+            + ': invalid placement as '
+            + _PLACEMENT.get(mode_num, '')
+            + ', expected: '
+            + placements
+            + '.'
+        )
         return False
     if not isempty(parentTypes):
         ptype = typify(inj.parent)
-        if 0 == (parentTypes & ptype):
-            inj.errs.append('$' + ijname + ': invalid placement in parent ' +
-                             typename(ptype) + ', expected: ' + typename(parentTypes) + '.')
+        if (parentTypes & ptype) == 0:
+            inj.errs.append(
+                '$'
+                + ijname
+                + ': invalid placement in parent '
+                + typename(ptype)
+                + ', expected: '
+                + typename(parentTypes)
+                + '.'
+            )
             return False
     return True
 
@@ -2000,10 +2036,18 @@ def injectorArgs(argTypes, args):
     for argI in range(numargs):
         arg = getelem(args, argI)
         argType = typify(arg)
-        if 0 == (argTypes[argI] & argType):
-            found[0] = ('invalid argument: ' + stringify(arg, 22) +
-                        ' (' + typename(argType) + ' at position ' + str(1 + argI) +
-                        ') is not of type: ' + typename(argTypes[argI]) + '.')
+        if (argTypes[argI] & argType) == 0:
+            found[0] = (
+                'invalid argument: '
+                + stringify(arg, 22)
+                + ' ('
+                + typename(argType)
+                + ' at position '
+                + str(1 + argI)
+                + ') is not of type: '
+                + typename(argTypes[argI])
+                + '.'
+            )
             break
         found[1 + argI] = arg
     return found
@@ -2027,7 +2071,7 @@ def injectChild(child, store, inj):
 def transform_FORMAT(inj, _val, _ref, store):
     slice(inj.keys, 0, 1, True)
 
-    if S_MVAL != inj.mode:
+    if inj.mode != S_MVAL:
         return UNDEF
 
     name = getprop(inj.parent, 1)
@@ -2039,7 +2083,7 @@ def transform_FORMAT(inj, _val, _ref, store):
     cinj = injectChild(child, store, inj)
     resolved = cinj.val
 
-    formatter = name if 0 < (T_function & typify(name)) else getprop(FORMATTER, name)
+    formatter = name if (T_function & typify(name)) > 0 else getprop(FORMATTER, name)
 
     if formatter is UNDEF:
         inj.errs.append('$FORMAT: unknown format: ' + str(name) + '.')
@@ -2063,7 +2107,7 @@ def transform_APPLY(inj, _val, _ref, store):
     apply_fn = err_apply_child[1]
     child = err_apply_child[2] if len(err_apply_child) > 2 else UNDEF
 
-    if UNDEF != err:
+    if err != UNDEF:
         inj.errs.append('$' + ijname + ': ' + err)
         return UNDEF
 
@@ -2089,23 +2133,23 @@ def transform_APPLY(inj, _val, _ref, store):
 # Transform data using spec.
 # Only operates on static JSON-like data.
 # Arrays are treated as if they are objects with indices as keys.
-def transform(
-        data,
-        spec,
-        injdef=UNDEF
-):
+def transform(data, spec, injdef=UNDEF):
     # Clone the spec so that the clone can be modified in place as the transform result.
     origspec = spec
     spec = clone(spec)
 
     extra = getprop(injdef, 'extra') if injdef else UNDEF
 
-    collect = getprop(injdef, 'errs') is not None and getprop(injdef, 'errs') is not UNDEF if injdef else False
+    collect = (
+        getprop(injdef, 'errs') is not None and getprop(injdef, 'errs') is not UNDEF
+        if injdef
+        else False
+    )
     errs = getprop(injdef, 'errs') if collect else []
 
     extraTransforms = {}
-    extraData = {} if UNDEF == extra else {}
-    
+    extraData = {}
+
     if extra:
         for k, v in items(extra):
             if isinstance(k, str) and k.startswith(S_DS):
@@ -2114,10 +2158,7 @@ def transform(
                 extraData[k] = v
 
     # Combine extra data with user data
-    data_clone = merge([
-        clone(extraData) if not isempty(extraData) else UNDEF,
-        clone(data)
-    ])
+    data_clone = merge([clone(extraData) if not isempty(extraData) else UNDEF, clone(data)])
 
     # Top-level store used by inject
     store = {
@@ -2125,19 +2166,14 @@ def transform(
         # NOTE: to escape data that contains "`$FOO`" keys at the top level,
         # place that data inside a holding map: { myholder: mydata }.
         S_DTOP: data_clone,
-
         # Original spec (before clone) for $REF to resolve refpath.
         S_DSPEC: lambda: origspec,
-        
         # Escape backtick (this also works inside backticks).
         '$BT': lambda *args, **kwargs: S_BT,
-        
         # Escape dollar sign (this also works inside backticks).
         '$DS': lambda *args, **kwargs: S_DS,
-        
         # Insert current date and time as an ISO string.
         '$WHEN': lambda *args, **kwargs: datetime.utcnow().isoformat(),
-
         '$DELETE': transform_DELETE,
         '$COPY': transform_COPY,
         '$KEY': transform_KEY,
@@ -2148,10 +2184,8 @@ def transform(
         '$REF': transform_REF,
         '$FORMAT': transform_FORMAT,
         '$APPLY': transform_APPLY,
-
         # Custom extra transforms, if any.
         **extraTransforms,
-
         S_DERRS: errs,
     }
 
@@ -2163,7 +2197,7 @@ def transform(
 
     out = inject(spec, store, injdef)
 
-    generr = 0 < size(errs) and not collect
+    generr = size(errs) > 0 and not collect
     if generr:
         raise ValueError(join(errs, ' | '))
 
@@ -2174,11 +2208,11 @@ def validate_STRING(inj, _val=UNDEF, _ref=UNDEF, _store=UNDEF):
     out = getprop(inj.dparent, inj.key)
     t = typify(out)
 
-    if 0 == (T_string & t):
+    if (T_string & t) == 0:
         inj.errs.append(_invalidTypeMsg(inj.path, S_string, t, out, 'V1010'))
         return UNDEF
 
-    if S_MT == out:
+    if out == S_MT:
         inj.errs.append('Empty string at ' + pathify(inj.path, 1))
         return UNDEF
 
@@ -2195,8 +2229,9 @@ TYPE_CHECKS = {
     S_map: lambda v: isinstance(v, dict),
     S_list: lambda v: isinstance(v, list),
     S_function: lambda v: callable(v) and not isinstance(v, type),
-    S_instance: lambda v: (not isinstance(v, (dict, list, str, int, float, bool))
-                           and v is not None and v is not UNDEF),
+    S_instance: lambda v: (
+        not isinstance(v, (dict, list, str, int, float, bool)) and v is not None and v is not UNDEF
+    ),
 }
 
 
@@ -2208,7 +2243,7 @@ def validate_TYPE(inj, _val=UNDEF, ref=UNDEF, _store=UNDEF):
     out = getprop(inj.dparent, inj.key)
     t = typify(out)
 
-    if 0 == (t & typev):
+    if (t & typev) == 0:
         inj.errs.append(_invalidTypeMsg(inj.path, tname, t, out, 'V1001'))
         return UNDEF
 
@@ -2227,17 +2262,16 @@ def validate_CHILD(inj, _val=UNDEF, _ref=UNDEF, _store=UNDEF):
     keys = inj.keys
 
     # Map syntax.
-    if S_MKEYPRE == mode:
+    if mode == S_MKEYPRE:
         childtm = getprop(parent, key)
 
         pkey = getelem(path, -2)
         tval = getprop(inj.dparent, pkey)
 
-        if UNDEF == tval:
+        if tval == UNDEF:
             tval = {}
         elif not ismap(tval):
-            inj.errs.append(_invalidTypeMsg(
-                path[:-1], S_object, typify(tval), tval, 'V0220'))
+            inj.errs.append(_invalidTypeMsg(path[:-1], S_object, typify(tval), tval, 'V0220'))
             return UNDEF
 
         ckeys = keysof(tval)
@@ -2249,28 +2283,26 @@ def validate_CHILD(inj, _val=UNDEF, _ref=UNDEF, _store=UNDEF):
         return UNDEF
 
     # List syntax.
-    if S_MVAL == mode:
-
+    if mode == S_MVAL:
         if not islist(parent):
             inj.errs.append('Invalid $CHILD as value')
             return UNDEF
 
         childtm = getprop(parent, 1)
 
-        if UNDEF == inj.dparent:
+        if inj.dparent == UNDEF:
             del parent[:]
             return UNDEF
 
         if not islist(inj.dparent):
-            msg = _invalidTypeMsg(
-                path[:-1], S_list, typify(inj.dparent), inj.dparent, 'V0230')
+            msg = _invalidTypeMsg(path[:-1], S_list, typify(inj.dparent), inj.dparent, 'V0230')
             inj.errs.append(msg)
             inj.keyI = size(parent)
             return inj.dparent
 
         for n in items(inj.dparent):
             setprop(parent, n[0], clone(childtm))
-        del parent[len(inj.dparent):]
+        del parent[len(inj.dparent) :]
         inj.keyI = 0
 
         out = getprop(inj.dparent, 0)
@@ -2284,11 +2316,13 @@ def validate_ONE(inj, _val=UNDEF, _ref=UNDEF, store=UNDEF):
     parent = inj.parent
     keyI = inj.keyI
 
-    if S_MVAL == mode:
-        if not islist(parent) or 0 != keyI:
-            inj.errs.append('The $ONE validator at field ' +
-                            pathify(inj.path, 1, 1) +
-                            ' must be the first element of an array.')
+    if mode == S_MVAL:
+        if not islist(parent) or keyI != 0:
+            inj.errs.append(
+                'The $ONE validator at field '
+                + pathify(inj.path, 1, 1)
+                + ' must be the first element of an array.'
+            )
             return None
 
         inj.keyI = size(inj.keys)
@@ -2299,10 +2333,12 @@ def validate_ONE(inj, _val=UNDEF, _ref=UNDEF, store=UNDEF):
         inj.key = getelem(inj.path, -1)
 
         tvals = parent[1:]
-        if 0 == size(tvals):
-            inj.errs.append('The $ONE validator at field ' +
-                            pathify(inj.path, 1, 1) +
-                            ' must have at least one argument.')
+        if size(tvals) == 0:
+            inj.errs.append(
+                'The $ONE validator at field '
+                + pathify(inj.path, 1, 1)
+                + ' must have at least one argument.'
+            )
             return None
 
         for tval in tvals:
@@ -2311,24 +2347,33 @@ def validate_ONE(inj, _val=UNDEF, _ref=UNDEF, store=UNDEF):
             vstore = merge([{}, store], 1)
             vstore[S_DTOP] = inj.dparent
 
-            vcurrent = validate(inj.dparent, tval, {
-                'extra': vstore,
-                'errs': terrs,
-                'meta': inj.meta,
-            })
+            vcurrent = validate(
+                inj.dparent,
+                tval,
+                {
+                    'extra': vstore,
+                    'errs': terrs,
+                    'meta': inj.meta,
+                },
+            )
 
             inj.setval(vcurrent, -2)
 
-            if 0 == size(terrs):
+            if size(terrs) == 0:
                 return None
 
         valdesc = ', '.join(stringify(n[1]) for n in items(tvals))
         valdesc = re.sub(r'`\$([A-Z]+)`', lambda m: m.group(1).lower(), valdesc)
 
-        inj.errs.append(_invalidTypeMsg(
-            inj.path,
-            ('one of ' if 1 < size(tvals) else '') + valdesc,
-            typify(inj.dparent), inj.dparent, 'V0210'))
+        inj.errs.append(
+            _invalidTypeMsg(
+                inj.path,
+                ('one of ' if size(tvals) > 1 else '') + valdesc,
+                typify(inj.dparent),
+                inj.dparent,
+                'V0210',
+            )
+        )
 
 
 def validate_EXACT(inj, _val=UNDEF, _ref=UNDEF, _store=UNDEF):
@@ -2337,11 +2382,13 @@ def validate_EXACT(inj, _val=UNDEF, _ref=UNDEF, _store=UNDEF):
     key = inj.key
     keyI = inj.keyI
 
-    if S_MVAL == mode:
-        if not islist(parent) or 0 != keyI:
-            inj.errs.append('The $EXACT validator at field ' +
-                pathify(inj.path, 1, 1) +
-                ' must be the first element of an array.')
+    if mode == S_MVAL:
+        if not islist(parent) or keyI != 0:
+            inj.errs.append(
+                'The $EXACT validator at field '
+                + pathify(inj.path, 1, 1)
+                + ' must be the first element of an array.'
+            )
             return None
 
         inj.keyI = size(inj.keys)
@@ -2352,10 +2399,12 @@ def validate_EXACT(inj, _val=UNDEF, _ref=UNDEF, _store=UNDEF):
         inj.key = getelem(inj.path, -1)
 
         tvals = parent[1:]
-        if 0 == size(tvals):
-            inj.errs.append('The $EXACT validator at field ' +
-                pathify(inj.path, 1, 1) +
-                ' must have at least one argument.')
+        if size(tvals) == 0:
+            inj.errs.append(
+                'The $EXACT validator at field '
+                + pathify(inj.path, 1, 1)
+                + ' must have at least one argument.'
+            )
             return None
 
         currentstr = None
@@ -2373,22 +2422,24 @@ def validate_EXACT(inj, _val=UNDEF, _ref=UNDEF, _store=UNDEF):
         valdesc = ', '.join(stringify(n[1]) for n in items(tvals))
         valdesc = re.sub(r'`\$([A-Z]+)`', lambda m: m.group(1).lower(), valdesc)
 
-        inj.errs.append(_invalidTypeMsg(
-            inj.path,
-            ('' if 1 < size(inj.path) else 'value ') +
-            'exactly equal to ' + ('' if 1 == size(tvals) else 'one of ') + valdesc,
-            typify(inj.dparent), inj.dparent, 'V0110'))
+        inj.errs.append(
+            _invalidTypeMsg(
+                inj.path,
+                ('' if size(inj.path) > 1 else 'value ')
+                + 'exactly equal to '
+                + ('' if size(tvals) == 1 else 'one of ')
+                + valdesc,
+                typify(inj.dparent),
+                inj.dparent,
+                'V0110',
+            )
+        )
     else:
         delprop(parent, key)
 
-        
-def _validation(
-        pval,
-        key,
-        parent,
-        inj
-):
-    if UNDEF == inj:
+
+def _validation(pval, key, parent, inj):
+    if inj == UNDEF:
         return
 
     if pval == SKIP:
@@ -2400,17 +2451,17 @@ def _validation(
     # Current val to verify.
     cval = getprop(inj.dparent, key)
 
-    if UNDEF == inj or (not exact and UNDEF == cval):
+    if inj == UNDEF or (not exact and cval == UNDEF):
         return
 
     ptype = typify(pval)
 
-    if 0 < (T_string & ptype) and S_DS in str(pval):
+    if (T_string & ptype) > 0 and S_DS in str(pval):
         return
 
     ctype = typify(cval)
 
-    if ptype != ctype and UNDEF != pval:
+    if ptype != ctype and pval != UNDEF:
         inj.errs.append(_invalidTypeMsg(inj.path, typename(ptype), ctype, cval, 'V0010'))
         return
 
@@ -2423,13 +2474,15 @@ def _validation(
         pkeys = keysof(pval)
 
         # Empty spec object {} means object can be open (any keys).
-        if 0 < len(pkeys) and True != getprop(pval, '`$OPEN`'):
+        if len(pkeys) > 0 and getprop(pval, '`$OPEN`') is not True:
             badkeys = []
             for ckey in ckeys:
                 if not haskey(pval, ckey):
                     badkeys.append(ckey)
-            if 0 < size(badkeys):
-                msg = 'Unexpected keys at field ' + pathify(inj.path, 1) + S_VIZ + join(badkeys, ', ')
+            if size(badkeys) > 0:
+                msg = (
+                    'Unexpected keys at field ' + pathify(inj.path, 1) + S_VIZ + join(badkeys, ', ')
+                )
                 inj.errs.append(msg)
         else:
             # Object is open, so merge in extra keys.
@@ -2443,9 +2496,8 @@ def _validation(
 
     elif exact:
         if cval != pval:
-            pathmsg = 'at field ' + pathify(inj.path, 1) + ': ' if 1 < size(inj.path) else ''
-            inj.errs.append('Value ' + pathmsg + str(cval) +
-                ' should equal ' + str(pval) + '.')
+            pathmsg = 'at field ' + pathify(inj.path, 1) + ': ' if size(inj.path) > 1 else ''
+            inj.errs.append('Value ' + pathmsg + str(cval) + ' should equal ' + str(pval) + '.')
 
     else:
         # Spec value was a default, copy over data
@@ -2469,80 +2521,84 @@ def validate(data, spec, injdef=UNDEF):
 
     collect = getprop(injdef, 'errs') is not None and getprop(injdef, 'errs') is not UNDEF
     errs = getprop(injdef, 'errs') if collect else []
-    
-    store = merge([
-        {
-            "$DELETE": None,
-            "$COPY": None,
-            "$KEY": None,
-            "$META": None,
-            "$MERGE": None,
-            "$EACH": None,
-            "$PACK": None,
 
-            "$STRING": validate_STRING,
-            "$NUMBER": validate_TYPE,
-            "$INTEGER": validate_TYPE,
-            "$DECIMAL": validate_TYPE,
-            "$BOOLEAN": validate_TYPE,
-            "$NULL": validate_TYPE,
-            "$NIL": validate_TYPE,
-            "$MAP": validate_TYPE,
-            "$LIST": validate_TYPE,
-            "$FUNCTION": validate_TYPE,
-            "$INSTANCE": validate_TYPE,
-            "$ANY": validate_ANY,
-            "$CHILD": validate_CHILD,
-            "$ONE": validate_ONE,
-            "$EXACT": validate_EXACT,
-        },
-
-        ({} if extra is UNDEF or extra is None else extra),
-
-        {
-            "$ERRS": errs,
-        }
-    ], 1)
+    store = merge(
+        [
+            {
+                '$DELETE': None,
+                '$COPY': None,
+                '$KEY': None,
+                '$META': None,
+                '$MERGE': None,
+                '$EACH': None,
+                '$PACK': None,
+                '$STRING': validate_STRING,
+                '$NUMBER': validate_TYPE,
+                '$INTEGER': validate_TYPE,
+                '$DECIMAL': validate_TYPE,
+                '$BOOLEAN': validate_TYPE,
+                '$NULL': validate_TYPE,
+                '$NIL': validate_TYPE,
+                '$MAP': validate_TYPE,
+                '$LIST': validate_TYPE,
+                '$FUNCTION': validate_TYPE,
+                '$INSTANCE': validate_TYPE,
+                '$ANY': validate_ANY,
+                '$CHILD': validate_CHILD,
+                '$ONE': validate_ONE,
+                '$EXACT': validate_EXACT,
+            },
+            ({} if extra is UNDEF or extra is None else extra),
+            {
+                '$ERRS': errs,
+            },
+        ],
+        1,
+    )
 
     meta = getprop(injdef, 'meta', {})
     setprop(meta, S_BEXACT, getprop(meta, S_BEXACT, False))
 
-    out = transform(data, spec, {
-        'meta': meta,
-        'extra': store,
-        'modify': _validation,
-        'handler': _validatehandler,
-        'errs': errs,
-    })
+    out = transform(
+        data,
+        spec,
+        {
+            'meta': meta,
+            'extra': store,
+            'modify': _validation,
+            'handler': _validatehandler,
+            'errs': errs,
+        },
+    )
 
-    generr = 0 < len(errs) and not collect
+    generr = len(errs) > 0 and not collect
     if generr:
         raise ValueError(' | '.join(errs))
 
     return out
 
 
-
 # Internal utilities
 # ==================
 
+
 def _validatehandler(inj, val, ref, store):
     out = val
-    
+
     m = R_META_PATH.match(ref) if ref else None
     ismetapath = m is not None
-    
+
     if ismetapath:
         if m.group(2) == '=':
             inj.setval([S_BEXACT, val])
         else:
             inj.setval(val)
         inj.keyI = -1
-        
+
         out = SKIP
     else:
         out = _injecthandler(inj, val, ref, store)
-    
+
     return out
 
 
@@ -2550,8 +2606,8 @@ def _validatehandler(inj, val, ref, store):
 # when needed by implementation language.
 def _setparentprop(state, val):
     setprop(state.parent, state.key, val)
-    
-    
+
+
 # Update all references to target in state.nodes.
 def _updateAncestors(_state, target, tkey, tval):
     # SetProp is sufficient in Python as target reference remains consistent even for lists.
@@ -2572,53 +2628,52 @@ def _injectstr(val, store, inj=UNDEF):
     full_re = re.compile(r'^`(\$[A-Z]+|[^`]*)[0-9]*`$')
     part_re = re.compile(r'`([^`]*)`')
 
-    if not isinstance(val, str) or S_MT == val:
+    if not isinstance(val, str) or val == S_MT:
         return S_MT
 
     out = val
-    
+
     # Pattern examples: "`a.b.c`", "`$NAME`", "`$NAME1`"
     m = full_re.match(val)
-    
+
     # Full string of the val is an injection.
     if m:
-        if UNDEF != inj:
+        if inj != UNDEF:
             inj.full = True
 
         pathref = m.group(1)
 
         # Special escapes inside injection.
-        if 3 < len(pathref):
+        if len(pathref) > 3:
             pathref = pathref.replace(r'$BT', S_BT).replace(r'$DS', S_DS)
 
         # Get the extracted path reference.
         out = getpath(store, pathref, inj)
 
     else:
-        
         # Check for injections within the string.
         def partial(mobj):
             ref = mobj.group(1)
 
             # Special escapes inside injection.
-            if 3 < len(ref):
+            if len(ref) > 3:
                 ref = ref.replace(r'$BT', S_BT).replace(r'$DS', S_DS)
-                
-            if UNDEF != inj:
+
+            if inj != UNDEF:
                 inj.full = False
 
             found = getpath(store, ref, inj)
-            
+
             # Ensure inject value is a string.
-            if UNDEF == found:
+            if found == UNDEF:
                 return S_MT
-                
+
             if isinstance(found, str):
                 # Convert test NULL marker to JSON 'null' when injecting into strings
                 if found == '__NULL__':
                     return 'null'
                 return found
-                
+
             if isfunc(found):
                 return found
 
@@ -2631,7 +2686,7 @@ def _injectstr(val, store, inj=UNDEF):
 
         # Also call the inj handler on the entire string, providing the
         # option for custom injection.
-        if UNDEF != inj and isfunc(inj.handler):
+        if inj != UNDEF and isfunc(inj.handler):
             inj.full = True
             out = inj.handler(inj, out, val, store)
 
@@ -2641,11 +2696,13 @@ def _injectstr(val, store, inj=UNDEF):
 def _invalidTypeMsg(path, needtype, vt, v, _whence=None):
     vs = 'no value' if v is None or v is UNDEF else stringify(v)
     return (
-        'Expected ' +
-        ('field ' + pathify(path, 1) + ' to be ' if 1 < size(path) else '') +
-        str(needtype) + ', but found ' +
-        (typename(vt) + S_VIZ if v is not None and v is not UNDEF else '') + vs +
-        '.'
+        'Expected '
+        + ('field ' + pathify(path, 1) + ' to be ' if size(path) > 1 else '')
+        + str(needtype)
+        + ', but found '
+        + (typename(vt) + S_VIZ if v is not None and v is not UNDEF else '')
+        + vs
+        + '.'
     )
 
 
@@ -2673,8 +2730,6 @@ class StructUtility:
         self.items = items
         self.jm = jm
         self.jt = jt
-        self.jo = jo
-        self.ja = ja
         self.join = join
         self.joinurl = joinurl
         self.jsonify = jsonify
@@ -2719,11 +2774,32 @@ class StructUtility:
         self.checkPlacement = checkPlacement
         self.injectorArgs = injectorArgs
         self.injectChild = injectChild
-    
+
 
 __all__ = [
+    'DELETE',
+    'MODENAME',
+    'M_KEYPOST',
+    'M_KEYPRE',
+    'M_VAL',
+    'SKIP',
     'Injection',
     'StructUtility',
+    'T_any',
+    'T_boolean',
+    'T_decimal',
+    'T_function',
+    'T_instance',
+    'T_integer',
+    'T_list',
+    'T_map',
+    'T_node',
+    'T_noval',
+    'T_null',
+    'T_number',
+    'T_scalar',
+    'T_string',
+    'T_symbol',
     'checkPlacement',
     'clone',
     'delprop',
@@ -2746,9 +2822,7 @@ __all__ = [
     'ismap',
     'isnode',
     'items',
-    'ja',
     'jm',
-    'jo',
     'join',
     'joinurl',
     'jsonify',
@@ -2770,26 +2844,4 @@ __all__ = [
     'typify',
     'validate',
     'walk',
-    'SKIP',
-    'DELETE',
-    'T_any',
-    'T_noval',
-    'T_boolean',
-    'T_decimal',
-    'T_integer',
-    'T_number',
-    'T_string',
-    'T_function',
-    'T_symbol',
-    'T_null',
-    'T_list',
-    'T_map',
-    'T_instance',
-    'T_scalar',
-    'T_node',
-    'M_KEYPRE',
-    'M_KEYPOST',
-    'M_VAL',
-    'MODENAME',
 ]
-

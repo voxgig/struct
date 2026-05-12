@@ -8,9 +8,7 @@ const { test, describe } = require('node:test')
 
 const { walk } = require('../src/struct')
 
-
 const BENCH = '1' === process.env.WALK_BENCH
-
 
 // Build a balanced tree of maps with given width and depth.
 // Total nodes: (width^(depth+1) - 1) / (width - 1).
@@ -25,7 +23,6 @@ function buildTree(width, depth) {
   return out
 }
 
-
 function countNodes(val) {
   if (null == val || 'object' !== typeof val) {
     return 1
@@ -36,7 +33,6 @@ function countNodes(val) {
   }
   return n
 }
-
 
 function measure(label, tree, runs) {
   // Touch path to simulate a minimal consumer. Using path.length keeps the
@@ -70,15 +66,13 @@ function measure(label, tree, runs) {
 
   console.log(
     `[walk-bench] ${label}: nodes=${nodes} runs=${runs} ` +
-    `min=${min.toFixed(2)}ms median=${median.toFixed(2)}ms ` +
-    `mean=${mean.toFixed(2)}ms max=${max.toFixed(2)}ms ` +
-    `ns/node=${nsPerNode.toFixed(1)} sink=${sink}`
+      `min=${min.toFixed(2)}ms median=${median.toFixed(2)}ms ` +
+      `mean=${mean.toFixed(2)}ms max=${max.toFixed(2)}ms ` +
+      `ns/node=${nsPerNode.toFixed(1)} sink=${sink}`,
   )
 }
 
-
 describe('walk-bench', () => {
-
   test('walk-bench-wide-and-deep', { skip: !BENCH }, () => {
     // ~299k nodes: width=8, depth=6.
     const wideDeep = buildTree(8, 6)
@@ -97,5 +91,4 @@ describe('walk-bench', () => {
     const deep = buildTree(2, 20)
     measure('deep (w=2,d=20)', deep, 5)
   })
-
 })

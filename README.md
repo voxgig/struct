@@ -34,8 +34,8 @@ syntax), and language-specific notes:
 | Ruby       | Complete   | [`rb/README.md`](./rb/README.md)      |
 | Lua        | Complete   | [`lua/README.md`](./lua/README.md)    |
 | Rust       | Complete   | [`rs/README.md`](./rs/README.md)      |
-| C#         | In progress| [`cs/README.md`](./cs/README.md)      |
-| Zig        | In progress| [`zig/README.md`](./zig/README.md)    |
+| C#         | Complete   | [`cs/README.md`](./cs/README.md)      |
+| Zig        | Complete   | [`zig/README.md`](./zig/README.md)    |
 | Java       | Partial    | [`java/README.md`](./java/README.md)  |
 | C++        | Partial    | [`cpp/README.md`](./cpp/README.md)    |
 
@@ -401,9 +401,56 @@ Each language directory contains:
 
 - the implementation source,
 - a test runner that consumes `build/test/*.jsonic`,
-- a `Makefile` with at minimum a `make test` target,
+- a `Makefile` with at minimum `make test` and `make lint` targets,
 - a `DOCS.md` with the per-language guide,
 - `NOTES.md` and `REVIEW.md` with implementation history.
+
+`make lint` runs that language's industry-standard code-quality tooling
+(linter + formatter check):
+
+| Language   | Lint / static analysis            | Format check          |
+|------------|-----------------------------------|-----------------------|
+| TypeScript | ESLint (`typescript-eslint`)      | Prettier              |
+| JavaScript | ESLint                            | Prettier              |
+| Python     | Ruff, mypy                        | Ruff format           |
+| Go         | golangci-lint, `go vet`           | `gofmt`               |
+| Ruby       | RuboCop                           | RuboCop               |
+| PHP        | PHP_CodeSniffer (PSR-12), PHPStan | PHP_CodeSniffer       |
+| Rust       | Clippy                            | `cargo fmt`           |
+| Java       | Checkstyle, SpotBugs              | Checkstyle            |
+| C++        | clang-tidy                        | clang-format          |
+| Lua        | luacheck                          | StyLua                |
+| Zig        | `zig build` (compiler)            | `zig fmt`             |
+| C#         | Roslyn analyzers                  | `dotnet format`       |
+| Kotlin     | detekt                            | ktlint                |
+
+Run everything with `make lint` at the repo root, or one language with
+`make lint-<lang>` (e.g. `make lint-go`).
+
+Beyond linting there are two more analysis stages:
+
+- **`make audit`** — per-language dependency / supply-chain scanning:
+  `npm audit` (ts/js), `pip-audit` + Bandit (py), `govulncheck` + `gosec`
+  (go), `bundler-audit` (rb), `composer audit` (php), `cargo audit` (rs),
+  `dotnet list --vulnerable` (cs).
+- **`make scan`** — repo-wide static analysis: secret scanning
+  ([gitleaks]), SAST ([Semgrep]), known-vulnerability scanning across all
+  lockfiles ([osv-scanner]), GitHub-workflow linting ([actionlint]), shell
+  linting ([shellcheck]), spell checking ([cspell]), markdown linting
+  ([markdownlint]), and a cross-port API-parity check
+  (`tools/check_parity.py`).
+
+`make analyze` runs all three (`lint` + `audit` + `scan`).  CI runs these
+in [`.github/workflows/lint.yml`](./.github/workflows/lint.yml) and
+[`.github/workflows/security.yml`](./.github/workflows/security.yml).
+
+[gitleaks]: https://github.com/gitleaks/gitleaks
+[Semgrep]: https://semgrep.dev/
+[osv-scanner]: https://google.github.io/osv-scanner/
+[actionlint]: https://github.com/rhysd/actionlint
+[shellcheck]: https://www.shellcheck.net/
+[cspell]: https://cspell.org/
+[markdownlint]: https://github.com/DavidAnson/markdownlint
 
 
 ## License

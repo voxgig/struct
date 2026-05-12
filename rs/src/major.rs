@@ -46,7 +46,15 @@ pub fn walk(
     maxdepth: Option<i64>,
 ) -> Value {
     let mut path: Vec<String> = Vec::new();
-    walk_impl(val, before, after, maxdepth, &Value::Noval, &Value::Noval, &mut path)
+    walk_impl(
+        val,
+        before,
+        after,
+        maxdepth,
+        &Value::Noval,
+        &Value::Noval,
+        &mut path,
+    )
 }
 
 fn walk_impl(
@@ -168,7 +176,11 @@ pub fn merge(val: &Value, maxdepth: Option<i64>) -> Value {
                             .unwrap_or(Value::Noval);
                         get_prop(&prev, key, Value::Noval)
                     } else {
-                        dst_b.borrow().get(pi as usize).cloned().unwrap_or(Value::Noval)
+                        dst_b
+                            .borrow()
+                            .get(pi as usize)
+                            .cloned()
+                            .unwrap_or(Value::Noval)
                     };
                     let mut db = dst_b.borrow_mut();
                     grow(&mut db, pi as usize);
@@ -359,8 +371,13 @@ impl Injection {
         {
             let b = this.borrow();
             if let Value::Map(m) = &b.meta {
-                let cur = m.borrow().get("__d").and_then(|v| v.as_num()).unwrap_or(0.0);
-                m.borrow_mut().insert("__d".to_string(), Value::Num(cur + 1.0));
+                let cur = m
+                    .borrow()
+                    .get("__d")
+                    .and_then(|v| v.as_num())
+                    .unwrap_or(0.0);
+                m.borrow_mut()
+                    .insert("__d".to_string(), Value::Num(cur + 1.0));
             }
         }
         let (parentkey, has_dparent, dpath_len, last_part) = {
@@ -370,7 +387,12 @@ impl Injection {
             } else {
                 None
             };
-            (parentkey, !b.dparent.is_noval(), b.dpath.len(), b.dpath.last().cloned())
+            (
+                parentkey,
+                !b.dparent.is_noval(),
+                b.dpath.len(),
+                b.dpath.last().cloned(),
+            )
         };
 
         if !has_dparent {
@@ -396,7 +418,21 @@ impl Injection {
     }
 
     pub fn child(this: &Inj, key_i: i64, keys: SVec) -> Inj {
-        let (key, parent_val, cval, path, nodes, mode, handler, modify, base, meta, errs, dpath, dparent) = {
+        let (
+            key,
+            parent_val,
+            cval,
+            path,
+            nodes,
+            mode,
+            handler,
+            modify,
+            base,
+            meta,
+            errs,
+            dpath,
+            dparent,
+        ) = {
             let b = this.borrow();
             let key = str_key(
                 keys.borrow()
@@ -521,7 +557,9 @@ pub fn get_path_inj(store: &Value, path: &Value, injdef: Option<&Inj>) -> Value 
         None => store.clone(),
     };
     let numparts = parts.len();
-    let dparent = injdef.map(|i| i.borrow().dparent.clone()).unwrap_or(Value::Noval);
+    let dparent = injdef
+        .map(|i| i.borrow().dparent.clone())
+        .unwrap_or(Value::Noval);
 
     let mut val = store.clone();
 
@@ -606,9 +644,7 @@ pub fn get_path_inj(store: &Value, path: &Value, injdef: Option<&Inj>) -> Value 
                             if ascends <= dpath.len() as i64 {
                                 val = get_path_inj(
                                     store,
-                                    &Value::list(
-                                        fullpath.into_iter().map(Value::Str).collect(),
-                                    ),
+                                    &Value::list(fullpath.into_iter().map(Value::Str).collect()),
                                     None,
                                 );
                             } else {
@@ -760,7 +796,13 @@ fn injectstr(val: &str, store: &Value, inj: Option<&Inj>) -> Value {
             match &found {
                 Value::Noval => String::new(),
                 Value::Str(s) => s.clone(),
-                other => jsonify(other, Some(&JsonFlags { indent: 0, offset: 0 })),
+                other => jsonify(
+                    other,
+                    Some(&JsonFlags {
+                        indent: 0,
+                        offset: 0,
+                    }),
+                ),
             }
         })
         .to_string();
@@ -1012,8 +1054,9 @@ pub fn inject_child(child: Value, store: &Value, inj: &Inj) -> Inj {
     cinj
 }
 
-const FORMATTER_NAMES: [&str; 7] =
-    ["identity", "upper", "lower", "string", "number", "integer", "concat"];
+const FORMATTER_NAMES: [&str; 7] = [
+    "identity", "upper", "lower", "string", "number", "integer", "concat",
+];
 
 fn apply_formatter(name: &str, k: &Value, v: &Value) -> Value {
     match name {
@@ -1061,7 +1104,13 @@ fn apply_formatter(name: &str, k: &Value, v: &Value) -> Value {
                 Value::str(
                     items_vec(v)
                         .iter()
-                        .map(|(_, n)| if is_node(n) { String::new() } else { js_string(n) })
+                        .map(|(_, n)| {
+                            if is_node(n) {
+                                String::new()
+                            } else {
+                                js_string(n)
+                            }
+                        })
                         .collect::<Vec<_>>()
                         .join(""),
                 )
@@ -1085,7 +1134,10 @@ fn transform_format(inj: &Inj, _val: &Value, _r: &str, store: &Value) -> Value {
     };
     let name = get_prop(&parent, &Value::Num(1.0), Value::Noval);
     let child = get_prop(&parent, &Value::Num(2.0), Value::Noval);
-    let tkey = path.get(path.len().saturating_sub(2)).cloned().unwrap_or_default();
+    let tkey = path
+        .get(path.len().saturating_sub(2))
+        .cloned()
+        .unwrap_or_default();
     let nlen = nodes.len();
     let target = if nlen >= 2 {
         nodes[nlen - 2].clone()
@@ -1103,7 +1155,10 @@ fn transform_format(inj: &Inj, _val: &Value, _r: &str, store: &Value) -> Value {
         .filter(|n| FORMATTER_NAMES.contains(n))
         .map(|s| s.to_string());
     if fname.is_none() && !is_func(&name) {
-        errs_push(inj, format!("$FORMAT: unknown format: {}.", js_string(&name)));
+        errs_push(
+            inj,
+            format!("$FORMAT: unknown format: {}.", js_string(&name)),
+        );
         return Value::Noval;
     }
 
@@ -1114,9 +1169,8 @@ fn transform_format(inj: &Inj, _val: &Value, _r: &str, store: &Value) -> Value {
         walk(resolved, Some(&mut fmt), None, None)
     } else if let Value::Func(f) = &name {
         let f = f.clone();
-        let mut fmt = |_k: &Value, v: &Value, _p: &Value, _t: &[String]| -> Value {
-            f(inj, v, "", store)
-        };
+        let mut fmt =
+            |_k: &Value, v: &Value, _p: &Value, _t: &[String]| -> Value { f(inj, v, "", store) };
         walk(resolved, Some(&mut fmt), None, None)
     } else {
         resolved
@@ -1146,7 +1200,10 @@ fn transform_apply(inj: &Inj, _val: &Value, _r: &str, store: &Value) -> Value {
     }
     let apply = ia.get(1).cloned().unwrap_or(Value::Noval);
     let child = ia.get(2).cloned().unwrap_or(Value::Noval);
-    let tkey = path.get(path.len().saturating_sub(2)).cloned().unwrap_or_default();
+    let tkey = path
+        .get(path.len().saturating_sub(2))
+        .cloned()
+        .unwrap_or_default();
     let nlen = nodes.len();
     let target = if nlen >= 2 {
         nodes[nlen - 2].clone()
@@ -1229,7 +1286,10 @@ fn transform_merge(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
             args = Value::list(vec![args]);
         }
         Injection::setval(inj, Value::Noval, None); // remove $MERGE key from parent
-        let args_vec: Vec<Value> = args.as_list().map(|l| l.borrow().clone()).unwrap_or_default();
+        let args_vec: Vec<Value> = args
+            .as_list()
+            .map(|l| l.borrow().clone())
+            .unwrap_or_default();
         let mut mergelist: Vec<Value> = vec![parent.clone()];
         mergelist.extend(args_vec);
         mergelist.push(clone(&parent));
@@ -1301,14 +1361,25 @@ fn transform_ref(inj: &Inj, val: &Value, _r: &str, store: &Value) -> Value {
         let tinj = Injection::child(
             inj,
             0,
-            Rc::new(RefCell::new(vec![tpath.last().cloned().unwrap_or_default()])),
+            Rc::new(RefCell::new(vec![tpath
+                .last()
+                .cloned()
+                .unwrap_or_default()])),
         );
         {
             let mut b = tinj.borrow_mut();
             b.path = tpath.clone();
             let nlen = nodes.len();
-            b.nodes = if nlen >= 1 { nodes[..nlen - 1].to_vec() } else { Vec::new() };
-            b.parent = if nlen >= 2 { nodes[nlen - 2].clone() } else { Value::Noval };
+            b.nodes = if nlen >= 1 {
+                nodes[..nlen - 1].to_vec()
+            } else {
+                Vec::new()
+            };
+            b.parent = if nlen >= 2 {
+                nodes[nlen - 2].clone()
+            } else {
+                Value::Noval
+            };
             b.val = tref.clone();
             b.dpath = cpath.clone();
             b.dparent = tcur.clone();
@@ -1345,7 +1416,12 @@ fn transform_each(inj: &Inj, _val: &Value, _r: &str, store: &Value) -> Value {
 
     let (parent, path, nodes, base) = {
         let b = inj.borrow();
-        (b.parent.clone(), b.path.clone(), b.nodes.clone(), b.base.clone())
+        (
+            b.parent.clone(),
+            b.path.clone(),
+            b.nodes.clone(),
+            b.base.clone(),
+        )
     };
     let args: Vec<Value> = slice(parent.clone(), Some(1), None, false)
         .as_list()
@@ -1360,11 +1436,18 @@ fn transform_each(inj: &Inj, _val: &Value, _r: &str, store: &Value) -> Value {
     let child = ia.get(2).cloned().unwrap_or(Value::Noval);
     let srcpath_str = srcpath.as_str().unwrap_or("").to_string();
 
-    let srcstore = get_prop(store, &Value::str(base.clone().unwrap_or_default()), store.clone());
+    let srcstore = get_prop(
+        store,
+        &Value::str(base.clone().unwrap_or_default()),
+        store.clone(),
+    );
     let src = get_path_inj(&srcstore, &srcpath, Some(inj));
     let srctype = typify(&src);
 
-    let tkey = path.get(path.len().saturating_sub(2)).cloned().unwrap_or_default();
+    let tkey = path
+        .get(path.len().saturating_sub(2))
+        .cloned()
+        .unwrap_or_default();
     let nlen = nodes.len();
     let target = if nlen >= 2 {
         nodes[nlen - 2].clone()
@@ -1403,7 +1486,10 @@ fn transform_each(inj: &Inj, _val: &Value, _r: &str, store: &Value) -> Value {
         } else {
             Value::list(items_vec(&src).into_iter().map(|(_, v)| v).collect())
         };
-        let ckey = path.get(path.len().saturating_sub(2)).cloned().unwrap_or_default();
+        let ckey = path
+            .get(path.len().saturating_sub(2))
+            .cloned()
+            .unwrap_or_default();
         let tpath = slice_str_vec(&path, Some(-1), None);
         let mut dpath: Vec<String> = vec![S_DTOP.to_string()];
         dpath.extend(srcpath_split(&srcpath_str));
@@ -1424,7 +1510,11 @@ fn transform_each(inj: &Inj, _val: &Value, _r: &str, store: &Value) -> Value {
         {
             let mut b = tinj.borrow_mut();
             b.path = tpath;
-            b.nodes = if nlen >= 1 { nodes[..nlen - 1].to_vec() } else { Vec::new() };
+            b.nodes = if nlen >= 1 {
+                nodes[..nlen - 1].to_vec()
+            } else {
+                Vec::new()
+            };
             b.parent = b.nodes.last().cloned().unwrap_or(Value::Noval);
             b.val = tval_v.clone();
             b.dpath = dpath;
@@ -1448,10 +1538,19 @@ fn transform_pack(inj: &Inj, _val: &Value, _r: &str, store: &Value) -> Value {
     }
     let (key, parent, path, nodes, base) = {
         let b = inj.borrow();
-        (b.key.clone(), b.parent.clone(), b.path.clone(), b.nodes.clone(), b.base.clone())
+        (
+            b.key.clone(),
+            b.parent.clone(),
+            b.path.clone(),
+            b.nodes.clone(),
+            b.base.clone(),
+        )
     };
     let args = get_prop(&parent, &Value::str(key), Value::Noval);
-    let args_vec: Vec<Value> = args.as_list().map(|l| l.borrow().clone()).unwrap_or_default();
+    let args_vec: Vec<Value> = args
+        .as_list()
+        .map(|l| l.borrow().clone())
+        .unwrap_or_default();
     let ia = injector_args(&[T_STRING as i64, T_ANY as i64], &args_vec);
     if let Value::Str(e) = &ia[0] {
         errs_push(inj, format!("$EACH: {e}"));
@@ -1461,21 +1560,34 @@ fn transform_pack(inj: &Inj, _val: &Value, _r: &str, store: &Value) -> Value {
     let origchildspec = ia.get(2).cloned().unwrap_or(Value::Noval);
     let srcpath_str = srcpath.as_str().unwrap_or("").to_string();
 
-    let tkey = path.get(path.len().saturating_sub(2)).cloned().unwrap_or_default();
+    let tkey = path
+        .get(path.len().saturating_sub(2))
+        .cloned()
+        .unwrap_or_default();
     let pathsize = path.len();
     let nlen = nodes.len();
     let target = if pathsize >= 2 {
         nodes.get(pathsize - 2).cloned().unwrap_or(Value::Noval)
     } else {
-        nodes.get(pathsize.saturating_sub(1)).cloned().unwrap_or(Value::Noval)
+        nodes
+            .get(pathsize.saturating_sub(1))
+            .cloned()
+            .unwrap_or(Value::Noval)
     };
     let target = if target.is_noval() {
-        nodes.get(pathsize.saturating_sub(1)).cloned().unwrap_or(Value::Noval)
+        nodes
+            .get(pathsize.saturating_sub(1))
+            .cloned()
+            .unwrap_or(Value::Noval)
     } else {
         target
     };
 
-    let srcstore = get_prop(store, &Value::str(base.clone().unwrap_or_default()), store.clone());
+    let srcstore = get_prop(
+        store,
+        &Value::str(base.clone().unwrap_or_default()),
+        store.clone(),
+    );
     let src_raw = get_path_inj(&srcstore, &srcpath, Some(inj));
     let src: Value = if is_list(&src_raw) {
         src_raw
@@ -1551,7 +1663,10 @@ fn transform_pack(inj: &Inj, _val: &Value, _r: &str, store: &Value) -> Value {
             set_prop(tsrc.clone(), &kn, n);
         }
         let tpath = slice_str_vec(&path, Some(-1), None);
-        let ckey = path.get(path.len().saturating_sub(2)).cloned().unwrap_or_default();
+        let ckey = path
+            .get(path.len().saturating_sub(2))
+            .cloned()
+            .unwrap_or_default();
         let mut dpath: Vec<String> = vec![S_DTOP.to_string()];
         dpath.extend(srcpath_split(&srcpath_str));
         dpath.push(format!("$:{ckey}"));
@@ -1568,7 +1683,11 @@ fn transform_pack(inj: &Inj, _val: &Value, _r: &str, store: &Value) -> Value {
         {
             let mut b = tinj.borrow_mut();
             b.path = tpath;
-            b.nodes = if nlen >= 1 { nodes[..nlen - 1].to_vec() } else { Vec::new() };
+            b.nodes = if nlen >= 1 {
+                nodes[..nlen - 1].to_vec()
+            } else {
+                Vec::new()
+            };
             b.parent = b.nodes.last().cloned().unwrap_or(Value::Noval);
             b.val = tval.clone();
             b.dpath = dpath;
@@ -1653,14 +1772,8 @@ pub fn transform(
     store_base.insert("$EACH".to_string(), Value::func(transform_each));
     store_base.insert("$PACK".to_string(), Value::func(transform_pack));
     store_base.insert("$REF".to_string(), Value::func(transform_ref));
-    store_base.insert(
-        "$FORMAT".to_string(),
-        Value::func(transform_format),
-    );
-    store_base.insert(
-        "$APPLY".to_string(),
-        Value::func(transform_apply),
-    );
+    store_base.insert("$FORMAT".to_string(), Value::func(transform_format));
+    store_base.insert("$APPLY".to_string(), Value::func(transform_apply));
 
     let store = merge(
         &Value::list(vec![
@@ -1691,7 +1804,9 @@ fn iso_now() -> String {
     // best-effort ISO-8601 UTC string; the corpus can't assert the exact
     // value (it changes), so granularity to the second is fine.
     use std::time::{SystemTime, UNIX_EPOCH};
-    let dur = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    let dur = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
     let secs = dur.as_secs() as i64;
     let millis = dur.subsec_millis();
     // days since 1970-01-01
@@ -1699,9 +1814,7 @@ fn iso_now() -> String {
     let tod = secs.rem_euclid(86_400);
     let (h, m, s) = (tod / 3600, (tod % 3600) / 60, tod % 60);
     let (y, mo, d) = civil_from_days(days);
-    format!(
-        "{y:04}-{mo:02}-{d:02}T{h:02}:{m:02}:{s:02}.{millis:03}Z"
-    )
+    format!("{y:04}-{mo:02}-{d:02}T{h:02}:{m:02}:{s:02}.{millis:03}Z")
 }
 
 fn civil_from_days(z: i64) -> (i64, i64, i64) {
@@ -1757,7 +1870,10 @@ fn validate_string(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
     if matches!(&out, Value::Str(s) if s.is_empty()) {
         errs_push(
             inj,
-            format!("Empty string at {}", pathify(&path_value(&path), Some(1), None)),
+            format!(
+                "Empty string at {}",
+                pathify(&path_value(&path), Some(1), None)
+            ),
         );
         return Value::Noval;
     }
@@ -1807,19 +1923,33 @@ fn tvals_desc(tvals: &[Value]) -> String {
 fn validate_child(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
     let (mode, key, parent, path, dparent) = {
         let b = inj.borrow();
-        (b.mode, b.key.clone(), b.parent.clone(), b.path.clone(), b.dparent.clone())
+        (
+            b.mode,
+            b.key.clone(),
+            b.parent.clone(),
+            b.path.clone(),
+            b.dparent.clone(),
+        )
     };
 
     if mode == M_KEYPRE {
         let childtm = get_prop(&parent, &Value::str(key), Value::Noval);
-        let pkey = path.get(path.len().saturating_sub(2)).cloned().unwrap_or_default();
+        let pkey = path
+            .get(path.len().saturating_sub(2))
+            .cloned()
+            .unwrap_or_default();
         let mut tval = get_prop(&dparent, &Value::str(pkey), Value::Noval);
         if tval.is_noval() {
             tval = Value::empty_map();
         } else if !is_map(&tval) {
             errs_push(
                 inj,
-                invalid_type_msg(&path[..path.len().saturating_sub(1)], S_object, typify(&tval), &tval),
+                invalid_type_msg(
+                    &path[..path.len().saturating_sub(1)],
+                    S_object,
+                    typify(&tval),
+                    &tval,
+                ),
             );
             return Value::Noval;
         }
@@ -1845,7 +1975,12 @@ fn validate_child(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
         if !is_list(&dparent) {
             errs_push(
                 inj,
-                invalid_type_msg(&path[..path.len().saturating_sub(1)], S_list, typify(&dparent), &dparent),
+                invalid_type_msg(
+                    &path[..path.len().saturating_sub(1)],
+                    S_list,
+                    typify(&dparent),
+                    &dparent,
+                ),
             );
             let plen = parent.as_list().map(|l| l.borrow().len()).unwrap_or(0) as i64;
             inj.borrow_mut().key_i = plen;
@@ -1911,7 +2046,10 @@ fn validate_one(inj: &Inj, _v: &Value, _r: &str, store: &Value) -> Value {
     }
     for tval in &tvals {
         let terrs = Value::empty_list();
-        let mut vstore = match merge(&Value::list(vec![Value::empty_map(), store.clone()]), Some(1)) {
+        let mut vstore = match merge(
+            &Value::list(vec![Value::empty_map(), store.clone()]),
+            Some(1),
+        ) {
             v @ Value::Map(_) => v,
             _ => Value::empty_map(),
         };
@@ -1935,7 +2073,11 @@ fn validate_one(inj: &Inj, _v: &Value, _r: &str, store: &Value) -> Value {
         inj,
         invalid_type_msg(
             &path_after,
-            &format!("{}{}", if tvals.len() > 1 { "one of " } else { "" }, valdesc),
+            &format!(
+                "{}{}",
+                if tvals.len() > 1 { "one of " } else { "" },
+                valdesc
+            ),
             typify(&dparent),
             &dparent,
         ),
@@ -1993,7 +2135,9 @@ fn validate_exact(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
     for tval in &tvals {
         let mut exactmatch = tval == &dparent;
         if !exactmatch && is_node(tval) {
-            let cs = currentstr.get_or_insert_with(|| stringify(&dparent, None, false)).clone();
+            let cs = currentstr
+                .get_or_insert_with(|| stringify(&dparent, None, false))
+                .clone();
             exactmatch = stringify(tval, None, false) == cs;
         }
         if exactmatch {
@@ -2042,13 +2186,19 @@ fn validation_modify(pval: &Value, key: &Value, parent: &Value, inj: &Inj, _stor
     }
     let ctype = typify(&cval);
     if ptype != ctype && !pval.is_noval() {
-        errs_push(inj, invalid_type_msg(&path, &type_name(ptype), ctype, &cval));
+        errs_push(
+            inj,
+            invalid_type_msg(&path, &type_name(ptype), ctype, &cval),
+        );
         return;
     }
 
     if is_map(&cval) {
         if !is_map(pval) {
-            errs_push(inj, invalid_type_msg(&path, &type_name(ptype), ctype, &cval));
+            errs_push(
+                inj,
+                invalid_type_msg(&path, &type_name(ptype), ctype, &cval),
+            );
             return;
         }
         let ckeys = keysof_vec(&cval);
@@ -2082,18 +2232,31 @@ fn validation_modify(pval: &Value, key: &Value, parent: &Value, inj: &Inj, _stor
         }
     } else if is_list(&cval) {
         if !is_list(pval) {
-            errs_push(inj, invalid_type_msg(&path, &type_name(ptype), ctype, &cval));
+            errs_push(
+                inj,
+                invalid_type_msg(&path, &type_name(ptype), ctype, &cval),
+            );
         }
     } else if exact {
         if &cval != pval {
             let pathmsg = if path.len() > 1 {
-                format!("at field {}{}", pathify(&path_value(&path), Some(1), None), S_VIZ)
+                format!(
+                    "at field {}{}",
+                    pathify(&path_value(&path), Some(1), None),
+                    S_VIZ
+                )
             } else {
                 String::new()
             };
             errs_push(
                 inj,
-                format!("Value {}{} should equal {}{}", pathmsg, js_string(&cval), js_string(pval), S_DT),
+                format!(
+                    "Value {}{} should equal {}{}",
+                    pathmsg,
+                    js_string(&cval),
+                    js_string(pval),
+                    S_DT
+                ),
             );
         }
     } else {
@@ -2132,12 +2295,22 @@ pub fn validate(
 
     // build the validator store
     let mut vmap: indexmap::IndexMap<String, Value> = indexmap::IndexMap::new();
-    for k in ["$DELETE", "$COPY", "$KEY", "$META", "$MERGE", "$EACH", "$PACK"] {
+    for k in [
+        "$DELETE", "$COPY", "$KEY", "$META", "$MERGE", "$EACH", "$PACK",
+    ] {
         vmap.insert(k.to_string(), Value::Null);
     }
     vmap.insert("$STRING".to_string(), Value::func(validate_string));
     for k in [
-        "$NUMBER", "$INTEGER", "$DECIMAL", "$BOOLEAN", "$NULL", "$NIL", "$MAP", "$LIST", "$FUNCTION",
+        "$NUMBER",
+        "$INTEGER",
+        "$DECIMAL",
+        "$BOOLEAN",
+        "$NULL",
+        "$NIL",
+        "$MAP",
+        "$LIST",
+        "$FUNCTION",
         "$INSTANCE",
     ] {
         vmap.insert(k.to_string(), Value::func(validate_type));
@@ -2176,8 +2349,7 @@ pub fn validate(
         ..Default::default()
     };
 
-    let out = transform(data, spec, Some(&td))
-        .unwrap_or(Value::Noval);
+    let out = transform(data, spec, Some(&td)).unwrap_or(Value::Noval);
 
     let errlen = errs.as_list().map(|l| l.borrow().len()).unwrap_or(0);
     if errlen > 0 && !collect {
@@ -2215,7 +2387,10 @@ fn js_gt(a: &Value, b: &Value) -> bool {
 }
 
 fn select_subvalidate(point: &Value, term: &Value, store: &Value, meta: &Value) -> bool {
-    let vstore = match merge(&Value::list(vec![Value::empty_map(), store.clone()]), Some(1)) {
+    let vstore = match merge(
+        &Value::list(vec![Value::empty_map(), store.clone()]),
+        Some(1),
+    ) {
         v @ Value::Map(_) => v,
         _ => Value::empty_map(),
     };
@@ -2228,7 +2403,10 @@ fn select_subvalidate(point: &Value, term: &Value, store: &Value, meta: &Value) 
         ..Default::default()
     };
     let _ = validate(point, term, Some(&vd));
-    terrs.as_list().map(|l| l.borrow().is_empty()).unwrap_or(true)
+    terrs
+        .as_list()
+        .map(|l| l.borrow().is_empty())
+        .unwrap_or(true)
 }
 
 fn select_and(inj: &Inj, _v: &Value, _r: &str, store: &Value) -> Value {
@@ -2237,7 +2415,13 @@ fn select_and(inj: &Inj, _v: &Value, _r: &str, store: &Value) -> Value {
     }
     let (key, parent, path, nodes, meta) = {
         let b = inj.borrow();
-        (b.key.clone(), b.parent.clone(), b.path.clone(), b.nodes.clone(), b.meta.clone())
+        (
+            b.key.clone(),
+            b.parent.clone(),
+            b.path.clone(),
+            b.nodes.clone(),
+            b.meta.clone(),
+        )
     };
     let terms: Vec<Value> = get_prop(&parent, &Value::str(key), Value::Noval)
         .as_list()
@@ -2259,7 +2443,10 @@ fn select_and(inj: &Inj, _v: &Value, _r: &str, store: &Value) -> Value {
             );
         }
     }
-    let gkey = path.get(path.len().saturating_sub(2)).cloned().unwrap_or_default();
+    let gkey = path
+        .get(path.len().saturating_sub(2))
+        .cloned()
+        .unwrap_or_default();
     let nlen = nodes.len();
     if nlen >= 2 {
         set_prop(nodes[nlen - 2].clone(), &Value::str(gkey), point);
@@ -2273,7 +2460,13 @@ fn select_or(inj: &Inj, _v: &Value, _r: &str, store: &Value) -> Value {
     }
     let (key, parent, path, nodes, meta) = {
         let b = inj.borrow();
-        (b.key.clone(), b.parent.clone(), b.path.clone(), b.nodes.clone(), b.meta.clone())
+        (
+            b.key.clone(),
+            b.parent.clone(),
+            b.path.clone(),
+            b.nodes.clone(),
+            b.meta.clone(),
+        )
     };
     let terms: Vec<Value> = get_prop(&parent, &Value::str(key), Value::Noval)
         .as_list()
@@ -2283,7 +2476,10 @@ fn select_or(inj: &Inj, _v: &Value, _r: &str, store: &Value) -> Value {
     let point = get_path_inj(store, &path_value(&ppath), None);
     for term in &terms {
         if select_subvalidate(&point, term, store, &meta) {
-            let gkey = path.get(path.len().saturating_sub(2)).cloned().unwrap_or_default();
+            let gkey = path
+                .get(path.len().saturating_sub(2))
+                .cloned()
+                .unwrap_or_default();
             let nlen = nodes.len();
             if nlen >= 2 {
                 set_prop(nodes[nlen - 2].clone(), &Value::str(gkey), point);
@@ -2310,7 +2506,13 @@ fn select_not(inj: &Inj, _v: &Value, _r: &str, store: &Value) -> Value {
     }
     let (key, parent, path, nodes, meta) = {
         let b = inj.borrow();
-        (b.key.clone(), b.parent.clone(), b.path.clone(), b.nodes.clone(), b.meta.clone())
+        (
+            b.key.clone(),
+            b.parent.clone(),
+            b.path.clone(),
+            b.nodes.clone(),
+            b.meta.clone(),
+        )
     };
     let term = get_prop(&parent, &Value::str(key), Value::Noval);
     let ppath = slice_str_vec(&path, Some(-1), None);
@@ -2327,7 +2529,10 @@ fn select_not(inj: &Inj, _v: &Value, _r: &str, store: &Value) -> Value {
             ),
         );
     }
-    let gkey = path.get(path.len().saturating_sub(2)).cloned().unwrap_or_default();
+    let gkey = path
+        .get(path.len().saturating_sub(2))
+        .cloned()
+        .unwrap_or_default();
     let nlen = nodes.len();
     if nlen >= 2 {
         set_prop(nodes[nlen - 2].clone(), &Value::str(gkey), point);
@@ -2341,10 +2546,18 @@ fn select_cmp(inj: &Inj, _v: &Value, r: &str, store: &Value) -> Value {
     }
     let (key, parent, path, nodes) = {
         let b = inj.borrow();
-        (b.key.clone(), b.parent.clone(), b.path.clone(), b.nodes.clone())
+        (
+            b.key.clone(),
+            b.parent.clone(),
+            b.path.clone(),
+            b.nodes.clone(),
+        )
     };
     let term = get_prop(&parent, &Value::str(key), Value::Noval);
-    let gkey = path.get(path.len().saturating_sub(2)).cloned().unwrap_or_default();
+    let gkey = path
+        .get(path.len().saturating_sub(2))
+        .cloned()
+        .unwrap_or_default();
     let ppath = slice_str_vec(&path, Some(-1), None);
     let point = get_path_inj(store, &path_value(&ppath), None);
 
@@ -2442,7 +2655,11 @@ pub fn select(children: &Value, query: &Value) -> Value {
             ..Default::default()
         };
         let _ = validate(child, &clone(&q), Some(&vd));
-        if errs.as_list().map(|l| l.borrow().is_empty()).unwrap_or(true) {
+        if errs
+            .as_list()
+            .map(|l| l.borrow().is_empty())
+            .unwrap_or(true)
+        {
             results.push(child.clone());
         }
     }

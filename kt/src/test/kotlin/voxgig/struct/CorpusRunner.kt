@@ -23,12 +23,14 @@ object CorpusRunner {
         synchronized(this) {
             c = CORPUS
             if (c != null) return c!!
-            val candidates = listOf(
-                Paths.get("..", "build", "test", "test.json"),
-                Paths.get("build", "test", "test.json"),
-            )
-            val path = candidates.firstOrNull { Files.exists(it) }
-                ?: throw IllegalStateException("corpus not found: tried ${candidates.joinToString()}")
+            val candidates =
+                listOf(
+                    Paths.get("..", "build", "test", "test.json"),
+                    Paths.get("build", "test", "test.json"),
+                )
+            val path =
+                candidates.firstOrNull { Files.exists(it) }
+                    ?: throw IllegalStateException("corpus not found: tried ${candidates.joinToString()}")
             val json = Files.readString(path)
             val type = object : TypeToken<Map<String, Any?>>() {}.type
             val parsed: Map<String, Any?> = GSON.fromJson(json, type)
@@ -38,11 +40,15 @@ object CorpusRunner {
     }
 
     @Suppress("UNCHECKED_CAST")
-    fun getSpec(category: String, name: String): Map<String, Any?> {
+    fun getSpec(
+        category: String,
+        name: String,
+    ): Map<String, Any?> {
         val all = loadCorpus()
         val struct = all["struct"] as Map<String, Any?>
-        val cat = struct[category] as? Map<String, Any?>
-            ?: throw IllegalArgumentException("Unknown category: $category")
+        val cat =
+            struct[category] as? Map<String, Any?>
+                ?: throw IllegalArgumentException("Unknown category: $category")
         return (cat[name] as? Map<String, Any?>)
             ?: throw IllegalArgumentException("Unknown spec: $category.$name")
     }
@@ -55,11 +61,15 @@ object CorpusRunner {
         var passed: Int = 0
         var total: Int = 0
         val failures: MutableList<String> = mutableListOf()
+
         override fun toString(): String = "$name: $passed/$total"
     }
 
-    fun runset(fullName: String, testspec: Map<String, Any?>, subject: Subject): Result =
-        runsetflags(fullName, testspec, true, subject)
+    fun runset(
+        fullName: String,
+        testspec: Map<String, Any?>,
+        subject: Subject,
+    ): Result = runsetflags(fullName, testspec, true, subject)
 
     @Suppress("UNCHECKED_CAST")
     fun runsetflags(
@@ -74,7 +84,14 @@ object CorpusRunner {
             if (eo !is Map<*, *>) continue
             val entry = eo as Map<String, Any?>
             val input = if (entry.containsKey("in")) Struct.clone(entry["in"]) else Struct.UNDEF
-            val expected: Any? = if (entry.containsKey("out")) entry["out"] else if (nullFlag) null else Struct.UNDEF
+            val expected: Any? =
+                if (entry.containsKey("out")) {
+                    entry["out"]
+                } else if (nullFlag) {
+                    null
+                } else {
+                    Struct.UNDEF
+                }
             res.total++
             try {
                 val got = subject.apply(input)
@@ -82,16 +99,23 @@ object CorpusRunner {
                     res.failures.add("[$i] expected err='${brief(entry["err"])}' but call returned ${brief(got)}")
                     continue
                 }
-                if (deepEqual(got, expected)) res.passed++
-                else res.failures.add("[$i] in=${brief(entry["in"])} expected=${brief(expected)} got=${brief(got)}")
+                if (deepEqual(got, expected)) {
+                    res.passed++
+                } else {
+                    res.failures.add("[$i] in=${brief(entry["in"])} expected=${brief(expected)} got=${brief(got)}")
+                }
             } catch (ex: Exception) {
                 if (entry.containsKey("err")) {
                     val expErr = entry["err"]
                     val msg = ex.message ?: ""
-                    val ok = expErr == true ||
-                        (expErr is String && (expErr.isEmpty() || msg.contains(expErr) || msg.lowercase().contains(expErr.lowercase())))
-                    if (ok) res.passed++
-                    else res.failures.add("[$i] err mismatch: expected '${brief(expErr)}' got '$msg'")
+                    val ok =
+                        expErr == true ||
+                            (expErr is String && (expErr.isEmpty() || msg.contains(expErr) || msg.lowercase().contains(expErr.lowercase())))
+                    if (ok) {
+                        res.passed++
+                    } else {
+                        res.failures.add("[$i] err mismatch: expected '${brief(expErr)}' got '$msg'")
+                    }
                 } else {
                     res.failures.add("[$i] in=${brief(entry["in"])} threw=${ex.message}")
                 }
@@ -100,7 +124,10 @@ object CorpusRunner {
         return res
     }
 
-    fun deepEqual(a: Any?, b: Any?): Boolean = normalize(a) == normalize(b)
+    fun deepEqual(
+        a: Any?,
+        b: Any?,
+    ): Boolean = normalize(a) == normalize(b)
 
     fun normalize(v: Any?): Any? {
         if (v === Struct.UNDEF || v == null) return null

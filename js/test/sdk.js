@@ -1,11 +1,9 @@
-
 const { StructUtility } = require('../src/struct')
 
 class SDK {
-
   #opts = {}
   #utility = {}
-  
+
   constructor(opts) {
     this.#opts = opts || {}
     this.#utility = {
@@ -13,12 +11,13 @@ class SDK {
       contextify: (ctxmap) => ctxmap,
       check: (ctx) => {
         return {
-          zed: 'ZED' +
+          zed:
+            'ZED' +
             (null == this.#opts ? '' : null == this.#opts.foo ? '' : this.#opts.foo) +
             '_' +
-            (null == ctx.meta.bar ? '0' : ctx.meta.bar)
+            (null == ctx.meta.bar ? '0' : ctx.meta.bar),
         }
-      }
+      },
     }
   }
 
@@ -30,11 +29,11 @@ class SDK {
     return new SDK(opts || this.#opts)
   }
 
-  utility() { 
-    return this.#utility 
+  utility() {
+    return this.#utility
   }
 }
 
 module.exports = {
-  SDK
+  SDK,
 }

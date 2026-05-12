@@ -1,7 +1,7 @@
 # Struct for Zig
 
 > Zig port of the canonical TypeScript implementation.
-> Status: in progress.  See [`../REPORT.md`](../REPORT.md) for parity.
+> Status: complete.  See [`../REPORT.md`](../REPORT.md) for parity.
 
 For motivation, language-neutral concepts, and the cross-language
 parity matrix, see the [top-level README](../README.md).

@@ -278,8 +278,6 @@ voxgigstruct.Select(
 ```go
 func Jm(args ...any) map[string]any   // JSON Object
 func Jt(args ...any) []any            // JSON Tuple/Array
-func Jo(args ...any) map[string]any   // alias for Jm
-func Ja(args ...any) []any            // alias for Jt
 ```
 
 ```go

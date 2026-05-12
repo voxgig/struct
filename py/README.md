@@ -64,8 +64,8 @@ from voxgig_struct import (
     size, slice, strkey, stringify, transform,
     typename, typify, validate, walk,
 
-    # builders + Python aliases
-    jm, jt, jo, ja,
+    # builders
+    jm, jt,
 
     # extras (Python-specific convenience)
     replace, joinurl,
@@ -274,15 +274,11 @@ select(
 # [{'age': 30, '$KEY': 'a'}]
 ```
 
-### Builders and aliases
+### Builders
 
 ```python
 jm('a', 1, 'b', 2)        # {'a': 1, 'b': 2}
 jt(1, 2, 3)               # [1, 2, 3]
-
-# Aliases (Python "JSON Object" / "JSON Array")
-jo(*args)   # alias for jm
-ja(*args)   # alias for jt
 ```
 
 ### Injection helpers

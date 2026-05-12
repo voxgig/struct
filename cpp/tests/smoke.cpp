@@ -9,7 +9,13 @@
 
 using namespace voxgig::structlib;
 
-#define CHECK(expr) do { if (!(expr)) { std::cerr << "FAIL: " << #expr << " at " << __LINE__ << "\n"; ok = false; } } while (0)
+#define CHECK(expr)                                                                                \
+  do {                                                                                             \
+    if (!(expr)) {                                                                                 \
+      std::cerr << "FAIL: " << #expr << " at " << __LINE__ << "\n";                                \
+      ok = false;                                                                                  \
+    }                                                                                              \
+  } while (0)
 
 int main() {
   bool ok = true;
@@ -94,8 +100,8 @@ int main() {
 
   // walk identity.
   Value tree = jm({"a", jm({"b", "B"})});
-  Value walked = walk_v(tree,
-      [](const Value&, const Value& v, const Value&, const std::vector<std::string>&) { return v; });
+  Value walked = walk_v(tree, [](const Value&, const Value& v, const Value&,
+                                 const std::vector<std::string>&) { return v; });
   CHECK(walked == tree);
 
   // merge.

@@ -1,0 +1,3 @@
+# shellcheck configuration.
+# Treat warnings and errors as failures; info/style suggestions are advisory.
+severity=warning

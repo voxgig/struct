@@ -4,7 +4,7 @@ require 'uri'
 module VoxgigStruct
   # --- Debug Logging Configuration ---
   DEBUG = false
-  
+
   def self.log(msg)
     puts "[DEBUG] #{msg}" if DEBUG
   end
@@ -15,58 +15,72 @@ module VoxgigStruct
   end
 
   # --- Constants ---
-  S_MKEYPRE  = 'key:pre'
-  S_MKEYPOST = 'key:post'
-  S_MVAL     = 'val'
-  S_MKEY     = 'key'
+  S_MKEYPRE  = 'key:pre'.freeze
+  S_MKEYPOST = 'key:post'.freeze
+  S_MVAL     = 'val'.freeze
+  S_MKEY     = 'key'.freeze
 
-  S_DKEY   = '`$KEY`'
-  S_DMETA  = '`$META`'
-  S_DTOP   = '$TOP'
-  S_DERRS  = '$ERRS'
+  S_DKEY   = '`$KEY`'.freeze
+  S_DMETA  = '`$META`'.freeze
+  S_DTOP   = '$TOP'.freeze
+  S_DERRS  = '$ERRS'.freeze
 
-  S_any      = 'any'
-  S_array    = 'array'
-  S_boolean  = 'boolean'
-  S_decimal  = 'decimal'
-  S_function = 'function'
-  S_instance = 'instance'
-  S_integer  = 'integer'
-  S_list     = 'list'
-  S_map      = 'map'
-  S_nil      = 'nil'
-  S_node     = 'node'
-  S_number   = 'number'
-  S_null     = 'null'
-  S_object   = 'object'
-  S_scalar   = 'scalar'
-  S_string   = 'string'
-  S_symbol   = 'symbol'
-  S_MT       = ''       # empty string constant (used as a prefix)
-  S_BT       = '`'
-  S_DS       = '$'
-  S_DT       = '.'      # delimiter for key paths
-  S_CN       = ':'      # colon for unknown paths
-  S_SP       = ' '
-  S_VIZ      = ': '
-  S_KEY      = 'KEY'
+  S_any      = 'any'.freeze
+  S_array    = 'array'.freeze
+  S_boolean  = 'boolean'.freeze
+  S_decimal  = 'decimal'.freeze
+  S_function = 'function'.freeze
+  S_instance = 'instance'.freeze
+  S_integer  = 'integer'.freeze
+  S_list     = 'list'.freeze
+  S_map      = 'map'.freeze
+  S_nil      = 'nil'.freeze
+  S_node     = 'node'.freeze
+  S_number   = 'number'.freeze
+  S_null     = 'null'.freeze
+  S_object   = 'object'.freeze
+  S_scalar   = 'scalar'.freeze
+  S_string   = 'string'.freeze
+  S_symbol   = 'symbol'.freeze
+  S_MT       = ''.freeze       # empty string constant (used as a prefix)
+  S_BT       = '`'.freeze
+  S_DS       = '$'.freeze
+  S_DT       = '.'.freeze      # delimiter for key paths
+  S_CN       = ':'.freeze      # colon for unknown paths
+  S_SP       = ' '.freeze
+  S_VIZ      = ': '.freeze
+  S_KEY      = 'KEY'.freeze
 
   # Types - bitfield integers matching TypeScript canonical
   _t = 31
-  T_any      = (1 << _t) - 1;     _t -= 1
-  T_noval    = 1 << _t;           _t -= 1
-  T_boolean  = 1 << _t;           _t -= 1
-  T_decimal  = 1 << _t;           _t -= 1
-  T_integer  = 1 << _t;           _t -= 1
-  T_number   = 1 << _t;           _t -= 1
-  T_string   = 1 << _t;           _t -= 1
-  T_function = 1 << _t;           _t -= 1
-  T_symbol   = 1 << _t;           _t -= 1
-  T_null     = 1 << _t;           _t -= 8
-  T_list     = 1 << _t;           _t -= 1
-  T_map      = 1 << _t;           _t -= 1
-  T_instance = 1 << _t;           _t -= 5
-  T_scalar   = 1 << _t;           _t -= 1
+  T_any = (1 << _t) - 1
+  _t -= 1
+  T_noval = 1 << _t
+  _t -= 1
+  T_boolean = 1 << _t
+  _t -= 1
+  T_decimal = 1 << _t
+  _t -= 1
+  T_integer = 1 << _t
+  _t -= 1
+  T_number = 1 << _t
+  _t -= 1
+  T_string = 1 << _t
+  _t -= 1
+  T_function = 1 << _t
+  _t -= 1
+  T_symbol = 1 << _t
+  _t -= 1
+  T_null = 1 << _t
+  _t -= 8
+  T_list = 1 << _t
+  _t -= 1
+  T_map = 1 << _t
+  _t -= 1
+  T_instance = 1 << _t
+  _t -= 5
+  T_scalar = 1 << _t
+  _t -= 1
   T_node     = 1 << _t
 
   TYPENAME = [
@@ -75,11 +89,11 @@ module VoxgigStruct
     '', '', '', '', '', '', '',
     S_list, S_map, S_instance,
     '', '', '', '',
-    S_scalar, S_node,
-  ]
+    S_scalar, S_node
+  ].freeze
 
-  SKIP = { '`$SKIP`' => true }
-  DELETE = { '`$DELETE`' => true }
+  SKIP = { '`$SKIP`' => true }.freeze
+  DELETE = { '`$DELETE`' => true }.freeze
 
   # Unique undefined marker.
   UNDEF = Object.new.freeze
@@ -111,6 +125,7 @@ module VoxgigStruct
 
   def self.clone(val)
     return nil if val.nil? || val.equal?(UNDEF)
+
     if isfunc(val)
       val
     elsif islist(val)
@@ -125,13 +140,13 @@ module VoxgigStruct
   end
 
   def self.escre(s)
-    s = s.nil? ? "" : s
+    s = '' if s.nil?
     Regexp.escape(s)
   end
 
   def self.escurl(s)
-    s = s.nil? ? "" : s
-    URI::DEFAULT_PARSER.escape(s, /[^A-Za-z0-9\-\.\_\~]/)
+    s = '' if s.nil?
+    URI::DEFAULT_PARSER.escape(s, /[^A-Za-z0-9\-._~]/)
   end
 
   # --- Internal getprop ---
@@ -139,31 +154,32 @@ module VoxgigStruct
   def self._getprop(val, key, alt = UNDEF)
     log("(_getprop) called with val=#{val.inspect} and key=#{key.inspect}")
     return alt if val.nil? || key.nil?
+
     if islist(val)
-      key = (key.to_s =~ /\A\d+\z/) ? key.to_i : key
+      key = key.to_i if key.to_s =~ /\A\d+\z/
       unless key.is_a?(Numeric) && key >= 0 && key < val.size
         log("(_getprop) index #{key.inspect} out of bounds; returning alt")
         return alt
       end
       result = val[key]
       log("(_getprop) returning #{result.inspect} from array for key #{key}")
-      return result
+      result
     elsif ismap(val)
       key_str = key.to_s
       if val.key?(key_str)
         result = val[key_str]
         log("(_getprop) found key #{key_str.inspect} in hash, returning #{result.inspect}")
-        return result
+        result
       elsif key.is_a?(String) && val.key?(key.to_sym)
         result = val[key.to_sym]
         log("(_getprop) found symbol key #{key.to_sym.inspect} in hash, returning #{result.inspect}")
-        return result
+        result
       else
         log("(_getprop) key #{key.inspect} not found; returning alt")
-        return alt
+        alt
       end
     else
-      log("(_getprop) value is not a node; returning alt")
+      log('(_getprop) value is not a node; returning alt')
       alt
     end
   end
@@ -176,9 +192,10 @@ module VoxgigStruct
   end
 
   def self.isempty(val)
-    return true if val.nil? || val.equal?(UNDEF) || val == ""
+    return true if val.nil? || val.equal?(UNDEF) || val == ''
     return true if islist(val) && val.empty?
     return true if ismap(val) && val.empty?
+
     false
   end
 
@@ -212,6 +229,7 @@ module VoxgigStruct
   def self.setprop(parent, key, val = :no_val_provided)
     log(">>> setprop called with parent=#{parent.inspect}, key=#{key.inspect}, val=#{val.inspect}")
     return parent unless iskey(key)
+
     if ismap(parent)
       key_str = key.to_s
       if val == :no_val_provided
@@ -227,20 +245,18 @@ module VoxgigStruct
       end
       if val == :no_val_provided
         parent.delete_at(key_i) if key_i >= 0 && key_i < parent.length
+      elsif key_i >= 0
+        index = [key_i, parent.length].min
+        parent[index] = val
       else
-        if key_i >= 0
-          index = key_i >= parent.length ? parent.length : key_i
-          parent[index] = val
-        else
-          parent.unshift(val)
-        end
+        parent.unshift(val)
       end
     end
     log("<<< setprop result: #{parent.inspect}")
     parent
   end
 
-  def self.stringify(val, maxlen = nil, pretty = nil)
+  def self.stringify(val, maxlen = nil, _pretty = nil)
     return '' if val.equal?(UNDEF)
     return 'null' if val.nil?
 
@@ -256,11 +272,7 @@ module VoxgigStruct
       end
     end
 
-    if !maxlen.nil? && maxlen >= 0
-      if valstr.length > maxlen
-        valstr = valstr[0, maxlen - 3] + '...'
-      end
-    end
+    valstr = "#{valstr[0, maxlen - 3]}..." if !maxlen.nil? && maxlen >= 0 && (valstr.length > maxlen)
 
     valstr
   end
@@ -269,48 +281,47 @@ module VoxgigStruct
     pathstr = nil
 
     path = if islist(val)
-      val
-    elsif val.is_a?(String)
-      [val]
-    elsif val.is_a?(Numeric)
-      [val]
-    else
-      nil
-    end
+             val
+           elsif val.is_a?(String)
+             [val]
+           elsif val.is_a?(Numeric)
+             [val]
+           end
 
-    start = startin.nil? ? 0 : startin < 0 ? 0 : startin
-    end_idx = endin.nil? ? 0 : endin < 0 ? 0 : endin
+    start = startin.nil? ? 0 : startin.negative? ? 0 : startin
+    end_idx = endin.nil? ? 0 : endin.negative? ? 0 : endin
 
     if path && start >= 0
-      path = path[start..-end_idx-1] || []
-      if path.empty?
-        pathstr = '<root>'
-      else
-        pathstr = path
-          .select { |p| iskey(p) }
-          .map { |p|
-            if p.is_a?(Numeric)
-              S_MT + p.floor.to_s
-            else
-              p.gsub('.', S_MT)
-            end
-          }
-          .join(S_DT)
-      end
+      path = path[start..(-end_idx - 1)] || []
+      pathstr = if path.empty?
+                  '<root>'
+                else
+                  path
+                    .select { |p| iskey(p) }
+                    .map do |p|
+                      if p.is_a?(Numeric)
+                        S_MT + p.floor.to_s
+                      else
+                        p.gsub('.', S_MT)
+                      end
+                    end
+                    .join(S_DT)
+                end
     end
 
     if pathstr.nil?
-      pathstr = '<unknown-path' + (val.equal?(UNDEF) ? '' : S_CN + stringify(val, 47)) + '>'
+      pathstr = "<unknown-path#{S_CN + stringify(val, 47) unless val.equal?(UNDEF)}>"
     end
 
     pathstr
   end
 
   def self.strkey(key = nil)
-    return "" if key.nil?
+    return '' if key.nil?
     return key if key.is_a?(String)
     return key.floor.to_s if key.is_a?(Numeric)
-    ""
+
+    ''
   end
 
   def self.isfunc(val)
@@ -325,8 +336,9 @@ module VoxgigStruct
     return 0 if val.nil? || val.equal?(UNDEF)
     return val.length if val.is_a?(String) || islist(val)
     return val.keys.length if ismap(val)
-    return (val == true ? 1 : 0) if val == true || val == false
+    return (val == true ? 1 : 0) if [true, false].include?(val)
     return val.to_i if val.is_a?(Numeric)
+
     0
   end
 
@@ -336,25 +348,26 @@ module VoxgigStruct
     if val.is_a?(Numeric) && !val.is_a?(TrueClass) && !val.is_a?(FalseClass)
       s = start_idx.nil? ? (-Float::INFINITY) : start_idx
       e = end_idx.nil? ? Float::INFINITY : (end_idx - 1)
-      return [[val, s].max, e].min
+      # Not Comparable#clamp: that raises when s > e, but here we want e returned.
+      return [[val, s].max, e].min # rubocop:disable Style/ComparableClamp
     end
 
     vlen = size(val)
 
     start_idx = 0 if !end_idx.nil? && start_idx.nil?
 
-    if !start_idx.nil?
+    unless start_idx.nil?
       s = start_idx
       e = end_idx
 
-      if s < 0
+      if s.negative?
         e = vlen + s
-        e = 0 if e < 0
+        e = 0 if e.negative?
         s = 0
       elsif !e.nil?
-        if e < 0
+        if e.negative?
           e = vlen + e
-          e = 0 if e < 0
+          e = 0 if e.negative?
         elsif vlen < e
           e = vlen
         end
@@ -380,9 +393,9 @@ module VoxgigStruct
   end
 
   def self.pad(str, padding = nil, padchar = nil)
-    str = str.is_a?(String) ? str : stringify(str)
-    padding = padding.nil? ? 44 : padding
-    padchar = padchar.nil? ? ' ' : (padchar.to_s + ' ')[0]
+    str = stringify(str) unless str.is_a?(String)
+    padding = 44 if padding.nil?
+    padchar = padchar.nil? ? ' ' : "#{padchar} "[0]
     if padding >= 0
       str.ljust(padding, padchar)
     else
@@ -396,24 +409,26 @@ module VoxgigStruct
       begin
         nkey = key.to_i
         if key.to_s.strip.match?(/\A-?\d+\z/)
-          nkey = val.length + nkey if nkey < 0
-          out = (0 <= nkey && nkey < val.length) ? val[nkey] : UNDEF
+          nkey = val.length + nkey if nkey.negative?
+          out = nkey >= 0 && nkey < val.length ? val[nkey] : UNDEF
         end
-      rescue
+      rescue StandardError
       end
     end
     if out.equal?(UNDEF)
       return isfunc(alt) ? alt.call : (alt.equal?(UNDEF) ? nil : alt)
     end
+
     out
   end
 
   def self.flatten(lst, depth = nil)
     depth = 1 if depth.nil?
     return lst unless islist(lst)
+
     out = []
     lst.each do |item|
-      if islist(item) && depth > 0
+      if islist(item) && depth.positive?
         out.concat(flatten(item, depth - 1))
       else
         out << item unless item.nil? || item.equal?(UNDEF)
@@ -424,22 +439,23 @@ module VoxgigStruct
 
   def self.filter(val, check)
     return [] unless isnode(val)
+
     items(val).select { |item| check.call(item) }.map { |item| item[1] }
   end
 
   def self.delprop(parent, key)
     return parent unless iskey(key)
+
     if ismap(parent)
       ks = strkey(key)
       parent.delete(ks)
     elsif islist(parent)
       return parent unless key.to_s.match?(/\A-?\d+\z/)
+
       begin
         ki = key.to_i
-        if 0 <= ki && ki < parent.length
-          parent.delete_at(ki)
-        end
-      rescue
+        parent.delete_at(ki) if ki >= 0 && ki < parent.length
+      rescue StandardError
       end
     end
     parent
@@ -447,25 +463,26 @@ module VoxgigStruct
 
   def self.join(arr, sep = nil, url = nil)
     return '' unless islist(arr)
+
     sepdef = sep.nil? ? ',' : sep.to_s
-    sepre = (sepdef.length == 1) ? Regexp.escape(sepdef) : nil
+    sepre = sepdef.length == 1 ? Regexp.escape(sepdef) : nil
 
     # Filter to non-empty strings only
     parts = arr.select { |n| n.is_a?(String) && n != '' }
 
-    parts = parts.map.with_index { |s, i|
+    parts = parts.map.with_index do |s, i|
       if sepre
-        if url && i == 0
+        if url && i.zero?
           s = s.sub(/#{sepre}+$/, '')
           next s
         end
-        s = s.sub(/^#{sepre}+/, '') if i > 0
+        s = s.sub(/^#{sepre}+/, '') if i.positive?
         s = s.sub(/#{sepre}+$/, '') if i < parts.length - 1 || !url
         # Collapse internal duplicate separators
         s = s.gsub(/([^#{sepre}])#{sepre}+([^#{sepre}])/, "\\1#{sepdef}\\2")
       end
       s
-    }.reject(&:empty?)
+    end.reject(&:empty?)
 
     parts.join(sepdef)
   end
@@ -476,22 +493,20 @@ module VoxgigStruct
 
   def self.jsonify(val, flags = nil)
     str = 'null'
-    if !val.nil?
+    unless val.nil?
       begin
         indent = (flags.is_a?(Hash) ? (flags['indent'] || flags[:indent]) : nil) || 2
         str = _json_stringify(val, indent, 0)
-        if str.nil?
-          str = 'null'
-        end
+        str = 'null' if str.nil?
         offset = (flags.is_a?(Hash) ? (flags['offset'] || flags[:offset]) : nil) || 0
-        if offset > 0
+        if offset.positive?
           lines = str.split("\n")
-          first = lines[0] || ''
-          rest = lines[1..-1] || []
+          lines[0] || ''
+          rest = lines[1..] || []
           rest_indented = rest.map { |l| (' ' * offset) + l }
-          str = "{\n" + rest_indented.join("\n")
+          str = "{\n#{rest_indented.join("\n")}"
         end
-      rescue => e
+      rescue StandardError
         str = '__JSONIFY_FAILED__'
       end
     end
@@ -501,8 +516,8 @@ module VoxgigStruct
   # Mimic JSON.stringify(val, null, indent) from JavaScript
   def self._json_stringify(val, indent, depth)
     return 'null' if val.nil?
-    return val.to_s if val == true || val == false
-    return val.is_a?(Float) ? val.to_s : val.to_s if val.is_a?(Numeric)
+    return val.to_s if [true, false].include?(val)
+    return val.to_s if val.is_a?(Numeric)
     return JSON.generate(val) if val.is_a?(String)
 
     ind = ' ' * indent
@@ -511,14 +526,16 @@ module VoxgigStruct
 
     if islist(val)
       return '[]' if val.empty?
+
       items_str = val.map { |v| current_indent + _json_stringify(v, indent, depth + 1) }
-      "[\n" + items_str.join(",\n") + "\n" + closing_indent + "]"
+      "[\n#{items_str.join(",\n")}\n#{closing_indent}]"
     elsif ismap(val)
       return '{}' if val.empty?
-      pairs = val.keys.sort.map { |k|
-        current_indent + JSON.generate(k) + ': ' + _json_stringify(val[k], indent, depth + 1)
-      }
-      "{\n" + pairs.join(",\n") + "\n" + closing_indent + "}"
+
+      pairs = val.keys.sort.map do |k|
+        "#{current_indent}#{JSON.generate(k)}: #{_json_stringify(val[k], indent, depth + 1)}"
+      end
+      "{\n#{pairs.join(",\n")}\n#{closing_indent}}"
     elsif isfunc(val)
       'null'
     else
@@ -542,6 +559,7 @@ module VoxgigStruct
 
   def self.replace(s, from, to)
     return s.to_s unless s.is_a?(String)
+
     if from.is_a?(Regexp)
       s.gsub(from, to.to_s)
     else
@@ -551,6 +569,7 @@ module VoxgigStruct
 
   def self.keysof(val)
     return [] unless isnode(val)
+
     if ismap(val)
       val.keys.sort
     elsif islist(val)
@@ -565,29 +584,33 @@ module VoxgigStruct
     _getprop(val, key, UNDEF) != UNDEF
   end
 
-  def self.joinurl(parts)
+  # NOTE: this is a second, simpler joinurl definition that intentionally
+  # overrides the join-based one above; kept for cross-language source parity.
+  def self.joinurl(parts) # rubocop:disable Lint/DuplicateMethods
     parts.compact.map.with_index do |s, i|
       s = s.to_s
       if i.zero?
-        s.sub(/\/+$/, '')
+        s.sub(%r{/+$}, '')
       else
-        s.sub(/([^\/])\/+/, '\1/').sub(/^\/+/, '').sub(/\/+$/, '')
+        s.sub(%r{([^/])/+}, '\1/').sub(%r{^/+}, '').sub(%r{/+$}, '')
       end
-    end.reject { |s| s.empty? }.join('/')
+    end.reject(&:empty?).join('/')
   end
 
   # Get type name string from type bitfield value.
   def self._clz32(n)
     return 32 if n <= 0
+
     31 - (n.bit_length - 1)
   end
 
   def self.typename(t)
     t = t.to_i
     idx = _clz32(t)
-    return TYPENAME[0] if idx < 0 || idx >= TYPENAME.length
+    return TYPENAME[0] if idx.negative? || idx >= TYPENAME.length
+
     r = TYPENAME[idx]
-    (r.nil? || r == S_MT) ? TYPENAME[0] : r
+    r.nil? || r == S_MT ? TYPENAME[0] : r
   end
 
   # Determine the type of a value as a bitfield integer.
@@ -595,37 +618,23 @@ module VoxgigStruct
     return T_noval if value.equal?(UNDEF)
     return T_scalar | T_null if value.nil?
 
-    if value == true || value == false
-      return T_scalar | T_boolean
-    end
+    return T_scalar | T_boolean if [true, false].include?(value)
 
-    if isfunc(value)
-      return T_scalar | T_function
-    end
+    return T_scalar | T_function if isfunc(value)
 
-    if value.is_a?(Integer)
-      return T_scalar | T_number | T_integer
-    end
+    return T_scalar | T_number | T_integer if value.is_a?(Integer)
 
     if value.is_a?(Float)
       return value.nan? ? T_noval : (T_scalar | T_number | T_decimal)
     end
 
-    if value.is_a?(String)
-      return T_scalar | T_string
-    end
+    return T_scalar | T_string if value.is_a?(String)
 
-    if value.is_a?(Symbol)
-      return T_scalar | T_symbol
-    end
+    return T_scalar | T_symbol if value.is_a?(Symbol)
 
-    if islist(value)
-      return T_node | T_list
-    end
+    return T_node | T_list if islist(value)
 
-    if ismap(value)
-      return T_node | T_map
-    end
+    return T_node | T_map if ismap(value)
 
     T_any
   end
@@ -637,12 +646,8 @@ module VoxgigStruct
   # path MUST clone it (e.g. `path.dup`); the contents will otherwise be
   # overwritten by subsequent visits.
   def self.walk(val, before = nil, after = nil, maxdepth = nil, key: nil, parent: nil, path: nil, pool: nil)
-    if pool.nil?
-      pool = [[]]
-    end
-    if path.nil?
-      path = pool[0]
-    end
+    pool = [[]] if pool.nil?
+    path = pool[0] if path.nil?
 
     depth = path.length
 
@@ -651,10 +656,8 @@ module VoxgigStruct
 
     out = _before.nil? ? val : _before.call(key, val, parent, path)
 
-    md = (maxdepth.is_a?(Numeric) && maxdepth >= 0) ? maxdepth : MAXDEPTH
-    if md == 0 || (md > 0 && md <= depth)
-      return out
-    end
+    md = maxdepth.is_a?(Numeric) && maxdepth >= 0 ? maxdepth : MAXDEPTH
+    return out if md.zero? || (md.positive? && md <= depth)
 
     if isnode(out)
       child_depth = depth + 1
@@ -698,24 +701,24 @@ module VoxgigStruct
     if ismap(a) && ismap(b)
       merged = a.dup
       b.each do |k, v|
-        if merged.key?(k)
-          merged[k] = deep_merge(merged[k], v)
-        else
-          merged[k] = v
-        end
+        merged[k] = if merged.key?(k)
+                      deep_merge(merged[k], v)
+                    else
+                      v
+                    end
       end
       merged
     elsif islist(a) && islist(b)
       max_len = [a.size, b.size].max
       merged = []
       (0...max_len).each do |i|
-        if i < a.size && i < b.size
-          merged[i] = deep_merge(a[i], b[i])
-        elsif i < b.size
-          merged[i] = b[i]
-        else
-          merged[i] = a[i]
-        end
+        merged[i] = if i < a.size && i < b.size
+                      deep_merge(a[i], b[i])
+                    elsif i < b.size
+                      b[i]
+                    else
+                      a[i]
+                    end
       end
       merged
     else
@@ -733,7 +736,7 @@ module VoxgigStruct
     return val unless islist(val)
 
     lenlist = val.length
-    return nil if lenlist == 0
+    return nil if lenlist.zero?
     return val[0] if lenlist == 1
 
     out = getprop(val, 0, {})
@@ -741,10 +744,7 @@ module VoxgigStruct
     (1...lenlist).each do |oI|
       obj = val[oI]
 
-      if !isnode(obj)
-        # Non-nodes (including nil) override directly
-        out = obj
-      else
+      if isnode(obj)
         cur = [out]
         dst = [out]
 
@@ -752,18 +752,18 @@ module VoxgigStruct
           pI = path.length
 
           if md <= pI
-            while cur.length <= pI; cur << nil; end
+            cur << nil while cur.length <= pI
             cur[pI] = v
-            setprop(cur[pI - 1], key, v) if pI > 0 && pI - 1 < cur.length
-            next nil  # stop descending
+            setprop(cur[pI - 1], key, v) if pI.positive? && pI - 1 < cur.length
+            next nil # stop descending
           elsif !isnode(v)
             cur[pI] = v
           else
             # Extend arrays as needed
-            while dst.length <= pI; dst << nil; end
-            while cur.length <= pI; cur << nil; end
+            dst << nil while dst.length <= pI
+            cur << nil while cur.length <= pI
 
-            dst[pI] = pI > 0 ? getprop(dst[pI - 1], key) : dst[pI]
+            dst[pI] = pI.positive? ? getprop(dst[pI - 1], key) : dst[pI]
             tval = dst[pI]
 
             if tval.nil?
@@ -772,7 +772,7 @@ module VoxgigStruct
               cur[pI] = tval
             else
               cur[pI] = v
-              v = nil  # stop descending
+              v = nil # stop descending
             end
           end
 
@@ -782,21 +782,24 @@ module VoxgigStruct
         after_fn = lambda { |key, _v, _parent, path|
           cI = path.length
           if cI < 1
-            next (cur.length > 0 ? cur[0] : _v)
+            next (cur.length.positive? ? cur[0] : _v)
           end
 
-          target = (cI - 1 < cur.length) ? cur[cI - 1] : nil
-          value = (cI < cur.length) ? cur[cI] : nil
+          target = cI - 1 < cur.length ? cur[cI - 1] : nil
+          value = cI < cur.length ? cur[cI] : nil
 
           setprop(target, key, value) if target
           value
         }
 
         out = walk(obj, before_fn, after_fn)
+      else
+        # Non-nodes (including nil) override directly
+        out = obj
       end
     end
 
-    if md == 0
+    if md.zero?
       out = getelem(val, -1)
       out = islist(out) ? [] : ismap(out) ? {} : out
     end
@@ -836,22 +839,25 @@ module VoxgigStruct
       dpath = injdef.dpath
       handler = injdef.handler
     else
-      base = nil; dparent = nil; inj_meta = nil; inj_key = nil; dpath = nil; handler = nil
+      base = nil
+      dparent = nil
+      inj_meta = nil
+      inj_key = nil
+      dpath = nil
+      handler = nil
     end
 
     src = base ? _getprop(store, base, store) : store
     numparts = parts.length
 
     # An empty path (incl empty string) just finds the src.
-    if path.nil? || store.nil? || (numparts == 1 && parts[0] == S_MT) || numparts == 0
+    if path.nil? || store.nil? || (numparts == 1 && parts[0] == S_MT) || numparts.zero?
       val = src
-    elsif numparts > 0
+    elsif numparts.positive?
       # Check for $ACTIONs
-      if numparts == 1
-        val = _getprop(store, parts[0], UNDEF)
-      end
+      val = _getprop(store, parts[0], UNDEF) if numparts == 1
 
-      if !isfunc(val)
+      unless isfunc(val)
         val = src
 
         # Check for meta path syntax
@@ -884,17 +890,17 @@ module VoxgigStruct
               pI += 1
             end
 
-            if injdef && ascends > 0
+            if injdef && ascends.positive?
               ascends -= 1 if pI == parts.length - 1
-              if ascends == 0
+              if ascends.zero?
                 val = dparent
               else
-                fullpath = flatten([slice(dpath, 0 - ascends), parts[(pI + 1)..-1]])
-                if dpath.is_a?(Array) && ascends <= dpath.length
-                  val = getpath(store, fullpath)
-                else
-                  val = UNDEF
-                end
+                fullpath = flatten([slice(dpath, 0 - ascends), parts[(pI + 1)..]])
+                val = if dpath.is_a?(Array) && ascends <= dpath.length
+                        getpath(store, fullpath)
+                      else
+                        UNDEF
+                      end
                 break
               end
             else
@@ -917,17 +923,16 @@ module VoxgigStruct
     val.equal?(UNDEF) ? nil : val
   end
 
+  S_BKEY = '`$KEY`'.freeze
+  S_BANNO = '`$ANNO`'.freeze
+  S_BEXACT = '`$EXACT`'.freeze
+  S_BVAL = '`$VAL`'.freeze
+  S_DSPEC = '$SPEC'.freeze
 
-  S_BKEY = '`$KEY`'
-  S_BANNO = '`$ANNO`'
-  S_BEXACT = '`$EXACT`'
-  S_BVAL = '`$VAL`'
-  S_DSPEC = '$SPEC'
-
-  R_FULL_INJECT = /\A`(\$[A-Z]+|[^`]*)[0-9]*`\z/
-  R_PART_INJECT = /`([^`]*)`/
-  R_META_PATH = /\A([^$]+)\$([=~])(.+)\z/
-  R_DOUBLE_DOLLAR = /\$\$/
+  R_FULL_INJECT = /\A`(\$[A-Z]+|[^`]*)[0-9]*`\z/.freeze
+  R_PART_INJECT = /`([^`]*)`/.freeze
+  R_META_PATH = /\A([^$]+)\$([=~])(.+)\z/.freeze
+  R_DOUBLE_DOLLAR = /\$\$/.freeze
 
   # --- _injectstr: Resolve backtick expressions in strings ---
   def self._injectstr(val, store, inj = nil)
@@ -941,19 +946,15 @@ module VoxgigStruct
       inj.full = true if inj
 
       pathref = m[1]
-      if pathref.length > 3
-        pathref = pathref.gsub('$BT', S_BT).gsub('$DS', S_DS)
-      end
+      pathref = pathref.gsub('$BT', S_BT).gsub('$DS', S_DS) if pathref.length > 3
 
       out = getpath(store, pathref, inj)
 
     else
       # Partial string injection: "prefix`ref`suffix"
       out = val.gsub(R_PART_INJECT) do |_match|
-        ref = $1
-        if ref.length > 3
-          ref = ref.gsub('$BT', S_BT).gsub('$DS', S_DS)
-        end
+        ref = ::Regexp.last_match(1)
+        ref = ref.gsub('$BT', S_BT).gsub('$DS', S_DS) if ref.length > 3
 
         inj.full = false if inj
 
@@ -972,7 +973,7 @@ module VoxgigStruct
         else
           begin
             JSON.generate(found)
-          rescue
+          rescue StandardError
             stringify(found)
           end
         end
@@ -1021,7 +1022,7 @@ module VoxgigStruct
     # Descend into node.
     if isnode(val)
       if ismap(val)
-        normal = val.keys.select { |k| !k.include?(S_DS) }.sort
+        normal = val.keys.reject { |k| k.include?(S_DS) }.sort
         transforms = val.keys.select { |k| k.include?(S_DS) }.sort
         nodekeys = normal + transforms
       else
@@ -1039,7 +1040,7 @@ module VoxgigStruct
         nkI = childinj.keyI
         nodekeys = childinj.keys
 
-        if !prekey.nil?
+        unless prekey.nil?
           childinj.val = getprop(val, prekey)
           childinj.mode = S_MVAL
 
@@ -1074,24 +1075,20 @@ module VoxgigStruct
 
     inj.val = val
 
-    if inj.prior.nil? && inj.root && haskey(inj.root, S_DTOP)
-      return getprop(inj.root, S_DTOP)
-    end
-    if inj.key == S_DTOP && inj.parent && haskey(inj.parent, S_DTOP)
-      return getprop(inj.parent, S_DTOP)
-    end
+    return getprop(inj.root, S_DTOP) if inj.prior.nil? && inj.root && haskey(inj.root, S_DTOP)
+    return getprop(inj.parent, S_DTOP) if inj.key == S_DTOP && inj.parent && haskey(inj.parent, S_DTOP)
+
     val
   end
 
   # Helper to read a property from injdef (Hash or object)
   def self._injdef_prop(injdef, key)
     return nil if injdef.nil?
+
     if injdef.is_a?(Hash)
       injdef[key] || injdef[key.to_sym]
     elsif injdef.respond_to?(key.to_sym)
       injdef.send(key.to_sym)
-    else
-      nil
     end
   end
 
@@ -1124,11 +1121,11 @@ module VoxgigStruct
     if mode.start_with?('key')
       out = key
     else
-      if !isnode(inj.dparent)
-        out = (inj.path.length != 2) ? inj.dparent : nil
-      else
-        out = getprop(inj.dparent, key)
-      end
+      out = if isnode(inj.dparent)
+              getprop(inj.dparent, key)
+            else
+              inj.path.length == 2 ? nil : inj.dparent
+            end
       inj.setval(out)
     end
     out
@@ -1148,9 +1145,7 @@ module VoxgigStruct
       return getprop(inj.dparent, keyspec)
     end
 
-    if ismap(inj.dparent) && inj.key && haskey(inj.dparent, inj.key)
-      return getprop(inj.dparent, inj.key)
-    end
+    return getprop(inj.dparent, inj.key) if ismap(inj.dparent) && inj.key && haskey(inj.dparent, inj.key)
 
     meta = getprop(parent, S_BANNO)
     getprop(meta, S_KEY, getprop(path, path.length - 2))
@@ -1175,19 +1170,19 @@ module VoxgigStruct
       return key
     elsif mode == S_MKEYPOST
       args = getprop(parent, key)
-      args = islist(args) ? args : [args]
+      args = [args] unless islist(args)
       inj.setval(nil)
       mergelist = [parent] + args + [clone(parent)]
       merge(mergelist)
       return key
     elsif mode == S_MVAL && islist(parent)
-      if strkey(inj.key) == '0' && size(parent) > 0
-        parent.delete_at(0)
-        return getprop(parent, 0)
-      else
-        return getprop(parent, inj.key)
-      end
+      return getprop(parent, inj.key) unless strkey(inj.key) == '0' && size(parent).positive?
+
+      parent.delete_at(0)
+      return getprop(parent, 0)
+
     end
+
     nil
   end
 
@@ -1198,7 +1193,7 @@ module VoxgigStruct
     parent = inj.parent
     nodes_ = inj.nodes
 
-    keys_.replace(keys_[0, 1]) if keys_
+    keys_&.replace(keys_[0, 1])
 
     return nil if mode != S_MVAL || !path || !nodes_
 
@@ -1218,7 +1213,7 @@ module VoxgigStruct
         tval = src.map { clone(child_template) }
       else
         tval = []
-        src.each do |k, v|
+        src.each_key do |k|
           cc = clone(child_template)
           setprop(cc, S_BANNO, { S_KEY => k }) if ismap(cc)
           tval << cc
@@ -1226,7 +1221,7 @@ module VoxgigStruct
       end
       tcurrent = ismap(src) ? src.values : src
 
-      if size(tval) > 0
+      if size(tval).positive?
         ckey = getelem(path, -2)
         tpath = path[0...-1]
 
@@ -1234,19 +1229,19 @@ module VoxgigStruct
         if srcpath.is_a?(String) && !srcpath.empty?
           srcpath.split(S_DT).each { |p| dpath << p if p != S_MT }
         end
-        dpath << ('$:' + ckey.to_s) if ckey
+        dpath << "$:#{ckey}" if ckey
 
         tcur = { ckey => tcurrent }
 
         if size(tpath) > 1
           pkey = getelem(path, -3, S_DTOP)
           tcur = { pkey => tcur }
-          dpath << ('$:' + pkey.to_s)
+          dpath << "$:#{pkey}"
         end
 
         tinj = inj.child(0, ckey ? [ckey] : [])
         tinj.path = tpath
-        tinj.nodes = nodes_.length > 0 ? nodes_[0...-1] : []
+        tinj.nodes = nodes_.length.positive? ? nodes_[0...-1] : []
         tinj.parent = getelem(tinj.nodes, -1)
         setprop(tinj.parent, ckey, tval) if ckey && tinj.parent
         tinj.val = tval
@@ -1259,7 +1254,7 @@ module VoxgigStruct
     end
 
     setprop(target, tkey, rval)
-    islist(rval) && size(rval) > 0 ? rval[0] : nil
+    islist(rval) && size(rval).positive? ? rval[0] : nil
   end
 
   def self.transform_PACK(inj, _val, _ref, store)
@@ -1279,12 +1274,12 @@ module VoxgigStruct
 
     tkey = getelem(path, -2)
     pathsize = size(path)
-    target = getelem(nodes_, pathsize - 2, lambda { getelem(nodes_, pathsize - 1) })
+    target = getelem(nodes_, pathsize - 2, -> { getelem(nodes_, pathsize - 1) })
 
     srcstore = getprop(store, inj.base, store)
     src = getpath(srcstore, srcpath, inj)
 
-    if !islist(src)
+    unless islist(src)
       if ismap(src)
         new_src = []
         items(src).each do |item|
@@ -1310,11 +1305,11 @@ module VoxgigStruct
 
       k = srckey
       if keypath
-        if keypath.is_a?(String) && keypath.start_with?(S_BT)
-          k = inject(keypath, merge([{}, store, { S_DTOP => srcnode }], 1))
-        else
-          k = getpath(srcnode, keypath, inj)
-        end
+        k = if keypath.is_a?(String) && keypath.start_with?(S_BT)
+              inject(keypath, merge([{}, store, { S_DTOP => srcnode }], 1))
+            else
+              getpath(srcnode, keypath, inj)
+            end
       end
 
       tchild = clone(child)
@@ -1330,28 +1325,28 @@ module VoxgigStruct
 
     rval = {}
 
-    if !isempty(tval)
+    unless isempty(tval)
       tsrc = {}
       src.each_with_index do |n, i|
-        if keypath.nil?
-          kn = i
-        elsif keypath.is_a?(String) && keypath.start_with?(S_BT)
-          kn = inject(keypath, merge([{}, store, { S_DTOP => n }], 1))
-        else
-          kn = getpath(n, keypath, inj)
-        end
+        kn = if keypath.nil?
+               i
+             elsif keypath.is_a?(String) && keypath.start_with?(S_BT)
+               inject(keypath, merge([{}, store, { S_DTOP => n }], 1))
+             else
+               getpath(n, keypath, inj)
+             end
         setprop(tsrc, kn, n)
       end
 
       tpath = slice(inj.path, -1)
       ckey = getelem(inj.path, -2)
-      dpath = flatten([S_DTOP, srcpath.to_s.split(S_DT), '$:' + ckey.to_s])
+      dpath = flatten([S_DTOP, srcpath.to_s.split(S_DT), "$:#{ckey}"])
 
       tcur = { ckey => tsrc }
       if size(tpath) > 1
         pkey = getelem(inj.path, -3, S_DTOP)
         tcur = { pkey => tcur }
-        dpath << ('$:' + pkey.to_s)
+        dpath << "$:#{pkey}"
       end
 
       tinj = inj.child(0, [ckey])
@@ -1372,7 +1367,7 @@ module VoxgigStruct
 
   def self.transform_REF(inj, _val, _ref, store)
     nodes_ = inj.nodes
-    return nil if S_MVAL != inj.mode
+    return nil if inj.mode != S_MVAL
 
     refpath = getprop(inj.parent, 1)
     inj.keyI = size(inj.keys)
@@ -1382,9 +1377,9 @@ module VoxgigStruct
 
     dpath = slice(inj.path, 1)
     ref = getpath(spec, refpath, {
-      'dpath' => dpath,
-      'dparent' => getpath(spec, dpath),
-    })
+                    'dpath' => dpath,
+                    'dparent' => getpath(spec, dpath)
+                  })
 
     tref = clone(ref)
 
@@ -1409,30 +1404,32 @@ module VoxgigStruct
     end
 
     tkey = getelem(inj.path, -2)
-    target = getelem(nodes_, -2, lambda { getelem(nodes_, -1) })
+    target = getelem(nodes_, -2, -> { getelem(nodes_, -1) })
     if rval.nil?
       delprop(target, tkey)
     else
       setprop(target, tkey, rval)
     end
 
-    if islist(target) && inj.prior
-      inj.prior.keyI -= 1
-    end
+    inj.prior.keyI -= 1 if islist(target) && inj.prior
 
     _val
   end
 
   FORMATTER = {
-    'identity' => lambda { |_k, v, *_a| v },
-    'upper' => lambda { |_k, v, *_a| isnode(v) ? v : (v.nil? ? 'null' : '' + v.to_s).upcase },
-    'lower' => lambda { |_k, v, *_a| isnode(v) ? v : (v.nil? ? 'null' : '' + v.to_s).downcase },
-    'string' => lambda { |_k, v, *_a| isnode(v) ? v : (v.nil? ? 'null' : '' + v.to_s) },
+    'identity' => ->(_k, v, *_a) { v },
+    'upper' => ->(_k, v, *_a) { isnode(v) ? v : (v.nil? ? 'null' : v.to_s).upcase },
+    'lower' => ->(_k, v, *_a) { isnode(v) ? v : (v.nil? ? 'null' : v.to_s).downcase },
+    'string' => ->(_k, v, *_a) { isnode(v) ? v : (v.nil? ? 'null' : v.to_s) },
     'number' => lambda { |_k, v, *_a|
       if isnode(v)
         v
       else
-        n = Float(v) rescue 0
+        n = begin
+          Float(v)
+        rescue StandardError
+          0
+        end
         n
       end
     },
@@ -1440,36 +1437,40 @@ module VoxgigStruct
       if isnode(v)
         v
       else
-        n = Integer(Float(v)) rescue 0
+        n = begin
+          Integer(Float(v))
+        rescue StandardError
+          0
+        end
         n
       end
     },
     'concat' => lambda { |k, v, *_a|
       if k.nil? && islist(v)
-        items(v, lambda { |n| isnode(n[1]) ? '' : (n[1].nil? ? 'null' : '' + n[1].to_s) }).join('')
+        items(v, ->(n) { isnode(n[1]) ? '' : (n[1].nil? ? 'null' : n[1].to_s) }).join
       else
         v
       end
-    },
-  }
+    }
+  }.freeze
 
   def self.transform_FORMAT(inj, _val, _ref, store)
     slice(inj.keys, 0, 1, true)
-    return nil if S_MVAL != inj.mode
+    return nil if inj.mode != S_MVAL
 
     name = getprop(inj.parent, 1)
     child = getprop(inj.parent, 2)
 
     tkey = getelem(inj.path, -2)
-    target = getelem(inj.nodes, -2, lambda { getelem(inj.nodes, -1) })
+    target = getelem(inj.nodes, -2, -> { getelem(inj.nodes, -1) })
 
     cinj = injectChild(child, store, inj)
     resolved = cinj.val
 
-    formatter = (0 < (T_function & typify(name))) ? name : FORMATTER[name]
+    formatter = T_function.anybits?(typify(name)) ? name : FORMATTER[name]
 
     if formatter.nil?
-      inj.errs << ('$FORMAT: unknown format: ' + name.to_s + '.')
+      inj.errs << "$FORMAT: unknown format: #{name}."
       return nil
     end
 
@@ -1486,12 +1487,12 @@ module VoxgigStruct
     args_list = islist(args) ? args : []
     err, apply, child = injectorArgs([T_function, T_any], args_list)
     if err
-      inj.errs << ('$' + ijname + ': ' + err)
+      inj.errs << "$#{ijname}: #{err}"
       return nil
     end
 
     tkey = getelem(inj.path, -2)
-    target = getelem(inj.nodes, -2, lambda { getelem(inj.nodes, -1) })
+    target = getelem(inj.nodes, -2, -> { getelem(inj.nodes, -1) })
 
     cinj = injectChild(child, store, inj)
     resolved = cinj.val
@@ -1504,16 +1505,16 @@ module VoxgigStruct
   def self.checkPlacement(modes, ijname, parentTypes, inj)
     mode_num = { S_MKEYPRE => M_KEYPRE, S_MKEYPOST => M_KEYPOST, S_MVAL => M_VAL }
     mode_int = mode_num[inj.mode] || 0
-    if 0 == (modes & mode_int)
-      inj.errs << '$' + ijname + ': invalid placement as ' + (PLACEMENT[mode_int] || '') +
-        ', expected: ' + [M_KEYPRE, M_KEYPOST, M_VAL].select { |m| modes & m != 0 }.map { |m| PLACEMENT[m] }.join(',') + '.'
+    if modes.nobits?(mode_int)
+      expected = [M_KEYPRE, M_KEYPOST, M_VAL].reject { |m| modes.nobits?(m) }
+      expected = expected.map { |m| PLACEMENT[m] }.join(',')
+      inj.errs << "$#{ijname}: invalid placement as #{PLACEMENT[mode_int] || ''}, expected: #{expected}."
       return false
     end
-    if !isempty(parentTypes)
+    unless isempty(parentTypes)
       ptype = typify(inj.parent)
-      if 0 == (parentTypes & ptype)
-        inj.errs << '$' + ijname + ': invalid placement in parent ' + typename(ptype) +
-          ', expected: ' + typename(parentTypes) + '.'
+      if parentTypes.nobits?(ptype)
+        inj.errs << "$#{ijname}: invalid placement in parent #{typename(ptype)}, expected: #{typename(parentTypes)}."
         return false
       end
     end
@@ -1527,10 +1528,10 @@ module VoxgigStruct
     (0...numargs).each do |argI|
       arg = args[argI]
       argType = typify(arg)
-      if 0 == (argTypes[argI] & argType)
-        found[0] = 'invalid argument: ' + stringify(arg, 22) +
-          ' (' + typename(argType) + ' at position ' + (1 + argI).to_s +
-          ') is not of type: ' + typename(argTypes[argI]) + '.'
+      if argTypes[argI].nobits?(argType)
+        found[0] =
+          "invalid argument: #{stringify(arg, 22)} (#{typename(argType)} at position #{1 + argI}) " \
+          "is not of type: #{typename(argTypes[argI])}."
         break
       end
       found[1 + argI] = arg
@@ -1579,16 +1580,16 @@ module VoxgigStruct
     end
 
     data_clone = merge([
-      isempty(extraData) ? nil : clone(extraData),
-      clone(data)
-    ])
+                         isempty(extraData) ? nil : clone(extraData),
+                         clone(data)
+                       ])
 
     store = {
       S_DTOP => data_clone,
-      S_DSPEC => lambda { origspec },
-      '$BT' => lambda { |*_a| S_BT },
-      '$DS' => lambda { |*_a| S_DS },
-      '$WHEN' => lambda { |*_a| Time.now.iso8601 },
+      S_DSPEC => -> { origspec },
+      '$BT' => ->(*_a) { S_BT },
+      '$DS' => ->(*_a) { S_DS },
+      '$WHEN' => ->(*_a) { Time.now.iso8601 },
       '$DELETE' => method(:transform_DELETE),
       '$COPY' => method(:transform_COPY),
       '$KEY' => method(:transform_KEY),
@@ -1599,7 +1600,7 @@ module VoxgigStruct
       '$PACK' => method(:transform_PACK),
       '$REF' => method(:transform_REF),
       '$FORMAT' => method(:transform_FORMAT),
-      '$APPLY' => method(:transform_APPLY),
+      '$APPLY' => method(:transform_APPLY)
     }
     extraTransforms.each { |k, v| store[k] = v }
     store[S_DERRS] = errs
@@ -1610,9 +1611,7 @@ module VoxgigStruct
 
     out = inject(spec, store, injdef)
 
-    if !errs.empty? && !collect
-      raise errs.join(' | ')
-    end
+    raise errs.join(' | ') if !errs.empty? && !collect
 
     out
   end
@@ -1620,53 +1619,53 @@ module VoxgigStruct
   # --- Validators ---
 
   def self._invalidTypeMsg(path, needtype, vt, v, _whence = nil)
-    vs = (v.nil? || v.equal?(UNDEF)) ? 'no value' : stringify(v)
-    'Expected ' +
-      (size(path) > 1 ? ('field ' + pathify(path, 1) + ' to be ') : '') +
-      needtype.to_s + ', but found ' +
-      ((v.nil? || v.equal?(UNDEF)) ? '' : typename(vt) + S_VIZ) + vs + '.'
+    vs = v.nil? || v.equal?(UNDEF) ? 'no value' : stringify(v)
+    "Expected #{if size(path) > 1
+                  "field #{pathify(path,
+                                   1)} to be "
+                end}#{needtype}, but found #{typename(vt) + S_VIZ unless v.nil? || v.equal?(UNDEF)}#{vs}."
   end
 
   def self.validate_STRING(inj, _val = nil, _ref = nil, _store = nil)
     out = getprop(inj.dparent, inj.key)
     t = typify(out)
-    if 0 == (T_string & t)
+    if T_string.nobits?(t)
       inj.errs << _invalidTypeMsg(inj.path, S_string, t, out, 'V1010')
       return nil
     end
     if out == S_MT
-      inj.errs << ('Empty string at ' + pathify(inj.path, 1))
+      inj.errs << "Empty string at #{pathify(inj.path, 1)}"
       return nil
     end
     out
   end
 
   TYPE_CHECKS = {
-    S_number => lambda { |v| v.is_a?(Numeric) && !(v == true || v == false) },
-    S_integer => lambda { |v| v.is_a?(Integer) && !(v == true || v == false) },
-    S_decimal => lambda { |v| v.is_a?(Float) },
-    S_boolean => lambda { |v| v == true || v == false },
-    S_null => lambda { |v| v.nil? },
-    S_nil => lambda { |v| v.equal?(UNDEF) },
-    S_map => lambda { |v| v.is_a?(Hash) },
-    S_list => lambda { |v| v.is_a?(Array) },
-    S_function => lambda { |v| v.respond_to?(:call) },
+    S_number => ->(v) { v.is_a?(Numeric) && ![true, false].include?(v) },
+    S_integer => ->(v) { v.is_a?(Integer) && ![true, false].include?(v) },
+    S_decimal => ->(v) { v.is_a?(Float) },
+    S_boolean => ->(v) { [true, false].include?(v) },
+    S_null => lambda(&:nil?),
+    S_nil => ->(v) { v.equal?(UNDEF) },
+    S_map => ->(v) { v.is_a?(Hash) },
+    S_list => ->(v) { v.is_a?(Array) },
+    S_function => ->(v) { v.respond_to?(:call) },
     S_instance => lambda { |v|
       !v.is_a?(Hash) && !v.is_a?(Array) && !v.is_a?(String) &&
-      !v.is_a?(Numeric) && !(v == true || v == false) && !v.nil? && !v.equal?(UNDEF)
-    },
-  }
+        !v.is_a?(Numeric) && ![true, false].include?(v) && !v.nil? && !v.equal?(UNDEF)
+    }
+  }.freeze
 
   def self.validate_TYPE(inj, _val = nil, ref = nil, _store = nil)
-    tname = (ref.is_a?(String) && ref.length > 1) ? ref[1..-1].downcase : S_any
+    tname = ref.is_a?(String) && ref.length > 1 ? ref[1..].downcase : S_any
     idx = TYPENAME.index(tname)
     typev = idx ? (1 << (31 - idx)) : 0
-    typev = typev | T_null if tname == S_nil
+    typev |= T_null if tname == S_nil
 
     out = getprop(inj.dparent, inj.key)
     t = typify(out)
 
-    if 0 == (t & typev)
+    if t.nobits?(typev)
       inj.errs << _invalidTypeMsg(inj.path, tname, t, out, 'V1001')
       return nil
     end
@@ -1684,7 +1683,7 @@ module VoxgigStruct
     path = inj.path
     keys = inj.keys
 
-    if S_MKEYPRE == mode
+    if mode == S_MKEYPRE
       childtm = getprop(parent, key)
       pkey = getelem(path, -2)
       tval = getprop(inj.dparent, pkey)
@@ -1705,8 +1704,8 @@ module VoxgigStruct
       return nil
     end
 
-    if S_MVAL == mode
-      if !islist(parent)
+    if mode == S_MVAL
+      unless islist(parent)
         inj.errs << 'Invalid $CHILD as value'
         return nil
       end
@@ -1718,7 +1717,7 @@ module VoxgigStruct
         return nil
       end
 
-      if !islist(inj.dparent)
+      unless islist(inj.dparent)
         inj.errs << _invalidTypeMsg(path[0...-1], S_list, typify(inj.dparent), inj.dparent, 'V0230')
         inj.keyI = size(parent)
         return inj.dparent
@@ -1740,48 +1739,47 @@ module VoxgigStruct
     parent = inj.parent
     keyI = inj.keyI
 
-    if S_MVAL == mode
-      if !islist(parent) || 0 != keyI
-        inj.errs << ('The $ONE validator at field ' + pathify(inj.path, 1, 1) +
-          ' must be the first element of an array.')
-        return nil
-      end
+    return unless mode == S_MVAL
 
-      inj.keyI = size(inj.keys)
-      inj.setval(inj.dparent, 2)
-      inj.path = inj.path[0...-1]
-      inj.key = getelem(inj.path, -1)
-
-      tvals = parent[1..-1]
-      if size(tvals) == 0
-        inj.errs << ('The $ONE validator at field ' + pathify(inj.path, 1, 1) +
-          ' must have at least one argument.')
-        return nil
-      end
-
-      tvals.each do |tval|
-        terrs = []
-        vstore = merge([{}, store], 1)
-        vstore[S_DTOP] = inj.dparent
-
-        vcurrent = validate(inj.dparent, tval, {
-          'extra' => vstore,
-          'errs' => terrs,
-          'meta' => inj.meta,
-        })
-
-        inj.setval(vcurrent, -2)
-        return nil if size(terrs) == 0
-      end
-
-      valdesc = items(tvals).map { |n| stringify(n[1]) }.join(', ')
-      valdesc = valdesc.gsub(/`\$([A-Z]+)`/) { $1.downcase }
-
-      inj.errs << _invalidTypeMsg(
-        inj.path,
-        (size(tvals) > 1 ? 'one of ' : '') + valdesc,
-        typify(inj.dparent), inj.dparent, 'V0210')
+    if !islist(parent) || keyI != 0
+      inj.errs << "The $ONE validator at field #{pathify(inj.path, 1, 1)} must be the first element of an array."
+      return nil
     end
+
+    inj.keyI = size(inj.keys)
+    inj.setval(inj.dparent, 2)
+    inj.path = inj.path[0...-1]
+    inj.key = getelem(inj.path, -1)
+
+    tvals = parent[1..]
+    if size(tvals).zero?
+      inj.errs << "The $ONE validator at field #{pathify(inj.path, 1, 1)} must have at least one argument."
+      return nil
+    end
+
+    tvals.each do |tval|
+      terrs = []
+      vstore = merge([{}, store], 1)
+      vstore[S_DTOP] = inj.dparent
+
+      vcurrent = validate(inj.dparent, tval, {
+                            'extra' => vstore,
+                            'errs' => terrs,
+                            'meta' => inj.meta
+                          })
+
+      inj.setval(vcurrent, -2)
+      return nil if size(terrs).zero?
+    end
+
+    valdesc = items(tvals).map { |n| stringify(n[1]) }.join(', ')
+    valdesc = valdesc.gsub(/`\$([A-Z]+)`/) { ::Regexp.last_match(1).downcase }
+
+    inj.errs << _invalidTypeMsg(
+      inj.path,
+      (size(tvals) > 1 ? 'one of ' : '') + valdesc,
+      typify(inj.dparent), inj.dparent, 'V0210'
+    )
   end
 
   def self.validate_EXACT(inj, _val = nil, _ref = nil, _store = nil)
@@ -1790,10 +1788,9 @@ module VoxgigStruct
     key = inj.key
     keyI = inj.keyI
 
-    if S_MVAL == mode
-      if !islist(parent) || 0 != keyI
-        inj.errs << ('The $EXACT validator at field ' + pathify(inj.path, 1, 1) +
-          ' must be the first element of an array.')
+    if mode == S_MVAL
+      if !islist(parent) || keyI != 0
+        inj.errs << "The $EXACT validator at field #{pathify(inj.path, 1, 1)} must be the first element of an array."
         return nil
       end
 
@@ -1802,10 +1799,9 @@ module VoxgigStruct
       inj.path = inj.path[0...-1]
       inj.key = getelem(inj.path, -1)
 
-      tvals = parent[1..-1]
-      if size(tvals) == 0
-        inj.errs << ('The $EXACT validator at field ' + pathify(inj.path, 1, 1) +
-          ' must have at least one argument.')
+      tvals = parent[1..]
+      if size(tvals).zero?
+        inj.errs << "The $EXACT validator at field #{pathify(inj.path, 1, 1)} must have at least one argument."
         return nil
       end
 
@@ -1820,13 +1816,13 @@ module VoxgigStruct
       end
 
       valdesc = items(tvals).map { |n| stringify(n[1]) }.join(', ')
-      valdesc = valdesc.gsub(/`\$([A-Z]+)`/) { $1.downcase }
+      valdesc = valdesc.gsub(/`\$([A-Z]+)`/) { ::Regexp.last_match(1).downcase }
 
       inj.errs << _invalidTypeMsg(
         inj.path,
-        (size(inj.path) > 1 ? '' : 'value ') +
-        'exactly equal to ' + (size(tvals) == 1 ? '' : 'one of ') + valdesc,
-        typify(inj.dparent), inj.dparent, 'V0110')
+        "#{'value ' unless size(inj.path) > 1}exactly equal to #{'one of ' unless size(tvals) == 1}#{valdesc}",
+        typify(inj.dparent), inj.dparent, 'V0110'
+      )
     else
       delprop(parent, key)
     end
@@ -1843,7 +1839,7 @@ module VoxgigStruct
     return if !exact && cval.nil?
 
     ptype = typify(pval)
-    return if 0 < (T_string & ptype) && pval.is_a?(String) && pval.include?(S_DS)
+    return if T_string.anybits?(ptype) && pval.is_a?(String) && pval.include?(S_DS)
 
     ctype = typify(cval)
 
@@ -1853,7 +1849,7 @@ module VoxgigStruct
     end
 
     if ismap(cval)
-      if !ismap(pval)
+      unless ismap(pval)
         inj.errs << _invalidTypeMsg(inj.path, typename(ptype), ctype, cval, 'V0020')
         return
       end
@@ -1861,10 +1857,10 @@ module VoxgigStruct
       ckeys = keysof(cval)
       pkeys = keysof(pval)
 
-      if pkeys.length > 0 && getprop(pval, '`$OPEN`') != true
-        badkeys = ckeys.select { |ck| !haskey(pval, ck) }
-        if badkeys.length > 0
-          inj.errs << ('Unexpected keys at field ' + pathify(inj.path, 1) + S_VIZ + join(badkeys, ', '))
+      if pkeys.length.positive? && getprop(pval, '`$OPEN`') != true
+        badkeys = ckeys.reject { |ck| haskey(pval, ck) }
+        if badkeys.length.positive?
+          inj.errs << "Unexpected keys at field #{pathify(inj.path, 1)}#{S_VIZ}#{join(badkeys, ', ')}"
         end
       else
         merge([pval, cval])
@@ -1872,20 +1868,18 @@ module VoxgigStruct
       end
 
     elsif islist(cval)
-      if !islist(pval)
-        inj.errs << _invalidTypeMsg(inj.path, typename(ptype), ctype, cval, 'V0030')
-      end
+      inj.errs << _invalidTypeMsg(inj.path, typename(ptype), ctype, cval, 'V0030') unless islist(pval)
 
     elsif exact
       # In exact mode, check key existence for nil values
       if cval.nil? && pval.nil?
         # Both nil: only match if key actually exists in data
         if ismap(inj.dparent) && !inj.dparent.key?(key.to_s)
-          inj.errs << ('Value at field ' + pathify(inj.path, 1) + ': key not present.')
+          inj.errs << "Value at field #{pathify(inj.path, 1)}: key not present."
         end
       elsif cval != pval
-        pathmsg = size(inj.path) > 1 ? ('at field ' + pathify(inj.path, 1) + ': ') : ''
-        inj.errs << ('Value ' + pathmsg + cval.to_s + ' should equal ' + pval.to_s + '.')
+        pathmsg = size(inj.path) > 1 ? "at field #{pathify(inj.path, 1)}: " : ''
+        inj.errs << "Value #{pathmsg}#{cval} should equal #{pval}."
       end
 
     else
@@ -1919,44 +1913,42 @@ module VoxgigStruct
     errs = collect ? _injdef_prop(injdef, 'errs') : []
 
     store = merge([
-      {
-        '$DELETE' => nil, '$COPY' => nil, '$KEY' => nil, '$META' => nil,
-        '$MERGE' => nil, '$EACH' => nil, '$PACK' => nil,
+                    {
+                      '$DELETE' => nil, '$COPY' => nil, '$KEY' => nil, '$META' => nil,
+                      '$MERGE' => nil, '$EACH' => nil, '$PACK' => nil,
 
-        '$STRING' => method(:validate_STRING),
-        '$NUMBER' => method(:validate_TYPE),
-        '$INTEGER' => method(:validate_TYPE),
-        '$DECIMAL' => method(:validate_TYPE),
-        '$BOOLEAN' => method(:validate_TYPE),
-        '$NULL' => method(:validate_TYPE),
-        '$NIL' => method(:validate_TYPE),
-        '$MAP' => method(:validate_TYPE),
-        '$LIST' => method(:validate_TYPE),
-        '$FUNCTION' => method(:validate_TYPE),
-        '$INSTANCE' => method(:validate_TYPE),
-        '$ANY' => method(:validate_ANY),
-        '$CHILD' => method(:validate_CHILD),
-        '$ONE' => method(:validate_ONE),
-        '$EXACT' => method(:validate_EXACT),
-      },
-      (extra.nil? ? {} : extra),
-      { S_DERRS => errs },
-    ], 1)
+                      '$STRING' => method(:validate_STRING),
+                      '$NUMBER' => method(:validate_TYPE),
+                      '$INTEGER' => method(:validate_TYPE),
+                      '$DECIMAL' => method(:validate_TYPE),
+                      '$BOOLEAN' => method(:validate_TYPE),
+                      '$NULL' => method(:validate_TYPE),
+                      '$NIL' => method(:validate_TYPE),
+                      '$MAP' => method(:validate_TYPE),
+                      '$LIST' => method(:validate_TYPE),
+                      '$FUNCTION' => method(:validate_TYPE),
+                      '$INSTANCE' => method(:validate_TYPE),
+                      '$ANY' => method(:validate_ANY),
+                      '$CHILD' => method(:validate_CHILD),
+                      '$ONE' => method(:validate_ONE),
+                      '$EXACT' => method(:validate_EXACT)
+                    },
+                    (extra.nil? ? {} : extra),
+                    { S_DERRS => errs }
+                  ], 1)
 
     meta = _injdef_prop(injdef, 'meta') || {}
     setprop(meta, S_BEXACT, getprop(meta, S_BEXACT, false)) if ismap(meta)
 
     out = transform(data, spec, {
-      'meta' => meta,
-      'extra' => store,
-      'modify' => method(:_validation),
-      'handler' => method(:_validatehandler),
-      'errs' => errs,
-    })
+                      'meta' => meta,
+                      'extra' => store,
+                      'modify' => method(:_validation),
+                      'handler' => method(:_validatehandler),
+                      'errs' => errs
+                    })
 
-    if !errs.empty? && !collect
-      raise errs.join(' | ')
-    end
+    raise errs.join(' | ') if !errs.empty? && !collect
 
     out
   end
@@ -1964,7 +1956,7 @@ module VoxgigStruct
   # --- Select operators ---
 
   def self.select_AND(inj, _val, _ref, store)
-    if S_MKEYPRE == inj.mode
+    if inj.mode == S_MKEYPRE
       terms = getprop(inj.parent, inj.key)
       ppath = slice(inj.path, -1)
       point = getpath(store, ppath)
@@ -1975,14 +1967,11 @@ module VoxgigStruct
       terms.each do |term|
         terrs = []
         validate(point, term, {
-          'extra' => vstore,
-          'errs' => terrs,
-          'meta' => inj.meta,
-        })
-        if !terrs.empty?
-          inj.errs << ('AND:' + pathify(ppath) + "\u2A2F" + stringify(point) +
-            ' fail:' + stringify(terms))
-        end
+                   'extra' => vstore,
+                   'errs' => terrs,
+                   'meta' => inj.meta
+                 })
+        inj.errs << "AND:#{pathify(ppath)}\u2A2F#{stringify(point)} fail:#{stringify(terms)}" unless terrs.empty?
       end
 
       gkey = getelem(inj.path, -2)
@@ -1993,7 +1982,7 @@ module VoxgigStruct
   end
 
   def self.select_OR(inj, _val, _ref, store)
-    if S_MKEYPRE == inj.mode
+    if inj.mode == S_MKEYPRE
       terms = getprop(inj.parent, inj.key)
       ppath = slice(inj.path, -1)
       point = getpath(store, ppath)
@@ -2004,26 +1993,25 @@ module VoxgigStruct
       terms.each do |term|
         terrs = []
         validate(point, term, {
-          'extra' => vstore,
-          'errs' => terrs,
-          'meta' => inj.meta,
-        })
-        if terrs.empty?
-          gkey = getelem(inj.path, -2)
-          gp = getelem(inj.nodes, -2)
-          setprop(gp, gkey, point)
-          return nil
-        end
+                   'extra' => vstore,
+                   'errs' => terrs,
+                   'meta' => inj.meta
+                 })
+        next unless terrs.empty?
+
+        gkey = getelem(inj.path, -2)
+        gp = getelem(inj.nodes, -2)
+        setprop(gp, gkey, point)
+        return nil
       end
 
-      inj.errs << ('OR:' + pathify(ppath) + "\u2A2F" + stringify(point) +
-        ' fail:' + stringify(terms))
+      inj.errs << "OR:#{pathify(ppath)}\u2A2F#{stringify(point)} fail:#{stringify(terms)}"
     end
     nil
   end
 
   def self.select_NOT(inj, _val, _ref, store)
-    if S_MKEYPRE == inj.mode
+    if inj.mode == S_MKEYPRE
       term = getprop(inj.parent, inj.key)
       ppath = slice(inj.path, -1)
       point = getpath(store, ppath)
@@ -2033,15 +2021,12 @@ module VoxgigStruct
 
       terrs = []
       validate(point, term, {
-        'extra' => vstore,
-        'errs' => terrs,
-        'meta' => inj.meta,
-      })
+                 'extra' => vstore,
+                 'errs' => terrs,
+                 'meta' => inj.meta
+               })
 
-      if terrs.empty?
-        inj.errs << ('NOT:' + pathify(ppath) + "\u2A2F" + stringify(point) +
-          ' fail:' + stringify(term))
-      end
+      inj.errs << "NOT:#{pathify(ppath)}\u2A2F#{stringify(point)} fail:#{stringify(term)}" if terrs.empty?
 
       gkey = getelem(inj.path, -2)
       gp = getelem(inj.nodes, -2)
@@ -2051,7 +2036,7 @@ module VoxgigStruct
   end
 
   def self.select_CMP(inj, _val, ref, store)
-    if S_MKEYPRE == inj.mode
+    if inj.mode == S_MKEYPRE
       term = getprop(inj.parent, inj.key)
       gkey = getelem(inj.path, -2)
       ppath = slice(inj.path, -1)
@@ -2060,26 +2045,25 @@ module VoxgigStruct
       pass_test = false
 
       begin
-        if '$GT' == ref && point > term
+        if ref == '$GT' && point > term
           pass_test = true
-        elsif '$LT' == ref && point < term
+        elsif ref == '$LT' && point < term
           pass_test = true
-        elsif '$GTE' == ref && point >= term
+        elsif ref == '$GTE' && point >= term
           pass_test = true
-        elsif '$LTE' == ref && point <= term
+        elsif ref == '$LTE' && point <= term
           pass_test = true
-        elsif '$LIKE' == ref
+        elsif ref == '$LIKE'
           pass_test = true if stringify(point).match?(Regexp.new(term.to_s))
         end
-      rescue
+      rescue StandardError
       end
 
       if pass_test
         gp = getelem(inj.nodes, -2)
         setprop(gp, gkey, point)
       else
-        inj.errs << ('CMP: ' + pathify(ppath) + "\u2A2F" + stringify(point) +
-          ' fail:' + ref.to_s + ' ' + stringify(term))
+        inj.errs << "CMP: #{pathify(ppath)}\u2A2F#{stringify(point)} fail:#{ref} #{stringify(term)}"
       end
     end
     nil
@@ -2089,18 +2073,18 @@ module VoxgigStruct
   def self.select(children, query)
     return [] unless isnode(children)
 
-    if ismap(children)
-      children = items(children).map { |item|
-        v = item[1]
-        setprop(v, '$KEY', item[0]) if ismap(v)
-        v
-      }
-    else
-      children = children.each_with_index.map { |n, i|
-        setprop(n, '$KEY', i) if ismap(n)
-        n
-      }
-    end
+    children = if ismap(children)
+                 items(children).map do |item|
+                   v = item[1]
+                   setprop(v, '$KEY', item[0]) if ismap(v)
+                   v
+                 end
+               else
+                 children.each_with_index.map do |n, i|
+                   setprop(n, '$KEY', i) if ismap(n)
+                   n
+                 end
+               end
 
     results = []
     q = clone(query)
@@ -2119,16 +2103,16 @@ module VoxgigStruct
       '$LT' => method(:select_CMP),
       '$GTE' => method(:select_CMP),
       '$LTE' => method(:select_CMP),
-      '$LIKE' => method(:select_CMP),
+      '$LIKE' => method(:select_CMP)
     }
 
     children.each do |child|
       terrs = []
       validate(child, clone(q), {
-        'errs' => terrs,
-        'meta' => { S_BEXACT => true },
-        'extra' => select_extra,
-      })
+                 'errs' => terrs,
+                 'meta' => { S_BEXACT => true },
+                 'extra' => select_extra
+               })
       results << child if terrs.empty?
     end
 
@@ -2138,11 +2122,11 @@ module VoxgigStruct
   # --- setpath ---
   def self.setpath(store, path, val, injdef = nil)
     pt = typify(path)
-    if 0 < (T_list & pt)
+    if T_list.anybits?(pt)
       parts = path
-    elsif 0 < (T_string & pt)
+    elsif T_string.anybits?(pt)
       parts = path.split(S_DT)
-    elsif 0 < (T_number & pt)
+    elsif T_number.anybits?(pt)
       parts = [path]
     else
       return nil
@@ -2152,12 +2136,12 @@ module VoxgigStruct
     numparts = size(parts)
     parent = base ? getprop(store, base, store) : store
 
-    (0...numparts - 1).each do |pI|
+    (0...(numparts - 1)).each do |pI|
       part_key = getelem(parts, pI)
       next_parent = getprop(parent, part_key)
       unless isnode(next_parent)
         next_part = getelem(parts, pI + 1)
-        next_parent = (0 < (T_number & typify(next_part))) ? [] : {}
+        next_parent = T_number.anybits?(typify(next_part)) ? [] : {}
         setprop(parent, part_key, next_parent)
       end
       parent = next_parent
@@ -2171,7 +2155,6 @@ module VoxgigStruct
 
     parent
   end
-
 
   # --- Injection class ---
   class Injection
@@ -2207,19 +2190,15 @@ module VoxgigStruct
       parentkey = VoxgigStruct.getelem(@path, -2)
 
       if @dparent.nil?
-        if VoxgigStruct.size(@dpath) > 1
-          @dpath = @dpath + [parentkey]
-        end
-      else
-        if parentkey
-          @dparent = VoxgigStruct.getprop(@dparent, parentkey)
-          lastpart = VoxgigStruct.getelem(@dpath, -1)
-          if lastpart == '$:' + parentkey.to_s
-            @dpath = VoxgigStruct.slice(@dpath, -1)
-          else
-            @dpath = @dpath + [parentkey]
-          end
-        end
+        @dpath += [parentkey] if VoxgigStruct.size(@dpath) > 1
+      elsif parentkey
+        @dparent = VoxgigStruct.getprop(@dparent, parentkey)
+        lastpart = VoxgigStruct.getelem(@dpath, -1)
+        @dpath = if lastpart == "$:#{parentkey}"
+                   VoxgigStruct.slice(@dpath, -1)
+                 else
+                   @dpath + [parentkey]
+                 end
       end
 
       @dparent
@@ -2274,11 +2253,8 @@ module VoxgigStruct
     end
 
     def to_s(prefix = nil)
-      'INJ' + (prefix ? '/' + prefix : '') + ':' +
-        VoxgigStruct.pad(VoxgigStruct.pathify(@path, 1)) +
-        (VoxgigStruct::MODENAME[VoxgigStruct::M_VAL] || '') + (@full ? '/full' : '') + ':' +
-        'key=' + @keyI.to_s + '/' + @key.to_s
+      "INJ#{"/#{prefix}" if prefix}:#{VoxgigStruct.pad(VoxgigStruct.pathify(@path, 1))}" \
+        "#{VoxgigStruct::MODENAME[VoxgigStruct::M_VAL] || ''}#{'/full' if @full}:key=#{@keyI}/#{@key}"
     end
   end
-
 end

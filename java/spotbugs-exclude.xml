@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SpotBugs exclusions for the Java port. -->
+<FindBugsFilter>
+  <!-- The StructUtility instance exposes the type bit-flag and mode
+       constants (T_*, M_*) as fields, mirroring the canonical TypeScript
+       `StructUtility` class.  SpotBugs flags them as SS_SHOULD_BE_STATIC
+       ("unread field; should this be static?"); keeping them as instance
+       fields is intentional for cross-language API parity. -->
+  <Match>
+    <Bug pattern="SS_SHOULD_BE_STATIC"/>
+  </Match>
+</FindBugsFilter>

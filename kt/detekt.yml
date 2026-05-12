@@ -1,0 +1,79 @@
+# detekt configuration for the Kotlin port.
+# https://detekt.dev/
+# This extends detekt's default rule set (buildUponDefaultConfig = true) and
+# relaxes a few rules that conflict with mirroring the canonical TypeScript
+# source layout.
+
+build:
+  maxIssues: 0
+
+complexity:
+  # The ported functions are large by design; don't fail on size alone.
+  LongMethod:
+    active: false
+  LongParameterList:
+    active: false
+  CyclomaticComplexMethod:
+    active: false
+  NestedBlockDepth:
+    active: false
+  TooManyFunctions:
+    active: false
+  # The main Struct class and the StructTests harness are intentionally monolithic,
+  # mirroring the canonical single-file sources.
+  LargeClass:
+    active: false
+  # Boolean guards mirror the canonical TS conditions verbatim; splitting them
+  # would obscure the 1:1 correspondence.
+  ComplexCondition:
+    active: false
+
+exceptions:
+  # The ported code mirrors TS `try { ... } catch (e) { ... }` blocks (which catch
+  # everything); the Kotlin equivalent catches the broad `Exception`.
+  TooGenericExceptionCaught:
+    active: false
+
+style:
+  MagicNumber:
+    active: false
+  ReturnCount:
+    active: false
+  WildcardImport:
+    active: true
+  # `error(...)` / `check(...)` are used in new code, but some sites still build
+  # exceptions explicitly to match the canonical messages/types.
+  UseCheckOrError:
+    active: false
+  # The port (and its test harness) keeps a few helpers/constants that exist for
+  # parity with the canonical sources or for ad-hoc debugging (e.g. `R_CMD_KEY`,
+  # the `is*Case` test predicates).
+  UnusedPrivateMember:
+    active: false
+  UnusedPrivateProperty:
+    active: false
+  # The corpus/test runner loops use multiple break/continue statements for the
+  # per-entry skip logic, matching the other ports' runners.
+  LoopWithTooManyJumpStatements:
+    active: false
+  MaxLineLength:
+    # A handful of `when` / expression lines mirror long TS expressions verbatim.
+    maxLineLength: 200
+
+potential-bugs:
+  # Diagnostic console output in the test runners uses String.format without an
+  # explicit Locale; this is test-only formatting, not library behaviour.
+  ImplicitDefaultLocale:
+    active: false
+
+naming:
+  # Type bit-flag constants are `T_string`, `M_VAL`, ... by cross-language convention.
+  VariableNaming:
+    active: false
+  TopLevelPropertyNaming:
+    active: false
+  ObjectPropertyNaming:
+    active: false
+  # Cross-language helpers keep their canonical names: `_injectstr`, `_invalidTypeMsg`, ...
+  FunctionNaming:
+    active: false

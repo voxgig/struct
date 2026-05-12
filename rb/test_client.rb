@@ -13,7 +13,7 @@ class DummyClient
     OpenStruct.new(struct: VoxgigStruct)
   end
 
-  def test(options = {})
+  def test(_options = {})
     self
   end
 end
@@ -31,4 +31,4 @@ class TestClient < Minitest::Test
   def test_client_check_basic
     @runset.call(@spec['basic'], @subject)
   end
-end 
+end

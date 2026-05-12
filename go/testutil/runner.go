@@ -18,8 +18,6 @@ import (
 	"unicode"
 )
 
-
-
 // Client interface defines the minimum needed to work with the runner
 type Client interface {
 	Utility() Utility
@@ -40,48 +38,47 @@ type StructUtility struct {
 	Stringify  func(val any, maxlen ...int) string
 	Walk       func(val any, apply voxgigstruct.WalkApply, opts ...any) any
 
-	DelProp    func(parent any, key any) any
-	EscRe      func(s string) string
-	EscUrl     func(s string) string
-	Filter     func(val any, check func([2]any) bool) []any
-	Flatten    func(list any, depths ...int) any
-	GetDef     func(val any, alt any) any
-	GetElem    func(val any, key any, alts ...any) any
-	GetProp    func(val any, key any, alts ...any) any
-	HasKey     func(val any, key any) bool
-	IsEmpty    func(val any) bool
-	IsFunc     func(val any) bool
-	IsKey      func(val any) bool
-	IsList     func(val any) bool
-	IsMap      func(val any) bool
-	Join       func(arr []any, args ...any) string
-	Jsonify    func(val any, flags ...map[string]any) string
-	KeysOf     func(val any) []string
-	Merge      func(val any, maxdepths ...int) any
-	Pad        func(str any, args ...any) string
-	Pathify    func(val any, from ...int) string
-	Select     func(children any, query any) []any
-	SetPath    func(store any, path any, val any, injdefs ...map[string]any) any
-	SetProp    func(parent any, key any, newval any) any
-	Size       func(val any) int
-	Slice      func(val any, args ...any) any
-	StrKey     func(key any) string
-	Transform  func(data any, spec any, injdefs ...*voxgigstruct.Injection) any
-	Typify     func(value any) int
-	Typename   func(t int) string
-	Validate   func(data any, spec any, injdefs ...*voxgigstruct.Injection) (any, error)
+	DelProp   func(parent any, key any) any
+	EscRe     func(s string) string
+	EscUrl    func(s string) string
+	Filter    func(val any, check func([2]any) bool) []any
+	Flatten   func(list any, depths ...int) any
+	GetDef    func(val any, alt any) any
+	GetElem   func(val any, key any, alts ...any) any
+	GetProp   func(val any, key any, alts ...any) any
+	HasKey    func(val any, key any) bool
+	IsEmpty   func(val any) bool
+	IsFunc    func(val any) bool
+	IsKey     func(val any) bool
+	IsList    func(val any) bool
+	IsMap     func(val any) bool
+	Join      func(arr []any, args ...any) string
+	Jsonify   func(val any, flags ...map[string]any) string
+	KeysOf    func(val any) []string
+	Merge     func(val any, maxdepths ...int) any
+	Pad       func(str any, args ...any) string
+	Pathify   func(val any, from ...int) string
+	Select    func(children any, query any) []any
+	SetPath   func(store any, path any, val any, injdefs ...map[string]any) any
+	SetProp   func(parent any, key any, newval any) any
+	Size      func(val any) int
+	Slice     func(val any, args ...any) any
+	StrKey    func(key any) string
+	Transform func(data any, spec any, injdefs ...*voxgigstruct.Injection) any
+	Typify    func(value any) int
+	Typename  func(t int) string
+	Validate  func(data any, spec any, injdefs ...*voxgigstruct.Injection) (any, error)
 
 	SKIP   any
 	DELETE any
 
-	Jo func(kv ...any) map[string]any
-	Ja func(v ...any) []any
+	Jm func(kv ...any) map[string]any
+	Jt func(v ...any) []any
 
 	CheckPlacement func(modes int, ijname string, parentTypes int, inj *voxgigstruct.Injection) bool
 	InjectorArgs   func(argTypes []int, args []any) []any
 	InjectChild    func(child any, store any, inj *voxgigstruct.Injection) *voxgigstruct.Injection
 }
-
 
 type Subject func(args ...any) (any, error)
 
@@ -107,20 +104,17 @@ type RunPack struct {
 }
 
 type TestPack struct {
-	Name    string  // Optional name field
+	Name    string // Optional name field
 	Client  Client
 	Subject Subject
 	Utility Utility
 }
-
-
 
 var (
 	NULLMARK   = "__NULL__"   // Value is JSON null
 	UNDEFMARK  = "__UNDEF__"  // Value is not present (thus, undefined)
 	EXISTSMARK = "__EXISTS__" // Value exists (not undefined)
 )
-
 
 // MakeRunner creates a runner function that can be used to run tests
 func MakeRunner(testfile string, client Client) func(name string, store any) (*RunPack, error) {
@@ -135,7 +129,7 @@ func MakeRunner(testfile string, client Client) func(name string, store any) (*R
 		if err != nil {
 			return nil, err
 		}
-		
+
 		subject, err := resolveSubject(name, utility)
 		if err != nil {
 			return nil, err
@@ -150,7 +144,7 @@ func MakeRunner(testfile string, client Client) func(name string, store any) (*R
 			if testsubject != nil {
 				subject = subjectify(testsubject)
 			}
-			
+
 			flags = resolveFlags(flags)
 
 			var testspecmap = fixJSON(
@@ -161,7 +155,6 @@ func MakeRunner(testfile string, client Client) func(name string, store any) (*R
 			testset, ok := testspecmap["set"].([]any)
 			if !ok {
 				panic(fmt.Sprintf("No test set in %v", name))
-				return
 			}
 
 			for _, entryVal := range testset {
@@ -243,20 +236,18 @@ func MakeRunner(testfile string, client Client) func(name string, store any) (*R
 	}
 }
 
-
 // // Runner is a convenience function that creates a runner with default settings
 // func Runner(name string, store any, testfile string) (*RunPack, error) {
 // 	runner := MakeRunner(testfile)
 // 	return runner(name, store)
 // }
 
-
 func resolveSpec(
 	name string,
 	testfile string,
 ) map[string]any {
 
-	data, err := os.ReadFile(filepath.Join(".", testfile))
+	data, err := os.ReadFile(filepath.Join(".", testfile)) // #nosec G304 -- fixed test-corpus path, not user input.
 	if err != nil {
 		panic(err)
 	}
@@ -289,7 +280,6 @@ func resolveSpec(
 
 	return spec
 }
-
 
 func resolveClients(
 	spec map[string]any,
@@ -372,7 +362,6 @@ func resolveClients(
 	return clients, nil
 }
 
-
 func resolveSubject(
 	name string,
 	container any,
@@ -381,7 +370,7 @@ func resolveSubject(
 	name = uppercaseFirstLetter(name)
 
 	val := reflect.ValueOf(container)
-	
+
 	if _, ok := container.(Utility); ok {
 		subjectVal := val.MethodByName(name)
 		subjectIF := subjectVal.Interface()
@@ -389,7 +378,6 @@ func resolveSubject(
 		return subject, nil
 	}
 
-	
 	if val.Kind() == reflect.Ptr {
 		val = val.Elem()
 	}
@@ -409,7 +397,7 @@ func resolveSubject(
 
 	fn := fieldVal.Interface()
 	var sfn Subject
-	
+
 	sfn, ok := fn.(Subject)
 	if !ok {
 		sfn = subjectify(fn)
@@ -417,7 +405,6 @@ func resolveSubject(
 
 	return sfn, nil
 }
-
 
 func resolveFlags(flags map[string]bool) map[string]bool {
 
@@ -431,7 +418,6 @@ func resolveFlags(flags map[string]bool) map[string]bool {
 
 	return flags
 }
-
 
 func resolveEntry(entryVal any, flags map[string]bool) map[string]any {
 	entry := entryVal.(map[string]any)
@@ -447,7 +433,6 @@ func resolveEntry(entryVal any, flags map[string]bool) map[string]any {
 
 	return entry
 }
-
 
 func checkResult(
 	t *testing.T,
@@ -494,11 +479,11 @@ func checkResult(
 			structUtils,
 		)
 		if err != nil {
-			t.Error(fmt.Sprintf("match error: %v", err))
+			t.Errorf("match error: %v", err)
 			return
 		}
 		if !pass {
-			t.Error(fmt.Sprintf("match fail: %v", err))
+			t.Errorf("match fail: %v", err)
 			return
 		}
 	}
@@ -561,13 +546,13 @@ func handleError(
 	}
 
 	if nil == entryErr {
-		t.Error(fmt.Sprintf("%s\n\nENTRY: %s", testerr.Error(), structUtils.Stringify(entry)))
+		t.Errorf("%s\n\nENTRY: %s", testerr.Error(), structUtils.Stringify(entry))
 		return
 	}
 
 	boolErr, hasBoolErr := entryErr.(bool)
 	if hasBoolErr && !boolErr {
-		t.Error(fmt.Sprintf("%s\n\nENTRY: %s", testerr.Error(), structUtils.Stringify(entry)))
+		t.Errorf("%s\n\nENTRY: %s", testerr.Error(), structUtils.Stringify(entry))
 		return
 	}
 
@@ -583,10 +568,10 @@ func handleError(
 
 	matchErr, err := MatchNode(entryErr, errStr, structUtils)
 
-  if err != nil {
-    t.Error(fmt.Sprintf("match error: %v", err))
-    return
-  }
+	if err != nil {
+		t.Errorf("match error: %v", err)
+		return
+	}
 
 	if boolErr || matchErr {
 		if entry["match"] != nil {
@@ -603,20 +588,20 @@ func handleError(
 			)
 
 			if !matchErr {
-				t.Error(fmt.Sprintf("match failed: %v", matchErr))
+				t.Errorf("match failed: %v", matchErr)
 			}
 
 			if nil != err {
-				t.Error(fmt.Sprintf("match failed: %v", err))
+				t.Errorf("match failed: %v", err)
 			}
 		}
 
 	} else {
 		// If we didn't match, then fail with an error message.
-		t.Error(fmt.Sprintf("ERROR MATCH: [%s] <=> [%s]",
+		t.Errorf("ERROR MATCH: [%s] <=> [%s]",
 			structUtils.Stringify(entryErr),
 			errStr,
-		))
+		)
 	}
 }
 
@@ -692,7 +677,6 @@ func resolveTestPack(
 
 	return testpack, err
 }
-
 
 func MatchNode(
 	check any,
@@ -786,7 +770,7 @@ func subjectify(fn any) Subject {
 	if ok {
 		return sfn
 	}
-	
+
 	fnType := v.Type()
 
 	return func(args ...any) (any, error) {
@@ -849,7 +833,6 @@ func subjectify(fn any) Subject {
 		}
 	}
 }
-
 
 func fixJSON(data any, flags map[string]bool) any {
 	// Ensure flags is initialized
@@ -929,7 +912,6 @@ func fixJSON(data any, flags map[string]bool) any {
 	}
 }
 
-
 func NullModifier(
 	val any,
 	key any,
@@ -984,7 +966,6 @@ func fdti(data any, indent string) string {
 	return result
 }
 
-
 func ToJSONString(data any) string {
 	jsonBytes, err := json.Marshal(data)
 	if err != nil {
@@ -993,12 +974,11 @@ func ToJSONString(data any) string {
 	return string(jsonBytes)
 }
 
-
 func uppercaseFirstLetter(s string) string {
 	if len(s) == 0 {
 		return s
 	}
-	
+
 	runes := []rune(s)
 	runes[0] = unicode.ToUpper(runes[0])
 	return string(runes)

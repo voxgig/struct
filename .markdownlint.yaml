@@ -1,0 +1,36 @@
+# markdownlint configuration.
+# https://github.com/DavidAnson/markdownlint/blob/main/doc/Rules.md
+#
+# This config keeps the rules that catch *broken* markdown (reversed links,
+# empty links, bad reference definitions, ...) and disables the purely
+# cosmetic whitespace/blank-line rules — the docs (READMEs, NOTES, REVIEW,
+# PLAN files across every port) are hand-written and don't follow one house
+# style for blank lines around headings/lists/tables.
+default: true
+
+MD003: false   # heading style (atx vs setext) — author's choice
+MD004: false   # unordered-list bullet style
+MD007: false   # unordered-list indentation
+MD009: false   # trailing spaces
+MD012: false   # multiple consecutive blank lines
+MD013: false   # line length — tables and code blocks are wide
+MD020: false   # space inside closed atx heading
+MD022: false   # blanks around headings
+MD024:         # duplicate headings — only flag true siblings
+  siblings_only: true
+MD026: false   # trailing punctuation in headings
+MD029: false   # ordered-list numbering style
+MD030: false   # spaces after list markers
+MD031: false   # blanks around fenced code blocks
+MD032: false   # blanks around lists
+MD033: false   # inline HTML
+MD034: false   # bare URLs (used freely in NOTES/REVIEW)
+MD035: false   # horizontal-rule style
+MD036: false   # emphasis used instead of a heading
+MD040: false   # language tag on fenced code blocks
+MD041: false   # first line must be a top-level heading
+MD046: false   # code-block style (fenced vs indented)
+MD047: false   # single trailing newline
+MD056: false   # table column count (some tables vary intentionally)
+MD058: false   # blanks around tables
+MD060: false   # table column style

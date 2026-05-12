@@ -6,12 +6,13 @@ use Exception;
 
 require_once __DIR__ . '/../src/Struct.php';
 
-class Runner {
-
+class Runner
+{
     private const NULLMARK  = "__NULL__";
     private const UNDEFMARK = "__UNDEF__";
 
-    public static function makeRunner(string $testfile, $client): callable {
+    public static function makeRunner(string $testfile, $client): callable
+    {
         return function (string $name, $store = null) use ($testfile, $client) {
             $store = $store ?? [];
             $utility = $client->utility();
@@ -57,7 +58,8 @@ class Runner {
         };
     }
 
-    private static function resolveSpec(string $name, string $testfile): array {
+    private static function resolveSpec(string $name, string $testfile): array
+    {
         // If $testfile is an absolute path, use it as-is; otherwise, build a path relative to __DIR__
         if (preg_match('/^(\/|[A-Za-z]:[\/\\\\])/', $testfile)) {
             $path = $testfile;
@@ -78,7 +80,8 @@ class Runner {
         }
     }
 
-    private static function resolveClients($client, array $spec, $store, $structUtils): array {
+    private static function resolveClients($client, array $spec, $store, $structUtils): array
+    {
         $clients = [];
         if (isset($spec['DEF']) && isset($spec['DEF']['client'])) {
             foreach ($spec['DEF']['client'] as $cn => $cdef) {
@@ -92,11 +95,13 @@ class Runner {
         return $clients;
     }
 
-    private static function resolveSubject(string $name, $container, $subject = null) {
+    private static function resolveSubject(string $name, $container, $subject = null)
+    {
         return $subject ?? ($container->$name ?? null);
     }
 
-    private static function resolveFlags($flags = null): array {
+    private static function resolveFlags($flags = null): array
+    {
         if ($flags === null) {
             $flags = [];
         }
@@ -105,14 +110,16 @@ class Runner {
         return $flags;
     }
 
-    private static function resolveEntry($entry, array $flags) {
+    private static function resolveEntry($entry, array $flags)
+    {
         if (!isset($entry['out']) && $flags['null']) {
             $entry['out'] = self::NULLMARK;
         }
         return $entry;
     }
 
-    private static function checkResult(array $entry, $res, $structUtils) {
+    private static function checkResult(array $entry, $res, $structUtils)
+    {
         $matched = false;
         if (isset($entry['match'])) {
             $result = [
@@ -136,7 +143,8 @@ class Runner {
         }
     }
 
-    private static function handleError(&$entry, \Exception $err, $structUtils) {
+    private static function handleError(&$entry, \Exception $err, $structUtils)
+    {
         $entry['thrown'] = $err->getMessage();
         if (isset($entry['err'])) {
             if ($entry['err'] === true || self::matchval($entry['err'], $err->getMessage(), $structUtils)) {
@@ -165,7 +173,8 @@ class Runner {
         }
     }
 
-    private static function resolveArgs($entry, array $testpack, $structUtils): array {
+    private static function resolveArgs($entry, array $testpack, $structUtils): array
+    {
         $args = [];
         if (isset($entry['in'])) {
             $args[] = $structUtils->clone($entry['in']);
@@ -185,7 +194,8 @@ class Runner {
         return $args;
     }
 
-    private static function resolveTestPack(string $name, $entry, $subject, $client, array $clients): array {
+    private static function resolveTestPack(string $name, $entry, $subject, $client, array $clients): array
+    {
         $testpack = [
             'client'  => $client,
             'subject' => $subject,
@@ -199,7 +209,8 @@ class Runner {
         return $testpack;
     }
 
-    private static function match($check, $base, $structUtils): void {
+    private static function match($check, $base, $structUtils): void
+    {
         $structUtils->walk($check, function ($key, $val, $parent, $path) use ($base, $structUtils) {
             if (!is_array($val) && !is_object($val)) {
                 $baseval = $structUtils->getpath($base, $path);
@@ -220,7 +231,8 @@ class Runner {
         });
     }
 
-    private static function matchval($check, $base, $structUtils): bool {
+    private static function matchval($check, $base, $structUtils): bool
+    {
         $pass = ($check === $base);
         if (!$pass) {
             if (is_string($check)) {
@@ -237,7 +249,8 @@ class Runner {
         return $pass;
     }
 
-    private static function fixJSON($val, array $flags) {
+    private static function fixJSON($val, array $flags)
+    {
         if ($val === null) {
             return $flags['null'] ? self::NULLMARK : $val;
         }
@@ -264,7 +277,8 @@ class Runner {
         return json_decode(json_encode($fixed), true);
     }
 
-    public static function nullModifier($val, $key, array &$parent) {
+    public static function nullModifier($val, $key, array &$parent)
+    {
         if ($val === self::NULLMARK) {
             $parent[$key] = null;
         } elseif (is_string($val)) {

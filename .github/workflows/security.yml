@@ -1,0 +1,208 @@
+name: Security & Static Analysis
+
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+    branches: [ main, dev ]
+  schedule:
+    # Re-scan weekly so newly disclosed advisories are caught even without a push.
+    - cron: '0 6 * * 1'
+
+permissions:
+  contents: read
+
+env:
+  # actions/checkout and the setup-* actions still bundle the deprecated
+  # Node 20 runtime; opt them into Node 24 now (default from 2026-06-02).
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  # ---- Repo-wide scans (one tool over the whole tree) ----
+
+  secrets:
+    name: secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install gitleaks
+        run: |
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz" \
+            | tar xz gitleaks && sudo mv gitleaks /usr/local/bin/
+      - run: gitleaks detect --no-banner --redact --verbose
+
+  dependencies:
+    name: dependency scan (osv-scanner)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+      - run: |
+          go install github.com/google/osv-scanner/v2/cmd/osv-scanner@latest
+          "$(go env GOPATH)/bin/osv-scanner" scan --config=osv-scanner.toml --recursive .
+
+  sast:
+    name: SAST (semgrep)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install semgrep
+      - run: semgrep scan --config p/security-audit --config p/secrets --metrics=off --error .
+
+  workflows:
+    name: workflow lint (actionlint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+      - run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@latest
+          "$(go env GOPATH)/bin/actionlint"
+
+  shell:
+    name: shell lint (shellcheck)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - run: git ls-files -z '*.sh' | xargs -0 -r shellcheck
+
+  spelling:
+    name: spell check (cspell)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+      - run: npx --yes cspell --no-progress --no-summary --gitignore "**/*.md"
+
+  markdown:
+    name: markdown lint (markdownlint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+      - run: npx --yes markdownlint-cli '**/*.md'
+
+  parity:
+    name: cross-port API parity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python3 tools/check_parity.py
+
+  # ---- Per-language dependency / security audits ----
+
+  audit-ts:
+    name: audit (ts — npm)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+      - working-directory: ./ts
+        run: npm install --package-lock-only && make audit
+
+  audit-js:
+    name: audit (js — npm)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+      - working-directory: ./js
+        run: npm install --package-lock-only && make audit
+
+  audit-py:
+    name: audit (py — pip-audit + bandit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pip-audit bandit
+      - working-directory: ./py
+        run: make audit
+
+  audit-go:
+    name: audit (go — govulncheck + gosec)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+      - run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+      - working-directory: ./go
+        run: |
+          gobin="$(go env GOPATH)/bin"
+          PATH="$gobin:$PATH" make audit
+
+  audit-rb:
+    name: audit (rb — bundler-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+          working-directory: ./rb
+      - working-directory: ./rb
+        run: gem install bundler-audit && make audit
+
+  audit-php:
+    name: audit (php — composer audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+      - working-directory: ./php
+        # Fresh COMPOSER_HOME: avoids the malformed github-oauth token that
+        # setup-php intermittently writes to its auth.json.
+        run: composer install && make audit
+        env:
+          COMPOSER_HOME: ${{ runner.temp }}/composer-home
+
+  audit-rs:
+    name: audit (rs — cargo audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo install cargo-audit --locked
+      - working-directory: ./rs
+        run: make audit
+
+  audit-cs:
+    name: audit (cs — dotnet list --vulnerable)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - working-directory: ./cs
+        run: make audit

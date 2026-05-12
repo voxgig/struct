@@ -1,4 +1,4 @@
-.PHONY: inspect build test walk-bench clean reset
+.PHONY: inspect build test lint walk-bench clean reset audit
 
 inspect:
 	@echo "Ruby version:"
@@ -13,6 +13,10 @@ build:
 test:
 	ruby test_voxgig_struct.rb
 
+# Code quality: RuboCop linter/formatter.
+lint:
+	bundle exec rubocop
+
 walk-bench:
 	WALK_BENCH=1 ruby walk_bench.rb
 
@@ -21,3 +25,8 @@ clean:
 
 reset: clean
 	rm -rf vendor
+
+# Supply-chain: scan dependencies against the ruby-advisory-db.
+# Requires: gem install bundler-audit
+audit:
+	bundle-audit check --update

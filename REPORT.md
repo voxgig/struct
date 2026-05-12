@@ -2,7 +2,7 @@
 
 **Date**: 2026-04-12
 **Canonical**: TypeScript (`ts/`)
-**Languages**: JS, Python, Go, PHP, Ruby, Lua, Java, C++
+**Languages**: JS, Python, Go, PHP, Ruby, Lua, Rust, Zig, C#, Java, C++
 
 
 ## Summary
@@ -20,6 +20,17 @@
 | **java** | 40 | 15 | 2 | 1178/1178 corpus | Complete |
 | **cpp** | 40 | 15 | 2 | 1178/1178 corpus | Complete |
 | **cs** | 40 | 15 | 2 | 1178/1178 corpus | Complete |
+| **zig** | 40 | 15 | 2 | 60/60 corpus sets | Complete |
+
+\*\* Zig: full TS-canonical parity, allocator-first signatures, a
+pointer-stable `JsonValue` union with heap `MapRef`/`ListRef` wrappers.
+All transform commands, validate checkers and select operators, the
+`Injection` state machine, and the injection helpers
+(`checkPlacement`/`injectorArgs`/`injectChild`) are wired; the full corpus
+runs as 60 `test` blocks (`zig build test`; `zig fmt --check` clean). The
+`test` runner crashes with SIGSEGV during arena teardown *after* all tests
+pass — a known `*MapRef`/`*ListRef` cross-reference issue — so `make test`
+treats "N/N tests passed" as success.
 
 \*\* Rust: full TS-canonical parity. Idiomatic `snake_case` API (`get_path`,
 `is_node`, …; see `rs/README.md` for the name table), `Rc<RefCell>`

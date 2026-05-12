@@ -1,7 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const __1 = require("..");
-let out;
 let errs;
 // errs = []
 // out = transform(undefined, undefined, { errs })
@@ -58,8 +57,8 @@ const extra = {
         }
     },
 };
-let meta = { capture: {} };
-out = (0, __1.transform)({ a: { b: 1, c: 2 } }, { a: { b: { '`$CAPTURE`': 'x' }, c: { '`$CAPTURE`': 'x' } } }, { extra, errs, meta });
+const meta = { capture: {} };
+const out = (0, __1.transform)({ a: { b: 1, c: 2 } }, { a: { b: { '`$CAPTURE`': 'x' }, c: { '`$CAPTURE`': 'x' } } }, { extra, errs, meta });
 console.dir(out, { depth: null });
 console.dir(errs, { depth: null });
 console.dir(meta, { depth: null });

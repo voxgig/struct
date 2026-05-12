@@ -4,7 +4,9 @@ EXTRA_INC := -I $(JSON_INC) -I /opt/homebrew/include -I /usr/local/include
 
 CXXFLAGS_COMMON := --std=c++17 -Wall -Wextra -Wno-unused-parameter
 
-.PHONY: build smoke test corpus check_leak sanitize clean reset inspect
+CPP_SOURCES := $(wildcard src/*.hpp tests/*.hpp tests/*.cpp)
+
+.PHONY: build smoke test corpus check_leak sanitize lint tidy format-check clean reset inspect
 
 # Default: compile and run the smoke test plus the full corpus driver.
 build: smoke corpus
@@ -25,6 +27,16 @@ check_leak: corpus
 
 sanitize:
 	g++ tests/struct_corpus_test.cpp $(CXXFLAGS_COMMON) -fsanitize=address,undefined -g -I ./src -I ./tests $(EXTRA_INC) -o sanitize.out && ./sanitize.out
+
+# Code quality: clang-tidy (static analysis) + clang-format check.
+lint: tidy format-check
+
+tidy:
+	clang-tidy tests/struct_corpus_test.cpp tests/smoke.cpp -- \
+	  $(CXXFLAGS_COMMON) -I ./src -I ./tests $(EXTRA_INC)
+
+format-check:
+	clang-format --dry-run --Werror $(CPP_SOURCES)
 
 clean:
 	rm -f out.out corpus.out smoke.out sanitize.out corpus-scoreboard.json

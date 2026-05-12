@@ -18,15 +18,14 @@ import unittest
 
 from voxgig_struct.voxgig_struct import walk
 
-
-BENCH = '1' == os.environ.get('WALK_BENCH', '')
+BENCH = os.environ.get('WALK_BENCH', '') == '1'
 
 
 def buildTree(width, depth):
     """Build a balanced tree of maps with given width and depth.
     Total nodes: (width^(depth+1) - 1) / (width - 1).
     """
-    if 0 == depth:
+    if depth == 0:
         return 0
     out = {}
     for i in range(width):
@@ -39,7 +38,7 @@ def countNodes(val):
         return 1
     n = 1
     if isinstance(val, dict):
-        for k in val.keys():
+        for k in val:
             n += countNodes(val[k])
     else:
         for v in val:
@@ -77,10 +76,10 @@ def measure(label, tree, runs, warmup=None):
     ns_per_node = (median * 1e6) / nodes
 
     print(
-        f"[walk-bench] {label}: nodes={nodes} runs={runs} "
-        f"min={tmin:.2f}ms median={median:.2f}ms "
-        f"mean={mean:.2f}ms max={tmax:.2f}ms "
-        f"ns/node={ns_per_node:.1f} sink={sink[0]}"
+        f'[walk-bench] {label}: nodes={nodes} runs={runs} '
+        f'min={tmin:.2f}ms median={median:.2f}ms '
+        f'mean={mean:.2f}ms max={tmax:.2f}ms '
+        f'ns/node={ns_per_node:.1f} sink={sink[0]}'
     )
 
 
@@ -91,9 +90,8 @@ def _env_int(name, default):
         return default
 
 
-@unittest.skipUnless(BENCH, "WALK_BENCH=1 not set")
+@unittest.skipUnless(BENCH, 'WALK_BENCH=1 not set')
 class TestWalkBench(unittest.TestCase):
-
     def test_walk_bench_a_wide_and_deep(self):
         w = _env_int('WALK_BENCH_WD_WIDTH', 8)
         d = _env_int('WALK_BENCH_WD_DEPTH', 6)

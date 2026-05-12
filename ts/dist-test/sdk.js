@@ -28,9 +28,9 @@ class SDK {
                     zed: 'ZED' +
                         (null == __classPrivateFieldGet(this, _SDK_opts, "f") ? '' : null == __classPrivateFieldGet(this, _SDK_opts, "f").foo ? '' : __classPrivateFieldGet(this, _SDK_opts, "f").foo) +
                         '_' +
-                        (null == ctx.meta?.bar ? '0' : ctx.meta.bar)
+                        (null == ctx.meta?.bar ? '0' : ctx.meta.bar),
                 };
-            }
+            },
         }, "f");
     }
     static async test(opts) {

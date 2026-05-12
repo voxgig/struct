@@ -189,12 +189,20 @@ const TYPENAME = [
     S_function,
     S_symbol,
     S_null,
-    '', '', '',
-    '', '', '', '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
     S_list,
     S_map,
     S_instance,
-    '', '', '', '',
+    '',
+    '',
+    '',
+    '',
     S_scalar,
     S_node,
 ];
@@ -208,9 +216,6 @@ exports.DELETE = DELETE;
 // Regular expression constants
 const R_INTEGER_KEY = /^[-0-9]+$/; // Match integer keys (including <0).
 const R_ESCAPE_REGEXP = /[.*+?^${}()|[\]\\]/g; // Chars that need escaping in regexp.
-const R_TRAILING_SLASH = /\/+$/; // Trailing slashes in URLs.
-const R_LEADING_TRAILING_SLASH = /([^\/])\/+/; // Multiple slashes in URL middle.
-const R_LEADING_SLASH = /^\/+/; // Leading slashes in URLs.
 const R_QUOTES = /"/g; // Double quotes for removal.
 const R_DOT = /\./g; // Dots in path strings.
 const R_CLONE_REF = /^`\$REF:([0-9]+)`$/; // Copy reference in cloning.
@@ -255,9 +260,10 @@ function iskey(key) {
 }
 // Check for an "empty" value - undefined, empty string, array, object.
 function isempty(val) {
-    return null == val || S_MT === val ||
+    return (null == val ||
+        S_MT === val ||
         (Array.isArray(val) && 0 === val.length) ||
-        (S_object === typeof val && 0 === Object.keys(val).length);
+        (S_object === typeof val && 0 === Object.keys(val).length));
 }
 // Value is a function.
 function isfunc(val) {
@@ -334,7 +340,7 @@ function slice(val, start, end, mutate) {
                     for (let i = 0, j = start; j < end; i++, j++) {
                         val[i] = val[j];
                     }
-                    val.length = (end - start);
+                    val.length = end - start;
                 }
                 else {
                     val = val.slice(start, end);
@@ -359,7 +365,7 @@ function slice(val, start, end, mutate) {
 function pad(str, padding, padchar) {
     str = S_string === typeof str ? str : stringify(str);
     padding = null == padding ? 44 : padding;
-    padchar = null == padchar ? S_SP : ((padchar + S_SP)[0]);
+    padchar = null == padchar ? S_SP : (padchar + S_SP)[0];
     return -1 < padding ? str.padEnd(padding, padchar) : str.padStart(0 - padding, padchar);
 }
 // Determine the type of a value as a bit code.
@@ -400,7 +406,7 @@ function typify(value) {
     }
     else if (S_object === typestr) {
         if (value.constructor instanceof Function) {
-            let cname = value.constructor.name;
+            const cname = value.constructor.name;
             if ('Object' !== cname && 'Array' !== cname) {
                 return T_node | T_instance;
             }
@@ -418,7 +424,7 @@ function getelem(val, key, alt) {
         return alt;
     }
     if (islist(val)) {
-        let nkey = parseInt(key);
+        const nkey = parseInt(key);
         if (Number.isInteger(nkey) && ('' + key).match(R_INTEGER_KEY)) {
             if (nkey < 0) {
                 key = val.length + nkey;
@@ -470,8 +476,11 @@ function strkey(key = NONE) {
 // Sorted keys of a map, or indexes (as strings) of a list.
 // Root utility - only uses language facilities.
 function keysof(val) {
-    return !isnode(val) ? [] :
-        ismap(val) ? Object.keys(val).sort() : val.map((_n, i) => S_MT + i);
+    return !isnode(val)
+        ? []
+        : ismap(val)
+            ? Object.keys(val).sort()
+            : val.map((_n, i) => S_MT + i);
 }
 // Value of property with name key in node val is defined.
 // Root utility - only uses language facilities.
@@ -498,9 +507,9 @@ function flatten(list, depth) {
 }
 // Filter item values using check function.
 function filter(val, check) {
-    let all = items(val);
-    let numall = size(all);
-    let out = [];
+    const all = items(val);
+    const numall = size(all);
+    const out = [];
     for (let i = 0; i < numall; i++) {
         if (check(all[i])) {
             out.push(all[i][1]);
@@ -521,7 +530,7 @@ function escurl(s) {
 // Replace a search string (all), or a regexp, in a source string.
 function replace(s, from, to) {
     let rs = s;
-    let ts = typify(s);
+    const ts = typify(s);
     if (0 === (T_string & ts)) {
         rs = stringify(s);
     }
@@ -540,8 +549,8 @@ function join(arr, sep, url) {
     const sepre = 1 === size(sepdef) ? escre(sepdef) : NONE;
     const out = filter(items(
     // filter(arr, (n) => null != n[1] && S_MT !== n[1]),
-    filter(arr, (n) => (0 < (T_string & typify(n[1]))) && S_MT !== n[1]), (n) => {
-        let i = +n[0];
+    filter(arr, (n) => 0 < (T_string & typify(n[1])) && S_MT !== n[1]), (n) => {
+        const i = +n[0];
         let s = n[1];
         if (NONE !== sepre && S_MT !== sepre) {
             if (url && 0 === i) {
@@ -557,8 +566,7 @@ function join(arr, sep, url) {
             s = replace(s, RegExp('([^' + sepre + '])' + sepre + '+([^' + sepre + '])'), '$1' + sepdef + '$2');
         }
         return s;
-    }), (n) => S_MT !== n[1])
-        .join(sepdef);
+    }), (n) => S_MT !== n[1]).join(sepdef);
     return out;
 }
 // Output JSON in a "standard" format, with 2 space indents, each property on a new line,
@@ -577,11 +585,12 @@ function jsonify(val, flags) {
             if (0 < offset) {
                 // Left offset entire indented JSON so that it aligns with surrounding code
                 // indented by offset. Assume first brace is on line with asignment, so not offset.
-                str = '{\n' +
-                    join(items(slice(str.split('\n'), 1), (n) => pad(n[1], 0 - offset - size(n[1]))), '\n');
+                str =
+                    '{\n' +
+                        join(items(slice(str.split('\n'), 1), (n) => pad(n[1], 0 - offset - size(n[1]))), '\n');
             }
         }
-        catch (e) {
+        catch {
             str = '__JSONIFY_FAILED__';
         }
     }
@@ -600,9 +609,7 @@ function stringify(val, maxlen, pretty) {
     else {
         try {
             valstr = JSON.stringify(val, function (_key, val) {
-                if (val !== null &&
-                    typeof val === "object" &&
-                    !Array.isArray(val)) {
+                if (val !== null && typeof val === 'object' && !Array.isArray(val)) {
                     const sortedObj = {};
                     items(val, (n) => {
                         sortedObj[n[0]] = val[n[0]];
@@ -613,17 +620,19 @@ function stringify(val, maxlen, pretty) {
             });
             valstr = valstr.replace(R_QUOTES, S_MT);
         }
-        catch (err) {
+        catch {
             valstr = '__STRINGIFY_FAILED__';
         }
     }
     if (null != maxlen && -1 < maxlen) {
-        let js = valstr.substring(0, maxlen);
-        valstr = maxlen < valstr.length ? (js.substring(0, maxlen - 3) + '...') : valstr;
+        const js = valstr.substring(0, maxlen);
+        valstr = maxlen < valstr.length ? js.substring(0, maxlen - 3) + '...' : valstr;
     }
     if (pretty) {
         // Indicate deeper JSON levels with different terminal colors (simplistic wrt strings).
-        let c = items([81, 118, 213, 39, 208, 201, 45, 190, 129, 51, 160, 121, 226, 33, 207, 69], (n) => '\x1b[38;5;' + n[1] + 'm'), r = '\x1b[0m', d = 0, o = c[0], t = o;
+        const c = items([81, 118, 213, 39, 208, 201, 45, 190, 129, 51, 160, 121, 226, 33, 207, 69], (n) => '\x1b[38;5;' + n[1] + 'm');
+        const r = '\x1b[0m';
+        let d = 0, o = c[0], t = o;
         for (const ch of valstr) {
             if (ch === '{' || ch === '[') {
                 d++;
@@ -646,10 +655,13 @@ function stringify(val, maxlen, pretty) {
 // Build a human friendly path string.
 function pathify(val, startin, endin) {
     let pathstr = NONE;
-    let path = islist(val) ? val :
-        S_string == typeof val ? [val] :
-            S_number == typeof val ? [val] :
-                NONE;
+    let path = islist(val)
+        ? val
+        : S_string == typeof val
+            ? [val]
+            : S_number == typeof val
+                ? [val]
+                : NONE;
     const start = null == startin ? 0 : -1 < startin ? startin : 0;
     const end = null == endin ? 0 : -1 < endin ? endin : 0;
     if (NONE != path && 0 <= start) {
@@ -659,9 +671,8 @@ function pathify(val, startin, endin) {
         }
         else {
             pathstr = join(items(filter(path, (n) => iskey(n[1])), (n) => {
-                let p = n[1];
-                return S_number === typeof p ? S_MT + Math.floor(p) :
-                    p.replace(R_DOT, S_MT);
+                const p = n[1];
+                return S_number === typeof p ? S_MT + Math.floor(p) : p.replace(R_DOT, S_MT);
             }), S_DT);
         }
     }
@@ -675,10 +686,8 @@ function pathify(val, startin, endin) {
 function clone(val) {
     const refs = [];
     const reftype = T_function | T_instance;
-    const replacer = (_k, v) => 0 < (reftype & typify(v)) ?
-        (refs.push(v), '`$REF:' + (refs.length - 1) + '`') : v;
-    const reviver = (_k, v, m) => S_string === typeof v ?
-        (m = v.match(R_CLONE_REF), m ? refs[m[1]] : v) : v;
+    const replacer = (_k, v) => 0 < (reftype & typify(v)) ? (refs.push(v), '`$REF:' + (refs.length - 1) + '`') : v;
+    const reviver = (_k, v, m) => S_string === typeof v ? ((m = v.match(R_CLONE_REF)), m ? refs[m[1]] : v) : v;
     const out = NONE === val ? NONE : JSON.parse(JSON.stringify(val, replacer), reviver);
     return out;
 }
@@ -702,7 +711,7 @@ function jt(...v) {
     }
     return a;
 }
-// Safely delete a property from an object or array element. 
+// Safely delete a property from an object or array element.
 // Undefined arguments and invalid keys are ignored.
 // Returns the (possibly modified) parent.
 // For objects, the property is deleted using the delete operator.
@@ -809,7 +818,7 @@ key, parent, path, pool) {
         for (let i = 0; i < depth; i++) {
             childPath[i] = path[i];
         }
-        for (let [ckey, child] of items(out)) {
+        for (const [ckey, child] of items(out)) {
             childPath[depth] = S_MT + ckey;
             setprop(out, ckey, walk(child, before, after, maxdepth, ckey, out, childPath, pool));
         }
@@ -840,16 +849,16 @@ function merge(val, maxdepth) {
     // Merge a list of values.
     out = getprop(list, 0, {});
     for (let oI = 1; oI < lenlist; oI++) {
-        let obj = list[oI];
+        const obj = list[oI];
         if (!isnode(obj)) {
             // Nodes win.
             out = obj;
         }
         else {
             // Current value at path end in overriding node.
-            let cur = [out];
+            const cur = [out];
             // Current value at path end in destination node.
-            let dst = [out];
+            const dst = [out];
             function before(key, val, _parent, path) {
                 const pI = size(path);
                 if (md <= pI) {
@@ -908,9 +917,13 @@ function merge(val, maxdepth) {
 // String paths create only maps. Use a string list to create list  parts.
 function setpath(store, path, val, injdef) {
     const pathType = typify(path);
-    const parts = 0 < (T_list & pathType) ? path :
-        0 < (T_string & pathType) ? path.split(S_DT) :
-            0 < (T_number & pathType) ? [path] : NONE;
+    const parts = 0 < (T_list & pathType)
+        ? path
+        : 0 < (T_string & pathType)
+            ? path.split(S_DT)
+            : 0 < (T_number & pathType)
+                ? [path]
+                : NONE;
     if (NONE === parts) {
         return NONE;
     }
@@ -936,9 +949,13 @@ function setpath(store, path, val, injdef) {
 }
 function getpath(store, path, injdef) {
     // Operate on a string array.
-    const parts = islist(path) ? path :
-        'string' === typeof path ? path.split(S_DT) :
-            'number' === typeof path ? [strkey(path)] : NONE;
+    const parts = islist(path)
+        ? path
+        : 'string' === typeof path
+            ? path.split(S_DT)
+            : 'number' === typeof path
+                ? [strkey(path)]
+                : NONE;
     if (NONE === parts) {
         return NONE;
     }
@@ -1063,8 +1080,8 @@ function inject(val, store, injdef) {
         nodekeys = keysof(val);
         if (ismap(val)) {
             nodekeys = flatten([
-                filter(nodekeys, (n => !n[1].includes(S_DS))),
-                filter(nodekeys, (n => n[1].includes(S_DS))),
+                filter(nodekeys, (n) => !n[1].includes(S_DS)),
+                filter(nodekeys, (n) => n[1].includes(S_DS)),
             ]);
         }
         else {
@@ -1112,9 +1129,9 @@ function inject(val, store, injdef) {
     }
     // Custom modification.
     if (inj.modify && SKIP !== val) {
-        let mkey = inj.key;
-        let mparent = inj.parent;
-        let mval = getprop(mparent, mkey);
+        const mkey = inj.key;
+        const mparent = inj.parent;
+        const mval = getprop(mparent, mkey);
         inj.modify(mval, mkey, mparent, inj, store);
     }
     // console.log('INJ-VAL', val)
@@ -1135,7 +1152,7 @@ const transform_COPY = (inj, _val) => {
     if (!checkPlacement(M_VAL, ijname, T_any, inj)) {
         return NONE;
     }
-    let out = getprop(inj.dparent, inj.key);
+    const out = getprop(inj.dparent, inj.key);
     inj.setval(out);
     return out;
 };
@@ -1164,9 +1181,9 @@ const transform_ANNO = (inj) => {
     delprop(parent, S_BANNO);
     return NONE;
 };
-// Merge a list of objects into the current object. 
+// Merge a list of objects into the current object.
 // Must be a key in an object. The value is merged over the current object.
-// If the value is an array, the elements are first merged using `merge`. 
+// If the value is an array, the elements are first merged using `merge`.
 // If the value is the empty string, merge the top level store.
 // Format: { '`$MERGE`': '`source-path`' | ['`source-paths`', ...] }
 const transform_MERGE = (inj) => {
@@ -1220,11 +1237,11 @@ const transform_EACH = (inj, _val, _ref, store) => {
         tval = items(src, () => clone(child));
     }
     else if (0 < (T_map & srctype)) {
-        tval = items(src, (n => merge([
+        tval = items(src, (n) => merge([
             clone(child),
             // Make a note of the key for $KEY transforms.
-            { [S_BANNO]: { KEY: n[0] } }
-        ], 1)));
+            { [S_BANNO]: { KEY: n[0] } },
+        ], 1));
     }
     let rval = [];
     if (0 < size(tval)) {
@@ -1258,7 +1275,7 @@ const transform_EACH = (inj, _val, _ref, store) => {
 // Convert a node to a map.
 // Format: { '`$PACK`':['source-path', child-template]}
 const transform_PACK = (inj, _val, _ref, store) => {
-    const { mode, key, path, parent, nodes } = inj;
+    const { key, path, parent, nodes } = inj;
     const ijname = 'EACH';
     if (!checkPlacement(M_KEYPRE, ijname, T_map, inj)) {
         return NONE;
@@ -1297,7 +1314,7 @@ const transform_PACK = (inj, _val, _ref, store) => {
     const childspec = delprop(origchildspec, S_BKEY);
     const child = getprop(childspec, S_BVAL, childspec);
     // Build parallel target object.
-    let tval = {};
+    const tval = {};
     items(src, (item) => {
         const srckey = item[0];
         const srcnode = item[1];
@@ -1323,12 +1340,13 @@ const transform_PACK = (inj, _val, _ref, store) => {
     let rval = {};
     if (!isempty(tval)) {
         // Build parallel source object.
-        let tsrc = {};
+        const tsrc = {};
         src.reduce((a, n, i) => {
-            let kn = null == keypath ? i :
-                keypath.startsWith('`') ?
-                    inject(keypath, merge([{}, store, { $TOP: n }], 1)) :
-                    getpath(n, keypath, inj);
+            const kn = null == keypath
+                ? i
+                : keypath.startsWith('`')
+                    ? inject(keypath, merge([{}, store, { $TOP: n }], 1))
+                    : getpath(n, keypath, inj);
             setprop(a, kn, n);
             return a;
         }, tsrc);
@@ -1386,11 +1404,11 @@ const transform_REF = (inj, val, _ref, store) => {
             return v;
         });
     }
-    let tref = clone(ref);
+    const tref = clone(ref);
     const cpath = slice(inj.path, -3);
     const tpath = slice(inj.path, -1);
-    let tcur = getpath(store, cpath);
-    let tval = getpath(store, tpath);
+    const tcur = getpath(store, cpath);
+    const tval = getpath(store, tpath);
     let rval = NONE;
     if (!hasSubRef || NONE !== tval) {
         const tinj = inj.child(0, [getelem(tpath, -1)]);
@@ -1428,21 +1446,21 @@ const transform_FORMAT = (inj, _val, _ref, store) => {
     const target = getelem(inj.nodes, -2, () => getelem(inj.nodes, -1));
     const cinj = injectChild(child, store, inj);
     const resolved = cinj.val;
-    let formatter = 0 < (T_function & typify(name)) ? name : getprop(FORMATTER, name);
+    const formatter = 0 < (T_function & typify(name)) ? name : getprop(FORMATTER, name);
     if (NONE === formatter) {
         inj.errs.push('$FORMAT: unknown format: ' + name + '.');
         return NONE;
     }
-    let out = walk(resolved, formatter);
+    const out = walk(resolved, formatter);
     setprop(target, tkey, out);
     // _updateAncestors(inj, target, tkey, out)
     return out;
 };
 const FORMATTER = {
     identity: (_k, v) => v,
-    upper: (_k, v) => isnode(v) ? v : ('' + v).toUpperCase(),
-    lower: (_k, v) => isnode(v) ? v : ('' + v).toLowerCase(),
-    string: (_k, v) => isnode(v) ? v : ('' + v),
+    upper: (_k, v) => (isnode(v) ? v : ('' + v).toUpperCase()),
+    lower: (_k, v) => (isnode(v) ? v : ('' + v).toLowerCase()),
+    string: (_k, v) => (isnode(v) ? v : '' + v),
     number: (_k, v) => {
         if (isnode(v)) {
             return v;
@@ -1467,7 +1485,9 @@ const FORMATTER = {
             return n | 0;
         }
     },
-    concat: (k, v) => null == k && islist(v) ? join(items(v, (n => isnode(n[1]) ? S_MT : (S_MT + n[1]))), S_MT) : v
+    concat: (k, v) => null == k && islist(v)
+        ? join(items(v, (n) => (isnode(n[1]) ? S_MT : S_MT + n[1])), S_MT)
+        : v,
 };
 const transform_APPLY = (inj, _val, _ref, store) => {
     const ijname = 'APPLY';
@@ -1501,12 +1521,11 @@ injdef) {
     const collect = null != injdef?.errs;
     const errs = injdef?.errs || [];
     const extraTransforms = {};
-    const extraData = null == extra ? NONE : items(extra)
-        .reduce((a, n) => (n[0].startsWith(S_DS) ? extraTransforms[n[0]] = n[1] : (a[n[0]] = n[1]), a), {});
-    const dataClone = merge([
-        isempty(extraData) ? NONE : clone(extraData),
-        clone(data),
-    ]);
+    const extraData = null == extra
+        ? NONE
+        : items(extra).reduce((a, n) => (n[0].startsWith(S_DS) ? (extraTransforms[n[0]] = n[1]) : (a[n[0]] = n[1]),
+            a), {});
+    const dataClone = merge([isempty(extraData) ? NONE : clone(extraData), clone(data)]);
     // Define a top level store that provides transform operations.
     const store = merge([
         {
@@ -1536,10 +1555,10 @@ injdef) {
         extraTransforms,
         {
             $ERRS: errs,
-        }
+        },
     ], 1);
     const out = inject(spec, store, injdef);
-    const generr = (0 < size(errs) && !collect);
+    const generr = 0 < size(errs) && !collect;
     if (generr) {
         throw new Error(join(errs, ' | '));
     }
@@ -1547,15 +1566,15 @@ injdef) {
 }
 // A required string value. NOTE: Rejects empty strings.
 const validate_STRING = (inj) => {
-    let out = getprop(inj.dparent, inj.key);
+    const out = getprop(inj.dparent, inj.key);
     const t = typify(out);
     if (0 === (T_string & t)) {
-        let msg = _invalidTypeMsg(inj.path, S_string, t, out, 'V1010');
+        const msg = _invalidTypeMsg(inj.path, S_string, t, out, 'V1010');
         inj.errs.push(msg);
         return NONE;
     }
     if (S_MT === out) {
-        let msg = 'Empty string at ' + pathify(inj.path, 1);
+        const msg = 'Empty string at ' + pathify(inj.path, 1);
         inj.errs.push(msg);
         return NONE;
     }
@@ -1564,7 +1583,7 @@ const validate_STRING = (inj) => {
 const validate_TYPE = (inj, _val, ref) => {
     const tname = slice(ref, 1).toLowerCase();
     const typev = 1 << (31 - TYPENAME.indexOf(tname));
-    let out = getprop(inj.dparent, inj.key);
+    const out = getprop(inj.dparent, inj.key);
     const t = typify(out);
     // console.log('TYPE', tname, typev, tn(typev), 'O=', t, tn(t), out, 'C=', t & typev)
     if (0 === (t & typev)) {
@@ -1575,7 +1594,7 @@ const validate_TYPE = (inj, _val, ref) => {
 };
 // Allow any value.
 const validate_ANY = (inj) => {
-    let out = getprop(inj.dparent, inj.key);
+    const out = getprop(inj.dparent, inj.key);
     return out;
 };
 // Specify child values for map or list.
@@ -1598,7 +1617,7 @@ const validate_CHILD = (inj) => {
             return NONE;
         }
         const ckeys = keysof(tval);
-        for (let ckey of ckeys) {
+        for (const ckey of ckeys) {
             setprop(parent, ckey, clone(childtm));
             // NOTE: modifying inj! This extends the child value loop in inject.
             keys.push(ckey);
@@ -1658,7 +1677,7 @@ const validate_ONE = (inj, _val, _ref, store) => {
         inj.setval(inj.dparent, 2);
         inj.path = slice(inj.path, -1);
         inj.key = getelem(inj.path, -1);
-        let tvals = slice(parent, 1);
+        const tvals = slice(parent, 1);
         if (0 === size(tvals)) {
             inj.errs.push('The $ONE validator at field ' +
                 pathify(inj.path, 1, 1) +
@@ -1666,9 +1685,9 @@ const validate_ONE = (inj, _val, _ref, store) => {
             return;
         }
         // See if we can find a match.
-        for (let tval of tvals) {
+        for (const tval of tvals) {
             // If match, then errs.length = 0
-            let terrs = [];
+            const terrs = [];
             const vstore = merge([{}, store], 1);
             vstore.$TOP = inj.dparent;
             const vcurrent = validate(inj.dparent, tval, {
@@ -1703,7 +1722,7 @@ const validate_EXACT = (inj) => {
         // inj.path = slice(inj.path, 0, size(inj.path) - 1)
         inj.path = slice(inj.path, 0, -1);
         inj.key = getelem(inj.path, -1);
-        let tvals = slice(parent, 1);
+        const tvals = slice(parent, 1);
         if (0 === size(tvals)) {
             inj.errs.push('The $EXACT validator at field ' +
                 pathify(inj.path, 1, 1) +
@@ -1712,7 +1731,7 @@ const validate_EXACT = (inj) => {
         }
         // See if we can find an exact value match.
         let currentstr = undefined;
-        for (let tval of tvals) {
+        for (const tval of tvals) {
             let exactmatch = tval === inj.dparent;
             if (!exactmatch && isnode(tval)) {
                 currentstr = undefined === currentstr ? stringify(inj.dparent) : currentstr;
@@ -1726,7 +1745,9 @@ const validate_EXACT = (inj) => {
         // There was no match.
         const valdesc = replace(join(items(tvals, (n) => stringify(n[1])), ', '), R_TRANSFORM_NAME, (_m, p1) => p1.toLowerCase());
         inj.errs.push(_invalidTypeMsg(inj.path, (1 < size(inj.path) ? '' : 'value ') +
-            'exactly equal to ' + (1 === size(tvals) ? '' : 'one of ') + valdesc, typify(inj.dparent), inj.dparent, 'V0110'));
+            'exactly equal to ' +
+            (1 === size(tvals) ? '' : 'one of ') +
+            valdesc, typify(inj.dparent), inj.dparent, 'V0110'));
     }
     else {
         delprop(parent, key);
@@ -1769,7 +1790,7 @@ const _validation = (pval, key, parent, inj) => {
         // Empty spec object {} means object can be open (any keys).
         if (0 < size(pkeys) && true !== getprop(pval, '`$OPEN`')) {
             const badkeys = [];
-            for (let ckey of ckeys) {
+            for (const ckey of ckeys) {
                 if (!haskey(pval, ckey)) {
                     badkeys.push(ckey);
                 }
@@ -1796,8 +1817,7 @@ const _validation = (pval, key, parent, inj) => {
     else if (exact) {
         if (cval !== pval) {
             const pathmsg = 1 < size(inj.path) ? 'at field ' + pathify(inj.path, 1) + S_VIZ : S_MT;
-            inj.errs.push('Value ' + pathmsg + cval +
-                ' should equal ' + pval + S_DT);
+            inj.errs.push('Value ' + pathmsg + cval + ' should equal ' + pval + S_DT);
         }
     }
     else {
@@ -1853,9 +1873,9 @@ injdef) {
         // NOTE: collecterrs parameter always wins.
         {
             $ERRS: errs,
-        }
+        },
     ], 1);
-    let meta = getprop(injdef, 'meta', {});
+    const meta = getprop(injdef, 'meta', {});
     setprop(meta, S_BEXACT, getprop(meta, S_BEXACT, false));
     const out = transform(data, spec, {
         meta,
@@ -1864,7 +1884,7 @@ injdef) {
         handler: _validatehandler,
         errs,
     });
-    const generr = (0 < size(errs) && !collect);
+    const generr = 0 < size(errs) && !collect;
     if (generr) {
         throw new Error(join(errs, ' | '));
     }
@@ -1877,8 +1897,8 @@ const select_AND = (inj, _val, _ref, store) => {
         const point = getpath(store, ppath);
         const vstore = merge([{}, store], 1);
         vstore.$TOP = point;
-        for (let term of terms) {
-            let terrs = [];
+        for (const term of terms) {
+            const terrs = [];
             validate(point, term, {
                 extra: vstore,
                 errs: terrs,
@@ -1900,8 +1920,8 @@ const select_OR = (inj, _val, _ref, store) => {
         const point = getpath(store, ppath);
         const vstore = merge([{}, store], 1);
         vstore.$TOP = point;
-        for (let term of terms) {
-            let terrs = [];
+        for (const term of terms) {
+            const terrs = [];
             validate(point, term, {
                 extra: vstore,
                 errs: terrs,
@@ -1924,7 +1944,7 @@ const select_NOT = (inj, _val, _ref, store) => {
         const point = getpath(store, ppath);
         const vstore = merge([{}, store], 1);
         vstore.$TOP = point;
-        let terrs = [];
+        const terrs = [];
         validate(point, term, {
             extra: vstore,
             errs: terrs,
@@ -1968,8 +1988,14 @@ const select_CMP = (inj, _val, ref, store) => {
             setprop(gp, gkey, point);
         }
         else {
-            inj.errs.push('CMP: ' + pathify(ppath) + S_VIZ + stringify(point) +
-                ' fail:' + ref + ' ' + stringify(term));
+            inj.errs.push('CMP: ' +
+                pathify(ppath) +
+                S_VIZ +
+                stringify(point) +
+                ' fail:' +
+                ref +
+                ' ' +
+                stringify(term));
         }
     }
     return NONE;
@@ -1983,7 +2009,7 @@ function select(children, query) {
         return [];
     }
     if (ismap(children)) {
-        children = items(children, n => {
+        children = items(children, (n) => {
             setprop(n[1], S_DKEY, n[0]);
             return n[1];
         });
@@ -2004,7 +2030,7 @@ function select(children, query) {
             $GTE: select_CMP,
             $LTE: select_CMP,
             $LIKE: select_CMP,
-        }
+        },
     };
     const q = clone(query);
     walk(q, (_k, v) => {
@@ -2042,14 +2068,31 @@ class Injection {
         this.meta = {};
     }
     toString(prefix) {
-        return 'INJ' + (null == prefix ? '' : S_FS + prefix) + S_CN +
+        return ('INJ' +
+            (null == prefix ? '' : S_FS + prefix) +
+            S_CN +
             pad(pathify(this.path, 1)) +
-            MODENAME[this.mode] + (this.full ? '/full' : '') + S_CN +
-            'key=' + this.keyI + S_FS + this.key + S_FS + S_OS + this.keys + S_CS +
-            '  p=' + stringify(this.parent, -1, 1) +
-            '  m=' + stringify(this.meta, -1, 1) +
-            '  d/' + pathify(this.dpath, 1) + '=' + stringify(this.dparent, -1, 1) +
-            '  r=' + stringify(this.nodes[0]?.[S_DTOP], -1, 1);
+            MODENAME[this.mode] +
+            (this.full ? '/full' : '') +
+            S_CN +
+            'key=' +
+            this.keyI +
+            S_FS +
+            this.key +
+            S_FS +
+            S_OS +
+            this.keys +
+            S_CS +
+            '  p=' +
+            stringify(this.parent, -1, 1) +
+            '  m=' +
+            stringify(this.meta, -1, 1) +
+            '  d/' +
+            pathify(this.dpath, 1) +
+            '=' +
+            stringify(this.dparent, -1, 1) +
+            '  r=' +
+            stringify(this.nodes[0]?.[S_DTOP], -1, 1));
     }
     descend() {
         this.meta.__d++;
@@ -2066,7 +2109,7 @@ class Injection {
             // this.dparent is the containing node of the current store value.
             if (null != parentkey) {
                 this.dparent = getprop(this.dparent, parentkey);
-                let lastpart = getelem(this.dpath, -1);
+                const lastpart = getelem(this.dpath, -1);
                 if (lastpart === '$:' + parentkey) {
                     this.dpath = slice(this.dpath, -1);
                 }
@@ -2101,16 +2144,15 @@ class Injection {
     setval(val, ancestor) {
         let parent = NONE;
         if (null == ancestor || ancestor < 2) {
-            parent = NONE === val ?
-                this.parent = delprop(this.parent, this.key) :
-                setprop(this.parent, this.key, val);
+            parent =
+                NONE === val
+                    ? (this.parent = delprop(this.parent, this.key))
+                    : setprop(this.parent, this.key, val);
         }
         else {
             const aval = getelem(this.nodes, 0 - ancestor);
             const akey = getelem(this.path, 0 - ancestor);
-            parent = NONE === val ?
-                delprop(aval, akey) :
-                setprop(aval, akey, val);
+            parent = NONE === val ? delprop(aval, akey) : setprop(aval, akey, val);
         }
         // console.log('SETVAL', val, this.key, this.parent)
         return parent;
@@ -2125,14 +2167,16 @@ class Injection {
 // }
 // Build a type validation error message.
 function _invalidTypeMsg(path, needtype, vt, v, _whence) {
-    let vs = null == v ? 'no value' : stringify(v);
-    return 'Expected ' +
-        (1 < size(path) ? ('field ' + pathify(path, 1) + ' to be ') : '') +
-        needtype + ', but found ' +
-        (null != v ? typename(vt) + S_VIZ : '') + vs +
+    const vs = null == v ? 'no value' : stringify(v);
+    return ('Expected ' +
+        (1 < size(path) ? 'field ' + pathify(path, 1) + ' to be ' : '') +
+        needtype +
+        ', but found ' +
+        (null != v ? typename(vt) + S_VIZ : '') +
+        vs +
         // Uncomment to help debug validation errors.
         // ' [' + _whence + ']' +
-        '.';
+        '.');
 }
 // Default inject handler for transforms. If the path resolves to a function,
 // call the function passing the injection inj. This is how transforms operate.
@@ -2238,15 +2282,25 @@ const PLACEMENT = {
 };
 function checkPlacement(modes, ijname, parentTypes, inj) {
     if (0 === (modes & inj.mode)) {
-        inj.errs.push('$' + ijname + ': invalid placement as ' + PLACEMENT[inj.mode] +
-            ', expected: ' + join(items([M_KEYPRE, M_KEYPOST, M_VAL].filter(m => modes & m), (n) => PLACEMENT[n[1]]), ',') + '.');
+        inj.errs.push('$' +
+            ijname +
+            ': invalid placement as ' +
+            PLACEMENT[inj.mode] +
+            ', expected: ' +
+            join(items([M_KEYPRE, M_KEYPOST, M_VAL].filter((m) => modes & m), (n) => PLACEMENT[n[1]]), ',') +
+            '.');
         return false;
     }
     if (!isempty(parentTypes)) {
         const ptype = typify(inj.parent);
         if (0 === (parentTypes & ptype)) {
-            inj.errs.push('$' + ijname + ': invalid placement in parent ' + typename(ptype) +
-                ', expected: ' + typename(parentTypes) + '.');
+            inj.errs.push('$' +
+                ijname +
+                ': invalid placement in parent ' +
+                typename(ptype) +
+                ', expected: ' +
+                typename(parentTypes) +
+                '.');
             return false;
         }
     }
@@ -2262,9 +2316,16 @@ function injectorArgs(argTypes, args) {
         const arg = args[argI];
         const argType = typify(arg);
         if (0 === (argTypes[argI] & argType)) {
-            found[0] = 'invalid argument: ' + stringify(arg, 22) +
-                ' (' + typename(argType) + ' at position ' + (1 + argI) +
-                ') is not of type: ' + typename(argTypes[argI]) + '.';
+            found[0] =
+                'invalid argument: ' +
+                    stringify(arg, 22) +
+                    ' (' +
+                    typename(argType) +
+                    ' at position ' +
+                    (1 + argI) +
+                    ') is not of type: ' +
+                    typename(argTypes[argI]) +
+                    '.';
             break;
         }
         found[1 + argI] = arg;

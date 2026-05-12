@@ -1,0 +1,25 @@
+# golangci-lint configuration for the Go port.
+# https://golangci-lint.run/
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  # The "standard" set: errcheck, govet, ineffassign, staticcheck, unused.
+  default: standard
+  exclusions:
+    rules:
+      # Error strings are intentionally phrased to match the canonical
+      # TypeScript port's wording (cross-language message parity), even where
+      # that conflicts with Go's lowercase-error-string convention.
+      - linters: [staticcheck]
+        text: "ST1005"
+      # The port deliberately uses "Yoda" comparisons (`"" != x`, `0 == idx`)
+      # throughout, mirroring the canonical source layout across all languages.
+      - linters: [staticcheck]
+        text: "ST1017"
+
+formatters:
+  enable:
+    - gofmt

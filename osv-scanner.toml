@@ -1,0 +1,14 @@
+# osv-scanner ignore list.
+# https://google.github.io/osv-scanner/configuration/
+#
+# Every entry must carry a reason and should be revisited periodically — this
+# file should only ever shrink.
+
+[[IgnoredVulns]]
+id = "GO-2025-3750"
+# This advisory is against the Go *standard library*; osv-scanner reports it
+# because `go/go.mod` declares `go 1.20` (the minimum supported toolchain).
+# CI and releases build with current Go (1.24+), which carries the fix.
+# Action item: when support for pre-1.23.10 Go toolchains is dropped, bump the
+# `go` directive instead of relying on this ignore.
+reason = "go.mod's `go 1.20` is the minimum-supported toolchain; CI/releases build with patched Go (1.24+)."

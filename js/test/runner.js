@@ -4,32 +4,22 @@ const { readFileSync } = require('node:fs')
 const { join } = require('node:path')
 const { deepEqual, fail, AssertionError } = require('node:assert')
 
-
 const NULLMARK = '__NULL__' // Value is JSON null
 const UNDEFMARK = '__UNDEF__' // Value is not present (thus, undefined).
 const EXISTSMARK = '__EXISTS__' // Value exists (not undefined).
 
-
 async function makeRunner(testfile, client) {
-
-  return async function runner(
-    name,
-    store = {}
-  ) {
+  return async function runner(name, store = {}) {
     store = store || {}
 
     const utility = client.utility()
     const structUtils = utility.struct
-    
+
     let spec = resolveSpec(name, testfile)
     let clients = await resolveClients(client, spec, store, structUtils)
     let subject = resolveSubject(name, utility)
 
-    let runsetflags = async (
-      testspec,
-      flags,
-      testsubject
-    ) => {
+    let runsetflags = async (testspec, flags, testsubject) => {
       subject = testsubject || subject
       flags = resolveFlags(flags)
       const testspecmap = fixJSON(testspec, flags)
@@ -47,17 +37,13 @@ async function makeRunner(testfile, client) {
           entry.res = res
 
           checkResult(entry, args, res, structUtils)
-        }
-        catch (err) {
+        } catch (err) {
           handleError(entry, err, structUtils)
         }
       }
     }
 
-    let runset = async (
-      testspec,
-      testsubject
-    ) => runsetflags(testspec, {}, testsubject)
+    let runset = async (testspec, testsubject) => runsetflags(testspec, {}, testsubject)
 
     const runpack = {
       spec,
@@ -71,23 +57,14 @@ async function makeRunner(testfile, client) {
   }
 }
 
-
 function resolveSpec(name, testfile) {
-  const alltests =
-    JSON.parse(readFileSync(join(
-      __dirname, testfile), 'utf8'))
+  const alltests = JSON.parse(readFileSync(join(__dirname, testfile), 'utf8'))
 
   let spec = alltests.primary?.[name] || alltests[name] || alltests
   return spec
 }
 
-
-async function resolveClients(
-  client,
-  spec,
-  store,
-  structUtils
-) {
+async function resolveClients(client, spec, store, structUtils) {
   const clients = {}
   if (spec.DEF && spec.DEF.client) {
     for (let cn in spec.DEF.client) {
@@ -103,12 +80,10 @@ async function resolveClients(
   return clients
 }
 
-
 function resolveSubject(name, container) {
   const subject = container[name] || container.struct[name]
   return subject
 }
-
 
 function resolveFlags(flags) {
   if (null == flags) {
@@ -118,34 +93,29 @@ function resolveFlags(flags) {
   return flags
 }
 
-
 function resolveEntry(entry, flags) {
   entry.out = null == entry.out && flags.null ? NULLMARK : entry.out
   return entry
 }
 
-
 function checkResult(entry, args, res, structUtils) {
   let matched = false
 
   if (entry.err) {
-    return fail('Expected error did not occur: ' + entry.err +
-      '\n\nENTRY: ' + JSON.stringify(entry, null, 2))
+    return fail(
+      'Expected error did not occur: ' + entry.err + '\n\nENTRY: ' + JSON.stringify(entry, null, 2),
+    )
   }
 
   if (entry.match) {
     const result = { in: entry.in, args, out: entry.res, ctx: entry.ctx }
-    match(
-      entry.match,
-      result,
-      structUtils
-    )
+    match(entry.match, result, structUtils)
 
     matched = true
   }
 
   const out = entry.out
-  
+
   if (out === res) {
     return
   }
@@ -158,7 +128,6 @@ function checkResult(entry, args, res, structUtils) {
   deepEqual(null != res ? JSON.parse(JSON.stringify(res)) : res, entry.out)
 }
 
-
 // Handle errors from test execution
 function handleError(entry, err, structUtils) {
   entry.thrown = err
@@ -170,48 +139,38 @@ function handleError(entry, err, structUtils) {
       if (entry.match) {
         match(
           entry.match,
-          { in: entry.in, out: entry.res, ctx: entry.ctx, err:fixJSON(err) },
-          structUtils
+          { in: entry.in, out: entry.res, ctx: entry.ctx, err: fixJSON(err) },
+          structUtils,
         )
       }
       return
     }
 
-    fail('ERROR MATCH: [' + structUtils.stringify(entry_err) +
-      '] <=> [' + err.message + ']')
+    fail('ERROR MATCH: [' + structUtils.stringify(entry_err) + '] <=> [' + err.message + ']')
   }
 
   // Unexpected error (test didn't specify an error expectation)
   else if (err instanceof AssertionError) {
     fail(err.message + '\n\nENTRY: ' + JSON.stringify(entry, null, 2))
-  }
-  else {
+  } else {
     fail(err.stack + '\\nnENTRY: ' + JSON.stringify(entry, null, 2))
   }
 }
 
-
-function resolveArgs(
-  entry,
-  testpack,
-  utility,
-  structUtils
-) {
+function resolveArgs(entry, testpack, utility, structUtils) {
   let args = []
 
   if (entry.ctx) {
     args = [entry.ctx]
-  }
-  else if (entry.args) {
+  } else if (entry.args) {
     args = entry.args
-  }
-  else {
+  } else {
     args = [structUtils.clone(entry.in)]
   }
 
   if (entry.ctx || entry.args) {
     let first = args[0]
-    if(structUtils.ismap(first)) {
+    if (structUtils.ismap(first)) {
       first = structUtils.clone(first)
       first = utility.contextify(first)
       args[0] = first
@@ -225,14 +184,7 @@ function resolveArgs(
   return args
 }
 
-
-function resolveTestPack(
-  name,
-  entry,
-  subject,
-  client,
-  clients
-) {
+function resolveTestPack(name, entry, subject, client, clients) {
   const testpack = {
     name,
     client,
@@ -249,16 +201,11 @@ function resolveTestPack(
   return testpack
 }
 
-
-function match(
-  check,
-  base,
-  structUtils
-) {
+function match(check, base, structUtils) {
   base = structUtils.clone(base)
-  
+
   structUtils.walk(check, (_key, val, _parent, path) => {
-    if(!structUtils.isnode(val)) {
+    if (!structUtils.isnode(val)) {
       let baseval = structUtils.getpath(base, path)
 
       if (baseval === val) {
@@ -274,11 +221,17 @@ function match(
       if (EXISTSMARK === val && null != baseval) {
         return val
       }
-      
+
       if (!matchval(val, baseval, structUtils)) {
-        fail('MATCH: ' + path.join('.') +
-             ': [' + structUtils.stringify(val) +
-             '] <=> [' + structUtils.stringify(baseval) + ']')
+        fail(
+          'MATCH: ' +
+            path.join('.') +
+            ': [' +
+            structUtils.stringify(val) +
+            '] <=> [' +
+            structUtils.stringify(baseval) +
+            ']',
+        )
       }
     }
 
@@ -286,31 +239,23 @@ function match(
   })
 }
 
-
-function matchval(
-  check,
-  base,
-  structUtils
-) {
+function matchval(check, base, structUtils) {
   // check = NULLMARK === check || UNDEFMARK === check ? undefined : check
   // check = NULLMARK === check ? undefined : check
 
   let pass = check === base
 
   if (!pass) {
-
     if ('string' === typeof check) {
       let basestr = structUtils.stringify(base)
 
       let rem = check.match(/^\/(.+)\/$/)
       if (rem) {
         pass = new RegExp(rem[1]).test(basestr)
-      }
-      else {
+      } else {
         pass = basestr.toLowerCase().includes(structUtils.stringify(check).toLowerCase())
       }
-    }
-    else if ('function' === typeof check) {
+    } else if ('function' === typeof check) {
       pass = true
     }
   }
@@ -318,45 +263,37 @@ function matchval(
   return pass
 }
 
-
 function fixJSON(val, flags) {
   if (null == val) {
     return flags.null ? NULLMARK : val
   }
 
   const replacer = (_k, v) => {
-    if(null == v && flags.null) {
+    if (null == v && flags.null) {
       return NULLMARK
     }
 
-    if(v instanceof Error) {
+    if (v instanceof Error) {
       return {
         ...v,
         name: v.name,
         message: v.message,
       }
     }
-    
+
     return v
   }
-  
+
   return JSON.parse(JSON.stringify(val, replacer))
 }
 
-
-function nullModifier(
-  val,
-  key,
-  parent
-) {
-  if ("__NULL__" === val) {
+function nullModifier(val, key, parent) {
+  if ('__NULL__' === val) {
     parent[key] = null
-  }
-  else if ('string' === typeof val) {
+  } else if ('string' === typeof val) {
     parent[key] = val.replaceAll('__NULL__', 'null')
   }
 }
-
 
 module.exports = {
   NULLMARK,

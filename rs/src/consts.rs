@@ -61,7 +61,7 @@ pub const T_STRING: u32 = 1 << 25;
 pub const T_FUNCTION: u32 = 1 << 24;
 pub const T_SYMBOL: u32 = 1 << 23;
 pub const T_NULL: u32 = 1 << 22; // the actual JSON null value.
-// t -= 7  => t = 14
+                                 // t -= 7  => t = 14
 pub const T_LIST: u32 = 1 << 14;
 pub const T_MAP: u32 = 1 << 13;
 pub const T_INSTANCE: u32 = 1 << 12;
@@ -81,21 +81,20 @@ pub const TYPENAME: [&str; 26] = [
     "function", // 7   clz32(1<<24)
     "symbol",   // 8   clz32(1<<23)
     "null",     // 9   clz32(1<<22)
-    "", "", "", "", "", "", "", // 10..=16
+    "", "", "", "", "", "", "",         // 10..=16
     "list",     // 17  clz32(1<<14)
     "map",      // 18  clz32(1<<13)
     "instance", // 19  clz32(1<<12)
-    "", "", "", "", // 20..=23
-    "scalar",   // 24  clz32(1<<7)
-    "node",     // 25  clz32(1<<6)
+    "", "", "", "",       // 20..=23
+    "scalar", // 24  clz32(1<<7)
+    "node",   // 25  clz32(1<<6)
 ];
 
 pub const MAXDEPTH: i64 = 32;
 
 // ---- regexes ----------------------------------------------------------
 pub static R_INTEGER_KEY: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[-0-9]+$").unwrap());
-pub static R_ESCAPE_REGEXP: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"[.*+?^${}()|\[\]\\]").unwrap());
+pub static R_ESCAPE_REGEXP: Lazy<Regex> = Lazy::new(|| Regex::new(r"[.*+?^${}()|\[\]\\]").unwrap());
 pub static R_QUOTES: Lazy<Regex> = Lazy::new(|| Regex::new(r#"""#).unwrap());
 pub static R_DOT: Lazy<Regex> = Lazy::new(|| Regex::new(r"\.").unwrap());
 pub static R_CLONE_REF: Lazy<Regex> = Lazy::new(|| Regex::new(r"^`\$REF:([0-9]+)`$").unwrap());

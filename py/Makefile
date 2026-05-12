@@ -1,4 +1,4 @@
-.PHONY: inspect build test bench clean reset
+.PHONY: inspect build test lint format-check typecheck bench clean reset audit
 
 inspect:
 	@echo "Python version:"
@@ -12,6 +12,18 @@ build:
 
 test:
 	python3 -m unittest discover -s tests
+
+# Code quality: Ruff (lint), Ruff (format check), mypy (static types).
+lint:
+	ruff check voxgig_struct tests
+	ruff format --check voxgig_struct tests
+	mypy
+
+format-check:
+	ruff format --check voxgig_struct tests
+
+typecheck:
+	mypy
 
 bench:
 	WALK_BENCH=1 python3 -m unittest discover -s tests -p 'test_walk_bench.py' -v
@@ -27,3 +39,8 @@ clean:
 	rm -rf *.egg-info dist build
 
 reset: clean
+
+# Supply-chain + security: dependency vuln scan (pip-audit) + Bandit SAST.
+audit:
+	pip-audit -r requirements-dev.txt
+	bandit -q -r voxgig_struct

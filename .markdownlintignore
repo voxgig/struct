@@ -1,0 +1,10 @@
+node_modules/
+**/node_modules/
+vendor/
+**/vendor/
+dist/
+dist-test/
+target/
+build/
+**/build/
+.gradle/

@@ -1,4 +1,4 @@
-.PHONY: inspect build test clean reset
+.PHONY: inspect build test lint fmt-check clean reset
 
 # Inspect: show language and project version info
 inspect:
@@ -11,6 +11,13 @@ inspect:
 # Build the library
 build:
 	zig build
+
+# Code quality: `zig fmt` formatting check. The compiler itself (zig build)
+# is the static analyser for Zig; there is no separate community linter.
+lint: fmt-check
+
+fmt-check:
+	zig fmt --check src test build.zig
 
 # Run all tests.
 # The zig test framework sometimes crashes with signal 11 during cleanup

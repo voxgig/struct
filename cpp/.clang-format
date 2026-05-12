@@ -1,0 +1,12 @@
+# clang-format configuration for the C++ port.
+# Base style with 2-space indent and a 100-column limit.
+BasedOnStyle: LLVM
+IndentWidth: 2
+TabWidth: 2
+UseTab: Never
+ColumnLimit: 100
+PointerAlignment: Left
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+SpaceAfterCStyleCast: true
+SortIncludes: false

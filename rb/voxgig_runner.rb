@@ -3,8 +3,8 @@ require 'json'
 require 'pathname'
 
 module VoxgigRunner
-  NULLMARK = "__NULL__"    # Represents a JSON null in tests
-  UNDEFMARK = "__UNDEF__"  # Represents an undefined value
+  NULLMARK = '__NULL__'.freeze    # Represents a JSON null in tests
+  UNDEFMARK = '__UNDEF__'.freeze  # Represents an undefined value
 
   # make_runner(testfile, client)
   # Returns a lambda that accepts a name (e.g. "struct") and an optional store,
@@ -29,27 +29,25 @@ module VoxgigRunner
         subject = testsubject || subject
         flags = resolve_flags(flags)
         testspecmap = fix_json(testspec, flags)
-        testset = testspecmap["set"] || []
+        testset = testspecmap['set'] || []
         testset.each do |entry|
-          begin
-            entry = resolve_entry(entry, flags)
-            # Log the test entry details if DEBUG is enabled.
-            puts "DEBUG: Running test entry: in=#{entry['in'].inspect} expected=#{entry['out'].inspect}" if ENV['DEBUG']
-            testpack = resolve_test_pack(name, entry, subject, client, clients)
-            args = resolve_args(entry, testpack, struct_utils)
-            # Log the arguments passed to subject.
-            puts "DEBUG: Arguments for subject: #{args.inspect}" if ENV['DEBUG']
-            # In Ruby we assume the subject is a Proc/lambda or a callable object.
-            res = testpack[:subject].call(*args)
-            entry["args"] = args
-            res = fix_json(res, flags)
-            entry["res"] = res
-            # Log the result obtained.
-            puts "DEBUG: Result obtained: #{struct_utils.stringify(res)}" if ENV['DEBUG']
-            check_result(entry, res, struct_utils)
-          rescue => err
-            handle_error(entry, err, struct_utils)
-          end
+          entry = resolve_entry(entry, flags)
+          # Log the test entry details if DEBUG is enabled.
+          puts "DEBUG: Running test entry: in=#{entry['in'].inspect} expected=#{entry['out'].inspect}" if ENV['DEBUG']
+          testpack = resolve_test_pack(name, entry, subject, client, clients)
+          args = resolve_args(entry, testpack, struct_utils)
+          # Log the arguments passed to subject.
+          puts "DEBUG: Arguments for subject: #{args.inspect}" if ENV['DEBUG']
+          # In Ruby we assume the subject is a Proc/lambda or a callable object.
+          res = testpack[:subject].call(*args)
+          entry['args'] = args
+          res = fix_json(res, flags)
+          entry['res'] = res
+          # Log the result obtained.
+          puts "DEBUG: Result obtained: #{struct_utils.stringify(res)}" if ENV['DEBUG']
+          check_result(entry, res, struct_utils)
+        rescue StandardError => e
+          handle_error(entry, e, struct_utils)
         end
       end
 
@@ -66,27 +64,24 @@ module VoxgigRunner
   def self.resolve_spec(name, testfile)
     full_path = File.join(__dir__, testfile)
     all_tests = JSON.parse(File.read(full_path))
-    if all_tests.key?("primary") && all_tests["primary"].key?(name)
-      spec = all_tests["primary"][name]
+    if all_tests.key?('primary') && all_tests['primary'].key?(name)
+      all_tests['primary'][name]
     elsif all_tests.key?(name)
-      spec = all_tests[name]
+      all_tests[name]
     else
-      spec = all_tests
+      all_tests
     end
-    spec
   end
 
   # If the spec contains a DEF section with client definitions, resolve them.
   # For each defined client, obtain its test instance via client.test(options).
   def self.resolve_clients(client, spec, store, struct_utils)
     clients = {}
-    if spec["DEF"] && spec["DEF"]["client"]
-      spec["DEF"]["client"].each do |cn, cdef|
-        copts = (cdef["test"] && cdef["test"]["options"]) || {}
+    if spec['DEF'] && spec['DEF']['client']
+      spec['DEF']['client'].each do |cn, cdef|
+        copts = (cdef['test'] && cdef['test']['options']) || {}
         # If there is an injection method defined, apply it.
-        if store.is_a?(Hash) && struct_utils.respond_to?(:inject)
-          struct_utils.inject(copts, store)
-        end
+        struct_utils.inject(copts, store) if store.is_a?(Hash) && struct_utils.respond_to?(:inject)
         clients[cn] = client.test(copts)
       end
     end
@@ -108,13 +103,13 @@ module VoxgigRunner
   # Ensure flags is a hash and set "null" flag to true if not provided.
   def self.resolve_flags(flags)
     flags ||= {}
-    flags["null"] = true unless flags.key?("null")
+    flags['null'] = true unless flags.key?('null')
     flags
   end
 
   # If the entry's "out" field is nil and the flag "null" is true, substitute NULLMARK.
   def self.resolve_entry(entry, flags)
-    entry["out"] = (entry["out"].nil? && flags["null"]) ? NULLMARK : entry["out"]
+    entry['out'] = entry['out'].nil? && flags['null'] ? NULLMARK : entry['out']
     entry
   end
 
@@ -122,42 +117,39 @@ module VoxgigRunner
   # Uses a deep equality check (via JSON round-trip) and may use a "match" clause.
   def self.check_result(entry, res, struct_utils)
     matched = false
-    if entry.key?("match")
-      result = { "in" => entry["in"], "out" => entry["res"], "ctx" => entry["ctx"], "args" => entry["args"] }
-      match(entry["match"], result, struct_utils)
+    if entry.key?('match')
+      result = { 'in' => entry['in'], 'out' => entry['res'], 'ctx' => entry['ctx'], 'args' => entry['args'] }
+      match(entry['match'], result, struct_utils)
       matched = true
     end
 
     # Log expected and actual values before comparison.
-    puts "DEBUG check_result: expected=#{struct_utils.stringify(entry['out'])} actual=#{struct_utils.stringify(res)}" if ENV['DEBUG']
-
-    if entry["out"] == res
-      return
+    if ENV['DEBUG']
+      puts "DEBUG check_result: expected=#{struct_utils.stringify(entry['out'])} actual=#{struct_utils.stringify(res)}"
     end
 
-    if matched && (entry["out"] == NULLMARK || entry["out"].nil?)
-      return
-    end
+    return if entry['out'] == res
 
-    unless deep_equal?(res, entry["out"])
-      raise "Mismatch: Expected #{struct_utils.stringify(entry['out'])} but got #{struct_utils.stringify(res)}"
-    end
+    return if matched && (entry['out'] == NULLMARK || entry['out'].nil?)
+
+    return if deep_equal?(res, entry['out'])
+
+    raise "Mismatch: Expected #{struct_utils.stringify(entry['out'])} but got #{struct_utils.stringify(res)}"
   end
 
   # In case of error during test execution, handle it.
   def self.handle_error(entry, err, struct_utils)
-    entry["thrown"] = err
-    if entry.key?("err")
-      if entry["err"] === true || matchval(entry["err"], err.message, struct_utils)
-        if entry.key?("match")
-          match(entry["match"], { "in" => entry["in"], "out" => entry["res"], "ctx" => entry["ctx"], "err" => err }, struct_utils)
-        end
-        return
+    entry['thrown'] = err
+    raise err unless entry.key?('err')
+
+    if entry['err'] == true || matchval(entry['err'], err.message, struct_utils)
+      if entry.key?('match')
+        match(entry['match'], { 'in' => entry['in'], 'out' => entry['res'], 'ctx' => entry['ctx'], 'err' => err },
+              struct_utils)
       end
-      raise "ERROR MATCH: [#{struct_utils.stringify(entry['err'])}] <=> [#{err.message}]"
-    else
-      raise err
+      return
     end
+    raise "ERROR MATCH: [#{struct_utils.stringify(entry['err'])}] <=> [#{err.message}]"
   end
 
   # Resolves arguments for the test subject.
@@ -165,19 +157,19 @@ module VoxgigRunner
   # If entry["ctx"] or entry["args"] is provided, use that instead.
   # Also, if passing an object, inject client and utility.
   def self.resolve_args(entry, testpack, struct_utils)
-    args = entry.key?("in") ? [struct_utils.clone(entry["in"])] : [VoxgigStruct::UNDEF]
-    if entry.key?("ctx")
-      args = [entry["ctx"]]
-    elsif entry.key?("args")
-      args = entry["args"]
+    args = entry.key?('in') ? [struct_utils.clone(entry['in'])] : [VoxgigStruct::UNDEF]
+    if entry.key?('ctx')
+      args = [entry['ctx']]
+    elsif entry.key?('args')
+      args = entry['args']
     end
 
-    if entry.key?("ctx") || entry.key?("args")
+    if entry.key?('ctx') || entry.key?('args')
       first = args[0]
       if first.is_a?(Hash) && !first.nil?
-        entry["ctx"] = struct_utils.clone(first)
-        first["client"] = testpack[:client]
-        first["utility"] = testpack[:utility]
+        entry['ctx'] = struct_utils.clone(first)
+        first['client'] = testpack[:client]
+        first['utility'] = testpack[:utility]
         args[0] = first
       end
     end
@@ -188,8 +180,8 @@ module VoxgigRunner
   # If the entry specifies a client override, use that client's utility and subject.
   def self.resolve_test_pack(name, entry, subject, client, clients)
     testpack = { client: client, subject: subject, utility: client.utility }
-    if entry.key?("client")
-      testpack[:client] = clients[entry["client"]]
+    if entry.key?('client')
+      testpack[:client] = clients[entry['client']]
       testpack[:utility] = testpack[:client].utility
       testpack[:subject] = resolve_subject(name, testpack[:utility])
     end
@@ -241,8 +233,8 @@ module VoxgigRunner
     unless pass
       if check.is_a?(String)
         basestr = struct_utils.stringify(base)
-        if check =~ /^\/(.+)\/$/
-          regex = Regexp.new($1)
+        if check =~ %r{^/(.+)/$}
+          regex = Regexp.new(::Regexp.last_match(1))
           pass = regex.match?(basestr)
         else
           pass = basestr.downcase.include?(struct_utils.stringify(check).downcase)
@@ -269,25 +261,26 @@ module VoxgigRunner
       end
     }
     JSON.generate(normalize.call(a)) == JSON.generate(normalize.call(b))
-  rescue
+  rescue StandardError
     a == b
   end
 
   # Returns a deep copy of a value via JSON round-trip.
   def self.fix_json(val, flags)
-    return flags["null"] ? NULLMARK : val if val.nil?
-    return flags["null"] ? NULLMARK : val if val.equal?(VoxgigStruct::UNDEF)
+    return flags['null'] ? NULLMARK : val if val.nil?
+    return flags['null'] ? NULLMARK : val if val.equal?(VoxgigStruct::UNDEF)
+
     JSON.parse(JSON.generate(val))
-  rescue
+  rescue StandardError
     val
   end
 
   # Applies a null modifier: if a value is "__NULL__", it replaces it with nil.
   def self.null_modifier(val, key, parent)
-    if val == "__NULL__"
+    if val == '__NULL__'
       parent[key] = nil
     elsif val.is_a?(String)
-      parent[key] = val.gsub("__NULL__", "null")
+      parent[key] = val.gsub('__NULL__', 'null')
     end
   end
 end

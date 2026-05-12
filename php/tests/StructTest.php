@@ -9,7 +9,6 @@ use Voxgig\Struct\ListRef;
 
 class StructTest extends TestCase
 {
-
     private stdClass $testSpec;
 
     protected function setUp(): void
@@ -225,8 +224,8 @@ class StructTest extends TestCase
                 $val = property_exists($input, 'val') ? $input->val : Struct::undef();
                 $key = property_exists($input, 'key') ? $input->key : Struct::undef();
                 $alt = property_exists($input, 'alt') ? $input->alt : Struct::undef();
-                return $alt === Struct::undef() ? 
-                    Struct::getelem($val, $key) : 
+                return $alt === Struct::undef() ?
+                    Struct::getelem($val, $key) :
                     Struct::getelem($val, $key, $alt);
             }
         );
@@ -433,10 +432,12 @@ class StructTest extends TestCase
             function ($input) {
                 $store = [
                     '$TOP' => $input->store,
-                    '$FOO' => function() { return 'foo'; }
+                    '$FOO' => function () {
+                        return 'foo';
+                    }
                 ];
                 $state = new \stdClass();
-                $state->handler = function($inj, $val, $cur, $ref) {
+                $state->handler = function ($inj, $val, $cur, $ref) {
                     return $val();
                 };
                 return Struct::getpath(
@@ -618,7 +619,6 @@ class StructTest extends TestCase
             $obj2,
             Struct::merge([$obj2])
         );
-
     }
 
     public function testGetpathBasic(): void
@@ -969,8 +969,12 @@ class StructTest extends TestCase
     public function testFilter(): void
     {
         $checkmap = [
-            'gt3' => function ($n) { return $n[1] > 3; },
-            'lt3' => function ($n) { return $n[1] < 3; },
+            'gt3' => function ($n) {
+                return $n[1] > 3;
+            },
+            'lt3' => function ($n) {
+                return $n[1] < 3;
+            },
         ];
         $this->testSet(
             $this->testSpec->minor->filter,
@@ -1001,7 +1005,9 @@ class StructTest extends TestCase
 
     public function testMinorEdgeClone(): void
     {
-        $f0 = function () { return null; };
+        $f0 = function () {
+            return null;
+        };
         $result = Struct::clone((object) ['a' => $f0]);
         $this->assertSame($f0, $result->a);
 
@@ -1014,7 +1020,9 @@ class StructTest extends TestCase
     public function testMinorEdgeCloneClosures(): void
     {
         // Closure preserved by reference in an object.
-        $fn = function ($x) { return $x + 1; };
+        $fn = function ($x) {
+            return $x + 1;
+        };
         $obj = (object) ['a' => 1, 'f' => $fn];
         $cloned = Struct::clone($obj);
         $this->assertSame($fn, $cloned->f);
@@ -1030,7 +1038,9 @@ class StructTest extends TestCase
         $this->assertNotSame($nested->x, $clonedNested->x);
 
         // Closure preserved in an array.
-        $fn3 = function () { return 'hello'; };
+        $fn3 = function () {
+            return 'hello';
+        };
         $arr = [$fn3, 1, 'two'];
         $clonedArr = Struct::clone($arr);
         $this->assertSame($fn3, $clonedArr[0]);
@@ -1038,8 +1048,12 @@ class StructTest extends TestCase
         $this->assertEquals('two', $clonedArr[2]);
 
         // Multiple closures preserved independently.
-        $fnA = function () { return 'A'; };
-        $fnB = function () { return 'B'; };
+        $fnA = function () {
+            return 'A';
+        };
+        $fnB = function () {
+            return 'B';
+        };
         $multi = (object) ['a' => $fnA, 'b' => $fnB, 'c' => 99];
         $clonedMulti = Struct::clone($multi);
         $this->assertSame($fnA, $clonedMulti->a);
@@ -1063,14 +1077,19 @@ class StructTest extends TestCase
 
         // Invokable object preserved by reference.
         $invokable = new class {
-            public function __invoke(): string { return 'invoked'; }
+            public function __invoke(): string
+            {
+                return 'invoked';
+            }
         };
         $objWithInvokable = (object) ['f' => $invokable];
         $clonedInvokable = Struct::clone($objWithInvokable);
         $this->assertSame($invokable, $clonedInvokable->f);
 
         // Bare closure as top-level value.
-        $topFn = function () { return 42; };
+        $topFn = function () {
+            return 42;
+        };
         $clonedTopFn = Struct::clone($topFn);
         $this->assertSame($topFn, $clonedTopFn);
 
@@ -1085,7 +1104,9 @@ class StructTest extends TestCase
 
     public function testMinorEdgeGetelem(): void
     {
-        $this->assertEquals(2, Struct::getelem([], 1, function () { return 2; }));
+        $this->assertEquals(2, Struct::getelem([], 1, function () {
+            return 2;
+        }));
     }
 
     public function testMinorEdgeItems(): void
@@ -1096,7 +1117,9 @@ class StructTest extends TestCase
 
     public function testMinorEdgeJsonify(): void
     {
-        $this->assertEquals('null', Struct::jsonify(function () { return 1; }));
+        $this->assertEquals('null', Struct::jsonify(function () {
+            return 1;
+        }));
     }
 
     public function testMinorEdgeKeysof(): void
@@ -1122,7 +1145,9 @@ class StructTest extends TestCase
     {
         $this->assertEquals(Struct::T_noval, Struct::typify(Struct::undef()));
         $this->assertEquals(Struct::T_scalar | Struct::T_null, Struct::typify(null));
-        $this->assertEquals(Struct::T_scalar | Struct::T_function, Struct::typify(function () { return null; }));
+        $this->assertEquals(Struct::T_scalar | Struct::T_function, Struct::typify(function () {
+            return null;
+        }));
     }
 
     // ——— Merge depth ———
@@ -1331,5 +1356,4 @@ class StructTest extends TestCase
         $result6 = Struct::validate($data6, $spec, $injdef6);
         $this->assertEmpty($errs6, 'empty ListRef should not cause type-mismatch against map spec');
     }
-
 }

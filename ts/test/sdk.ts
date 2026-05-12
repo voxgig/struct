@@ -1,8 +1,6 @@
-
 import { StructUtility } from '../dist/StructUtility'
 
 class SDK {
-
   #opts: any = {}
   #utility: any = {}
 
@@ -14,12 +12,13 @@ class SDK {
       makeContext: (ctxmap: any) => ctxmap,
       check: (ctx: any) => {
         return {
-          zed: 'ZED' +
+          zed:
+            'ZED' +
             (null == this.#opts ? '' : null == this.#opts.foo ? '' : this.#opts.foo) +
             '_' +
-            (null == ctx.meta?.bar ? '0' : ctx.meta.bar)
+            (null == ctx.meta?.bar ? '0' : ctx.meta.bar),
         }
-      }
+      },
     }
   }
 
@@ -36,6 +35,4 @@ class SDK {
   }
 }
 
-export {
-  SDK
-}
+export { SDK }

@@ -6,6 +6,14 @@ on:
   pull_request:
     branches: [ main, dev ]
 
+permissions:
+  contents: read
+
+env:
+  # actions/checkout and the setup-* actions still bundle the deprecated
+  # Node 20 runtime; opt them into Node 24 now (default from 2026-06-02).
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   test-ts:
     runs-on: ${{ matrix.os }}
@@ -14,9 +22,9 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         node-version: [24, latest]
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Setup Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
       - name: Install dependencies
@@ -36,9 +44,9 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         node-version: ['24', 'latest']
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Setup Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
       - name: Install dependencies
@@ -55,9 +63,9 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         python-version: ['3.10', '3.11', '3.12', '3.13']
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Setup Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
       - name: Run tests
@@ -71,9 +79,9 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         go-version: ['1.20', '1.21', '1.22', '1.23', '1.24']
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Setup Go ${{ matrix.go-version }}
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go-version }}
       - name: Build
@@ -89,7 +97,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
         with:
@@ -110,14 +118,18 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.1'
       - name: Install dependencies
         working-directory: ./php
+        # setup-php intermittently writes a malformed github-oauth token to its
+        # auth.json; a fresh COMPOSER_HOME sidesteps it (no auth needed here).
         run: composer install
+        env:
+          COMPOSER_HOME: ${{ runner.temp }}/composer-home
       - name: Run tests
         working-directory: ./php
         run: vendor/bin/phpunit
@@ -128,7 +140,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Build
@@ -144,9 +156,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Setup .NET
-        uses: actions/setup-dotnet@v3
+        uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
       - name: Run tests
@@ -160,7 +172,7 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         java-version: ['17']
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Setup Java ${{ matrix.java-version }}
         uses: actions/setup-java@v4
         with:
@@ -173,6 +185,7 @@ jobs:
       - name: Run tests (Windows)
         if: runner.os == 'Windows'
         working-directory: ./kt
+        shell: pwsh
         run: .\gradlew.bat test
 
   test-java:
@@ -182,7 +195,7 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         java-version: ['17']
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Setup Java ${{ matrix.java-version }}
         uses: actions/setup-java@v4
         with:
@@ -198,7 +211,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Setup Lua
         uses: leafo/gh-actions-lua@v10
         with:
@@ -222,7 +235,7 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         zig-version: ['0.13.0']
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Setup Zig ${{ matrix.zig-version }}
         uses: mlugg/setup-zig@v1
         with:
@@ -252,7 +265,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Install nlohmann/json (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y nlohmann-json3-dev

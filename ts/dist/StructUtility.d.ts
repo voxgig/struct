@@ -48,9 +48,9 @@ declare function ismap(val: any): val is {
 declare function islist(val: any): val is any[];
 declare function iskey(key: any): key is PropKey;
 declare function isempty(val: any): boolean;
-declare function isfunc(val: any): val is Function;
+declare function isfunc(val: any): val is (...args: any[]) => any;
 declare function size(val: any): number;
-declare function slice<V extends any>(val: V, start?: number, end?: number, mutate?: boolean): V;
+declare function slice<V>(val: V, start?: number, end?: number, mutate?: boolean): V;
 declare function pad(str: any, padding?: number, padchar?: string): string;
 declare function typify(value: any): number;
 declare function getelem(val: any, key: any, alt?: any): any;

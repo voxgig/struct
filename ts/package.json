@@ -25,6 +25,11 @@
     "test-direct": "node dist-test/direct.js",
     "watch": "tsc --build src test -w",
     "build": "tsc --build src test",
+    "typecheck": "tsc --build src test --force",
+    "lint": "eslint src test",
+    "lint:fix": "eslint src test --fix",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\"",
     "doc": "echo doc",
     "inject-version": "node -e \"t=['./src/StructUtility.ts','./test/runner.ts','./test/utility/StructUtility.test.ts'],r=require,fs=r('fs'),v=r('./package.json').version,t.map(f=>fs.writeFileSync(f,fs.readFileSync(f,'utf8').replace(/\\/\\/ VERSION: @voxgig\\/struct [^\\n]+/, '// VERSION: @voxgig/struct '+v)))\"",
     "clean": "rm -rf dist dist-test node_modules yarn.lock package-lock.json",
@@ -41,7 +46,12 @@
     "dist"
   ],
   "devDependencies": {
+    "@eslint/js": "^9.14.0",
     "@types/node": "^25.6.0",
-    "typescript": "^5.9.3"
+    "eslint": "^9.14.0",
+    "globals": "^15.12.0",
+    "prettier": "^3.3.3",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.13.0"
   }
 }

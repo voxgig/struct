@@ -30,7 +30,6 @@ local function buildTree(width, depth)
   return out
 end
 
-
 local function countNodes(val)
   if type(val) ~= "table" then
     return 1
@@ -41,7 +40,6 @@ local function countNodes(val)
   end
   return n
 end
-
 
 local function measure(label, tree, runs)
   local sink = 0
@@ -67,33 +65,38 @@ local function measure(label, tree, runs)
   local min = times[1]
   local max = times[#times]
   local sum = 0
-  for _, t in ipairs(times) do sum = sum + t end
+  for _, t in ipairs(times) do
+    sum = sum + t
+  end
   local mean = sum / #times
 
   local nodes = countNodes(tree)
   local nsPerNode = (median * 1e6) / nodes
 
-  print(string.format(
-    "[walk-bench] %s: nodes=%d runs=%d min=%.2fms median=%.2fms mean=%.2fms max=%.2fms ns/node=%.1f sink=%d",
-    label, nodes, runs, min, median, mean, max, nsPerNode, sink
-  ))
+  print(
+    string.format(
+      "[walk-bench] %s: nodes=%d runs=%d min=%.2fms median=%.2fms mean=%.2fms max=%.2fms ns/node=%.1f sink=%d",
+      label,
+      nodes,
+      runs,
+      min,
+      median,
+      mean,
+      max,
+      nsPerNode,
+      sink
+    )
+  )
 end
 
-
 -- ~299k nodes: width=8, depth=6.
-local wideDeep = buildTree(8, 6)
-measure("wide+deep (w=8,d=6)", wideDeep, 7)
-wideDeep = nil
+measure("wide+deep (w=8,d=6)", buildTree(8, 6), 7)
 collectgarbage("collect")
 
 -- ~1M nodes, shallow.
-local wide = buildTree(1000, 2)
-measure("wide (w=1000,d=2)", wide, 7)
-wide = nil
+measure("wide (w=1000,d=2)", buildTree(1000, 2), 7)
 collectgarbage("collect")
 
 -- ~2M nodes, deep. Lua's MAXDEPTH in walk is 32, so w=2,d=20 is safe.
-local deep = buildTree(2, 20)
-measure("deep (w=2,d=20)", deep, 5)
-deep = nil
+measure("deep (w=2,d=20)", buildTree(2, 20), 5)
 collectgarbage("collect")
