@@ -2,7 +2,7 @@ package runner
 
 import (
 	"fmt"
-	
+
 	voxgigstruct "github.com/voxgig/struct/go"
 )
 
@@ -64,7 +64,7 @@ func NewSDK(opts map[string]any) *SDK {
 	sdk := &SDK{
 		opts: opts,
 	}
-	
+
 	// Create the StructUtility
 	structUtil := &StructUtility{
 		IsNode:     voxgigstruct.IsNode,
@@ -76,36 +76,36 @@ func NewSDK(opts map[string]any) *SDK {
 		Stringify:  voxgigstruct.Stringify,
 		Walk:       voxgigstruct.Walk,
 
-		DelProp:    voxgigstruct.DelProp,
-		EscRe:      voxgigstruct.EscRe,
-		EscUrl:     voxgigstruct.EscUrl,
-		Filter:     voxgigstruct.Filter,
-		Flatten:    voxgigstruct.Flatten,
-		GetDef:     voxgigstruct.GetDef,
-		GetElem:    voxgigstruct.GetElem,
-		GetProp:    voxgigstruct.GetProp,
-		HasKey:     voxgigstruct.HasKey,
-		IsEmpty:    voxgigstruct.IsEmpty,
-		IsFunc:     voxgigstruct.IsFunc,
-		IsKey:      voxgigstruct.IsKey,
-		IsList:     voxgigstruct.IsList,
-		IsMap:      voxgigstruct.IsMap,
-		Join:       voxgigstruct.Join,
-		Jsonify:    voxgigstruct.Jsonify,
-		KeysOf:     voxgigstruct.KeysOf,
-		Merge:      voxgigstruct.Merge,
-		Pad:        voxgigstruct.Pad,
-		Pathify:    voxgigstruct.Pathify,
-		Select:     voxgigstruct.Select,
-		SetPath:    voxgigstruct.SetPath,
-		SetProp:    voxgigstruct.SetProp,
-		Size:       voxgigstruct.Size,
-		Slice:      voxgigstruct.Slice,
-		StrKey:     voxgigstruct.StrKey,
-		Transform:  voxgigstruct.Transform,
-		Typify:     voxgigstruct.Typify,
-		Typename:   voxgigstruct.Typename,
-		Validate:   voxgigstruct.Validate,
+		DelProp:   voxgigstruct.DelProp,
+		EscRe:     voxgigstruct.EscRe,
+		EscUrl:    voxgigstruct.EscUrl,
+		Filter:    voxgigstruct.Filter,
+		Flatten:   voxgigstruct.Flatten,
+		GetDef:    voxgigstruct.GetDef,
+		GetElem:   voxgigstruct.GetElem,
+		GetProp:   voxgigstruct.GetProp,
+		HasKey:    voxgigstruct.HasKey,
+		IsEmpty:   voxgigstruct.IsEmpty,
+		IsFunc:    voxgigstruct.IsFunc,
+		IsKey:     voxgigstruct.IsKey,
+		IsList:    voxgigstruct.IsList,
+		IsMap:     voxgigstruct.IsMap,
+		Join:      voxgigstruct.Join,
+		Jsonify:   voxgigstruct.Jsonify,
+		KeysOf:    voxgigstruct.KeysOf,
+		Merge:     voxgigstruct.Merge,
+		Pad:       voxgigstruct.Pad,
+		Pathify:   voxgigstruct.Pathify,
+		Select:    voxgigstruct.Select,
+		SetPath:   voxgigstruct.SetPath,
+		SetProp:   voxgigstruct.SetProp,
+		Size:      voxgigstruct.Size,
+		Slice:     voxgigstruct.Slice,
+		StrKey:    voxgigstruct.StrKey,
+		Transform: voxgigstruct.Transform,
+		Typify:    voxgigstruct.Typify,
+		Typename:  voxgigstruct.Typename,
+		Validate:  voxgigstruct.Validate,
 
 		SKIP:   voxgigstruct.SKIP,
 		DELETE: voxgigstruct.DELETE,
@@ -117,7 +117,7 @@ func NewSDK(opts map[string]any) *SDK {
 		InjectorArgs:   voxgigstruct.InjectorArgs,
 		InjectChild:    voxgigstruct.InjectChild,
 	}
-	
+
 	// Create the utility
 	sdk.utility = &SDKUtility{
 		sdk:     sdk,

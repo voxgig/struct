@@ -12,7 +12,8 @@ test:
 	PATH="$(HOME)/.luarocks/bin:$$PATH" find ./test/ -name "*test.lua" | xargs $$(command -v busted || echo $(HOME)/.luarocks/bin/busted)
 
 # Code quality: luacheck (lint) + StyLua (format check).
-# Install with: luarocks install luacheck   and   cargo install stylua
+# Install with:  luarocks install luacheck
+#                cargo install stylua --features lua54   (5.3+ bitwise ops)
 lint:
 	luacheck src test
 	stylua --check src test

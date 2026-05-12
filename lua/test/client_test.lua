@@ -7,14 +7,13 @@ local SDK = require("sdk").SDK
 
 local TEST_JSON_FILE = "../build/test/test.json"
 
-describe('client', function()
+describe("client", function()
   local runner = makeRunner(TEST_JSON_FILE, SDK:test())
 
-  local runnerCheck = runner('check')
-  local spec, runset, subject = runnerCheck.spec, runnerCheck.runset,
-      runnerCheck.subject
+  local runnerCheck = runner("check")
+  local spec, runset, subject = runnerCheck.spec, runnerCheck.runset, runnerCheck.subject
 
-  test('client-check-basic', function()
+  test("client-check-basic", function()
     runset(spec.basic, subject)
   end)
 end)

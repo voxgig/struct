@@ -19,10 +19,10 @@ async function makeRunner(testfile, client) {
         store = store || {};
         const utility = client.utility();
         const structUtils = utility.struct;
-        let spec = resolveSpec(name, testfile);
-        let clients = await resolveClients(client, spec, store, structUtils);
+        const spec = resolveSpec(name, testfile);
+        const clients = await resolveClients(client, spec, store, structUtils);
         let subject = resolveSubject(name, utility);
-        let runsetflags = async (testspec, flags, testsubject) => {
+        const runsetflags = async (testspec, flags, testsubject) => {
             subject = testsubject || subject;
             flags = resolveFlags(flags);
             const testspecmap = fixJSON(testspec, flags);
@@ -30,8 +30,8 @@ async function makeRunner(testfile, client) {
             for (let entry of testset) {
                 try {
                     entry = resolveEntry(entry, flags);
-                    let testpack = resolveTestPack(name, entry, subject, client, clients);
-                    let args = resolveArgs(entry, testpack, utility, structUtils);
+                    const testpack = resolveTestPack(name, entry, subject, client, clients);
+                    const args = resolveArgs(entry, testpack, utility, structUtils);
                     let res = await testpack.subject(...args);
                     res = fixJSON(res, flags);
                     entry.res = res;
@@ -45,7 +45,7 @@ async function makeRunner(testfile, client) {
                 }
             }
         };
-        let runset = async (testspec, testsubject) => runsetflags(testspec, {}, testsubject);
+        const runset = async (testspec, testsubject) => runsetflags(testspec, {}, testsubject);
         const runpack = {
             spec,
             runset,
@@ -58,13 +58,13 @@ async function makeRunner(testfile, client) {
 }
 function resolveSpec(name, testfile) {
     const alltests = JSON.parse((0, node_fs_1.readFileSync)((0, node_path_1.join)(__dirname, testfile), 'utf8'));
-    let spec = alltests.primary?.[name] || alltests[name] || alltests;
+    const spec = alltests.primary?.[name] || alltests[name] || alltests;
     return spec;
 }
 async function resolveClients(client, spec, store, structUtils) {
     const clients = {};
     if (spec.DEF && spec.DEF.client) {
-        for (let cn in spec.DEF.client) {
+        for (const cn in spec.DEF.client) {
             const cdef = spec.DEF.client[cn];
             const copts = cdef.test.options || {};
             if ('object' === typeof store && structUtils?.inject) {
@@ -93,8 +93,7 @@ function resolveEntry(entry, flags) {
 function checkResult(entry, args, res, structUtils) {
     let matched = false;
     if (entry.err) {
-        return (0, node_assert_1.fail)('Expected error did not occur: ' + entry.err +
-            '\n\nENTRY: ' + JSON.stringify(entry, null, 2));
+        return (0, node_assert_1.fail)('Expected error did not occur: ' + entry.err + '\n\nENTRY: ' + JSON.stringify(entry, null, 2));
     }
     if (entry.match) {
         const result = { in: entry.in, args, out: entry.res, ctx: entry.ctx };
@@ -122,8 +121,7 @@ function handleError(entry, err, structUtils) {
             }
             return;
         }
-        (0, node_assert_1.fail)('ERROR MATCH: [' + structUtils.stringify(entry_err) +
-            '] <=> [' + err.message + ']');
+        (0, node_assert_1.fail)('ERROR MATCH: [' + structUtils.stringify(entry_err) + '] <=> [' + err.message + ']');
     }
     // Unexpected error (test didn't specify an error expectation)
     else if (err instanceof node_assert_1.AssertionError) {
@@ -175,7 +173,7 @@ function match(check, basex, structUtils) {
     const cbase = structUtils.clone(basex);
     structUtils.walk(check, (_key, val, _parent, path) => {
         if (!structUtils.isnode(val)) {
-            let baseval = structUtils.getpath(cbase, path);
+            const baseval = structUtils.getpath(cbase, path);
             if (baseval === val) {
                 return val;
             }
@@ -188,9 +186,13 @@ function match(check, basex, structUtils) {
                 return val;
             }
             if (!matchval(val, baseval, structUtils)) {
-                (0, node_assert_1.fail)('MATCH: ' + path.join('.') +
-                    ': [' + structUtils.stringify(val) +
-                    '] <=> [' + structUtils.stringify(baseval) + ']');
+                (0, node_assert_1.fail)('MATCH: ' +
+                    path.join('.') +
+                    ': [' +
+                    structUtils.stringify(val) +
+                    '] <=> [' +
+                    structUtils.stringify(baseval) +
+                    ']');
             }
         }
         return val;
@@ -200,8 +202,8 @@ function matchval(check, base, structUtils) {
     let pass = check === base;
     if (!pass) {
         if ('string' === typeof check) {
-            let basestr = structUtils.stringify(base);
-            let rem = check.match(/^\/(.+)\/$/);
+            const basestr = structUtils.stringify(base);
+            const rem = check.match(/^\/(.+)\/$/);
             if (rem) {
                 pass = new RegExp(rem[1]).test(basestr);
             }
@@ -235,7 +237,7 @@ function fixJSON(val, flags) {
     return JSON.parse(JSON.stringify(val, replacer));
 }
 function nullModifier(val, key, parent) {
-    if ("__NULL__" === val) {
+    if ('__NULL__' === val) {
         parent[key] = null;
     }
     else if ('string' === typeof val) {

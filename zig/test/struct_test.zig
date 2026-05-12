@@ -200,7 +200,7 @@ fn wrap_filter(allocator: Allocator, val: JsonValue) JsonValue {
     const list = v.array.data.items;
 
     const result_lr = allocator.create(voxgig_struct.ListRef) catch return .null;
-        result_lr.* = .{ .data = voxgig_struct.ListData.init(allocator) };
+    result_lr.* = .{ .data = voxgig_struct.ListData.init(allocator) };
     for (list) |item| {
         const num: f64 = switch (item) {
             .integer => |i| @floatFromInt(i),
@@ -626,7 +626,8 @@ fn cloneWithDepth(allocator: Allocator, val: JsonValue, maxdepth: i32, depth: i3
         return JsonValue.makeMap(allocator) catch return .null;
     }
     if (voxgig_struct.ismap(val)) {
-        const new_obj_ref = allocator.create(voxgig_struct.MapRef) catch return .null; new_obj_ref.* = .{ .data = voxgig_struct.MapData.init(allocator) };
+        const new_obj_ref = allocator.create(voxgig_struct.MapRef) catch return .null;
+        new_obj_ref.* = .{ .data = voxgig_struct.MapData.init(allocator) };
         var it = val.object.iterator();
         while (it.next()) |kv| {
             try new_obj_ref.put(kv.key_ptr.*, try cloneWithDepth(allocator, kv.value_ptr.*, maxdepth, depth + 1));

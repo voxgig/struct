@@ -2,17 +2,17 @@ package voxgig.struct
 
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import java.nio.file.Files
+import java.nio.file.Path
+import java.util.function.Function
+import java.util.function.Supplier
+import java.util.regex.Pattern
 import kotlin.math.floor
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
-import java.nio.file.Files
-import java.nio.file.Path
-import java.util.function.Function
-import java.util.function.Supplier
-import java.util.regex.Pattern
 
 @Suppress("UNCHECKED_CAST")
 class StructTests {
@@ -64,9 +64,10 @@ class StructTests {
 
     @Test
     fun walkBasic() {
-        val walkPath = Struct.WalkApply { _, v, _, p ->
-            if (v is String) v + "~" + p.joinToString(".") else v
-        }
+        val walkPath =
+            Struct.WalkApply { _, v, _, p ->
+                if (v is String) v + "~" + p.joinToString(".") else v
+            }
         runSet(walkSpec["basic"] as Map<String, Any?>) { input -> Struct.walk(input, walkPath) }
     }
 
@@ -76,32 +77,35 @@ class StructTests {
         val outMap = test["out"] as Map<*, *>
 
         val logAfter = mutableListOf<Any?>()
-        val walklogAfter = Struct.WalkApply { key, value, parent, path ->
-            val ks = key ?: ""
-            val entry = "k=${Struct.stringify(ks)}, v=${Struct.stringify(value)}, p=${slog(parent)}, t=${Struct.pathify(path)}"
-            logAfter.add(entry)
-            value
-        }
+        val walklogAfter =
+            Struct.WalkApply { key, value, parent, path ->
+                val ks = key ?: ""
+                val entry = "k=${Struct.stringify(ks)}, v=${Struct.stringify(value)}, p=${slog(parent)}, t=${Struct.pathify(path)}"
+                logAfter.add(entry)
+                value
+            }
         Struct.walk(test["in"], null, walklogAfter)
         assertEquals(outMap["after"], logAfter)
 
         val logBefore = mutableListOf<Any?>()
-        val walklogBefore = Struct.WalkApply { key, value, parent, path ->
-            val ks = key ?: ""
-            val entry = "k=${Struct.stringify(ks)}, v=${Struct.stringify(value)}, p=${slog(parent)}, t=${Struct.pathify(path)}"
-            logBefore.add(entry)
-            value
-        }
+        val walklogBefore =
+            Struct.WalkApply { key, value, parent, path ->
+                val ks = key ?: ""
+                val entry = "k=${Struct.stringify(ks)}, v=${Struct.stringify(value)}, p=${slog(parent)}, t=${Struct.pathify(path)}"
+                logBefore.add(entry)
+                value
+            }
         Struct.walk(test["in"], walklogBefore)
         assertEquals(outMap["before"], logBefore)
 
         val logBoth = mutableListOf<Any?>()
-        val walklogBoth = Struct.WalkApply { key, value, parent, path ->
-            val ks = key ?: ""
-            val entry = "k=${Struct.stringify(ks)}, v=${Struct.stringify(value)}, p=${slog(parent)}, t=${Struct.pathify(path)}"
-            logBoth.add(entry)
-            value
-        }
+        val walklogBoth =
+            Struct.WalkApply { key, value, parent, path ->
+                val ks = key ?: ""
+                val entry = "k=${Struct.stringify(ks)}, v=${Struct.stringify(value)}, p=${slog(parent)}, t=${Struct.pathify(path)}"
+                logBoth.add(entry)
+                value
+            }
         Struct.walk(test["in"], walklogBoth, walklogBoth)
         assertEquals(outMap["both"], logBoth)
     }
@@ -114,21 +118,22 @@ class StructTests {
             val maxdepth = m["maxdepth"]
             val top = arrayOfNulls<Any>(1)
             val cur = arrayOfNulls<Any>(1)
-            val copy = Struct.WalkApply { key, value, _, _ ->
-                if (Struct.isnode(value)) {
-                    val child: Any? = if (Struct.islist(value)) mutableListOf<Any?>() else linkedMapOf<String, Any?>()
-                    if (key == null) {
-                        top[0] = child
-                        cur[0] = child
-                    } else {
-                        cur[0] = Struct.setprop(cur[0], key, child)
-                        cur[0] = child
+            val copy =
+                Struct.WalkApply { key, value, _, _ ->
+                    if (Struct.isnode(value)) {
+                        val child: Any? = if (Struct.islist(value)) mutableListOf<Any?>() else linkedMapOf<String, Any?>()
+                        if (key == null) {
+                            top[0] = child
+                            cur[0] = child
+                        } else {
+                            cur[0] = Struct.setprop(cur[0], key, child)
+                            cur[0] = child
+                        }
+                    } else if (key != null) {
+                        cur[0] = Struct.setprop(cur[0], key, value)
                     }
-                } else if (key != null) {
-                    cur[0] = Struct.setprop(cur[0], key, value)
+                    value
                 }
-                value
-            }
             if (maxdepth == null) Struct.walk(src, copy) else Struct.walk(src, copy, null, intish(maxdepth))
             top[0]
         }
@@ -139,30 +144,32 @@ class StructTests {
         runSet(walkSpec["copy"] as Map<String, Any?>) { v ->
             val cur = arrayOfNulls<Any>(33)
             val keys = arrayOfNulls<String>(33)
-            val walkcopy = Struct.WalkApply { key, value, _, path ->
-                if (key == null) {
-                    java.util.Arrays.fill(cur, null)
-                    java.util.Arrays.fill(keys, null)
-                    cur[0] = when {
-                        Struct.ismap(value) -> linkedMapOf<String, Any?>()
-                        Struct.islist(value) -> mutableListOf<Any?>()
-                        else -> value
+            val walkcopy =
+                Struct.WalkApply { key, value, _, path ->
+                    if (key == null) {
+                        java.util.Arrays.fill(cur, null)
+                        java.util.Arrays.fill(keys, null)
+                        cur[0] =
+                            when {
+                                Struct.ismap(value) -> linkedMapOf<String, Any?>()
+                                Struct.islist(value) -> mutableListOf<Any?>()
+                                else -> value
+                            }
+                        return@WalkApply value
                     }
-                    return@WalkApply value
+                    var node: Any? = value
+                    val i = path.size
+                    keys[i] = key
+                    if (Struct.isnode(node)) {
+                        cur[i] = if (Struct.ismap(node)) linkedMapOf<String, Any?>() else mutableListOf<Any?>()
+                        node = cur[i]
+                    }
+                    cur[i - 1] = Struct.setprop(cur[i - 1], key, node)
+                    for (j in i - 1 downTo 1) {
+                        cur[j - 1] = Struct.setprop(cur[j - 1], keys[j], cur[j])
+                    }
+                    value
                 }
-                var node: Any? = value
-                val i = path.size
-                keys[i] = key
-                if (Struct.isnode(node)) {
-                    cur[i] = if (Struct.ismap(node)) linkedMapOf<String, Any?>() else mutableListOf<Any?>()
-                    node = cur[i]
-                }
-                cur[i - 1] = Struct.setprop(cur[i - 1], key, node)
-                for (j in i - 1 downTo 1) {
-                    cur[j - 1] = Struct.setprop(cur[j - 1], keys[j], cur[j])
-                }
-                value
-            }
             Struct.walk(v, walkcopy)
             cur[0]
         }
@@ -229,11 +236,12 @@ class StructTests {
     fun getpathRelative() {
         runSet(getpathSpec["relative"] as Map<String, Any?>) { v ->
             val m = v as Map<*, *>
-            val inj = Struct.Injection(null, null).apply {
-                dparent = m["dparent"]
-                val dp = m["dpath"]
-                if (dp is String && dp.isNotEmpty()) dpath = dp.split(".").toMutableList()
-            }
+            val inj =
+                Struct.Injection(null, null).apply {
+                    dparent = m["dparent"]
+                    val dp = m["dpath"]
+                    if (dp is String && dp.isNotEmpty()) dpath = dp.split(".").toMutableList()
+                }
             Struct.getpath(m["store"], m["path"], inj)
         }
     }
@@ -244,22 +252,25 @@ class StructTests {
             val m = v as Map<*, *>
             val injObj = m["inj"]
             if (injObj is Map<*, *>) {
-                val inj = Struct.Injection(null, null).apply {
-                    if (injObj.containsKey("key")) key = injObj["key"]?.toString() ?: ""
-                    if (injObj.containsKey("dparent")) dparent = injObj["dparent"]
-                    if (injObj.containsKey("dpath")) {
-                        val dp = injObj["dpath"]
-                        if (dp is List<*>) dpath = dp.map { it?.toString() ?: "" }.toMutableList()
-                    }
-                    if (injObj.containsKey("meta")) {
-                        val mm = injObj["meta"]
-                        if (mm is Map<*, *>) {
-                            meta = linkedMapOf<String, Any?>().also { for ((k, vv) in mm) it[k.toString()] = vv }
+                val inj =
+                    Struct.Injection(null, null).apply {
+                        if (injObj.containsKey("key")) key = injObj["key"]?.toString() ?: ""
+                        if (injObj.containsKey("dparent")) dparent = injObj["dparent"]
+                        if (injObj.containsKey("dpath")) {
+                            val dp = injObj["dpath"]
+                            if (dp is List<*>) dpath = dp.map { it?.toString() ?: "" }.toMutableList()
+                        }
+                        if (injObj.containsKey("meta")) {
+                            val mm = injObj["meta"]
+                            if (mm is Map<*, *>) {
+                                meta = linkedMapOf<String, Any?>().also { for ((k, vv) in mm) it[k.toString()] = vv }
+                            }
                         }
                     }
-                }
                 Struct.getpath(m["store"], m["path"], inj)
-            } else Struct.getpath(m["store"], m["path"])
+            } else {
+                Struct.getpath(m["store"], m["path"])
+            }
         }
     }
 
@@ -271,9 +282,10 @@ class StructTests {
             store[Struct.S_DTOP] = m["store"]
             store["\$FOO"] = Supplier { "foo" }
             val inj = Struct.Injection(null, null)
-            inj.handler = Struct.Injector { _, value, _, _ ->
-                if (value is Supplier<*>) value.get() else value
-            }
+            inj.handler =
+                Struct.Injector { _, value, _, _ ->
+                    if (value is Supplier<*>) value.get() else value
+                }
             Struct.getpath(store, m["path"], inj)
         }
     }
@@ -442,13 +454,14 @@ class StructTests {
         val extra = linkedMapOf<String, Any?>()
         // Custom $INTEGER validator using the canonical Injector signature.
         // Returns the data value either way so the output keeps the original key.
-        extra["\$INTEGER"] = Struct.Injector { inj, _, _, _ ->
-            val v = Struct.getprop(inj.dparent, inj.key)
-            if (v !is Number || floor(v.toDouble()) != v.toDouble()) {
-                inj.errs.add("Not an integer at ${Struct.pathify(inj.path, 1)}: $v")
+        extra["\$INTEGER"] =
+            Struct.Injector { inj, _, _, _ ->
+                val v = Struct.getprop(inj.dparent, inj.key)
+                if (v !is Number || floor(v.toDouble()) != v.toDouble()) {
+                    inj.errs.add("Not an integer at ${Struct.pathify(inj.path, 1)}: $v")
+                }
+                v
             }
-            v
-        }
 
         val shape = mapOf("a" to "`\$INTEGER`")
         val opts = linkedMapOf<String, Any?>("extra" to extra, "errs" to errs)
@@ -497,11 +510,12 @@ class StructTests {
 
     @Test
     fun transformEdgeApply() {
-        val spec = mutableListOf<Any?>(
-            "`\$APPLY`",
-            Function<Any?, Any?> { v -> 1 + (v as Number).toInt() },
-            1
-        )
+        val spec =
+            mutableListOf<Any?>(
+                "`\$APPLY`",
+                Function<Any?, Any?> { v -> 1 + (v as Number).toInt() },
+                1,
+            )
         assertEquals(2L, normalize(Struct.transform(linkedMapOf<String, Any?>(), spec)))
     }
 
@@ -509,14 +523,16 @@ class StructTests {
     fun transformModify() {
         val data = linkedMapOf<String, Any?>("x" to "X")
         val spec = linkedMapOf<String, Any?>("z" to "`x`")
-        val opts = linkedMapOf<String, Any?>(
-            "modify" to Struct.Modify { value, key, parent, _, _ ->
-                if (key != null && parent is MutableMap<*, *> && value is String) {
-                    @Suppress("UNCHECKED_CAST")
-                    (parent as MutableMap<String, Any?>)[key.toString()] = "@$value"
-                }
-            }
-        )
+        val opts =
+            linkedMapOf<String, Any?>(
+                "modify" to
+                    Struct.Modify { value, key, parent, _, _ ->
+                        if (key != null && parent is MutableMap<*, *> && value is String) {
+                            @Suppress("UNCHECKED_CAST")
+                            (parent as MutableMap<String, Any?>)[key.toString()] = "@$value"
+                        }
+                    },
+            )
         val got = Struct.transform(data, spec, opts)
         assertTrue(normalize(mapOf("z" to "@X")) == normalize(got))
     }
@@ -524,17 +540,20 @@ class StructTests {
     @Test
     fun transformExtra() {
         val data = linkedMapOf<String, Any?>("a" to 1)
-        val spec = linkedMapOf<String, Any?>(
-            "x" to "`a`",
-            "b" to "`\$COPY`",
-            "c" to "`\$UPPER`"
-        )
-        val extra = linkedMapOf<String, Any?>(
-            "b" to 2,
-            "\$UPPER" to Struct.Injector { inj, _, _, _ ->
-                if (inj.path.isNotEmpty()) inj.path.last().uppercase() else ""
-            }
-        )
+        val spec =
+            linkedMapOf<String, Any?>(
+                "x" to "`a`",
+                "b" to "`\$COPY`",
+                "c" to "`\$UPPER`",
+            )
+        val extra =
+            linkedMapOf<String, Any?>(
+                "b" to 2,
+                "\$UPPER" to
+                    Struct.Injector { inj, _, _, _ ->
+                        if (inj.path.isNotEmpty()) inj.path.last().uppercase() else ""
+                    },
+            )
         val opts = linkedMapOf<String, Any?>("extra" to extra)
         val got = Struct.transform(data, spec, opts)
         assertTrue(normalize(mapOf("x" to 1, "b" to 2, "c" to "C")) == normalize(got))
@@ -550,14 +569,17 @@ class StructTests {
         assertEquals(99, ((got["x"] as Supplier<*>).get() as Number).toInt())
     }
 
-    private fun runSet(testspec: Map<String, Any?>, fn: (Any?) -> Any?) {
+    private fun runSet(
+        testspec: Map<String, Any?>,
+        fn: (Any?) -> Any?,
+    ) {
         runSet(testspec, fn, null)
     }
 
     private fun runSet(
         testspec: Map<String, Any?>,
         fn: (Any?) -> Any?,
-        filter: ((Map<*, *>) -> Boolean)?
+        filter: ((Map<*, *>) -> Boolean)?,
     ) {
         val set = testspec["set"] as List<*>
         for (eo in set) {
@@ -574,7 +596,10 @@ class StructTests {
         }
     }
 
-    private fun runValidateSet(testspec: Map<String, Any?>, useInj: Boolean) {
+    private fun runValidateSet(
+        testspec: Map<String, Any?>,
+        useInj: Boolean,
+    ) {
         val set = testspec["set"] as List<*>
         for (eo in set) {
             if (eo !is Map<*, *>) continue
@@ -593,7 +618,7 @@ class StructTests {
                 val got = Struct.validate(data, spec, options)
                 assertTrue(
                     normalize(entry["out"]) == normalize(got),
-                    "Mismatch in=${json(input)} expected=${json(entry["out"])} got=${json(got)}"
+                    "Mismatch in=${json(input)} expected=${json(entry["out"])} got=${json(got)}",
                 )
             }
         }
@@ -649,25 +674,30 @@ class StructTests {
         return true
     }
 
-    private fun collectCommands(node: Any?, out: MutableSet<String>) {
+    private fun collectCommands(
+        node: Any?,
+        out: MutableSet<String>,
+    ) {
         when (node) {
             is String -> {
                 val m = cmdRef.matcher(node)
                 while (m.find()) out.add(m.group(1))
             }
-            is Map<*, *> -> node.forEach { (k, v) ->
-                collectCommands(k?.toString(), out)
-                collectCommands(v, out)
-            }
+            is Map<*, *> ->
+                node.forEach { (k, v) ->
+                    collectCommands(k?.toString(), out)
+                    collectCommands(v, out)
+                }
             is List<*> -> node.forEach { collectCommands(it, out) }
         }
     }
 
-    private fun json(v: Any?): String = try {
-        gson.toJson(if (v === Struct.UNDEF) "__UNDEF__" else v)
-    } catch (_: Exception) {
-        v.toString()
-    }
+    private fun json(v: Any?): String =
+        try {
+            gson.toJson(if (v === Struct.UNDEF) "__UNDEF__" else v)
+        } catch (_: Exception) {
+            v.toString()
+        }
 
     private fun normalize(v: Any?): Any? {
         if (v === Struct.UNDEF) return "__UNDEF__"

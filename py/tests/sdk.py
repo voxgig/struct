@@ -1,4 +1,3 @@
-
 import voxgig_struct
 
 # class StructUtils:
@@ -14,6 +13,7 @@ class Context:
         self.utility = None
         self.meta = {}
 
+
 class Utility:
     def __init__(self, opts=None):
         self._opts = opts
@@ -22,37 +22,37 @@ class Utility:
 
     def contextify(self, ctxmap):
         ctx = Context()
-        meta = ctxmap.get('meta',{})
-        for k,v in meta.items():
+        meta = ctxmap.get('meta', {})
+        for k, v in meta.items():
             ctx.meta[k] = v
         return ctx
-            
+
     def check(self, ctx):
-        zed = "ZED"
-    
+        zed = 'ZED'
+
         if self._opts is None:
-            zed += ""
+            zed += ''
         else:
-            foo = self._opts.get("foo")
-            zed += "0" if foo is None else str(foo)
+            foo = self._opts.get('foo')
+            zed += '0' if foo is None else str(foo)
 
-        zed += "_"
-        zed += str(ctx.meta.get("bar"))
+        zed += '_'
+        zed += str(ctx.meta.get('bar'))
 
-        return {"zed": zed}
+        return {'zed': zed}
 
 
 class SDK:
     def __init__(self, opts=None):
         self._opts = opts or {}
         self._utility = Utility(opts)
-        
+
     @staticmethod
     def test(opts=None):
         return SDK(opts)
-        
+
     def tester(self, opts=None):
-        return SDK(self.opts if None == opts else opts)
-        
+        return SDK(self.opts if opts == None else opts)
+
     def utility(self):
         return self._utility

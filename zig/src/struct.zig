@@ -229,12 +229,20 @@ pub const TYPENAME = [_][]const u8{
     S_function,
     S_symbol,
     S_null,
-    "", "", "",
-    "", "", "", "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
     S_list,
     S_map,
     S_instance,
-    "", "", "", "",
+    "",
+    "",
+    "",
+    "",
     S_scalar,
     S_node,
 };
@@ -439,7 +447,9 @@ pub fn keysof(allocator: Allocator, val: JsonValue) !JsonValue {
         }
         std.mem.sort([]const u8, key_strs.items, {}, stringLessThan);
 
-        const arr_lr2 = try allocator.create(ListRef); arr_lr2.* = .{ .data = try ListData.initCapacity(allocator, obj.count()) }; const arr = arr_lr2;
+        const arr_lr2 = try allocator.create(ListRef);
+        arr_lr2.* = .{ .data = try ListData.initCapacity(allocator, obj.count()) };
+        const arr = arr_lr2;
         for (key_strs.items) |k| {
             try arr.append(JsonValue{ .string = k });
         }
@@ -484,11 +494,13 @@ pub fn items(allocator: Allocator, val: JsonValue) !JsonValue {
         }
         std.mem.sort([]const u8, key_strs.items, {}, stringLessThan);
 
-        const arr_lr2 = try allocator.create(ListRef); arr_lr2.* = .{ .data = try ListData.initCapacity(allocator, obj.count()) }; const arr = arr_lr2;
+        const arr_lr2 = try allocator.create(ListRef);
+        arr_lr2.* = .{ .data = try ListData.initCapacity(allocator, obj.count()) };
+        const arr = arr_lr2;
         for (key_strs.items) |k| {
             const pair_lr = try allocator.create(ListRef);
-        pair_lr.* = .{ .data = try ListData.initCapacity(allocator, 2) };
-        const pair = pair_lr;
+            pair_lr.* = .{ .data = try ListData.initCapacity(allocator, 2) };
+            const pair = pair_lr;
             try pair.append(JsonValue{ .string = k });
             try pair.append(obj.get(k).?);
             try arr.append(JsonValue{ .array = pair });
@@ -503,8 +515,8 @@ pub fn items(allocator: Allocator, val: JsonValue) !JsonValue {
         const arr = arr_lr;
         for (list, 0..) |v, i| {
             const pair_lr = try allocator.create(ListRef);
-        pair_lr.* = .{ .data = try ListData.initCapacity(allocator, 2) };
-        const pair = pair_lr;
+            pair_lr.* = .{ .data = try ListData.initCapacity(allocator, 2) };
+            const pair = pair_lr;
             const idx_str = try std.fmt.allocPrint(allocator, "{d}", .{i});
             try pair.append(JsonValue{ .string = idx_str });
             try pair.append(v);
@@ -525,8 +537,8 @@ pub fn flatten(allocator: Allocator, val: JsonValue, depth: i64) !JsonValue {
 
 fn flattenDepth(allocator: Allocator, arr: []const JsonValue, depth: i64) !*ListRef {
     const result_lr = try allocator.create(ListRef);
-        result_lr.* = .{ .data = ListData.init(allocator) };
-        const result = result_lr;
+    result_lr.* = .{ .data = ListData.init(allocator) };
+    const result = result_lr;
     for (arr) |item| {
         if (depth > 0 and item == .array) {
             const sub = try flattenDepth(allocator, item.array.data.items, depth - 1);
@@ -545,7 +557,7 @@ pub fn clone(allocator: Allocator, val: JsonValue) !JsonValue {
     return switch (val) {
         .object => |obj| {
             const new_obj = try allocator.create(MapRef);
-        new_obj.* = .{ .data = MapData.init(allocator) };
+            new_obj.* = .{ .data = MapData.init(allocator) };
             try new_obj.data.ensureTotalCapacity(@intCast(obj.count()));
             var it = obj.iterator();
             while (it.next()) |kv| {
@@ -556,8 +568,8 @@ pub fn clone(allocator: Allocator, val: JsonValue) !JsonValue {
         },
         .array => |arr| {
             const new_arr_lr = try allocator.create(ListRef);
-        new_arr_lr.* = .{ .data = try ListData.initCapacity(allocator, arr.data.items.len) };
-        const new_arr = new_arr_lr;
+            new_arr_lr.* = .{ .data = try ListData.initCapacity(allocator, arr.data.items.len) };
+            const new_arr = new_arr_lr;
             for (arr.data.items) |item| {
                 const cloned_item = try clone(allocator, item);
                 try new_arr.append(cloned_item);
@@ -1241,8 +1253,8 @@ pub fn sliceMut(allocator: Allocator, val: JsonValue, start_in: ?i64, end_in: ?i
             const e_usize: usize = @intCast(end_val);
             const src = val.array.data.items[s_usize..e_usize];
             const new_arr_lr = try allocator.create(ListRef);
-        new_arr_lr.* = .{ .data = try ListData.initCapacity(allocator, src.len) };
-        const new_arr = new_arr_lr;
+            new_arr_lr.* = .{ .data = try ListData.initCapacity(allocator, src.len) };
+            const new_arr = new_arr_lr;
             for (src) |item| {
                 try new_arr.append(item);
             }
@@ -1256,8 +1268,8 @@ pub fn sliceMut(allocator: Allocator, val: JsonValue, start_in: ?i64, end_in: ?i
     } else {
         if (val == .array) {
             const empty_arr_lr = try allocator.create(ListRef);
-        empty_arr_lr.* = .{ .data = ListData.init(allocator) };
-        const empty_arr = empty_arr_lr;
+            empty_arr_lr.* = .{ .data = ListData.init(allocator) };
+            const empty_arr = empty_arr_lr;
             _ = &empty_arr;
             return JsonValue{ .array = empty_arr };
         }
@@ -1455,7 +1467,7 @@ pub fn merge(allocator: Allocator, val: JsonValue, maxdepth: i32) !JsonValue {
         if (islist(last)) return try JsonValue.makeList(allocator);
         if (ismap(last)) {
             const obj = try allocator.create(MapRef);
-        obj.* = .{ .data = MapData.init(allocator) };
+            obj.* = .{ .data = MapData.init(allocator) };
             _ = &obj;
             return JsonValue{ .object = obj };
         }
@@ -2920,7 +2932,7 @@ fn cmdPack(allocator: Allocator, inj: *Injection, store: JsonValue) !JsonValue {
 
     // Build the output map.
     const result_obj = try allocator.create(MapRef);
-        result_obj.* = .{ .data = MapData.init(allocator) };
+    result_obj.* = .{ .data = MapData.init(allocator) };
     for (src_list.items, 0..) |src_item, idx| {
         // Resolve the key for this item.
         var item_key: []const u8 = "";
@@ -2929,7 +2941,7 @@ fn cmdPack(allocator: Allocator, inj: *Injection, store: JsonValue) !JsonValue {
             if (std.mem.startsWith(u8, kp, "`")) {
                 // Backtick path: inject to resolve.
                 const key_store = try allocator.create(MapRef);
-        key_store.* = .{ .data = MapData.init(allocator) };
+                key_store.* = .{ .data = MapData.init(allocator) };
                 if (store == .object) {
                     var sit = store.object.iterator();
                     while (sit.next()) |kv| try key_store.put(kv.key_ptr.*, kv.value_ptr.*);
@@ -3171,7 +3183,7 @@ fn injectChild(allocator: Allocator, child_raw: JsonValue, store: JsonValue, inj
 
     // Build store with correct data context.
     const child_store = try allocator.create(MapRef);
-        child_store.* = .{ .data = MapData.init(allocator) };
+    child_store.* = .{ .data = MapData.init(allocator) };
     if (store == .object) {
         var sit = store.object.iterator();
         while (sit.next()) |kv| try child_store.put(kv.key_ptr.*, kv.value_ptr.*);
@@ -3197,7 +3209,7 @@ pub fn transform(allocator: Allocator, data: JsonValue, spec: JsonValue) !JsonVa
     const orig_spec = try clone(allocator, spec);
 
     const store = try allocator.create(MapRef);
-        store.* = .{ .data = MapData.init(allocator) };
+    store.* = .{ .data = MapData.init(allocator) };
     try store.put(S_DTOP, data_clone);
     try store.put(S_DSPEC, orig_spec);
     const store_val = JsonValue{ .object = store };

@@ -1,7 +1,5 @@
-
 // RUN: go test
 // RUN-SOME: go test -v -run=TestStruct/getpath
-
 
 package voxgigstruct_test
 
@@ -17,15 +15,14 @@ import (
 
 const TEST_JSON_FILE = "../build/test/test.json"
 
-
 func TestClient(t *testing.T) {
 	store := make(map[string]any)
 
-  sdk, err := runner.TestSDK(nil)
-  if err != nil {
-    t.Fatalf("Failed to create SDK: %v", err)
-  }
-  runnerFunc := runner.MakeRunner(TEST_JSON_FILE, sdk)
+	sdk, err := runner.TestSDK(nil)
+	if err != nil {
+		t.Fatalf("Failed to create SDK: %v", err)
+	}
+	runnerFunc := runner.MakeRunner(TEST_JSON_FILE, sdk)
 	runnerMap, err := runnerFunc("check", store)
 	if err != nil {
 		t.Fatalf("Failed to create runner check: %v", err)
@@ -36,6 +33,6 @@ func TestClient(t *testing.T) {
 	var subject runner.Subject = runnerMap.Subject
 
 	t.Run("client-check-basic", func(t *testing.T) {
-    runset(t, spec["basic"], subject)
+		runset(t, spec["basic"], subject)
 	})
 }

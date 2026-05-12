@@ -307,7 +307,11 @@ pub fn get_prop(val: &Value, key: &Value, alt: Value) -> Value {
                 .and_then(|i| lb.get(i).cloned())
                 .unwrap_or(Value::Noval)
         }
-        Value::Map(m) => m.borrow().get(&js_string(key)).cloned().unwrap_or(Value::Noval),
+        Value::Map(m) => m
+            .borrow()
+            .get(&js_string(key))
+            .cloned()
+            .unwrap_or(Value::Noval),
         Value::Sentinel(s) => {
             if js_string(key) == s.tag {
                 Value::Bool(true)
@@ -491,9 +495,8 @@ pub fn join(arr: &Value, sep: Option<&str>, url: bool) -> String {
     };
 
     // filter to string non-empty entries
-    let str_entries: Vec<Value> = filter_vals(arr, |n| {
-        matches!(&n.1, Value::Str(s) if !s.is_empty())
-    });
+    let str_entries: Vec<Value> =
+        filter_vals(arr, |n| matches!(&n.1, Value::Str(s) if !s.is_empty()));
 
     let processed: Vec<String> = items_vec(&Value::list(str_entries))
         .into_iter()
@@ -549,7 +552,10 @@ pub struct JsonFlags {
 
 impl Default for JsonFlags {
     fn default() -> Self {
-        JsonFlags { indent: 2, offset: 0 }
+        JsonFlags {
+            indent: 2,
+            offset: 0,
+        }
     }
 }
 
@@ -618,7 +624,8 @@ fn json_encode(val: &Value, indent: usize, level: usize) -> Option<String> {
             let items: Vec<String> = lb
                 .iter()
                 .map(|v| {
-                    let enc = json_encode(v, indent, level + 1).unwrap_or_else(|| "null".to_string());
+                    let enc =
+                        json_encode(v, indent, level + 1).unwrap_or_else(|| "null".to_string());
                     if indent > 0 {
                         format!("{inner_pad}{enc}")
                     } else {
@@ -646,7 +653,8 @@ fn json_encode(val: &Value, indent: usize, level: usize) -> Option<String> {
             let items: Vec<String> = entries
                 .iter()
                 .map(|(k, v)| {
-                    let enc = json_encode(v, indent, level + 1).unwrap_or_else(|| "null".to_string());
+                    let enc =
+                        json_encode(v, indent, level + 1).unwrap_or_else(|| "null".to_string());
                     if indent > 0 {
                         format!("{inner_pad}{}{colon}{enc}", json_quote(k))
                     } else {
@@ -682,7 +690,11 @@ fn json_quote(s: &str) -> String {
 pub fn stringify(val: &Value, maxlen: Option<i64>, pretty: bool) -> String {
     let mut valstr;
     if val.is_noval() {
-        return if pretty { "<>".to_string() } else { String::new() };
+        return if pretty {
+            "<>".to_string()
+        } else {
+            String::new()
+        };
     }
     if let Value::Str(s) = val {
         valstr = s.clone();
@@ -823,7 +835,12 @@ pub fn pathify(val: &Value, startin: Option<i64>, endin: Option<i64>) -> String 
     if let Some(path) = &path {
         if start >= 0 {
             let plen = path.len() as i64;
-            let sliced = slice(Value::list(path.clone()), Some(start), Some(plen - end), false);
+            let sliced = slice(
+                Value::list(path.clone()),
+                Some(start),
+                Some(plen - end),
+                false,
+            );
             let sv: Vec<Value> = sliced
                 .as_list()
                 .map(|l| l.borrow().clone())

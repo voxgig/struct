@@ -1,14 +1,7 @@
-
-import {
-  validate,
-  transform,
-  M_KEYPRE,
-} from '..'
-
+import { validate, transform, M_KEYPRE } from '..'
 
 let out: any
 let errs: any
-
 
 // errs = []
 // out = transform(undefined, undefined, { errs })
@@ -26,8 +19,6 @@ let errs: any
 // out = transform(undefined, undefined, { errs })
 // console.log('transform-OUT', out, errs)
 
-
-
 // errs = []
 // out = validate(undefined, undefined, { errs })
 // console.log('validate-OUT', out, errs)
@@ -40,11 +31,9 @@ let errs: any
 // out = validate({ x: 2 }, undefined, { errs })
 // console.log('validate-OUT', out, errs)
 
-
 // errs = []
 // out = validate({ x: 3 }, { y: '`dm$=a`' }, { meta: { dm: { a: 4 } }, errs })
 // console.log('validate-OUT', out, errs)
-
 
 // errs = []
 // out = validate({ x: 4 }, { y: '`dm$=a`' }, { meta: { dm: {} }, errs })
@@ -70,7 +59,6 @@ let errs: any
 // out = validate(1000, 1001, { errs })
 // console.log('validate-OUT', out, errs)
 
-
 const extra = {
   $CAPTURE: (inj: any) => {
     if (M_KEYPRE === inj.mode) {
@@ -84,13 +72,12 @@ const extra = {
   },
 }
 
-let meta = { capture: {} }
+const meta = { capture: {} }
 out = transform(
   { a: { b: 1, c: 2 } },
   { a: { b: { '`$CAPTURE`': 'x' }, c: { '`$CAPTURE`': 'x' } } },
-  { extra, errs, meta }
+  { extra, errs, meta },
 )
 console.dir(out, { depth: null })
 console.dir(errs, { depth: null })
 console.dir(meta, { depth: null })
-

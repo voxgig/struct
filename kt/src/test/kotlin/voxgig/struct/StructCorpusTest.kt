@@ -20,19 +20,19 @@ import java.util.function.Function
  */
 @Suppress("UNCHECKED_CAST")
 class StructCorpusTest {
-
     companion object {
         private val SCOREBOARD: MutableMap<String, CorpusRunner.Result> = TreeMap()
-        private val CATEGORY_TO_FILE: Map<String, String> = linkedMapOf(
-            "minor" to "minor.jsonic",
-            "walk" to "walk.jsonic",
-            "merge" to "merge.jsonic",
-            "getpath" to "getpath.jsonic",
-            "inject" to "inject.jsonic",
-            "transform" to "transform.jsonic",
-            "validate" to "validate.jsonic",
-            "select" to "select.jsonic",
-        )
+        private val CATEGORY_TO_FILE: Map<String, String> =
+            linkedMapOf(
+                "minor" to "minor.jsonic",
+                "walk" to "walk.jsonic",
+                "merge" to "merge.jsonic",
+                "getpath" to "getpath.jsonic",
+                "inject" to "inject.jsonic",
+                "transform" to "transform.jsonic",
+                "validate" to "validate.jsonic",
+                "select" to "select.jsonic",
+            )
 
         @JvmStatic
         @AfterAll
@@ -88,9 +88,16 @@ class StructCorpusTest {
         }
     }
 
-    private fun getp(input: Any?, key: String): Any? = if (input is Map<*, *>) (input as Map<String, Any?>)[key] else null
-    private fun getpDef(input: Any?, key: String, def: Any?): Any? =
-        if (input is Map<*, *> && (input as Map<String, Any?>).containsKey(key)) input[key] else def
+    private fun getp(
+        input: Any?,
+        key: String,
+    ): Any? = if (input is Map<*, *>) (input as Map<String, Any?>)[key] else null
+
+    private fun getpDef(
+        input: Any?,
+        key: String,
+        def: Any?,
+    ): Any? = if (input is Map<*, *> && (input as Map<String, Any?>).containsKey(key)) input[key] else def
 
     @TestFactory
     fun corpus(): Iterable<DynamicTest> {
@@ -105,11 +112,15 @@ class StructCorpusTest {
         add(tests, "minor", "isempty", false) { Struct.isempty(it) }
         add(tests, "minor", "isfunc", true) { Struct.isfunc(it) }
         add(tests, "minor", "getprop", true) {
-            val v = getp(it, "val"); val k = getp(it, "key"); val a = getpDef(it, "alt", Struct.UNDEF)
+            val v = getp(it, "val")
+            val k = getp(it, "key")
+            val a = getpDef(it, "alt", Struct.UNDEF)
             if (a === Struct.UNDEF) Struct.getprop(v, k) else Struct.getprop(v, k, a)
         }
         add(tests, "minor", "getelem", true) {
-            val v = getp(it, "val"); val k = getp(it, "key"); val a = getpDef(it, "alt", Struct.UNDEF)
+            val v = getp(it, "val")
+            val k = getp(it, "key")
+            val a = getpDef(it, "alt", Struct.UNDEF)
             if (a === Struct.UNDEF) Struct.getelem(v, k) else Struct.getelem(v, k, a)
         }
         add(tests, "minor", "clone", false) { Struct.clone(it) }
@@ -172,16 +183,22 @@ class StructCorpusTest {
             val maxdepth = (getp(it, "maxdepth") as? Number)?.toInt()
             val top = arrayOfNulls<Any>(1)
             val cur = arrayOfNulls<Any>(1)
-            val copy = Struct.WalkApply { key, value, _, _ ->
-                if (Struct.isnode(value)) {
-                    val child: Any? = if (Struct.islist(value)) mutableListOf<Any?>() else linkedMapOf<String, Any?>()
-                    if (key == null) { top[0] = child; cur[0] = child }
-                    else { cur[0] = Struct.setprop(cur[0], key, child); cur[0] = child }
-                } else if (key != null) {
-                    cur[0] = Struct.setprop(cur[0], key, value)
+            val copy =
+                Struct.WalkApply { key, value, _, _ ->
+                    if (Struct.isnode(value)) {
+                        val child: Any? = if (Struct.islist(value)) mutableListOf<Any?>() else linkedMapOf<String, Any?>()
+                        if (key == null) {
+                            top[0] = child
+                            cur[0] = child
+                        } else {
+                            cur[0] = Struct.setprop(cur[0], key, child)
+                            cur[0] = child
+                        }
+                    } else if (key != null) {
+                        cur[0] = Struct.setprop(cur[0], key, value)
+                    }
+                    value
                 }
-                value
-            }
             if (maxdepth == null) Struct.walk(src, copy) else Struct.walk(src, copy, null, maxdepth)
             top[0]
         }
@@ -191,46 +208,52 @@ class StructCorpusTest {
         add(tests, "merge", "array", true) { Struct.merge(it) }
         add(tests, "merge", "integrity", true) { Struct.merge(it) }
         add(tests, "merge", "depth", true) {
-            val v = getp(it, "val"); val d = (getp(it, "depth") as? Number)?.toInt() ?: 32
+            val v = getp(it, "val")
+            val d = (getp(it, "depth") as? Number)?.toInt() ?: 32
             Struct.merge(v, d)
         }
 
         // ===== getpath =====
         add(tests, "getpath", "basic", true) { Struct.getpath(getp(it, "store"), getp(it, "path")) }
         add(tests, "getpath", "relative", true) {
-            val inj: Struct.Injection? = (it as? Map<String, Any?>)?.let { m ->
-                if (!m.containsKey("dparent") && !m.containsKey("dpath") && !m.containsKey("base")) null
-                else Struct.Injection(null, null).apply {
-                    if (m.containsKey("dparent")) dparent = m["dparent"]
-                    if (m.containsKey("dpath")) {
-                        when (val dp = m["dpath"]) {
-                            is List<*> -> dpath = dp.map { e -> e?.toString() ?: "" }.toMutableList()
-                            is String -> if (dp.isNotEmpty()) dpath = dp.split(".").toMutableList()
+            val inj: Struct.Injection? =
+                (it as? Map<String, Any?>)?.let { m ->
+                    if (!m.containsKey("dparent") && !m.containsKey("dpath") && !m.containsKey("base")) {
+                        null
+                    } else {
+                        Struct.Injection(null, null).apply {
+                            if (m.containsKey("dparent")) dparent = m["dparent"]
+                            if (m.containsKey("dpath")) {
+                                when (val dp = m["dpath"]) {
+                                    is List<*> -> dpath = dp.map { e -> e?.toString() ?: "" }.toMutableList()
+                                    is String -> if (dp.isNotEmpty()) dpath = dp.split(".").toMutableList()
+                                }
+                            }
+                            if (m.containsKey("base") && m["base"] is String) base = m["base"] as String
                         }
                     }
-                    if (m.containsKey("base") && m["base"] is String) base = m["base"] as String
                 }
-            }
             Struct.getpath(getp(it, "store"), getp(it, "path"), inj)
         }
         add(tests, "getpath", "special", true) {
             val injMap = getp(it, "inj") as? Map<String, Any?>
-            val inj = injMap?.let { im ->
-                Struct.Injection(null, null).apply {
-                    if (im.containsKey("key")) key = im["key"]?.toString() ?: ""
-                    if (im.containsKey("dparent")) dparent = im["dparent"]
-                    if (im.containsKey("dpath")) {
-                        val dp = im["dpath"]
-                        if (dp is List<*>) dpath = dp.map { e -> e?.toString() ?: "" }.toMutableList()
-                    }
-                    if (im.containsKey("meta")) {
-                        val mm = im["meta"]
-                        if (mm is Map<*, *>) {
-                            meta = linkedMapOf<String, Any?>().also { for ((k, v) in mm) it[k.toString()] = v }
+            val inj =
+                injMap?.let { im ->
+                    Struct.Injection(null, null).apply {
+                        if (im.containsKey("key")) key = im["key"]?.toString() ?: ""
+                        if (im.containsKey("dparent")) dparent = im["dparent"]
+                        if (im.containsKey("dpath")) {
+                            val dp = im["dpath"]
+                            if (dp is List<*>) dpath = dp.map { e -> e?.toString() ?: "" }.toMutableList()
+                        }
+                        if (im.containsKey("meta")) {
+                            val mm = im["meta"]
+                            if (mm is Map<*, *>) {
+                                meta = linkedMapOf<String, Any?>().also { for ((k, v) in mm) it[k.toString()] = v }
+                            }
                         }
                     }
                 }
-            }
             Struct.getpath(getp(it, "store"), getp(it, "path"), inj)
         }
 
@@ -246,20 +269,26 @@ class StructCorpusTest {
         add(tests, "transform", "ref", true) { Struct.transform(getp(it, "data"), getp(it, "spec")) }
         add(tests, "transform", "format", false) { Struct.transform(getp(it, "data"), getp(it, "spec")) }
         add(tests, "transform", "modify", true) {
-            val opts = linkedMapOf<String, Any?>(
-                "modify" to Struct.Modify { v, k, parent, _, _ ->
-                    if (k != null && parent is MutableMap<*, *> && v is String) {
-                        @Suppress("UNCHECKED_CAST")
-                        (parent as MutableMap<String, Any?>)[k.toString()] = "@$v"
-                    }
-                }
-            )
+            val opts =
+                linkedMapOf<String, Any?>(
+                    "modify" to
+                        Struct.Modify { v, k, parent, _, _ ->
+                            if (k != null && parent is MutableMap<*, *> && v is String) {
+                                @Suppress("UNCHECKED_CAST")
+                                (parent as MutableMap<String, Any?>)[k.toString()] = "@$v"
+                            }
+                        },
+                )
             Struct.transform(getp(it, "data"), getp(it, "spec"), opts)
         }
         add(tests, "transform", "apply", true) {
-            val opts = linkedMapOf<String, Any?>("extra" to linkedMapOf<String, Any?>(
-                "apply" to Function<Any?, Any?> { v -> if (v is String) v.uppercase() else v }
-            ))
+            val opts =
+                linkedMapOf<String, Any?>(
+                    "extra" to
+                        linkedMapOf<String, Any?>(
+                            "apply" to Function<Any?, Any?> { v -> if (v is String) v.uppercase() else v },
+                        ),
+                )
             Struct.transform(getp(it, "data"), getp(it, "spec"), opts)
         }
 
@@ -290,10 +319,17 @@ class StructCorpusTest {
         nullFlag: Boolean,
         subject: CorpusRunner.Subject,
     ) {
-        tests.add(DynamicTest.dynamicTest("$category-$name") {
-            val spec = try { CorpusRunner.getSpec(category, name) } catch (_: Exception) { return@dynamicTest }
-            val r = CorpusRunner.runsetflags("$category.$name", spec, nullFlag, subject)
-            SCOREBOARD["$category.$name"] = r
-        })
+        tests.add(
+            DynamicTest.dynamicTest("$category-$name") {
+                val spec =
+                    try {
+                        CorpusRunner.getSpec(category, name)
+                    } catch (_: Exception) {
+                        return@dynamicTest
+                    }
+                val r = CorpusRunner.runsetflags("$category.$name", spec, nullFlag, subject)
+                SCOREBOARD["$category.$name"] = r
+            },
+        )
     }
 }

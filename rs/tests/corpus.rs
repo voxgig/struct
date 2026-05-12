@@ -140,7 +140,10 @@ struct Run {
 
 impl Run {
     fn new() -> Self {
-        Run { failures: Vec::new(), passed: 0 }
+        Run {
+            failures: Vec::new(),
+            passed: 0,
+        }
     }
 
     /// Run a test set: `label` for messages, `null_flag` matches the TS
@@ -207,7 +210,9 @@ impl Run {
                 self.passed += 1;
                 continue;
             }
-            if matched && (expected == Value::str(NULLMARK) || expected.is_noval() || expected.is_null()) {
+            if matched
+                && (expected == Value::str(NULLMARK) || expected.is_noval() || expected.is_null())
+            {
                 self.passed += 1;
                 continue;
             }
@@ -253,7 +258,8 @@ impl Run {
             match result {
                 Err(msg) => {
                     if err_expected.is_noval() {
-                        self.failures.push(format!("{label}#{i}: unexpected error: {msg}"));
+                        self.failures
+                            .push(format!("{label}#{i}: unexpected error: {msg}"));
                         continue;
                     }
                     let want = match &err_expected {
@@ -267,7 +273,9 @@ impl Run {
                     let ok = if let Some(rem) =
                         want.strip_prefix('/').and_then(|s| s.strip_suffix('/'))
                     {
-                        regex::Regex::new(rem).map(|re| re.is_match(&msg)).unwrap_or(false)
+                        regex::Regex::new(rem)
+                            .map(|re| re.is_match(&msg))
+                            .unwrap_or(false)
                     } else {
                         msg.to_lowercase().contains(&want.to_lowercase())
                     };
@@ -298,15 +306,14 @@ impl Run {
                         base.insert("out".to_string(), res.clone());
                         let base = Value::map(base);
                         if let Some(why) = match_check(&match_spec, &base) {
-                            self.failures.push(format!("{label}#{i}: match failed ({why})"));
+                            self.failures
+                                .push(format!("{label}#{i}: match failed ({why})"));
                             continue;
                         }
                         matched = true;
                     }
                     if res == expected
-                        || (matched
-                            && (expected == Value::str(NULLMARK)
-                                || expected.is_nullish()))
+                        || (matched && (expected == Value::str(NULLMARK) || expected.is_nullish()))
                     {
                         self.passed += 1;
                     } else {
@@ -412,7 +419,12 @@ fn inject_def_from_value(v: &Value) -> InjectDef {
         if let Value::Str(s) = dpath {
             d.dpath = Some(s.split('.').map(|x| x.to_string()).collect());
         } else if let Value::List(l) = &dpath {
-            d.dpath = Some(l.borrow().iter().map(|x| as_str_opt(x).unwrap_or_default()).collect());
+            d.dpath = Some(
+                l.borrow()
+                    .iter()
+                    .map(|x| as_str_opt(x).unwrap_or_default())
+                    .collect(),
+            );
         }
     }
     d
@@ -433,13 +445,27 @@ fn corpus() {
     }
 
     // -------- minor --------------------------------------------------
-    run.run_set(&set!("minor", "isnode"), true, "minor-isnode", |v| b(is_node(&v)));
-    run.run_set(&set!("minor", "ismap"), true, "minor-ismap", |v| b(is_map(&v)));
-    run.run_set(&set!("minor", "islist"), true, "minor-islist", |v| b(is_list(&v)));
-    run.run_set(&set!("minor", "iskey"), false, "minor-iskey", |v| b(is_key(&v)));
-    run.run_set(&set!("minor", "strkey"), false, "minor-strkey", |v| Value::str(str_key(v)));
-    run.run_set(&set!("minor", "isempty"), false, "minor-isempty", |v| b(is_empty(&v)));
-    run.run_set(&set!("minor", "isfunc"), true, "minor-isfunc", |v| b(is_func(&v)));
+    run.run_set(&set!("minor", "isnode"), true, "minor-isnode", |v| {
+        b(is_node(&v))
+    });
+    run.run_set(&set!("minor", "ismap"), true, "minor-ismap", |v| {
+        b(is_map(&v))
+    });
+    run.run_set(&set!("minor", "islist"), true, "minor-islist", |v| {
+        b(is_list(&v))
+    });
+    run.run_set(&set!("minor", "iskey"), false, "minor-iskey", |v| {
+        b(is_key(&v))
+    });
+    run.run_set(&set!("minor", "strkey"), false, "minor-strkey", |v| {
+        Value::str(str_key(v))
+    });
+    run.run_set(&set!("minor", "isempty"), false, "minor-isempty", |v| {
+        b(is_empty(&v))
+    });
+    run.run_set(&set!("minor", "isfunc"), true, "minor-isfunc", |v| {
+        b(is_func(&v))
+    });
     run.run_set(&set!("minor", "clone"), false, "minor-clone", |v| clone(&v));
     run.run_set(&set!("minor", "filter"), true, "minor-filter", |vin| {
         let val = vget(&vin, "val");
@@ -453,15 +479,24 @@ fn corpus() {
     run.run_set(&set!("minor", "flatten"), true, "minor-flatten", |vin| {
         flatten(&vget(&vin, "val"), as_i64_opt(&vget(&vin, "depth")))
     });
-    run.run_set(&set!("minor", "escre"), true, "minor-escre", |v| Value::str(esc_re(&v)));
-    run.run_set(&set!("minor", "escurl"), true, "minor-escurl", |v| Value::str(esc_url(&v)));
-    run.run_set(&set!("minor", "stringify"), true, "minor-stringify", |vin| {
-        let mut val = vget(&vin, "val");
-        if val == Value::str(NULLMARK) {
-            val = Value::str("null");
-        }
-        Value::str(stringify(&val, as_i64_opt(&vget(&vin, "max")), false))
+    run.run_set(&set!("minor", "escre"), true, "minor-escre", |v| {
+        Value::str(esc_re(&v))
     });
+    run.run_set(&set!("minor", "escurl"), true, "minor-escurl", |v| {
+        Value::str(esc_url(&v))
+    });
+    run.run_set(
+        &set!("minor", "stringify"),
+        true,
+        "minor-stringify",
+        |vin| {
+            let mut val = vget(&vin, "val");
+            if val == Value::str(NULLMARK) {
+                val = Value::str("null");
+            }
+            Value::str(stringify(&val, as_i64_opt(&vget(&vin, "max")), false))
+        },
+    );
     run.run_set(&set!("minor", "jsonify"), false, "minor-jsonify", |vin| {
         let flags_v = vget(&vin, "flags");
         let flags = if flags_v.is_noval() {
@@ -475,7 +510,11 @@ fn corpus() {
     });
     run.run_set(&set!("minor", "pathify"), true, "minor-pathify", |vin| {
         let pathv = vget(&vin, "path");
-        let path = if pathv == Value::str(NULLMARK) { Value::Noval } else { pathv.clone() };
+        let path = if pathv == Value::str(NULLMARK) {
+            Value::Noval
+        } else {
+            pathv.clone()
+        };
         let mut ps = pathify(&path, as_i64_opt(&vget(&vin, "from")), None);
         ps = ps.replace("__NULL__.", "");
         if pathv == Value::str(NULLMARK) {
@@ -501,7 +540,9 @@ fn corpus() {
     run.run_set(&set!("minor", "haskey"), false, "minor-haskey", |vin| {
         b(has_key(&vget(&vin, "src"), &vget(&vin, "key")))
     });
-    run.run_set(&set!("minor", "keysof"), true, "minor-keysof", |v| keys_of(&v));
+    run.run_set(&set!("minor", "keysof"), true, "minor-keysof", |v| {
+        keys_of(&v)
+    });
     run.run_set(&set!("minor", "join"), false, "minor-join", |vin| {
         let val = vget(&vin, "val");
         let sep = as_str_opt(&vget(&vin, "sep"));
@@ -511,16 +552,34 @@ fn corpus() {
     run.run_set(&set!("minor", "typename"), true, "minor-typename", |v| {
         Value::str(type_name(v.as_num().unwrap_or(0.0) as i64))
     });
-    run.run_set(&set!("minor", "typify"), false, "minor-typify", |v| Value::Num(typify(&v) as f64));
-    run.run_set(&set!("minor", "size"), false, "minor-size", |v| Value::Num(size(&v) as f64));
+    run.run_set(&set!("minor", "typify"), false, "minor-typify", |v| {
+        Value::Num(typify(&v) as f64)
+    });
+    run.run_set(&set!("minor", "size"), false, "minor-size", |v| {
+        Value::Num(size(&v) as f64)
+    });
     run.run_set(&set!("minor", "slice"), false, "minor-slice", |vin| {
-        slice(vget(&vin, "val"), as_i64_opt(&vget(&vin, "start")), as_i64_opt(&vget(&vin, "end")), false)
+        slice(
+            vget(&vin, "val"),
+            as_i64_opt(&vget(&vin, "start")),
+            as_i64_opt(&vget(&vin, "end")),
+            false,
+        )
     });
     run.run_set(&set!("minor", "pad"), false, "minor-pad", |vin| {
-        Value::str(pad(vget(&vin, "val"), as_i64_opt(&vget(&vin, "pad")), as_str_opt(&vget(&vin, "char"))))
+        Value::str(pad(
+            vget(&vin, "val"),
+            as_i64_opt(&vget(&vin, "pad")),
+            as_str_opt(&vget(&vin, "char")),
+        ))
     });
     run.run_set(&set!("minor", "setpath"), false, "minor-setpath", |vin| {
-        set_path(&vget(&vin, "store"), &vget(&vin, "path"), vget(&vin, "val"), None)
+        set_path(
+            &vget(&vin, "store"),
+            &vget(&vin, "path"),
+            vget(&vin, "val"),
+            None,
+        )
     });
 
     // -------- walk ---------------------------------------------------
@@ -547,7 +606,11 @@ fn corpus() {
                     stringify(k, None, false),
                     stringify(v, None, false),
                     stringify(p, None, false),
-                    pathify(&Value::list(path.iter().cloned().map(Value::Str).collect()), None, None),
+                    pathify(
+                        &Value::list(path.iter().cloned().map(Value::Str).collect()),
+                        None,
+                        None
+                    ),
                 )));
                 v.clone()
             };
@@ -559,7 +622,11 @@ fn corpus() {
                         stringify(k, None, false),
                         stringify(v, None, false),
                         stringify(p, None, false),
-                        pathify(&Value::list(path.iter().cloned().map(Value::Str).collect()), None, None),
+                        pathify(
+                            &Value::list(path.iter().cloned().map(Value::Str).collect()),
+                            None,
+                            None
+                        ),
                     )));
                     v.clone()
                 }
@@ -573,7 +640,11 @@ fn corpus() {
             let out = Value::list(lines.borrow().clone());
             out
         };
-        for (label, b, a) in [("after", false, true), ("before", true, false), ("both", true, true)] {
+        for (label, b, a) in [
+            ("after", false, true),
+            ("before", true, false),
+            ("both", true, true),
+        ] {
             let got = mk_log(&input, b, a);
             let exp = vget(&want, label);
             if got == exp {
@@ -613,7 +684,12 @@ fn corpus() {
             }
             val.clone()
         };
-        let _ = walk(vget(&vin, "src"), Some(&mut copy), None, as_i64_opt(&vget(&vin, "maxdepth")));
+        let _ = walk(
+            vget(&vin, "src"),
+            Some(&mut copy),
+            None,
+            as_i64_opt(&vget(&vin, "maxdepth")),
+        );
         let r = top.borrow().clone();
         r
     });
@@ -634,14 +710,22 @@ fn corpus() {
             let i = path.len();
             let mut v = val.clone();
             if matches!(val, Value::List(_) | Value::Map(_)) {
-                v = if is_map(val) { Value::empty_map() } else { Value::empty_list() };
+                v = if is_map(val) {
+                    Value::empty_map()
+                } else {
+                    Value::empty_list()
+                };
                 let mut cb = c.borrow_mut();
                 while cb.len() <= i {
                     cb.push(Value::Noval);
                 }
                 cb[i] = v.clone();
             }
-            let parent_copy = c.borrow().get(i.saturating_sub(1)).cloned().unwrap_or(Value::Noval);
+            let parent_copy = c
+                .borrow()
+                .get(i.saturating_sub(1))
+                .cloned()
+                .unwrap_or(Value::Noval);
             set_prop(parent_copy, k, v);
             val.clone()
         };
@@ -652,7 +736,12 @@ fn corpus() {
 
     // -------- merge --------------------------------------------------
     for name in ["cases", "array", "integrity"] {
-        run.run_set(&set!("merge", name), true, &format!("merge-{name}"), |vin| merge(&vin, None));
+        run.run_set(
+            &set!("merge", name),
+            true,
+            &format!("merge-{name}"),
+            |vin| merge(&vin, None),
+        );
     }
     run.run_set(&set!("merge", "depth"), true, "merge-depth", |vin| {
         merge(&vget(&vin, "val"), as_i64_opt(&vget(&vin, "depth")))
@@ -679,41 +768,60 @@ fn corpus() {
     run.run_set(&set!("getpath", "basic"), true, "getpath-basic", |vin| {
         get_path(&vget(&vin, "store"), &vget(&vin, "path"), None)
     });
-    run.run_set(&set!("getpath", "relative"), true, "getpath-relative", |vin| {
-        let dpath = match vget(&vin, "dpath") {
-            Value::Str(dp) => Some(dp.split('.').map(|x| x.to_string()).collect()),
-            _ => None,
-        };
-        let d = InjectDef {
-            dparent: Some(vget(&vin, "dparent")),
-            dpath,
-            ..Default::default()
-        };
-        get_path(&vget(&vin, "store"), &vget(&vin, "path"), Some(&d))
-    });
-    run.run_set(&set!("getpath", "special"), true, "getpath-special", |vin| {
-        let d = inject_def_from_value(&vget(&vin, "inj"));
-        get_path(&vget(&vin, "store"), &vget(&vin, "path"), Some(&d))
-    });
-    run.run_set(&set!("getpath", "handler"), true, "getpath-handler", |vin| {
-        // getpath({ $TOP: store, $FOO: () => 'foo' }, path, { handler: (_inj, val) => val() })
-        let store_inner = vget(&vin, "store");
-        let mut topmap = IndexMap::new();
-        topmap.insert("$TOP".to_string(), store_inner);
-        topmap.insert(
-            "$FOO".to_string(),
-            Value::func(|_inj: &Inj, _v: &Value, _r: &str, _st: &Value| Value::str("foo")),
-        );
-        let store = Value::map(topmap);
-        let handler: NativeFn = Rc::new(|inj: &Inj, val: &Value, _r: &str, st: &Value| -> Value {
-            match val {
-                Value::Func(f) => f(inj, &Value::Noval, "", st),
-                other => other.clone(),
-            }
-        });
-        let d = InjectDef { handler: Some(handler), ..Default::default() };
-        get_path(&store, &vget(&vin, "path"), Some(&d))
-    });
+    run.run_set(
+        &set!("getpath", "relative"),
+        true,
+        "getpath-relative",
+        |vin| {
+            let dpath = match vget(&vin, "dpath") {
+                Value::Str(dp) => Some(dp.split('.').map(|x| x.to_string()).collect()),
+                _ => None,
+            };
+            let d = InjectDef {
+                dparent: Some(vget(&vin, "dparent")),
+                dpath,
+                ..Default::default()
+            };
+            get_path(&vget(&vin, "store"), &vget(&vin, "path"), Some(&d))
+        },
+    );
+    run.run_set(
+        &set!("getpath", "special"),
+        true,
+        "getpath-special",
+        |vin| {
+            let d = inject_def_from_value(&vget(&vin, "inj"));
+            get_path(&vget(&vin, "store"), &vget(&vin, "path"), Some(&d))
+        },
+    );
+    run.run_set(
+        &set!("getpath", "handler"),
+        true,
+        "getpath-handler",
+        |vin| {
+            // getpath({ $TOP: store, $FOO: () => 'foo' }, path, { handler: (_inj, val) => val() })
+            let store_inner = vget(&vin, "store");
+            let mut topmap = IndexMap::new();
+            topmap.insert("$TOP".to_string(), store_inner);
+            topmap.insert(
+                "$FOO".to_string(),
+                Value::func(|_inj: &Inj, _v: &Value, _r: &str, _st: &Value| Value::str("foo")),
+            );
+            let store = Value::map(topmap);
+            let handler: NativeFn =
+                Rc::new(|inj: &Inj, val: &Value, _r: &str, st: &Value| -> Value {
+                    match val {
+                        Value::Func(f) => f(inj, &Value::Noval, "", st),
+                        other => other.clone(),
+                    }
+                });
+            let d = InjectDef {
+                handler: Some(handler),
+                ..Default::default()
+            };
+            get_path(&store, &vget(&vin, "path"), Some(&d))
+        },
+    );
 
     // -------- inject -------------------------------------------------
     {
@@ -722,7 +830,11 @@ fn corpus() {
         let bin = vget(&basic, "in");
         let bout = fix_json(&vget(&basic, "out"), true);
         let got = fix_json(
-            &inject(clone(&vget(&bin, "val")), &clone(&vget(&bin, "store")), None),
+            &inject(
+                clone(&vget(&bin, "val")),
+                &clone(&vget(&bin, "store")),
+                None,
+            ),
             true,
         );
         if got == bout {
@@ -742,12 +854,19 @@ fn corpus() {
                     if svv == NULLMARK {
                         set_prop(parent.clone(), key, Value::Null);
                     } else {
-                        set_prop(parent.clone(), key, Value::str(svv.replace(NULLMARK, "null")));
+                        set_prop(
+                            parent.clone(),
+                            key,
+                            Value::str(svv.replace(NULLMARK, "null")),
+                        );
                     }
                 }
             },
         );
-        let d = InjectDef { modify: Some(null_mod), ..Default::default() };
+        let d = InjectDef {
+            modify: Some(null_mod),
+            ..Default::default()
+        };
         inject(vget(&vin, "val"), &vget(&vin, "store"), Some(&d))
     });
     run.run_set(&set!("inject", "deep"), true, "inject-deep", |vin| {
@@ -759,7 +878,11 @@ fn corpus() {
         let basic = vget_path(&s, &["transform", "basic"]);
         let bin = vget(&basic, "in");
         let bout = fix_json(&vget(&basic, "out"), true);
-        let got = match transform(&clone(&vget(&bin, "data")), &clone(&vget(&bin, "spec")), None) {
+        let got = match transform(
+            &clone(&vget(&bin, "data")),
+            &clone(&vget(&bin, "spec")),
+            None,
+        ) {
             Ok(v) => fix_json(&v, true),
             Err(e) => Value::str(format!("ERR:{}", e)),
         };
@@ -782,46 +905,71 @@ fn corpus() {
         ("format", false),
         ("apply", true),
     ] {
-        run.run_set_fallible(&set!("transform", name), null_flag, &format!("transform-{name}"), |vin| {
-            transform(&vget(&vin, "data"), &vget(&vin, "spec"), None).map_err(|e| e.message)
-        });
-    }
-    run.run_set(&set!("transform", "modify"), true, "transform-modify", |vin| {
-        let m: Modify = Rc::new(
-            |val: &Value, key: &Value, parent: &Value, _inj: &Inj, _store: &Value| {
-                if let Value::Str(svv) = val {
-                    set_prop(parent.clone(), key, Value::str(format!("@{svv}")));
-                }
-            },
+        run.run_set_fallible(
+            &set!("transform", name),
+            null_flag,
+            &format!("transform-{name}"),
+            |vin| transform(&vget(&vin, "data"), &vget(&vin, "spec"), None).map_err(|e| e.message),
         );
-        let d = InjectDef { modify: Some(m), ..Default::default() };
-        match transform(&vget(&vin, "data"), &vget(&vin, "spec"), Some(&d)) {
-            Ok(v) => v,
-            Err(_) => Value::Noval,
-        }
-    });
+    }
+    run.run_set(
+        &set!("transform", "modify"),
+        true,
+        "transform-modify",
+        |vin| {
+            let m: Modify = Rc::new(
+                |val: &Value, key: &Value, parent: &Value, _inj: &Inj, _store: &Value| {
+                    if let Value::Str(svv) = val {
+                        set_prop(parent.clone(), key, Value::str(format!("@{svv}")));
+                    }
+                },
+            );
+            let d = InjectDef {
+                modify: Some(m),
+                ..Default::default()
+            };
+            match transform(&vget(&vin, "data"), &vget(&vin, "spec"), Some(&d)) {
+                Ok(v) => v,
+                Err(_) => Value::Noval,
+            }
+        },
+    );
 
     // -------- validate -----------------------------------------------
     for name in ["basic", "invalid"] {
-        run.run_set_fallible(&set!("validate", name), false, &format!("validate-{name}"), |vin| {
-            validate(&vget(&vin, "data"), &vget(&vin, "spec"), None).map_err(|e| e.message)
-        });
+        run.run_set_fallible(
+            &set!("validate", name),
+            false,
+            &format!("validate-{name}"),
+            |vin| validate(&vget(&vin, "data"), &vget(&vin, "spec"), None).map_err(|e| e.message),
+        );
     }
     for name in ["child", "one", "exact"] {
-        run.run_set_fallible(&set!("validate", name), true, &format!("validate-{name}"), |vin| {
-            validate(&vget(&vin, "data"), &vget(&vin, "spec"), None).map_err(|e| e.message)
-        });
+        run.run_set_fallible(
+            &set!("validate", name),
+            true,
+            &format!("validate-{name}"),
+            |vin| validate(&vget(&vin, "data"), &vget(&vin, "spec"), None).map_err(|e| e.message),
+        );
     }
-    run.run_set_fallible(&set!("validate", "special"), true, "validate-special", |vin| {
-        let d = inject_def_from_value(&vget(&vin, "inj"));
-        validate(&vget(&vin, "data"), &vget(&vin, "spec"), Some(&d)).map_err(|e| e.message)
-    });
+    run.run_set_fallible(
+        &set!("validate", "special"),
+        true,
+        "validate-special",
+        |vin| {
+            let d = inject_def_from_value(&vget(&vin, "inj"));
+            validate(&vget(&vin, "data"), &vget(&vin, "spec"), Some(&d)).map_err(|e| e.message)
+        },
+    );
 
     // -------- select -------------------------------------------------
     for name in ["basic", "operators", "edge", "alts"] {
-        run.run_set(&set!("select", name), true, &format!("select-{name}"), |vin| {
-            select(&vget(&vin, "obj"), &vget(&vin, "query"))
-        });
+        run.run_set(
+            &set!("select", name),
+            true,
+            &format!("select-{name}"),
+            |vin| select(&vget(&vin, "obj"), &vget(&vin, "query")),
+        );
     }
 
     // -------- primary / SDK ------------------------------------------
@@ -840,10 +988,7 @@ fn corpus() {
         } else {
             voxgig_struct::value::js_string(&bar)
         };
-        Value::map_of([(
-            "zed".to_string(),
-            Value::str(format!("ZED{foo_s}_{bar_s}")),
-        )])
+        Value::map_of([("zed".to_string(), Value::str(format!("ZED{foo_s}_{bar_s}")))])
     }
     {
         let check = vget_path(&spec, &["primary", "check"]);
@@ -885,10 +1030,7 @@ fn corpus() {
     // -------- report -------------------------------------------------
     if !run.failures.is_empty() {
         let n = run.failures.len();
-        let mut msg = format!(
-            "\n{} corpus check(s) failed ({} passed):\n",
-            n, run.passed
-        );
+        let mut msg = format!("\n{} corpus check(s) failed ({} passed):\n", n, run.passed);
         for f in run.failures.iter().take(60) {
             msg.push_str("  - ");
             msg.push_str(f);

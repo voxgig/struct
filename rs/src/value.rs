@@ -200,7 +200,8 @@ impl PartialEq for Value {
                 let a = a.borrow();
                 let b = b.borrow();
                 a.len() == b.len()
-                    && a.iter().all(|(k, v)| b.get(k).map(|w| v == w).unwrap_or(false))
+                    && a.iter()
+                        .all(|(k, v)| b.get(k).map(|w| v == w).unwrap_or(false))
             }
             _ => false,
         }
@@ -352,7 +353,9 @@ pub fn js_string_to_number(s: &str) -> f64 {
         return 0.0;
     }
     if let Some(hex) = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
-        return i64::from_str_radix(hex, 16).map(|n| n as f64).unwrap_or(f64::NAN);
+        return i64::from_str_radix(hex, 16)
+            .map(|n| n as f64)
+            .unwrap_or(f64::NAN);
     }
     t.parse::<f64>().unwrap_or(f64::NAN)
 }

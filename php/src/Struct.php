@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Voxgig\Struct;
@@ -63,7 +64,6 @@ class ListRef implements \ArrayAccess, \Countable, \IteratorAggregate
  */
 class Struct
 {
-
     /* =======================
      * String Constants
      * =======================
@@ -76,7 +76,7 @@ class Struct
     private const S_DKEY = '`$KEY`';
     private const S_DMETA = '`$META`';
     private const S_DANNO = '`$ANNO`';
-    
+
     // Match TypeScript constants exactly
     private const S_BKEY = '`$KEY`';
     private const S_BANNO = '`$ANNO`';
@@ -432,7 +432,9 @@ class Struct
     // External callers should use getprop(), which normalises UNDEF to null (or $alt).
     public static function _getprop(mixed $val, mixed $key, mixed $alt = null): mixed
     {
-        if ($alt === null) { $alt = self::undef(); }
+        if ($alt === null) {
+            $alt = self::undef();
+        }
         // 1) undefined‐marker or invalid key → alt
         if ($val === self::undef() || $key === self::undef()) {
             return $alt;
@@ -616,8 +618,11 @@ class Struct
                         $s = preg_replace('/' . $sepre . '+$/', self::S_MT, $s);
                     }
 
-                    $s = preg_replace('/([^' . $sepre . '])' . $sepre . '+([^' . $sepre . '])/',
-                        '$1' . $sepdef . '$2', $s);
+                    $s = preg_replace(
+                        '/([^' . $sepre . '])' . $sepre . '+([^' . $sepre . '])/',
+                        '$1' . $sepdef . '$2',
+                        $s
+                    );
                 }
 
                 return $s;
@@ -661,7 +666,9 @@ class Struct
                         self::items($rest, function ($n) use ($offset) {
                             return self::pad($n[1], 0 - $offset - self::size($n[1]));
                         }),
-                        function ($n) { return true; }
+                        function ($n) {
+                            return true;
+                        }
                     );
                     $str = "{\n" . implode("\n", $padded);
                 }
@@ -776,7 +783,7 @@ class Struct
         $padding = $padding ?? 44;
         $padchar = $padchar ?? ' ';
         $padchar = ($padchar . ' ')[0]; // Get first character or space as fallback
-        
+
         if ($padding >= 0) {
             return str_pad($str, $padding, $padchar, STR_PAD_RIGHT);
         } else {
@@ -1238,7 +1245,14 @@ class Struct
             foreach (self::items($out) as [$childKey, $childVal]) {
                 $pool[$childDepth][$depth] = self::S_MT . $childKey;
                 $result = self::_walk(
-                    $childVal, $before, $after, $md, $childKey, $out, $pool[$childDepth], $pool
+                    $childVal,
+                    $before,
+                    $after,
+                    $md,
+                    $childKey,
+                    $out,
+                    $pool[$childDepth],
+                    $pool
                 );
                 if (self::ismap($out)) {
                     if (is_object($out)) {
@@ -1353,7 +1367,7 @@ class Struct
         // An empty path (incl empty string) just finds the src (base data)
         if ($path === null || $store === null || ($numparts === 1 && $parts[0] === '')) {
             $val = $src;
-        } else if ($numparts > 0) {
+        } elseif ($numparts > 0) {
             // Check for $ACTIONs
             if ($numparts === 1) {
                 $val = self::_getprop($store, $parts[0]);
@@ -1375,16 +1389,16 @@ class Struct
 
                     if ($injdef && $part === '$KEY') {
                         $part = self::_getprop($injdef, 'key');
-                    } else if ($injdef && str_starts_with($part, '$GET:')) {
+                    } elseif ($injdef && str_starts_with($part, '$GET:')) {
                         // $GET:path$ -> get store value, use as path part (string)
                         $getpath = substr($part, 5, -1);
                         $getval = self::getpath($src, $getpath);
                         $part = self::stringify($getval);
-                    } else if ($injdef && str_starts_with($part, '$REF:')) {
+                    } elseif ($injdef && str_starts_with($part, '$REF:')) {
                         // $REF:refpath$ -> get spec value, use as path part (string)
                         $refpath = substr($part, 5, -1);
                         $part = self::stringify(self::getpath(self::_getprop($store, '$SPEC'), self::slice($part, 5, -1)));
-                    } else if ($injdef && str_starts_with($part, '$META:')) {
+                    } elseif ($injdef && str_starts_with($part, '$META:')) {
                         // $META:metapath$ -> get meta value, use as path part (string)
                         $part = self::stringify(self::getpath(self::_getprop($injdef, 'meta'), substr($part, 6, -1)));
                     }
@@ -1540,7 +1554,7 @@ class Struct
             }
         }
         // Inject paths into string scalars.
-        else if ($valtype === 'string') {
+        elseif ($valtype === 'string') {
             $inj->mode = self::M_VAL;
             $val = self::_injectstr($val, $store, $inj);
             if (self::SKIP !== $val) {
@@ -1603,10 +1617,9 @@ class Struct
 
             // Get the extracted path reference.
             $out = self::getpath($store, $pathref, $inj);
-        }
-        else {
+        } else {
             // Check for injections within the string.
-            $out = preg_replace_callback('/`([^`]+)`/', function($matches) use ($store, $inj) {
+            $out = preg_replace_callback('/`([^`]+)`/', function ($matches) use ($store, $inj) {
                 $ref = $matches[1];
 
                 if (strlen($ref) > 3) {
@@ -1844,7 +1857,7 @@ class Struct
         // Create clones of the child template for each value of the current source.
         if (self::islist($src)) {
             $srcArr = ($src instanceof ListRef) ? $src->list : (array) $src;
-            $tval = array_map(function($_) use ($child) {
+            $tval = array_map(function ($_) use ($child) {
                 return self::clone($child);
             }, $srcArr);
         } elseif (self::ismap($src)) {
@@ -2259,13 +2272,15 @@ class Struct
         $extra = null;
         $modify = null;
         $errs = null;
-        if (is_object($injdef) && (
+        if (
+            is_object($injdef) && (
             property_exists($injdef, 'extra') ||
             property_exists($injdef, 'modify') ||
             property_exists($injdef, 'errs') ||
             property_exists($injdef, 'meta') ||
             property_exists($injdef, 'handler')
-        )) {
+            )
+        ) {
             // New injdef pattern: { extra, modify, errs, meta, handler }
             $extra = property_exists($injdef, 'extra') ? $injdef->extra : null;
             $modify = property_exists($injdef, 'modify') ? $injdef->modify : null;
@@ -2301,7 +2316,7 @@ class Struct
                 self::S_DTOP => $dataClone,
                 '$BT' => fn() => self::S_BT,
                 '$DS' => fn() => self::S_DS,
-                '$WHEN' => fn() => (new \DateTime)->format(\DateTime::ATOM),
+                '$WHEN' => fn() => (new \DateTime())->format(\DateTime::ATOM),
                 '$DELETE' => [self::class, 'transform_DELETE'],
                 '$COPY' => [self::class, 'transform_COPY'],
                 '$KEY' => [self::class, 'transform_KEY'],
@@ -2375,7 +2390,8 @@ class Struct
      * Remove unresolved $REF list entries from a list spec.
      * This handles PHP's value-type arrays where in-place mutation via references doesn't propagate.
      */
-    private static function _cleanRefEntries(array $list): array {
+    private static function _cleanRefEntries(array $list): array
+    {
         $cleaned = [];
         foreach ($list as $item) {
             if (self::islist($item) && count($item) >= 1 && self::_getprop($item, 0) === '`$REF`') {
@@ -2561,9 +2577,12 @@ class Struct
                 $tval = new \stdClass();
             } elseif (!self::ismap($tval)) {
                 $inj->errs[] = self::_invalidTypeMsg(
-                    self::slice($inj->path, 0, -1), self::S_object, self::typify($tval), $tval);
+                    self::slice($inj->path, 0, -1),
+                    self::S_object,
+                    self::typify($tval),
+                    $tval
+                );
                 return self::undef();
-
             }
 
             $ckeys = self::keysof($tval);
@@ -2599,7 +2618,11 @@ class Struct
 
             if (!self::islist($inj->dparent)) {
                 $msg = self::_invalidTypeMsg(
-                    self::slice($inj->path, 0, -1), self::S_array, self::typify($inj->dparent), $inj->dparent);
+                    self::slice($inj->path, 0, -1),
+                    self::S_array,
+                    self::typify($inj->dparent),
+                    $inj->dparent
+                );
                 $inj->errs[] = $msg;
                 $inj->keyI = count($parent);
                 return $inj->dparent;
@@ -2689,7 +2712,9 @@ class Struct
             $inj->errs[] = self::_invalidTypeMsg(
                 $inj->path,
                 (1 < count($tvals) ? 'one of ' : '') . $valdesc,
-                self::typify($inj->dparent), $inj->dparent);
+                self::typify($inj->dparent),
+                $inj->dparent
+            );
         }
 
         return self::undef();
@@ -2754,7 +2779,9 @@ class Struct
                 $inj->path,
                 (1 < count($inj->path) ? '' : 'value ') .
                 'exactly equal to ' . (1 === count($tvals) ? '' : 'one of ') . $valdesc,
-                self::typify($inj->dparent), $inj->dparent);
+                self::typify($inj->dparent),
+                $inj->dparent
+            );
         } else {
             self::delprop($parent, $key);
         }
@@ -2804,9 +2831,11 @@ class Struct
         // map, treat an empty array/ListRef in the data as an empty map so
         // that validation does not produce a spurious type-mismatch error.
         // Go/Lua don't hit this because they have distinct map/list types.
-        if (0 < (self::T_map & $ptype) &&
+        if (
+            0 < (self::T_map & $ptype) &&
             (is_array($cval) || $cval instanceof \Voxgig\Struct\ListRef) &&
-            0 === count($cval)) {
+            0 === count($cval)
+        ) {
             $cval = new \stdClass();
             $ctype = self::typify($cval);
         }
@@ -2895,7 +2924,7 @@ class Struct
     /**
      * Validate a data structure against a shape specification.
      * The shape specification follows the "by example" principle.
-     * 
+     *
      * @param mixed $data Source data to validate
      * @param mixed $spec Validation specification
      * @param mixed $injdef Optional injection definition with extra validators, etc.
@@ -2990,12 +3019,12 @@ class Struct
         }
 
         if (self::ismap($children)) {
-            $children = array_map(function($n) {
+            $children = array_map(function ($n) {
                 self::setprop($n[1], self::S_DKEY, $n[0]);
                 return $n[1];
             }, self::items($children));
         } else {
-            $children = array_map(function($n, $i) {
+            $children = array_map(function ($n, $i) {
                 if (self::ismap($n)) {
                     self::setprop($n, self::S_DKEY, $i);
                 }
@@ -3180,17 +3209,13 @@ class Struct
 
             if ('$GT' === $ref && $point > $term) {
                 $pass = true;
-            }
-            elseif ('$LT' === $ref && $point < $term) {
+            } elseif ('$LT' === $ref && $point < $term) {
                 $pass = true;
-            }
-            elseif ('$GTE' === $ref && $point >= $term) {
+            } elseif ('$GTE' === $ref && $point >= $term) {
                 $pass = true;
-            }
-            elseif ('$LTE' === $ref && $point <= $term) {
+            } elseif ('$LTE' === $ref && $point <= $term) {
                 $pass = true;
-            }
-            elseif ('$LIKE' === $ref && preg_match('/' . $term . '/', self::stringify($point))) {
+            } elseif ('$LIKE' === $ref && preg_match('/' . $term . '/', self::stringify($point))) {
                 $pass = true;
             }
 
@@ -3198,8 +3223,7 @@ class Struct
                 // Update spec to match found value so that _validate does not complain
                 $gp = self::getelem($state->nodes, -2);
                 self::setprop($gp, $gkey, $point);
-            }
-            else {
+            } else {
                 $state->errs[] = 'CMP: ' . self::pathify($ppath) . ': ' . self::stringify($point) .
                     ' fail:' . $ref . ' ' . self::stringify($term);
             }
@@ -3280,8 +3304,7 @@ class Struct
         if (self::ismap($parent)) {
             $key = self::strkey($key);
             unset($parent->$key);
-        }
-        elseif (self::islist($parent)) {
+        } elseif (self::islist($parent)) {
             // Ensure key is an integer
             $keyI = (int)$key;
             if (!is_numeric($key) || (string)$keyI !== (string)$key) {
@@ -3400,8 +3423,7 @@ class Struct
                 $cinj = $inj->prior->prior->child($inj->prior->keyI, $inj->prior->keys);
                 $cinj->val = $child;
                 self::setprop($cinj->parent, $inj->prior->key, $child);
-            }
-            else {
+            } else {
                 $cinj = $inj->prior->child($inj->keyI, $inj->keys);
                 $cinj->val = $child;
                 self::setprop($cinj->parent, $inj->key, $child);
@@ -3412,13 +3434,11 @@ class Struct
 
         return $cinj;
     }
-
 }
 
 
 class Injection
 {
-
     public int $mode;
     public bool $full;
     public int $keyI;
@@ -3495,14 +3515,12 @@ class Injection
 
         // Resolve current node in store for local paths.
         if (Struct::UNDEF === $this->dparent) {
-
             // Even if there's no data, dpath should continue to match path, so that
             // relative paths work properly.
             if (1 < Struct::size($this->dpath)) {
                 $this->dpath = Struct::flatten([$this->dpath, $parentkey]);
             }
-        }
-        else {
+        } else {
             // this->dparent is the containing node of the current store value.
             if (null !== $parentkey && Struct::UNDEF !== $parentkey) {
                 $this->dparent = Struct::_getprop($this->dparent, $parentkey);
@@ -3510,8 +3528,7 @@ class Injection
                 $lastpart = Struct::getelem($this->dpath, -1);
                 if ($lastpart === '$:' . $parentkey) {
                     $this->dpath = Struct::slice($this->dpath, -1);
-                }
-                else {
+                } else {
                     $this->dpath = Struct::flatten([$this->dpath, $parentkey]);
                 }
             }
@@ -3559,8 +3576,7 @@ class Injection
             } else {
                 $parent = Struct::setprop($this->parent, $this->key, $val);
             }
-        }
-        else {
+        } else {
             $aval = Struct::getelem($this->nodes, 0 - $ancestor);
             $akey = Struct::getelem($this->path, 0 - $ancestor);
             if (Struct::UNDEF === $val) {
@@ -3573,4 +3589,3 @@ class Injection
         return $parent;
     }
 }
-?>

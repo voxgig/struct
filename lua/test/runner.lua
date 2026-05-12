@@ -2,14 +2,16 @@ local json = require("dkjson")
 local lfs = require("lfs")
 local luassert = require("luassert")
 
-
-local NULLMARK = "__NULL__"     -- Value is JSON null
-local UNDEFMARK = "__UNDEF__"   -- Value is not present (thus undefined)
+local NULLMARK = "__NULL__" -- Value is JSON null
+local UNDEFMARK = "__UNDEF__" -- Value is not present (thus undefined)
 local EXISTSMARK = "__EXISTS__" -- Value exists (not undefined)
 
 -- Unique sentinel for JSON null (distinguishes from the literal string "null")
-local JSON_NULL = setmetatable({}, { __tostring = function() return "null" end })
-
+local JSON_NULL = setmetatable({}, {
+  __tostring = function()
+    return "null"
+  end,
+})
 
 ----------------------------------------------------------
 -- Utility Functions
@@ -28,7 +30,6 @@ local function readFileSync(path)
   return content
 end
 
-
 -- Join path segments with forward slashes
 -- @param ... (string) Path segments to join
 -- @return (string) Joined path
@@ -36,13 +37,11 @@ local function join(...)
   return table.concat({ ... }, "/")
 end
 
-
 -- Assert failure with message
 -- @param msg (string) Failure message
 local function fail(msg)
   luassert(false, msg)
 end
-
 
 -- Deep equality check between two values
 -- @param actual (any) The actual value
@@ -66,8 +65,6 @@ local checkResult
 local handleError
 local match
 local matchval
-
-
 
 -- Creates a runner function that can be used to run tests
 -- @param testfile (string) The path to the test file
@@ -143,7 +140,7 @@ local function makeRunner(testfile, client)
       runset = runset,
       runsetflags = runsetflags,
       subject = subject,
-      client = client
+      client = client,
     }
 
     return runpack
@@ -152,21 +149,15 @@ local function makeRunner(testfile, client)
   return runner
 end
 
-
-
 -- Resolve the test specification from a file
 -- @param name (string) The name of the test specification
 -- @param testfile (string) The path to the test file
 -- @return (table) The resolved test specification
 resolveSpec = function(name, testfile)
-  local alltests = json.decode(readFileSync(join(lfs.currentdir(), testfile)),
-    1, JSON_NULL)
-  local spec =
-      (alltests.primary and alltests.primary[name]) or (alltests[name]) or
-      alltests
+  local alltests = json.decode(readFileSync(join(lfs.currentdir(), testfile)), 1, JSON_NULL)
+  local spec = (alltests.primary and alltests.primary[name]) or alltests[name] or alltests
   return spec
 end
-
 
 -- Resolve client instances based on specification
 -- @param spec (table) The test specification
@@ -191,7 +182,6 @@ resolveClients = function(client, spec, store, structUtils)
   return clients
 end
 
-
 -- Resolve the test subject function
 -- @param name (string) The name of the subject to resolve
 -- @param container (table) The container object (Utility)
@@ -200,7 +190,6 @@ resolveSubject = function(name, container)
   local subject = container[name] or container.struct[name]
   return subject
 end
-
 
 -- Resolve test flags with defaults
 -- @param flags (table) Input flags
@@ -217,7 +206,6 @@ resolveFlags = function(flags)
   return flags
 end
 
-
 -- Prepare a test entry with the given flags
 -- @param entry (table) The test entry
 -- @param flags (table) Processing flags
@@ -226,7 +214,6 @@ resolveEntry = function(entry, flags)
   entry.out = (entry.out == nil and flags.null) and NULLMARK or entry.out
   return entry
 end
-
 
 -- Check the result of a test against expectations
 -- @param entry (table) The test entry
@@ -238,7 +225,7 @@ checkResult = function(entry, args, res, structUtils)
 
   -- If expected error but none thrown, fail
   if entry.err then
-    fail('Expected error did not occur: ' .. structUtils.stringify(entry.err))
+    fail("Expected error did not occur: " .. structUtils.stringify(entry.err))
     return
   end
 
@@ -248,7 +235,7 @@ checkResult = function(entry, args, res, structUtils)
       ["in"] = entry["in"],
       args = args,
       out = entry.res,
-      ctx = entry.ctx
+      ctx = entry.ctx,
     }
     match(entry.match, result, structUtils)
     matched = true
@@ -277,7 +264,6 @@ checkResult = function(entry, args, res, structUtils)
   end
 end
 
-
 -- Handle errors during test execution
 -- @param entry (table) The test entry
 -- @param err (any) The error that occurred
@@ -293,28 +279,22 @@ handleError = function(entry, err, structUtils)
       if entry.match then
         -- Process the error with fixJSON before matching
         local processed_err = fixJSON(err, { null = true })
-        match(
-          entry.match,
-          {
-            ["in"] = entry["in"],
-            out = entry.res,
-            ctx = entry.ctx,
-            err = processed_err
-          },
-          structUtils
-        )
+        match(entry.match, {
+          ["in"] = entry["in"],
+          out = entry.res,
+          ctx = entry.ctx,
+          err = processed_err,
+        }, structUtils)
       end
       return
     end
 
-    fail("ERROR MATCH: [" .. structUtils.stringify(entry_err) .. "] <=> [" ..
-      err_message .. "]")
+    fail("ERROR MATCH: [" .. structUtils.stringify(entry_err) .. "] <=> [" .. err_message .. "]")
   else
     -- fail((err.stack or err_message) .. "\n\nENTRY: " .. inspect(entry))
     fail((err.stack or err_message))
   end
 end
-
 
 -- Prepare test arguments
 -- @param entry (table) The test entry
@@ -347,7 +327,6 @@ resolveArgs = function(entry, testpack, utility, structUtils)
   return args
 end
 
-
 -- Resolve the test pack with client and subject
 -- @param name (string) The name of the test
 -- @param entry (table) The test entry
@@ -360,7 +339,7 @@ resolveTestPack = function(name, entry, subject, client, clients)
     name = name,
     client = client,
     subject = subject,
-    utility = client:utility()
+    utility = client:utility(),
   }
 
   if entry.client then
@@ -371,7 +350,6 @@ resolveTestPack = function(name, entry, subject, client, clients)
 
   return testpack
 end
-
 
 -- Match a check structure against a base structure
 -- @param check (table) The check structure with patterns
@@ -401,16 +379,21 @@ match = function(check, base, structUtils)
       end
 
       if not matchval(val, baseval, structUtils) then
-        fail("MATCH: " .. table.concat(path, ".") .. ": [" ..
-          structUtils.stringify(val) .. "] <=> [" ..
-          structUtils.stringify(baseval) .. "]")
+        fail(
+          "MATCH: "
+            .. table.concat(path, ".")
+            .. ": ["
+            .. structUtils.stringify(val)
+            .. "] <=> ["
+            .. structUtils.stringify(baseval)
+            .. "]"
+        )
       end
     end
 
     return val
   end)
 end
-
 
 -- Check if a test value matches a base value according to defined rules
 -- @param check (any) The test pattern or value to check
@@ -429,15 +412,23 @@ matchval = function(check, base, structUtils)
       if rem then
         -- Convert JS RegExp to Lua pattern when possible
         -- This is a simplification and might need adjustments for complex patterns
-        local lua_pattern = rem:gsub("%%", "%%%%"):gsub("%.", "%%."):gsub("%+",
-              "%%+"):gsub("%-", "%%-"):gsub("%*", "%%*"):gsub("%?", "%%?"):gsub(
-              "%[", "%%["):gsub("%]", "%%]"):gsub("%^", "%%^"):gsub("%$", "%%$")
-            :gsub("%(", "%%("):gsub("%)", "%%)")
+        local lua_pattern = rem
+          :gsub("%%", "%%%%")
+          :gsub("%.", "%%.")
+          :gsub("%+", "%%+")
+          :gsub("%-", "%%-")
+          :gsub("%*", "%%*")
+          :gsub("%?", "%%?")
+          :gsub("%[", "%%[")
+          :gsub("%]", "%%]")
+          :gsub("%^", "%%^")
+          :gsub("%$", "%%$")
+          :gsub("%(", "%%(")
+          :gsub("%)", "%%)")
         pass = basestr:match(lua_pattern) ~= nil
       else
         -- Convert both strings to lowercase and check if one contains the other
-        pass = basestr:lower():find(structUtils.stringify(check):lower(), 1,
-          true) ~= nil
+        pass = basestr:lower():find(structUtils.stringify(check):lower(), 1, true) ~= nil
       end
     elseif type(check) == "function" then
       pass = true
@@ -446,7 +437,6 @@ matchval = function(check, base, structUtils)
 
   return pass
 end
-
 
 -- Transform null values in JSON data according to flags.
 -- dkjson decodes JSON null as the Lua string "null".
@@ -466,15 +456,25 @@ fixJSON = function(val, flags)
   end
 
   local function isarray(t)
-    if type(t) ~= "table" then return false end
-    if t == JSON_NULL then return false end
+    if type(t) ~= "table" then
+      return false
+    end
+    if t == JSON_NULL then
+      return false
+    end
     local mt = getmetatable(t)
-    if mt and mt.__jsontype == "array" then return true end
+    if mt and mt.__jsontype == "array" then
+      return true
+    end
     local count = 0
     local max = 0
     for k in pairs(t) do
-      if type(k) ~= "number" then return false end
-      if k > max then max = k end
+      if type(k) ~= "number" then
+        return false
+      end
+      if k > max then
+        max = k
+      end
       count = count + 1
     end
     return count > 0 and max == count
@@ -532,7 +532,6 @@ fixJSON = function(val, flags)
   return replacer(val)
 end
 
-
 -- Process null marker values
 -- @param val (any) The value to check
 -- @param key (any) The key in the parent
@@ -545,12 +544,11 @@ local function nullModifier(val, key, parent)
   end
 end
 
-
 -- Module exports
 return {
   NULLMARK = NULLMARK,
   EXISTSMARK = EXISTSMARK,
   JSON_NULL = JSON_NULL,
   nullModifier = nullModifier,
-  makeRunner = makeRunner
+  makeRunner = makeRunner,
 }

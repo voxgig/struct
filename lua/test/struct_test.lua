@@ -3,8 +3,8 @@ package.path = package.path .. ";./test/?.lua"
 local assert = require("luassert")
 
 local runnerModule = require("runner")
-local makeRunner, nullModifier, NULLMARK, JSON_NULL = runnerModule.makeRunner,
-    runnerModule.nullModifier, runnerModule.NULLMARK, runnerModule.JSON_NULL
+local makeRunner, nullModifier, NULLMARK, JSON_NULL =
+  runnerModule.makeRunner, runnerModule.nullModifier, runnerModule.NULLMARK, runnerModule.JSON_NULL
 
 local SDK = require("sdk").SDK
 
@@ -20,7 +20,7 @@ local TEST_JSON_FILE = "../build/test/test.json"
 local function array(...)
   local t = { ... }
   return setmetatable(t, {
-    __jsontype = "array"
+    __jsontype = "array",
   })
 end
 
@@ -30,7 +30,7 @@ end
 local function object(t)
   t = t or {}
   return setmetatable(t, {
-    __jsontype = "object"
+    __jsontype = "object",
   })
 end
 
@@ -41,9 +41,9 @@ end
 describe("struct", function()
   local runner = makeRunner(TEST_JSON_FILE, SDK:test())
 
-  local runnerStruct = runner('struct')
-  local spec, runset, runsetflags, client = runnerStruct.spec,
-      runnerStruct.runset, runnerStruct.runsetflags, runnerStruct.client
+  local runnerStruct = runner("struct")
+  local spec, runset, runsetflags, client =
+    runnerStruct.spec, runnerStruct.runset, runnerStruct.runsetflags, runnerStruct.client
 
   local struct_util = client:utility().struct
   -- Extract test specifications for different function groups
@@ -152,37 +152,31 @@ describe("struct", function()
     runset(minorSpec.isnode, isnode)
   end)
 
-
   test("minor-ismap", function()
     runset(minorSpec.ismap, ismap)
   end)
-
 
   test("minor-islist", function()
     runset(minorSpec.islist, islist)
   end)
 
-
   test("minor-iskey", function()
     runsetflags(minorSpec.iskey, {
-      null = false
+      null = false,
     }, iskey)
   end)
 
-
   test("minor-strkey", function()
     runsetflags(minorSpec.strkey, {
-      null = false
+      null = false,
     }, strkey)
   end)
 
-
   test("minor-isempty", function()
     runsetflags(minorSpec.isempty, {
-      null = false
+      null = false,
     }, isempty)
   end)
-
 
   test("minor-isfunc", function()
     runset(minorSpec.isfunc, isfunc)
@@ -193,15 +187,17 @@ describe("struct", function()
     end
 
     assert.equal(isfunc(f0), true)
-    assert.equal(isfunc(function()
-      return nil
-    end), true)
+    assert.equal(
+      isfunc(function()
+        return nil
+      end),
+      true
+    )
   end)
-
 
   test("minor-clone", function()
     runsetflags(minorSpec.clone, {
-      null = false
+      null = false,
     }, clone)
 
     -- Additional function cloning test
@@ -210,23 +206,25 @@ describe("struct", function()
     end
 
     local original = {
-      a = f0
+      a = f0,
     }
     local copied = clone(original)
     assert.are.same(original, copied)
   end)
 
-
   test("minor-filter", function()
     local checkmap = {
-      gt3 = function(n) return n[2] > 3 end,
-      lt3 = function(n) return n[2] < 3 end,
+      gt3 = function(n)
+        return n[2] > 3
+      end,
+      lt3 = function(n)
+        return n[2] < 3
+      end,
     }
     runset(minorSpec.filter, function(vin)
       return filter(vin.val, checkmap[vin.check])
     end)
   end)
-
 
   test("minor-flatten", function()
     runset(minorSpec.flatten, function(vin)
@@ -234,11 +232,9 @@ describe("struct", function()
     end)
   end)
 
-
   test("minor-escre", function()
     runset(minorSpec.escre, escre)
   end)
-
 
   test("minor-escurl", function()
     runset(minorSpec.escurl, function(vin)
@@ -246,7 +242,6 @@ describe("struct", function()
       return escurl(vin):gsub("+", "%%20")
     end)
   end)
-
 
   test("minor-stringify", function()
     runset(minorSpec.stringify, function(vin)
@@ -258,10 +253,9 @@ describe("struct", function()
     end)
   end)
 
-
-  test('minor-pathify', function()
+  test("minor-pathify", function()
     runsetflags(minorSpec.pathify, {
-      null = true
+      null = true,
     }, function(vin)
       local path
       if NULLMARK == vin.path then
@@ -270,28 +264,25 @@ describe("struct", function()
         path = vin.path
       end
 
-      local pathstr = pathify(path, vin.from):gsub('__NULL__%.', '')
-      pathstr = NULLMARK == vin.path and pathstr:gsub('>', ':null>') or pathstr
+      local pathstr = pathify(path, vin.from):gsub("__NULL__%.", "")
+      pathstr = NULLMARK == vin.path and pathstr:gsub(">", ":null>") or pathstr
       return pathstr
     end)
   end)
-
 
   test("minor-items", function()
     runset(minorSpec.items, items)
   end)
 
-
   test("minor-edge-items", function()
-    local a0 = {11, 22, 33}
+    local a0 = { 11, 22, 33 }
     a0.x = 1
-    assert.same(items(a0), {{'0', 11}, {'1', 22}, {'2', 33}})
+    assert.same(items(a0), { { "0", 11 }, { "1", 22 }, { "2", 33 } })
   end)
-
 
   test("minor-getprop", function()
     runsetflags(minorSpec.getprop, {
-      null = false
+      null = false,
     }, function(vin)
       if vin.alt == nil then
         return getprop(vin.val, vin.key)
@@ -300,7 +291,6 @@ describe("struct", function()
       end
     end)
   end)
-
 
   test("minor-edge-getprop", function()
     local strarr = { "a", "b", "c", "d", "e" }
@@ -312,13 +302,11 @@ describe("struct", function()
     assert.same(getprop(intarr, "2"), 5)
   end)
 
-
   test("minor-setprop", function()
     runset(minorSpec.setprop, function(vin)
       return setprop(vin.parent, vin.key, vin.val)
     end)
   end)
-
 
   test("minor-edge-setprop", function()
     local strarr0 = { "a", "b", "c", "d", "e" }
@@ -332,40 +320,35 @@ describe("struct", function()
     assert.same({ 2, 3, 555, 7, 11 }, setprop(intarr1, "2", 555))
   end)
 
-
   test("minor-haskey", function()
     runsetflags(minorSpec.haskey, {
-      null = false
+      null = false,
     }, function(vin)
       return haskey(vin.src, vin.key)
     end)
   end)
-
 
   test("minor-keysof", function()
     runset(minorSpec.keysof, keysof)
   end)
 
   test("minor-edge-keysof", function()
-    local a0 = {11, 22, 33}
+    local a0 = { 11, 22, 33 }
     a0.x = 1
-    assert.same(keysof(a0), {'0', '1', '2'})
+    assert.same(keysof(a0), { "0", "1", "2" })
   end)
-
 
   test("minor-join", function()
     runsetflags(minorSpec.join, {
-      null = false
+      null = false,
     }, function(vin)
       return join(vin.val, vin.sep, vin.url)
     end)
   end)
 
-
   test("minor-typename", function()
     runset(minorSpec.typename, typename)
   end)
-
 
   test("minor-typify", function()
     -- Filter out JSON null 'in' entries: Lua typify(nil) returns T_null,
@@ -378,14 +361,13 @@ describe("struct", function()
       end
     end
     runsetflags(filtered, {
-      null = false
+      null = false,
     }, typify)
   end)
 
-
   test("minor-getelem", function()
     runsetflags(minorSpec.getelem, {
-      null = false
+      null = false,
     }, function(vin)
       if vin.alt == nil then
         return getelem(vin.val, vin.key)
@@ -395,47 +377,41 @@ describe("struct", function()
     end)
   end)
 
-
   test("minor-size", function()
     runsetflags(minorSpec.size, {
-      null = false
+      null = false,
     }, size)
   end)
 
-
   test("minor-slice", function()
     runsetflags(minorSpec.slice, {
-      null = false
+      null = false,
     }, function(vin)
-      return slice(vin.val, vin.start, vin['end'])
+      return slice(vin.val, vin.start, vin["end"])
     end)
   end)
 
-
   test("minor-pad", function()
     runsetflags(minorSpec.pad, {
-      null = false
+      null = false,
     }, function(vin)
       return pad(vin.val, vin.pad, vin.char)
     end)
   end)
 
-
   test("minor-setpath", function()
     runsetflags(minorSpec.setpath, {
-      null = false
+      null = false,
     }, function(vin)
       return setpath(vin.store, vin.path, vin.val)
     end)
   end)
-
 
   test("minor-delprop", function()
     runset(minorSpec.delprop, function(vin)
       return delprop(vin.parent, vin.key)
     end)
   end)
-
 
   test("minor-edge-delprop", function()
     local strarr0 = { "a", "b", "c", "d", "e" }
@@ -449,15 +425,13 @@ describe("struct", function()
     assert.same({ 2, 3, 7, 11 }, delprop(intarr1, "2"))
   end)
 
-
   test("minor-jsonify", function()
     runsetflags(minorSpec.jsonify, {
-      null = false
+      null = false,
     }, function(vin)
       return jsonify(vin.val, vin.flags)
     end)
   end)
-
 
   ----------------------------------------------------------
   -- Walk Tests
@@ -467,8 +441,14 @@ describe("struct", function()
     local test = clone(walkSpec.log)
 
     local function walklog(key, val, parent, path)
-      return "k=" .. stringify(key) .. ", v=" .. stringify(val) .. ", p=" ..
-        stringify(parent) .. ", t=" .. pathify(path)
+      return "k="
+        .. stringify(key)
+        .. ", v="
+        .. stringify(val)
+        .. ", p="
+        .. stringify(parent)
+        .. ", t="
+        .. pathify(path)
     end
 
     -- Test before callback
@@ -499,7 +479,6 @@ describe("struct", function()
     assert.same(logba, test.out.both)
   end)
 
-
   test("walk-basic", function()
     local function walkpath(_key, val, _parent, path)
       if type(val) == "string" then
@@ -512,7 +491,6 @@ describe("struct", function()
       return walk(vin, walkpath)
     end)
   end)
-
 
   test("walk-depth", function()
     runsetflags(walkSpec.depth, { null = false }, function(vin)
@@ -537,7 +515,6 @@ describe("struct", function()
       return top
     end)
   end)
-
 
   test("walk-copy", function()
     local cur
@@ -568,31 +545,26 @@ describe("struct", function()
     end)
   end)
 
-
   ----------------------------------------------------------
   -- Merge Tests
   ----------------------------------------------------------
 
   test("merge-basic", function()
     local test = clone(mergeSpec.basic)
-    assert.same(test.out, merge(test['in']))
+    assert.same(test.out, merge(test["in"]))
   end)
-
 
   test("merge-cases", function()
     runset(mergeSpec.cases, merge)
   end)
 
-
   test("merge-array", function()
     runset(mergeSpec.array, merge)
   end)
 
-
   test("merge-integrity", function()
     runset(mergeSpec.integrity, merge)
   end)
-
 
   test("merge-special", function()
     local f0 = function()
@@ -601,29 +573,33 @@ describe("struct", function()
 
     assert.same(f0, merge(array(f0)))
     assert.same(f0, merge(array(nil, f0)))
-    assert.same(object({
-      a = f0
-    }), merge(array(object({
-      a = f0
-    }))))
-    assert.same(object({
-      a = object({
-        b = f0
-      })
-    }), merge(array(object({
-      a = object({
-        b = f0
-      })
-    }))))
+    assert.same(
+      object({
+        a = f0,
+      }),
+      merge(array(object({
+        a = f0,
+      })))
+    )
+    assert.same(
+      object({
+        a = object({
+          b = f0,
+        }),
+      }),
+      merge(array(object({
+        a = object({
+          b = f0,
+        }),
+      })))
+    )
   end)
-
 
   test("merge-depth", function()
     runset(mergeSpec.depth, function(vin)
       return merge(vin.val, vin.depth)
     end)
   end)
-
 
   ----------------------------------------------------------
   -- GetPath Tests
@@ -635,14 +611,13 @@ describe("struct", function()
     end)
   end)
 
-
   test("getpath-relative", function()
     runset(getpathSpec.relative, function(vin)
       local dpath = vin.dpath
-      if type(dpath) == 'string' then
+      if type(dpath) == "string" then
         -- Split dpath string into array
         local parts = {}
-        for part in dpath:gmatch('[^%.]+') do
+        for part in dpath:gmatch("[^%.]+") do
           table.insert(parts, part)
         end
         dpath = parts
@@ -651,31 +626,30 @@ describe("struct", function()
     end)
   end)
 
-
   test("getpath-special", function()
     runset(spec.getpath.special, function(vin)
       return getpath(vin.store, vin.path, vin.inj)
     end)
   end)
 
-
   test("getpath-handler", function()
     runset(spec.getpath.handler, function(vin)
       return getpath(
         {
           ["$TOP"] = vin.store,
-          ["$FOO"] = function() return 'foo' end,
+          ["$FOO"] = function()
+            return "foo"
+          end,
         },
         vin.path,
         {
           handler = function(_inj, val, _cur, _ref)
             return val()
-          end
+          end,
         }
       )
     end)
   end)
-
 
   ----------------------------------------------------------
   -- Inject Tests
@@ -683,9 +657,8 @@ describe("struct", function()
 
   test("inject-basic", function()
     local test = clone(injectSpec.basic)
-    assert.same(test.out, inject(test['in'].val, test['in'].store))
+    assert.same(test.out, inject(test["in"].val, test["in"].store))
   end)
-
 
   test("inject-string", function()
     runset(injectSpec.string, function(vin)
@@ -694,13 +667,11 @@ describe("struct", function()
     end)
   end)
 
-
   test("inject-deep", function()
     runset(injectSpec.deep, function(vin)
       return inject(vin.val, vin.store)
     end)
   end)
-
 
   ----------------------------------------------------------
   -- Transform Tests
@@ -708,10 +679,8 @@ describe("struct", function()
 
   test("transform-basic", function()
     local test = clone(transformSpec.basic)
-    assert.same(transform(test['in'].data, test['in'].spec),
-      test.out)
+    assert.same(transform(test["in"].data, test["in"].spec), test.out)
   end)
-
 
   test("transform-paths", function()
     runset(transformSpec.paths, function(vin)
@@ -719,13 +688,11 @@ describe("struct", function()
     end)
   end)
 
-
   test("transform-cmds", function()
     runset(transformSpec.cmds, function(vin)
       return transform(vin.data, vin.spec)
     end)
   end)
-
 
   test("transform-each", function()
     runset(transformSpec.each, function(vin)
@@ -733,13 +700,11 @@ describe("struct", function()
     end)
   end)
 
-
   test("transform-pack", function()
     runset(transformSpec.pack, function(vin)
       return transform(vin.data, vin.spec)
     end)
   end)
-
 
   test("transform-ref", function()
     runset(transformSpec.ref, function(vin)
@@ -747,20 +712,17 @@ describe("struct", function()
     end)
   end)
 
-
   test("transform-format", function()
     runsetflags(transformSpec.format, { null = false }, function(vin)
       return transform(vin.data, vin.spec)
     end)
   end)
 
-
   test("transform-apply", function()
     runset(transformSpec.apply, function(vin)
       return transform(vin.data, vin.spec)
     end)
   end)
-
 
   test("transform-modify", function()
     runset(transformSpec.modify, function(vin)
@@ -771,35 +733,36 @@ describe("struct", function()
             parent[key] = "@" .. val
             val = parent[key]
           end
-        end
+        end,
       })
     end)
   end)
 
-
   test("transform-extra", function()
     -- Test advanced transform functionality
-    assert.same(transform({
-      a = 1
-    }, {
-      x = '`a`',
-      b = '`$COPY`',
-      c = '`$UPPER`'
-    }, {
-      extra = {
+    assert.same(
+      transform({
+        a = 1,
+      }, {
+        x = "`a`",
+        b = "`$COPY`",
+        c = "`$UPPER`",
+      }, {
+        extra = {
+          b = 2,
+          ["$UPPER"] = function(inj)
+            local path = inj.path
+            return ("" .. tostring(getprop(path, #path - 1))):upper()
+          end,
+        },
+      }),
+      {
+        x = 1,
         b = 2,
-        ["$UPPER"] = function(inj)
-          local path = inj.path
-          return ('' .. tostring(getprop(path, #path - 1))):upper()
-        end
+        c = "C",
       }
-    }), {
-      x = 1,
-      b = 2,
-      c = 'C'
-    })
+    )
   end)
-
 
   test("transform-funcval", function()
     -- Test function handling in transform
@@ -807,32 +770,43 @@ describe("struct", function()
       return 99
     end
 
-    assert.same(transform({}, {
-      x = 1
-    }), {
-      x = 1
-    })
-    assert.same(transform({}, {
-      x = f0
-    }), {
-      x = f0
-    })
-    assert.same(transform({
-      a = 1
-    }, {
-      x = '`a`'
-    }), {
-      x = 1
-    })
-    assert.same(transform({
-      f0 = f0
-    }, {
-      x = '`f0`'
-    }), {
-      x = f0
-    })
+    assert.same(
+      transform({}, {
+        x = 1,
+      }),
+      {
+        x = 1,
+      }
+    )
+    assert.same(
+      transform({}, {
+        x = f0,
+      }),
+      {
+        x = f0,
+      }
+    )
+    assert.same(
+      transform({
+        a = 1,
+      }, {
+        x = "`a`",
+      }),
+      {
+        x = 1,
+      }
+    )
+    assert.same(
+      transform({
+        f0 = f0,
+      }, {
+        x = "`f0`",
+      }),
+      {
+        x = f0,
+      }
+    )
   end)
-
 
   ----------------------------------------------------------
   -- Validate Tests
@@ -844,13 +818,11 @@ describe("struct", function()
     end)
   end)
 
-
   test("validate-child", function()
     runset(validateSpec.child, function(vin)
       return validate(vin.data, vin.spec)
     end)
   end)
-
 
   test("validate-one", function()
     runset(validateSpec.one, function(vin)
@@ -858,13 +830,11 @@ describe("struct", function()
     end)
   end)
 
-
   test("validate-exact", function()
     runset(validateSpec.exact, function(vin)
       return validate(vin.data, vin.spec)
     end)
   end)
-
 
   test("validate-invalid", function()
     runsetflags(validateSpec.invalid, { null = false }, function(vin)
@@ -872,13 +842,11 @@ describe("struct", function()
     end)
   end)
 
-
   test("validate-special", function()
     runset(validateSpec.special, function(vin)
       return validate(vin.data, vin.spec, vin.inj)
     end)
   end)
-
 
   test("validate-custom", function()
     -- Test custom validation functions
@@ -897,23 +865,22 @@ describe("struct", function()
             table.insert(path_parts, tostring(inj.path[i]))
           end
           local path_str = table.concat(path_parts, ".")
-          table.insert(inj.errs, "Not an integer at " .. path_str .. ": " ..
-            tostring(out))
+          table.insert(inj.errs, "Not an integer at " .. path_str .. ": " .. tostring(out))
           return nil
         end
         return out
-      end
+      end,
     }
 
     local shape = {
-      a = "`$INTEGER`"
+      a = "`$INTEGER`",
     }
 
     local out = validate({
-      a = 1
+      a = 1,
     }, shape, { extra = extra, errs = errs })
     assert.same({
-      a = 1
+      a = 1,
     }, out)
     assert.equal(0, #errs)
 
@@ -921,7 +888,6 @@ describe("struct", function()
     assert.same({ a = "A" }, out)
     assert.same(array("Not an integer at a: A"), errs)
   end)
-
 
   ----------------------------------------------------------
   -- Select Tests
@@ -933,20 +899,17 @@ describe("struct", function()
     end)
   end)
 
-
   test("select-operators", function()
     runset(selectSpec.operators, function(vin)
       return select_fn(vin.obj, vin.query)
     end)
   end)
 
-
   test("select-edge", function()
     runset(selectSpec.edge, function(vin)
       return select_fn(vin.obj, vin.query)
     end)
   end)
-
 
   test("select-alts", function()
     runset(selectSpec.alts, function(vin)

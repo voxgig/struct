@@ -31,4 +31,4 @@ class TestClient < Minitest::Test
   def test_client_check_basic
     @runset.call(@spec['basic'], @subject)
   end
-end 
+end

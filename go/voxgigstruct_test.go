@@ -1,7 +1,5 @@
-
 // RUN: go test
 // RUN-SOME: go test -v -run=TestStruct/getpath
-
 
 package voxgigstruct_test
 
@@ -16,12 +14,11 @@ import (
 	"github.com/voxgig/struct/go/testutil"
 )
 
-
 // NOTE: tests are in order of increasing dependence.
 func TestStruct(t *testing.T) {
 
 	store := make(map[string]any)
-	
+
 	// Create an SDK client for the runner
 	sdk, err := runner.TestSDK(nil)
 	if err != nil {
@@ -38,16 +35,15 @@ func TestStruct(t *testing.T) {
 	var runset runner.RunSet = runnerMap.RunSet
 	var runsetFlags runner.RunSetFlags = runnerMap.RunSetFlags
 
-	var minorSpec     = spec["minor"].(map[string]any)
-	var walkSpec      = spec["walk"].(map[string]any)
-	var mergeSpec     = spec["merge"].(map[string]any)
-	var getpathSpec   = spec["getpath"].(map[string]any)
-	var injectSpec    = spec["inject"].(map[string]any)
+	var minorSpec = spec["minor"].(map[string]any)
+	var walkSpec = spec["walk"].(map[string]any)
+	var mergeSpec = spec["merge"].(map[string]any)
+	var getpathSpec = spec["getpath"].(map[string]any)
+	var injectSpec = spec["inject"].(map[string]any)
 	var transformSpec = spec["transform"].(map[string]any)
-	var validateSpec  = spec["validate"].(map[string]any)
-	var selectSpec    = spec["select"].(map[string]any)
+	var validateSpec = spec["validate"].(map[string]any)
+	var selectSpec = spec["select"].(map[string]any)
 
-  
 	// minor tests
 	// ===========
 
@@ -60,30 +56,30 @@ func TestStruct(t *testing.T) {
 			"getelem": voxgigstruct.GetElem,
 			"getprop": voxgigstruct.GetProp,
 
-			"getpath":  voxgigstruct.GetPath,
-			"haskey":   voxgigstruct.HasKey,
-			"inject":   voxgigstruct.Inject,
-			"isempty":  voxgigstruct.IsEmpty,
-			"isfunc":   voxgigstruct.IsFunc,
+			"getpath": voxgigstruct.GetPath,
+			"haskey":  voxgigstruct.HasKey,
+			"inject":  voxgigstruct.Inject,
+			"isempty": voxgigstruct.IsEmpty,
+			"isfunc":  voxgigstruct.IsFunc,
 
-			"iskey":   voxgigstruct.IsKey,
-			"islist":  voxgigstruct.IsList,
-			"ismap":   voxgigstruct.IsMap,
-			"isnode":  voxgigstruct.IsNode,
-			"items":   voxgigstruct.Items,
+			"iskey":  voxgigstruct.IsKey,
+			"islist": voxgigstruct.IsList,
+			"ismap":  voxgigstruct.IsMap,
+			"isnode": voxgigstruct.IsNode,
+			"items":  voxgigstruct.Items,
 
-			"joinurl":   voxgigstruct.JoinUrl,
-			"jsonify":   voxgigstruct.Jsonify,
-			"keysof":    voxgigstruct.KeysOf,
-			"merge":     voxgigstruct.Merge,
-			"pad":       voxgigstruct.Pad,
-			"pathify":   voxgigstruct.Pathify,
+			"joinurl": voxgigstruct.JoinUrl,
+			"jsonify": voxgigstruct.Jsonify,
+			"keysof":  voxgigstruct.KeysOf,
+			"merge":   voxgigstruct.Merge,
+			"pad":     voxgigstruct.Pad,
+			"pathify": voxgigstruct.Pathify,
 
-			"select":    voxgigstruct.Select,
-			"setpath":   voxgigstruct.SetPath,
-			"size":      voxgigstruct.Size,
-			"slice":     voxgigstruct.Slice,
-			"setprop":   voxgigstruct.SetProp,
+			"select":  voxgigstruct.Select,
+			"setpath": voxgigstruct.SetPath,
+			"size":    voxgigstruct.Size,
+			"slice":   voxgigstruct.Slice,
+			"setprop": voxgigstruct.SetProp,
 
 			"strkey":    voxgigstruct.StrKey,
 			"stringify": voxgigstruct.Stringify,
@@ -100,37 +96,30 @@ func TestStruct(t *testing.T) {
 		}
 	})
 
-  
 	t.Run("minor-isnode", func(t *testing.T) {
 		runset(t, minorSpec["isnode"], voxgigstruct.IsNode)
 	})
 
-
-  t.Run("minor-ismap", func(t *testing.T) {
+	t.Run("minor-ismap", func(t *testing.T) {
 		runset(t, minorSpec["ismap"], voxgigstruct.IsMap)
 	})
 
-  
 	t.Run("minor-islist", func(t *testing.T) {
 		runset(t, minorSpec["islist"], voxgigstruct.IsList)
 	})
 
-  
 	t.Run("minor-iskey", func(t *testing.T) {
 		runsetFlags(t, minorSpec["iskey"], map[string]bool{"null": false}, voxgigstruct.IsKey)
 	})
-
 
 	t.Run("minor-strkey", func(t *testing.T) {
 		runsetFlags(t, minorSpec["strkey"], map[string]bool{"null": false}, voxgigstruct.StrKey)
 	})
 
-  
 	t.Run("minor-isempty", func(t *testing.T) {
 		runsetFlags(t, minorSpec["isempty"], map[string]bool{"null": false}, voxgigstruct.IsEmpty)
 	})
 
-  
 	t.Run("minor-isfunc", func(t *testing.T) {
 		runset(t, minorSpec["isfunc"], voxgigstruct.IsFunc)
 
@@ -147,7 +136,6 @@ func TestStruct(t *testing.T) {
 		}
 	})
 
-  
 	t.Run("minor-clone", func(t *testing.T) {
 		runsetFlags(
 			t,
@@ -156,27 +144,24 @@ func TestStruct(t *testing.T) {
 			voxgigstruct.Clone,
 		)
 
-    f0 := func() any { return nil }
-		expected0 := map[string]any{"a":f0}
-		result0 := voxgigstruct.Clone(map[string]any{"a":f0})
+		f0 := func() any { return nil }
+		expected0 := map[string]any{"a": f0}
+		result0 := voxgigstruct.Clone(map[string]any{"a": f0})
 		if !reflect.DeepEqual(runner.Fdt(expected0), runner.Fdt(result0)) {
 			t.Errorf("Expected: %v, Got: %v", expected0, result0)
 		}
 	})
 
-  
 	t.Run("minor-escre", func(t *testing.T) {
 		runset(t, minorSpec["escre"], voxgigstruct.EscRe)
 	})
 
-  
 	t.Run("minor-escurl", func(t *testing.T) {
 		runset(t, minorSpec["escurl"], func(in string) string {
 			return strings.ReplaceAll(voxgigstruct.EscUrl(fmt.Sprint(in)), "+", "%20")
 		})
 	})
 
-  
 	t.Run("minor-stringify", func(t *testing.T) {
 		runset(t, minorSpec["stringify"], func(v any) any {
 			m := v.(map[string]any)
@@ -195,7 +180,6 @@ func TestStruct(t *testing.T) {
 		})
 	})
 
-  
 	t.Run("minor-pathify", func(t *testing.T) {
 		runsetFlags(
 			t,
@@ -231,12 +215,10 @@ func TestStruct(t *testing.T) {
 		)
 	})
 
-  
 	t.Run("minor-items", func(t *testing.T) {
 		runset(t, minorSpec["items"], voxgigstruct.Items)
 	})
 
-  
 	t.Run("minor-getprop", func(t *testing.T) {
 		runsetFlags(
 			t,
@@ -255,7 +237,6 @@ func TestStruct(t *testing.T) {
 		)
 	})
 
-  
 	t.Run("minor-edge-getprop", func(t *testing.T) {
 		strarr := []string{"a", "b", "c", "d", "e"}
 		expectedA := "c"
@@ -284,7 +265,6 @@ func TestStruct(t *testing.T) {
 		}
 	})
 
-  
 	t.Run("minor-setprop", func(t *testing.T) {
 		runsetFlags(
 			t,
@@ -300,7 +280,6 @@ func TestStruct(t *testing.T) {
 			})
 	})
 
-  
 	t.Run("minor-edge-setprop", func(t *testing.T) {
 		strarr0 := []string{"a", "b", "c", "d", "e"}
 		strarr1 := []string{"a", "b", "c", "d", "e"}
@@ -333,7 +312,6 @@ func TestStruct(t *testing.T) {
 		}
 	})
 
-  
 	t.Run("minor-haskey", func(t *testing.T) {
 		runsetFlags(t, minorSpec["haskey"], map[string]bool{"null": false}, func(v any) any {
 			m := v.(map[string]any)
@@ -343,12 +321,10 @@ func TestStruct(t *testing.T) {
 		})
 	})
 
-  
 	t.Run("minor-keysof", func(t *testing.T) {
 		runset(t, minorSpec["keysof"], voxgigstruct.KeysOf)
 	})
 
-  
 	t.Run("minor-filter", func(t *testing.T) {
 		checkmap := map[string]func([2]any) bool{
 			"gt3": func(n [2]any) bool {
@@ -372,7 +348,6 @@ func TestStruct(t *testing.T) {
 		})
 	})
 
-
 	t.Run("minor-flatten", func(t *testing.T) {
 		runset(t, minorSpec["flatten"], func(v any) any {
 			m := v.(map[string]any)
@@ -384,7 +359,6 @@ func TestStruct(t *testing.T) {
 			return voxgigstruct.Flatten(val, int(depth.(int)))
 		})
 	})
-
 
 	t.Run("minor-join", func(t *testing.T) {
 		runsetFlags(t, minorSpec["join"], map[string]bool{"null": false}, func(v any) any {
@@ -400,21 +374,17 @@ func TestStruct(t *testing.T) {
 		})
 	})
 
-
 	t.Run("minor-typename", func(t *testing.T) {
 		runset(t, minorSpec["typename"], voxgigstruct.Typename)
 	})
-
 
 	t.Run("minor-typify", func(t *testing.T) {
 		runsetFlags(t, minorSpec["typify"], map[string]bool{"null": false}, voxgigstruct.Typify)
 	})
 
-
 	t.Run("minor-size", func(t *testing.T) {
 		runsetFlags(t, minorSpec["size"], map[string]bool{"null": false}, voxgigstruct.Size)
 	})
-
 
 	t.Run("minor-slice", func(t *testing.T) {
 		runsetFlags(t, minorSpec["slice"], map[string]bool{"null": false}, func(v any) any {
@@ -426,7 +396,6 @@ func TestStruct(t *testing.T) {
 		})
 	})
 
-
 	t.Run("minor-pad", func(t *testing.T) {
 		runsetFlags(t, minorSpec["pad"], map[string]bool{"null": false}, func(v any) any {
 			m := v.(map[string]any)
@@ -436,7 +405,6 @@ func TestStruct(t *testing.T) {
 			return voxgigstruct.Pad(val, pad, char)
 		})
 	})
-
 
 	t.Run("minor-getelem", func(t *testing.T) {
 		runsetFlags(t, minorSpec["getelem"], map[string]bool{"null": false}, func(v any) any {
@@ -451,14 +419,12 @@ func TestStruct(t *testing.T) {
 		})
 	})
 
-
 	t.Run("minor-edge-getelem", func(t *testing.T) {
 		result := voxgigstruct.GetElem([]any{}, 1, func() int { return 2 })
 		if result != 2 {
 			t.Errorf("Expected: 2, Got: %v", result)
 		}
 	})
-
 
 	t.Run("minor-delprop", func(t *testing.T) {
 		runset(t, minorSpec["delprop"], func(v any) any {
@@ -468,7 +434,6 @@ func TestStruct(t *testing.T) {
 			return voxgigstruct.DelProp(parent, key)
 		})
 	})
-
 
 	t.Run("minor-edge-delprop", func(t *testing.T) {
 		strarr0 := []any{"a", "b", "c", "d", "e"}
@@ -498,7 +463,6 @@ func TestStruct(t *testing.T) {
 		}
 	})
 
-
 	t.Run("minor-setpath", func(t *testing.T) {
 		runsetFlags(t, minorSpec["setpath"], map[string]bool{"null": false}, func(v any) any {
 			m := v.(map[string]any)
@@ -508,7 +472,6 @@ func TestStruct(t *testing.T) {
 			return voxgigstruct.SetPath(store, path, val)
 		})
 	})
-
 
 	t.Run("minor-edge-setpath", func(t *testing.T) {
 		x := map[string]any{"y": map[string]any{"z": 1, "q": 2}}
@@ -523,7 +486,6 @@ func TestStruct(t *testing.T) {
 		}
 	})
 
-
 	t.Run("minor-jsonify", func(t *testing.T) {
 		runsetFlags(t, minorSpec["jsonify"], map[string]bool{"null": false}, func(v any) any {
 			m := v.(map[string]any)
@@ -535,14 +497,12 @@ func TestStruct(t *testing.T) {
 		})
 	})
 
-
 	t.Run("minor-edge-jsonify", func(t *testing.T) {
 		result := voxgigstruct.Jsonify(func() int { return 1 })
 		if result != "null" {
 			t.Errorf("Expected: null, Got: %v", result)
 		}
 	})
-
 
 	t.Run("minor-edge-stringify", func(t *testing.T) {
 		a := make(map[string]any)
@@ -552,7 +512,6 @@ func TestStruct(t *testing.T) {
 			t.Errorf("Expected: __STRINGIFY_FAILED__, Got: %v", result)
 		}
 	})
-
 
 	t.Run("minor-edge-clone", func(t *testing.T) {
 		// Functions are preserved (same reference, not deep-cloned).
@@ -590,7 +549,6 @@ func TestStruct(t *testing.T) {
 		}
 	})
 
-
 	t.Run("minor-edge-typify", func(t *testing.T) {
 		// nil → T_scalar | T_null
 		tNil := voxgigstruct.Typify(nil)
@@ -614,7 +572,6 @@ func TestStruct(t *testing.T) {
 		}
 	})
 
-
 	// walk tests
 	// ==========
 
@@ -625,7 +582,6 @@ func TestStruct(t *testing.T) {
 		}
 	})
 
-  
 	t.Run("walk-log", func(t *testing.T) {
 		test := voxgigstruct.Clone(walkSpec["log"]).(map[string]any)
 
@@ -685,7 +641,6 @@ func TestStruct(t *testing.T) {
 		}
 	})
 
-
 	t.Run("walk-basic", func(t *testing.T) {
 		walkpath := func(k *string, val any, parent any, path []string) any {
 			if str, ok := val.(string); ok {
@@ -701,7 +656,6 @@ func TestStruct(t *testing.T) {
 			return voxgigstruct.Walk(v, walkpath)
 		})
 	})
-
 
 	t.Run("walk-depth", func(t *testing.T) {
 		runsetFlags(t, walkSpec["depth"], map[string]bool{"null": false}, func(v any) any {
@@ -742,7 +696,6 @@ func TestStruct(t *testing.T) {
 			return top
 		})
 	})
-
 
 	t.Run("walk-copy", func(t *testing.T) {
 		runset(t, walkSpec["copy"], func(v any) any {
@@ -792,7 +745,6 @@ func TestStruct(t *testing.T) {
 		})
 	})
 
-  
 	// merge tests
 	// ===========
 
@@ -803,7 +755,6 @@ func TestStruct(t *testing.T) {
 		}
 	})
 
-  
 	t.Run("merge-basic", func(t *testing.T) {
 		test := mergeSpec["basic"].(map[string]any)
 		inVal := test["in"]
@@ -814,13 +765,11 @@ func TestStruct(t *testing.T) {
 		}
 	})
 
-  
 	t.Run("merge-cases", func(t *testing.T) {
 		runset(t, mergeSpec["cases"], func(v any) any {
 			return voxgigstruct.Merge(v)
 		})
 	})
-
 
 	t.Run("merge-array", func(t *testing.T) {
 		runset(t, mergeSpec["array"], func(v any) any {
@@ -834,44 +783,42 @@ func TestStruct(t *testing.T) {
 		})
 	})
 
-  
 	t.Run("merge-special", func(t *testing.T) {
 		f0 := func() int { return 11 }
-		
-		result0 := voxgigstruct.Merge([]any{f0})
-    var fr0 = result0.(func() int)
 
-    if f0() != fr0() {
+		result0 := voxgigstruct.Merge([]any{f0})
+		var fr0 = result0.(func() int)
+
+		if f0() != fr0() {
 			t.Errorf("Expected same function reference (A)")
 		}
-		
+
 		result1 := voxgigstruct.Merge([]any{nil, f0})
-    var fr1 = result1.(func() int)
+		var fr1 = result1.(func() int)
 		if f0() != fr1() {
 			t.Errorf("Expected same function reference (B)")
 		}
-		
+
 		result2 := voxgigstruct.Merge([]any{map[string]any{"a": f0}}).(map[string]any)
-    var fr2 = result2["a"].(func() int)
+		var fr2 = result2["a"].(func() int)
 		if f0() != fr2() {
 			t.Errorf("Expected object with function reference")
 		}
 
 		result3 := voxgigstruct.Merge([]any{[]any{f0}}).([]any)
-    var fr3 = result3[0].(func() int)
+		var fr3 = result3[0].(func() int)
 		if f0() != fr3() {
 			t.Errorf("Expected array with function reference")
 		}
-    
+
 		result4 := voxgigstruct.Merge([]any{map[string]any{"a": map[string]any{"b": f0}}})
-    var b = result4.(map[string]any)["a"].(map[string]any)
-    var fr4 = b["b"].(func() int)
+		var b = result4.(map[string]any)["a"].(map[string]any)
+		var fr4 = b["b"].(func() int)
 
 		if f0() != fr4() {
 			t.Errorf("Expected deep object with function reference")
 		}
 	})
-
 
 	t.Run("merge-depth", func(t *testing.T) {
 		runset(t, mergeSpec["depth"], func(v any) any {
@@ -885,7 +832,6 @@ func TestStruct(t *testing.T) {
 		})
 	})
 
-
 	// getpath tests
 	// =============
 
@@ -896,7 +842,6 @@ func TestStruct(t *testing.T) {
 		}
 	})
 
-  
 	t.Run("getpath-basic", func(t *testing.T) {
 		runset(t, getpathSpec["basic"], func(v any) any {
 			m := v.(map[string]any)
@@ -906,7 +851,6 @@ func TestStruct(t *testing.T) {
 			return voxgigstruct.GetPath(store, path)
 		})
 	})
-
 
 	t.Run("getpath-relative", func(t *testing.T) {
 		runset(t, getpathSpec["relative"], func(v any) any {
@@ -929,7 +873,6 @@ func TestStruct(t *testing.T) {
 			return voxgigstruct.GetPath(store, path, inj)
 		})
 	})
-
 
 	t.Run("getpath-special", func(t *testing.T) {
 		runset(t, getpathSpec["special"], func(v any) any {
@@ -956,7 +899,6 @@ func TestStruct(t *testing.T) {
 		})
 	})
 
-  
 	// inject tests
 	// ============
 
@@ -967,7 +909,6 @@ func TestStruct(t *testing.T) {
 		}
 	})
 
-  
 	t.Run("inject-basic", func(t *testing.T) {
 		subtest := injectSpec["basic"].(map[string]any)
 		inVal := subtest["in"].(map[string]any)
@@ -979,7 +920,6 @@ func TestStruct(t *testing.T) {
 		}
 	})
 
-
 	t.Run("inject-string", func(t *testing.T) {
 		runset(t, injectSpec["string"], func(v any) any {
 			m := v.(map[string]any)
@@ -990,7 +930,6 @@ func TestStruct(t *testing.T) {
 		})
 	})
 
-  
 	t.Run("inject-deep", func(t *testing.T) {
 		runset(t, injectSpec["deep"], func(v any) any {
 			m := v.(map[string]any)
@@ -1000,7 +939,6 @@ func TestStruct(t *testing.T) {
 		})
 	})
 
-  
 	// transform tests
 	// ===============
 
@@ -1011,7 +949,6 @@ func TestStruct(t *testing.T) {
 		}
 	})
 
-  
 	t.Run("transform-basic", func(t *testing.T) {
 		subtest := transformSpec["basic"].(map[string]any)
 		inVal := subtest["in"].(map[string]any)
@@ -1024,7 +961,6 @@ func TestStruct(t *testing.T) {
 		}
 	})
 
-  
 	t.Run("transform-paths", func(t *testing.T) {
 		runset(t, transformSpec["paths"], func(v any) any {
 			m := v.(map[string]any)
@@ -1034,7 +970,6 @@ func TestStruct(t *testing.T) {
 		})
 	})
 
-  
 	t.Run("transform-cmds", func(t *testing.T) {
 		runset(t, transformSpec["cmds"], func(v any) any {
 			m := v.(map[string]any)
@@ -1044,7 +979,6 @@ func TestStruct(t *testing.T) {
 		})
 	})
 
-  
 	t.Run("transform-each", func(t *testing.T) {
 		runset(t, transformSpec["each"], func(v any) any {
 			m := v.(map[string]any)
@@ -1054,7 +988,6 @@ func TestStruct(t *testing.T) {
 		})
 	})
 
-  
 	t.Run("transform-pack", func(t *testing.T) {
 		runset(t, transformSpec["pack"], func(v any) any {
 			m := v.(map[string]any)
@@ -1064,7 +997,6 @@ func TestStruct(t *testing.T) {
 		})
 	})
 
-  
 	// NOTE: transform-ref has some edge case failures in $REF handling
 	// (cyclic refs, nested self-refs). Kept as opt-in for now.
 	t.Run("transform-ref", func(t *testing.T) {
@@ -1076,7 +1008,6 @@ func TestStruct(t *testing.T) {
 		})
 	})
 
-
 	t.Run("transform-format", func(t *testing.T) {
 		runsetFlags(t, transformSpec["format"], map[string]bool{"null": false}, func(v any) any {
 			m := v.(map[string]any)
@@ -1085,7 +1016,6 @@ func TestStruct(t *testing.T) {
 			return voxgigstruct.Transform(data, spec)
 		})
 	})
-
 
 	t.Run("transform-apply", func(t *testing.T) {
 		runset(t, transformSpec["apply"], func(v any) (any, error) {
@@ -1109,7 +1039,6 @@ func TestStruct(t *testing.T) {
 			t.Errorf("Expected: 2, Got: %v", result)
 		}
 	})
-
 
 	t.Run("transform-modify", func(t *testing.T) {
 		runset(t, transformSpec["modify"], func(v any) any {
@@ -1135,7 +1064,6 @@ func TestStruct(t *testing.T) {
 		})
 	})
 
-  
 	t.Run("transform-extra", func(t *testing.T) {
 		data := map[string]any{"a": 1}
 		spec := map[string]any{
@@ -1178,43 +1106,41 @@ func TestStruct(t *testing.T) {
 		if !reflect.DeepEqual(result, output) {
 			t.Errorf("Expected: %s, \nGot: %s \nExpected JSON: %s \nGot JSON: %s",
 				runner.Fdt(output),
-        runner.Fdt(result),
-        runner.ToJSONString(output),
-        runner.ToJSONString(result),
-      )
+				runner.Fdt(result),
+				runner.ToJSONString(output),
+				runner.ToJSONString(result),
+			)
 		}
 	})
 
-
 	t.Run("transform-funcval", func(t *testing.T) {
-    f0 := func() int { return 22 }
-		
+		f0 := func() int { return 22 }
+
 		result1 := voxgigstruct.Transform(map[string]any{}, map[string]any{"x": 1})
 		expected1 := map[string]any{"x": 1}
 		if !reflect.DeepEqual(expected1, result1) {
 			t.Errorf("Expected simple value transform result")
 		}
-		
+
 		result2 := voxgigstruct.Transform(map[string]any{}, map[string]any{"x": f0})
-    var fr0 = result2.(map[string]any)["x"].(func() int) 
-    if f0() != fr0() {
-      t.Errorf("Expected x to be f0")
+		var fr0 = result2.(map[string]any)["x"].(func() int)
+		if f0() != fr0() {
+			t.Errorf("Expected x to be f0")
 		}
-		
-    result3 := voxgigstruct.Transform(map[string]any{"a": 1}, map[string]any{"x": "`a`"})
-    expected3 := map[string]any{"x": 1}
-    if !reflect.DeepEqual(expected3, result3) {
-	 		t.Errorf("Expected value lookup transform to work")
-    }
-		
-    result4 := voxgigstruct.Transform(map[string]any{"f0": f0}, map[string]any{"x": "`f0`"})
-    var fr4 = result4.(map[string]any)["x"].(func() int)
-    if 22 != fr4() {
-	 		t.Errorf("Expected function to be preserved")
-    }
+
+		result3 := voxgigstruct.Transform(map[string]any{"a": 1}, map[string]any{"x": "`a`"})
+		expected3 := map[string]any{"x": 1}
+		if !reflect.DeepEqual(expected3, result3) {
+			t.Errorf("Expected value lookup transform to work")
+		}
+
+		result4 := voxgigstruct.Transform(map[string]any{"f0": f0}, map[string]any{"x": "`f0`"})
+		var fr4 = result4.(map[string]any)["x"].(func() int)
+		if 22 != fr4() {
+			t.Errorf("Expected function to be preserved")
+		}
 	})
 
-  
 	// validate tests
 	// ===============
 
@@ -1225,7 +1151,6 @@ func TestStruct(t *testing.T) {
 		}
 	})
 
-  
 	t.Run("validate-basic", func(t *testing.T) {
 		runsetFlags(t, validateSpec["basic"], map[string]bool{"null": false}, func(v any) (any, error) {
 			m := v.(map[string]any)
@@ -1235,7 +1160,6 @@ func TestStruct(t *testing.T) {
 		})
 	})
 
-  
 	t.Run("validate-child", func(t *testing.T) {
 		runset(t, validateSpec["child"], func(v any) (any, error) {
 			m := v.(map[string]any)
@@ -1248,7 +1172,6 @@ func TestStruct(t *testing.T) {
 		})
 	})
 
-
 	t.Run("validate-one", func(t *testing.T) {
 		runset(t, validateSpec["one"], func(v any) (any, error) {
 			m := v.(map[string]any)
@@ -1257,7 +1180,6 @@ func TestStruct(t *testing.T) {
 			return voxgigstruct.Validate(data, spec)
 		})
 	})
-
 
 	t.Run("validate-exact", func(t *testing.T) {
 		runset(t, validateSpec["exact"], func(v any) (any, error) {
@@ -1268,7 +1190,6 @@ func TestStruct(t *testing.T) {
 		})
 	})
 
-
 	t.Run("validate-invalid", func(t *testing.T) {
 		runsetFlags(t, validateSpec["invalid"], map[string]bool{"null": false}, func(v any) (any, error) {
 			m := v.(map[string]any)
@@ -1276,7 +1197,6 @@ func TestStruct(t *testing.T) {
 		})
 	})
 
-  
 	t.Run("validate-special", func(t *testing.T) {
 		runset(t, validateSpec["special"], func(v any) (any, error) {
 			m := v.(map[string]any)
@@ -1299,7 +1219,6 @@ func TestStruct(t *testing.T) {
 		})
 	})
 
-
 	t.Run("validate-custom", func(t *testing.T) {
 		errs := voxgigstruct.ListRefCreate[any]() // make([]any,0)
 
@@ -1310,8 +1229,8 @@ func TestStruct(t *testing.T) {
 			store any,
 		) any {
 			out := voxgigstruct.GetProp(inj.Dparent, inj.Key)
-      
-      switch x := out.(type) {
+
+			switch x := out.(type) {
 			case int:
 				return x
 			default:
@@ -1356,7 +1275,7 @@ func TestStruct(t *testing.T) {
 		if nil != err {
 			t.Error(err)
 		}
-    
+
 		expected1 := map[string]any{"a": "A"}
 		if !reflect.DeepEqual(out, expected1) {
 			t.Errorf("Expected: %v, Got: %v", expected1, out)
@@ -1368,7 +1287,6 @@ func TestStruct(t *testing.T) {
 		}
 
 	})
-
 
 	t.Run("validate-edge", func(t *testing.T) {
 		// $INSTANCE validator should fail for integer, map, and list values.
@@ -1402,7 +1320,6 @@ func TestStruct(t *testing.T) {
 		}
 	})
 
-
 	// select tests
 	// ============
 
@@ -1415,7 +1332,6 @@ func TestStruct(t *testing.T) {
 		})
 	})
 
-
 	t.Run("select-operators", func(t *testing.T) {
 		runset(t, selectSpec["operators"], func(v any) any {
 			m := v.(map[string]any)
@@ -1424,7 +1340,6 @@ func TestStruct(t *testing.T) {
 			return voxgigstruct.Select(obj, query)
 		})
 	})
-
 
 	t.Run("select-edge", func(t *testing.T) {
 		runset(t, selectSpec["edge"], func(v any) any {
@@ -1435,7 +1350,6 @@ func TestStruct(t *testing.T) {
 		})
 	})
 
-
 	t.Run("select-alts", func(t *testing.T) {
 		runset(t, selectSpec["alts"], func(v any) any {
 			m := v.(map[string]any)
@@ -1444,7 +1358,6 @@ func TestStruct(t *testing.T) {
 			return voxgigstruct.Select(obj, query)
 		})
 	})
-
 
 	// JSON Builder
 	// ============
@@ -1472,7 +1385,6 @@ func TestStruct(t *testing.T) {
 			t.Errorf("Expected:\n%v\nGot:\n%v", expected2, result2)
 		}
 	})
-
 
 	// getpath-handler test
 	// ====================
@@ -1506,7 +1418,6 @@ func TestStruct(t *testing.T) {
 		})
 	})
 }
-
 
 func IsSameFunc(target any, candidate any) bool {
 	if reflect.TypeOf(target).Kind() != reflect.Func || reflect.TypeOf(candidate).Kind() != reflect.Func {

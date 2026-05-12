@@ -58,7 +58,7 @@ const extra = {
         }
     },
 };
-let meta = { capture: {} };
+const meta = { capture: {} };
 out = (0, __1.transform)({ a: { b: 1, c: 2 } }, { a: { b: { '`$CAPTURE`': 'x' }, c: { '`$CAPTURE`': 'x' } } }, { extra, errs, meta });
 console.dir(out, { depth: null });
 console.dir(errs, { depth: null });

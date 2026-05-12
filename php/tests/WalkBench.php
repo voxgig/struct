@@ -83,6 +83,6 @@ function benchOne(string $label, int $width, int $depth, int $iters): void
 // nodes to make ns/node meaningful. Sizes are intentionally modest so the
 // baseline (pre-optimization) fits in 512M memory while still producing
 // enough total visits for ns/node to stabilize.
-benchOne('wide+deep',   8,    6,  3);     // ~299k nodes
-benchOne('very-wide',   1000, 2,  5);     // ~1.001m nodes
-benchOne('very-deep',   2,    14, 30);    // ~32k nodes per tree, d=14
+benchOne('wide+deep', 8, 6, 3);     // ~299k nodes
+benchOne('very-wide', 1000, 2, 5);     // ~1.001m nodes
+benchOne('very-deep', 2, 14, 30);    // ~32k nodes per tree, d=14

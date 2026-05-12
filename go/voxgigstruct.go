@@ -135,8 +135,8 @@ const (
 	T_map      = 1 << 13
 	T_instance = 1 << 12
 	// 4 bits reserved
-	T_scalar   = 1 << 7
-	T_node     = 1 << 6
+	T_scalar = 1 << 7
+	T_node   = 1 << 6
 )
 
 // TYPENAME maps bit position (via leading zeros count) to type name string.
@@ -862,12 +862,10 @@ func KeysOf(val any) []string {
 	return make([]string, 0)
 }
 
-
 // Value of property with name key in node val is defined.
 func HasKey(val any, key any) bool {
 	return nil != GetProp(val, key)
 }
-
 
 // List the sorted keys of a map or list as an array of tuples of the form [key, value].
 func Items(val any) [][2]any {
@@ -875,7 +873,7 @@ func Items(val any) [][2]any {
 		m := val.(map[string]any)
 		out := make([][2]any, 0, len(m))
 
-    keys := KeysOf(val)
+		keys := KeysOf(val)
 		// keys := make([]string, 0, len(m))
 		// for k := range m {
 		// 	keys = append(keys, k)
@@ -959,7 +957,6 @@ func Filter(val any, check func([2]any) bool) []any {
 	return out
 }
 
-
 // Escape regular expression.
 func EscRe(s string) string {
 	if s == "" {
@@ -1015,7 +1012,6 @@ func JoinUrl(parts []any) string {
 
 	return strings.Join(finalParts, "/")
 }
-
 
 // Concatenate string array elements, merging separator chars as needed.
 // Optional args: sep (string, default ","), url (bool, default false).
@@ -1091,7 +1087,6 @@ func Join(arr []any, args ...any) string {
 
 	return strings.Join(parts, sep)
 }
-
 
 // Output JSON in a "standard" format, with 2 space indents, each property on a new line,
 // and spaces after {[: and before ]}. Any "weird" values (NaN, etc) are output as null.
@@ -1596,7 +1591,6 @@ func Walk(
 	return _walkDescend(val, apply, nil, maxdepth, nil, nil, nil, pool)
 }
 
-
 // WalkDescend performs a post-order walk from an arbitrary start point
 // (with explicit key, parent, and path). Unlike Walk it does not share a
 // pool across recursive calls: it allocates per-call path arrays. Intended
@@ -1610,7 +1604,6 @@ func WalkDescend(
 ) any {
 	return _walkDescendAlloc(val, nil, apply, 32, key, parent, path)
 }
-
 
 // _walkDescend is the pool-threaded core used by Walk. The `path` slice it
 // hands to callbacks is reused across sibling visits: each recursive call
@@ -1684,7 +1677,6 @@ func _walkDescend(
 
 	return out
 }
-
 
 // _walkDescendAlloc is the legacy per-call-allocating descent used by
 // WalkDescend, preserved for callers that enter the recursion at an
@@ -2485,7 +2477,7 @@ var Transform_MERGE Injector = func(
 		}
 
 		// Remove the $MERGE command from a parent map.
-    DelProp(inj.Parent, inj.Key)
+		DelProp(inj.Parent, inj.Key)
 
 		list, ok := _asList(args)
 		if !ok {
@@ -2506,7 +2498,6 @@ var Transform_MERGE Injector = func(
 	// Ensures $MERGE is removed from parent list.
 	return nil
 }
-
 
 // Convert a node to a list.
 // Format: ['`$EACH`', '`source-path-of-node`', child-template]
@@ -2652,7 +2643,6 @@ var Transform_EACH Injector = func(
 	}
 	return nil
 }
-
 
 // transform_PACK => `$PACK`
 var Transform_PACK Injector = func(
@@ -3026,7 +3016,6 @@ var Transform_APPLY Injector = func(
 	return out
 }
 
-
 // transform_FORMAT => `$FORMAT`
 // injectChild resolves a child value via injection, going up the injection chain
 // to get the correct data context.
@@ -3222,7 +3211,6 @@ var Transform_FORMAT Injector = func(
 	return out
 }
 
-
 // ---------------------------------------------------------------------
 // Transform function: top-level
 
@@ -3296,10 +3284,10 @@ func TransformModifyHandler(
 	_ = origspec
 
 	store := map[string]any{
-		S_DTOP: dataClone,
+		S_DTOP:  dataClone,
 		S_DSPEC: func() any { return origspec },
-		"$BT": func() any { return S_BT },
-		"$DS": func() any { return S_DS },
+		"$BT":   func() any { return S_BT },
+		"$DS":   func() any { return S_DS },
 		"$WHEN": func() any {
 			return time.Now().UTC().Format(time.RFC3339)
 		},
@@ -3537,7 +3525,7 @@ var validate_OBJECT Injector = func(
 		msg := _invalidTypeMsg(inj.Path.List, S_object, Typename(t), out)
 		inj.Errs.Append(msg)
 
-    return nil
+		return nil
 	}
 
 	return out
@@ -3771,7 +3759,7 @@ func init_validate_ONE() {
 
 			// Clean up structure by replacing [$ONE, ...] with current value
 			SetProp(grandparent, grandkey, inj.Dparent)
-      inj.Parent = inj.Dparent
+			inj.Parent = inj.Dparent
 
 			// Adjust the path
 			inj.Path.List = inj.Path.List[:len(inj.Path.List)-1]
@@ -3877,7 +3865,7 @@ func init_validate_EXACT() {
 
 			// Clean up structure by replacing [$EXACT, ...] with current value
 			SetProp(grandparent, grandkey, inj.Dparent)
-      inj.Parent = inj.Dparent
+			inj.Parent = inj.Dparent
 
 			// Adjust the path
 			inj.Path.List = inj.Path.List[:len(inj.Path.List)-1]
@@ -3897,21 +3885,21 @@ func init_validate_EXACT() {
 			// See if we can find an exact value match
 			var currentStr *string
 			for _, tval := range tvals {
-        exactMatch := false
+				exactMatch := false
 
-        if !exactMatch {
-          // Unwrap ListRefs for comparison since data and spec may have
-          // different wrapping levels.
-          unwrapFlags := map[string]bool{"unwrap": true}
-          utval := CloneFlags(tval, unwrapFlags)
-          ucurrent := CloneFlags(inj.Dparent, unwrapFlags)
-          exactMatch = reflect.DeepEqual(utval, ucurrent)
-        }
-        
+				if !exactMatch {
+					// Unwrap ListRefs for comparison since data and spec may have
+					// different wrapping levels.
+					unwrapFlags := map[string]bool{"unwrap": true}
+					utval := CloneFlags(tval, unwrapFlags)
+					ucurrent := CloneFlags(inj.Dparent, unwrapFlags)
+					exactMatch = reflect.DeepEqual(utval, ucurrent)
+				}
+
 				if !exactMatch && IsNode(tval) {
 					if nil == currentStr {
 						tmpstr := Stringify(inj.Dparent)
-            currentStr = &tmpstr
+						currentStr = &tmpstr
 					}
 					tvalStr := Stringify(tval)
 					exactMatch = tvalStr == *currentStr
@@ -3991,7 +3979,7 @@ func makeValidation(exact bool) Modify {
 		ptype := Typify(pval)
 
 		// Delete any special commands remaining.
-		if 0 < (T_string & ptype) && pval != nil {
+		if 0 < (T_string&ptype) && pval != nil {
 			if strVal, ok := pval.(string); ok && strings.Contains(strVal, S_DS) {
 				return
 			}
@@ -4135,7 +4123,6 @@ func Validate(
 		errs = ListRefCreate[any]()
 	}
 
-  
 	// Initialize validate_ONE if not already initialized.
 	// This avoids a circular reference error, validate_ONE calls Validate.
 	if validate_ONE == nil {
@@ -4151,7 +4138,7 @@ func Validate(
 	store := map[string]any{
 		// Remove the transform commands
 		"$DELETE": nil,
-		"$COPY":   nil, 
+		"$COPY":   nil,
 		"$KEY":    nil,
 		"$META":   nil,
 		"$MERGE":  nil,
@@ -4215,7 +4202,7 @@ func Validate(
 	// Run the transformation with validation and _validatehandler
 	out := TransformModifyHandler(data, spec, store, validationFn, _validatehandler, errs, meta)
 
-	// Generate an error if we collected any errors and the caller didn't provide 
+	// Generate an error if we collected any errors and the caller didn't provide
 	// their own error collection
 	var err error
 	generr := 0 < len(errs.List) && collecterrs == nil
@@ -4234,7 +4221,6 @@ func Validate(
 
 	return out, err
 }
-
 
 // Mode names for injection modes.
 var MODENAME = map[int]string{
@@ -4295,7 +4281,6 @@ func InjectorArgs(argTypes []int, args []any) []any {
 	}
 	return found
 }
-
 
 // Select helpers - internal injectors for query matching.
 
@@ -4468,7 +4453,6 @@ var select_CMP Injector = func(
 	return nil
 }
 
-
 // Internal exact-mode validation for Select.
 // Like Validate but uses exact scalar comparison.
 func validateCollectExact(
@@ -4531,7 +4515,6 @@ func validateCollectExact(
 	meta := map[string]any{S_BEXACT: true}
 	TransformModifyHandler(data, spec, store, makeValidation(true), _validatehandler, errs, meta)
 }
-
 
 // Select children from a node that match a query.
 // Uses validate internally with query operators ($AND, $OR, $NOT,
@@ -4604,7 +4587,6 @@ func Select(children any, query any) []any {
 	return results
 }
 
-
 // Internal utilities
 // ==================
 
@@ -4618,11 +4600,9 @@ func ListRefCreate[T any]() *ListRef[T] {
 	}
 }
 
-
 func (l *ListRef[T]) Append(elem T) {
 	l.List = append(l.List, elem)
 }
-
 
 func (l *ListRef[T]) Prepend(elem T) {
 	l.List = append([]T{elem}, l.List...)
@@ -4635,7 +4615,6 @@ func _join(vals []any, sep string) string {
 	}
 	return strings.Join(strVals, sep)
 }
-
 
 func _invalidTypeMsg(path []string, needtype string, vt string, v any, whence ...string) string {
 	vs := "no value"
@@ -4670,7 +4649,6 @@ func _getType(v any) string {
 	}
 	return reflect.TypeOf(v).String()
 }
-
 
 // StrKey converts different types of keys to string representation.
 // String keys are returned as is.
@@ -4709,7 +4687,6 @@ func StrKey(key any) string {
 	}
 }
 
-
 func _resolveStrings(input []any) []string {
 	var result []string
 
@@ -4723,7 +4700,6 @@ func _resolveStrings(input []any) []string {
 
 	return result
 }
-
 
 // Extract a bare []any from either a []any or a *ListRef[any].
 // Recursively unwrap *ListRef[any] to []any for JSON marshaling.
@@ -4769,7 +4745,6 @@ func _asList(val any) ([]any, bool) {
 	return nil, false
 }
 
-
 func _listify(src any) []any {
 	if lr, ok := src.(*ListRef[any]); ok {
 		return lr.List
@@ -4796,7 +4771,6 @@ func _listify(src any) []any {
 
 	return nil
 }
-
 
 // toFloat64 helps unify numeric types for floor conversion.
 func _toFloat64(val any) (float64, error) {
@@ -4831,7 +4805,6 @@ func _toFloat64(val any) (float64, error) {
 	}
 }
 
-
 // _parseInt is a helper to convert a string to int safely.
 func _parseInt(s string) (int, error) {
 	// We'll do a very simple parse:
@@ -4850,14 +4823,11 @@ func _parseInt(s string) (int, error) {
 	return x * sign, nil
 }
 
-
 type ParseIntError struct{ input string }
-
 
 func (e *ParseIntError) Error() string {
 	return "cannot parse int from: " + e.input
 }
-
 
 func _makeArrayType(values []any, target any) any {
 	targetElem := reflect.TypeOf(target).Elem()
@@ -4875,7 +4845,6 @@ func _makeArrayType(values []any, target any) any {
 	return out.Interface()
 }
 
-
 func _stringifyValue(v any) string {
 	switch vv := v.(type) {
 	case string:
@@ -4886,9 +4855,6 @@ func _stringifyValue(v any) string {
 		return Stringify(v)
 	}
 }
-
-
-
 
 // DEBUG
 

@@ -20,13 +20,12 @@ function SDK:new(opts)
     end,
     check = function(ctx)
       return {
-        zed = "ZED" ..
-            (_opts == nil and "" or
-              (_opts.foo == nil and "" or _opts.foo)) ..
-            "_" ..
-            (ctx.meta and ctx.meta.bar or "0")
+        zed = "ZED"
+          .. (_opts == nil and "" or (_opts.foo == nil and "" or _opts.foo))
+          .. "_"
+          .. (ctx.meta and ctx.meta.bar or "0"),
       }
-    end
+    end,
   }
 
   function instance:tester(opts)
@@ -46,5 +45,5 @@ function SDK:test(opts)
 end
 
 return {
-  SDK = SDK
+  SDK = SDK,
 }

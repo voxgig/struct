@@ -20,6 +20,8 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
+# __init__.py re-exports the public API; the imports are intentional.
+"voxgig_struct/__init__.py" = ["F401"]
 "tests/**" = ["B011"]
 
 [tool.ruff.format]

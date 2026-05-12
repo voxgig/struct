@@ -3,6 +3,7 @@
 namespace Voxgig\Struct;
 
 use PHPUnit\Framework\TestCase;
+
 require_once __DIR__ . '/SDK.php';
 require_once __DIR__ . '/Runner.php';
 
@@ -24,4 +25,4 @@ class ClientTest extends TestCase
         // If we get here without exceptions, the test passed
         $this->assertTrue(true);
     }
-} 
+}

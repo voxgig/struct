@@ -10,12 +10,13 @@ const NULLMARK = '__NULL__' // Value is JSON null
 const UNDEFMARK = '__UNDEF__' // Value is not present (thus, undefined).
 const EXISTSMARK = '__EXISTS__' // Value exists (not undefined).
 
-
 type Subject = (...args: any[]) => any
 type RunSet = (testspec: any, testsubject: Function) => Promise<any>
-type RunSetFlags = (testspec: any, flags: Record<string, boolean>, testsubject: Function)
-  => Promise<any>
-
+type RunSetFlags = (
+  testspec: any,
+  flags: Record<string, boolean>,
+  testsubject: Function,
+) => Promise<any>
 
 type RunPack = {
   spec: Record<string, any>
@@ -24,7 +25,6 @@ type RunPack = {
   subject: Subject
   client: any
 }
-
 
 type TestPack = {
   name?: string
@@ -35,38 +35,27 @@ type TestPack = {
 
 type Flags = Record<string, boolean>
 
-
 type Utility = {
   struct: any
   makeContext: (ctxmap: Record<string, any>, basectx?: any) => any
 }
 
-
 type Client = {
   utility: () => Utility
 }
 
-
 async function makeRunner(testfile: string, client: Client) {
-
-  return async function runner(
-    name: string,
-    store?: any,
-  ): Promise<RunPack> {
+  return async function runner(name: string, store?: any): Promise<RunPack> {
     store = store || {}
 
     const utility = client.utility()
     const structUtils = utility.struct
 
-    let spec = resolveSpec(name, testfile)
-    let clients = await resolveClients(client, spec, store, structUtils)
+    const spec = resolveSpec(name, testfile)
+    const clients = await resolveClients(client, spec, store, structUtils)
     let subject = resolveSubject(name, utility)
 
-    let runsetflags: RunSetFlags = async (
-      testspec: any,
-      flags: Flags,
-      testsubject: Function
-    ) => {
+    const runsetflags: RunSetFlags = async (testspec: any, flags: Flags, testsubject: Function) => {
       subject = testsubject || subject
       flags = resolveFlags(flags)
       const testspecmap = fixJSON(testspec, flags)
@@ -76,16 +65,15 @@ async function makeRunner(testfile: string, client: Client) {
         try {
           entry = resolveEntry(entry, flags)
 
-          let testpack = resolveTestPack(name, entry, subject, client, clients)
-          let args = resolveArgs(entry, testpack, utility, structUtils)
+          const testpack = resolveTestPack(name, entry, subject, client, clients)
+          const args = resolveArgs(entry, testpack, utility, structUtils)
 
           let res = await testpack.subject(...args)
           res = fixJSON(res, flags)
           entry.res = res
 
           checkResult(entry, args, res, structUtils)
-        }
-        catch (err: any) {
+        } catch (err: any) {
           if (err instanceof AssertionError) {
             throw err
           }
@@ -94,10 +82,8 @@ async function makeRunner(testfile: string, client: Client) {
       }
     }
 
-    let runset: RunSet = async (
-      testspec: any,
-      testsubject: Function
-    ) => runsetflags(testspec, {}, testsubject)
+    const runset: RunSet = async (testspec: any, testsubject: Function) =>
+      runsetflags(testspec, {}, testsubject)
 
     const runpack: RunPack = {
       spec,
@@ -112,25 +98,21 @@ async function makeRunner(testfile: string, client: Client) {
 }
 
 function resolveSpec(name: string, testfile: string): Record<string, any> {
-  const alltests =
-    JSON.parse(readFileSync(join(__dirname, testfile), 'utf8'))
+  const alltests = JSON.parse(readFileSync(join(__dirname, testfile), 'utf8'))
 
-  let spec = alltests.primary?.[name] || alltests[name] || alltests
+  const spec = alltests.primary?.[name] || alltests[name] || alltests
   return spec
 }
-
 
 async function resolveClients(
   client: any,
   spec: Record<string, any>,
   store: any,
-  structUtils: Record<string, any>
-):
-  Promise<Record<string, any>> {
-
+  structUtils: Record<string, any>,
+): Promise<Record<string, any>> {
   const clients: Record<string, any> = {}
   if (spec.DEF && spec.DEF.client) {
-    for (let cn in spec.DEF.client) {
+    for (const cn in spec.DEF.client) {
       const cdef = spec.DEF.client[cn]
       const copts = cdef.test.options || {}
       if ('object' === typeof store && structUtils?.inject) {
@@ -143,12 +125,10 @@ async function resolveClients(
   return clients
 }
 
-
 function resolveSubject(name: string, container: any) {
   const subject = container[name] || container.struct[name]
   return subject
 }
-
 
 function resolveFlags(flags?: Flags): Flags {
   if (null == flags) {
@@ -158,28 +138,23 @@ function resolveFlags(flags?: Flags): Flags {
   return flags
 }
 
-
 function resolveEntry(entry: any, flags: Flags): any {
   entry.out = null == entry.out && flags.null ? NULLMARK : entry.out
   return entry
 }
 
-
 function checkResult(entry: any, args: any[], res: any, structUtils: Record<string, any>) {
   let matched = false
 
   if (entry.err) {
-    return fail('Expected error did not occur: ' + entry.err +
-      '\n\nENTRY: ' + JSON.stringify(entry, null, 2))
+    return fail(
+      'Expected error did not occur: ' + entry.err + '\n\nENTRY: ' + JSON.stringify(entry, null, 2),
+    )
   }
 
   if (entry.match) {
     const result = { in: entry.in, args, out: entry.res, ctx: entry.ctx }
-    match(
-      entry.match,
-      result,
-      structUtils
-    )
+    match(entry.match, result, structUtils)
 
     matched = true
   }
@@ -198,7 +173,6 @@ function checkResult(entry: any, args: any[], res: any, structUtils: Record<stri
   deepStrictEqual(null != res ? JSON.parse(JSON.stringify(res)) : res, entry.out)
 }
 
-
 // Handle errors from test execution
 function handleError(entry: any, err: any, structUtils: Record<string, any>) {
   entry.thrown = err
@@ -211,41 +185,36 @@ function handleError(entry: any, err: any, structUtils: Record<string, any>) {
         match(
           entry.match,
           { in: entry.in, out: entry.res, ctx: entry.ctx, err: fixJSON(err, { null: true }) },
-          structUtils
+          structUtils,
         )
       }
       return
     }
 
-    fail('ERROR MATCH: [' + structUtils.stringify(entry_err) +
-      '] <=> [' + err.message + ']')
+    fail('ERROR MATCH: [' + structUtils.stringify(entry_err) + '] <=> [' + err.message + ']')
   }
 
   // Unexpected error (test didn't specify an error expectation)
   else if (err instanceof AssertionError) {
     fail(err.message + '\n\nENTRY: ' + JSON.stringify(entry, null, 2))
-  }
-  else {
+  } else {
     fail(err.stack + '\\nnENTRY: ' + JSON.stringify(entry, null, 2))
   }
 }
-
 
 function resolveArgs(
   entry: any,
   testpack: TestPack,
   utility: Utility,
-  structUtils: Record<string, any>
+  structUtils: Record<string, any>,
 ): any[] {
   let args: any[] = []
 
   if (entry.ctx) {
     args = [entry.ctx]
-  }
-  else if (entry.args) {
+  } else if (entry.args) {
     args = entry.args
-  }
-  else {
+  } else {
     args = [structUtils.clone(entry.in)]
   }
 
@@ -265,13 +234,12 @@ function resolveArgs(
   return args
 }
 
-
 function resolveTestPack(
   name: string,
   entry: any,
   subject: Subject,
   client: any,
-  clients: Record<string, any>
+  clients: Record<string, any>,
 ) {
   const testpack: TestPack = {
     name,
@@ -289,17 +257,12 @@ function resolveTestPack(
   return testpack
 }
 
-
-function match(
-  check: any,
-  basex: any,
-  structUtils: Record<string, any>
-) {
+function match(check: any, basex: any, structUtils: Record<string, any>) {
   const cbase = structUtils.clone(basex)
 
   structUtils.walk(check, (_key: any, val: any, _parent: any, path: any) => {
     if (!structUtils.isnode(val)) {
-      let baseval = structUtils.getpath(cbase, path)
+      const baseval = structUtils.getpath(cbase, path)
 
       if (baseval === val) {
         return val
@@ -316,9 +279,15 @@ function match(
       }
 
       if (!matchval(val, baseval, structUtils)) {
-        fail('MATCH: ' + path.join('.') +
-          ': [' + structUtils.stringify(val) +
-          '] <=> [' + structUtils.stringify(baseval) + ']')
+        fail(
+          'MATCH: ' +
+            path.join('.') +
+            ': [' +
+            structUtils.stringify(val) +
+            '] <=> [' +
+            structUtils.stringify(baseval) +
+            ']',
+        )
       }
     }
 
@@ -326,35 +295,26 @@ function match(
   })
 }
 
-
-function matchval(
-  check: any,
-  base: any,
-  structUtils: Record<string, any>
-) {
+function matchval(check: any, base: any, structUtils: Record<string, any>) {
   let pass = check === base
 
   if (!pass) {
-
     if ('string' === typeof check) {
-      let basestr = structUtils.stringify(base)
+      const basestr = structUtils.stringify(base)
 
-      let rem = check.match(/^\/(.+)\/$/)
+      const rem = check.match(/^\/(.+)\/$/)
       if (rem) {
         pass = new RegExp(rem[1]).test(basestr)
-      }
-      else {
+      } else {
         pass = basestr.toLowerCase().includes(structUtils.stringify(check).toLowerCase())
       }
-    }
-    else if ('function' === typeof check) {
+    } else if ('function' === typeof check) {
       pass = true
     }
   }
 
   return pass
 }
-
 
 function fixJSON(val: any, flags?: Flags): any {
   if (null == val) {
@@ -380,25 +340,12 @@ function fixJSON(val: any, flags?: Flags): any {
   return JSON.parse(JSON.stringify(val, replacer))
 }
 
-
-function nullModifier(
-  val: any,
-  key: any,
-  parent: any
-) {
-  if ("__NULL__" === val) {
+function nullModifier(val: any, key: any, parent: any) {
+  if ('__NULL__' === val) {
     parent[key] = null
-  }
-  else if ('string' === typeof val) {
+  } else if ('string' === typeof val) {
     parent[key] = val.replaceAll('__NULL__', 'null')
   }
 }
 
-
-export {
-  NULLMARK,
-  EXISTSMARK,
-  nullModifier,
-  makeRunner,
-}
-
+export { NULLMARK, EXISTSMARK, nullModifier, makeRunner }

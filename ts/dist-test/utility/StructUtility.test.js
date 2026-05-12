@@ -89,7 +89,9 @@ const { equal, deepEqual } = node_assert_1.default;
     (0, node_test_1.test)('minor-isfunc', async () => {
         const { isfunc } = struct;
         await runset(spec.minor.isfunc, isfunc);
-        function f0() { return null; }
+        function f0() {
+            return null;
+        }
         equal(isfunc(f0), true);
         equal(isfunc(() => null), true);
     });
@@ -101,7 +103,7 @@ const { equal, deepEqual } = node_assert_1.default;
         const f0 = () => null;
         deepEqual({ a: f0 }, clone({ a: f0 }));
         const x = { y: 1 };
-        let xc = clone(x);
+        const xc = clone(x);
         deepEqual(x, xc);
         (0, node_assert_1.default)(x !== xc);
         class A {
@@ -110,7 +112,7 @@ const { equal, deepEqual } = node_assert_1.default;
             }
         }
         const a = new A();
-        let ac = clone(a);
+        const ac = clone(a);
         deepEqual(a, ac);
         (0, node_assert_1.default)(a === ac);
         equal(a.constructor.name, ac.constructor.name);
@@ -132,7 +134,7 @@ const { equal, deepEqual } = node_assert_1.default;
         await runset(spec.minor.escurl, struct.escurl);
     });
     (0, node_test_1.test)('minor-stringify', async () => {
-        await runset(spec.minor.stringify, (vin) => struct.stringify((runner_1.NULLMARK === vin.val ? "null" : vin.val), vin.max));
+        await runset(spec.minor.stringify, (vin) => struct.stringify(runner_1.NULLMARK === vin.val ? 'null' : vin.val, vin.max));
     });
     (0, node_test_1.test)('minor-edge-stringify', async () => {
         const { stringify } = struct;
@@ -151,7 +153,7 @@ const { equal, deepEqual } = node_assert_1.default;
     });
     (0, node_test_1.test)('minor-pathify', async () => {
         await runsetflags(spec.minor.pathify, { null: true }, (vin) => {
-            let path = runner_1.NULLMARK == vin.path ? undefined : vin.path;
+            const path = runner_1.NULLMARK == vin.path ? undefined : vin.path;
             let pathstr = struct.pathify(path, vin.from).replace('__NULL__.', '');
             pathstr = runner_1.NULLMARK === vin.path ? pathstr.replace('>', ':null>') : pathstr;
             return pathstr;
@@ -164,7 +166,11 @@ const { equal, deepEqual } = node_assert_1.default;
         const { items } = struct;
         const a0 = [11, 22, 33];
         a0.x = 1;
-        deepEqual(items(a0), [['0', 11], ['1', 22], ['2', 33]]);
+        deepEqual(items(a0), [
+            ['0', 11],
+            ['1', 22],
+            ['2', 33],
+        ]);
     });
     (0, node_test_1.test)('minor-getelem', async () => {
         const { getelem } = struct;
@@ -180,10 +186,10 @@ const { equal, deepEqual } = node_assert_1.default;
     });
     (0, node_test_1.test)('minor-edge-getprop', async () => {
         const { getprop } = struct;
-        let strarr = ['a', 'b', 'c', 'd', 'e'];
+        const strarr = ['a', 'b', 'c', 'd', 'e'];
         deepEqual(getprop(strarr, 2), 'c');
         deepEqual(getprop(strarr, '2'), 'c');
-        let intarr = [2, 3, 5, 7, 11];
+        const intarr = [2, 3, 5, 7, 11];
         deepEqual(getprop(intarr, 2), 5);
         deepEqual(getprop(intarr, '2'), 5);
     });
@@ -192,12 +198,12 @@ const { equal, deepEqual } = node_assert_1.default;
     });
     (0, node_test_1.test)('minor-edge-setprop', async () => {
         const { setprop } = struct;
-        let strarr0 = ['a', 'b', 'c', 'd', 'e'];
-        let strarr1 = ['a', 'b', 'c', 'd', 'e'];
+        const strarr0 = ['a', 'b', 'c', 'd', 'e'];
+        const strarr1 = ['a', 'b', 'c', 'd', 'e'];
         deepEqual(setprop(strarr0, 2, 'C'), ['a', 'b', 'C', 'd', 'e']);
         deepEqual(setprop(strarr1, '2', 'CC'), ['a', 'b', 'CC', 'd', 'e']);
-        let intarr0 = [2, 3, 5, 7, 11];
-        let intarr1 = [2, 3, 5, 7, 11];
+        const intarr0 = [2, 3, 5, 7, 11];
+        const intarr1 = [2, 3, 5, 7, 11];
         deepEqual(setprop(intarr0, 2, 55), [2, 3, 55, 7, 11]);
         deepEqual(setprop(intarr1, '2', 555), [2, 3, 555, 7, 11]);
     });
@@ -206,12 +212,12 @@ const { equal, deepEqual } = node_assert_1.default;
     });
     (0, node_test_1.test)('minor-edge-delprop', async () => {
         const { delprop } = struct;
-        let strarr0 = ['a', 'b', 'c', 'd', 'e'];
-        let strarr1 = ['a', 'b', 'c', 'd', 'e'];
+        const strarr0 = ['a', 'b', 'c', 'd', 'e'];
+        const strarr1 = ['a', 'b', 'c', 'd', 'e'];
         deepEqual(delprop(strarr0, 2), ['a', 'b', 'd', 'e']);
         deepEqual(delprop(strarr1, '2'), ['a', 'b', 'd', 'e']);
-        let intarr0 = [2, 3, 5, 7, 11];
-        let intarr1 = [2, 3, 5, 7, 11];
+        const intarr0 = [2, 3, 5, 7, 11];
+        const intarr1 = [2, 3, 5, 7, 11];
         deepEqual(delprop(intarr0, 2), [2, 3, 7, 11]);
         deepEqual(delprop(intarr1, '2'), [2, 3, 7, 11]);
     });
@@ -275,10 +281,14 @@ const { equal, deepEqual } = node_assert_1.default;
         const test = clone(spec.walk.log);
         let log = [];
         function walklog(key, val, parent, path) {
-            log.push('k=' + stringify(key) +
-                ', v=' + stringify(val) +
-                ', p=' + stringify(parent) +
-                ', t=' + pathify(path));
+            log.push('k=' +
+                stringify(key) +
+                ', v=' +
+                stringify(val) +
+                ', p=' +
+                stringify(parent) +
+                ', t=' +
+                pathify(path));
             return val;
         }
         walk(test.in, undefined, walklog);
@@ -302,7 +312,7 @@ const { equal, deepEqual } = node_assert_1.default;
             let cur = undefined;
             function copy(key, val, _parent, _path) {
                 if (undefined === key || struct.isnode(val)) {
-                    let child = struct.islist(val) ? [] : {};
+                    const child = struct.islist(val) ? [] : {};
                     if (undefined === key) {
                         top = cur = child;
                     }
@@ -329,7 +339,7 @@ const { equal, deepEqual } = node_assert_1.default;
                 return val;
             }
             let v = val;
-            let i = size(path);
+            const i = size(path);
             if (isnode(v)) {
                 v = cur[i] = ismap(v) ? {} : [];
             }
@@ -414,7 +424,7 @@ const { equal, deepEqual } = node_assert_1.default;
         }, vin.path, {
             handler: (_inj, val, _cur, _ref) => {
                 return val();
-            }
+            },
         }));
     });
     // inject tests
@@ -468,21 +478,22 @@ const { equal, deepEqual } = node_assert_1.default;
                 if (null != key && null != parent && 'string' === typeof val) {
                     val = parent[key] = '@' + val;
                 }
-            }
+            },
         }));
     });
     (0, node_test_1.test)('transform-extra', async () => {
         deepEqual(struct.transform({ a: 1 }, { x: '`a`', b: '`$COPY`', c: '`$UPPER`' }, {
             extra: {
-                b: 2, $UPPER: (state) => {
+                b: 2,
+                $UPPER: (state) => {
                     const { path } = state;
                     return ('' + struct.getprop(path, path.length - 1)).toUpperCase();
-                }
-            }
+                },
+            },
         }), {
             x: 1,
             b: 2,
-            c: 'C'
+            c: 'C',
         });
     });
     (0, node_test_1.test)('transform-funcval', async () => {
@@ -538,8 +549,8 @@ const { equal, deepEqual } = node_assert_1.default;
             $INTEGER: (inj) => {
                 const { key } = inj;
                 // let out = getprop(current, key)
-                let out = struct.getprop(inj.dparent, key);
-                let t = typeof out;
+                const out = struct.getprop(inj.dparent, key);
+                const t = typeof out;
                 if ('number' !== t && !Number.isInteger(out)) {
                     inj.errs.push('Not an integer at ' + inj.path.slice(1).join('.') + ': ' + out);
                     return;
@@ -606,7 +617,7 @@ const { equal, deepEqual } = node_assert_1.default;
     "k": null
   }
 ]`);
-        equal(jsonify(jm(true, 1, false, 2, null, 3, ['a'], 4, { 'b': 0 }, 5)), `{
+        equal(jsonify(jm(true, 1, false, 2, null, 3, ['a'], 4, { b: 0 }, 5)), `{
   "true": 1,
   "false": 2,
   "null": 3,
