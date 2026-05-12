@@ -694,6 +694,13 @@ fn corpus() {
         validate(&vget(&vin, "data"), &vget(&vin, "spec"), Some(&d)).map_err(|e| e.message)
     });
 
+    // -------- select -------------------------------------------------
+    for name in ["basic", "operators", "edge", "alts"] {
+        run.run_set(&set!("select", name), true, &format!("select-{name}"), |vin| {
+            select(&vget(&vin, "obj"), &vget(&vin, "query"))
+        });
+    }
+
     // -------- report -------------------------------------------------
     if !run.failures.is_empty() {
         let n = run.failures.len();

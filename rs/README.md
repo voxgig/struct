@@ -1,10 +1,12 @@
 # Struct for Rust
 
 > Rust port of the canonical TypeScript implementation.
-> Status: **in progress** — foundation + minor utilities + `walk` / `merge` /
-> `getpath` / `setpath` are done and corpus-tested; `inject` / `transform` /
-> `validate` / `select` are staged. See [`NOTES.md`](./NOTES.md) and
-> [`PLAN.md`](./PLAN.md).
+> Status: **functionally complete** — all eight `struct/*` corpus files pass
+> (`cargo test` → 1120 checks): minor utilities, `walk`, `merge`, `getpath`,
+> `setpath`, `inject`, `transform` (all 11 commands), `validate` (all 15
+> checkers), `select` (all operators). The only thing not ported is the
+> top-level `primary` SDK-integration test (an example SDK built on `struct`,
+> not the library). See [`NOTES.md`](./NOTES.md) and [`PLAN.md`](./PLAN.md).
 
 For motivation, the language-neutral concepts, and the cross-language parity
 matrix, see the [top-level README](../README.md) and [`REPORT.md`](../REPORT.md).

@@ -2193,8 +2193,260 @@ pub fn validate(
     Ok(out)
 }
 
-pub fn select(_children: &Value, _query: &Value) -> Value {
-    unimplemented!("select: not yet ported — see rs/PLAN.md §11 and rs/NOTES.md")
+// ---- select ----------------------------------------------------------
+
+fn js_lt(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Str(x), Value::Str(y)) => x < y,
+        _ => {
+            let (x, y) = (js_to_number(a), js_to_number(b));
+            x < y // NaN -> false, matches JS
+        }
+    }
+}
+fn js_gt(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Str(x), Value::Str(y)) => x > y,
+        _ => {
+            let (x, y) = (js_to_number(a), js_to_number(b));
+            x > y
+        }
+    }
+}
+
+fn select_subvalidate(point: &Value, term: &Value, store: &Value, meta: &Value) -> bool {
+    let vstore = match merge(&Value::list(vec![Value::empty_map(), store.clone()]), Some(1)) {
+        v @ Value::Map(_) => v,
+        _ => Value::empty_map(),
+    };
+    set_prop(vstore.clone(), &Value::str(S_DTOP), point.clone());
+    let terrs = Value::empty_list();
+    let vd = InjectDef {
+        extra: Some(vstore),
+        errs: Some(terrs.clone()),
+        meta: Some(meta.clone()),
+        ..Default::default()
+    };
+    let _ = validate(point, term, Some(&vd));
+    terrs.as_list().map(|l| l.borrow().is_empty()).unwrap_or(true)
+}
+
+fn select_and(inj: &Inj, _v: &Value, _r: &str, store: &Value) -> Value {
+    if inj.borrow().mode != M_KEYPRE {
+        return Value::Noval;
+    }
+    let (key, parent, path, nodes, meta) = {
+        let b = inj.borrow();
+        (b.key.clone(), b.parent.clone(), b.path.clone(), b.nodes.clone(), b.meta.clone())
+    };
+    let terms: Vec<Value> = get_prop(&parent, &Value::str(key), Value::Noval)
+        .as_list()
+        .map(|l| l.borrow().clone())
+        .unwrap_or_default();
+    let ppath = slice_str_vec(&path, Some(-1), None);
+    let point = get_path_inj(store, &path_value(&ppath), None);
+    for term in &terms {
+        if !select_subvalidate(&point, term, store, &meta) {
+            errs_push(
+                inj,
+                format!(
+                    "AND:{}{}{} fail:{}",
+                    pathify(&path_value(&ppath), None, None),
+                    S_VIZ,
+                    stringify(&point, None, false),
+                    stringify(&Value::list(terms.clone()), None, false)
+                ),
+            );
+        }
+    }
+    let gkey = path.get(path.len().saturating_sub(2)).cloned().unwrap_or_default();
+    let nlen = nodes.len();
+    if nlen >= 2 {
+        set_prop(nodes[nlen - 2].clone(), &Value::str(gkey), point);
+    }
+    Value::Noval
+}
+
+fn select_or(inj: &Inj, _v: &Value, _r: &str, store: &Value) -> Value {
+    if inj.borrow().mode != M_KEYPRE {
+        return Value::Noval;
+    }
+    let (key, parent, path, nodes, meta) = {
+        let b = inj.borrow();
+        (b.key.clone(), b.parent.clone(), b.path.clone(), b.nodes.clone(), b.meta.clone())
+    };
+    let terms: Vec<Value> = get_prop(&parent, &Value::str(key), Value::Noval)
+        .as_list()
+        .map(|l| l.borrow().clone())
+        .unwrap_or_default();
+    let ppath = slice_str_vec(&path, Some(-1), None);
+    let point = get_path_inj(store, &path_value(&ppath), None);
+    for term in &terms {
+        if select_subvalidate(&point, term, store, &meta) {
+            let gkey = path.get(path.len().saturating_sub(2)).cloned().unwrap_or_default();
+            let nlen = nodes.len();
+            if nlen >= 2 {
+                set_prop(nodes[nlen - 2].clone(), &Value::str(gkey), point);
+            }
+            return Value::Noval;
+        }
+    }
+    errs_push(
+        inj,
+        format!(
+            "OR:{}{}{} fail:{}",
+            pathify(&path_value(&ppath), None, None),
+            S_VIZ,
+            stringify(&point, None, false),
+            stringify(&Value::list(terms.clone()), None, false)
+        ),
+    );
+    Value::Noval
+}
+
+fn select_not(inj: &Inj, _v: &Value, _r: &str, store: &Value) -> Value {
+    if inj.borrow().mode != M_KEYPRE {
+        return Value::Noval;
+    }
+    let (key, parent, path, nodes, meta) = {
+        let b = inj.borrow();
+        (b.key.clone(), b.parent.clone(), b.path.clone(), b.nodes.clone(), b.meta.clone())
+    };
+    let term = get_prop(&parent, &Value::str(key), Value::Noval);
+    let ppath = slice_str_vec(&path, Some(-1), None);
+    let point = get_path_inj(store, &path_value(&ppath), None);
+    if select_subvalidate(&point, &term, store, &meta) {
+        errs_push(
+            inj,
+            format!(
+                "NOT:{}{}{} fail:{}",
+                pathify(&path_value(&ppath), None, None),
+                S_VIZ,
+                stringify(&point, None, false),
+                stringify(&term, None, false)
+            ),
+        );
+    }
+    let gkey = path.get(path.len().saturating_sub(2)).cloned().unwrap_or_default();
+    let nlen = nodes.len();
+    if nlen >= 2 {
+        set_prop(nodes[nlen - 2].clone(), &Value::str(gkey), point);
+    }
+    Value::Noval
+}
+
+fn select_cmp(inj: &Inj, _v: &Value, r: &str, store: &Value) -> Value {
+    if inj.borrow().mode != M_KEYPRE {
+        return Value::Noval;
+    }
+    let (key, parent, path, nodes) = {
+        let b = inj.borrow();
+        (b.key.clone(), b.parent.clone(), b.path.clone(), b.nodes.clone())
+    };
+    let term = get_prop(&parent, &Value::str(key), Value::Noval);
+    let gkey = path.get(path.len().saturating_sub(2)).cloned().unwrap_or_default();
+    let ppath = slice_str_vec(&path, Some(-1), None);
+    let point = get_path_inj(store, &path_value(&ppath), None);
+
+    let pass = match r {
+        "$GT" => js_gt(&point, &term),
+        "$LT" => js_lt(&point, &term),
+        "$GTE" => js_gt(&point, &term) || point == term,
+        "$LTE" => js_lt(&point, &term) || point == term,
+        "$LIKE" => {
+            let pat = term.as_str().unwrap_or("").to_string();
+            regex::Regex::new(&pat)
+                .map(|re| re.is_match(&stringify(&point, None, false)))
+                .unwrap_or(false)
+        }
+        _ => false,
+    };
+
+    if pass {
+        let nlen = nodes.len();
+        if nlen >= 2 {
+            set_prop(nodes[nlen - 2].clone(), &Value::str(gkey), point);
+        }
+    } else {
+        errs_push(
+            inj,
+            format!(
+                "CMP: {}{}{} fail:{} {}",
+                pathify(&path_value(&ppath), None, None),
+                S_VIZ,
+                stringify(&point, None, false),
+                r,
+                stringify(&term, None, false)
+            ),
+        );
+    }
+    Value::Noval
+}
+
+pub fn select(children: &Value, query: &Value) -> Value {
+    if !is_node(children) {
+        return Value::empty_list();
+    }
+
+    let child_list: Vec<Value> = match children {
+        Value::Map(_) => items_vec(children)
+            .into_iter()
+            .map(|(k, v)| {
+                set_prop(v.clone(), &Value::str(S_DKEY), Value::str(k));
+                v
+            })
+            .collect(),
+        Value::List(_) => items_vec(children)
+            .into_iter()
+            .map(|(k, v)| {
+                set_prop(
+                    v.clone(),
+                    &Value::str(S_DKEY),
+                    Value::Num(k.parse::<f64>().unwrap_or(f64::NAN)),
+                );
+                v
+            })
+            .collect(),
+        _ => return Value::empty_list(),
+    };
+
+    let extra = Value::map_of([
+        ("$AND".to_string(), Value::func(select_and)),
+        ("$OR".to_string(), Value::func(select_or)),
+        ("$NOT".to_string(), Value::func(select_not)),
+        ("$GT".to_string(), Value::func(select_cmp)),
+        ("$LT".to_string(), Value::func(select_cmp)),
+        ("$GTE".to_string(), Value::func(select_cmp)),
+        ("$LTE".to_string(), Value::func(select_cmp)),
+        ("$LIKE".to_string(), Value::func(select_cmp)),
+    ]);
+    let meta = Value::map_of([(S_BEXACT.to_string(), Value::Bool(true))]);
+
+    let q = clone(query);
+    let mut open = |_k: &Value, v: &Value, _p: &Value, _t: &[String]| -> Value {
+        if is_map(v) {
+            let cur = get_prop(v, &Value::str(S_BOPEN), Value::Bool(true));
+            set_prop(v.clone(), &Value::str(S_BOPEN), cur);
+        }
+        v.clone()
+    };
+    walk(q.clone(), Some(&mut open), None, None);
+
+    let mut results: Vec<Value> = Vec::new();
+    for child in &child_list {
+        let errs = Value::empty_list();
+        let vd = InjectDef {
+            errs: Some(errs.clone()),
+            meta: Some(meta.clone()),
+            extra: Some(extra.clone()),
+            ..Default::default()
+        };
+        let _ = validate(child, &clone(&q), Some(&vd));
+        if errs.as_list().map(|l| l.borrow().is_empty()).unwrap_or(true) {
+            results.push(child.clone());
+        }
+    }
+    Value::list(results)
 }
 
 // keep `Injection::has_handler` referenced (used once staging is complete)

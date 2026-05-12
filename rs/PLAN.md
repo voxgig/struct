@@ -1,17 +1,16 @@
 # Rust Port — Porting Plan & Challenge Analysis
 
-> Status: **implementation in progress.** Done and corpus-tested (830
-> checks via `cargo test`): the foundation (`Value` type, constants, jsnum
-> coercions), all minor utilities, `walk`, `merge`, `getpath`/`setpath`,
-> the `Injection` state machine, `inject` / `_injectstr` / `_injecthandler`,
-> and `transform` with the `$BT`/`$DS`/`$WHEN`/`$SPEC` thunks and the
-> `$COPY`/`$DELETE`/`$KEY`/`$ANNO`/`$MERGE` commands (`checkPlacement` /
-> `injectorArgs` included). Staged: the structural transform commands
-> (`$EACH`/`$PACK`/`$REF`/`$FORMAT`/`$APPLY` + `injectChild`/`FORMATTER`),
-> `validate` (+ 15 checkers), `select` (+ operators) — see
-> [`NOTES.md`](./NOTES.md). [`README.md`](./README.md) has the API. The
-> rest of this document is the original challenge analysis and roadmap —
-> still the reference for the remaining work.
+> Status: **functionally complete.** All eight `struct/*` corpus files pass
+> (`cargo test` → 1120 checks): foundation (`Value` type, constants, jsnum
+> coercions), all minor utilities, `walk`, `merge`, `getpath`/`setpath`, the
+> `Injection` state machine, `inject` / `_injectstr` / `_injecthandler`,
+> `transform` (all 11 commands + `$BT`/`$DS`/`$WHEN`/`$SPEC` thunks +
+> `checkPlacement`/`injectorArgs`/`injectChild`/`FORMATTER`), `validate`
+> (all 15 checkers + `_validation` + `_validatehandler` + `$OPEN`), and
+> `select` (all operators). Not ported: the top-level `primary` SDK
+> integration test (an example SDK built on `struct`, not the library) — see
+> [`NOTES.md`](./NOTES.md). [`README.md`](./README.md) has the API. The rest
+> of this document is the original challenge analysis and roadmap.
 >
 > The canonical implementation is
 > [`ts/src/StructUtility.ts`](../ts/src/StructUtility.ts) (~3,135 lines);

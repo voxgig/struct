@@ -1,25 +1,30 @@
 # Rust Implementation Notes
 
 Port of the canonical TypeScript implementation (`ts/src/StructUtility.ts`).
-Design rationale and the full challenge analysis live in [`PLAN.md`](./PLAN.md);
-this file records the concrete decisions and the current state.
+The full challenge analysis and the original phased roadmap live in
+[`PLAN.md`](./PLAN.md).
 
 ## Status
 
+The library is **functionally complete** against the shared corpus: all eight
+`struct/*` test files pass (`cargo test` → 1120 checks). The only thing not
+ported is the top-level `primary` SDK-integration test (the mock client /
+utility / `makeContext` harness — cf. `go/testutil/`), which exercises an
+example SDK *built on* `struct`, not `struct` itself.
+
 | Subsystem | State | Corpus |
 |---|---|---|
-| Value type, type bit-flags, mode flags, sentinels, jsnum coercions | done | — |
+| `Value` type, type bit-flags, mode flags, sentinels, jsnum coercions | done | — |
 | Minor utilities (`typename`, `typify`, predicates, `getprop`/`getelem`/`setprop`/`delprop`, `keysof`/`items`/`haskey`, `flatten`/`filter`, `escre`/`escurl`/`join`, `jsonify`/`stringify`/`pathify`/`clone`, `size`/`slice`/`pad`, `jm`/`jt`, `getdef`/`strkey`) | done | `minor.*` ✓ |
 | `walk` | done | `walk.basic` ✓ |
-| `merge` | done (walk-based, `Rc<RefCell>` scratch vectors) | `merge.cases` / `merge.array` / `merge.integrity` / `merge.basic` ✓ |
-| `getpath` / `setpath` | done (incl. relative `..` ascents, `$KEY`/`$GET:`/`$REF:`/`$META:`, `$$` escape, meta-path `$=`/`$~`, custom handler) | `getpath.basic` / `getpath.relative` / `getpath.special` / `getpath.handler` ✓ |
-| `Injection` (state machine: `descend`/`child`/`setval`), `inject`, `_injectstr`, `_injecthandler` | done | `inject.basic` / `inject.string` / `inject.deep` ✓ |
-| `transform` + `$BT`/`$DS`/`$WHEN`/`$SPEC` thunks + `$COPY`/`$DELETE`/`$KEY`/`$ANNO`/`$MERGE` commands, `checkPlacement`, `injectorArgs` | done | `transform.basic` / `transform.paths` / `transform.cmds` / `transform.modify` ✓ |
-| `transform` structural commands: `$EACH`, `$PACK`, `$REF`, `$FORMAT`, `$APPLY` (+ `injectChild`, `FORMATTER`); `validate` (+ 15 checkers); `select` (+ operators) | **staged** — `$EACH`/`$PACK`/etc. registered as error-pushing stubs; `validate`/`select` are `unimplemented!()` pointing at `PLAN.md` | not yet wired |
-| Corpus test runner (`tests/corpus.rs`) | covers the implemented subsets (830 checks) | — |
-| Top-level `primary` / SDK tests (mock client / `makeContext`) | not started | — |
-
-Running `cargo test` exercises the implemented corpus subsets.
+| `merge` | done (walk-based, `Rc<RefCell>` scratch vectors) | `merge.*` ✓ |
+| `getpath` / `setpath` | done | `getpath.*` ✓ |
+| `Injection` state machine, `inject`, `_injectstr`, `_injecthandler` | done | `inject.*` ✓ |
+| `transform` + all 11 commands (`$DELETE`, `$COPY`, `$KEY`, `$ANNO`, `$MERGE`, `$EACH`, `$PACK`, `$REF`, `$FORMAT`, `$APPLY`; `$META` recognised) + `$BT`/`$DS`/`$WHEN`/`$SPEC` thunks + `checkPlacement`/`injectorArgs`/`injectChild` + `FORMATTER` | done | `transform.*` ✓ |
+| `validate` + all 15 checkers (`$STRING`, `$NUMBER`/`$INTEGER`/`$DECIMAL`/`$BOOLEAN`/`$NULL`/`$NIL`/`$MAP`/`$LIST`/`$FUNCTION`/`$INSTANCE` via `validate_TYPE`, `$ANY`, `$CHILD`, `$ONE`, `$EXACT`) + `_validation` (modify hook) + `_validatehandler` + `_invalidTypeMsg` + `$OPEN` open-objects | done | `validate.*` ✓ |
+| `select` + operators (`$AND`, `$OR`, `$NOT`, `$GT`, `$LT`, `$GTE`, `$LTE`, `$LIKE`) | done | `select.*` ✓ |
+| Corpus test runner (`tests/corpus.rs`) | covers all `struct/*` slices (1120 checks) | — |
+| Top-level `primary` / SDK tests (mock client / `makeContext`) | not ported (out of scope — example SDK, not the library) | — |
 
 ## Key decisions (see PLAN.md for the reasoning)
 
@@ -46,26 +51,22 @@ Running `cargo test` exercises the implemented corpus subsets.
   callbacks are `&mut dyn FnMut(&Value, &Value, &Value, &[String]) -> Value` with `key`
   = `Noval` at the root and a `Str` for every descendant.
 - **`Injection`** is `Rc<RefCell<Injection>>` (`Inj`) because the inject machinery keeps
-  live mutable back-references (`prior`) — see PLAN.md §9. The borrow discipline (PLAN.md
-  §3) — accessors return owned `Value`s, never leak a `Ref`/`RefMut` guard across a call —
-  is the rule that keeps `RefCell` from panicking.
+  live mutable back-references (`prior`) — e.g. `$REF`/`injectChild` mutate `inj.prior.key_i`.
+  The borrow discipline (PLAN.md §3) — accessors return owned `Value`s, never leak a
+  `Ref`/`RefMut` guard across a call — is the rule that keeps `RefCell` from panicking.
 - **`transform` / `validate`** return `Result<Value, StructError>` (the `throw new Error`
   case becomes `Err`); the infallible utilities return `Value`.
-- **`escre`** does regex-metachar escaping via a closure replacement (`$&` → `format!("\\{}",
-  &caps[0])`); `escurl` is `encodeURIComponent` hand-rolled over UTF-8 bytes (not escaping
-  `A-Za-z0-9-_.!~*'()`).
+- **`escre`** does regex-metachar escaping via a closure replacement; `escurl` is
+  `encodeURIComponent` hand-rolled over UTF-8 bytes (not escaping `A-Za-z0-9-_.!~*'()`).
+- **`$WHEN`** uses `std::time::SystemTime` + a hand-rolled ISO-8601 UTC formatter (no
+  `chrono`/`time` dependency).
 
-## What's not done / next
+## Not ported
 
-- The structural transform commands: `$EACH`, `$PACK`, `$REF`, `$FORMAT`, `$APPLY` (+
-  `injectChild`, the `FORMATTER` table). These build the parallel data structures and
-  recurse with adjusted injection state; the `prior.keyI--` in `$REF`/`injectChild` is the
-  studied exception (PLAN.md §9 item 3). Currently registered as error-pushing stubs so
-  `transform` with those commands fails cleanly rather than crashing.
-- `$META` transform command (the `$=`/`$~` meta-path syntax in `getpath` is done; the
-  `$META` *command* and `_validatehandler`'s meta handling are not).
-- `validate` + the 15 checkers, `_validation`/`_validatehandler`, `$OPEN` open-object
-  handling, `_invalidTypeMsg` text.
-- `select` + `$AND`/`$OR`/`$NOT`/`$GT`/`$LT`/`$GTE`/`$LTE`/`$LIKE`.
-- The top-level `primary` SDK tests (mock client / utility / `makeContext`; cf.
-  `go/testutil/`).
+- The top-level `primary.check` SDK-integration test (mock client / utility /
+  `makeContext`, cf. `ts/test/sdk.ts` + `ts/test/utility/`). This is an example
+  SDK that uses `struct`, not part of the library.
+- `T_symbol` / `T_instance` constants exist for parity but are never returned by
+  `typify` (no JSON-shaped Rust analog); user-supplied `$APPLY` functions and
+  user formatters in `$FORMAT` are best-effort (the corpus only exercises named
+  formatters and the `$APPLY` error paths).
