@@ -34,7 +34,7 @@ syntax), and language-specific notes:
 | Ruby       | Complete   | [`rb/README.md`](./rb/README.md)      |
 | Lua        | Complete   | [`lua/README.md`](./lua/README.md)    |
 | Rust       | Complete   | [`rs/README.md`](./rs/README.md)      |
-| C#         | In progress| [`cs/README.md`](./cs/README.md)      |
+| C#         | Complete   | [`cs/README.md`](./cs/README.md)      |
 | Zig        | Complete   | [`zig/README.md`](./zig/README.md)    |
 | Java       | Partial    | [`java/README.md`](./java/README.md)  |
 | C++        | Partial    | [`cpp/README.md`](./cpp/README.md)    |
