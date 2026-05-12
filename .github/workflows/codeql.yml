@@ -36,7 +36,7 @@ jobs:
           - language: ruby
             build-mode: none
           - language: go
-            build-mode: none
+            build-mode: manual
           - language: csharp
             build-mode: none
           - language: java-kotlin
@@ -46,6 +46,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up Go (for the Go build trace)
+        if: matrix.language == 'go'
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
@@ -53,7 +59,7 @@ jobs:
           build-mode: ${{ matrix.build-mode }}
           queries: security-extended
 
-      # Only C++ needs a real compile for CodeQL to extract the code.
+      # C++ and Go need a real compile for CodeQL to extract the code.
       - name: Build C++ (for CodeQL extraction)
         if: matrix.language == 'cpp'
         run: |
@@ -61,6 +67,10 @@ jobs:
           cd cpp
           g++ tests/struct_corpus_test.cpp --std=c++17 -c -o /dev/null -I ./src -I ./tests
           g++ tests/smoke.cpp            --std=c++17 -c -o /dev/null -I ./src -I ./tests
+
+      - name: Build Go (for CodeQL extraction)
+        if: matrix.language == 'go'
+        run: cd go && go build ./...
 
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@v3

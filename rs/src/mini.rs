@@ -99,20 +99,8 @@ pub fn size(val: &Value) -> i64 {
         Value::List(l) => l.borrow().len() as i64,
         Value::Map(m) => m.borrow().len() as i64,
         Value::Str(s) => s.encode_utf16().count() as i64,
-        Value::Num(n) => {
-            if n.is_finite() {
-                n.floor() as i64
-            } else {
-                0
-            }
-        }
-        Value::Bool(b) => {
-            if *b {
-                1
-            } else {
-                0
-            }
-        }
+        Value::Num(n) if n.is_finite() => n.floor() as i64,
+        Value::Bool(b) => i64::from(*b),
         _ => 0,
     }
 }

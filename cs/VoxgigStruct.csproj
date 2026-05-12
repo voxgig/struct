@@ -12,9 +12,11 @@
     <RootNamespace>Voxgig.Struct</RootNamespace>
     <LangVersion>12</LangVersion>
 
-    <!-- Code quality: built-in Roslyn analyzers (.NET + code-style). -->
+    <!-- Code quality: built-in Roslyn analyzers (.NET + code-style).
+         Pinned to the .NET 8.0 rule set (rather than "latest") so a newer
+         SDK patch can't introduce a new default-on rule and break CI. -->
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
-    <AnalysisLevel>latest</AnalysisLevel>
+    <AnalysisLevel>8.0</AnalysisLevel>
     <AnalysisMode>Recommended</AnalysisMode>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
   </PropertyGroup>

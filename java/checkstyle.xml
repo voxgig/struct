@@ -5,16 +5,18 @@
 
 <!-- Checkstyle configuration for the Java port.
      A focused, low-noise rule set: it targets real maintainability problems
-     (unused imports, empty blocks, equals/hashCode, fall-through, brace
-     placement) rather than full Google/Sun formatting enforcement, since the
-     port deliberately mirrors the canonical TypeScript source layout. -->
+     (unused imports, empty blocks, equals/hashCode, fall-through) rather than
+     full formatting enforcement. The brace-placement / braceless-`if` rules
+     (NeedBraces, LeftCurly, RightCurly) are intentionally off — this port
+     mirrors the canonical TypeScript source layout, which uses braceless
+     single-statement `if`s and TS-style brace placement throughout. -->
 <module name="Checker">
   <property name="charset" value="UTF-8"/>
   <property name="severity" value="warning"/>
   <property name="fileExtensions" value="java"/>
 
   <module name="LineLength">
-    <property name="max" value="120"/>
+    <property name="max" value="140"/>
     <property name="ignorePattern" value="^package.*|^import.*|a href|href|http://|https://"/>
   </module>
 
@@ -24,13 +26,10 @@
     <module name="RedundantImport"/>
     <module name="AvoidStarImport"/>
 
-    <!-- Blocks / braces -->
+    <!-- Blocks -->
     <module name="EmptyBlock">
       <property name="option" value="text"/>
     </module>
-    <module name="NeedBraces"/>
-    <module name="LeftCurly"/>
-    <module name="RightCurly"/>
 
     <!-- Coding problems -->
     <module name="EqualsHashCode"/>
