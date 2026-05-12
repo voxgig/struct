@@ -6,11 +6,9 @@ The full challenge analysis and the original phased roadmap live in
 
 ## Status
 
-The library is **functionally complete** against the shared corpus: all eight
-`struct/*` test files pass (`cargo test` → 1120 checks). The only thing not
-ported is the top-level `primary` SDK-integration test (the mock client /
-utility / `makeContext` harness — cf. `go/testutil/`), which exercises an
-example SDK *built on* `struct`, not `struct` itself.
+**Complete** against the shared corpus: all eight `struct/*` test files plus
+the top-level `primary.check` SDK-integration test pass (`cargo test` → 1122
+checks). `cargo clippy` is clean.
 
 | Subsystem | State | Corpus |
 |---|---|---|
@@ -23,8 +21,8 @@ example SDK *built on* `struct`, not `struct` itself.
 | `transform` + all 11 commands (`$DELETE`, `$COPY`, `$KEY`, `$ANNO`, `$MERGE`, `$EACH`, `$PACK`, `$REF`, `$FORMAT`, `$APPLY`; `$META` recognised) + `$BT`/`$DS`/`$WHEN`/`$SPEC` thunks + `checkPlacement`/`injectorArgs`/`injectChild` + `FORMATTER` | done | `transform.*` ✓ |
 | `validate` + all 15 checkers (`$STRING`, `$NUMBER`/`$INTEGER`/`$DECIMAL`/`$BOOLEAN`/`$NULL`/`$NIL`/`$MAP`/`$LIST`/`$FUNCTION`/`$INSTANCE` via `validate_TYPE`, `$ANY`, `$CHILD`, `$ONE`, `$EXACT`) + `_validation` (modify hook) + `_validatehandler` + `_invalidTypeMsg` + `$OPEN` open-objects | done | `validate.*` ✓ |
 | `select` + operators (`$AND`, `$OR`, `$NOT`, `$GT`, `$LT`, `$GTE`, `$LTE`, `$LIKE`) | done | `select.*` ✓ |
-| Corpus test runner (`tests/corpus.rs`) | covers all `struct/*` slices (1120 checks) | — |
-| Top-level `primary` / SDK tests (mock client / `makeContext`) | not ported (out of scope — example SDK, not the library) | — |
+| Top-level `primary.check` (mock SDK: `check(ctx)` + client options) | done | `primary.check` ✓ |
+| Corpus test runner (`tests/corpus.rs`) | covers the full `test.json` (1122 checks) | — |
 
 ## Key decisions (see PLAN.md for the reasoning)
 
@@ -61,12 +59,14 @@ example SDK *built on* `struct`, not `struct` itself.
 - **`$WHEN`** uses `std::time::SystemTime` + a hand-rolled ISO-8601 UTC formatter (no
   `chrono`/`time` dependency).
 
-## Not ported
+## Caveats
 
-- The top-level `primary.check` SDK-integration test (mock client / utility /
-  `makeContext`, cf. `ts/test/sdk.ts` + `ts/test/utility/`). This is an example
-  SDK that uses `struct`, not part of the library.
 - `T_symbol` / `T_instance` constants exist for parity but are never returned by
-  `typify` (no JSON-shaped Rust analog); user-supplied `$APPLY` functions and
-  user formatters in `$FORMAT` are best-effort (the corpus only exercises named
-  formatters and the `$APPLY` error paths).
+  `typify` (no JSON-shaped Rust analog). User-supplied `$APPLY` functions and
+  user formatters in `$FORMAT` are best-effort — the corpus only exercises named
+  formatters and the `$APPLY` error paths, so the exact argument order for those
+  callables isn't pinned down.
+- The `primary.check` SDK test uses a minimal mock SDK in `tests/corpus.rs`
+  (mirroring `ts/test/sdk.ts`): `check(ctx)` returns
+  `{zed: 'ZED' + (opts.foo ?? '') + '_' + (ctx.meta?.bar ?? '0')}`. There's no
+  full `makeContext`/client framework — the corpus doesn't need one.

@@ -149,7 +149,7 @@ pub fn slice(val: Value, start: Option<i64>, end: Option<i64>, mutate: bool) -> 
             s = 0;
         } else if let Some(mut ee) = end {
             if ee < 0 {
-                ee = vlen + ee;
+                ee += vlen;
                 if ee < 0 {
                     ee = 0;
                 }

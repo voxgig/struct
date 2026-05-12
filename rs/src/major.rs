@@ -79,8 +79,8 @@ fn walk_impl(
             path.push(ckey.clone());
             let res = walk_impl(
                 child,
-                before.as_mut().map(|f| &mut **f),
-                after.as_mut().map(|f| &mut **f),
+                before.as_deref_mut(),
+                after.as_deref_mut(),
                 maxdepth,
                 &Value::str(ckey.clone()),
                 &out,
@@ -1677,7 +1677,7 @@ pub fn transform(
     if errlen > 0 && !collect {
         let msgs: Vec<String> = errs
             .as_list()
-            .map(|l| l.borrow().iter().map(|e| js_string(e)).collect())
+            .map(|l| l.borrow().iter().map(js_string).collect())
             .unwrap_or_default();
         return Err(StructError {
             message: msgs.join(" | "),

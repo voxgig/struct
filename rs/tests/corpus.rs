@@ -561,11 +561,15 @@ fn corpus() {
         get_path(&vget(&vin, "store"), &vget(&vin, "path"), None)
     });
     run.run_set(&set!("getpath", "relative"), true, "getpath-relative", |vin| {
-        let mut d = InjectDef::default();
-        d.dparent = Some(vget(&vin, "dparent"));
-        if let Value::Str(dp) = vget(&vin, "dpath") {
-            d.dpath = Some(dp.split('.').map(|x| x.to_string()).collect());
-        }
+        let dpath = match vget(&vin, "dpath") {
+            Value::Str(dp) => Some(dp.split('.').map(|x| x.to_string()).collect()),
+            _ => None,
+        };
+        let d = InjectDef {
+            dparent: Some(vget(&vin, "dparent")),
+            dpath,
+            ..Default::default()
+        };
         get_path(&vget(&vin, "store"), &vget(&vin, "path"), Some(&d))
     });
     run.run_set(&set!("getpath", "special"), true, "getpath-special", |vin| {
@@ -699,6 +703,64 @@ fn corpus() {
         run.run_set(&set!("select", name), true, &format!("select-{name}"), |vin| {
             select(&vget(&vin, "obj"), &vget(&vin, "query"))
         });
+    }
+
+    // -------- primary / SDK ------------------------------------------
+    // A tiny mock SDK (mirrors ts/test/sdk.ts): check(ctx) ->
+    //   { zed: 'ZED' + (opts.foo ?? '') + '_' + (ctx.meta?.bar ?? '0') }
+    fn sdk_check(opts: &Value, ctx: &Value) -> Value {
+        let foo = get_prop(opts, &Value::str("foo"), Value::Noval);
+        let foo_s = if foo.is_nullish() {
+            String::new()
+        } else {
+            voxgig_struct::value::js_string(&foo)
+        };
+        let bar = get_path(ctx, &Value::str("meta.bar"), None);
+        let bar_s = if bar.is_nullish() {
+            "0".to_string()
+        } else {
+            voxgig_struct::value::js_string(&bar)
+        };
+        Value::map_of([(
+            "zed".to_string(),
+            Value::str(format!("ZED{foo_s}_{bar_s}")),
+        )])
+    }
+    {
+        let check = vget_path(&spec, &["primary", "check"]);
+        // resolve clients from DEF.client (options are inject()'d against {} — a no-op here)
+        let def_clients = vget_path(&check, &["DEF", "client"]);
+        let mut clients: IndexMap<String, Value> = IndexMap::new();
+        if let Value::Map(m) = &def_clients {
+            for (cn, cdef) in m.borrow().iter() {
+                let opts = vget_path(cdef, &["test", "options"]);
+                let opts = inject(clone(&opts), &Value::empty_map(), None);
+                clients.insert(cn.clone(), opts);
+            }
+        }
+        let basic = vget(&check, "basic");
+        let testset = vget(&basic, "set");
+        if let Some(l) = testset.as_list() {
+            for (i, entry) in l.borrow().iter().enumerate() {
+                let ctx = vget(entry, "ctx");
+                let client = vget(entry, "client");
+                let opts = match &client {
+                    Value::Str(c) => clients.get(c).cloned().unwrap_or(Value::empty_map()),
+                    _ => Value::empty_map(),
+                };
+                let res = fix_json(&sdk_check(&opts, &ctx), true);
+                let want = fix_json(&vget(entry, "out"), true);
+                if res == want {
+                    run.passed += 1;
+                } else {
+                    run.failures.push(format!(
+                        "check-basic#{i}: got {}, want {}",
+                        stringify(&res, Some(120), false),
+                        stringify(&want, Some(120), false)
+                    ));
+                }
+            }
+        }
     }
 
     // -------- report -------------------------------------------------

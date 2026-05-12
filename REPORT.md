@@ -16,9 +16,19 @@
 | **php** | 46 | 15 | 2 | 82/82 pass | Complete |
 | **rb** | 40+ | 15 | 2 | 75/75 pass | Complete |
 | **lua** | 40+ | 15 | 2 | 75/75 pass | Complete |
+| **rs** | 40+ | 15 | 2 | 1122/1122 corpus | Complete |
 | **java** | 40 | 15 | 2 | 1178/1178 corpus | Complete |
 | **cpp** | 40 | 15 | 2 | 1178/1178 corpus | Complete |
 | **cs** | 40 | 15 | 2 | 1178/1178 corpus | Complete |
+
+\*\* Rust: full TS-canonical parity. Idiomatic `snake_case` API (`get_path`,
+`is_node`, …; see `rs/README.md` for the name table), `Rc<RefCell>`
+reference-stable nodes via the `indexmap` crate, `Value::Noval` vs `Value::Null`
+kept distinct. All 11 transform commands, all 15 validate checkers, all 4 select
+operators, the `Injection` state machine, and the `primary.check` SDK test pass
+(`cargo test` → 1122 corpus checks; `cargo clippy` clean). See
+[rs/PLAN.md](./rs/PLAN.md) for the porting plan / challenge analysis and
+[rs/NOTES.md](./rs/NOTES.md) for the decisions.
 
 \*\* Java, C++ and C#: full TS-canonical parity. Injection state machine,
 `SKIP`/`DELETE` sentinels, mode constants, all 11 transform commands
