@@ -1,0 +1,68 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+    branches: [ main, dev ]
+  schedule:
+    - cron: '0 8 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      # Required to upload the SARIF results to the code-scanning dashboard.
+      security-events: write
+      # Only needed for workflows in private repos; harmless here.
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # CodeQL supports these languages; it does not support Lua or Zig, and
+        # Rust is still in preview, so those ports are covered by `make lint`
+        # / `make scan` instead.  `javascript-typescript` covers both the ts/
+        # and js/ ports; `java-kotlin` covers both java/ and kt/.
+        include:
+          - language: javascript-typescript
+            build-mode: none
+          - language: python
+            build-mode: none
+          - language: ruby
+            build-mode: none
+          - language: go
+            build-mode: none
+          - language: csharp
+            build-mode: none
+          - language: java-kotlin
+            build-mode: none
+          - language: cpp
+            build-mode: manual
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          queries: security-extended
+
+      # Only C++ needs a real compile for CodeQL to extract the code.
+      - name: Build C++ (for CodeQL extraction)
+        if: matrix.language == 'cpp'
+        run: |
+          sudo apt-get update && sudo apt-get install -y nlohmann-json3-dev
+          cd cpp
+          g++ tests/struct_corpus_test.cpp --std=c++17 -c -o /dev/null -I ./src -I ./tests
+          g++ tests/smoke.cpp            --std=c++17 -c -o /dev/null -I ./src -I ./tests
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"

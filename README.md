@@ -442,7 +442,10 @@ Beyond linting there are two more analysis stages:
 
 `make analyze` runs all three (`lint` + `audit` + `scan`).  CI runs these
 in [`.github/workflows/lint.yml`](./.github/workflows/lint.yml) and
-[`.github/workflows/security.yml`](./.github/workflows/security.yml).
+[`.github/workflows/security.yml`](./.github/workflows/security.yml), and
+[`.github/workflows/codeql.yml`](./.github/workflows/codeql.yml) runs
+GitHub [CodeQL] over the ts/js, Python, Go, Ruby, Java/Kotlin, C# and C++
+ports (results in the repository's *Security → Code scanning* tab).
 
 [gitleaks]: https://github.com/gitleaks/gitleaks
 [Semgrep]: https://semgrep.dev/
@@ -450,6 +453,7 @@ in [`.github/workflows/lint.yml`](./.github/workflows/lint.yml) and
 [actionlint]: https://github.com/rhysd/actionlint
 [shellcheck]: https://www.shellcheck.net/
 [cspell]: https://cspell.org/
+[CodeQL]: https://codeql.github.com/
 [markdownlint]: https://github.com/DavidAnson/markdownlint
 
 

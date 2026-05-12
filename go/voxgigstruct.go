@@ -1334,9 +1334,9 @@ func CloneFlags(val any, flags map[string]bool) any {
 	}
 }
 
-// Define a JSON Object from alternating key-value arguments.
-// jo("a", 1, "b", 2) => {"a": 1, "b": 2}
-func Jo(kv ...any) map[string]any {
+// Jm defines a JSON object from alternating key/value arguments.
+// Jm("a", 1, "b", 2) => {"a": 1, "b": 2}
+func Jm(kv ...any) map[string]any {
 	o := make(map[string]any)
 	kvsize := len(kv)
 	for i := 0; i < kvsize; i += 2 {
@@ -1350,15 +1350,21 @@ func Jo(kv ...any) map[string]any {
 	return o
 }
 
-// Define a JSON Array from arguments.
-// ja(1, "x", true) => [1, "x", true]
-func Ja(v ...any) []any {
+// Jt defines a JSON array (tuple) from positional arguments.
+// Jt(1, "x", true) => [1, "x", true]
+func Jt(v ...any) []any {
 	a := make([]any, len(v))
 	for i := 0; i < len(v); i++ {
 		a[i] = GetProp(v, i)
 	}
 	return a
 }
+
+// Jo is an alias for Jm (define a JSON object from key/value arguments).
+func Jo(kv ...any) map[string]any { return Jm(kv...) }
+
+// Ja is an alias for Jt (define a JSON array from arguments).
+func Ja(v ...any) []any { return Jt(v...) }
 
 // Safely delete a property from a map or list element.
 // For maps, the property is deleted. For lists, the element at the

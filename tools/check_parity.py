@@ -35,10 +35,7 @@ PARTIAL_PORTS = ["java", "cpp", "cs", "zig", "kt"]
 # Accepted, documented divergences (normalised name keys).  Anything NOT listed
 # here is treated as a parity gap and fails the check; this list should only
 # shrink.
-KNOWN_GAPS: dict[str, set[str]] = {
-    # The `jm`/`jt` JSON builders are not yet ported to Go.
-    "go": {"jm", "jt"},
-}
+KNOWN_GAPS: dict[str, set[str]] = {}
 
 # Source files per port (implementation only — not tests).
 SOURCES = {
