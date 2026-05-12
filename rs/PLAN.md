@@ -1,14 +1,17 @@
 # Rust Port — Porting Plan & Challenge Analysis
 
-> Status: **implementation in progress.** The foundation (`Value` type,
-> constants, jsnum coercions), all minor utilities, `walk`, `merge`, and
-> `getpath`/`setpath` are implemented and pass their corpus slices (712
-> checks via `cargo test`). `inject` / `transform` / `validate` / `select`
-> are staged — the `Injection` state machine and plumbing are in place,
-> the bodies are `unimplemented!()` stubs pointing here. See
-> [`NOTES.md`](./NOTES.md) for the current state and [`README.md`](./README.md)
-> for the API. The rest of this document is the original challenge analysis
-> and roadmap — still the reference for the remaining work.
+> Status: **implementation in progress.** Done and corpus-tested (830
+> checks via `cargo test`): the foundation (`Value` type, constants, jsnum
+> coercions), all minor utilities, `walk`, `merge`, `getpath`/`setpath`,
+> the `Injection` state machine, `inject` / `_injectstr` / `_injecthandler`,
+> and `transform` with the `$BT`/`$DS`/`$WHEN`/`$SPEC` thunks and the
+> `$COPY`/`$DELETE`/`$KEY`/`$ANNO`/`$MERGE` commands (`checkPlacement` /
+> `injectorArgs` included). Staged: the structural transform commands
+> (`$EACH`/`$PACK`/`$REF`/`$FORMAT`/`$APPLY` + `injectChild`/`FORMATTER`),
+> `validate` (+ 15 checkers), `select` (+ operators) — see
+> [`NOTES.md`](./NOTES.md). [`README.md`](./README.md) has the API. The
+> rest of this document is the original challenge analysis and roadmap —
+> still the reference for the remaining work.
 >
 > The canonical implementation is
 > [`ts/src/StructUtility.ts`](../ts/src/StructUtility.ts) (~3,135 lines);

@@ -13,8 +13,10 @@ this file records the concrete decisions and the current state.
 | `walk` | done | `walk.basic` ✓ |
 | `merge` | done (walk-based, `Rc<RefCell>` scratch vectors) | `merge.cases` / `merge.array` / `merge.integrity` / `merge.basic` ✓ |
 | `getpath` / `setpath` | done (incl. relative `..` ascents, `$KEY`/`$GET:`/`$REF:`/`$META:`, `$$` escape, meta-path `$=`/`$~`, custom handler) | `getpath.basic` / `getpath.relative` / `getpath.special` / `getpath.handler` ✓ |
-| `inject`, `transform` (+ 11 commands), `validate` (+ 15 checkers), `select` (+ operators) | **staged** — `unimplemented!()` stubs pointing at `PLAN.md`; the `Injection` state machine, `InjectDef`, the default handler, and the structural plumbing are in place | not yet wired |
-| Corpus test runner (`tests/corpus.rs`) | covers the implemented subsets (712 checks) | — |
+| `Injection` (state machine: `descend`/`child`/`setval`), `inject`, `_injectstr`, `_injecthandler` | done | `inject.basic` / `inject.string` / `inject.deep` ✓ |
+| `transform` + `$BT`/`$DS`/`$WHEN`/`$SPEC` thunks + `$COPY`/`$DELETE`/`$KEY`/`$ANNO`/`$MERGE` commands, `checkPlacement`, `injectorArgs` | done | `transform.basic` / `transform.paths` / `transform.cmds` / `transform.modify` ✓ |
+| `transform` structural commands: `$EACH`, `$PACK`, `$REF`, `$FORMAT`, `$APPLY` (+ `injectChild`, `FORMATTER`); `validate` (+ 15 checkers); `select` (+ operators) | **staged** — `$EACH`/`$PACK`/etc. registered as error-pushing stubs; `validate`/`select` are `unimplemented!()` pointing at `PLAN.md` | not yet wired |
+| Corpus test runner (`tests/corpus.rs`) | covers the implemented subsets (830 checks) | — |
 | Top-level `primary` / SDK tests (mock client / `makeContext`) | not started | — |
 
 Running `cargo test` exercises the implemented corpus subsets.
@@ -55,12 +57,13 @@ Running `cargo test` exercises the implemented corpus subsets.
 
 ## What's not done / next
 
-- `inject` + the three-phase child loop + `_injectstr` (full-match vs partial, `$BT`/`$DS`
-  escapes, `$NAME999` transform-name syntax).
-- `transform` + the 11 commands (`$DELETE`/`$COPY`/`$KEY`/`$ANNO`/`$META`/`$MERGE`/`$EACH`/
-  `$PACK`/`$REF`/`$FORMAT`/`$APPLY`), `checkPlacement`/`injectorArgs`/`injectChild`, the
-  `FORMATTER` table. The `prior.keyI--` in `$REF`/`injectChild` is the studied exception
-  (PLAN.md §9 item 3).
+- The structural transform commands: `$EACH`, `$PACK`, `$REF`, `$FORMAT`, `$APPLY` (+
+  `injectChild`, the `FORMATTER` table). These build the parallel data structures and
+  recurse with adjusted injection state; the `prior.keyI--` in `$REF`/`injectChild` is the
+  studied exception (PLAN.md §9 item 3). Currently registered as error-pushing stubs so
+  `transform` with those commands fails cleanly rather than crashing.
+- `$META` transform command (the `$=`/`$~` meta-path syntax in `getpath` is done; the
+  `$META` *command* and `_validatehandler`'s meta handling are not).
 - `validate` + the 15 checkers, `_validation`/`_validatehandler`, `$OPEN` open-object
   handling, `_invalidTypeMsg` text.
 - `select` + `$AND`/`$OR`/`$NOT`/`$GT`/`$LT`/`$GTE`/`$LTE`/`$LIKE`.

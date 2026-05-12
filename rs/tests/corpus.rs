@@ -491,6 +491,87 @@ fn corpus() {
         get_path(&store, &vget(&vin, "path"), Some(&d))
     });
 
+    // -------- inject -------------------------------------------------
+    {
+        // inject.basic is a single { in: {val, store}, out } object.
+        let basic = vget_path(&s, &["inject", "basic"]);
+        let bin = vget(&basic, "in");
+        let bout = fix_json(&vget(&basic, "out"), true);
+        let got = fix_json(
+            &inject(clone(&vget(&bin, "val")), &clone(&vget(&bin, "store")), None),
+            true,
+        );
+        if got == bout {
+            run.passed += 1;
+        } else {
+            run.failures.push(format!(
+                "inject-basic: got {}, want {}",
+                stringify(&got, Some(200), false),
+                stringify(&bout, Some(200), false)
+            ));
+        }
+    }
+    run.run_set(&set!("inject", "string"), true, "inject-string", |vin| {
+        let null_mod: Modify = Rc::new(
+            |val: &Value, key: &Value, parent: &Value, _inj: &Inj, _store: &Value| {
+                if let Value::Str(svv) = val {
+                    if svv == NULLMARK {
+                        set_prop(parent.clone(), key, Value::Null);
+                    } else {
+                        set_prop(parent.clone(), key, Value::str(svv.replace(NULLMARK, "null")));
+                    }
+                }
+            },
+        );
+        let d = InjectDef { modify: Some(null_mod), ..Default::default() };
+        inject(vget(&vin, "val"), &vget(&vin, "store"), Some(&d))
+    });
+    run.run_set(&set!("inject", "deep"), true, "inject-deep", |vin| {
+        inject(vget(&vin, "val"), &vget(&vin, "store"), None)
+    });
+
+    // -------- transform ---------------------------------------------
+    {
+        let basic = vget_path(&s, &["transform", "basic"]);
+        let bin = vget(&basic, "in");
+        let bout = fix_json(&vget(&basic, "out"), true);
+        let got = match transform(&clone(&vget(&bin, "data")), &clone(&vget(&bin, "spec")), None) {
+            Ok(v) => fix_json(&v, true),
+            Err(e) => Value::str(format!("ERR:{}", e)),
+        };
+        if got == bout {
+            run.passed += 1;
+        } else {
+            run.failures.push(format!(
+                "transform-basic: got {}, want {}",
+                stringify(&got, Some(200), false),
+                stringify(&bout, Some(200), false)
+            ));
+        }
+    }
+    for name in ["paths", "cmds"] {
+        run.run_set(&set!("transform", name), true, &format!("transform-{name}"), |vin| {
+            match transform(&vget(&vin, "data"), &vget(&vin, "spec"), None) {
+                Ok(v) => v,
+                Err(_) => Value::Noval,
+            }
+        });
+    }
+    run.run_set(&set!("transform", "modify"), true, "transform-modify", |vin| {
+        let m: Modify = Rc::new(
+            |val: &Value, key: &Value, parent: &Value, _inj: &Inj, _store: &Value| {
+                if let Value::Str(svv) = val {
+                    set_prop(parent.clone(), key, Value::str(format!("@{svv}")));
+                }
+            },
+        );
+        let d = InjectDef { modify: Some(m), ..Default::default() };
+        match transform(&vget(&vin, "data"), &vget(&vin, "spec"), Some(&d)) {
+            Ok(v) => v,
+            Err(_) => Value::Noval,
+        }
+    });
+
     // -------- report -------------------------------------------------
     if !run.failures.is_empty() {
         let n = run.failures.len();
