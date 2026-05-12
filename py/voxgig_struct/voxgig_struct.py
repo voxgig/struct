@@ -693,7 +693,7 @@ def jsonify(val: Any = UNDEF, flags: dict[str, Any] = UNDEF) -> str:
     return json_str
 
 
-def jo(*kv: Any) -> dict[str, Any]:
+def jm(*kv: Any) -> dict[str, Any]:
     """
     Define a JSON Object using function arguments.
     Arguments are treated as key-value pairs.
@@ -715,7 +715,7 @@ def jo(*kv: Any) -> dict[str, Any]:
     return o
 
 
-def ja(*v: Any) -> list[Any]:
+def jt(*v: Any) -> list[Any]:
     """
     Define a JSON Array using function arguments.
     """
@@ -726,11 +726,6 @@ def ja(*v: Any) -> list[Any]:
         a[i] = v[i] if i < vsize else None
 
     return a
-
-
-# Aliases to match TS canonical names
-jm = jo
-jt = ja
 
 
 def select_AND(state, _val, _ref, store):
@@ -2735,8 +2730,6 @@ class StructUtility:
         self.items = items
         self.jm = jm
         self.jt = jt
-        self.jo = jo
-        self.ja = ja
         self.join = join
         self.joinurl = joinurl
         self.jsonify = jsonify
@@ -2829,9 +2822,7 @@ __all__ = [
     'ismap',
     'isnode',
     'items',
-    'ja',
     'jm',
-    'jo',
     'join',
     'joinurl',
     'jsonify',

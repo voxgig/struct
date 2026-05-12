@@ -72,8 +72,8 @@ type StructUtility struct {
 	SKIP   any
 	DELETE any
 
-	Jo func(kv ...any) map[string]any
-	Ja func(v ...any) []any
+	Jm func(kv ...any) map[string]any
+	Jt func(v ...any) []any
 
 	CheckPlacement func(modes int, ijname string, parentTypes int, inj *voxgigstruct.Injection) bool
 	InjectorArgs   func(argTypes []int, args []any) []any

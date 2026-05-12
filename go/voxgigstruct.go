@@ -1360,12 +1360,6 @@ func Jt(v ...any) []any {
 	return a
 }
 
-// Jo is an alias for Jm (define a JSON object from key/value arguments).
-func Jo(kv ...any) map[string]any { return Jm(kv...) }
-
-// Ja is an alias for Jt (define a JSON array from arguments).
-func Ja(v ...any) []any { return Jt(v...) }
-
 // Safely delete a property from a map or list element.
 // For maps, the property is deleted. For lists, the element at the
 // index is removed and remaining elements are shifted down.

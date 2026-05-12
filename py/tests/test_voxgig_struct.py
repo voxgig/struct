@@ -54,8 +54,8 @@ islist = struct_utils.islist
 ismap = struct_utils.ismap
 isnode = struct_utils.isnode
 items = struct_utils.items
-ja = struct_utils.ja
-jo = struct_utils.jo
+jm = struct_utils.jm
+jt = struct_utils.jt
 joinurl = struct_utils.joinurl
 jsonify = struct_utils.jsonify
 keysof = struct_utils.keysof
@@ -771,27 +771,27 @@ class TestStruct(unittest.TestCase):
     # -------------------------------------------------
 
     def test_json_builder(self):
-        self.assertEqual(jsonify(jo('a', 1)), '{\n  "a": 1\n}')
+        self.assertEqual(jsonify(jm('a', 1)), '{\n  "a": 1\n}')
 
-        self.assertEqual(jsonify(ja('b', 2)), '[\n  "b",\n  2\n]')
+        self.assertEqual(jsonify(jt('b', 2)), '[\n  "b",\n  2\n]')
 
         self.assertEqual(
-            jsonify(jo('c', 'C', 'd', jo('x', True), 'e', ja(None, False))),
+            jsonify(jm('c', 'C', 'd', jm('x', True), 'e', jt(None, False))),
             '{\n  "c": "C",\n  "d": {\n    "x": true\n  },\n  "e": [\n    null,\n    false\n  ]\n}',
         )
 
         self.assertEqual(
             jsonify(
-                ja(
+                jt(
                     3.3,
-                    jo('f', True, 'g', False, 'h', None, 'i', ja('y', 0), 'j', jo('z', -1), 'k'),
+                    jm('f', True, 'g', False, 'h', None, 'i', jt('y', 0), 'j', jm('z', -1), 'k'),
                 )
             ),
             '[\n  3.3,\n  {\n    "f": true,\n    "g": false,\n    "h": null,\n    "i": [\n      "y",\n      0\n    ],\n    "j": {\n      "z": -1\n    },\n    "k": null\n  }\n]',
         )
 
         self.assertEqual(
-            jsonify(jo(True, 1, False, 2, None, 3, ['a'], 4, {'b': 0}, 5)),
+            jsonify(jm(True, 1, False, 2, None, 3, ['a'], 4, {'b': 0}, 5)),
             '{\n  "true": 1,\n  "false": 2,\n  "null": 3,\n  "[a]": 4,\n  "{b:0}": 5\n}',
         )
 

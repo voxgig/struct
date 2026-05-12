@@ -110,8 +110,8 @@ func NewSDK(opts map[string]any) *SDK {
 		SKIP:   voxgigstruct.SKIP,
 		DELETE: voxgigstruct.DELETE,
 
-		Jo: voxgigstruct.Jo,
-		Ja: voxgigstruct.Ja,
+		Jm: voxgigstruct.Jm,
+		Jt: voxgigstruct.Jt,
 
 		CheckPlacement: voxgigstruct.CheckPlacement,
 		InjectorArgs:   voxgigstruct.InjectorArgs,

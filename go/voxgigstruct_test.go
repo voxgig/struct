@@ -1364,22 +1364,22 @@ func TestStruct(t *testing.T) {
 
 	t.Run("json-builder", func(t *testing.T) {
 		expected0 := "{\n  \"a\": 1\n}"
-		result0 := voxgigstruct.Jsonify(voxgigstruct.Jo("a", 1))
+		result0 := voxgigstruct.Jsonify(voxgigstruct.Jm("a", 1))
 		if result0 != expected0 {
 			t.Errorf("Expected: %v, Got: %v", expected0, result0)
 		}
 
 		expected1 := "[\n  \"b\",\n  2\n]"
-		result1 := voxgigstruct.Jsonify(voxgigstruct.Ja("b", 2))
+		result1 := voxgigstruct.Jsonify(voxgigstruct.Jt("b", 2))
 		if result1 != expected1 {
 			t.Errorf("Expected: %v, Got: %v", expected1, result1)
 		}
 
 		expected2 := "{\n  \"c\": \"C\",\n  \"d\": {\n    \"x\": true\n  },\n  \"e\": [\n    null,\n    false\n  ]\n}"
-		result2 := voxgigstruct.Jsonify(voxgigstruct.Jo(
+		result2 := voxgigstruct.Jsonify(voxgigstruct.Jm(
 			"c", "C",
-			"d", voxgigstruct.Jo("x", true),
-			"e", voxgigstruct.Ja(nil, false),
+			"d", voxgigstruct.Jm("x", true),
+			"e", voxgigstruct.Jt(nil, false),
 		))
 		if result2 != expected2 {
 			t.Errorf("Expected:\n%v\nGot:\n%v", expected2, result2)
