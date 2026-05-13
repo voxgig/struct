@@ -17,9 +17,9 @@
 
 | Language | Functions | Type Constants | Sentinels | Tests | Status |
 |----------|-----------|---------------|-----------|-------|--------|
-| **ts** (canonical) | 40 | 15 | 2 | 83/83 pass | Reference (Group A/B) |
-| **js** | 40 | 15 | 2 | 84/84 pass | Group A/B applied |
-| **py** | 40+ | 15 | 2 | 78/84 pass | Group A/B partial \*1 |
+| **ts** (canonical) | 40 | 15 | 2 | 89/89 pass | Reference (Group A/B) |
+| **js** | 40 | 15 | 2 | 90/90 pass | Group A/B applied |
+| **py** | 40+ | 15 | 2 | 90/93 pass (3 skip) | Group A/B applied |
 | **go** | 50+ | 15 | 2 | 92/92 pass | already Group A |
 | **php** | 46 | 15 | 2 | 84/84 pass | already Group A |
 | **rb** | 40+ | 15 | 2 | 75/75 pass | already Group A |
@@ -27,23 +27,22 @@
 | **rs** | 40+ | 15 | 2 | corpus pass | already Group A |
 | **c** | 40 | 15 | 2 | 1177/1177 corpus | Group A/B applied |
 | **java** | 40 | 15 | 2 | 1245/1245 corpus | already Group A |
-| **cpp** | 40 | 15 | 2 | n/a \*2 | already Group A |
+| **cpp** | 40 | 15 | 2 | 1245/1245 corpus | nlohmann/json fix |
 | **cs** | 40 | 15 | 2 | 78/78 corpus | already Group A |
 | **kt** | 40 | 15 | 2 | 135/135 | already Group A |
-| **zig** | 40 | 15 | 2 | 59/60 corpus sets \*3 | already Group A |
+| **zig** | 40 | 15 | 2 | 60/60 corpus sets \*1 | wrap_pad fix |
 
-\*1 Python: getprop / getelem / haskey are now Group A; Injection.setval
-mirrors setprop (no delete-on-None shortcut). Six legacy
-transform/validate tests fail because the existing test corpus encodes
-the older delete-on-undef shape (TS gets away with it because
-JSON.stringify drops undefined, Python's json.dumps does not). Per
-spec point 6, the test runner / corpus need a follow-up pass.
+\*1 Zig: pre-existing `transform-ref` arena-teardown SIGSEGV is
+unaffected by this rollout and is reported by the build wrapper, even
+though all 60 individual tests now pass. The `minor-pad` regression
+was fixed by stringifying non-string vals in the test wrapper.
 
-\*2 C++: build currently blocked by missing system nlohmann/json (pre-
-existing); unaffected by this rollout.
-
-\*3 Zig: pre-existing minor-pad failure and a `transform-ref` arena
-teardown SIGSEGV (already documented).
+The `sentinels.jsonic` conformance category (UNDEF_SPEC.md point 7)
+exercises Group A's "null = absent" rule with three side-by-side
+input states (VALUE, NULL, ABSENT) for getprop / getelem / haskey /
+isempty / isnode, plus a stringify_null check. TS, JS, and Python
+each wire 6 sentinels-* tests; ports that haven't wired the category
+still pass their existing corpus.
 
 \*\* C: full TS-canonical parity. Reference-counted `vs_value` tagged
 union with `vs_list` / `vs_map` (insertion-ordered, hash-indexed) for
