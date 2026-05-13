@@ -4,6 +4,16 @@
 **Canonical**: TypeScript (`ts/`)
 **Languages**: JS, Python, Go, PHP, Ruby, Lua, Rust, C, Zig, C#, Java, C++, Kotlin
 
+**Runtime third-party dependencies**: 8 of 14 ports ship with **zero**
+runtime third-party packages (ts, js, py, go, rb, php, cs, **rs**,
+**zig** — Rust and Zig now vendor an in-tree RE2-subset regex engine
+in `rs/src/re.rs` / `zig/src/regex.zig`, mirroring the C and Lua
+ports). The remaining ports depend on a JSON parser at the text
+boundary only: lua/dkjson, java/gson, kt/gson, c/cJSON,
+cpp/nlohmann_json. Rust still has `indexmap` for insertion-ordered
+maps, which fills a stdlib gap the C/C++/Zig ports cover by
+hand-writing an OrderedMap.
+
 **Group A/B semantics rollout** (per `UNDEF_SPEC.md`):
 - `getprop` / `getelem` / `haskey` / `isempty` / `isnode` are **Group A**:
   a stored null is treated as "no value" and returns the alt / false.
