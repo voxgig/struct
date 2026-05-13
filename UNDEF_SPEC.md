@@ -403,6 +403,92 @@ After this, every port can be diff-read against canonical TS for
 sentinel handling, and a new test that exercises the corner case
 catches regressions in every port simultaneously.
 
+## Client-code impact
+
+The spec governs library internals and the test corpus. Most client
+code is unaffected. Two patterns work identically in every port and
+need no migration:
+
+```
+// 1. Get-with-default: alt is returned only for ABSENT.
+//    Stored JSON null is a real value and is returned as-is.
+v = getprop(obj, 'k', default)
+
+// 2. Presence test: true iff key is present, regardless of value.
+if haskey(obj, 'k') { ... }
+```
+
+The pattern that **does** break in ports that historically conflated
+ABSENT with NULL is direct comparison of the returned value against
+the language's native null/nil/None:
+
+```
+v = getprop(obj, 'k')            // no default
+if v == null { ... }              // before: matched ABSENT and NULL together
+                                  // after:  matches NULL only — ABSENT gives UNDEF
+```
+
+Migration target (works in every port, regardless of how UNDEF is
+modelled):
+
+```
+if haskey(obj, 'k') {
+    v = getprop(obj, 'k')
+    if is_null(v) { /* stored JSON null */ }
+    else          { /* concrete value */ }
+} else {
+    /* absent */
+}
+```
+
+### Migration friction per port
+
+| Port | Client migration | What breaks |
+|---|---|---|
+| ts / js | none | `=== undefined` / `=== null` already do the right thing |
+| rs, zig, cpp, c | none | type system / tagged variant already forces the distinction |
+| java, cs, kt | minor | clients using `Map.containsKey` already fine; clients comparing returned values to literal `null` to detect absent must switch to `=== UNDEF` (identity) |
+| rb | minor | `v.nil?` no longer catches absent; use `haskey` or `equal?(UNDEF)` |
+| go | **breaking** | `if v == nil` no longer catches absent — switch to `haskey` / `getprop(.., default)` / `== UNDEF` |
+| php | **breaking** | `=== null` no longer catches absent — switch to `array_key_exists` (PHP idiom) or `UNDEF` identity |
+| py | **breaking** | `is None` no longer catches absent — switch to `'k' in obj`, `haskey(obj, 'k')`, or `is UNDEF` |
+| lua | **breaking — biggest** | `v == nil` flips meaning (now only ABSENT). Clients round-tripping JSON now see `JNULL` for stored null. Use `is_null(v)` / `is_undef(v)`. |
+
+### What every port must export to clients
+
+For client code to write portable cross-port logic, each port exports:
+
+- `UNDEF` — the sentinel value (constant or singleton).
+- `JNULL` — Lua only; the JSON-null sentinel.
+- `is_undef(v)` / `is_null(v)` — predicates. **Recommended over direct comparison** because they hide each port's representation choice.
+- `haskey(obj, k)` — presence test on map / list.
+- `getprop(obj, k, alt)` — value-with-default lookup.
+
+Clients written against these five APIs are completely insulated from
+per-language UNDEF mechanics. The migration burden falls entirely on
+clients that bypassed them by comparing returned values to the host
+language's literal null/nil/None.
+
+### When the distinction actually matters to clients
+
+Most application code doesn't care: it asks for a value, falls back to
+a default, and moves on. The distinction matters in three concrete
+patterns:
+
+1. **PATCH-vs-PUT semantics.** A JSON-API endpoint that distinguishes
+   "remove this field" (UNDEF) from "set this field to null" (NULL).
+2. **Config with explicit unset.** A config file where `{db: null}`
+   means "explicitly disable the db connection" and `{}` (no `db`
+   key) means "use the default".
+3. **Round-trip preservation.** Code that loads JSON, mutates a
+   subtree, and writes it back, where dropping vs preserving null
+   fields would change the output.
+
+For these, the spec gives clients a portable contract: any port that
+passes the conformance category supports the distinction the same
+way.
+
+
 ## TL;DR
 
 - Define three states: VALUE, NULL, ABSENT. Every port must
@@ -419,3 +505,9 @@ catches regressions in every port simultaneously.
   sentinels; the corpus never sees them.
 - A shared conformance category (`sentinels.jsonic`) makes the
   contract mechanically testable.
+- Client code that uses `getprop(obj, k, default)` and `haskey(obj, k)`
+  is unaffected by the spec. The pattern that breaks is bypassing
+  those helpers and comparing returned values against the host
+  language's literal null/nil/None — that comparison is what
+  conflates ABSENT and NULL in py/lua/php/go and must be replaced
+  with `is_undef(v)` / `is_null(v)`.
