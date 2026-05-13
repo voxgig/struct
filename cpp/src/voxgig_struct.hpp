@@ -397,6 +397,9 @@ inline std::vector<std::string> keysof(const Value& v) {
   if (v.is_map()) {
     for (const auto& [k, _] : *v.as_map())
       out.push_back(k);
+    // Matches TS canonical Object.keys(val).sort() — keysof returns
+    // alphabetically sorted keys regardless of insertion order.
+    std::sort(out.begin(), out.end());
   } else {
     auto l = v.as_list();
     out.reserve(l->size());
@@ -743,7 +746,8 @@ inline void _json_escape(const std::string& s, std::string& out) {
   }
 }
 
-inline void _jsonify_inner(const Value& v, std::string& out, int indent, int depth) {
+inline void _jsonify_inner(const Value& v, std::string& out, int indent, int depth,
+                            bool sort_keys = false) {
   if (v.is_undef() || v.is_null()) { out += "null"; return; }
   if (v.is_bool()) { out += v.as_bool() ? "true" : "false"; return; }
   if (v.is_int()) {
@@ -784,7 +788,7 @@ inline void _jsonify_inner(const Value& v, std::string& out, int indent, int dep
         out += '\n';
         out.append(static_cast<size_t>((depth + 1) * indent), ' ');
       }
-      _jsonify_inner(e, out, indent, depth + 1);
+      _jsonify_inner(e, out, indent, depth + 1, sort_keys);
     }
     if (indent > 0) {
       out += '\n';
@@ -797,8 +801,19 @@ inline void _jsonify_inner(const Value& v, std::string& out, int indent, int dep
     const auto& m = *v.as_map();
     if (m.empty()) { out += "{}"; return; }
     out += '{';
+
+    // Optionally walk in sorted key order (stringify behaviour, matching
+    // TS canonical's stringify replacer). jsonify keeps insertion order.
+    std::vector<std::string> order;
+    order.reserve(m.size());
+    for (const auto& [k, _e] : m) order.push_back(k);
+    if (sort_keys) std::sort(order.begin(), order.end());
+
     bool first = true;
-    for (const auto& [k, e] : m) {
+    for (const auto& k : order) {
+      const Value* ep = m.find(k);
+      if (!ep) continue;
+      const auto& e = *ep;
       if (!first) out += ',';
       first = false;
       if (indent > 0) {
@@ -808,7 +823,7 @@ inline void _jsonify_inner(const Value& v, std::string& out, int indent, int dep
       out += '"';
       _json_escape(k, out);
       out += indent > 0 ? "\": " : "\":";
-      _jsonify_inner(e, out, indent, depth + 1);
+      _jsonify_inner(e, out, indent, depth + 1, sort_keys);
     }
     if (indent > 0) {
       out += '\n';
@@ -872,10 +887,11 @@ inline std::string stringify(const Value& v, int maxlen) {
   if (v.is_string()) {
     valstr = v.as_string();
   } else {
-    // Use the in-tree printer (no third-party dep) with compact output;
-    // then strip double-quotes (TS regex /"/g).
+    // Use the in-tree printer (no third-party dep) with compact output
+    // AND sorted keys (matches TS canonical's stringify replacer); then
+    // strip double-quotes (TS regex /"/g).
     std::string raw;
-    _jsonify_inner(v, raw, 0, 0);
+    _jsonify_inner(v, raw, 0, 0, true);
     valstr.reserve(raw.size());
     for (char c : raw)
       if (c != '"')
