@@ -1,513 +1,416 @@
-# Absent vs Null — Uniform Cross-Port Semantics
+# Absent vs Null — Uniform Cross-Port Semantics (Corrected)
 
 > **What this is.** A specification for how every port of voxgig-struct
-> represents and exchanges three states — *absent*, *JSON null*, and
-> *any other value* — so that the shared test corpus is unambiguous,
-> the public API behaves the same in every language, and ordinary
-> language JSON parsers can be used unchanged with a small
-> preprocessing layer on top.
+> handles three states — *absent*, *JSON null*, and *any other value*
+> — given the hard constraint that most languages cannot reliably
+> distinguish JSON null from absent at the value level.
 >
-> Companion to `UNDEF.md` (which documents what each language can do
-> natively) and `REGEX_API.md` / `REGEX.md` (which apply the same
-> "uniform-API plus minimal preprocessing" pattern to regex).
+> The previous draft of this spec required ports to expose a distinct
+> `UNDEF` sentinel through the public API. That assumption was wrong:
+> Python, Lua, PHP, Go (and arguably Ruby) cannot enforce that
+> distinction without either contaminating returned data with non-JSON
+> sentinel objects (forcing all client code to know about them) or
+> forcing every API site through awkward boxing types. The corrected
+> design accepts the constraint and **moves the distinction entirely
+> inside the test corpus**.
+>
+> Companion to `UNDEF.md` (what each language can do natively).
 
-## The three states
+## The two states the library exposes
 
 For every value position the library deals with — map value, list
-element, struct field, function parameter, function return — exactly
-one of three states applies:
+element, struct field, function parameter, function return — the
+**public API recognises only two observable states**:
 
-| State | Meaning | Library symbol | JSON serialisation |
-|---|---|---|---|
-| **VALUE** | The slot holds a concrete value (a string, number, bool, list, map, etc.) | the value itself | the value's JSON form |
-| **NULL** | The slot holds JSON `null` as a real value | the language's "null" (or a sentinel — see Lua) | `null` |
-| **ABSENT** | The slot has no value at all (key not present / variable unset / return omitted) | the language's `UNDEF` sentinel | the key is omitted entirely |
+| State | Meaning |
+|---|---|
+| **VALUE** | The slot holds a concrete value (a non-null/non-nil/non-None primitive, list, or map). |
+| **NO-VALUE** | The slot is empty. This unifies "key absent", "JSON null", and the language's native null/nil/None. |
 
-Both NULL and ABSENT are *empty* (`isempty` returns true for both),
-but they are not interchangeable: `getprop({a:null}, 'a')` must
-return NULL, `getprop({}, 'a')` must return ABSENT. The test corpus
-encodes the difference; every port must preserve it.
+This is a deliberate choice. JSON has three states at the syntactic
+level (value, null, key omitted) but the library exposes them as two,
+because:
 
-## The corpus encoding
+- Python, Ruby, Go, PHP, Lua cannot tell `null` from absent at the
+  value level without a sentinel object that clients would then have
+  to import and identity-check.
+- Returning a sentinel from the API leaks an implementation type into
+  every client and makes round-tripping through JSON impossible
+  (the sentinel can't be serialised back out without ambiguity).
+- The behaviours most code wants — "give me a value or a default",
+  "is this key meaningful?", "what's the shape of this tree?" —
+  treat null and absent identically anyway.
 
-The shared corpus (`build/test/test.json`) is plain JSON. JSON can
-already express two of the three states directly:
+So the API rule is: **the language's native null/nil/None is
+synonymous with absent throughout the library's surface.** Clients
+who need PATCH-vs-PUT semantics (the rare case where the distinction
+genuinely matters) handle it themselves at the protocol layer.
 
-- VALUE: any normal JSON value.
-- NULL: literal `null`.
-- ABSENT: the key is omitted from the containing object.
+## Public-API behaviour
 
-That covers most cases. Three positions are not natively expressible
-in JSON and need string markers:
+`X` denotes any non-null value. `NULL` denotes the language's native
+null/nil/None.
 
-1. **An expected output that should be the ABSENT sentinel.** JSON can
-   leave the key out of the *containing* object, but if the value
-   appears at the root or as a list element, there's no "omit it"
-   syntax. Use the marker string `"__UNDEF__"`.
+| Call | Returns |
+|---|---|
+| `getprop({a:X}, 'a')` | X |
+| `getprop({a:NULL}, 'a')` | NULL (which the caller should treat as "no value") |
+| `getprop({}, 'a')` | NULL |
+| `getprop({a:X}, 'a', alt)` | X |
+| **`getprop({a:NULL}, 'a', alt)`** | **alt** — null is treated as absent for the default-substitution rule |
+| `getprop({}, 'a', alt)` | alt |
+| `haskey({a:X}, 'a')` | true |
+| **`haskey({a:NULL}, 'a')`** | **false** — null counts as "no value" |
+| `haskey({}, 'a')` | false |
+| `setprop(p, 'a', X)` | p with `a = X` |
+| **`setprop(p, 'a', NULL)`** | **p with `a` removed** — null means "no value", so deletes |
+| `delprop(p, 'a')` | p with `a` removed |
+| `isempty(NULL)` | true |
+| `isempty('')` / `isempty([])` / `isempty({})` | true |
+| `isnode(NULL)` | false |
+| `typify(NULL)` | `T_NOVAL` (one bit, the same value the canonical previously gave to undefined) |
+| `stringify(NULL)` | `""` (empty — null is "no value", so nothing to stringify) |
+| `pad(NULL, 6)` | `"      "` (six spaces — stringify yields empty, then pad) |
 
-2. **A NULL value in a context where the runner has converted nulls to
-   markers.** Some ports' runners replace JSON null with the marker
-   `"__NULL__"` so the library never sees the language's native null
-   (which would, in those languages, be indistinguishable from
-   ABSENT). Use the marker string `"__NULL__"`.
+This is the single source of truth. Every port satisfies it.
 
-3. **"This key must exist, regardless of value"** in an output
-   assertion. Use the marker string `"__EXISTS__"`.
+> **Note on the canonical TS.** Today's canonical TS distinguishes
+> `undefined` from `null` and returns `null` from
+> `getprop({a:null}, 'a', alt)`. To match this spec, the canonical
+> TS also needs to be updated so that `getprop({a:null}, 'a', alt)`
+> returns `alt`. The change is small (one extra `null ===` test in
+> `getprop` and `haskey`, swap `NONE === val` for `null == val` in
+> `setval`'s delete check, etc.), but it does mean the canonical's
+> ts test corpus needs the same updates other ports' corpora need.
+> Treat this as part of the rollout.
 
-These three markers are the only special-cased strings. They were
-chosen to be unlikely to collide with real data; if a test ever needs
-to assert on the literal string `"__NULL__"`, escape it (e.g.
-`"$__NULL__"`).
+## The three states still matter — for testing
 
-## Preprocessing — input side
+Although the library exposes only two states, the **test corpus
+must encode all three** so we can verify that the library actually
+unifies null and absent into NO-VALUE (rather than silently
+preserving one of them). Without separate corpus encodings, you
+cannot tell whether a port is correctly conflating them or has a
+latent bug that happens to be invisible against the tests you
+wrote.
 
-For every test entry the runner does this *after* JSON-parsing:
+So the corpus needs to express, for any value position:
+
+- VALUE — a concrete JSON value
+- NULL — JSON null (the wire-level "value is null" case)
+- ABSENT — key omitted (the wire-level "value is missing" case)
+
+And the corpus is parsed using the **language's standard JSON
+parser** — we cannot ship a bespoke parser per port. Therefore the
+corpus must encode these three states in a way that any JSON parser
+can represent. That gives us:
+
+- VALUE: any literal JSON value (e.g. `1`, `"x"`, `[]`).
+- NULL: the JSON token `null`. Parsed natively as the language's
+  null/nil/None. Same as absent from the library's POV — but the
+  test still needs to verify that.
+- ABSENT: in a map-value position, omit the key entirely. In any
+  other position (root, list slot, function arg), use the **marker
+  string `"__UNDEF__"`** which the runner preprocessor removes from
+  its parent / treats as absent on the way in.
+
+JSON syntax already gives us VALUE and NULL. The only thing it
+cannot express is ABSENT in a non-map-value position. That's what
+`"__UNDEF__"` is for.
+
+## Corpus markers
+
+| Marker (string literal) | Meaning in the corpus | After preprocessing |
+|---|---|---|
+| `"__UNDEF__"` | "this should be ABSENT" | The marker is **removed from its parent**: at a map-value position, the key is deleted; at a list slot, the slot is removed and indices renumber; at the root or a function-arg position, the value is replaced with the language's native null (since that's how the library represents NO-VALUE on return). |
+| `"__EXISTS__"` | "in an expected output: assert the key is present, value irrelevant" | Used in expected outputs only; the comparison routine special-cases it. |
+
+That's the entire marker surface. **No `__NULL__` marker is needed**
+— JSON null is already JSON null, and the runner can pass it through
+to the library unchanged. The library treats it as NO-VALUE because
+the API contract says so.
+
+The corpus author writes tests like:
+
+```jsonic
+getprop: {
+  set: [
+    # VALUE case
+    { in: { val:{a:1}, key:'a', alt:'D' }, out: 1 }
+
+    # NULL case (JSON null in source data)
+    { in: { val:{a:null}, key:'a', alt:'D' }, out: 'D' }
+
+    # ABSENT case (key omitted entirely)
+    { in: { val:{}, key:'a', alt:'D' }, out: 'D' }
+  ]
+}
+```
+
+All three tests verify the library does the right thing. The middle
+one (NULL) is the case ports historically got wrong by returning
+null instead of `'D'`.
+
+And for the rare positions JSON can't express absence in:
+
+```jsonic
+# Root-position ABSENT — the library is called with no first arg
+# (or the language equivalent). __UNDEF__ tells the preprocessor
+# to convert this slot to the language's native null on the way in,
+# which the library then treats as NO-VALUE.
+{ in: { val: '__UNDEF__', key:'a', alt:'D' }, out: 'D' }
+
+# List-slot ABSENT — the marker is removed from the list during
+# preprocessing, so this is equivalent to ['a']:
+{ in: { val: ['__UNDEF__', 'a'], key: 0 }, out: 'a' }
+```
+
+## Test runner preprocessing
+
+The corpus is parsed once with the language's standard JSON parser.
+Then, before any test is run, the runner does **one walk** of the
+parsed tree:
 
 ```
-markers_to_sentinels(value):
+preprocess(value):
     if value is the string "__UNDEF__":
-        return UNDEF
-    if value is the string "__NULL__":
-        return NULL
+        # Removed by the parent walker (see below). At root, returned as null.
+        return REMOVE_MARKER
     if value is a map:
-        return {k: markers_to_sentinels(v) for k, v in value.items()}
+        out = {}
+        for k, v in value.items():
+            pv = preprocess(v)
+            if pv is REMOVE_MARKER:
+                continue  # drop this key
+            out[k] = pv
+        return out
     if value is a list:
-        return [markers_to_sentinels(v) for v in value]
+        out = []
+        for v in value:
+            pv = preprocess(v)
+            if pv is REMOVE_MARKER:
+                continue  # drop this slot (indices shift)
+            out.append(pv)
+        return out
     return value
 ```
 
-After this pass, the value the library receives has:
-- Native JSON nulls → language null (or `JNULL` sentinel in Lua — see below).
-- Marker strings → real sentinels.
-- Everything else unchanged.
+After this single pass:
 
-## Preprocessing — output side
+- VALUE inputs are unchanged.
+- NULL inputs are unchanged — language's native null.
+- ABSENT-in-map inputs are unchanged — the key was never in the JSON.
+- `"__UNDEF__"` marker inputs have been **removed from their
+  containers**, producing the absent-key / shorter-list shape the
+  library actually receives.
+- Root-position `"__UNDEF__"` becomes the language's null (since the
+  library accepts null = NO-VALUE there anyway).
 
-When a function's actual output is compared against the corpus's
-expected output, the runner does the inverse on both sides:
+The library now operates on perfectly natural language-native data.
+It never sees a marker. It never knows the corpus existed.
 
-```
-sentinels_to_markers(value):
-    if value is UNDEF:
-        return "__UNDEF__"
-    if value is NULL (or JNULL in Lua):
-        return "__NULL__"
-    if value is a map:
-        return {k: sentinels_to_markers(v) for k, v in value.items()}
-    if value is a list:
-        return [sentinels_to_markers(v) for v in value]
-    return value
-```
+## Output comparison
 
-Then deep-compare. (Or compare the two as compact-JSON strings — the
-markers survive JSON round-trip because they're just strings.)
-
-Either side can short-circuit: if the language already distinguishes
-absent / null / value at the value level, the runner can compare
-directly. The marker form is the lowest-common-denominator that every
-port can produce, so it's the canonical comparison form.
-
-## Per-language sentinel implementation
-
-Every port declares a constant `UNDEF` that is:
-
-1. **Identity-distinct from null.** `UNDEF == null` is false; `UNDEF
-   is null` is false; `is_undef(null)` is false; `is_null(UNDEF)` is
-   false.
-2. **Identity-distinct from every other library value.** The sentinel
-   is a singleton — `UNDEF == UNDEF` is true; `UNDEF == anything_else`
-   is false.
-3. **Identifiable by `is_undef(v)`.** Every port exports an
-   `is_undef` / `isUndef` / `IsUndef` predicate matching the port's
-   naming convention.
-
-Concrete choice per language:
-
-| Port | UNDEF | NULL |
-|---|---|---|
-| ts / js | `undefined` | `null` |
-| py | a `class _Undef:` singleton instance | `None` |
-| go | `var UNDEF = struct{ _voxgig_undef bool }{}` (a singleton struct value, or a `*sentinel` shared address) | `nil` |
-| rb | `UNDEF = Object.new.freeze` | `nil` |
-| php | `class _Undef {} ; UNDEF = new _Undef()` (and an `array_key_exists` style API at map sites) | `null` |
-| lua | `UNDEF = setmetatable({}, {__tostring=function() return 'UNDEF' end})` plus the **JNULL sentinel** (see next section) | **JNULL = setmetatable({}, {__tostring=function() return 'JNULL' end})** — Lua tables cannot store nil, so JSON null must be a sentinel value |
-| rs | `enum Value::Noval` | `enum Value::Null` |
-| java | `static final Object UNDEF = new Object()` | `null` |
-| cs | `static readonly object UNDEF = new()` | `null` |
-| cpp | `std::monostate{}` (a variant alternative) | `nullptr_t` (another alternative) |
-| kt | `val UNDEF: Any = Any()` | `null` |
-| zig | `Value{ .noval = {} }` variant | `Value{ .null = {} }` variant |
-| c | `VS_VAL_UNDEF` tagged enum case | `VS_VAL_NULL` tagged enum case |
-
-The crucial property is that `is_undef(v)` checks **object identity**
-(via `===`, `is`, `===` again in Ruby, `equal?`, `===` in Kotlin,
-pointer identity in C, variant tag in Rust/Zig/C++, etc.), not
-structural equality. This rules out cases like Python's old
-`UNDEF = None` (where `==` could not distinguish them) and PHP's
-old `'__UNDEFINED__'` string (where a JSON corpus containing that
-exact string would be misinterpreted).
-
-## Lua's JNULL — the special case
-
-Lua tables literally cannot hold `nil` as a value: assignment is
-equivalent to deletion. Therefore JSON `null` cannot survive a
-round-trip through a Lua table using native nil. Required behaviour:
-
-1. The Lua JSON parser produces `JNULL` (a unique sentinel table) for
-   every JSON `null` it sees.
-2. Every library function that distinguishes null from undef does so
-   by checking against the `JNULL` sentinel — not against `nil`.
-3. The Lua JSON serializer converts `JNULL` back to JSON `null`.
-4. Lua's `nil` is reserved for the `UNDEF` semantic (and for "this
-   variable simply isn't bound").
-
-`is_null(v)` returns `true` only when `v == JNULL` (table identity).
-`is_undef(v)` returns `true` when `v == nil` *or* `v == UNDEF`
-(because Lua has no other choice for unbound names). Both queries
-remain disjoint.
-
-The same pattern applies to any future port whose host language has
-the "no nil in containers" property.
-
-## Public-API behaviour table
-
-These are the contract every port must satisfy. `U` denotes the
-language's UNDEF sentinel; `N` denotes its NULL representation; `V`
-is any non-empty value.
-
-| Call | Input | Returns |
-|---|---|---|
-| `getprop({a:V}, 'a')` | key present, value V | V |
-| `getprop({a:N}, 'a')` | key present, value NULL | N (**not** U, **not** alt) |
-| `getprop({}, 'a')` | key absent | U (or alt if supplied) |
-| `getprop({a:V}, 'a', alt)` | key present, value V | V |
-| `getprop({}, 'a', alt)` | key absent | alt |
-| `getprop({a:N}, 'a', alt)` | key present, value NULL | **N** (not alt — null is a real value) |
-| `haskey({a:N}, 'a')` | key present, value NULL | true |
-| `haskey({}, 'a')` | key absent | false |
-| `setprop(p, 'a', V)` | sets a→V | p (with a=V) |
-| `setprop(p, 'a', N)` | sets a→NULL | p (with a=NULL) |
-| `setprop(p, 'a', U)` | "set to undef" | **equivalent to delprop**; key removed |
-| `setval(inj, U)` | same logic in the Injection setter | delete |
-| `setval(inj, N)` | sets the slot to NULL | the value is N |
-| `delprop(p, 'a')` | removes key | p (a gone) |
-| `isempty(U)` | | true |
-| `isempty(N)` | | true |
-| `isempty('')` / `isempty([])` / `isempty({})` | | true |
-| `isnode(N)` | | false |
-| `isnode(U)` | | false |
-| `typify(U)` | | `T_NOVAL` |
-| `typify(N)` | | `T_SCALAR \| T_NULL` |
-| `is_undef(U)` | | true |
-| `is_undef(N)` | | false |
-| `is_null(N)` | | true |
-| `is_null(U)` | | false |
-| `clone(N)` returns a value v such that `is_null(v)` | | true |
-| `clone(U)` returns a value v such that `is_undef(v)` | | true |
-| `stringify(U)` | | `""` (empty) |
-| `stringify(N)` | | `"null"` |
-| `pad(U, 6)` | | `"      "` (6 spaces — empty string padded) |
-| `pad(N, 6)` | | `"null  "` (stringify(NULL) padded) |
-
-The Python and Lua ports failed two of the `null`-related rows above
-(`getprop({a:N},'a')` → `N`; `pad(N,6)` → `"null  "`) before this
-branch's surgical fixes — the conflation `UNDEF == NULL` made them
-indistinguishable. Codifying the table here makes those bugs
-catchable by a single shared conformance test (see below).
-
-## JSON I/O contract
-
-Every port exposes two JSON entry points whose behaviour is fixed:
+When a test asserts `out: X`, the runner compares the library's
+actual return value to `X`. Because the library unifies null and
+absent on its output side (returning null in most languages, removing
+the key in a returned map for ABSENT positions), the comparison
+routine uses a simple rule:
 
 ```
-parse_json(text) -> value
-    JSON null               -> NULL (or JNULL in Lua)
-    Missing key             -> not present in the parsed map (no marker emitted)
-    All other JSON          -> the obvious native representation
-
-to_json(value) -> text
-    UNDEF                   -> if a map value, omit the key; if at root or list slot, emit "null"
-    NULL / JNULL            -> emit "null"
-    Other                   -> the obvious JSON form
+deep_equal_for_test(actual, expected):
+    # Normalise both sides: treat NULL and "key not present"
+    # as equivalent (just like the library does).
+    ...
 ```
 
-The "if a map value, omit the key" rule is the inverse of the JSON
-encoding rule for ABSENT. It's the only place `to_json` can encode
-ABSENT, because list slots and root values cannot be "absent" in
-JSON syntax.
+Concretely:
+- A map `{a: 1}` (no `b`) and a map `{a: 1, b: null}` compare equal.
+- A list `[1, 2]` and `[1, null, 2]` do NOT — list slots are
+  positional, and a JSON null in the middle of a list is a real
+  position holding a "no-value" value. The corpus should write
+  what it actually means.
+- For root / scalar positions, `null` and `"__UNDEF__"` (post-preprocess
+  → null) compare equal.
 
-## Test-corpus authoring rules
+The runner exposes one knob per test category (`null:true` or
+`null:false`, already present in today's runner):
 
-When adding tests:
+- `null:true` (default) — apply the null-and-absent-equal rule.
+- `null:false` — treat null and absent as distinct on the output
+  side. This is the mode `stringify` / `pad` / `typify` / `isnull`
+  tests use, because those functions exist specifically to inspect
+  the null-ness of a value and would be meaningless if their tests
+  conflated the two.
 
-1. **Default behaviour.** Write tests as plain JSON. A `null` is
-   JSON null; omitting a key means the key is absent. The runner's
-   preprocessing pipeline converts these to the language's sentinels.
+## What this removes from the previous draft
 
-2. **Need to express the UNDEF sentinel as a value?** Write the string
-   `"__UNDEF__"`. The input preprocessor replaces it with U before
-   the library sees it. The output preprocessor replaces U with
-   `"__UNDEF__"` before comparison.
+The previous draft of this spec required each port to:
 
-3. **Need to express JSON null as a value in marker-mode tests?**
-   Write the string `"__NULL__"`. Same input/output substitution
-   rules apply.
+- Define a unique `UNDEF` sentinel value identity-distinct from null.
+- Define `JNULL` sentinel in Lua.
+- Export `is_undef` / `is_null` predicates to clients.
+- Convert markers ↔ sentinels in both directions through the runner.
 
-4. **Need to assert "this key must exist, value irrelevant"?** Write
-   `"__EXISTS__"` in the expected output.
+The corrected design **removes all of this**. The library has no
+`UNDEF` sentinel in its public API. There is no `JNULL`. There is no
+`is_undef` (or rather: `is_undef(v)` and `is_null(v)` mean the same
+thing, both true for "no value"). The runner has no
+`sentinels_to_markers` step. Internal sentinels in Python's old code
+(`UNDEF = None`) are unnecessary at the API boundary — the
+language's native null *is* "no value".
 
-5. **Choose the runner mode per category.** Most tests run with
-   marker substitution enabled (`null:true`) — this is the most
-   portable mode. Tests that specifically exercise null-handling
-   (`stringify(null)`, `pad(null,6)`, `typify(null)`, `isnull(null)`)
-   use `null:false` and operate on the language's native null
-   directly.
+The benefit is enormous portability simplification:
 
-6. **Lua caveat.** Tests that put null into a list slot and expect to
-   read it back unchanged will only pass in Lua if the JSON parser
-   was wired up to produce JNULL (not nil). The Lua port's runner
-   handles this automatically.
+- Python keeps `UNDEF = None` (its natural state).
+- Lua keeps `nil` for "no value", and doesn't need a `JNULL` sentinel
+  to round-trip JSON null (because the library doesn't distinguish
+  null from absent on output anyway — JSON null in input is treated
+  as "no value", and the library either returns nil or omits the
+  key, both of which serialise back to either nothing or `null`).
+- Go uses `nil` end-to-end.
+- PHP uses `null` end-to-end.
+- Ruby drops the `Object.new.freeze` sentinel.
+- TS / JS still have `undefined` and `null` as language-distinct
+  values, but the library treats both as "no value" identically.
+- Rust / Zig / C# / Java / C++ / Kotlin / C — same: the language's
+  native null suffices; the in-port `Noval` / `monostate` /
+  `VS_VAL_UNDEF` variants are an internal modelling choice for
+  things like "no current parent during inject descent", **not**
+  something that escapes through the public API.
 
-## Shared conformance test
+## What stays the same
 
-To make the API table mechanically checkable, add a category
-`build/test/sentinels.jsonic` exercising each row of the table:
+- The `SKIP` and `DELETE` sentinels remain unchanged. They are
+  pointer/identity sentinels used **inside** transform/inject specs
+  to signal "skip this key" and "delete this key". They never appear
+  in client data or test output; they are spec-internal markers.
+
+- The shared test corpus structure is unchanged. We just add (a)
+  the `"__UNDEF__"` marker (and document it), and (b) the
+  conformance category below.
+
+- The 13 ports already largely match the new model — every port
+  except Python and Lua already conflates null with absent at the
+  API. Python's recent fixes (getprop, setval, pad, setprop) were
+  half-right and half-wrong; under this corrected spec, some of
+  them need to be reverted. See the rollout below.
+
+## Conformance test category
+
+Add `build/test/sentinels.jsonic` exercising the API table:
 
 ```jsonic
 sentinels: {
-  is_undef: {
+
+  # getprop unifies null and absent for the default-substitution rule.
+  getprop_unify: {
     set: [
-      { in: '__UNDEF__', out: true }
-      { in: '__NULL__',  out: false }
-      { in: 0,           out: false }
-      { in: '',          out: false }
-      { in: '__EXISTS__', out: false }   # only meaningful in expected-output
+      { in: { val:{a:1},    key:'a', alt:'D' }, out: 1   }
+      { in: { val:{a:null}, key:'a', alt:'D' }, out: 'D' }
+      { in: { val:{},       key:'a', alt:'D' }, out: 'D' }
     ]
   }
 
-  is_null: {
+  # haskey: null counts as "no value", so haskey returns false.
+  haskey_unify: {
     set: [
-      { in: '__UNDEF__', out: false }
-      { in: '__NULL__',  out: true }
-      { in: 0,           out: false }
-      { in: '',          out: false }
+      { in: { src:{a:1},    key:'a' }, out: true  }
+      { in: { src:{a:null}, key:'a' }, out: false }
+      { in: { src:{},       key:'a' }, out: false }
     ]
   }
 
-  getprop: {
+  # setprop: storing null is equivalent to delprop.
+  setprop_unify: {
     set: [
-      { in: { val: {a: 1},          key: 'a' }, out: 1 }
-      { in: { val: {a: '__NULL__'}, key: 'a' }, out: '__NULL__' }
-      { in: { val: {},              key: 'a' }, out: '__UNDEF__' }
-      { in: { val: {a: '__NULL__'}, key: 'a', alt: 99 }, out: '__NULL__' }
-      { in: { val: {},              key: 'a', alt: 99 }, out: 99 }
+      { in: { parent:{a:1,b:2}, key:'b', val:7 },    out: {a:1, b:7} }
+      { in: { parent:{a:1,b:2}, key:'b', val:null }, out: {a:1}      }
     ]
   }
 
-  haskey: {
+  # ABSENT in a list slot — preprocessor removes the marker, list shortens.
+  list_absent: {
     set: [
-      { in: { src: {a: '__NULL__'}, key: 'a' }, out: true }
-      { in: { src: {a: 1},          key: 'a' }, out: true }
-      { in: { src: {},              key: 'a' }, out: false }
+      { in: { val:['a', '__UNDEF__', 'b'], key:1 }, out: 'b' }
     ]
   }
 
-  setprop: {
+  # isempty unifies null and absent (and empty containers).
+  isempty_unify: {
     set: [
-      # setprop(parent, key, UNDEF) deletes the key.
-      { in: { parent: {a: 1, b: 2}, key: 'b', val: '__UNDEF__' },
-        out: { a: 1 } }
-      # setprop(parent, key, NULL) sets the key to JSON null.
-      { in: { parent: {a: 1}, key: 'b', val: '__NULL__' },
-        out: { a: 1, b: '__NULL__' } }
-    ]
-  }
-
-  isempty: {
-    set: [
-      { in: '__UNDEF__', out: true }
-      { in: '__NULL__',  out: true }
-      { in: '',          out: true }
-      { in: [],          out: true }
-      { in: {},          out: true }
-      { in: 0,           out: false }   # 0 is a value, not empty
-    ]
-  }
-
-  typify: {
-    set: [
-      { in: '__UNDEF__', out: 1073741824 }     # T_NOVAL
-      { in: '__NULL__',  out: 4194432  }       # T_SCALAR | T_NULL
-    ]
-  }
-
-  stringify: {
-    set: [
-      { in: { val: '__UNDEF__' }, out: '' }
-      { in: { val: '__NULL__'  }, out: 'null' }
-    ]
-  }
-
-  pad: {
-    set: [
-      { in: { val: '__UNDEF__', pad: 6 }, out: '      ' }
-      { in: { val: '__NULL__',  pad: 6 }, out: 'null  ' }
+      { in: null, out: true  }
+      { in: '',   out: true  }
+      { in: [],   out: true  }
+      { in: {},   out: true  }
+      { in: 0,    out: false }
     ]
   }
 }
 ```
 
 A port passing this category demonstrates conformance with the
-sentinel spec. The Python and Lua ports' fixes in this branch would
-be caught by this category if the corpus included it.
+spec. The Python and Lua fixes in this branch would be caught and
+adjusted by this category.
 
 ## Rollout
 
-The mechanical changes implied by this spec:
+1. **Add `UNDEF.md` cross-reference** (the language-semantics doc)
+   to clarify that the spec is about library API behaviour, not
+   about what each host language can do natively.
 
-1. **Adopt a new shared corpus category** (`sentinels.jsonic` per
-   above). This is the conformance test.
+2. **Land `sentinels.jsonic`** in the corpus and wire it into every
+   port's test runner.
 
-2. **Document the markers** (`__UNDEF__`, `__NULL__`, `__EXISTS__`) at
-   the top of `build/test/test.jsonic` so authors don't have to read
-   this spec to find them.
+3. **Per-port adjustments:**
+   - **ts / js (canonical)** — make `getprop` / `haskey` / `setval`
+     / `setprop` treat null and undefined as identical for the
+     default-substitution and delete rules. Currently TS distinguishes
+     them; this is the cosmetic change that aligns canonical with
+     the new spec.
+   - **py** — partially revert the recent fix. `getprop` must
+     return `alt` for `{a:None}`. `setprop(p,'a',None)` deletes
+     (the pre-existing behaviour). `setval` reverts to the simple
+     form. `pad(None, 6)` returns `"      "` not `"null  "`.
+     `stringify(None)` returns `""`. These reverts move the port
+     into spec conformance and are smaller than the previous fix.
+   - **lua** — no `JNULL` sentinel needed. Continue using nil
+     end-to-end. The previous `pad(nil)` fix reverts.
+   - **php** — keep current "null is absent" semantics. The string
+     `'__UNDEFINED__'` and `stdClass` sentinels can be removed
+     entirely (or kept as port-internal-only details).
+   - **go** — `nil` for both. No `UNDEF` value needed.
+   - **rb** — `nil` for both. `Object.new.freeze` sentinel can be
+     dropped.
+   - **rs / zig / cpp / c** — these distinguish internally for good
+     reasons (their value types are tagged unions / variants and
+     a `Noval` variant is convenient for the inject machinery's
+     "no current parent" representation). But the **public API**
+     of `getprop` / `haskey` / `setprop` / `isempty` / etc. must
+     treat the `Noval` variant and the `Null` variant as the same
+     for the default-substitution rule.
+   - **java / cs / kt** — same as rs: an internal `UNDEF` sentinel
+     is fine for the inject state machine, but the public API
+     conflates null and absent.
 
-3. **Port-by-port audit.**
-   - **ts, js, rs, java, cs, cpp, kt, zig, c**: already conformant.
-     Just verify the conformance category passes.
-   - **rb**: should be conformant (already uses `UNDEF = Object.new.freeze`); verify.
-   - **php**: has the string `'__UNDEFINED__'` plus a `stdClass`
-     instance. Pick one for `UNDEF` and document. Probably the
-     stdClass instance (string sentinels can collide with corpus
-     data).
-   - **go**: define `var UNDEF struct{}` (a unique struct instance)
-     and update internal call sites that currently use `nil` as
-     both. Map-level absent-detection remains via the comma-ok
-     idiom.
-   - **py**: replace `UNDEF: Any = None` with a sentinel object.
-     The surgical fixes in this branch (`getprop`, `setval`,
-     `setprop`, `pad`) are correct workarounds, but with a real
-     sentinel they become principled. ~191 references to update,
-     mostly mechanical (`val == UNDEF` → `val is UNDEF` is already
-     correct usage).
-   - **lua**: introduce the `JNULL` sentinel. Wire it into the JSON
-     parser. Update `is_null` / `is_undef` / `clone` / `stringify`
-     / `pad` accordingly. This is the most invasive port-side
-     change but the cleanest.
-
-4. **Tests' default null-flag.** Keep the existing `null:true`/
-   `null:false` per-category flags. The new markers compose with
-   them; nothing changes for tests that don't need the distinction.
-
-After this, every port can be diff-read against canonical TS for
-sentinel handling, and a new test that exercises the corner case
-catches regressions in every port simultaneously.
-
-## Client-code impact
-
-The spec governs library internals and the test corpus. Most client
-code is unaffected. Two patterns work identically in every port and
-need no migration:
-
-```
-// 1. Get-with-default: alt is returned only for ABSENT.
-//    Stored JSON null is a real value and is returned as-is.
-v = getprop(obj, 'k', default)
-
-// 2. Presence test: true iff key is present, regardless of value.
-if haskey(obj, 'k') { ... }
-```
-
-The pattern that **does** break in ports that historically conflated
-ABSENT with NULL is direct comparison of the returned value against
-the language's native null/nil/None:
-
-```
-v = getprop(obj, 'k')            // no default
-if v == null { ... }              // before: matched ABSENT and NULL together
-                                  // after:  matches NULL only — ABSENT gives UNDEF
-```
-
-Migration target (works in every port, regardless of how UNDEF is
-modelled):
-
-```
-if haskey(obj, 'k') {
-    v = getprop(obj, 'k')
-    if is_null(v) { /* stored JSON null */ }
-    else          { /* concrete value */ }
-} else {
-    /* absent */
-}
-```
-
-### Migration friction per port
-
-| Port | Client migration | What breaks |
-|---|---|---|
-| ts / js | none | `=== undefined` / `=== null` already do the right thing |
-| rs, zig, cpp, c | none | type system / tagged variant already forces the distinction |
-| java, cs, kt | minor | clients using `Map.containsKey` already fine; clients comparing returned values to literal `null` to detect absent must switch to `=== UNDEF` (identity) |
-| rb | minor | `v.nil?` no longer catches absent; use `haskey` or `equal?(UNDEF)` |
-| go | **breaking** | `if v == nil` no longer catches absent — switch to `haskey` / `getprop(.., default)` / `== UNDEF` |
-| php | **breaking** | `=== null` no longer catches absent — switch to `array_key_exists` (PHP idiom) or `UNDEF` identity |
-| py | **breaking** | `is None` no longer catches absent — switch to `'k' in obj`, `haskey(obj, 'k')`, or `is UNDEF` |
-| lua | **breaking — biggest** | `v == nil` flips meaning (now only ABSENT). Clients round-tripping JSON now see `JNULL` for stored null. Use `is_null(v)` / `is_undef(v)`. |
-
-### What every port must export to clients
-
-For client code to write portable cross-port logic, each port exports:
-
-- `UNDEF` — the sentinel value (constant or singleton).
-- `JNULL` — Lua only; the JSON-null sentinel.
-- `is_undef(v)` / `is_null(v)` — predicates. **Recommended over direct comparison** because they hide each port's representation choice.
-- `haskey(obj, k)` — presence test on map / list.
-- `getprop(obj, k, alt)` — value-with-default lookup.
-
-Clients written against these five APIs are completely insulated from
-per-language UNDEF mechanics. The migration burden falls entirely on
-clients that bypassed them by comparing returned values to the host
-language's literal null/nil/None.
-
-### When the distinction actually matters to clients
-
-Most application code doesn't care: it asks for a value, falls back to
-a default, and moves on. The distinction matters in three concrete
-patterns:
-
-1. **PATCH-vs-PUT semantics.** A JSON-API endpoint that distinguishes
-   "remove this field" (UNDEF) from "set this field to null" (NULL).
-2. **Config with explicit unset.** A config file where `{db: null}`
-   means "explicitly disable the db connection" and `{}` (no `db`
-   key) means "use the default".
-3. **Round-trip preservation.** Code that loads JSON, mutates a
-   subtree, and writes it back, where dropping vs preserving null
-   fields would change the output.
-
-For these, the spec gives clients a portable contract: any port that
-passes the conformance category supports the distinction the same
-way.
-
+4. **Update the corpus runners** to honour the `null:true` /
+   `null:false` flag in the manner this spec describes (most already
+   do).
 
 ## TL;DR
 
-- Define three states: VALUE, NULL, ABSENT. Every port must
-  distinguish them.
-- Each port picks a sentinel for ABSENT (`UNDEF`) that is identity-
-  distinct from its NULL. Lua additionally picks a sentinel for NULL
-  (`JNULL`) because Lua tables can't store nil.
-- The shared corpus uses plain JSON (which encodes VALUE / NULL / ABSENT
-  natively) plus three reserved marker strings — `"__UNDEF__"`,
-  `"__NULL__"`, `"__EXISTS__"` — for the few corner cases JSON
-  syntax can't express.
-- The test runner's preprocessing pipeline translates between markers
-  and sentinels in both directions. Library code only sees real
-  sentinels; the corpus never sees them.
-- A shared conformance category (`sentinels.jsonic`) makes the
-  contract mechanically testable.
-- Client code that uses `getprop(obj, k, default)` and `haskey(obj, k)`
-  is unaffected by the spec. The pattern that breaks is bypassing
-  those helpers and comparing returned values against the host
-  language's literal null/nil/None — that comparison is what
-  conflates ABSENT and NULL in py/lua/php/go and must be replaced
-  with `is_undef(v)` / `is_null(v)`.
+- The library has **two** observable value states: VALUE and NO-VALUE.
+- NO-VALUE = the language's native null/nil/None = absent key. The
+  library doesn't distinguish them anywhere in its public API.
+- Sentinels exist **only in the test corpus**, **only on input**, and
+  **only to encode ABSENT in positions JSON can't express it**
+  (root, list slots, function args). The one marker is `"__UNDEF__"`.
+- A preprocessor walks the parsed JSON once and **removes**
+  `"__UNDEF__"` markers from their containers, leaving the library to
+  see ordinary language-native data.
+- The library never sees sentinels. Clients never see sentinels.
+- Lua needs no `JNULL`. Python needs no separate `UNDEF` object.
+  Ruby / PHP / Go drop their existing sentinels.
+- A `sentinels.jsonic` conformance category proves a port unifies
+  null and absent correctly via three side-by-side test cases per
+  affected API.
