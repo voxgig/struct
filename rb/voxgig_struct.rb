@@ -562,29 +562,35 @@ module VoxgigStruct
     str
   end
 
-  # Mimic JSON.stringify(val, null, indent) from JavaScript
+  # Mimic JSON.stringify(val, null, indent) from JavaScript.
+  # indent == 0 → compact single-line. indent > 0 → pretty printed.
+  # Map keys are emitted in insertion order (matches TS canonical).
   def self._json_stringify(val, indent, depth)
     return 'null' if val.nil?
     return val.to_s if [true, false].include?(val)
     return val.to_s if val.is_a?(Numeric)
     return JSON.generate(val) if val.is_a?(String)
 
-    ind = ' ' * indent
-    current_indent = ind * (depth + 1)
-    closing_indent = ind * depth
+    compact = indent.nil? || indent <= 0
+    ind = compact ? '' : ' ' * indent
+    current_indent = compact ? '' : ind * (depth + 1)
+    closing_indent = compact ? '' : ind * depth
+    open_nl = compact ? '' : "\n"
+    pair_sep = compact ? ',' : ",\n"
+    kv_sep = compact ? ':' : ': '
 
     if islist(val)
       return '[]' if val.empty?
 
       items_str = val.map { |v| current_indent + _json_stringify(v, indent, depth + 1) }
-      "[\n#{items_str.join(",\n")}\n#{closing_indent}]"
+      "[#{open_nl}#{items_str.join(pair_sep)}#{open_nl}#{closing_indent}]"
     elsif ismap(val)
       return '{}' if val.empty?
 
-      pairs = val.keys.sort.map do |k|
-        "#{current_indent}#{JSON.generate(k)}: #{_json_stringify(val[k], indent, depth + 1)}"
+      pairs = val.keys.map do |k|
+        "#{current_indent}#{JSON.generate(k)}#{kv_sep}#{_json_stringify(val[k], indent, depth + 1)}"
       end
-      "{\n#{pairs.join(",\n")}\n#{closing_indent}}"
+      "{#{open_nl}#{pairs.join(pair_sep)}#{open_nl}#{closing_indent}}"
     elsif isfunc(val)
       'null'
     else

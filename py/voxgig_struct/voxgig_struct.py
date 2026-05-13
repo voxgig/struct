@@ -791,7 +791,12 @@ def jsonify(val: Any = UNDEF, flags: dict[str, Any] = UNDEF) -> str:
     indent = getprop(flags, 'indent', 2)
 
     try:
-        json_str = json.dumps(val, indent=indent, separators=(',', ': ') if indent else (',', ':'))
+        if indent and indent > 0:
+            # JS-style pretty print: newlines, spaces, ": " between key/value.
+            json_str = json.dumps(val, indent=indent, separators=(',', ': '))
+        else:
+            # indent=0 = compact single-line, matching the C/Rust/Lua printers.
+            json_str = json.dumps(val, separators=(',', ':'))
     except Exception:
         return S_null
 

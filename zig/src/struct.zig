@@ -946,16 +946,18 @@ fn jsonifyWrite(val: JsonValue, writer: anytype, indent_size: usize, offset: usi
                 try writer.writeAll("[]");
                 return;
             }
-            try writer.writeAll("[\n");
+            const compact = indent_size == 0;
+            try writer.writeByte('[');
+            if (!compact) try writer.writeByte('\n');
             for (arr.data.items, 0..) |item, i| {
-                try writeIndent(writer, offset + indent_size * (depth + 1));
+                if (!compact) try writeIndent(writer, offset + indent_size * (depth + 1));
                 try jsonifyWrite(item, writer, indent_size, offset, depth + 1);
                 if (i < arr.data.items.len - 1) {
                     try writer.writeByte(',');
                 }
-                try writer.writeByte('\n');
+                if (!compact) try writer.writeByte('\n');
             }
-            try writeIndent(writer, offset + indent_size * depth);
+            if (!compact) try writeIndent(writer, offset + indent_size * depth);
             try writer.writeByte(']');
         },
         .object => |obj| {
@@ -963,30 +965,25 @@ fn jsonifyWrite(val: JsonValue, writer: anytype, indent_size: usize, offset: usi
                 try writer.writeAll("{}");
                 return;
             }
-            // Sort keys
-            const allocator = std.heap.page_allocator;
-            var key_list = std.ArrayList([]const u8).init(allocator);
-            defer key_list.deinit();
+            const compact = indent_size == 0;
+            // Iterate in INSERTION order (matches TS canonical JSON.stringify)
+            try writer.writeByte('{');
+            if (!compact) try writer.writeByte('\n');
             var it = obj.iterator();
-            while (it.next()) |kv| {
-                key_list.append(kv.key_ptr.*) catch return;
-            }
-            std.mem.sort([]const u8, key_list.items, {}, stringLessThan);
-
-            try writer.writeAll("{\n");
-            for (key_list.items, 0..) |k, i| {
-                const v = obj.get(k).?;
-                try writeIndent(writer, offset + indent_size * (depth + 1));
+            var i: usize = 0;
+            const total = obj.count();
+            while (it.next()) |kv| : (i += 1) {
+                if (!compact) try writeIndent(writer, offset + indent_size * (depth + 1));
                 try writer.writeByte('"');
-                try writer.writeAll(k);
-                try writer.writeAll("\": ");
-                try jsonifyWrite(v, writer, indent_size, offset, depth + 1);
-                if (i < key_list.items.len - 1) {
+                try writer.writeAll(kv.key_ptr.*);
+                try writer.writeAll(if (compact) "\":" else "\": ");
+                try jsonifyWrite(kv.value_ptr.*, writer, indent_size, offset, depth + 1);
+                if (i < total - 1) {
                     try writer.writeByte(',');
                 }
-                try writer.writeByte('\n');
+                if (!compact) try writer.writeByte('\n');
             }
-            try writeIndent(writer, offset + indent_size * depth);
+            if (!compact) try writeIndent(writer, offset + indent_size * depth);
             try writer.writeByte('}');
         },
         .number_string => |s| try writer.writeAll(s),

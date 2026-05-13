@@ -690,16 +690,23 @@ class Struct
             }
             $indent = self::_getprop($flags, 'indent', 2);
             try {
-                $encoded = json_encode($val, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
-                if ($encoded === false) {
-                    return '__JSONIFY_FAILED__';
+                if ($indent > 0) {
+                    $encoded = json_encode($val, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+                    if ($encoded === false) {
+                        return '__JSONIFY_FAILED__';
+                    }
+                    // PHP's JSON_PRETTY_PRINT uses 4-space indents; convert to requested indent
+                    $encoded = preg_replace_callback('/^(    +)/m', function ($matches) use ($indent) {
+                        $level = (int)(strlen($matches[1]) / 4);
+                        return str_repeat(' ', $level * $indent);
+                    }, $encoded);
+                } else {
+                    // indent=0: compact single-line, matching C/Rust/Java/Kotlin printers.
+                    $encoded = json_encode($val, JSON_UNESCAPED_SLASHES);
+                    if ($encoded === false) {
+                        return '__JSONIFY_FAILED__';
+                    }
                 }
-
-                // PHP's JSON_PRETTY_PRINT uses 4-space indents; convert to requested indent
-                $encoded = preg_replace_callback('/^(    +)/m', function ($matches) use ($indent) {
-                    $level = (int)(strlen($matches[1]) / 4);
-                    return str_repeat(' ', $level * $indent);
-                }, $encoded);
 
                 $str = $encoded;
 
