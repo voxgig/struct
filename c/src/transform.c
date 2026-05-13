@@ -792,8 +792,13 @@ static vs_value* tx_REF(vs_injection* inj, vs_value* val, const char* ref, vs_va
 
   vs_value* grandparent = vs_inj_setval(inj, rval, 2);
   if (vs_is_list(grandparent) && inj->prior) {
-    if (inj->prior->keyI > 0)
+    /* TS: `inj.prior.keyI--`. With signed numbers, keyI can go to -1. We use
+       keyI_neg as a flag for "logically -1" (size_t cannot represent it). */
+    if (inj->prior->keyI > 0) {
       inj->prior->keyI--;
+    } else if (inj->prior->keyI == 0 && !inj->prior->keyI_neg) {
+      inj->prior->keyI_neg = true;
+    }
   }
 
   vs_release(refpath);

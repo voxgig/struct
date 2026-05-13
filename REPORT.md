@@ -17,7 +17,7 @@
 | **rb** | 40+ | 15 | 2 | 75/75 pass | Complete |
 | **lua** | 40+ | 15 | 2 | 75/75 pass | Complete |
 | **rs** | 40+ | 15 | 2 | 1187/1187 corpus | Complete |
-| **c** | 40 | 15 | 2 | 1107/1110 corpus | Complete |
+| **c** | 40 | 15 | 2 | 1109/1110 corpus | Complete |
 | **java** | 40 | 15 | 2 | 1178/1178 corpus | Complete |
 | **cpp** | 40 | 15 | 2 | 1178/1178 corpus | Complete |
 | **cs** | 40 | 15 | 2 | 1178/1178 corpus | Complete |
@@ -32,9 +32,9 @@ validate checkers, all 4 select operators, the injection helpers
 (`vs_check_placement` / `vs_injector_args` / `vs_inject_child`) are
 wired. The full corpus runs via the `corpus.out` driver
 (`make build` / `make test`; `make lint` runs clang-format check +
-clang-tidy clean). Remaining failures: 3 edge cases in `$REF` deep
-recursion and the `$LIKE` operator (substring-only — full POSIX regex
-deferred to avoid the optional `libregex` dependency).
+clang-tidy clean). The single remaining failure is the `$LIKE`
+operator (substring-only — full POSIX regex deferred to avoid the
+optional `libregex` dependency).
 
 \*\* Zig: full TS-canonical parity, allocator-first signatures, a
 pointer-stable `JsonValue` union with heap `MapRef`/`ListRef` wrappers.
@@ -335,11 +335,10 @@ performance-* + readability-* + misc-*). `make lint` runs both clean.
 runs under valgrind.
 
 **Known limitations:**
-- 3 of 1110 corpus tests fail: 2 in `transform.ref` (deeply-nested
-  recursive `$REF` resolution) and 1 in `select.operators` (`$LIKE`
-  uses substring containment instead of a full regex — the C standard
-  library has no portable regex API and `libpcre` was kept out of
-  scope to minimise dependencies).
+- 1 of 1110 corpus tests fails: `select.operators[15]`. The `$LIKE`
+  operator uses substring containment instead of a full regex — the C
+  standard library has no portable regex API and `libpcre` was kept
+  out of scope to minimise dependencies.
 - ASan reports some forgotten `vs_release` calls in the top-level
   `vs_select` / `vs_validate` helpers; no use-after-free or
   double-free. Will be cleaned up in a follow-up pass.

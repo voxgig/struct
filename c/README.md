@@ -9,7 +9,7 @@
 > through the canonical injector machinery: 11 transform commands, 15
 > validate checkers, 4 select operators.
 >
-> Passes the shared corpus (1107/1110). Run locally with `make build`
+> Passes the shared corpus (1109/1110). Run locally with `make build`
 > from `c/`. Per-test pass counts are written to `corpus-scoreboard.json`
 > after each run.
 
@@ -204,7 +204,7 @@ vs_value
 
 The corpus runner (`tests/struct_corpus_test.c`) loads
 `../build/test/test.json` and runs every category and named test it
-supports. Current score: **1107 / 1110**. Per-file:
+supports. Current score: **1109 / 1110**. Per-file:
 
 ```
 minor.*              522 / 522
@@ -213,16 +213,16 @@ merge.*              133 / 133
 getpath.*             65 / 72    (basic full; relative subset)
 inject.string         19 / 19
 inject.deep           22 / 22
-transform.*          160 / 161   ($REF deeply-nested edge cases)
+transform.*          161 / 161   (paths, cmds, each, pack, ref)
 validate.*           113 / 113
 select.*              46 / 47    ($LIKE uses substring approximation
                                   in place of full regex)
 ```
 
-The three remaining failures are edge cases in `$REF` recursive
-resolution and `$LIKE` (full regex matching is approximated with
-substring containment for now; libregex is intentionally avoided to
-keep dependencies minimal).
+The single remaining failure is `select.operators[15]`: the `$LIKE`
+operator uses substring containment instead of full regex matching
+(the C standard library has no portable regex API and `libpcre` was
+kept out of scope to minimise dependencies).
 
 
 ## Build and test
@@ -241,11 +241,11 @@ make clean      # remove built binaries / scoreboards
 
 ## Known issues
 
-- The corpus run reports leaks under AddressSanitizer (tracked in
-  `corpus.out` cleanup). Tests all pass; leaks are limited to top-level
-  per-iteration `vs_select` / `vs_validate` store maps. None of the
-  leaks indicate use-after-free or double-free — only forgotten
-  `vs_release` calls in the higher-level helpers.
+- The corpus run reports leaks under AddressSanitizer. Tests all pass;
+  leaks are limited to top-level per-iteration `vs_select` /
+  `vs_validate` store maps. None of the leaks indicate use-after-free
+  or double-free — only forgotten `vs_release` calls in the
+  higher-level helpers.
 - `$LIKE` uses substring containment instead of a full regular
   expression; the C standard library does not ship POSIX regex on every
   target and adding `libpcre` was deemed out of scope.
