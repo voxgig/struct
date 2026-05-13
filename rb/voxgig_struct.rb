@@ -1158,7 +1158,7 @@ module VoxgigStruct
   # --- Transform commands ---
 
   def self.transform_DELETE(inj, _val, _ref, _store)
-    inj.setval(nil)
+    inj.setval(UNDEF)
     nil
   end
 
@@ -1220,7 +1220,7 @@ module VoxgigStruct
     elsif mode == S_MKEYPOST
       args = getprop(parent, key)
       args = [args] unless islist(args)
-      inj.setval(nil)
+      inj.setval(UNDEF)
       mergelist = [parent] + args + [clone(parent)]
       merge(mergelist)
       return key
@@ -1749,7 +1749,7 @@ module VoxgigStruct
         keys << ckey
       end
 
-      inj.setval(nil)
+      inj.setval(UNDEF)
       return nil
     end
 
@@ -2280,24 +2280,24 @@ module VoxgigStruct
     end
 
     def setval(val, ancestor = nil)
-      if val.nil? && (ancestor.nil? || (ancestor.is_a?(Numeric) && ancestor < 2))
-        # nil without ancestor: delete from parent (matches TS undefined)
-        VoxgigStruct.delprop(@parent, @key)
-      elsif val.nil? && ancestor.is_a?(Numeric) && ancestor >= 2
-        # nil with ancestor: set to nil in grandparent (preserves key for $ONE/$EXACT)
-        VoxgigStruct.setprop(
-          VoxgigStruct.getelem(@nodes, 0 - ancestor),
-          VoxgigStruct.getelem(@path, 0 - ancestor),
-          val
-        )
-      elsif ancestor.nil? || (ancestor.is_a?(Numeric) && ancestor < 2)
-        VoxgigStruct.setprop(@parent, @key, val)
+      # Mirrors the canonical TS Injection.setval: UNDEF (sentinel) and
+      # nil (Ruby collapses both onto the same "no value" slot) delete
+      # the slot at every ancestor level; any other value sets it. The
+      # delete-on-undef shortcut is used by injectors (transform_DELETE,
+      # transform_MERGE, validate_CHILD) to signal "drop this slot" via
+      # their return value rather than calling delprop explicitly.
+      if ancestor.nil? || (ancestor.is_a?(Numeric) && ancestor < 2)
+        target = @parent
+        key = @key
       else
-        VoxgigStruct.setprop(
-          VoxgigStruct.getelem(@nodes, 0 - ancestor),
-          VoxgigStruct.getelem(@path, 0 - ancestor),
-          val
-        )
+        target = VoxgigStruct.getelem(@nodes, 0 - ancestor)
+        key = VoxgigStruct.getelem(@path, 0 - ancestor)
+      end
+
+      if val.nil? || val.equal?(VoxgigStruct::UNDEF)
+        VoxgigStruct.delprop(target, key)
+      else
+        VoxgigStruct.setprop(target, key, val)
       end
     end
 

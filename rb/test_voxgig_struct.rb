@@ -241,8 +241,14 @@ class TestVoxgigStruct < Minitest::Test
   end
 
   def test_minor_pad
+    # pad is Group B: stringify(null) renders as "null". With the
+    # runner's nested NULLMARK substitution turned on, the corpus
+    # null value arrives as the marker string — convert it back to
+    # the literal "null" so pad's output matches the corpus shape.
     @runsetflags.call(@minor_spec['pad'], {}, lambda { |vin|
-      VoxgigStruct.pad(vin['val'], vin['pad'], vin['char'])
+      v = vin['val']
+      v = 'null' if v == VoxgigRunner::NULLMARK
+      VoxgigStruct.pad(v, vin['pad'], vin['char'])
     })
   end
 
@@ -672,5 +678,90 @@ class TestVoxgigStruct < Minitest::Test
     assert deep_equal(VoxgigStruct.jm('a', 1, 'b', 2), { 'a' => 1, 'b' => 2 })
     assert deep_equal(VoxgigStruct.jt(1, 2, 3), [1, 2, 3])
     assert deep_equal(VoxgigStruct.jt, [])
+  end
+
+  # --- Injection.setval: UNDEF vs nil sentinel tests ---
+  #
+  # These tests bypass the corpus runner and exercise Injection.setval
+  # directly with real nil / UNDEF values at both ancestor levels.
+  # Before the sentinel refactor Ruby had a "MIXED" branch:
+  #   nil + ancestor>=2 → setprop(grandparent, key, nil)  (preserved key)
+  #   nil + ancestor<2  → delprop                          (removed key)
+  # The runner masked the discrepancy by only ever passing the marker
+  # string "__NULL__" at validator slots. These tests cover the path
+  # the runner skipped, so a future regression would surface here.
+
+  def test_setval_undef_deletes_parent_slot
+    parent = { 'a' => 1, 'b' => 2 }
+    inj = VoxgigStruct::Injection.new(nil, parent)
+    inj.key = 'b'
+    inj.parent = parent
+    inj.path = ['', 'b']
+    inj.nodes = [{ '$TOP' => parent }, parent]
+    inj.setval(VoxgigStruct::UNDEF)
+    assert_equal({ 'a' => 1 }, parent
+)
+  end
+
+  def test_setval_nil_deletes_parent_slot
+    parent = { 'a' => 1, 'b' => 2 }
+    inj = VoxgigStruct::Injection.new(nil, parent)
+    inj.key = 'b'
+    inj.parent = parent
+    inj.path = ['', 'b']
+    inj.nodes = [{ '$TOP' => parent }, parent]
+    inj.setval(nil)
+    assert_equal({ 'a' => 1 }, parent)
+  end
+
+  def test_setval_undef_deletes_ancestor_slot
+    # ancestor=2: must remove the slot in @nodes[-2] at @path[-2].
+    grand = { 'x' => { 'y' => 9 } }
+    middle = grand['x']
+    inj = VoxgigStruct::Injection.new(nil, middle)
+    inj.key = 'y'
+    inj.parent = middle
+    inj.path = ['', 'x', 'y']
+    inj.nodes = [{ '$TOP' => grand }, grand, middle]
+    inj.setval(VoxgigStruct::UNDEF, 2)
+    assert_equal({}, grand)
+  end
+
+  def test_setval_nil_at_ancestor2_also_deletes
+    # Before the refactor this branch SET nil instead of deleting,
+    # which only worked because the runner substituted nested null
+    # → "__NULL__" string before reaching this path.
+    grand = { 'x' => { 'y' => 9 } }
+    middle = grand['x']
+    inj = VoxgigStruct::Injection.new(nil, middle)
+    inj.key = 'y'
+    inj.parent = middle
+    inj.path = ['', 'x', 'y']
+    inj.nodes = [{ '$TOP' => grand }, grand, middle]
+    inj.setval(nil, 2)
+    assert_equal({}, grand)
+  end
+
+  def test_setval_value_sets_parent_slot
+    parent = { 'a' => 1 }
+    inj = VoxgigStruct::Injection.new(nil, parent)
+    inj.key = 'b'
+    inj.parent = parent
+    inj.path = ['', 'b']
+    inj.nodes = [{ '$TOP' => parent }, parent]
+    inj.setval('X')
+    assert_equal({ 'a' => 1, 'b' => 'X' }, parent)
+  end
+
+  # validate(nil, ['`$EXACT`', nil]) is the precise corpus case that
+  # the old MIXED branch was tailored for. With the runner now doing
+  # nested NULLMARK substitution and setval treating nil/UNDEF
+  # uniformly as delete, the substituted "__NULL__" string flows
+  # through and validation succeeds without error.
+
+  def test_validate_exact_nil_against_nil_no_errors
+    errs = []
+    VoxgigStruct.validate(nil, ['`$EXACT`', nil], { 'errs' => errs })
+    assert_equal [], errs
   end
 end
