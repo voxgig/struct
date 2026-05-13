@@ -3123,6 +3123,32 @@ fn cmdPack(allocator: Allocator, inj: *Injection, store: JsonValue) !JsonValue {
 // Format: ["`$REF`", "spec-path"]
 // ============================================================================
 
+// Recursively scan a node tree for the literal "`$REF`" string. Used by
+// cmdRef to detect self-recursive references and break the cycle before
+// the inject loop stack-overflows.
+fn scanForRef(val: JsonValue, found: *bool) void {
+    if (found.*) return;
+    switch (val) {
+        .string => |s| {
+            if (std.mem.eql(u8, s, "`$REF`")) found.* = true;
+        },
+        .array => |arr| {
+            for (arr.data.items) |item| {
+                scanForRef(item, found);
+                if (found.*) return;
+            }
+        },
+        .object => |obj| {
+            var it = obj.iterator();
+            while (it.next()) |kv| {
+                scanForRef(kv.value_ptr.*, found);
+                if (found.*) return;
+            }
+        },
+        else => {},
+    }
+}
+
 fn cmdRef(allocator: Allocator, inj: *Injection, store: JsonValue) !JsonValue {
     if (inj.mode != M_VAL) return .null;
 
@@ -3147,6 +3173,15 @@ fn cmdRef(allocator: Allocator, inj: *Injection, store: JsonValue) !JsonValue {
         if (target != .null) _ = delprop(allocator, target, JsonValue{ .string = tkey }) catch {};
         return .null;
     }
+
+    // Cycle break: if the resolved spec contains another `$REF` literal AND
+    // there is no current data at the target slot, do NOT inject. This is the
+    // self-recursive-ref case (e.g. spec {z:{y:["$REF","z"]}} with data {}).
+    // Other ports do the same check; without it the inject loop recurses
+    // infinitely into the same clone and the test process stack-overflows
+    // (manifests as a SIGSEGV during the transform-ref test).
+    var has_sub_ref = false;
+    if (isnode(ref_result)) scanForRef(ref_result, &has_sub_ref);
 
     // Clone the referenced spec and inject it with proper data context.
     const tref = try clone(allocator, ref_result);
@@ -3190,8 +3225,23 @@ fn cmdRef(allocator: Allocator, inj: *Injection, store: JsonValue) !JsonValue {
     };
     tinj.keys[0] = lastPath;
 
-    _ = try inject(allocator, tref, store, tinj);
-    const rval = tinj.val;
+    // Cycle break (matches the Rust / JS / Py / Go ports): if the resolved
+    // ref contains another `$REF` literal AND there is no current data at
+    // the target path, skip injection. Otherwise inject the cloned ref.
+    const tval_at: JsonValue = blk2: {
+        if (tpath.len == 0) break :blk2 store;
+        var joined = std.ArrayList(u8).init(allocator);
+        for (tpath, 0..) |p, pi| {
+            if (pi > 0) joined.append('.') catch break :blk2 .null;
+            joined.appendSlice(p) catch break :blk2 .null;
+        }
+        break :blk2 getpath(allocator, JsonValue{ .string = joined.items }, store) catch .null;
+    };
+    const skip_for_cycle = has_sub_ref and tval_at == .null;
+    const rval: JsonValue = if (skip_for_cycle) .null else blk: {
+        _ = try inject(allocator, tref, store, tinj);
+        break :blk tinj.val;
+    };
 
     // Set the result on the grandparent.
     _ = try inj.setval(rval, 2);
