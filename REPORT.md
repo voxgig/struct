@@ -50,19 +50,41 @@ NFA engine in-tree (c/cpp/lua/rs/zig).
 | **cpp** | 40 | 15 | 2 | 1245/1245 corpus | nlohmann/json fix |
 | **cs** | 40 | 15 | 2 | 78/78 corpus | already Group A |
 | **kt** | 40 | 15 | 2 | 135/135 | already Group A |
-| **zig** | 40 | 15 | 2 | 53/60 corpus sets \*1 | wrap_pad fix + $REF cycle-break |
+| **zig** | 40 | 15 | 2 | 59/60 corpus sets \*1 | cycle-break + 6 latent-bug fixes |
 
 \*1 Zig: previously reported "60/60 passing with a SIGSEGV" was
 misleading — the test process actually died at test 47/60
-(transform-ref entry 6, a self-cyclic $REF spec) due to **stack
+(transform-ref entry 6, a self-cyclic `$REF` spec) due to **stack
 overflow from infinite recursion in `cmdRef`**, so tests 48–60 never
-ran. Fixed by porting the `has_sub_ref` cycle-break check from the
+ran. Fixed by porting the `has_sub_ref` cycle-break from the
 Rust / JS / Py / Go ports. The unblock revealed 7 latent test
-failures (transform.ref[15], validate.basic[32], validate.child[3],
-validate.one[4], validate.exact[6], select.basic[11],
-select.edge[0]) that need separate per-case investigation. The
-`minor-pad` regression was fixed earlier by stringifying non-string
-vals in the test wrapper.
+failures hidden behind the segfault; 6 were fixed in this round:
+
+- `validate.basic[32]`, `validate.child[3]`: `validationModify`
+  was discarding the `merge()` return value, so empty-spec `{}` and
+  `$OPEN:true` slots never picked up the data keys. Added an
+  in-place `mergeIntoMap` helper.
+- `validate.one[4]`, `validate.exact[6]`: `cmdValidateOne` /
+  `cmdValidateExactCmd` were reading `getprop(inj.dparent, inj.key)`
+  but `$ONE` / `$EXACT` wrap the current data (the dparent itself),
+  not a sub-slot. Now use `inj.dparent` directly.
+- `select.basic[11]`: `validateExactMatch` had no plain-array
+  branch, so `{tags:["a","b"]}` matched any data array. Now
+  compares element-by-element.
+- `select.edge[0]`, `select.edge[2]`: select operators
+  (`$AND`/`$OR`/`$NOT`/cmps) returned early, ignoring non-operator
+  spec keys at the same level; a missing data key against a null
+  spec slot matched. Now operators run AND-combined with the
+  regular-key match, and an absent data key fails the match.
+- Plus a `getpath` fix so absolute paths like `"$TOP.z.p"` don't
+  re-traverse `$TOP` inside the data (mirrors Rust's
+  `get_path_inj` when there is no base).
+
+One failure remains: `transform.ref[20]` — deep nested
+`[[$REF,z2],[$REF,z2]]` array-of-`$REF` where the recursive inject's
+dparent ends up one level too shallow. Needs a per-level
+descend-during-recursion adjustment that's larger than the
+in-cmdRef fixes already applied.
 
 The `sentinels.jsonic` conformance category (UNDEF_SPEC.md point 7)
 exercises Group A's "null = absent" rule with three side-by-side
