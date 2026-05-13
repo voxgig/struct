@@ -22,7 +22,7 @@
 | **py** | 40+ | 15 | 2 | 90/93 pass (3 skip) | Group A/B applied |
 | **go** | 50+ | 15 | 2 | 92/92 pass | already Group A |
 | **php** | 46 | 15 | 2 | 84/84 pass | already Group A |
-| **rb** | 40+ | 15 | 2 | 75/75 pass | already Group A |
+| **rb** | 40+ | 15 | 2 | 81/81 pass | Group A/B + UNDEF setval |
 | **lua** | 40+ | 15 | 2 | 74/74 pass | already Group A |
 | **rs** | 40+ | 15 | 2 | corpus pass | already Group A |
 | **c** | 40 | 15 | 2 | 1177/1177 corpus | Group A/B applied |
