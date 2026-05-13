@@ -2,7 +2,7 @@ CC ?= gcc
 CFLAGS_COMMON := -std=c11 -Wall -Wextra -Wpedantic -Wshadow -Wno-unused-parameter -D_GNU_SOURCE
 CFLAGS_DEBUG := -O0 -g
 CFLAGS_RELEASE := -O2
-LDLIBS := -lcjson -lm
+LDLIBS := -lm
 
 EXTRA_INC := -I /usr/include -I /usr/local/include -I /opt/homebrew/include
 
@@ -53,5 +53,4 @@ inspect:
 	@echo "$(CC) version:"
 	@$(CC) --version | head -1
 	@echo ""
-	@echo "cJSON header:"
-	@find /usr/include /usr/local/include /opt/homebrew/include -name 'cJSON.h' 2>/dev/null | head -1
+	@echo "No third-party deps — JSON I/O is in src/value_io.c."

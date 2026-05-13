@@ -2,7 +2,8 @@
  *
  * Voxgig Struct — JSON I/O bridge.
  *
- * Uses cJSON only as a text parser/serialiser. Runtime values use vs_value.
+ * Hand-written recursive-descent JSON parser (no third-party deps).
+ * Runtime values use vs_value.
  */
 
 #ifndef VOXGIG_STRUCT_VALUE_IO_H
