@@ -1586,7 +1586,9 @@ fn mergeNodes(
         return try clone(allocator, src);
     }
 
-    // Both maps: deep merge.
+    // Both maps: deep merge. Clone dst so the caller's existing reference
+    // is unchanged; callers that want in-place semantics either take the
+    // return value or use the dedicated mergeIntoMap below.
     if (ismap(src) and ismap(dst)) {
         var result = try clone(allocator, dst);
         var it = src.object.iterator();
@@ -1630,6 +1632,17 @@ fn mergeNodes(
     }
 
     return src;
+}
+
+// In-place map merge: copy every key/value from src into dst, replacing
+// dst's entries. Used by validationModify's empty-spec branch where the
+// caller needs the merged result visible through the original *MapRef.
+fn mergeIntoMap(dst: JsonValue, src: JsonValue) !void {
+    if (dst != .object or src != .object) return;
+    var it = src.object.iterator();
+    while (it.next()) |kv| {
+        try dst.object.put(kv.key_ptr.*, kv.value_ptr.*);
+    }
 }
 
 // ============================================================================
@@ -1702,8 +1715,18 @@ pub fn getpathInj(allocator: Allocator, path_val: JsonValue, store: JsonValue, i
         }
     }
 
-    // Resolve through $TOP (or dparent for relative paths).
-    var val = getpropFromStore(store);
+    // Resolve through $TOP (or dparent for relative paths). However if the
+    // path's first part already matches a key in store, start from store
+    // directly — this lets absolute paths like "$TOP.z.p" walk without
+    // double-traversing $TOP. Mirrors what the Rust port does (its
+    // get_path_inj starts with src = store when there's no base).
+    var val = if (numparts > 0
+        and parts[0].len > 0
+        and store == .object
+        and store.object.get(parts[0]) != null)
+        store
+    else
+        getpropFromStore(store);
 
     // Meta-path syntax: "name$~rest" or "name$=rest" on the first part.
     if (numparts > 0 and inj != null and inj.?.meta != .null) {
@@ -2576,10 +2599,11 @@ fn cmdValidateOne(allocator: Allocator, inj: *Injection, _: JsonValue) anyerror!
     const parent_items = inj.parent.array.data.items;
     if (parent_items.len < 2) return .null;
 
-    // Get data value at this position.
-    const data_val = getprop(allocator, inj.dparent, JsonValue{ .string = inj.key }, .null) catch inj.dparent;
+    // The data value to validate is inj.dparent itself — $ONE wraps the
+    // current data, not a sub-slot of it. Mirrors the Rust / Go ports.
+    const data_val = inj.dparent;
 
-    // Replace [$ONE, alt0, alt1, ...] with the data value in the grandparent.
+    // Replace [$ONE, alt0, alt1, ...] in the grandparent with data_val.
     _ = try inj.setval(data_val, 2);
 
     // Try each alternative.
@@ -2612,7 +2636,9 @@ fn cmdValidateExactCmd(allocator: Allocator, inj: *Injection) anyerror!JsonValue
     const parent_items = inj.parent.array.data.items;
     if (parent_items.len < 2) return .null;
 
-    const data_val = getprop(allocator, inj.dparent, JsonValue{ .string = inj.key }, .null) catch inj.dparent;
+    // $EXACT wraps the current data value; data_val is inj.dparent itself,
+    // not a sub-slot. Mirrors Rust / Go ports.
+    const data_val = inj.dparent;
     _ = try inj.setval(data_val, 2);
 
     const alts = parent_items[1..];
@@ -3228,10 +3254,18 @@ fn cmdRef(allocator: Allocator, inj: *Injection, store: JsonValue) !JsonValue {
     // Cycle break (matches the Rust / JS / Py / Go ports): if the resolved
     // ref contains another `$REF` literal AND there is no current data at
     // the target path, skip injection. Otherwise inject the cloned ref.
+    //
+    // Zig's getpath auto-unwraps store.$TOP, so an absolute path like
+    // ["$TOP", "z", "p"] would re-traverse "$TOP" inside the data and hit
+    // a dead end. Strip the leading "$TOP" before joining.
+    const tpath_strip: []const []const u8 = if (tpath.len > 0 and std.mem.eql(u8, tpath[0], S_DTOP))
+        tpath[1..]
+    else
+        tpath;
     const tval_at: JsonValue = blk2: {
-        if (tpath.len == 0) break :blk2 store;
+        if (tpath_strip.len == 0) break :blk2 store;
         var joined = std.ArrayList(u8).init(allocator);
-        for (tpath, 0..) |p, pi| {
+        for (tpath_strip, 0..) |p, pi| {
             if (pi > 0) joined.append('.') catch break :blk2 .null;
             joined.appendSlice(p) catch break :blk2 .null;
         }
@@ -3561,13 +3595,10 @@ fn validationModify(allocator: Allocator, _: JsonValue, key: []const u8, parent:
             if (pval == .object) {
                 if (pval.object.get(S_BOPEN)) |ov| {
                     if (ov == .bool and ov.bool) {
-                        // Open mode: merge data into spec result.
-                        const ml = [_]JsonValue{ pval, cval };
-                        const ml_lr = allocator.create(ListRef) catch return;
-                        ml_lr.* = .{ .data = ListData.init(allocator) };
-                        for (ml) |item| ml_lr.append(item) catch {};
-                        _ = merge(allocator, JsonValue{ .array = ml_lr }, MAXDEPTH) catch {};
-                        if (pval == .object) _ = pval.object.fetchOrderedRemove(S_BOPEN);
+                        // Open mode: copy data keys into pval so they appear
+                        // in the result. Drop the $OPEN marker afterwards.
+                        mergeIntoMap(pval, cval) catch {};
+                        _ = pval.object.fetchOrderedRemove(S_BOPEN);
                         return;
                     }
                 }
@@ -3596,12 +3627,10 @@ fn validationModify(allocator: Allocator, _: JsonValue, key: []const u8, parent:
                 }
             }
         } else {
-            // Empty spec object {} = open, merge in data.
-            const ml = [_]JsonValue{ pval, cval };
-            const ml_lr = allocator.create(ListRef) catch return;
-            ml_lr.* = .{ .data = ListData.init(allocator) };
-            for (ml) |item| ml_lr.append(item) catch {};
-            _ = merge(allocator, JsonValue{ .array = ml_lr }, MAXDEPTH) catch {};
+            // Empty spec object {} = open. Copy data keys into pval so the
+            // result map (which IS pval, since spec_clone is what inject
+            // returns) sees the data.
+            mergeIntoMap(pval, cval) catch {};
         }
     } else if (!isnode(cval)) {
         if (inj.exact_mode) {
@@ -4005,42 +4034,63 @@ fn validateExactMatch(
     errs: *std.ArrayList([]const u8),
     path: []const []const u8,
 ) anyerror!JsonValue {
-    // Operator handling for select queries.
+    // Operator handling for select queries. Operators ($AND/$OR/$NOT/$CMP)
+    // are combined AND-style with the rest of the spec keys at the same
+    // level — every operator must pass AND every regular key must match
+    // (open-world for the non-operator slots).
     if (spec_val == .object) {
-        // Check for operators.
+        // Run each operator that appears, accumulating errors. Count whether
+        // there are any non-operator keys; if none, skip the key-by-key
+        // match step (which would otherwise require data to be an object).
+        var has_plain_key = false;
+        var it = spec_val.object.iterator();
+        while (it.next()) |kv| {
+            const k = kv.key_ptr.*;
+            if (std.mem.eql(u8, k, S_BOPEN)) continue;
+            if (k.len > 0 and k[0] == '`') continue;
+            has_plain_key = true;
+            break;
+        }
+
         if (spec_val.object.get("`$AND`")) |terms| {
-            return try selectAnd(allocator, terms, data_val, errs, path);
+            _ = try selectAnd(allocator, terms, data_val, errs, path);
         }
         if (spec_val.object.get("`$OR`")) |terms| {
-            return try selectOr(allocator, terms, data_val, errs, path);
+            _ = try selectOr(allocator, terms, data_val, errs, path);
         }
         if (spec_val.object.get("`$NOT`")) |term| {
-            return try selectNot(allocator, term, data_val, errs, path);
+            _ = try selectNot(allocator, term, data_val, errs, path);
         }
         if (spec_val.object.get("`$GT`")) |term| {
-            return try selectCmp(allocator, "$GT", term, data_val, errs, path);
+            _ = try selectCmp(allocator, "$GT", term, data_val, errs, path);
         }
         if (spec_val.object.get("`$LT`")) |term| {
-            return try selectCmp(allocator, "$LT", term, data_val, errs, path);
+            _ = try selectCmp(allocator, "$LT", term, data_val, errs, path);
         }
         if (spec_val.object.get("`$GTE`")) |term| {
-            return try selectCmp(allocator, "$GTE", term, data_val, errs, path);
+            _ = try selectCmp(allocator, "$GTE", term, data_val, errs, path);
         }
         if (spec_val.object.get("`$LTE`")) |term| {
-            return try selectCmp(allocator, "$LTE", term, data_val, errs, path);
+            _ = try selectCmp(allocator, "$LTE", term, data_val, errs, path);
         }
         if (spec_val.object.get("`$LIKE`")) |term| {
-            return try selectCmp(allocator, "$LIKE", term, data_val, errs, path);
+            _ = try selectCmp(allocator, "$LIKE", term, data_val, errs, path);
         }
+
+        if (!has_plain_key) return data_val;
 
         if (data_val != .object) {
             try errs.append("type mismatch: expected object");
             return data_val;
         }
 
-        // Match each spec key against data (open: extra data keys are OK).
-        var it = spec_val.object.iterator();
-        while (it.next()) |kv| {
+        // Match each non-operator spec key against data (open: extra data
+        // keys are OK). Group A/B-aware: a missing key in data fails the
+        // match unconditionally, even if the spec slot is null. Otherwise
+        // a query like {value:null} would spuriously match objects that
+        // don't have a "value" key.
+        var it2 = spec_val.object.iterator();
+        while (it2.next()) |kv| {
             const k = kv.key_ptr.*;
             if (std.mem.eql(u8, k, S_BOPEN)) continue;
             if (k.len > 0 and k[0] == '`') continue;
@@ -4049,8 +4099,16 @@ fn validateExactMatch(
             @memcpy(new_path[0..path.len], path);
             new_path[path.len] = k;
 
-            const child_data = if (data_val.object.get(k)) |v| v else .null;
-            _ = try validateExactMatch(allocator, kv.value_ptr.*, child_data, errs, new_path);
+            if (data_val.object.get(k)) |child_data| {
+                _ = try validateExactMatch(allocator, kv.value_ptr.*, child_data, errs, new_path);
+            } else {
+                const p = try pathifySlice(allocator, new_path);
+                try errs.append(try std.fmt.allocPrint(
+                    allocator,
+                    "Missing key at {s}.",
+                    .{p},
+                ));
+            }
         }
         return data_val;
     }
@@ -4064,6 +4122,34 @@ fn validateExactMatch(
                 if (std.mem.eql(u8, first.string, "`$EXACT`"))
                     return try validateExact(allocator, spec_val, data_val, errs, path);
             }
+        }
+        // Plain array spec: compare to data element-by-element. Length and
+        // every element must match (recurse via validateExactMatch). A non-
+        // array data fails immediately.
+        if (data_val != .array) {
+            const p = try pathifySlice(allocator, path);
+            try errs.append(try std.fmt.allocPrint(
+                allocator,
+                "Value at {s}: {s} should be a list.",
+                .{ p, try stringify(allocator, data_val, null) },
+            ));
+            return data_val;
+        }
+        if (spec_val.array.data.items.len != data_val.array.data.items.len) {
+            const p = try pathifySlice(allocator, path);
+            try errs.append(try std.fmt.allocPrint(
+                allocator,
+                "Value at {s}: list length {d} should equal {d}.",
+                .{ p, data_val.array.data.items.len, spec_val.array.data.items.len },
+            ));
+            return data_val;
+        }
+        for (spec_val.array.data.items, data_val.array.data.items, 0..) |sv, dv, i| {
+            const idx_buf = try std.fmt.allocPrint(allocator, "{d}", .{i});
+            var new_path = try allocator.alloc([]const u8, path.len + 1);
+            @memcpy(new_path[0..path.len], path);
+            new_path[path.len] = idx_buf;
+            _ = try validateExactMatch(allocator, sv, dv, errs, new_path);
         }
         return data_val;
     }
