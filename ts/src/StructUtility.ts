@@ -429,7 +429,7 @@ function getelem(val: any, key: any, alt?: any) {
 
   if (islist(val)) {
     const nkey = parseInt(key)
-    if (Number.isInteger(nkey) && ('' + key).match(R_INTEGER_KEY)) {
+    if (Number.isInteger(nkey) && re_test(R_INTEGER_KEY, '' + key)) {
       if (nkey < 0) {
         key = val.length + nkey
       }
@@ -543,14 +543,87 @@ function filter(val: any, check: (item: [string, any]) => boolean): any[] {
 
 // Escape regular expression.
 function escre(s: string) {
-  // s = null == s ? S_MT : s
-  return replace(s, R_ESCAPE_REGEXP, '\\$&')
+  return re_replace(R_ESCAPE_REGEXP, s, '\\$&')
+}
+
+// Alias so call sites read naturally next to the other re_* helpers.
+function re_escape(s: string) {
+  return escre(s)
 }
 
 // Escape URLs.
 function escurl(s: string) {
   s = null == s ? S_MT : s
   return encodeURIComponent(s)
+}
+
+// ===========================================================================
+// Regex utility — uniform API. Every port exposes these same names. The
+// dialect is the RE2 subset documented in /REGEX.md. Internal library code
+// uses these helpers instead of host-language regex methods directly.
+// ===========================================================================
+
+// Compile a regex (or return as-is if already compiled). Cached behaviour is
+// up to the port; in TS we just construct a RegExp.
+function re_compile(pattern: string | RegExp, flags?: string): RegExp {
+  if (pattern instanceof RegExp) {
+    return pattern
+  }
+  return new RegExp(pattern, flags)
+}
+
+// First match. Returns [whole, capture1, ...] or null.
+function re_find(pattern: string | RegExp, input: string): RegExpMatchArray | null {
+  const re = pattern instanceof RegExp ? pattern : new RegExp(pattern)
+  return input.match(re)
+}
+
+// All non-overlapping matches, left to right. Each element is the same shape
+// as re_find's array.
+function re_find_all(pattern: string | RegExp, input: string): RegExpMatchArray[] {
+  let re: RegExp
+  if (pattern instanceof RegExp) {
+    re = pattern.global ? pattern : new RegExp(pattern.source, pattern.flags + 'g')
+  } else {
+    re = new RegExp(pattern, 'g')
+  }
+  const out: RegExpMatchArray[] = []
+  let m: RegExpExecArray | null
+  while ((m = re.exec(input)) !== null) {
+    out.push(m as unknown as RegExpMatchArray)
+    if (m[0] === '') re.lastIndex++ // avoid infinite loop on empty match
+  }
+  return out
+}
+
+// Replace every match. `replacement` is either a string (with $& and $1..$9)
+// or a callback receiving the same array as re_find returns.
+function re_replace(
+  pattern: string | RegExp,
+  input: string,
+  replacement: string | ((m: RegExpMatchArray) => string),
+): string {
+  let re: RegExp
+  if (pattern instanceof RegExp) {
+    re = pattern.global ? pattern : new RegExp(pattern.source, pattern.flags + 'g')
+  } else {
+    re = new RegExp(pattern, 'g')
+  }
+  if (typeof replacement === 'function') {
+    return input.replace(re, (...args: any[]) => {
+      // Strip the trailing offset + full string args String.prototype.replace passes.
+      // The callback below receives just the capture groups (whole at [0]).
+      const groups = args.slice(0, -2) as unknown as RegExpMatchArray
+      return replacement(groups)
+    })
+  }
+  return input.replace(re, replacement)
+}
+
+// Boolean test for any match.
+function re_test(pattern: string | RegExp, input: string): boolean {
+  const re = pattern instanceof RegExp ? pattern : new RegExp(pattern)
+  return re.test(input)
 }
 
 // Replace a search string (all), or a regexp, in a source string.
@@ -582,21 +655,21 @@ function join(arr: any[], sep?: string, url?: boolean) {
 
         if (NONE !== sepre && S_MT !== sepre) {
           if (url && 0 === i) {
-            s = replace(s, RegExp(sepre + '+$'), S_MT)
+            s = re_replace(re_compile(sepre + '+$'), s, S_MT)
             return s
           }
 
           if (0 < i) {
-            s = replace(s, RegExp('^' + sepre + '+'), S_MT)
+            s = re_replace(re_compile('^' + sepre + '+'), s, S_MT)
           }
 
           if (i < sarr - 1 || !url) {
-            s = replace(s, RegExp(sepre + '+$'), S_MT)
+            s = re_replace(re_compile(sepre + '+$'), s, S_MT)
           }
 
-          s = replace(
+          s = re_replace(
+            re_compile('([^' + sepre + '])' + sepre + '+([^' + sepre + '])'),
             s,
-            RegExp('([^' + sepre + '])' + sepre + '+([^' + sepre + '])'),
             '$1' + sepdef + '$2',
           )
         }
@@ -665,7 +738,7 @@ function stringify(val: any, maxlen?: number, pretty?: any): string {
         }
         return val
       })
-      valstr = valstr.replace(R_QUOTES, S_MT)
+      valstr = re_replace(R_QUOTES, valstr, S_MT)
     } catch {
       valstr = '__STRINGIFY_FAILED__'
     }
@@ -730,7 +803,7 @@ function pathify(val: any, startin?: number, endin?: number) {
           filter(path, (n) => iskey(n[1])),
           (n) => {
             const p = n[1]
-            return S_number === typeof p ? S_MT + Math.floor(p) : p.replace(R_DOT, S_MT)
+            return S_number === typeof p ? S_MT + Math.floor(p) : re_replace(R_DOT, p, S_MT)
           },
         ),
         S_DT,
@@ -753,7 +826,7 @@ function clone(val: any): any {
   const replacer: any = (_k: any, v: any) =>
     0 < (reftype & typify(v)) ? (refs.push(v), '`$REF:' + (refs.length - 1) + '`') : v
   const reviver: any = (_k: any, v: any, m: any) =>
-    S_string === typeof v ? ((m = v.match(R_CLONE_REF)), m ? refs[m[1]] : v) : v
+    S_string === typeof v ? ((m = re_find(R_CLONE_REF, v)), m ? refs[m[1]] : v) : v
   const out = NONE === val ? NONE : JSON.parse(JSON.stringify(val, replacer), reviver)
   return out
 }
@@ -1112,7 +1185,7 @@ function getpath(store: any, path: number | string | string[], injdef?: Partial<
     if (!isfunc(val)) {
       val = src
 
-      const m = parts[0].match(R_META_PATH)
+      const m = re_find(R_META_PATH, parts[0])
       if (m && injdef && injdef.meta) {
         val = getprop(injdef.meta, m[1])
         parts[0] = m[3]
@@ -1137,7 +1210,7 @@ function getpath(store: any, path: number | string | string[], injdef?: Partial<
         }
 
         // $$ escapes $
-        part = part.replace(R_DOUBLE_DOLLAR, '$')
+        part = re_replace(R_DOUBLE_DOLLAR, part, '$')
 
         if (S_MT === part) {
           let ascends = 0
@@ -2417,7 +2490,7 @@ const select_CMP: Injector = (inj: Injection, _val: any, ref: string, store: any
       pass = true
     } else if ('$LTE' === ref && point <= term) {
       pass = true
-    } else if ('$LIKE' === ref && stringify(point).match(RegExp(term))) {
+    } else if ('$LIKE' === ref && re_test(re_compile(term), stringify(point))) {
       pass = true
     }
 
@@ -2693,7 +2766,7 @@ const _injecthandler: Injector = (inj: Injection, val: any, ref: string, store: 
 const _validatehandler: Injector = (inj: Injection, val: any, ref: string, store: any): any => {
   let out = val
 
-  const m = ref.match(R_META_PATH)
+  const m = re_find(R_META_PATH, ref)
   const ismetapath = null != m
 
   if (ismetapath) {
@@ -2730,7 +2803,7 @@ function _injectstr(val: string, store: any, inj?: Injection): any {
   let out: any = val
 
   // Pattern examples: "`a.b.c`", "`$NAME`", "`$NAME1`"
-  const m = val.match(R_INJECTION_FULL)
+  const m = re_find(R_INJECTION_FULL, val)
 
   // Full string of the val is an injection.
   if (m) {
@@ -2741,7 +2814,7 @@ function _injectstr(val: string, store: any, inj?: Injection): any {
 
     // Special escapes inside injection.
     if (3 < size(pathref)) {
-      pathref = pathref.replace(R_BT_ESCAPE, S_BT).replace(R_DS_ESCAPE, S_DS)
+      pathref = re_replace(R_DS_ESCAPE, re_replace(R_BT_ESCAPE, pathref, S_BT), S_DS)
     }
 
     // Get the extracted path reference.
@@ -2752,7 +2825,7 @@ function _injectstr(val: string, store: any, inj?: Injection): any {
       // Special escapes inside injection.
 
       if (3 < size(ref)) {
-        ref = ref.replace(R_BT_ESCAPE, S_BT).replace(R_DS_ESCAPE, S_DS)
+        ref = re_replace(R_DS_ESCAPE, re_replace(R_BT_ESCAPE, ref, S_BT), S_DS)
       }
 
       if (inj) {
@@ -2765,7 +2838,7 @@ function _injectstr(val: string, store: any, inj?: Injection): any {
       return NONE === found ? S_MT : S_string === typeof found ? found : JSON.stringify(found)
     }
 
-    out = val.replace(R_INJECTION_PARTIAL, partial)
+    out = re_replace(R_INJECTION_PARTIAL, val, (m) => partial('', m[1]))
 
     // Also call the inj handler on the entire string, providing the
     // option for custom injection.
@@ -2990,6 +3063,12 @@ export {
   typename,
   validate,
   walk,
+  re_compile,
+  re_find,
+  re_find_all,
+  re_replace,
+  re_test,
+  re_escape,
   SKIP,
   DELETE,
   jm,
