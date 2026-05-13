@@ -748,6 +748,29 @@ fn isReSpecial(c: u8) bool {
     };
 }
 
+// ----------------------------------------------------------------------------
+// Regex utility — uniform re_* API (see /REGEX_API.md). Zig currently uses
+// `mvzr` for regex; a follow-up commit can vendor it in-tree to drop the
+// .zon dependency.
+// ----------------------------------------------------------------------------
+
+const _mvzr_re = @import("mvzr");
+
+pub const ReCompiled = _mvzr_re.Regex;
+
+pub fn re_compile(pattern: []const u8) ?ReCompiled {
+    return _mvzr_re.compile(pattern);
+}
+
+pub fn re_test(pattern: []const u8, input: []const u8) bool {
+    const re = _mvzr_re.compile(pattern) orelse return false;
+    return re.isMatch(input);
+}
+
+pub fn re_escape(allocator: Allocator, s: []const u8) ![]const u8 {
+    return escre(allocator, s);
+}
+
 // URL-encode a string.
 pub fn escurl(allocator: Allocator, s: []const u8) ![]const u8 {
     if (s.len == 0) return S_MT;

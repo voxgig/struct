@@ -144,6 +144,55 @@ module VoxgigStruct
     Regexp.escape(s)
   end
 
+  # ---------------------------------------------------------------------
+  # Regex utility — uniform re_* API (see /REGEX_API.md). Ruby's Onigmo
+  # engine is a strict superset of RE2.
+  # ---------------------------------------------------------------------
+
+  def self.re_compile(pattern)
+    pattern.is_a?(Regexp) ? pattern : Regexp.new(pattern)
+  end
+
+  def self.re_test(pattern, input)
+    !!(re_compile(pattern) =~ input.to_s)
+  end
+
+  def self.re_find(pattern, input)
+    m = re_compile(pattern).match(input.to_s)
+    return nil if m.nil?
+    [m[0]] + m.captures.map { |c| c.nil? ? '' : c }
+  end
+
+  def self.re_find_all(pattern, input)
+    out = []
+    input.to_s.scan(re_compile(pattern)) do
+      m = Regexp.last_match
+      out << [m[0]] + m.captures.map { |c| c.nil? ? '' : c }
+    end
+    out
+  end
+
+  def self.re_replace(pattern, input, replacement)
+    rx = re_compile(pattern)
+    if replacement.respond_to?(:call)
+      input.to_s.gsub(rx) do |_match|
+        m = Regexp.last_match
+        replacement.call([m[0]] + m.captures.map { |c| c.nil? ? '' : c })
+      end
+    else
+      # Translate JS-style $& / $1 to Ruby's \0 / \1
+      ruby_repl = replacement.gsub(/\$([&0-9])/) do |_|
+        ch = $1
+        ch == '&' ? '\\0' : "\\#{ch}"
+      end
+      input.to_s.gsub(rx, ruby_repl)
+    end
+  end
+
+  def self.re_escape(s)
+    escre(s)
+  end
+
   def self.escurl(s)
     s = '' if s.nil?
     URI::DEFAULT_PARSER.escape(s, /[^A-Za-z0-9\-._~]/)

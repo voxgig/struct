@@ -433,6 +433,66 @@ pub fn esc_re(s: &Value) -> String {
         .to_string()
 }
 
+// ---------------------------------------------------------------------------
+// Regex utility — uniform re_* API (see /REGEX_API.md). The Rust port
+// currently wraps the `regex` crate, whose dialect IS the RE2 reference.
+// A follow-up commit can vendor an in-tree NFA matcher to drop the dep.
+// ---------------------------------------------------------------------------
+
+/// Compile a pattern. Mirrors `re_compile(pattern)`.
+pub fn re_compile(pattern: &str) -> Result<regex::Regex, regex::Error> {
+    regex::Regex::new(pattern)
+}
+
+/// First match. Returns `Some([whole, capture1, ...])` or `None`.
+pub fn re_find(pattern: &str, input: &str) -> Option<Vec<String>> {
+    let re = regex::Regex::new(pattern).ok()?;
+    let m = re.captures(input)?;
+    Some(
+        m.iter()
+            .map(|c| c.map(|x| x.as_str().to_string()).unwrap_or_default())
+            .collect(),
+    )
+}
+
+/// All non-overlapping matches.
+pub fn re_find_all(pattern: &str, input: &str) -> Vec<Vec<String>> {
+    let re = match regex::Regex::new(pattern) {
+        Ok(r) => r,
+        Err(_) => return Vec::new(),
+    };
+    re.captures_iter(input)
+        .map(|caps| {
+            caps.iter()
+                .map(|c| c.map(|x| x.as_str().to_string()).unwrap_or_default())
+                .collect()
+        })
+        .collect()
+}
+
+/// Replace every match. Supports `$&` (whole match) and `$1`..`$9` (captures).
+pub fn re_replace(pattern: &str, input: &str, replacement: &str) -> String {
+    let re = match regex::Regex::new(pattern) {
+        Ok(r) => r,
+        Err(_) => return input.to_string(),
+    };
+    // Translate JS-style $& to ${0} (Rust regex uses $0..$N).
+    let rust_repl = replacement.replace("$&", "$0");
+    re.replace_all(input, rust_repl.as_str()).into_owned()
+}
+
+/// Boolean test.
+pub fn re_test(pattern: &str, input: &str) -> bool {
+    regex::Regex::new(pattern)
+        .map(|re| re.is_match(input))
+        .unwrap_or(false)
+}
+
+/// Alias of `esc_re`.
+pub fn re_escape(s: &str) -> String {
+    esc_re(&Value::from(s))
+}
+
 /// `escurl(s)` — `encodeURIComponent`.
 pub fn esc_url(s: &Value) -> String {
     let s = match s {

@@ -580,6 +580,50 @@ inline std::string escre(const Value& v) {
   return std::regex_replace(s, R_ESCAPE_REGEXP(), "\\$&");
 }
 
+// ----------------------------------------------------------------------------
+// Regex utility — uniform re_* API (see /REGEX_API.md). C++'s <regex>
+// (ECMAScript dialect by default) is a strict superset of RE2.
+// ----------------------------------------------------------------------------
+
+inline std::regex re_compile(const std::string& pattern) {
+  return std::regex(pattern);
+}
+
+inline bool re_test(const std::string& pattern, const std::string& input) {
+  return std::regex_search(input, std::regex(pattern));
+}
+
+inline std::vector<std::string> re_find(const std::string& pattern, const std::string& input) {
+  std::smatch m;
+  if (!std::regex_search(input, m, std::regex(pattern))) return {};
+  std::vector<std::string> out;
+  for (size_t i = 0; i < m.size(); i++) out.push_back(m[i].str());
+  return out;
+}
+
+inline std::vector<std::vector<std::string>> re_find_all(const std::string& pattern,
+                                                          const std::string& input) {
+  std::vector<std::vector<std::string>> out;
+  std::regex rx(pattern);
+  auto begin = std::sregex_iterator(input.begin(), input.end(), rx);
+  auto end = std::sregex_iterator();
+  for (auto it = begin; it != end; ++it) {
+    std::vector<std::string> row;
+    for (size_t i = 0; i < it->size(); i++) row.push_back((*it)[i].str());
+    out.push_back(std::move(row));
+  }
+  return out;
+}
+
+inline std::string re_replace(const std::string& pattern, const std::string& input,
+                              const std::string& replacement) {
+  return std::regex_replace(input, std::regex(pattern), replacement);
+}
+
+inline std::string re_escape(const std::string& s) {
+  return std::regex_replace(s, R_ESCAPE_REGEXP(), "\\$&");
+}
+
 inline std::string escurl(const Value& v) {
   if (v.is_undef())
     return "";

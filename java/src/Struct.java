@@ -614,6 +614,67 @@ public class Struct {
     return in.replaceAll("([\\\\.\\[\\]{}()*+?^$|])", "\\\\$1");
   }
 
+  // -------------------------------------------------------------------------
+  // Regex utility — uniform re* API (see /REGEX_API.md). Java's
+  // java.util.regex.Pattern is an ECMAScript-like engine; a strict superset
+  // of RE2.
+  // -------------------------------------------------------------------------
+
+  public static java.util.regex.Pattern reCompile(String pattern) {
+    return java.util.regex.Pattern.compile(pattern);
+  }
+
+  public static boolean reTest(String pattern, String input) {
+    if (input == null) input = "";
+    return java.util.regex.Pattern.compile(pattern).matcher(input).find();
+  }
+
+  public static String[] reFind(String pattern, String input) {
+    if (input == null) input = "";
+    java.util.regex.Matcher m = java.util.regex.Pattern.compile(pattern).matcher(input);
+    if (!m.find()) return null;
+    String[] out = new String[m.groupCount() + 1];
+    for (int i = 0; i <= m.groupCount(); i++) {
+      out[i] = m.group(i) == null ? "" : m.group(i);
+    }
+    return out;
+  }
+
+  public static java.util.List<String[]> reFindAll(String pattern, String input) {
+    if (input == null) input = "";
+    java.util.List<String[]> out = new java.util.ArrayList<>();
+    java.util.regex.Matcher m = java.util.regex.Pattern.compile(pattern).matcher(input);
+    while (m.find()) {
+      String[] row = new String[m.groupCount() + 1];
+      for (int i = 0; i <= m.groupCount(); i++) row[i] = m.group(i) == null ? "" : m.group(i);
+      out.add(row);
+    }
+    return out;
+  }
+
+  public static String reReplace(String pattern, String input, String replacement) {
+    if (input == null) input = "";
+    // Translate JS-style $& / $1 to Java's $0 / $1
+    String javaRepl = replacement.replace("$&", "\\$0");
+    return java.util.regex.Pattern.compile(pattern).matcher(input).replaceAll(javaRepl);
+  }
+
+  public static String reReplaceFn(String pattern, String input,
+                                   java.util.function.Function<String[], String> fn) {
+    if (input == null) input = "";
+    java.util.regex.Matcher m = java.util.regex.Pattern.compile(pattern).matcher(input);
+    StringBuffer sb = new StringBuffer();
+    while (m.find()) {
+      String[] groups = new String[m.groupCount() + 1];
+      for (int i = 0; i <= m.groupCount(); i++) groups[i] = m.group(i) == null ? "" : m.group(i);
+      m.appendReplacement(sb, java.util.regex.Matcher.quoteReplacement(fn.apply(groups)));
+    }
+    m.appendTail(sb);
+    return sb.toString();
+  }
+
+  public static String reEscape(String s) { return escre(s); }
+
   public static String escurl(Object s) {
     if (s == null || s == UNDEF) {
       return "";

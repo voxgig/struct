@@ -546,6 +546,31 @@ object Struct {
         return input.replace(Regex("""([\\.\[\]{}()*+?^$|])"""), """\\$1""")
     }
 
+    // -----------------------------------------------------------------
+    // Regex utility — uniform re* API (see /REGEX_API.md). Kotlin's Regex
+    // backs onto java.util.regex.Pattern (an RE2 superset).
+    // -----------------------------------------------------------------
+
+    fun reCompile(pattern: String): Regex = Regex(pattern)
+
+    fun reTest(pattern: String, input: String): Boolean = Regex(pattern).containsMatchIn(input)
+
+    fun reFind(pattern: String, input: String): List<String>? {
+        val m = Regex(pattern).find(input) ?: return null
+        return m.groupValues
+    }
+
+    fun reFindAll(pattern: String, input: String): List<List<String>> =
+        Regex(pattern).findAll(input).map { it.groupValues }.toList()
+
+    fun reReplace(pattern: String, input: String, replacement: String): String {
+        // Translate JS $& to Kotlin $0
+        val kRepl = replacement.replace("$&", "\$0")
+        return Regex(pattern).replace(input, kRepl)
+    }
+
+    fun reEscape(s: String): String = escre(s)
+
     fun escurl(s: Any?): String {
         if (s == null || s === UNDEF) return ""
         return URLEncoder.encode(s.toString(), StandardCharsets.UTF_8).replace("+", "%20")

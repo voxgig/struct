@@ -966,6 +966,54 @@ func EscRe(s string) string {
 	return re.ReplaceAllString(s, `\${0}`)
 }
 
+// ---------------------------------------------------------------------------
+// Regex utility — uniform Re* API (see /REGEX_API.md). Go's stdlib `regexp`
+// IS the RE2 reference implementation, so the wrappers are direct passthroughs.
+// ---------------------------------------------------------------------------
+
+// ReCompile compiles a pattern. Accepts a string or an already-compiled *regexp.Regexp.
+func ReCompile(pattern string) *regexp.Regexp {
+	return regexp.MustCompile(pattern)
+}
+
+// ReFind returns [whole, capture1, ...] for the first match, or nil.
+func ReFind(pattern, input string) []string {
+	return regexp.MustCompile(pattern).FindStringSubmatch(input)
+}
+
+// ReFindRe is the *regexp.Regexp form.
+func ReFindRe(re *regexp.Regexp, input string) []string {
+	return re.FindStringSubmatch(input)
+}
+
+// ReFindAll returns all non-overlapping match-group arrays.
+func ReFindAll(pattern, input string) [][]string {
+	return regexp.MustCompile(pattern).FindAllStringSubmatch(input, -1)
+}
+
+// ReReplace replaces every match. The replacement supports Go's $0..$N
+// reference syntax (functionally equivalent to JS $&..$N).
+func ReReplace(pattern, input, replacement string) string {
+	return regexp.MustCompile(pattern).ReplaceAllString(input, replacement)
+}
+
+// ReReplaceFunc replaces every match via the callback.
+func ReReplaceFunc(pattern, input string, fn func([]string) string) string {
+	re := regexp.MustCompile(pattern)
+	return re.ReplaceAllStringFunc(input, func(m string) string {
+		groups := re.FindStringSubmatch(m)
+		return fn(groups)
+	})
+}
+
+// ReTest reports whether the input matches.
+func ReTest(pattern, input string) bool {
+	return regexp.MustCompile(pattern).MatchString(input)
+}
+
+// ReEscape is an alias for EscRe.
+func ReEscape(s string) string { return EscRe(s) }
+
 // Escape URLs.
 func EscUrl(s string) string {
 	return url.QueryEscape(s)

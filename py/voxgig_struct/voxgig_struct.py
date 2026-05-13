@@ -575,6 +575,81 @@ def escre(s: Any):
     return re.sub(pattern, r'\\\1', s)
 
 
+# ---------------------------------------------------------------------------
+# Regex utility — uniform re_* API (see /REGEX_API.md). The Python port
+# wraps the stdlib `re` module; the dialect is the RE2 subset.
+# ---------------------------------------------------------------------------
+
+def re_compile(pattern, flags=0):
+    "Compile a regex (or return as-is if already a compiled pattern)."
+    if hasattr(pattern, 'pattern'):
+        return pattern
+    return re.compile(pattern, flags)
+
+
+def re_find(pattern, input):
+    "First match. Returns [whole, capture1, ...] or None."
+    rx = pattern if hasattr(pattern, 'search') else re.compile(pattern)
+    m = rx.search(input)
+    if not m:
+        return None
+    return [m.group(0)] + [g if g is not None else '' for g in m.groups()]
+
+
+def re_find_all(pattern, input):
+    "All non-overlapping matches."
+    rx = pattern if hasattr(pattern, 'finditer') else re.compile(pattern)
+    out = []
+    for m in rx.finditer(input):
+        out.append([m.group(0)] + [g if g is not None else '' for g in m.groups()])
+    return out
+
+
+def re_replace(pattern, input, replacement):
+    "Replace every match. `replacement` may be a string with $&/$1 or a callable."
+    rx = pattern if hasattr(pattern, 'sub') else re.compile(pattern)
+    if callable(replacement):
+        def _cb(m):
+            return replacement([m.group(0)] + [g if g is not None else '' for g in m.groups()])
+        return rx.sub(_cb, input)
+    # Translate $& and $1..$9 to Python's \g<0>/\1..\9
+    py_repl = []
+    i = 0
+    while i < len(replacement):
+        c = replacement[i]
+        if c == '$' and i + 1 < len(replacement):
+            nxt = replacement[i + 1]
+            if nxt == '&':
+                py_repl.append('\\g<0>')
+                i += 2
+                continue
+            if nxt.isdigit():
+                py_repl.append('\\' + nxt)
+                i += 2
+                continue
+            if nxt == '$':
+                py_repl.append('$')
+                i += 2
+                continue
+        if c == '\\':
+            py_repl.append('\\\\')
+        else:
+            py_repl.append(c)
+        i += 1
+    return rx.sub(''.join(py_repl), input)
+
+
+def re_test(pattern, input):
+    "Boolean test."
+    rx = pattern if hasattr(pattern, 'search') else re.compile(pattern)
+    return rx.search(input) is not None
+
+
+def re_escape(s):
+    "Alias of escre."
+    return escre(s)
+
+
 def escurl(s: Any):
     "Escape URLs."
     if s == UNDEF:

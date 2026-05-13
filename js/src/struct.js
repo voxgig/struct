@@ -431,9 +431,52 @@ function filter(val, check) {
 }
 // Escape regular expression.
 function escre(s) {
-  // s = null == s ? S_MT : s
-  return replace(s, R_ESCAPE_REGEXP, '\\$&')
+  return re_replace(R_ESCAPE_REGEXP, s, '\\$&')
 }
+
+// Regex utility — uniform re_* API. See /REGEX_API.md.
+// The JS port wraps the built-in RegExp; the dialect is the RE2 subset.
+function re_compile(pattern, flags) {
+  if (pattern instanceof RegExp) return pattern
+  return new RegExp(pattern, flags)
+}
+function re_find(pattern, input) {
+  const re = pattern instanceof RegExp ? pattern : new RegExp(pattern)
+  return input.match(re)
+}
+function re_find_all(pattern, input) {
+  let re
+  if (pattern instanceof RegExp) {
+    re = pattern.global ? pattern : new RegExp(pattern.source, pattern.flags + 'g')
+  } else {
+    re = new RegExp(pattern, 'g')
+  }
+  const out = []
+  let m
+  while ((m = re.exec(input)) !== null) {
+    out.push(m)
+    if (m[0] === '') re.lastIndex++
+  }
+  return out
+}
+function re_replace(pattern, input, replacement) {
+  let re
+  if (pattern instanceof RegExp) {
+    re = pattern.global ? pattern : new RegExp(pattern.source, pattern.flags + 'g')
+  } else {
+    re = new RegExp(pattern, 'g')
+  }
+  if (typeof replacement === 'function') {
+    return input.replace(re, (...args) => replacement(args.slice(0, -2)))
+  }
+  return input.replace(re, replacement)
+}
+function re_test(pattern, input) {
+  const re = pattern instanceof RegExp ? pattern : new RegExp(pattern)
+  return re.test(input)
+}
+function re_escape(s) { return escre(s) }
+
 // Escape URLs.
 function escurl(s) {
   s = null == s ? S_MT : s
@@ -2397,6 +2440,13 @@ class StructUtility {
 module.exports = {
   StructUtility,
   Injection,
+
+  re_compile,
+  re_find,
+  re_find_all,
+  re_replace,
+  re_test,
+  re_escape,
 
   clone,
   delprop,
