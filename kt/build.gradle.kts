@@ -13,7 +13,9 @@ repositories {
 }
 
 dependencies {
-    implementation("com.google.code.gson:gson:2.11.0")
+    // Gson is used ONLY by the test harness (corpus loading + assertion
+    // diffs). The library proper has no third-party JSON dependency.
+    testImplementation("com.google.code.gson:gson:2.11.0")
     testImplementation(kotlin("test"))
 }
 

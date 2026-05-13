@@ -1,7 +1,5 @@
 package voxgig.struct;
 
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -868,67 +866,122 @@ public class Struct {
       if (ov instanceof Number n) offset = n.intValue();
     }
     try {
-      Object jsonSafe = toJsonSafe(val, new IdentityHashMap<>());
-      Gson gson = indent > 0
-          ? new GsonBuilder().setPrettyPrinting().create()
-          : new GsonBuilder().create();
-      String out = gson.toJson(jsonSafe);
-      if (indent != 2 && indent > 0) {
-        out = rewriteIndent(out, indent);
-      }
+      StringBuilder sb = new StringBuilder();
+      _jsonifyInner(val, sb, indent, 0, new IdentityHashMap<>());
+      String out = sb.toString();
       if (offset > 0 && out.contains("\n")) {
         String[] lines = out.split("\n", -1);
-        StringBuilder sb = new StringBuilder(lines[0]);
+        StringBuilder pb = new StringBuilder(lines[0]);
         String pad = " ".repeat(offset);
         for (int i = 1; i < lines.length; i++) {
-          sb.append("\n").append(pad).append(lines[i]);
+          pb.append("\n").append(pad).append(lines[i]);
         }
-        out = sb.toString();
+        out = pb.toString();
       }
-      return out == null ? "null" : out;
+      return out;
     } catch (Exception e) {
       return "__JSONIFY_FAILED__";
     }
   }
 
-  private static String rewriteIndent(String pretty, int indent) {
-    String[] lines = pretty.split("\n", -1);
-    StringBuilder sb = new StringBuilder();
-    for (int i = 0; i < lines.length; i++) {
-      String line = lines[i];
-      int spaces = 0;
-      while (spaces < line.length() && line.charAt(spaces) == ' ') spaces++;
-      int level = spaces / 2;
-      sb.append(" ".repeat(level * indent)).append(line.substring(spaces));
-      if (i < lines.length - 1) sb.append('\n');
+  // Pure-Java JSON emitter — mirrors c/src/utility.c::jsonify_inner. Map
+  // keys are emitted in INSERTION order (matching TS canonical's
+  // JSON.stringify behaviour). No third-party JSON library involved.
+  private static void _jsonifyInner(Object v, StringBuilder out, int indent, int depth,
+                                    IdentityHashMap<Object, Boolean> seen) {
+    if (v == null || v == UNDEF) { out.append("null"); return; }
+    if (v instanceof Boolean b) { out.append(b ? "true" : "false"); return; }
+    if (v instanceof Number n) {
+      double d = n.doubleValue();
+      if (!Double.isFinite(d)) { out.append("null"); return; }
+      if (Math.floor(d) == d && Math.abs(d) < 1e15) {
+        out.append(Long.toString((long) d));
+      } else {
+        // %g-style: shortest round-trip-ish. Locale-independent.
+        String s = String.format(java.util.Locale.ROOT, "%g", d);
+        // Trim trailing zeros in the fractional part (matches C %g).
+        if (s.contains(".") && !s.contains("e") && !s.contains("E")) {
+          s = s.replaceAll("0+$", "").replaceAll("\\.$", "");
+        }
+        out.append(s);
+      }
+      return;
     }
-    return sb.toString();
+    if (v instanceof String s) {
+      out.append('"');
+      _jsonEscape(s, out);
+      out.append('"');
+      return;
+    }
+    if (v instanceof Function) { out.append("null"); return; }
+    if (seen.containsKey(v)) { out.append("null"); return; }
+    seen.put(v, true);
+    if (v instanceof List<?> l) {
+      if (l.isEmpty()) { out.append("[]"); seen.remove(v); return; }
+      out.append('[');
+      boolean first = true;
+      for (Object e : l) {
+        if (!first) out.append(',');
+        first = false;
+        if (indent > 0) {
+          out.append('\n').append(" ".repeat((depth + 1) * indent));
+        }
+        _jsonifyInner(e, out, indent, depth + 1, seen);
+      }
+      if (indent > 0) {
+        out.append('\n').append(" ".repeat(depth * indent));
+      }
+      out.append(']');
+      seen.remove(v);
+      return;
+    }
+    if (v instanceof Map<?, ?> m) {
+      if (m.isEmpty()) { out.append("{}"); seen.remove(v); return; }
+      out.append('{');
+      boolean first = true;
+      for (Map.Entry<?, ?> e : m.entrySet()) {
+        if (!first) out.append(',');
+        first = false;
+        if (indent > 0) {
+          out.append('\n').append(" ".repeat((depth + 1) * indent));
+        }
+        out.append('"');
+        _jsonEscape(java.util.Objects.toString(e.getKey()), out);
+        out.append(indent > 0 ? "\": " : "\":");
+        _jsonifyInner(e.getValue(), out, indent, depth + 1, seen);
+      }
+      if (indent > 0) {
+        out.append('\n').append(" ".repeat(depth * indent));
+      }
+      out.append('}');
+      seen.remove(v);
+      return;
+    }
+    seen.remove(v);
+    out.append("null");
   }
 
-  private static Object toJsonSafe(Object val, IdentityHashMap<Object, Boolean> seen) {
-    if (val == null || val == UNDEF) return null;
-    if (val instanceof String || val instanceof Boolean) return val;
-    if (val instanceof Number n) return jsonNumber(n);
-    if (val instanceof Function) return null;
-    if (seen.containsKey(val)) return null;
-    seen.put(val, true);
-    if (val instanceof List<?> l) {
-      List<Object> out = new ArrayList<>();
-      for (Object n : l) out.add(toJsonSafe(n, seen));
-      seen.remove(val);
-      return out;
-    }
-    if (val instanceof Map<?, ?> m) {
-      Map<String, Object> out = new LinkedHashMap<>();
-      for (Map.Entry<?, ?> e : m.entrySet()) {
-        out.put(Objects.toString(e.getKey()), toJsonSafe(e.getValue(), seen));
+  private static void _jsonEscape(String s, StringBuilder out) {
+    for (int i = 0; i < s.length(); i++) {
+      char c = s.charAt(i);
+      switch (c) {
+        case '"':  out.append("\\\""); break;
+        case '\\': out.append("\\\\"); break;
+        case '\b': out.append("\\b"); break;
+        case '\f': out.append("\\f"); break;
+        case '\n': out.append("\\n"); break;
+        case '\r': out.append("\\r"); break;
+        case '\t': out.append("\\t"); break;
+        default:
+          if (c < 0x20) {
+            out.append(String.format("\\u%04x", (int) c));
+          } else {
+            out.append(c);
+          }
       }
-      seen.remove(val);
-      return out;
     }
-    seen.remove(val);
-    return null;
   }
+
 
   private static String numstr(Number n) {
     double d = n.doubleValue();
@@ -1477,8 +1530,9 @@ public class Struct {
       return s;
     }
     if (found instanceof Map<?, ?> || found instanceof List<?>) {
-      Object safe = toJsonSafe(found, new IdentityHashMap<>());
-      return new Gson().toJson(safe);
+      StringBuilder sb = new StringBuilder();
+      _jsonifyInner(found, sb, 0, 0, new IdentityHashMap<>());
+      return sb.toString();
     }
     return stringify(found);
   }

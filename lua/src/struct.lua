@@ -1086,10 +1086,11 @@ local function jsonify(val, flags)
               return "{}"
             end
             local parts = {}
+            local kv_sep = indent_size == 0 and '":' or '": '
             for _, k in ipairs(keys_list) do
               local sv = ser(v[k], depth + 1)
               if sv ~= nil then -- Skip undefined values
-                table.insert(parts, '"' .. k .. '": ' .. sv)
+                table.insert(parts, '"' .. k .. kv_sep .. sv)
               end
             end
             if #parts == 0 then
@@ -3381,8 +3382,9 @@ _injectstr = function(val, store, inj)
       elseif type(found) == S_string then
         return found
       elseif type(found) == "table" then
-        local dkjson = require("dkjson")
-        local ok, result = pcall(dkjson.encode, found)
+        -- Use the in-tree jsonify (compact form) so the library proper has
+        -- no third-party JSON dependency.
+        local ok, result = pcall(jsonify, found, { indent = 0 })
         if ok and result then
           return result
         end

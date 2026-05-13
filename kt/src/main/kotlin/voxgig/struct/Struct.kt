@@ -1,7 +1,5 @@
 package voxgig.struct
 
-import com.google.gson.Gson
-import com.google.gson.GsonBuilder
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.util.IdentityHashMap
@@ -725,10 +723,9 @@ object Struct {
             if (ov is Number) offset = ov.toInt()
         }
         return try {
-            val safe = toJsonSafe(value, IdentityHashMap())
-            val gson = if (indent > 0) GsonBuilder().setPrettyPrinting().create() else GsonBuilder().create()
-            var out = gson.toJson(safe) ?: "null"
-            if (indent != 2 && indent > 0) out = rewriteIndent(out, indent)
+            val sb = StringBuilder()
+            _jsonifyInner(value, sb, indent, 0, IdentityHashMap())
+            var out = sb.toString()
             if (offset > 0 && out.contains('\n')) {
                 val lines = out.split("\n")
                 val pad = " ".repeat(offset)
@@ -740,42 +737,104 @@ object Struct {
         }
     }
 
-    private fun rewriteIndent(
-        pretty: String,
+    // Pure-Kotlin JSON emitter — mirrors c/src/utility.c::jsonify_inner.
+    // Map keys are emitted in INSERTION order (matching TS canonical's
+    // JSON.stringify). No third-party JSON library involved.
+    private fun _jsonifyInner(
+        v: Any?,
+        out: StringBuilder,
         indent: Int,
-    ): String {
-        return pretty.split("\n").joinToString("\n") { line ->
-            val spaces = line.takeWhile { it == ' ' }.length
-            val level = spaces / 2
-            " ".repeat(level * indent) + line.drop(spaces)
+        depth: Int,
+        seen: IdentityHashMap<Any, Boolean>,
+    ) {
+        if (v == null || v === UNDEF) {
+            out.append("null"); return
         }
+        if (v is Boolean) {
+            out.append(if (v) "true" else "false"); return
+        }
+        if (v is Number) {
+            val d = v.toDouble()
+            if (!d.isFinite()) { out.append("null"); return }
+            if (floor(d) == d && Math.abs(d) < 1e15) {
+                out.append(d.toLong().toString())
+            } else {
+                var s = String.format(Locale.ROOT, "%g", d)
+                if (s.contains('.') && !s.contains('e') && !s.contains('E')) {
+                    s = s.trimEnd('0').trimEnd('.')
+                }
+                out.append(s)
+            }
+            return
+        }
+        if (v is String) {
+            out.append('"'); _jsonEscape(v, out); out.append('"'); return
+        }
+        if (v is Function<*>) { out.append("null"); return }
+        if (seen.containsKey(v)) { out.append("null"); return }
+        seen[v] = true
+        if (v is List<*>) {
+            if (v.isEmpty()) { out.append("[]"); seen.remove(v); return }
+            out.append('[')
+            var first = true
+            for (e in v) {
+                if (!first) out.append(',')
+                first = false
+                if (indent > 0) {
+                    out.append('\n').append(" ".repeat((depth + 1) * indent))
+                }
+                _jsonifyInner(e, out, indent, depth + 1, seen)
+            }
+            if (indent > 0) {
+                out.append('\n').append(" ".repeat(depth * indent))
+            }
+            out.append(']')
+            seen.remove(v)
+            return
+        }
+        if (v is Map<*, *>) {
+            if (v.isEmpty()) { out.append("{}"); seen.remove(v); return }
+            out.append('{')
+            var first = true
+            for ((k, e) in v) {
+                if (!first) out.append(',')
+                first = false
+                if (indent > 0) {
+                    out.append('\n').append(" ".repeat((depth + 1) * indent))
+                }
+                out.append('"')
+                _jsonEscape(k.toString(), out)
+                out.append(if (indent > 0) "\": " else "\":")
+                _jsonifyInner(e, out, indent, depth + 1, seen)
+            }
+            if (indent > 0) {
+                out.append('\n').append(" ".repeat(depth * indent))
+            }
+            out.append('}')
+            seen.remove(v)
+            return
+        }
+        seen.remove(v)
+        out.append("null")
     }
 
-    private fun toJsonSafe(
-        value: Any?,
-        seen: IdentityHashMap<Any, Boolean>,
-    ): Any? {
-        if (value == null || value === UNDEF) return null
-        if (value is String || value is Boolean) return value
-        if (value is Number) return jsonNumber(value)
-        if (value is Function<*>) return null
-        if (seen.containsKey(value)) return null
-        seen[value] = true
-        return when (value) {
-            is List<*> -> {
-                val out = value.map { toJsonSafe(it, seen) }
-                seen.remove(value)
-                out
-            }
-            is Map<*, *> -> {
-                val out = linkedMapOf<String, Any?>()
-                value.forEach { (k, v) -> out[k.toString()] = toJsonSafe(v, seen) }
-                seen.remove(value)
-                out
-            }
-            else -> {
-                seen.remove(value)
-                null
+    private fun _jsonEscape(s: String, out: StringBuilder) {
+        for (c in s) {
+            when (c) {
+                '"' -> out.append("\\\"")
+                '\\' -> out.append("\\\\")
+                '\b' -> out.append("\\b")
+                '' -> out.append("\\f")
+                '\n' -> out.append("\\n")
+                '\r' -> out.append("\\r")
+                '\t' -> out.append("\\t")
+                else -> {
+                    if (c.code < 0x20) {
+                        out.append(String.format("\\u%04x", c.code))
+                    } else {
+                        out.append(c)
+                    }
+                }
             }
         }
     }
@@ -1954,8 +2013,9 @@ object Struct {
         if (found == null) return "null"
         if (found is String) return found
         if (found is Map<*, *> || found is List<*>) {
-            val safe = toJsonSafe(found, IdentityHashMap())
-            return Gson().toJson(safe)
+            val sb = StringBuilder()
+            _jsonifyInner(found, sb, 0, 0, IdentityHashMap())
+            return sb.toString()
         }
         return stringify(found)
     }
