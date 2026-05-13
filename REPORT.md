@@ -2,26 +2,48 @@
 
 **Date**: 2026-05-13
 **Canonical**: TypeScript (`ts/`)
-**Languages**: JS, Python, Go, PHP, Ruby, Lua, Rust, C, Zig, C#, Java, C++
+**Languages**: JS, Python, Go, PHP, Ruby, Lua, Rust, C, Zig, C#, Java, C++, Kotlin
 
+**Group A/B semantics rollout** (per `UNDEF_SPEC.md`):
+- `getprop` / `getelem` / `haskey` / `isempty` / `isnode` are **Group A**:
+  a stored null is treated as "no value" and returns the alt / false.
+- All value-processing functions (`setprop`, `delprop`, `clone`,
+  `stringify`, `jsonify`, `pad`, `typify`, `walk`, `merge`, `inject`,
+  `transform`, `validate`, `select`) are **Group B**: they preserve null
+  literally. Internal Group B callers use a per-port `_lookup` helper to
+  read raw stored values (including null) at a slot.
 
 ## Summary
 
 | Language | Functions | Type Constants | Sentinels | Tests | Status |
 |----------|-----------|---------------|-----------|-------|--------|
-| **ts** (canonical) | 40 | 15 | 2 | 83/83 pass | Reference |
-| **js** | 40 | 15 | 2 | 84/84 pass | Complete |
-| **py** | 40+ | 15 | 2 | 84/84 pass | Complete |
-| **go** | 50+ | 15 | 2 | 92/92 pass | Complete |
-| **php** | 46 | 15 | 2 | 82/82 pass | Complete |
-| **rb** | 40+ | 15 | 2 | 75/75 pass | Complete |
-| **lua** | 40+ | 15 | 2 | 75/75 pass | Complete |
-| **rs** | 40+ | 15 | 2 | 1187/1187 corpus | Complete |
-| **c** | 40 | 15 | 2 | 1109/1110 corpus | Complete |
-| **java** | 40 | 15 | 2 | 1178/1178 corpus | Complete |
-| **cpp** | 40 | 15 | 2 | 1178/1178 corpus | Complete |
-| **cs** | 40 | 15 | 2 | 1178/1178 corpus | Complete |
-| **zig** | 40 | 15 | 2 | 60/60 corpus sets | Complete |
+| **ts** (canonical) | 40 | 15 | 2 | 83/83 pass | Reference (Group A/B) |
+| **js** | 40 | 15 | 2 | 84/84 pass | Group A/B applied |
+| **py** | 40+ | 15 | 2 | 78/84 pass | Group A/B partial \*1 |
+| **go** | 50+ | 15 | 2 | 92/92 pass | already Group A |
+| **php** | 46 | 15 | 2 | 84/84 pass | already Group A |
+| **rb** | 40+ | 15 | 2 | 75/75 pass | already Group A |
+| **lua** | 40+ | 15 | 2 | 74/74 pass | already Group A |
+| **rs** | 40+ | 15 | 2 | corpus pass | already Group A |
+| **c** | 40 | 15 | 2 | 1177/1177 corpus | Group A/B applied |
+| **java** | 40 | 15 | 2 | 1245/1245 corpus | already Group A |
+| **cpp** | 40 | 15 | 2 | n/a \*2 | already Group A |
+| **cs** | 40 | 15 | 2 | 78/78 corpus | already Group A |
+| **kt** | 40 | 15 | 2 | 135/135 | already Group A |
+| **zig** | 40 | 15 | 2 | 59/60 corpus sets \*3 | already Group A |
+
+\*1 Python: getprop / getelem / haskey are now Group A; Injection.setval
+mirrors setprop (no delete-on-None shortcut). Six legacy
+transform/validate tests fail because the existing test corpus encodes
+the older delete-on-undef shape (TS gets away with it because
+JSON.stringify drops undefined, Python's json.dumps does not). Per
+spec point 6, the test runner / corpus need a follow-up pass.
+
+\*2 C++: build currently blocked by missing system nlohmann/json (pre-
+existing); unaffected by this rollout.
+
+\*3 Zig: pre-existing minor-pad failure and a `transform-ref` arena
+teardown SIGSEGV (already documented).
 
 \*\* C: full TS-canonical parity. Reference-counted `vs_value` tagged
 union with `vs_list` / `vs_map` (insertion-ordered, hash-indexed) for
