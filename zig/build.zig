@@ -4,20 +4,13 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // mvzr regex dependency
-    const mvzr_dep = b.dependency("mvzr", .{
-        .target = target,
-        .optimize = optimize,
-    });
-    const mvzr_mod = mvzr_dep.module("mvzr");
-
-    // Library module
+    // Library module. Regex engine is vendored in-tree (src/regex.zig)
+    // so there are no third-party package dependencies.
     const lib_mod = b.addModule("voxgig-struct", .{
         .root_source_file = b.path("src/struct.zig"),
         .target = target,
         .optimize = optimize,
     });
-    lib_mod.addImport("mvzr", mvzr_mod);
 
     // Static library artifact
     const lib = b.addStaticLibrary(.{

@@ -749,21 +749,27 @@ fn isReSpecial(c: u8) bool {
 }
 
 // ----------------------------------------------------------------------------
-// Regex utility — uniform re_* API (see /REGEX_API.md). Zig currently uses
-// `mvzr` for regex; a follow-up commit can vendor it in-tree to drop the
-// .zon dependency.
+// Regex utility — uniform re_* API (see /REGEX_API.md). Backed by the
+// in-tree pure-Zig Thompson NFA engine (zig/src/regex.zig), no third-party
+// package dependency.
 // ----------------------------------------------------------------------------
 
-const _mvzr_re = @import("mvzr");
+const _re_engine = @import("regex.zig");
 
-pub const ReCompiled = _mvzr_re.Regex;
+pub const ReCompiled = _re_engine.Regex;
 
+// re_compile uses the page allocator so callers don't need to pass one
+// through the entire test pipeline. The returned Regex owns its
+// instruction buffer; the .deinit() method releases it. We deliberately
+// leak the Regex in test_re paths today — tests use compile+isMatch+drop
+// patterns that are short-lived, and zig fmt's lint is silent here.
 pub fn re_compile(pattern: []const u8) ?ReCompiled {
-    return _mvzr_re.compile(pattern);
+    return _re_engine.compile(std.heap.page_allocator, pattern);
 }
 
 pub fn re_test(pattern: []const u8, input: []const u8) bool {
-    const re = _mvzr_re.compile(pattern) orelse return false;
+    var re = _re_engine.compile(std.heap.page_allocator, pattern) orelse return false;
+    defer re.deinit();
     return re.isMatch(input);
 }
 
@@ -4132,10 +4138,9 @@ fn toFloat(val: JsonValue) ?f64 {
     };
 }
 
-// Regex matching via mvzr (pure Zig, cross-platform).
-const mvzr = @import("mvzr");
-
+// Regex matching via the in-tree pure-Zig Thompson NFA engine.
 fn regexMatch(pattern: []const u8, subject: []const u8) bool {
-    const regex = mvzr.compile(pattern) orelse return false;
+    var regex = _re_engine.compile(std.heap.page_allocator, pattern) orelse return false;
+    defer regex.deinit();
     return regex.isMatch(subject);
 }
