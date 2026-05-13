@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # Ports the README marks "Complete" — these must be in full parity with the
 # canonical TypeScript API.  ("ts" itself is the canonical source, so it is
 # trivially in parity and is not checked.)
-COMPLETE_PORTS = ["js", "py", "go", "php", "rb", "lua", "rs", "zig", "cs"]
+COMPLETE_PORTS = ["js", "py", "go", "php", "rb", "lua", "rs", "c", "zig", "cs"]
 PARTIAL_PORTS = ["java", "cpp", "kt"]
 
 # Accepted, documented divergences (normalised name keys).  Anything NOT listed
@@ -47,6 +47,14 @@ SOURCES = {
     "rb": ["rb/voxgig_struct.rb"],
     "lua": ["lua/src/struct.lua"],
     "rs": ["rs/src/lib.rs", "rs/src/major.rs", "rs/src/mini.rs"],
+    "c": [
+        "c/src/voxgig_struct.h",
+        "c/src/value.h",
+        "c/src/utility.c",
+        "c/src/inject.c",
+        "c/src/transform.c",
+        "c/src/value.c",
+    ],
     "java": ["java/src/Struct.java"],
     "cpp": ["cpp/src/voxgig_struct.hpp", "cpp/src/value.hpp", "cpp/src/utility_decls.hpp"],
     "cs": ["cs/Struct.cs"],
@@ -102,6 +110,21 @@ def defined_keys(port: str) -> set[str]:
             keys.add(norm(ident))
         for ident in _IDENT_DECL.findall(text):
             keys.add(norm(ident))
+    # The C port uses a `vs_` prefix on every public function. Strip it so
+    # `vs_getpath` matches canonical `getpath`. Trailing `_v` / `_va` (vs_jm_va
+    # for variadic-style builders, vs_walk_v for the value overload) is also
+    # stripped.
+    if port == "c":
+        extra: set[str] = set()
+        for k in keys:
+            if k.startswith("vs"):
+                stripped = k[2:]
+                if stripped.endswith("va"):
+                    extra.add(stripped[:-2])
+                if stripped.endswith("v"):
+                    extra.add(stripped[:-1])
+                extra.add(stripped)
+        keys |= extra
     return keys
 
 

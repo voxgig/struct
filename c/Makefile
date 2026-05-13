@@ -1,0 +1,57 @@
+CC ?= gcc
+CFLAGS_COMMON := -std=c11 -Wall -Wextra -Wpedantic -Wshadow -Wno-unused-parameter -D_GNU_SOURCE
+CFLAGS_DEBUG := -O0 -g
+CFLAGS_RELEASE := -O2
+LDLIBS := -lcjson -lm
+
+EXTRA_INC := -I /usr/include -I /usr/local/include -I /opt/homebrew/include
+
+C_SOURCES := $(wildcard src/*.c)
+C_HEADERS := $(wildcard src/*.h)
+TEST_SOURCES := $(wildcard tests/*.c)
+TEST_HEADERS := $(wildcard tests/*.h)
+ALL_SOURCES := $(C_SOURCES) $(C_HEADERS) $(TEST_SOURCES) $(TEST_HEADERS)
+
+.PHONY: build smoke test corpus check_leak sanitize lint tidy format format-check clean reset inspect
+
+# Default: compile and run the corpus driver.
+build: corpus
+
+smoke:
+	$(CC) tests/smoke.c $(C_SOURCES) $(CFLAGS_COMMON) $(CFLAGS_DEBUG) -I ./src $(EXTRA_INC) -o smoke.out $(LDLIBS) && ./smoke.out
+
+corpus:
+	$(CC) tests/struct_corpus_test.c $(C_SOURCES) $(CFLAGS_COMMON) $(CFLAGS_DEBUG) -I ./src $(EXTRA_INC) -o corpus.out $(LDLIBS) && ./corpus.out
+
+test: corpus
+
+check_leak: corpus
+	valgrind --leak-check=full --show-leak-kinds=all --error-exitcode=1 ./corpus.out
+
+sanitize:
+	$(CC) tests/struct_corpus_test.c $(C_SOURCES) $(CFLAGS_COMMON) -fsanitize=address,undefined -g -I ./src $(EXTRA_INC) -o sanitize.out $(LDLIBS) && ./sanitize.out
+
+# Code quality: clang-tidy (static analysis) + clang-format check.
+lint: format-check tidy
+
+tidy:
+	clang-tidy $(C_SOURCES) $(TEST_SOURCES) -- \
+	  $(CFLAGS_COMMON) -I ./src $(EXTRA_INC)
+
+format:
+	clang-format -i $(ALL_SOURCES)
+
+format-check:
+	clang-format --dry-run --Werror $(ALL_SOURCES)
+
+clean:
+	rm -f smoke.out corpus.out sanitize.out corpus-scoreboard.json
+
+reset: clean
+
+inspect:
+	@echo "$(CC) version:"
+	@$(CC) --version | head -1
+	@echo ""
+	@echo "cJSON header:"
+	@find /usr/include /usr/local/include /opt/homebrew/include -name 'cJSON.h' 2>/dev/null | head -1
