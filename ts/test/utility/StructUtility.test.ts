@@ -841,4 +841,43 @@ describe('StructUtility', async () => {
 }`,
     )
   })
+
+  // Group A conformance — null and absent unified on observation.
+  // ============================================================
+
+  test('sentinels-getprop_unify', async () => {
+    const { getprop } = struct
+    await runsetflags(spec.sentinels.getprop_unify, { null: false }, (vin: any) =>
+      getprop(vin.val, vin.key, vin.alt),
+    )
+  })
+
+  test('sentinels-getelem_absent', async () => {
+    const { getelem } = struct
+    await runsetflags(spec.sentinels.getelem_absent, { null: false }, (vin: any) =>
+      getelem(vin.val, vin.key, vin.alt),
+    )
+  })
+
+  test('sentinels-haskey_unify', async () => {
+    const { haskey } = struct
+    await runsetflags(spec.sentinels.haskey_unify, { null: false }, (vin: any) =>
+      haskey(vin.val, vin.key),
+    )
+  })
+
+  test('sentinels-isempty_unify', async () => {
+    const { isempty } = struct
+    await runsetflags(spec.sentinels.isempty_unify, { null: false }, struct.isempty)
+  })
+
+  test('sentinels-isnode_unify', async () => {
+    const { isnode } = struct
+    await runsetflags(spec.sentinels.isnode_unify, { null: false }, struct.isnode)
+  })
+
+  test('sentinels-stringify_null', async () => {
+    const { stringify } = struct
+    await runsetflags(spec.sentinels.stringify_null, { null: false }, struct.stringify)
+  })
 })

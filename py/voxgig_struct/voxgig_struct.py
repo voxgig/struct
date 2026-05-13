@@ -1040,6 +1040,11 @@ def stringify(val: Any, maxlen: int = UNDEF, pretty: Any = None):
     pretty = bool(pretty)
     valstr = S_MT
 
+    # Python collapses UNDEF and JSON null to None, so stringify(None)
+    # cannot reliably tell them apart. The existing minor.stringify
+    # corpus expects "" for the absent case ({in:{}, out:''}); the
+    # sentinels stringify_null wrapper substitutes the NULLMARK string
+    # for callers that want the explicit "null" rendering of JSON null.
     if val == UNDEF:
         return '<>' if pretty else valstr
 

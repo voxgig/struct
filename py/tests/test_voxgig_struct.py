@@ -795,6 +795,49 @@ class TestStruct(unittest.TestCase):
             '{\n  "true": 1,\n  "false": 2,\n  "null": 3,\n  "[a]": 4,\n  "{b:0}": 5\n}',
         )
 
+    # -------------------------------------------------
+    # Group A conformance — null and absent unified.
+    # -------------------------------------------------
+
+    def test_sentinels_getprop_unify(self):
+        runsetflags(
+            spec['sentinels']['getprop_unify'],
+            {'null': False},
+            lambda vin: getprop(vin.get('val'), vin.get('key'), vin.get('alt')),
+        )
+
+    def test_sentinels_getelem_absent(self):
+        runsetflags(
+            spec['sentinels']['getelem_absent'],
+            {'null': False},
+            lambda vin: getelem(vin.get('val'), vin.get('key'), vin.get('alt')),
+        )
+
+    def test_sentinels_haskey_unify(self):
+        runsetflags(
+            spec['sentinels']['haskey_unify'],
+            {'null': False},
+            lambda vin: haskey(vin.get('val'), vin.get('key')),
+        )
+
+    def test_sentinels_isempty_unify(self):
+        runsetflags(spec['sentinels']['isempty_unify'], {'null': False}, isempty)
+
+    def test_sentinels_isnode_unify(self):
+        runsetflags(spec['sentinels']['isnode_unify'], {'null': False}, isnode)
+
+    def test_sentinels_stringify_null(self):
+        # Python conflates None=absent=null at the value level, so the
+        # corpus null entry would arrive as None — same as a missing key.
+        # Run with the runner's default null substitution and convert the
+        # marker back to the literal string 'null' so stringify can render
+        # it the same way TS/JS do for actual null.
+        from tests.runner import NULLMARK
+        runset(
+            spec['sentinels']['stringify_null'],
+            lambda vin: stringify('null' if vin == NULLMARK else vin),
+        )
+
 
 # If you want to run this file directly, add:
 if __name__ == '__main__':
