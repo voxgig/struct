@@ -17811,6 +17811,183 @@
       },
       "name": "select",
       "set": []
+    },
+    "sentinels": {
+      "getprop_unify": {
+        "set": [
+          {
+            "in": {
+              "val": {
+                "a": 1
+              },
+              "key": "a",
+              "alt": "D"
+            },
+            "out": 1
+          },
+          {
+            "in": {
+              "val": {
+                "a": null
+              },
+              "key": "a",
+              "alt": "D"
+            },
+            "out": "D"
+          },
+          {
+            "in": {
+              "val": {},
+              "key": "a",
+              "alt": "D"
+            },
+            "out": "D"
+          }
+        ]
+      },
+      "getelem_absent": {
+        "set": [
+          {
+            "in": {
+              "val": [
+                10,
+                20
+              ],
+              "key": 0,
+              "alt": "D"
+            },
+            "out": 10
+          },
+          {
+            "in": {
+              "val": [
+                null,
+                20
+              ],
+              "key": 0,
+              "alt": "D"
+            },
+            "out": "D"
+          },
+          {
+            "in": {
+              "val": [],
+              "key": 0,
+              "alt": "D"
+            },
+            "out": "D"
+          }
+        ]
+      },
+      "haskey_unify": {
+        "set": [
+          {
+            "in": {
+              "val": {
+                "a": 1
+              },
+              "key": "a"
+            },
+            "out": true
+          },
+          {
+            "in": {
+              "val": {
+                "a": null
+              },
+              "key": "a"
+            },
+            "out": false
+          },
+          {
+            "in": {
+              "val": {},
+              "key": "a"
+            },
+            "out": false
+          }
+        ]
+      },
+      "isempty_unify": {
+        "set": [
+          {
+            "in": null,
+            "out": true
+          },
+          {
+            "in": "",
+            "out": true
+          },
+          {
+            "in": [],
+            "out": true
+          },
+          {
+            "in": {},
+            "out": true
+          },
+          {
+            "in": 0,
+            "out": false
+          },
+          {
+            "in": "a",
+            "out": false
+          },
+          {
+            "in": [
+              1
+            ],
+            "out": false
+          }
+        ]
+      },
+      "isnode_unify": {
+        "set": [
+          {
+            "in": {
+              "a": 1
+            },
+            "out": true
+          },
+          {
+            "in": [
+              1
+            ],
+            "out": true
+          },
+          {
+            "in": null,
+            "out": false
+          },
+          {
+            "in": 1,
+            "out": false
+          },
+          {
+            "in": "x",
+            "out": false
+          }
+        ]
+      },
+      "stringify_null": {
+        "set": [
+          {
+            "in": null,
+            "out": "null"
+          },
+          {
+            "in": 1,
+            "out": "1"
+          },
+          {
+            "in": "a",
+            "out": "a"
+          }
+        ]
+      },
+      "name": "sentinels",
+      "set": []
     }
   },
   "primary": {

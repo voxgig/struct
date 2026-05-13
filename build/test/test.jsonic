@@ -12,6 +12,7 @@ struct: transform: @"transform.jsonic"
 struct: walk: @"walk.jsonic"
 struct: validate: @"validate.jsonic"
 struct: select: @"select.jsonic"
+struct: sentinels: @"sentinels.jsonic"
 
 primary: check: {
   DEF: {
