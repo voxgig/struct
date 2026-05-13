@@ -1,6 +1,6 @@
 
 struct: &: {
-  name: .$KEY
+  name: key()
   set: []
 }
 

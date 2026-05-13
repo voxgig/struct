@@ -254,11 +254,22 @@ class Injection:
         return cinj
 
     def setval(self, val: Any, ancestor: int | None = None) -> Any:
-        """Set the value in the parent node at the specified ancestor level."""
+        """Set the value in the parent node at the specified ancestor level.
+
+        Mirrors TS canonical: val of UNDEF (Python None) deletes; any other
+        value (including JSON null mapped to a NULLMARK string by the runner)
+        sets. setprop itself is a pure set — the delete-on-undef logic lives
+        here.
+        """
         if ancestor is None or ancestor < 2:
-            return setprop(self.parent, self.key, val)
+            target = self.parent
+            key = self.key
         else:
-            return setprop(getelem(self.nodes, 0 - ancestor), getelem(self.path, 0 - ancestor), val)
+            target = getelem(self.nodes, 0 - ancestor)
+            key = getelem(self.path, 0 - ancestor)
+        if val is None:
+            return delprop(target, key)
+        return setprop(target, key, val)
 
 
 def getdef(val, alt):
@@ -371,7 +382,13 @@ def slice(val: Any, start: int = UNDEF, end: int = UNDEF, mutate: bool = False) 
 
 def pad(s: Any, padding: int = UNDEF, padchar: str = UNDEF) -> str:
     """Pad a string to a specified length"""
-    s = stringify(s)
+    # Mirror TS canonical: stringify(null) is "null", distinct from
+    # stringify(undefined) which is "". Python's UNDEF=None conflates the
+    # two; explicitly coerce JSON-null to the literal string "null" first.
+    if s is None:
+        s = 'null'
+    else:
+        s = stringify(s)
     padding = 44 if padding is UNDEF else padding
     padchar = ' ' if padchar is UNDEF else (padchar + ' ')[0]
 
@@ -498,7 +515,13 @@ def getprop(val: Any = UNDEF, key: Any = UNDEF, alt: Any = UNDEF) -> Any:
     out = alt
 
     if ismap(val):
-        out = val.get(str(key), alt)
+        # Use `in` rather than .get() with default: a stored JSON null (None)
+        # must be returned as-is, not collapsed to alt. Python's UNDEF=None
+        # makes "absent" and "null" indistinguishable through .get(default).
+        skey = str(key)
+        if skey in val:
+            return val[skey]
+        return alt
 
     elif islist(val):
         try:
@@ -1131,7 +1154,13 @@ def clone(val: Any = UNDEF):
 def setprop(parent: Any, key: Any, val: Any):
     """
     Safely set a property on a dictionary or list.
-    - None value deletes the key/element (mirrors JS undefined behavior).
+
+    Mirrors TS canonical: setprop SETS, including JSON null. Callers wanting
+    to delete must use delprop. (Python's UNDEF==None previously conflated
+    "absent" and "JSON null"; the delete-on-None behaviour silently dropped
+    null values, breaking $ANY validation. See Injection.setval for the
+    delete-on-undef logic.)
+
     - For lists, negative key -> prepend.
     - For lists, key > len(list) -> append.
     """
@@ -1140,10 +1169,7 @@ def setprop(parent: Any, key: Any, val: Any):
 
     if ismap(parent):
         key = str(key)
-        if val is None:
-            parent.pop(key, None)
-        else:
-            parent[key] = val
+        parent[key] = val
 
     elif islist(parent):
         try:
@@ -1151,11 +1177,8 @@ def setprop(parent: Any, key: Any, val: Any):
         except ValueError:
             return parent
 
-        if val is None:
-            if 0 <= key_i < len(parent):
-                for pI in range(key_i, len(parent) - 1):
-                    parent[pI] = parent[pI + 1]
-                parent.pop()
+        if False:
+            pass
         else:
             if key_i >= 0:
                 key_i = min(key_i, len(parent))
@@ -1695,9 +1718,8 @@ def transform_KEY(inj, val, ref, store):
 
     keyspec = getprop(parent, S_BKEY)
     if keyspec is not UNDEF:
-        # Need to use setprop directly here since we're removing a specific key (S_DKEY)
-        # not the current state's key
-        setprop(parent, S_BKEY, UNDEF)
+        # Explicitly delete the marker key.
+        delprop(parent, S_BKEY)
         return getprop(inj.dparent, keyspec)
 
     # If no explicit keyspec, and current data has a field matching this key,
@@ -1714,7 +1736,7 @@ def transform_ANNO(inj, val, ref, store):
     Annotate node. Does nothing itself, just used by other injectors, and is removed when called.
     """
     parent = inj.parent
-    setprop(parent, S_BANNO, UNDEF)
+    delprop(parent, S_BANNO)
     return UNDEF
 
 

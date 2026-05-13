@@ -764,8 +764,8 @@ setpath: {
     { in: { store:{x:1} val:7 },
       match:args:0:store:x:1 }
 
-    { in: { store:{a:1,b:2} path:'b', val:22 }, out: {b:22},
-      match:args:0:store:b:22 }
+    { in: { store:{a:1,b:2} path:'b', val:22 }, out: {a:1,b:22},
+      match:args:0:store:{a:1,b:22} }
 
     { in: { store:{a:{b:{c:1}}} path:'a.b.c', val:99 }, out: {c:99},
       match:args:0:store:a:b:c:99 }

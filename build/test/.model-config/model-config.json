@@ -2,10 +2,10 @@
   "sys": {
     "model": {
       "builders": {},
-      "action": {},
       "order": {
         "action": ""
-      }
+      },
+      "action": {}
     }
   }
 }

@@ -129,6 +129,33 @@ __attribute__((unused)) static void str_lower(char* s) {
     *s = (char)tolower((unsigned char)*s);
 }
 
+/* Deep-copy `v`, replacing every JSON null with the marker string "__NULL__".
+ * Mirrors what the TS / JS / Py / Go / Lua runners do under their null flag —
+ * the corpus uses null in source to mean "JSON null" but every runner
+ * substitutes a string marker so comparisons can be done in JSON-poor
+ * languages. */
+static vs_value* null_substitute(vs_value* v) {
+  if (!v || vs_is_undef(v))
+    return vs_new_undef();
+  if (vs_is_null(v))
+    return vs_new_string("__NULL__");
+  if (vs_is_list(v)) {
+    vs_value* out = vs_new_list();
+    vs_list* l = vs_as_list(v);
+    for (size_t i = 0; i < l->len; i++)
+      vs_list_push(vs_as_list(out), null_substitute(l->items[i]));
+    return out;
+  }
+  if (vs_is_map(v)) {
+    vs_value* out = vs_new_map();
+    vs_map* m = vs_as_map(v);
+    for (size_t i = 0; i < m->len; i++)
+      vs_map_set(vs_as_map(out), m->entries[i].key, null_substitute(m->entries[i].value));
+    return out;
+  }
+  return vs_clone(v);
+}
+
 static void run_subject(runner_result* res, vs_value* testspec, bool null_flag,
                         runner_subject_fn subj, void* ud) {
   vs_value* setk = vs_new_string("set");

@@ -752,7 +752,14 @@ end
 -- Pad a string or number.
 -- Positive padlen = right-pad (padEnd), negative padlen = left-pad (padStart).
 local function pad(val, padlen, padchar)
-  val = S_string == type(val) and val or stringify(val)
+  -- Mirror TS canonical: stringify(null) is "null". Lua's nil corresponds
+  -- to JSON null when input doesn't carry the runner's __NULL__ marker;
+  -- explicitly coerce here so padding works the same as in TS.
+  if val == nil then
+    val = "null"
+  else
+    val = S_string == type(val) and val or stringify(val)
+  end
   padlen = padlen or 44
   padchar = padchar or S_SP
   if #padchar > 1 then
