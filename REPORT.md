@@ -50,12 +50,19 @@ NFA engine in-tree (c/cpp/lua/rs/zig).
 | **cpp** | 40 | 15 | 2 | 1245/1245 corpus | nlohmann/json fix |
 | **cs** | 40 | 15 | 2 | 78/78 corpus | already Group A |
 | **kt** | 40 | 15 | 2 | 135/135 | already Group A |
-| **zig** | 40 | 15 | 2 | 60/60 corpus sets \*1 | wrap_pad fix |
+| **zig** | 40 | 15 | 2 | 53/60 corpus sets \*1 | wrap_pad fix + $REF cycle-break |
 
-\*1 Zig: pre-existing `transform-ref` arena-teardown SIGSEGV is
-unaffected by this rollout and is reported by the build wrapper, even
-though all 60 individual tests now pass. The `minor-pad` regression
-was fixed by stringifying non-string vals in the test wrapper.
+\*1 Zig: previously reported "60/60 passing with a SIGSEGV" was
+misleading — the test process actually died at test 47/60
+(transform-ref entry 6, a self-cyclic $REF spec) due to **stack
+overflow from infinite recursion in `cmdRef`**, so tests 48–60 never
+ran. Fixed by porting the `has_sub_ref` cycle-break check from the
+Rust / JS / Py / Go ports. The unblock revealed 7 latent test
+failures (transform.ref[15], validate.basic[32], validate.child[3],
+validate.one[4], validate.exact[6], select.basic[11],
+select.edge[0]) that need separate per-case investigation. The
+`minor-pad` regression was fixed earlier by stringifying non-string
+vals in the test wrapper.
 
 The `sentinels.jsonic` conformance category (UNDEF_SPEC.md point 7)
 exercises Group A's "null = absent" rule with three side-by-side
@@ -83,9 +90,13 @@ All transform commands, validate checkers and select operators, the
 `Injection` state machine, and the injection helpers
 (`checkPlacement`/`injectorArgs`/`injectChild`) are wired; the full corpus
 runs as 60 `test` blocks (`zig build test`; `zig fmt --check` clean). The
-`test` runner crashes with SIGSEGV during arena teardown *after* all tests
-pass — a known `*MapRef`/`*ListRef` cross-reference issue — so `make test`
-treats "N/N tests passed" as success.
+`test` runner used to die with SIGSEGV at test 47/60 (transform-ref),
+which was originally documented as an "arena teardown / *MapRef
+cross-reference" issue. Re-investigation showed it was actually
+**stack overflow from a missing $REF cycle-break in cmdRef** — fixed
+by porting the `has_sub_ref` check that every other port already had.
+The fix unblocked the test process and exposed 7 separate test
+failures the SIGSEGV had been hiding.
 
 \*\* Rust: full TS-canonical parity. Idiomatic `snake_case` API (`get_path`,
 `is_node`, …; see `rs/README.md` for the name table), `Rc<RefCell>`
