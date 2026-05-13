@@ -6,7 +6,7 @@
 // TS->Rust table in README.md.
 
 use indexmap::IndexMap;
-use regex::Regex;
+use crate::re::{Captures, Regex, RegexError};
 
 use crate::consts::*;
 use crate::value::{is_integer_f64, js_string, js_to_number, num_to_string, Value};
@@ -429,24 +429,23 @@ pub fn filter<F: Fn(&(String, Value)) -> bool>(val: &Value, check: F) -> Value {
 pub fn esc_re(s: &Value) -> String {
     let rs = coerce_for_replace(s);
     R_ESCAPE_REGEXP
-        .replace_all(&rs, |caps: &regex::Captures| format!("\\{}", &caps[0]))
-        .to_string()
+        .replace_all(&rs, |caps: &Captures<'_>| format!("\\{}", &caps[0]))
+        .into_owned()
 }
 
 // ---------------------------------------------------------------------------
-// Regex utility — uniform re_* API (see /REGEX_API.md). The Rust port
-// currently wraps the `regex` crate, whose dialect IS the RE2 reference.
-// A follow-up commit can vendor an in-tree NFA matcher to drop the dep.
+// Regex utility — uniform re_* API (see /REGEX_API.md). Backed by the
+// in-tree pure-Rust Thompson NFA engine (crate::re), no third-party crate.
 // ---------------------------------------------------------------------------
 
 /// Compile a pattern. Mirrors `re_compile(pattern)`.
-pub fn re_compile(pattern: &str) -> Result<regex::Regex, regex::Error> {
-    regex::Regex::new(pattern)
+pub fn re_compile(pattern: &str) -> Result<Regex, RegexError> {
+    Regex::new(pattern)
 }
 
 /// First match. Returns `Some([whole, capture1, ...])` or `None`.
 pub fn re_find(pattern: &str, input: &str) -> Option<Vec<String>> {
-    let re = regex::Regex::new(pattern).ok()?;
+    let re = Regex::new(pattern).ok()?;
     let m = re.captures(input)?;
     Some(
         m.iter()
@@ -457,7 +456,7 @@ pub fn re_find(pattern: &str, input: &str) -> Option<Vec<String>> {
 
 /// All non-overlapping matches.
 pub fn re_find_all(pattern: &str, input: &str) -> Vec<Vec<String>> {
-    let re = match regex::Regex::new(pattern) {
+    let re = match Regex::new(pattern) {
         Ok(r) => r,
         Err(_) => return Vec::new(),
     };
@@ -472,18 +471,16 @@ pub fn re_find_all(pattern: &str, input: &str) -> Vec<Vec<String>> {
 
 /// Replace every match. Supports `$&` (whole match) and `$1`..`$9` (captures).
 pub fn re_replace(pattern: &str, input: &str, replacement: &str) -> String {
-    let re = match regex::Regex::new(pattern) {
+    let re = match Regex::new(pattern) {
         Ok(r) => r,
         Err(_) => return input.to_string(),
     };
-    // Translate JS-style $& to ${0} (Rust regex uses $0..$N).
-    let rust_repl = replacement.replace("$&", "$0");
-    re.replace_all(input, rust_repl.as_str()).into_owned()
+    re.replace_all(input, replacement).into_owned()
 }
 
 /// Boolean test.
 pub fn re_test(pattern: &str, input: &str) -> bool {
-    regex::Regex::new(pattern)
+    Regex::new(pattern)
         .map(|re| re.is_match(input))
         .unwrap_or(false)
 }

@@ -7,8 +7,8 @@
 
 #![allow(non_upper_case_globals)] // S_* string constants mirror the TS names
 
+use crate::re::Regex;
 use once_cell::sync::Lazy;
-use regex::Regex;
 
 // ---- mode flags (bitfield) for inject steps ---------------------------
 pub const M_KEYPRE: i64 = 1;
