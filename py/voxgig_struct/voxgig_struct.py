@@ -254,10 +254,13 @@ class Injection:
         return cinj
 
     def setval(self, val: Any, ancestor: int | None = None) -> Any:
-        """Mirrors TS canonical setprop. Literal assignment: None at the slot
-        is None (not delete). Use delprop for deletion. Python's UNDEF==None
-        means setval(NONE) and setval(JSON null) cannot be told apart by the
-        caller — both literally set the slot to None.
+        """Inject-state setter. Mirrors the canonical TS Injection.setval:
+        val of UNDEF (= None in Python — distinguishability is impossible
+        in any of the dynamic-typed ports anyway) deletes the slot, any
+        other value sets it. setprop itself remains a pure assignment per
+        the Group B rule — this delete-on-undef shortcut lives only here
+        so transform/validate injectors can signal "no value at this slot"
+        through their return value.
         """
         if ancestor is None or ancestor < 2:
             target = self.parent
@@ -265,6 +268,8 @@ class Injection:
         else:
             target = getelem(self.nodes, 0 - ancestor)
             key = getelem(self.path, 0 - ancestor)
+        if val is None:
+            return delprop(target, key)
         return setprop(target, key, val)
 
 
