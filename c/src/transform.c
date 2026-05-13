@@ -2084,10 +2084,9 @@ static vs_value* sel_CMP(vs_injection* inj, vs_value* val, const char* ref, vs_v
   else if (strcmp(ref, "$LTE") == 0)
     pass = c <= 0;
   else if (strcmp(ref, "$LIKE") == 0) {
-    /* Simple substring contain as approximation since C regex is fragile. */
     char* ps = vs_stringify(point, -1);
     const char* termstr = vs_is_string(term) ? vs_as_string(term) : "";
-    pass = strstr(ps, termstr) != NULL;
+    pass = vs_re_test(termstr, ps);
     free(ps);
   }
   const char* gkey = inj->path.len >= 2 ? inj->path.data[inj->path.len - 2] : "";

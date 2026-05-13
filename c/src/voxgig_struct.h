@@ -18,6 +18,7 @@
 #ifndef VOXGIG_STRUCT_H
 #define VOXGIG_STRUCT_H
 
+#include "regex.h"
 #include "value.h"
 #include "value_io.h"
 
@@ -44,6 +45,33 @@ void vs_strvec_clear(vs_strvec* v);
 void vs_strvec_resize(vs_strvec* v, size_t n); /* fill with "" */
 void vs_strvec_set(vs_strvec* v, size_t i, const char* s);
 void vs_strvec_copy(vs_strvec* dst, const vs_strvec* src);
+
+/* ===========================================================================
+ * Regex utility — uniform re_* names (mirror of REGEX_API.md). Wraps the
+ * vendored RE2-subset engine in src/regex.c.
+ *
+ * vs_re_compile returns a vs_regex* that must be released with vs_regex_free.
+ * The other helpers accept either a vs_regex* (already-compiled) or a pattern
+ * string (compiled on the fly and freed before returning).
+ * ===========================================================================*/
+
+vs_regex* vs_re_compile(const char* pattern);
+bool vs_re_test(const char* pattern, const char* input);
+bool vs_re_test_re(const vs_regex* re, const char* input);
+
+/* Returns a newly-allocated list of strings: [whole, capture1, ...]. Caller
+ * vs_strvec_free()s. If no match, returns a vs_strvec with len==0. */
+vs_strvec vs_re_find(const char* pattern, const char* input);
+vs_strvec vs_re_find_re(const vs_regex* re, const char* input);
+
+/* Returns malloc'd string. */
+char* vs_re_replace(const char* pattern, const char* input, const char* replacement);
+char* vs_re_replace_re(const vs_regex* re, const char* input, const char* replacement);
+char* vs_re_replace_cb(const vs_regex* re, const char* input,
+                       char* (*cb)(const vs_strvec* caps, void* ud), void* ud);
+
+/* Alias of vs_escre. */
+char* vs_re_escape(const char* literal);
 
 struct vs_injection {
   int mode;         /* M_KEYPRE / M_KEYPOST / M_VAL bitfield */

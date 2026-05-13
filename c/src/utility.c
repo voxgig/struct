@@ -90,19 +90,33 @@ static bool parse_intstr(const char* s, size_t n, int64_t* out) {
   return true;
 }
 
+/* R_INTEGER_KEY: ^[-0-9]+$ — goes through the vendored regex engine so the
+   call sites read the same as the canonical TS. */
+static vs_regex* R_INTEGER_KEY_re(void) {
+  static vs_regex* re = NULL;
+  if (!re)
+    re = vs_re_compile("^[-0-9]+$");
+  return re;
+}
 static bool match_integer_key(const char* s, size_t n) {
   if (!s || n == 0)
     return false;
-  size_t i = 0;
-  if (s[0] == '-')
-    i++;
-  if (i >= n)
-    return false;
-  for (; i < n; i++) {
-    if (s[i] < '0' || s[i] > '9')
-      return false;
+  char buf[64];
+  char* tmp = NULL;
+  const char* z;
+  if (n < sizeof(buf)) {
+    memcpy(buf, s, n);
+    buf[n] = '\0';
+    z = buf;
+  } else {
+    tmp = (char*)malloc(n + 1);
+    memcpy(tmp, s, n);
+    tmp[n] = '\0';
+    z = tmp;
   }
-  return true;
+  bool ok = vs_re_test_re(R_INTEGER_KEY_re(), z);
+  free(tmp);
+  return ok;
 }
 
 /* ===========================================================================
@@ -718,22 +732,9 @@ char* vs_escre(vs_value* v) {
   const char* s = "";
   if (vs_is_string(v))
     s = vs_as_string(v);
-  size_t n = strlen(s);
-  size_t cap = n * 2 + 1;
-  char* o = (char*)malloc(cap);
-  if (!o)
-    abort();
-  size_t j = 0;
-  for (size_t i = 0; i < n; i++) {
-    char c = s[i];
-    if (c == '.' || c == '*' || c == '+' || c == '?' || c == '^' || c == '$' || c == '{' ||
-        c == '}' || c == '(' || c == ')' || c == '|' || c == '[' || c == ']' || c == '\\') {
-      o[j++] = '\\';
-    }
-    o[j++] = c;
-  }
-  o[j] = '\0';
-  return o;
+  /* Equivalent to canonical TS: replace /[.*+?^${}()|[\]\\]/g with "\\$&".
+     vs_re_escape implements the same character set. */
+  return vs_re_escape(s);
 }
 
 char* vs_escurl(vs_value* v) {

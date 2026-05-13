@@ -327,45 +327,36 @@ vs_injection* vs_inject_child(vs_value* child, vs_value* store, vs_injection* in
  * ===========================================================================*/
 
 /* R_INJECTION_FULL: ^`(\$[A-Z]+|[^`]*)[0-9]*`$
- * Returns true if val is a full single-injection string of length>=2.
- * On match, fills pathref (allocated). */
+ * Goes through the vendored regex engine so the call site reads the same as
+ * the canonical TS. The captured group is returned via out_pathref. */
+static vs_regex* R_INJECTION_FULL_re(void) {
+  static vs_regex* re = NULL;
+  if (!re)
+    re = vs_re_compile("^`(\\$[A-Z]+|[^`]*)[0-9]*`$");
+  return re;
+}
 static bool match_injection_full(const char* val, size_t vlen, char** out_pathref) {
-  if (vlen < 2 || val[0] != '`' || val[vlen - 1] != '`')
-    return false;
-  /* Inside content: val+1 .. vlen-2 */
-  size_t ilen = vlen - 2;
-  const char* in = val + 1;
-  /* No backticks inside. */
-  for (size_t i = 0; i < ilen; i++) {
-    if (in[i] == '`')
-      return false;
+  char buf[256];
+  char* tmp = NULL;
+  const char* z;
+  if (vlen < sizeof(buf)) {
+    memcpy(buf, val, vlen);
+    buf[vlen] = '\0';
+    z = buf;
+  } else {
+    tmp = (char*)malloc(vlen + 1);
+    memcpy(tmp, val, vlen);
+    tmp[vlen] = '\0';
+    z = tmp;
   }
-  /* Two alternatives:
-   *  (a) "$NAME" — $ + [A-Z]+
-   *  (b) [^`]* — any non-backtick
-   * Then optional [0-9]* at the end (these digits are NOT in the capture for $NAME case,
-   * but for the [^`]* case they're part of the capture).
-   */
-  /* TS regex: ^`(\$[A-Z]+|[^`]*)[0-9]*`$ — the captured group is either $NAME (no digits)
-   * or [^`]* greedy. The greedy `[^`]*` will eat trailing digits too. So the only case
-   * where digits get stripped is when the captured part is $NAME (uppercase only). */
-  /* Detect $NAME form. */
-  if (ilen > 1 && in[0] == '$') {
-    size_t j = 1;
-    while (j < ilen && in[j] >= 'A' && in[j] <= 'Z')
-      j++;
-    /* Verify the rest is digits only. */
-    size_t k = j;
-    while (k < ilen && in[k] >= '0' && in[k] <= '9')
-      k++;
-    if (k == ilen && j > 1) {
-      *out_pathref = xstrndup_s2(in, j); /* without trailing digits */
-      return true;
-    }
+  vs_strvec caps = vs_re_find_re(R_INJECTION_FULL_re(), z);
+  bool ok = (caps.len >= 2);
+  if (ok) {
+    *out_pathref = xstrndup_s2(caps.data[1], strlen(caps.data[1]));
   }
-  /* Fall through: full content is the pathref (greedy). */
-  *out_pathref = xstrndup_s2(in, ilen);
-  return true;
+  vs_strvec_free(&caps);
+  free(tmp);
+  return ok;
 }
 
 /* Apply $BT and $DS escapes. */
