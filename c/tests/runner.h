@@ -134,7 +134,7 @@ __attribute__((unused)) static void str_lower(char* s) {
  * the corpus uses null in source to mean "JSON null" but every runner
  * substitutes a string marker so comparisons can be done in JSON-poor
  * languages. */
-static vs_value* null_substitute(vs_value* v) {
+__attribute__((unused)) static vs_value* null_substitute(vs_value* v) {
   if (!v || vs_is_undef(v))
     return vs_new_undef();
   if (vs_is_null(v))
@@ -170,24 +170,24 @@ static void run_subject(runner_result* res, vs_value* testspec, bool null_flag,
     vs_value* eo = sl->items[i];
     if (!vs_is_map(eo))
       continue;
-    vs_value* ink = vs_new_string("in");
-    bool has_in = vs_haskey(eo, ink);
-    vs_value* in_raw = vs_getprop(eo, ink, NULL);
-    vs_release(ink);
+    /* Use vs_map_get directly: vs_haskey treats null at a key as "no value"
+       (Group A rule), but the runner needs literal presence to preserve
+       test inputs like { in: null } where null IS the value to pass. */
+    vs_value* in_raw_ptr = vs_map_get(vs_as_map(eo), "in");
+    bool has_in = (in_raw_ptr != NULL);
+    vs_value* in_raw = in_raw_ptr ? vs_retain(in_raw_ptr) : vs_new_undef();
     vs_value* in = has_in ? vs_clone(in_raw) : vs_new_undef();
-    vs_value* outk = vs_new_string("out");
-    bool has_out = vs_haskey(eo, outk);
+    vs_value* out_raw_ptr = vs_map_get(vs_as_map(eo), "out");
+    bool has_out = (out_raw_ptr != NULL);
     vs_value* expected = NULL;
     if (has_out)
-      expected = vs_getprop(eo, outk, NULL);
+      expected = vs_retain(out_raw_ptr);
     else if (null_flag)
       expected = vs_new_null();
     else
       expected = vs_new_undef();
-    vs_release(outk);
-    vs_value* errk = vs_new_string("err");
-    vs_value* err_v = vs_haskey(eo, errk) ? vs_getprop(eo, errk, NULL) : vs_new_undef();
-    vs_release(errk);
+    vs_value* err_ptr = vs_map_get(vs_as_map(eo), "err");
+    vs_value* err_v = err_ptr ? vs_retain(err_ptr) : vs_new_undef();
 
     res->total++;
     char* err_msg = NULL;

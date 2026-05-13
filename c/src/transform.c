@@ -96,7 +96,7 @@ static vs_value* tx_COPY(vs_injection* inj, vs_value* val, const char* ref, vs_v
   if (!vs_check_placement(VS_M_VAL, "COPY", VS_T_ANY, inj))
     return vs_new_undef();
   vs_value* keyv = vs_new_string(inj->key);
-  vs_value* out = vs_getprop(inj->dparent, keyv, NULL);
+  vs_value* tmp = vs_lookup(inj->dparent, keyv); vs_value* out = tmp ? vs_retain(tmp) : vs_new_undef();
   vs_release(keyv);
   vs_inj_setval(inj, out, 0);
   return out;
@@ -1109,7 +1109,7 @@ static vs_value* va_STRING(vs_injection* inj, vs_value* val, const char* ref, vs
   (void)store;
   (void)ud;
   vs_value* keyv = vs_new_string(inj->key);
-  vs_value* out = vs_getprop(inj->dparent, keyv, NULL);
+  vs_value* tmp = vs_lookup(inj->dparent, keyv); vs_value* out = tmp ? vs_retain(tmp) : vs_new_undef();
   vs_release(keyv);
   int t = vs_typify(out);
   if ((t & VS_T_STRING) == 0) {
@@ -1153,7 +1153,7 @@ static vs_value* va_TYPE(vs_injection* inj, vs_value* val, const char* ref, vs_v
   tname[cp] = '\0';
   int typev = typename_to_bit(tname);
   vs_value* keyv = vs_new_string(inj->key);
-  vs_value* out = vs_getprop(inj->dparent, keyv, NULL);
+  vs_value* tmp = vs_lookup(inj->dparent, keyv); vs_value* out = tmp ? vs_retain(tmp) : vs_new_undef();
   vs_release(keyv);
   int t = vs_typify(out);
   if ((t & typev) == 0) {
@@ -1172,7 +1172,7 @@ static vs_value* va_ANY(vs_injection* inj, vs_value* val, const char* ref, vs_va
   (void)store;
   (void)ud;
   vs_value* keyv = vs_new_string(inj->key);
-  vs_value* out = vs_getprop(inj->dparent, keyv, NULL);
+  vs_value* tmp = vs_lookup(inj->dparent, keyv); vs_value* out = tmp ? vs_retain(tmp) : vs_new_undef();
   vs_release(keyv);
   return out;
 }
@@ -1518,7 +1518,10 @@ static void _validation(vs_value* pval, vs_value* key, vs_value* parent, vs_inje
       bool first = true;
       for (size_t i = 0; i < ckeys.len; i++) {
         vs_value* kv = vs_new_string(ckeys.data[i]);
-        bool has = vs_haskey(pval, kv);
+        /* Literal presence: _validation needs to know if the SHAPE declares
+           this key, regardless of whether validator stored null in the slot.
+           Group A's haskey would miss null-valued slots. */
+        bool has = vs_lookup(pval, kv) != NULL;
         vs_release(kv);
         if (!has) {
           if (!first)

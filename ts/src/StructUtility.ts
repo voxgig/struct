@@ -437,7 +437,8 @@ function getelem(val: any, key: any, alt?: any) {
     }
   }
 
-  if (NONE === out) {
+  // null at a slot counts as "no value" — same Group A rule as getprop.
+  if (null == out) {
     return 0 < (T_function & typify(alt)) ? alt() : alt
   }
 
@@ -457,11 +458,26 @@ function getprop(val: any, key: any, alt?: any) {
     out = val[key]
   }
 
-  if (NONE === out) {
+  // JSON null at a key is treated as "no value" for the default-substitution
+  // rule. This unifies cross-port behaviour: every host language conflates
+  // null and absent at the value level either always or via positional
+  // checks; the library follows that constraint on observation.
+  if (null == out) {
     return alt
   }
 
   return out
+}
+
+// Internal: literal value lookup that preserves stored JSON null. Group B
+// callers (validate / transform commands / builders / inject internals) use
+// this when they need to inspect the raw stored value at a slot regardless
+// of whether it is null. The public getprop / getelem / haskey APIs treat
+// null as absent (Group A) per UNDEF_SPEC.md.
+function _lookup(val: any, key: any): any {
+  if (NONE === val || NONE === key) return NONE
+  if (isnode(val)) return val[key]
+  return NONE
 }
 
 // Convert different types of keys to string representation.
@@ -500,7 +516,8 @@ function keysof(val: any): string[] {
 // Value of property with name key in node val is defined.
 // Root utility - only uses language facilities.
 function haskey(val: any, key: any) {
-  return NONE !== getprop(val, key)
+  // null at a key counts as "no value" — same rule as getprop.
+  return null != getprop(val, key)
 }
 
 // List the sorted keys of a map or list as an array of tuples of the form [key, value].
@@ -836,9 +853,12 @@ function jm(...kv: any[]): Record<string, any> {
   const kvsize = size(kv)
   const o: any = {}
   for (let i = 0; i < kvsize; i += 2) {
-    let k = getprop(kv, i, '$KEY' + i)
+    // Builders are Group B (value processing): preserve literal stored
+    // values, including null. Direct array index distinguishes "slot exists
+    // with value null" from "slot beyond end of kv".
+    let k = i < kv.length ? kv[i] : '$KEY' + i
     k = 'string' === typeof k ? k : stringify(k)
-    o[k] = getprop(kv, i + 1, null)
+    o[k] = i + 1 < kv.length ? kv[i + 1] : null
   }
   return o
 }
@@ -1373,7 +1393,7 @@ function inject(val: any, store: any, injdef?: Partial<Injection>) {
 
   // Original val reference may no longer be correct.
   // This return value is only used as the top level result.
-  return getprop(inj.parent, S_DTOP)
+  return _lookup(inj.parent, S_DTOP)
 }
 
 // The transform_* functions are special command inject handlers (see Injector).
@@ -1392,7 +1412,7 @@ const transform_COPY: Injector = (inj: Injection, _val: any) => {
     return NONE
   }
 
-  const out = getprop(inj.dparent, inj.key)
+  const out = _lookup(inj.dparent, inj.key)
   inj.setval(out)
 
   return out
@@ -1409,7 +1429,7 @@ const transform_KEY: Injector = (inj: Injection) => {
   }
 
   // Key is defined by $KEY meta property.
-  const keyspec = getprop(parent, S_BKEY)
+  const keyspec = _lookup(parent, S_BKEY)
   if (NONE !== keyspec) {
     delprop(parent, S_BKEY)
     return getprop(inj.dparent, keyspec)
@@ -1417,7 +1437,7 @@ const transform_KEY: Injector = (inj: Injection) => {
 
   // Key is defined within general purpose $META object.
   // return getprop(getprop(parent, S_BANNO), S_KEY, getprop(path, path.length - 2))
-  return getprop(getprop(parent, S_BANNO), S_KEY, getelem(path, -2))
+  return _lookup(_lookup(parent, S_BANNO), S_KEY) ?? getelem(path, -2)
 }
 
 // Annotate node.  Does nothing itself, just used by
@@ -1692,7 +1712,7 @@ const transform_REF: Injector = (inj: Injection, val: any, _ref: string, store: 
   }
 
   // Get arguments: ['`$REF`', 'ref-path'].
-  const refpath = getprop(inj.parent, 1)
+  const refpath = _lookup(inj.parent, 1)
   inj.keyI = size(inj.keys)
 
   // Spec reference.
@@ -1764,8 +1784,8 @@ const transform_FORMAT: Injector = (inj: Injection, _val: any, _ref: string, sto
 
   // Get arguments: ['`$FORMAT`', 'name', child].
   // TODO: EACH and PACK should accept customm functions too
-  const name = getprop(inj.parent, 1)
-  const child = getprop(inj.parent, 2)
+  const name = _lookup(inj.parent, 1)
+  const child = _lookup(inj.parent, 2)
 
   // Source data.
   const tkey = getelem(inj.path, -2)
@@ -1937,7 +1957,7 @@ function transform(
 
 // A required string value. NOTE: Rejects empty strings.
 const validate_STRING: Injector = (inj: Injection) => {
-  const out = getprop(inj.dparent, inj.key)
+  const out = _lookup(inj.dparent, inj.key)
 
   const t = typify(out)
   if (0 === (T_string & t)) {
@@ -1958,7 +1978,7 @@ const validate_STRING: Injector = (inj: Injection) => {
 const validate_TYPE: Injector = (inj: Injection, _val: any, ref: string) => {
   const tname = slice(ref, 1).toLowerCase()
   const typev = 1 << (31 - TYPENAME.indexOf(tname))
-  const out = getprop(inj.dparent, inj.key)
+  const out = _lookup(inj.dparent, inj.key)
 
   const t = typify(out)
 
@@ -1974,7 +1994,7 @@ const validate_TYPE: Injector = (inj: Injection, _val: any, ref: string) => {
 
 // Allow any value.
 const validate_ANY: Injector = (inj: Injection) => {
-  const out = getprop(inj.dparent, inj.key)
+  const out = _lookup(inj.dparent, inj.key)
   return out
 }
 
@@ -2022,7 +2042,7 @@ const validate_CHILD: Injector = (inj: Injection) => {
       return NONE
     }
 
-    const childtm = getprop(parent, 1)
+    const childtm = _lookup(parent, 1)
 
     if (NONE === inj.dparent) {
       // Empty list as default.
@@ -2264,7 +2284,10 @@ const _validation: Modify = (pval: any, key?: any, parent?: any, inj?: Injection
     if (0 < size(pkeys) && true !== getprop(pval, '`$OPEN`')) {
       const badkeys = []
       for (const ckey of ckeys) {
-        if (!haskey(pval, ckey)) {
+        // Literal presence: _validation needs to know if the SHAPE declares
+        // this key, regardless of whether the validator stored null in that
+        // slot. The Group A haskey would miss null-valued slots.
+        if (NONE === _lookup(pval, ckey)) {
           badkeys.push(ckey)
         }
       }
@@ -2379,7 +2402,7 @@ function validate(
 
 const select_AND: Injector = (inj: Injection, _val: any, _ref: string, store: any) => {
   if (M_KEYPRE === inj.mode) {
-    const terms = getprop(inj.parent, inj.key)
+    const terms = _lookup(inj.parent, inj.key)
 
     const ppath = slice(inj.path, -1)
     const point = getpath(store, ppath)
@@ -2411,7 +2434,7 @@ const select_AND: Injector = (inj: Injection, _val: any, _ref: string, store: an
 
 const select_OR: Injector = (inj: Injection, _val: any, _ref: string, store: any) => {
   if (M_KEYPRE === inj.mode) {
-    const terms = getprop(inj.parent, inj.key)
+    const terms = _lookup(inj.parent, inj.key)
 
     const ppath = slice(inj.path, -1)
     const point = getpath(store, ppath)
@@ -2443,7 +2466,7 @@ const select_OR: Injector = (inj: Injection, _val: any, _ref: string, store: any
 
 const select_NOT: Injector = (inj: Injection, _val: any, _ref: string, store: any) => {
   if (M_KEYPRE === inj.mode) {
-    const term = getprop(inj.parent, inj.key)
+    const term = _lookup(inj.parent, inj.key)
 
     const ppath = slice(inj.path, -1)
     const point = getpath(store, ppath)
@@ -2471,7 +2494,7 @@ const select_NOT: Injector = (inj: Injection, _val: any, _ref: string, store: an
 
 const select_CMP: Injector = (inj: Injection, _val: any, ref: string, store: any) => {
   if (M_KEYPRE === inj.mode) {
-    const term = getprop(inj.parent, inj.key)
+    const term = _lookup(inj.parent, inj.key)
     // const src = getprop(store, inj.base, store)
     const gkey = getelem(inj.path, -2)
 

@@ -63,7 +63,13 @@ declare function items<T>(val: any, apply: (item: [string, any]) => T): T[];
 declare function flatten(list: any[], depth?: number): any[];
 declare function filter(val: any, check: (item: [string, any]) => boolean): any[];
 declare function escre(s: string): string;
+declare function re_escape(s: string): string;
 declare function escurl(s: string): string;
+declare function re_compile(pattern: string | RegExp, flags?: string): RegExp;
+declare function re_find(pattern: string | RegExp, input: string): RegExpMatchArray | null;
+declare function re_find_all(pattern: string | RegExp, input: string): RegExpMatchArray[];
+declare function re_replace(pattern: string | RegExp, input: string, replacement: string | ((m: RegExpMatchArray) => string)): string;
+declare function re_test(pattern: string | RegExp, input: string): boolean;
 declare function join(arr: any[], sep?: string, url?: boolean): string;
 declare function jsonify(val: any, flags?: {
     indent?: number;
@@ -183,5 +189,5 @@ declare class StructUtility {
     injectorArgs: typeof injectorArgs;
     injectChild: typeof injectChild;
 }
-export { StructUtility, clone, delprop, escre, escurl, filter, flatten, getdef, getelem, getpath, getprop, haskey, inject, isempty, isfunc, iskey, islist, ismap, isnode, items, join, jsonify, keysof, merge, pad, pathify, select, setpath, setprop, size, slice, strkey, stringify, transform, typify, typename, validate, walk, SKIP, DELETE, jm, jt, T_any, T_noval, T_boolean, T_decimal, T_integer, T_number, T_string, T_function, T_symbol, T_null, T_list, T_map, T_instance, T_scalar, T_node, M_KEYPRE, M_KEYPOST, M_VAL, MODENAME, checkPlacement, injectorArgs, injectChild, };
+export { StructUtility, clone, delprop, escre, escurl, filter, flatten, getdef, getelem, getpath, getprop, haskey, inject, isempty, isfunc, iskey, islist, ismap, isnode, items, join, jsonify, keysof, merge, pad, pathify, select, setpath, setprop, size, slice, strkey, stringify, transform, typify, typename, validate, walk, re_compile, re_find, re_find_all, re_replace, re_test, re_escape, SKIP, DELETE, jm, jt, T_any, T_noval, T_boolean, T_decimal, T_integer, T_number, T_string, T_function, T_symbol, T_null, T_list, T_map, T_instance, T_scalar, T_node, M_KEYPRE, M_KEYPOST, M_VAL, MODENAME, checkPlacement, injectorArgs, injectChild, };
 export type { Injection, Injector, WalkApply };

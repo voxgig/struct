@@ -532,7 +532,9 @@ vs_value* vs_getprop(vs_value* val, vs_value* key, vs_value* alt) {
     char* k = vs_strkey(key);
     vs_value* v = vs_map_get(vs_as_map(val), k);
     free(k);
-    if (v && !vs_is_undef(v))
+    /* Group A: JSON null at the key is treated as "no value" — same rule as
+       absent. Returns alt. Mirrors the canonical TS post-spec semantics. */
+    if (v && !vs_is_undef(v) && !vs_is_null(v))
       return vs_retain(v);
     return alt ? vs_retain(alt) : vs_new_undef();
   }
@@ -555,16 +557,49 @@ vs_value* vs_getprop(vs_value* val, vs_value* key, vs_value* alt) {
       return alt ? vs_retain(alt) : vs_new_undef();
     }
     vs_value* v = vs_list_get(l, (size_t)nk);
-    return v ? vs_retain(v) : (alt ? vs_retain(alt) : vs_new_undef());
+    /* Group A: null at the slot also returns alt. */
+    if (v && !vs_is_undef(v) && !vs_is_null(v))
+      return vs_retain(v);
+    return alt ? vs_retain(alt) : vs_new_undef();
   }
   return alt ? vs_retain(alt) : vs_new_undef();
 }
 
 bool vs_haskey(vs_value* val, vs_value* key) {
   vs_value* v = vs_getprop(val, key, NULL);
-  bool out = v && !vs_is_undef(v);
+  /* Group A: null counts as "no value", same rule as getprop. */
+  bool out = v && !vs_is_undef(v) && !vs_is_null(v);
   vs_release(v);
   return out;
+}
+
+/* Internal literal lookup. See header. */
+vs_value* vs_lookup(vs_value* val, vs_value* key) {
+  if (!val || vs_is_undef(val) || !key || vs_is_undef(key))
+    return NULL;
+  if (vs_is_map(val)) {
+    char* k = vs_strkey(key);
+    vs_value* v = vs_map_get(vs_as_map(val), k);
+    free(k);
+    return v;
+  }
+  if (vs_is_list(val)) {
+    int64_t nk = 0;
+    if (vs_is_int(key))
+      nk = vs_as_int(key);
+    else if (vs_is_double(key))
+      nk = (int64_t)vs_as_double(key);
+    else if (vs_is_string(key)) {
+      if (!parse_intstr(vs_as_string(key), vs_string_len(key), &nk))
+        return NULL;
+    } else
+      return NULL;
+    vs_list* l = vs_as_list(val);
+    if (nk < 0 || nk >= (int64_t)l->len)
+      return NULL;
+    return vs_list_get(l, (size_t)nk);
+  }
+  return NULL;
 }
 
 /* ===========================================================================

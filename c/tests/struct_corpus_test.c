@@ -60,11 +60,15 @@ static void run(const char* cat, const char* name, bool null_flag, runner_subjec
 }
 
 /* Helpers. */
+/* Raw map lookup for runner field extraction. Unlike vs_getprop (Group A,
+ * which treats null at a key as "no value"), this returns the literal stored
+ * value — including null — so tests for Group B functions like stringify and
+ * pad receive their corpus input verbatim. */
 static vs_value* getp(vs_value* in, const char* key) {
-  vs_value* kv = vs_new_string(key);
-  vs_value* v = vs_getprop(in, kv, NULL);
-  vs_release(kv);
-  return v;
+  if (!vs_is_map(in))
+    return vs_new_undef();
+  vs_value* v = vs_map_get(vs_as_map(in), key);
+  return v ? vs_retain(v) : vs_new_undef();
 }
 
 /* Subject implementations. */

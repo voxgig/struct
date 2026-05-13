@@ -39,6 +39,12 @@ exports.typify = typify;
 exports.typename = typename;
 exports.validate = validate;
 exports.walk = walk;
+exports.re_compile = re_compile;
+exports.re_find = re_find;
+exports.re_find_all = re_find_all;
+exports.re_replace = re_replace;
+exports.re_test = re_test;
+exports.re_escape = re_escape;
 exports.jm = jm;
 exports.jt = jt;
 exports.checkPlacement = checkPlacement;
@@ -425,14 +431,15 @@ function getelem(val, key, alt) {
     }
     if (islist(val)) {
         const nkey = parseInt(key);
-        if (Number.isInteger(nkey) && ('' + key).match(R_INTEGER_KEY)) {
+        if (Number.isInteger(nkey) && re_test(R_INTEGER_KEY, '' + key)) {
             if (nkey < 0) {
                 key = val.length + nkey;
             }
             out = val[key];
         }
     }
-    if (NONE === out) {
+    // null at a slot counts as "no value" — same Group A rule as getprop.
+    if (null == out) {
         return 0 < (T_function & typify(alt)) ? alt() : alt;
     }
     return out;
@@ -447,10 +454,26 @@ function getprop(val, key, alt) {
     if (isnode(val)) {
         out = val[key];
     }
-    if (NONE === out) {
+    // JSON null at a key is treated as "no value" for the default-substitution
+    // rule. This unifies cross-port behaviour: every host language conflates
+    // null and absent at the value level either always or via positional
+    // checks; the library follows that constraint on observation.
+    if (null == out) {
         return alt;
     }
     return out;
+}
+// Internal: literal value lookup that preserves stored JSON null. Group B
+// callers (validate / transform commands / builders / inject internals) use
+// this when they need to inspect the raw stored value at a slot regardless
+// of whether it is null. The public getprop / getelem / haskey APIs treat
+// null as absent (Group A) per UNDEF_SPEC.md.
+function _lookup(val, key) {
+    if (NONE === val || NONE === key)
+        return NONE;
+    if (isnode(val))
+        return val[key];
+    return NONE;
 }
 // Convert different types of keys to string representation.
 // String keys are returned as is.
@@ -485,7 +508,8 @@ function keysof(val) {
 // Value of property with name key in node val is defined.
 // Root utility - only uses language facilities.
 function haskey(val, key) {
-    return NONE !== getprop(val, key);
+    // null at a key counts as "no value" — same rule as getprop.
+    return null != getprop(val, key);
 }
 function items(val, apply) {
     let out = keysof(val).map((k) => [k, val[k]]);
@@ -519,13 +543,78 @@ function filter(val, check) {
 }
 // Escape regular expression.
 function escre(s) {
-    // s = null == s ? S_MT : s
-    return replace(s, R_ESCAPE_REGEXP, '\\$&');
+    return re_replace(R_ESCAPE_REGEXP, s, '\\$&');
+}
+// Alias so call sites read naturally next to the other re_* helpers.
+function re_escape(s) {
+    return escre(s);
 }
 // Escape URLs.
 function escurl(s) {
     s = null == s ? S_MT : s;
     return encodeURIComponent(s);
+}
+// ===========================================================================
+// Regex utility — uniform API. Every port exposes these same names. The
+// dialect is the RE2 subset documented in /REGEX.md. Internal library code
+// uses these helpers instead of host-language regex methods directly.
+// ===========================================================================
+// Compile a regex (or return as-is if already compiled). Cached behaviour is
+// up to the port; in TS we just construct a RegExp.
+function re_compile(pattern, flags) {
+    if (pattern instanceof RegExp) {
+        return pattern;
+    }
+    return new RegExp(pattern, flags);
+}
+// First match. Returns [whole, capture1, ...] or null.
+function re_find(pattern, input) {
+    const re = pattern instanceof RegExp ? pattern : new RegExp(pattern);
+    return input.match(re);
+}
+// All non-overlapping matches, left to right. Each element is the same shape
+// as re_find's array.
+function re_find_all(pattern, input) {
+    let re;
+    if (pattern instanceof RegExp) {
+        re = pattern.global ? pattern : new RegExp(pattern.source, pattern.flags + 'g');
+    }
+    else {
+        re = new RegExp(pattern, 'g');
+    }
+    const out = [];
+    let m;
+    while ((m = re.exec(input)) !== null) {
+        out.push(m);
+        if (m[0] === '')
+            re.lastIndex++; // avoid infinite loop on empty match
+    }
+    return out;
+}
+// Replace every match. `replacement` is either a string (with $& and $1..$9)
+// or a callback receiving the same array as re_find returns.
+function re_replace(pattern, input, replacement) {
+    let re;
+    if (pattern instanceof RegExp) {
+        re = pattern.global ? pattern : new RegExp(pattern.source, pattern.flags + 'g');
+    }
+    else {
+        re = new RegExp(pattern, 'g');
+    }
+    if (typeof replacement === 'function') {
+        return input.replace(re, (...args) => {
+            // Strip the trailing offset + full string args String.prototype.replace passes.
+            // The callback below receives just the capture groups (whole at [0]).
+            const groups = args.slice(0, -2);
+            return replacement(groups);
+        });
+    }
+    return input.replace(re, replacement);
+}
+// Boolean test for any match.
+function re_test(pattern, input) {
+    const re = pattern instanceof RegExp ? pattern : new RegExp(pattern);
+    return re.test(input);
 }
 // Replace a search string (all), or a regexp, in a source string.
 function replace(s, from, to) {
@@ -554,16 +643,16 @@ function join(arr, sep, url) {
         let s = n[1];
         if (NONE !== sepre && S_MT !== sepre) {
             if (url && 0 === i) {
-                s = replace(s, RegExp(sepre + '+$'), S_MT);
+                s = re_replace(re_compile(sepre + '+$'), s, S_MT);
                 return s;
             }
             if (0 < i) {
-                s = replace(s, RegExp('^' + sepre + '+'), S_MT);
+                s = re_replace(re_compile('^' + sepre + '+'), s, S_MT);
             }
             if (i < sarr - 1 || !url) {
-                s = replace(s, RegExp(sepre + '+$'), S_MT);
+                s = re_replace(re_compile(sepre + '+$'), s, S_MT);
             }
-            s = replace(s, RegExp('([^' + sepre + '])' + sepre + '+([^' + sepre + '])'), '$1' + sepdef + '$2');
+            s = re_replace(re_compile('([^' + sepre + '])' + sepre + '+([^' + sepre + '])'), s, '$1' + sepdef + '$2');
         }
         return s;
     }), (n) => S_MT !== n[1]).join(sepdef);
@@ -618,7 +707,7 @@ function stringify(val, maxlen, pretty) {
                 }
                 return val;
             });
-            valstr = valstr.replace(R_QUOTES, S_MT);
+            valstr = re_replace(R_QUOTES, valstr, S_MT);
         }
         catch {
             valstr = '__STRINGIFY_FAILED__';
@@ -672,7 +761,7 @@ function pathify(val, startin, endin) {
         else {
             pathstr = join(items(filter(path, (n) => iskey(n[1])), (n) => {
                 const p = n[1];
-                return S_number === typeof p ? S_MT + Math.floor(p) : p.replace(R_DOT, S_MT);
+                return S_number === typeof p ? S_MT + Math.floor(p) : re_replace(R_DOT, p, S_MT);
             }), S_DT);
         }
     }
@@ -687,7 +776,7 @@ function clone(val) {
     const refs = [];
     const reftype = T_function | T_instance;
     const replacer = (_k, v) => 0 < (reftype & typify(v)) ? (refs.push(v), '`$REF:' + (refs.length - 1) + '`') : v;
-    const reviver = (_k, v, m) => S_string === typeof v ? ((m = v.match(R_CLONE_REF)), m ? refs[m[1]] : v) : v;
+    const reviver = (_k, v, m) => S_string === typeof v ? ((m = re_find(R_CLONE_REF, v)), m ? refs[m[1]] : v) : v;
     const out = NONE === val ? NONE : JSON.parse(JSON.stringify(val, replacer), reviver);
     return out;
 }
@@ -696,9 +785,12 @@ function jm(...kv) {
     const kvsize = size(kv);
     const o = {};
     for (let i = 0; i < kvsize; i += 2) {
-        let k = getprop(kv, i, '$KEY' + i);
+        // Builders are Group B (value processing): preserve literal stored
+        // values, including null. Direct array index distinguishes "slot exists
+        // with value null" from "slot beyond end of kv".
+        let k = i < kv.length ? kv[i] : '$KEY' + i;
         k = 'string' === typeof k ? k : stringify(k);
-        o[k] = getprop(kv, i + 1, null);
+        o[k] = i + 1 < kv.length ? kv[i + 1] : null;
     }
     return o;
 }
@@ -976,7 +1068,7 @@ function getpath(store, path, injdef) {
         }
         if (!isfunc(val)) {
             val = src;
-            const m = parts[0].match(R_META_PATH);
+            const m = re_find(R_META_PATH, parts[0]);
             if (m && injdef && injdef.meta) {
                 val = getprop(injdef.meta, m[1]);
                 parts[0] = m[3];
@@ -1000,7 +1092,7 @@ function getpath(store, path, injdef) {
                     part = stringify(getpath(getprop(injdef, 'meta'), slice(part, 6, -1)));
                 }
                 // $$ escapes $
-                part = part.replace(R_DOUBLE_DOLLAR, '$');
+                part = re_replace(R_DOUBLE_DOLLAR, part, '$');
                 if (S_MT === part) {
                     let ascends = 0;
                     while (S_MT === parts[1 + pI]) {
@@ -1138,7 +1230,7 @@ function inject(val, store, injdef) {
     inj.val = val;
     // Original val reference may no longer be correct.
     // This return value is only used as the top level result.
-    return getprop(inj.parent, S_DTOP);
+    return _lookup(inj.parent, S_DTOP);
 }
 // The transform_* functions are special command inject handlers (see Injector).
 // Delete a key from a map or list.
@@ -1152,7 +1244,7 @@ const transform_COPY = (inj, _val) => {
     if (!checkPlacement(M_VAL, ijname, T_any, inj)) {
         return NONE;
     }
-    const out = getprop(inj.dparent, inj.key);
+    const out = _lookup(inj.dparent, inj.key);
     inj.setval(out);
     return out;
 };
@@ -1165,14 +1257,14 @@ const transform_KEY = (inj) => {
         return NONE;
     }
     // Key is defined by $KEY meta property.
-    const keyspec = getprop(parent, S_BKEY);
+    const keyspec = _lookup(parent, S_BKEY);
     if (NONE !== keyspec) {
         delprop(parent, S_BKEY);
         return getprop(inj.dparent, keyspec);
     }
     // Key is defined within general purpose $META object.
     // return getprop(getprop(parent, S_BANNO), S_KEY, getprop(path, path.length - 2))
-    return getprop(getprop(parent, S_BANNO), S_KEY, getelem(path, -2));
+    return _lookup(_lookup(parent, S_BANNO), S_KEY) ?? getelem(path, -2);
 };
 // Annotate node.  Does nothing itself, just used by
 // other injectors, and is removed when called.
@@ -1383,7 +1475,7 @@ const transform_REF = (inj, val, _ref, store) => {
         return NONE;
     }
     // Get arguments: ['`$REF`', 'ref-path'].
-    const refpath = getprop(inj.parent, 1);
+    const refpath = _lookup(inj.parent, 1);
     inj.keyI = size(inj.keys);
     // Spec reference.
     const spec = getprop(store, S_DSPEC)();
@@ -1439,8 +1531,8 @@ const transform_FORMAT = (inj, _val, _ref, store) => {
     }
     // Get arguments: ['`$FORMAT`', 'name', child].
     // TODO: EACH and PACK should accept customm functions too
-    const name = getprop(inj.parent, 1);
-    const child = getprop(inj.parent, 2);
+    const name = _lookup(inj.parent, 1);
+    const child = _lookup(inj.parent, 2);
     // Source data.
     const tkey = getelem(inj.path, -2);
     const target = getelem(inj.nodes, -2, () => getelem(inj.nodes, -1));
@@ -1566,7 +1658,7 @@ injdef) {
 }
 // A required string value. NOTE: Rejects empty strings.
 const validate_STRING = (inj) => {
-    const out = getprop(inj.dparent, inj.key);
+    const out = _lookup(inj.dparent, inj.key);
     const t = typify(out);
     if (0 === (T_string & t)) {
         const msg = _invalidTypeMsg(inj.path, S_string, t, out, 'V1010');
@@ -1583,7 +1675,7 @@ const validate_STRING = (inj) => {
 const validate_TYPE = (inj, _val, ref) => {
     const tname = slice(ref, 1).toLowerCase();
     const typev = 1 << (31 - TYPENAME.indexOf(tname));
-    const out = getprop(inj.dparent, inj.key);
+    const out = _lookup(inj.dparent, inj.key);
     const t = typify(out);
     // console.log('TYPE', tname, typev, tn(typev), 'O=', t, tn(t), out, 'C=', t & typev)
     if (0 === (t & typev)) {
@@ -1594,7 +1686,7 @@ const validate_TYPE = (inj, _val, ref) => {
 };
 // Allow any value.
 const validate_ANY = (inj) => {
-    const out = getprop(inj.dparent, inj.key);
+    const out = _lookup(inj.dparent, inj.key);
     return out;
 };
 // Specify child values for map or list.
@@ -1633,7 +1725,7 @@ const validate_CHILD = (inj) => {
             inj.errs.push('Invalid $CHILD as value');
             return NONE;
         }
-        const childtm = getprop(parent, 1);
+        const childtm = _lookup(parent, 1);
         if (NONE === inj.dparent) {
             // Empty list as default.
             // parent.length = 0
@@ -1791,7 +1883,10 @@ const _validation = (pval, key, parent, inj) => {
         if (0 < size(pkeys) && true !== getprop(pval, '`$OPEN`')) {
             const badkeys = [];
             for (const ckey of ckeys) {
-                if (!haskey(pval, ckey)) {
+                // Literal presence: _validation needs to know if the SHAPE declares
+                // this key, regardless of whether the validator stored null in that
+                // slot. The Group A haskey would miss null-valued slots.
+                if (NONE === _lookup(pval, ckey)) {
                     badkeys.push(ckey);
                 }
             }
@@ -1892,7 +1987,7 @@ injdef) {
 }
 const select_AND = (inj, _val, _ref, store) => {
     if (M_KEYPRE === inj.mode) {
-        const terms = getprop(inj.parent, inj.key);
+        const terms = _lookup(inj.parent, inj.key);
         const ppath = slice(inj.path, -1);
         const point = getpath(store, ppath);
         const vstore = merge([{}, store], 1);
@@ -1915,7 +2010,7 @@ const select_AND = (inj, _val, _ref, store) => {
 };
 const select_OR = (inj, _val, _ref, store) => {
     if (M_KEYPRE === inj.mode) {
-        const terms = getprop(inj.parent, inj.key);
+        const terms = _lookup(inj.parent, inj.key);
         const ppath = slice(inj.path, -1);
         const point = getpath(store, ppath);
         const vstore = merge([{}, store], 1);
@@ -1939,7 +2034,7 @@ const select_OR = (inj, _val, _ref, store) => {
 };
 const select_NOT = (inj, _val, _ref, store) => {
     if (M_KEYPRE === inj.mode) {
-        const term = getprop(inj.parent, inj.key);
+        const term = _lookup(inj.parent, inj.key);
         const ppath = slice(inj.path, -1);
         const point = getpath(store, ppath);
         const vstore = merge([{}, store], 1);
@@ -1960,7 +2055,7 @@ const select_NOT = (inj, _val, _ref, store) => {
 };
 const select_CMP = (inj, _val, ref, store) => {
     if (M_KEYPRE === inj.mode) {
-        const term = getprop(inj.parent, inj.key);
+        const term = _lookup(inj.parent, inj.key);
         // const src = getprop(store, inj.base, store)
         const gkey = getelem(inj.path, -2);
         // const tval = getprop(src, gkey)
@@ -1979,7 +2074,7 @@ const select_CMP = (inj, _val, ref, store) => {
         else if ('$LTE' === ref && point <= term) {
             pass = true;
         }
-        else if ('$LIKE' === ref && stringify(point).match(RegExp(term))) {
+        else if ('$LIKE' === ref && re_test(re_compile(term), stringify(point))) {
             pass = true;
         }
         if (pass) {
@@ -2196,7 +2291,7 @@ const _injecthandler = (inj, val, ref, store) => {
 };
 const _validatehandler = (inj, val, ref, store) => {
     let out = val;
-    const m = ref.match(R_META_PATH);
+    const m = re_find(R_META_PATH, ref);
     const ismetapath = null != m;
     if (ismetapath) {
         if ('=' === m[2]) {
@@ -2229,7 +2324,7 @@ function _injectstr(val, store, inj) {
     }
     let out = val;
     // Pattern examples: "`a.b.c`", "`$NAME`", "`$NAME1`"
-    const m = val.match(R_INJECTION_FULL);
+    const m = re_find(R_INJECTION_FULL, val);
     // Full string of the val is an injection.
     if (m) {
         if (null != inj) {
@@ -2238,7 +2333,7 @@ function _injectstr(val, store, inj) {
         let pathref = m[1];
         // Special escapes inside injection.
         if (3 < size(pathref)) {
-            pathref = pathref.replace(R_BT_ESCAPE, S_BT).replace(R_DS_ESCAPE, S_DS);
+            pathref = re_replace(R_DS_ESCAPE, re_replace(R_BT_ESCAPE, pathref, S_BT), S_DS);
         }
         // Get the extracted path reference.
         out = getpath(store, pathref, inj);
@@ -2248,7 +2343,7 @@ function _injectstr(val, store, inj) {
         const partial = (_m, ref) => {
             // Special escapes inside injection.
             if (3 < size(ref)) {
-                ref = ref.replace(R_BT_ESCAPE, S_BT).replace(R_DS_ESCAPE, S_DS);
+                ref = re_replace(R_DS_ESCAPE, re_replace(R_BT_ESCAPE, ref, S_BT), S_DS);
             }
             if (inj) {
                 inj.full = false;
@@ -2257,7 +2352,7 @@ function _injectstr(val, store, inj) {
             // Ensure inject value is a string.
             return NONE === found ? S_MT : S_string === typeof found ? found : JSON.stringify(found);
         };
-        out = val.replace(R_INJECTION_PARTIAL, partial);
+        out = re_replace(R_INJECTION_PARTIAL, val, (m) => partial('', m[1]));
         // Also call the inj handler on the entire string, providing the
         // option for custom injection.
         if (null != inj && isfunc(inj.handler)) {

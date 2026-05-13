@@ -130,6 +130,16 @@ char* vs_pad(vs_value* str, vs_value* padding, vs_value* padchar);
 int vs_typify(const vs_value* v);
 vs_value* vs_getelem(vs_value* val, vs_value* key, vs_value* alt);
 vs_value* vs_getprop(vs_value* val, vs_value* key, vs_value* alt);
+
+/* Internal: literal lookup that preserves stored JSON null. Group B callers
+ * (validate / transform commands / builders / inject internals) use this
+ * when they need to inspect the raw stored value at a slot regardless of
+ * whether it is null. The public vs_getprop / vs_getelem / vs_haskey APIs
+ * treat null as absent (Group A) per /UNDEF_SPEC.md.
+ *
+ * Returned reference is borrowed from the container (NOT retained). Caller
+ * must vs_retain() if it needs to outlive the parent container. */
+vs_value* vs_lookup(vs_value* val, vs_value* key);
 char* vs_strkey(vs_value* key);
 vs_strvec vs_keysof(vs_value* val);
 bool vs_haskey(vs_value* val, vs_value* key);
