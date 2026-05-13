@@ -4,15 +4,25 @@
 **Canonical**: TypeScript (`ts/`)
 **Languages**: JS, Python, Go, PHP, Ruby, Lua, Rust, C, Zig, C#, Java, C++, Kotlin
 
-**Runtime third-party dependencies**: 8 of 14 ports ship with **zero**
-runtime third-party packages (ts, js, py, go, rb, php, cs, **rs**,
-**zig** — Rust and Zig now vendor an in-tree RE2-subset regex engine
-in `rs/src/re.rs` / `zig/src/regex.zig`, mirroring the C and Lua
-ports). The remaining ports depend on a JSON parser at the text
-boundary only: lua/dkjson, java/gson, kt/gson, c/cJSON,
-cpp/nlohmann_json. Rust still has `indexmap` for insertion-ordered
-maps, which fills a stdlib gap the C/C++/Zig ports cover by
-hand-writing an OrderedMap.
+**Runtime third-party dependencies**: every port's **library proper**
+now has zero third-party JSON dependency. Each port exports the
+same-name `jsonify` function backed by a hand-written printer that
+mirrors `c/src/utility.c::jsonify_inner` (insertion-order map keys
+matching TS canonical `JSON.stringify`, `%g`-style double formatting,
+identical compact / indented shapes, identical escape sequences). The
+cross-port `minor.jsonify` test set in the corpus pins this shape on
+both pretty (`indent=2`) and compact (`indent=0`) forms.
+
+| Lib third-party | Test-runner third-party |
+|---|---|
+| **none** in any port (ts/js/py/go/rb/php/cs/rs/zig stdlib; c/cpp/java/kt/lua use a hand printer) | c: **none** (vendored JSON parser in `src/value_io.c`); cpp: **none** (vendored JSON parser in `src/value_io.hpp`); java/kt: gson (test-scope only); lua: dkjson + luafilesystem (test-scope only); rs: serde_json (dev-dep only) |
+
+Rust still has `indexmap` for insertion-ordered maps — fills a stdlib
+gap the C/C++/Zig ports cover by hand-writing an OrderedMap.
+
+Regex: every port either uses its language's built-in regex engine
+(RE2-syntax-superset, no dep) or has a vendored RE2-subset Thompson
+NFA engine in-tree (c/cpp/lua/rs/zig).
 
 **Group A/B semantics rollout** (per `UNDEF_SPEC.md`):
 - `getprop` / `getelem` / `haskey` / `isempty` / `isnode` are **Group A**:
