@@ -254,12 +254,10 @@ class Injection:
         return cinj
 
     def setval(self, val: Any, ancestor: int | None = None) -> Any:
-        """Set the value in the parent node at the specified ancestor level.
-
-        Mirrors TS canonical: val of UNDEF (Python None) deletes; any other
-        value (including JSON null mapped to a NULLMARK string by the runner)
-        sets. setprop itself is a pure set — the delete-on-undef logic lives
-        here.
+        """Mirrors TS canonical setprop. Literal assignment: None at the slot
+        is None (not delete). Use delprop for deletion. Python's UNDEF==None
+        means setval(NONE) and setval(JSON null) cannot be told apart by the
+        caller — both literally set the slot to None.
         """
         if ancestor is None or ancestor < 2:
             target = self.parent
@@ -267,8 +265,6 @@ class Injection:
         else:
             target = getelem(self.nodes, 0 - ancestor)
             key = getelem(self.path, 0 - ancestor)
-        if val is None:
-            return delprop(target, key)
         return setprop(target, key, val)
 
 
@@ -477,12 +473,12 @@ def typify(value: Any = _TYPIFY_NO_ARG) -> int:
 
 def getelem(val: Any, key: Any, alt: Any = UNDEF) -> Any:
     """
-    Get a list element. The key should be an integer, or a string
-    that can parse to an integer only. Negative integers count from the end of the list.
+    Get a list element. Group A semantics: a stored None at the slot
+    returns alt, just like an out-of-range index.
     """
     out = UNDEF
 
-    if val == UNDEF or key == UNDEF:
+    if val is UNDEF or key is UNDEF:
         return alt
 
     if islist(val):
@@ -495,7 +491,7 @@ def getelem(val: Any, key: Any, alt: Any = UNDEF) -> Any:
         except (ValueError, IndexError):
             pass
 
-    if out == UNDEF:
+    if out is UNDEF or out is None:
         return alt() if (T_function & typify(alt)) > 0 else alt
 
     return out
@@ -503,41 +499,55 @@ def getelem(val: Any, key: Any, alt: Any = UNDEF) -> Any:
 
 def getprop(val: Any = UNDEF, key: Any = UNDEF, alt: Any = UNDEF) -> Any:
     """
-    Safely get a property of a node. Undefined arguments return undefined.
-    If the key is not found, return the alternative value.
+    Safely get a property of a node. Group A semantics (per UNDEF_SPEC.md):
+    a stored None is treated as "no value" and returns alt. Internal callers
+    that need to inspect the raw stored value at a slot (preserving null)
+    use _lookup.
     """
-    if val == UNDEF:
-        return alt
-
-    if key == UNDEF:
+    if val is UNDEF or key is UNDEF:
         return alt
 
     out = alt
 
     if ismap(val):
-        # Use `in` rather than .get() with default: a stored JSON null (None)
-        # must be returned as-is, not collapsed to alt. Python's UNDEF=None
-        # makes "absent" and "null" indistinguishable through .get(default).
         skey = str(key)
         if skey in val:
-            return val[skey]
-        return alt
+            out = val[skey]
 
     elif islist(val):
         try:
-            key = int(key)
+            ki = int(key)
         except (ValueError, TypeError):
             return alt
 
-        if 0 <= key < len(val):
-            return val[key]
-        else:
-            return alt
+        if 0 <= ki < len(val):
+            out = val[ki]
 
-    if out == UNDEF:
+    if out is None:
         return alt
 
     return out
+
+
+def _lookup(val: Any, key: Any) -> Any:
+    """Internal raw lookup: returns the literally-stored value (including
+    None for JSON null), or UNDEF when the slot doesn't exist. Used by
+    Group B callers that must distinguish a null slot from an absent one
+    while still using a unified test runner."""
+    if val is UNDEF or key is UNDEF:
+        return UNDEF
+    if ismap(val):
+        skey = str(key)
+        return val[skey] if skey in val else UNDEF
+    if islist(val):
+        try:
+            ki = int(key)
+        except (ValueError, TypeError):
+            return UNDEF
+        if 0 <= ki < len(val):
+            return val[ki]
+        return UNDEF
+    return UNDEF
 
 
 def keysof(val: Any = UNDEF) -> list[str]:
@@ -551,8 +561,9 @@ def keysof(val: Any = UNDEF) -> list[str]:
 
 
 def haskey(val: Any = UNDEF, key: Any = UNDEF) -> bool:
-    "Value of property with name key in node val is defined."
-    return getprop(val, key) != UNDEF
+    "Value of property with name key in node val is defined (and not None)."
+    out = getprop(val, key)
+    return out is not UNDEF and out is not None
 
 
 def items(val: Any = UNDEF, apply=None):
@@ -1658,7 +1669,7 @@ def transform_DELETE(inj, val, ref, store):
     """
     Injection handler to delete a key from a map/list.
     """
-    inj.setval(UNDEF)
+    delprop(inj.parent, inj.key)
     return UNDEF
 
 
@@ -1762,7 +1773,7 @@ def transform_MERGE(inj, val, ref, store):
         args = args if islist(args) else [args]
 
         # Remove the $MERGE command from a parent map.
-        inj.setval(UNDEF)
+        delprop(inj.parent, inj.key)
 
         # Literals in the parent have precedence, but we still merge onto
         # the parent object, so that node tree references are not changed.
@@ -2376,7 +2387,7 @@ def validate_CHILD(inj, _val=UNDEF, _ref=UNDEF, _store=UNDEF):
             setprop(parent, ckey, clone(childtm))
             keys.append(ckey)
 
-        inj.setval(UNDEF)
+        delprop(inj.parent, inj.key)
         return UNDEF
 
     # List syntax.
