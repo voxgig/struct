@@ -1484,7 +1484,8 @@ static vs_value* walk_rec(walk_state* st, vs_value* val, vs_value* key, vs_value
         ckey = vs_new_string(keys.data[i]);
       }
       vs_value* ckeyv = vs_new_string(keys.data[i]);
-      vs_value* child = vs_getprop(out, ckeyv, NULL);
+      vs_value* cp = vs_lookup(out, ckeyv);
+      vs_value* child = cp ? vs_retain(cp) : vs_new_undef();
       vs_release(ckeyv);
 
       vs_value* nchild = walk_rec(st, child, ckey, out, path);
@@ -1929,10 +1930,11 @@ vs_value* vs_getpath(vs_value* store, vs_value* path, vs_injection* injdef) {
           }
         } else {
           vs_value* k = vs_new_string(part);
-          vs_value* nv = vs_getprop(val, k, NULL);
+          vs_value* nv = vs_lookup(val, k);
           vs_release(k);
+          vs_value* tv = nv ? vs_retain(nv) : vs_new_undef();
           vs_release(val);
-          val = nv;
+          val = tv;
         }
         free(part);
       }

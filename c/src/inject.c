@@ -131,7 +131,8 @@ void vs_inj_descend(vs_injection* inj) {
   } else {
     if (parentkey) {
       vs_value* k = vs_new_string(parentkey);
-      vs_value* nd = vs_getprop(inj->dparent, k, NULL);
+      vs_value* lp = vs_lookup(inj->dparent, k);
+      vs_value* nd = lp ? vs_retain(lp) : vs_new_undef();
       vs_release(k);
       vs_release(inj->dparent);
       inj->dparent = nd;
@@ -156,7 +157,8 @@ vs_injection* vs_inj_child(vs_injection* parent, size_t keyI, const vs_strvec* k
   /* key = strkey(keys[keyI]) */
   const char* keystr = (keyI < keys->len) ? keys->data[keyI] : "";
   vs_value* keyv = vs_new_string(keystr);
-  vs_value* val = vs_getprop(parent->val, keyv, NULL);
+  vs_value* vp = vs_lookup(parent->val, keyv);
+  vs_value* val = vp ? vs_retain(vp) : vs_new_undef();
   vs_release(keyv);
 
   vs_injection* cinj = (vs_injection*)calloc(1, sizeof(vs_injection));
@@ -678,7 +680,8 @@ vs_value* vs_inject(vs_value* val, vs_value* store, vs_injection* injdef) {
   /* Modify callback. */
   if (inj->modify_val && vs_is_modify(inj->modify_val) && !vs_is_skip(val)) {
     vs_value* keyv = vs_new_string(inj->key);
-    vs_value* mval = vs_getprop(inj->parent, keyv, NULL);
+    vs_value* mvp = vs_lookup(inj->parent, keyv);
+    vs_value* mval = mvp ? vs_retain(mvp) : vs_new_undef();
     inj->modify_val->as.fn.fn.mod(mval, keyv, inj->parent, inj, store, inj->modify_val->as.fn.ud);
     vs_release(mval);
     vs_release(keyv);

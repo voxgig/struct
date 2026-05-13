@@ -1477,7 +1477,8 @@ static void _validation(vs_value* pval, vs_value* key, vs_value* parent, vs_inje
   bool exact = vs_is_bool(exv) && vs_as_bool(exv);
   vs_release(exv);
 
-  vs_value* cval = vs_getprop(inj->dparent, key, NULL);
+  vs_value* cp = vs_lookup(inj->dparent, key);
+  vs_value* cval = cp ? vs_retain(cp) : vs_new_undef();
   bool cval_undef = !cval || vs_is_undef(cval);
   if (!exact && cval_undef) {
     vs_release(cval);
