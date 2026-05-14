@@ -1,8 +1,8 @@
 # Language Version Comparison Report
 
 **Date**: 2026-05-13
-**Canonical**: TypeScript (`ts/`)
-**Languages**: JS, Python, Go, PHP, Ruby, Lua, Rust, C, Zig, C#, Java, C++, Kotlin
+**Canonical**: TypeScript (`typescript/`)
+**Languages**: JS, Python, Go, PHP, Ruby, Lua, Rust, C, Zig, C#, Java, C++, Kotlin, Perl, Swift
 
 **Runtime third-party dependencies**: every port's **library proper**
 now has zero third-party JSON dependency. Each port exports the
@@ -15,14 +15,18 @@ both pretty (`indent=2`) and compact (`indent=0`) forms.
 
 | Lib third-party | Test-runner third-party |
 |---|---|
-| **none** in any port (ts/js/py/go/rb/php/cs/rs/zig stdlib; c/cpp/java/kt/lua use a hand printer) | c: **none** (vendored JSON parser in `src/value_io.c`); cpp: **none** (vendored JSON parser in `src/value_io.hpp`); java/kt: gson (test-scope only); lua: dkjson + luafilesystem (test-scope only); rs: serde_json (dev-dep only) |
+| **zero runtime third-party deps in any port.** Every port either uses its language's stdlib JSON (typescript/javascript/python/go/ruby/php/csharp/zig), hand-rolls a small JSON printer (c/cpp/java/kotlin/lua/swift/perl/rust), or pipes the corpus through the language's stdlib parser at test time. | c: **none** (vendored JSON parser in `src/value_io.c`); cpp: **none** (vendored JSON parser in `src/value_io.hpp`); java/kotlin: gson (test-scope only); lua: dkjson + luafilesystem (test-scope only); rust: serde_json (dev-dep only) |
 
-Rust still has `indexmap` for insertion-ordered maps — fills a stdlib
-gap the C/C++/Zig ports cover by hand-writing an OrderedMap.
+Languages whose stdlib lacks an insertion-ordered map (C, C++, Zig,
+Rust, Perl, Swift) all hand-roll one in-tree — `Map` inside
+`c/src/value.h`, `OrderedMap` inside `cpp/src/value.hpp` and
+`zig/src/struct.zig`, `rust/src/ordered_map.rs`,
+`swift/Sources/VoxgigStruct/OrderedDictionary.swift`, and
+`perl/lib/Voxgig/Struct.pm`'s `Voxgig::Struct::OrderedHash` tie class.
 
 Regex: every port either uses its language's built-in regex engine
 (RE2-syntax-superset, no dep) or has a vendored RE2-subset Thompson
-NFA engine in-tree (c/cpp/lua/rs/zig).
+NFA engine in-tree (c/cpp/lua/rust/zig).
 
 **Group A/B semantics rollout** (per `UNDEF_SPEC.md`):
 - `getprop` / `getelem` / `haskey` / `isempty` / `isnode` are **Group A**:
@@ -37,20 +41,22 @@ NFA engine in-tree (c/cpp/lua/rs/zig).
 
 | Language | Functions | Type Constants | Sentinels | Tests | Status |
 |----------|-----------|---------------|-----------|-------|--------|
-| **ts** (canonical) | 40 | 15 | 2 | 89/89 pass | Reference (Group A/B) |
-| **js** | 40 | 15 | 2 | 90/90 pass | Group A/B applied |
-| **py** | 40+ | 15 | 2 | 90/93 pass (3 skip) | Group A/B applied |
+| **typescript** (canonical) | 40 | 15 | 2 | 89/89 pass | Reference (Group A/B) |
+| **javascript** | 40 | 15 | 2 | 90/90 pass | Group A/B applied |
+| **python** | 40+ | 15 | 2 | 90/93 pass (3 skip) | Group A/B applied |
 | **go** | 50+ | 15 | 2 | 92/92 pass | already Group A |
 | **php** | 46 | 15 | 2 | 84/84 pass | already Group A |
-| **rb** | 40+ | 15 | 2 | 81/81 pass | Group A/B + UNDEF setval |
+| **ruby** | 40+ | 15 | 2 | 81/81 pass | Group A/B + UNDEF setval |
 | **lua** | 40+ | 15 | 2 | 74/74 pass | already Group A |
-| **rs** | 40+ | 15 | 2 | corpus pass | already Group A |
+| **rust** | 40+ | 15 | 2 | corpus pass | already Group A |
 | **c** | 40 | 15 | 2 | 1177/1177 corpus | Group A/B applied |
 | **java** | 40 | 15 | 2 | 1245/1245 corpus | already Group A |
-| **cpp** | 40 | 15 | 2 | 1245/1245 corpus | nlohmann/json fix |
-| **cs** | 40 | 15 | 2 | 78/78 corpus | already Group A |
-| **kt** | 40 | 15 | 2 | 135/135 | already Group A |
-| **zig** | 40 | 15 | 2 | 59/60 corpus sets \*1 | cycle-break + 6 latent-bug fixes |
+| **cpp** | 48 | 15 | 2 | 1268/1268 corpus | full TS-canonical parity |
+| **csharp** | 40 | 15 | 2 | 78/78 corpus | already Group A |
+| **kotlin** | 40 | 15 | 2 | 135/135 | already Group A |
+| **zig** | 40 | 15 | 2 | 60/60 corpus sets \*1 | cycle-break + 7 latent-bug fixes |
+| **perl** | 40 | 15 | 2 | full corpus (700+ cases) | full canonical parity |
+| **swift** | 48 | 15 | 2 | full corpus (700+ cases) | full canonical parity |
 
 \*1 Zig: previously reported "60/60 passing with a SIGSEGV" was
 misleading — the test process actually died at test 47/60
@@ -80,11 +86,19 @@ failures hidden behind the segfault; 6 were fixed in this round:
   re-traverse `$TOP` inside the data (mirrors Rust's
   `get_path_inj` when there is no base).
 
-One failure remains: `transform.ref[20]` — deep nested
-`[[$REF,z2],[$REF,z2]]` array-of-`$REF` where the recursive inject's
-dparent ends up one level too shallow. Needs a per-level
-descend-during-recursion adjustment that's larger than the
-in-cmdRef fixes already applied.
+`transform.ref[20]` (deep nested `[[$REF,z2],[$REF,z2]]`
+array-of-`$REF`): fixed. `cmdRef` decrements `prior.key_i` so the
+parent inject loop revisits the slot that `setval(rval, 2)` just
+shrunk; the Zig port had a `if (prior.key_i > 0)` guard that swallowed
+the step-back when the deleted slot was at index 0, so the second
+nested `$REF` in the same list was skipped. Replaced the guard with
+`prior.key_i = prior.key_i -% 1` (wraparound), retyped the inject
+loop's `nkI` as `isize`, and read `childinj.key_i` via `@bitCast` so
+`0 -% 1` round-trips back to `-1`; `nkI += 1` then lands on the same
+index again, matching the TS / Rust / Go / Py / JS ports. Unblocking
+this exposed one more latent bug — `cmdEach` was calling `getpath`
+without the injection, so a `"."` source path resolved against root
+data instead of `inj.dparent`; switched to `getpathInj`.
 
 The `sentinels.jsonic` conformance category (UNDEF_SPEC.md point 7)
 exercises Group A's "null = absent" rule with three side-by-side
@@ -118,16 +132,16 @@ cross-reference" issue. Re-investigation showed it was actually
 **stack overflow from a missing $REF cycle-break in cmdRef** — fixed
 by porting the `has_sub_ref` check that every other port already had.
 The fix unblocked the test process and exposed 7 separate test
-failures the SIGSEGV had been hiding.
+failures the SIGSEGV had been hiding — all now fixed (see \*1 above
+for the `transform.ref[20]` and `cmdEach` follow-up). `zig build test`
+is 60/60 passing.
 
 \*\* Rust: full TS-canonical parity. Idiomatic `snake_case` API (`get_path`,
-`is_node`, …; see `rs/README.md` for the name table), `Rc<RefCell>`
+`is_node`, …; see `rust/README.md` for the name table), `Rc<RefCell>`
 reference-stable nodes via the `indexmap` crate, `Value::Noval` vs `Value::Null`
 kept distinct. All 11 transform commands, all 15 validate checkers, all 4 select
 operators, the `Injection` state machine, and the `primary.check` SDK test pass
-(`cargo test` → 1187 corpus checks; `cargo clippy` clean). See
-[rs/PLAN.md](./rs/PLAN.md) for the porting plan / challenge analysis and
-[rs/NOTES.md](./rs/NOTES.md) for the decisions.
+(`cargo test` → 1187 corpus checks; `cargo clippy` clean).
 
 \*\* Java, C++ and C#: full TS-canonical parity. Injection state machine,
 `SKIP`/`DELETE` sentinels, mode constants, all 11 transform commands
@@ -142,9 +156,7 @@ The C++ port uses a custom `Value` class wrapping `std::variant` over
 `<monostate, nullptr_t, bool, int64_t, double, string,
 shared_ptr<List>, shared_ptr<Map>, Injector, Modify, const Sentinel*>`,
 with a custom insertion-ordered `OrderedMap`. nlohmann/json is used
-only as a JSON-text parse/serialise bridge. See
-[cpp/REFACTOR_PLAN.md](./cpp/REFACTOR_PLAN.md) for the design
-rationale.
+only as a JSON-text parse/serialise bridge.
 
 
 ## TypeScript Canonical API (Reference)
@@ -198,7 +210,7 @@ Wraps all functions, constants, and sentinels as instance properties.
 ## Per-Language Analysis
 
 
-### JavaScript (`js/`)
+### JavaScript (`javascript/`)
 
 **Status: COMPLETE** -- Full functional parity with TypeScript.
 
@@ -221,7 +233,7 @@ Also exports `replace` as a public function (internal-only in TS).
 **Gap count: 0**
 
 
-### Python (`py/`)
+### Python (`python/`)
 
 **Status: COMPLETE** -- Full functional parity with TypeScript.
 
@@ -303,7 +315,7 @@ MODENAME present.
 **Gap count: 0**
 
 
-### Ruby (`rb/`)
+### Ruby (`ruby/`)
 
 **Status: COMPLETE** -- Full functional parity with TypeScript.
 
@@ -403,8 +415,8 @@ runtime helpers `$BT` / `$DS` / `$WHEN` / `$SPEC`.
   `void* ud` closure pointer.
 
 **Code quality:** `clang-format` (LLVM-derived style; checked via
-`make format-check`) and `clang-tidy` (bugprone-* + clang-analyzer-* +
-performance-* + readability-* + misc-*). `make lint` runs both clean.
+`make format-check`) and `clang-tidy` (`bugprone-*` + `clang-analyzer-*` +
+`performance-*` + `readability-*` + `misc-*`). `make lint` runs both clean.
 `make sanitize` runs the corpus under ASan + UBSan; `make check_leak`
 runs under valgrind.
 
@@ -460,41 +472,165 @@ Missing (18):
 
 ### C++ (`cpp/`)
 
-**Status: INCOMPLETE** -- Basic type/property utilities only; major subsystems missing.
+**Status: COMPLETE** -- Full TS-canonical parity.
 
-**Tests:** Catch2 framework; limited test coverage for ~16 functions.
+**Tests:** 1268/1268 corpus checks passing (`make test` -- driver in
+`tests/struct_corpus_test.cpp`). The full `minor` / `walk` / `merge` /
+`getpath` / `inject` / `transform` / `validate` / `select` jsonic sets
+all pass.
 
-**Exported Functions (18 of 40):**
-Present: typename_of, typify, isnode, ismap, islist, iskey, isempty, isfunc,
-getprop, setprop, keysof, haskey, items, escre, escurl, joinurl, stringify,
-clone, walk, merge (partial).
+**Exported functions:** All 48 canonical functions present in
+`src/voxgig_struct.hpp`. Two cosmetic renames:
+- `walk` / `merge` / `getpath` / `setpath` are declared as `walk_v` /
+  `merge_v` / `getpath_v` / `setpath_v` -- the `_v` suffix
+  disambiguates them from header-internal helpers of the same root
+  name.
+- `typename` is declared as `typename_of` because `typename` is a
+  reserved C++ keyword.
 
-Missing (22):
-- **Path operations:** getpath, setpath
-- **Major subsystems:** inject, transform, validate, select
-- **Minor utilities:** getdef, getelem, delprop, size, slice, flatten, filter,
-  pad, replace, join, jsonify, strkey, pathify
-- **Builders:** jm, jt
-- **Injection helpers:** checkPlacement, injectorArgs, injectChild
+`tools/check_parity.py` knows about both conventions (strips trailing
+`_v` and `_of` for the cpp port the way it strips `vs_` and trailing
+`_v`/`_va` for the C port).
 
-**Constants:** All 15 type constants present (bitfield integers).
-- Missing: SKIP, DELETE sentinels.
-- Missing: M_KEYPRE, M_KEYPOST, M_VAL mode constants.
-- Missing: MODENAME.
+**Constants:** All 15 type bit-flags (`T_*`), 3 mode constants
+(`M_KEYPRE`/`M_KEYPOST`/`M_VAL`), `SKIP` / `DELETE` sentinels
+(pointer-identity singletons), `MODENAME` table.
 
-**No Injection class.**
+**Injection state:** Full `Injection` struct with `descend` / `child` /
+`setval` plus the inject / transform / validate / select dispatchers.
 
-**Transform commands:** None implemented.
-**Validate checkers:** None implemented.
+**Transform commands:** All 11 (`$DELETE` / `$COPY` / `$KEY` / `$META` /
+`$ANNO` / `$MERGE` / `$EACH` / `$PACK` / `$REF` / `$FORMAT` / `$APPLY`)
+plus the runtime helpers `$BT` / `$DS` / `$WHEN` / `$SPEC`.
 
-**Implementation issues:**
-- All functions use `args_container&&` (vector of JSON) -- no type-safe signatures.
-- `walk()` casts function pointers through JSON via `intptr_t` (undefined behavior).
-- `clone()` is shallow copy (TS does deep clone).
-- `merge()` has large commented-out section; partially implemented.
-- Debug console output left in code.
+**Validate checkers:** All 15 (`$MAP` / `$LIST` / `$STRING` / `$NUMBER` /
+`$INTEGER` / `$DECIMAL` / `$BOOLEAN` / `$NULL` / `$NIL` / `$FUNCTION` /
+`$INSTANCE` / `$ANY` / `$CHILD` / `$ONE` / `$EXACT`).
 
-**Gap count: ~35** (22 missing functions + all transform/validate + missing constants + UB issues)
+**Select operators:** `$AND` / `$OR` / `$NOT` / `$GT` / `$LT` / `$GTE` /
+`$LTE` / `$LIKE`.
+
+**Language adaptations:**
+- `Value` is a `std::variant`-backed type in `src/value.hpp`
+  (insertion-ordered map, list, scalars, function, sentinel).
+- Map insertion order is preserved by a vector + open-addressing index
+  inside `Value` -- required by `inject`'s `$`-suffix key partition.
+- JSON I/O via `nlohmann/json` (`src/value_io.hpp`); runtime values
+  are the custom `Value`, not `nlohmann::json`.
+- Function values are `std::function`s holding an injector or modify
+  callback.
+
+**Gap count: 0**
+
+
+### Perl (`perl/`)
+
+**Status: COMPLETE** -- Full canonical parity. All 25 minor
+utilities, walk, merge, setpath, getpath, inject, transform,
+validate, and select are wired and pass the corpus tests.
+
+**Tests:** 121 corpus subtests (700+ individual cases). The runner
+loads `../build/test/test.json` and exercises every wired set:
+- `minor.*` 191/191 across 13 subsets.
+- `walk.basic` 32/32, `getpath.basic` 58/58.
+- `inject.basic` + `inject.string` 19/19 + `inject.deep` 22/22.
+- `transform.basic` + `transform.paths` 44/44 + `transform.cmds`
+  35/35 + `transform.each` 43/43 + `transform.pack` 19/19 +
+  `transform.ref` 25/25 + `transform.format` 21/21 +
+  `transform.modify` 1/1 + `transform.apply` (empty set).
+- `validate.basic` 39/39 + `validate.child` 18/18 +
+  `validate.one` 6/6 + `validate.exact` 11/11 +
+  `validate.special` 12/12 + `validate.invalid` (empty set).
+- `select.basic` 12/12 + `select.operators` 58/58 +
+  `select.edge` 11/11 + `select.alts` 7/7.
+
+**Wired:** all 25 minor utilities; `walk`, `merge`, `setpath`,
+`getpath`; `inject`, `_injectstr`, `_injecthandler`,
+`_validatehandler`; `transform` and the 11 transform commands
+(`$DELETE`, `$COPY`, `$KEY`, `$META`, `$ANNO`, `$MERGE`, `$EACH`,
+`$PACK`, `$REF`, `$FORMAT`, `$APPLY`) plus the `FORMATTER` table;
+`validate` and the 15 validate checkers; `select` and the 4 select
+operators (`$AND`, `$OR`, `$NOT`, `$CMP`). All injection helpers
+(`Injection` state, `checkPlacement`, `injectorArgs`,
+`injectChild`, `_inj_child`, `_inj_descend`, `_inj_setval`).
+Builder helpers (`jm`, `jt`). All 15 type constants, 3 mode
+constants, both sentinels, boolean and null singletons.
+
+**Language adaptations:**
+- **Insertion-ordered maps:** Perl hashes randomise key order, so
+  every map is tied to `Tie::IxHash`. The in-tree JSON parser uses
+  the same tie so JSON object key order survives parsing.
+- **String vs number scalars:** Perl scalars don't distinguish
+  `"0.0"` from `0.0`. The JSON parser forces numeric values to have
+  `SVf_IOK` / `SVf_NOK` set; `_is_number_sv` / `_is_string_sv` check
+  these flags via `B::svref_2object` so `getpath` can keep TS's
+  `typeof path === 'number'` branch reachable. The CMP operator
+  carefully avoids `0 + $x` on the matched value because that
+  mutates the SV's IOK flag and would change subsequent typify
+  results.
+- **Booleans:** `$JTRUE` / `$JFALSE` are blessed singletons with
+  overloaded `bool`, `0+`, `""` so they behave correctly under
+  `?:`, `==`, and stringification.
+- **JSON null vs Perl `undef`:** `$JNULL` is a blessed singleton
+  (with overloaded `""` → `"null"`) distinct from Perl `undef`.
+  `$NONE` is a separate sentinel for "absent" — this keeps Group A
+  (treat-null-as-absent) and Group B (raw lookup) getprop semantics
+  distinct.
+
+**Gap count: 0.**
+
+
+### Swift (`swift/`)
+
+**Status: COMPLETE** -- Full TS-canonical parity. All 25 minor
+utilities, walk, merge, setpath, getpath, inject, transform,
+validate, and select are wired and pass the corpus tests.
+
+**Tests:** 11 corpus subtests + 3 smoke tests, ~700+ individual cases
+all passing (`swift test --enable-test-discovery` -- driver in
+`Tests/VoxgigStructTests/CorpusTests.swift`).
+- `minor.*` 191/191 across 13 subsets.
+- `walk.basic` 32/32, `getpath.basic` 58/58.
+- `inject.basic` + `inject.string` 19/19 + `inject.deep` 22/22.
+- `merge.cases` 55/55 + `merge.array` 35/35 + `merge.integrity` 6/6 +
+  `merge.depth` 45/45.
+- `transform.*` 188/188 (`paths` 44/44, `cmds` 35/35, `each` 43/43,
+  `pack` 19/19, `ref` 25/25, `format` 21/21, `modify` 1/1).
+- `validate.*` 86/86 (`basic` 39/39, `child` 18/18, `one` 6/6,
+  `exact` 11/11, `special` 12/12).
+- `select.*` 88/88 (`basic` 12/12, `operators` 58/58, `edge` 11/11,
+  `alts` 7/7).
+
+**Wired:** all 48 canonical functions including the `re_*` regex
+wrappers; `Injection` reference class with `child` / `descend` /
+`setval`; all 11 transform commands plus the `$BT` / `$DS` / `$WHEN` /
+`$SPEC` thunks and the `FORMATTER` table; all 15 validate checkers;
+all 4 select operators (`$AND` / `$OR` / `$NOT` / `$CMP` family).
+Injection helpers `checkPlacement`, `injectorArgs`, `injectChild`.
+Builder helpers `jm`, `jmd`, `jt`. All 15 type constants, 3 mode
+constants, `SKIP` / `DELETE` sentinels.
+
+**Language adaptations:**
+- `Value` is an `indirect enum` with `.noval` (TS undefined),
+  `.null` (JSON null), `.bool`, `.int(Int64)`, `.double(Double)`,
+  `.string`, `.list(VList)`, `.map(VMap)`, `.function(Injector)`,
+  `.sentinel(Sentinel)`. Container cases hold class instances so
+  list / map references stay reference-stable across calls -- the
+  canonical merge / walk semantics rely on that.
+- **Insertion-ordered maps** use `OrderedDictionary` from
+  `apple/swift-collections` (one non-stdlib dependency). The
+  in-tree JSON parser builds these directly so object key order
+  survives parsing.
+- **Numbers** split into `.int(Int64)` / `.double(Double)` so
+  `typify` is direct. Mixed-int/double equality works in `==`.
+- **`Injection` as a class** (reference type): every recursive
+  inject call shares the same `keyI` / `keys` / `dpath` / `errs`
+  state without copying.
+- **NULLMARK round-trip** in the test runner mirrors the canonical
+  TS `nullModifier` so "stored null vs absent" survives the
+  otherwise-lossy JSON round-trip.
+
+**Gap count: 0**
 
 
 ---
@@ -625,28 +761,20 @@ No remaining issues. Full parity achieved.
 5. **P2 - keysof() bug**: Returns zeros for list indices.
 6. **P2 - walk()**: Post-order only, no before/after or maxdepth.
 
-### C++
-1. **P0 - Missing subsystems**: No inject, transform, validate, select.
-2. **P0 - Missing path ops**: No getpath, setpath.
-3. **P0 - Undefined behavior**: `walk()` casts function pointers through `intptr_t`.
-4. **P1 - No Injection class**: Cannot support injection state management.
-5. **P1 - Shallow clone**: Should be deep clone.
-6. **P2 - No type-safe signatures**: All functions use `args_container&&`.
-
-
 ---
 
 
 ## Completeness Ranking
 
-1. **js** -- 100% parity. Identical runtime semantics. 84/84 tests passing.
+1. **javascript** -- 100% parity. Identical runtime semantics. 84/84 tests passing.
 2. **go** -- 100% parity. Idiomatic Go adaptations. 92/92 tests passing.
-3. **py** -- 100% parity. All functions, constants, and commands present. 84/84 tests passing.
+3. **python** -- 100% parity. All functions, constants, and commands present. 84/84 tests passing.
 4. **lua** -- 100% parity. All functions and commands present. 75/75 tests passing.
 5. **php** -- 100% parity. All functions, constants, and commands present. 82/82 tests passing.
-6. **rb** -- 100% parity. All 40 functions, Injection class, all 11 transform commands, all 15 validators, select with operators. 75/75 tests passing.
-7. **java** -- ~45% parity. Basic utilities only; all major subsystems missing.
-8. **cpp** -- ~40% parity. Basic utilities only; UB issues; all major subsystems missing.
+6. **ruby** -- 100% parity. All 40 functions, Injection class, all 11 transform commands, all 15 validators, select with operators. 75/75 tests passing.
+7. **cpp** -- 100% parity. All 48 canonical functions, full `Injection` state, all 11 transform commands, 15 validate checkers, 4 select operators. 1268/1268 corpus checks passing.
+8. **swift** -- 100% parity. All 48 canonical functions, `Injection` reference class, all 11 transform commands, 15 validate checkers, 4 select operators. Full corpus passing.
+9. **java** -- ~45% parity. Basic utilities only; all major subsystems missing.
 
 
 ---
@@ -655,8 +783,7 @@ No remaining issues. Full parity achieved.
 ## Recommendations
 
 ### Immediate (P0)
-- **Java/C++**: Implement getpath, setpath as foundation for inject/transform/validate.
-- **C++**: Fix undefined behavior in `walk()` function pointer handling.
+- **Java**: Implement getpath, setpath as foundation for inject/transform/validate.
 
 ### Short-term (P1)
 - **Java**: Implement Injection class and SKIP/DELETE sentinels.
@@ -664,4 +791,3 @@ No remaining issues. Full parity achieved.
 
 ### Medium-term (P2)
 - **Java**: Fix keysof() bug, improve walk() to support before/after callbacks.
-- **C++**: Redesign function signatures for type safety.

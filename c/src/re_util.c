@@ -12,10 +12,12 @@
 #include <string.h>
 
 static char* rdup(const char* s) {
-  if (!s) s = "";
+  if (!s)
+    s = "";
   size_t n = strlen(s);
   char* o = (char*)malloc(n + 1);
-  if (!o) abort();
+  if (!o)
+    abort();
   memcpy(o, s, n + 1);
   return o;
 }
@@ -26,7 +28,8 @@ vs_regex* vs_re_compile(const char* pattern) {
 
 bool vs_re_test(const char* pattern, const char* input) {
   vs_regex* re = vs_regex_compile(pattern, NULL);
-  if (!re) return false;
+  if (!re)
+    return false;
   bool out = vs_regex_test(re, input, input ? strlen(input) : 0);
   vs_regex_free(re);
   return out;
@@ -39,10 +42,12 @@ bool vs_re_test_re(const vs_regex* re, const char* input) {
 vs_strvec vs_re_find_re(const vs_regex* re, const char* input) {
   vs_strvec out;
   vs_strvec_init(&out);
-  if (!re || !input) return out;
+  if (!re || !input)
+    return out;
   int ngroups = vs_regex_ngroups(re);
   int* caps = (int*)malloc(sizeof(int) * (size_t)(ngroups * 2));
-  for (int i = 0; i < ngroups * 2; i++) caps[i] = -1;
+  for (int i = 0; i < ngroups * 2; i++)
+    caps[i] = -1;
   if (vs_regex_find(re, input, strlen(input), caps, ngroups)) {
     for (int g = 0; g < ngroups; g++) {
       int s = caps[2 * g], e = caps[2 * g + 1];
@@ -65,7 +70,8 @@ vs_strvec vs_re_find(const char* pattern, const char* input) {
 }
 
 char* vs_re_replace_re(const vs_regex* re, const char* input, const char* replacement) {
-  if (!re) return rdup(input);
+  if (!re)
+    return rdup(input);
   return vs_regex_replace(re, input ? input : "", input ? strlen(input) : 0,
                           replacement ? replacement : "");
 }
@@ -102,17 +108,20 @@ static char* cb_adapter(const int* caps, int ncaps, const char* input, void* ud)
 
 char* vs_re_replace_cb(const vs_regex* re, const char* input,
                        char* (*cb)(const vs_strvec* caps, void* ud), void* ud) {
-  if (!re || !input) return rdup(input);
+  if (!re || !input)
+    return rdup(input);
   struct cb_ctx ctx = {cb, ud};
   return vs_regex_replace_cb_fn(re, input, strlen(input), cb_adapter, &ctx);
 }
 
 char* vs_re_escape(const char* literal) {
-  if (!literal) literal = "";
+  if (!literal)
+    literal = "";
   /* Same set as canonical R_ESCAPE_REGEXP: [.*+?^${}()|\[\]\\] */
   size_t n = strlen(literal);
   char* o = (char*)malloc(n * 2 + 1);
-  if (!o) abort();
+  if (!o)
+    abort();
   size_t j = 0;
   for (size_t i = 0; i < n; i++) {
     char c = literal[i];

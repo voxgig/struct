@@ -1,0 +1,23 @@
+[package]
+name = "voxgig-struct"
+version = "0.1.0"
+edition = "2021"
+description = "Uniform JSON-shaped data structure manipulations — Rust port of @voxgig/struct"
+license = "MIT"
+repository = "https://github.com/voxgig/struct"
+keywords = ["voxgig", "data", "struct", "structure", "json"]
+
+[lib]
+name = "voxgig_struct"
+path = "src/lib.rs"
+
+[dependencies]
+# Zero runtime dependencies. The library uses only `std`:
+# - `OrderedMap` (insertion-ordered map) lives in `src/ordered_map.rs`.
+# - Regex engine lives in `src/re.rs`.
+# - Lazy statics use `std::sync::LazyLock` (stable since 1.80).
+
+[dev-dependencies]
+# Test-only: corpus loader uses serde_json to parse `test.json` into
+# `serde_json::Value`, then converts to our in-tree `Value`.
+serde_json = "1"

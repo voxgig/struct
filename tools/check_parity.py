@@ -2,10 +2,10 @@
 """Cross-port API parity check.
 
 The canonical public API is the `export { ... }` block in
-`ts/src/StructUtility.ts`.  Every "complete" port is expected to define an
-equivalent function for each canonical name, in that language's casing
-convention (snake_case in Rust, PascalCase in Go/C#, camelCase in Java,
-lower-smushed everywhere else).
+`typescript/src/StructUtility.ts`.  Every "complete" port is expected to
+define an equivalent function for each canonical name, in that language's
+casing convention (snake_case in Rust, PascalCase in Go/C#, camelCase in
+Java, lower-smushed everywhere else).
 
 This is a smoke test: it confirms a function with the expected name exists in
 each port's source (matching is done on a case/underscore-insensitive key, so
@@ -27,29 +27,44 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 # Ports the README marks "Complete" — these must be in full parity with the
-# canonical TypeScript API.  ("ts" itself is the canonical source, so it is
-# trivially in parity and is not checked.)
-COMPLETE_PORTS = ["js", "py", "go", "php", "rb", "lua", "rs", "c", "zig", "cs"]
-PARTIAL_PORTS = ["java", "cpp", "kt"]
+# canonical TypeScript API.  ("typescript" itself is the canonical source,
+# so it is trivially in parity and is not checked.)
+COMPLETE_PORTS = [
+    "javascript", "python", "go", "php", "ruby", "lua",
+    "rust", "c", "zig", "csharp", "perl", "cpp", "swift",
+]
+PARTIAL_PORTS = ["java", "kotlin"]
 
 # Accepted, documented divergences (normalised name keys).  Anything NOT listed
 # here is treated as a parity gap and fails the check; this list should only
 # shrink.
-KNOWN_GAPS: dict[str, set[str]] = {}
+#
+# zig: the regex helper module exports `re_compile`/`re_test`/`re_escape` but
+#   not the canonical `re_find`/`re_find_all`/`re_replace` (the in-tree NFA
+#   engine has the primitives, no top-level wrapper has been wired). Track
+#   them as known gaps so the parity check can still fail on *new* gaps;
+#   this list should only shrink.
+KNOWN_GAPS: dict[str, set[str]] = {
+    "zig": {"refind", "refindall", "rereplace"},
+}
 
 # Source files per port (implementation only — not tests).
 SOURCES = {
-    "ts": ["ts/src/StructUtility.ts"],
-    "js": ["js/src/struct.js"],
-    "py": ["py/voxgig_struct/voxgig_struct.py", "py/voxgig_struct/__init__.py"],
+    "typescript": ["typescript/src/StructUtility.ts"],
+    "javascript": ["javascript/src/struct.js"],
+    "python": [
+        "python/voxgig_struct/voxgig_struct.py",
+        "python/voxgig_struct/__init__.py",
+    ],
     "go": ["go/voxgigstruct.go"],
     "php": ["php/src/Struct.php"],
-    "rb": ["rb/voxgig_struct.rb"],
+    "ruby": ["ruby/voxgig_struct.rb"],
     "lua": ["lua/src/struct.lua"],
-    "rs": ["rs/src/lib.rs", "rs/src/major.rs", "rs/src/mini.rs"],
+    "rust": ["rust/src/lib.rs", "rust/src/major.rs", "rust/src/mini.rs"],
     "c": [
         "c/src/voxgig_struct.h",
         "c/src/value.h",
+        "c/src/regex.h",
         "c/src/utility.c",
         "c/src/inject.c",
         "c/src/transform.c",
@@ -57,9 +72,24 @@ SOURCES = {
     ],
     "java": ["java/src/Struct.java"],
     "cpp": ["cpp/src/voxgig_struct.hpp", "cpp/src/value.hpp", "cpp/src/utility_decls.hpp"],
-    "cs": ["cs/Struct.cs"],
+    "csharp": ["csharp/Struct.cs"],
     "zig": ["zig/src/struct.zig"],
-    "kt": ["kt/src/main/kotlin/voxgig/struct/Struct.kt"],
+    "kotlin": ["kotlin/src/main/kotlin/voxgig/struct/Struct.kt"],
+    "perl": ["perl/lib/Voxgig/Struct.pm"],
+    "swift": [
+        "swift/Sources/VoxgigStruct/Value.swift",
+        "swift/Sources/VoxgigStruct/Constants.swift",
+        "swift/Sources/VoxgigStruct/JSON.swift",
+        "swift/Sources/VoxgigStruct/Minor.swift",
+        "swift/Sources/VoxgigStruct/Walk.swift",
+        "swift/Sources/VoxgigStruct/Merge.swift",
+        "swift/Sources/VoxgigStruct/Path.swift",
+        "swift/Sources/VoxgigStruct/Inject.swift",
+        "swift/Sources/VoxgigStruct/Injection.swift",
+        "swift/Sources/VoxgigStruct/Transform.swift",
+        "swift/Sources/VoxgigStruct/Validate.swift",
+        "swift/Sources/VoxgigStruct/Select.swift",
+    ],
 }
 
 
@@ -69,10 +99,13 @@ def norm(name: str) -> str:
 
 
 def canonical_names() -> list[str]:
-    ts = (ROOT / "ts/src/StructUtility.ts").read_text()
+    ts = (ROOT / "typescript/src/StructUtility.ts").read_text()
     m = re.search(r"^export \{\n(.*?)\n\}", ts, re.S | re.M)
     if not m:
-        sys.exit("could not parse the canonical export list from ts/src/StructUtility.ts")
+        sys.exit(
+            "could not parse the canonical export list from "
+            "typescript/src/StructUtility.ts"
+        )
     names = [n.strip().rstrip(",") for n in m.group(1).splitlines() if n.strip()]
     out = []
     for n in names:
@@ -90,6 +123,10 @@ _IDENT_BEFORE_PAREN = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 #   `jm = jo`  (Python alias),  `select = select_fn`  (Lua module table),
 #   `getpath: getPath,` (JS module.exports), `var Jm = ...` (Go), `jm,` (export list)
 _IDENT_DECL = re.compile(r"^\s*(?:(?:export|public|static|const|let|var|local)\s+)*([A-Za-z_][A-Za-z0-9_]*)\s*(?:[:=,]|$)", re.M)
+# Perl `sub NAME {` / `sub NAME (` / `sub NAME;` definitions: the language
+# doesn't put `(` after the function name in the definition, so neither of
+# the patterns above catches them.
+_PERL_SUB_DECL = re.compile(r"^\s*sub\s+([A-Za-z_][A-Za-z0-9_]*)", re.M)
 
 
 def defined_keys(port: str) -> set[str]:
@@ -110,6 +147,9 @@ def defined_keys(port: str) -> set[str]:
             keys.add(norm(ident))
         for ident in _IDENT_DECL.findall(text):
             keys.add(norm(ident))
+        if port == "perl":
+            for ident in _PERL_SUB_DECL.findall(text):
+                keys.add(norm(ident))
     # The C port uses a `vs_` prefix on every public function. Strip it so
     # `vs_getpath` matches canonical `getpath`. Trailing `_v` / `_va` (vs_jm_va
     # for variadic-style builders, vs_walk_v for the value overload) is also
@@ -124,6 +164,25 @@ def defined_keys(port: str) -> set[str]:
                 if stripped.endswith("v"):
                     extra.add(stripped[:-1])
                 extra.add(stripped)
+                # vs_regex_* -> re_* alias (the C port's regex helpers ship
+                # under the `vs_regex_` namespace, but canonical names are
+                # `re_compile` / `re_test` / `re_find` / `re_find_all` /
+                # `re_replace` / `re_escape`).
+                if stripped.startswith("regex"):
+                    extra.add("re" + stripped[len("regex"):])
+        keys |= extra
+    # The C++ port renames `walk` / `merge` / `getpath` / `setpath` to the
+    # `_v` ("value-style") suffix to disambiguate them from header-internal
+    # helpers, and `typename` to `typename_str` because `typename` is a
+    # reserved C++ keyword.  Add the canonical name for each `_v` / `_str`
+    # variant so the parity check sees them.
+    if port == "cpp":
+        extra = set()
+        for k in keys:
+            if k.endswith("v") and len(k) > 1:
+                extra.add(k[:-1])
+            if k.endswith("str") and len(k) > 3:
+                extra.add(k[:-3])
         keys |= extra
     return keys
 

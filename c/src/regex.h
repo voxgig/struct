@@ -60,8 +60,7 @@ int vs_regex_find_all(const vs_regex* re, const char* input, size_t ilen, int* c
 /* Replace every match in `input`. `replacement` may contain $& (whole match)
  * and $1..$9 (capture references). Returns a malloc'd C string (caller
  * frees). Returns NULL on allocation failure. */
-char* vs_regex_replace(const vs_regex* re, const char* input, size_t ilen,
-                       const char* replacement);
+char* vs_regex_replace(const vs_regex* re, const char* input, size_t ilen, const char* replacement);
 
 /* Callback variant: `cb` receives the captures array (length 2*ncaps where
  * ncaps is the number of groups in the regex + 1 for the whole match), the
