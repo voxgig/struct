@@ -47,7 +47,7 @@ NFA engine in-tree (c/cpp/lua/rust/zig).
 | **rust** | 40+ | 15 | 2 | corpus pass | already Group A |
 | **c** | 40 | 15 | 2 | 1177/1177 corpus | Group A/B applied |
 | **java** | 40 | 15 | 2 | 1245/1245 corpus | already Group A |
-| **cpp** | 40 | 15 | 2 | 1245/1245 corpus | nlohmann/json fix |
+| **cpp** | 48 | 15 | 2 | 1268/1268 corpus | full TS-canonical parity |
 | **csharp** | 40 | 15 | 2 | 78/78 corpus | already Group A |
 | **kotlin** | 40 | 15 | 2 | 135/135 | already Group A |
 | **zig** | 40 | 15 | 2 | 60/60 corpus sets \*1 | cycle-break + 7 latent-bug fixes |
@@ -151,9 +151,7 @@ The C++ port uses a custom `Value` class wrapping `std::variant` over
 `<monostate, nullptr_t, bool, int64_t, double, string,
 shared_ptr<List>, shared_ptr<Map>, Injector, Modify, const Sentinel*>`,
 with a custom insertion-ordered `OrderedMap`. nlohmann/json is used
-only as a JSON-text parse/serialise bridge. See
-[cpp/REFACTOR_PLAN.md](./cpp/REFACTOR_PLAN.md) for the design
-rationale.
+only as a JSON-text parse/serialise bridge.
 
 
 ## TypeScript Canonical API (Reference)
@@ -469,41 +467,55 @@ Missing (18):
 
 ### C++ (`cpp/`)
 
-**Status: INCOMPLETE** -- Basic type/property utilities only; major subsystems missing.
+**Status: COMPLETE** -- Full TS-canonical parity.
 
-**Tests:** Catch2 framework; limited test coverage for ~16 functions.
+**Tests:** 1268/1268 corpus checks passing (`make test` -- driver in
+`tests/struct_corpus_test.cpp`). The full `minor` / `walk` / `merge` /
+`getpath` / `inject` / `transform` / `validate` / `select` jsonic sets
+all pass.
 
-**Exported Functions (18 of 40):**
-Present: typename_of, typify, isnode, ismap, islist, iskey, isempty, isfunc,
-getprop, setprop, keysof, haskey, items, escre, escurl, joinurl, stringify,
-clone, walk, merge (partial).
+**Exported functions:** All 48 canonical functions present in
+`src/voxgig_struct.hpp`. Two cosmetic renames:
+- `walk` / `merge` / `getpath` / `setpath` are declared as `walk_v` /
+  `merge_v` / `getpath_v` / `setpath_v` -- the `_v` suffix
+  disambiguates them from header-internal helpers of the same root
+  name.
+- `typename` is declared as `typename_of` because `typename` is a
+  reserved C++ keyword.
 
-Missing (22):
-- **Path operations:** getpath, setpath
-- **Major subsystems:** inject, transform, validate, select
-- **Minor utilities:** getdef, getelem, delprop, size, slice, flatten, filter,
-  pad, replace, join, jsonify, strkey, pathify
-- **Builders:** jm, jt
-- **Injection helpers:** checkPlacement, injectorArgs, injectChild
+`tools/check_parity.py` knows about both conventions (strips trailing
+`_v` and `_of` for the cpp port the way it strips `vs_` and trailing
+`_v`/`_va` for the C port).
 
-**Constants:** All 15 type constants present (bitfield integers).
-- Missing: SKIP, DELETE sentinels.
-- Missing: M_KEYPRE, M_KEYPOST, M_VAL mode constants.
-- Missing: MODENAME.
+**Constants:** All 15 type bit-flags (`T_*`), 3 mode constants
+(`M_KEYPRE`/`M_KEYPOST`/`M_VAL`), `SKIP` / `DELETE` sentinels
+(pointer-identity singletons), `MODENAME` table.
 
-**No Injection class.**
+**Injection state:** Full `Injection` struct with `descend` / `child` /
+`setval` plus the inject / transform / validate / select dispatchers.
 
-**Transform commands:** None implemented.
-**Validate checkers:** None implemented.
+**Transform commands:** All 11 (`$DELETE` / `$COPY` / `$KEY` / `$META` /
+`$ANNO` / `$MERGE` / `$EACH` / `$PACK` / `$REF` / `$FORMAT` / `$APPLY`)
+plus the runtime helpers `$BT` / `$DS` / `$WHEN` / `$SPEC`.
 
-**Implementation issues:**
-- All functions use `args_container&&` (vector of JSON) -- no type-safe signatures.
-- `walk()` casts function pointers through JSON via `intptr_t` (undefined behavior).
-- `clone()` is shallow copy (TS does deep clone).
-- `merge()` has large commented-out section; partially implemented.
-- Debug console output left in code.
+**Validate checkers:** All 15 (`$MAP` / `$LIST` / `$STRING` / `$NUMBER` /
+`$INTEGER` / `$DECIMAL` / `$BOOLEAN` / `$NULL` / `$NIL` / `$FUNCTION` /
+`$INSTANCE` / `$ANY` / `$CHILD` / `$ONE` / `$EXACT`).
 
-**Gap count: ~35** (22 missing functions + all transform/validate + missing constants + UB issues)
+**Select operators:** `$AND` / `$OR` / `$NOT` / `$GT` / `$LT` / `$GTE` /
+`$LTE` / `$LIKE`.
+
+**Language adaptations:**
+- `Value` is a `std::variant`-backed type in `src/value.hpp`
+  (insertion-ordered map, list, scalars, function, sentinel).
+- Map insertion order is preserved by a vector + open-addressing index
+  inside `Value` -- required by `inject`'s `$`-suffix key partition.
+- JSON I/O via `nlohmann/json` (`src/value_io.hpp`); runtime values
+  are the custom `Value`, not `nlohmann::json`.
+- Function values are `std::function`s holding an injector or modify
+  callback.
+
+**Gap count: 0**
 
 
 ### Perl (`perl/`)
@@ -691,15 +703,6 @@ No remaining issues. Full parity achieved.
 5. **P2 - keysof() bug**: Returns zeros for list indices.
 6. **P2 - walk()**: Post-order only, no before/after or maxdepth.
 
-### C++
-1. **P0 - Missing subsystems**: No inject, transform, validate, select.
-2. **P0 - Missing path ops**: No getpath, setpath.
-3. **P0 - Undefined behavior**: `walk()` casts function pointers through `intptr_t`.
-4. **P1 - No Injection class**: Cannot support injection state management.
-5. **P1 - Shallow clone**: Should be deep clone.
-6. **P2 - No type-safe signatures**: All functions use `args_container&&`.
-
-
 ---
 
 
@@ -711,8 +714,8 @@ No remaining issues. Full parity achieved.
 4. **lua** -- 100% parity. All functions and commands present. 75/75 tests passing.
 5. **php** -- 100% parity. All functions, constants, and commands present. 82/82 tests passing.
 6. **ruby** -- 100% parity. All 40 functions, Injection class, all 11 transform commands, all 15 validators, select with operators. 75/75 tests passing.
-7. **java** -- ~45% parity. Basic utilities only; all major subsystems missing.
-8. **cpp** -- ~40% parity. Basic utilities only; UB issues; all major subsystems missing.
+7. **cpp** -- 100% parity. All 48 canonical functions, full `Injection` state, all 11 transform commands, 15 validate checkers, 4 select operators. 1268/1268 corpus checks passing.
+8. **java** -- ~45% parity. Basic utilities only; all major subsystems missing.
 
 
 ---
@@ -721,8 +724,7 @@ No remaining issues. Full parity achieved.
 ## Recommendations
 
 ### Immediate (P0)
-- **Java/C++**: Implement getpath, setpath as foundation for inject/transform/validate.
-- **C++**: Fix undefined behavior in `walk()` function pointer handling.
+- **Java**: Implement getpath, setpath as foundation for inject/transform/validate.
 
 ### Short-term (P1)
 - **Java**: Implement Injection class and SKIP/DELETE sentinels.
@@ -730,4 +732,3 @@ No remaining issues. Full parity achieved.
 
 ### Medium-term (P2)
 - **Java**: Fix keysof() bug, improve walk() to support before/after callbacks.
-- **C++**: Redesign function signatures for type safety.

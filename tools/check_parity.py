@@ -31,9 +31,9 @@ ROOT = Path(__file__).resolve().parent.parent
 # so it is trivially in parity and is not checked.)
 COMPLETE_PORTS = [
     "javascript", "python", "go", "php", "ruby", "lua",
-    "rust", "c", "zig", "csharp", "perl",
+    "rust", "c", "zig", "csharp", "perl", "cpp",
 ]
-PARTIAL_PORTS = ["java", "cpp", "kotlin"]
+PARTIAL_PORTS = ["java", "kotlin"]
 
 # Accepted, documented divergences (normalised name keys).  Anything NOT listed
 # here is treated as a parity gap and fails the check; this list should only
@@ -141,6 +141,19 @@ def defined_keys(port: str) -> set[str]:
                 if stripped.endswith("v"):
                     extra.add(stripped[:-1])
                 extra.add(stripped)
+        keys |= extra
+    # The C++ port renames `walk` / `merge` / `getpath` / `setpath` to the
+    # `_v` ("value-style") suffix to disambiguate them from header-internal
+    # helpers, and `typename` to `typename_str` because `typename` is a
+    # reserved C++ keyword.  Add the canonical name for each `_v` / `_str`
+    # variant so the parity check sees them.
+    if port == "cpp":
+        extra = set()
+        for k in keys:
+            if k.endswith("v") and len(k) > 1:
+                extra.add(k[:-1])
+            if k.endswith("str") and len(k) > 3:
+                extra.add(k[:-3])
         keys |= extra
     return keys
 
