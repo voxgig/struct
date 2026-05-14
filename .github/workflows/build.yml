@@ -275,3 +275,39 @@ jobs:
       - name: Run tests
         working-directory: ./cpp
         run: make test
+
+  test-perl:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Perl (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y perl
+      - name: Setup Perl (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          # macOS runners ship perl + prove; nothing to install. The port
+          # has zero non-core runtime deps.
+          perl -V | head -1
+      - name: Run tests
+        working-directory: ./perl
+        run: prove -Ilib t/
+
+  test-swift:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: '6.0.2'
+      - name: Run tests
+        working-directory: ./swift
+        run: swift test --enable-test-discovery

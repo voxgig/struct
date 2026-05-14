@@ -168,8 +168,8 @@ java/target/
 
 
 # Kotlin / Gradle
-kt/build/
-kt/.gradle/
+kotlin/build/
+kotlin/.gradle/
 
 # C++ build artefacts
 cpp/corpus-scoreboard.json
