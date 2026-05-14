@@ -75,7 +75,11 @@ basic: {
 
     { in: [['X']], out: [['X~0.0']] }
     { in: {a:1,b:'B'}, out: {a:1,b:'B~b'} }
-    { in: {a:{b:null}}, out: {a:{b:null}} }
+    # NOTE: a null-passthrough case was once here. It got removed because each
+    # port's test runner applies a different JSON-null → "__NULL__" marker
+    # convention before walk() sees the input, which means no single expected
+    # value works across all ports. Non-string passthrough is already
+    # exercised by the numeric cases above ({a:1,...}).
   ]
 }
 

@@ -120,7 +120,7 @@ fn matchval(check: &Value, base: &Value) -> bool {
     if let Value::Str(cs) = check {
         let bstr = stringify(base, None, false);
         if let Some(rem) = cs.strip_prefix('/').and_then(|s| s.strip_suffix('/')) {
-            if let Ok(re) = regex::Regex::new(rem) {
+            if let Ok(re) = voxgig_struct::re::Regex::new(rem) {
                 return re.is_match(&bstr);
             }
         }
@@ -273,7 +273,7 @@ impl Run {
                     let ok = if let Some(rem) =
                         want.strip_prefix('/').and_then(|s| s.strip_suffix('/'))
                     {
-                        regex::Regex::new(rem)
+                        voxgig_struct::re::Regex::new(rem)
                             .map(|re| re.is_match(&msg))
                             .unwrap_or(false)
                     } else {

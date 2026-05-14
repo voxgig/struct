@@ -144,6 +144,55 @@ module VoxgigStruct
     Regexp.escape(s)
   end
 
+  # ---------------------------------------------------------------------
+  # Regex utility — uniform re_* API (see /REGEX_API.md). Ruby's Onigmo
+  # engine is a strict superset of RE2.
+  # ---------------------------------------------------------------------
+
+  def self.re_compile(pattern)
+    pattern.is_a?(Regexp) ? pattern : Regexp.new(pattern)
+  end
+
+  def self.re_test(pattern, input)
+    !!(re_compile(pattern) =~ input.to_s)
+  end
+
+  def self.re_find(pattern, input)
+    m = re_compile(pattern).match(input.to_s)
+    return nil if m.nil?
+    [m[0]] + m.captures.map { |c| c.nil? ? '' : c }
+  end
+
+  def self.re_find_all(pattern, input)
+    out = []
+    input.to_s.scan(re_compile(pattern)) do
+      m = Regexp.last_match
+      out << [m[0]] + m.captures.map { |c| c.nil? ? '' : c }
+    end
+    out
+  end
+
+  def self.re_replace(pattern, input, replacement)
+    rx = re_compile(pattern)
+    if replacement.respond_to?(:call)
+      input.to_s.gsub(rx) do |_match|
+        m = Regexp.last_match
+        replacement.call([m[0]] + m.captures.map { |c| c.nil? ? '' : c })
+      end
+    else
+      # Translate JS-style $& / $1 to Ruby's \0 / \1
+      ruby_repl = replacement.gsub(/\$([&0-9])/) do |_|
+        ch = $1
+        ch == '&' ? '\\0' : "\\#{ch}"
+      end
+      input.to_s.gsub(rx, ruby_repl)
+    end
+  end
+
+  def self.re_escape(s)
+    escre(s)
+  end
+
   def self.escurl(s)
     s = '' if s.nil?
     URI::DEFAULT_PARSER.escape(s, /[^A-Za-z0-9\-._~]/)
@@ -513,29 +562,35 @@ module VoxgigStruct
     str
   end
 
-  # Mimic JSON.stringify(val, null, indent) from JavaScript
+  # Mimic JSON.stringify(val, null, indent) from JavaScript.
+  # indent == 0 → compact single-line. indent > 0 → pretty printed.
+  # Map keys are emitted in insertion order (matches TS canonical).
   def self._json_stringify(val, indent, depth)
     return 'null' if val.nil?
     return val.to_s if [true, false].include?(val)
     return val.to_s if val.is_a?(Numeric)
     return JSON.generate(val) if val.is_a?(String)
 
-    ind = ' ' * indent
-    current_indent = ind * (depth + 1)
-    closing_indent = ind * depth
+    compact = indent.nil? || indent <= 0
+    ind = compact ? '' : ' ' * indent
+    current_indent = compact ? '' : ind * (depth + 1)
+    closing_indent = compact ? '' : ind * depth
+    open_nl = compact ? '' : "\n"
+    pair_sep = compact ? ',' : ",\n"
+    kv_sep = compact ? ':' : ': '
 
     if islist(val)
       return '[]' if val.empty?
 
       items_str = val.map { |v| current_indent + _json_stringify(v, indent, depth + 1) }
-      "[\n#{items_str.join(",\n")}\n#{closing_indent}]"
+      "[#{open_nl}#{items_str.join(pair_sep)}#{open_nl}#{closing_indent}]"
     elsif ismap(val)
       return '{}' if val.empty?
 
-      pairs = val.keys.sort.map do |k|
-        "#{current_indent}#{JSON.generate(k)}: #{_json_stringify(val[k], indent, depth + 1)}"
+      pairs = val.keys.map do |k|
+        "#{current_indent}#{JSON.generate(k)}#{kv_sep}#{_json_stringify(val[k], indent, depth + 1)}"
       end
-      "{\n#{pairs.join(",\n")}\n#{closing_indent}}"
+      "{#{open_nl}#{pairs.join(pair_sep)}#{open_nl}#{closing_indent}}"
     elsif isfunc(val)
       'null'
     else
@@ -1109,7 +1164,7 @@ module VoxgigStruct
   # --- Transform commands ---
 
   def self.transform_DELETE(inj, _val, _ref, _store)
-    inj.setval(nil)
+    inj.setval(UNDEF)
     nil
   end
 
@@ -1171,7 +1226,7 @@ module VoxgigStruct
     elsif mode == S_MKEYPOST
       args = getprop(parent, key)
       args = [args] unless islist(args)
-      inj.setval(nil)
+      inj.setval(UNDEF)
       mergelist = [parent] + args + [clone(parent)]
       merge(mergelist)
       return key
@@ -1700,7 +1755,7 @@ module VoxgigStruct
         keys << ckey
       end
 
-      inj.setval(nil)
+      inj.setval(UNDEF)
       return nil
     end
 
@@ -2231,24 +2286,24 @@ module VoxgigStruct
     end
 
     def setval(val, ancestor = nil)
-      if val.nil? && (ancestor.nil? || (ancestor.is_a?(Numeric) && ancestor < 2))
-        # nil without ancestor: delete from parent (matches TS undefined)
-        VoxgigStruct.delprop(@parent, @key)
-      elsif val.nil? && ancestor.is_a?(Numeric) && ancestor >= 2
-        # nil with ancestor: set to nil in grandparent (preserves key for $ONE/$EXACT)
-        VoxgigStruct.setprop(
-          VoxgigStruct.getelem(@nodes, 0 - ancestor),
-          VoxgigStruct.getelem(@path, 0 - ancestor),
-          val
-        )
-      elsif ancestor.nil? || (ancestor.is_a?(Numeric) && ancestor < 2)
-        VoxgigStruct.setprop(@parent, @key, val)
+      # Mirrors the canonical TS Injection.setval: UNDEF (sentinel) and
+      # nil (Ruby collapses both onto the same "no value" slot) delete
+      # the slot at every ancestor level; any other value sets it. The
+      # delete-on-undef shortcut is used by injectors (transform_DELETE,
+      # transform_MERGE, validate_CHILD) to signal "drop this slot" via
+      # their return value rather than calling delprop explicitly.
+      if ancestor.nil? || (ancestor.is_a?(Numeric) && ancestor < 2)
+        target = @parent
+        key = @key
       else
-        VoxgigStruct.setprop(
-          VoxgigStruct.getelem(@nodes, 0 - ancestor),
-          VoxgigStruct.getelem(@path, 0 - ancestor),
-          val
-        )
+        target = VoxgigStruct.getelem(@nodes, 0 - ancestor)
+        key = VoxgigStruct.getelem(@path, 0 - ancestor)
+      end
+
+      if val.nil? || val.equal?(VoxgigStruct::UNDEF)
+        VoxgigStruct.delprop(target, key)
+      else
+        VoxgigStruct.setprop(target, key, val)
       end
     end
 

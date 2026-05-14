@@ -23,7 +23,6 @@
 #include <vector>
 
 #include "value.hpp"
-#include "value_io.hpp"
 
 namespace voxgig {
 namespace structlib {
@@ -398,6 +397,9 @@ inline std::vector<std::string> keysof(const Value& v) {
   if (v.is_map()) {
     for (const auto& [k, _] : *v.as_map())
       out.push_back(k);
+    // Matches TS canonical Object.keys(val).sort() — keysof returns
+    // alphabetically sorted keys regardless of insertion order.
+    std::sort(out.begin(), out.end());
   } else {
     auto l = v.as_list();
     out.reserve(l->size());
@@ -580,6 +582,50 @@ inline std::string escre(const Value& v) {
   return std::regex_replace(s, R_ESCAPE_REGEXP(), "\\$&");
 }
 
+// ----------------------------------------------------------------------------
+// Regex utility — uniform re_* API (see /REGEX_API.md). C++'s <regex>
+// (ECMAScript dialect by default) is a strict superset of RE2.
+// ----------------------------------------------------------------------------
+
+inline std::regex re_compile(const std::string& pattern) {
+  return std::regex(pattern);
+}
+
+inline bool re_test(const std::string& pattern, const std::string& input) {
+  return std::regex_search(input, std::regex(pattern));
+}
+
+inline std::vector<std::string> re_find(const std::string& pattern, const std::string& input) {
+  std::smatch m;
+  if (!std::regex_search(input, m, std::regex(pattern))) return {};
+  std::vector<std::string> out;
+  for (size_t i = 0; i < m.size(); i++) out.push_back(m[i].str());
+  return out;
+}
+
+inline std::vector<std::vector<std::string>> re_find_all(const std::string& pattern,
+                                                          const std::string& input) {
+  std::vector<std::vector<std::string>> out;
+  std::regex rx(pattern);
+  auto begin = std::sregex_iterator(input.begin(), input.end(), rx);
+  auto end = std::sregex_iterator();
+  for (auto it = begin; it != end; ++it) {
+    std::vector<std::string> row;
+    for (size_t i = 0; i < it->size(); i++) row.push_back((*it)[i].str());
+    out.push_back(std::move(row));
+  }
+  return out;
+}
+
+inline std::string re_replace(const std::string& pattern, const std::string& input,
+                              const std::string& replacement) {
+  return std::regex_replace(input, std::regex(pattern), replacement);
+}
+
+inline std::string re_escape(const std::string& s) {
+  return std::regex_replace(s, R_ESCAPE_REGEXP(), "\\$&");
+}
+
 inline std::string escurl(const Value& v) {
   if (v.is_undef())
     return "";
@@ -673,14 +719,129 @@ inline std::string join(const Value& arr, const Value& sep_v, const Value& url_v
 // jsonify / stringify / pathify
 // ===========================================================================
 
-inline std::string jsonify(const Value& v, int indent = 2) {
-  if (v.is_undef())
-    return "null";
-  try {
-    return to_njson(v).dump(indent < 0 ? -1 : indent);
-  } catch (...) {
-    return "__JSONIFY_FAILED__";
+// Pure-C++ JSON emitter — mirrors c/src/utility.c::jsonify_inner. Map keys
+// are emitted in INSERTION order (matching TS canonical's JSON.stringify
+// behaviour), not alphabetically. Used by jsonify / stringify / partial
+// inject so the library proper does not depend on nlohmann::json for
+// output (nlohmann is still used by the test harness for corpus loading).
+inline void _json_escape(const std::string& s, std::string& out) {
+  for (char c : s) {
+    switch (c) {
+      case '"':  out += "\\\""; break;
+      case '\\': out += "\\\\"; break;
+      case '\b': out += "\\b"; break;
+      case '\f': out += "\\f"; break;
+      case '\n': out += "\\n"; break;
+      case '\r': out += "\\r"; break;
+      case '\t': out += "\\t"; break;
+      default:
+        if (static_cast<unsigned char>(c) < 0x20) {
+          char buf[8];
+          std::snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned char>(c));
+          out += buf;
+        } else {
+          out += c;
+        }
+    }
   }
+}
+
+inline void _jsonify_inner(const Value& v, std::string& out, int indent, int depth,
+                            bool sort_keys = false) {
+  if (v.is_undef() || v.is_null()) { out += "null"; return; }
+  if (v.is_bool()) { out += v.as_bool() ? "true" : "false"; return; }
+  if (v.is_int()) {
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%lld", static_cast<long long>(v.as_int()));
+    out += buf;
+    return;
+  }
+  if (v.is_double()) {
+    double d = v.as_double();
+    if (!std::isfinite(d)) { out += "null"; return; }
+    char buf[48];
+    if (std::floor(d) == d && std::abs(d) < 1e15) {
+      std::snprintf(buf, sizeof(buf), "%lld", static_cast<long long>(d));
+    } else {
+      // Use %g (shortest round-trip-ish form) — matches C's doublestr and
+      // closely tracks JS JSON.stringify for typical fractional values.
+      std::snprintf(buf, sizeof(buf), "%g", d);
+    }
+    out += buf;
+    return;
+  }
+  if (v.is_string()) {
+    out += '"';
+    _json_escape(v.as_string(), out);
+    out += '"';
+    return;
+  }
+  if (v.is_list()) {
+    const auto& l = *v.as_list();
+    if (l.empty()) { out += "[]"; return; }
+    out += '[';
+    bool first = true;
+    for (const auto& e : l) {
+      if (!first) out += ',';
+      first = false;
+      if (indent > 0) {
+        out += '\n';
+        out.append(static_cast<size_t>((depth + 1) * indent), ' ');
+      }
+      _jsonify_inner(e, out, indent, depth + 1, sort_keys);
+    }
+    if (indent > 0) {
+      out += '\n';
+      out.append(static_cast<size_t>(depth * indent), ' ');
+    }
+    out += ']';
+    return;
+  }
+  if (v.is_map()) {
+    const auto& m = *v.as_map();
+    if (m.empty()) { out += "{}"; return; }
+    out += '{';
+
+    // Optionally walk in sorted key order (stringify behaviour, matching
+    // TS canonical's stringify replacer). jsonify keeps insertion order.
+    std::vector<std::string> order;
+    order.reserve(m.size());
+    for (const auto& [k, _e] : m) order.push_back(k);
+    if (sort_keys) std::sort(order.begin(), order.end());
+
+    bool first = true;
+    for (const auto& k : order) {
+      const Value* ep = m.find(k);
+      if (!ep) continue;
+      const auto& e = *ep;
+      if (!first) out += ',';
+      first = false;
+      if (indent > 0) {
+        out += '\n';
+        out.append(static_cast<size_t>((depth + 1) * indent), ' ');
+      }
+      out += '"';
+      _json_escape(k, out);
+      out += indent > 0 ? "\": " : "\":";
+      _jsonify_inner(e, out, indent, depth + 1, sort_keys);
+    }
+    if (indent > 0) {
+      out += '\n';
+      out.append(static_cast<size_t>(depth * indent), ' ');
+    }
+    out += '}';
+    return;
+  }
+  // function / sentinel / unknown -> null
+  out += "null";
+}
+
+inline std::string jsonify(const Value& v, int indent = 2) {
+  if (v.is_undef() || v.is_null())
+    return "null";
+  std::string out;
+  _jsonify_inner(v, out, indent, 0);
+  return out;
 }
 
 inline std::string jsonify(const Value& v, const Value& flags) {
@@ -726,21 +887,15 @@ inline std::string stringify(const Value& v, int maxlen) {
   if (v.is_string()) {
     valstr = v.as_string();
   } else {
-    try {
-      // Use to_njson to dump with sorted keys for stable output, then strip
-      // quotes from the result. Mirrors TS's stringify.
-      nlohmann::json j = to_njson(v);
-      valstr = j.dump();
-      // Strip double-quotes (TS regex /"/g).
-      std::string out;
-      out.reserve(valstr.size());
-      for (char c : valstr)
-        if (c != '"')
-          out.push_back(c);
-      valstr = out;
-    } catch (...) {
-      valstr = "__STRINGIFY_FAILED__";
-    }
+    // Use the in-tree printer (no third-party dep) with compact output
+    // AND sorted keys (matches TS canonical's stringify replacer); then
+    // strip double-quotes (TS regex /"/g).
+    std::string raw;
+    _jsonify_inner(v, raw, 0, 0, true);
+    valstr.reserve(raw.size());
+    for (char c : raw)
+      if (c != '"')
+        valstr.push_back(c);
   }
   if (maxlen > 0 && static_cast<int>(valstr.size()) > maxlen) {
     if (maxlen >= 3) {
@@ -1447,11 +1602,8 @@ inline Value injectstr(const std::string& val, const Value& store, Injection* in
     } else if (found.is_string()) {
       out += found.as_string();
     } else {
-      try {
-        out += to_njson(found).dump();
-      } catch (...) {
-        out += stringify(found);
-      }
+      // Compact JSON for non-string injection — no third-party dep.
+      _jsonify_inner(found, out, 0, 0);
     }
     cursor = pos + it->length(0);
   }

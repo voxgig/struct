@@ -254,11 +254,23 @@ class Injection:
         return cinj
 
     def setval(self, val: Any, ancestor: int | None = None) -> Any:
-        """Set the value in the parent node at the specified ancestor level."""
+        """Inject-state setter. Mirrors the canonical TS Injection.setval:
+        val of UNDEF (= None in Python — distinguishability is impossible
+        in any of the dynamic-typed ports anyway) deletes the slot, any
+        other value sets it. setprop itself remains a pure assignment per
+        the Group B rule — this delete-on-undef shortcut lives only here
+        so transform/validate injectors can signal "no value at this slot"
+        through their return value.
+        """
         if ancestor is None or ancestor < 2:
-            return setprop(self.parent, self.key, val)
+            target = self.parent
+            key = self.key
         else:
-            return setprop(getelem(self.nodes, 0 - ancestor), getelem(self.path, 0 - ancestor), val)
+            target = getelem(self.nodes, 0 - ancestor)
+            key = getelem(self.path, 0 - ancestor)
+        if val is None:
+            return delprop(target, key)
+        return setprop(target, key, val)
 
 
 def getdef(val, alt):
@@ -371,7 +383,13 @@ def slice(val: Any, start: int = UNDEF, end: int = UNDEF, mutate: bool = False) 
 
 def pad(s: Any, padding: int = UNDEF, padchar: str = UNDEF) -> str:
     """Pad a string to a specified length"""
-    s = stringify(s)
+    # Mirror TS canonical: stringify(null) is "null", distinct from
+    # stringify(undefined) which is "". Python's UNDEF=None conflates the
+    # two; explicitly coerce JSON-null to the literal string "null" first.
+    if s is None:
+        s = 'null'
+    else:
+        s = stringify(s)
     padding = 44 if padding is UNDEF else padding
     padchar = ' ' if padchar is UNDEF else (padchar + ' ')[0]
 
@@ -460,12 +478,12 @@ def typify(value: Any = _TYPIFY_NO_ARG) -> int:
 
 def getelem(val: Any, key: Any, alt: Any = UNDEF) -> Any:
     """
-    Get a list element. The key should be an integer, or a string
-    that can parse to an integer only. Negative integers count from the end of the list.
+    Get a list element. Group A semantics: a stored None at the slot
+    returns alt, just like an out-of-range index.
     """
     out = UNDEF
 
-    if val == UNDEF or key == UNDEF:
+    if val is UNDEF or key is UNDEF:
         return alt
 
     if islist(val):
@@ -478,7 +496,7 @@ def getelem(val: Any, key: Any, alt: Any = UNDEF) -> Any:
         except (ValueError, IndexError):
             pass
 
-    if out == UNDEF:
+    if out is UNDEF or out is None:
         return alt() if (T_function & typify(alt)) > 0 else alt
 
     return out
@@ -486,35 +504,55 @@ def getelem(val: Any, key: Any, alt: Any = UNDEF) -> Any:
 
 def getprop(val: Any = UNDEF, key: Any = UNDEF, alt: Any = UNDEF) -> Any:
     """
-    Safely get a property of a node. Undefined arguments return undefined.
-    If the key is not found, return the alternative value.
+    Safely get a property of a node. Group A semantics (per UNDEF_SPEC.md):
+    a stored None is treated as "no value" and returns alt. Internal callers
+    that need to inspect the raw stored value at a slot (preserving null)
+    use _lookup.
     """
-    if val == UNDEF:
-        return alt
-
-    if key == UNDEF:
+    if val is UNDEF or key is UNDEF:
         return alt
 
     out = alt
 
     if ismap(val):
-        out = val.get(str(key), alt)
+        skey = str(key)
+        if skey in val:
+            out = val[skey]
 
     elif islist(val):
         try:
-            key = int(key)
+            ki = int(key)
         except (ValueError, TypeError):
             return alt
 
-        if 0 <= key < len(val):
-            return val[key]
-        else:
-            return alt
+        if 0 <= ki < len(val):
+            out = val[ki]
 
-    if out == UNDEF:
+    if out is None:
         return alt
 
     return out
+
+
+def _lookup(val: Any, key: Any) -> Any:
+    """Internal raw lookup: returns the literally-stored value (including
+    None for JSON null), or UNDEF when the slot doesn't exist. Used by
+    Group B callers that must distinguish a null slot from an absent one
+    while still using a unified test runner."""
+    if val is UNDEF or key is UNDEF:
+        return UNDEF
+    if ismap(val):
+        skey = str(key)
+        return val[skey] if skey in val else UNDEF
+    if islist(val):
+        try:
+            ki = int(key)
+        except (ValueError, TypeError):
+            return UNDEF
+        if 0 <= ki < len(val):
+            return val[ki]
+        return UNDEF
+    return UNDEF
 
 
 def keysof(val: Any = UNDEF) -> list[str]:
@@ -528,8 +566,9 @@ def keysof(val: Any = UNDEF) -> list[str]:
 
 
 def haskey(val: Any = UNDEF, key: Any = UNDEF) -> bool:
-    "Value of property with name key in node val is defined."
-    return getprop(val, key) != UNDEF
+    "Value of property with name key in node val is defined (and not None)."
+    out = getprop(val, key)
+    return out is not UNDEF and out is not None
 
 
 def items(val: Any = UNDEF, apply=None):
@@ -573,6 +612,81 @@ def escre(s: Any):
         s = ''
     pattern = r'([.*+?^${}()|\[\]\\])'
     return re.sub(pattern, r'\\\1', s)
+
+
+# ---------------------------------------------------------------------------
+# Regex utility — uniform re_* API (see /REGEX_API.md). The Python port
+# wraps the stdlib `re` module; the dialect is the RE2 subset.
+# ---------------------------------------------------------------------------
+
+def re_compile(pattern, flags=0):
+    "Compile a regex (or return as-is if already a compiled pattern)."
+    if hasattr(pattern, 'pattern'):
+        return pattern
+    return re.compile(pattern, flags)
+
+
+def re_find(pattern, input):
+    "First match. Returns [whole, capture1, ...] or None."
+    rx = pattern if hasattr(pattern, 'search') else re.compile(pattern)
+    m = rx.search(input)
+    if not m:
+        return None
+    return [m.group(0)] + [g if g is not None else '' for g in m.groups()]
+
+
+def re_find_all(pattern, input):
+    "All non-overlapping matches."
+    rx = pattern if hasattr(pattern, 'finditer') else re.compile(pattern)
+    out = []
+    for m in rx.finditer(input):
+        out.append([m.group(0)] + [g if g is not None else '' for g in m.groups()])
+    return out
+
+
+def re_replace(pattern, input, replacement):
+    "Replace every match. `replacement` may be a string with $&/$1 or a callable."
+    rx = pattern if hasattr(pattern, 'sub') else re.compile(pattern)
+    if callable(replacement):
+        def _cb(m):
+            return replacement([m.group(0)] + [g if g is not None else '' for g in m.groups()])
+        return rx.sub(_cb, input)
+    # Translate $& and $1..$9 to Python's \g<0>/\1..\9
+    py_repl = []
+    i = 0
+    while i < len(replacement):
+        c = replacement[i]
+        if c == '$' and i + 1 < len(replacement):
+            nxt = replacement[i + 1]
+            if nxt == '&':
+                py_repl.append('\\g<0>')
+                i += 2
+                continue
+            if nxt.isdigit():
+                py_repl.append('\\' + nxt)
+                i += 2
+                continue
+            if nxt == '$':
+                py_repl.append('$')
+                i += 2
+                continue
+        if c == '\\':
+            py_repl.append('\\\\')
+        else:
+            py_repl.append(c)
+        i += 1
+    return rx.sub(''.join(py_repl), input)
+
+
+def re_test(pattern, input):
+    "Boolean test."
+    rx = pattern if hasattr(pattern, 'search') else re.compile(pattern)
+    return rx.search(input) is not None
+
+
+def re_escape(s):
+    "Alias of escre."
+    return escre(s)
 
 
 def escurl(s: Any):
@@ -677,7 +791,12 @@ def jsonify(val: Any = UNDEF, flags: dict[str, Any] = UNDEF) -> str:
     indent = getprop(flags, 'indent', 2)
 
     try:
-        json_str = json.dumps(val, indent=indent, separators=(',', ': ') if indent else (',', ':'))
+        if indent and indent > 0:
+            # JS-style pretty print: newlines, spaces, ": " between key/value.
+            json_str = json.dumps(val, indent=indent, separators=(',', ': '))
+        else:
+            # indent=0 = compact single-line, matching the C/Rust/Lua printers.
+            json_str = json.dumps(val, separators=(',', ':'))
     except Exception:
         return S_null
 
@@ -926,6 +1045,11 @@ def stringify(val: Any, maxlen: int = UNDEF, pretty: Any = None):
     pretty = bool(pretty)
     valstr = S_MT
 
+    # Python collapses UNDEF and JSON null to None, so stringify(None)
+    # cannot reliably tell them apart. The existing minor.stringify
+    # corpus expects "" for the absent case ({in:{}, out:''}); the
+    # sentinels stringify_null wrapper substitutes the NULLMARK string
+    # for callers that want the explicit "null" rendering of JSON null.
     if val == UNDEF:
         return '<>' if pretty else valstr
 
@@ -1056,7 +1180,13 @@ def clone(val: Any = UNDEF):
 def setprop(parent: Any, key: Any, val: Any):
     """
     Safely set a property on a dictionary or list.
-    - None value deletes the key/element (mirrors JS undefined behavior).
+
+    Mirrors TS canonical: setprop SETS, including JSON null. Callers wanting
+    to delete must use delprop. (Python's UNDEF==None previously conflated
+    "absent" and "JSON null"; the delete-on-None behaviour silently dropped
+    null values, breaking $ANY validation. See Injection.setval for the
+    delete-on-undef logic.)
+
     - For lists, negative key -> prepend.
     - For lists, key > len(list) -> append.
     """
@@ -1065,10 +1195,7 @@ def setprop(parent: Any, key: Any, val: Any):
 
     if ismap(parent):
         key = str(key)
-        if val is None:
-            parent.pop(key, None)
-        else:
-            parent[key] = val
+        parent[key] = val
 
     elif islist(parent):
         try:
@@ -1076,11 +1203,8 @@ def setprop(parent: Any, key: Any, val: Any):
         except ValueError:
             return parent
 
-        if val is None:
-            if 0 <= key_i < len(parent):
-                for pI in range(key_i, len(parent) - 1):
-                    parent[pI] = parent[pI + 1]
-                parent.pop()
+        if False:
+            pass
         else:
             if key_i >= 0:
                 key_i = min(key_i, len(parent))
@@ -1560,7 +1684,7 @@ def transform_DELETE(inj, val, ref, store):
     """
     Injection handler to delete a key from a map/list.
     """
-    inj.setval(UNDEF)
+    delprop(inj.parent, inj.key)
     return UNDEF
 
 
@@ -1620,9 +1744,8 @@ def transform_KEY(inj, val, ref, store):
 
     keyspec = getprop(parent, S_BKEY)
     if keyspec is not UNDEF:
-        # Need to use setprop directly here since we're removing a specific key (S_DKEY)
-        # not the current state's key
-        setprop(parent, S_BKEY, UNDEF)
+        # Explicitly delete the marker key.
+        delprop(parent, S_BKEY)
         return getprop(inj.dparent, keyspec)
 
     # If no explicit keyspec, and current data has a field matching this key,
@@ -1639,7 +1762,7 @@ def transform_ANNO(inj, val, ref, store):
     Annotate node. Does nothing itself, just used by other injectors, and is removed when called.
     """
     parent = inj.parent
-    setprop(parent, S_BANNO, UNDEF)
+    delprop(parent, S_BANNO)
     return UNDEF
 
 
@@ -1665,7 +1788,7 @@ def transform_MERGE(inj, val, ref, store):
         args = args if islist(args) else [args]
 
         # Remove the $MERGE command from a parent map.
-        inj.setval(UNDEF)
+        delprop(inj.parent, inj.key)
 
         # Literals in the parent have precedence, but we still merge onto
         # the parent object, so that node tree references are not changed.
@@ -2279,7 +2402,7 @@ def validate_CHILD(inj, _val=UNDEF, _ref=UNDEF, _store=UNDEF):
             setprop(parent, ckey, clone(childtm))
             keys.append(ckey)
 
-        inj.setval(UNDEF)
+        delprop(inj.parent, inj.key)
         return UNDEF
 
     # List syntax.

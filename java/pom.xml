@@ -20,10 +20,13 @@
   </properties>
 
   <dependencies>
+    <!-- Gson is used ONLY by the test harness (corpus loading + assertion
+         diffs). The library proper has no third-party JSON dependency. -->
     <dependency>
       <groupId>com.google.code.gson</groupId>
       <artifactId>gson</artifactId>
       <version>${gson.version}</version>
+      <scope>test</scope>
     </dependency>
 
     <dependency>

@@ -386,9 +386,20 @@ fn wrap_pad(allocator: Allocator, val: JsonValue) JsonValue {
     if (val != .object) return JsonValue{ .string = voxgig_struct.S_MT };
     const m = val.object;
     const v = m.get("val") orelse return JsonValue{ .string = voxgig_struct.S_MT };
-    const s = switch (v) {
-        .string => |str| str,
-        else => return JsonValue{ .string = voxgig_struct.S_MT },
+
+    // pad is Group B: stringify non-string vals so {val:1, pad:5} → "1    ",
+    // {val:null, pad:6} → "null  " (TS canonical behaviour). The arena
+    // allocator owned by the runner frees the temporary stringify output
+    // at test-case end, so we don't need an explicit free here.
+    const s: []const u8 = switch (v) {
+        .string => |str| blk: {
+            if (std.mem.eql(u8, str, runner.NULLMARK)) {
+                break :blk voxgig_struct.stringify(allocator, JsonValue{ .null = {} }, null) catch str;
+            }
+            break :blk str;
+        },
+        .null => voxgig_struct.stringify(allocator, JsonValue{ .null = {} }, null) catch "",
+        else => voxgig_struct.stringify(allocator, v, null) catch "",
     };
 
     var padding: i64 = 44;

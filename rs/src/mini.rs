@@ -6,7 +6,7 @@
 // TS->Rust table in README.md.
 
 use indexmap::IndexMap;
-use regex::Regex;
+use crate::re::{Captures, Regex, RegexError};
 
 use crate::consts::*;
 use crate::value::{is_integer_f64, js_string, js_to_number, num_to_string, Value};
@@ -429,8 +429,65 @@ pub fn filter<F: Fn(&(String, Value)) -> bool>(val: &Value, check: F) -> Value {
 pub fn esc_re(s: &Value) -> String {
     let rs = coerce_for_replace(s);
     R_ESCAPE_REGEXP
-        .replace_all(&rs, |caps: &regex::Captures| format!("\\{}", &caps[0]))
-        .to_string()
+        .replace_all(&rs, |caps: &Captures<'_>| format!("\\{}", &caps[0]))
+        .into_owned()
+}
+
+// ---------------------------------------------------------------------------
+// Regex utility — uniform re_* API (see /REGEX_API.md). Backed by the
+// in-tree pure-Rust Thompson NFA engine (crate::re), no third-party crate.
+// ---------------------------------------------------------------------------
+
+/// Compile a pattern. Mirrors `re_compile(pattern)`.
+pub fn re_compile(pattern: &str) -> Result<Regex, RegexError> {
+    Regex::new(pattern)
+}
+
+/// First match. Returns `Some([whole, capture1, ...])` or `None`.
+pub fn re_find(pattern: &str, input: &str) -> Option<Vec<String>> {
+    let re = Regex::new(pattern).ok()?;
+    let m = re.captures(input)?;
+    Some(
+        m.iter()
+            .map(|c| c.map(|x| x.as_str().to_string()).unwrap_or_default())
+            .collect(),
+    )
+}
+
+/// All non-overlapping matches.
+pub fn re_find_all(pattern: &str, input: &str) -> Vec<Vec<String>> {
+    let re = match Regex::new(pattern) {
+        Ok(r) => r,
+        Err(_) => return Vec::new(),
+    };
+    re.captures_iter(input)
+        .map(|caps| {
+            caps.iter()
+                .map(|c| c.map(|x| x.as_str().to_string()).unwrap_or_default())
+                .collect()
+        })
+        .collect()
+}
+
+/// Replace every match. Supports `$&` (whole match) and `$1`..`$9` (captures).
+pub fn re_replace(pattern: &str, input: &str, replacement: &str) -> String {
+    let re = match Regex::new(pattern) {
+        Ok(r) => r,
+        Err(_) => return input.to_string(),
+    };
+    re.replace_all(input, replacement).into_owned()
+}
+
+/// Boolean test.
+pub fn re_test(pattern: &str, input: &str) -> bool {
+    Regex::new(pattern)
+        .map(|re| re.is_match(input))
+        .unwrap_or(false)
+}
+
+/// Alias of `esc_re`.
+pub fn re_escape(s: &str) -> String {
+    esc_re(&Value::from(s))
 }
 
 /// `escurl(s)` — `encodeURIComponent`.

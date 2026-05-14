@@ -557,6 +557,59 @@ class Struct
         return preg_quote($s, '/');
     }
 
+    // -----------------------------------------------------------------------
+    // Regex utility — uniform re_* API (see /REGEX_API.md). PHP's PCRE is a
+    // strict superset of RE2.
+    // -----------------------------------------------------------------------
+
+    public static function re_compile(string $pattern): string
+    {
+        // PHP wants a delimited pattern; return one delimited with '/'.
+        if (strlen($pattern) > 0 && $pattern[0] === '/') return $pattern;
+        return '/' . str_replace('/', '\\/', $pattern) . '/';
+    }
+
+    public static function re_test(string $pattern, string $input): bool
+    {
+        return @preg_match(self::re_compile($pattern), $input) === 1;
+    }
+
+    public static function re_find(string $pattern, string $input): ?array
+    {
+        if (@preg_match(self::re_compile($pattern), $input, $m) === 1) {
+            return $m;
+        }
+        return null;
+    }
+
+    public static function re_find_all(string $pattern, string $input): array
+    {
+        $out = [];
+        if (@preg_match_all(self::re_compile($pattern), $input, $m, PREG_SET_ORDER) !== false) {
+            $out = $m;
+        }
+        return $out;
+    }
+
+    public static function re_replace(string $pattern, string $input, $replacement): string
+    {
+        if (is_callable($replacement)) {
+            return preg_replace_callback(self::re_compile($pattern), function ($m) use ($replacement) {
+                return $replacement($m);
+            }, $input);
+        }
+        // Translate JS-style $& / $1 to PCRE \0 / \1 (which preg_replace supports as ${0} etc.).
+        $php_repl = preg_replace_callback('/\$([&0-9])/', function ($m) {
+            return '\\' . ($m[1] === '&' ? '0' : $m[1]);
+        }, $replacement);
+        return preg_replace(self::re_compile($pattern), $php_repl, $input);
+    }
+
+    public static function re_escape(string $s): string
+    {
+        return self::escre($s);
+    }
+
     public static function escurl(?string $s): string
     {
         $s = $s ?? self::S_MT;
@@ -637,16 +690,23 @@ class Struct
             }
             $indent = self::_getprop($flags, 'indent', 2);
             try {
-                $encoded = json_encode($val, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
-                if ($encoded === false) {
-                    return '__JSONIFY_FAILED__';
+                if ($indent > 0) {
+                    $encoded = json_encode($val, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+                    if ($encoded === false) {
+                        return '__JSONIFY_FAILED__';
+                    }
+                    // PHP's JSON_PRETTY_PRINT uses 4-space indents; convert to requested indent
+                    $encoded = preg_replace_callback('/^(    +)/m', function ($matches) use ($indent) {
+                        $level = (int)(strlen($matches[1]) / 4);
+                        return str_repeat(' ', $level * $indent);
+                    }, $encoded);
+                } else {
+                    // indent=0: compact single-line, matching C/Rust/Java/Kotlin printers.
+                    $encoded = json_encode($val, JSON_UNESCAPED_SLASHES);
+                    if ($encoded === false) {
+                        return '__JSONIFY_FAILED__';
+                    }
                 }
-
-                // PHP's JSON_PRETTY_PRINT uses 4-space indents; convert to requested indent
-                $encoded = preg_replace_callback('/^(    +)/m', function ($matches) use ($indent) {
-                    $level = (int)(strlen($matches[1]) / 4);
-                    return str_repeat(' ', $level * $indent);
-                }, $encoded);
 
                 $str = $encoded;
 

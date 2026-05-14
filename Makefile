@@ -10,11 +10,11 @@
 #   make inspect       — show version info for all languages
 #   make clean         — clean all build artifacts
 
-LANGS = ts js py go rb php lua zig java rs
+LANGS = ts js py go rb php lua zig java rs c
 
 # Languages that ship a `make lint` target (the test/build aggregates above
 # deliberately omit cpp/cs/kt, but their lint targets exist).
-LINT_LANGS = ts js py go rb php lua zig java rs cpp cs kt
+LINT_LANGS = ts js py go rb php lua zig java rs c cpp cs kt
 
 # Languages whose ecosystem has a dependency / supply-chain audit tool wired up.
 AUDIT_LANGS = ts js py go rb php rs cs
@@ -69,7 +69,7 @@ reset: $(LANGS:%=reset-%)
 # These need their tools on PATH:
 #   gitleaks, osv-scanner, semgrep, actionlint, shellcheck, cspell, markdownlint
 
-scan: scan-secrets scan-deps scan-sast scan-workflows scan-shell scan-parity scan-spelling scan-docs
+scan: scan-secrets scan-deps scan-sast scan-workflows scan-shell scan-parity scan-regex scan-spelling scan-docs
 
 scan-secrets:
 	@echo "======== scan: secrets (gitleaks) ========"
@@ -103,6 +103,10 @@ scan-docs:
 scan-parity:
 	@echo "======== scan: cross-port API parity ========"
 	python3 tools/check_parity.py
+
+scan-regex:
+	@echo "======== scan: corpus regex stays inside RE2 subset ========"
+	python3 tools/check_corpus_regex.py
 
 # Everything: linters/formatters + dependency audits + repo-wide scans.
 analyze: lint audit scan

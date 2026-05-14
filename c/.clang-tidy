@@ -1,0 +1,33 @@
+---
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -bugprone-assignment-in-if-condition,
+  -bugprone-branch-clone,
+  -bugprone-suspicious-include,
+  -bugprone-too-small-loop-variable,
+  -bugprone-unchecked-optional-access,
+  -bugprone-reserved-identifier,
+  -bugprone-macro-parentheses,
+  -bugprone-not-null-terminated-result,
+  -bugprone-suspicious-string-compare,
+  clang-analyzer-*,
+  -clang-analyzer-security.insecureAPI.strcpy,
+  -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,
+  performance-*,
+  -performance-no-int-to-ptr,
+  readability-non-const-parameter,
+  readability-redundant-control-flow,
+  misc-*,
+  -misc-include-cleaner,
+  -misc-no-recursion,
+  -misc-unused-parameters,
+  -misc-const-correctness,
+  -misc-use-anonymous-namespace
+WarningsAsErrors: ''
+HeaderFilterRegex: '.*src/.*\.h$'
+FormatStyle: file
+...

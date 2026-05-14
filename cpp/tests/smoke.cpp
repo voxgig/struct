@@ -76,13 +76,14 @@ int main() {
   setprop(m3, Value("e"), Value(5));
   CHECK(getprop(m, Value("e")) == Value::undef());
 
-  // keysof preserves insertion order.
+  // keysof returns alphabetically sorted keys (matches TS canonical
+  // Object.keys(val).sort()).
   Value ord = jm({"z", 1, "a", 2, "m", 3});
   auto ks = keysof(ord);
   CHECK(ks.size() == 3);
-  CHECK(ks[0] == "z");
-  CHECK(ks[1] == "a");
-  CHECK(ks[2] == "m");
+  CHECK(ks[0] == "a");
+  CHECK(ks[1] == "m");
+  CHECK(ks[2] == "z");
 
   // Sentinel survives clone.
   Value sk = SKIP();

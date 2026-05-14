@@ -122,11 +122,112 @@ operators: {
     { in: { query: {x:{y:20}}, obj: [{x:{y:20,z:220}},{x:{y:21,z:221}}] }, 
       out: [{x:{y:20,z:220},'$KEY':0}] }
 
-    { in: { query: {s0:'`$LIKE`':'[aA][bB][cC]'}, obj: [{s0:'DEf'},{s0:'ABc'}] }, 
+    { in: { query: {s0:'`$LIKE`':'[aA][bB][cC]'}, obj: [{s0:'DEf'},{s0:'ABc'}] },
       out: [{s0:'ABc','$KEY':1}] }
 
+    # $LIKE — RE2 feature coverage. Every pattern must stay inside the RE2
+    # subset documented in /REGEX.md. These tests are the contract: any port
+    # whose engine fails one of these has a regex backend gap.
 
-    { in: { query: {'`$NOT`':10}, obj: [9,10,11] }, 
+    # Literal substring (re_test reports a match anywhere unless anchored).
+    { in: { query: {s:'`$LIKE`':'hello'}, obj: [{s:'say hello world'},{s:'goodbye'}] },
+      out: [{s:'say hello world','$KEY':0}] }
+
+    # Anchored at start.
+    { in: { query: {s:'`$LIKE`':'^cat'}, obj: [{s:'cat sat'},{s:'a cat'}] },
+      out: [{s:'cat sat','$KEY':0}] }
+
+    # Anchored at end.
+    { in: { query: {s:'`$LIKE`':'end$'}, obj: [{s:'the end'},{s:'ended here'}] },
+      out: [{s:'the end','$KEY':0}] }
+
+    # Both anchors — exact match.
+    { in: { query: {s:'`$LIKE`':'^abc$'}, obj: [{s:'abc'},{s:'abcd'},{s:'xabc'}] },
+      out: [{s:'abc','$KEY':0}] }
+
+    # `.` matches any single char.
+    { in: { query: {s:'`$LIKE`':'^a.c$'}, obj: [{s:'abc'},{s:'aXc'},{s:'ac'}] },
+      out: [{s:'abc','$KEY':0},{s:'aXc','$KEY':1}] }
+
+    # `*` zero-or-more (greedy).
+    { in: { query: {s:'`$LIKE`':'^ab*c$'}, obj: [{s:'ac'},{s:'abc'},{s:'abbbc'},{s:'abdc'}] },
+      out: [{s:'ac','$KEY':0},{s:'abc','$KEY':1},{s:'abbbc','$KEY':2}] }
+
+    # `+` one-or-more.
+    { in: { query: {s:'`$LIKE`':'^ab+c$'}, obj: [{s:'ac'},{s:'abc'},{s:'abbbc'}] },
+      out: [{s:'abc','$KEY':1},{s:'abbbc','$KEY':2}] }
+
+    # `?` zero-or-one.
+    { in: { query: {s:'`$LIKE`':'^colou?r$'}, obj: [{s:'color'},{s:'colour'},{s:'colouur'}] },
+      out: [{s:'color','$KEY':0},{s:'colour','$KEY':1}] }
+
+    # Bounded quantifier {n}.
+    { in: { query: {s:'`$LIKE`':'^a{3}$'}, obj: [{s:'aa'},{s:'aaa'},{s:'aaaa'}] },
+      out: [{s:'aaa','$KEY':1}] }
+
+    # Bounded range {n,m}.
+    { in: { query: {s:'`$LIKE`':'^a{2,4}$'}, obj: [{s:'a'},{s:'aa'},{s:'aaa'},{s:'aaaa'},{s:'aaaaa'}] },
+      out: [{s:'aa','$KEY':1},{s:'aaa','$KEY':2},{s:'aaaa','$KEY':3}] }
+
+    # Open-ended {n,}.
+    { in: { query: {s:'`$LIKE`':'^a{2,}$'}, obj: [{s:'a'},{s:'aa'},{s:'aaa'}] },
+      out: [{s:'aa','$KEY':1},{s:'aaa','$KEY':2}] }
+
+    # Character class — positive.
+    { in: { query: {s:'`$LIKE`':'^[abc]$'}, obj: [{s:'a'},{s:'b'},{s:'c'},{s:'d'}] },
+      out: [{s:'a','$KEY':0},{s:'b','$KEY':1},{s:'c','$KEY':2}] }
+
+    # Character class — negative.
+    { in: { query: {s:'`$LIKE`':'^[^xyz]$'}, obj: [{s:'a'},{s:'x'},{s:'y'}] },
+      out: [{s:'a','$KEY':0}] }
+
+    # Character range.
+    { in: { query: {s:'`$LIKE`':'^[0-9]+$'}, obj: [{s:'123'},{s:'12a'},{s:''}] },
+      out: [{s:'123','$KEY':0}] }
+
+    # Predefined class \d.
+    { in: { query: {s:'`$LIKE`':'^\\d{3}$'}, obj: [{s:'123'},{s:'12'},{s:'abc'}] },
+      out: [{s:'123','$KEY':0}] }
+
+    # Predefined class \w.
+    { in: { query: {s:'`$LIKE`':'^\\w+$'}, obj: [{s:'abc_123'},{s:'hi there'}] },
+      out: [{s:'abc_123','$KEY':0}] }
+
+    # Predefined class \s.
+    { in: { query: {s:'`$LIKE`':'^a\\sb$'}, obj: [{s:'a b'},{s:'a\tb'},{s:'ab'}] },
+      out: [{s:'a b','$KEY':0},{s:'a\tb','$KEY':1}] }
+
+    # Negated predefined class \D.
+    { in: { query: {s:'`$LIKE`':'^\\D+$'}, obj: [{s:'abc'},{s:'a1'}] },
+      out: [{s:'abc','$KEY':0}] }
+
+    # Alternation.
+    { in: { query: {s:'`$LIKE`':'^(cat|dog)$'}, obj: [{s:'cat'},{s:'dog'},{s:'fish'}] },
+      out: [{s:'cat','$KEY':0},{s:'dog','$KEY':1}] }
+
+    # Non-capturing group with alternation and quantifier.
+    { in: { query: {s:'`$LIKE`':'^(?:ab|cd)+$'}, obj: [{s:'ab'},{s:'abcd'},{s:'abcdab'},{s:'abc'}] },
+      out: [{s:'ab','$KEY':0},{s:'abcd','$KEY':1},{s:'abcdab','$KEY':2}] }
+
+    # Capturing group used implicitly (engine still matches; we don't expose captures via $LIKE).
+    { in: { query: {s:'`$LIKE`':'^a(bc)+d$'}, obj: [{s:'abcd'},{s:'abcbcd'},{s:'ad'}] },
+      out: [{s:'abcd','$KEY':0},{s:'abcbcd','$KEY':1}] }
+
+    # Word boundary.
+    { in: { query: {s:'`$LIKE`':'\\bword\\b'}, obj: [{s:'a word here'},{s:'sword'},{s:'word!'}] },
+      out: [{s:'a word here','$KEY':0},{s:'word!','$KEY':2}] }
+
+    # Escaped metacharacter (literal dot).
+    { in: { query: {s:'`$LIKE`':'^a\\.b$'}, obj: [{s:'a.b'},{s:'aXb'}] },
+      out: [{s:'a.b','$KEY':0}] }
+
+    # Lazy quantifier (best-effort; engines that don't distinguish should still
+    # match the same set since the pattern is anchored).
+    { in: { query: {s:'`$LIKE`':'^a.*?b$'}, obj: [{s:'ab'},{s:'aXXXb'},{s:'aXY'}] },
+      out: [{s:'ab','$KEY':0},{s:'aXXXb','$KEY':1}] }
+
+
+    { in: { query: {'`$NOT`':10}, obj: [9,10,11] },
       out: [9,11] }
 
     { in: { query: {'`$NOT`':{n0:'x'}}, obj: [{n0:x},{n0:y},{n0:z}] }, 

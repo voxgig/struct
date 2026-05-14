@@ -405,6 +405,29 @@ jsonify: {
     { in: {val:{x:{y:2}}, flags:{indent:4}}, out: '{\n    "x": {\n        "y": 2\n    }\n}' }
     { in: {val:{x:{y:2}}, flags:{indent:1,offset:2}},
       out: '{\n   "x": {\n    "y": 2\n   }\n  }' }
+
+    # Cross-port consistency — the hand-written printer in every port
+    # must produce byte-identical output for these inputs.
+
+    # Compact (indent=0) form.
+    { in: {val:[1,2,3], flags:{indent:0}}, out: '[1,2,3]' }
+    { in: {val:{a:1,b:2}, flags:{indent:0}}, out: '{"a":1,"b":2}' }
+    { in: {val:{x:[1,2]}, flags:{indent:0}}, out: '{"x":[1,2]}' }
+    { in: {val:[{a:1}], flags:{indent:0}}, out: '[{"a":1}]' }
+
+    # String escapes — every \\, ", \n, \r, \t must escape to JSON form.
+    { in: {val:'a\\b'},  out: '"a\\\\b"' }
+    { in: {val:'a"b'},   out: '"a\\"b"' }
+    { in: {val:'a\nb'},  out: '"a\\nb"' }
+    { in: {val:'a\tb'},  out: '"a\\tb"' }
+
+    # Insertion-order test deferred: the test-runner JSON parser in cpp/cs/rs
+    # currently sorts map keys alphabetically (nlohmann / System.Text.Json /
+    # serde_json defaults), which means the input is already re-ordered by
+    # the time it reaches the printer. Once those ports use an
+    # insertion-order-preserving parser, the printer side is correct and
+    # this test will pass.
+    # { in: {val:{b:1,a:2,c:3}, flags:{indent:0}}, out: '{"b":1,"a":2,"c":3}' }
   ]
 }
 
@@ -764,8 +787,8 @@ setpath: {
     { in: { store:{x:1} val:7 },
       match:args:0:store:x:1 }
 
-    { in: { store:{a:1,b:2} path:'b', val:22 }, out: {b:22},
-      match:args:0:store:b:22 }
+    { in: { store:{a:1,b:2} path:'b', val:22 }, out: {a:1,b:22},
+      match:args:0:store:{a:1,b:22} }
 
     { in: { store:{a:{b:{c:1}}} path:'a.b.c', val:99 }, out: {c:99},
       match:args:0:store:a:b:c:99 }

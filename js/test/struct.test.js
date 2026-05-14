@@ -780,4 +780,37 @@ describe('struct', async () => {
       '{\n  "true": 1,\n  "false": 2,\n  "null": 3,\n  "[a]": 4,\n  "{b:0}": 5\n}',
     )
   })
+
+  // Group A conformance — null and absent unified on observation.
+  // ============================================================
+
+  test('sentinels-getprop_unify', async () => {
+    await runsetflags(spec.sentinels.getprop_unify, { null: false }, (vin) =>
+      struct.getprop(vin.val, vin.key, vin.alt),
+    )
+  })
+
+  test('sentinels-getelem_absent', async () => {
+    await runsetflags(spec.sentinels.getelem_absent, { null: false }, (vin) =>
+      struct.getelem(vin.val, vin.key, vin.alt),
+    )
+  })
+
+  test('sentinels-haskey_unify', async () => {
+    await runsetflags(spec.sentinels.haskey_unify, { null: false }, (vin) =>
+      struct.haskey(vin.val, vin.key),
+    )
+  })
+
+  test('sentinels-isempty_unify', async () => {
+    await runsetflags(spec.sentinels.isempty_unify, { null: false }, struct.isempty)
+  })
+
+  test('sentinels-isnode_unify', async () => {
+    await runsetflags(spec.sentinels.isnode_unify, { null: false }, struct.isnode)
+  })
+
+  test('sentinels-stringify_null', async () => {
+    await runsetflags(spec.sentinels.stringify_null, { null: false }, struct.stringify)
+  })
 })

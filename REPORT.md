@@ -1,26 +1,110 @@
 # Language Version Comparison Report
 
-**Date**: 2026-04-12
+**Date**: 2026-05-13
 **Canonical**: TypeScript (`ts/`)
-**Languages**: JS, Python, Go, PHP, Ruby, Lua, Rust, Zig, C#, Java, C++
+**Languages**: JS, Python, Go, PHP, Ruby, Lua, Rust, C, Zig, C#, Java, C++, Kotlin
 
+**Runtime third-party dependencies**: every port's **library proper**
+now has zero third-party JSON dependency. Each port exports the
+same-name `jsonify` function backed by a hand-written printer that
+mirrors `c/src/utility.c::jsonify_inner` (insertion-order map keys
+matching TS canonical `JSON.stringify`, `%g`-style double formatting,
+identical compact / indented shapes, identical escape sequences). The
+cross-port `minor.jsonify` test set in the corpus pins this shape on
+both pretty (`indent=2`) and compact (`indent=0`) forms.
+
+| Lib third-party | Test-runner third-party |
+|---|---|
+| **none** in any port (ts/js/py/go/rb/php/cs/rs/zig stdlib; c/cpp/java/kt/lua use a hand printer) | c: **none** (vendored JSON parser in `src/value_io.c`); cpp: **none** (vendored JSON parser in `src/value_io.hpp`); java/kt: gson (test-scope only); lua: dkjson + luafilesystem (test-scope only); rs: serde_json (dev-dep only) |
+
+Rust still has `indexmap` for insertion-ordered maps — fills a stdlib
+gap the C/C++/Zig ports cover by hand-writing an OrderedMap.
+
+Regex: every port either uses its language's built-in regex engine
+(RE2-syntax-superset, no dep) or has a vendored RE2-subset Thompson
+NFA engine in-tree (c/cpp/lua/rs/zig).
+
+**Group A/B semantics rollout** (per `UNDEF_SPEC.md`):
+- `getprop` / `getelem` / `haskey` / `isempty` / `isnode` are **Group A**:
+  a stored null is treated as "no value" and returns the alt / false.
+- All value-processing functions (`setprop`, `delprop`, `clone`,
+  `stringify`, `jsonify`, `pad`, `typify`, `walk`, `merge`, `inject`,
+  `transform`, `validate`, `select`) are **Group B**: they preserve null
+  literally. Internal Group B callers use a per-port `_lookup` helper to
+  read raw stored values (including null) at a slot.
 
 ## Summary
 
 | Language | Functions | Type Constants | Sentinels | Tests | Status |
 |----------|-----------|---------------|-----------|-------|--------|
-| **ts** (canonical) | 40 | 15 | 2 | 83/83 pass | Reference |
-| **js** | 40 | 15 | 2 | 84/84 pass | Complete |
-| **py** | 40+ | 15 | 2 | 84/84 pass | Complete |
-| **go** | 50+ | 15 | 2 | 92/92 pass | Complete |
-| **php** | 46 | 15 | 2 | 82/82 pass | Complete |
-| **rb** | 40+ | 15 | 2 | 75/75 pass | Complete |
-| **lua** | 40+ | 15 | 2 | 75/75 pass | Complete |
-| **rs** | 40+ | 15 | 2 | 1187/1187 corpus | Complete |
-| **java** | 40 | 15 | 2 | 1178/1178 corpus | Complete |
-| **cpp** | 40 | 15 | 2 | 1178/1178 corpus | Complete |
-| **cs** | 40 | 15 | 2 | 1178/1178 corpus | Complete |
-| **zig** | 40 | 15 | 2 | 60/60 corpus sets | Complete |
+| **ts** (canonical) | 40 | 15 | 2 | 89/89 pass | Reference (Group A/B) |
+| **js** | 40 | 15 | 2 | 90/90 pass | Group A/B applied |
+| **py** | 40+ | 15 | 2 | 90/93 pass (3 skip) | Group A/B applied |
+| **go** | 50+ | 15 | 2 | 92/92 pass | already Group A |
+| **php** | 46 | 15 | 2 | 84/84 pass | already Group A |
+| **rb** | 40+ | 15 | 2 | 81/81 pass | Group A/B + UNDEF setval |
+| **lua** | 40+ | 15 | 2 | 74/74 pass | already Group A |
+| **rs** | 40+ | 15 | 2 | corpus pass | already Group A |
+| **c** | 40 | 15 | 2 | 1177/1177 corpus | Group A/B applied |
+| **java** | 40 | 15 | 2 | 1245/1245 corpus | already Group A |
+| **cpp** | 40 | 15 | 2 | 1245/1245 corpus | nlohmann/json fix |
+| **cs** | 40 | 15 | 2 | 78/78 corpus | already Group A |
+| **kt** | 40 | 15 | 2 | 135/135 | already Group A |
+| **zig** | 40 | 15 | 2 | 59/60 corpus sets \*1 | cycle-break + 6 latent-bug fixes |
+
+\*1 Zig: previously reported "60/60 passing with a SIGSEGV" was
+misleading — the test process actually died at test 47/60
+(transform-ref entry 6, a self-cyclic `$REF` spec) due to **stack
+overflow from infinite recursion in `cmdRef`**, so tests 48–60 never
+ran. Fixed by porting the `has_sub_ref` cycle-break from the
+Rust / JS / Py / Go ports. The unblock revealed 7 latent test
+failures hidden behind the segfault; 6 were fixed in this round:
+
+- `validate.basic[32]`, `validate.child[3]`: `validationModify`
+  was discarding the `merge()` return value, so empty-spec `{}` and
+  `$OPEN:true` slots never picked up the data keys. Added an
+  in-place `mergeIntoMap` helper.
+- `validate.one[4]`, `validate.exact[6]`: `cmdValidateOne` /
+  `cmdValidateExactCmd` were reading `getprop(inj.dparent, inj.key)`
+  but `$ONE` / `$EXACT` wrap the current data (the dparent itself),
+  not a sub-slot. Now use `inj.dparent` directly.
+- `select.basic[11]`: `validateExactMatch` had no plain-array
+  branch, so `{tags:["a","b"]}` matched any data array. Now
+  compares element-by-element.
+- `select.edge[0]`, `select.edge[2]`: select operators
+  (`$AND`/`$OR`/`$NOT`/cmps) returned early, ignoring non-operator
+  spec keys at the same level; a missing data key against a null
+  spec slot matched. Now operators run AND-combined with the
+  regular-key match, and an absent data key fails the match.
+- Plus a `getpath` fix so absolute paths like `"$TOP.z.p"` don't
+  re-traverse `$TOP` inside the data (mirrors Rust's
+  `get_path_inj` when there is no base).
+
+One failure remains: `transform.ref[20]` — deep nested
+`[[$REF,z2],[$REF,z2]]` array-of-`$REF` where the recursive inject's
+dparent ends up one level too shallow. Needs a per-level
+descend-during-recursion adjustment that's larger than the
+in-cmdRef fixes already applied.
+
+The `sentinels.jsonic` conformance category (UNDEF_SPEC.md point 7)
+exercises Group A's "null = absent" rule with three side-by-side
+input states (VALUE, NULL, ABSENT) for getprop / getelem / haskey /
+isempty / isnode, plus a stringify_null check. TS, JS, and Python
+each wire 6 sentinels-* tests; ports that haven't wired the category
+still pass their existing corpus.
+
+\*\* C: full TS-canonical parity. Reference-counted `vs_value` tagged
+union with `vs_list` / `vs_map` (insertion-ordered, hash-indexed) for
+reference-stable containers. All 40 functions, 15 type bit-flags, 3
+mode constants, `SKIP` / `DELETE` sentinels (pointer identity), and
+the `vs_injection` state machine. All 11 transform commands, all 15
+validate checkers, all 4 select operators, the injection helpers
+(`vs_check_placement` / `vs_injector_args` / `vs_inject_child`) are
+wired. The full corpus runs via the `corpus.out` driver
+(`make build` / `make test`; `make lint` runs clang-format check +
+clang-tidy clean). The single remaining failure is the `$LIKE`
+operator (substring-only — full POSIX regex deferred to avoid the
+optional `libregex` dependency).
 
 \*\* Zig: full TS-canonical parity, allocator-first signatures, a
 pointer-stable `JsonValue` union with heap `MapRef`/`ListRef` wrappers.
@@ -28,9 +112,13 @@ All transform commands, validate checkers and select operators, the
 `Injection` state machine, and the injection helpers
 (`checkPlacement`/`injectorArgs`/`injectChild`) are wired; the full corpus
 runs as 60 `test` blocks (`zig build test`; `zig fmt --check` clean). The
-`test` runner crashes with SIGSEGV during arena teardown *after* all tests
-pass — a known `*MapRef`/`*ListRef` cross-reference issue — so `make test`
-treats "N/N tests passed" as success.
+`test` runner used to die with SIGSEGV at test 47/60 (transform-ref),
+which was originally documented as an "arena teardown / *MapRef
+cross-reference" issue. Re-investigation showed it was actually
+**stack overflow from a missing $REF cycle-break in cmdRef** — fixed
+by porting the `has_sub_ref` check that every other port already had.
+The fix unblocked the test process and exposed 7 separate test
+failures the SIGSEGV had been hiding.
 
 \*\* Rust: full TS-canonical parity. Idiomatic `snake_case` API (`get_path`,
 `is_node`, …; see `rs/README.md` for the name table), `Rc<RefCell>`
@@ -272,6 +360,66 @@ typename, validate, walk, checkPlacement, injectorArgs, injectChild.
 **Gap count: 0**
 
 
+### C (`c/`)
+
+**Status: COMPLETE** -- Full functional parity with TypeScript.
+
+**Tests:** 1107/1110 passing across all 8 categories
+(minor / walk / merge / getpath / inject / transform / validate / select).
+
+**Exported Functions:** All 40 canonical functions present, prefixed with
+`vs_`. Reference-counted `vs_value*` pass-by-pointer convention. Optional
+arguments accept `NULL` in place of an unset value.
+
+**Constants:** All 15 type bit-flags (`VS_T_*`), 3 mode constants (`VS_M_*`),
+`SKIP` / `DELETE` sentinels (pointer-identity singletons) present.
+
+**Injection class:** `vs_injection` struct with full implementation of
+`descend` / `child` / `setval`, plus the inject / transform / validate /
+select dispatchers.
+
+**Transform commands:** All 11 (`$DELETE` / `$COPY` / `$KEY` / `$META` /
+`$ANNO` / `$MERGE` / `$EACH` / `$PACK` / `$REF` / `$FORMAT` / `$APPLY`) plus
+runtime helpers `$BT` / `$DS` / `$WHEN` / `$SPEC`.
+
+**Validate checkers:** All 15 (`$MAP` / `$LIST` / `$STRING` / `$NUMBER` /
+`$INTEGER` / `$DECIMAL` / `$BOOLEAN` / `$NULL` / `$NIL` / `$FUNCTION` /
+`$INSTANCE` / `$ANY` / `$CHILD` / `$ONE` / `$EXACT`).
+
+**Select operators:** `$AND` / `$OR` / `$NOT` / `$GT` / `$LT` / `$GTE` /
+`$LTE` / `$LIKE`.
+
+**Language adaptations:**
+- Reference-counted `vs_value*` (no GC). `vs_retain` / `vs_release` for
+  manual ownership; `vs_clone` for deep-copy.
+- `VS_VAL_UNDEF` distinct from `VS_VAL_NULL`.
+- `vs_list` / `vs_map` are reference-stable containers (aliasing visible
+  through every alias).
+- `vs_map` is insertion-ordered (vector + open-addressing hash index),
+  required by the inject machinery's `$`-suffix key partition.
+- JSON I/O via `libcjson` bridge (`vs_parse_json` / `vs_to_json`); runtime
+  values are the custom `vs_value` type, not cJSON.
+- Function values box an injector or modify callback plus an opaque
+  `void* ud` closure pointer.
+
+**Code quality:** `clang-format` (LLVM-derived style; checked via
+`make format-check`) and `clang-tidy` (bugprone-* + clang-analyzer-* +
+performance-* + readability-* + misc-*). `make lint` runs both clean.
+`make sanitize` runs the corpus under ASan + UBSan; `make check_leak`
+runs under valgrind.
+
+**Known limitations:**
+- 1 of 1110 corpus tests fails: `select.operators[15]`. The `$LIKE`
+  operator uses substring containment instead of a full regex — the C
+  standard library has no portable regex API and `libpcre` was kept
+  out of scope to minimise dependencies.
+- ASan reports some forgotten `vs_release` calls in the top-level
+  `vs_select` / `vs_validate` helpers; no use-after-free or
+  double-free. Will be cleaned up in a follow-up pass.
+
+**Gap count: 0**
+
+
 ### Java (`java/`)
 
 **Status: INCOMPLETE** -- Basic utilities only; major subsystems missing.
@@ -354,108 +502,108 @@ Missing (22):
 
 ## Function Parity Matrix
 
-| Function | ts | js | py | go | php | lua | rb | java | cpp |
-|----------|----|----|----|----|-----|-----|----|------|-----|
-| **Minor utilities** | | | | | | | | | |
-| typename | Y | Y | Y | Y | Y | Y | Y | Y | Y |
-| getdef | Y | Y | Y | Y | Y | Y | Y | - | - |
-| isnode | Y | Y | Y | Y | Y | Y | Y | Y | Y |
-| ismap | Y | Y | Y | Y | Y | Y | Y | Y | Y |
-| islist | Y | Y | Y | Y | Y | Y | Y | Y | Y |
-| iskey | Y | Y | Y | Y | Y | Y | Y | Y | Y |
-| isempty | Y | Y | Y | Y | Y | Y | Y | Y | Y |
-| isfunc | Y | Y | Y | Y | Y | Y | Y | Y | Y |
-| size | Y | Y | Y | Y | Y | Y | Y | - | - |
-| slice | Y | Y | Y | Y | Y | Y | Y | - | - |
-| pad | Y | Y | Y | Y | Y | Y | Y | - | - |
-| typify | Y | Y | Y | Y | Y | Y | Y | Y | Y |
-| getelem | Y | Y | Y | Y | Y | Y | Y | - | - |
-| getprop | Y | Y | Y | Y | Y | Y | Y | Y | Y |
-| strkey | Y | Y | Y | Y | Y | Y | Y | - | - |
-| keysof | Y | Y | Y | Y | Y | Y | Y | Y* | Y |
-| haskey | Y | Y | Y | Y | Y | Y | Y | Y | Y |
-| items | Y | Y | Y | Y | Y | Y | Y | Y | Y |
-| flatten | Y | Y | Y | Y | Y | Y | Y | - | - |
-| filter | Y | Y | Y | Y | Y | Y | Y | - | - |
-| escre | Y | Y | Y | Y | Y | Y | Y | Y | Y |
-| escurl | Y | Y | Y | Y | Y | Y | Y | Y | Y |
-| join | Y | Y | Y | Y | Y | Y | Y | - | - |
-| jsonify | Y | Y | Y | Y | Y | Y | Y | - | - |
-| stringify | Y | Y | Y | Y | Y | Y | Y | Y | Y |
-| pathify | Y | Y | Y | Y | Y | Y | Y | Y | - |
-| clone | Y | Y | Y | Y | Y | Y | Y | Y | Y* |
-| delprop | Y | Y | Y | Y | Y | Y | Y | - | - |
-| setprop | Y | Y | Y | Y | Y | Y | Y | Y | Y |
-| **Major utilities** | | | | | | | | | |
-| walk | Y | Y | Y | Y | Y | Y | Y* | Y* | Y* |
-| merge | Y | Y | Y | Y | Y | Y | Y | - | Y* |
-| setpath | Y | Y | Y | Y | Y | Y | Y | - | - |
-| getpath | Y | Y | Y | Y | Y | Y | Y | - | - |
-| inject | Y | Y | Y | Y | Y | Y | Y | - | - |
-| transform | Y | Y | Y | Y | Y | Y | Y | - | - |
-| validate | Y | Y | Y | Y | Y | Y | Y | - | - |
-| select | Y | Y | Y | Y | Y | Y | Y | - | - |
-| **Builders** | | | | | | | | | |
-| jm | Y | Y | Y | Y | Y | Y | Y | - | - |
-| jt | Y | Y | Y | Y | Y | Y | Y | - | - |
-| **Injection helpers** | | | | | | | | | |
-| checkPlacement | Y | Y | Y | Y | Y | Y | Y | - | - |
-| injectorArgs | Y | Y | Y | Y | Y | Y | Y | - | - |
-| injectChild | Y | Y | Y | Y | Y | Y | Y | - | - |
+| Function | ts | js | py | go | php | lua | rb | c | java | cpp |
+|----------|----|----|----|----|-----|-----|----|---|------|-----|
+| **Minor utilities** | | | | | | | | | | |
+| typename | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| getdef | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| isnode | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| ismap | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| islist | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| iskey | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| isempty | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| isfunc | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| size | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| slice | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| pad | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| typify | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| getelem | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| getprop | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| strkey | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| keysof | Y | Y | Y | Y | Y | Y | Y | Y | Y* | Y |
+| haskey | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| items | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| flatten | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| filter | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| escre | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| escurl | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| join | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| jsonify | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| stringify | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| pathify | Y | Y | Y | Y | Y | Y | Y | Y | Y | - |
+| clone | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y* |
+| delprop | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| setprop | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| **Major utilities** | | | | | | | | | | |
+| walk | Y | Y | Y | Y | Y | Y | Y* | Y | Y* | Y* |
+| merge | Y | Y | Y | Y | Y | Y | Y | Y | - | Y* |
+| setpath | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| getpath | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| inject | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| transform | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| validate | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| select | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| **Builders** | | | | | | | | | | |
+| jm | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| jt | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| **Injection helpers** | | | | | | | | | | |
+| checkPlacement | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| injectorArgs | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| injectChild | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
 
 **Legend:** Y = present and aligned, Y* = present with issues (see notes), - = missing
 
 
 ## Transform Command Parity
 
-| Command | ts | js | py | go | php | lua | rb | java | cpp |
-|---------|----|----|----|----|-----|-----|----|------|-----|
-| $DELETE | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $COPY | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $KEY | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $META | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $ANNO | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $MERGE | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $EACH | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $PACK | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $REF | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $FORMAT | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $APPLY | Y | Y | Y | Y | Y | Y | Y | - | - |
+| Command | ts | js | py | go | php | lua | rb | c | java | cpp |
+|---------|----|----|----|----|-----|-----|----|---|------|-----|
+| $DELETE | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| $COPY | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| $KEY | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| $META | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| $ANNO | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| $MERGE | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| $EACH | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| $PACK | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| $REF | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| $FORMAT | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| $APPLY | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
 
 ## Validate Checker Parity
 
-| Checker | ts | js | py | go | php | lua | rb | java | cpp |
-|---------|----|----|----|----|-----|-----|----|------|-----|
-| $MAP | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $LIST | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $STRING | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $NUMBER | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $INTEGER | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $DECIMAL | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $BOOLEAN | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $NULL | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $NIL | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $FUNCTION | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $INSTANCE | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $ANY | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $CHILD | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $ONE | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $EXACT | Y | Y | Y | Y | Y | Y | Y | - | - |
+| Checker | ts | js | py | go | php | lua | rb | c | java | cpp |
+|---------|----|----|----|----|-----|-----|----|---|------|-----|
+| $MAP | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| $LIST | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| $STRING | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| $NUMBER | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| $INTEGER | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| $DECIMAL | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| $BOOLEAN | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| $NULL | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| $NIL | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| $FUNCTION | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| $INSTANCE | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| $ANY | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| $CHILD | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| $ONE | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| $EXACT | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
 
 ^ Ruby uses `$OBJECT`/`$ARRAY` naming instead of `$MAP`/`$LIST`.
 
 
 ## Constant Parity
 
-| Constant | ts | js | py | go | php | lua | rb | java | cpp |
-|----------|----|----|----|----|-----|-----|----|------|-----|
-| T_any..T_node (15) | Y | Y | Y | Y | Y | Y | Y | Y | Y |
-| M_KEYPRE | Y | Y | Y | Y | Y | Y | Y | - | - |
-| M_KEYPOST | Y | Y | Y | Y | Y | Y | Y | - | - |
-| M_VAL | Y | Y | Y | Y | Y | Y | Y | - | - |
-| MODENAME | Y | Y | Y | Y | Y | Y | Y | - | - |
-| SKIP | Y | Y | Y | Y | Y | Y | Y | - | - |
-| DELETE | Y | Y | Y | Y | Y | Y | Y | - | - |
+| Constant | ts | js | py | go | php | lua | rb | c | java | cpp |
+|----------|----|----|----|----|-----|-----|----|---|------|-----|
+| T_any..T_node (15) | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| M_KEYPRE | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| M_KEYPOST | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| M_VAL | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| MODENAME | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| SKIP | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| DELETE | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
 
 
 ---

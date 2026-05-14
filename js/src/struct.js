@@ -350,13 +350,14 @@ function getelem(val, key, alt) {
       out = val[key]
     }
   }
-  if (NONE === out) {
+  // Group A: a stored JSON null is treated as "no value".
+  if (null == out) {
     return 0 < (T_function & typify(alt)) ? alt() : alt
   }
   return out
 }
-// Safely get a property of a node. Undefined arguments return undefined.
-// If the key is not found, return the alternative value, if any.
+// Safely get a property of a node. Group A semantics (UNDEF_SPEC.md):
+// a stored null is treated as "no value" and returns alt.
 function getprop(val, key, alt) {
   let out = alt
   if (NONE === val || NONE === key) {
@@ -365,10 +366,18 @@ function getprop(val, key, alt) {
   if (isnode(val)) {
     out = val[key]
   }
-  if (NONE === out) {
+  if (null == out) {
     return alt
   }
   return out
+}
+// Internal raw read: returns the literally-stored value (including null),
+// or NONE when absent. Group B callers use this to distinguish null from
+// absent. Group A's getprop conflates them.
+function _lookup(val, key) {
+  if (NONE === val || NONE === key) return NONE
+  if (isnode(val)) return val[key]
+  return NONE
 }
 // Convert different types of keys to string representation.
 // String keys are returned as is.
@@ -397,7 +406,7 @@ function keysof(val) {
 // Value of property with name key in node val is defined.
 // Root utility - only uses language facilities.
 function haskey(val, key) {
-  return NONE !== getprop(val, key)
+  return null != getprop(val, key)
 }
 function items(val, apply) {
   let out = keysof(val).map((k) => [k, val[k]])
@@ -431,9 +440,52 @@ function filter(val, check) {
 }
 // Escape regular expression.
 function escre(s) {
-  // s = null == s ? S_MT : s
-  return replace(s, R_ESCAPE_REGEXP, '\\$&')
+  return re_replace(R_ESCAPE_REGEXP, s, '\\$&')
 }
+
+// Regex utility — uniform re_* API. See /REGEX_API.md.
+// The JS port wraps the built-in RegExp; the dialect is the RE2 subset.
+function re_compile(pattern, flags) {
+  if (pattern instanceof RegExp) return pattern
+  return new RegExp(pattern, flags)
+}
+function re_find(pattern, input) {
+  const re = pattern instanceof RegExp ? pattern : new RegExp(pattern)
+  return input.match(re)
+}
+function re_find_all(pattern, input) {
+  let re
+  if (pattern instanceof RegExp) {
+    re = pattern.global ? pattern : new RegExp(pattern.source, pattern.flags + 'g')
+  } else {
+    re = new RegExp(pattern, 'g')
+  }
+  const out = []
+  let m
+  while ((m = re.exec(input)) !== null) {
+    out.push(m)
+    if (m[0] === '') re.lastIndex++
+  }
+  return out
+}
+function re_replace(pattern, input, replacement) {
+  let re
+  if (pattern instanceof RegExp) {
+    re = pattern.global ? pattern : new RegExp(pattern.source, pattern.flags + 'g')
+  } else {
+    re = new RegExp(pattern, 'g')
+  }
+  if (typeof replacement === 'function') {
+    return input.replace(re, (...args) => replacement(args.slice(0, -2)))
+  }
+  return input.replace(re, replacement)
+}
+function re_test(pattern, input) {
+  const re = pattern instanceof RegExp ? pattern : new RegExp(pattern)
+  return re.test(input)
+}
+function re_escape(s) { return escre(s) }
+
 // Escape URLs.
 function escurl(s) {
   s = null == s ? S_MT : s
@@ -625,9 +677,12 @@ function jm(...kv) {
   const kvsize = size(kv)
   const o = {}
   for (let i = 0; i < kvsize; i += 2) {
-    let k = getprop(kv, i, '$KEY' + i)
+    // Builders are Group B (value processing): preserve literal stored
+    // values, including null. Direct array index distinguishes "slot exists
+    // with value null" from "slot beyond end of kv".
+    let k = i < kv.length ? kv[i] : '$KEY' + i
     k = 'string' === typeof k ? k : stringify(k)
-    o[k] = getprop(kv, i + 1, null)
+    o[k] = i + 1 < kv.length ? kv[i + 1] : null
   }
   return o
 }
@@ -1058,7 +1113,7 @@ function inject(val, store, injdef) {
   inj.val = val
   // Original val reference may no longer be correct.
   // This return value is only used as the top level result.
-  return getprop(inj.parent, S_DTOP)
+  return _lookup(inj.parent, S_DTOP)
 }
 // The transform_* functions are special command inject handlers (see Injector).
 // Delete a key from a map or list.
@@ -1085,14 +1140,13 @@ const transform_KEY = (inj) => {
     return NONE
   }
   // Key is defined by $KEY meta property.
-  const keyspec = getprop(parent, S_BKEY)
+  const keyspec = _lookup(parent, S_BKEY)
   if (NONE !== keyspec) {
     delprop(parent, S_BKEY)
-    return getprop(inj.dparent, keyspec)
+    return _lookup(inj.dparent, keyspec)
   }
   // Key is defined within general purpose $META object.
-  // return getprop(getprop(parent, S_BANNO), S_KEY, getprop(path, path.length - 2))
-  return getprop(getprop(parent, S_BANNO), S_KEY, getelem(path, -2))
+  return _lookup(_lookup(parent, S_BANNO), S_KEY) ?? getelem(path, -2)
 }
 // Annotate node.  Does nothing itself, just used by
 // other injectors, and is removed when called.
@@ -1305,7 +1359,7 @@ const transform_REF = (inj, val, _ref, store) => {
     return NONE
   }
   // Get arguments: ['`$REF`', 'ref-path'].
-  const refpath = getprop(inj.parent, 1)
+  const refpath = _lookup(inj.parent, 1)
   inj.keyI = size(inj.keys)
   // Spec reference.
   const spec = getprop(store, S_DSPEC)()
@@ -1360,8 +1414,8 @@ const transform_FORMAT = (inj, _val, _ref, store) => {
   }
   // Get arguments: ['`$FORMAT`', 'name', child].
   // TODO: EACH and PACK should accept customm functions too
-  const name = getprop(inj.parent, 1)
-  const child = getprop(inj.parent, 2)
+  const name = _lookup(inj.parent, 1)
+  const child = _lookup(inj.parent, 2)
   // Source data.
   const tkey = getelem(inj.path, -2)
   const target = getelem(inj.nodes, -2, () => getelem(inj.nodes, -1))
@@ -1497,7 +1551,7 @@ function transform(
 }
 // A required string value. NOTE: Rejects empty strings.
 const validate_STRING = (inj) => {
-  let out = getprop(inj.dparent, inj.key)
+  let out = _lookup(inj.dparent, inj.key)
   const t = typify(out)
   if (0 === (T_string & t)) {
     let msg = _invalidTypeMsg(inj.path, S_string, t, out, 'V1010')
@@ -1514,7 +1568,7 @@ const validate_STRING = (inj) => {
 const validate_TYPE = (inj, _val, ref) => {
   const tname = slice(ref, 1).toLowerCase()
   const typev = 1 << (31 - TYPENAME.indexOf(tname))
-  let out = getprop(inj.dparent, inj.key)
+  let out = _lookup(inj.dparent, inj.key)
   const t = typify(out)
   // console.log('TYPE', tname, typev, tn(typev), 'O=', t, tn(t), out, 'C=', t & typev)
   if (0 === (t & typev)) {
@@ -1525,7 +1579,7 @@ const validate_TYPE = (inj, _val, ref) => {
 }
 // Allow any value.
 const validate_ANY = (inj) => {
-  let out = getprop(inj.dparent, inj.key)
+  let out = _lookup(inj.dparent, inj.key)
   return out
 }
 // Specify child values for map or list.
@@ -1536,7 +1590,7 @@ const validate_CHILD = (inj) => {
   // Setup data structures for validation by cloning child template.
   // Map syntax.
   if (M_KEYPRE === mode) {
-    const childtm = getprop(parent, key)
+    const childtm = _lookup(parent, key)
     // Get corresponding current object.
     const pkey = getelem(path, -2)
     let tval = getprop(inj.dparent, pkey)
@@ -1764,7 +1818,7 @@ const _validation = (pval, key, parent, inj) => {
     if (0 < size(pkeys) && true !== getprop(pval, '`$OPEN`')) {
       const badkeys = []
       for (let ckey of ckeys) {
-        if (!haskey(pval, ckey)) {
+        if (NONE === _lookup(pval, ckey)) {
           badkeys.push(ckey)
         }
       }
@@ -1866,7 +1920,7 @@ function validate(
 }
 const select_AND = (inj, _val, _ref, store) => {
   if (M_KEYPRE === inj.mode) {
-    const terms = getprop(inj.parent, inj.key)
+    const terms = _lookup(inj.parent, inj.key)
     const ppath = slice(inj.path, -1)
     const point = getpath(store, ppath)
     const vstore = merge([{}, store], 1)
@@ -1891,7 +1945,7 @@ const select_AND = (inj, _val, _ref, store) => {
 }
 const select_OR = (inj, _val, _ref, store) => {
   if (M_KEYPRE === inj.mode) {
-    const terms = getprop(inj.parent, inj.key)
+    const terms = _lookup(inj.parent, inj.key)
     const ppath = slice(inj.path, -1)
     const point = getpath(store, ppath)
     const vstore = merge([{}, store], 1)
@@ -1915,7 +1969,7 @@ const select_OR = (inj, _val, _ref, store) => {
 }
 const select_NOT = (inj, _val, _ref, store) => {
   if (M_KEYPRE === inj.mode) {
-    const term = getprop(inj.parent, inj.key)
+    const term = _lookup(inj.parent, inj.key)
     const ppath = slice(inj.path, -1)
     const point = getpath(store, ppath)
     const vstore = merge([{}, store], 1)
@@ -1936,7 +1990,7 @@ const select_NOT = (inj, _val, _ref, store) => {
 }
 const select_CMP = (inj, _val, ref, store) => {
   if (M_KEYPRE === inj.mode) {
-    const term = getprop(inj.parent, inj.key)
+    const term = _lookup(inj.parent, inj.key)
     // const src = getprop(store, inj.base, store)
     const gkey = getelem(inj.path, -2)
     // const tval = getprop(src, gkey)
@@ -2397,6 +2451,13 @@ class StructUtility {
 module.exports = {
   StructUtility,
   Injection,
+
+  re_compile,
+  re_find,
+  re_find_all,
+  re_replace,
+  re_test,
+  re_escape,
 
   clone,
   delprop,

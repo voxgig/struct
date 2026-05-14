@@ -12,6 +12,10 @@ description = {
    ]],
    license = "MIT"
 }
+-- The library proper has zero third-party dependencies — src/struct.lua
+-- uses only the Lua standard library. The entries below are needed
+-- ONLY by the test harness (busted/luassert for assertions, dkjson +
+-- luafilesystem for corpus loading and file ops).
 dependencies = {
    "lua >= 5.3",
    "busted >= 2.0.0",

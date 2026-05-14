@@ -93,11 +93,8 @@ inline std::string brief(const Value& v) {
   std::string s;
   if (v.is_undef())
     return UNDEFMARK();
-  try {
-    s = to_njson(v).dump();
-  } catch (...) {
-    s = stringify(v);
-  }
+  // Use the library's in-tree jsonify (compact form, no third-party dep).
+  s = jsonify(v, 0);
   if (s.size() > 200)
     s = s.substr(0, 197) + "...";
   return s;

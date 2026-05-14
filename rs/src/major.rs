@@ -784,7 +784,7 @@ fn injectstr(val: &str, store: &Value, inj: Option<&Inj>) -> Value {
 
     // partial injection: replace each `ref` occurrence
     let out_str = R_INJECTION_PARTIAL
-        .replace_all(val, |caps: &regex::Captures| -> String {
+        .replace_all(val, |caps: &crate::re::Captures<'_>| -> String {
             let mut r = caps[1].to_string();
             if r.chars().count() > 3 {
                 r = r.replace("$BT", S_BT).replace("$DS", S_DS);
@@ -1915,7 +1915,7 @@ fn tvals_desc(tvals: &[Value]) -> String {
         .collect::<Vec<_>>()
         .join(", ");
     R_TRANSFORM_NAME
-        .replace_all(&joined, |caps: &regex::Captures| caps[1].to_lowercase())
+        .replace_all(&joined, |caps: &crate::re::Captures<'_>| caps[1].to_lowercase())
         .to_string()
 }
 
@@ -2568,7 +2568,7 @@ fn select_cmp(inj: &Inj, _v: &Value, r: &str, store: &Value) -> Value {
         "$LTE" => js_lt(&point, &term) || point == term,
         "$LIKE" => {
             let pat = term.as_str().unwrap_or("").to_string();
-            regex::Regex::new(&pat)
+            crate::re::Regex::new(&pat)
                 .map(|re| re.is_match(&stringify(&point, None, false)))
                 .unwrap_or(false)
         }

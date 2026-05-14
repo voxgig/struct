@@ -2,6 +2,21 @@
 
 -- VERSION: @voxgig/struct 0.0.10
 
+-- RE2-subset regex engine — pure Lua, no external deps. Lua's built-in
+-- string.match uses Lua patterns (not regex), so for cross-port uniformity
+-- we use this engine. See /REGEX_API.md.
+local _regex_ok, _regex = pcall(require, "regex")
+if not _regex_ok then
+  -- When loaded from a sibling test file with package.path tweaked.
+  _regex_ok, _regex = pcall(dofile, (debug.getinfo(1, "S").source:sub(2):gsub("struct%.lua$", "regex.lua")))
+end
+local re_compile = _regex and _regex.re_compile or nil
+local re_test = _regex and _regex.re_test or nil
+local re_find = _regex and _regex.re_find or nil
+local re_find_all = _regex and _regex.re_find_all or nil
+local re_replace = _regex and _regex.re_replace or nil
+local re_escape = _regex and _regex.re_escape or nil
+
 --[[
   Voxgig Struct
   =============
@@ -737,7 +752,14 @@ end
 -- Pad a string or number.
 -- Positive padlen = right-pad (padEnd), negative padlen = left-pad (padStart).
 local function pad(val, padlen, padchar)
-  val = S_string == type(val) and val or stringify(val)
+  -- Mirror TS canonical: stringify(null) is "null". Lua's nil corresponds
+  -- to JSON null when input doesn't carry the runner's __NULL__ marker;
+  -- explicitly coerce here so padding works the same as in TS.
+  if val == nil then
+    val = "null"
+  else
+    val = S_string == type(val) and val or stringify(val)
+  end
   padlen = padlen or 44
   padchar = padchar or S_SP
   if #padchar > 1 then
@@ -1064,10 +1086,11 @@ local function jsonify(val, flags)
               return "{}"
             end
             local parts = {}
+            local kv_sep = indent_size == 0 and '":' or '": '
             for _, k in ipairs(keys_list) do
               local sv = ser(v[k], depth + 1)
               if sv ~= nil then -- Skip undefined values
-                table.insert(parts, '"' .. k .. '": ' .. sv)
+                table.insert(parts, '"' .. k .. kv_sep .. sv)
               end
             end
             if #parts == 0 then
@@ -3161,8 +3184,12 @@ local function select_CMP(inj, _val, ref, store)
       pass = true
     elseif "$LTE" == ref and point <= term then
       pass = true
-    elseif "$LIKE" == ref and stringify(point):match(term) then
-      pass = true
+    elseif "$LIKE" == ref then
+      if re_test then
+        if re_test(tostring(term), stringify(point)) then pass = true end
+      else
+        if stringify(point):match(term) then pass = true end
+      end
     end
 
     if pass then
@@ -3355,8 +3382,9 @@ _injectstr = function(val, store, inj)
       elseif type(found) == S_string then
         return found
       elseif type(found) == "table" then
-        local dkjson = require("dkjson")
-        local ok, result = pcall(dkjson.encode, found)
+        -- Use the in-tree jsonify (compact form) so the library proper has
+        -- no third-party JSON dependency.
+        local ok, result = pcall(jsonify, found, { indent = 0 })
         if ok and result then
           return result
         end

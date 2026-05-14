@@ -175,16 +175,11 @@ fn checkResult(expected: StdJsonValue, result: StdJsonValue) !void {
 }
 
 fn fmtJson(val: StdJsonValue) []const u8 {
-    return switch (val) {
-        .null => "null",
-        .bool => |b| if (b) "true" else "false",
-        .integer => "integer",
-        .float => "float",
-        .string => |s| s,
-        .array => "array",
-        .object => "object",
-        .number_string => |s| s,
-    };
+    // Best-effort one-line representation for diagnostic output. Uses the
+    // process-wide page allocator so the lifetime is OK for a print-and-die.
+    var buf = std.ArrayList(u8).init(std.heap.page_allocator);
+    std.json.stringify(val, .{}, buf.writer()) catch return "?";
+    return buf.items;
 }
 
 /// Deep equality for std.json.Value.
