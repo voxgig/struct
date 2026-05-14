@@ -31,7 +31,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # so it is trivially in parity and is not checked.)
 COMPLETE_PORTS = [
     "javascript", "python", "go", "php", "ruby", "lua",
-    "rust", "c", "zig", "csharp", "perl", "cpp",
+    "rust", "c", "zig", "csharp", "perl", "cpp", "swift",
 ]
 PARTIAL_PORTS = ["java", "kotlin"]
 
@@ -67,6 +67,20 @@ SOURCES = {
     "zig": ["zig/src/struct.zig"],
     "kotlin": ["kotlin/src/main/kotlin/voxgig/struct/Struct.kt"],
     "perl": ["perl/lib/Voxgig/Struct.pm"],
+    "swift": [
+        "swift/Sources/VoxgigStruct/Value.swift",
+        "swift/Sources/VoxgigStruct/Constants.swift",
+        "swift/Sources/VoxgigStruct/JSON.swift",
+        "swift/Sources/VoxgigStruct/Minor.swift",
+        "swift/Sources/VoxgigStruct/Walk.swift",
+        "swift/Sources/VoxgigStruct/Merge.swift",
+        "swift/Sources/VoxgigStruct/Path.swift",
+        "swift/Sources/VoxgigStruct/Inject.swift",
+        "swift/Sources/VoxgigStruct/Injection.swift",
+        "swift/Sources/VoxgigStruct/Transform.swift",
+        "swift/Sources/VoxgigStruct/Validate.swift",
+        "swift/Sources/VoxgigStruct/Select.swift",
+    ],
 }
 
 

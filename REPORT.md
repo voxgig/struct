@@ -2,7 +2,7 @@
 
 **Date**: 2026-05-13
 **Canonical**: TypeScript (`typescript/`)
-**Languages**: JS, Python, Go, PHP, Ruby, Lua, Rust, C, Zig, C#, Java, C++, Kotlin, Perl
+**Languages**: JS, Python, Go, PHP, Ruby, Lua, Rust, C, Zig, C#, Java, C++, Kotlin, Perl, Swift
 
 **Runtime third-party dependencies**: every port's **library proper**
 now has zero third-party JSON dependency. Each port exports the
@@ -52,6 +52,7 @@ NFA engine in-tree (c/cpp/lua/rust/zig).
 | **kotlin** | 40 | 15 | 2 | 135/135 | already Group A |
 | **zig** | 40 | 15 | 2 | 60/60 corpus sets \*1 | cycle-break + 7 latent-bug fixes |
 | **perl** | 40 | 15 | 2 | full corpus (700+ cases) | full canonical parity |
+| **swift** | 48 | 15 | 2 | full corpus (700+ cases) | full canonical parity |
 
 \*1 Zig: previously reported "60/60 passing with a SIGSEGV" was
 misleading — the test process actually died at test 47/60
@@ -575,6 +576,59 @@ constants, both sentinels, boolean and null singletons.
 **Gap count: 0.**
 
 
+### Swift (`swift/`)
+
+**Status: COMPLETE** -- Full TS-canonical parity. All 25 minor
+utilities, walk, merge, setpath, getpath, inject, transform,
+validate, and select are wired and pass the corpus tests.
+
+**Tests:** 11 corpus subtests + 3 smoke tests, ~700+ individual cases
+all passing (`swift test --enable-test-discovery` -- driver in
+`Tests/VoxgigStructTests/CorpusTests.swift`).
+- `minor.*` 191/191 across 13 subsets.
+- `walk.basic` 32/32, `getpath.basic` 58/58.
+- `inject.basic` + `inject.string` 19/19 + `inject.deep` 22/22.
+- `merge.cases` 55/55 + `merge.array` 35/35 + `merge.integrity` 6/6 +
+  `merge.depth` 45/45.
+- `transform.*` 188/188 (`paths` 44/44, `cmds` 35/35, `each` 43/43,
+  `pack` 19/19, `ref` 25/25, `format` 21/21, `modify` 1/1).
+- `validate.*` 86/86 (`basic` 39/39, `child` 18/18, `one` 6/6,
+  `exact` 11/11, `special` 12/12).
+- `select.*` 88/88 (`basic` 12/12, `operators` 58/58, `edge` 11/11,
+  `alts` 7/7).
+
+**Wired:** all 48 canonical functions including the `re_*` regex
+wrappers; `Injection` reference class with `child` / `descend` /
+`setval`; all 11 transform commands plus the `$BT` / `$DS` / `$WHEN` /
+`$SPEC` thunks and the `FORMATTER` table; all 15 validate checkers;
+all 4 select operators (`$AND` / `$OR` / `$NOT` / `$CMP` family).
+Injection helpers `checkPlacement`, `injectorArgs`, `injectChild`.
+Builder helpers `jm`, `jmd`, `jt`. All 15 type constants, 3 mode
+constants, `SKIP` / `DELETE` sentinels.
+
+**Language adaptations:**
+- `Value` is an `indirect enum` with `.noval` (TS undefined),
+  `.null` (JSON null), `.bool`, `.int(Int64)`, `.double(Double)`,
+  `.string`, `.list(VList)`, `.map(VMap)`, `.function(Injector)`,
+  `.sentinel(Sentinel)`. Container cases hold class instances so
+  list / map references stay reference-stable across calls -- the
+  canonical merge / walk semantics rely on that.
+- **Insertion-ordered maps** use `OrderedDictionary` from
+  `apple/swift-collections` (one non-stdlib dependency). The
+  in-tree JSON parser builds these directly so object key order
+  survives parsing.
+- **Numbers** split into `.int(Int64)` / `.double(Double)` so
+  `typify` is direct. Mixed-int/double equality works in `==`.
+- **`Injection` as a class** (reference type): every recursive
+  inject call shares the same `keyI` / `keys` / `dpath` / `errs`
+  state without copying.
+- **NULLMARK round-trip** in the test runner mirrors the canonical
+  TS `nullModifier` so "stored null vs absent" survives the
+  otherwise-lossy JSON round-trip.
+
+**Gap count: 0**
+
+
 ---
 
 
@@ -715,7 +769,8 @@ No remaining issues. Full parity achieved.
 5. **php** -- 100% parity. All functions, constants, and commands present. 82/82 tests passing.
 6. **ruby** -- 100% parity. All 40 functions, Injection class, all 11 transform commands, all 15 validators, select with operators. 75/75 tests passing.
 7. **cpp** -- 100% parity. All 48 canonical functions, full `Injection` state, all 11 transform commands, 15 validate checkers, 4 select operators. 1268/1268 corpus checks passing.
-8. **java** -- ~45% parity. Basic utilities only; all major subsystems missing.
+8. **swift** -- 100% parity. All 48 canonical functions, `Injection` reference class, all 11 transform commands, 15 validate checkers, 4 select operators. Full corpus passing.
+9. **java** -- ~45% parity. Basic utilities only; all major subsystems missing.
 
 
 ---

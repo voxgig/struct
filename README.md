@@ -40,6 +40,7 @@ syntax), and language-specific notes:
 | Java       | Partial    | [`java/README.md`](./java/README.md)                  |
 | C++        | Complete   | [`cpp/README.md`](./cpp/README.md)                    |
 | Perl       | Complete   | [`perl/README.md`](./perl/README.md)                  |
+| Swift      | Complete   | [`swift/README.md`](./swift/README.md)                |
 
 The cross-language parity matrix lives in [`REPORT.md`](./REPORT.md).
 
@@ -394,7 +395,7 @@ Quote the checker in backticks inside a `validate` spec, e.g. `` `$STRING` ``.
 ├── build/test/       # shared JSON test corpus (.jsonic)
 ├── typescript/  javascript/  python/   # canonical + JS-family ports
 ├── go/  ruby/  php/                     # other complete ports
-├── lua/  csharp/  zig/  rust/  c/  perl/  kotlin/  cpp/
+├── lua/  csharp/  zig/  rust/  c/  perl/  kotlin/  cpp/  swift/
 ├── java/                                # partial port
 └── LICENSE
 ```
