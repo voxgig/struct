@@ -24,7 +24,7 @@ Cell legend:
 
 ## Master table
 
-| Position | ts/js | py | go | rb | php | lua | rs | java | cs | cpp | kt | zig | c |
+| Position | typescript/javascript | python | go | ruby | php | lua | rust | java | csharp | cpp | kotlin | zig | c |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | **Variable (local)** — uninitialised vs `null`-assigned | ✅ `typeof === 'undefined'` vs `=== null` | 🟡 unbound name → `NameError`; assigned `None` → exists. No "uninitialised but defined". | 🟡 `var v T` gets zero value; for ref types that's `nil` — indistinguishable from explicit `nil`. | 🟡 `defined?(v)` returns `nil` for unbound, `"local-variable"` for assigned-`nil`. | 🟡 `isset($v)` = false for unset AND null; `array_key_exists('v', get_defined_vars())` distinguishes. | ❌ a Lua local is `nil` until assigned and `nil` after `= nil`; identical. | ✅ compile-time: must definitely-assign before use. `Option<T>` models absent. | ✅ compile-time: must definitely-assign locals. Fields default to `null` (ref) / 0 (val). | ✅ compile-time definite-assignment; nullable refs `T?` distinguishable via flow analysis. | ✅ types like `std::optional<T>` model absent distinctly; reading uninit primitive is UB. | ✅ `lateinit`/`by lazy` exist precisely for "declared but not yet set" distinct from null. | ✅ `?T` optionals: `null` is the empty case. | ⊘ uninitialised auto storage = UB; static = zero-init. No managed concept. |
 | **Function parameter** — omitted vs `null` passed | ✅ `arguments.length` / default `undefined` vs explicit `null` | ✅ default-sentinel idiom: `def f(x=SENT): if x is SENT` | ✅ variadic `...args` + `len(args)`. Non-variadic: arity is fixed. | ✅ default-sentinel idiom: `def p(x = SENT)` + `equal?(SENT)` | ✅ default param + `func_num_args()`; or `null` default + `array_key_exists` on `func_get_args()` | ✅ `select('#', ...)` returns true arg count in varargs | ✅ params are fixed-arity; `Option<Option<T>>` encodes "omitted" vs "stored null" | 🟡 only via overloads (different arities) — single signature can't tell omitted from null | ✅ optional params + `default`; or `[CallerArgumentExpression]`; sentinel works too | ✅ default args + `std::optional<T>` parameter | 🟡 default value + sentinel-object idiom; no built-in "was this defaulted?" check | ✅ params are fixed-arity; `??T` encodes "omitted" vs "stored null" | ⊘ no defaults, no varargs introspection beyond `va_list` count |
@@ -87,9 +87,9 @@ The voxgig-struct C port shows the explicit approach: a tagged union with `VS_VA
 
 ## Cross-cutting observations
 
-- **Compile-time languages** (rs, java, cs, cpp, kt, zig) all enforce definite-assignment for locals. That's enough to make "uninitialised variable" a compile-time error, sidestepping the problem. The remaining distinction at value/parameter/return level is handled by an explicit "Maybe" type (`Option`, `Optional`, `std::optional`, `?T`).
+- **Compile-time languages** (rust, java, csharp, cpp, kotlin, zig) all enforce definite-assignment for locals. That's enough to make "uninitialised variable" a compile-time error, sidestepping the problem. The remaining distinction at value/parameter/return level is handled by an explicit "Maybe" type (`Option`, `Optional`, `std::optional`, `?T`).
 
-- **Dynamic languages** (js, py, rb, php, lua) can never enforce "declared but not assigned" — declaration and assignment are typically the same operation. Their answer is at the *position* level: `in`, `key?`, `array_key_exists`, `instance_variable_defined?`.
+- **Dynamic languages** (javascript, python, ruby, php, lua) can never enforce "declared but not assigned" — declaration and assignment are typically the same operation. Their answer is at the *position* level: `in`, `key?`, `array_key_exists`, `instance_variable_defined?`.
 
 - **The position that's hardest across most languages** is the list/array element. JS, Go, Ruby and Kotlin all conflate "out-of-bounds" with "stored null" if you read by index without first checking the bounds. Only the strict-typed compile-time languages (Rust, C++, Zig) plus PHP (via `array_key_exists` on numeric indices) provide a clean answer.
 
@@ -103,17 +103,17 @@ The probes captured this clearly:
 
 | Language | `function r1() {}` | `function r2() { return null; }` | Distinguishable? |
 |---|---|---|---|
-| ts / js | `undefined` | `null` | ✅ |
-| py | `None` | `None` | ❌ |
+| typescript / javascript | `undefined` | `null` | ✅ |
+| python | `None` | `None` | ❌ |
 | go (`func r() any { return nil }`) | n/a — must declare return type | `nil` | ✅ (different signatures) |
-| rb | `nil` | `nil` | ❌ (without `respond_to?`) |
+| ruby | `nil` | `nil` | ❌ (without `respond_to?`) |
 | php | `NULL` | `NULL` | ❌ |
 | lua | `select('#', f()) == 0` | `select('#', f()) == 1, first == nil` | ✅ |
-| rs | `()` | `Option<T>::None` | ✅ (compile-time distinct types) |
+| rust | `()` | `Option<T>::None` | ✅ (compile-time distinct types) |
 | java | `void r1()` | `Object r2() { return null; }` | ✅ (compile-time distinct types) |
-| cs | `void` | `object?` | ✅ |
+| csharp | `void` | `object?` | ✅ |
 | cpp | `void` | `std::optional<T>::nullopt` | ✅ |
-| kt | `Unit` | `T?: null` | ✅ |
+| kotlin | `Unit` | `T?: null` | ✅ |
 | zig | `void` | `?T: null` | ✅ |
 | c | `void` | `T (return val)` | ✅ |
 
@@ -121,12 +121,12 @@ The probes captured this clearly:
 
 If you order the 13 languages by how cleanly they support "absent ≠ null" in the general case:
 
-1. **rs, zig** — `Option<T>` / `?T` is first-class. Cleanest.
-2. **ts / js** — `undefined` and `null` are distinct primitive values at every position except array holes.
+1. **rust, zig** — `Option<T>` / `?T` is first-class. Cleanest.
+2. **typescript / javascript** — `undefined` and `null` are distinct primitive values at every position except array holes.
 3. **cpp** — needs `std::optional`/`std::variant`/`std::any`, but they're stdlib.
-4. **rb, php** — only `nil`/`null` natively, but rich introspection makes positional distinction easy.
-5. **java, cs, kt** — definite-assignment plus `containsKey`/`Optional`/`Nullable<T>`/`lateinit`. Solid.
+4. **ruby, php** — only `nil`/`null` natively, but rich introspection makes positional distinction easy.
+5. **java, csharp, kotlin** — definite-assignment plus `containsKey`/`Optional`/`Nullable<T>`/`lateinit`. Solid.
 6. **go** — comma-ok at maps; pointer or extra flag elsewhere.
-7. **py** — sentinel-object idiom is required at value level; positional introspection (`in`, `hasattr`, `IndexError`) is fine.
+7. **python** — sentinel-object idiom is required at value level; positional introspection (`in`, `hasattr`, `IndexError`) is fine.
 8. **c** — language gives nothing; you model it with a tagged union or NULL-pointer convention.
 9. **lua** — at the table-value position, the distinction is **impossible**. Everywhere else it's emulated.

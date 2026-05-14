@@ -15,40 +15,40 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  lint-ts:
+  lint-typescript:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 'lts/*'
-      - working-directory: ./ts
+      - working-directory: ./typescript
         run: npm install
-      - working-directory: ./ts
+      - working-directory: ./typescript
         run: make lint
 
-  lint-js:
+  lint-javascript:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 'lts/*'
-      - working-directory: ./js
+      - working-directory: ./javascript
         run: npm install
-      - working-directory: ./js
+      - working-directory: ./javascript
         run: make lint
 
-  lint-py:
+  lint-python:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - working-directory: ./py
+      - working-directory: ./python
         run: pip install -r requirements-dev.txt
-      - working-directory: ./py
+      - working-directory: ./python
         run: make lint
 
   lint-go:
@@ -65,17 +65,17 @@ jobs:
           gobin="$(go env GOPATH)/bin"
           PATH="$gobin:$PATH" make lint
 
-  lint-rs:
+  lint-rust:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
-      - working-directory: ./rs
+      - working-directory: ./rust
         run: make lint
 
-  lint-rb:
+  lint-ruby:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -83,8 +83,8 @@ jobs:
         with:
           ruby-version: '3.3'
           bundler-cache: true
-          working-directory: ./rb
-      - working-directory: ./rb
+          working-directory: ./ruby
+      - working-directory: ./ruby
         run: make lint
 
   lint-php:
@@ -115,7 +115,7 @@ jobs:
       - working-directory: ./java
         run: make lint
 
-  lint-kt:
+  lint-kotlin:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -123,7 +123,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - working-directory: ./kt
+      - working-directory: ./kotlin
         run: ./gradlew detekt ktlintCheck
 
   lint-lua:
@@ -156,12 +156,12 @@ jobs:
       - working-directory: ./cpp
         run: make lint
 
-  lint-cs:
+  lint-csharp:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
-      - working-directory: ./cs
+      - working-directory: ./csharp
         run: dotnet build VoxgigStruct.csproj -warnaserror -nologo

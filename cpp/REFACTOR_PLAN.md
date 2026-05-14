@@ -172,7 +172,7 @@ custom `Value` does.
 - **Add**: `/home/user/struct/cpp/test-baseline.json`
 - **Update**: `/home/user/struct/cpp/README.md`,
   `/home/user/struct/cpp/REVIEW.md`, `/home/user/struct/REPORT.md`
-- **Reference (read-only)**: `/home/user/struct/ts/src/StructUtility.ts`,
+- **Reference (read-only)**: `/home/user/struct/typescript/src/StructUtility.ts`,
   `/home/user/struct/java/src/Struct.java`,
   `/home/user/struct/build/test/test.json`
 
@@ -209,7 +209,7 @@ corpus pass count delta recorded in the commit message.
 - **Verify**: existing 17 tests still compile and pass.
 
 ### Step 3 — Corpus runner & baseline scoreboard
-- Port `js/test/runner.js` (or copy from `java/src/test/Runner.java`)
+- Port `javascript/test/runner.js` (or copy from `java/src/test/Runner.java`)
   to `tests/runner.hpp`. Implement `NULLMARK`/`UNDEFMARK`/`EXISTSMARK`,
   `fixJSON`, deep-equal normaliser, per-entry pass/fail capture.
 - Add `tests/struct_corpus_test.cpp` that walks every `(category,

@@ -1,7 +1,7 @@
 # Language Version Comparison Report
 
 **Date**: 2026-05-13
-**Canonical**: TypeScript (`ts/`)
+**Canonical**: TypeScript (`typescript/`)
 **Languages**: JS, Python, Go, PHP, Ruby, Lua, Rust, C, Zig, C#, Java, C++, Kotlin, Perl
 
 **Runtime third-party dependencies**: every port's **library proper**
@@ -15,14 +15,14 @@ both pretty (`indent=2`) and compact (`indent=0`) forms.
 
 | Lib third-party | Test-runner third-party |
 |---|---|
-| **none** in any port (ts/js/py/go/rb/php/cs/rs/zig stdlib; c/cpp/java/kt/lua use a hand printer) | c: **none** (vendored JSON parser in `src/value_io.c`); cpp: **none** (vendored JSON parser in `src/value_io.hpp`); java/kt: gson (test-scope only); lua: dkjson + luafilesystem (test-scope only); rs: serde_json (dev-dep only) |
+| **none** in any port (typescript/javascript/python/go/ruby/php/csharp/rust/zig stdlib; c/cpp/java/kotlin/lua use a hand printer) | c: **none** (vendored JSON parser in `src/value_io.c`); cpp: **none** (vendored JSON parser in `src/value_io.hpp`); java/kotlin: gson (test-scope only); lua: dkjson + luafilesystem (test-scope only); rust: serde_json (dev-dep only) |
 
 Rust still has `indexmap` for insertion-ordered maps — fills a stdlib
 gap the C/C++/Zig ports cover by hand-writing an OrderedMap.
 
 Regex: every port either uses its language's built-in regex engine
 (RE2-syntax-superset, no dep) or has a vendored RE2-subset Thompson
-NFA engine in-tree (c/cpp/lua/rs/zig).
+NFA engine in-tree (c/cpp/lua/rust/zig).
 
 **Group A/B semantics rollout** (per `UNDEF_SPEC.md`):
 - `getprop` / `getelem` / `haskey` / `isempty` / `isnode` are **Group A**:
@@ -37,21 +37,21 @@ NFA engine in-tree (c/cpp/lua/rs/zig).
 
 | Language | Functions | Type Constants | Sentinels | Tests | Status |
 |----------|-----------|---------------|-----------|-------|--------|
-| **ts** (canonical) | 40 | 15 | 2 | 89/89 pass | Reference (Group A/B) |
-| **js** | 40 | 15 | 2 | 90/90 pass | Group A/B applied |
-| **py** | 40+ | 15 | 2 | 90/93 pass (3 skip) | Group A/B applied |
+| **typescript** (canonical) | 40 | 15 | 2 | 89/89 pass | Reference (Group A/B) |
+| **javascript** | 40 | 15 | 2 | 90/90 pass | Group A/B applied |
+| **python** | 40+ | 15 | 2 | 90/93 pass (3 skip) | Group A/B applied |
 | **go** | 50+ | 15 | 2 | 92/92 pass | already Group A |
 | **php** | 46 | 15 | 2 | 84/84 pass | already Group A |
-| **rb** | 40+ | 15 | 2 | 81/81 pass | Group A/B + UNDEF setval |
+| **ruby** | 40+ | 15 | 2 | 81/81 pass | Group A/B + UNDEF setval |
 | **lua** | 40+ | 15 | 2 | 74/74 pass | already Group A |
-| **rs** | 40+ | 15 | 2 | corpus pass | already Group A |
+| **rust** | 40+ | 15 | 2 | corpus pass | already Group A |
 | **c** | 40 | 15 | 2 | 1177/1177 corpus | Group A/B applied |
 | **java** | 40 | 15 | 2 | 1245/1245 corpus | already Group A |
 | **cpp** | 40 | 15 | 2 | 1245/1245 corpus | nlohmann/json fix |
-| **cs** | 40 | 15 | 2 | 78/78 corpus | already Group A |
-| **kt** | 40 | 15 | 2 | 135/135 | already Group A |
+| **csharp** | 40 | 15 | 2 | 78/78 corpus | already Group A |
+| **kotlin** | 40 | 15 | 2 | 135/135 | already Group A |
 | **zig** | 40 | 15 | 2 | 60/60 corpus sets \*1 | cycle-break + 7 latent-bug fixes |
-| **pl** | 40 | 15 | 2 | full corpus (700+ cases) | full canonical parity |
+| **perl** | 40 | 15 | 2 | full corpus (700+ cases) | full canonical parity |
 
 \*1 Zig: previously reported "60/60 passing with a SIGSEGV" was
 misleading — the test process actually died at test 47/60
@@ -132,13 +132,13 @@ for the `transform.ref[20]` and `cmdEach` follow-up). `zig build test`
 is 60/60 passing.
 
 \*\* Rust: full TS-canonical parity. Idiomatic `snake_case` API (`get_path`,
-`is_node`, …; see `rs/README.md` for the name table), `Rc<RefCell>`
+`is_node`, …; see `rust/README.md` for the name table), `Rc<RefCell>`
 reference-stable nodes via the `indexmap` crate, `Value::Noval` vs `Value::Null`
 kept distinct. All 11 transform commands, all 15 validate checkers, all 4 select
 operators, the `Injection` state machine, and the `primary.check` SDK test pass
 (`cargo test` → 1187 corpus checks; `cargo clippy` clean). See
-[rs/PLAN.md](./rs/PLAN.md) for the porting plan / challenge analysis and
-[rs/NOTES.md](./rs/NOTES.md) for the decisions.
+[rust/PLAN.md](./rust/PLAN.md) for the porting plan / challenge analysis and
+[rust/NOTES.md](./rust/NOTES.md) for the decisions.
 
 \*\* Java, C++ and C#: full TS-canonical parity. Injection state machine,
 `SKIP`/`DELETE` sentinels, mode constants, all 11 transform commands
@@ -209,7 +209,7 @@ Wraps all functions, constants, and sentinels as instance properties.
 ## Per-Language Analysis
 
 
-### JavaScript (`js/`)
+### JavaScript (`javascript/`)
 
 **Status: COMPLETE** -- Full functional parity with TypeScript.
 
@@ -232,7 +232,7 @@ Also exports `replace` as a public function (internal-only in TS).
 **Gap count: 0**
 
 
-### Python (`py/`)
+### Python (`python/`)
 
 **Status: COMPLETE** -- Full functional parity with TypeScript.
 
@@ -314,7 +314,7 @@ MODENAME present.
 **Gap count: 0**
 
 
-### Ruby (`rb/`)
+### Ruby (`ruby/`)
 
 **Status: COMPLETE** -- Full functional parity with TypeScript.
 
@@ -508,7 +508,7 @@ Missing (22):
 **Gap count: ~35** (22 missing functions + all transform/validate + missing constants + UB issues)
 
 
-### Perl (`pl/`)
+### Perl (`perl/`)
 
 **Status: COMPLETE** -- Full canonical parity. All 25 minor
 utilities, walk, merge, setpath, getpath, inject, transform,
@@ -707,12 +707,12 @@ No remaining issues. Full parity achieved.
 
 ## Completeness Ranking
 
-1. **js** -- 100% parity. Identical runtime semantics. 84/84 tests passing.
+1. **javascript** -- 100% parity. Identical runtime semantics. 84/84 tests passing.
 2. **go** -- 100% parity. Idiomatic Go adaptations. 92/92 tests passing.
-3. **py** -- 100% parity. All functions, constants, and commands present. 84/84 tests passing.
+3. **python** -- 100% parity. All functions, constants, and commands present. 84/84 tests passing.
 4. **lua** -- 100% parity. All functions and commands present. 75/75 tests passing.
 5. **php** -- 100% parity. All functions, constants, and commands present. 82/82 tests passing.
-6. **rb** -- 100% parity. All 40 functions, Injection class, all 11 transform commands, all 15 validators, select with operators. 75/75 tests passing.
+6. **ruby** -- 100% parity. All 40 functions, Injection class, all 11 transform commands, all 15 validators, select with operators. 75/75 tests passing.
 7. **java** -- ~45% parity. Basic utilities only; all major subsystems missing.
 8. **cpp** -- ~40% parity. Basic utilities only; UB issues; all major subsystems missing.
 

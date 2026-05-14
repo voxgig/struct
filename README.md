@@ -26,20 +26,20 @@ syntax), and language-specific notes:
 
 | Language   | Status     | README                                |
 |------------|------------|---------------------------------------|
-| TypeScript | Canonical  | [`ts/README.md`](./ts/README.md)      |
-| JavaScript | Complete   | [`js/README.md`](./js/README.md)      |
-| Python     | Complete   | [`py/README.md`](./py/README.md)      |
-| Go         | Complete   | [`go/README.md`](./go/README.md)      |
-| PHP        | Complete   | [`php/README.md`](./php/README.md)    |
-| Ruby       | Complete   | [`rb/README.md`](./rb/README.md)      |
-| Lua        | Complete   | [`lua/README.md`](./lua/README.md)    |
-| Rust       | Complete   | [`rs/README.md`](./rs/README.md)      |
-| C          | Complete   | [`c/README.md`](./c/README.md)        |
-| C#         | Complete   | [`cs/README.md`](./cs/README.md)      |
-| Zig        | Complete   | [`zig/README.md`](./zig/README.md)    |
-| Java       | Partial    | [`java/README.md`](./java/README.md)  |
-| C++        | Partial    | [`cpp/README.md`](./cpp/README.md)    |
-| Perl       | Complete   | [`pl/README.md`](./pl/README.md)      |
+| TypeScript | Canonical  | [`typescript/README.md`](./typescript/README.md)      |
+| JavaScript | Complete   | [`javascript/README.md`](./javascript/README.md)      |
+| Python     | Complete   | [`python/README.md`](./python/README.md)              |
+| Go         | Complete   | [`go/README.md`](./go/README.md)                      |
+| PHP        | Complete   | [`php/README.md`](./php/README.md)                    |
+| Ruby       | Complete   | [`ruby/README.md`](./ruby/README.md)                  |
+| Lua        | Complete   | [`lua/README.md`](./lua/README.md)                    |
+| Rust       | Complete   | [`rust/README.md`](./rust/README.md)                  |
+| C          | Complete   | [`c/README.md`](./c/README.md)                        |
+| C#         | Complete   | [`csharp/README.md`](./csharp/README.md)              |
+| Zig        | Complete   | [`zig/README.md`](./zig/README.md)                    |
+| Java       | Partial    | [`java/README.md`](./java/README.md)                  |
+| C++        | Partial    | [`cpp/README.md`](./cpp/README.md)                    |
+| Perl       | Complete   | [`perl/README.md`](./perl/README.md)                  |
 
 The cross-language parity matrix lives in [`REPORT.md`](./REPORT.md).
 
@@ -211,7 +211,7 @@ names that match your language's casing convention.
 ## Language-neutral API reference
 
 This is the canonical API surface, defined in TypeScript at
-[`ts/src/StructUtility.ts`](./ts/src/StructUtility.ts).  Every port
+[`typescript/src/StructUtility.ts`](./typescript/src/StructUtility.ts).  Every port
 exposes equivalents.  The casing varies by language convention
 (`getpath` in JS/Py/Lua/Rb/PHP; `GetPath` in Go/C#; `getPath` in
 Java).
@@ -392,10 +392,10 @@ Quote the checker in backticks inside a `validate` spec, e.g. `` `$STRING` ``.
 ├── README.md         # this file
 ├── REPORT.md         # cross-language parity matrix
 ├── build/test/       # shared JSON test corpus (.jsonic)
-├── ts/  js/  py/     # canonical + JS-family ports
-├── go/  rb/  php/    # other complete ports
-├── lua/ cs/ zig/
-├── java/ cpp/        # partial ports
+├── typescript/  javascript/  python/   # canonical + JS-family ports
+├── go/  ruby/  php/                     # other complete ports
+├── lua/  csharp/  zig/  rust/  c/  perl/  kotlin/
+├── java/  cpp/                          # partial ports
 └── LICENSE
 ```
 
@@ -432,9 +432,10 @@ Run everything with `make lint` at the repo root, or one language with
 Beyond linting there are two more analysis stages:
 
 - **`make audit`** — per-language dependency / supply-chain scanning:
-  `npm audit` (ts/js), `pip-audit` + Bandit (py), `govulncheck` + `gosec`
-  (go), `bundler-audit` (rb), `composer audit` (php), `cargo audit` (rs),
-  `dotnet list --vulnerable` (cs).
+  `npm audit` (typescript/javascript), `pip-audit` + Bandit (python),
+  `govulncheck` + `gosec` (go), `bundler-audit` (ruby),
+  `composer audit` (php), `cargo audit` (rust),
+  `dotnet list --vulnerable` (csharp).
 - **`make scan`** — repo-wide static analysis: secret scanning
   ([gitleaks]), SAST ([Semgrep]), known-vulnerability scanning across all
   lockfiles ([osv-scanner]), GitHub-workflow linting ([actionlint]), shell

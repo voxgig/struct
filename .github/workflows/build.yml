@@ -15,7 +15,7 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  test-ts:
+  test-typescript:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -28,16 +28,16 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
       - name: Install dependencies
-        working-directory: ./ts
+        working-directory: ./typescript
         run: npm install
       - name: Build
-        working-directory: ./ts
+        working-directory: ./typescript
         run: npm run build
       - name: Run tests
-        working-directory: ./ts
+        working-directory: ./typescript
         run: npm test
 
-  test-js:
+  test-javascript:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -50,13 +50,13 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
       - name: Install dependencies
-        working-directory: ./js
+        working-directory: ./javascript
         run: npm install
       - name: Run tests
-        working-directory: ./js
+        working-directory: ./javascript
         run: npm test
 
-  test-py:
+  test-python:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -69,7 +69,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Run tests
-        working-directory: ./py
+        working-directory: ./python
         run: python -m unittest discover -s tests
 
   test-go:
@@ -91,7 +91,7 @@ jobs:
         working-directory: ./go
         run: go test -v ./...
 
-  test-rb:
+  test-ruby:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -104,12 +104,12 @@ jobs:
           ruby-version: '3.2'
           bundler-cache: true
       - name: Install dependencies
-        working-directory: ./rb
+        working-directory: ./ruby
         run: |
           gem install bundler
           bundle install
       - name: Run tests
-        working-directory: ./rb
+        working-directory: ./ruby
         run: ruby test_voxgig_struct.rb
 
   test-php:
@@ -134,7 +134,7 @@ jobs:
         working-directory: ./php
         run: vendor/bin/phpunit
 
-  test-rs:
+  test-rust:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -144,13 +144,13 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Build
-        working-directory: ./rs
+        working-directory: ./rust
         run: cargo build --all-targets
       - name: Run tests
-        working-directory: ./rs
+        working-directory: ./rust
         run: cargo test
 
-  test-cs:
+  test-csharp:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -162,10 +162,10 @@ jobs:
         with:
           dotnet-version: '8.0.x'
       - name: Run tests
-        working-directory: ./cs/tests
+        working-directory: ./csharp/tests
         run: dotnet test
 
-  test-kt:
+  test-kotlin:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -180,11 +180,11 @@ jobs:
           java-version: ${{ matrix.java-version }}
       - name: Run tests (Unix)
         if: runner.os != 'Windows'
-        working-directory: ./kt
+        working-directory: ./kotlin
         run: ./gradlew test
       - name: Run tests (Windows)
         if: runner.os == 'Windows'
-        working-directory: ./kt
+        working-directory: ./kotlin
         shell: pwsh
         run: .\gradlew.bat test
 

@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="voxgig.struct.StructTests" tests="45" skipped="0" failures="0" errors="0" timestamp="2026-05-14T04:17:47.164Z" hostname="vm" time="0.355">
+  <properties/>
+  <testcase name="injectString()" classname="voxgig.struct.StructTests" time="0.014"/>
+  <testcase name="validateInvalid()" classname="voxgig.struct.StructTests" time="0.026"/>
+  <testcase name="transformFuncval()" classname="voxgig.struct.StructTests" time="0.013"/>
+  <testcase name="mergeIntegrity()" classname="voxgig.struct.StructTests" time="0.013"/>
+  <testcase name="transformRef()" classname="voxgig.struct.StructTests" time="0.027"/>
+  <testcase name="getpathExists()" classname="voxgig.struct.StructTests" time="0.012"/>
+  <testcase name="validateSpecial()" classname="voxgig.struct.StructTests" time="0.016"/>
+  <testcase name="transformCmds()" classname="voxgig.struct.StructTests" time="0.017"/>
+  <testcase name="transformEach()" classname="voxgig.struct.StructTests" time="0.007"/>
+  <testcase name="transformPack()" classname="voxgig.struct.StructTests" time="0.005"/>
+  <testcase name="transformBasic()" classname="voxgig.struct.StructTests" time="0.002"/>
+  <testcase name="transformExtra()" classname="voxgig.struct.StructTests" time="0.002"/>
+  <testcase name="selectAlts()" classname="voxgig.struct.StructTests" time="0.004"/>
+  <testcase name="selectEdge()" classname="voxgig.struct.StructTests" time="0.012"/>
+  <testcase name="injectBasic()" classname="voxgig.struct.StructTests" time="0.005"/>
+  <testcase name="validateOne()" classname="voxgig.struct.StructTests" time="0.004"/>
+  <testcase name="transformEdgeApply()" classname="voxgig.struct.StructTests" time="0.003"/>
+  <testcase name="mergeArray()" classname="voxgig.struct.StructTests" time="0.004"/>
+  <testcase name="mergeBasic()" classname="voxgig.struct.StructTests" time="0.002"/>
+  <testcase name="mergeCases()" classname="voxgig.struct.StructTests" time="0.003"/>
+  <testcase name="mergeDepth()" classname="voxgig.struct.StructTests" time="0.003"/>
+  <testcase name="transformExists()" classname="voxgig.struct.StructTests" time="0.002"/>
+  <testcase name="transformFormat()" classname="voxgig.struct.StructTests" time="0.004"/>
+  <testcase name="validateBasic()" classname="voxgig.struct.StructTests" time="0.005"/>
+  <testcase name="validateChild()" classname="voxgig.struct.StructTests" time="0.005"/>
+  <testcase name="validateExact()" classname="voxgig.struct.StructTests" time="0.004"/>
+  <testcase name="transformModify()" classname="voxgig.struct.StructTests" time="0.003"/>
+  <testcase name="validateCustom()" classname="voxgig.struct.StructTests" time="0.003"/>
+  <testcase name="getpathRelative()" classname="voxgig.struct.StructTests" time="0.003"/>
+  <testcase name="mergeExists()" classname="voxgig.struct.StructTests" time="0.002"/>
+  <testcase name="selectBasic()" classname="voxgig.struct.StructTests" time="0.004"/>
+  <testcase name="transformPathsSubset()" classname="voxgig.struct.StructTests" time="0.003"/>
+  <testcase name="walkCopy()" classname="voxgig.struct.StructTests" time="0.003"/>
+  <testcase name="getpathHandler()" classname="voxgig.struct.StructTests" time="0.003"/>
+  <testcase name="walkExists()" classname="voxgig.struct.StructTests" time="0.01"/>
+  <testcase name="validateEdge()" classname="voxgig.struct.StructTests" time="0.003"/>
+  <testcase name="walkLog()" classname="voxgig.struct.StructTests" time="0.003"/>
+  <testcase name="selectOperators()" classname="voxgig.struct.StructTests" time="0.052"/>
+  <testcase name="walkBasic()" classname="voxgig.struct.StructTests" time="0.004"/>
+  <testcase name="walkDepth()" classname="voxgig.struct.StructTests" time="0.003"/>
+  <testcase name="mergeSpecial()" classname="voxgig.struct.StructTests" time="0.002"/>
+  <testcase name="injectExists()" classname="voxgig.struct.StructTests" time="0.003"/>
+  <testcase name="getpathBasic()" classname="voxgig.struct.StructTests" time="0.003"/>
+  <testcase name="getpathSpecial()" classname="voxgig.struct.StructTests" time="0.002"/>
+  <testcase name="injectDeep()" classname="voxgig.struct.StructTests" time="0.003"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

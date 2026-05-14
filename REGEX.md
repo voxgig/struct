@@ -13,7 +13,7 @@ The library uses regular expressions in two places:
 1. **Internal**: parsing path syntax, splitting backtick injections, the
    meta-path delimiter, the `$$`/`$BT`/`$DS` escapes, the
    `$NAME[digits]` transform pattern, integer-key detection, etc. Every
-   internal pattern in `ts/src/StructUtility.ts` is RE2-compatible:
+   internal pattern in `typescript/src/StructUtility.ts` is RE2-compatible:
 
    | Pattern | What it matches | RE2 OK? |
    |---|---|---|
@@ -114,7 +114,7 @@ Already the baseline. No action.
 
 ### Rust
 
-`rs/Cargo.toml` currently lists `regex = "1"` as a runtime dependency.
+`rust/Cargo.toml` currently lists `regex = "1"` as a runtime dependency.
 Two routes:
 
 1. **Vendor a minimal matcher.** Implement `voxgig_struct::_regex` —
@@ -233,7 +233,7 @@ To keep the corpus inside the portable subset:
    - Zig: copy `mvzr.zig` in-tree under `zig/src/vendor/` (MIT licence
      allows). Remove the `.zon` dependency.
    - Rust: replace the `regex` crate with a vendored matcher. ~600 LOC
-     in `rs/src/regex.rs`.
+     in `rust/src/regex.rs`.
 
 Once the four affected ports (rs, zig, c, lua) are done, every port
 guarantees the subset and **no port carries a runtime regex dep beyond
