@@ -307,9 +307,16 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
-      - uses: swift-actions/setup-swift@v2
+      # macOS runners ship a recent Swift toolchain (6.x) with Xcode by
+      # default; `swift-actions/setup-swift@v2`'s macOS download path is
+      # not reliable for 6.0.2 specifically. Only install on Linux.
+      - name: Setup Swift (Linux)
+        if: runner.os == 'Linux'
+        uses: swift-actions/setup-swift@v2
         with:
           swift-version: '6.0.2'
+      - name: Swift version
+        run: swift --version
       - name: Run tests
         working-directory: ./swift
         run: swift test --enable-test-discovery

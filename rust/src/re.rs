@@ -366,10 +366,8 @@ impl<'a> Parser<'a> {
         for i in from..to {
             let mut insn = self.code[i];
             match insn.op {
-                Op::Jmp(t) => {
-                    if (t as usize) >= from && (t as usize) < to {
-                        insn.op = Op::Jmp(t + delta);
-                    }
+                Op::Jmp(t) if (t as usize) >= from && (t as usize) < to => {
+                    insn.op = Op::Jmp(t + delta);
                 }
                 Op::Split(x, y) => {
                     let nx = if (x as usize) >= from && (x as usize) < to {
@@ -394,10 +392,8 @@ impl<'a> Parser<'a> {
     fn shift_targets_after(&mut self, from: usize, by: i32) {
         for i in (from + 1)..self.code.len() {
             match &mut self.code[i].op {
-                Op::Jmp(t) => {
-                    if *t as usize >= from {
-                        *t += by;
-                    }
+                Op::Jmp(t) if *t as usize >= from => {
+                    *t += by;
                 }
                 Op::Split(x, y) => {
                     if *x as usize >= from {
@@ -576,10 +572,8 @@ impl<'a> Parser<'a> {
             // Patch jumps inside the moved block (everything from start+1 to end).
             for i in (start + 1)..self.code.len() {
                 match &mut self.code[i].op {
-                    Op::Jmp(t) => {
-                        if *t as usize >= start {
-                            *t += 1;
-                        }
+                    Op::Jmp(t) if *t as usize >= start => {
+                        *t += 1;
                     }
                     Op::Split(x, y) => {
                         if *x as usize >= start {
@@ -786,20 +780,14 @@ impl Regex {
             for th in &cur.threads {
                 let insn = &self.code[th.pc];
                 match insn.op {
-                    Op::Char(b) => {
-                        if c == b as i32 {
-                            nxt.add(self, input, th.pc + 1, &th.slots, sp + 1);
-                        }
+                    Op::Char(b) if c == b as i32 => {
+                        nxt.add(self, input, th.pc + 1, &th.slots, sp + 1);
                     }
-                    Op::Any => {
-                        if c >= 0 && c != b'\n' as i32 {
-                            nxt.add(self, input, th.pc + 1, &th.slots, sp + 1);
-                        }
+                    Op::Any if c >= 0 && c != b'\n' as i32 => {
+                        nxt.add(self, input, th.pc + 1, &th.slots, sp + 1);
                     }
-                    Op::Class => {
-                        if c >= 0 && insn.cc.has(c as u8) {
-                            nxt.add(self, input, th.pc + 1, &th.slots, sp + 1);
-                        }
+                    Op::Class if c >= 0 && insn.cc.has(c as u8) => {
+                        nxt.add(self, input, th.pc + 1, &th.slots, sp + 1);
                     }
                     Op::Match => {
                         // Always overwrite: descendants of higher-priority
