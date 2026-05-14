@@ -164,6 +164,16 @@ use overload
     '""'    => sub { ${ $_[0] } ? 'true' : 'false' },
     fallback => 1;
 sub TO_JSON { return ${ $_[0] } ? \1 : \0 }
+
+# Stringify the JSON-null singleton as 'null' rather than the blessed
+# scalar's address (matches TS / JS toString of null).
+package Voxgig::Struct::Null;
+use overload
+    'bool' => sub { 0 },
+    '0+'   => sub { 0 },
+    '""'   => sub { 'null' },
+    fallback => 1;
+
 package Voxgig::Struct;
 
 # Sentinels (immutable singletons). SKIP omits the slot, DELETE removes it.
@@ -219,15 +229,18 @@ sub _mklist { return [] }
 sub _is_tied_hash {
     my ($ref) = @_;
     return 0 unless defined $ref;
-    my $r = ref $ref;
-    return 0 unless $r eq 'HASH';
+    my $rt = reftype($ref) // '';
+    return 0 unless $rt eq 'HASH';
     return defined tied(%$ref) ? 1 : 0;
 }
 
 # Get the in-order keys of a map (or sorted-as-strings for plain hashes).
+# Works on plain HASH refs AND blessed hash-backed objects (e.g. sentinels).
 sub _map_keys {
     my ($ref) = @_;
-    return () unless ref $ref eq 'HASH';
+    return () unless defined $ref;
+    my $rt = reftype($ref) // '';
+    return () unless $rt eq 'HASH';
     if (my $tied = tied(%$ref)) {
         return $tied->Keys;
     }
@@ -656,7 +669,7 @@ sub _jsonify_inner {
         return "\"$mark\"";
     }
     if (!ref $val) {
-        if (looks_like_number($val) && $val =~ /^-?\d+(?:\.\d+|[eE][+-]?\d+)?$/) {
+        if (_is_number_sv($val)) {
             return _format_number($val);
         }
         return _json_string($val);
@@ -1187,6 +1200,9 @@ sub getpath {
         if (_is_number_sv($path_in)) {
             @parts = (strkey($path_in));
         }
+        elsif ("$path_in" eq '') {
+            @parts = ('');
+        }
         else {
             @parts = split /\./, "$path_in", -1;
         }
@@ -1404,49 +1420,43 @@ sub _injecthandler {
 # (partial injection). Mirrors TS _injectstr.
 sub _injectstr {
     my ($val, $store, $inj) = @_;
-    return '' unless defined $val;
-    $val = "$val";
+    return '' unless defined $val && !ref($val);
     return '' if $val eq '';
-    # Full injection: entire string is one `…` block.
-    if ($val =~ /^`(.+)`$/) {
-        my $inner = $1;
-        # Inner must not contain another backtick.
-        if (index($inner, '`') == -1) {
-            $inj->{full} = 1 if defined $inj;
-            my $pathref = $inner;
-            # Strip trailing digit-suffix (used for ordering).
-            $pathref =~ s/[0-9]+$//;
+    # Full injection: pattern is `($NAME or [^`]*)[0-9]*`. The optional
+    # trailing digits are part of the *match* but NOT part of m[1] —
+    # they're an ordering suffix on $NAME commands only. This matches
+    # canonical TS R_INJECTION_FULL exactly.
+    if ($val =~ /^`(\$[A-Z]+|[^`]*)[0-9]*`$/) {
+        my $pathref = $1;
+        $inj->{full} = 1 if defined $inj;
+        if (length($pathref) > 3) {
             $pathref =~ s/\$BT/`/g;
             $pathref =~ s/\$DS/\$/g;
-            return getpath($store, $pathref, $inj);
         }
+        return getpath($store, $pathref, $inj);
     }
-    # No backticks → return literal.
     return $val if index($val, '`') == -1;
-    # Partial injection — replace each `…` segment.
     $inj->{full} = 0 if defined $inj;
-    my $out = '';
-    my $i = 0;
-    while ($i < length($val)) {
-        my $c = substr($val, $i, 1);
-        if ($c eq '`') {
-            my $close = index($val, '`', $i + 1);
-            if ($close < 0) { $out .= $c; $i++; next }
-            my $ref = substr($val, $i + 1, $close - $i - 1);
+    my $out = $val;
+    $out =~ s{`([^`]+)`}{
+        my $ref = $1;
+        if (length($ref) > 3) {
             $ref =~ s/\$BT/`/g;
             $ref =~ s/\$DS/\$/g;
-            my $found = getpath($store, $ref, $inj);
-            if (!ref $found && _is_string_sv($found)) { $out .= $found }
-            elsif (is_jnull($found))                  { $out .= 'null' }
-            elsif (is_none($found) || !defined $found) { }  # blank
-            elsif (isnode($found))                    { $out .= jsonify($found, 0) }
-            else                                       { $out .= stringify($found) }
-            $i = $close + 1;
         }
-        else {
-            $out .= $c;
-            $i++;
-        }
+        $inj->{full} = 0 if defined $inj;
+        my $found = getpath($store, $ref, $inj);
+        if (is_none($found))                            { '' }
+        elsif (!ref $found && _is_string_sv($found))    { $found }
+        elsif (is_jnull($found))                        { 'null' }
+        elsif (is_jbool($found))                        { $$found ? 'true' : 'false' }
+        elsif (isnode($found))                          { _stringify_inner($found, 0) }
+        elsif (!ref $found && _is_number_sv($found))    { _format_number($found) }
+        else                                             { stringify($found) }
+    }ge;
+    if (defined $inj && isfunc($inj->{handler})) {
+        $inj->{full} = 1;
+        $out = $inj->{handler}->($inj, $out, $val, $store);
     }
     return $out;
 }
@@ -1509,7 +1519,7 @@ sub inject {
             $nkI++;
         }
     }
-    elsif (!ref $val) {
+    elsif (defined $val && !ref($val) && _is_string_sv($val)) {
         $inj->{mode} = M_VAL;
         $val = _injectstr($val, $store, $inj);
         if (!(is_sentinel($val) && (_map_keys($val))[0] eq '`$SKIP`')) {
@@ -1590,58 +1600,982 @@ sub injectorArgs {
 
 sub injectChild {
     my ($child, $store, $inj) = @_;
-    my $cinj = _inj_child($inj, 0, [S_DTOP]);
-    $cinj->{val} = $child;
+    my $cinj = $inj;
+    if (defined $inj->{prior}) {
+        if (defined $inj->{prior}{prior}) {
+            $cinj = _inj_child($inj->{prior}{prior}, $inj->{prior}{keyI}, $inj->{prior}{keys});
+            $cinj->{val} = $child;
+            setprop($cinj->{parent}, $inj->{prior}{key}, $child);
+        }
+        else {
+            $cinj = _inj_child($inj->{prior}, $inj->{keyI}, $inj->{keys});
+            $cinj->{val} = $child;
+            setprop($cinj->{parent}, $inj->{key}, $child);
+        }
+    }
     inject($child, $store, $cinj);
     return $cinj;
 }
 
-sub _store_unwrap {
-    my ($store) = @_;
-    return $store unless ismap($store);
-    return exists $store->{ S_DTOP() } ? $store->{ S_DTOP() } : $store;
+# ============================================================================
+# Transform commands (11)
+# ============================================================================
+
+sub transform_DELETE {
+    my ($inj) = @_;
+    _inj_setval($inj, NONE());
+    return NONE();
 }
 
-sub _resolve_part {
-    my ($val, $part, $inj, $store) = @_;
-    return undef unless defined $val;
-    # $REF:subpath$ / $GET:subpath$ / $META:subpath$ — meta-path syntax.
-    if (defined $inj && length($part) > 5
-        && substr($part, 0, 5) eq '$REF:' && substr($part, -1) eq '$') {
-        my $sub = substr($part, 5, length($part) - 6);
-        my $spec = ismap($store) ? $store->{ S_DSPEC() } : undef;
-        my $r = getpath($spec, $sub);
-        return _resolve_part($val, stringify($r), $inj, $store);
+sub transform_COPY {
+    my ($inj, $val, $ref, $store) = @_;
+    return NONE() unless checkPlacement(M_VAL, 'COPY', T_any, $inj);
+    my $out = _lookup($inj->{dparent}, $inj->{key});
+    _inj_setval($inj, $out);
+    return $out;
+}
+
+sub transform_KEY {
+    my ($inj) = @_;
+    return NONE() if $inj->{mode} != M_VAL;
+    my $parent = $inj->{parent};
+    my $keyspec = _lookup($parent, S_BKEY);
+    if (!is_none($keyspec)) {
+        delprop($parent, S_BKEY);
+        return getprop($inj->{dparent}, $keyspec);
     }
-    if (defined $inj && length($part) > 5
-        && substr($part, 0, 5) eq '$GET:' && substr($part, -1) eq '$') {
-        my $sub = substr($part, 5, length($part) - 6);
-        my $r = getpath($store, $sub);
-        return _resolve_part($val, stringify($r), $inj, $store);
+    my $anno = _lookup($parent, S_BANNO);
+    my $k = _lookup($anno, S_KEY);
+    if (!is_none($k)) { return $k }
+    return getelem($inj->{path}, -2);
+}
+
+sub transform_META {
+    my ($inj) = @_;
+    delprop($inj->{parent}, S_DMETA);
+    return NONE();
+}
+
+sub transform_ANNO {
+    my ($inj) = @_;
+    delprop($inj->{parent}, S_BANNO);
+    return NONE();
+}
+
+sub transform_MERGE {
+    my ($inj) = @_;
+    my $mode   = $inj->{mode};
+    my $key    = $inj->{key};
+    my $parent = $inj->{parent};
+    my $out    = NONE();
+    if ($mode == M_KEYPRE)  { $out = $key }
+    elsif ($mode == M_KEYPOST) {
+        $out = $key;
+        my $args = getprop($parent, $key);
+        $args = islist($args) ? $args : [$args];
+        _inj_setval($inj, NONE());
+        my $merge_list = flatten([[$parent], $args, [clone($parent)]]);
+        merge($merge_list);
     }
-    if (defined $inj && length($part) > 6
-        && substr($part, 0, 6) eq '$META:' && substr($part, -1) eq '$') {
-        my $sub = substr($part, 6, length($part) - 7);
-        my $r = getpath($inj->{meta}, $sub);
-        return _resolve_part($val, stringify($r), $inj, $store);
+    return $out;
+}
+
+sub transform_EACH {
+    my ($inj, $val, $ref, $store) = @_;
+    return NONE() unless checkPlacement(M_VAL, 'EACH', T_list, $inj);
+    slice($inj->{keys}, 0, 1, 1);
+    my $rest = slice($inj->{parent}, 1);
+    my ($err, $srcpath, $child) = injectorArgs([T_string, T_any], $rest);
+    if (!is_none($err)) {
+        push @{ $inj->{errs} }, '$EACH: ' . $err;
+        return NONE();
     }
-    # Handle $$ → $ escape.
-    $part =~ s/\$\$/\$/g;
-    # $KEY → current injection key.
-    if ($part eq '$KEY' && defined $inj) {
-        $part = $inj->{key};
+    my $srcstore = getprop($store, $inj->{base}, $store);
+    my $src = getpath($srcstore, $srcpath, $inj);
+    my $srctype = typify($src);
+    my $tcur = [];
+    my $tval = [];
+    my $tkey = getelem($inj->{path}, -2);
+    my $target = getelem(
+        $inj->{nodes}, -2,
+        sub { getelem($inj->{nodes}, -1) },
+    );
+    if ($srctype & T_list) {
+        $tval = items($src, sub { clone($child) });
     }
-    if (ismap($val)) {
-        return exists $val->{$part} ? $val->{$part} : undef;
+    elsif ($srctype & T_map) {
+        $tval = items($src, sub {
+            my ($pair) = @_;
+            my $ann = _mkmap();
+            $ann->{ S_BANNO() } = jm('KEY', $pair->[0]);
+            merge([clone($child), $ann], 1);
+        });
     }
-    if (islist($val)) {
-        return undef unless $part =~ /^-?\d+$/;
-        my $idx = int($part);
-        $idx = scalar(@$val) + $idx if $idx < 0;
-        return undef if $idx < 0 || $idx >= @$val;
-        return $val->[$idx];
+    my $rval = [];
+    if (size($tval) > 0) {
+        $tcur = (!defined $src || is_none($src)) ? NONE() : items($src, sub { $_[0]->[1] });
+        my $ckey = getelem($inj->{path}, -2);
+        my $tpath = slice($inj->{path}, -1);
+        my $dpath = flatten([S_DTOP, [split /\./, "$srcpath", -1], '$:' . $ckey]);
+        my $tcurmap = jm($ckey, $tcur);
+        if (size($tpath) > 1) {
+            my $pkey = getelem($inj->{path}, -3, S_DTOP);
+            $tcurmap = jm($pkey, $tcurmap);
+            push @$dpath, '$:' . $pkey;
+        }
+        my $tinj = _inj_child($inj, 0, [$ckey]);
+        $tinj->{path} = $tpath;
+        $tinj->{nodes} = slice($inj->{nodes}, -1);
+        $tinj->{parent} = getelem($tinj->{nodes}, -1);
+        setprop($tinj->{parent}, $ckey, $tval);
+        $tinj->{val} = $tval;
+        $tinj->{dpath} = $dpath;
+        $tinj->{dparent} = $tcurmap;
+        inject($tval, $store, $tinj);
+        $rval = $tinj->{val};
     }
-    return undef;
+    setprop($target, $tkey, $rval);
+    return getelem($rval, 0);
+}
+
+sub transform_PACK {
+    my ($inj, $val, $ref, $store) = @_;
+    my $key    = $inj->{key};
+    my $path   = $inj->{path};
+    my $parent = $inj->{parent};
+    my $nodes  = $inj->{nodes};
+    return NONE() unless checkPlacement(M_KEYPRE, 'EACH', T_map, $inj);
+    my $args = getprop($parent, $key);
+    my ($err, $srcpath, $origchildspec) = injectorArgs([T_string, T_any], $args);
+    if (!is_none($err)) {
+        push @{ $inj->{errs} }, '$EACH: ' . $err;
+        return NONE();
+    }
+    my $tkey = getelem($path, -2);
+    my $pathsize = size($path);
+    my $target = getelem(
+        $nodes, $pathsize - 2,
+        sub { getelem($nodes, $pathsize - 1) },
+    );
+    my $srcstore = getprop($store, $inj->{base}, $store);
+    my $src = getpath($srcstore, $srcpath, $inj);
+    if (!islist($src)) {
+        if (ismap($src)) {
+            $src = items($src, sub {
+                my ($item) = @_;
+                setprop($item->[1], S_BANNO, jm('KEY', $item->[0]));
+                $item->[1];
+            });
+        }
+        else { $src = NONE() }
+    }
+    return NONE() if is_none($src) || !defined $src;
+    my $keypath = getprop($origchildspec, S_BKEY);
+    my $childspec = delprop($origchildspec, S_BKEY);
+    my $child = getprop($childspec, S_BVAL, $childspec);
+    my $tval = _mkmap();
+    items($src, sub {
+        my ($item) = @_;
+        my ($srckey, $srcnode) = ($item->[0], $item->[1]);
+        my $kk = $srckey;
+        if (!is_none($keypath)) {
+            if (index($keypath, '`') == 0) {
+                my $tmap = jm( S_DTOP, $srcnode );
+                my $mstore = merge([_mkmap(), $store, $tmap], 1);
+                $kk = inject($keypath, $mstore);
+            }
+            else {
+                $kk = getpath($srcnode, $keypath, $inj);
+            }
+        }
+        my $tchild = clone($child);
+        setprop($tval, $kk, $tchild);
+        my $anno = getprop($srcnode, S_BANNO);
+        if (is_none($anno)) { delprop($tchild, S_BANNO) }
+        else                { setprop($tchild, S_BANNO, $anno) }
+    });
+    my $rval = _mkmap();
+    if (!isempty($tval)) {
+        my $tsrc = _mkmap();
+        for (my $i = 0; $i < @$src; $i++) {
+            my $n = $src->[$i];
+            my $kn;
+            if (is_none($keypath)) { $kn = $i }
+            elsif (index($keypath, '`') == 0) {
+                my $tmap = jm( S_DTOP, $n );
+                my $mstore = merge([_mkmap(), $store, $tmap], 1);
+                $kn = inject($keypath, $mstore);
+            }
+            else { $kn = getpath($n, $keypath, $inj) }
+            setprop($tsrc, $kn, $n);
+        }
+        my $tpath = slice($inj->{path}, -1);
+        my $ckey = getelem($inj->{path}, -2);
+        my $dpath = flatten([S_DTOP, [split /\./, "$srcpath", -1], '$:' . $ckey]);
+        my $tcur = jm($ckey, $tsrc);
+        if (size($tpath) > 1) {
+            my $pkey = getelem($inj->{path}, -3, S_DTOP);
+            $tcur = jm($pkey, $tcur);
+            push @$dpath, '$:' . $pkey;
+        }
+        my $tinj = _inj_child($inj, 0, [$ckey]);
+        $tinj->{path} = $tpath;
+        $tinj->{nodes} = slice($inj->{nodes}, -1);
+        $tinj->{parent} = getelem($tinj->{nodes}, -1);
+        $tinj->{val} = $tval;
+        $tinj->{dpath} = $dpath;
+        $tinj->{dparent} = $tcur;
+        inject($tval, $store, $tinj);
+        $rval = $tinj->{val};
+    }
+    setprop($target, $tkey, $rval);
+    return NONE();
+}
+
+sub transform_REF {
+    my ($inj, $val, $ref, $store) = @_;
+    return NONE() if $inj->{mode} != M_VAL;
+    my $nodes = $inj->{nodes};
+    my $refpath = _lookup($inj->{parent}, 1);
+    $inj->{keyI} = size($inj->{keys});
+    my $specfn = getprop($store, S_DSPEC);
+    my $spec = isfunc($specfn) ? $specfn->() : $specfn;
+    my $dpath = slice($inj->{path}, 1);
+    my $sub_inj = {
+        dpath   => $dpath,
+        dparent => getpath($spec, $dpath),
+        base    => S_DTOP,
+        meta    => $inj->{meta},
+    };
+    my $resolved = getpath($spec, $refpath, $sub_inj);
+    my $hasSubRef = 0;
+    if (isnode($resolved)) {
+        walk($resolved, sub {
+            my ($k, $v) = @_;
+            if (defined $v && !ref($v) && $v eq '`$REF`') { $hasSubRef = 1 }
+            return $v;
+        });
+    }
+    my $tref = clone($resolved);
+    my $cpath = slice($inj->{path}, -3);
+    my $tpath = slice($inj->{path}, -1);
+    my $tcur = getpath($store, $cpath);
+    my $tval = getpath($store, $tpath);
+    my $rval = NONE();
+    if (!$hasSubRef || !is_none($tval)) {
+        my $tinj = _inj_child($inj, 0, [getelem($tpath, -1)]);
+        $tinj->{path}    = $tpath;
+        $tinj->{nodes}   = slice($inj->{nodes}, -1);
+        $tinj->{parent}  = getelem($nodes, -2);
+        $tinj->{val}     = $tref;
+        $tinj->{dpath}   = flatten([$cpath]);
+        $tinj->{dparent} = $tcur;
+        inject($tref, $store, $tinj);
+        $rval = $tinj->{val};
+    }
+    my $grandparent = _inj_setval($inj, $rval, 2);
+    if (islist($grandparent) && $inj->{prior}) {
+        $inj->{prior}{keyI}--;
+    }
+    return $val;
+}
+
+our %FORMATTER = (
+    identity => sub { $_[1] },
+    upper    => sub {
+        my (undef, $v) = @_;
+        return $v if isnode($v);
+        my $s = defined $v ? "$v" : '';
+        return uc $s;
+    },
+    lower    => sub {
+        my (undef, $v) = @_;
+        return $v if isnode($v);
+        my $s = defined $v ? "$v" : '';
+        return lc $s;
+    },
+    string   => sub {
+        my (undef, $v) = @_;
+        return $v if isnode($v);
+        return defined $v ? "$v" : '';
+    },
+    number   => sub {
+        my (undef, $v) = @_;
+        return $v if isnode($v);
+        my $n = defined $v && looks_like_number($v) ? 0 + $v : 0;
+        return $n;
+    },
+    integer  => sub {
+        my (undef, $v) = @_;
+        return $v if isnode($v);
+        my $n = defined $v && looks_like_number($v) ? int(0 + $v) : 0;
+        return $n;
+    },
+    concat   => sub {
+        my ($k, $v) = @_;
+        if (!defined $k && islist($v)) {
+            my $out = '';
+            for my $e (@$v) {
+                $out .= isnode($e) ? '' : (defined $e ? "$e" : '');
+            }
+            return $out;
+        }
+        return $v;
+    },
+);
+
+sub transform_FORMAT {
+    my ($inj, $val, $ref, $store) = @_;
+    slice($inj->{keys}, 0, 1, 1);
+    return NONE() if $inj->{mode} != M_VAL;
+    my $name  = _lookup($inj->{parent}, 1);
+    my $child = _lookup($inj->{parent}, 2);
+    my $tkey = getelem($inj->{path}, -2);
+    my $target = getelem(
+        $inj->{nodes}, -2,
+        sub { getelem($inj->{nodes}, -1) },
+    );
+    my $cinj = injectChild($child, $store, $inj);
+    my $resolved = $cinj->{val};
+    my $formatter = (typify($name) & T_function) ? $name : $FORMATTER{$name // ''};
+    if (!defined $formatter) {
+        push @{ $inj->{errs} }, '$FORMAT: unknown format: ' . (defined $name ? $name : '') . '.';
+        return NONE();
+    }
+    my $out = walk($resolved, $formatter);
+    setprop($target, $tkey, $out);
+    return $out;
+}
+
+sub transform_APPLY {
+    my ($inj, $val, $ref, $store) = @_;
+    return NONE() unless checkPlacement(M_VAL, 'APPLY', T_list, $inj);
+    my $rest = slice($inj->{parent}, 1);
+    my ($err, $apply, $child) = injectorArgs([T_function, T_any], $rest);
+    if (!is_none($err)) {
+        push @{ $inj->{errs} }, '$APPLY: ' . $err;
+        return NONE();
+    }
+    my $tkey = getelem($inj->{path}, -2);
+    my $target = getelem(
+        $inj->{nodes}, -2,
+        sub { getelem($inj->{nodes}, -1) },
+    );
+    my $cinj = injectChild($child, $store, $inj);
+    my $resolved = $cinj->{val};
+    my $out = $apply->($resolved, $store, $cinj);
+    setprop($target, $tkey, $out);
+    return $out;
+}
+
+# ============================================================================
+# Transform — top-level wrapper.
+# ============================================================================
+
+sub transform {
+    my ($data, $spec, $injdef) = @_;
+    my $origspec = $spec;
+    $spec = clone($origspec);
+    my $extra = defined $injdef ? $injdef->{extra} : undef;
+    my $collect = defined $injdef && defined $injdef->{errs};
+    my $errs = ($injdef && $injdef->{errs}) ? $injdef->{errs} : [];
+    my $extraTransforms = _mkmap();
+    my $extraData;
+    if (defined $extra) {
+        $extraData = _mkmap();
+        for my $pair (@{ items($extra) }) {
+            my ($k, $v) = @$pair;
+            if (index($k, S_DS) == 0) {
+                $extraTransforms->{$k} = $v;
+            }
+            else {
+                $extraData->{$k} = $v;
+            }
+        }
+    }
+    my $dataClone = merge([
+        (defined $extraData && !isempty($extraData)) ? clone($extraData) : NONE(),
+        clone($data),
+    ]);
+    my $base_store = jm(
+        S_DTOP, $dataClone,
+        '$SPEC', sub { $origspec },
+        '$BT',   sub { S_BT },
+        '$DS',   sub { S_DS },
+        '$WHEN', sub {
+            my @t = gmtime;
+            return sprintf('%04d-%02d-%02dT%02d:%02d:%02d.000Z',
+                $t[5]+1900, $t[4]+1, $t[3], $t[2], $t[1], $t[0]);
+        },
+        '$DELETE', \&transform_DELETE,
+        '$COPY',   \&transform_COPY,
+        '$KEY',    \&transform_KEY,
+        '$META',   \&transform_META,
+        '$ANNO',   \&transform_ANNO,
+        '$MERGE',  \&transform_MERGE,
+        '$EACH',   \&transform_EACH,
+        '$PACK',   \&transform_PACK,
+        '$REF',    \&transform_REF,
+        '$FORMAT', \&transform_FORMAT,
+        '$APPLY',  \&transform_APPLY,
+    );
+    my $errs_map = jm(S_DERRS, $errs);
+    my $store = merge([$base_store, $extraTransforms, $errs_map], 1);
+    my $out = inject($spec, $store, $injdef);
+    if (size($errs) > 0 && !$collect) {
+        die CORE::join(' | ', map { defined $_ ? "$_" : '' } @$errs);
+    }
+    return $out;
+}
+
+# ============================================================================
+# Validate checkers (15)
+# ============================================================================
+
+sub _invalid_type_msg {
+    my ($path, $needtype, $vt, $v, $whence) = @_;
+    my $vs = (!defined $v) ? 'no value' : stringify($v);
+    my $field = (size($path) > 1) ? ('field ' . pathify($path, 1) . ' to be ') : '';
+    my $extra = (defined $v) ? (typename($vt) . S_VIZ) : '';
+    return 'Expected ' . $field . $needtype . ', but found ' . $extra . $vs . '.';
+}
+
+sub validate_STRING {
+    my ($inj) = @_;
+    my $out = _lookup($inj->{dparent}, $inj->{key});
+    my $t = typify($out);
+    if (!($t & T_string)) {
+        push @{ $inj->{errs} }, _invalid_type_msg($inj->{path}, S_string, $t, $out, 'V1010');
+        return NONE();
+    }
+    if (defined $out && !ref($out) && $out eq '') {
+        push @{ $inj->{errs} }, 'Empty string at ' . pathify($inj->{path}, 1);
+        return NONE();
+    }
+    return $out;
+}
+
+sub validate_TYPE {
+    my ($inj, $val, $ref) = @_;
+    my $tname = lc substr($ref, 1);
+    my %TNAME_TO_BIT = (
+        S_nil()      => T_noval,
+        S_boolean()  => T_boolean,
+        S_decimal()  => T_decimal,
+        S_integer()  => T_integer,
+        S_number()   => T_number,
+        S_string()   => T_string,
+        S_function() => T_function,
+        S_symbol()   => T_symbol,
+        S_null()     => T_null,
+        S_list()     => T_list,
+        S_map()      => T_map,
+        S_instance() => T_instance,
+        S_scalar()   => T_scalar,
+        S_node()     => T_node,
+        S_any()      => T_any,
+    );
+    my $typev = $TNAME_TO_BIT{$tname} // 0;
+    # Special "number" matches integers & decimals.
+    if ($tname eq S_number) {
+        $typev = T_integer | T_decimal | T_number;
+    }
+    my $out = _lookup($inj->{dparent}, $inj->{key});
+    my $t = typify($out);
+    if (!($t & $typev)) {
+        push @{ $inj->{errs} }, _invalid_type_msg($inj->{path}, $tname, $t, $out, 'V1001');
+        return NONE();
+    }
+    return $out;
+}
+
+sub validate_ANY {
+    my ($inj) = @_;
+    return _lookup($inj->{dparent}, $inj->{key});
+}
+
+sub validate_CHILD {
+    my ($inj) = @_;
+    my $mode = $inj->{mode};
+    my $key = $inj->{key};
+    my $parent = $inj->{parent};
+    my $keys = $inj->{keys};
+    my $path = $inj->{path};
+    if ($mode == M_KEYPRE) {
+        my $childtm = getprop($parent, $key);
+        my $pkey = getelem($path, -2);
+        my $tval = getprop($inj->{dparent}, $pkey);
+        if (!defined $tval || is_none($tval)) { $tval = _mkmap() }
+        elsif (!ismap($tval)) {
+            push @{ $inj->{errs} }, _invalid_type_msg(slice($inj->{path}, -1), S_object, typify($tval), $tval, 'V0220');
+            return NONE();
+        }
+        my $ckeys = keysof($tval);
+        for my $ckey (@$ckeys) {
+            setprop($parent, $ckey, clone($childtm));
+            push @$keys, $ckey;
+        }
+        _inj_setval($inj, NONE());
+        return NONE();
+    }
+    if ($mode == M_VAL) {
+        if (!islist($parent)) {
+            push @{ $inj->{errs} }, 'Invalid $CHILD as value';
+            return NONE();
+        }
+        my $childtm = _lookup($parent, 1);
+        if (is_none($inj->{dparent})) {
+            slice($parent, 0, 0, 1);
+            return NONE();
+        }
+        if (!islist($inj->{dparent})) {
+            my $msg = _invalid_type_msg(slice($inj->{path}, -1), S_list, typify($inj->{dparent}), $inj->{dparent}, 'V0230');
+            push @{ $inj->{errs} }, $msg;
+            $inj->{keyI} = size($parent);
+            return $inj->{dparent};
+        }
+        items($inj->{dparent}, sub {
+            my ($n) = @_;
+            setprop($parent, $n->[0], clone($childtm));
+        });
+        slice($parent, 0, scalar @{ $inj->{dparent} }, 1);
+        $inj->{keyI} = 0;
+        return getprop($inj->{dparent}, 0);
+    }
+    return NONE();
+}
+
+sub validate_ONE {
+    my ($inj, $val, $ref, $store) = @_;
+    my $mode = $inj->{mode};
+    my $parent = $inj->{parent};
+    my $keyI = $inj->{keyI};
+    if ($mode == M_VAL) {
+        if (!islist($parent) || $keyI != 0) {
+            push @{ $inj->{errs} },
+                'The $ONE validator at field ' . pathify($inj->{path}, 1, 1) .
+                ' must be the first element of an array.';
+            return;
+        }
+        $inj->{keyI} = size($inj->{keys});
+        _inj_setval($inj, $inj->{dparent}, 2);
+        $inj->{path} = slice($inj->{path}, -1);
+        $inj->{key} = getelem($inj->{path}, -1);
+        my $tvals = slice($parent, 1);
+        if (size($tvals) == 0) {
+            push @{ $inj->{errs} },
+                'The $ONE validator at field ' . pathify($inj->{path}, 1, 1) .
+                ' must have at least one argument.';
+            return;
+        }
+        for my $tval (@$tvals) {
+            my $terrs = [];
+            my $vstore = merge([_mkmap(), $store], 1);
+            $vstore->{ S_DTOP() } = $inj->{dparent};
+            my $vcurrent = validate($inj->{dparent}, $tval, {
+                extra => $vstore,
+                errs  => $terrs,
+                meta  => $inj->{meta},
+            });
+            _inj_setval($inj, $vcurrent, -2);
+            return if size($terrs) == 0;
+        }
+        my $valdesc = CORE::join(', ', map { stringify($_) } @$tvals);
+        $valdesc =~ s/`\$([A-Z]+)`/lc($1)/ge;
+        push @{ $inj->{errs} }, _invalid_type_msg(
+            $inj->{path},
+            (size($tvals) > 1 ? 'one of ' : '') . $valdesc,
+            typify($inj->{dparent}),
+            $inj->{dparent},
+            'V0210',
+        );
+    }
+}
+
+sub validate_EXACT {
+    my ($inj) = @_;
+    my $mode = $inj->{mode};
+    my $parent = $inj->{parent};
+    my $key = $inj->{key};
+    my $keyI = $inj->{keyI};
+    if ($mode == M_VAL) {
+        if (!islist($parent) || $keyI != 0) {
+            push @{ $inj->{errs} },
+                'The $EXACT validator at field ' . pathify($inj->{path}, 1, 1) .
+                ' must be the first element of an array.';
+            return;
+        }
+        $inj->{keyI} = size($inj->{keys});
+        _inj_setval($inj, $inj->{dparent}, 2);
+        $inj->{path} = slice($inj->{path}, 0, -1);
+        $inj->{key} = getelem($inj->{path}, -1);
+        my $tvals = slice($parent, 1);
+        if (size($tvals) == 0) {
+            push @{ $inj->{errs} },
+                'The $EXACT validator at field ' . pathify($inj->{path}, 1, 1) .
+                ' must have at least one argument.';
+            return;
+        }
+        my $currentstr;
+        for my $tval (@$tvals) {
+            my $exactmatch = _exact_eq($tval, $inj->{dparent});
+            if (!$exactmatch && isnode($tval)) {
+                $currentstr //= stringify($inj->{dparent});
+                my $tvalstr = stringify($tval);
+                $exactmatch = ($tvalstr eq $currentstr);
+            }
+            return if $exactmatch;
+        }
+        my $valdesc = CORE::join(', ', map { stringify($_) } @$tvals);
+        $valdesc =~ s/`\$([A-Z]+)`/lc($1)/ge;
+        push @{ $inj->{errs} }, _invalid_type_msg(
+            $inj->{path},
+            (size($inj->{path}) > 1 ? '' : 'value ') . 'exactly equal to ' .
+                (size($tvals) == 1 ? '' : 'one of ') . $valdesc,
+            typify($inj->{dparent}),
+            $inj->{dparent},
+            'V0110',
+        );
+    }
+    else {
+        delprop($parent, $key);
+    }
+}
+
+sub _exact_eq {
+    my ($a, $b) = @_;
+    # NONE/undef: treat both forms as equivalent.
+    my $a_na = !defined $a || is_none($a);
+    my $b_na = !defined $b || is_none($b);
+    return 1 if $a_na && $b_na;
+    return 0 if $a_na || $b_na;
+    return 1 if is_jnull($a) && is_jnull($b);
+    return 0 if is_jnull($a) || is_jnull($b);
+    if (is_jbool($a) && is_jbool($b)) { return $$a == $$b }
+    return 0 if is_jbool($a) || is_jbool($b);
+    if (!ref($a) && !ref($b)) {
+        if (_is_number_sv($a) && _is_number_sv($b)) {
+            return 0 + $a == 0 + $b;
+        }
+        return "$a" eq "$b";
+    }
+    return 0;
+}
+
+# Validation modify: runs after each child's inject pass.
+sub _validation {
+    my ($pval, $key, $parent, $inj) = @_;
+    return if is_none($inj);
+    return if is_sentinel($pval) && (_map_keys($pval))[0] eq '`$SKIP`';
+    my $exact = getprop($inj->{meta}, S_BEXACT, $JFALSE);
+    my $exact_bool = is_jbool($exact) ? !!$$exact : ($exact ? 1 : 0);
+    my $cval = getprop($inj->{dparent}, $key);
+    return if is_none($inj) || (!$exact_bool && is_none($cval));
+    my $ptype = typify($pval);
+    if (($ptype & T_string) && defined $pval && !ref($pval) && index($pval, S_DS) >= 0) {
+        return;
+    }
+    my $ctype = typify($cval);
+    if ($ptype != $ctype && !is_none($pval)) {
+        push @{ $inj->{errs} },
+            _invalid_type_msg($inj->{path}, typename($ptype), $ctype, $cval, 'V0010');
+        return;
+    }
+    if (ismap($cval)) {
+        if (!ismap($pval)) {
+            push @{ $inj->{errs} },
+                _invalid_type_msg($inj->{path}, typename($ptype), $ctype, $cval, 'V0020');
+            return;
+        }
+        my $ckeys = keysof($cval);
+        my $pkeys = keysof($pval);
+        my $open_flag = getprop($pval, '`$OPEN`');
+        my $is_open = is_jbool($open_flag) ? !!$$open_flag : ($open_flag ? 1 : 0);
+        if (size($pkeys) > 0 && !$is_open) {
+            my @badkeys;
+            for my $ck (@$ckeys) {
+                if (is_none(_lookup($pval, $ck))) {
+                    push @badkeys, $ck;
+                }
+            }
+            if (@badkeys) {
+                push @{ $inj->{errs} },
+                    'Unexpected keys at field ' . pathify($inj->{path}, 1) . S_VIZ . CORE::join(', ', @badkeys);
+            }
+        }
+        else {
+            merge([$pval, $cval]);
+            if (isnode($pval)) { delprop($pval, '`$OPEN`') }
+        }
+    }
+    elsif (islist($cval)) {
+        if (!islist($pval)) {
+            push @{ $inj->{errs} },
+                _invalid_type_msg($inj->{path}, typename($ptype), $ctype, $cval, 'V0030');
+        }
+    }
+    elsif ($exact_bool) {
+        my $eq = _exact_eq($cval, $pval);
+        if (!$eq) {
+            my $pathmsg = size($inj->{path}) > 1
+                ? 'at field ' . pathify($inj->{path}, 1) . S_VIZ
+                : S_MT;
+            push @{ $inj->{errs} },
+                'Value ' . $pathmsg . stringify($cval) . ' should equal ' . stringify($pval) . S_DT;
+        }
+    }
+    else {
+        setprop($parent, $key, $cval);
+    }
+    return;
+}
+
+sub _validatehandler {
+    my ($inj, $val, $ref, $store) = @_;
+    if (defined $ref && !ref($ref) && $ref =~ $R_META_PATH) {
+        my ($name, $sym, $rest) = ($1, $2, $3);
+        if ($sym eq '=') {
+            _inj_setval($inj, [S_BEXACT, $val]);
+        }
+        else {
+            _inj_setval($inj, $val);
+        }
+        $inj->{keyI} = -1;
+        return SKIP();
+    }
+    return _injecthandler($inj, $val, $ref, $store);
+}
+
+sub validate {
+    my ($data, $spec, $injdef) = @_;
+    my $extra = defined $injdef ? $injdef->{extra} : undef;
+    my $collect = defined $injdef && defined $injdef->{errs};
+    my $errs = ($injdef && $injdef->{errs}) ? $injdef->{errs} : [];
+    my $base = jm(
+        '$DELETE', $JNULL,
+        '$COPY',   $JNULL,
+        '$KEY',    $JNULL,
+        '$META',   $JNULL,
+        '$MERGE',  $JNULL,
+        '$EACH',   $JNULL,
+        '$PACK',   $JNULL,
+        '$STRING',   \&validate_STRING,
+        '$NUMBER',   \&validate_TYPE,
+        '$INTEGER',  \&validate_TYPE,
+        '$DECIMAL',  \&validate_TYPE,
+        '$BOOLEAN',  \&validate_TYPE,
+        '$NULL',     \&validate_TYPE,
+        '$NIL',      \&validate_TYPE,
+        '$MAP',      \&validate_TYPE,
+        '$LIST',     \&validate_TYPE,
+        '$FUNCTION', \&validate_TYPE,
+        '$INSTANCE', \&validate_TYPE,
+        '$ANY',      \&validate_ANY,
+        '$CHILD',    \&validate_CHILD,
+        '$ONE',      \&validate_ONE,
+        '$EXACT',    \&validate_EXACT,
+    );
+    my $errsmap = jm(S_DERRS, $errs);
+    my $store = merge([$base, getdef($extra, _mkmap()), $errsmap], 1);
+    my $meta = getprop($injdef, 'meta', _mkmap());
+    setprop($meta, S_BEXACT, getprop($meta, S_BEXACT, $JFALSE));
+    my $out = transform($data, $spec, {
+        meta    => $meta,
+        extra   => $store,
+        modify  => \&_validation,
+        handler => \&_validatehandler,
+        errs    => $errs,
+    });
+    if (size($errs) > 0 && !$collect) {
+        die CORE::join(' | ', map { defined $_ ? "$_" : '' } @$errs);
+    }
+    return $out;
+}
+
+# ============================================================================
+# Select operators (4)
+# ============================================================================
+
+sub select_AND {
+    my ($inj, $val, $ref, $store) = @_;
+    return NONE() unless $inj->{mode} == M_KEYPRE;
+    my $terms = _lookup($inj->{parent}, $inj->{key});
+    my $ppath = slice($inj->{path}, -1);
+    my $point = getpath($store, $ppath);
+    my $vstore = merge([_mkmap(), $store], 1);
+    $vstore->{ S_DTOP() } = $point;
+    for my $term (@$terms) {
+        my $terrs = [];
+        validate($point, $term, {
+            extra => $vstore,
+            errs  => $terrs,
+            meta  => $inj->{meta},
+        });
+        if (size($terrs) != 0) {
+            push @{ $inj->{errs} },
+                'AND:' . pathify($ppath) . S_VIZ . stringify($point) .
+                ' fail:' . stringify($terms);
+        }
+    }
+    my $gkey = getelem($inj->{path}, -2);
+    my $gp = getelem($inj->{nodes}, -2);
+    setprop($gp, $gkey, $point);
+    return NONE();
+}
+
+sub select_OR {
+    my ($inj, $val, $ref, $store) = @_;
+    return NONE() unless $inj->{mode} == M_KEYPRE;
+    my $terms = _lookup($inj->{parent}, $inj->{key});
+    my $ppath = slice($inj->{path}, -1);
+    my $point = getpath($store, $ppath);
+    my $vstore = merge([_mkmap(), $store], 1);
+    $vstore->{ S_DTOP() } = $point;
+    for my $term (@$terms) {
+        my $terrs = [];
+        validate($point, $term, {
+            extra => $vstore,
+            errs  => $terrs,
+            meta  => $inj->{meta},
+        });
+        if (size($terrs) == 0) {
+            my $gkey = getelem($inj->{path}, -2);
+            my $gp = getelem($inj->{nodes}, -2);
+            setprop($gp, $gkey, $point);
+            return NONE();
+        }
+    }
+    push @{ $inj->{errs} },
+        'OR:' . pathify($ppath) . S_VIZ . stringify($point) .
+        ' fail:' . stringify($terms);
+    return NONE();
+}
+
+sub select_NOT {
+    my ($inj, $val, $ref, $store) = @_;
+    return NONE() unless $inj->{mode} == M_KEYPRE;
+    my $term = _lookup($inj->{parent}, $inj->{key});
+    my $ppath = slice($inj->{path}, -1);
+    my $point = getpath($store, $ppath);
+    my $vstore = merge([_mkmap(), $store], 1);
+    $vstore->{ S_DTOP() } = $point;
+    my $terrs = [];
+    validate($point, $term, {
+        extra => $vstore,
+        errs  => $terrs,
+        meta  => $inj->{meta},
+    });
+    if (size($terrs) == 0) {
+        push @{ $inj->{errs} },
+            'NOT:' . pathify($ppath) . S_VIZ . stringify($point) .
+            ' fail:' . stringify($term);
+    }
+    my $gkey = getelem($inj->{path}, -2);
+    my $gp = getelem($inj->{nodes}, -2);
+    setprop($gp, $gkey, $point);
+    return NONE();
+}
+
+sub select_CMP {
+    my ($inj, $val, $ref, $store) = @_;
+    return NONE() unless $inj->{mode} == M_KEYPRE;
+    my $term = _lookup($inj->{parent}, $inj->{key});
+    my $gkey = getelem($inj->{path}, -2);
+    my $ppath = slice($inj->{path}, -1);
+    my $point = getpath($store, $ppath);
+    my $pass = 0;
+    # NOTE: avoid numifying $point / $term via `0 + $x` — that mutates the
+    # SV's IOK flag (so a string "123" becomes typify=integer afterwards).
+    # We probe types via Scalar::Util::looks_like_number on a COPY.
+    my $pc = $point;
+    my $tc = $term;
+    my $both_num = defined $point && defined $term
+        && !ref($point) && !ref($term)
+        && looks_like_number($pc) && looks_like_number($tc);
+    if ($ref eq '$GT') {
+        $pass = $both_num ? ((0 + $pc) > (0 + $tc))
+              : (defined $point && defined $term && "$point" gt "$term");
+    }
+    elsif ($ref eq '$LT') {
+        $pass = $both_num ? ((0 + $pc) < (0 + $tc))
+              : (defined $point && defined $term && "$point" lt "$term");
+    }
+    elsif ($ref eq '$GTE') {
+        $pass = $both_num ? ((0 + $pc) >= (0 + $tc))
+              : (defined $point && defined $term && "$point" ge "$term");
+    }
+    elsif ($ref eq '$LTE') {
+        $pass = $both_num ? ((0 + $pc) <= (0 + $tc))
+              : (defined $point && defined $term && "$point" le "$term");
+    }
+    elsif ($ref eq '$LIKE') {
+        my $s = stringify($point);
+        $pass = (defined $term && $s =~ /$term/) ? 1 : 0;
+    }
+    if ($pass) {
+        my $gp = getelem($inj->{nodes}, -2);
+        setprop($gp, $gkey, $point);
+    }
+    else {
+        push @{ $inj->{errs} },
+            'CMP: ' . pathify($ppath) . S_VIZ . stringify($point) .
+            ' fail:' . $ref . ' ' . stringify($term);
+    }
+    return NONE();
+}
+
+sub select {
+    my ($children, $query) = @_;
+    return [] unless isnode($children);
+    if (ismap($children)) {
+        $children = items($children, sub {
+            my ($n) = @_;
+            setprop($n->[1], S_DKEY, $n->[0]);
+            return $n->[1];
+        });
+    }
+    else {
+        $children = items($children, sub {
+            my ($n) = @_;
+            setprop($n->[1], S_DKEY, int($n->[0]));
+            return $n->[1];
+        });
+    }
+    my $results = [];
+    my $meta = _mkmap();
+    $meta->{ S_BEXACT() } = $JTRUE;
+    my $extra = jm(
+        '$AND',  \&select_AND,
+        '$OR',   \&select_OR,
+        '$NOT',  \&select_NOT,
+        '$GT',   \&select_CMP,
+        '$LT',   \&select_CMP,
+        '$GTE',  \&select_CMP,
+        '$LTE',  \&select_CMP,
+        '$LIKE', \&select_CMP,
+    );
+    my $q = clone($query);
+    walk($q, sub {
+        my ($k, $v) = @_;
+        if (ismap($v)) {
+            my $existing = getprop($v, '`$OPEN`', $JTRUE);
+            setprop($v, '`$OPEN`', $existing);
+        }
+        return $v;
+    });
+    for my $child (@$children) {
+        my $errs = [];
+        my $injdef = {
+            errs  => $errs,
+            meta  => $meta,
+            extra => $extra,
+        };
+        validate($child, clone($q), $injdef);
+        if (size($errs) == 0) {
+            push @$results, $child;
+        }
+    }
+    return $results;
 }
 
 1;

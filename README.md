@@ -39,7 +39,7 @@ syntax), and language-specific notes:
 | Zig        | Complete   | [`zig/README.md`](./zig/README.md)    |
 | Java       | Partial    | [`java/README.md`](./java/README.md)  |
 | C++        | Partial    | [`cpp/README.md`](./cpp/README.md)    |
-| Perl       | Partial    | [`pl/README.md`](./pl/README.md)      |
+| Perl       | Complete   | [`pl/README.md`](./pl/README.md)      |
 
 The cross-language parity matrix lives in [`REPORT.md`](./REPORT.md).
 

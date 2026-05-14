@@ -1,7 +1,7 @@
 # Struct for Perl
 
 > Perl port of the canonical TypeScript implementation.
-> Status: partial — see [`../REPORT.md`](../REPORT.md).
+> Status: complete — full canonical parity, 700+ corpus cases passing.
 
 For motivation, language-neutral concepts, and the cross-language
 parity matrix, see the [top-level README](../README.md).
@@ -78,33 +78,30 @@ because they don't preserve insertion order.
   `filter`, `escre`, `escurl`, `join`, `jsonify`, `stringify`,
   `pathify`, `clone`, `delprop`, `setprop`, `typename`, `getdef`.
 - Major utilities: `walk`, `merge`, `setpath`, `getpath`.
+- `inject` (three-phase key processing) with `_injectstr` (full
+  and partial backtick refs) and `_injecthandler` (default command
+  dispatcher).
+- `transform` and the 11 transform commands: `$DELETE`, `$COPY`,
+  `$KEY`, `$META`, `$ANNO`, `$MERGE`, `$EACH`, `$PACK`, `$REF`,
+  `$FORMAT`, `$APPLY` (plus the `FORMATTER` table for $FORMAT:
+  `identity`, `upper`, `lower`, `string`, `number`, `integer`,
+  `concat`).
+- `validate` and the 15 validate checkers: `$STRING`, `$NUMBER`,
+  `$INTEGER`, `$DECIMAL`, `$BOOLEAN`, `$NULL`, `$NIL`, `$MAP`,
+  `$LIST`, `$FUNCTION`, `$INSTANCE`, `$ANY`, `$CHILD`, `$ONE`,
+  `$EXACT`.
+- `select` and the 4 select operators: `$AND`, `$OR`, `$NOT`,
+  `$CMP` (with `$GT`, `$LT`, `$GTE`, `$LTE`, `$LIKE`).
 - Type constants (`T_any`, `T_noval`, `T_boolean`, …, `T_node`),
   mode constants (`M_KEYPRE` / `M_KEYPOST` / `M_VAL`), modename
-  table, sentinels (`SKIP`, `DELETE`), boolean singletons (`JTRUE`,
-  `JFALSE`), null singleton (`JNULL`), absence sentinel (`NONE`).
-- `Injection` state, `inject` with three-phase key processing
-  (`M_KEYPRE` / `M_VAL` / `M_KEYPOST`), `_injectstr` for full /
-  partial backtick refs, `_injecthandler` (default command dispatcher).
-- Injection helpers: `checkPlacement`, `injectorArgs`, `injectChild`.
+  table, sentinels (`SKIP`, `DELETE`), boolean singletons
+  (`JTRUE`, `JFALSE`), null singleton (`JNULL`), absence sentinel
+  (`NONE`).
+- Injection helpers: `Injection` state (built as a hashref with
+  `_inj_child` / `_inj_descend` / `_inj_setval`), `checkPlacement`,
+  `injectorArgs`, `injectChild`.
 - Builder helpers: `jm` (insertion-ordered map literal), `jt`
   (list literal).
-
-### Not yet wired
-
-- The 11 transform commands (`$DELETE`, `$COPY`, `$KEY`, `$META`,
-  `$ANNO`, `$MERGE`, `$EACH`, `$PACK`, `$REF`, `$FORMAT`, `$APPLY`).
-- The 15 validate checkers (`$MAP`, `$LIST`, `$STRING`, `$NUMBER`,
-  `$INTEGER`, `$DECIMAL`, `$BOOLEAN`, `$NULL`, `$NIL`, `$FUNCTION`,
-  `$INSTANCE`, `$ANY`, `$CHILD`, `$ONE`, `$EXACT`).
-- The 4 select operators (`$AND`, `$OR`, `$NOT`, `$CMP`).
-- `transform`, `validate`, `select` (these are thin wrappers over
-  `inject` that register their respective command tables).
-
-The TS canonical command-table functions all follow the
-`Injector` signature already exercised by `_injecthandler` and
-`_injectstr` — so adding them is a direct translation rather than
-a structural change; see [`../REPORT.md`](../REPORT.md) for status
-across ports.
 
 ## Tests
 

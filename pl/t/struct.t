@@ -28,7 +28,9 @@ my $struct_spec = $spec->{struct};
 
 sub canon {
     my ($v) = @_;
-    return Voxgig::Struct::jsonify($v, 0);
+    # Map keys aren't significant for equality — sort them so the
+    # comparison ignores insertion order (matches node's deepStrictEqual).
+    return Voxgig::Struct::_stringify_inner($v, 1);
 }
 
 # Run a single set with a "subject" callback that takes `in` and returns the
@@ -208,6 +210,97 @@ if (Voxgig::Struct::ismap($struct_spec->{inject})) {
                    Voxgig::Struct::clone($in->{val}),
                    $in->{store});
            });
+}
+
+# Transform.
+if (Voxgig::Struct::ismap($struct_spec->{transform})) {
+    my $tx = $struct_spec->{transform};
+    if (Voxgig::Struct::ismap($tx->{basic}) && exists $tx->{basic}{in}) {
+        my $b = $tx->{basic};
+        my $got = eval { Voxgig::Struct::transform(
+            Voxgig::Struct::clone($b->{in}{data}),
+            Voxgig::Struct::clone($b->{in}{spec}),
+        ) };
+        is(canon($got), canon($b->{out}), 'transform.basic');
+    }
+    for my $sec (qw(paths cmds each pack ref apply)) {
+        runset("transform.$sec", $tx->{$sec}{set},
+               sub {
+                   my $in = $_[0];
+                   return Voxgig::Struct::transform(
+                       Voxgig::Struct::clone($in->{data}),
+                       Voxgig::Struct::clone($in->{spec}),
+                   );
+               });
+    }
+    # transform.format uses { null: false } — no NULLMARK fixup applied to
+    # input data, so genuine nulls flow through.
+    runset('transform.format', $tx->{format}{set},
+           sub {
+               my $in = $_[0];
+               return Voxgig::Struct::transform(
+                   Voxgig::Struct::clone($in->{data}),
+                   Voxgig::Struct::clone($in->{spec}),
+               );
+           });
+    # transform.modify uses a string-prefixer modifier.
+    runset('transform.modify', $tx->{modify}{set},
+           sub {
+               my $in = $_[0];
+               return Voxgig::Struct::transform(
+                   Voxgig::Struct::clone($in->{data}),
+                   Voxgig::Struct::clone($in->{spec}),
+                   { modify => sub {
+                       my ($val, $key, $parent) = @_;
+                       return unless defined $key && defined $parent && ref $parent;
+                       return if ref $val;
+                       return if !defined $val;
+                       return if Voxgig::Struct::is_jbool($val) || Voxgig::Struct::is_jnull($val);
+                       return unless Voxgig::Struct::_is_string_sv($val);
+                       my $new = '@' . $val;
+                       if (Voxgig::Struct::ismap($parent)) { $parent->{$key} = $new }
+                       elsif (Voxgig::Struct::islist($parent)) { $parent->[$key] = $new }
+                   }},
+               );
+           });
+}
+
+# Validate.
+if (Voxgig::Struct::ismap($struct_spec->{validate})) {
+    my $vd = $struct_spec->{validate};
+    for my $sec (qw(basic child one exact invalid special)) {
+        runset("validate.$sec", $vd->{$sec}{set},
+               sub {
+                   my $in = $_[0];
+                   return Voxgig::Struct::validate(
+                       Voxgig::Struct::clone($in->{data}),
+                       Voxgig::Struct::clone($in->{spec}),
+                       $in->{inj},
+                   );
+               });
+    }
+}
+
+# Select. Apply NULLMARK fixup (the canonical runner does this by default
+# with flags.null=true so a stored null encodes as "__NULL__" and exact-
+# match has a string to match against rather than a "key missing" state).
+# The runner ALSO fixJSONs the expected `out` for comparison.
+if (Voxgig::Struct::ismap($struct_spec->{select})) {
+    my $sl = $struct_spec->{select};
+    for my $sec (qw(basic operators edge alts)) {
+        my $entries = $sl->{$sec}{set};
+        next unless Voxgig::Struct::islist($entries);
+        for (my $i = 0; $i < @$entries; $i++) {
+            my $entry = $entries->[$i];
+            next unless Voxgig::Struct::ismap($entry);
+            my $in = $entry->{in};
+            my $obj   = $fix_null->(Voxgig::Struct::clone($in->{obj}));
+            my $query = $fix_null->(Voxgig::Struct::clone($in->{query}));
+            my $got = Voxgig::Struct::select($obj, $query);
+            my $exp = $fix_null->(Voxgig::Struct::clone($entry->{out}));
+            is(canon($got), canon($exp), "select.$sec#$i");
+        }
+    }
 }
 
 done_testing();
