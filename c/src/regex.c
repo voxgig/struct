@@ -27,7 +27,8 @@
 static char* re_strdup(const char* s) {
   size_t n = strlen(s);
   char* o = (char*)malloc(n + 1);
-  if (!o) abort();
+  if (!o)
+    abort();
   memcpy(o, s, n + 1);
   return o;
 }
@@ -37,17 +38,17 @@ static char* re_strdup(const char* s) {
  * ===========================================================================*/
 
 typedef enum {
-  OP_CHAR,    /* match one literal char  (data.c)          */
-  OP_ANY,     /* . (any char, byte for now)                 */
-  OP_CLASS,   /* character class                            */
-  OP_MATCH,   /* accept                                      */
-  OP_JMP,     /* unconditional jump to data.x                */
-  OP_SPLIT,   /* branch: try data.x first, else data.y       */
-  OP_SAVE,    /* record offset at slot data.i                */
-  OP_BOL,     /* ^                                            */
-  OP_EOL,     /* $                                            */
-  OP_WB,      /* \b                                           */
-  OP_NWB      /* \B                                           */
+  OP_CHAR,  /* match one literal char  (data.c)          */
+  OP_ANY,   /* . (any char, byte for now)                 */
+  OP_CLASS, /* character class                            */
+  OP_MATCH, /* accept                                      */
+  OP_JMP,   /* unconditional jump to data.x                */
+  OP_SPLIT, /* branch: try data.x first, else data.y       */
+  OP_SAVE,  /* record offset at slot data.i                */
+  OP_BOL,   /* ^                                            */
+  OP_EOL,   /* $                                            */
+  OP_WB,    /* \b                                           */
+  OP_NWB    /* \B                                           */
 } vs_op;
 
 /* Character class: a bitmap of 256 bits (32 bytes). Negation toggled at
@@ -59,11 +60,11 @@ typedef struct {
 typedef struct vs_insn {
   vs_op op;
   union {
-    int c;          /* char for OP_CHAR */
-    int slot;       /* slot index for OP_SAVE */
-    int jmp;        /* target index for OP_JMP */
+    int c;    /* char for OP_CHAR */
+    int slot; /* slot index for OP_SAVE */
+    int jmp;  /* target index for OP_JMP */
     struct {
-      int x, y;     /* SPLIT targets */
+      int x, y; /* SPLIT targets */
     } split;
     vs_charclass cc;
   } data;
@@ -84,11 +85,14 @@ struct vs_regex {
 };
 
 static void code_reserve(vs_regex* re, int extra) {
-  if (re->code_len + extra <= re->code_cap) return;
+  if (re->code_len + extra <= re->code_cap)
+    return;
   int nc = re->code_cap == 0 ? 32 : re->code_cap;
-  while (nc < re->code_len + extra) nc *= 2;
+  while (nc < re->code_len + extra)
+    nc *= 2;
   re->code = (vs_insn*)realloc(re->code, (size_t)nc * sizeof(vs_insn));
-  if (!re->code) abort();
+  if (!re->code)
+    abort();
   re->code_cap = nc;
 }
 
@@ -116,60 +120,62 @@ static void cc_set_range(vs_charclass* cc, int lo, int hi) {
     lo = hi;
     hi = t;
   }
-  for (int c = lo; c <= hi; c++) cc_set(cc, c);
+  for (int c = lo; c <= hi; c++)
+    cc_set(cc, c);
 }
 static bool cc_has(const vs_charclass* cc, int ch) {
   ch &= 0xFF;
   return (cc->bits[ch >> 3] >> (ch & 7)) & 1u;
 }
 static void cc_negate(vs_charclass* cc) {
-  for (int i = 0; i < 32; i++) cc->bits[i] = (uint8_t)~cc->bits[i];
+  for (int i = 0; i < 32; i++)
+    cc->bits[i] = (uint8_t)~cc->bits[i];
 }
 static void cc_predef(vs_charclass* cc, int c) {
   switch (c) {
-    case 'd':
-      cc_set_range(cc, '0', '9');
-      break;
-    case 'D':
-      cc_set_range(cc, 0, 255);
-      for (int x = '0'; x <= '9'; x++)
-        cc->bits[x >> 3] &= (uint8_t)~(1u << (x & 7));
-      break;
-    case 's':
-      cc_set(cc, ' ');
-      cc_set(cc, '\t');
-      cc_set(cc, '\n');
-      cc_set(cc, '\r');
-      cc_set(cc, '\f');
-      cc_set(cc, '\v');
-      break;
-    case 'S':
-      cc_set_range(cc, 0, 255);
-      cc->bits[' ' >> 3] &= (uint8_t)~(1u << (' ' & 7));
-      cc->bits['\t' >> 3] &= (uint8_t)~(1u << ('\t' & 7));
-      cc->bits['\n' >> 3] &= (uint8_t)~(1u << ('\n' & 7));
-      cc->bits['\r' >> 3] &= (uint8_t)~(1u << ('\r' & 7));
-      cc->bits['\f' >> 3] &= (uint8_t)~(1u << ('\f' & 7));
-      cc->bits['\v' >> 3] &= (uint8_t)~(1u << ('\v' & 7));
-      break;
-    case 'w':
-      cc_set_range(cc, '0', '9');
-      cc_set_range(cc, 'A', 'Z');
-      cc_set_range(cc, 'a', 'z');
-      cc_set(cc, '_');
-      break;
-    case 'W':
-      cc_set_range(cc, 0, 255);
-      for (int x = '0'; x <= '9'; x++)
-        cc->bits[x >> 3] &= (uint8_t)~(1u << (x & 7));
-      for (int x = 'A'; x <= 'Z'; x++)
-        cc->bits[x >> 3] &= (uint8_t)~(1u << (x & 7));
-      for (int x = 'a'; x <= 'z'; x++)
-        cc->bits[x >> 3] &= (uint8_t)~(1u << (x & 7));
-      cc->bits['_' >> 3] &= (uint8_t)~(1u << ('_' & 7));
-      break;
-    default:
-      break;
+  case 'd':
+    cc_set_range(cc, '0', '9');
+    break;
+  case 'D':
+    cc_set_range(cc, 0, 255);
+    for (int x = '0'; x <= '9'; x++)
+      cc->bits[x >> 3] &= (uint8_t) ~(1u << (x & 7));
+    break;
+  case 's':
+    cc_set(cc, ' ');
+    cc_set(cc, '\t');
+    cc_set(cc, '\n');
+    cc_set(cc, '\r');
+    cc_set(cc, '\f');
+    cc_set(cc, '\v');
+    break;
+  case 'S':
+    cc_set_range(cc, 0, 255);
+    cc->bits[' ' >> 3] &= (uint8_t) ~(1u << (' ' & 7));
+    cc->bits['\t' >> 3] &= (uint8_t) ~(1u << ('\t' & 7));
+    cc->bits['\n' >> 3] &= (uint8_t) ~(1u << ('\n' & 7));
+    cc->bits['\r' >> 3] &= (uint8_t) ~(1u << ('\r' & 7));
+    cc->bits['\f' >> 3] &= (uint8_t) ~(1u << ('\f' & 7));
+    cc->bits['\v' >> 3] &= (uint8_t) ~(1u << ('\v' & 7));
+    break;
+  case 'w':
+    cc_set_range(cc, '0', '9');
+    cc_set_range(cc, 'A', 'Z');
+    cc_set_range(cc, 'a', 'z');
+    cc_set(cc, '_');
+    break;
+  case 'W':
+    cc_set_range(cc, 0, 255);
+    for (int x = '0'; x <= '9'; x++)
+      cc->bits[x >> 3] &= (uint8_t) ~(1u << (x & 7));
+    for (int x = 'A'; x <= 'Z'; x++)
+      cc->bits[x >> 3] &= (uint8_t) ~(1u << (x & 7));
+    for (int x = 'a'; x <= 'z'; x++)
+      cc->bits[x >> 3] &= (uint8_t) ~(1u << (x & 7));
+    cc->bits['_' >> 3] &= (uint8_t) ~(1u << ('_' & 7));
+    break;
+  default:
+    break;
   }
 }
 
@@ -189,14 +195,18 @@ typedef struct {
 static void perr(parser* p, const char* msg) {
   if (!p->err) {
     p->err = (char*)malloc(64 + strlen(msg));
-    if (p->err) snprintf(p->err, 64 + strlen(msg), "regex parse error at %zu: %s", p->pos, msg);
+    if (p->err)
+      snprintf(p->err, 64 + strlen(msg), "regex parse error at %zu: %s", p->pos, msg);
   }
 }
 
 static int hexval(int c) {
-  if (c >= '0' && c <= '9') return c - '0';
-  if (c >= 'a' && c <= 'f') return 10 + c - 'a';
-  if (c >= 'A' && c <= 'F') return 10 + c - 'A';
+  if (c >= '0' && c <= '9')
+    return c - '0';
+  if (c >= 'a' && c <= 'f')
+    return 10 + c - 'a';
+  if (c >= 'A' && c <= 'F')
+    return 10 + c - 'A';
   return -1;
 }
 
@@ -210,51 +220,51 @@ static int parse_escape(parser* p, int* predef_ch) {
   }
   int c = (unsigned char)p->src[p->pos++];
   switch (c) {
-    case 'n':
-      return '\n';
-    case 't':
-      return '\t';
-    case 'r':
-      return '\r';
-    case 'f':
-      return '\f';
-    case 'v':
-      return '\v';
-    case '0':
-      return '\0';
-    case 'a':
-      return '\a';
-    case 'e':
-      return 27;
-    case 'x': {
-      if (p->pos + 1 >= p->slen) {
-        perr(p, "bad \\xNN");
-        return 0;
-      }
-      int h1 = hexval((unsigned char)p->src[p->pos]);
-      int h2 = hexval((unsigned char)p->src[p->pos + 1]);
-      if (h1 < 0 || h2 < 0) {
-        perr(p, "bad \\xNN");
-        return 0;
-      }
-      p->pos += 2;
-      return (h1 << 4) | h2;
+  case 'n':
+    return '\n';
+  case 't':
+    return '\t';
+  case 'r':
+    return '\r';
+  case 'f':
+    return '\f';
+  case 'v':
+    return '\v';
+  case '0':
+    return '\0';
+  case 'a':
+    return '\a';
+  case 'e':
+    return 27;
+  case 'x': {
+    if (p->pos + 1 >= p->slen) {
+      perr(p, "bad \\xNN");
+      return 0;
     }
-    case 'd':
-    case 'D':
-    case 's':
-    case 'S':
-    case 'w':
-    case 'W':
-      *predef_ch = c;
-      return -1;
-    case 'b':
-    case 'B':
-      *predef_ch = c;
-      return -2;
-    default:
-      /* Literal escape for metacharacters: \. \* \\ \+ \? \( \) \[ \] \{ \} \| \^ \$ */
-      return c;
+    int h1 = hexval((unsigned char)p->src[p->pos]);
+    int h2 = hexval((unsigned char)p->src[p->pos + 1]);
+    if (h1 < 0 || h2 < 0) {
+      perr(p, "bad \\xNN");
+      return 0;
+    }
+    p->pos += 2;
+    return (h1 << 4) | h2;
+  }
+  case 'd':
+  case 'D':
+  case 's':
+  case 'S':
+  case 'w':
+  case 'W':
+    *predef_ch = c;
+    return -1;
+  case 'b':
+  case 'B':
+    *predef_ch = c;
+    return -2;
+  default:
+    /* Literal escape for metacharacters: \. \* \\ \+ \? \( \) \[ \] \{ \} \| \^ \$ */
+    return c;
   }
 }
 
@@ -282,7 +292,8 @@ static void parse_class(parser* p, vs_charclass* out) {
         vs_charclass sub;
         cc_zero(&sub);
         cc_predef(&sub, predef);
-        for (int i = 0; i < 32; i++) out->bits[i] |= sub.bits[i];
+        for (int i = 0; i < 32; i++)
+          out->bits[i] |= sub.bits[i];
         continue;
       }
       if (c == -2) {
@@ -301,7 +312,8 @@ static void parse_class(parser* p, vs_charclass* out) {
         p->pos++;
         int hpred = 0;
         hi = parse_escape(p, &hpred);
-        if (hi < 0) hi = '-';
+        if (hi < 0)
+          hi = '-';
       } else {
         hi = (unsigned char)p->src[p->pos++];
       }
@@ -315,12 +327,14 @@ static void parse_class(parser* p, vs_charclass* out) {
     return;
   }
   p->pos++;
-  if (neg) cc_negate(out);
+  if (neg)
+    cc_negate(out);
 }
 
 /* Parse one atom into the code stream; return index of the first emitted insn. */
 static int parse_atom(parser* p) {
-  if (p->pos >= p->slen) return p->re->code_len;
+  if (p->pos >= p->slen)
+    return p->re->code_len;
   int start = p->re->code_len;
   char c = p->src[p->pos];
   if (c == '(') {
@@ -334,8 +348,10 @@ static int parse_atom(parser* p) {
                p->src[p->pos + 2] == '<') {
       /* (?P<name>...) — named group. We don't expose names but still capture. */
       p->pos += 3;
-      while (p->pos < p->slen && p->src[p->pos] != '>') p->pos++;
-      if (p->pos < p->slen) p->pos++; /* eat '>' */
+      while (p->pos < p->slen && p->src[p->pos] != '>')
+        p->pos++;
+      if (p->pos < p->slen)
+        p->pos++; /* eat '>' */
     }
     if (capture) {
       group = p->next_group++;
@@ -403,12 +419,15 @@ static int code_clone(vs_regex* re, int from, int to) {
     /* Patch JMP / SPLIT targets that pointed inside the cloned range. */
     if (re->code[re->code_len].op == OP_JMP) {
       int t = re->code[re->code_len].data.jmp;
-      if (t >= from && t < to) re->code[re->code_len].data.jmp = t + delta;
+      if (t >= from && t < to)
+        re->code[re->code_len].data.jmp = t + delta;
     } else if (re->code[re->code_len].op == OP_SPLIT) {
       int x = re->code[re->code_len].data.split.x;
       int y = re->code[re->code_len].data.split.y;
-      if (x >= from && x < to) re->code[re->code_len].data.split.x = x + delta;
-      if (y >= from && y < to) re->code[re->code_len].data.split.y = y + delta;
+      if (x >= from && x < to)
+        re->code[re->code_len].data.split.x = x + delta;
+      if (y >= from && y < to)
+        re->code[re->code_len].data.split.y = y + delta;
     }
     re->code_len++;
   }
@@ -421,7 +440,8 @@ static void apply_quant(parser* p, int start, char q, int n_lo, int n_hi, bool l
   vs_regex* re = p->re;
   int end = re->code_len;
   int alen = end - start;
-  if (alen <= 0) return;
+  if (alen <= 0)
+    return;
 
   if (q == '*' || q == '+' || q == '?') {
     if (q == '?') {
@@ -435,7 +455,8 @@ static void apply_quant(parser* p, int start, char q, int n_lo, int n_hi, bool l
       re->code[start].data.split.y = lazy ? start + 1 : re->code_len;
       /* Patch jmp/split inside the moved block. */
       for (int i = start + 1; i < re->code_len; i++) {
-        if (re->code[i].op == OP_JMP) re->code[i].data.jmp += 1;
+        if (re->code[i].op == OP_JMP)
+          re->code[i].data.jmp += 1;
         else if (re->code[i].op == OP_SPLIT) {
           re->code[i].data.split.x += 1;
           re->code[i].data.split.y += 1;
@@ -450,7 +471,8 @@ static void apply_quant(parser* p, int start, char q, int n_lo, int n_hi, bool l
       re->code[start].data.split.x = lazy ? re->code_len + 1 : start + 1;
       re->code[start].data.split.y = lazy ? start + 1 : re->code_len + 1;
       for (int i = start + 1; i < re->code_len; i++) {
-        if (re->code[i].op == OP_JMP) re->code[i].data.jmp += 1;
+        if (re->code[i].op == OP_JMP)
+          re->code[i].data.jmp += 1;
         else if (re->code[i].op == OP_SPLIT) {
           re->code[i].data.split.x += 1;
           re->code[i].data.split.y += 1;
@@ -505,7 +527,8 @@ static int parse_concat(parser* p) {
   int start = p->re->code_len;
   while (p->pos < p->slen && p->src[p->pos] != ')' && p->src[p->pos] != '|') {
     int atom_start = parse_atom(p);
-    if (p->err) return start;
+    if (p->err)
+      return start;
     /* Quantifier? */
     if (p->pos < p->slen) {
       char q = p->src[p->pos];
@@ -546,8 +569,10 @@ static int parse_concat(parser* p) {
               got_hi = true;
               p->pos++;
             }
-            if (got_hi) n_hi = hi;
-            else open = true;
+            if (got_hi)
+              n_hi = hi;
+            else
+              open = true;
           }
           if (p->pos < p->slen && p->src[p->pos] == '}') {
             p->pos++;
@@ -570,7 +595,8 @@ static int parse_concat(parser* p) {
 static int parse_alt(parser* p) {
   vs_regex* re = p->re;
   int start = parse_concat(p);
-  if (p->err) return start;
+  if (p->err)
+    return start;
   while (p->pos < p->slen && p->src[p->pos] == '|') {
     /* Insert SPLIT at `start`, with x=start+1 and y=after-current. */
     int branch1_end = re->code_len;
@@ -579,15 +605,19 @@ static int parse_alt(parser* p) {
     int branch2_start = re->code_len;
     /* Shift to insert SPLIT at `start`. */
     code_reserve(re, 1);
-    memmove(&re->code[start + 1], &re->code[start], (size_t)(re->code_len - start) * sizeof(vs_insn));
+    memmove(&re->code[start + 1], &re->code[start],
+            (size_t)(re->code_len - start) * sizeof(vs_insn));
     re->code_len++;
     /* Patch jumps inside the moved block. */
     for (int i = start + 1; i < re->code_len; i++) {
       if (re->code[i].op == OP_JMP) {
-        if (re->code[i].data.jmp >= start) re->code[i].data.jmp += 1;
+        if (re->code[i].data.jmp >= start)
+          re->code[i].data.jmp += 1;
       } else if (re->code[i].op == OP_SPLIT) {
-        if (re->code[i].data.split.x >= start) re->code[i].data.split.x += 1;
-        if (re->code[i].data.split.y >= start) re->code[i].data.split.y += 1;
+        if (re->code[i].data.split.x >= start)
+          re->code[i].data.split.x += 1;
+        if (re->code[i].data.split.y >= start)
+          re->code[i].data.split.y += 1;
       }
     }
     re->code[start].op = OP_SPLIT;
@@ -608,10 +638,13 @@ static int parse_alt(parser* p) {
  * ===========================================================================*/
 
 vs_regex* vs_regex_compile(const char* pattern, char** err) {
-  if (err) *err = NULL;
-  if (!pattern) return NULL;
+  if (err)
+    *err = NULL;
+  if (!pattern)
+    return NULL;
   vs_regex* re = (vs_regex*)calloc(1, sizeof(vs_regex));
-  if (!re) return NULL;
+  if (!re)
+    return NULL;
   parser p = {0};
   p.src = pattern;
   p.slen = strlen(pattern);
@@ -623,11 +656,14 @@ vs_regex* vs_regex_compile(const char* pattern, char** err) {
   re->code[s].data.slot = 0;
   /* Detect leading ^ to set anchored_start (allows the matcher to skip
      scanning starts; ^ is also emitted normally). */
-  if (p.slen > 0 && p.src[0] == '^') re->anchored_start = true;
+  if (p.slen > 0 && p.src[0] == '^')
+    re->anchored_start = true;
   parse_alt(&p);
   if (p.err) {
-    if (err) *err = p.err;
-    else free(p.err);
+    if (err)
+      *err = p.err;
+    else
+      free(p.err);
     vs_regex_free(re);
     return NULL;
   }
@@ -648,7 +684,8 @@ vs_regex* vs_regex_compile(const char* pattern, char** err) {
 }
 
 void vs_regex_free(vs_regex* re) {
-  if (!re) return;
+  if (!re)
+    return;
   free(re->code);
   free(re);
 }
@@ -679,8 +716,10 @@ static int g_gen = 0;
 
 static thread_t* tl_add(threadlist* tl, int pc, const int* slots, int nslots, int sp,
                         const vs_regex* re, const char* input, size_t ilen) {
-  if (pc < 0 || pc >= re->code_len) return NULL;
-  if (tl->visited[pc] == g_gen) return NULL;
+  if (pc < 0 || pc >= re->code_len)
+    return NULL;
+  if (tl->visited[pc] == g_gen)
+    return NULL;
   tl->visited[pc] = g_gen;
 
   /* Follow epsilon-edges (JMP, SPLIT, SAVE, anchors) eagerly. */
@@ -694,7 +733,8 @@ static thread_t* tl_add(threadlist* tl, int pc, const int* slots, int nslots, in
   }
   if (in->op == OP_SAVE) {
     int* ns = (int*)malloc((size_t)nslots * sizeof(int));
-    if (!ns) abort();
+    if (!ns)
+      abort();
     memcpy(ns, slots, (size_t)nslots * sizeof(int));
     ns[in->data.slot] = sp;
     thread_t* t = tl_add(tl, pc + 1, ns, nslots, sp, re, input, ilen);
@@ -703,41 +743,47 @@ static thread_t* tl_add(threadlist* tl, int pc, const int* slots, int nslots, in
     return NULL;
   }
   if (in->op == OP_BOL) {
-    if (sp != 0 && input[sp - 1] != '\n') return NULL;
+    if (sp != 0 && input[sp - 1] != '\n')
+      return NULL;
     return tl_add(tl, pc + 1, slots, nslots, sp, re, input, ilen);
   }
   if (in->op == OP_EOL) {
-    if ((size_t)sp != ilen && input[sp] != '\n') return NULL;
+    if ((size_t)sp != ilen && input[sp] != '\n')
+      return NULL;
     return tl_add(tl, pc + 1, slots, nslots, sp, re, input, ilen);
   }
   if (in->op == OP_WB || in->op == OP_NWB) {
-    bool left = sp > 0 &&
-                (isalnum((unsigned char)input[sp - 1]) || (unsigned char)input[sp - 1] == '_');
-    bool right = (size_t)sp < ilen &&
-                 (isalnum((unsigned char)input[sp]) || (unsigned char)input[sp] == '_');
+    bool left =
+        sp > 0 && (isalnum((unsigned char)input[sp - 1]) || (unsigned char)input[sp - 1] == '_');
+    bool right =
+        (size_t)sp < ilen && (isalnum((unsigned char)input[sp]) || (unsigned char)input[sp] == '_');
     bool at_boundary = left != right;
     bool want = in->op == OP_WB;
-    if (at_boundary != want) return NULL;
+    if (at_boundary != want)
+      return NULL;
     return tl_add(tl, pc + 1, slots, nslots, sp, re, input, ilen);
   }
   /* Char-consuming op: queue the thread. */
   if (tl->len + 1 > tl->cap) {
     int nc = tl->cap == 0 ? 16 : tl->cap * 2;
     tl->threads = (thread_t*)realloc(tl->threads, (size_t)nc * sizeof(thread_t));
-    if (!tl->threads) abort();
+    if (!tl->threads)
+      abort();
     tl->cap = nc;
   }
   thread_t* t = &tl->threads[tl->len++];
   t->pc = pc;
   t->slots = (int*)malloc((size_t)nslots * sizeof(int));
-  if (!t->slots) abort();
+  if (!t->slots)
+    abort();
   memcpy(t->slots, slots, (size_t)nslots * sizeof(int));
   return t;
 }
 
 /* Free thread slot arrays. */
 static void tl_clear(threadlist* tl) {
-  for (int i = 0; i < tl->len; i++) free(tl->threads[i].slots);
+  for (int i = 0; i < tl->len; i++)
+    free(tl->threads[i].slots);
   tl->len = 0;
 }
 
@@ -748,7 +794,8 @@ static bool match_at(const vs_regex* re, const char* input, size_t ilen, int sta
   cur.visited = (int*)calloc((size_t)re->code_len, sizeof(int));
   nxt.visited = (int*)calloc((size_t)re->code_len, sizeof(int));
   int* init_slots = (int*)malloc((size_t)nslots * sizeof(int));
-  for (int i = 0; i < nslots; i++) init_slots[i] = -1;
+  for (int i = 0; i < nslots; i++)
+    init_slots[i] = -1;
 
   g_gen++;
   memset(cur.visited, 0, (size_t)re->code_len * sizeof(int));
@@ -757,7 +804,8 @@ static bool match_at(const vs_regex* re, const char* input, size_t ilen, int sta
 
   bool found = false;
   int* best_slots = (int*)malloc((size_t)nslots * sizeof(int));
-  for (int i = 0; i < nslots; i++) best_slots[i] = -1;
+  for (int i = 0; i < nslots; i++)
+    best_slots[i] = -1;
 
   int sp = start;
   while (cur.len > 0) {
@@ -768,9 +816,11 @@ static bool match_at(const vs_regex* re, const char* input, size_t ilen, int sta
       thread_t* th = &cur.threads[i];
       vs_insn* in = &re->code[th->pc];
       if (in->op == OP_CHAR) {
-        if (c == in->data.c) tl_add(&nxt, th->pc + 1, th->slots, nslots, sp + 1, re, input, ilen);
+        if (c == in->data.c)
+          tl_add(&nxt, th->pc + 1, th->slots, nslots, sp + 1, re, input, ilen);
       } else if (in->op == OP_ANY) {
-        if (c >= 0 && c != '\n') tl_add(&nxt, th->pc + 1, th->slots, nslots, sp + 1, re, input, ilen);
+        if (c >= 0 && c != '\n')
+          tl_add(&nxt, th->pc + 1, th->slots, nslots, sp + 1, re, input, ilen);
       } else if (in->op == OP_CLASS) {
         if (c >= 0 && cc_has(&in->data.cc, c))
           tl_add(&nxt, th->pc + 1, th->slots, nslots, sp + 1, re, input, ilen);
@@ -789,7 +839,8 @@ static bool match_at(const vs_regex* re, const char* input, size_t ilen, int sta
     cur = nxt;
     nxt = tmp;
     sp++;
-    if (cur.len == 0) break;
+    if (cur.len == 0)
+      break;
   }
   /* Handle EOI: drain the remaining current threads (some may have advanced
      past the last char and now point at MATCH via epsilons). */
@@ -818,17 +869,20 @@ static bool match_at(const vs_regex* re, const char* input, size_t ilen, int sta
 }
 
 bool vs_regex_find(const vs_regex* re, const char* input, size_t ilen, int* caps, int ncaps) {
-  if (!re || !input) return false;
+  if (!re || !input)
+    return false;
   int nslots = re->ngroups * 2;
   int* slots = (int*)malloc((size_t)nslots * sizeof(int));
-  if (!slots) return false;
+  if (!slots)
+    return false;
   bool ok = false;
   for (size_t start = 0; start <= ilen; start++) {
     if (match_at(re, input, ilen, (int)start, slots, nslots)) {
       ok = true;
       break;
     }
-    if (re->anchored_start) break;
+    if (re->anchored_start)
+      break;
   }
   if (ok && caps) {
     int copy = ncaps < re->ngroups ? ncaps : re->ngroups;
@@ -851,7 +905,8 @@ bool vs_regex_test(const vs_regex* re, const char* input, size_t ilen) {
 
 int vs_regex_find_all(const vs_regex* re, const char* input, size_t ilen, int* caps,
                       int max_matches) {
-  if (!re || !input) return 0;
+  if (!re || !input)
+    return 0;
   int per = 2 * VS_REGEX_MAX_GROUPS;
   int count = 0;
   size_t pos = 0;
@@ -865,13 +920,16 @@ int vs_regex_find_all(const vs_regex* re, const char* input, size_t ilen, int* c
         ok = true;
         break;
       }
-      if (re->anchored_start && start > pos) break;
+      if (re->anchored_start && start > pos)
+        break;
     }
-    if (!ok) break;
+    if (!ok)
+      break;
     if (caps) {
       int* row = caps + count * per;
       int copy = re->ngroups;
-      if (copy > VS_REGEX_MAX_GROUPS) copy = VS_REGEX_MAX_GROUPS;
+      if (copy > VS_REGEX_MAX_GROUPS)
+        copy = VS_REGEX_MAX_GROUPS;
       for (int g = 0; g < copy; g++) {
         row[2 * g] = slots[2 * g];
         row[2 * g + 1] = slots[2 * g + 1];
@@ -883,8 +941,10 @@ int vs_regex_find_all(const vs_regex* re, const char* input, size_t ilen, int* c
     }
     count++;
     /* Advance: if match was empty, step by 1 to avoid infinite loop. */
-    if (slots[1] == slots[0]) pos = (size_t)slots[1] + 1;
-    else pos = (size_t)slots[1];
+    if (slots[1] == slots[0])
+      pos = (size_t)slots[1] + 1;
+    else
+      pos = (size_t)slots[1];
   }
   free(slots);
   return count;
@@ -897,9 +957,11 @@ int vs_regex_find_all(const vs_regex* re, const char* input, size_t ilen, int* c
 static void sb_push(char** buf, size_t* len, size_t* cap, const char* s, size_t n) {
   if (*len + n + 1 > *cap) {
     size_t nc = *cap == 0 ? 64 : *cap;
-    while (nc < *len + n + 1) nc *= 2;
+    while (nc < *len + n + 1)
+      nc *= 2;
     *buf = (char*)realloc(*buf, nc);
-    if (!*buf) abort();
+    if (!*buf)
+      abort();
     *cap = nc;
   }
   memcpy(*buf + *len, s, n);
@@ -917,14 +979,16 @@ static char* expand_replacement(const char* repl, const int* caps, const char* i
       char nc = repl[i + 1];
       if (nc == '&') {
         int s = caps[0], e = caps[1];
-        if (s >= 0 && e >= s) sb_push(&out, &len, &cap, input + s, (size_t)(e - s));
+        if (s >= 0 && e >= s)
+          sb_push(&out, &len, &cap, input + s, (size_t)(e - s));
         i += 2;
         continue;
       }
       if (nc >= '0' && nc <= '9') {
         int g = nc - '0';
         int s = caps[2 * g], e = caps[2 * g + 1];
-        if (s >= 0 && e >= s) sb_push(&out, &len, &cap, input + s, (size_t)(e - s));
+        if (s >= 0 && e >= s)
+          sb_push(&out, &len, &cap, input + s, (size_t)(e - s));
         i += 2;
         continue;
       }
@@ -937,13 +1001,15 @@ static char* expand_replacement(const char* repl, const int* caps, const char* i
     sb_push(&out, &len, &cap, &repl[i], 1);
     i++;
   }
-  if (!out) out = re_strdup("");
+  if (!out)
+    out = re_strdup("");
   return out;
 }
 
 char* vs_regex_replace(const vs_regex* re, const char* input, size_t ilen,
                        const char* replacement) {
-  if (!re || !input) return NULL;
+  if (!re || !input)
+    return NULL;
   int nslots = re->ngroups * 2;
   int* slots = (int*)malloc((size_t)nslots * sizeof(int));
   char* out = NULL;
@@ -957,7 +1023,8 @@ char* vs_regex_replace(const vs_regex* re, const char* input, size_t ilen,
         ok = true;
         break;
       }
-      if (re->anchored_start && start > pos) break;
+      if (re->anchored_start && start > pos)
+        break;
     }
     if (!ok) {
       sb_push(&out, &len, &cap, input + pos, ilen - pos);
@@ -971,20 +1038,23 @@ char* vs_regex_replace(const vs_regex* re, const char* input, size_t ilen,
     /* Advance. */
     size_t mend = (size_t)slots[1];
     if ((int)mend == slots[0]) {
-      if (mend < ilen) sb_push(&out, &len, &cap, input + mend, 1);
+      if (mend < ilen)
+        sb_push(&out, &len, &cap, input + mend, 1);
       pos = mend + 1;
     } else {
       pos = mend;
     }
   }
-  if (!out) out = re_strdup("");
+  if (!out)
+    out = re_strdup("");
   free(slots);
   return out;
 }
 
 char* vs_regex_replace_cb_fn(const vs_regex* re, const char* input, size_t ilen,
                              vs_regex_replace_cb cb, void* ud) {
-  if (!re || !input) return NULL;
+  if (!re || !input)
+    return NULL;
   int nslots = re->ngroups * 2;
   int* slots = (int*)malloc((size_t)nslots * sizeof(int));
   char* out = NULL;
@@ -998,7 +1068,8 @@ char* vs_regex_replace_cb_fn(const vs_regex* re, const char* input, size_t ilen,
         ok = true;
         break;
       }
-      if (re->anchored_start && start > pos) break;
+      if (re->anchored_start && start > pos)
+        break;
     }
     if (!ok) {
       sb_push(&out, &len, &cap, input + pos, ilen - pos);
@@ -1010,13 +1081,15 @@ char* vs_regex_replace_cb_fn(const vs_regex* re, const char* input, size_t ilen,
     free(rep);
     size_t mend = (size_t)slots[1];
     if ((int)mend == slots[0]) {
-      if (mend < ilen) sb_push(&out, &len, &cap, input + mend, 1);
+      if (mend < ilen)
+        sb_push(&out, &len, &cap, input + mend, 1);
       pos = mend + 1;
     } else {
       pos = mend;
     }
   }
-  if (!out) out = re_strdup("");
+  if (!out)
+    out = re_strdup("");
   free(slots);
   return out;
 }

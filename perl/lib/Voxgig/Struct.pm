@@ -65,7 +65,7 @@ sub CLEAR {
 sub FIRSTKEY {
     my ($self) = @_;
     $self->{_iter} = 0;
-    return undef unless @{ $self->{_keys} };
+    return unless @{ $self->{_keys} };
     return $self->{_keys}[0];
 }
 
@@ -73,7 +73,7 @@ sub NEXTKEY {
     my ($self, $lastkey) = @_;
     $self->{_iter}++;
     my $i = $self->{_iter};
-    return undef if $i >= scalar @{ $self->{_keys} };
+    return if $i >= scalar @{ $self->{_keys} };
     return $self->{_keys}[$i];
 }
 
@@ -1173,7 +1173,7 @@ sub _walk_inner {
 sub merge {
     my ($vals, $depth) = @_;
     return $vals unless islist($vals);
-    return undef unless @$vals;
+    return unless @$vals;
     return $vals->[0] if @$vals == 1;
     my $out = $vals->[0];
     $depth = MAXDEPTH unless defined $depth;
@@ -2676,7 +2676,7 @@ sub re_test {
 # Single match. Returns [whole, $1, $2, ...] or undef. Mirrors JS String.match.
 sub re_find {
     my ($pattern, $input) = @_;
-    return undef unless defined $input;
+    return unless defined $input;
     my $re = re_compile($pattern);
     if ($input =~ $re) {
         my $whole = substr($input, $-[0], $+[0] - $-[0]);
@@ -2688,7 +2688,7 @@ sub re_find {
         }
         return [ $whole, @caps ];
     }
-    return undef;
+    return;
 }
 
 # All non-overlapping left-to-right matches. Same shape as re_find per element.

@@ -45,7 +45,9 @@ static void jp_skip_ws(jp* p) {
   }
 }
 
-static int jp_peek(jp* p) { return p->pos < p->len ? (unsigned char)p->src[p->pos] : -1; }
+static int jp_peek(jp* p) {
+  return p->pos < p->len ? (unsigned char)p->src[p->pos] : -1;
+}
 
 static bool jp_match(jp* p, const char* lit) {
   size_t n = strlen(lit);
@@ -326,7 +328,7 @@ vs_value* vs_parse_json(const char* text, size_t len) {
     return vs_new_undef();
   if (len == 0)
     len = strlen(text);
-  jp p = { .src = text, .len = len, .pos = 0 };
+  jp p = {.src = text, .len = len, .pos = 0};
   return jp_value(&p);
 }
 

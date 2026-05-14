@@ -15,11 +15,14 @@ build:
 test:
 	$(SWIFT) test --enable-test-discovery
 
-# `swift format` is bundled with the toolchain (`swift-format`); if it
-# isn't on PATH, lint is a no-op rather than a hard failure.
+# `swift format` is bundled with the Swift toolchain (`swift-format`).
+# Local soft-skip when not on PATH; CI hardens this by setting CI=true
+# so a missing tool is a hard failure.
 lint:
 	@if command -v swift-format >/dev/null 2>&1; then \
-		swift-format lint --recursive Sources Tests; \
+		swift-format lint --strict --recursive Sources Tests; \
+	elif [ "$$CI" = "true" ]; then \
+		echo "swift-format not installed (required in CI)"; exit 1; \
 	else \
 		echo "swift-format not installed — skipping lint"; \
 	fi

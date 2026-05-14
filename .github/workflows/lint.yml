@@ -165,3 +165,29 @@ jobs:
           dotnet-version: '8.0.x'
       - working-directory: ./csharp
         run: dotnet build VoxgigStruct.csproj -warnaserror -nologo
+
+  lint-c:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y clang-tidy clang-format
+      - working-directory: ./c
+        run: make lint
+
+  lint-perl:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y libperl-critic-perl
+      - working-directory: ./perl
+        run: make lint
+
+  lint-swift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: '6.0.2'
+      - working-directory: ./swift
+        run: make lint
