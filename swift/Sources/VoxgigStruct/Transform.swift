@@ -4,7 +4,6 @@
 // `$BT` / `$DS` / `$WHEN` / `$SPEC` are exposed as function values too.
 
 import Foundation
-import OrderedCollections
 
 // MARK: - $DELETE
 

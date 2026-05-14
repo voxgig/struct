@@ -182,9 +182,10 @@ cs/tests/corpus-scoreboard.json
 cs/tests/bin/
 cs/tests/obj/
 
-# Rust (rs port)
-rs/target/
-rs/Cargo.lock
+# Rust (rust port) — track Cargo.lock now that the port has no
+# third-party dependencies (the in-tree OrderedMap + LazyLock replaced
+# indexmap + once_cell, and serde_json is dev-only).
+rust/target/
 
 # Lint / static-analysis caches
 .ruff_cache/

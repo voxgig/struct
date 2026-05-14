@@ -7,7 +7,6 @@
 // recursive-descent parser that builds `VMap` directly.
 
 import Foundation
-import OrderedCollections
 
 public enum JSONParseError: Error {
     case unexpected(String, Int)

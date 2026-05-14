@@ -3,7 +3,6 @@
 // See ../REPORT.md for cross-language parity.
 
 import Foundation
-import OrderedCollections
 
 // MARK: - Sentinel
 //

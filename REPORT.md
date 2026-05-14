@@ -15,10 +15,14 @@ both pretty (`indent=2`) and compact (`indent=0`) forms.
 
 | Lib third-party | Test-runner third-party |
 |---|---|
-| **none** in any port (typescript/javascript/python/go/ruby/php/csharp/rust/zig stdlib; c/cpp/java/kotlin/lua use a hand printer) | c: **none** (vendored JSON parser in `src/value_io.c`); cpp: **none** (vendored JSON parser in `src/value_io.hpp`); java/kotlin: gson (test-scope only); lua: dkjson + luafilesystem (test-scope only); rust: serde_json (dev-dep only) |
+| **zero runtime third-party deps in any port.** Every port either uses its language's stdlib JSON (typescript/javascript/python/go/ruby/php/csharp/zig), hand-rolls a small JSON printer (c/cpp/java/kotlin/lua/swift/perl/rust), or pipes the corpus through the language's stdlib parser at test time. | c: **none** (vendored JSON parser in `src/value_io.c`); cpp: **none** (vendored JSON parser in `src/value_io.hpp`); java/kotlin: gson (test-scope only); lua: dkjson + luafilesystem (test-scope only); rust: serde_json (dev-dep only) |
 
-Rust still has `indexmap` for insertion-ordered maps — fills a stdlib
-gap the C/C++/Zig ports cover by hand-writing an OrderedMap.
+Languages whose stdlib lacks an insertion-ordered map (C, C++, Zig,
+Rust, Perl, Swift) all hand-roll one in-tree — `Map` inside
+`c/src/value.h`, `OrderedMap` inside `cpp/src/value.hpp` and
+`zig/src/struct.zig`, `rust/src/ordered_map.rs`,
+`swift/Sources/VoxgigStruct/OrderedDictionary.swift`, and
+`perl/lib/Voxgig/Struct.pm`'s `Voxgig::Struct::OrderedHash` tie class.
 
 Regex: every port either uses its language's built-in regex engine
 (RE2-syntax-superset, no dep) or has a vendored RE2-subset Thompson

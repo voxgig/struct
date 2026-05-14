@@ -12,8 +12,12 @@ name = "voxgig_struct"
 path = "src/lib.rs"
 
 [dependencies]
-indexmap = "2"
-once_cell = "1"
+# Zero runtime dependencies. The library uses only `std`:
+# - `OrderedMap` (insertion-ordered map) lives in `src/ordered_map.rs`.
+# - Regex engine lives in `src/re.rs`.
+# - Lazy statics use `std::sync::LazyLock` (stable since 1.80).
 
 [dev-dependencies]
+# Test-only: corpus loader uses serde_json to parse `test.json` into
+# `serde_json::Value`, then converts to our in-tree `Value`.
 serde_json = "1"

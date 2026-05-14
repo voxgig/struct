@@ -14,6 +14,7 @@ use std::rc::Rc;
 
 use crate::consts::*;
 use crate::mini::*;
+use crate::ordered_map::OrderedMap;
 use crate::value::{js_string, js_to_int32, js_to_number, Value};
 use crate::StructError;
 
@@ -825,7 +826,7 @@ pub fn inject(val: Value, store: &Value, injdef: Option<&InjectDef>) -> Value {
 /// Build the root injection for a top-level `inject` (mirrors the TS setup
 /// block when `injdef.mode == null`).
 fn make_root_injection(val: Value, store: &Value, injdef: Option<&InjectDef>) -> Inj {
-    let mut top = indexmap::IndexMap::new();
+    let mut top = OrderedMap::new();
     top.insert(S_DTOP.to_string(), val.clone());
     let inj = Injection::root(val, Value::map(top));
     {
@@ -1716,11 +1717,11 @@ pub fn transform(
         .unwrap_or_else(Value::empty_list);
 
     // split `extra` into data-extras (non-$) and transform-extras ($)
-    let mut extra_transforms = indexmap::IndexMap::new();
+    let mut extra_transforms = OrderedMap::new();
     let extra_data: Value = match &extra {
         None => Value::Noval,
         Some(e) => {
-            let mut a = indexmap::IndexMap::new();
+            let mut a = OrderedMap::new();
             for (k, v) in items_vec(e) {
                 if k.starts_with(S_DS) {
                     extra_transforms.insert(k, v);
@@ -1746,7 +1747,7 @@ pub fn transform(
 
     // build the transform store
     let origspec_for_thunk = origspec.clone();
-    let mut store_base: indexmap::IndexMap<String, Value> = indexmap::IndexMap::new();
+    let mut store_base: OrderedMap<Value> = OrderedMap::new();
     store_base.insert(S_DTOP.to_string(), data_clone);
     store_base.insert(
         "$SPEC".to_string(),
@@ -2294,7 +2295,7 @@ pub fn validate(
         .unwrap_or_else(Value::empty_list);
 
     // build the validator store
-    let mut vmap: indexmap::IndexMap<String, Value> = indexmap::IndexMap::new();
+    let mut vmap: OrderedMap<Value> = OrderedMap::new();
     for k in [
         "$DELETE", "$COPY", "$KEY", "$META", "$MERGE", "$EACH", "$PACK",
     ] {

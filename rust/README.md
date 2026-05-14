@@ -14,14 +14,19 @@ matrix, see the [top-level README](../README.md) and [`REPORT.md`](../REPORT.md)
 Inside the monorepo:
 
 ```bash
-cd rs
+cd rust
 cargo build
 cargo test          # runs the shared corpus (../build/test/test.json) against
                     # the implemented subsets
 ```
 
-Tested with a recent stable Rust (edition 2021). Crate: `voxgig-struct`;
-library path `voxgig_struct`.
+Tested with stable Rust 1.80+ (edition 2021). Crate: `voxgig-struct`;
+library path `voxgig_struct`. **Zero runtime third-party dependencies** —
+the insertion-ordered map type lives in-tree at
+[`src/ordered_map.rs`](./src/ordered_map.rs); lazy statics use
+`std::sync::LazyLock`; the regex engine lives at
+[`src/re.rs`](./src/re.rs). `serde_json` appears under
+`[dev-dependencies]` only — used by the test corpus loader.
 
 ```rust
 use voxgig_struct::{Value, get_path};

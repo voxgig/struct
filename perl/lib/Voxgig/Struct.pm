@@ -9,8 +9,84 @@ use warnings;
 use utf8;
 use Scalar::Util qw(blessed reftype looks_like_number refaddr);
 use List::Util qw();
-use Tie::IxHash;
 use B qw();
+
+# ============================================================================
+# Voxgig::Struct::OrderedHash — minimal insertion-ordered tied hash.
+#
+# Perl hashes randomise key order; the canonical contract requires that
+# JSON object key order survive every operation. Other ports either get
+# this for free (Python 3.7+ dict, Ruby Hash, PHP array, JS object) or
+# hand-roll an OrderedMap (C / C++ / Zig). This is the Perl equivalent —
+# keeps the port dependency-free. Implements the standard `Tie::Hash`
+# protocol plus a `Keys()` direct accessor for fast iteration.
+# ============================================================================
+
+package Voxgig::Struct::OrderedHash;
+
+sub TIEHASH {
+    my ($class) = @_;
+    return bless { _keys => [], _data => {} }, $class;
+}
+
+sub STORE {
+    my ($self, $key, $value) = @_;
+    if (!exists $self->{_data}{$key}) {
+        push @{ $self->{_keys} }, $key;
+    }
+    $self->{_data}{$key} = $value;
+    return $value;
+}
+
+sub FETCH {
+    my ($self, $key) = @_;
+    return $self->{_data}{$key};
+}
+
+sub EXISTS {
+    my ($self, $key) = @_;
+    return exists $self->{_data}{$key} ? 1 : 0;
+}
+
+sub DELETE {
+    my ($self, $key) = @_;
+    return unless exists $self->{_data}{$key};
+    my $v = delete $self->{_data}{$key};
+    @{ $self->{_keys} } = grep { $_ ne $key } @{ $self->{_keys} };
+    return $v;
+}
+
+sub CLEAR {
+    my ($self) = @_;
+    @{ $self->{_keys} } = ();
+    %{ $self->{_data} } = ();
+}
+
+sub FIRSTKEY {
+    my ($self) = @_;
+    $self->{_iter} = 0;
+    return undef unless @{ $self->{_keys} };
+    return $self->{_keys}[0];
+}
+
+sub NEXTKEY {
+    my ($self, $lastkey) = @_;
+    $self->{_iter}++;
+    my $i = $self->{_iter};
+    return undef if $i >= scalar @{ $self->{_keys} };
+    return $self->{_keys}[$i];
+}
+
+sub SCALAR {
+    my ($self) = @_;
+    return scalar @{ $self->{_keys} };
+}
+
+# Direct ordered-keys accessor (matches Tie::IxHash's `Keys` so the
+# rest of Voxgig::Struct's hot path can skip iterator overhead).
+sub Keys { @{ $_[0]{_keys} } }
+
+package Voxgig::Struct;
 
 # Distinguish numbers from strings at the SV level. JSON numbers come in with
 # IOK / NOK flags set (because our parser does `0+$n`); JSON strings stay
@@ -190,7 +266,7 @@ sub is_sentinel {
 sub _make_sentinel {
     my ($mark) = @_;
     my %h;
-    tie %h, 'Tie::IxHash';
+    tie %h, 'Voxgig::Struct::OrderedHash';
     $h{$mark} = $JTRUE;
     return bless \%h, 'Voxgig::Struct::Sentinel';
 }
@@ -218,7 +294,7 @@ use constant MAXDEPTH => 32;
 # Build a new empty insertion-ordered map.
 sub _mkmap {
     my %h;
-    tie %h, 'Tie::IxHash';
+    tie %h, 'Voxgig::Struct::OrderedHash';
     return \%h;
 }
 
@@ -256,7 +332,7 @@ sub _ensure_ordered {
     my @pairs;
     push @pairs, $_, $ref->{$_} for keys %$ref;
     %$ref = ();
-    tie %$ref, 'Tie::IxHash';
+    tie %$ref, 'Voxgig::Struct::OrderedHash';
     for (my $i = 0; $i < @pairs; $i += 2) {
         $ref->{ $pairs[$i] } = $pairs[ $i + 1 ];
     }
@@ -931,7 +1007,7 @@ sub _parse_object {
     my ($self) = @_;
     $self->{pos}++;  # consume {
     my %h;
-    tie %h, 'Tie::IxHash';
+    tie %h, 'Voxgig::Struct::OrderedHash';
     $self->_skip_ws;
     if ($self->_peek eq '}') { $self->{pos}++; return \%h }
     while (1) {

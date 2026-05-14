@@ -6,7 +6,8 @@
 // - `Noval` is the TS `undefined` — property absent. NOT a scalar.
 // - `Null` is JSON null — a real value, distinct from `Noval`.
 // - Lists and maps are `Rc<RefCell<...>>`: reference-stable, mutated in place.
-// - `IndexMap` preserves insertion order (the inject machinery needs it).
+// - `OrderedMap` preserves insertion order (the inject machinery needs it);
+//   defined inline in `ordered_map.rs` — no third-party dependency.
 // - `Func` carries callables that live inside the data (transform commands, etc.).
 // - `Sentinel` (SKIP / DELETE) is compared by pointer identity.
 
@@ -14,12 +15,11 @@ use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
 
-use indexmap::IndexMap;
-
 use crate::major::Inj;
+use crate::ordered_map::OrderedMap;
 
 pub type VList = Rc<RefCell<Vec<Value>>>;
-pub type VMap = Rc<RefCell<IndexMap<String, Value>>>;
+pub type VMap = Rc<RefCell<OrderedMap<Value>>>;
 
 /// Injector-shaped native function: `(inj, val, ref, store) -> any`.
 /// Thunks (e.g. `$WHEN`) just ignore the arguments. Takes the injection by
@@ -61,16 +61,16 @@ impl Value {
         Value::list(Vec::new())
     }
 
-    pub fn map(entries: IndexMap<String, Value>) -> Value {
+    pub fn map(entries: OrderedMap<Value>) -> Value {
         Value::Map(Rc::new(RefCell::new(entries)))
     }
 
     pub fn empty_map() -> Value {
-        Value::map(IndexMap::new())
+        Value::map(OrderedMap::new())
     }
 
     pub fn map_of<I: IntoIterator<Item = (String, Value)>>(pairs: I) -> Value {
-        let mut m = IndexMap::new();
+        let mut m = OrderedMap::new();
         for (k, v) in pairs {
             m.insert(k, v);
         }

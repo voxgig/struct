@@ -18,9 +18,10 @@ make test
 
 Tested with Perl 5.38. Module: [`lib/Voxgig/Struct.pm`](./lib/Voxgig/Struct.pm).
 
-The port has one non-core dependency, `Tie::IxHash`, for insertion-ordered
-hashes. Available as a Debian/Ubuntu package (`libtie-ixhash-perl`) or via
-CPAN.
+Zero runtime third-party dependencies — only core `Scalar::Util`,
+`List::Util` and `B`. The insertion-ordered hash type lives in-tree
+as the `Voxgig::Struct::OrderedHash` tie class at the top of the
+module.
 
 
 ## Quick start
@@ -50,7 +51,7 @@ JSON values, with two refinements:
 
 | JSON type | Perl form                                  |
 |-----------|--------------------------------------------|
-| object    | `HASH` ref, tied to `Tie::IxHash` so map key insertion order is preserved (matches the canonical TS contract). |
+| object    | `HASH` ref, tied to `Voxgig::Struct::OrderedHash` so map key insertion order is preserved (matches the canonical TS contract). |
 | array     | `ARRAY` ref.                               |
 | string    | plain scalar with `SVf_POK` only.          |
 | number    | plain scalar with `SVf_IOK` or `SVf_NOK` set. The in-tree JSON parser sets this so `getpath` can distinguish `"0.0"` (string path) from `0.0` (numeric path), matching TS's `typeof path` branch. |
@@ -66,7 +67,7 @@ preserves or removes the slot.
 ### JSON parser
 
 `Voxgig::Struct::parse_json($text)` returns a structure that uses the
-type rules above (in particular, `Tie::IxHash`-tied maps and
+type rules above (in particular, `Voxgig::Struct::OrderedHash`-tied maps and
 flag-marked numbers). `Cpanel::JSON::XS` / `JSON::PP` are not used
 because they don't preserve insertion order.
 

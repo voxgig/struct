@@ -21,10 +21,9 @@ cd swift
 make test
 ```
 
-Tested with Swift 6.0.2. One non-stdlib dependency:
-[`apple/swift-collections`](https://github.com/apple/swift-collections)
-for `OrderedDictionary` — required so insertion order survives the
-JSON parse round-trip (the canonical contract).
+Tested with Swift 6.0.2. **Zero runtime third-party dependencies** —
+only Foundation. The insertion-ordered map type lives in-tree at
+[`Sources/VoxgigStruct/OrderedDictionary.swift`](./Sources/VoxgigStruct/OrderedDictionary.swift).
 
 
 ## Quick start
@@ -86,7 +85,7 @@ or removes the slot.
 ### JSON parser
 
 `JSON.parse(text)` returns a `Value` that uses the type rules above
-(in particular, `Tie::IxHash`-equivalent `OrderedDictionary`-backed
+(in particular, the in-tree `OrderedDictionary`-backed
 maps and `.int` vs `.double` for integers vs decimals). The Foundation
 `JSONSerialization` is not used because it doesn't preserve insertion
 order. `JSON.stringify(value, indent: 2)` serialises back.
@@ -127,7 +126,7 @@ order. `JSON.stringify(value, indent: 2)` serialises back.
 
 - **Insertion-ordered maps:** Swift dictionaries don't preserve
   insertion order, so every map is backed by `OrderedDictionary`
-  from `apple/swift-collections`. The in-tree JSON parser builds
+  from the in-tree `OrderedDictionary`. The JSON parser builds
   these directly so object key order survives parsing.
 - **Number representation:** TS's `Number` is a single double; the
   port splits into `.int(Int64)` and `.double(Double)` so `typify`

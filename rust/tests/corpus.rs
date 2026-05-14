@@ -11,7 +11,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use indexmap::IndexMap;
+use voxgig_struct::ordered_map::OrderedMap;
 use serde_json::Value as J;
 
 use voxgig_struct::value::Value;
@@ -31,7 +31,7 @@ fn j_to_v(j: &J) -> Value {
         J::String(s) => Value::Str(s.clone()),
         J::Array(a) => Value::list(a.iter().map(j_to_v).collect()),
         J::Object(o) => {
-            let mut m = IndexMap::new();
+            let mut m = OrderedMap::new();
             for (k, v) in o.iter() {
                 m.insert(k.clone(), j_to_v(v));
             }
@@ -93,7 +93,7 @@ fn fix_json(v: &Value, null_flag: bool) -> Value {
         }
         Value::List(l) => Value::list(l.borrow().iter().map(|x| fix_json(x, null_flag)).collect()),
         Value::Map(m) => {
-            let mut nm = IndexMap::new();
+            let mut nm = OrderedMap::new();
             for (k, x) in m.borrow().iter() {
                 nm.insert(k.clone(), fix_json(x, null_flag));
             }
@@ -191,7 +191,7 @@ impl Run {
             let mut matched = false;
             if !match_spec.is_noval() {
                 // base = { in: entry.in (original), args: [vin (post-call)], out: res }
-                let mut base = IndexMap::new();
+                let mut base = OrderedMap::new();
                 base.insert("in".to_string(), vget(entry, "in"));
                 base.insert("args".to_string(), Value::list(vec![vin.clone()]));
                 base.insert("out".to_string(), res.clone());
@@ -300,7 +300,7 @@ impl Run {
                     let res = fix_json(&v, null_flag);
                     let mut matched = false;
                     if !match_spec.is_noval() {
-                        let mut base = IndexMap::new();
+                        let mut base = OrderedMap::new();
                         base.insert("in".to_string(), vget(entry, "in"));
                         base.insert("args".to_string(), Value::list(vec![vin.clone()]));
                         base.insert("out".to_string(), res.clone());
@@ -801,7 +801,7 @@ fn corpus() {
         |vin| {
             // getpath({ $TOP: store, $FOO: () => 'foo' }, path, { handler: (_inj, val) => val() })
             let store_inner = vget(&vin, "store");
-            let mut topmap = IndexMap::new();
+            let mut topmap = OrderedMap::new();
             topmap.insert("$TOP".to_string(), store_inner);
             topmap.insert(
                 "$FOO".to_string(),
@@ -994,7 +994,7 @@ fn corpus() {
         let check = vget_path(&spec, &["primary", "check"]);
         // resolve clients from DEF.client (options are inject()'d against {} — a no-op here)
         let def_clients = vget_path(&check, &["DEF", "client"]);
-        let mut clients: IndexMap<String, Value> = IndexMap::new();
+        let mut clients: OrderedMap<Value> = OrderedMap::new();
         if let Value::Map(m) = &def_clients {
             for (cn, cdef) in m.borrow().iter() {
                 let opts = vget_path(cdef, &["test", "options"]);

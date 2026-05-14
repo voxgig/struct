@@ -9,6 +9,7 @@
 #![allow(clippy::too_many_arguments)]
 
 pub mod consts;
+pub mod ordered_map;
 pub mod re;
 pub mod value;
 

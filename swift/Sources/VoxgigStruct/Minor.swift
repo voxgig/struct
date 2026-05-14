@@ -3,7 +3,6 @@
 // typescript/src/StructUtility.ts.
 
 import Foundation
-import OrderedCollections
 
 // MARK: - typename / typify / getdef
 

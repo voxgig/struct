@@ -5,7 +5,7 @@
 // helpers from StructUtility.ts. Names are idiomatic snake_case; see the
 // TS->Rust table in README.md.
 
-use indexmap::IndexMap;
+use crate::ordered_map::OrderedMap;
 use crate::re::{Captures, Regex, RegexError};
 
 use crate::consts::*;
@@ -649,7 +649,7 @@ fn json_encode(val: &Value, indent: usize, level: usize) -> Option<String> {
         Value::Str(s) => Some(json_quote(s)),
         Value::Sentinel(_) => {
             // a `{ '`$SKIP`': true }` map
-            let mut m = IndexMap::new();
+            let mut m = OrderedMap::new();
             let tag = match val {
                 Value::Sentinel(s) => s.tag.to_string(),
                 _ => unreachable!(),
@@ -928,7 +928,7 @@ pub fn clone(val: &Value) -> Value {
         Value::Str(s) => Value::Str(s.clone()),
         Value::List(l) => Value::list(l.borrow().iter().map(clone).collect()),
         Value::Map(m) => {
-            let mut nm = IndexMap::new();
+            let mut nm = OrderedMap::new();
             for (k, v) in m.borrow().iter() {
                 nm.insert(k.clone(), clone(v));
             }
@@ -1002,7 +1002,7 @@ pub fn set_prop(parent: Value, key: &Value, val: Value) -> Value {
 // ---- builders ---------------------------------------------------------
 
 pub fn jm(kv: &[Value]) -> Value {
-    let mut o = IndexMap::new();
+    let mut o = OrderedMap::new();
     let n = kv.len();
     let mut i = 0;
     while i < n {
