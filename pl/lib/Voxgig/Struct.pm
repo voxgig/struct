@@ -1,0 +1,1647 @@
+# Copyright (c) 2025-2026 Voxgig Ltd. MIT LICENSE.
+# Perl port of the canonical TypeScript implementation (ts/src/StructUtility.ts).
+# See ../REPORT.md for cross-language parity.
+package Voxgig::Struct;
+
+use 5.018;
+use strict;
+use warnings;
+use utf8;
+use Scalar::Util qw(blessed reftype looks_like_number refaddr);
+use List::Util qw();
+use Tie::IxHash;
+use B qw();
+
+# Distinguish numbers from strings at the SV level. JSON numbers come in with
+# IOK / NOK flags set (because our parser does `0+$n`); JSON strings stay
+# pure POK. Used in getpath / typify to keep TS's typeof(path) === 'number'
+# branch reachable.
+sub _is_number_sv {
+    my ($val) = @_;
+    return 0 unless defined $val;
+    return 0 if ref $val;
+    my $sv = B::svref_2object(\$val);
+    my $flags = $sv->FLAGS;
+    return ($flags & (B::SVf_NOK() | B::SVf_IOK())) ? 1 : 0;
+}
+
+sub _is_string_sv {
+    my ($val) = @_;
+    return 0 unless defined $val;
+    return 0 if ref $val;
+    my $sv = B::svref_2object(\$val);
+    my $flags = $sv->FLAGS;
+    # POK without IOK/NOK → pure string.
+    return ($flags & B::SVf_POK()) && !($flags & (B::SVf_NOK() | B::SVf_IOK())) ? 1 : 0;
+}
+
+our $VERSION = '0.0.10';
+
+# ============================================================================
+# Constants
+# ============================================================================
+
+# Injection modes (a key is injected three times: pre / val / post).
+use constant M_KEYPRE  => 1;
+use constant M_KEYPOST => 2;
+use constant M_VAL     => 4;
+
+# Backtick-quoted command names.
+use constant S_BKEY   => '`$KEY`';
+use constant S_BANNO  => '`$ANNO`';
+use constant S_BEXACT => '`$EXACT`';
+use constant S_BVAL   => '`$VAL`';
+use constant S_BOPEN  => '`$OPEN`';
+
+# Annotation keys.
+use constant S_DKEY  => '$KEY';
+use constant S_DTOP  => '$TOP';
+use constant S_DERRS => '$ERRS';
+use constant S_DSPEC => '$SPEC';
+use constant S_DMETA => '$META';
+
+# Type names.
+use constant S_list     => 'list';
+use constant S_base     => 'base';
+use constant S_boolean  => 'boolean';
+use constant S_function => 'function';
+use constant S_symbol   => 'symbol';
+use constant S_instance => 'instance';
+use constant S_key      => 'key';
+use constant S_any      => 'any';
+use constant S_nil      => 'nil';
+use constant S_null     => 'null';
+use constant S_number   => 'number';
+use constant S_object   => 'object';
+use constant S_string   => 'string';
+use constant S_decimal  => 'decimal';
+use constant S_integer  => 'integer';
+use constant S_map      => 'map';
+use constant S_scalar   => 'scalar';
+use constant S_node     => 'node';
+
+# Common single-character strings.
+use constant S_BT  => '`';
+use constant S_CN  => ':';
+use constant S_CS  => ']';
+use constant S_DS  => '$';
+use constant S_DT  => '.';
+use constant S_FS  => '/';
+use constant S_KEY => 'KEY';
+use constant S_MT  => '';
+use constant S_OS  => '[';
+use constant S_SP  => ' ';
+use constant S_CM  => ',';
+use constant S_VIZ => ': ';
+
+# Type bit flags. Same numeric layout as the canonical TS:
+# T_any is all-bits-below set; the others are distinct bits decreasing
+# down the list. The order matches TYPENAME below for table-driven lookup.
+use constant T_any      => (1 << 13) - 1;
+use constant T_noval    => 1 << 13;
+use constant T_boolean  => 1 << 12;
+use constant T_decimal  => 1 << 11;
+use constant T_integer  => 1 << 10;
+use constant T_number   => 1 << 9;
+use constant T_string   => 1 << 8;
+use constant T_function => 1 << 7;
+use constant T_symbol   => 1 << 6;
+use constant T_null     => 1 << 5;
+use constant T_list     => 1 << 4;
+use constant T_map      => 1 << 3;
+use constant T_instance => 1 << 2;
+use constant T_scalar   => 1 << 1;
+use constant T_node     => 1 << 0;
+
+our %TYPENAME = (
+    T_noval()    => S_nil,
+    T_boolean()  => S_boolean,
+    T_decimal()  => S_decimal,
+    T_integer()  => S_integer,
+    T_number()   => S_number,
+    T_string()   => S_string,
+    T_function() => S_function,
+    T_symbol()   => S_symbol,
+    T_null()     => S_null,
+    T_list()     => S_list,
+    T_map()      => S_map,
+    T_instance() => S_instance,
+    T_scalar()   => S_scalar,
+    T_node()     => S_node,
+);
+
+# Mode → human-readable name (mirrors TS MODENAME).
+our %MODENAME = (
+    M_KEYPRE()  => 'key:pre',
+    M_KEYPOST() => 'key:post',
+    M_VAL()     => 'val',
+);
+
+# Sentinel for "absent" (corresponds to TS undefined / Python NULLMARK).
+# Use a unique blessed reference — refaddr identifies it.
+our $NONE = do { my $x = \"$$"; bless $x, 'Voxgig::Struct::None' };
+sub NONE { return $NONE }
+sub is_none { return defined $_[0] && blessed($_[0]) && blessed($_[0]) eq 'Voxgig::Struct::None' }
+
+# JSON null sentinel — distinct from Perl undef (which is "absent").
+our $JNULL = bless \(my $jn_dummy = 'null'), 'Voxgig::Struct::Null';
+sub JNULL { return $JNULL }
+sub is_jnull { return defined $_[0] && blessed($_[0]) && blessed($_[0]) eq 'Voxgig::Struct::Null' }
+
+# Booleans (JSON true/false).
+our $JTRUE  = bless \(my $jt_dummy = 1), 'Voxgig::Struct::Bool';
+our $JFALSE = bless \(my $jf_dummy = 0), 'Voxgig::Struct::Bool';
+sub JTRUE  { return $JTRUE }
+sub JFALSE { return $JFALSE }
+sub is_jbool { return defined $_[0] && blessed($_[0]) && blessed($_[0]) eq 'Voxgig::Struct::Bool' }
+sub jbool { return $_[0] ? $JTRUE : $JFALSE }
+
+# Bool overloading so $JTRUE/$JFALSE evaluate sanely in boolean context.
+package Voxgig::Struct::Bool;
+use overload
+    'bool'  => sub { ${ $_[0] } ? 1 : 0 },
+    '0+'    => sub { ${ $_[0] } ? 1 : 0 },
+    '""'    => sub { ${ $_[0] } ? 'true' : 'false' },
+    fallback => 1;
+sub TO_JSON { return ${ $_[0] } ? \1 : \0 }
+package Voxgig::Struct;
+
+# Sentinels (immutable singletons). SKIP omits the slot, DELETE removes it.
+our $SKIP = _make_sentinel('`$SKIP`');
+our $DELETE = _make_sentinel('`$DELETE`');
+sub SKIP   { return $SKIP }
+sub DELETE { return $DELETE }
+sub is_sentinel {
+    my ($val) = @_;
+    return 0 unless defined $val && blessed($val) && blessed($val) eq 'Voxgig::Struct::Sentinel';
+    return 1;
+}
+
+sub _make_sentinel {
+    my ($mark) = @_;
+    my %h;
+    tie %h, 'Tie::IxHash';
+    $h{$mark} = $JTRUE;
+    return bless \%h, 'Voxgig::Struct::Sentinel';
+}
+
+# Common regex patterns (precompiled).
+our $R_INTEGER_KEY     = qr/^-?[0-9]+$/;
+our $R_ESCAPE_REGEXP   = qr/[.*+?^\${}()|\[\]\\]/;
+our $R_QUOTES          = qr/"/;
+our $R_DOT             = qr/\./;
+our $R_CLONE_REF       = qr/^`\$REF:([0-9]+)`$/;
+our $R_META_PATH       = qr/^([^\$]+)\$([=~])(.+)$/;
+our $R_DOUBLE_DOLLAR   = qr/\$\$/;
+our $R_TRANSFORM_NAME  = qr/`\$([A-Z]+)`/;
+our $R_INJECTION_FULL  = qr/^`(\$[A-Z]+|[^`]*)[0-9]*`$/;
+our $R_BT_ESCAPE       = qr/\$BT/;
+our $R_DS_ESCAPE       = qr/\$DS/;
+our $R_INJECTION_PARTIAL = qr/`([^`]+)`/;
+
+use constant MAXDEPTH => 32;
+
+# ============================================================================
+# Map helpers (insertion-ordered hashes via Tie::IxHash).
+# ============================================================================
+
+# Build a new empty insertion-ordered map.
+sub _mkmap {
+    my %h;
+    tie %h, 'Tie::IxHash';
+    return \%h;
+}
+
+# Build a new empty list.
+sub _mklist { return [] }
+
+# Detect whether a hash reference is tied to Tie::IxHash (i.e. our map type).
+sub _is_tied_hash {
+    my ($ref) = @_;
+    return 0 unless defined $ref;
+    my $r = ref $ref;
+    return 0 unless $r eq 'HASH';
+    return defined tied(%$ref) ? 1 : 0;
+}
+
+# Get the in-order keys of a map (or sorted-as-strings for plain hashes).
+sub _map_keys {
+    my ($ref) = @_;
+    return () unless ref $ref eq 'HASH';
+    if (my $tied = tied(%$ref)) {
+        return $tied->Keys;
+    }
+    return keys %$ref;
+}
+
+# Ensure a hash is tied to Tie::IxHash (preserving current keys/values in
+# their existing order). No-op if already tied.
+sub _ensure_ordered {
+    my ($ref) = @_;
+    return $ref unless ref $ref eq 'HASH';
+    return $ref if _is_tied_hash($ref);
+    my @pairs;
+    push @pairs, $_, $ref->{$_} for keys %$ref;
+    %$ref = ();
+    tie %$ref, 'Tie::IxHash';
+    for (my $i = 0; $i < @pairs; $i += 2) {
+        $ref->{ $pairs[$i] } = $pairs[ $i + 1 ];
+    }
+    return $ref;
+}
+
+# ============================================================================
+# Type predicates
+# ============================================================================
+
+sub typename {
+    my ($t) = @_;
+    return $TYPENAME{$t} // S_any;
+}
+
+sub getdef {
+    my ($val, $alt) = @_;
+    return is_none($val) ? $alt : (defined $val ? $val : $alt);
+}
+
+sub isnode {
+    my ($val) = @_;
+    return 0 unless defined $val;
+    return 0 if is_none($val) || is_jnull($val) || is_sentinel($val) || is_jbool($val);
+    return 0 unless ref $val;
+    my $r = reftype($val) // ref($val);
+    return 1 if $r eq 'HASH' || $r eq 'ARRAY';
+    return 0;
+}
+
+sub ismap {
+    my ($val) = @_;
+    return 0 unless defined $val;
+    return 0 if is_none($val) || is_jnull($val) || is_sentinel($val) || is_jbool($val);
+    return 0 unless ref $val;
+    my $r = reftype($val) // ref($val);
+    return $r eq 'HASH' ? 1 : 0;
+}
+
+sub islist {
+    my ($val) = @_;
+    return 0 unless defined $val;
+    return 0 if is_none($val) || is_jnull($val) || is_sentinel($val) || is_jbool($val);
+    return 0 unless ref $val;
+    my $r = reftype($val) // ref($val);
+    return $r eq 'ARRAY' ? 1 : 0;
+}
+
+sub iskey {
+    my ($k) = @_;
+    return 0 unless defined $k;
+    return 0 if is_none($k) || is_jnull($k);
+    if (!ref $k) {
+        return 0 if $k eq '';
+        # Either a non-empty string, or a number.
+        return 1;
+    }
+    return 0;
+}
+
+sub isempty {
+    my ($val) = @_;
+    return 1 if !defined $val || is_none($val) || is_jnull($val);
+    if (!ref $val) {
+        return $val eq '' ? 1 : 0;
+    }
+    if (islist($val)) { return @$val == 0 ? 1 : 0 }
+    if (ismap($val))  { return _map_keys($val) == 0 ? 1 : 0 }
+    return 0;
+}
+
+sub isfunc {
+    my ($val) = @_;
+    return defined $val && ref $val eq 'CODE' ? 1 : 0;
+}
+
+sub size {
+    my ($val) = @_;
+    return 0 if !defined $val || is_none($val) || is_jnull($val);
+    if (is_jbool($val)) { return $$val ? 1 : 0 }
+    if (ref $val) {
+        if (islist($val)) { return scalar @$val }
+        if (ismap($val))  { return scalar _map_keys($val) }
+        return 0;
+    }
+    if (looks_like_number($val) && "$val" !~ /[^0-9eE.+\-]/) {
+        # Number: floor.
+        my $n = 0 + $val;
+        return int($n);  # int() in Perl truncates toward zero; matches floor for >=0
+    }
+    return length($val);
+}
+
+# Slice a list, string or number (clamp). Negative indices supported.
+# When `mutate` is set, mutates the list in place.
+sub slice {
+    my ($val, $start, $end, $mutate) = @_;
+    if (defined $val && !ref($val) && looks_like_number($val) && $val !~ /[^0-9eE.+\-]/ && $val ne '') {
+        # Number → clamp.
+        my $lo = (defined $start && looks_like_number($start)) ? 0 + $start : -2**52;
+        my $hi = (defined $end && looks_like_number($end)) ? (0 + $end) - 1 : 2**52;
+        my $v = 0 + $val;
+        $v = $lo if $v < $lo;
+        $v = $hi if $v > $hi;
+        return $v;
+    }
+    my $vlen = size($val);
+    if (defined $end && !defined $start) { $start = 0 }
+    if (defined $start) {
+        if ($start < 0) {
+            $end = $vlen + $start;
+            $end = 0 if $end < 0;
+            $start = 0;
+        }
+        elsif (defined $end) {
+            if ($end < 0) {
+                $end = $vlen + $end;
+                $end = 0 if $end < 0;
+            }
+            elsif ($vlen < $end) {
+                $end = $vlen;
+            }
+        }
+        else {
+            $end = $vlen;
+        }
+        $start = $vlen if $vlen < $start;
+        if (-1 < $start && $start <= $end && $end <= $vlen) {
+            if (islist($val)) {
+                if ($mutate) {
+                    my @kept = @{$val}[ $start .. $end - 1 ];
+                    @$val = @kept;
+                    return $val;
+                }
+                return [ @{$val}[ $start .. $end - 1 ] ];
+            }
+            elsif (!ref $val) {
+                return substr($val, $start, $end - $start);
+            }
+        }
+        else {
+            if (islist($val)) {
+                @$val = () if $mutate;
+                return $mutate ? $val : [];
+            }
+            elsif (!ref $val) {
+                return '';
+            }
+        }
+    }
+    return $val;
+}
+
+sub pad {
+    my ($str, $padding, $padchar) = @_;
+    $padchar = ' ' unless defined $padchar;
+    return $str unless defined $padding;
+    return $str if $padding == 0;
+    my $s = defined $str ? "$str" : '';
+    my $need = abs($padding) - length($s);
+    return $s if $need <= 0;
+    my $fill = $padchar x $need;
+    return $padding < 0 ? $fill . $s : $s . $fill;
+}
+
+# Compute a bit-flag describing the type of value.
+sub typify {
+    my ($value) = @_;
+    return T_noval    if !defined $value || is_none($value);
+    return T_null     if is_jnull($value);
+    if (is_jbool($value)) { return T_boolean }
+    if (is_sentinel($value)) { return T_map }
+    if (ref $value) {
+        if (islist($value)) { return T_list }
+        if (ismap($value))  { return T_map }
+        if (isfunc($value)) { return T_function }
+        return T_instance;
+    }
+    # Scalar.
+    if (_is_number_sv($value)) {
+        if ($value =~ /[.eE]/ || (int($value) != $value)) { return T_decimal }
+        return T_integer;
+    }
+    return T_string;
+}
+
+# Get an element from a list with negative-index support and a fallback.
+# Mirrors TS getelem.
+sub getelem {
+    my ($val, $key, $alt) = @_;
+    $alt = is_none($_[2]) ? $NONE : (exists $_[2] ? $alt : $NONE);
+    return $alt unless islist($val);
+    my $len = scalar @$val;
+    my $k;
+    if (defined $key && !ref($key) && looks_like_number($key)) { $k = int($key) }
+    elsif (ref $key eq 'CODE') {
+        # Fallback callback (TS supports getelem(val, key, () => ...)).
+        return $key->();
+    }
+    else { return $alt }
+    $k = $len + $k if $k < 0;
+    return $alt if $k < 0 || $k >= $len;
+    my $v = $val->[$k];
+    return is_none($v) ? $alt : (defined $v ? $v : $alt);
+}
+
+sub getprop {
+    my ($val, $key, $alt) = @_;
+    $alt = NONE() unless exists $_[2];
+    return $alt unless defined $val && ref $val;
+    if (islist($val)) {
+        return getelem($val, $key, $alt);
+    }
+    if (ismap($val)) {
+        my $k = strkey($key);
+        return $alt if $k eq '';
+        return $alt unless exists $val->{$k};
+        my $v = $val->{$k};
+        # Group A semantics: stored null counts as absent for getprop.
+        return $alt if !defined $v || is_jnull($v) || is_none($v);
+        return $v;
+    }
+    return $alt;
+}
+
+# Group B: read raw stored value (including JSON null) at a slot.
+sub _lookup {
+    my ($val, $key) = @_;
+    return NONE() unless defined $val && ref $val;
+    if (islist($val)) {
+        return NONE() unless defined $key && !ref($key) && looks_like_number($key);
+        my $k = int($key);
+        my $len = scalar @$val;
+        $k = $len + $k if $k < 0;
+        return NONE() if $k < 0 || $k >= $len;
+        my $v = $val->[$k];
+        return is_none($v) ? NONE() : $v;
+    }
+    if (ismap($val)) {
+        my $k = strkey($key);
+        return NONE() if $k eq '';
+        return NONE() unless exists $val->{$k};
+        return $val->{$k};
+    }
+    return NONE();
+}
+
+sub strkey {
+    my ($key) = @_;
+    return '' unless defined $key;
+    return '' if is_none($key) || is_jnull($key);
+    if (!ref $key) {
+        if (looks_like_number($key)) {
+            # Integer-ish keys formatted without trailing zeros.
+            if ($key == int($key) && $key !~ /[.eE]/) { return "" . int($key) }
+            return "$key";
+        }
+        return "$key";
+    }
+    return '';
+}
+
+sub keysof {
+    my ($val) = @_;
+    return [] unless defined $val && ref $val;
+    if (islist($val)) {
+        my @k = map { "$_" } 0 .. $#$val;
+        return \@k;
+    }
+    if (ismap($val)) {
+        my @keys = _map_keys($val);
+        return [ sort @keys ];
+    }
+    return [];
+}
+
+sub haskey {
+    my ($val, $key) = @_;
+    return 0 unless defined $val && ref $val;
+    if (islist($val)) {
+        return 0 unless defined $key && !ref($key) && looks_like_number($key);
+        my $k = int($key);
+        my $len = scalar @$val;
+        $k = $len + $k if $k < 0;
+        return 0 if $k < 0 || $k >= $len;
+        my $v = $val->[$k];
+        return (defined $v && !is_jnull($v) && !is_none($v)) ? 1 : 0;
+    }
+    if (ismap($val)) {
+        my $k = strkey($key);
+        return 0 if $k eq '';
+        return 0 unless exists $val->{$k};
+        my $v = $val->{$k};
+        return (defined $v && !is_jnull($v) && !is_none($v)) ? 1 : 0;
+    }
+    return 0;
+}
+
+# items: return [ [k0,v0], [k1,v1] ... ]. With $apply, apply to each pair.
+sub items {
+    my ($val, $apply) = @_;
+    my @out;
+    if (islist($val)) {
+        for (my $i = 0; $i < @$val; $i++) {
+            my $pair = [ "$i", $val->[$i] ];
+            push @out, defined $apply ? $apply->($pair) : $pair;
+        }
+    }
+    elsif (ismap($val)) {
+        for my $k (_map_keys($val)) {
+            my $pair = [ "$k", $val->{$k} ];
+            push @out, defined $apply ? $apply->($pair) : $pair;
+        }
+    }
+    return \@out;
+}
+
+sub flatten {
+    my ($val) = @_;
+    return [] unless islist($val);
+    my @out;
+    my @stack = reverse @$val;
+    while (@stack) {
+        my $item = pop @stack;
+        if (islist($item)) {
+            push @stack, reverse @$item;
+        }
+        else {
+            push @out, $item;
+        }
+    }
+    return \@out;
+}
+
+# Filter a list or map by predicate. Lists return [v...]; maps return [[k,v]...].
+sub filter {
+    my ($val, $pred) = @_;
+    return [] unless defined $val && ref $val;
+    my @out;
+    if (islist($val)) {
+        for (my $i = 0; $i < @$val; $i++) {
+            my $pair = [ "$i", $val->[$i] ];
+            push @out, $pair if $pred->($pair);
+        }
+    }
+    elsif (ismap($val)) {
+        for my $k (_map_keys($val)) {
+            my $pair = [ "$k", $val->{$k} ];
+            push @out, $pair if $pred->($pair);
+        }
+    }
+    return \@out;
+}
+
+# Escape a string for use as a literal pattern in a regular expression.
+sub escre {
+    my ($s) = @_;
+    return '' unless defined $s;
+    $s = "$s";
+    $s =~ s/([.*+?^\${}()|\[\]\\])/\\$1/g;
+    return $s;
+}
+
+# Escape characters that are unsafe in a URL component.
+sub escurl {
+    my ($s) = @_;
+    return '' unless defined $s;
+    $s = "$s";
+    $s =~ s/([^A-Za-z0-9\-_.~])/sprintf('%%%02X', ord($1))/ge;
+    return $s;
+}
+
+# Join list parts with a separator. With trailing-separator option.
+sub join {
+    my ($parts, $sep, $strip_empty) = @_;
+    $sep = '' unless defined $sep;
+    return '' unless islist($parts);
+    my @list = grep { defined $_ && !is_none($_) && $_ ne '' || !$strip_empty } @$parts;
+    return CORE::join($sep, map { defined $_ ? "$_" : '' } @list);
+}
+
+# Convert a path to a dotted string. depth>0 → start at that depth.
+sub pathify {
+    my ($val, $depth) = @_;
+    $depth = 0 unless defined $depth;
+    my @parts;
+    if (islist($val)) { @parts = @$val }
+    elsif (!ref $val && defined $val) {
+        @parts = split /\./, "$val";
+    }
+    @parts = @parts[$depth .. $#parts] if $depth && @parts > $depth;
+    return CORE::join('.', map { defined $_ ? "$_" : '' } @parts);
+}
+
+# Compact-format a JSON-like value to a string (no whitespace).
+sub jsonify {
+    my ($val, $indent) = @_;
+    $indent = 0 unless defined $indent;
+    return _jsonify_inner($val, $indent, 0);
+}
+
+sub _jsonify_inner {
+    my ($val, $indent, $depth) = @_;
+    return 'null' if !defined $val || is_jnull($val);
+    return 'null' if is_none($val);  # NONE collapses to null when serialised.
+    if (is_jbool($val)) { return $$val ? 'true' : 'false' }
+    if (is_sentinel($val)) {
+        # Sentinel — emit its own backtick marker.
+        my ($mark) = _map_keys($val);
+        return "\"$mark\"";
+    }
+    if (!ref $val) {
+        if (looks_like_number($val) && $val =~ /^-?\d+(?:\.\d+|[eE][+-]?\d+)?$/) {
+            return _format_number($val);
+        }
+        return _json_string($val);
+    }
+    if (islist($val)) {
+        return '[]' unless @$val;
+        my @parts;
+        for my $v (@$val) {
+            push @parts, _jsonify_inner($v, $indent, $depth + 1);
+        }
+        if ($indent > 0) {
+            my $pad = (' ' x $indent) x ($depth + 1);
+            my $end = (' ' x $indent) x $depth;
+            return "[\n$pad" . CORE::join(",\n$pad", @parts) . "\n$end]";
+        }
+        return '[' . CORE::join(',', @parts) . ']';
+    }
+    if (ismap($val)) {
+        my @keys = _map_keys($val);
+        return '{}' unless @keys;
+        my @parts;
+        for my $k (@keys) {
+            my $kj = _json_string($k);
+            my $vj = _jsonify_inner($val->{$k}, $indent, $depth + 1);
+            if ($indent > 0) {
+                push @parts, "$kj: $vj";
+            }
+            else {
+                push @parts, "$kj:$vj";
+            }
+        }
+        if ($indent > 0) {
+            my $pad = (' ' x $indent) x ($depth + 1);
+            my $end = (' ' x $indent) x $depth;
+            return "{\n$pad" . CORE::join(",\n$pad", @parts) . "\n$end}";
+        }
+        return '{' . CORE::join(',', @parts) . '}';
+    }
+    if (isfunc($val)) { return '"<function>"' }
+    return 'null';
+}
+
+# Format a number using TS / JS %g-style: drop trailing zeros, no trailing dot.
+sub _format_number {
+    my ($v) = @_;
+    if ($v == int($v) && $v !~ /[.eE]/) {
+        return "" . int($v);
+    }
+    my $s = sprintf('%.15g', 0 + $v);
+    return $s;
+}
+
+# Escape and quote a JSON string.
+sub _json_string {
+    my ($s) = @_;
+    return '""' unless defined $s;
+    $s = "$s";
+    $s =~ s/\\/\\\\/g;
+    $s =~ s/"/\\"/g;
+    $s =~ s/\x08/\\b/g;
+    $s =~ s/\x09/\\t/g;
+    $s =~ s/\x0A/\\n/g;
+    $s =~ s/\x0C/\\f/g;
+    $s =~ s/\x0D/\\r/g;
+    $s =~ s/([\x00-\x1F])/sprintf('\\u%04x', ord($1))/ge;
+    return '"' . $s . '"';
+}
+
+# Human-friendly stringification (TS canonical stringify): JSON.stringify
+# with a replacer that sorts map keys alphabetically (mirrors TS), then
+# strip all double-quotes. Numbers, booleans and null are emitted as bare
+# values. Strings come out unquoted at the root.
+sub stringify {
+    my ($val, $maxlen, $pretty) = @_;
+    return $pretty ? '<>' : '' if is_none($val);
+    my $s;
+    if (!defined $val) {
+        $s = '';
+    }
+    elsif (!ref $val && _is_string_sv($val)) {
+        $s = $val;
+    }
+    else {
+        $s = _stringify_inner($val, 1);
+        $s =~ s/"//g;
+    }
+    if (defined $maxlen && $maxlen > -1) {
+        if (length($s) > $maxlen) {
+            $s = substr($s, 0, $maxlen - 3) . '...';
+        }
+    }
+    return $s;
+}
+
+sub _stringify_inner {
+    my ($val, $sort_keys) = @_;
+    return 'null' if !defined $val || is_jnull($val) || is_none($val);
+    if (is_jbool($val))     { return $$val ? 'true' : 'false' }
+    if (is_sentinel($val)) {
+        my ($mark) = _map_keys($val);
+        return "\"$mark\"";
+    }
+    if (!ref $val) {
+        if (_is_number_sv($val)) { return _format_number($val) }
+        return _json_string($val);
+    }
+    if (islist($val)) {
+        return '[]' unless @$val;
+        return '[' . CORE::join(',', map { _stringify_inner($_, $sort_keys) } @$val) . ']';
+    }
+    if (ismap($val)) {
+        my @keys = _map_keys($val);
+        @keys = sort @keys if $sort_keys;
+        return '{}' unless @keys;
+        my @parts = map {
+            _json_string($_) . ':' . _stringify_inner($val->{$_}, $sort_keys)
+        } @keys;
+        return '{' . CORE::join(',', @parts) . '}';
+    }
+    if (isfunc($val)) { return '"<function>"' }
+    return 'null';
+}
+
+# Deep clone with reference-stability tracking for shared structures.
+sub clone {
+    my ($val) = @_;
+    return _clone_inner($val, {});
+}
+
+sub _clone_inner {
+    my ($val, $seen) = @_;
+    return $val unless defined $val;
+    return $val if is_none($val) || is_jnull($val) || is_jbool($val);
+    return $val if is_sentinel($val);
+    return $val unless ref $val;
+    return $val if isfunc($val);
+    my $addr = refaddr($val);
+    return $seen->{$addr} if defined $addr && exists $seen->{$addr};
+    if (islist($val)) {
+        my $out = [];
+        $seen->{$addr} = $out if defined $addr;
+        push @$out, _clone_inner($_, $seen) for @$val;
+        return $out;
+    }
+    if (ismap($val)) {
+        my $out = _mkmap();
+        $seen->{$addr} = $out if defined $addr;
+        for my $k (_map_keys($val)) {
+            $out->{$k} = _clone_inner($val->{$k}, $seen);
+        }
+        return $out;
+    }
+    return $val;
+}
+
+# Delete a property; safe on lists (negative index) and maps.
+sub delprop {
+    my ($val, $key) = @_;
+    return $val unless defined $val && ref $val;
+    if (islist($val)) {
+        return $val unless defined $key && !ref($key) && looks_like_number($key);
+        my $k = int($key);
+        my $len = scalar @$val;
+        $k = $len + $k if $k < 0;
+        return $val if $k < 0 || $k >= $len;
+        splice(@$val, $k, 1);
+        return $val;
+    }
+    if (ismap($val)) {
+        my $k = strkey($key);
+        return $val if $k eq '';
+        delete $val->{$k};
+        return $val;
+    }
+    return $val;
+}
+
+# Set a property; sentinels SKIP/DELETE handled specially.
+sub setprop {
+    my ($val, $key, $newval) = @_;
+    return $val unless defined $val && ref $val;
+    if (is_sentinel($newval)) {
+        my ($mark) = _map_keys($newval);
+        if ($mark eq '`$SKIP`')   { return $val }
+        if ($mark eq '`$DELETE`') { return delprop($val, $key) }
+    }
+    if (is_none($newval)) { return delprop($val, $key) }
+    if (islist($val)) {
+        return $val unless defined $key && !ref($key) && looks_like_number($key);
+        my $k = int($key);
+        my $len = scalar @$val;
+        $k = $len + $k if $k < 0;
+        if ($k >= $len) {
+            $val->[$_] = $JNULL for $len .. $k - 1;
+        }
+        $val->[$k] = $newval;
+        return $val;
+    }
+    if (ismap($val)) {
+        my $k = strkey($key);
+        return $val if $k eq '';
+        $val->{$k} = $newval;
+        return $val;
+    }
+    return $val;
+}
+
+1;  # End of Voxgig::Struct (more to come).
+
+# ============================================================================
+# Insertion-order-preserving JSON parser.
+# Needed because Cpanel::JSON::XS / JSON::PP return plain Perl hashes whose
+# key order is randomised. We hand-roll a minimal recursive-descent parser
+# that builds Tie::IxHash maps. Numbers stay as Perl scalars; booleans
+# become $JTRUE / $JFALSE; null becomes $JNULL; strings stay scalar.
+# ============================================================================
+
+package Voxgig::Struct::JsonParser;
+use strict;
+use warnings;
+use Scalar::Util qw();
+
+sub parse {
+    my ($text) = @_;
+    my $self = bless { text => $text, pos => 0, len => length($text) }, __PACKAGE__;
+    $self->_skip_ws;
+    my $v = $self->_parse_value;
+    $self->_skip_ws;
+    die "JSON: trailing data at pos $self->{pos}" if $self->{pos} < $self->{len};
+    return $v;
+}
+
+sub _skip_ws {
+    my ($self) = @_;
+    while ($self->{pos} < $self->{len}) {
+        my $c = substr($self->{text}, $self->{pos}, 1);
+        last unless $c eq ' ' || $c eq "\t" || $c eq "\n" || $c eq "\r";
+        $self->{pos}++;
+    }
+}
+
+sub _peek {
+    my ($self) = @_;
+    return $self->{pos} < $self->{len} ? substr($self->{text}, $self->{pos}, 1) : '';
+}
+
+sub _parse_value {
+    my ($self) = @_;
+    $self->_skip_ws;
+    my $c = $self->_peek;
+    return $self->_parse_object if $c eq '{';
+    return $self->_parse_array  if $c eq '[';
+    return $self->_parse_string if $c eq '"';
+    return $self->_parse_keyword if $c eq 't' || $c eq 'f' || $c eq 'n';
+    return $self->_parse_number;
+}
+
+sub _parse_object {
+    my ($self) = @_;
+    $self->{pos}++;  # consume {
+    my %h;
+    tie %h, 'Tie::IxHash';
+    $self->_skip_ws;
+    if ($self->_peek eq '}') { $self->{pos}++; return \%h }
+    while (1) {
+        $self->_skip_ws;
+        die "JSON: expected string key at pos $self->{pos}" unless $self->_peek eq '"';
+        my $k = $self->_parse_string;
+        $self->_skip_ws;
+        die "JSON: expected : at pos $self->{pos}" unless $self->_peek eq ':';
+        $self->{pos}++;
+        my $v = $self->_parse_value;
+        $h{$k} = $v;
+        $self->_skip_ws;
+        my $c = $self->_peek;
+        if ($c eq ',') { $self->{pos}++; next }
+        if ($c eq '}') { $self->{pos}++; last }
+        die "JSON: expected , or } at pos $self->{pos}";
+    }
+    return \%h;
+}
+
+sub _parse_array {
+    my ($self) = @_;
+    $self->{pos}++;  # consume [
+    my @a;
+    $self->_skip_ws;
+    if ($self->_peek eq ']') { $self->{pos}++; return \@a }
+    while (1) {
+        my $v = $self->_parse_value;
+        push @a, $v;
+        $self->_skip_ws;
+        my $c = $self->_peek;
+        if ($c eq ',') { $self->{pos}++; next }
+        if ($c eq ']') { $self->{pos}++; last }
+        die "JSON: expected , or ] at pos $self->{pos}";
+    }
+    return \@a;
+}
+
+sub _parse_string {
+    my ($self) = @_;
+    $self->{pos}++;  # consume "
+    my $out = '';
+    while ($self->{pos} < $self->{len}) {
+        my $c = substr($self->{text}, $self->{pos}, 1);
+        if ($c eq '"') { $self->{pos}++; return $out }
+        if ($c eq '\\') {
+            my $esc = substr($self->{text}, $self->{pos} + 1, 1);
+            if    ($esc eq '"')  { $out .= '"';  $self->{pos} += 2 }
+            elsif ($esc eq '\\') { $out .= '\\'; $self->{pos} += 2 }
+            elsif ($esc eq '/')  { $out .= '/';  $self->{pos} += 2 }
+            elsif ($esc eq 'b')  { $out .= "\x08"; $self->{pos} += 2 }
+            elsif ($esc eq 'f')  { $out .= "\x0C"; $self->{pos} += 2 }
+            elsif ($esc eq 'n')  { $out .= "\x0A"; $self->{pos} += 2 }
+            elsif ($esc eq 'r')  { $out .= "\x0D"; $self->{pos} += 2 }
+            elsif ($esc eq 't')  { $out .= "\x09"; $self->{pos} += 2 }
+            elsif ($esc eq 'u') {
+                my $hex = substr($self->{text}, $self->{pos} + 2, 4);
+                $out .= chr(hex($hex));
+                $self->{pos} += 6;
+            }
+            else {
+                $out .= $esc;
+                $self->{pos} += 2;
+            }
+        }
+        else {
+            $out .= $c;
+            $self->{pos}++;
+        }
+    }
+    die "JSON: unterminated string";
+}
+
+sub _parse_keyword {
+    my ($self) = @_;
+    if (substr($self->{text}, $self->{pos}, 4) eq 'true') {
+        $self->{pos} += 4;
+        return $Voxgig::Struct::JTRUE;
+    }
+    if (substr($self->{text}, $self->{pos}, 5) eq 'false') {
+        $self->{pos} += 5;
+        return $Voxgig::Struct::JFALSE;
+    }
+    if (substr($self->{text}, $self->{pos}, 4) eq 'null') {
+        $self->{pos} += 4;
+        return $Voxgig::Struct::JNULL;
+    }
+    die "JSON: invalid keyword at pos $self->{pos}";
+}
+
+sub _parse_number {
+    my ($self) = @_;
+    my $start = $self->{pos};
+    my $c = $self->_peek;
+    $self->{pos}++ if $c eq '-';
+    while ($self->{pos} < $self->{len}) {
+        my $d = substr($self->{text}, $self->{pos}, 1);
+        last unless $d =~ /[0-9.eE+\-]/;
+        $self->{pos}++;
+    }
+    my $s = substr($self->{text}, $start, $self->{pos} - $start);
+    # Force the SV to be IOK or NOK so callers can distinguish from a string.
+    if ($s =~ /[.eE]/) {
+        my $n = 0 + $s;
+        $n += 0;  # ensure NOK
+        return $n;
+    }
+    else {
+        my $n = int($s);
+        $n += 0;  # ensure IOK
+        return $n;
+    }
+}
+
+package Voxgig::Struct;
+
+sub parse_json {
+    my ($text) = @_;
+    return Voxgig::Struct::JsonParser::parse($text);
+}
+
+# ============================================================================
+# Walk: recursive descent with before/after callbacks and depth control.
+# ============================================================================
+
+sub walk {
+    my ($val, $before, $after, $maxdepth) = @_;
+    $maxdepth = MAXDEPTH unless defined $maxdepth;
+    return _walk_inner($val, undef, undef, [], $before, $after, $maxdepth, 0);
+}
+
+sub _walk_inner {
+    my ($val, $key, $parent, $path, $before, $after, $maxdepth, $depth) = @_;
+    if (defined $before) {
+        $val = $before->($key, $val, $parent, $path);
+    }
+    if ($depth >= $maxdepth) {
+        return $val;
+    }
+    if (islist($val)) {
+        for (my $i = 0; $i < @$val; $i++) {
+            my $sub_path = [ @$path, "$i" ];
+            $val->[$i] = _walk_inner($val->[$i], "$i", $val, $sub_path, $before, $after, $maxdepth, $depth + 1);
+        }
+    }
+    elsif (ismap($val)) {
+        for my $k (_map_keys($val)) {
+            my $sub_path = [ @$path, "$k" ];
+            $val->{$k} = _walk_inner($val->{$k}, $k, $val, $sub_path, $before, $after, $maxdepth, $depth + 1);
+        }
+    }
+    if (defined $after) {
+        $val = $after->($key, $val, $parent, $path);
+    }
+    return $val;
+}
+
+# ============================================================================
+# Merge: deep merge of a list of nodes. Later wins; nodes deep-merge,
+# scalars overwrite. With $depth=1, only top-level merges.
+# ============================================================================
+
+sub merge {
+    my ($vals, $depth) = @_;
+    return $vals unless islist($vals);
+    return undef unless @$vals;
+    return $vals->[0] if @$vals == 1;
+    my $out = $vals->[0];
+    $depth = MAXDEPTH unless defined $depth;
+    for (my $i = 1; $i < @$vals; $i++) {
+        $out = _merge_pair($out, $vals->[$i], $depth, 0);
+    }
+    return $out;
+}
+
+sub _merge_pair {
+    my ($a, $b, $maxdepth, $depth) = @_;
+    return $b if !defined $a || is_none($a);
+    return $b unless isnode($a);
+    return $b unless isnode($b);
+    return $b if islist($a) != islist($b);  # type mismatch → replace
+    if ($depth >= $maxdepth) { return $b }
+    if (islist($a)) {
+        for (my $i = 0; $i < @$b; $i++) {
+            if ($i < @$a) {
+                $a->[$i] = _merge_pair($a->[$i], $b->[$i], $maxdepth, $depth + 1);
+            }
+            else {
+                $a->[$i] = $b->[$i];
+            }
+        }
+        return $a;
+    }
+    # Map.
+    for my $k (_map_keys($b)) {
+        my $bv = $b->{$k};
+        if (exists $a->{$k}) {
+            $a->{$k} = _merge_pair($a->{$k}, $bv, $maxdepth, $depth + 1);
+        }
+        else {
+            $a->{$k} = $bv;
+        }
+    }
+    return $a;
+}
+
+# ============================================================================
+# setpath: descend a dotted path and set a leaf value (creating maps/lists).
+# ============================================================================
+
+sub setpath {
+    my ($store, $path_in, $val) = @_;
+    my @parts;
+    if (islist($path_in)) { @parts = @$path_in }
+    elsif (defined $path_in && !ref $path_in) {
+        @parts = split /\./, "$path_in";
+    }
+    return $store unless @parts;
+    my $node = $store;
+    for (my $i = 0; $i < $#parts; $i++) {
+        my $k = $parts[$i];
+        my $nxt = $parts[$i + 1];
+        my $child;
+        if (islist($node)) {
+            my $idx = int($k);
+            $idx = scalar(@$node) + $idx if $idx < 0;
+            $child = $node->[$idx];
+            if (!isnode($child)) {
+                $child = (defined $nxt && $nxt =~ /^-?\d+$/) ? [] : _mkmap();
+                $node->[$idx] = $child;
+            }
+        }
+        elsif (ismap($node)) {
+            $child = $node->{$k};
+            if (!isnode($child)) {
+                $child = (defined $nxt && $nxt =~ /^-?\d+$/) ? [] : _mkmap();
+                $node->{$k} = $child;
+            }
+        }
+        else {
+            return $store;
+        }
+        $node = $child;
+    }
+    my $last = $parts[-1];
+    setprop($node, $last, $val);
+    return $store;
+}
+
+# ============================================================================
+# getpath: descend a dotted path with optional injection context.
+# Supports ancestor traversal via consecutive dots (".." = parent of parent).
+# Absolute paths starting with a top-level key; relative paths starting with
+# "." use the injection's dparent.
+# ============================================================================
+
+sub getpath {
+    my ($store, $path_in, $inj) = @_;
+
+    # Coerce path into a parts list. Anything else returns NONE.
+    my @parts;
+    if (islist($path_in)) {
+        @parts = @$path_in;
+    }
+    elsif (defined $path_in && !ref($path_in) && !is_jbool($path_in) && !is_jnull($path_in)) {
+        if (_is_number_sv($path_in)) {
+            @parts = (strkey($path_in));
+        }
+        else {
+            @parts = split /\./, "$path_in", -1;
+        }
+    }
+    else {
+        return NONE();
+    }
+
+    my $val = $store;
+    my $base = defined $inj ? $inj->{base} : undef;
+    my $src = defined $base ? getprop($store, $base, $store) : $store;
+    my $numparts = scalar @parts;
+    my $dparent = defined $inj ? $inj->{dparent} : undef;
+
+    if (!defined $path_in || !defined $store
+        || ($numparts == 1 && $parts[0] eq S_MT))
+    {
+        $val = $src;
+    }
+    elsif ($numparts > 0) {
+        # Single-part lookup may hit a function.
+        if ($numparts == 1) {
+            $val = getprop($store, $parts[0]);
+        }
+        if (!isfunc($val)) {
+            $val = $src;
+            # Meta-path syntax on first part.
+            if (defined $inj && $inj->{meta} && $parts[0] =~ $R_META_PATH) {
+                my ($name, $sym, $rest) = ($1, $2, $3);
+                $val = getprop($inj->{meta}, $name);
+                $parts[0] = $rest;
+            }
+            my $dpath = defined $inj ? $inj->{dpath} : undef;
+            for (my $pI = 0; defined $val && !is_none($val) && $pI < $numparts; $pI++) {
+                my $part = $parts[$pI];
+                if (defined $inj && defined $part && $part eq S_DKEY) {
+                    $part = $inj->{key};
+                }
+                elsif (defined $inj && defined $part && index($part, '$GET:') == 0) {
+                    my $sub = substr($part, 5, length($part) - 6);
+                    $part = stringify(getpath($src, $sub));
+                }
+                elsif (defined $inj && defined $part && index($part, '$REF:') == 0) {
+                    my $sub = substr($part, 5, length($part) - 6);
+                    $part = stringify(getpath(getprop($store, S_DSPEC), $sub));
+                }
+                elsif (defined $inj && defined $part && index($part, '$META:') == 0) {
+                    my $sub = substr($part, 6, length($part) - 7);
+                    $part = stringify(getpath($inj->{meta}, $sub));
+                }
+                $part = '' unless defined $part;
+                $part =~ s/\$\$/\$/g;
+                if ($part eq S_MT) {
+                    my $ascends = 0;
+                    while ($pI + 1 < $numparts && $parts[$pI + 1] eq S_MT) {
+                        $ascends++;
+                        $pI++;
+                    }
+                    if (defined $inj && $ascends > 0) {
+                        $ascends-- if $pI == $#parts;
+                        if ($ascends == 0) { $val = $dparent }
+                        else {
+                            my @dp = islist($dpath) ? @$dpath : ();
+                            my $cut = @dp - $ascends;
+                            $cut = 0 if $cut < 0;
+                            my @full = @dp[0 .. $cut - 1];
+                            push @full, @parts[$pI + 1 .. $#parts] if $pI + 1 <= $#parts;
+                            if ($ascends <= scalar @dp) {
+                                $val = getpath($store, \@full);
+                            }
+                            else { $val = NONE() }
+                            last;
+                        }
+                    }
+                    else {
+                        $val = $dparent;
+                    }
+                }
+                else {
+                    $val = getprop($val, $part);
+                }
+            }
+        }
+    }
+
+    # Optional handler callback.
+    if (defined $inj && defined $inj->{handler} && isfunc($inj->{handler})) {
+        my $ref = pathify($path_in);
+        $val = $inj->{handler}->($inj, $val, $ref, $store);
+    }
+    return $val;
+}
+
+# ============================================================================
+# Injection — recursive state for inject / transform / validate / select.
+# Modelled as a plain hashref (not a Perl class) to keep the port lean; the
+# canonical TS Injection methods (`child`, `descend`, `setval`) appear as
+# helper functions that take the inj hashref as their first argument.
+# ============================================================================
+
+# Construct a root Injection bound to a value and its synthetic parent.
+sub _new_injection {
+    my ($val, $parent) = @_;
+    my $meta = _mkmap();
+    $meta->{'__d'} = 0;
+    return {
+        mode    => M_VAL,
+        full    => 0,
+        keyI    => 0,
+        keys    => [S_DTOP],
+        key     => S_DTOP,
+        val     => $val,
+        parent  => $parent,
+        path    => [S_DTOP],
+        nodes   => [$parent],
+        handler => \&_injecthandler,
+        errs    => [],
+        meta    => $meta,
+        dparent => $NONE,
+        dpath   => [S_DTOP],
+        base    => S_DTOP,
+    };
+}
+
+# child(keyI, keys): build a child injection for the next descent step.
+sub _inj_child {
+    my ($inj, $keyI, $keys) = @_;
+    my $key  = strkey($keys->[$keyI]);
+    my $val  = $inj->{val};
+    my $cinj = _new_injection(getprop($val, $key), $val);
+    $cinj->{keyI} = $keyI;
+    $cinj->{keys} = $keys;
+    $cinj->{key}  = $key;
+    $cinj->{path}  = [ @{ $inj->{path} || [] }, $key ];
+    $cinj->{nodes} = [ @{ $inj->{nodes} || [] }, $val ];
+    $cinj->{mode}    = $inj->{mode};
+    $cinj->{handler} = $inj->{handler};
+    $cinj->{modify}  = $inj->{modify};
+    $cinj->{base}    = $inj->{base};
+    $cinj->{meta}    = $inj->{meta};
+    $cinj->{errs}    = $inj->{errs};
+    $cinj->{prior}   = $inj;
+    $cinj->{dpath}   = [ @{ $inj->{dpath} || [] } ];
+    $cinj->{dparent} = $inj->{dparent};
+    return $cinj;
+}
+
+# descend(): step into the current node. dparent walks down by parentkey,
+# dpath grows or contracts past synthetic $:KEY markers (TS canonical).
+sub _inj_descend {
+    my ($inj) = @_;
+    $inj->{meta}{'__d'} = ($inj->{meta}{'__d'} // 0) + 1;
+    my $parentkey;
+    my $plen = scalar @{ $inj->{path} || [] };
+    if ($plen >= 2) { $parentkey = $inj->{path}[ $plen - 2 ] }
+    if (is_none($inj->{dparent})) {
+        # No data: still grow dpath so relative paths line up with path.
+        if (defined $inj->{dpath} && scalar(@{ $inj->{dpath} }) > 1 && defined $parentkey) {
+            push @{ $inj->{dpath} }, $parentkey;
+        }
+    }
+    elsif (defined $parentkey) {
+        $inj->{dparent} = getprop($inj->{dparent}, $parentkey);
+        my $last = (scalar @{ $inj->{dpath} || [] }) > 0
+            ? $inj->{dpath}[ scalar(@{ $inj->{dpath} }) - 1 ]
+            : '';
+        if (defined $last && $last eq '$:' . $parentkey) {
+            pop @{ $inj->{dpath} };
+        }
+        else {
+            push @{ $inj->{dpath} }, $parentkey;
+        }
+    }
+    return $inj->{dparent};
+}
+
+# setval(val, ancestor?): write a value into the parent (or a higher
+# ancestor when ancestor>=2). NONE / SKIP / DELETE delete the slot.
+sub _inj_setval {
+    my ($inj, $val, $ancestor) = @_;
+    my $target;
+    my $tkey;
+    if (!defined $ancestor || $ancestor < 2) {
+        $target = $inj->{parent};
+        $tkey   = $inj->{key};
+    }
+    else {
+        my $nlen = scalar @{ $inj->{nodes} || [] };
+        my $plen = scalar @{ $inj->{path}  || [] };
+        return $inj->{parent} if $ancestor > $nlen || $ancestor > $plen;
+        $target = $inj->{nodes}[ $nlen - $ancestor ];
+        $tkey   = $inj->{path}[  $plen - $ancestor ];
+    }
+    if (is_none($val)) { delprop($target, $tkey) }
+    else               { setprop($target, $tkey, $val) }
+    return $target;
+}
+
+# Default inject handler: if the resolved value is a function and the
+# reference looks like a `$NAME` command, invoke it; otherwise return val.
+sub _injecthandler {
+    my ($inj, $val, $ref, $store) = @_;
+    my $iscmd = isfunc($val) && (is_none($ref) || (defined $ref && index($ref, S_DS) == 0));
+    if ($iscmd) {
+        return $val->($inj, $val, $ref, $store);
+    }
+    elsif ($inj->{mode} == M_VAL && $inj->{full}) {
+        _inj_setval($inj, $val);
+    }
+    return $val;
+}
+
+# Resolve a string scalar that may contain backtick injection refs.
+# Returns the resolved value (full injection) or the substituted string
+# (partial injection). Mirrors TS _injectstr.
+sub _injectstr {
+    my ($val, $store, $inj) = @_;
+    return '' unless defined $val;
+    $val = "$val";
+    return '' if $val eq '';
+    # Full injection: entire string is one `…` block.
+    if ($val =~ /^`(.+)`$/) {
+        my $inner = $1;
+        # Inner must not contain another backtick.
+        if (index($inner, '`') == -1) {
+            $inj->{full} = 1 if defined $inj;
+            my $pathref = $inner;
+            # Strip trailing digit-suffix (used for ordering).
+            $pathref =~ s/[0-9]+$//;
+            $pathref =~ s/\$BT/`/g;
+            $pathref =~ s/\$DS/\$/g;
+            return getpath($store, $pathref, $inj);
+        }
+    }
+    # No backticks → return literal.
+    return $val if index($val, '`') == -1;
+    # Partial injection — replace each `…` segment.
+    $inj->{full} = 0 if defined $inj;
+    my $out = '';
+    my $i = 0;
+    while ($i < length($val)) {
+        my $c = substr($val, $i, 1);
+        if ($c eq '`') {
+            my $close = index($val, '`', $i + 1);
+            if ($close < 0) { $out .= $c; $i++; next }
+            my $ref = substr($val, $i + 1, $close - $i - 1);
+            $ref =~ s/\$BT/`/g;
+            $ref =~ s/\$DS/\$/g;
+            my $found = getpath($store, $ref, $inj);
+            if (!ref $found && _is_string_sv($found)) { $out .= $found }
+            elsif (is_jnull($found))                  { $out .= 'null' }
+            elsif (is_none($found) || !defined $found) { }  # blank
+            elsif (isnode($found))                    { $out .= jsonify($found, 0) }
+            else                                       { $out .= stringify($found) }
+            $i = $close + 1;
+        }
+        else {
+            $out .= $c;
+            $i++;
+        }
+    }
+    return $out;
+}
+
+# Recursive inject. Walks $val, performing 3-phase key injection on each
+# child of a node, or full / partial string injection on a scalar.
+sub inject {
+    my ($val, $store, $injdef) = @_;
+    my $inj;
+    if (!defined $injdef || !defined $injdef->{mode}) {
+        my $vp = _mkmap();
+        $vp->{ S_DTOP() } = $val;
+        $inj = _new_injection($val, $vp);
+        $inj->{dparent} = $store;
+        $inj->{errs}    = getprop($store, S_DERRS, []);
+        $inj->{meta}{'__d'} = 0;
+        if (defined $injdef) {
+            $inj->{modify}  = $injdef->{modify}  if defined $injdef->{modify};
+            $inj->{extra}   = $injdef->{extra}   if defined $injdef->{extra};
+            $inj->{meta}    = $injdef->{meta}    if defined $injdef->{meta};
+            $inj->{handler} = $injdef->{handler} if defined $injdef->{handler};
+        }
+    }
+    else {
+        $inj = $injdef;
+    }
+    _inj_descend($inj);
+
+    if (isnode($val)) {
+        my @nodekeys;
+        if (ismap($val)) {
+            my @rawk = _map_keys($val);
+            my @raw  = sort @rawk;
+            my @plain   = grep { index($_, S_DS) < 0 } @raw;
+            my @cmd     = grep { index($_, S_DS) >= 0 } @raw;
+            @nodekeys = (@plain, @cmd);
+        }
+        else {
+            @nodekeys = map { "$_" } 0 .. $#$val;
+        }
+        my $nkI = 0;
+        while ($nkI < scalar @nodekeys) {
+            my $childinj = _inj_child($inj, $nkI, [@nodekeys]);
+            my $nodekey  = $childinj->{key};
+            $childinj->{mode} = M_KEYPRE;
+            my $prekey = _injectstr($nodekey, $store, $childinj);
+            $nkI = $childinj->{keyI};
+            @nodekeys = @{ $childinj->{keys} };
+            if (!is_none($prekey)) {
+                $childinj->{val}  = getprop($val, $prekey);
+                $childinj->{mode} = M_VAL;
+                inject($childinj->{val}, $store, $childinj);
+                $nkI = $childinj->{keyI};
+                @nodekeys = @{ $childinj->{keys} };
+                $childinj->{mode} = M_KEYPOST;
+                _injectstr($nodekey, $store, $childinj);
+                $nkI = $childinj->{keyI};
+                @nodekeys = @{ $childinj->{keys} };
+            }
+            $nkI++;
+        }
+    }
+    elsif (!ref $val) {
+        $inj->{mode} = M_VAL;
+        $val = _injectstr($val, $store, $inj);
+        if (!(is_sentinel($val) && (_map_keys($val))[0] eq '`$SKIP`')) {
+            _inj_setval($inj, $val);
+        }
+    }
+
+    if ($inj->{modify} && !(is_sentinel($val) && (_map_keys($val))[0] eq '`$SKIP`')) {
+        my $mkey = $inj->{key};
+        my $mparent = $inj->{parent};
+        my $mval = getprop($mparent, $mkey);
+        $inj->{modify}->($mval, $mkey, $mparent, $inj, $store);
+    }
+
+    $inj->{val} = $val;
+    return _lookup($inj->{parent}, S_DTOP);
+}
+
+# ============================================================================
+# Builder helpers: jm = JSON-map literal, jt = JSON-list literal.
+# Both produce insertion-ordered map / list structures from Perl args.
+# ============================================================================
+
+sub jm {
+    my $m = _mkmap();
+    for (my $i = 0; $i < @_; $i += 2) {
+        my $k = $_[$i];
+        my $v = $_[ $i + 1 ];
+        $m->{$k} = $v;
+    }
+    return $m;
+}
+
+sub jt {
+    return [@_];
+}
+
+# ============================================================================
+# checkPlacement / injectorArgs / injectChild — helpers used by custom
+# injectors (mirrors TS exports).
+# ============================================================================
+
+sub checkPlacement {
+    my ($modes, $name, $parent_types, $inj) = @_;
+    # modes can be a single mode bitmask. parent_types is a type-flag mask.
+    if (!($inj->{mode} & $modes)) {
+        push @{ $inj->{errs} }, '$' . $name . ': invalid placement as '
+            . ($MODENAME{ $inj->{mode} } // 'unknown') . ', expected: '
+            . CORE::join(',', map { $MODENAME{$_} // '?' } grep { $modes & $_ } (M_KEYPRE, M_KEYPOST, M_VAL));
+        return 0;
+    }
+    if ($parent_types) {
+        my $ptype = typify($inj->{parent});
+        if (!($ptype & $parent_types)) {
+            push @{ $inj->{errs} }, '$' . $name . ': invalid placement in parent '
+                . typename($ptype) . '.';
+            return 0;
+        }
+    }
+    return 1;
+}
+
+sub injectorArgs {
+    my ($types, $args) = @_;
+    return (NONE(), @$args) unless islist($args);
+    my @out;
+    for (my $i = 0; $i < @$types; $i++) {
+        my $expected = $types->[$i];
+        my $arg = $args->[$i];
+        my $atype = typify($arg);
+        if ($expected != T_any && !($atype & $expected)) {
+            return ('argument ' . $i . ' not of type: ' . typename($expected), @$args);
+        }
+        push @out, $arg;
+    }
+    return (NONE(), @out);
+}
+
+sub injectChild {
+    my ($child, $store, $inj) = @_;
+    my $cinj = _inj_child($inj, 0, [S_DTOP]);
+    $cinj->{val} = $child;
+    inject($child, $store, $cinj);
+    return $cinj;
+}
+
+sub _store_unwrap {
+    my ($store) = @_;
+    return $store unless ismap($store);
+    return exists $store->{ S_DTOP() } ? $store->{ S_DTOP() } : $store;
+}
+
+sub _resolve_part {
+    my ($val, $part, $inj, $store) = @_;
+    return undef unless defined $val;
+    # $REF:subpath$ / $GET:subpath$ / $META:subpath$ — meta-path syntax.
+    if (defined $inj && length($part) > 5
+        && substr($part, 0, 5) eq '$REF:' && substr($part, -1) eq '$') {
+        my $sub = substr($part, 5, length($part) - 6);
+        my $spec = ismap($store) ? $store->{ S_DSPEC() } : undef;
+        my $r = getpath($spec, $sub);
+        return _resolve_part($val, stringify($r), $inj, $store);
+    }
+    if (defined $inj && length($part) > 5
+        && substr($part, 0, 5) eq '$GET:' && substr($part, -1) eq '$') {
+        my $sub = substr($part, 5, length($part) - 6);
+        my $r = getpath($store, $sub);
+        return _resolve_part($val, stringify($r), $inj, $store);
+    }
+    if (defined $inj && length($part) > 6
+        && substr($part, 0, 6) eq '$META:' && substr($part, -1) eq '$') {
+        my $sub = substr($part, 6, length($part) - 7);
+        my $r = getpath($inj->{meta}, $sub);
+        return _resolve_part($val, stringify($r), $inj, $store);
+    }
+    # Handle $$ → $ escape.
+    $part =~ s/\$\$/\$/g;
+    # $KEY → current injection key.
+    if ($part eq '$KEY' && defined $inj) {
+        $part = $inj->{key};
+    }
+    if (ismap($val)) {
+        return exists $val->{$part} ? $val->{$part} : undef;
+    }
+    if (islist($val)) {
+        return undef unless $part =~ /^-?\d+$/;
+        my $idx = int($part);
+        $idx = scalar(@$val) + $idx if $idx < 0;
+        return undef if $idx < 0 || $idx >= @$val;
+        return $val->[$idx];
+    }
+    return undef;
+}
+
+1;

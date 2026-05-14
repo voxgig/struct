@@ -2,7 +2,7 @@
 
 **Date**: 2026-05-13
 **Canonical**: TypeScript (`ts/`)
-**Languages**: JS, Python, Go, PHP, Ruby, Lua, Rust, C, Zig, C#, Java, C++, Kotlin
+**Languages**: JS, Python, Go, PHP, Ruby, Lua, Rust, C, Zig, C#, Java, C++, Kotlin, Perl
 
 **Runtime third-party dependencies**: every port's **library proper**
 now has zero third-party JSON dependency. Each port exports the
@@ -51,6 +51,7 @@ NFA engine in-tree (c/cpp/lua/rs/zig).
 | **cs** | 40 | 15 | 2 | 78/78 corpus | already Group A |
 | **kt** | 40 | 15 | 2 | 135/135 | already Group A |
 | **zig** | 40 | 15 | 2 | 60/60 corpus sets \*1 | cycle-break + 7 latent-bug fixes |
+| **pl** | 29 + helpers | 15 | 2 | 16/18 wired sets (290+ cases) | initial scaffold; inject wired, transforms/validate/select pending |
 
 \*1 Zig: previously reported "60/60 passing with a SIGSEGV" was
 misleading — the test process actually died at test 47/60
@@ -505,6 +506,57 @@ Missing (22):
 - Debug console output left in code.
 
 **Gap count: ~35** (22 missing functions + all transform/validate + missing constants + UB issues)
+
+
+### Perl (`pl/`)
+
+**Status: PARTIAL** -- Initial scaffold. All minor + walk + merge +
+getpath + setpath + the `inject` state machine are wired and pass
+the corpus tests for those subsystems; the transform / validate /
+select command tables are not yet wired.
+
+**Tests:** 16/18 corpus sets passing, 290+ individual test cases.
+- `minor.isnode` 7/7, `minor.ismap` 7/7, `minor.islist` 7/7,
+  `minor.iskey` 13/13, `minor.isempty` 14/14, `minor.size` 19/19,
+  `minor.keysof` 9/9, `minor.haskey` 20/20, `minor.getprop` 53/53,
+  `minor.clone` 13/13, `minor.escre` 2/2, `minor.escurl` 2/2,
+  `minor.stringify` 12/12 — 191/191.
+- `walk.basic` 32/32. `getpath.basic` 58/58. `inject.basic` 1/1.
+- `inject.string` 17/19, `inject.deep` 17/22 — null / partial-mix
+  edges left for follow-up.
+
+**Wired:** all 25 minor utilities plus `walk`, `merge`, `setpath`,
+`getpath`, `inject`, `_injectstr`, `_injecthandler`, the Injection
+state (built as a hashref with `_inj_child` / `_inj_descend` /
+`_inj_setval`), `checkPlacement`, `injectorArgs`, `injectChild`,
+`jm`, `jt`. All 15 type constants, 3 mode constants, both sentinels,
+boolean and null singletons.
+
+**Not yet wired:** the 11 transform commands, 15 validate checkers,
+4 select operators, and the `transform` / `validate` / `select`
+top-level wrappers. The injection plumbing is in place — adding
+each command is a direct port of the canonical TS `transform_*` /
+`validate_*` / `select_*` table entry.
+
+**Language adaptations:**
+- **Insertion-ordered maps:** Perl hashes randomise key order, so
+  every map is tied to `Tie::IxHash`. The in-tree JSON parser uses
+  the same tie so JSON object key order survives parsing.
+- **String vs number scalars:** Perl scalars don't distinguish
+  `"0.0"` from `0.0`. The JSON parser forces numeric values to have
+  `SVf_IOK` / `SVf_NOK` set; `_is_number_sv` / `_is_string_sv` check
+  these flags via `B::svref_2object` so `getpath` can keep TS's
+  `typeof path === 'number'` branch reachable.
+- **Booleans:** `$JTRUE` / `$JFALSE` are blessed singletons with
+  overloaded `bool`, `0+`, `""` so they behave correctly under
+  `?:`, `==`, and stringification.
+- **JSON null vs Perl `undef`:** `$JNULL` (blessed singleton) is
+  JSON null; `undef` and `NONE` (a separate blessed singleton)
+  represent "absent" / "no value". This separates Group A from
+  Group B getprop semantics.
+
+**Gap count: ~30** (11 transform + 15 validate + 4 select
+commands + `transform` / `validate` / `select` wrappers).
 
 
 ---
