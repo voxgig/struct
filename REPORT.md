@@ -50,7 +50,7 @@ NFA engine in-tree (c/cpp/lua/rs/zig).
 | **cpp** | 40 | 15 | 2 | 1245/1245 corpus | nlohmann/json fix |
 | **cs** | 40 | 15 | 2 | 78/78 corpus | already Group A |
 | **kt** | 40 | 15 | 2 | 135/135 | already Group A |
-| **zig** | 40 | 15 | 2 | 59/60 corpus sets \*1 | cycle-break + 6 latent-bug fixes |
+| **zig** | 40 | 15 | 2 | 60/60 corpus sets \*1 | cycle-break + 7 latent-bug fixes |
 
 \*1 Zig: previously reported "60/60 passing with a SIGSEGV" was
 misleading — the test process actually died at test 47/60
@@ -80,11 +80,19 @@ failures hidden behind the segfault; 6 were fixed in this round:
   re-traverse `$TOP` inside the data (mirrors Rust's
   `get_path_inj` when there is no base).
 
-One failure remains: `transform.ref[20]` — deep nested
-`[[$REF,z2],[$REF,z2]]` array-of-`$REF` where the recursive inject's
-dparent ends up one level too shallow. Needs a per-level
-descend-during-recursion adjustment that's larger than the
-in-cmdRef fixes already applied.
+`transform.ref[20]` (deep nested `[[$REF,z2],[$REF,z2]]`
+array-of-`$REF`): fixed. `cmdRef` decrements `prior.key_i` so the
+parent inject loop revisits the slot that `setval(rval, 2)` just
+shrunk; the Zig port had a `if (prior.key_i > 0)` guard that swallowed
+the step-back when the deleted slot was at index 0, so the second
+nested `$REF` in the same list was skipped. Replaced the guard with
+`prior.key_i = prior.key_i -% 1` (wraparound), retyped the inject
+loop's `nkI` as `isize`, and read `childinj.key_i` via `@bitCast` so
+`0 -% 1` round-trips back to `-1`; `nkI += 1` then lands on the same
+index again, matching the TS / Rust / Go / Py / JS ports. Unblocking
+this exposed one more latent bug — `cmdEach` was calling `getpath`
+without the injection, so a `"."` source path resolved against root
+data instead of `inj.dparent`; switched to `getpathInj`.
 
 The `sentinels.jsonic` conformance category (UNDEF_SPEC.md point 7)
 exercises Group A's "null = absent" rule with three side-by-side
@@ -118,7 +126,9 @@ cross-reference" issue. Re-investigation showed it was actually
 **stack overflow from a missing $REF cycle-break in cmdRef** — fixed
 by porting the `has_sub_ref` check that every other port already had.
 The fix unblocked the test process and exposed 7 separate test
-failures the SIGSEGV had been hiding.
+failures the SIGSEGV had been hiding — all now fixed (see \*1 above
+for the `transform.ref[20]` and `cmdEach` follow-up). `zig build test`
+is 60/60 passing.
 
 \*\* Rust: full TS-canonical parity. Idiomatic `snake_case` API (`get_path`,
 `is_node`, …; see `rs/README.md` for the name table), `Rc<RefCell>`

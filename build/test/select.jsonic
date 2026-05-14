@@ -93,12 +93,100 @@ operators: {
       out: [{status:'active',priority:'high','$KEY':'a'}, {status:'pending',priority:'high','$KEY':'c'}] }
     
     # Empty `$AND` array (should match all)
-    { in: { query: {'`$AND`':[]}, obj: {a:{x:1}, b:{x:2}} }, 
+    { in: { query: {'`$AND`':[]}, obj: {a:{x:1}, b:{x:2}} },
       out: [{x:1,'$KEY':'a'}, {x:2,'$KEY':'b'}] }
-    
+
     # Empty `$OR` array (should match none)
-    { in: { query: {'`$OR`':[]}, obj: {a:{x:1}, b:{x:2}} }, 
+    { in: { query: {'`$OR`':[]}, obj: {a:{x:1}, b:{x:2}} },
       out: [] }
+
+    # $AND of two $OR clauses — both ORs must succeed.
+    { in: { query: {'`$AND`':[{'`$OR`':[{role:'admin'},{role:'user'}]},
+                              {'`$OR`':[{age:30},{age:35}]}]},
+            obj: [{role:'admin',age:30},{role:'admin',age:25},{role:'guest',age:30},
+                  {role:'user',age:35},{role:'user',age:40}] },
+      out: [{role:'admin',age:30,'$KEY':0},{role:'user',age:35,'$KEY':3}] }
+
+    # $OR over three $AND clauses — any AND triple may match.
+    { in: { query: {'`$OR`':[{'`$AND`':[{role:'admin'},{active:true}]},
+                             {'`$AND`':[{role:'user'},{age:30}]},
+                             {'`$AND`':[{role:'guest'},{vip:true}]}]},
+            obj: [{role:'admin',active:true,age:50},{role:'admin',active:false},
+                  {role:'user',age:30},{role:'user',age:25},
+                  {role:'guest',vip:true},{role:'guest',vip:false}] },
+      out: [{role:'admin',active:true,age:50,'$KEY':0},{role:'user',age:30,'$KEY':2},
+            {role:'guest',vip:true,'$KEY':4}] }
+
+    # Deep nesting: $OR -> $AND -> $OR.
+    { in: { query: {'`$OR`':[{'`$AND`':[{type:'a'},{'`$OR`':[{x:1},{x:2}]}]},
+                             {type:'b'}]},
+            obj: [{type:'a',x:1},{type:'a',x:2},{type:'a',x:3},{type:'b'},{type:'c'}] },
+      out: [{type:'a',x:1,'$KEY':0},{type:'a',x:2,'$KEY':1},{type:'b','$KEY':3}] }
+
+    # $AND with a $NOT term inside.
+    { in: { query: {'`$AND`':[{type:'user'},{'`$NOT`':{banned:true}}]},
+            obj: [{type:'user',banned:false},{type:'user',banned:true},
+                  {type:'admin',banned:false}] },
+      out: [{type:'user',banned:false,'$KEY':0}] }
+
+    # $NOT wrapping $AND — excludes records that match both x:1 AND y:2.
+    { in: { query: {'`$NOT`':{'`$AND`':[{x:1},{y:2}]}},
+            obj: [{x:1,y:2},{x:1,y:3},{x:2,y:2},{x:2,y:3}] },
+      out: [{x:1,y:3,'$KEY':1},{x:2,y:2,'$KEY':2},{x:2,y:3,'$KEY':3}] }
+
+    # $NOT wrapping $OR — excludes records matching either branch.
+    { in: { query: {'`$NOT`':{'`$OR`':[{x:1},{y:2}]}},
+            obj: [{x:1,y:1},{x:2,y:2},{x:2,y:3},{x:3,y:3}] },
+      out: [{x:2,y:3,'$KEY':2},{x:3,y:3,'$KEY':3}] }
+
+    # $AND combining $GT and $LT on the same field (range).
+    { in: { query: {a:{'`$AND`':[{'`$GT`':10},{'`$LT`':20}]}},
+            obj: [{a:5},{a:10},{a:15},{a:20},{a:25}] },
+      out: [{a:15,'$KEY':2}] }
+
+    # $OR combining $LT and $GT on the same field (out-of-range).
+    { in: { query: {a:{'`$OR`':[{'`$LT`':10},{'`$GT`':20}]}},
+            obj: [{a:5},{a:10},{a:15},{a:20},{a:25}] },
+      out: [{a:5,'$KEY':0},{a:25,'$KEY':4}] }
+
+    # Empty $OR nested inside $AND — $AND fails (OR matches nothing).
+    { in: { query: {'`$AND`':[{x:1},{'`$OR`':[]}]}, obj: [{x:1},{x:2}] },
+      out: [] }
+
+    # Empty $AND nested inside $OR — $AND matches everything, $OR succeeds.
+    { in: { query: {'`$OR`':[{'`$AND`':[]},{x:1}]}, obj: [{x:1},{x:2}] },
+      out: [{x:1,'$KEY':0},{x:2,'$KEY':1}] }
+
+    # Mixed equality plus $AND clause — equality and AND both required.
+    { in: { query: {type:'user','`$AND`':[{active:true},{age:30}]},
+            obj: [{type:'user',active:true,age:30},{type:'user',active:true,age:25},
+                  {type:'admin',active:true,age:30}] },
+      out: [{type:'user',active:true,age:30,'$KEY':0}] }
+
+    # Mixed equality, $AND and $OR at the same level.
+    { in: { query: {type:'user',
+                    '`$AND`':[{active:true}],
+                    '`$OR`':[{age:25},{age:30}]},
+            obj: [{type:'user',active:true,age:30},{type:'user',active:false,age:30},
+                  {type:'user',active:true,age:25},{type:'user',active:true,age:40},
+                  {type:'admin',active:true,age:30}] },
+      out: [{type:'user',active:true,age:30,'$KEY':0},
+            {type:'user',active:true,age:25,'$KEY':2}] }
+
+    # $AND inside $AND (degenerate nesting).
+    { in: { query: {'`$AND`':[{'`$AND`':[{x:1},{y:2}]}]},
+            obj: [{x:1,y:2},{x:1,y:3},{x:2,y:2}] },
+      out: [{x:1,y:2,'$KEY':0}] }
+
+    # $OR inside $OR (degenerate nesting).
+    { in: { query: {'`$OR`':[{'`$OR`':[{x:1},{x:2}]},{x:3}]},
+            obj: [{x:1},{x:2},{x:3},{x:4}] },
+      out: [{x:1,'$KEY':0},{x:2,'$KEY':1},{x:3,'$KEY':2}] }
+
+    # Triple nested $AND($AND($OR)).
+    { in: { query: {'`$AND`':[{'`$AND`':[{'`$OR`':[{x:1},{x:2}]}]}]},
+            obj: [{x:1},{x:2},{x:3}] },
+      out: [{x:1,'$KEY':0},{x:2,'$KEY':1}] }
 
 
     { in: { query: {a:{'`$GT`':10}}, obj: [{a:9},{a:10},{a:11},{a:12}] }, 

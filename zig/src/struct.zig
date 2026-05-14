@@ -1720,10 +1720,7 @@ pub fn getpathInj(allocator: Allocator, path_val: JsonValue, store: JsonValue, i
     // directly — this lets absolute paths like "$TOP.z.p" walk without
     // double-traversing $TOP. Mirrors what the Rust port does (its
     // get_path_inj starts with src = store when there's no base).
-    var val = if (numparts > 0
-        and parts[0].len > 0
-        and store == .object
-        and store.object.get(parts[0]) != null)
+    var val = if (numparts > 0 and parts[0].len > 0 and store == .object and store.object.get(parts[0]) != null)
         store
     else
         getpropFromStore(store);
@@ -2215,18 +2212,22 @@ pub fn inject(allocator: Allocator, val: JsonValue, store: JsonValue, inj_opt: ?
         for (normal_keys.items) |k| try node_keys.append(k);
         for (transform_keys.items) |k| try node_keys.append(k);
 
-        var nkI: usize = 0;
-        while (nkI < node_keys.items.len) {
-            const nodekey = node_keys.items[nkI];
+        // nkI is signed so cmdRef's `prior.key_i -%= 1` on a fresh 0 wraps to
+        // max-usize and bit-casts back to -1 here — then `nkI += 1` lands on
+        // the same index again, re-visiting the slot that the parent list
+        // just shifted into place. Matches the TS / Rust / Go ports.
+        var nkI: isize = 0;
+        while (nkI < @as(isize, @intCast(node_keys.items.len))) {
+            const nodekey = node_keys.items[@as(usize, @intCast(nkI))];
 
-            var childinj = try inj.child(nkI, node_keys.items);
+            var childinj = try inj.child(@as(usize, @intCast(nkI)), node_keys.items);
             childinj.mode = M_KEYPRE;
 
             // Phase 1: KEYPRE — inject the key string.
             const pre_key = try injectStr(allocator, nodekey, store, childinj);
 
             // Injection may modify child processing state.
-            nkI = childinj.key_i;
+            nkI = @as(isize, @bitCast(childinj.key_i));
             node_keys = blk: {
                 var nk = std.ArrayList([]const u8).init(allocator);
                 for (childinj.keys) |k| try nk.append(k);
@@ -2243,7 +2244,7 @@ pub fn inject(allocator: Allocator, val: JsonValue, store: JsonValue, inj_opt: ?
                 // Phase 2: VAL — inject the child value.
                 _ = try inject(allocator, childval, store, childinj);
 
-                nkI = childinj.key_i;
+                nkI = @as(isize, @bitCast(childinj.key_i));
                 node_keys = blk: {
                     var nk = std.ArrayList([]const u8).init(allocator);
                     for (childinj.keys) |k| try nk.append(k);
@@ -2255,7 +2256,7 @@ pub fn inject(allocator: Allocator, val: JsonValue, store: JsonValue, inj_opt: ?
                 childinj.mode = M_KEYPOST;
                 _ = try injectStr(allocator, nodekey, store, childinj);
 
-                nkI = childinj.key_i;
+                nkI = @as(isize, @bitCast(childinj.key_i));
                 node_keys = blk: {
                     var nk = std.ArrayList([]const u8).init(allocator);
                     for (childinj.keys) |k| try nk.append(k);
@@ -2878,11 +2879,14 @@ fn cmdEach(allocator: Allocator, inj: *Injection, store: JsonValue) !JsonValue {
 
     const srcpath = if (srcpath_val == .string) srcpath_val.string else "";
 
-    // Resolve source data.
+    // Resolve source data. Pass the injection so a srcpath of "." (or any
+    // other dparent-relative reference) resolves against inj.dparent — TS /
+    // Rust / Go pass the inj through here too, otherwise "." reads as the
+    // root store and $EACH iterates the wrong node.
     const src = if (srcpath.len == 0)
         getpropFromStore(store)
     else
-        try getpath(allocator, JsonValue{ .string = srcpath }, store);
+        try getpathInj(allocator, JsonValue{ .string = srcpath }, store, inj);
 
     // Find target node and key.
     const tkey = if (inj.path.len >= 2) inj.path[inj.path.len - 2] else S_DTOP;
@@ -3280,11 +3284,17 @@ fn cmdRef(allocator: Allocator, inj: *Injection, store: JsonValue) !JsonValue {
     // Set the result on the grandparent.
     _ = try inj.setval(rval, 2);
 
-    // Adjust prior key index if grandparent is a list.
+    // Adjust prior key index if grandparent is a list. Wrap on underflow:
+    // setval(rval, 2) above just shrunk the grandparent list at path[-2], so
+    // the caller's loop variable needs to step back one slot to re-visit the
+    // index that the shift moved into the current position. The TS / JS / Py
+    // / Go / Rust ports do `prior.keyI--` on a signed counter; here key_i is
+    // usize, so we wrap with -%= 1 — the consumer loop bit-casts back through
+    // isize so 0 -% 1 reads as -1 and `+ 1` lands back on the same index.
     if (inj.prior) |prior| {
         const gp = if (inj.nodes.len >= 2) inj.nodes[inj.nodes.len - 2] else .null;
         if (islist(gp)) {
-            if (prior.key_i > 0) prior.key_i -= 1;
+            prior.key_i = prior.key_i -% 1;
         }
     }
 
