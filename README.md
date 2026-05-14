@@ -404,8 +404,8 @@ Each language directory contains:
 - the implementation source,
 - a test runner that consumes `build/test/*.jsonic`,
 - a `Makefile` with at minimum `make test` and `make lint` targets,
-- a `DOCS.md` with the per-language guide,
-- `NOTES.md` and `REVIEW.md` with implementation history.
+- a `README.md` with the per-language quick-start. Cross-port quirks
+  go in the top-level [`NOTES.md`](./NOTES.md).
 
 `make lint` runs that language's industry-standard code-quality tooling
 (linter + formatter check):

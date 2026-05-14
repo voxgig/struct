@@ -136,9 +136,7 @@ is 60/60 passing.
 reference-stable nodes via the `indexmap` crate, `Value::Noval` vs `Value::Null`
 kept distinct. All 11 transform commands, all 15 validate checkers, all 4 select
 operators, the `Injection` state machine, and the `primary.check` SDK test pass
-(`cargo test` → 1187 corpus checks; `cargo clippy` clean). See
-[rust/PLAN.md](./rust/PLAN.md) for the porting plan / challenge analysis and
-[rust/NOTES.md](./rust/NOTES.md) for the decisions.
+(`cargo test` → 1187 corpus checks; `cargo clippy` clean).
 
 \*\* Java, C++ and C#: full TS-canonical parity. Injection state machine,
 `SKIP`/`DELETE` sentinels, mode constants, all 11 transform commands

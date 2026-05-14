@@ -4,8 +4,7 @@
 > Status: **complete** — the full shared corpus passes (`cargo test` → 1187
 > checks; `cargo clippy` clean): minor utilities, `walk`, `merge`, `getpath`,
 > `setpath`, `inject`, `transform` (all 11 commands), `validate` (all 15
-> checkers), `select` (all operators), and the `primary.check` SDK test. See
-> [`NOTES.md`](./NOTES.md) and [`PLAN.md`](./PLAN.md).
+> checkers), `select` (all operators), and the `primary.check` SDK test.
 
 For motivation, the language-neutral concepts, and the cross-language parity
 matrix, see the [top-level README](../README.md) and [`REPORT.md`](../REPORT.md).
@@ -120,4 +119,5 @@ Rust has no optional/overloaded parameters, so:
   returns `Vec<(String, Value)>`. Likewise `keys_of` / `keysof_vec`, `filter` /
   `filter_vals`.
 
-See [`NOTES.md`](./NOTES.md) for the full set of decisions and what's still staged.
+See [`REPORT.md`](../REPORT.md#rust-rust) for the rust-port adaptations
+write-up, and [`../NOTES.md`](../NOTES.md) for cross-port quirks.

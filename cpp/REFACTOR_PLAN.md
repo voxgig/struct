@@ -171,7 +171,7 @@ custom `Value` does.
 - **Modify**: `/home/user/struct/cpp/tests/runner.hpp`
 - **Add**: `/home/user/struct/cpp/test-baseline.json`
 - **Update**: `/home/user/struct/cpp/README.md`,
-  `/home/user/struct/cpp/REVIEW.md`, `/home/user/struct/REPORT.md`
+  `/home/user/struct/REPORT.md`
 - **Reference (read-only)**: `/home/user/struct/typescript/src/StructUtility.ts`,
   `/home/user/struct/java/src/Struct.java`,
   `/home/user/struct/build/test/test.json`
@@ -321,7 +321,7 @@ Implement (in dependency order):
 ### Step 16 — Cleanup, docs, parity report
 - Remove the legacy `Utility`/`Provider`/`hash_table` machinery from
   `utility_decls.hpp` if it has no remaining caller after Step 2.
-- Update `cpp/README.md` and `cpp/REVIEW.md` to reflect Complete
+- Update `cpp/README.md` to reflect Complete
   status; bump `REPORT.md`.
 - Add ASan / UBSan job to the Makefile (`make sanitize`).
 
