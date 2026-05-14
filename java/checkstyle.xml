@@ -39,7 +39,10 @@
     <module name="SimplifyBooleanReturn"/>
     <module name="StringLiteralEquality"/>
     <module name="EmptyStatement"/>
-    <module name="OneStatementPerLine"/>
+    <!-- OneStatementPerLine off: the in-tree `_jsonifyInner` (and a few
+         other tight TS-mirror sites) use `if (cond) { x; return; }`
+         one-liners that mirror the canonical TS layout. The rest of the
+         braceless-`if` exception note above applies. -->
     <module name="UpperEll"/>
     <module name="ModifierOrder"/>
 

@@ -833,6 +833,7 @@ class TestStruct(unittest.TestCase):
         # marker back to the literal string 'null' so stringify can render
         # it the same way TS/JS do for actual null.
         from tests.runner import NULLMARK
+
         runset(
             spec['sentinels']['stringify_null'],
             lambda vin: stringify('null' if vin == NULLMARK else vin),

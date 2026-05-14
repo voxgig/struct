@@ -699,8 +699,7 @@ class TestVoxgigStruct < Minitest::Test
     inj.path = ['', 'b']
     inj.nodes = [{ '$TOP' => parent }, parent]
     inj.setval(VoxgigStruct::UNDEF)
-    assert_equal({ 'a' => 1 }, parent
-)
+    assert_equal({ 'a' => 1 }, parent)
   end
 
   def test_setval_nil_deletes_parent_slot

@@ -280,12 +280,32 @@ namespace Voxgig.Struct
         // Typename lookup (indexed by bit position from MSB of type code).
         private static readonly string[] TYPENAME =
         [
-            S_any, S_nil, S_boolean, S_decimal, S_integer, S_number,
-            S_string, S_function, S_nil, S_null,
-            "", "", "", "", "", "", "",
-            S_list, S_map, S_instance,
-            "", "", "", "",
-            S_scalar, S_node
+            S_any,
+            S_nil,
+            S_boolean,
+            S_decimal,
+            S_integer,
+            S_number,
+            S_string,
+            S_function,
+            S_nil,
+            S_null,
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            S_list,
+            S_map,
+            S_instance,
+            "",
+            "",
+            "",
+            "",
+            S_scalar,
+            S_node
         ];
 
         // Regular expressions (compile-time generated; see partial methods at end of class).
@@ -707,32 +727,46 @@ namespace Voxgig.Struct
         // .NET's System.Text.RegularExpressions is a strict superset of RE2.
         // ---------------------------------------------------------------
 
-        public static System.Text.RegularExpressions.Regex ReCompile(string pattern)
-            => new System.Text.RegularExpressions.Regex(pattern);
+        public static Regex ReCompile(string pattern)
+        {
+            return new(pattern);
+        }
 
         public static bool ReTest(string pattern, string input)
-            => new System.Text.RegularExpressions.Regex(pattern).IsMatch(input ?? "");
+        {
+            return new Regex(pattern).IsMatch(input ?? "");
+        }
 
         public static string[]? ReFind(string pattern, string input)
         {
-            var m = new System.Text.RegularExpressions.Regex(pattern).Match(input ?? "");
-            if (!m.Success) return null;
+            var m = new Regex(pattern).Match(input ?? "");
+            if (!m.Success)
+            {
+                return null;
+            }
+
             var groups = m.Groups;
             var out_ = new string[groups.Count];
             for (int i = 0; i < groups.Count; i++)
+            {
                 out_[i] = groups[i].Success ? groups[i].Value : "";
+            }
+
             return out_;
         }
 
-        public static System.Collections.Generic.List<string[]> ReFindAll(string pattern, string input)
+        public static List<string[]> ReFindAll(string pattern, string input)
         {
-            var rx = new System.Text.RegularExpressions.Regex(pattern);
-            var outs = new System.Collections.Generic.List<string[]>();
-            foreach (System.Text.RegularExpressions.Match m in rx.Matches(input ?? ""))
+            var rx = new Regex(pattern);
+            var outs = new List<string[]>();
+            foreach (Match m in rx.Matches(input ?? "").Cast<Match>())
             {
                 var row = new string[m.Groups.Count];
                 for (int i = 0; i < m.Groups.Count; i++)
+                {
                     row[i] = m.Groups[i].Success ? m.Groups[i].Value : "";
+                }
+
                 outs.Add(row);
             }
             return outs;
@@ -742,10 +776,13 @@ namespace Voxgig.Struct
         {
             // Translate JS-style $& to $0
             var dotnetRepl = replacement.Replace("$&", "$0");
-            return new System.Text.RegularExpressions.Regex(pattern).Replace(input ?? "", dotnetRepl);
+            return new Regex(pattern).Replace(input ?? "", dotnetRepl);
         }
 
-        public static string ReEscape(string s) => EscRe(s);
+        public static string ReEscape(string s)
+        {
+            return EscRe(s);
+        }
 
         // URL-encode a string.
         public static string EscUrl(string? s)

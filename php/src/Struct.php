@@ -565,7 +565,9 @@ class Struct
     public static function re_compile(string $pattern): string
     {
         // PHP wants a delimited pattern; return one delimited with '/'.
-        if (strlen($pattern) > 0 && $pattern[0] === '/') return $pattern;
+        if (strlen($pattern) > 0 && $pattern[0] === '/') {
+            return $pattern;
+        }
         return '/' . str_replace('/', '\\/', $pattern) . '/';
     }
 

@@ -597,21 +597,24 @@ inline bool re_test(const std::string& pattern, const std::string& input) {
 
 inline std::vector<std::string> re_find(const std::string& pattern, const std::string& input) {
   std::smatch m;
-  if (!std::regex_search(input, m, std::regex(pattern))) return {};
+  if (!std::regex_search(input, m, std::regex(pattern)))
+    return {};
   std::vector<std::string> out;
-  for (size_t i = 0; i < m.size(); i++) out.push_back(m[i].str());
+  for (size_t i = 0; i < m.size(); i++)
+    out.push_back(m[i].str());
   return out;
 }
 
 inline std::vector<std::vector<std::string>> re_find_all(const std::string& pattern,
-                                                          const std::string& input) {
+                                                         const std::string& input) {
   std::vector<std::vector<std::string>> out;
   std::regex rx(pattern);
   auto begin = std::sregex_iterator(input.begin(), input.end(), rx);
   auto end = std::sregex_iterator();
   for (auto it = begin; it != end; ++it) {
     std::vector<std::string> row;
-    for (size_t i = 0; i < it->size(); i++) row.push_back((*it)[i].str());
+    for (size_t i = 0; i < it->size(); i++)
+      row.push_back((*it)[i].str());
     out.push_back(std::move(row));
   }
   return out;
@@ -727,29 +730,49 @@ inline std::string join(const Value& arr, const Value& sep_v, const Value& url_v
 inline void _json_escape(const std::string& s, std::string& out) {
   for (char c : s) {
     switch (c) {
-      case '"':  out += "\\\""; break;
-      case '\\': out += "\\\\"; break;
-      case '\b': out += "\\b"; break;
-      case '\f': out += "\\f"; break;
-      case '\n': out += "\\n"; break;
-      case '\r': out += "\\r"; break;
-      case '\t': out += "\\t"; break;
-      default:
-        if (static_cast<unsigned char>(c) < 0x20) {
-          char buf[8];
-          std::snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned char>(c));
-          out += buf;
-        } else {
-          out += c;
-        }
+    case '"':
+      out += "\\\"";
+      break;
+    case '\\':
+      out += "\\\\";
+      break;
+    case '\b':
+      out += "\\b";
+      break;
+    case '\f':
+      out += "\\f";
+      break;
+    case '\n':
+      out += "\\n";
+      break;
+    case '\r':
+      out += "\\r";
+      break;
+    case '\t':
+      out += "\\t";
+      break;
+    default:
+      if (static_cast<unsigned char>(c) < 0x20) {
+        char buf[8];
+        std::snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned char>(c));
+        out += buf;
+      } else {
+        out += c;
+      }
     }
   }
 }
 
 inline void _jsonify_inner(const Value& v, std::string& out, int indent, int depth,
-                            bool sort_keys = false) {
-  if (v.is_undef() || v.is_null()) { out += "null"; return; }
-  if (v.is_bool()) { out += v.as_bool() ? "true" : "false"; return; }
+                           bool sort_keys = false) {
+  if (v.is_undef() || v.is_null()) {
+    out += "null";
+    return;
+  }
+  if (v.is_bool()) {
+    out += v.as_bool() ? "true" : "false";
+    return;
+  }
   if (v.is_int()) {
     char buf[32];
     std::snprintf(buf, sizeof(buf), "%lld", static_cast<long long>(v.as_int()));
@@ -758,7 +781,10 @@ inline void _jsonify_inner(const Value& v, std::string& out, int indent, int dep
   }
   if (v.is_double()) {
     double d = v.as_double();
-    if (!std::isfinite(d)) { out += "null"; return; }
+    if (!std::isfinite(d)) {
+      out += "null";
+      return;
+    }
     char buf[48];
     if (std::floor(d) == d && std::abs(d) < 1e15) {
       std::snprintf(buf, sizeof(buf), "%lld", static_cast<long long>(d));
@@ -778,11 +804,15 @@ inline void _jsonify_inner(const Value& v, std::string& out, int indent, int dep
   }
   if (v.is_list()) {
     const auto& l = *v.as_list();
-    if (l.empty()) { out += "[]"; return; }
+    if (l.empty()) {
+      out += "[]";
+      return;
+    }
     out += '[';
     bool first = true;
     for (const auto& e : l) {
-      if (!first) out += ',';
+      if (!first)
+        out += ',';
       first = false;
       if (indent > 0) {
         out += '\n';
@@ -799,22 +829,29 @@ inline void _jsonify_inner(const Value& v, std::string& out, int indent, int dep
   }
   if (v.is_map()) {
     const auto& m = *v.as_map();
-    if (m.empty()) { out += "{}"; return; }
+    if (m.empty()) {
+      out += "{}";
+      return;
+    }
     out += '{';
 
     // Optionally walk in sorted key order (stringify behaviour, matching
     // TS canonical's stringify replacer). jsonify keeps insertion order.
     std::vector<std::string> order;
     order.reserve(m.size());
-    for (const auto& [k, _e] : m) order.push_back(k);
-    if (sort_keys) std::sort(order.begin(), order.end());
+    for (const auto& [k, _e] : m)
+      order.push_back(k);
+    if (sort_keys)
+      std::sort(order.begin(), order.end());
 
     bool first = true;
     for (const auto& k : order) {
       const Value* ep = m.find(k);
-      if (!ep) continue;
+      if (!ep)
+        continue;
       const auto& e = *ep;
-      if (!first) out += ',';
+      if (!first)
+        out += ',';
       first = false;
       if (indent > 0) {
         out += '\n';

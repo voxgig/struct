@@ -815,7 +815,7 @@ fn human_json_depth(val: &Value, depth: usize) -> Option<String> {
             let parts: Vec<String> = keys
                 .iter()
                 .map(|k| {
-                    let v = mb.get(*k).unwrap();
+                    let v = mb.get(k).unwrap();
                     format!(
                         "{}:{}",
                         json_quote(k),

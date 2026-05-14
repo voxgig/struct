@@ -415,8 +415,8 @@ runtime helpers `$BT` / `$DS` / `$WHEN` / `$SPEC`.
   `void* ud` closure pointer.
 
 **Code quality:** `clang-format` (LLVM-derived style; checked via
-`make format-check`) and `clang-tidy` (bugprone-* + clang-analyzer-* +
-performance-* + readability-* + misc-*). `make lint` runs both clean.
+`make format-check`) and `clang-tidy` (`bugprone-*` + `clang-analyzer-*` +
+`performance-*` + `readability-*` + `misc-*`). `make lint` runs both clean.
 `make sanitize` runs the corpus under ASan + UBSan; `make check_leak`
 runs under valgrind.
 

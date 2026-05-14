@@ -551,17 +551,29 @@ object Struct {
 
     fun reCompile(pattern: String): Regex = Regex(pattern)
 
-    fun reTest(pattern: String, input: String): Boolean = Regex(pattern).containsMatchIn(input)
+    fun reTest(
+        pattern: String,
+        input: String,
+    ): Boolean = Regex(pattern).containsMatchIn(input)
 
-    fun reFind(pattern: String, input: String): List<String>? {
+    fun reFind(
+        pattern: String,
+        input: String,
+    ): List<String>? {
         val m = Regex(pattern).find(input) ?: return null
         return m.groupValues
     }
 
-    fun reFindAll(pattern: String, input: String): List<List<String>> =
-        Regex(pattern).findAll(input).map { it.groupValues }.toList()
+    fun reFindAll(
+        pattern: String,
+        input: String,
+    ): List<List<String>> = Regex(pattern).findAll(input).map { it.groupValues }.toList()
 
-    fun reReplace(pattern: String, input: String, replacement: String): String {
+    fun reReplace(
+        pattern: String,
+        input: String,
+        replacement: String,
+    ): String {
         // Translate JS $& to Kotlin $0
         val kRepl = replacement.replace("$&", "\$0")
         return Regex(pattern).replace(input, kRepl)
@@ -748,14 +760,19 @@ object Struct {
         seen: IdentityHashMap<Any, Boolean>,
     ) {
         if (v == null || v === UNDEF) {
-            out.append("null"); return
+            out.append("null")
+            return
         }
         if (v is Boolean) {
-            out.append(if (v) "true" else "false"); return
+            out.append(if (v) "true" else "false")
+            return
         }
         if (v is Number) {
             val d = v.toDouble()
-            if (!d.isFinite()) { out.append("null"); return }
+            if (!d.isFinite()) {
+                out.append("null")
+                return
+            }
             if (floor(d) == d && Math.abs(d) < 1e15) {
                 out.append(d.toLong().toString())
             } else {
@@ -768,13 +785,26 @@ object Struct {
             return
         }
         if (v is String) {
-            out.append('"'); _jsonEscape(v, out); out.append('"'); return
+            out.append('"')
+            _jsonEscape(v, out)
+            out.append('"')
+            return
         }
-        if (v is Function<*>) { out.append("null"); return }
-        if (seen.containsKey(v)) { out.append("null"); return }
+        if (v is Function<*>) {
+            out.append("null")
+            return
+        }
+        if (seen.containsKey(v)) {
+            out.append("null")
+            return
+        }
         seen[v] = true
         if (v is List<*>) {
-            if (v.isEmpty()) { out.append("[]"); seen.remove(v); return }
+            if (v.isEmpty()) {
+                out.append("[]")
+                seen.remove(v)
+                return
+            }
             out.append('[')
             var first = true
             for (e in v) {
@@ -793,7 +823,11 @@ object Struct {
             return
         }
         if (v is Map<*, *>) {
-            if (v.isEmpty()) { out.append("{}"); seen.remove(v); return }
+            if (v.isEmpty()) {
+                out.append("{}")
+                seen.remove(v)
+                return
+            }
             out.append('{')
             var first = true
             for ((k, e) in v) {
@@ -818,7 +852,10 @@ object Struct {
         out.append("null")
     }
 
-    private fun _jsonEscape(s: String, out: StringBuilder) {
+    private fun _jsonEscape(
+        s: String,
+        out: StringBuilder,
+    ) {
         for (c in s) {
             when (c) {
                 '"' -> out.append("\\\"")

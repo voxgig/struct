@@ -386,10 +386,7 @@ def pad(s: Any, padding: int = UNDEF, padchar: str = UNDEF) -> str:
     # Mirror TS canonical: stringify(null) is "null", distinct from
     # stringify(undefined) which is "". Python's UNDEF=None conflates the
     # two; explicitly coerce JSON-null to the literal string "null" first.
-    if s is None:
-        s = 'null'
-    else:
-        s = stringify(s)
+    s = 'null' if s is None else stringify(s)
     padding = 44 if padding is UNDEF else padding
     padchar = ' ' if padchar is UNDEF else (padchar + ' ')[0]
 
@@ -543,7 +540,7 @@ def _lookup(val: Any, key: Any) -> Any:
         return UNDEF
     if ismap(val):
         skey = str(key)
-        return val[skey] if skey in val else UNDEF
+        return val.get(skey, UNDEF)
     if islist(val):
         try:
             ki = int(key)
@@ -619,6 +616,7 @@ def escre(s: Any):
 # wraps the stdlib `re` module; the dialect is the RE2 subset.
 # ---------------------------------------------------------------------------
 
+
 def re_compile(pattern, flags=0):
     "Compile a regex (or return as-is if already a compiled pattern)."
     if hasattr(pattern, 'pattern'):
@@ -648,8 +646,10 @@ def re_replace(pattern, input, replacement):
     "Replace every match. `replacement` may be a string with $&/$1 or a callable."
     rx = pattern if hasattr(pattern, 'sub') else re.compile(pattern)
     if callable(replacement):
+
         def _cb(m):
             return replacement([m.group(0)] + [g if g is not None else '' for g in m.groups()])
+
         return rx.sub(_cb, input)
     # Translate $& and $1..$9 to Python's \g<0>/\1..\9
     py_repl = []

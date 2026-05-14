@@ -278,6 +278,7 @@ module VoxgigRunner
 
   def self._fix_json_walk(val, flags)
     return flags['null'] ? NULLMARK : val if val.nil? || val.equal?(VoxgigStruct::UNDEF)
+
     if val.is_a?(Hash)
       val.each_with_object({}) { |(k, v), h| h[k] = _fix_json_walk(v, flags) }
     elsif val.is_a?(Array)

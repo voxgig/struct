@@ -38,7 +38,15 @@ PARTIAL_PORTS = ["java", "kotlin"]
 # Accepted, documented divergences (normalised name keys).  Anything NOT listed
 # here is treated as a parity gap and fails the check; this list should only
 # shrink.
-KNOWN_GAPS: dict[str, set[str]] = {}
+#
+# zig: the regex helper module exports `re_compile`/`re_test`/`re_escape` but
+#   not the canonical `re_find`/`re_find_all`/`re_replace` (the in-tree NFA
+#   engine has the primitives, no top-level wrapper has been wired). Track
+#   them as known gaps so the parity check can still fail on *new* gaps;
+#   this list should only shrink.
+KNOWN_GAPS: dict[str, set[str]] = {
+    "zig": {"refind", "refindall", "rereplace"},
+}
 
 # Source files per port (implementation only — not tests).
 SOURCES = {
@@ -56,6 +64,7 @@ SOURCES = {
     "c": [
         "c/src/voxgig_struct.h",
         "c/src/value.h",
+        "c/src/regex.h",
         "c/src/utility.c",
         "c/src/inject.c",
         "c/src/transform.c",
@@ -155,6 +164,12 @@ def defined_keys(port: str) -> set[str]:
                 if stripped.endswith("v"):
                     extra.add(stripped[:-1])
                 extra.add(stripped)
+                # vs_regex_* -> re_* alias (the C port's regex helpers ship
+                # under the `vs_regex_` namespace, but canonical names are
+                # `re_compile` / `re_test` / `re_find` / `re_find_all` /
+                # `re_replace` / `re_escape`).
+                if stripped.startswith("regex"):
+                    extra.add("re" + stripped[len("regex"):])
         keys |= extra
     # The C++ port renames `walk` / `merge` / `getpath` / `setpath` to the
     # `_v` ("value-style") suffix to disambiguate them from header-internal

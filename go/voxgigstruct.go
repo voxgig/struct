@@ -1159,9 +1159,17 @@ func Jsonify(val any, flags ...map[string]any) string {
 	}
 
 	if nil != val {
-		indentStr := strings.Repeat(" ", indent)
-		offsetStr := strings.Repeat(" ", offset)
-		b, err := json.MarshalIndent(val, offsetStr, indentStr)
+		// Canonical: indent==0 → compact JSON (json.Marshal). Otherwise
+		// pretty-print with the given indent and prefix.
+		var b []byte
+		var err error
+		if indent == 0 {
+			b, err = json.Marshal(val)
+		} else {
+			indentStr := strings.Repeat(" ", indent)
+			offsetStr := strings.Repeat(" ", offset)
+			b, err = json.MarshalIndent(val, offsetStr, indentStr)
+		}
 		if err != nil {
 			str = S_null
 		} else {

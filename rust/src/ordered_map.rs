@@ -22,20 +22,30 @@ use std::ops::Index;
 
 #[derive(Clone, Default)]
 pub struct OrderedMap<V> {
-    keys:    Vec<String>,
-    values:  Vec<V>,
-    index:   HashMap<String, usize>,
+    keys: Vec<String>,
+    values: Vec<V>,
+    index: HashMap<String, usize>,
 }
 
 impl<V> OrderedMap<V> {
     pub fn new() -> Self {
-        OrderedMap { keys: Vec::new(), values: Vec::new(), index: HashMap::new() }
+        OrderedMap {
+            keys: Vec::new(),
+            values: Vec::new(),
+            index: HashMap::new(),
+        }
     }
 
-    pub fn len(&self) -> usize { self.keys.len() }
-    pub fn is_empty(&self) -> bool { self.keys.is_empty() }
+    pub fn len(&self) -> usize {
+        self.keys.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.keys.is_empty()
+    }
 
-    pub fn contains_key(&self, key: &str) -> bool { self.index.contains_key(key) }
+    pub fn contains_key(&self, key: &str) -> bool {
+        self.index.contains_key(key)
+    }
 
     pub fn get(&self, key: &str) -> Option<&V> {
         self.index.get(key).map(|&i| &self.values[i])
@@ -66,18 +76,28 @@ impl<V> OrderedMap<V> {
         let v = self.values.remove(i);
         // Re-index every entry whose position changed.
         for (k, idx) in self.index.iter_mut() {
-            if *idx > i { *idx -= 1; }
+            if *idx > i {
+                *idx -= 1;
+            }
             // Defensive — the removed key is gone from `index` already.
             let _ = k;
         }
         Some(v)
     }
 
-    pub fn keys(&self) -> std::slice::Iter<'_, String> { self.keys.iter() }
-    pub fn values(&self) -> std::slice::Iter<'_, V> { self.values.iter() }
+    pub fn keys(&self) -> std::slice::Iter<'_, String> {
+        self.keys.iter()
+    }
+    pub fn values(&self) -> std::slice::Iter<'_, V> {
+        self.values.iter()
+    }
 
     pub fn iter(&self) -> OrderedMapIter<'_, V> {
-        OrderedMapIter { keys: &self.keys, values: &self.values, i: 0 }
+        OrderedMapIter {
+            keys: &self.keys,
+            values: &self.values,
+            i: 0,
+        }
     }
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = (&String, &mut V)> {
@@ -86,7 +106,7 @@ impl<V> OrderedMap<V> {
 }
 
 pub struct OrderedMapIter<'a, V> {
-    keys:   &'a [String],
+    keys: &'a [String],
     values: &'a [V],
     i: usize,
 }
@@ -94,7 +114,9 @@ pub struct OrderedMapIter<'a, V> {
 impl<'a, V> Iterator for OrderedMapIter<'a, V> {
     type Item = (&'a String, &'a V);
     fn next(&mut self) -> Option<Self::Item> {
-        if self.i >= self.keys.len() { return None; }
+        if self.i >= self.keys.len() {
+            return None;
+        }
         let r = (&self.keys[self.i], &self.values[self.i]);
         self.i += 1;
         Some(r)
@@ -111,7 +133,9 @@ impl<V> Index<&str> for OrderedMap<V> {
 impl<V> FromIterator<(String, V)> for OrderedMap<V> {
     fn from_iter<I: IntoIterator<Item = (String, V)>>(iter: I) -> Self {
         let mut m = OrderedMap::new();
-        for (k, v) in iter { m.insert(k, v); }
+        for (k, v) in iter {
+            m.insert(k, v);
+        }
         m
     }
 }
@@ -119,13 +143,17 @@ impl<V> FromIterator<(String, V)> for OrderedMap<V> {
 impl<'a, V> IntoIterator for &'a OrderedMap<V> {
     type Item = (&'a String, &'a V);
     type IntoIter = OrderedMapIter<'a, V>;
-    fn into_iter(self) -> Self::IntoIter { self.iter() }
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
 }
 
 impl<V: std::fmt::Debug> std::fmt::Debug for OrderedMap<V> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut m = f.debug_map();
-        for (k, v) in self.iter() { m.entry(k, v); }
+        for (k, v) in self.iter() {
+            m.entry(k, v);
+        }
         m.finish()
     }
 }

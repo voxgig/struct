@@ -195,7 +195,17 @@
     "cinj",
     "startin",
     "injdefs",
-    "luassert"
+    "luassert",
+    "libm",
+    "Onigmo",
+    "gson",
+    "dparent",
+    "cmps",
+    "svref",
+    "Cpanel",
+    "JTRUE",
+    "JFALSE",
+    "JNULL"
   ],
   "ignoreRegExpList": [
     "/`\\$[A-Z]+`/",

@@ -95,7 +95,7 @@ order. `JSON.stringify(value, indent: 2)` serialises back.
 - All 25 **minor utilities**: `isnode`, `ismap`, `islist`, `iskey`,
   `isempty`, `isfunc`, `size`, `slice`, `pad`, `typify`, `getelem`,
   `getprop`, `strkey`, `keysof`, `haskey`, `items`, `flatten`,
-  `filter`, `escre`, `escurl`, `vjoin`, `jsonify`, `stringify`,
+  `filter`, `escre`, `escurl`, `join`, `jsonify`, `stringify`,
   `pathify`, `clone`, `delprop`, `setprop`, `typename`, `getdef`.
 - Major utilities: `walk`, `merge`, `setpath`, `getpath`.
 - `inject` (three-phase key processing) with `_injectstr` (full and

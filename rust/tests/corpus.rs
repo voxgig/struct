@@ -11,8 +11,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use voxgig_struct::ordered_map::OrderedMap;
 use serde_json::Value as J;
+use voxgig_struct::ordered_map::OrderedMap;
 
 use voxgig_struct::value::Value;
 use voxgig_struct::*;

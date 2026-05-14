@@ -484,7 +484,9 @@ function re_test(pattern, input) {
   const re = pattern instanceof RegExp ? pattern : new RegExp(pattern)
   return re.test(input)
 }
-function re_escape(s) { return escre(s) }
+function re_escape(s) {
+  return escre(s)
+}
 
 // Escape URLs.
 function escurl(s) {

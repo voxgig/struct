@@ -48,29 +48,39 @@ struct CharClass {
 }
 
 impl CharClass {
-    fn zero() -> Self { Self { bits: [0; 32] } }
+    fn zero() -> Self {
+        Self { bits: [0; 32] }
+    }
     fn set(&mut self, c: u8) {
         self.bits[(c >> 3) as usize] |= 1u8 << (c & 7);
     }
     fn set_range(&mut self, lo: u8, hi: u8) {
         let (lo, hi) = if lo > hi { (hi, lo) } else { (lo, hi) };
-        for c in lo..=hi { self.set(c); }
+        for c in lo..=hi {
+            self.set(c);
+        }
     }
     fn has(&self, c: u8) -> bool {
         (self.bits[(c >> 3) as usize] >> (c & 7)) & 1 == 1
     }
     fn negate(&mut self) {
-        for b in self.bits.iter_mut() { *b = !*b; }
+        for b in self.bits.iter_mut() {
+            *b = !*b;
+        }
     }
     fn predef(&mut self, c: u8) {
         match c {
             b'd' => self.set_range(b'0', b'9'),
             b'D' => {
                 self.set_range(0, 255);
-                for x in b'0'..=b'9' { self.bits[(x >> 3) as usize] &= !(1u8 << (x & 7)); }
+                for x in b'0'..=b'9' {
+                    self.bits[(x >> 3) as usize] &= !(1u8 << (x & 7));
+                }
             }
             b's' => {
-                for c in [b' ', b'\t', b'\n', b'\r', 0x0C, 0x0B].iter() { self.set(*c); }
+                for c in [b' ', b'\t', b'\n', b'\r', 0x0C, 0x0B].iter() {
+                    self.set(*c);
+                }
             }
             b'S' => {
                 self.set_range(0, 255);
@@ -86,9 +96,15 @@ impl CharClass {
             }
             b'W' => {
                 self.set_range(0, 255);
-                for x in b'0'..=b'9' { self.bits[(x >> 3) as usize] &= !(1u8 << (x & 7)); }
-                for x in b'A'..=b'Z' { self.bits[(x >> 3) as usize] &= !(1u8 << (x & 7)); }
-                for x in b'a'..=b'z' { self.bits[(x >> 3) as usize] &= !(1u8 << (x & 7)); }
+                for x in b'0'..=b'9' {
+                    self.bits[(x >> 3) as usize] &= !(1u8 << (x & 7));
+                }
+                for x in b'A'..=b'Z' {
+                    self.bits[(x >> 3) as usize] &= !(1u8 << (x & 7));
+                }
+                for x in b'a'..=b'z' {
+                    self.bits[(x >> 3) as usize] &= !(1u8 << (x & 7));
+                }
                 self.bits[(b'_' >> 3) as usize] &= !(1u8 << (b'_' & 7));
             }
             _ => {}
@@ -103,7 +119,12 @@ struct Insn {
 }
 
 impl Insn {
-    fn new(op: Op) -> Self { Self { op, cc: CharClass::zero() } }
+    fn new(op: Op) -> Self {
+        Self {
+            op,
+            cc: CharClass::zero(),
+        }
+    }
 }
 
 // ---------- compiled regex ----------
@@ -206,7 +227,9 @@ impl<'a> Parser<'a> {
                 if k == 1 {
                     let mut sub = CharClass::zero();
                     sub.predef(p);
-                    for i in 0..32 { out.bits[i] |= sub.bits[i]; }
+                    for i in 0..32 {
+                        out.bits[i] |= sub.bits[i];
+                    }
                     continue;
                 }
                 c = if k == 2 { 8 } else { b };
@@ -238,7 +261,9 @@ impl<'a> Parser<'a> {
             return out;
         }
         self.pos += 1;
-        if neg { out.negate(); }
+        if neg {
+            out.negate();
+        }
         out
     }
 
@@ -250,13 +275,18 @@ impl<'a> Parser<'a> {
 
     // Returns the index of the first emitted instruction for this atom.
     fn parse_atom(&mut self) -> usize {
-        if self.pos >= self.src.len() { return self.code.len(); }
+        if self.pos >= self.src.len() {
+            return self.code.len();
+        }
         let start = self.code.len();
         let c = self.src[self.pos];
         if c == b'(' {
             self.pos += 1;
             let mut capture = true;
-            if self.pos + 1 < self.src.len() && self.src[self.pos] == b'?' && self.src[self.pos + 1] == b':' {
+            if self.pos + 1 < self.src.len()
+                && self.src[self.pos] == b'?'
+                && self.src[self.pos + 1] == b':'
+            {
                 capture = false;
                 self.pos += 2;
             } else if self.pos + 2 < self.src.len()
@@ -266,15 +296,21 @@ impl<'a> Parser<'a> {
             {
                 // Named group — consume name; we don't expose names but still capture.
                 self.pos += 3;
-                while self.pos < self.src.len() && self.src[self.pos] != b'>' { self.pos += 1; }
-                if self.pos < self.src.len() { self.pos += 1; }
+                while self.pos < self.src.len() && self.src[self.pos] != b'>' {
+                    self.pos += 1;
+                }
+                if self.pos < self.src.len() {
+                    self.pos += 1;
+                }
             }
             let group = if capture {
                 let g = self.next_group;
                 self.next_group += 1;
                 self.emit(Op::Save(g * 2));
                 g
-            } else { 0 };
+            } else {
+                0
+            };
             self.parse_alt();
             if self.pos >= self.src.len() || self.src[self.pos] != b')' {
                 self.perr("unclosed (");
@@ -311,7 +347,9 @@ impl<'a> Parser<'a> {
                 2 => {
                     self.emit(if p == b'b' { Op::Wb } else { Op::Nwb });
                 }
-                _ => { self.emit(Op::Char(b)); }
+                _ => {
+                    self.emit(Op::Char(b));
+                }
             }
         } else if c == b')' || c == b'|' {
             return start;
@@ -334,8 +372,16 @@ impl<'a> Parser<'a> {
                     }
                 }
                 Op::Split(x, y) => {
-                    let nx = if (x as usize) >= from && (x as usize) < to { x + delta } else { x };
-                    let ny = if (y as usize) >= from && (y as usize) < to { y + delta } else { y };
+                    let nx = if (x as usize) >= from && (x as usize) < to {
+                        x + delta
+                    } else {
+                        x
+                    };
+                    let ny = if (y as usize) >= from && (y as usize) < to {
+                        y + delta
+                    } else {
+                        y
+                    };
                     insn.op = Op::Split(nx, ny);
                 }
                 _ => {}
@@ -348,10 +394,18 @@ impl<'a> Parser<'a> {
     fn shift_targets_after(&mut self, from: usize, by: i32) {
         for i in (from + 1)..self.code.len() {
             match &mut self.code[i].op {
-                Op::Jmp(t) => { if *t as usize >= from { *t += by; } }
+                Op::Jmp(t) => {
+                    if *t as usize >= from {
+                        *t += by;
+                    }
+                }
                 Op::Split(x, y) => {
-                    if *x as usize >= from { *x += by; }
-                    if *y as usize >= from { *y += by; }
+                    if *x as usize >= from {
+                        *x += by;
+                    }
+                    if *y as usize >= from {
+                        *y += by;
+                    }
                 }
                 _ => {}
             }
@@ -361,7 +415,9 @@ impl<'a> Parser<'a> {
     fn apply_quant(&mut self, start: usize, q: u8, n_lo: i32, n_hi: i32, lazy: bool) {
         let end = self.code.len();
         let alen = end - start;
-        if alen == 0 { return; }
+        if alen == 0 {
+            return;
+        }
 
         match q {
             b'?' => {
@@ -401,7 +457,9 @@ impl<'a> Parser<'a> {
             }
             b'{' => {
                 // Emit n_lo mandatory copies (we already have one — the original atom).
-                for _ in 1..n_lo { self.code_clone(start, end); }
+                for _ in 1..n_lo {
+                    self.code_clone(start, end);
+                }
                 if n_hi == -1 {
                     // {n,}: Kleene-star of the atom appended.
                     let split_ix = self.emit(Op::Split(0, 0));
@@ -433,16 +491,20 @@ impl<'a> Parser<'a> {
 
     fn parse_concat(&mut self) -> usize {
         let start = self.code.len();
-        while self.pos < self.src.len() && self.src[self.pos] != b')' && self.src[self.pos] != b'|' {
+        while self.pos < self.src.len() && self.src[self.pos] != b')' && self.src[self.pos] != b'|'
+        {
             let atom_start = self.parse_atom();
-            if self.err.is_some() { return start; }
+            if self.err.is_some() {
+                return start;
+            }
             if self.pos < self.src.len() {
                 let q = self.src[self.pos];
                 if q == b'*' || q == b'+' || q == b'?' {
                     self.pos += 1;
                     let mut lazy = false;
                     if self.pos < self.src.len() && self.src[self.pos] == b'?' {
-                        lazy = true; self.pos += 1;
+                        lazy = true;
+                        self.pos += 1;
                     }
                     self.apply_quant(atom_start, q, 0, 0, lazy);
                 } else if q == b'{' {
@@ -470,15 +532,26 @@ impl<'a> Parser<'a> {
                                 got_hi = true;
                                 self.pos += 1;
                             }
-                            if got_hi { n_hi = hi; } else { open = true; }
+                            if got_hi {
+                                n_hi = hi;
+                            } else {
+                                open = true;
+                            }
                         }
                         if self.pos < self.src.len() && self.src[self.pos] == b'}' {
                             self.pos += 1;
                             let mut lazy = false;
                             if self.pos < self.src.len() && self.src[self.pos] == b'?' {
-                                lazy = true; self.pos += 1;
+                                lazy = true;
+                                self.pos += 1;
                             }
-                            self.apply_quant(atom_start, b'{', n_lo, if open { -1 } else { n_hi }, lazy);
+                            self.apply_quant(
+                                atom_start,
+                                b'{',
+                                n_lo,
+                                if open { -1 } else { n_hi },
+                                lazy,
+                            );
                         } else {
                             self.perr("bad {n,m}");
                         }
@@ -491,7 +564,9 @@ impl<'a> Parser<'a> {
 
     fn parse_alt(&mut self) -> usize {
         let start = self.parse_concat();
-        if self.err.is_some() { return start; }
+        if self.err.is_some() {
+            return start;
+        }
         while self.pos < self.src.len() && self.src[self.pos] == b'|' {
             let branch1_end = self.code.len();
             let jmp_ix = self.emit(Op::Jmp(0)); // placeholder
@@ -501,10 +576,18 @@ impl<'a> Parser<'a> {
             // Patch jumps inside the moved block (everything from start+1 to end).
             for i in (start + 1)..self.code.len() {
                 match &mut self.code[i].op {
-                    Op::Jmp(t) => { if *t as usize >= start { *t += 1; } }
+                    Op::Jmp(t) => {
+                        if *t as usize >= start {
+                            *t += 1;
+                        }
+                    }
                     Op::Split(x, y) => {
-                        if *x as usize >= start { *x += 1; }
-                        if *y as usize >= start { *y += 1; }
+                        if *x as usize >= start {
+                            *x += 1;
+                        }
+                        if *y as usize >= start {
+                            *y += 1;
+                        }
                     }
                     _ => {}
                 }
@@ -536,13 +619,22 @@ impl Regex {
         p.code.push(Insn::new(Op::Save(0)));
         let anchored_start = !bytes.is_empty() && bytes[0] == b'^';
         p.parse_alt();
-        if let Some(e) = p.err { return Err(RegexError(e)); }
+        if let Some(e) = p.err {
+            return Err(RegexError(e));
+        }
         if p.pos < bytes.len() {
-            return Err(RegexError(format!("regex parse error at {}: unexpected )", p.pos)));
+            return Err(RegexError(format!(
+                "regex parse error at {}: unexpected )",
+                p.pos
+            )));
         }
         p.code.push(Insn::new(Op::Save(1)));
         p.code.push(Insn::new(Op::Match));
-        Ok(Self { code: p.code, ngroups: p.next_group, anchored_start })
+        Ok(Self {
+            code: p.code,
+            ngroups: p.next_group,
+            anchored_start,
+        })
     }
 
     pub fn is_match(&self, input: &str) -> bool {
@@ -551,11 +643,20 @@ impl Regex {
 
     pub fn captures<'h>(&self, input: &'h str) -> Option<Captures<'h>> {
         let slots = self.find_first(input.as_bytes())?;
-        Some(Captures { input, slots, ngroups: self.ngroups })
+        Some(Captures {
+            input,
+            slots,
+            ngroups: self.ngroups,
+        })
     }
 
     pub fn captures_iter<'r, 'h>(&'r self, input: &'h str) -> CapturesIter<'r, 'h> {
-        CapturesIter { re: self, input, pos: 0, done: false }
+        CapturesIter {
+            re: self,
+            input,
+            pos: 0,
+            done: false,
+        }
     }
 
     /// Replace the FIRST match only. Mirrors `regex` crate `replace`.
@@ -563,14 +664,24 @@ impl Regex {
         let bytes = input.as_bytes();
         let mut start = 0usize;
         let slots = loop {
-            if start > bytes.len() { return Cow::Borrowed(input); }
-            if let Some(s) = self.match_at(bytes, start) { break s; }
-            if self.anchored_start { return Cow::Borrowed(input); }
+            if start > bytes.len() {
+                return Cow::Borrowed(input);
+            }
+            if let Some(s) = self.match_at(bytes, start) {
+                break s;
+            }
+            if self.anchored_start {
+                return Cow::Borrowed(input);
+            }
             start += 1;
         };
         let mut out = String::with_capacity(input.len());
         out.push_str(&input[..start]);
-        let caps = Captures { input, slots: slots.clone(), ngroups: self.ngroups };
+        let caps = Captures {
+            input,
+            slots: slots.clone(),
+            ngroups: self.ngroups,
+        };
         rep.replace_into(&caps, &mut out);
         let mend = slots[1] as usize;
         out.push_str(&input[mend..]);
@@ -590,9 +701,13 @@ impl Regex {
                     found_slots = Some(s);
                     break;
                 }
-                if self.anchored_start && start > pos { break; }
+                if self.anchored_start && start > pos {
+                    break;
+                }
                 start += 1;
-                if start > bytes.len() { break; }
+                if start > bytes.len() {
+                    break;
+                }
             }
             let slots = match found_slots {
                 Some(s) => s,
@@ -604,7 +719,11 @@ impl Regex {
             any = true;
             // Copy pre-match.
             out.push_str(&input[pos..start]);
-            let caps = Captures { input, slots: slots.clone(), ngroups: self.ngroups };
+            let caps = Captures {
+                input,
+                slots: slots.clone(),
+                ngroups: self.ngroups,
+            };
             rep.replace_into(&caps, &mut out);
             let mend = slots[1] as usize;
             if slots[1] == slots[0] {
@@ -620,7 +739,11 @@ impl Regex {
                 pos = mend;
             }
         }
-        if any { Cow::Owned(out) } else { Cow::Borrowed(input) }
+        if any {
+            Cow::Owned(out)
+        } else {
+            Cow::Borrowed(input)
+        }
     }
 
     // ---- internal matching ----
@@ -628,9 +751,15 @@ impl Regex {
     fn find_first(&self, bytes: &[u8]) -> Option<Vec<i32>> {
         let mut start: usize = 0;
         loop {
-            if let Some(s) = self.match_at(bytes, start) { return Some(s); }
-            if self.anchored_start { return None; }
-            if start > bytes.len() { return None; }
+            if let Some(s) = self.match_at(bytes, start) {
+                return Some(s);
+            }
+            if self.anchored_start {
+                return None;
+            }
+            if start > bytes.len() {
+                return None;
+            }
             start += 1;
         }
     }
@@ -645,25 +774,31 @@ impl Regex {
         let mut best: Option<Vec<i32>> = None;
         let mut sp = start;
         loop {
-            if cur.threads.is_empty() { break; }
+            if cur.threads.is_empty() {
+                break;
+            }
             nxt.reset();
-            let c: i32 = if sp < input.len() { input[sp] as i32 } else { -1 };
+            let c: i32 = if sp < input.len() {
+                input[sp] as i32
+            } else {
+                -1
+            };
             for th in &cur.threads {
                 let insn = &self.code[th.pc];
                 match insn.op {
                     Op::Char(b) => {
                         if c == b as i32 {
-                            nxt.add(self, &input, th.pc + 1, &th.slots, sp + 1);
+                            nxt.add(self, input, th.pc + 1, &th.slots, sp + 1);
                         }
                     }
                     Op::Any => {
                         if c >= 0 && c != b'\n' as i32 {
-                            nxt.add(self, &input, th.pc + 1, &th.slots, sp + 1);
+                            nxt.add(self, input, th.pc + 1, &th.slots, sp + 1);
                         }
                     }
                     Op::Class => {
                         if c >= 0 && insn.cc.has(c as u8) {
-                            nxt.add(self, &input, th.pc + 1, &th.slots, sp + 1);
+                            nxt.add(self, input, th.pc + 1, &th.slots, sp + 1);
                         }
                     }
                     Op::Match => {
@@ -679,7 +814,9 @@ impl Regex {
             }
             std::mem::swap(&mut cur, &mut nxt);
             sp += 1;
-            if cur.threads.is_empty() { break; }
+            if cur.threads.is_empty() {
+                break;
+            }
         }
         // Drain remaining current threads at EOI (some may have advanced past
         // last char and now point at Match via epsilons). Always overwrite —
@@ -710,7 +847,11 @@ struct ThreadList {
 
 impl ThreadList {
     fn new(code_len: usize) -> Self {
-        Self { threads: Vec::new(), visited: vec![0; code_len], gen: 0 }
+        Self {
+            threads: Vec::new(),
+            visited: vec![0; code_len],
+            gen: 0,
+        }
     }
 
     fn reset(&mut self) {
@@ -723,12 +864,19 @@ impl ThreadList {
     }
 
     fn add(&mut self, re: &Regex, input: &[u8], pc: usize, slots: &[i32], sp: usize) {
-        if pc >= re.code.len() { return; }
-        if self.visited[pc] == self.gen { return; }
+        if pc >= re.code.len() {
+            return;
+        }
+        if self.visited[pc] == self.gen {
+            return;
+        }
         self.visited[pc] = self.gen;
         let insn = &re.code[pc];
         match insn.op {
-            Op::Jmp(t) => { self.add(re, input, t as usize, slots, sp); return; }
+            Op::Jmp(t) => {
+                self.add(re, input, t as usize, slots, sp);
+                return;
+            }
             Op::Split(x, y) => {
                 self.add(re, input, x as usize, slots, sp);
                 self.add(re, input, y as usize, slots, sp);
@@ -756,8 +904,8 @@ impl ThreadList {
                 let left = sp > 0
                     && sp - 1 < input.len()
                     && (input[sp - 1].is_ascii_alphanumeric() || input[sp - 1] == b'_');
-                let right = sp < input.len()
-                    && (input[sp].is_ascii_alphanumeric() || input[sp] == b'_');
+                let right =
+                    sp < input.len() && (input[sp].is_ascii_alphanumeric() || input[sp] == b'_');
                 let at_boundary = left != right;
                 let want = matches!(insn.op, Op::Wb);
                 if at_boundary == want {
@@ -768,7 +916,10 @@ impl ThreadList {
             _ => {}
         }
         // Char-consuming op: queue thread.
-        self.threads.push(Thread { pc, slots: slots.to_vec() });
+        self.threads.push(Thread {
+            pc,
+            slots: slots.to_vec(),
+        });
     }
 }
 
@@ -778,9 +929,12 @@ impl ThreadList {
 
 // Initial gen tracking: bump before first use to avoid 0 match.
 impl ThreadList {
+    #[allow(dead_code)] // kept for the regex engine's reset hooks.
     #[inline]
     fn ensure_first_gen(&mut self) {
-        if self.gen == 0 { self.gen = 1; }
+        if self.gen == 0 {
+            self.gen = 1;
+        }
     }
 }
 
@@ -794,9 +948,15 @@ pub struct Match<'h> {
 }
 
 impl<'h> Match<'h> {
-    pub fn as_str(&self) -> &'h str { &self.text[self.start..self.end] }
-    pub fn start(&self) -> usize { self.start }
-    pub fn end(&self) -> usize { self.end }
+    pub fn as_str(&self) -> &'h str {
+        &self.text[self.start..self.end]
+    }
+    pub fn start(&self) -> usize {
+        self.start
+    }
+    pub fn end(&self) -> usize {
+        self.end
+    }
 }
 
 pub struct Captures<'h> {
@@ -807,13 +967,26 @@ pub struct Captures<'h> {
 
 impl<'h> Captures<'h> {
     pub fn get(&self, i: usize) -> Option<Match<'h>> {
-        if i >= self.ngroups { return None; }
+        if i >= self.ngroups {
+            return None;
+        }
         let s = self.slots[2 * i];
         let e = self.slots[2 * i + 1];
-        if s < 0 || e < 0 || e < s { return None; }
-        Some(Match { text: self.input, start: s as usize, end: e as usize })
+        if s < 0 || e < 0 || e < s {
+            return None;
+        }
+        Some(Match {
+            text: self.input,
+            start: s as usize,
+            end: e as usize,
+        })
     }
-    pub fn len(&self) -> usize { self.ngroups }
+    pub fn len(&self) -> usize {
+        self.ngroups
+    }
+    pub fn is_empty(&self) -> bool {
+        self.ngroups == 0
+    }
     pub fn iter(&self) -> impl Iterator<Item = Option<Match<'h>>> + '_ {
         (0..self.ngroups).map(move |i| self.get(i))
     }
@@ -838,25 +1011,37 @@ pub struct CapturesIter<'r, 'h> {
 impl<'r, 'h> Iterator for CapturesIter<'r, 'h> {
     type Item = Captures<'h>;
     fn next(&mut self) -> Option<Self::Item> {
-        if self.done { return None; }
+        if self.done {
+            return None;
+        }
         let bytes = self.input.as_bytes();
         let mut start = self.pos;
         let mut found: Option<Vec<i32>> = None;
         loop {
-            if start > bytes.len() { break; }
+            if start > bytes.len() {
+                break;
+            }
             if let Some(s) = self.re.match_at(bytes, start) {
                 found = Some(s);
                 break;
             }
-            if self.re.anchored_start { break; }
+            if self.re.anchored_start {
+                break;
+            }
             start += 1;
         }
         let slots = found?;
         // Advance: if match was empty, step by 1 to avoid infinite loop.
         let mend = slots[1] as usize;
         self.pos = if slots[1] == slots[0] { mend + 1 } else { mend };
-        if mend > bytes.len() { self.done = true; }
-        Some(Captures { input: self.input, slots, ngroups: self.re.ngroups })
+        if mend > bytes.len() {
+            self.done = true;
+        }
+        Some(Captures {
+            input: self.input,
+            slots,
+            ngroups: self.re.ngroups,
+        })
     }
 }
 
@@ -874,13 +1059,17 @@ impl Replacer for &str {
             if bytes[i] == b'$' && i + 1 < bytes.len() {
                 let nc = bytes[i + 1];
                 if nc == b'&' {
-                    if let Some(m) = caps.get(0) { dst.push_str(m.as_str()); }
+                    if let Some(m) = caps.get(0) {
+                        dst.push_str(m.as_str());
+                    }
                     i += 2;
                     continue;
                 }
                 if nc.is_ascii_digit() {
                     let g = (nc - b'0') as usize;
-                    if let Some(m) = caps.get(g) { dst.push_str(m.as_str()); }
+                    if let Some(m) = caps.get(g) {
+                        dst.push_str(m.as_str());
+                    }
                     i += 2;
                     continue;
                 }
@@ -895,12 +1084,18 @@ impl Replacer for &str {
                         j += 1;
                     }
                     if any && j < bytes.len() && bytes[j] == b'}' {
-                        if let Some(m) = caps.get(g) { dst.push_str(m.as_str()); }
+                        if let Some(m) = caps.get(g) {
+                            dst.push_str(m.as_str());
+                        }
                         i = j + 1;
                         continue;
                     }
                 }
-                if nc == b'$' { dst.push('$'); i += 2; continue; }
+                if nc == b'$' {
+                    dst.push('$');
+                    i += 2;
+                    continue;
+                }
             }
             dst.push(bytes[i] as char);
             i += 1;
@@ -923,7 +1118,9 @@ impl<F: FnMut(&Captures<'_>) -> String> Replacer for F {
 
 // ---------- compile-time MAX_GROUPS sanity ----------
 #[allow(dead_code)]
-const _: () = { let _ = MAX_GROUPS; };
+const _: () = {
+    let _ = MAX_GROUPS;
+};
 
 // ============================================================================
 // Tests

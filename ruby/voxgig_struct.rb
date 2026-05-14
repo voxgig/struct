@@ -160,6 +160,7 @@ module VoxgigStruct
   def self.re_find(pattern, input)
     m = re_compile(pattern).match(input.to_s)
     return nil if m.nil?
+
     [m[0]] + m.captures.map { |c| c.nil? ? '' : c }
   end
 
@@ -167,7 +168,7 @@ module VoxgigStruct
     out = []
     input.to_s.scan(re_compile(pattern)) do
       m = Regexp.last_match
-      out << [m[0]] + m.captures.map { |c| c.nil? ? '' : c }
+      out << ([m[0]] + m.captures.map { |c| c.nil? ? '' : c })
     end
     out
   end
@@ -182,7 +183,7 @@ module VoxgigStruct
     else
       # Translate JS-style $& / $1 to Ruby's \0 / \1
       ruby_repl = replacement.gsub(/\$([&0-9])/) do |_|
-        ch = $1
+        ch = ::Regexp.last_match(1)
         ch == '&' ? '\\0' : "\\#{ch}"
       end
       input.to_s.gsub(rx, ruby_repl)

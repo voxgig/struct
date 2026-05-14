@@ -1916,7 +1916,9 @@ fn tvals_desc(tvals: &[Value]) -> String {
         .collect::<Vec<_>>()
         .join(", ");
     R_TRANSFORM_NAME
-        .replace_all(&joined, |caps: &crate::re::Captures<'_>| caps[1].to_lowercase())
+        .replace_all(&joined, |caps: &crate::re::Captures<'_>| {
+            caps[1].to_lowercase()
+        })
         .to_string()
 }
 
