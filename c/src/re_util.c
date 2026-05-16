@@ -119,17 +119,27 @@ vs_strvec_vec vs_re_find_all_re(const vs_regex* re, const char* input) {
     max_matches *= 2;
   }
   int ngroups = vs_regex_ngroups(re);
+  /* vs_regex_find_all writes a fixed VS_REGEX_MAX_GROUPS pairs per row; any
+   * groups beyond that are silently dropped at the engine layer (the row
+   * isn't even wide enough to store them). Clamp here so we don't read past
+   * the row into the next match's bytes when ngroups > VS_REGEX_MAX_GROUPS. */
+  int capped = ngroups < VS_REGEX_MAX_GROUPS ? ngroups : VS_REGEX_MAX_GROUPS;
   for (int m = 0; m < count; m++) {
     int* row_caps = caps + m * per_row;
     vs_strvec row;
     vs_strvec_init(&row);
-    for (int g = 0; g < ngroups; g++) {
+    for (int g = 0; g < capped; g++) {
       int s = row_caps[2 * g], e = row_caps[2 * g + 1];
       if (s < 0 || e < s) {
         vs_strvec_push(&row, "");
       } else {
         vs_strvec_push_n(&row, input + s, (size_t)(e - s));
       }
+    }
+    /* Keep the row width == ngroups for caller consistency with
+     * vs_re_find/vs_re_find_re; the truncated groups are empty. */
+    for (int g = capped; g < ngroups; g++) {
+      vs_strvec_push(&row, "");
     }
     vs_strvec_vec_push(&out, row);
   }
