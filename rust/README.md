@@ -170,7 +170,9 @@ portable patterns.
 - **No catastrophic backtracking.** Thompson-NFA construction means
   P1/P2 from the discovery panel run in microseconds.
 - **Zero-width `re_replace`.** `re_replace("a*", "abc", "X")` returns
-  `"XXbXcX"`, the canonical ECMA convention.
+  `"XXbXcX"` — the convention shared with all PCRE/ECMA/Java/.NET
+  engines and the other in-tree Thompson ports (C / Lua / Zig). Go
+  (RE2) returns `"XbXcX"` instead; see `/REGEX_PATHOLOGICAL.md`.
 - **Single-threaded.** `Value` uses `Rc<RefCell<…>>` so it is
   `!Send + !Sync`. The regex statics use `std::sync::LazyLock` and
   are thread-safe in isolation, but the public API isn't.

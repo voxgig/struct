@@ -133,7 +133,7 @@ which are portable to the Go / Rust / C / Lua / Zig ports.
   The discovery panel runs P1/P2 in microseconds here, but other
   pathological shapes can still blow up. Stay flat.
 - **Zero-width `replace`.** `re_replace("a*", "abc", "X")` returns
-  `"XXbXcX"`, the canonical ECMA convention.
+  `"XXbXcX"` — the ECMA convention shared by all PCRE/ECMA/.NET/Java/Onigmo engines plus the in-tree Thompson ports. Go (RE2) returns `"XbXcX"` instead; see `/REGEX_PATHOLOGICAL.md`.
 - **UTF-8 handling.** Pass character strings (use `use utf8;` for
   literals, or `decode_utf8` for bytes). Encoding round-trip bugs in
   caller code can manifest as `cafÃ©` style mojibake at print time —

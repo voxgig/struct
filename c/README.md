@@ -273,9 +273,11 @@ patterns.
   `vs_regex_free`, `vs_strvec_free`, `vs_strvec_vec_free`, and `free`
   respectively.
 - **Zero-width `re_replace`.** `vs_re_replace("a*", "abc", "X")`
-  returns `"XXbXcX"`, the canonical ECMA convention. (Pre-fix the
-  engine produced `"XaXbXcX"` because greedy quantifiers behaved
-  lazily; the `OP_MATCH` handler in `regex.c` is now priority-correct.)
+  returns `"XXbXcX"` — the convention shared with PCRE/ECMA/Java/.NET
+  and the other in-tree Thompson ports (Rust / Lua / Zig). Go (RE2)
+  returns `"XbXcX"` instead. (Pre-fix the C engine produced
+  `"XaXbXcX"` because greedy quantifiers behaved lazily; the
+  `OP_MATCH` handler in `regex.c` is now priority-correct.)
 
 See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
 

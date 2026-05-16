@@ -409,9 +409,11 @@ back-reference semantics, so `re.re_test("^(a+)\\1$", "aaaa")` returns
 - **No catastrophic backtracking.** Thompson-NFA construction; P1/P2
   finish in microseconds.
 - **Zero-width `re_replace`.** `re.re_replace("a*", "abc", "X")`
-  returns `"XXbXcX"`, the canonical ECMA convention. (Pre-fix the
-  engine produced `"XaXbXcX"`; the `OP_MATCH` handler in `regex.lua`
-  is now priority-correct, matching the C port's fix.)
+  returns `"XXbXcX"` — the convention shared with PCRE/ECMA/Java/.NET
+  and the other in-tree Thompson ports (Rust / C / Zig). Go (RE2)
+  returns `"XbXcX"` instead. (Pre-fix the Lua engine produced
+  `"XaXbXcX"`; the `OP_MATCH` handler in `regex.lua` is now
+  priority-correct, matching the C port's fix.)
 
 See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
 

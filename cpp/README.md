@@ -265,7 +265,7 @@ and lookaround; using them will not be portable.
   quantifiers; even then, performance won't match the dedicated
   engines.
 - **Zero-width `replace`.** `re_replace("a*", "abc", "X")` returns
-  `"XXbXcX"`, the canonical ECMA convention.
+  `"XXbXcX"` — the ECMA convention shared by all PCRE/ECMA/.NET/Java/Onigmo engines plus the in-tree Thompson ports. Go (RE2) returns `"XbXcX"` instead; see `/REGEX_PATHOLOGICAL.md`.
 
 See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
 

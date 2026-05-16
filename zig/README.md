@@ -296,8 +296,10 @@ lookaround, possessive quantifiers, atomic groups.
   callback variant gives full control.
 - **No catastrophic backtracking.** Thompson-NFA construction; P1/P2
   finish in microseconds.
-- **Zero-width `re_replace`** follows the ECMA convention:
-  `re_replace(alloc, "a*", "abc", "X")` returns `"XXbXcX"`.
+- **Zero-width `re_replace`** matches the in-tree-Thompson and
+  PCRE/ECMA convention: `re_replace(alloc, "a*", "abc", "X")` returns
+  `"XXbXcX"`. Go (RE2) returns `"XbXcX"` instead; this is RE2's
+  chosen rule and we don't paper over it.
 
 See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
 

@@ -389,7 +389,7 @@ not be portable to the Go / Rust / C / Lua / Zig ports.
   is backtracking. `^(a+)+$` against 22 a's plus `!` runs ~190 ms here;
   RE2-style ports finish the same case in <0.1 ms. Use flat patterns.
 - **Zero-width `replace`.** `re_replace("a*", "abc", "X")` returns
-  `"XXbXcX"`, the canonical ECMA convention.
+  `"XXbXcX"` — the ECMA convention shared by all PCRE/ECMA/.NET/Java/Onigmo engines plus the in-tree Thompson ports. Go (RE2) returns `"XbXcX"` instead; see `/REGEX_PATHOLOGICAL.md`.
 
 See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
 

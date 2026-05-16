@@ -63,7 +63,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 )
 
 const Version = "0.1.0"
@@ -995,51 +994,14 @@ func ReFindAll(pattern, input string) [][]string {
 // ReReplace replaces every match. The replacement supports Go's $0..$N
 // reference syntax (functionally equivalent to JS $&..$N).
 //
-// Iterates matches manually to follow the ECMAScript zero-width convention
-// (TS is the canonical source): unlike Go's ReplaceAllString, which
-// suppresses an empty match immediately after a non-empty match at the
-// same offset, we emit a replacement for EVERY match and advance by one
-// rune on a zero-width match. This makes `re_replace("a*", "abc", "X")`
-// yield "XXbXcX" — matching JS/TS/Python/Java/.NET/Ruby/PHP/Rust.
+// Note: Go's `regexp` (RE2) suppresses an empty match immediately
+// following a non-empty match at the same offset. This is RE2's
+// chosen convention and differs from ECMAScript / Python / Java etc:
+// `re_replace("a*", "abc", "X")` returns "XbXcX" here, "XXbXcX" on
+// PCRE/ECMA engines. The variance is inherent to the host regex
+// package; see REGEX_PATHOLOGICAL.md.
 func ReReplace(pattern, input, replacement string) string {
-	re := regexp.MustCompile(pattern)
-	var out strings.Builder
-	pos := 0
-	for pos <= len(input) {
-		loc := re.FindStringSubmatchIndex(input[pos:])
-		if loc == nil {
-			out.WriteString(input[pos:])
-			break
-		}
-		// Shift offsets back to absolute-input coordinates so Expand can
-		// look up captures from `input`.
-		abs := make([]int, len(loc))
-		for i, v := range loc {
-			if v < 0 {
-				abs[i] = -1
-			} else {
-				abs[i] = v + pos
-			}
-		}
-		mstart, mend := abs[0], abs[1]
-		out.WriteString(input[pos:mstart])
-		out.Write(re.ExpandString(nil, replacement, input, abs))
-		if mend == mstart {
-			if mstart < len(input) {
-				_, sz := utf8.DecodeRuneInString(input[mstart:])
-				if sz == 0 {
-					sz = 1
-				}
-				out.WriteString(input[mstart : mstart+sz])
-				pos = mstart + sz
-			} else {
-				pos = mstart + 1
-			}
-		} else {
-			pos = mend
-		}
-	}
-	return out.String()
+	return regexp.MustCompile(pattern).ReplaceAllString(input, replacement)
 }
 
 // ReReplaceFunc replaces every match via the callback.

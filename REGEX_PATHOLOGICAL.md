@@ -35,7 +35,7 @@ under its own tests directory.
 | ruby       |    0.04 | 0.05    | `"XXbXcX"`   | `café/au/lait` | OK    | ERR (clean)       | matches   |
 | php        |    3    | 0.3     | `"XXbXcX"`   | `café/au/lait` | OK    | ERR (clean)       | matches   |
 | perl       |    0.06 | 0.06    | `"XXbXcX"`   | `café/au/lait` | OK    | ERR (clean)       | matches   |
-| go         |    0.03 | 0.02    | `"XXbXcX"`   | `café/au/lait` | PANIC | PANIC             | PANIC     |
+| go         |    0.03 | 0.02    | `"XbXcX"`    | `café/au/lait` | PANIC | PANIC             | PANIC     |
 | rust       |    0.01 | 0.01    | `"XXbXcX"`   | `café/au/lait` | OK    | ERR (clean)       | non-match |
 | java       |   13    | 0.2     | `"XXbXcX"`   | `caf?/au/lait` | OK    | ERR (clean)       | matches   |
 | cpp        | **1190**| 24      | `"XXbXcX"`   | `café/au/lait` | OK    | ERR (clean)       | matches   |
@@ -82,16 +82,7 @@ n/r = toolchain unavailable in this environment.
    engine already supported the operation; only the wrapper was
    missing.
 
-5. **go — `re_replace` zero-width convention differed from JS**
-   (`go/voxgigstruct.go`). Go's `ReplaceAllString` suppresses an
-   empty match immediately after a non-empty match at the same
-   offset, so `re_replace("a*", "abc", "X")` yielded `"XbXcX"`
-   instead of the canonical `"XXbXcX"`. Replaced the passthrough
-   with a manual match-and-emit loop that follows the ECMAScript
-   rule (always emit a replacement, advance by one rune on
-   zero-width). Existing Go tests still pass.
-
-6. **zig — `re_find` / `re_find_all` / `re_replace` not exposed**
+5. **zig — `re_find` / `re_find_all` / `re_replace` not exposed**
    (`zig/src/struct.zig`, `zig/src/regex.zig`). The engine had
    `matchAt` but only `re_compile` / `re_test` / `re_escape` were
    public. Made `findFirst` public, added `findFrom(input, start)`,
@@ -100,12 +91,24 @@ n/r = toolchain unavailable in this environment.
    (no zig toolchain); the wrappers compile against the engine but
    need a host-side smoke pass.
 
-7. **perl — discovery test showed `cafÃ©/au/lait`** (`perl/t/regex_pathological.t`).
+6. **perl — discovery test showed `cafÃ©/au/lait`** (`perl/t/regex_pathological.t`).
    This turned out to be a test-script bug, not a port bug:
    `encode_json` returns UTF-8-encoded bytes and `binmode STDOUT,
    ':utf8'` then re-encoded them as Latin-1. Switched the test to
    `JSON::PP->new->utf8(0)->encode` so the `:utf8` layer encodes
    once. The Perl port's `re_replace` was correct all along.
+
+**Deliberately not fixed — Go `re_replace` zero-width convention.**
+Go's `regexp.ReplaceAllString` suppresses an empty match immediately
+after a non-empty match at the same offset, so
+`re_replace("a*", "abc", "X")` returns `"XbXcX"` here, not the
+ECMA-canonical `"XXbXcX"`. This is RE2's chosen rule — it's
+host-package behaviour we don't own. An earlier attempt wrapped
+`ReplaceAllString` with a manual emit loop to align the output; it
+was reverted in line with "don't modify inherent language regex
+variance, just document it." Callers writing portable code should
+not assume zero-width replacement semantics are identical across
+ports.
 
 ## Irreconcilable — engine-bound, documented for callers
 
@@ -161,7 +164,17 @@ sharp edges that come with the host engines we don't own.
    backrefs are running outside the contract on every RE2-family
    port.
 
-5. **Java / .NET stdout encoding.** Java printed `caf?` for P4/P5,
+5. **P3 zero-width `replace_all` convention varies between engines.**
+   `re_replace("a*", "abc", "X")` produces:
+   - `"XXbXcX"` — every PCRE / ECMA / .NET / Java engine, plus the
+     in-tree Thompson NFA ports (Rust, C, Lua) after the engine fix.
+   - `"XbXcX"` — Go (RE2). RE2 deliberately suppresses an empty match
+     that immediately follows a non-empty match at the same offset.
+   This is inherent to RE2 / Go's `regexp` package; there is no
+   portable workaround that doesn't replace the engine. Don't rely on
+   zero-width replacement output being identical across ports.
+
+6. **Java / .NET stdout encoding.** Java printed `caf?` for P4/P5,
    not because the regex returned the wrong string but because
    `System.out`'s default `PrintStream` uses the platform's default
    charset on JVMs without `-Dfile.encoding=UTF-8`. The in-memory
@@ -169,7 +182,7 @@ sharp edges that come with the host engines we don't own.
    UTF-8 on .NET 6+, so C# was unaffected. This is orthogonal to
    the regex contract.
 
-6. **Time-of-iteration variance on backtracking engines.** P1 / P2
+7. **Time-of-iteration variance on backtracking engines.** P1 / P2
    numbers vary across runs depending on JIT warmup, GC, and host
    load. The qualitative split (linear vs catastrophic) is stable;
    the specific milliseconds aren't a regression signal.

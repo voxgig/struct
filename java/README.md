@@ -275,7 +275,7 @@ not be portable.
   the discovery panel sees P1 (`^(a+)+$` over 22 a's plus `!`) in
   ~13 ms here. Other shapes can be worse. Prefer flat patterns.
 - **Zero-width `replace`.** `reReplace("a*", "abc", "X")` returns
-  `"XXbXcX"`, the canonical ECMA convention.
+  `"XXbXcX"` — the ECMA convention shared by all PCRE/ECMA/.NET/Java/Onigmo engines plus the in-tree Thompson ports. Go (RE2) returns `"XbXcX"` instead; see `/REGEX_PATHOLOGICAL.md`.
 - **`System.out` encoding.** When printing match results that contain
   non-ASCII characters, `System.out`'s default `PrintStream` uses the
   platform's default charset, not UTF-8. The discovery panel sees

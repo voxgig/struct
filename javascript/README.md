@@ -397,7 +397,7 @@ do not, so using those will not be portable.
   Node 22 vs <0.1 ms on RE2-style engines). Prefer flat patterns and
   character classes over alternations.
 - **Zero-width `replace`.** `re_replace("a*", "abc", "X")` returns
-  `"XXbXcX"`, the canonical ECMA convention.
+  `"XXbXcX"` — the ECMA convention shared by all PCRE/ECMA/.NET/Java/Onigmo engines plus the in-tree Thompson ports. Go (RE2) returns `"XbXcX"` instead; see `/REGEX_PATHOLOGICAL.md`.
 
 See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input
 panel.

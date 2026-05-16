@@ -415,7 +415,7 @@ reference implementation.
 | `ReTest(pattern, input)`          | `re.MatchString(input)` |
 | `ReFind(pattern, input)`          | `re.FindStringSubmatch(input)` |
 | `ReFindAll(pattern, input)`       | `re.FindAllStringSubmatch(input, -1)` |
-| `ReReplace(pattern, input, rep)`  | manual match-and-emit loop (see "Sharp edges") |
+| `ReReplace(pattern, input, rep)`  | `re.ReplaceAllString(input, rep)` |
 | `ReReplaceFunc(pattern, input,f)` | `re.ReplaceAllStringFunc(input, f)` |
 | `ReEscape(s)`                     | alias for `EscRe(s)` |
 
@@ -438,12 +438,13 @@ no PCRE escape hatch.
 - **No backreferences or lookaround.** RE2 does not support them by
   design. `^(a+)\1$` panics on compile. The cross-port dialect already
   forbids them; this is the engine that enforces the rule hardest.
-- **Zero-width `re_replace` aligned to ECMA convention.**
-  `re_replace("a*", "abc", "X")` returns `"XXbXcX"`. Go's stdlib
-  `ReplaceAllString` would return `"XbXcX"` (it suppresses an empty
-  match immediately after a non-empty match at the same offset).
-  `ReReplace` here uses a manual emit loop so the result matches the
-  TS canonical and all other ports.
+- **Zero-width `re_replace` uses RE2's convention.**
+  `re_replace("a*", "abc", "X")` returns `"XbXcX"` — RE2 suppresses
+  an empty match immediately after a non-empty match at the same
+  offset. PCRE / ECMA / .NET / Java / the in-tree Thompson ports all
+  return `"XXbXcX"` instead. This is inherent to Go's host regex
+  package and is **not** wrapped: portable callers should not depend
+  on cross-port identity of zero-width replacement output.
 
 See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
 

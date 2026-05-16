@@ -600,8 +600,11 @@ portable.
   (`a+` instead of `(a+)+`) and keep injected user input in
   character classes, not in alternations.
 - **Zero-width `replace`.** `re_replace("a*", "abc", "X")` returns
-  `"XXbXcX"` here. This is the canonical convention; the Go, C, and
-  Lua ports were aligned to this output.
+  `"XXbXcX"` here — the ECMA convention shared by every port whose
+  host engine is PCRE/ECMA/.NET/Java/Onigmo, plus the in-tree
+  Thompson NFA ports (Rust / C / Lua / Zig). Go is the exception:
+  RE2 returns `"XbXcX"`. Don't rely on cross-port identity of
+  zero-width replacement output — see `/REGEX_PATHOLOGICAL.md`.
 
 See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input
 panel and per-port outcomes.
