@@ -133,8 +133,18 @@ pub const Regex = struct {
         return false;
     }
 
-    fn findFirst(self: Regex, input: []const u8) ?[]i32 {
+    pub fn findFirst(self: Regex, input: []const u8) ?[]i32 {
         var start: usize = 0;
+        while (true) {
+            if (self.matchAt(input, start)) |slots| return slots;
+            if (self.anchored_start) return null;
+            if (start > input.len) return null;
+            start += 1;
+        }
+    }
+
+    pub fn findFrom(self: Regex, input: []const u8, from: usize) ?[]i32 {
+        var start: usize = from;
         while (true) {
             if (self.matchAt(input, start)) |slots| return slots;
             if (self.anchored_start) return null;

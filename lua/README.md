@@ -370,6 +370,54 @@ reference-stable" assumption holds without a wrapper.
 75/75 tests pass against the shared corpus.
 
 
+## Regex
+
+Uniform six-function regex API (see `/REGEX_API.md`). The Lua port
+**ships its own RE2-subset engine** in `src/regex.lua` (~500 LOC of
+pure Lua — Lua's built-in pattern language is intentionally not
+regex, so we vendor one). No LuaRocks dependency, no FFI.
+
+### API
+
+| Function | Returns |
+|---|---|
+| `re.re_compile(pattern)`              | compiled regex object |
+| `re.re_test(pattern, input)`          | `true` / `false` |
+| `re.re_find(pattern, input)`          | `{whole, group1, …}` or `nil` |
+| `re.re_find_all(pattern, input)`      | `{ {whole, group1, …}, … }` |
+| `re.re_replace(pattern, input, repl)` | `string` |
+| `re.re_escape(literal)`               | `string` |
+
+### Dialect
+
+The in-tree engine implements the RE2 subset documented in
+`/REGEX.md`: literals + escapes, `.`, `^`/`$`, `* + ? {n} {n,} {n,m}`
+(greedy + lazy), classes incl. `\d \w \s` and friends, `\b`/`\B`,
+`(...)` / `(?:...)`, alternation.
+
+**Not supported** (by design — RE2 doesn't either): backreferences,
+lookaround, possessive quantifiers, atomic groups. Backref patterns
+compile (the parser treats `\1` as a literal `1`) but never match
+back-reference semantics, so `re.re_test("^(a+)\\1$", "aaaa")` returns
+`false`. Don't rely on this — write portable patterns.
+
+### Sharp edges (Lua-specific)
+
+- **It's a Lua VM regex engine.** P7 (`a{0,10000}b$`) takes ~80 ms
+  here — fine functionally, slow versus native engines. The library's
+  hot paths don't use bounded quantifiers anywhere near that size.
+- **No catastrophic backtracking.** Thompson-NFA construction; P1/P2
+  finish in microseconds.
+- **Zero-width `re_replace`.** `re.re_replace("a*", "abc", "X")`
+  returns `"XXbXcX"` — the convention shared with PCRE/ECMA/Java/.NET
+  and the other in-tree Thompson ports (Rust / C / Zig). Go (RE2)
+  returns `"XbXcX"` instead. (Pre-fix the Lua engine produced
+  `"XaXbXcX"`; the `OP_MATCH` handler in `regex.lua` is now
+  priority-correct, matching the C port's fix.)
+
+See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
+
+
 ## Build and test
 
 ```bash

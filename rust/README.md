@@ -126,3 +126,55 @@ Rust has no optional/overloaded parameters, so:
 
 See [`REPORT.md`](../REPORT.md#rust-rust) for the rust-port adaptations
 write-up, and [`../NOTES.md`](../NOTES.md) for cross-port quirks.
+
+
+## Regex
+
+Uniform six-function regex API (see `/REGEX_API.md`). The Rust port
+**ships its own RE2-subset engine** in `src/re.rs` — no `regex` crate
+dependency, no third-party crates at all (`Cargo.toml` lists none for
+runtime).
+
+### API
+
+| Function | Returns |
+|---|---|
+| `re_compile(pattern)`           | `Result<Regex, RegexError>` |
+| `re_test(pattern, input)`       | `bool` |
+| `re_find(pattern, input)`       | `Option<Vec<String>>` — `[whole, group1, …]` |
+| `re_find_all(pattern, input)`   | `Vec<Vec<String>>` |
+| `re_replace(pattern, input, r)` | `String` |
+| `re_escape(s)`                  | `String` |
+
+### Dialect
+
+The in-tree engine implements the RE2 subset documented in
+`/REGEX.md`: literals + escapes, `.`, `^`/`$`, `* + ? {n} {n,} {n,m}`
+(greedy + lazy), classes incl. `\d \w \s` and friends, `\b`/`\B`,
+`(...)` / `(?:...)`, alternation.
+
+**Not supported** (by design — RE2 doesn't either):
+backreferences, lookaround, possessive quantifiers, atomic groups.
+Backref patterns like `^(a+)\1$` *compile* (the parser doesn't reject
+`\1`) but never match the back-reference semantically, so `re_test`
+returns `false` rather than erroring. Don't rely on this — write
+portable patterns.
+
+### Sharp edges (Rust-specific)
+
+- **Bounded quantifiers are unrolled.** `a{0,10000}` compiles into
+  10 000 Split+atom-clone pairs. The matcher was previously recursive
+  during epsilon-closure and stack-overflowed on such patterns; it is
+  now iterative (`Threads::add` uses an explicit work stack).
+  `re_test("^a{0,10000}b$", …)` now runs in ~10 ms here.
+- **No catastrophic backtracking.** Thompson-NFA construction means
+  P1/P2 from the discovery panel run in microseconds.
+- **Zero-width `re_replace`.** `re_replace("a*", "abc", "X")` returns
+  `"XXbXcX"` — the convention shared with all PCRE/ECMA/Java/.NET
+  engines and the other in-tree Thompson ports (C / Lua / Zig). Go
+  (RE2) returns `"XbXcX"` instead; see `/REGEX_PATHOLOGICAL.md`.
+- **Single-threaded.** `Value` uses `Rc<RefCell<…>>` so it is
+  `!Send + !Sync`. The regex statics use `std::sync::LazyLock` and
+  are thread-safe in isolation, but the public API isn't.
+
+See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.

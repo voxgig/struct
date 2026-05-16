@@ -247,6 +247,46 @@ No standard test runner configured yet.  `StructTest.java` exists
 but is minimal.
 
 
+## Regex
+
+Uniform six-function regex API (see `/REGEX_API.md`). The Java port
+wraps `java.util.regex.Pattern`.
+
+### API
+
+| Function | Maps to |
+|---|---|
+| `reCompile(pattern)`              | `Pattern.compile(pattern)` (throws `PatternSyntaxException` on bad pattern) |
+| `reTest(pattern, input)`          | `Pattern.compile(pattern).matcher(input).find()` |
+| `reFind(pattern, input)`          | first match as `String[]` of `[whole, group1, …]` or `null` |
+| `reFindAll(pattern, input)`       | `List<String[]>` |
+| `reReplace(pattern, input, repl)` | `matcher.replaceAll(repl)` |
+| `reEscape(s)`                     | escape regex metacharacters |
+
+### Dialect
+
+Patterns must stay inside the **RE2 subset** documented in `/REGEX.md`.
+Java's regex supports backreferences and lookaround; using them will
+not be portable.
+
+### Sharp edges
+
+- **Catastrophic backtracking.** `java.util.regex` is backtracking;
+  the discovery panel sees P1 (`^(a+)+$` over 22 a's plus `!`) in
+  ~13 ms here. Other shapes can be worse. Prefer flat patterns.
+- **Zero-width `replace`.** `reReplace("a*", "abc", "X")` returns
+  `"XXbXcX"` — the ECMA convention shared by all PCRE/ECMA/.NET/Java/Onigmo engines plus the in-tree Thompson ports. Go (RE2) returns `"XbXcX"` instead; see `/REGEX_PATHOLOGICAL.md`.
+- **`System.out` encoding.** When printing match results that contain
+  non-ASCII characters, `System.out`'s default `PrintStream` uses the
+  platform's default charset, not UTF-8. The discovery panel sees
+  `caf?` in stdout though the in-memory `String` is correct UTF-16.
+  Pass `-Dfile.encoding=UTF-8` (or use `PrintStream(System.out, true,
+  StandardCharsets.UTF_8)`) when this matters. Orthogonal to the
+  regex itself.
+
+See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
+
+
 ## Build and test
 
 ```bash

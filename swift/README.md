@@ -145,6 +145,42 @@ order. `JSON.stringify(value, indent: 2)` serialises back.
   `__NULL__` round-trip for the `inject.string` and `select.*`
   sets exactly as the canonical TS runner does.
 
+## Regex
+
+Uniform six-function regex API (see `/REGEX_API.md`). The Swift port
+wraps `NSRegularExpression`.
+
+### API
+
+| Function | Returns |
+|---|---|
+| `re_compile(pattern, flags?)`         | `NSRegularExpression?` (nil on bad pattern) |
+| `re_test(pattern, input)`             | `Bool` |
+| `re_find(pattern, input)`             | `Value.list([whole, group1, …])` or `.noval` |
+| `re_find_all(pattern, input)`         | `Value.list([...])` |
+| `re_replace(pattern, input, repl)`    | `String` |
+| `re_escape(v)`                        | `String` |
+
+### Dialect
+
+Patterns must stay inside the **RE2 subset** documented in `/REGEX.md`.
+`NSRegularExpression` (ICU-based) supports backreferences and lookaround;
+using them will not be portable.
+
+### Sharp edges
+
+- **Catastrophic backtracking.** ICU regex is backtracking. Stay
+  inside the RE2 subset and prefer flat patterns.
+- **Compile failures are nil, not throws.** `re_compile` returns
+  `nil` on bad pattern (the underlying `try?` swallows the error).
+  Callers should check the optional rather than rely on an exception.
+- **`Value` shape for `re_find` / `re_find_all`.** The Swift port
+  threads results through the in-tree `Value` enum (matching the
+  rest of the API surface), not raw arrays.
+
+See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
+
+
 ## Tests
 
 ```bash

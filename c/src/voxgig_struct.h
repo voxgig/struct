@@ -64,6 +64,20 @@ bool vs_re_test_re(const vs_regex* re, const char* input);
 vs_strvec vs_re_find(const char* pattern, const char* input);
 vs_strvec vs_re_find_re(const vs_regex* re, const char* input);
 
+/* List-of-lists of strings — one vs_strvec per match (each row is
+ * [whole, capture1, ...]). Caller must vs_strvec_vec_free() to release. */
+typedef struct vs_strvec_vec {
+  size_t len;
+  size_t cap;
+  vs_strvec* data;
+} vs_strvec_vec;
+
+void vs_strvec_vec_init(vs_strvec_vec* v);
+void vs_strvec_vec_free(vs_strvec_vec* v);
+
+vs_strvec_vec vs_re_find_all(const char* pattern, const char* input);
+vs_strvec_vec vs_re_find_all_re(const vs_regex* re, const char* input);
+
 /* Returns malloc'd string. */
 char* vs_re_replace(const char* pattern, const char* input, const char* replacement);
 char* vs_re_replace_re(const vs_regex* re, const char* input, const char* replacement);

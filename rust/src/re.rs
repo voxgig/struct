@@ -852,62 +852,68 @@ impl ThreadList {
     }
 
     fn add(&mut self, re: &Regex, input: &[u8], pc: usize, slots: &[i32], sp: usize) {
-        if pc >= re.code.len() {
-            return;
-        }
-        if self.visited[pc] == self.gen {
-            return;
-        }
-        self.visited[pc] = self.gen;
-        let insn = &re.code[pc];
-        match insn.op {
-            Op::Jmp(t) => {
-                self.add(re, input, t as usize, slots, sp);
-                return;
+        // Iterative epsilon-closure: we walk Jmp/Split/Save/Bol/Eol/Wb/Nwb
+        // until we hit a char-consuming op or Match. A recursive version
+        // overflows the stack on long Thompson chains (e.g. `a{0,10000}`
+        // unrolls into 10000 chained Splits — `cargo test` aborted with
+        // SIGABRT on the pathological-regex panel before this loop landed).
+        //
+        // The stack mirrors the recursive order: Split pushes y first then
+        // x, so x is processed first (priority preserved).
+        let mut stack: Vec<(usize, Vec<i32>)> = vec![(pc, slots.to_vec())];
+        while let Some((cur_pc, cur_slots)) = stack.pop() {
+            if cur_pc >= re.code.len() {
+                continue;
             }
-            Op::Split(x, y) => {
-                self.add(re, input, x as usize, slots, sp);
-                self.add(re, input, y as usize, slots, sp);
-                return;
+            if self.visited[cur_pc] == self.gen {
+                continue;
             }
-            Op::Save(slot) => {
-                let mut ns = slots.to_vec();
-                ns[slot] = sp as i32;
-                self.add(re, input, pc + 1, &ns, sp);
-                return;
-            }
-            Op::Bol => {
-                if sp == 0 || (sp - 1 < input.len() && input[sp - 1] == b'\n') {
-                    self.add(re, input, pc + 1, slots, sp);
+            self.visited[cur_pc] = self.gen;
+            match re.code[cur_pc].op {
+                Op::Jmp(t) => {
+                    stack.push((t as usize, cur_slots));
                 }
-                return;
-            }
-            Op::Eol => {
-                if sp >= input.len() || input[sp] == b'\n' {
-                    self.add(re, input, pc + 1, slots, sp);
+                Op::Split(x, y) => {
+                    // Push y first so x (higher priority) is popped first.
+                    stack.push((y as usize, cur_slots.clone()));
+                    stack.push((x as usize, cur_slots));
                 }
-                return;
-            }
-            Op::Wb | Op::Nwb => {
-                let left = sp > 0
-                    && sp - 1 < input.len()
-                    && (input[sp - 1].is_ascii_alphanumeric() || input[sp - 1] == b'_');
-                let right =
-                    sp < input.len() && (input[sp].is_ascii_alphanumeric() || input[sp] == b'_');
-                let at_boundary = left != right;
-                let want = matches!(insn.op, Op::Wb);
-                if at_boundary == want {
-                    self.add(re, input, pc + 1, slots, sp);
+                Op::Save(slot) => {
+                    let mut ns = cur_slots;
+                    ns[slot] = sp as i32;
+                    stack.push((cur_pc + 1, ns));
                 }
-                return;
+                Op::Bol => {
+                    if sp == 0 || (sp - 1 < input.len() && input[sp - 1] == b'\n') {
+                        stack.push((cur_pc + 1, cur_slots));
+                    }
+                }
+                Op::Eol => {
+                    if sp >= input.len() || input[sp] == b'\n' {
+                        stack.push((cur_pc + 1, cur_slots));
+                    }
+                }
+                Op::Wb | Op::Nwb => {
+                    let left = sp > 0
+                        && sp - 1 < input.len()
+                        && (input[sp - 1].is_ascii_alphanumeric() || input[sp - 1] == b'_');
+                    let right = sp < input.len()
+                        && (input[sp].is_ascii_alphanumeric() || input[sp] == b'_');
+                    let at_boundary = left != right;
+                    let want = matches!(re.code[cur_pc].op, Op::Wb);
+                    if at_boundary == want {
+                        stack.push((cur_pc + 1, cur_slots));
+                    }
+                }
+                _ => {
+                    // Char-consuming op (or Match): queue thread.
+                    self.threads.push(Thread {
+                        pc: cur_pc,
+                        slots: cur_slots,
+                    });
+                }
             }
-            _ => {}
         }
-        // Char-consuming op: queue thread.
-        self.threads.push(Thread {
-            pc,
-            slots: slots.to_vec(),
-        });
     }
 }
 

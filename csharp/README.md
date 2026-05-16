@@ -260,6 +260,42 @@ In progress.  Coverage of canonical functions is broad; check
 [`../REPORT.md`](../REPORT.md) for the latest status.
 
 
+## Regex
+
+Uniform six-function regex API (see `/REGEX_API.md`). The C# port
+wraps `System.Text.RegularExpressions.Regex`.
+
+### API
+
+| Function | Maps to |
+|---|---|
+| `ReCompile(pattern)`             | `new Regex(pattern)` (throws `RegexParseException` on bad pattern) |
+| `ReTest(pattern, input)`         | `Regex.IsMatch(input, pattern)` |
+| `ReFind(pattern, input)`         | first match as `string[]` of `[whole, group1, …]` or `null` |
+| `ReFindAll(pattern, input)`      | `List<string[]>` |
+| `ReReplace(pattern, input, rep)` | `Regex.Replace(input, pattern, rep)` |
+| `ReEscape(s)`                    | `Regex.Escape(s)` |
+
+### Dialect
+
+Patterns must stay inside the **RE2 subset** documented in `/REGEX.md`.
+.NET regex supports backreferences and lookaround; using them will not
+be portable.
+
+### Sharp edges
+
+- **Catastrophic backtracking.** .NET's regex is backtracking; the
+  discovery panel sees P1 (`^(a+)+$` over 22 a's plus `!`) in
+  ~390 ms here. .NET 7+ ships a non-backtracking engine you can opt
+  into via `RegexOptions.NonBacktracking` — consider it for
+  untrusted patterns. Stay inside the RE2 subset and prefer flat
+  patterns.
+- **Zero-width `replace`.** `ReReplace("a*", "abc", "X")` returns
+  `"XXbXcX"` — the ECMA convention shared by all PCRE/ECMA/.NET/Java/Onigmo engines plus the in-tree Thompson ports. Go (RE2) returns `"XbXcX"` instead; see `/REGEX_PATHOLOGICAL.md`.
+
+See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
+
+
 ## Build and test
 
 ```bash

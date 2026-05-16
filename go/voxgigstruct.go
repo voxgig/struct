@@ -993,6 +993,13 @@ func ReFindAll(pattern, input string) [][]string {
 
 // ReReplace replaces every match. The replacement supports Go's $0..$N
 // reference syntax (functionally equivalent to JS $&..$N).
+//
+// Note: Go's `regexp` (RE2) suppresses an empty match immediately
+// following a non-empty match at the same offset. This is RE2's
+// chosen convention and differs from ECMAScript / Python / Java etc:
+// `re_replace("a*", "abc", "X")` returns "XbXcX" here, "XXbXcX" on
+// PCRE/ECMA engines. The variance is inherent to the host regex
+// package; see REGEX_PATHOLOGICAL.md.
 func ReReplace(pattern, input, replacement string) string {
 	return regexp.MustCompile(pattern).ReplaceAllString(input, replacement)
 }

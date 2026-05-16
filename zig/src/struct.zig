@@ -773,6 +773,102 @@ pub fn re_test(pattern: []const u8, input: []const u8) bool {
     return re.isMatch(input);
 }
 
+/// re_find — first match as `[whole, capture1, ...]`. Slices alias `input`,
+/// so the result is valid only while `input` is alive. Returns null on
+/// compile error or no-match. The outer slice and inner slices must be
+/// freed by the caller.
+pub fn re_find(allocator: Allocator, pattern: []const u8, input: []const u8) ?[][]const u8 {
+    var re = _re_engine.compile(std.heap.page_allocator, pattern) orelse return null;
+    defer re.deinit();
+    const slots = re.findFirst(input) orelse return null;
+    defer std.heap.page_allocator.free(slots);
+    const ngroups = re.ngroups;
+    const out = allocator.alloc([]const u8, ngroups) catch return null;
+    var g: usize = 0;
+    while (g < ngroups) : (g += 1) {
+        const s = slots[2 * g];
+        const e = slots[2 * g + 1];
+        if (s < 0 or e < s) {
+            out[g] = "";
+        } else {
+            out[g] = input[@as(usize, @intCast(s))..@as(usize, @intCast(e))];
+        }
+    }
+    return out;
+}
+
+/// re_find_all — every non-overlapping match. Caller owns the returned
+/// slice-of-slices and must free both levels.
+pub fn re_find_all(allocator: Allocator, pattern: []const u8, input: []const u8) ?[][][]const u8 {
+    var re = _re_engine.compile(std.heap.page_allocator, pattern) orelse return null;
+    defer re.deinit();
+    var rows = std.ArrayList([][]const u8).init(allocator);
+    defer rows.deinit();
+    var pos: usize = 0;
+    while (pos <= input.len) {
+        const slots = re.findFrom(input, pos) orelse break;
+        defer std.heap.page_allocator.free(slots);
+        const ngroups = re.ngroups;
+        const row = allocator.alloc([]const u8, ngroups) catch return null;
+        var g: usize = 0;
+        while (g < ngroups) : (g += 1) {
+            const s = slots[2 * g];
+            const e = slots[2 * g + 1];
+            if (s < 0 or e < s) {
+                row[g] = "";
+            } else {
+                row[g] = input[@as(usize, @intCast(s))..@as(usize, @intCast(e))];
+            }
+        }
+        rows.append(row) catch return null;
+        const mstart = @as(usize, @intCast(slots[0]));
+        const mend = @as(usize, @intCast(slots[1]));
+        if (mend == mstart) {
+            pos = mend + 1;
+        } else {
+            pos = mend;
+        }
+    }
+    return rows.toOwnedSlice() catch return null;
+}
+
+/// re_replace — replace every match in `input` with `replacement`. The
+/// replacement string is taken literally; $& / $1.. substitution is not
+/// expanded in this minimal wrapper (matches the engine's current shape).
+/// On zero-width match the current rune is emitted and we advance by one
+/// byte, mirroring the ECMAScript convention used by other ports.
+pub fn re_replace(allocator: Allocator, pattern: []const u8, input: []const u8, replacement: []const u8) ![]u8 {
+    var re = _re_engine.compile(std.heap.page_allocator, pattern) orelse {
+        return allocator.dupe(u8, input);
+    };
+    defer re.deinit();
+    var out = std.ArrayList(u8).init(allocator);
+    defer out.deinit();
+    var pos: usize = 0;
+    while (pos <= input.len) {
+        const slots = re.findFrom(input, pos) orelse {
+            try out.appendSlice(input[pos..]);
+            break;
+        };
+        defer std.heap.page_allocator.free(slots);
+        const mstart = @as(usize, @intCast(slots[0]));
+        const mend = @as(usize, @intCast(slots[1]));
+        try out.appendSlice(input[pos..mstart]);
+        try out.appendSlice(replacement);
+        if (mend == mstart) {
+            if (mstart < input.len) {
+                try out.append(input[mstart]);
+                pos = mstart + 1;
+            } else {
+                pos = mstart + 1;
+            }
+        } else {
+            pos = mend;
+        }
+    }
+    return out.toOwnedSlice();
+}
+
 pub fn re_escape(allocator: Allocator, s: []const u8) ![]const u8 {
     return escre(allocator, s);
 }

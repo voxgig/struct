@@ -401,6 +401,54 @@ canonical "lists are reference-stable" assumption.
 92/92 tests pass against the shared corpus.
 
 
+## Regex
+
+Uniform six-function regex API (see `/REGEX_API.md`). The Go port
+wraps the stdlib `regexp` package — Go's `regexp` *is* the RE2
+reference implementation.
+
+### API
+
+| Function | Maps to |
+|---|---|
+| `ReCompile(pattern)`              | `regexp.MustCompile(pattern)` (panics on bad pattern) |
+| `ReTest(pattern, input)`          | `re.MatchString(input)` |
+| `ReFind(pattern, input)`          | `re.FindStringSubmatch(input)` |
+| `ReFindAll(pattern, input)`       | `re.FindAllStringSubmatch(input, -1)` |
+| `ReReplace(pattern, input, rep)`  | `re.ReplaceAllString(input, rep)` |
+| `ReReplaceFunc(pattern, input,f)` | `re.ReplaceAllStringFunc(input, f)` |
+| `ReEscape(s)`                     | alias for `EscRe(s)` |
+
+### Dialect
+
+Patterns must stay inside the **RE2 subset** documented in `/REGEX.md`.
+Since Go's regexp engine *is* RE2, this is the natural ceiling: there is
+no PCRE escape hatch.
+
+### Sharp edges (Go-specific)
+
+- **`ReCompile` panics.** It's a pass-through to `regexp.MustCompile`,
+  so an invalid pattern aborts via `panic`. This matches the
+  throw/raise behaviour of every other port; wrap in `recover()` if
+  you accept user-supplied patterns.
+- **Bounded quantifier cap.** RE2 refuses `{n,m}` with `m > 1000`.
+  `^a{0,10000}b$` *panics* at compile time with "invalid repeat
+  count". This is a hard RE2 limit — no portable workaround. The
+  canonical patterns and `$LIKE` operator stay well below it.
+- **No backreferences or lookaround.** RE2 does not support them by
+  design. `^(a+)\1$` panics on compile. The cross-port dialect already
+  forbids them; this is the engine that enforces the rule hardest.
+- **Zero-width `re_replace` uses RE2's convention.**
+  `re_replace("a*", "abc", "X")` returns `"XbXcX"` — RE2 suppresses
+  an empty match immediately after a non-empty match at the same
+  offset. PCRE / ECMA / .NET / Java / the in-tree Thompson ports all
+  return `"XXbXcX"` instead. This is inherent to Go's host regex
+  package and is **not** wrapped: portable callers should not depend
+  on cross-port identity of zero-width replacement output.
+
+See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
+
+
 ## Build and test
 
 ```bash

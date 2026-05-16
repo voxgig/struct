@@ -361,6 +361,39 @@ parity with other ports beats style here.
 84/84 tests pass against the shared corpus.
 
 
+## Regex
+
+Uniform six-function regex API (see `/REGEX_API.md`). The Python port
+wraps the stdlib `re` module.
+
+### API
+
+| Function | Maps to |
+|---|---|
+| `re_compile(pattern, flags=0)`         | `re.compile(pattern, flags)` |
+| `re_test(pattern, input)`              | `bool(re.search(pattern, input))` |
+| `re_find(pattern, input)`              | first match as `[whole, group1, ...]` or `None` |
+| `re_find_all(pattern, input)`          | all matches, one row per match |
+| `re_replace(pattern, input, repl)`     | `re.sub(pattern, repl, input)` |
+| `re_escape(s)`                         | `re.escape(s)` |
+
+### Dialect
+
+Patterns must stay inside the **RE2 subset** documented in `/REGEX.md`.
+Python's `re` supports backreferences and lookaround; using them will
+not be portable to the Go / Rust / C / Lua / Zig ports.
+
+### Sharp edges
+
+- **Catastrophic backtracking.** Python's `re` (the default C engine)
+  is backtracking. `^(a+)+$` against 22 a's plus `!` runs ~190 ms here;
+  RE2-style ports finish the same case in <0.1 ms. Use flat patterns.
+- **Zero-width `replace`.** `re_replace("a*", "abc", "X")` returns
+  `"XXbXcX"` — the ECMA convention shared by all PCRE/ECMA/.NET/Java/Onigmo engines plus the in-tree Thompson ports. Go (RE2) returns `"XbXcX"` instead; see `/REGEX_PATHOLOGICAL.md`.
+
+See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
+
+
 ## Build and test
 
 ```bash
