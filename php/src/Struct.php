@@ -565,20 +565,25 @@ class Struct
     public static function re_compile(string $pattern): string
     {
         // PHP wants a delimited pattern; return one delimited with '/'.
-        if (strlen($pattern) > 0 && $pattern[0] === '/') {
-            return $pattern;
+        $delimited = strlen($pattern) > 0 && $pattern[0] === '/'
+            ? $pattern
+            : '/' . str_replace('/', '\\/', $pattern) . '/';
+        // PCRE returns false from preg_match on invalid patterns; surface that
+        // to the caller (matching the throw behaviour of JS/Python/Java/.NET).
+        if (@preg_match($delimited, '') === false) {
+            throw new \InvalidArgumentException("Invalid regex pattern: $pattern");
         }
-        return '/' . str_replace('/', '\\/', $pattern) . '/';
+        return $delimited;
     }
 
     public static function re_test(string $pattern, string $input): bool
     {
-        return @preg_match(self::re_compile($pattern), $input) === 1;
+        return preg_match(self::re_compile($pattern), $input) === 1;
     }
 
     public static function re_find(string $pattern, string $input): ?array
     {
-        if (@preg_match(self::re_compile($pattern), $input, $m) === 1) {
+        if (preg_match(self::re_compile($pattern), $input, $m) === 1) {
             return $m;
         }
         return null;
@@ -587,7 +592,7 @@ class Struct
     public static function re_find_all(string $pattern, string $input): array
     {
         $out = [];
-        if (@preg_match_all(self::re_compile($pattern), $input, $m, PREG_SET_ORDER) !== false) {
+        if (preg_match_all(self::re_compile($pattern), $input, $m, PREG_SET_ORDER) !== false) {
             $out = $m;
         }
         return $out;

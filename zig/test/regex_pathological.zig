@@ -1,32 +1,19 @@
 // Discovery test: pathological regex inputs run against the port's re_* API.
 // Goal is to surface failures across ports, not to assert behaviour.
 // Panel is the same in every port (see REGEX.md).
-//
-// Zig's public regex surface currently exposes only re_compile/re_test/re_escape
-// (see src/struct.zig). The find/replace/find_all cases below mark themselves
-// as N/A — that absence is itself part of the discovery.
 
 const std = @import("std");
 const voxgig_struct = @import("voxgig-struct");
 
-fn record_test(label: []const u8, ok: bool, ms: f64, value: anytype) void {
-    const T = @TypeOf(value);
-    const writer = std.io.getStdOut().writer();
-    if (ok) {
-        if (T == bool) {
-            writer.print("[regex-discovery] {s} | {d:.2}ms | OK | {}\n", .{ label, ms, value }) catch {};
-        } else {
-            writer.print("[regex-discovery] {s} | {d:.2}ms | OK | {any}\n", .{ label, ms, value }) catch {};
-        }
-    } else {
-        writer.print("[regex-discovery] {s} | {d:.2}ms | ERR | compile or run failed\n", .{ label, ms }) catch {};
-    }
+fn ms_since(t0: i128) f64 {
+    return @as(f64, @floatFromInt(std.time.nanoTimestamp() - t0)) / 1e6;
 }
 
 test "regex pathological discovery" {
-    var buf: [4096]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&buf);
-    const alloc = fba.allocator();
+    const writer = std.io.getStdOut().writer();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
 
     const a22 = try alloc.alloc(u8, 22);
     @memset(a22, 'a');
@@ -44,51 +31,53 @@ test "regex pathological discovery" {
     }
     const nest40 = nest_buf[0..pos];
 
-    // P1
     var t0 = std.time.nanoTimestamp();
     const b1 = voxgig_struct.re_test("^(a+)+$", p1_in);
-    var ms = @as(f64, @floatFromInt(std.time.nanoTimestamp() - t0)) / 1e6;
-    record_test("P1_redos_nested_plus", true, ms, b1);
+    try writer.print("[regex-discovery] P1_redos_nested_plus | {d:.2}ms | OK | {}\n", .{ ms_since(t0), b1 });
 
-    // P2
     t0 = std.time.nanoTimestamp();
     const b2 = voxgig_struct.re_test("^(a|aa)+$", p1_in);
-    ms = @as(f64, @floatFromInt(std.time.nanoTimestamp() - t0)) / 1e6;
-    record_test("P2_redos_alt_overlap", true, ms, b2);
+    try writer.print("[regex-discovery] P2_redos_alt_overlap | {d:.2}ms | OK | {}\n", .{ ms_since(t0), b2 });
 
-    // P3, P4, P5, P10 — replace/find/find_all not in zig public surface.
-    const writer = std.io.getStdOut().writer();
-    try writer.print("[regex-discovery] P3_empty_repeat_replace | -.--ms | N/A | re_replace not exposed\n", .{});
-    try writer.print("[regex-discovery] P4_unicode_replace_dot | -.--ms | N/A | re_replace not exposed\n", .{});
-    try writer.print("[regex-discovery] P5_unicode_find_codepoint | -.--ms | N/A | re_find not exposed\n", .{});
-
-    // P6
     t0 = std.time.nanoTimestamp();
-    const b6 = voxgig_struct.re_test(nest40, "a");
-    ms = @as(f64, @floatFromInt(std.time.nanoTimestamp() - t0)) / 1e6;
-    record_test("P6_deep_nesting_compile", true, ms, b6);
+    const p3 = try voxgig_struct.re_replace(alloc, "a*", "abc", "X");
+    try writer.print("[regex-discovery] P3_empty_repeat_replace | {d:.2}ms | OK | \"{s}\"\n", .{ ms_since(t0), p3 });
 
-    // P7
     t0 = std.time.nanoTimestamp();
-    const b7 = voxgig_struct.re_test("^a{0,10000}b$", "aaaaaaaaaab");
-    ms = @as(f64, @floatFromInt(std.time.nanoTimestamp() - t0)) / 1e6;
-    record_test("P7_big_bounded_quantifier", true, ms, b7);
+    const p4 = try voxgig_struct.re_replace(alloc, "\\.", "café.au.lait", "/");
+    try writer.print("[regex-discovery] P4_unicode_replace_dot | {d:.2}ms | OK | \"{s}\"\n", .{ ms_since(t0), p4 });
 
-    // P8
     t0 = std.time.nanoTimestamp();
-    const p8 = voxgig_struct.re_compile("[abc");
-    ms = @as(f64, @floatFromInt(std.time.nanoTimestamp() - t0)) / 1e6;
-    if (p8 == null) {
-        try writer.print("[regex-discovery] P8_invalid_pattern | {d:.2}ms | ERR | compile returned null\n", .{ms});
+    if (voxgig_struct.re_find(alloc, "é", "café au lait")) |p5| {
+        try writer.print("[regex-discovery] P5_unicode_find_codepoint | {d:.2}ms | OK | [\"{s}\"]\n", .{ ms_since(t0), p5[0] });
     } else {
-        try writer.print("[regex-discovery] P8_invalid_pattern | {d:.2}ms | OK | \"compiled\"\n", .{ms});
+        try writer.print("[regex-discovery] P5_unicode_find_codepoint | {d:.2}ms | OK | null\n", .{ms_since(t0)});
     }
 
-    // P9
+    t0 = std.time.nanoTimestamp();
+    const b6 = voxgig_struct.re_test(nest40, "a");
+    try writer.print("[regex-discovery] P6_deep_nesting_compile | {d:.2}ms | OK | {}\n", .{ ms_since(t0), b6 });
+
+    t0 = std.time.nanoTimestamp();
+    const b7 = voxgig_struct.re_test("^a{0,10000}b$", "aaaaaaaaaab");
+    try writer.print("[regex-discovery] P7_big_bounded_quantifier | {d:.2}ms | OK | {}\n", .{ ms_since(t0), b7 });
+
+    t0 = std.time.nanoTimestamp();
+    const p8 = voxgig_struct.re_compile("[abc");
+    if (p8 == null) {
+        try writer.print("[regex-discovery] P8_invalid_pattern | {d:.2}ms | ERR | compile returned null\n", .{ms_since(t0)});
+    } else {
+        try writer.print("[regex-discovery] P8_invalid_pattern | {d:.2}ms | OK | \"compiled\"\n", .{ms_since(t0)});
+    }
+
     t0 = std.time.nanoTimestamp();
     const b9 = voxgig_struct.re_test("^(a+)\\1$", "aaaa");
-    ms = @as(f64, @floatFromInt(std.time.nanoTimestamp() - t0)) / 1e6;
-    record_test("P9_backref_re2_forbidden", true, ms, b9);
+    try writer.print("[regex-discovery] P9_backref_re2_forbidden | {d:.2}ms | OK | {}\n", .{ ms_since(t0), b9 });
 
-    try writer.print("[regex-discovery] P10_find_all_zero_width | -.--ms | N/A | re_find_all not exposed\n", .{});
+    t0 = std.time.nanoTimestamp();
+    if (voxgig_struct.re_find_all(alloc, "a*", "bbb")) |p10| {
+        try writer.print("[regex-discovery] P10_find_all_zero_width | {d:.2}ms | OK | <{} matches>\n", .{ ms_since(t0), p10.len });
+    } else {
+        try writer.print("[regex-discovery] P10_find_all_zero_width | {d:.2}ms | OK | null\n", .{ms_since(t0)});
+    }
 }

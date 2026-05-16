@@ -114,9 +114,15 @@ int main(void) {
 
   /* P10 */
   t0 = now_ms();
-  (void)vs_re_test("a*", "bbb");  /* find_all not in public header */
+  vs_strvec_vec p10 = vs_re_find_all("a*", "bbb");
   ms = now_ms() - t0;
-  printf("[regex-discovery] P10_find_all_zero_width | %.2fms | OK | <find_all not exposed>\n", ms);
+  printf("[regex-discovery] P10_find_all_zero_width | %.2fms | OK | [", ms);
+  for (size_t i = 0; i < p10.len; i++) {
+    if (i) printf(",");
+    print_strvec(&p10.data[i]);
+  }
+  printf("]\n");
+  vs_strvec_vec_free(&p10);
 
   free(a22);
   free(p1_in);

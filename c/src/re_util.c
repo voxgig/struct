@@ -8,6 +8,7 @@
 #include "regex.h"
 #include "voxgig_struct.h"
 
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -65,6 +66,75 @@ vs_strvec vs_re_find_re(const vs_regex* re, const char* input) {
 vs_strvec vs_re_find(const char* pattern, const char* input) {
   vs_regex* re = vs_regex_compile(pattern, NULL);
   vs_strvec out = vs_re_find_re(re, input);
+  vs_regex_free(re);
+  return out;
+}
+
+void vs_strvec_vec_init(vs_strvec_vec* v) {
+  v->len = 0;
+  v->cap = 0;
+  v->data = NULL;
+}
+
+void vs_strvec_vec_free(vs_strvec_vec* v) {
+  if (!v) return;
+  for (size_t i = 0; i < v->len; i++) {
+    vs_strvec_free(&v->data[i]);
+  }
+  free(v->data);
+  v->data = NULL;
+  v->len = v->cap = 0;
+}
+
+static void vs_strvec_vec_push(vs_strvec_vec* v, vs_strvec row) {
+  if (v->len == v->cap) {
+    size_t nc = v->cap == 0 ? 4 : v->cap * 2;
+    v->data = (vs_strvec*)realloc(v->data, nc * sizeof(vs_strvec));
+    if (!v->data) abort();
+    v->cap = nc;
+  }
+  v->data[v->len++] = row;
+}
+
+vs_strvec_vec vs_re_find_all_re(const vs_regex* re, const char* input) {
+  vs_strvec_vec out;
+  vs_strvec_vec_init(&out);
+  if (!re || !input) return out;
+  size_t ilen = strlen(input);
+  /* Grow the caps buffer until vs_regex_find_all stops filling it. */
+  int max_matches = 64;
+  int per_row = 2 * VS_REGEX_MAX_GROUPS;
+  int* caps = NULL;
+  int count = 0;
+  for (;;) {
+    caps = (int*)realloc(caps, (size_t)(max_matches * per_row) * sizeof(int));
+    if (!caps) abort();
+    count = vs_regex_find_all(re, input, ilen, caps, max_matches);
+    if (count < max_matches) break;
+    max_matches *= 2;
+  }
+  int ngroups = vs_regex_ngroups(re);
+  for (int m = 0; m < count; m++) {
+    int* row_caps = caps + m * per_row;
+    vs_strvec row;
+    vs_strvec_init(&row);
+    for (int g = 0; g < ngroups; g++) {
+      int s = row_caps[2 * g], e = row_caps[2 * g + 1];
+      if (s < 0 || e < s) {
+        vs_strvec_push(&row, "");
+      } else {
+        vs_strvec_push_n(&row, input + s, (size_t)(e - s));
+      }
+    }
+    vs_strvec_vec_push(&out, row);
+  }
+  free(caps);
+  return out;
+}
+
+vs_strvec_vec vs_re_find_all(const char* pattern, const char* input) {
+  vs_regex* re = vs_regex_compile(pattern, NULL);
+  vs_strvec_vec out = vs_re_find_all_re(re, input);
   vs_regex_free(re);
   return out;
 }

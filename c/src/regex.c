@@ -825,12 +825,17 @@ static bool match_at(const vs_regex* re, const char* input, size_t ilen, int sta
         if (c >= 0 && cc_has(&in->data.cc, c))
           tl_add(&nxt, th->pc + 1, th->slots, nslots, sp + 1, re, input, ilen);
       } else if (in->op == OP_MATCH) {
-        if (!found) {
-          found = true;
-          memcpy(best_slots, th->slots, (size_t)nslots * sizeof(int));
-        }
-        /* Higher-priority threads come first; once we've matched, lower
-           priority threads in this generation can be skipped. */
+        /* Always overwrite: threads are priority-ordered (highest first),
+         * and lower-priority threads after this one don't get processed
+         * (we break below). Across sp, a later MATCH can only arrive from
+         * descendants of HIGHER-priority threads (threads[k+1..]'s
+         * descendants are never added to nxt once we break here). So
+         * overwriting unconditionally implements leftmost-longest /
+         * leftmost-first correctly. The earlier `if (!found)` made greedy
+         * quantifiers behave lazily — e.g. `a*` on "abc" matched "" not "a".
+         */
+        found = true;
+        memcpy(best_slots, th->slots, (size_t)nslots * sizeof(int));
         break;
       }
     }
@@ -843,14 +848,18 @@ static bool match_at(const vs_regex* re, const char* input, size_t ilen, int sta
       break;
   }
   /* Handle EOI: drain the remaining current threads (some may have advanced
-     past the last char and now point at MATCH via epsilons). */
+     past the last char and now point at MATCH via epsilons). At this point
+     the threads are still priority-ordered, and the first MATCH (highest
+     priority) is the canonical leftmost-first within this generation —
+     but any earlier-recorded MATCH at a prior sp was from a LOWER-priority
+     thread (those at higher indices that came BEFORE the surviving high-
+     priority threads got to consume an extra char), so an EOI MATCH here
+     should always overwrite. */
   for (int i = 0; i < cur.len; i++) {
     thread_t* th = &cur.threads[i];
     if (re->code[th->pc].op == OP_MATCH) {
-      if (!found) {
-        found = true;
-        memcpy(best_slots, th->slots, (size_t)nslots * sizeof(int));
-      }
+      found = true;
+      memcpy(best_slots, th->slots, (size_t)nslots * sizeof(int));
       break;
     }
   }

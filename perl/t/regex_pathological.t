@@ -11,10 +11,14 @@ use Test::More;
 use FindBin;
 use lib "$FindBin::Bin/../lib";
 use Voxgig::Struct qw();
-use JSON::PP qw(encode_json);
+use JSON::PP qw();
 use Time::HiRes qw(gettimeofday tv_interval);
 
 binmode STDOUT, ':utf8';
+
+# JSON::PP defaults to UTF-8-encoding its output bytes. We want characters
+# so STDOUT's :utf8 layer can encode them once (not twice).
+my $JSON = JSON::PP->new->utf8(0);
 
 sub record {
     my ($label, $fn) = @_;
@@ -25,7 +29,7 @@ sub record {
         chomp $err;
         $outcome = "ERR | $err";
     } else {
-        my $enc = eval { encode_json($r) };
+        my $enc = eval { $JSON->encode($r) };
         $enc = (defined $r ? "$r" : 'null') if $@;
         $outcome = "OK | $enc";
     }

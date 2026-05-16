@@ -483,7 +483,11 @@ local function match_at(re, input, ilen, start)
       elseif op == OP_CLASS then
         if c >= 0 and insn.data.cc[c] then add_thread(re, nxt, th.pc + 1, th.slots, sp + 1, input, ilen, visited) end
       elseif op == OP_MATCH then
-        if not found then found = th.slots end
+        -- Always overwrite: priority ordering means later MATCHes from
+        -- surviving (higher-priority) descendants in nxt should override
+        -- earlier matches from lower-priority threads. `if not found` made
+        -- greedy quantifiers behave lazily (e.g. `a*` on "abc" matched "").
+        found = th.slots
         break
       end
     end
@@ -491,10 +495,10 @@ local function match_at(re, input, ilen, start)
     sp = sp + 1
     if #cur == 0 then break end
   end
-  -- Drain remaining current threads for trailing MATCH.
+  -- Drain remaining current threads for trailing MATCH (mirrors C engine).
   for i = 1, #cur do
     if re.code[cur[i].pc].op == OP_MATCH then
-      if not found then found = cur[i].slots end
+      found = cur[i].slots
       break
     end
   end
