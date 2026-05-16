@@ -14,7 +14,7 @@ use Voxgig::Struct qw();
 use JSON::PP qw();
 use Time::HiRes qw(gettimeofday tv_interval);
 
-binmode STDOUT, ':utf8';
+binmode STDOUT, ':encoding(UTF-8)';
 
 # JSON::PP defaults to UTF-8-encoding its output bytes. We want characters
 # so STDOUT's :utf8 layer can encode them once (not twice).

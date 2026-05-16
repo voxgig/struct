@@ -61,14 +61,16 @@ int main(void) {
   t0 = now_ms();
   char* p3 = vs_re_replace("a*", "abc", "X");
   ms = now_ms() - t0;
-  printf("[regex-discovery] P3_empty_repeat_replace | %.2fms | OK | \"%s\"\n", ms, p3 ? p3 : "(null)");
+  printf("[regex-discovery] P3_empty_repeat_replace | %.2fms | OK | \"%s\"\n", ms,
+         p3 ? p3 : "(null)");
   free(p3);
 
   /* P4 */
   t0 = now_ms();
   char* p4 = vs_re_replace("\\.", "café.au.lait", "/");
   ms = now_ms() - t0;
-  printf("[regex-discovery] P4_unicode_replace_dot | %.2fms | OK | \"%s\"\n", ms, p4 ? p4 : "(null)");
+  printf("[regex-discovery] P4_unicode_replace_dot | %.2fms | OK | \"%s\"\n", ms,
+         p4 ? p4 : "(null)");
   free(p4);
 
   /* P5 */
@@ -84,7 +86,8 @@ int main(void) {
   t0 = now_ms();
   bool b6 = vs_re_test(nest40, "a");
   ms = now_ms() - t0;
-  printf("[regex-discovery] P6_deep_nesting_compile | %.2fms | OK | %s\n", ms, b6 ? "true" : "false");
+  printf("[regex-discovery] P6_deep_nesting_compile | %.2fms | OK | %s\n", ms,
+         b6 ? "true" : "false");
 
   /* P7 */
   t0 = now_ms();
@@ -92,7 +95,8 @@ int main(void) {
   sprintf(p7_in, "%sb", "aaaaaaaaaa");
   bool b7 = vs_re_test("^a{0,10000}b$", p7_in);
   ms = now_ms() - t0;
-  printf("[regex-discovery] P7_big_bounded_quantifier | %.2fms | OK | %s\n", ms, b7 ? "true" : "false");
+  printf("[regex-discovery] P7_big_bounded_quantifier | %.2fms | OK | %s\n", ms,
+         b7 ? "true" : "false");
   free(p7_in);
 
   /* P8 — invalid pattern. vs_re_compile returns NULL on error. */
@@ -110,7 +114,8 @@ int main(void) {
   t0 = now_ms();
   bool b9 = vs_re_test("^(a+)\\1$", "aaaa");
   ms = now_ms() - t0;
-  printf("[regex-discovery] P9_backref_re2_forbidden | %.2fms | OK | %s\n", ms, b9 ? "true" : "false");
+  printf("[regex-discovery] P9_backref_re2_forbidden | %.2fms | OK | %s\n", ms,
+         b9 ? "true" : "false");
 
   /* P10 */
   t0 = now_ms();
@@ -118,7 +123,8 @@ int main(void) {
   ms = now_ms() - t0;
   printf("[regex-discovery] P10_find_all_zero_width | %.2fms | OK | [", ms);
   for (size_t i = 0; i < p10.len; i++) {
-    if (i) printf(",");
+    if (i)
+      printf(",");
     print_strvec(&p10.data[i]);
   }
   printf("]\n");

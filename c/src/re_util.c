@@ -77,7 +77,8 @@ void vs_strvec_vec_init(vs_strvec_vec* v) {
 }
 
 void vs_strvec_vec_free(vs_strvec_vec* v) {
-  if (!v) return;
+  if (!v)
+    return;
   for (size_t i = 0; i < v->len; i++) {
     vs_strvec_free(&v->data[i]);
   }
@@ -90,7 +91,8 @@ static void vs_strvec_vec_push(vs_strvec_vec* v, vs_strvec row) {
   if (v->len == v->cap) {
     size_t nc = v->cap == 0 ? 4 : v->cap * 2;
     v->data = (vs_strvec*)realloc(v->data, nc * sizeof(vs_strvec));
-    if (!v->data) abort();
+    if (!v->data)
+      abort();
     v->cap = nc;
   }
   v->data[v->len++] = row;
@@ -99,7 +101,8 @@ static void vs_strvec_vec_push(vs_strvec_vec* v, vs_strvec row) {
 vs_strvec_vec vs_re_find_all_re(const vs_regex* re, const char* input) {
   vs_strvec_vec out;
   vs_strvec_vec_init(&out);
-  if (!re || !input) return out;
+  if (!re || !input)
+    return out;
   size_t ilen = strlen(input);
   /* Grow the caps buffer until vs_regex_find_all stops filling it. */
   int max_matches = 64;
@@ -108,9 +111,11 @@ vs_strvec_vec vs_re_find_all_re(const vs_regex* re, const char* input) {
   int count = 0;
   for (;;) {
     caps = (int*)realloc(caps, (size_t)(max_matches * per_row) * sizeof(int));
-    if (!caps) abort();
+    if (!caps)
+      abort();
     count = vs_regex_find_all(re, input, ilen, caps, max_matches);
-    if (count < max_matches) break;
+    if (count < max_matches)
+      break;
     max_matches *= 2;
   }
   int ngroups = vs_regex_ngroups(re);

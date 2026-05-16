@@ -21,7 +21,6 @@ function record(label, fn) {
         outcome = `ERR | ${e && e.message ? e.message : String(e)}`;
     }
     const ms = Number(process.hrtime.bigint() - t0) / 1e6;
-    // eslint-disable-next-line no-console
     console.log(`[regex-discovery] ${label} | ${ms.toFixed(2)}ms | ${outcome}`);
 }
 (0, node_test_1.test)('regex pathological discovery', () => {
