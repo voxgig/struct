@@ -251,6 +251,57 @@ subsystems present) but the test corpus pass rate is being raised.
 60+ tests pass; see [`../REPORT.md`](../REPORT.md) for current status.
 
 
+## Regex
+
+Uniform regex API (see `/REGEX_API.md`). The Zig port **ships its own
+RE2-subset engine** in `src/regex.zig` (Thompson NFA), replacing the
+earlier `mvzr` dependency. No third-party runtime crates.
+
+### API
+
+| Function | Returns |
+|---|---|
+| `re_compile(pattern)`                          | `?ReCompiled` (nil on bad pattern) |
+| `re_test(pattern, input)`                      | `bool` |
+| `re_find(alloc, pattern, input)`               | `?[][]const u8` (caller frees) |
+| `re_find_all(alloc, pattern, input)`           | `?[][][]const u8` (caller frees both levels) |
+| `re_replace(alloc, pattern, input, repl)`      | `![]u8` (caller frees) |
+| `re_escape(alloc, s)`                          | `![]const u8` |
+
+`ReCompiled` is an alias for the engine's `Regex` type
+(`src/regex.zig`); it owns an instruction buffer and is released with
+`.deinit()`.
+
+### Dialect
+
+The in-tree engine implements the RE2 subset documented in `/REGEX.md`:
+literals + escapes, `.`, `^`/`$`, `* + ? {n} {n,} {n,m}` (greedy + lazy),
+classes incl. `\d \w \s` and friends, `\b`/`\B`, `(...)` / `(?:...)`,
+alternation.
+
+**Not supported** (by design — RE2 doesn't either): backreferences,
+lookaround, possessive quantifiers, atomic groups.
+
+### Sharp edges (Zig-specific)
+
+- **Allocator-explicit.** `re_test` and `re_compile` use
+  `std.heap.page_allocator` internally so callers don't have to pipe
+  one through every call; the find/find_all/replace wrappers ask for
+  one because they return caller-owned slices.
+- **`re_find` / `re_find_all` slices alias the input.** They are
+  valid only while `input` is alive. Copy if you need to retain past
+  the input's lifetime.
+- **`re_replace` takes the replacement literally** in the current
+  wrapper — no `$&`/`$1..` expansion. The engine's lower-level
+  callback variant gives full control.
+- **No catastrophic backtracking.** Thompson-NFA construction; P1/P2
+  finish in microseconds.
+- **Zero-width `re_replace`** follows the ECMA convention:
+  `re_replace(alloc, "a*", "abc", "X")` returns `"XXbXcX"`.
+
+See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
+
+
 ## Build and test
 
 ```bash

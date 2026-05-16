@@ -225,6 +225,61 @@ operator uses substring containment instead of full regex matching
 kept out of scope to minimise dependencies).
 
 
+## Regex
+
+Uniform regex API (see `/REGEX_API.md`). The C port **ships its own
+RE2-subset Thompson NFA engine** in `src/regex.c` (~700 LOC) — no
+external dependency. The wrapper layer (`src/re_util.c`) exposes the
+shared `re_*` names alongside the lower-level `vs_regex_*` engine
+API.
+
+### API
+
+| Function | Returns |
+|---|---|
+| `vs_re_compile(pattern)`                       | `vs_regex*` (NULL on bad pattern) |
+| `vs_re_test(pattern, input)`                   | `bool` |
+| `vs_re_find(pattern, input)`                   | `vs_strvec` of `[whole, group1, …]` |
+| `vs_re_find_all(pattern, input)`               | `vs_strvec_vec` (one row per match) |
+| `vs_re_replace(pattern, input, replacement)`   | malloc'd `char*` |
+| `vs_re_replace_cb(re, input, cb, ud)`          | malloc'd `char*` (callback variant) |
+| `vs_re_escape(literal)`                        | malloc'd `char*` |
+
+The `_re` suffixed variants take an already-compiled `vs_regex*`.
+
+### Dialect
+
+The in-tree engine implements the RE2 subset documented in `/REGEX.md`:
+literals + escapes, `.`, `^`/`$`, `* + ? {n} {n,} {n,m}` (greedy + lazy),
+classes incl. `\d \w \s` and friends, `\b`/`\B`, `(...)` / `(?:...)`,
+alternation.
+
+**Not supported** (by design — RE2 doesn't either): backreferences,
+lookaround, possessive quantifiers, atomic groups. Backref patterns
+compile (the parser treats `\1` as a literal `1`) but never match
+back-reference semantics, so `vs_re_test("^(a+)\\1$", "aaaa")` returns
+`false` rather than erroring. Don't rely on this — write portable
+patterns.
+
+### Sharp edges (C-specific)
+
+- **No catastrophic backtracking.** Thompson-NFA construction means
+  P1/P2 from the discovery panel finish in microseconds regardless of
+  input length.
+- **Captures cap.** `VS_REGEX_MAX_GROUPS = 16` in `regex.h`. Patterns
+  with more capturing groups silently truncate.
+- **Memory management.** `vs_regex*`, `vs_strvec`, `vs_strvec_vec`,
+  and the `char*` returned by `re_replace` are all caller-owned. Use
+  `vs_regex_free`, `vs_strvec_free`, `vs_strvec_vec_free`, and `free`
+  respectively.
+- **Zero-width `re_replace`.** `vs_re_replace("a*", "abc", "X")`
+  returns `"XXbXcX"`, the canonical ECMA convention. (Pre-fix the
+  engine produced `"XaXbXcX"` because greedy quantifiers behaved
+  lazily; the `OP_MATCH` handler in `regex.c` is now priority-correct.)
+
+See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
+
+
 ## Build and test
 
 ```bash

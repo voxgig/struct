@@ -345,6 +345,41 @@ and a `maxdepth` parameter, matching the canonical algorithm.
 75/75 tests pass, 150 assertions.
 
 
+## Regex
+
+Uniform six-function regex API (see `/REGEX_API.md`). The Ruby port
+wraps the built-in `Regexp` (Onigmo engine).
+
+### API
+
+| Function | Maps to |
+|---|---|
+| `re_compile(pattern)`              | `Regexp.new(pattern)` |
+| `re_test(pattern, input)`          | `input =~ re` |
+| `re_find(pattern, input)`          | `input.match(re)` → `[whole, group1, ...]` |
+| `re_find_all(pattern, input)`      | `input.scan(re)` (one row per match) |
+| `re_replace(pattern, input, repl)` | `input.gsub(re, repl)` |
+| `re_escape(s)`                     | `Regexp.escape(s)` |
+
+### Dialect
+
+Patterns must stay inside the **RE2 subset** documented in `/REGEX.md`.
+Onigmo supports backreferences and lookaround; using them will not be
+portable to the Go / Rust / C / Lua / Zig ports.
+
+### Sharp edges
+
+- **Catastrophic backtracking.** Onigmo has internal mitigations for
+  some classic ReDoS shapes — `^(a+)+$` against 22 a's plus `!` runs
+  in microseconds here. Larger inputs or different shapes can still
+  blow up; the safe rule is to stay inside the RE2 subset and avoid
+  nested quantifiers.
+- **Zero-width `replace`.** `re_replace("a*", "abc", "X")` returns
+  `"XXbXcX"`, the canonical ECMA convention.
+
+See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
+
+
 ## Build and test
 
 ```bash

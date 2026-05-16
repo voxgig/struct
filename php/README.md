@@ -362,6 +362,46 @@ PHP method names match canonical lowercase: `getpath`, `setpath`,
 82/82 tests pass, 920 assertions.
 
 
+## Regex
+
+Uniform six-function regex API (see `/REGEX_API.md`). The PHP port
+wraps PCRE (`preg_*`).
+
+### API
+
+| Function | Maps to |
+|---|---|
+| `re_compile(pattern)`              | delimited PCRE pattern (validated via `preg_match`) |
+| `re_test(pattern, input)`          | `preg_match` → bool |
+| `re_find(pattern, input)`          | `preg_match` with captures, returns `[whole, group1, ...]` or `null` |
+| `re_find_all(pattern, input)`      | `preg_match_all(..., PREG_SET_ORDER)` |
+| `re_replace(pattern, input, repl)` | `preg_replace` (or `preg_replace_callback` for callable repl) |
+| `re_escape(s)`                     | `preg_quote(s)` equivalent |
+
+### Dialect
+
+Patterns must stay inside the **RE2 subset** documented in `/REGEX.md`.
+PCRE supports backreferences and lookaround; using them will not be
+portable.
+
+### Sharp edges
+
+- **`re_compile` validates eagerly.** Invalid patterns throw
+  `InvalidArgumentException` at compile time. This is a recent fix:
+  the wrapper used to swallow PCRE warnings via `@preg_match` and
+  return `false` silently from `re_test`/`re_find`. Callers can now
+  distinguish "no match" from "bad pattern".
+- **Catastrophic backtracking.** PCRE is a backtracking engine but has
+  a JIT and a backtrack limit; the discovery panel runs P1/P2 in a few
+  ms here. Larger inputs or pathological shapes can hit
+  `pcre.backtrack_limit` and return `false`. Stay inside the RE2 subset
+  and prefer flat patterns.
+- **Zero-width `replace`.** `re_replace("a*", "abc", "X")` returns
+  `"XXbXcX"`, the canonical ECMA convention.
+
+See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
+
+
 ## Build and test
 
 ```bash

@@ -367,6 +367,42 @@ Otherwise functionally identical -- both run on V8.
 84/84 tests pass against the shared corpus.
 
 
+## Regex
+
+Uniform six-function regex API (see `/REGEX_API.md`). On JavaScript
+this is the ECMAScript `RegExp` built-in.
+
+### API
+
+| Function | Maps to |
+|---|---|
+| `re_compile(pattern, flags?)`     | `new RegExp(pattern, flags ?? 'g')` |
+| `re_test(pattern, input)`         | `pattern.test(input)` |
+| `re_find(pattern, input)`         | `input.match(pattern)` (non-global pattern) |
+| `re_find_all(pattern, input)`     | `[...input.matchAll(pattern)]` |
+| `re_replace(pattern, input, rep)` | `input.replace(pattern, rep)` (global pattern) |
+| `re_escape(s)`                    | escape `[.*+?^${}()|[\]\\]` in `s` |
+
+### Dialect
+
+Patterns must stay inside the **RE2 subset** documented in `/REGEX.md`.
+`RegExp` itself supports backreferences and lookaround, but other ports
+do not, so using those will not be portable.
+
+### Sharp edges
+
+- **Catastrophic backtracking.** `RegExp` is a backtracking engine;
+  nested quantifiers like `(a+)+` against a non-matching suffix can be
+  exponential in input length (the discovery panel sees ~180 ms on
+  Node 22 vs <0.1 ms on RE2-style engines). Prefer flat patterns and
+  character classes over alternations.
+- **Zero-width `replace`.** `re_replace("a*", "abc", "X")` returns
+  `"XXbXcX"`, the canonical ECMA convention.
+
+See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input
+panel.
+
+
 ## Build and test
 
 ```bash

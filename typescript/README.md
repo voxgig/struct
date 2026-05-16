@@ -563,6 +563,50 @@ calls (one shared array per depth).  Clone it (`path.slice()`) if
 you need to retain it past the callback.
 
 
+## Regex
+
+The library exposes a uniform six-function regex API across every
+port (see `/REGEX_API.md` for the contract and `/REGEX.md` for the
+supported dialect). On TypeScript the canonical implementation is
+ECMAScript `RegExp`.
+
+### API
+
+| Function | Maps to |
+|---|---|
+| `re_compile(pattern, flags?)`     | `new RegExp(pattern, flags ?? 'g')` |
+| `re_test(pattern, input)`         | `pattern.test(input)` |
+| `re_find(pattern, input)`         | `input.match(pattern)` (non-global pattern) |
+| `re_find_all(pattern, input)`     | `[...input.matchAll(pattern)]` |
+| `re_replace(pattern, input, rep)` | `input.replace(pattern, rep)` (global pattern) |
+| `re_escape(s)`                    | escape `[.*+?^${}()|[\]\\]` in `s` |
+
+### Dialect
+
+Patterns must stay inside the **RE2 subset** documented in `/REGEX.md`:
+literals + escapes, `.`, `^`/`$`, `* + ? {n} {n,} {n,m}` (greedy + lazy),
+character classes incl. `\d \w \s` etc., `\b`/`\B`, `(...)` / `(?:...)` /
+`(?<name>...)`, alternation. ECMAScript `RegExp` supports backreferences
+and lookaround, but other ports do not — using those will not be
+portable.
+
+### Sharp edges
+
+- **Catastrophic backtracking.** ECMAScript `RegExp` uses backtracking;
+  nested quantifiers (e.g. `(a+)+`) against a non-matching suffix can be
+  exponential in the input length. The discovery panel measures ~180 ms
+  on Node 22 for `^(a+)+$` against 22 a's plus `!`. RE2-style engines
+  finish the same case in under 0.1 ms. Write linear-friendly patterns
+  (`a+` instead of `(a+)+`) and keep injected user input in
+  character classes, not in alternations.
+- **Zero-width `replace`.** `re_replace("a*", "abc", "X")` returns
+  `"XXbXcX"` here. This is the canonical convention; the Go, C, and
+  Lua ports were aligned to this output.
+
+See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input
+panel and per-port outcomes.
+
+
 ## Build and test
 
 ```bash

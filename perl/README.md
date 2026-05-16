@@ -104,6 +104,44 @@ because they don't preserve insertion order.
 - Builder helpers: `jm` (insertion-ordered map literal), `jt`
   (list literal).
 
+## Regex
+
+Uniform six-function regex API (see `/REGEX_API.md`). The Perl port
+wraps Perl's built-in regex engine.
+
+### API
+
+| Function | Maps to |
+|---|---|
+| `re_compile(pattern, flags?)`         | `qr/$pattern/` |
+| `re_test(pattern, input)`             | `$input =~ $re` |
+| `re_find(pattern, input)`             | first match as `[whole, $1, ...]` or `undef` |
+| `re_find_all(pattern, input)`         | all matches, one arrayref per match |
+| `re_replace(pattern, input, repl)`    | `s/$re/$repl/g` (callable or template) |
+| `re_escape(s)`                        | `quotemeta` equivalent |
+
+### Dialect
+
+Patterns must stay inside the **RE2 subset** documented in `/REGEX.md`.
+Perl's regex supports backreferences, lookaround, recursion — none of
+which are portable to the Go / Rust / C / Lua / Zig ports.
+
+### Sharp edges
+
+- **Catastrophic backtracking.** Perl's regex engine is backtracking
+  but ships with optimisations (trie engine for alternation, etc.).
+  The discovery panel runs P1/P2 in microseconds here, but other
+  pathological shapes can still blow up. Stay flat.
+- **Zero-width `replace`.** `re_replace("a*", "abc", "X")` returns
+  `"XXbXcX"`, the canonical ECMA convention.
+- **UTF-8 handling.** Pass character strings (use `use utf8;` for
+  literals, or `decode_utf8` for bytes). Encoding round-trip bugs in
+  caller code can manifest as `cafÃ©` style mojibake at print time —
+  the regex itself preserves character semantics.
+
+See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
+
+
 ## Tests
 
 ```bash

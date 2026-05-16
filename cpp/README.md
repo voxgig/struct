@@ -233,6 +233,43 @@ Catch2 framework with limited test coverage.  See the
 [overview](./overview/) directory for current API examples.
 
 
+## Regex
+
+Uniform six-function regex API (see `/REGEX_API.md`). The C++ port
+wraps `<regex>` (C++11), which defaults to the ECMAScript dialect.
+
+### API
+
+| Function | Maps to |
+|---|---|
+| `re_compile(pattern)`             | `std::regex(pattern)` (throws `std::regex_error` on bad pattern) |
+| `re_test(pattern, input)`         | `std::regex_search` → bool |
+| `re_find(pattern, input)`         | first match groups as `std::vector<std::string>` (empty if no match) |
+| `re_find_all(pattern, input)`     | `std::vector<std::vector<std::string>>` |
+| `re_replace(pattern, input, rep)` | `std::regex_replace(input, re, rep)` |
+| `re_escape(s)`                    | escape regex metacharacters |
+
+### Dialect
+
+Patterns must stay inside the **RE2 subset** documented in `/REGEX.md`.
+`std::regex` defaults to ECMAScript syntax and supports backreferences
+and lookaround; using them will not be portable.
+
+### Sharp edges (C++-specific)
+
+- **libstdc++ `<regex>` has the worst-in-class catastrophic
+  backtracking.** The discovery panel measures **~1.2 s** for
+  `^(a+)+$` over 22 a's plus `!`. This is well-known and is the
+  reason many production C++ projects avoid `<regex>` in favour of
+  RE2 or PCRE2. Stay inside the RE2 subset and avoid nested
+  quantifiers; even then, performance won't match the dedicated
+  engines.
+- **Zero-width `replace`.** `re_replace("a*", "abc", "X")` returns
+  `"XXbXcX"`, the canonical ECMA convention.
+
+See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
+
+
 ## Build and test
 
 ```bash
