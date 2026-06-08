@@ -10,7 +10,7 @@ parity matrix, see the [top-level README](../README.md) and
 ## Install
 
 ```bash
-cd py
+cd python
 pip install -e .
 ```
 
@@ -21,7 +21,7 @@ Or, without installing, add the source directory to `sys.path`:
 
 ```python
 import sys
-sys.path.insert(0, '/path/to/struct/py')
+sys.path.insert(0, '/path/to/struct/python')
 from voxgig_struct import getpath, transform, validate
 ```
 
@@ -339,7 +339,7 @@ both map to `None` at the user-facing API.
 
 `typify(None)` returns `T_scalar | T_null`.  Where the test corpus
 needs to disambiguate, the runner uses string sentinels `__NULL__`
-and `__UNDEFMARK__`.
+and `__UNDEF__`.
 
 ### Walk uses keyword arguments
 
@@ -397,7 +397,7 @@ See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
 ## Build and test
 
 ```bash
-cd py
+cd python
 make test
 ```
 

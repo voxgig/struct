@@ -12,7 +12,7 @@ parity matrix, see the [top-level README](../README.md).
 Inside the monorepo:
 
 ```bash
-cd pl
+cd perl
 make test
 ```
 

@@ -301,7 +301,7 @@ internally by `merge` and `inject`; you only need it when writing
 custom modify callbacks that mutate lists.
 
 ```go
-ref := &voxgigstruct.ListRef[int]{Data: []int{1, 2, 3}}
+ref := &voxgigstruct.ListRef[int]{List: []int{1, 2, 3}}
 ```
 
 
@@ -369,7 +369,7 @@ $NULL  $NIL    $FUNCTION $INSTANCE $ANY       $CHILD    $ONE     $EXACT
 
 Go has only `nil`.  JSON null and "absent" both map to `nil` at the
 user-facing API.  Where the test corpus needs to distinguish them,
-the test runner uses string sentinels `__NULL__` and `__UNDEFMARK__`.
+the test runner uses string sentinels `__NULL__` and `__UNDEF__`.
 
 ### Multiple variants instead of optional parameters
 

@@ -24,7 +24,7 @@ parity matrix, see the [top-level README](../README.md).
 Inside the monorepo:
 
 ```bash
-cd cs
+cd csharp
 dotnet restore
 dotnet build
 ```
@@ -299,7 +299,7 @@ See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
 ## Build and test
 
 ```bash
-cd cs
+cd csharp
 dotnet restore
 dotnet test
 ```

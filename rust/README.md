@@ -49,7 +49,7 @@ pub enum Value {
     Num(f64),                                    // one numeric kind; integer-ness derived
     Str(String),
     List(Rc<RefCell<Vec<Value>>>),               // reference-stable, mutable in place
-    Map(Rc<RefCell<IndexMap<String, Value>>>),   // insertion-ordered, reference-stable
+    Map(Rc<RefCell<OrderedMap<Value>>>),   // insertion-ordered, reference-stable
     Func(Rc<dyn Fn(&Inj, &Value, &str, &Value) -> Value>),  // callable values in data
     Sentinel(&'static Sentinel),                 // SKIP / DELETE — pointer identity
 }
