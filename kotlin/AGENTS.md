@@ -82,9 +82,9 @@ passes that you could not run.
 - **Escape `$` in source strings.** Backtick commands like `` `$STRING` ``
   are written `"`\$STRING`"` in Kotlin because `$` begins a string
   template. Watch this in tests and `$`-command keys.
-- **`var \`val\``** — the `Injection` field is named `val`, a Kotlin
-  keyword, so it is backtick-quoted in source. Keep it; it mirrors the
-  canonical field name.
+- **The `val` field is backtick-quoted in source.** The `Injection` field
+  is named `val` — a Kotlin keyword — so the source writes it as a
+  backtick-escaped identifier. Keep it; it mirrors the canonical field name.
 - **Regex edges are intentional.** Zero-width `reReplace` → `"XXbXcX"`
   and catastrophic backtracking are the backtracking-engine behaviour
   shared with the ECMA family; do not "fix" them by diverging. See

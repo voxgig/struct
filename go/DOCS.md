@@ -49,18 +49,18 @@ go test ./...
 package main
 
 import (
-	"fmt"
-	voxgigstruct "github.com/voxgig/struct/go"
+  "fmt"
+  voxgigstruct "github.com/voxgig/struct/go"
 )
 
 func main() {
-	config := voxgigstruct.Merge([]any{
-		map[string]any{"db": map[string]any{"host": "localhost", "port": 5432}, "debug": false},
-		map[string]any{"db": map[string]any{"host": "db.internal"}, "debug": true},
-	})
+  config := voxgigstruct.Merge([]any{
+    map[string]any{"db": map[string]any{"host": "localhost", "port": 5432}, "debug": false},
+    map[string]any{"db": map[string]any{"host": "db.internal"}, "debug": true},
+  })
 
-	fmt.Println(voxgigstruct.GetPath(config, "db.host")) // db.internal
-	fmt.Println(voxgigstruct.GetPath(config, "db.port")) // 5432 (survived the deep merge)
+  fmt.Println(voxgigstruct.GetPath(config, "db.host")) // db.internal
+  fmt.Println(voxgigstruct.GetPath(config, "db.port")) // 5432 (survived the deep merge)
 }
 ```
 
@@ -73,29 +73,29 @@ full language-neutral walkthrough; the Go-flavoured version:
 ```go
 // Reshape by example — the spec mirrors the output you want.
 out, _ := voxgigstruct.Transform(
-	map[string]any{"user": map[string]any{"first": "Ada", "last": "Lovelace"}, "age": 36},
-	map[string]any{"name": "`user.first`", "surname": "`user.last`", "years": "`age`"},
+  map[string]any{"user": map[string]any{"first": "Ada", "last": "Lovelace"}, "age": 36},
+  map[string]any{"name": "`user.first`", "surname": "`user.last`", "years": "`age`"},
 )
 // map[name:Ada surname:Lovelace years:36]
 
 // Validate by example — leaves are type checkers; returns (data, error).
 _, err := voxgigstruct.Validate(
-	map[string]any{"name": "Ada", "age": 36},
-	map[string]any{"name": "`$STRING`", "age": "`$INTEGER`"},
+  map[string]any{"name": "Ada", "age": 36},
+  map[string]any{"name": "`$STRING`", "age": "`$INTEGER`"},
 )
 
 // Walk the tree — replace values on ascent. The key is *string (nil at the root).
 voxgigstruct.Walk(tree, nil, func(key *string, val, parent any, path []string) any {
-	if val == nil {
-		return "DEFAULT"
-	}
-	return val
+  if val == nil {
+    return "DEFAULT"
+  }
+  return val
 })
 
 // Select children by query — each match tagged with its $KEY.
 voxgigstruct.Select(
-	map[string]any{"a": map[string]any{"age": 30}, "b": map[string]any{"age": 25}},
-	map[string]any{"age": 30},
+  map[string]any{"a": map[string]any{"age": 30}, "b": map[string]any{"age": 25}},
+  map[string]any{"age": 30},
 )
 // [map[$KEY:a age:30]]
 ```
@@ -132,9 +132,9 @@ and are covered by port-local unit tests, not the JSON corpus.
 ```go
 seen := [][]string{}
 voxgigstruct.Walk(tree, func(key *string, val, parent any, path []string) any {
-	cp := append([]string(nil), path...) // the path slice is reused — copy to retain it
-	seen = append(seen, cp)
-	return val
+  cp := append([]string(nil), path...) // the path slice is reused — copy to retain it
+  seen = append(seen, cp)
+  return val
 })
 ```
 
@@ -226,7 +226,7 @@ type:
 
 ```go
 type ListRef[T any] struct {
-	List []T
+  List []T
 }
 ```
 
