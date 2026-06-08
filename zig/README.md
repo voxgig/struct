@@ -180,8 +180,8 @@ pub fn stringifyPretty(allocator: Allocator, val: JsonValue,
 ### Inject / transform / validate / select
 
 ```zig
-pub fn injectVal(allocator: Allocator, val: JsonValue,
-                 store: JsonValue, inj_opt: ?*Injection) anyerror!JsonValue
+pub fn inject(allocator: Allocator, val: JsonValue,
+              store: JsonValue, inj_opt: ?*Injection) anyerror!JsonValue
 pub fn transform(allocator: Allocator, data: JsonValue,
                  spec: JsonValue) !JsonValue
 // validate, select also present — see source
@@ -246,9 +246,12 @@ explicitly; errors propagate through `!` returns.
 
 ### Status
 
-In progress.  Coverage of the canonical API is broad (all major
-subsystems present) but the test corpus pass rate is being raised.
-60+ tests pass; see [`../REPORT.md`](../REPORT.md) for current status.
+Complete: all major subsystems are present and the port passes its share
+of the shared corpus. One honest caveat — the top-level `re_find` /
+`re_find_all` / `re_replace` wrappers are not yet wired (the in-tree NFA
+engine has the primitives), a documented known gap in
+[`../tools/check_parity.py`](../tools/check_parity.py). See
+[`../REPORT.md`](../REPORT.md) for the cross-port matrix.
 
 
 ## Regex
