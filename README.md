@@ -223,8 +223,8 @@ names that match your language's casing convention.
 This is the canonical API surface, defined in TypeScript at
 [`typescript/src/StructUtility.ts`](./typescript/src/StructUtility.ts).  Every port
 exposes equivalents.  The casing varies by language convention
-(`getpath` in JS/Py/Lua/Rb/PHP; `GetPath` in Go/C#; `getPath` in
-Java).
+(`getpath` in TS/JS/Py/Ruby/PHP/Lua/Perl/Java/Kotlin/Swift; `GetPath`
+in Go/C#; `get_path` in Rust; `vs_getpath` in C).
 
 ### Minor utilities (25)
 

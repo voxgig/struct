@@ -37,8 +37,8 @@ The library is organised across `src/`:
   tagged union, reference-counted `vs_list` / `vs_map`, sentinels,
   type bit-flags, predicates.
 - [`value_io.h`](./src/value_io.h) / [`value_io.c`](./src/value_io.c) — JSON
-  parse / serialise via [`libcjson`](https://github.com/DaveGamble/cJSON)
-  as a text bridge.
+  parse / serialise via an in-tree, hand-written recursive-descent
+  parser/printer (no third-party dependency).
 - [`utility.c`](./src/utility.c) — minor utilities plus `walk` / `merge`
   / `getpath` / `setpath`.
 - [`inject.c`](./src/inject.c) — `vs_injection` state machine, `_injectstr`,
@@ -48,9 +48,10 @@ The library is organised across `src/`:
 
 Symbol prefix `vs_`. Compiler: any C11-capable (gcc / clang). Dependencies:
 
-- `libcjson-dev` (only for JSON-text parse / serialise; runtime values use
-  the custom `vs_value` type).
-- `libm` for `floor` / `isfinite`.
+- **No third-party dependency.** JSON text is parsed/serialised by the
+  in-tree recursive-descent code in `value_io.c`; runtime values use the
+  custom `vs_value` type.
+- `libm` (the standard math library) for `floor` / `isfinite`.
 
 ```c
 #include "voxgig_struct.h"

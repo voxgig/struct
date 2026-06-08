@@ -4,8 +4,8 @@
 The canonical public API is the `export { ... }` block in
 `typescript/src/StructUtility.ts`.  Every "complete" port is expected to
 define an equivalent function for each canonical name, in that language's
-casing convention (snake_case in Rust, PascalCase in Go/C#, camelCase in
-Java, lower-smushed everywhere else).
+casing convention (snake_case in Rust, PascalCase in Go/C#, lower-smushed
+everywhere else — Java and Kotlin included).
 
 This is a smoke test: it confirms a function with the expected name exists in
 each port's source (matching is done on a case/underscore-insensitive key, so

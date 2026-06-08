@@ -406,7 +406,7 @@ panel.
 ## Build and test
 
 ```bash
-cd js
+cd javascript
 make test           # runs the shared .jsonic corpus
 ```
 

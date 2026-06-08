@@ -613,7 +613,7 @@ panel and per-port outcomes.
 ## Build and test
 
 ```bash
-cd ts
+cd typescript
 npm install
 npm run build              # tsc -> dist/
 npm test                   # node --test on dist-test/

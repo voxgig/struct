@@ -12,7 +12,7 @@ parity matrix, see the [top-level README](../README.md) and
 In the monorepo:
 
 ```bash
-cd rb
+cd ruby
 bundle install
 ```
 
@@ -383,7 +383,7 @@ See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
 ## Build and test
 
 ```bash
-cd rb
+cd ruby
 bundle install
 make test
 ```

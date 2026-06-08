@@ -127,7 +127,7 @@ into the directory and use its `Makefile`. First run installs deps.
 | C++ | `cpp/` | `make test` (needs `nlohmann/json` header) | clang-tidy + clang-format | `_v`/`_str` suffix variants |
 | C# | `csharp/` | `dotnet test` | Roslyn analyzers | PascalCase; SDK pinned to 8.0 on purpose |
 | Zig | `zig/` | `zig build test` | `zig build` + `zig fmt` | `allocator` is the first parameter |
-| Java | `java/` | `mvn test` | checkstyle + spotbugs | camelCase; partial port (JUnit 6) |
+| Java | `java/` | `mvn test` | checkstyle + spotbugs | lowercase names; partial port (JUnit 6) |
 | Kotlin | `kotlin/` | `./gradlew test` | detekt + ktlint | partial port |
 | Perl | `perl/` | `prove -Ilib t/` | perlcritic | `Tie::IxHash`-style ordered hash |
 | Swift | `swift/` | `swift test` | swift-format | `allocator`-free; in-tree ordered dict |
@@ -165,9 +165,9 @@ markdownlint, plus each language's linters).
 
 ## Conventions
 
-- **Casing.** `getpath` (JS/TS/Py/Rb/PHP/Lua/Perl), `GetPath` (Go/C#),
-  `getPath` (Java/Kotlin), `get_path` (Rust), `vs_getpath` (C). Parity is
-  checked case/underscore-insensitively.
+- **Casing.** `getpath` (TS/JS/Py/Ruby/PHP/Lua/Perl/Java/Kotlin/Swift),
+  `GetPath` (Go/C#), `get_path` (Rust), `vs_getpath` (C — and C++ adds
+  `_v`/`_str` variants). Parity is checked case/underscore-insensitively.
 - **Absent vs. null ("Group A/B").** See [`UNDEF_SPEC.md`](./UNDEF_SPEC.md).
   Group A readers (`getprop`, `getelem`, `haskey`, `isempty`, `isnode`)
   treat a stored `null` as "no value". Group B value-processors
