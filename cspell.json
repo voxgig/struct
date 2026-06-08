@@ -207,7 +207,15 @@
     "Cpanel",
     "JTRUE",
     "JFALSE",
-    "JNULL"
+    "JNULL",
+    "Ilib",
+    "Werror",
+    "Dskip",
+    "CPAN",
+    "vspec",
+    "deflt",
+    "mkmap",
+    "rereplace"
   ],
   "ignoreRegExpList": [
     "/`\\$[A-Z]+`/",
