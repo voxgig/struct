@@ -38,11 +38,20 @@ syntax), and language-specific notes:
 | C#         | Complete   | [`csharp/README.md`](./csharp/README.md)              |
 | Zig        | Complete   | [`zig/README.md`](./zig/README.md)                    |
 | Java       | Partial    | [`java/README.md`](./java/README.md)                  |
+| Kotlin     | Partial    | [`kotlin/README.md`](./kotlin/README.md)              |
 | C++        | Complete   | [`cpp/README.md`](./cpp/README.md)                    |
 | Perl       | Complete   | [`perl/README.md`](./perl/README.md)                  |
 | Swift      | Complete   | [`swift/README.md`](./swift/README.md)                |
 
+Each port directory also carries a `DOCS.md` (the comprehensive,
+four-part guide) and an `AGENTS.md` (notes for AI coding agents).
+
 The cross-language parity matrix lives in [`REPORT.md`](./REPORT.md).
+
+For the in-depth, language-neutral guide — tutorial, how-to recipes, full
+reference, and design explanation — see [`DOCS.md`](./DOCS.md). If you (or
+an AI coding agent) are going to *modify* this repository, start with
+[`AGENTS.md`](./AGENTS.md).
 
 
 ## Motivation
