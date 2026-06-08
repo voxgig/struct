@@ -20,6 +20,10 @@ export default tseslint.config(
     rules: {
       // The library is deliberately "JSON-shaped any" at its boundaries.
       '@typescript-eslint/no-explicit-any': 'off',
+      // The source is ported verbatim across every language; the
+      // init-then-reassign patterns that ESLint 10's `no-useless-assignment`
+      // flags are kept on purpose to preserve line-for-line structural parity.
+      'no-useless-assignment': 'off',
       '@typescript-eslint/no-unused-vars': [
         'warn',
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' },
