@@ -5,6 +5,7 @@ edition = "2021"
 description = "Uniform JSON-shaped data structure manipulations — Rust port of @voxgig/struct"
 license = "MIT"
 repository = "https://github.com/voxgig/struct"
+readme = "README.md"
 keywords = ["voxgig", "data", "struct", "structure", "json"]
 
 [lib]

@@ -19,8 +19,19 @@
     <AnalysisLevel>8.0</AnalysisLevel>
     <AnalysisMode>Recommended</AnalysisMode>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+
+    <!-- NuGet package metadata. -->
+    <Version>0.1.0</Version>
+    <PackageId>VoxgigStruct</PackageId>
+    <Authors>Voxgig</Authors>
+    <Description>Uniform JSON-shaped data structure manipulations — C# port of @voxgig/struct</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/voxgig/struct</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/voxgig/struct</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
   <ItemGroup>
     <Compile Remove="tests/**" />
+    <None Include="README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 </Project>

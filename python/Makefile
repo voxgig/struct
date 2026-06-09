@@ -1,4 +1,4 @@
-.PHONY: inspect build test lint format-check typecheck bench clean reset audit
+.PHONY: inspect build test lint format-check typecheck bench clean reset audit publish
 
 inspect:
 	@echo "Python version:"
@@ -44,3 +44,15 @@ reset: clean
 audit:
 	pip-audit -r requirements-dev.txt
 	bandit -q -r voxgig_struct
+
+# Release: build sdist+wheel, upload to PyPI, then tag python/vX.Y.Z (version from pyproject.toml).
+# Needs PyPI auth (TWINE_USERNAME/TWINE_PASSWORD or ~/.pypirc). Check the package locally with:
+#   python3 -m build && twine check dist/*
+VERSION := $(shell python3 -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])" 2>/dev/null)
+publish: test
+	python3 -m build
+	twine upload dist/*
+	@if git rev-parse -q --verify "refs/tags/python/v$(VERSION)" >/dev/null; then \
+	  echo "tag python/v$(VERSION) already exists — bump pyproject.toml version first"; exit 1; fi
+	git tag -a "python/v$(VERSION)" -m "python v$(VERSION)"
+	git push origin "python/v$(VERSION)"

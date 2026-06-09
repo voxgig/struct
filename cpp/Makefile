@@ -6,7 +6,7 @@ CXXFLAGS_COMMON := --std=c++17 -Wall -Wextra -Wno-unused-parameter
 
 CPP_SOURCES := $(wildcard src/*.hpp tests/*.hpp tests/*.cpp)
 
-.PHONY: build smoke test corpus check_leak sanitize lint tidy format-check clean reset inspect
+.PHONY: build smoke test corpus check_leak sanitize lint tidy format-check clean reset inspect publish
 
 # Default: compile and run the smoke test plus the full corpus driver.
 build: smoke corpus
@@ -49,3 +49,14 @@ inspect:
 	@echo ""
 	@echo "nlohmann/json header:"
 	@find /usr/include /usr/local/include /opt/homebrew/include -name 'json.hpp' -path '*nlohmann*' 2>/dev/null | head -1
+
+# Release: C++ has no registry — publishing IS the git tag. The port lives in a
+# subdirectory, so the tag MUST be the `cpp/vX.Y.Z` form. Version is in the
+# VERSION file.
+VERSION := $(shell cat VERSION)
+publish: test
+	@if git rev-parse -q --verify "refs/tags/cpp/v$(VERSION)" >/dev/null; then \
+	  echo "tag cpp/v$(VERSION) already exists — bump cpp/VERSION first"; exit 1; fi
+	git tag -a "cpp/v$(VERSION)" -m "cpp v$(VERSION)"
+	git push origin "cpp/v$(VERSION)"
+	@echo "Published cpp/v$(VERSION). Header-only; no central registry — consumers vendor the headers or pin this tag."

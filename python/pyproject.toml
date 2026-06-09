@@ -1,5 +1,28 @@
-# Tooling configuration for the Python port.
+# Packaging + tooling configuration for the Python port.
 # Code quality: Ruff (lint + format) and mypy (static types).
+
+# ---- Build backend ----
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+# ---- Project metadata ----
+[project]
+name = "voxgig-struct"
+version = "0.1.0"
+description = "Uniform JSON-shaped data structure manipulations — Python port of @voxgig/struct"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Voxgig" }]
+keywords = ["voxgig", "struct", "json", "data"]
+
+[project.urls]
+Homepage = "https://github.com/voxgig/struct"
+Repository = "https://github.com/voxgig/struct"
+
+[tool.setuptools]
+packages = ["voxgig_struct"]
 
 # ---- Ruff: linter + formatter ----
 # https://docs.astral.sh/ruff/
