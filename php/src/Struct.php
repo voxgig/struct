@@ -656,7 +656,7 @@ class Struct
                 $i = (int) $n[0];
                 $s = $n[1];
 
-                if ('' !== $sepre && self::S_MT !== $sepre) {
+                if (self::S_MT !== $sepre) {
                     if ($url && 0 === $i) {
                         $s = preg_replace('/' . $sepre . '+$/', self::S_MT, $s);
                         return $s;
@@ -1277,6 +1277,7 @@ class Struct
      * reuses the same path buffer across sibling iterations, eliminating
      * the per-node path allocation the original implementation incurred.
      *
+     * @param array<int, string>             $path
      * @param array<int, array<int, string>> $pool
      */
     private static function _walk(
