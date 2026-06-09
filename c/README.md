@@ -15,7 +15,7 @@
 
 For motivation, language-neutral concepts, and the cross-language
 parity matrix, see the [top-level README](../README.md) and
-[REPORT.md](../REPORT.md).
+[REPORT.md](../design/REPORT.md).
 
 
 ## Install
@@ -228,7 +228,7 @@ kept out of scope to minimise dependencies).
 
 ## Regex
 
-Uniform regex API (see `/REGEX_API.md`). The C port **ships its own
+Uniform regex API (see `/design/REGEX_API.md`). The C port **ships its own
 RE2-subset Thompson NFA engine** in `src/regex.c` (~700 LOC) — no
 external dependency. The wrapper layer (`src/re_util.c`) exposes the
 shared `re_*` names alongside the lower-level `vs_regex_*` engine
@@ -250,7 +250,7 @@ The `_re` suffixed variants take an already-compiled `vs_regex*`.
 
 ### Dialect
 
-The in-tree engine implements the RE2 subset documented in `/REGEX.md`:
+The in-tree engine implements the RE2 subset documented in `/design/REGEX.md`:
 literals + escapes, `.`, `^`/`$`, `* + ? {n} {n,} {n,m}` (greedy + lazy),
 classes incl. `\d \w \s` and friends, `\b`/`\B`, `(...)` / `(?:...)`,
 alternation.
@@ -280,7 +280,7 @@ patterns.
   `"XaXbXcX"` because greedy quantifiers behaved lazily; the
   `OP_MATCH` handler in `regex.c` is now priority-correct.)
 
-See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
+See `/design/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
 
 
 ## Build and test

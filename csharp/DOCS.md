@@ -247,7 +247,7 @@ ECMA/PCRE/Java backtracking family on the two sharp edges (catastrophic
 backtracking; zero-width `ReReplace("a*", "abc", "X")` returning
 `"XXbXcX"`, where RE2/Go returns `"XbXcX"`). Both are detailed in
 [`README.md` → Regex](./README.md#regex) and
-[`../REGEX_PATHOLOGICAL.md`](../REGEX_PATHOLOGICAL.md). .NET 7+ offers
+[`../REGEX_PATHOLOGICAL.md`](../design/REGEX_PATHOLOGICAL.md). .NET 7+ offers
 `RegexOptions.NonBacktracking` if you must accept untrusted patterns.
 
 ---

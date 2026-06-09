@@ -192,7 +192,7 @@ Python has only `None`, so it cannot natively distinguish the JSON `null`
 scalar from "absent" — yet the library keeps them distinct. The port
 bridges this with the internal `UNDEF` sentinel, and both `null` and
 "absent" surface as `None` at the user-facing API. The
-[Group A/B rule](../UNDEF_SPEC.md) still applies:
+[Group A/B rule](../design/UNDEF_SPEC.md) still applies:
 
 - **Group A — readers** (`getprop`, `getelem`, `haskey`, `isempty`,
   `isnode`): a stored `None` is treated as *no value*.
@@ -228,7 +228,7 @@ backreferences and lookaround, but those won't port to the Go / Rust / C /
 Lua / Zig engines. Two sharp edges (catastrophic backtracking on patterns
 like `^(a+)+$`; zero-width `re_replace` returning `"XXbXcX"`) are detailed
 in [`README.md` → Regex](./README.md#regex) and
-[`../REGEX_PATHOLOGICAL.md`](../REGEX_PATHOLOGICAL.md).
+[`../REGEX_PATHOLOGICAL.md`](../design/REGEX_PATHOLOGICAL.md).
 
 ---
 

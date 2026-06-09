@@ -297,7 +297,7 @@ quantifiers like `a{0,10000}` don't overflow the stack. Stay inside the
 *compiles* but never matches). Zero-width `re_replace` follows the
 ECMA/PCRE convention: `re_replace("a*", "abc", "X")` returns `"XXbXcX"`
 (Go's RE2 returns `"XbXcX"`). See [`README.md` → Regex](./README.md#regex)
-and [`../REGEX_PATHOLOGICAL.md`](../REGEX_PATHOLOGICAL.md).
+and [`../REGEX_PATHOLOGICAL.md`](../design/REGEX_PATHOLOGICAL.md).
 
 ---
 

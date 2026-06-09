@@ -106,7 +106,7 @@ because they don't preserve insertion order.
 
 ## Regex
 
-Uniform six-function regex API (see `/REGEX_API.md`). The Perl port
+Uniform six-function regex API (see `/design/REGEX_API.md`). The Perl port
 wraps Perl's built-in regex engine.
 
 ### API
@@ -122,7 +122,7 @@ wraps Perl's built-in regex engine.
 
 ### Dialect
 
-Patterns must stay inside the **RE2 subset** documented in `/REGEX.md`.
+Patterns must stay inside the **RE2 subset** documented in `/design/REGEX.md`.
 Perl's regex supports backreferences, lookaround, recursion — none of
 which are portable to the Go / Rust / C / Lua / Zig ports.
 
@@ -133,13 +133,13 @@ which are portable to the Go / Rust / C / Lua / Zig ports.
   The discovery panel runs P1/P2 in microseconds here, but other
   pathological shapes can still blow up. Stay flat.
 - **Zero-width `replace`.** `re_replace("a*", "abc", "X")` returns
-  `"XXbXcX"` — the ECMA convention shared by all PCRE/ECMA/.NET/Java/Onigmo engines plus the in-tree Thompson ports. Go (RE2) returns `"XbXcX"` instead; see `/REGEX_PATHOLOGICAL.md`.
+  `"XXbXcX"` — the ECMA convention shared by all PCRE/ECMA/.NET/Java/Onigmo engines plus the in-tree Thompson ports. Go (RE2) returns `"XbXcX"` instead; see `/design/REGEX_PATHOLOGICAL.md`.
 - **UTF-8 handling.** Pass character strings (use `use utf8;` for
   literals, or `decode_utf8` for bytes). Encoding round-trip bugs in
   caller code can manifest as `cafÃ©` style mojibake at print time —
   the regex itself preserves character semantics.
 
-See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
+See `/design/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
 
 
 ## Tests

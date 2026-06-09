@@ -4,7 +4,7 @@
 
 For motivation, language-neutral concepts, and the cross-language
 parity matrix, see the [top-level README](../README.md) and
-[REPORT.md](../REPORT.md).
+[REPORT.md](../design/REPORT.md).
 
 
 ## Install
@@ -363,7 +363,7 @@ parity with other ports beats style here.
 
 ## Regex
 
-Uniform six-function regex API (see `/REGEX_API.md`). The Python port
+Uniform six-function regex API (see `/design/REGEX_API.md`). The Python port
 wraps the stdlib `re` module.
 
 ### API
@@ -379,7 +379,7 @@ wraps the stdlib `re` module.
 
 ### Dialect
 
-Patterns must stay inside the **RE2 subset** documented in `/REGEX.md`.
+Patterns must stay inside the **RE2 subset** documented in `/design/REGEX.md`.
 Python's `re` supports backreferences and lookaround; using them will
 not be portable to the Go / Rust / C / Lua / Zig ports.
 
@@ -389,9 +389,9 @@ not be portable to the Go / Rust / C / Lua / Zig ports.
   is backtracking. `^(a+)+$` against 22 a's plus `!` runs ~190 ms here;
   RE2-style ports finish the same case in <0.1 ms. Use flat patterns.
 - **Zero-width `replace`.** `re_replace("a*", "abc", "X")` returns
-  `"XXbXcX"` — the ECMA convention shared by all PCRE/ECMA/.NET/Java/Onigmo engines plus the in-tree Thompson ports. Go (RE2) returns `"XbXcX"` instead; see `/REGEX_PATHOLOGICAL.md`.
+  `"XXbXcX"` — the ECMA convention shared by all PCRE/ECMA/.NET/Java/Onigmo engines plus the in-tree Thompson ports. Go (RE2) returns `"XbXcX"` instead; see `/design/REGEX_PATHOLOGICAL.md`.
 
-See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
+See `/design/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
 
 
 ## Build and test

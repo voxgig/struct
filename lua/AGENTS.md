@@ -67,14 +67,14 @@ installed** — if you can't run a target, say so; don't claim a change works.
   optional `injdef` table (`{ extra =, errs =, modify = }`) where canonical
   TS spreads `extra`/`modify`/`collecterrs`; `$APPLY` is called
   `fn(resolved, store, inj)`. These signatures are port-local (unit tests,
-  not the corpus — see [`../NOTES.md`](../NOTES.md)).
+  not the corpus — see [`../NOTES.md`](../design/NOTES.md)).
 
 ## Gotchas
 
 - **`nil` is the only absent value.** Lua has no separate null, so the port
   is **Group A throughout** — a stored `nil` is "no value". The corpus uses
   `"__NULL__"` / `"__UNDEF__"` / `"__EXISTS__"` sentinels where it must
-  distinguish them (see [`../UNDEF_SPEC.md`](../UNDEF_SPEC.md)).
+  distinguish them (see [`../UNDEF_SPEC.md`](../design/UNDEF_SPEC.md)).
 - **0-based external paths, 1-based storage.** `getpath(list, '0')` is the
   first element; the translation is internal. Don't "fix" call sites.
 - **`escre` escapes Lua patterns, not RE2.** It is for `string.match` /
@@ -83,7 +83,7 @@ installed** — if you can't run a target, say so; don't claim a change works.
 - **Regex is the in-tree Thompson NFA** in `regex.lua` (RE2 subset;
   ECMA-style zero-width `re_replace` → `"XXbXcX"`). Backref/lookaround don't
   match by design; pathological-input differences across engine families are
-  **documented, not bugs** ([`../REGEX_PATHOLOGICAL.md`](../REGEX_PATHOLOGICAL.md)) —
+  **documented, not bugs** ([`../REGEX_PATHOLOGICAL.md`](../design/REGEX_PATHOLOGICAL.md)) —
   don't diverge to "fix" them.
 - **Editing here is downstream.** After any canonical behaviour change:
   update `../build/test/*.jsonic`, make the canonical TS pass, then mirror

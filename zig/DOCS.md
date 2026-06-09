@@ -237,7 +237,7 @@ the boundary.
 ### `null` versus absent (Group A/B)
 
 Zig has no `undefined` JSON value, so the port models "absent" with the
-`.null` case and applies the [Group A/B rule](../REPORT.md):
+`.null` case and applies the [Group A/B rule](../design/REPORT.md):
 
 - **Group A readers** (`getprop`, `getelem`, `haskey`, `isempty`,
   `isnode`) treat a stored `.null` as *no value* — you get the `alt` or
@@ -248,7 +248,7 @@ Zig has no `undefined` JSON value, so the port models "absent" with the
 
 This split is the single most common source of port bugs; the
 `sentinels.jsonic` corpus category exercises it directly. Full spec:
-[`../UNDEF_SPEC.md`](../UNDEF_SPEC.md).
+[`../UNDEF_SPEC.md`](../design/UNDEF_SPEC.md).
 
 ### Regex: in-tree engine, and a documented parity gap
 
@@ -268,7 +268,7 @@ divergence rather than wired-and-verified parity. Treat them as
 not-yet-guaranteed until that entry shrinks. Engine-family edges (zero-width
 `re_replace` → `"XXbXcX"`, no catastrophic backtracking) are detailed in
 [`README.md` → Regex](./README.md#regex) and
-[`../REGEX_PATHOLOGICAL.md`](../REGEX_PATHOLOGICAL.md).
+[`../REGEX_PATHOLOGICAL.md`](../design/REGEX_PATHOLOGICAL.md).
 
 ### This is a port, not the source of truth
 
@@ -298,7 +298,7 @@ all tests pass — `*MapRef`/`*ListRef` cross-references confuse arena
 teardown. The [`Makefile`](./Makefile) `test` target filters this: if the
 output reports `N/N tests passed` with `N == total`, the run is treated as
 successful. `zig build test` runs the suite as 60 `test` blocks, currently
-60/60 (see [`../REPORT.md`](../REPORT.md)).
+60/60 (see [`../REPORT.md`](../design/REPORT.md)).
 
 Tests live in [`test/`](./test/); the runner
 ([`test/runner.zig`](./test/runner.zig)) loads the shared corpus from

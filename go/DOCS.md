@@ -125,7 +125,7 @@ Register a named function and reference it by name in the spec. A custom
 function may return the `SKIP` / `DELETE` sentinels to omit/remove the
 current key. The exact callable shape is the port-local `Modify` /
 `Injector` type — see [`README.md`](./README.md#injection-helpers) and
-[`../NOTES.md`](../NOTES.md), since function-value signatures vary by port
+[`../NOTES.md`](../design/NOTES.md), since function-value signatures vary by port
 and are covered by port-local unit tests, not the JSON corpus.
 
 ### Keep a `walk` path past the callback
@@ -205,7 +205,7 @@ behaviour starts there, then flows to the corpus and out to every port (see
 
 Go has only `nil`. Both "absent" and the JSON `null` scalar map to `nil` at
 the user-facing API. The port already follows the **Group A** rule (see
-[`../UNDEF_SPEC.md`](../UNDEF_SPEC.md) and [`../REPORT.md`](../REPORT.md)):
+[`../UNDEF_SPEC.md`](../design/UNDEF_SPEC.md) and [`../REPORT.md`](../design/REPORT.md)):
 readers (`GetProp`, `GetElem`, `HasKey`, `IsEmpty`, `IsNode`) treat a stored
 `null` as "no value" and return the alt / `false`, while value-processors
 (`SetProp`, `Clone`, `Walk`, `Merge`, `Inject`, `Transform`, `Validate`,
@@ -258,7 +258,7 @@ The uniform six-function regex API (`ReCompile` / `ReTest` / `ReFind` /
 implementation: linear-time matching, no backtracking, and therefore no
 backreferences or lookaround (RE2 rejects them at compile time — there is no
 PCRE escape hatch). Stay inside the **RE2 subset** documented in
-[`../REGEX.md`](../REGEX.md); `ReCompile` is a pass-through to
+[`../REGEX.md`](../design/REGEX.md); `ReCompile` is a pass-through to
 `regexp.MustCompile`, so an invalid pattern **panics** (wrap in `recover()`
 if you accept user-supplied patterns).
 
@@ -269,7 +269,7 @@ ECMA / PCRE / backtracking ports (and the in-tree Thompson engines) return
 `"XXbXcX"` instead. This is inherent to Go's host engine and is **not**
 papered over — portable callers should not depend on cross-port identity of
 zero-width replacement output. Full panel:
-[`../REGEX_PATHOLOGICAL.md`](../REGEX_PATHOLOGICAL.md).
+[`../REGEX_PATHOLOGICAL.md`](../design/REGEX_PATHOLOGICAL.md).
 
 ---
 
@@ -288,7 +288,7 @@ make test                       # go test -v ./...
 The runner in [`voxgigstruct_test.go`](./voxgigstruct_test.go) loads the
 shared corpus from [`../build/test/`](../build/test/) and mirrors the
 reference runner. This port passes 92/92 of the shared corpus suite (see
-[`../REPORT.md`](../REPORT.md)).
+[`../REPORT.md`](../design/REPORT.md)).
 
 **To change behaviour:** behaviour is canonical, so start in the TypeScript
 source and the corpus, not here — edit

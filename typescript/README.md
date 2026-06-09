@@ -7,7 +7,7 @@
 
 For motivation, language-neutral concepts, and the cross-language
 parity matrix, see the [top-level README](../README.md) and
-[REPORT.md](../REPORT.md).
+[REPORT.md](../design/REPORT.md).
 
 
 ## Install
@@ -566,7 +566,7 @@ you need to retain it past the callback.
 ## Regex
 
 The library exposes a uniform six-function regex API across every
-port (see `/REGEX_API.md` for the contract and `/REGEX.md` for the
+port (see `/design/REGEX_API.md` for the contract and `/design/REGEX.md` for the
 supported dialect). On TypeScript the canonical implementation is
 ECMAScript `RegExp`.
 
@@ -583,7 +583,7 @@ ECMAScript `RegExp`.
 
 ### Dialect
 
-Patterns must stay inside the **RE2 subset** documented in `/REGEX.md`:
+Patterns must stay inside the **RE2 subset** documented in `/design/REGEX.md`:
 literals + escapes, `.`, `^`/`$`, `* + ? {n} {n,} {n,m}` (greedy + lazy),
 character classes incl. `\d \w \s` etc., `\b`/`\B`, `(...)` / `(?:...)` /
 `(?<name>...)`, alternation. ECMAScript `RegExp` supports backreferences
@@ -604,9 +604,9 @@ portable.
   host engine is PCRE/ECMA/.NET/Java/Onigmo, plus the in-tree
   Thompson NFA ports (Rust / C / Lua / Zig). Go is the exception:
   RE2 returns `"XbXcX"`. Don't rely on cross-port identity of
-  zero-width replacement output — see `/REGEX_PATHOLOGICAL.md`.
+  zero-width replacement output — see `/design/REGEX_PATHOLOGICAL.md`.
 
-See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input
+See `/design/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input
 panel and per-port outcomes.
 
 

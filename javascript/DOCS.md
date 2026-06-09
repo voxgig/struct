@@ -232,7 +232,7 @@ lookaround, but those don't port. Two sharp edges to know about:
   `"XXbXcX"` (the ECMA convention); RE2 ports like Go return `"XbXcX"`.
 
 Both are detailed in [`README.md` → Regex](./README.md#regex) and
-[`../REGEX_PATHOLOGICAL.md`](../REGEX_PATHOLOGICAL.md).
+[`../REGEX_PATHOLOGICAL.md`](../design/REGEX_PATHOLOGICAL.md).
 
 ---
 

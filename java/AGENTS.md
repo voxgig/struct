@@ -13,7 +13,7 @@ only what is specific to the Java port.
 ## Status (read this)
 
 The top-level [`../README.md`](../README.md) still lists Java as **Partial**,
-and [`../REPORT.md`](../REPORT.md)'s per-language section echoes an older
+and [`../REPORT.md`](../design/REPORT.md)'s per-language section echoes an older
 "22 of 40 / no test runner" snapshot. Both are **stale**. The current source
 defines the **full canonical API** — all 40 functions, the `Injection` state
 machine, `SKIP`/`DELETE`, mode constants + `MODENAME`, all 11 transform
@@ -80,7 +80,7 @@ versions). The corpus driver writes `target/corpus-scoreboard.json`.
 
 - **`null` is not `UNDEF`.** Group A readers (`getprop`, `getElem`,
   `hasKey`, `isempty`, `isnode`) treat a stored `null` as absent; Group B
-  processors preserve it. Re-read [`../UNDEF_SPEC.md`](../UNDEF_SPEC.md)
+  processors preserve it. Re-read [`../UNDEF_SPEC.md`](../design/UNDEF_SPEC.md)
   before touching any read/merge/clone path.
 - **`Map.of(...)` is immutable** — fine to read, but `merge`/`setpath`/`walk`
   write back into nodes; pass `LinkedHashMap`/`ArrayList` (or
@@ -90,7 +90,7 @@ versions). The corpus driver writes `target/corpus-scoreboard.json`.
   library hand-rolls `jsonify`. Never add a runtime third-party dependency.
 - **Function-value signatures** (`$APPLY`, `$FORMAT`, callable `alt`) use
   `java.util.function.Function`; covered by port-local unit tests, not the
-  JSON corpus — see [`../NOTES.md`](../NOTES.md).
+  JSON corpus — see [`../NOTES.md`](../design/NOTES.md).
 - **The corpus test won't red-bar on a shortfall** — `StructCorpusTest`
   records counts to the scoreboard. Diff `target/corpus-scoreboard.json`
   against `test-baseline.json` to catch regressions.

@@ -35,7 +35,7 @@ is almost never "make this port clever"; it is "make this port agree with
 the canonical TypeScript, case for case, in idiomatic local style."
 
 Ports and their status (full table in [`README.md`](./README.md), parity
-matrix in [`REPORT.md`](./REPORT.md)):
+matrix in [`REPORT.md`](design/REPORT.md)):
 
 | Canonical | Complete | Partial |
 |---|---|---|
@@ -54,7 +54,7 @@ matrix in [`REPORT.md`](./REPORT.md)):
    canonical TS still passes it first.
 3. **Do not add runtime dependencies.** Every port's library proper has
    zero third-party runtime deps (it uses the host stdlib, or a small
-   in-tree helper — see [`REPORT.md`](./REPORT.md)). Test harnesses may use
+   in-tree helper — see [`REPORT.md`](design/REPORT.md)). Test harnesses may use
    a JSON/test library; the library may not.
 4. **Do not rename public functions.** The public surface is the
    `export { … }` block in the canonical TS. Casing is per-language
@@ -70,10 +70,11 @@ matrix in [`REPORT.md`](./REPORT.md)):
 ├── README.md            # user-facing overview + language-neutral reference
 ├── DOCS.md              # comprehensive language-neutral guide (tutorial→reference)
 ├── AGENTS.md            # this file
-├── REPORT.md            # cross-port parity matrix (per-port function/test counts)
-├── NOTES.md             # cross-cutting quirks & edge cases that fit nowhere else
-├── UNDEF.md / UNDEF_SPEC.md   # the absent-vs-null ("Group A/B") semantics
-├── REGEX.md / REGEX_API.md / REGEX_PATHOLOGICAL.md   # the regex dialect & API
+├── design/              # reports & specs:
+│   ├── REPORT.md        #   cross-port parity matrix (per-port function/test counts)
+│   ├── NOTES.md         #   cross-cutting quirks & edge cases that fit nowhere else
+│   ├── UNDEF.md / UNDEF_SPEC.md        # the absent-vs-null ("Group A/B") semantics
+│   └── REGEX.md / REGEX_API.md / REGEX_PATHOLOGICAL.md   # the regex dialect & API
 ├── Makefile             # top-level aggregate targets (test/lint/audit/scan)
 ├── build/test/*.jsonic  # the shared test corpus — the behavioural contract
 ├── tools/               # check_parity.py, check_corpus_regex.py
@@ -154,7 +155,7 @@ markdownlint, plus each language's linters).
 4. Propagate the same logic to **every** port; run each port's tests.
 5. `python3 tools/check_parity.py` and `make test` stay green.
 6. Document any unavoidable per-port variance in the port's `README.md`
-   and, if cross-cutting, in [`NOTES.md`](./NOTES.md).
+   and, if cross-cutting, in [`NOTES.md`](design/NOTES.md).
 
 ### Add a new public function
 1. Implement + export it in the canonical TS; add corpus coverage.
@@ -168,7 +169,7 @@ markdownlint, plus each language's linters).
 - **Casing.** `getpath` (TS/JS/Py/Ruby/PHP/Lua/Perl/Java/Kotlin/Swift),
   `GetPath` (Go/C#), `get_path` (Rust), `vs_getpath` (C — and C++ adds
   `_v`/`_str` variants). Parity is checked case/underscore-insensitively.
-- **Absent vs. null ("Group A/B").** See [`UNDEF_SPEC.md`](./UNDEF_SPEC.md).
+- **Absent vs. null ("Group A/B").** See [`UNDEF_SPEC.md`](design/UNDEF_SPEC.md).
   Group A readers (`getprop`, `getelem`, `haskey`, `isempty`, `isnode`)
   treat a stored `null` as "no value". Group B value-processors
   (`setprop`, `clone`, `walk`, `merge`, `inject`, `transform`, `validate`,
@@ -178,11 +179,11 @@ markdownlint, plus each language's linters).
   semantics). Languages without an ordered-map stdlib type hand-roll one
   in-tree (see `REPORT.md`); never swap in an unordered map.
 - **Regex.** Patterns must stay inside the **RE2 subset**
-  ([`REGEX.md`](./REGEX.md)); the uniform six-function API is in
-  [`REGEX_API.md`](./REGEX_API.md). `python3 tools/check_corpus_regex.py`
+  ([`REGEX.md`](design/REGEX.md)); the uniform six-function API is in
+  [`REGEX_API.md`](design/REGEX_API.md). `python3 tools/check_corpus_regex.py`
   enforces the corpus stays in-subset. Backtracking-engine ports
   (Python/PHP/Perl/Ruby/JS) and RE2/NFA ports differ on a few pathological
-  inputs — documented in [`REGEX_PATHOLOGICAL.md`](./REGEX_PATHOLOGICAL.md);
+  inputs — documented in [`REGEX_PATHOLOGICAL.md`](design/REGEX_PATHOLOGICAL.md);
   do not "fix" these by diverging.
 - **Commit messages.** Conventional, scoped (`fix(go): …`, `deps(php): …`,
   `docs: …`). Describe *what changed and why*, and note test results.
@@ -201,7 +202,7 @@ markdownlint, plus each language's linters).
   ordered-map usage instead.
 - **Function-value signatures** (`$APPLY`, `$FORMAT`, callable `alt`) vary
   by port and are covered by *port-local unit tests*, not the JSON corpus —
-  see [`NOTES.md`](./NOTES.md).
+  see [`NOTES.md`](design/NOTES.md).
 - **Toolchains may be missing** in a given environment (Lua, C#, Zig,
   Swift are common gaps). If you can't build a port, say so — don't guess
   that a change works.
@@ -211,8 +212,8 @@ markdownlint, plus each language's linters).
 
 - Conceptual + how-to + full reference: [`DOCS.md`](./DOCS.md)
 - Per-port specifics: `<lang>/DOCS.md`, `<lang>/README.md`, `<lang>/AGENTS.md`
-- Parity matrix: [`REPORT.md`](./REPORT.md)
-- Edge cases & quirks: [`NOTES.md`](./NOTES.md), [`UNDEF.md`](./UNDEF.md)
-- Regex: [`REGEX.md`](./REGEX.md), [`REGEX_API.md`](./REGEX_API.md)
+- Parity matrix: [`REPORT.md`](design/REPORT.md)
+- Edge cases & quirks: [`NOTES.md`](design/NOTES.md), [`UNDEF.md`](design/UNDEF.md)
+- Regex: [`REGEX.md`](design/REGEX.md), [`REGEX_API.md`](design/REGEX_API.md)
 </content>
 </invoke>

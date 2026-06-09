@@ -68,7 +68,7 @@ make inspect      # g++ version + located nlohmann/json header
 ## Gotchas
 
 - **`null` is not `undefined`.** Re-read the Group A/B rule
-  ([`../UNDEF_SPEC.md`](../UNDEF_SPEC.md)) before touching any
+  ([`../UNDEF_SPEC.md`](../design/UNDEF_SPEC.md)) before touching any
   read/merge/clone path: Group A readers (`getprop`, `getelem`, `haskey`,
   `isempty`, `isnode`) treat stored `null` as absent; Group B
   value-processors preserve it literally.
@@ -76,7 +76,7 @@ make inspect      # g++ version + located nlohmann/json header
   subset — no backreferences/lookaround. libstdc++'s `<regex>` backtracks
   catastrophically; the documented zero-width-`re_replace` and
   catastrophic-backtracking differences in
-  [`../REGEX_PATHOLOGICAL.md`](../REGEX_PATHOLOGICAL.md) are expected — do
+  [`../REGEX_PATHOLOGICAL.md`](../design/REGEX_PATHOLOGICAL.md) are expected — do
   not "fix" them by diverging.
 - **The README is stale.** It describes an earlier partial state (namespace
   `VoxgigStruct`, an `args_container&&` calling convention, missing
@@ -94,4 +94,4 @@ make inspect      # g++ version + located nlohmann/json header
   [`README.md`](./README.md)
 - Repo rules & workflows: [`../AGENTS.md`](../AGENTS.md)
 - The contract: [`../build/test/`](../build/test/) · Parity:
-  `../tools/check_parity.py` · Matrix: [`../REPORT.md`](../REPORT.md)
+  `../tools/check_parity.py` · Matrix: [`../REPORT.md`](../design/REPORT.md)

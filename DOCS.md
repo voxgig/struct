@@ -216,7 +216,7 @@ S.transform(data, { total: { '`$APPLY`': 'sum' } }, { extra: { sum: (k, v, paren
 ```
 Register the function in `extra`; reference it by name with `$APPLY`. (The
 exact callback signature varies slightly by port — see
-[`NOTES.md`](./NOTES.md).)
+[`NOTES.md`](design/NOTES.md).)
 
 ### Validate incoming data, throwing on mismatch
 ```js
@@ -381,7 +381,7 @@ stored `null` counts as "no value". See [Explanation](#null-versus-absent-group-
 `T_string`, `T_function`, `T_symbol`, `T_null`, `T_list`, `T_map`,
 `T_instance`, `T_scalar` (set on every scalar), `T_node` (set on every
 node). `T_symbol`/`T_instance` are only ever produced on JS/TS — see
-[`NOTES.md`](./NOTES.md).
+[`NOTES.md`](design/NOTES.md).
 
 ### Walk / inject phase flags
 
@@ -408,9 +408,9 @@ alternative), `$EXACT` (equal a literal exactly).
 A uniform six-function regex layer wraps each host engine so call sites
 read the same everywhere: `re_compile`, `re_test`, `re_find`,
 `re_find_all`, `re_replace`, `re_escape`. Patterns must stay inside the
-**RE2 subset**. Full spec: [`REGEX_API.md`](./REGEX_API.md),
-[`REGEX.md`](./REGEX.md); cross-engine edge cases:
-[`REGEX_PATHOLOGICAL.md`](./REGEX_PATHOLOGICAL.md).
+**RE2 subset**. Full spec: [`REGEX_API.md`](design/REGEX_API.md),
+[`REGEX.md`](design/REGEX.md); cross-engine edge cases:
+[`REGEX_PATHOLOGICAL.md`](design/REGEX_PATHOLOGICAL.md).
 
 ---
 
@@ -452,7 +452,7 @@ every port pass again.
 Most JSON tooling treats `null` and "missing" as the same thing. `struct`
 deliberately distinguishes them, because configuration and validation care
 about the difference ("the user set this to null" ≠ "the user didn't set
-it"). The rule (full text in [`UNDEF_SPEC.md`](./UNDEF_SPEC.md)):
+it"). The rule (full text in [`UNDEF_SPEC.md`](design/UNDEF_SPEC.md)):
 
 - **Group A — readers** (`getprop`, `getelem`, `haskey`, `isempty`,
   `isnode`): a stored `null` is treated as *no value*; you get the `alt`
@@ -490,7 +490,7 @@ small in-tree helper or two: an ordered map, a JSON printer, sometimes a
 regex engine). Test harnesses may pull in a JSON/test library, but the
 shipped library never does. This keeps `struct` safe to embed inside an SDK
 without dragging a dependency tree along, and it is enforced — see
-[`REPORT.md`](./REPORT.md) and `make audit`.
+[`REPORT.md`](design/REPORT.md) and `make audit`.
 
 ### The regex subset
 
@@ -500,7 +500,7 @@ backtracking-engine ports (JS, Python, PHP, Perl, Ruby) and linear-time
 RE2/NFA ports (Go, Rust, C, C++, Zig, Lua) agree. A handful of pathological
 inputs still differ between engine families (notably zero-width
 `re_replace` and catastrophic backtracking); those differences are
-documented, not "fixed", in [`REGEX_PATHOLOGICAL.md`](./REGEX_PATHOLOGICAL.md).
+documented, not "fixed", in [`REGEX_PATHOLOGICAL.md`](design/REGEX_PATHOLOGICAL.md).
 
 ### Where everything is written down
 
@@ -509,9 +509,9 @@ documented, not "fixed", in [`REGEX_PATHOLOGICAL.md`](./REGEX_PATHOLOGICAL.md).
 | Overview + at-a-glance reference | [`README.md`](./README.md) |
 | This guide | `DOCS.md` |
 | Working in the repo (for agents) | [`AGENTS.md`](./AGENTS.md) |
-| Per-port parity matrix | [`REPORT.md`](./REPORT.md) |
-| Cross-cutting quirks | [`NOTES.md`](./NOTES.md) |
-| Absent-vs-null spec | [`UNDEF.md`](./UNDEF.md), [`UNDEF_SPEC.md`](./UNDEF_SPEC.md) |
-| Regex dialect + API | [`REGEX.md`](./REGEX.md), [`REGEX_API.md`](./REGEX_API.md), [`REGEX_PATHOLOGICAL.md`](./REGEX_PATHOLOGICAL.md) |
+| Per-port parity matrix | [`REPORT.md`](design/REPORT.md) |
+| Cross-cutting quirks | [`NOTES.md`](design/NOTES.md) |
+| Absent-vs-null spec | [`UNDEF.md`](design/UNDEF.md), [`UNDEF_SPEC.md`](design/UNDEF_SPEC.md) |
+| Regex dialect + API | [`REGEX.md`](design/REGEX.md), [`REGEX_API.md`](design/REGEX_API.md), [`REGEX_PATHOLOGICAL.md`](design/REGEX_PATHOLOGICAL.md) |
 | Per-port specifics | `<lang>/DOCS.md`, `<lang>/README.md`, `<lang>/AGENTS.md` |
 </content>

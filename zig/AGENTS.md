@@ -82,7 +82,7 @@ lint` runs only the format check.
 - **`null` is "absent" here.** Zig has no JSON `undefined`; the port uses
   the `.null` case and the Group A/B rule (Group A readers treat stored
   `.null` as absent; Group B preserve it). Re-read
-  [`../UNDEF_SPEC.md`](../UNDEF_SPEC.md) before touching any read/merge/clone
+  [`../UNDEF_SPEC.md`](../design/UNDEF_SPEC.md) before touching any read/merge/clone
   path.
 - **Tested on Zig 0.13.0.** The build assumes that toolchain; newer Zig has
   moved `std.ArrayList`/build APIs, so confirm the version (`make inspect`)

@@ -114,7 +114,7 @@ Register the function under `extra` and reference it by name. It may
 return `Struct.SKIP` / `Struct.UNDEF` to omit/remove the current key.
 `extra` keys starting with `$` register injectors; the rest merge into
 the transform data. (Callback signatures vary by port — see
-[`../NOTES.md`](../NOTES.md).)
+[`../NOTES.md`](../design/NOTES.md).)
 
 ### Keep a `walk` path past the callback
 The `path` list passed to a `WalkApply` is reused, so copy it
@@ -196,11 +196,11 @@ language-neutral form:
   and Group B processors (`clone`, `merge`, `walk`, `transform`,
   `validate`, `select`, …) preserve it literally.
 
-[`../REPORT.md`](../REPORT.md) records this port as **already Group A**
+[`../REPORT.md`](../design/REPORT.md) records this port as **already Group A**
 (135/135). If your data source returns `null` for "not set", decide which
 you mean before handing it to `struct`. The corpus bridges the two with
 the `"__NULL__"` / `"__UNDEF__"` / `"__EXISTS__"` markers (see
-[`../UNDEF_SPEC.md`](../UNDEF_SPEC.md)).
+[`../UNDEF_SPEC.md`](../design/UNDEF_SPEC.md)).
 
 ### Object model: reference-stable, zero-dependency JSON
 
@@ -225,7 +225,7 @@ aligns with the ECMA/backtracking family on the two documented sharp
 edges: catastrophic backtracking (`^(a+)+$` over 22 a's plus `!` ≈ 24 ms
 here) and zero-width `reReplace` returning `"XXbXcX"` (Go's RE2 returns
 `"XbXcX"`). See [`README.md` → Regex](./README.md#regex) and
-[`../REGEX_PATHOLOGICAL.md`](../REGEX_PATHOLOGICAL.md);
+[`../REGEX_PATHOLOGICAL.md`](../design/REGEX_PATHOLOGICAL.md);
 `python3 ../tools/check_corpus_regex.py` keeps the corpus in-subset.
 
 ---

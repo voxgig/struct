@@ -46,7 +46,7 @@ syntax), and language-specific notes:
 Each port directory also carries a `DOCS.md` (the comprehensive,
 four-part guide) and an `AGENTS.md` (notes for AI coding agents).
 
-The cross-language parity matrix lives in [`REPORT.md`](./REPORT.md).
+The cross-language parity matrix lives in [`REPORT.md`](design/REPORT.md).
 
 For the in-depth, language-neutral guide — tutorial, how-to recipes, full
 reference, and design explanation — see [`DOCS.md`](./DOCS.md). If you (or
@@ -400,7 +400,9 @@ Quote the checker in backticks inside a `validate` spec, e.g. `` `$STRING` ``.
 ```
 .
 ├── README.md         # this file
-├── REPORT.md         # cross-language parity matrix
+├── DOCS.md           # comprehensive language-neutral guide
+├── AGENTS.md         # guidance for AI coding agents (+ CLAUDE.md pointer)
+├── design/           # reports & specs: REPORT, NOTES, REGEX*, UNDEF*
 ├── build/test/       # shared JSON test corpus (.jsonic)
 ├── typescript/  javascript/  python/   # canonical + JS-family ports
 ├── go/  ruby/  php/                     # other complete ports
@@ -415,7 +417,7 @@ Each language directory contains:
 - a test runner that consumes `build/test/*.jsonic`,
 - a `Makefile` with at minimum `make test` and `make lint` targets,
 - a `README.md` with the per-language quick-start. Cross-port quirks
-  go in the top-level [`NOTES.md`](./NOTES.md).
+  go in the top-level [`NOTES.md`](design/NOTES.md).
 
 `make lint` runs that language's industry-standard code-quality tooling
 (linter + formatter check):

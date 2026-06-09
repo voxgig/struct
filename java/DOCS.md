@@ -232,7 +232,7 @@ backtracking/ECMA ports (Python, PHP, Perl, Ruby, JS, .NET): catastrophic
 backtracking on shapes like `^(a+)+$`, and zero-width
 `reReplace("a*", "abc", "X")` returning `"XXbXcX"` (RE2 ports like Go return
 `"XbXcX"`). See [`README.md` → Regex](./README.md#regex) and
-[`../REGEX_PATHOLOGICAL.md`](../REGEX_PATHOLOGICAL.md).
+[`../REGEX_PATHOLOGICAL.md`](../design/REGEX_PATHOLOGICAL.md).
 
 ---
 

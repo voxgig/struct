@@ -15,7 +15,7 @@
 
 For motivation, language-neutral concepts, and the cross-language
 parity matrix, see the [top-level README](../README.md) and
-[REPORT.md](../REPORT.md).  For the in-depth guide (tutorial, recipes,
+[REPORT.md](../design/REPORT.md).  For the in-depth guide (tutorial, recipes,
 explanation), see [`DOCS.md`](./DOCS.md).
 
 
@@ -113,14 +113,14 @@ links no JSON dependency. `nlohmann/json` appears only in the test driver.
 ### `null` versus absent
 
 The port follows the shared Group A/B rule (see
-[`../UNDEF_SPEC.md`](../UNDEF_SPEC.md)): readers treat a stored null as
+[`../UNDEF_SPEC.md`](../design/UNDEF_SPEC.md)): readers treat a stored null as
 "no value"; value-processors preserve it. `Value::undef()` is the absent
 sentinel used as the default `alt`.
 
 
 ## Regex
 
-Uniform six-function regex API (see `/REGEX_API.md`). The C++ port
+Uniform six-function regex API (see `/design/REGEX_API.md`). The C++ port
 wraps `<regex>` (C++11), which defaults to the ECMAScript dialect.
 
 ### API
@@ -136,7 +136,7 @@ wraps `<regex>` (C++11), which defaults to the ECMAScript dialect.
 
 ### Dialect
 
-Patterns must stay inside the **RE2 subset** documented in `/REGEX.md`.
+Patterns must stay inside the **RE2 subset** documented in `/design/REGEX.md`.
 `std::regex` defaults to ECMAScript syntax and supports backreferences
 and lookaround; using them will not be portable.
 
@@ -150,9 +150,9 @@ and lookaround; using them will not be portable.
   quantifiers; even then, performance won't match the dedicated
   engines.
 - **Zero-width `replace`.** `re_replace("a*", "abc", "X")` returns
-  `"XXbXcX"` — the ECMA convention shared by all PCRE/ECMA/.NET/Java/Onigmo engines plus the in-tree Thompson ports. Go (RE2) returns `"XbXcX"` instead; see `/REGEX_PATHOLOGICAL.md`.
+  `"XXbXcX"` — the ECMA convention shared by all PCRE/ECMA/.NET/Java/Onigmo engines plus the in-tree Thompson ports. Go (RE2) returns `"XbXcX"` instead; see `/design/REGEX_PATHOLOGICAL.md`.
 
-See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
+See `/design/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
 
 
 ## Build and test

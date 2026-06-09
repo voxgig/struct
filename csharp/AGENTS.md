@@ -94,7 +94,7 @@ commands. First run restores NuGet packages.
 - **The regex engine backtracks** (`System.Text.RegularExpressions`), so
   this port shares the ECMA/PCRE/Java edge cases, not the RE2 ones. Stay in
   the RE2 subset; don't "fix" documented pathological differences by
-  diverging (see [`../REGEX_PATHOLOGICAL.md`](../REGEX_PATHOLOGICAL.md)).
+  diverging (see [`../REGEX_PATHOLOGICAL.md`](../design/REGEX_PATHOLOGICAL.md)).
 
 ## See also
 
@@ -102,4 +102,4 @@ commands. First run restores NuGet packages.
   [`README.md`](./README.md)
 - Repo rules & workflows: [`../AGENTS.md`](../AGENTS.md)
 - The contract: [`../build/test/`](../build/test/) · Parity:
-  `../tools/check_parity.py` · Status: [`../REPORT.md`](../REPORT.md)
+  `../tools/check_parity.py` · Status: [`../REPORT.md`](../design/REPORT.md)

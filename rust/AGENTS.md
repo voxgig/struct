@@ -86,7 +86,7 @@ repo root, `make test-rust` / `make lint-rust` do too. Stable Rust 1.80+
   backref/lookaround patterns may *compile* but won't match (`re_test`
   returns `false`). Zero-width `re_replace` returns `"XXbXcX"` (ECMA
   convention), differing from Go's RE2 — that divergence is documented in
-  [`../REGEX_PATHOLOGICAL.md`](../REGEX_PATHOLOGICAL.md); do not "fix" it.
+  [`../REGEX_PATHOLOGICAL.md`](../design/REGEX_PATHOLOGICAL.md); do not "fix" it.
 - **Editing here is downstream.** A behaviour change starts in canonical
   TypeScript + the corpus, then ports here. After it: `cargo test` +
   `make lint` green, then `python3 ../tools/check_parity.py` and the other

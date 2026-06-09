@@ -216,7 +216,7 @@ compatibility). User-facing APIs accept and return `null`, so you rarely see the
 sentinel directly.
 
 This port already follows **Group A** null semantics (see
-[`../UNDEF_SPEC.md`](../UNDEF_SPEC.md) and [`../REPORT.md`](../REPORT.md)):
+[`../UNDEF_SPEC.md`](../design/UNDEF_SPEC.md) and [`../REPORT.md`](../design/REPORT.md)):
 
 - **Group A readers** (`getprop`, `getelem`, `haskey`, `isempty`, `isnode`)
   treat a stored `null` as *no value* — you get the `$alt` or `false`.
@@ -250,7 +250,7 @@ with the ECMA/backtracking engine family:
   `'XXbXcX'`, the ECMA convention (Go's RE2 returns `'XbXcX'`).
 
 Both are detailed in [`README.md` → Regex](./README.md#regex) and the
-cross-port panel [`../REGEX_PATHOLOGICAL.md`](../REGEX_PATHOLOGICAL.md).
+cross-port panel [`../REGEX_PATHOLOGICAL.md`](../design/REGEX_PATHOLOGICAL.md).
 
 ---
 
@@ -271,7 +271,7 @@ Dev tooling: PHPUnit ^12, PHPStan ^2.1, PHP_CodeSniffer ^3.13 (config in
 There is no build step. Tests live in [`tests/`](./tests/) (PHPUnit suite
 configured in [`phpunit.xml`](./phpunit.xml)); the runner loads the shared
 corpus from [`../build/test/`](../build/test/). The port passes the shared corpus
-suite (82/82, 920 assertions — see [`../REPORT.md`](../REPORT.md)).
+suite (82/82, 920 assertions — see [`../REPORT.md`](../design/REPORT.md)).
 
 **To change behaviour:** do it in canonical TypeScript first, adjust the corpus,
 then port the change here, run `make test` and `make lint`, and re-run

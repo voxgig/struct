@@ -66,7 +66,7 @@ wraps `npm test`; `make lint` runs `npm run lint` *and* `npm run format:check`;
   not edit it to make this port pass.
 - **`null` is not `undefined`.** JS distinguishes them and so does `struct`:
   Group A readers treat stored `null` as absent; Group B processors preserve
-  it. Re-read the Group A/B rule ([`../UNDEF_SPEC.md`](../UNDEF_SPEC.md))
+  it. Re-read the Group A/B rule ([`../UNDEF_SPEC.md`](../design/UNDEF_SPEC.md))
   before touching any read/merge/clone path.
 - **Editing here is downstream of a canonical change.** If you are matching a
   TS behaviour change: update this port to follow it, run `npm test`, then
@@ -75,7 +75,7 @@ wraps `npm test`; `make lint` runs `npm run lint` *and* `npm run format:check`;
 - **Regex stays in the RE2 subset.** ECMAScript `RegExp` allows
   backreferences/lookaround, but they don't port. Pathological-input
   differences (catastrophic backtracking; zero-width `re_replace`) are
-  documented in [`../REGEX_PATHOLOGICAL.md`](../REGEX_PATHOLOGICAL.md) — do
+  documented in [`../REGEX_PATHOLOGICAL.md`](../design/REGEX_PATHOLOGICAL.md) — do
   not "fix" them by diverging.
 
 ## See also

@@ -80,7 +80,7 @@ tests/<driver>.c -lm`. `make test-c` from the repo root wraps `make test`.
 - **`null` is not `undefined`.** `VS_VAL_NULL` and `VS_VAL_UNDEF` are
   distinct kinds. Group A readers treat stored `null` as absent; Group B
   processors preserve it (raw reads go through `vs_lookup`). Re-read
-  [`../UNDEF_SPEC.md`](../UNDEF_SPEC.md) before touching any read/merge/clone
+  [`../UNDEF_SPEC.md`](../design/UNDEF_SPEC.md) before touching any read/merge/clone
   path.
 - **Don't reorder map keys.** `vs_map` is insertion-ordered on purpose (the
   inject machinery partitions keys by `$`-suffix); order is observable via
@@ -89,7 +89,7 @@ tests/<driver>.c -lm`. `make test-c` from the repo root wraps `make test`.
   backtracking, captures cap at `VS_REGEX_MAX_GROUPS` (16), and zero-width
   `vs_re_replace` is ECMA-style (`"XXbXcX"`). `$LIKE` dispatches through
   `vs_re_test`. Don't "fix" the cross-engine differences in
-  [`../REGEX_PATHOLOGICAL.md`](../REGEX_PATHOLOGICAL.md).
+  [`../REGEX_PATHOLOGICAL.md`](../design/REGEX_PATHOLOGICAL.md).
 - **A behaviour change is a cross-port event.** Change the canonical TS and
   the corpus first; then port here, `make test` + `make lint` green, and
   re-run `python3 ../tools/check_parity.py` and the other ports.

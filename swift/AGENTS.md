@@ -90,4 +90,4 @@ don't claim a change works.
   [`README.md`](./README.md)
 - Repo rules & workflows: [`../AGENTS.md`](../AGENTS.md)
 - The contract: [`../build/test/`](../build/test/) · Parity:
-  `../tools/check_parity.py` · Matrix: [`../REPORT.md`](../REPORT.md)
+  `../tools/check_parity.py` · Matrix: [`../REPORT.md`](../design/REPORT.md)

@@ -80,5 +80,5 @@ same commands.
 - Repo rules & workflows: [`../AGENTS.md`](../AGENTS.md)
 - The contract: [`../build/test/`](../build/test/) · Parity:
   [`../tools/check_parity.py`](../tools/check_parity.py)
-- Group A/B: [`../UNDEF_SPEC.md`](../UNDEF_SPEC.md) · Regex:
-  [`../REGEX_PATHOLOGICAL.md`](../REGEX_PATHOLOGICAL.md)
+- Group A/B: [`../UNDEF_SPEC.md`](../design/UNDEF_SPEC.md) · Regex:
+  [`../REGEX_PATHOLOGICAL.md`](../design/REGEX_PATHOLOGICAL.md)

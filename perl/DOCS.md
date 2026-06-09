@@ -216,7 +216,7 @@ return order-randomised plain hashes.
 
 Perl `undef` is overloaded in everyday code, so the port keeps three
 distinct things — the [Group A/B rule](../DOCS.md#null-versus-absent-group-ab)
-in Perl form (full text in [`../UNDEF_SPEC.md`](../UNDEF_SPEC.md)):
+in Perl form (full text in [`../UNDEF_SPEC.md`](../design/UNDEF_SPEC.md)):
 
 - **`undef` / `$NONE` = absent.** Group A readers (`getprop`, `getelem`,
   `haskey`, `isempty`, `isnode`) treat absence — and a stored `$JNULL` —
@@ -242,7 +242,7 @@ ECMA/backtracking family: catastrophic backtracking on pathological shapes,
 and zero-width `re_replace("a*", "abc", "X")` returning `"XXbXcX"` (Go/RE2
 returns `"XbXcX"`). Both are detailed in
 [`README.md` → Regex](./README.md#regex) and
-[`../REGEX_PATHOLOGICAL.md`](../REGEX_PATHOLOGICAL.md). Pass character
+[`../REGEX_PATHOLOGICAL.md`](../design/REGEX_PATHOLOGICAL.md). Pass character
 strings (`use utf8;` for literals).
 
 ---

@@ -68,7 +68,7 @@ make audit               # govulncheck + gosec
   it breaks reference stability.
 - **`nil` is absent *and* JSON null.** Go has only `nil`. The port follows
   the Group A/B rule (already Group A — see
-  [`../UNDEF_SPEC.md`](../UNDEF_SPEC.md)). Re-read it before touching any
+  [`../UNDEF_SPEC.md`](../design/UNDEF_SPEC.md)). Re-read it before touching any
   read/merge/clone path — the top source of port bugs.
 - **Corpus markers.** `testutil/runner.go` defines `NULLMARK = "__NULL__"`,
   `UNDEFMARK = "__UNDEF__"`, `EXISTSMARK = "__EXISTS__"`. `__UNDEFMARK__` is
@@ -77,7 +77,7 @@ make audit               # govulncheck + gosec
   lookaround, no PCRE escape hatch. `ReCompile` is `regexp.MustCompile`, so a
   bad/out-of-subset pattern **panics**. Zero-width `re_replace` diverges by
   design — `ReReplace("a*", "abc", "X")` returns `"XbXcX"`, not `"XXbXcX"`;
-  don't "fix" it (see [`../REGEX_PATHOLOGICAL.md`](../REGEX_PATHOLOGICAL.md)).
+  don't "fix" it (see [`../REGEX_PATHOLOGICAL.md`](../design/REGEX_PATHOLOGICAL.md)).
 - **Editing here doesn't change canonical behaviour.** A genuine behaviour
   change starts in the TypeScript source + corpus, then propagates here; run
   `python3 ../tools/check_parity.py` and the touched ports' tests after.
@@ -89,5 +89,5 @@ make audit               # govulncheck + gosec
 - Repo rules & workflows: [`../AGENTS.md`](../AGENTS.md)
 - The contract: [`../build/test/`](../build/test/) · Parity:
   [`../tools/check_parity.py`](../tools/check_parity.py)
-- Null semantics: [`../UNDEF_SPEC.md`](../UNDEF_SPEC.md) · Parity matrix:
-  [`../REPORT.md`](../REPORT.md)
+- Null semantics: [`../UNDEF_SPEC.md`](../design/UNDEF_SPEC.md) · Parity matrix:
+  [`../REPORT.md`](../design/REPORT.md)

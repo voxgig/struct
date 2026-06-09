@@ -131,7 +131,7 @@ spec. The Lua `$APPLY` function is invoked as `fn(resolved, store, inj)` —
 the resolved child value, the injection store, and the child injection
 object. A custom function may return the `SKIP` / `DELETE` sentinels to
 omit/remove the current key. Function-value signatures are port-local and
-covered by unit tests, not the JSON corpus — see [`../NOTES.md`](../NOTES.md).
+covered by unit tests, not the JSON corpus — see [`../NOTES.md`](../design/NOTES.md).
 
 ### Keep a `walk` path past the callback
 ```lua
@@ -216,8 +216,8 @@ distinct null value. So the language-neutral
 is **Group A throughout** (a stored `nil` is simply "no value"). Where the
 corpus must distinguish a real null from absent, the test runner uses the
 string sentinels `"__NULL__"` / `"__UNDEF__"` / `"__EXISTS__"`; the library
-itself never sees a separate null. See [`../REPORT.md`](../REPORT.md) and
-[`../UNDEF_SPEC.md`](../UNDEF_SPEC.md).
+itself never sees a separate null. See [`../REPORT.md`](../design/REPORT.md) and
+[`../UNDEF_SPEC.md`](../design/UNDEF_SPEC.md).
 
 ### Lists are reference-stable
 
@@ -245,7 +245,7 @@ quantifiers run on the Lua VM and are slow versus native engines
 (the ECMA/PCRE/Java/.NET convention, shared with the other in-tree Thompson
 ports Rust/C/Zig; Go's RE2 returns `"XbXcX"`). Details:
 [`README.md` → Regex](./README.md#regex) and
-[`../REGEX_PATHOLOGICAL.md`](../REGEX_PATHOLOGICAL.md).
+[`../REGEX_PATHOLOGICAL.md`](../design/REGEX_PATHOLOGICAL.md).
 
 ---
 
@@ -264,7 +264,7 @@ make clean           # rm luacov.* .busted
 ```
 
 The corpus suite reports **75/75 cases passing** (per
-[`../REPORT.md`](../REPORT.md)). Tests live in
+[`../REPORT.md`](../design/REPORT.md)). Tests live in
 [`test/`](./test/); [`test/struct_test.lua`](./test/struct_test.lua) is the
 busted suite and [`test/runner.lua`](./test/runner.lua) is the JSONIC driver
 that loads the shared corpus from [`../build/test/`](../build/test/).

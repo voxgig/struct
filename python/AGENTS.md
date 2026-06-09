@@ -63,7 +63,7 @@ Dev tooling floors: `ruff>=0.9`, `mypy>=1.14`. No build step.
 ## Gotchas
 
 - **`None` is not "absent".** This is the single most common port bug. Re-read
-  the Group A/B rule ([`../UNDEF_SPEC.md`](../UNDEF_SPEC.md)) before touching
+  the Group A/B rule ([`../UNDEF_SPEC.md`](../design/UNDEF_SPEC.md)) before touching
   any read/merge/clone path. The corpus uses `"__NULL__"` to mark a real
   null distinct from absent.
 - **Editing here never changes canonical behaviour.** If a behaviour looks
@@ -72,7 +72,7 @@ Dev tooling floors: `ruff>=0.9`, `mypy>=1.14`. No build step.
 - **Stay in the RE2 subset.** The port wraps stdlib `re`, which allows
   backreferences and lookaround — those won't port to the RE2/NFA ports.
   Cross-engine edge cases are documented, not "fixed", in
-  [`../REGEX_PATHOLOGICAL.md`](../REGEX_PATHOLOGICAL.md).
+  [`../REGEX_PATHOLOGICAL.md`](../design/REGEX_PATHOLOGICAL.md).
 - **Don't reorder map keys** to satisfy a diff — `dict` preserves insertion
   order and key order is observable through `keysof`, `items`, and
   `jsonify`.

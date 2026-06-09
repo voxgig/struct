@@ -233,7 +233,7 @@ returns `nil` (not a throw) on a bad pattern, and `re_find`/`re_find_all`
 thread results through `Value.list`, not raw arrays. Cross-engine
 pathological inputs (catastrophic backtracking; zero-width replace) are in
 [`README.md` → Regex](./README.md#regex) and
-[`../REGEX_PATHOLOGICAL.md`](../REGEX_PATHOLOGICAL.md).
+[`../REGEX_PATHOLOGICAL.md`](../design/REGEX_PATHOLOGICAL.md).
 
 ---
 

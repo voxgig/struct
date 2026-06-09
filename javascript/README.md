@@ -5,7 +5,7 @@
 
 For motivation, language-neutral concepts, and the cross-language
 parity matrix, see the [top-level README](../README.md) and
-[REPORT.md](../REPORT.md).
+[REPORT.md](../design/REPORT.md).
 
 
 ## Install
@@ -369,7 +369,7 @@ Otherwise functionally identical -- both run on V8.
 
 ## Regex
 
-Uniform six-function regex API (see `/REGEX_API.md`). On JavaScript
+Uniform six-function regex API (see `/design/REGEX_API.md`). On JavaScript
 this is the ECMAScript `RegExp` built-in.
 
 ### API
@@ -385,7 +385,7 @@ this is the ECMAScript `RegExp` built-in.
 
 ### Dialect
 
-Patterns must stay inside the **RE2 subset** documented in `/REGEX.md`.
+Patterns must stay inside the **RE2 subset** documented in `/design/REGEX.md`.
 `RegExp` itself supports backreferences and lookaround, but other ports
 do not, so using those will not be portable.
 
@@ -397,9 +397,9 @@ do not, so using those will not be portable.
   Node 22 vs <0.1 ms on RE2-style engines). Prefer flat patterns and
   character classes over alternations.
 - **Zero-width `replace`.** `re_replace("a*", "abc", "X")` returns
-  `"XXbXcX"` — the ECMA convention shared by all PCRE/ECMA/.NET/Java/Onigmo engines plus the in-tree Thompson ports. Go (RE2) returns `"XbXcX"` instead; see `/REGEX_PATHOLOGICAL.md`.
+  `"XXbXcX"` — the ECMA convention shared by all PCRE/ECMA/.NET/Java/Onigmo engines plus the in-tree Thompson ports. Go (RE2) returns `"XbXcX"` instead; see `/design/REGEX_PATHOLOGICAL.md`.
 
-See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input
+See `/design/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input
 panel.
 
 

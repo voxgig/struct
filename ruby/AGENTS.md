@@ -57,12 +57,12 @@ There is no build step (`make build` is a no-op).
 - **`null` is not `UNDEF`.** Group A readers (`getprop`, `getelem`,
   `haskey`, `isempty`, `isnode`) treat a stored `nil` as absent; Group B
   processors preserve it. `setval` keeps the distinction. Re-read
-  [`../UNDEF_SPEC.md`](../UNDEF_SPEC.md) before touching any read/merge path.
+  [`../UNDEF_SPEC.md`](../design/UNDEF_SPEC.md) before touching any read/merge path.
 - **Editing here is *not* a cross-port event** — unless you've found a
   canonical bug. A normal fix makes Ruby match the corpus and stops there.
 - **Regex is backtracking (Onigmo).** Edges align with the JS/Python/PHP/
   Perl ports, not the RE2 ports — see
-  [`../REGEX_PATHOLOGICAL.md`](../REGEX_PATHOLOGICAL.md). Don't "fix" a
+  [`../REGEX_PATHOLOGICAL.md`](../design/REGEX_PATHOLOGICAL.md). Don't "fix" a
   documented cross-engine difference by diverging; stay in the RE2 subset.
 - **`joinurl` is defined twice** in the source (the second carries a
   `rubocop:disable Lint/DuplicateMethods`). If you touch it, keep both call

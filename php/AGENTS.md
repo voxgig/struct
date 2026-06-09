@@ -70,7 +70,7 @@ make inspect     # PHP + project version
   exists to fix — suspect it first when a deep mutation doesn't stick.
 - **`null` is not "absent".** Internally, absence is the `Struct::undef()`
   sentinel object (the public `Struct::UNDEF` string is legacy). This port is
-  **Group A** (see [`../UNDEF_SPEC.md`](../UNDEF_SPEC.md)): readers treat stored
+  **Group A** (see [`../UNDEF_SPEC.md`](../design/UNDEF_SPEC.md)): readers treat stored
   null as no-value; value-processors preserve it. Internal Group B reads use
   `_getprop`, not the null-normalising public `getprop`. Re-read the Group A/B
   rule before touching any read/merge/clone path.
@@ -82,7 +82,7 @@ make inspect     # PHP + project version
   the same corpus case, suspect the canonical TS, not this port.
 - **Regex is PCRE (backtracking).** Stay inside the RE2 subset; the documented
   pathological-input differences in
-  [`../REGEX_PATHOLOGICAL.md`](../REGEX_PATHOLOGICAL.md) are expected — do not
+  [`../REGEX_PATHOLOGICAL.md`](../design/REGEX_PATHOLOGICAL.md) are expected — do not
   "fix" them by diverging.
 
 ## See also
@@ -93,5 +93,5 @@ make inspect     # PHP + project version
   [`../DOCS.md`](../DOCS.md)
 - The contract: [`../build/test/`](../build/test/) · Parity:
   [`../tools/check_parity.py`](../tools/check_parity.py) · Matrix:
-  [`../REPORT.md`](../REPORT.md)
+  [`../REPORT.md`](../design/REPORT.md)
 ```

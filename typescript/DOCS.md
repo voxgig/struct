@@ -206,7 +206,7 @@ six-function API (`re_compile` / `re_test` / `re_find` / `re_find_all` /
 *allows* backreferences and lookaround, but those don't port. Two sharp
 edges (catastrophic backtracking; zero-width `re_replace` returning
 `"XXbXcX"`) are detailed in [`README.md` → Regex](./README.md#regex) and
-[`../REGEX_PATHOLOGICAL.md`](../REGEX_PATHOLOGICAL.md).
+[`../REGEX_PATHOLOGICAL.md`](../design/REGEX_PATHOLOGICAL.md).
 
 ---
 

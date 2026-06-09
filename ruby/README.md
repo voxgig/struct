@@ -4,7 +4,7 @@
 
 For motivation, language-neutral concepts, and the cross-language
 parity matrix, see the [top-level README](../README.md) and
-[REPORT.md](../REPORT.md).
+[REPORT.md](../design/REPORT.md).
 
 
 ## Install
@@ -347,7 +347,7 @@ and a `maxdepth` parameter, matching the canonical algorithm.
 
 ## Regex
 
-Uniform six-function regex API (see `/REGEX_API.md`). The Ruby port
+Uniform six-function regex API (see `/design/REGEX_API.md`). The Ruby port
 wraps the built-in `Regexp` (Onigmo engine).
 
 ### API
@@ -363,7 +363,7 @@ wraps the built-in `Regexp` (Onigmo engine).
 
 ### Dialect
 
-Patterns must stay inside the **RE2 subset** documented in `/REGEX.md`.
+Patterns must stay inside the **RE2 subset** documented in `/design/REGEX.md`.
 Onigmo supports backreferences and lookaround; using them will not be
 portable to the Go / Rust / C / Lua / Zig ports.
 
@@ -375,9 +375,9 @@ portable to the Go / Rust / C / Lua / Zig ports.
   blow up; the safe rule is to stay inside the RE2 subset and avoid
   nested quantifiers.
 - **Zero-width `replace`.** `re_replace("a*", "abc", "X")` returns
-  `"XXbXcX"` — the ECMA convention shared by all PCRE/ECMA/.NET/Java/Onigmo engines plus the in-tree Thompson ports. Go (RE2) returns `"XbXcX"` instead; see `/REGEX_PATHOLOGICAL.md`.
+  `"XXbXcX"` — the ECMA convention shared by all PCRE/ECMA/.NET/Java/Onigmo engines plus the in-tree Thompson ports. Go (RE2) returns `"XbXcX"` instead; see `/design/REGEX_PATHOLOGICAL.md`.
 
-See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
+See `/design/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
 
 
 ## Build and test

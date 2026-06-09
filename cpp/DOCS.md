@@ -210,7 +210,7 @@ genuine behaviour change starts in TypeScript and flows out to every port
 
 C++ here has both, kept distinct — the
 [Group A/B rule](../DOCS.md#null-versus-absent-group-ab) in language-neutral
-form (full text in [`../UNDEF_SPEC.md`](../UNDEF_SPEC.md)):
+form (full text in [`../UNDEF_SPEC.md`](../design/UNDEF_SPEC.md)):
 
 - **Absent** is `Value::undef()` (`std::monostate`). `getprop` on a missing
   key returns the `alt`; Group A readers (`getprop`, `getelem`, `haskey`,
@@ -255,7 +255,7 @@ Two sharp edges: libstdc++'s `<regex>` has the worst-in-class catastrophic
 backtracking, and zero-width `re_replace("a*", "abc", "X")` returns
 `"XXbXcX"` (the ECMA convention; Go's RE2 returns `"XbXcX"`). Details in
 [`README.md` → Regex](./README.md#regex) and
-[`../REGEX_PATHOLOGICAL.md`](../REGEX_PATHOLOGICAL.md).
+[`../REGEX_PATHOLOGICAL.md`](../design/REGEX_PATHOLOGICAL.md).
 
 ---
 

@@ -149,7 +149,7 @@ transform's `extra`, and reference it by name in the spec. A custom
 function may return the `SKIP` / `DELETE` sentinels (see below) to
 omit/remove the current key. The callback signature
 (`vs_injector_fn` / `vs_modify_fn`) is C-specific and covered by the
-port's unit tests, not the JSON corpus — see [`../NOTES.md`](../NOTES.md).
+port's unit tests, not the JSON corpus — see [`../NOTES.md`](../design/NOTES.md).
 
 ### Collect all validation errors instead of aborting
 `vs_validate` returns the data on success. To gather errors rather than
@@ -247,7 +247,7 @@ mirrors TS `undefined` vs `null` and is the language-neutral
   `vs_merge`, `vs_inject`, `vs_transform`, `vs_validate`, `vs_select`, …):
   `null` is preserved literally.
 
-Full text in [`../UNDEF_SPEC.md`](../UNDEF_SPEC.md). This is the single most
+Full text in [`../UNDEF_SPEC.md`](../design/UNDEF_SPEC.md). This is the single most
 common source of port bugs.
 
 ### Reference-stable containers
@@ -273,7 +273,7 @@ lookaround). Two consequences:
 
 - **Linear time, no catastrophic backtracking** — pathological inputs
   finish in microseconds. See
-  [`../REGEX_PATHOLOGICAL.md`](../REGEX_PATHOLOGICAL.md).
+  [`../REGEX_PATHOLOGICAL.md`](../design/REGEX_PATHOLOGICAL.md).
 - **Zero-width `re_replace` is ECMA-style**: `vs_re_replace("a*", "abc",
   "X")` returns `"XXbXcX"` (the convention shared with the other in-tree
   Thompson ports). Captures cap at `VS_REGEX_MAX_GROUPS` (16). Compiled
@@ -298,7 +298,7 @@ make clean       # remove built binaries / scoreboard
 The corpus runner ([`tests/struct_corpus_test.c`](./tests/struct_corpus_test.c))
 loads the shared corpus from [`../build/test/`](../build/test/) — the same
 contract every port runs. This port passes the corpus (1177/1177 per
-[`../REPORT.md`](../REPORT.md)); per-test counts are written to
+[`../REPORT.md`](../design/REPORT.md)); per-test counts are written to
 `corpus-scoreboard.json` after each run.
 
 **To change behaviour:** this is a port, so behaviour changes start in the

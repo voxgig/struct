@@ -18,7 +18,7 @@
 
 For motivation, language-neutral concepts, and the cross-language
 parity matrix, see the [top-level README](../README.md),
-[`../DOCS.md`](../DOCS.md), and [`../REPORT.md`](../REPORT.md). The
+[`../DOCS.md`](../DOCS.md), and [`../REPORT.md`](../design/REPORT.md). The
 Kotlin port guide is [`DOCS.md`](./DOCS.md).
 
 
@@ -266,7 +266,7 @@ Inside backticks in a `validate` spec (implemented as `validate_STRING`,
 ### Why partial?
 
 The Kotlin port is classified **Partial** in the parity matrix
-([`../REPORT.md`](../REPORT.md)) in the same bracket as Java. In
+([`../REPORT.md`](../design/REPORT.md)) in the same bracket as Java. In
 practice it implements the entire canonical public surface and
 `check_parity.py` reports it `ok`; the classification reflects port
 maturity rather than a missing API. Treat behavioural authority as
@@ -299,7 +299,7 @@ is absent.
 
 ## Regex
 
-Uniform six-function regex API (see [`../REGEX_API.md`](../REGEX_API.md)).
+Uniform six-function regex API (see [`../REGEX_API.md`](../design/REGEX_API.md)).
 The Kotlin port backs onto `kotlin.text.Regex` / `java.util.regex` (a
 backtracking engine, RE2 superset).
 
@@ -317,7 +317,7 @@ backtracking engine, RE2 superset).
 ### Dialect
 
 Patterns must stay inside the **RE2 subset** documented in
-[`../REGEX.md`](../REGEX.md). Kotlin/Java regex supports backreferences
+[`../REGEX.md`](../design/REGEX.md). Kotlin/Java regex supports backreferences
 and lookaround; using them will not be portable.
 
 ### Sharp edges
@@ -328,10 +328,10 @@ and lookaround; using them will not be portable.
 - **Zero-width `replace`.** `reReplace("a*", "abc", "X")` returns
   `"XXbXcX"` — the ECMA/backtracking convention shared by all
   PCRE/ECMA/.NET/Java/Onigmo engines. Go (RE2) returns `"XbXcX"`; see
-  [`../REGEX_PATHOLOGICAL.md`](../REGEX_PATHOLOGICAL.md). Kotlin's edges
+  [`../REGEX_PATHOLOGICAL.md`](../design/REGEX_PATHOLOGICAL.md). Kotlin's edges
   align with the other backtracking-family ports.
 
-See [`../REGEX_PATHOLOGICAL.md`](../REGEX_PATHOLOGICAL.md) for the
+See [`../REGEX_PATHOLOGICAL.md`](../design/REGEX_PATHOLOGICAL.md) for the
 cross-port pathological-input panel.
 
 

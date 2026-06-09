@@ -14,7 +14,7 @@ covers only what is specific to the Kotlin port.
 ## Status
 
 Classified **Partial** in [`../README.md`](../README.md) and
-[`../REPORT.md`](../REPORT.md) (same bracket as Java). In practice the
+[`../REPORT.md`](../design/REPORT.md) (same bracket as Java). In practice the
 full canonical surface is present (40 functions, 15 type flags, 3 mode
 constants, the sentinels, the `Injection` machine) and
 `../tools/check_parity.py` reports it `ok`. REPORT.md records it as
@@ -71,7 +71,7 @@ passes that you could not run.
   to `implementation`.
 - **`null` vs absent (Group A/B):** the single most common port bug.
   Group A readers treat a stored `null` as absent; Group B processors
-  preserve it. Re-read [`../UNDEF_SPEC.md`](../UNDEF_SPEC.md) before
+  preserve it. Re-read [`../UNDEF_SPEC.md`](../design/UNDEF_SPEC.md) before
   touching any read/merge/clone path.
 
 ## Gotchas
@@ -88,10 +88,10 @@ passes that you could not run.
 - **Regex edges are intentional.** Zero-width `reReplace` → `"XXbXcX"`
   and catastrophic backtracking are the backtracking-engine behaviour
   shared with the ECMA family; do not "fix" them by diverging. See
-  [`../REGEX_PATHOLOGICAL.md`](../REGEX_PATHOLOGICAL.md).
+  [`../REGEX_PATHOLOGICAL.md`](../design/REGEX_PATHOLOGICAL.md).
 - **Function-value signatures** (`$APPLY`, `$FORMAT`, callable `alt`) are
   covered by port-local unit tests, not the JSON corpus — see
-  [`../NOTES.md`](../NOTES.md).
+  [`../NOTES.md`](../design/NOTES.md).
 
 ## See also
 
@@ -100,4 +100,4 @@ passes that you could not run.
 - Repo rules & workflows: [`../AGENTS.md`](../AGENTS.md)
 - The contract: [`../build/test/`](../build/test/) · Parity:
   [`../tools/check_parity.py`](../tools/check_parity.py) · Matrix:
-  [`../REPORT.md`](../REPORT.md)
+  [`../REPORT.md`](../design/REPORT.md)

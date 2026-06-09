@@ -16,7 +16,7 @@
 
 For motivation, language-neutral concepts, and the cross-language
 parity matrix, see the [top-level README](../README.md) and
-[REPORT.md](../REPORT.md).  For the in-depth guide (tutorial, recipes,
+[REPORT.md](../design/REPORT.md).  For the in-depth guide (tutorial, recipes,
 explanation), see [`DOCS.md`](./DOCS.md).
 
 > **Maturity note.** The top-level README lists Java as a *partial* port.
@@ -125,7 +125,7 @@ no wrapper.
 ### `null` conventions
 
 Java has only `null`. As in Go, `null` stands in for both JSON null and
-"absent"; the shared Group A/B rule (see [`../UNDEF_SPEC.md`](../UNDEF_SPEC.md))
+"absent"; the shared Group A/B rule (see [`../UNDEF_SPEC.md`](../design/UNDEF_SPEC.md))
 decides which a given function means, and the corpus uses the `__NULL__`
 sentinel where it must disambiguate.
 
@@ -139,7 +139,7 @@ runtime dependency (it hand-rolls its JSON printer).
 
 ## Regex
 
-Uniform six-function regex API (see `/REGEX_API.md`). The Java port
+Uniform six-function regex API (see `/design/REGEX_API.md`). The Java port
 wraps `java.util.regex.Pattern`.
 
 ### API
@@ -155,7 +155,7 @@ wraps `java.util.regex.Pattern`.
 
 ### Dialect
 
-Patterns must stay inside the **RE2 subset** documented in `/REGEX.md`.
+Patterns must stay inside the **RE2 subset** documented in `/design/REGEX.md`.
 Java's regex supports backreferences and lookaround; using them will
 not be portable.
 
@@ -165,7 +165,7 @@ not be portable.
   the discovery panel sees P1 (`^(a+)+$` over 22 a's plus `!`) in
   ~13 ms here. Other shapes can be worse. Prefer flat patterns.
 - **Zero-width `replace`.** `reReplace("a*", "abc", "X")` returns
-  `"XXbXcX"` — the ECMA convention shared by all PCRE/ECMA/.NET/Java/Onigmo engines plus the in-tree Thompson ports. Go (RE2) returns `"XbXcX"` instead; see `/REGEX_PATHOLOGICAL.md`.
+  `"XXbXcX"` — the ECMA convention shared by all PCRE/ECMA/.NET/Java/Onigmo engines plus the in-tree Thompson ports. Go (RE2) returns `"XbXcX"` instead; see `/design/REGEX_PATHOLOGICAL.md`.
 - **`System.out` encoding.** When printing match results that contain
   non-ASCII characters, `System.out`'s default `PrintStream` uses the
   platform's default charset, not UTF-8. The discovery panel sees
@@ -174,7 +174,7 @@ not be portable.
   StandardCharsets.UTF_8)`) when this matters. Orthogonal to the
   regex itself.
 
-See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
+See `/design/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
 
 
 ## Build and test

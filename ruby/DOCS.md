@@ -216,7 +216,7 @@ with the other backtracking ports (JS, Python, PHP, Perl): zero-width
 `re_replace("a*", "abc", "X")` yields `"XXbXcX"` (RE2 ports return
 `"XbXcX"`), and nested quantifiers can still backtrack catastrophically on
 some shapes. Both are detailed in [`README.md` → Regex](./README.md#regex)
-and [`../REGEX_PATHOLOGICAL.md`](../REGEX_PATHOLOGICAL.md).
+and [`../REGEX_PATHOLOGICAL.md`](../design/REGEX_PATHOLOGICAL.md).
 
 ---
 

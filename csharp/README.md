@@ -258,12 +258,12 @@ Behaviour is unchanged.
 
 Complete: the full canonical API is present and the parity check
 ([`../tools/check_parity.py`](../tools/check_parity.py)) reports C# `ok`.
-See [`../REPORT.md`](../REPORT.md) for the cross-port matrix.
+See [`../REPORT.md`](../design/REPORT.md) for the cross-port matrix.
 
 
 ## Regex
 
-Uniform six-function regex API (see `/REGEX_API.md`). The C# port
+Uniform six-function regex API (see `/design/REGEX_API.md`). The C# port
 wraps `System.Text.RegularExpressions.Regex`.
 
 ### API
@@ -279,7 +279,7 @@ wraps `System.Text.RegularExpressions.Regex`.
 
 ### Dialect
 
-Patterns must stay inside the **RE2 subset** documented in `/REGEX.md`.
+Patterns must stay inside the **RE2 subset** documented in `/design/REGEX.md`.
 .NET regex supports backreferences and lookaround; using them will not
 be portable.
 
@@ -292,9 +292,9 @@ be portable.
   untrusted patterns. Stay inside the RE2 subset and prefer flat
   patterns.
 - **Zero-width `replace`.** `ReReplace("a*", "abc", "X")` returns
-  `"XXbXcX"` — the ECMA convention shared by all PCRE/ECMA/.NET/Java/Onigmo engines plus the in-tree Thompson ports. Go (RE2) returns `"XbXcX"` instead; see `/REGEX_PATHOLOGICAL.md`.
+  `"XXbXcX"` — the ECMA convention shared by all PCRE/ECMA/.NET/Java/Onigmo engines plus the in-tree Thompson ports. Go (RE2) returns `"XbXcX"` instead; see `/design/REGEX_PATHOLOGICAL.md`.
 
-See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
+See `/design/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
 
 
 ## Build and test
