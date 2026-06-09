@@ -93,7 +93,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.2'
+          php-version: '8.3'
       - working-directory: ./php
         # Use a fresh COMPOSER_HOME: setup-php intermittently writes a
         # malformed github-oauth token to its auth.json, which makes
@@ -111,7 +111,10 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          # checkstyle 13.5.0 is compiled for Java 21 (class file v65); the
+          # JDK running the checkstyle plugin must be 21+ even though the
+          # project itself targets release 17.
+          java-version: '21'
       - working-directory: ./java
         run: make lint
 

@@ -193,7 +193,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.2'
+          php-version: '8.3'
       - working-directory: ./php
         # Fresh COMPOSER_HOME: avoids the malformed github-oauth token that
         # setup-php intermittently writes to its auth.json.

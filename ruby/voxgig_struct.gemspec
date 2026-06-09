@@ -7,8 +7,10 @@ Gem::Specification.new do |spec|
   spec.authors     = ['Voxgig']
   spec.homepage    = 'https://github.com/voxgig/struct'
 
-  spec.files        = ['voxgig_struct.rb', 'README.md']
+  spec.files         = ['voxgig_struct.rb', 'README.md']
   spec.require_paths = ['.']
 
   spec.required_ruby_version = '>= 2.7'
+
+  spec.metadata = { 'rubygems_mfa_required' => 'true' }
 end

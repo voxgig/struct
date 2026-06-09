@@ -3,12 +3,13 @@
 # See ../REPORT.md for cross-language parity.
 package Voxgig::Struct;
 
-our $VERSION = '0.1.0';
-
 use 5.018;
 use strict;
 use warnings;
 use utf8;
+
+our $VERSION = '0.1.0';
+
 use Scalar::Util qw(blessed reftype looks_like_number refaddr);
 use List::Util qw();
 use B qw();
