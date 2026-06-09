@@ -12,14 +12,18 @@
 #   make publish-rust  — publish ONE language to its registry + tag <lang>/vX.Y.Z
 #   make publish       — show the per-language publish targets (no publish-all)
 
-# Target names are the port directory names, used verbatim as `make -C <dir>`.
-LANGS = typescript javascript python go ruby php lua zig java rust c
+# Every port directory. Target names are the dir names, used verbatim as
+# `make -C <dir>`. Each port ships at least `test` and `lint`; `build`,
+# `inspect`, `clean` and `reset` are invoked tolerantly (a port without one
+# just reports "(no <t> target)").
+LANGS = typescript javascript python go ruby php lua zig java rust c cpp csharp kotlin perl swift
 
-# Languages that ship a `make lint` target (the test/build aggregates above
-# deliberately omit cpp/csharp/kotlin, but their lint targets exist).
-LINT_LANGS = typescript javascript python go ruby php lua zig java rust c cpp csharp kotlin
+# Every port ships a `make lint` target, so lint covers the full set.
+LINT_LANGS = $(LANGS)
 
 # Languages whose ecosystem has a dependency / supply-chain audit tool wired up.
+# The rest (lua zig java c cpp kotlin perl swift) ship no `audit` target, so
+# they are intentionally excluded from `make audit`.
 AUDIT_LANGS = typescript javascript python go ruby php rust csharp
 
 # Every port ships a `make publish` target: it publishes to that ecosystem's
