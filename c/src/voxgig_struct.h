@@ -3,16 +3,16 @@
  * Voxgig Struct — public C API.
  *
  * C port of the canonical TypeScript implementation. The runtime value type
- * is vs_value (see value.h). The functions below mirror the canonical API,
- * lowercased with `vs_` prefix.
+ * is voxgig_value (see value.h). The functions below mirror the canonical API,
+ * lowercased with `voxgig_` prefix.
  *
- * Naming: `vs_<canonical>` (e.g. vs_getpath, vs_setprop, vs_walk). Optional
+ * Naming: `voxgig_<canonical>` (e.g. voxgig_getpath, voxgig_setprop, voxgig_walk). Optional
  * arguments in the TS API are exposed via NULL: pass NULL to indicate
  * "not provided".
  *
- * Memory model: All vs_value* arguments are borrowed (caller still owns
- * its reference). Returned vs_value* are owned by the caller — use
- * vs_release() to free.
+ * Memory model: All voxgig_value* arguments are borrowed (caller still owns
+ * its reference). Returned voxgig_value* are owned by the caller — use
+ * voxgig_release() to free.
  */
 
 #ifndef VOXGIG_STRUCT_H
@@ -31,179 +31,183 @@ extern "C" {
  * ===========================================================================*/
 
 /* string vector — heap-owned, used for path arrays. */
-typedef struct vs_strvec {
+typedef struct voxgig_strvec {
   size_t len;
   size_t cap;
   char** data;
-} vs_strvec;
+} voxgig_strvec;
 
-void vs_strvec_init(vs_strvec* v);
-void vs_strvec_free(vs_strvec* v);
-void vs_strvec_push(vs_strvec* v, const char* s);
-void vs_strvec_push_n(vs_strvec* v, const char* s, size_t n);
-void vs_strvec_clear(vs_strvec* v);
-void vs_strvec_resize(vs_strvec* v, size_t n); /* fill with "" */
-void vs_strvec_set(vs_strvec* v, size_t i, const char* s);
-void vs_strvec_copy(vs_strvec* dst, const vs_strvec* src);
+void voxgig_strvec_init(voxgig_strvec* v);
+void voxgig_strvec_free(voxgig_strvec* v);
+void voxgig_strvec_push(voxgig_strvec* v, const char* s);
+void voxgig_strvec_push_n(voxgig_strvec* v, const char* s, size_t n);
+void voxgig_strvec_clear(voxgig_strvec* v);
+void voxgig_strvec_resize(voxgig_strvec* v, size_t n); /* fill with "" */
+void voxgig_strvec_set(voxgig_strvec* v, size_t i, const char* s);
+void voxgig_strvec_copy(voxgig_strvec* dst, const voxgig_strvec* src);
 
 /* ===========================================================================
  * Regex utility — uniform re_* names (mirror of REGEX_API.md). Wraps the
  * vendored RE2-subset engine in src/regex.c.
  *
- * vs_re_compile returns a vs_regex* that must be released with vs_regex_free.
- * The other helpers accept either a vs_regex* (already-compiled) or a pattern
+ * voxgig_re_compile returns a voxgig_regex* that must be released with voxgig_regex_free.
+ * The other helpers accept either a voxgig_regex* (already-compiled) or a pattern
  * string (compiled on the fly and freed before returning).
  * ===========================================================================*/
 
-vs_regex* vs_re_compile(const char* pattern);
-bool vs_re_test(const char* pattern, const char* input);
-bool vs_re_test_re(const vs_regex* re, const char* input);
+voxgig_regex* voxgig_re_compile(const char* pattern);
+bool voxgig_re_test(const char* pattern, const char* input);
+bool voxgig_re_test_re(const voxgig_regex* re, const char* input);
 
 /* Returns a newly-allocated list of strings: [whole, capture1, ...]. Caller
- * vs_strvec_free()s. If no match, returns a vs_strvec with len==0. */
-vs_strvec vs_re_find(const char* pattern, const char* input);
-vs_strvec vs_re_find_re(const vs_regex* re, const char* input);
+ * voxgig_strvec_free()s. If no match, returns a voxgig_strvec with len==0. */
+voxgig_strvec voxgig_re_find(const char* pattern, const char* input);
+voxgig_strvec voxgig_re_find_re(const voxgig_regex* re, const char* input);
 
-/* List-of-lists of strings — one vs_strvec per match (each row is
- * [whole, capture1, ...]). Caller must vs_strvec_vec_free() to release. */
-typedef struct vs_strvec_vec {
+/* List-of-lists of strings — one voxgig_strvec per match (each row is
+ * [whole, capture1, ...]). Caller must voxgig_strvec_vec_free() to release. */
+typedef struct voxgig_strvec_vec {
   size_t len;
   size_t cap;
-  vs_strvec* data;
-} vs_strvec_vec;
+  voxgig_strvec* data;
+} voxgig_strvec_vec;
 
-void vs_strvec_vec_init(vs_strvec_vec* v);
-void vs_strvec_vec_free(vs_strvec_vec* v);
+void voxgig_strvec_vec_init(voxgig_strvec_vec* v);
+void voxgig_strvec_vec_free(voxgig_strvec_vec* v);
 
-vs_strvec_vec vs_re_find_all(const char* pattern, const char* input);
-vs_strvec_vec vs_re_find_all_re(const vs_regex* re, const char* input);
+voxgig_strvec_vec voxgig_re_find_all(const char* pattern, const char* input);
+voxgig_strvec_vec voxgig_re_find_all_re(const voxgig_regex* re, const char* input);
 
 /* Returns malloc'd string. */
-char* vs_re_replace(const char* pattern, const char* input, const char* replacement);
-char* vs_re_replace_re(const vs_regex* re, const char* input, const char* replacement);
-char* vs_re_replace_cb(const vs_regex* re, const char* input,
-                       char* (*cb)(const vs_strvec* caps, void* ud), void* ud);
+char* voxgig_re_replace(const char* pattern, const char* input, const char* replacement);
+char* voxgig_re_replace_re(const voxgig_regex* re, const char* input, const char* replacement);
+char* voxgig_re_replace_cb(const voxgig_regex* re, const char* input,
+                           char* (*cb)(const voxgig_strvec* caps, void* ud), void* ud);
 
-/* Alias of vs_escre. */
-char* vs_re_escape(const char* literal);
+/* Alias of voxgig_escre. */
+char* voxgig_re_escape(const char* literal);
 
-struct vs_injection {
-  int mode;         /* M_KEYPRE / M_KEYPOST / M_VAL bitfield */
-  bool full;        /* full-string injection */
-  size_t keyI;      /* index of parent key in keys */
-  bool keyI_neg;    /* true if keyI is logically -1 (validator hack) */
-  vs_strvec keys;   /* parent keys */
-  char* key;        /* current parent key (owned) */
-  vs_value* val;    /* current child value (borrowed in canonical; owned in C state) */
-  vs_value* parent; /* current parent (in transform specification, borrowed) */
-  vs_strvec path;   /* path to current node */
+struct voxgig_injection {
+  int mode;             /* M_KEYPRE / M_KEYPOST / M_VAL bitfield */
+  bool full;            /* full-string injection */
+  size_t keyI;          /* index of parent key in keys */
+  bool keyI_neg;        /* true if keyI is logically -1 (validator hack) */
+  voxgig_strvec keys;   /* parent keys */
+  char* key;            /* current parent key (owned) */
+  voxgig_value* val;    /* current child value (borrowed in canonical; owned in C state) */
+  voxgig_value* parent; /* current parent (in transform specification, borrowed) */
+  voxgig_strvec path;   /* path to current node */
   /* nodes stack: list of borrowed nodes (each entry is borrowed). */
   size_t nodes_len;
   size_t nodes_cap;
-  vs_value** nodes;
-  vs_value* handler_val; /* injector value (owned) */
-  /* errs is a vs_value list (owned) */
-  vs_value* errs;
-  /* meta is a vs_value map (owned) */
-  vs_value* meta;
-  vs_value* dparent; /* borrowed */
-  vs_strvec dpath;
-  char* base;           /* owned, may be NULL */
-  vs_value* modify_val; /* owned */
-  vs_injection* prior;  /* not owned */
-  vs_value* extra;      /* borrowed */
+  voxgig_value** nodes;
+  voxgig_value* handler_val; /* injector value (owned) */
+  /* errs is a voxgig_value list (owned) */
+  voxgig_value* errs;
+  /* meta is a voxgig_value map (owned) */
+  voxgig_value* meta;
+  voxgig_value* dparent; /* borrowed */
+  voxgig_strvec dpath;
+  char* base;               /* owned, may be NULL */
+  voxgig_value* modify_val; /* owned */
+  voxgig_injection* prior;  /* not owned */
+  voxgig_value* extra;      /* borrowed */
 };
 
-vs_injection* vs_inj_new(vs_value* val, vs_value* parent);
-void vs_inj_free(vs_injection* inj);
-void vs_inj_descend(vs_injection* inj);
-vs_injection* vs_inj_child(vs_injection* parent, size_t keyI, const vs_strvec* keys);
-vs_value* vs_inj_setval(vs_injection* inj, vs_value* val, int ancestor); /* val borrowed */
+voxgig_injection* voxgig_inj_new(voxgig_value* val, voxgig_value* parent);
+void voxgig_inj_free(voxgig_injection* inj);
+void voxgig_inj_descend(voxgig_injection* inj);
+voxgig_injection* voxgig_inj_child(voxgig_injection* parent, size_t keyI,
+                                   const voxgig_strvec* keys);
+voxgig_value* voxgig_inj_setval(voxgig_injection* inj, voxgig_value* val,
+                                int ancestor); /* val borrowed */
 
-void vs_inj_nodes_push(vs_injection* inj, vs_value* n); /* borrowed */
-void vs_inj_set_path(vs_injection* inj, const vs_strvec* path);
-void vs_inj_set_dpath(vs_injection* inj, const vs_strvec* path);
+void voxgig_inj_nodes_push(voxgig_injection* inj, voxgig_value* n); /* borrowed */
+void voxgig_inj_set_path(voxgig_injection* inj, const voxgig_strvec* path);
+void voxgig_inj_set_dpath(voxgig_injection* inj, const voxgig_strvec* path);
 
 /* ===========================================================================
  * Minor utilities
  * ===========================================================================*/
 
-const char* vs_typename(int t);
-vs_value* vs_getdef(vs_value* val, vs_value* alt);
+const char* voxgig_typename(int t);
+voxgig_value* voxgig_getdef(voxgig_value* val, voxgig_value* alt);
 
-bool vs_isnode(const vs_value* v);
-bool vs_ismap(const vs_value* v);
-bool vs_islist(const vs_value* v);
-bool vs_iskey(const vs_value* v);
-bool vs_isempty(const vs_value* v);
-bool vs_isfunc(const vs_value* v);
+bool voxgig_isnode(const voxgig_value* v);
+bool voxgig_ismap(const voxgig_value* v);
+bool voxgig_islist(const voxgig_value* v);
+bool voxgig_iskey(const voxgig_value* v);
+bool voxgig_isempty(const voxgig_value* v);
+bool voxgig_isfunc(const voxgig_value* v);
 
-int64_t vs_size(const vs_value* v);
-vs_value* vs_slice(vs_value* v, vs_value* start, vs_value* end, bool mutate);
-char* vs_pad(vs_value* str, vs_value* padding, vs_value* padchar);
-int vs_typify(const vs_value* v);
-vs_value* vs_getelem(vs_value* val, vs_value* key, vs_value* alt);
-vs_value* vs_getprop(vs_value* val, vs_value* key, vs_value* alt);
+int64_t voxgig_size(const voxgig_value* v);
+voxgig_value* voxgig_slice(voxgig_value* v, voxgig_value* start, voxgig_value* end, bool mutate);
+char* voxgig_pad(voxgig_value* str, voxgig_value* padding, voxgig_value* padchar);
+int voxgig_typify(const voxgig_value* v);
+voxgig_value* voxgig_getelem(voxgig_value* val, voxgig_value* key, voxgig_value* alt);
+voxgig_value* voxgig_getprop(voxgig_value* val, voxgig_value* key, voxgig_value* alt);
 
 /* Internal: literal lookup that preserves stored JSON null. Group B callers
  * (validate / transform commands / builders / inject internals) use this
  * when they need to inspect the raw stored value at a slot regardless of
- * whether it is null. The public vs_getprop / vs_getelem / vs_haskey APIs
+ * whether it is null. The public voxgig_getprop / voxgig_getelem / voxgig_haskey APIs
  * treat null as absent (Group A) per /UNDEF_SPEC.md.
  *
  * Returned reference is borrowed from the container (NOT retained). Caller
- * must vs_retain() if it needs to outlive the parent container. */
-vs_value* vs_lookup(vs_value* val, vs_value* key);
-char* vs_strkey(vs_value* key);
-vs_strvec vs_keysof(vs_value* val);
-bool vs_haskey(vs_value* val, vs_value* key);
+ * must voxgig_retain() if it needs to outlive the parent container. */
+voxgig_value* voxgig_lookup(voxgig_value* val, voxgig_value* key);
+char* voxgig_strkey(voxgig_value* key);
+voxgig_strvec voxgig_keysof(voxgig_value* val);
+bool voxgig_haskey(voxgig_value* val, voxgig_value* key);
 
 /* Items as a List of [k,v] pairs (owned). */
-vs_value* vs_items_v(vs_value* val);
+voxgig_value* voxgig_items_v(voxgig_value* val);
 
-vs_value* vs_flatten(vs_value* list, vs_value* depth);
-vs_value* vs_filter(vs_value* val, vs_itemcheck_fn check, void* ud);
+voxgig_value* voxgig_flatten(voxgig_value* list, voxgig_value* depth);
+voxgig_value* voxgig_filter(voxgig_value* val, voxgig_itemcheck_fn check, void* ud);
 
-char* vs_escre(vs_value* v);
-char* vs_escurl(vs_value* v);
-char* vs_replace_str(const char* s, const char* from, const char* to);
-char* vs_join_v(vs_value* arr, vs_value* sep, vs_value* url);
-char* vs_jsonify(vs_value* val, vs_value* flags);
-char* vs_stringify(vs_value* val, int maxlen);
-char* vs_pathify(vs_value* val, int startin, int endin);
+char* voxgig_escre(voxgig_value* v);
+char* voxgig_escurl(voxgig_value* v);
+char* voxgig_replace_str(const char* s, const char* from, const char* to);
+char* voxgig_join_v(voxgig_value* arr, voxgig_value* sep, voxgig_value* url);
+char* voxgig_jsonify(voxgig_value* val, voxgig_value* flags);
+char* voxgig_stringify(voxgig_value* val, int maxlen);
+char* voxgig_pathify(voxgig_value* val, int startin, int endin);
 
-vs_value* vs_jm_va(int n, vs_value** kv);
-vs_value* vs_jt_va(int n, vs_value** v);
+voxgig_value* voxgig_jm_va(int n, voxgig_value** kv);
+voxgig_value* voxgig_jt_va(int n, voxgig_value** v);
 
-vs_value* vs_delprop(vs_value* parent, vs_value* key); /* returns parent */
-vs_value* vs_setprop(vs_value* parent, vs_value* key, vs_value* val);
+voxgig_value* voxgig_delprop(voxgig_value* parent, voxgig_value* key); /* returns parent */
+voxgig_value* voxgig_setprop(voxgig_value* parent, voxgig_value* key, voxgig_value* val);
 
 /* ===========================================================================
  * Major utilities
  * ===========================================================================*/
 
-vs_value* vs_walk(vs_value* val, vs_walkapply_fn before, vs_walkapply_fn after, int maxdepth,
-                  void* ud);
+voxgig_value* voxgig_walk(voxgig_value* val, voxgig_walkapply_fn before, voxgig_walkapply_fn after,
+                          int maxdepth, void* ud);
 
-vs_value* vs_merge(vs_value* val, int maxdepth);
+voxgig_value* voxgig_merge(voxgig_value* val, int maxdepth);
 
-vs_value* vs_setpath(vs_value* store, vs_value* path, vs_value* val, vs_injection* injdef);
-vs_value* vs_getpath(vs_value* store, vs_value* path, vs_injection* injdef);
+voxgig_value* voxgig_setpath(voxgig_value* store, voxgig_value* path, voxgig_value* val,
+                             voxgig_injection* injdef);
+voxgig_value* voxgig_getpath(voxgig_value* store, voxgig_value* path, voxgig_injection* injdef);
 
-vs_value* vs_inject(vs_value* val, vs_value* store, vs_injection* injdef);
+voxgig_value* voxgig_inject(voxgig_value* val, voxgig_value* store, voxgig_injection* injdef);
 
-vs_value* vs_transform(vs_value* data, vs_value* spec, vs_injection* injdef);
-vs_value* vs_validate(vs_value* data, vs_value* spec, vs_injection* injdef);
+voxgig_value* voxgig_transform(voxgig_value* data, voxgig_value* spec, voxgig_injection* injdef);
+voxgig_value* voxgig_validate(voxgig_value* data, voxgig_value* spec, voxgig_injection* injdef);
 
 /* select returns a new List. */
-vs_value* vs_select(vs_value* children, vs_value* query);
+voxgig_value* voxgig_select(voxgig_value* children, voxgig_value* query);
 
 /* Injection helpers. */
-bool vs_check_placement(int modes, const char* ijname, int parent_types, vs_injection* inj);
+bool voxgig_check_placement(int modes, const char* ijname, int parent_types, voxgig_injection* inj);
 /* injectorArgs: returns a List; element 0 is the error (string or undef),
    elements 1..n are the args. Owned by caller. */
-vs_value* vs_injector_args(const int* argTypes, size_t n, vs_value* args);
-vs_injection* vs_inject_child(vs_value* child, vs_value* store, vs_injection* inj);
+voxgig_value* voxgig_injector_args(const int* argTypes, size_t n, voxgig_value* args);
+voxgig_injection* voxgig_inject_child(voxgig_value* child, voxgig_value* store,
+                                      voxgig_injection* inj);
 
 #ifdef __cplusplus
 }

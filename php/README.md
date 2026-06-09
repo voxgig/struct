@@ -5,7 +5,7 @@
 
 For motivation, language-neutral concepts, and the cross-language
 parity matrix, see the [top-level README](../README.md) and
-[REPORT.md](../REPORT.md).
+[REPORT.md](../design/REPORT.md).
 
 
 ## Install
@@ -364,7 +364,7 @@ PHP method names match canonical lowercase: `getpath`, `setpath`,
 
 ## Regex
 
-Uniform six-function regex API (see `/REGEX_API.md`). The PHP port
+Uniform six-function regex API (see `/design/REGEX_API.md`). The PHP port
 wraps PCRE (`preg_*`).
 
 ### API
@@ -380,7 +380,7 @@ wraps PCRE (`preg_*`).
 
 ### Dialect
 
-Patterns must stay inside the **RE2 subset** documented in `/REGEX.md`.
+Patterns must stay inside the **RE2 subset** documented in `/design/REGEX.md`.
 PCRE supports backreferences and lookaround; using them will not be
 portable.
 
@@ -397,9 +397,9 @@ portable.
   `pcre.backtrack_limit` and return `false`. Stay inside the RE2 subset
   and prefer flat patterns.
 - **Zero-width `replace`.** `re_replace("a*", "abc", "X")` returns
-  `"XXbXcX"` — the ECMA convention shared by all PCRE/ECMA/.NET/Java/Onigmo engines plus the in-tree Thompson ports. Go (RE2) returns `"XbXcX"` instead; see `/REGEX_PATHOLOGICAL.md`.
+  `"XXbXcX"` — the ECMA convention shared by all PCRE/ECMA/.NET/Java/Onigmo engines plus the in-tree Thompson ports. Go (RE2) returns `"XbXcX"` instead; see `/design/REGEX_PATHOLOGICAL.md`.
 
-See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
+See `/design/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
 
 
 ## Build and test

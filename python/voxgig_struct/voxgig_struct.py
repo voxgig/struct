@@ -501,7 +501,7 @@ def getelem(val: Any, key: Any, alt: Any = UNDEF) -> Any:
 
 def getprop(val: Any = UNDEF, key: Any = UNDEF, alt: Any = UNDEF) -> Any:
     """
-    Safely get a property of a node. Group A semantics (per UNDEF_SPEC.md):
+    Safely get a property of a node. Group A semantics (per design/UNDEF_SPEC.md):
     a stored None is treated as "no value" and returns alt. Internal callers
     that need to inspect the raw stored value at a slot (preserving null)
     use _lookup.
@@ -612,7 +612,7 @@ def escre(s: Any):
 
 
 # ---------------------------------------------------------------------------
-# Regex utility — uniform re_* API (see /REGEX_API.md). The Python port
+# Regex utility — uniform re_* API (see /design/REGEX_API.md). The Python port
 # wraps the stdlib `re` module; the dialect is the RE2 subset.
 # ---------------------------------------------------------------------------
 

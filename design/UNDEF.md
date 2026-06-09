@@ -82,7 +82,7 @@ No managed types, no maps, no exceptions. The conventions are:
 - For "absent at a map/list slot": library-dependent — typically a `bool found` out-param or a NULL-pointer return from `lookup()`.
 - For "absent at a variable position": there is none — uninitialised auto storage is UB, static storage is zero-initialised.
 
-The voxgig-struct C port shows the explicit approach: a tagged union with `VS_VAL_UNDEF` and `VS_VAL_NULL` as distinct enum cases. That's how you model the distinction *inside* C — the language gives you nothing for free.
+The voxgig-struct C port shows the explicit approach: a tagged union with `VOXGIG_VAL_UNDEF` and `VOXGIG_VAL_NULL` as distinct enum cases. That's how you model the distinction *inside* C — the language gives you nothing for free.
 
 
 ## Cross-cutting observations

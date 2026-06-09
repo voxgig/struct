@@ -3,6 +3,8 @@
 # See ../REPORT.md for cross-language parity.
 package Voxgig::Struct;
 
+our $VERSION = '0.1.0';
+
 use 5.018;
 use strict;
 use warnings;
@@ -110,8 +112,6 @@ sub _is_string_sv {
     # POK without IOK/NOK → pure string.
     return ($flags & B::SVf_POK()) && !($flags & (B::SVf_NOK() | B::SVf_IOK())) ? 1 : 0;
 }
-
-our $VERSION = '0.0.10';
 
 # ============================================================================
 # Constants

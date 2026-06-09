@@ -3,7 +3,7 @@
  * Voxgig Struct — JSON I/O bridge.
  *
  * Hand-written recursive-descent JSON parser (no third-party deps).
- * Runtime values use vs_value.
+ * Runtime values use voxgig_value.
  */
 
 #ifndef VOXGIG_STRUCT_VALUE_IO_H
@@ -15,14 +15,14 @@
 extern "C" {
 #endif
 
-/* Parse a JSON text. Returns a new vs_value (owned by caller). */
-vs_value* vs_parse_json(const char* text, size_t len);
+/* Parse a JSON text. Returns a new voxgig_value (owned by caller). */
+voxgig_value* voxgig_parse_json(const char* text, size_t len);
 
 /* Parse a JSON file. */
-vs_value* vs_parse_json_file(const char* path);
+voxgig_value* voxgig_parse_json_file(const char* path);
 
 /* Serialise to JSON text. Returns malloc'd string the caller must free(). */
-char* vs_to_json(const vs_value* v);
+char* voxgig_to_json(const voxgig_value* v);
 
 #ifdef __cplusplus
 }

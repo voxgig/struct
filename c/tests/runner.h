@@ -16,7 +16,7 @@
 /* Subject: function from input value to output value.
  * On error, the subject may set *err to an error message (caller-owned char*).
  */
-typedef vs_value* (*runner_subject_fn)(vs_value* in, char** err, void* ud);
+typedef voxgig_value* (*runner_subject_fn)(voxgig_value* in, char** err, void* ud);
 
 typedef struct runner_result {
   char* name;
@@ -55,26 +55,26 @@ static inline void runner_push_failure(runner_result* r, const char* msg) {
 
 /* Normalize: turn integer-valued doubles into ints; sort map keys; sentinels and
  * undef → null for stable comparison. */
-static vs_value* normalize(const vs_value* v) {
-  if (!v || vs_is_undef(v) || vs_is_null(v))
-    return vs_new_null();
-  if (vs_is_double(v)) {
-    double d = vs_as_double(v);
+static voxgig_value* normalize(const voxgig_value* v) {
+  if (!v || voxgig_is_undef(v) || voxgig_is_null(v))
+    return voxgig_new_null();
+  if (voxgig_is_double(v)) {
+    double d = voxgig_as_double(v);
     if (isfinite(d) && floor(d) == d)
-      return vs_new_int((int64_t)d);
-    return vs_new_double(d);
+      return voxgig_new_int((int64_t)d);
+    return voxgig_new_double(d);
   }
-  if (vs_is_list(v)) {
-    vs_value* out = vs_new_list();
-    vs_list* l = vs_as_list(v);
+  if (voxgig_is_list(v)) {
+    voxgig_value* out = voxgig_new_list();
+    voxgig_list* l = voxgig_as_list(v);
     for (size_t i = 0; i < l->len; i++) {
-      vs_list_push(vs_as_list(out), normalize(l->items[i]));
+      voxgig_list_push(voxgig_as_list(out), normalize(l->items[i]));
     }
     return out;
   }
-  if (vs_is_map(v)) {
+  if (voxgig_is_map(v)) {
     /* Sort by key (alphabetical). */
-    vs_map* m = vs_as_map(v);
+    voxgig_map* m = voxgig_as_map(v);
     size_t n = m->len;
     size_t* idx = (size_t*)malloc(n * sizeof(size_t) + 1);
     for (size_t i = 0; i < n; i++)
@@ -88,29 +88,30 @@ static vs_value* normalize(const vs_value* v) {
         j--;
       }
     }
-    vs_value* out = vs_new_map();
+    voxgig_value* out = voxgig_new_map();
     for (size_t i = 0; i < n; i++) {
-      vs_map_set(vs_as_map(out), m->entries[idx[i]].key, normalize(m->entries[idx[i]].value));
+      voxgig_map_set(voxgig_as_map(out), m->entries[idx[i]].key,
+                     normalize(m->entries[idx[i]].value));
     }
     free(idx);
     return out;
   }
-  return vs_clone((vs_value*)v);
+  return voxgig_clone((voxgig_value*)v);
 }
 
-static bool deep_equal(const vs_value* a, const vs_value* b) {
-  vs_value* na = normalize(a);
-  vs_value* nb = normalize(b);
-  bool eq = vs_equals(na, nb);
-  vs_release(na);
-  vs_release(nb);
+static bool deep_equal(const voxgig_value* a, const voxgig_value* b) {
+  voxgig_value* na = normalize(a);
+  voxgig_value* nb = normalize(b);
+  bool eq = voxgig_equals(na, nb);
+  voxgig_release(na);
+  voxgig_release(nb);
   return eq;
 }
 
-static char* brief(const vs_value* v) {
-  if (!v || vs_is_undef(v))
+static char* brief(const voxgig_value* v) {
+  if (!v || voxgig_is_undef(v))
     return strdup("__UNDEF__");
-  char* s = vs_jsonify((vs_value*)v, NULL);
+  char* s = voxgig_jsonify((voxgig_value*)v, NULL);
   if (!s)
     return strdup("?");
   size_t n = strlen(s);
@@ -134,73 +135,73 @@ __attribute__((unused)) static void str_lower(char* s) {
  * the corpus uses null in source to mean "JSON null" but every runner
  * substitutes a string marker so comparisons can be done in JSON-poor
  * languages. */
-__attribute__((unused)) static vs_value* null_substitute(vs_value* v) {
-  if (!v || vs_is_undef(v))
-    return vs_new_undef();
-  if (vs_is_null(v))
-    return vs_new_string("__NULL__");
-  if (vs_is_list(v)) {
-    vs_value* out = vs_new_list();
-    vs_list* l = vs_as_list(v);
+__attribute__((unused)) static voxgig_value* null_substitute(voxgig_value* v) {
+  if (!v || voxgig_is_undef(v))
+    return voxgig_new_undef();
+  if (voxgig_is_null(v))
+    return voxgig_new_string("__NULL__");
+  if (voxgig_is_list(v)) {
+    voxgig_value* out = voxgig_new_list();
+    voxgig_list* l = voxgig_as_list(v);
     for (size_t i = 0; i < l->len; i++)
-      vs_list_push(vs_as_list(out), null_substitute(l->items[i]));
+      voxgig_list_push(voxgig_as_list(out), null_substitute(l->items[i]));
     return out;
   }
-  if (vs_is_map(v)) {
-    vs_value* out = vs_new_map();
-    vs_map* m = vs_as_map(v);
+  if (voxgig_is_map(v)) {
+    voxgig_value* out = voxgig_new_map();
+    voxgig_map* m = voxgig_as_map(v);
     for (size_t i = 0; i < m->len; i++)
-      vs_map_set(vs_as_map(out), m->entries[i].key, null_substitute(m->entries[i].value));
+      voxgig_map_set(voxgig_as_map(out), m->entries[i].key, null_substitute(m->entries[i].value));
     return out;
   }
-  return vs_clone(v);
+  return voxgig_clone(v);
 }
 
-static void run_subject(runner_result* res, vs_value* testspec, bool null_flag,
+static void run_subject(runner_result* res, voxgig_value* testspec, bool null_flag,
                         runner_subject_fn subj, void* ud) {
-  vs_value* setk = vs_new_string("set");
-  vs_value* set = vs_getprop(testspec, setk, NULL);
-  vs_release(setk);
-  if (!vs_is_list(set)) {
-    vs_release(set);
+  voxgig_value* setk = voxgig_new_string("set");
+  voxgig_value* set = voxgig_getprop(testspec, setk, NULL);
+  voxgig_release(setk);
+  if (!voxgig_is_list(set)) {
+    voxgig_release(set);
     return;
   }
-  vs_list* sl = vs_as_list(set);
+  voxgig_list* sl = voxgig_as_list(set);
   for (size_t i = 0; i < sl->len; i++) {
-    vs_value* eo = sl->items[i];
-    if (!vs_is_map(eo))
+    voxgig_value* eo = sl->items[i];
+    if (!voxgig_is_map(eo))
       continue;
-    /* Use vs_map_get directly: vs_haskey treats null at a key as "no value"
+    /* Use voxgig_map_get directly: voxgig_haskey treats null at a key as "no value"
        (Group A rule), but the runner needs literal presence to preserve
        test inputs like { in: null } where null IS the value to pass. */
-    vs_value* in_raw_ptr = vs_map_get(vs_as_map(eo), "in");
+    voxgig_value* in_raw_ptr = voxgig_map_get(voxgig_as_map(eo), "in");
     bool has_in = (in_raw_ptr != NULL);
-    vs_value* in_raw = in_raw_ptr ? vs_retain(in_raw_ptr) : vs_new_undef();
-    vs_value* in = has_in ? vs_clone(in_raw) : vs_new_undef();
-    vs_value* out_raw_ptr = vs_map_get(vs_as_map(eo), "out");
+    voxgig_value* in_raw = in_raw_ptr ? voxgig_retain(in_raw_ptr) : voxgig_new_undef();
+    voxgig_value* in = has_in ? voxgig_clone(in_raw) : voxgig_new_undef();
+    voxgig_value* out_raw_ptr = voxgig_map_get(voxgig_as_map(eo), "out");
     bool has_out = (out_raw_ptr != NULL);
-    vs_value* expected = NULL;
+    voxgig_value* expected = NULL;
     if (has_out)
-      expected = vs_retain(out_raw_ptr);
+      expected = voxgig_retain(out_raw_ptr);
     else if (null_flag)
-      expected = vs_new_null();
+      expected = voxgig_new_null();
     else
-      expected = vs_new_undef();
-    vs_value* err_ptr = vs_map_get(vs_as_map(eo), "err");
-    vs_value* err_v = err_ptr ? vs_retain(err_ptr) : vs_new_undef();
+      expected = voxgig_new_undef();
+    voxgig_value* err_ptr = voxgig_map_get(voxgig_as_map(eo), "err");
+    voxgig_value* err_v = err_ptr ? voxgig_retain(err_ptr) : voxgig_new_undef();
 
     res->total++;
     char* err_msg = NULL;
-    vs_value* got = subj(in, &err_msg, ud);
+    voxgig_value* got = subj(in, &err_msg, ud);
 
-    if (!vs_is_undef(err_v)) {
+    if (!voxgig_is_undef(err_v)) {
       /* Test expects an error. Check if err_msg was set. */
       bool match = false;
       if (err_msg) {
-        if (vs_is_bool(err_v) && vs_as_bool(err_v)) {
+        if (voxgig_is_bool(err_v) && voxgig_as_bool(err_v)) {
           match = true;
-        } else if (vs_is_string(err_v)) {
-          const char* es = vs_as_string(err_v);
+        } else if (voxgig_is_string(err_v)) {
+          const char* es = voxgig_as_string(err_v);
           if (!es || !*es)
             match = true;
           else if (strstr(err_msg, es))
@@ -231,11 +232,11 @@ static void run_subject(runner_result* res, vs_value* testspec, bool null_flag,
         free(es);
       }
       free(err_msg);
-      vs_release(got);
-      vs_release(err_v);
-      vs_release(in);
-      vs_release(in_raw);
-      vs_release(expected);
+      voxgig_release(got);
+      voxgig_release(err_v);
+      voxgig_release(in);
+      voxgig_release(in_raw);
+      voxgig_release(expected);
       continue;
     }
 
@@ -261,13 +262,13 @@ static void run_subject(runner_result* res, vs_value* testspec, bool null_flag,
       free(ins);
     }
     free(err_msg);
-    vs_release(got);
-    vs_release(err_v);
-    vs_release(in);
-    vs_release(in_raw);
-    vs_release(expected);
+    voxgig_release(got);
+    voxgig_release(err_v);
+    voxgig_release(in);
+    voxgig_release(in_raw);
+    voxgig_release(expected);
   }
-  vs_release(set);
+  voxgig_release(set);
 }
 
 #endif

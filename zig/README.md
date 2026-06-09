@@ -1,7 +1,7 @@
 # Struct for Zig
 
 > Zig port of the canonical TypeScript implementation.
-> Status: complete.  See [`../REPORT.md`](../REPORT.md) for parity.
+> Status: complete.  See [`../REPORT.md`](../design/REPORT.md) for parity.
 
 For motivation, language-neutral concepts, and the cross-language
 parity matrix, see the [top-level README](../README.md).
@@ -180,8 +180,8 @@ pub fn stringifyPretty(allocator: Allocator, val: JsonValue,
 ### Inject / transform / validate / select
 
 ```zig
-pub fn injectVal(allocator: Allocator, val: JsonValue,
-                 store: JsonValue, inj_opt: ?*Injection) anyerror!JsonValue
+pub fn inject(allocator: Allocator, val: JsonValue,
+              store: JsonValue, inj_opt: ?*Injection) anyerror!JsonValue
 pub fn transform(allocator: Allocator, data: JsonValue,
                  spec: JsonValue) !JsonValue
 // validate, select also present — see source
@@ -246,14 +246,17 @@ explicitly; errors propagate through `!` returns.
 
 ### Status
 
-In progress.  Coverage of the canonical API is broad (all major
-subsystems present) but the test corpus pass rate is being raised.
-60+ tests pass; see [`../REPORT.md`](../REPORT.md) for current status.
+Complete: all major subsystems are present and the port passes its share
+of the shared corpus. One honest caveat — the top-level `re_find` /
+`re_find_all` / `re_replace` wrappers are not yet wired (the in-tree NFA
+engine has the primitives), a documented known gap in
+[`../tools/check_parity.py`](../tools/check_parity.py). See
+[`../REPORT.md`](../design/REPORT.md) for the cross-port matrix.
 
 
 ## Regex
 
-Uniform regex API (see `/REGEX_API.md`). The Zig port **ships its own
+Uniform regex API (see `/design/REGEX_API.md`). The Zig port **ships its own
 RE2-subset engine** in `src/regex.zig` (Thompson NFA), replacing the
 earlier `mvzr` dependency. No third-party runtime crates.
 
@@ -274,7 +277,7 @@ earlier `mvzr` dependency. No third-party runtime crates.
 
 ### Dialect
 
-The in-tree engine implements the RE2 subset documented in `/REGEX.md`:
+The in-tree engine implements the RE2 subset documented in `/design/REGEX.md`:
 literals + escapes, `.`, `^`/`$`, `* + ? {n} {n,} {n,m}` (greedy + lazy),
 classes incl. `\d \w \s` and friends, `\b`/`\B`, `(...)` / `(?:...)`,
 alternation.
@@ -301,7 +304,7 @@ lookaround, possessive quantifiers, atomic groups.
   `"XXbXcX"`. Go (RE2) returns `"XbXcX"` instead; this is RE2's
   chosen rule and we don't paper over it.
 
-See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
+See `/design/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
 
 
 ## Build and test

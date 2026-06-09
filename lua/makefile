@@ -1,6 +1,6 @@
 # Makefile - Common commands for Lua project
 
-.PHONY: setup test lint format-check bench clean
+.PHONY: setup test lint format-check bench clean publish
 
 # Setup the environment
 setup:
@@ -28,3 +28,18 @@ bench:
 # Clean artifacts
 clean:
 	rm -rf luacov.* .busted
+
+# Release: publish to LuaRocks, then tag lua/vX.Y.Z (version from the rockspec,
+# stripping the rockspec revision suffix). Needs LuaRocks auth (LUAROCKS_API_KEY).
+# LuaRocks requires the rockspec *filename* to be name-version-revision, so we
+# upload a canonically-named copy of the in-tree struct.rockspec.
+VERSION := $(shell grep -E '^version' struct.rockspec | sed -E 's/.*"([0-9.]+)-[0-9]+".*/\1/')
+ROCKREV := $(shell grep -E '^version' struct.rockspec | sed -E 's/.*"([0-9.]+-[0-9]+)".*/\1/')
+publish: test
+	cp struct.rockspec "voxgig-struct-$(ROCKREV).rockspec"
+	luarocks upload "voxgig-struct-$(ROCKREV).rockspec" --api-key=$$LUAROCKS_API_KEY
+	rm -f "voxgig-struct-$(ROCKREV).rockspec"
+	@if git rev-parse -q --verify "refs/tags/lua/v$(VERSION)" >/dev/null; then \
+	  echo "tag lua/v$(VERSION) already exists — bump struct.rockspec version first"; exit 1; fi
+	git tag -a "lua/v$(VERSION)" -m "lua v$(VERSION)"
+	git push origin "lua/v$(VERSION)"

@@ -4,7 +4,7 @@
 # The goal is to surface which inputs cause errors, hangs, or surprising
 # output across ports — NOT to assert any specific behaviour. Each case
 # wraps the call so one failure does not mask the others.
-# The panel is the same in every port (see REGEX.md).
+# The panel is the same in every port (see design/REGEX.md).
 
 import json
 import time
