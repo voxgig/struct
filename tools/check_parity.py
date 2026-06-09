@@ -150,22 +150,22 @@ def defined_keys(port: str) -> set[str]:
         if port == "perl":
             for ident in _PERL_SUB_DECL.findall(text):
                 keys.add(norm(ident))
-    # The C port uses a `vs_` prefix on every public function. Strip it so
-    # `vs_getpath` matches canonical `getpath`. Trailing `_v` / `_va` (vs_jm_va
-    # for variadic-style builders, vs_walk_v for the value overload) is also
-    # stripped.
+    # The C port uses a `voxgig_` prefix on every public function. Strip it so
+    # `voxgig_getpath` matches canonical `getpath`. Trailing `_v` / `_va`
+    # (voxgig_jm_va for variadic-style builders, voxgig_walk_v for the value
+    # overload) is also stripped.
     if port == "c":
         extra: set[str] = set()
         for k in keys:
-            if k.startswith("vs"):
-                stripped = k[2:]
+            if k.startswith("voxgig"):
+                stripped = k[len("voxgig"):]
                 if stripped.endswith("va"):
                     extra.add(stripped[:-2])
                 if stripped.endswith("v"):
                     extra.add(stripped[:-1])
                 extra.add(stripped)
-                # vs_regex_* -> re_* alias (the C port's regex helpers ship
-                # under the `vs_regex_` namespace, but canonical names are
+                # voxgig_regex_* -> re_* alias (the C port's regex helpers ship
+                # under the `voxgig_regex_` namespace, but canonical names are
                 # `re_compile` / `re_test` / `re_find` / `re_find_all` /
                 # `re_replace` / `re_escape`).
                 if stripped.startswith("regex"):

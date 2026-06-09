@@ -157,8 +157,8 @@ quantifiers and lazy modifiers). Either:
    simple and fast" approach builds a Thompson NFA in ~200 LOC plus
    another ~100 for the parser.
 
-Either way, the API is small: `vs_regex_compile`, `vs_regex_match`,
-`vs_regex_free`. No `libpcre`, no `libregex.h` (which isn't portable
+Either way, the API is small: `voxgig_regex_compile`, `voxgig_regex_match`,
+`voxgig_regex_free`. No `libpcre`, no `libregex.h` (which isn't portable
 to non-POSIX targets).
 
 ### Lua
@@ -223,7 +223,7 @@ To keep the corpus inside the portable subset:
    - Add the parity scanner check.
 
 2. **Next (small code touches):**
-   - C port: implement `vs_regex_*` matcher (~500 LOC). Wire `$LIKE`
+   - C port: implement `voxgig_regex_*` matcher (~500 LOC). Wire `$LIKE`
      to it. Drop the substring fallback and update the parity-matrix
      entry from `Y*` to `Y`.
    - Lua: add an explicit divergence note in `lua/README.md`. No code

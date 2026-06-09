@@ -284,7 +284,7 @@ The canonical signatures live in
 [`typescript/src/StructUtility.ts`](./typescript/src/StructUtility.ts); the
 parity tool treats its `export { … }` block as the definitive public API
 (48 names). Function names are shown in canonical casing; substitute your
-port's convention (`GetPath`, `get_path`, `vs_getpath`, …).
+port's convention (`GetPath`, `get_path`, `voxgig_getpath`, …).
 
 ### Predicates and type inspection
 

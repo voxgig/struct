@@ -3,8 +3,8 @@
 > C99/C11 port of the canonical TypeScript implementation.
 >
 > **Status: complete.** Full TS-canonical parity: all 40 functions, 15 type
-> bit-flags, 3 mode constants (`VS_M_KEYPRE` / `VS_M_KEYPOST` / `VS_M_VAL`),
-> `SKIP` / `DELETE` sentinels (pointer-identity), and the `vs_injection`
+> bit-flags, 3 mode constants (`VOXGIG_M_KEYPRE` / `VOXGIG_M_KEYPOST` / `VOXGIG_M_VAL`),
+> `SKIP` / `DELETE` sentinels (pointer-identity), and the `voxgig_injection`
 > state machine. `inject` / `transform` / `validate` / `select` all dispatch
 > through the canonical injector machinery: 11 transform commands, 15
 > validate checkers, 4 select operators.
@@ -33,37 +33,37 @@ make check_leak  # build + run under valgrind
 
 The library is organised across `src/`:
 
-- [`value.h`](./src/value.h) / [`value.c`](./src/value.c) — `vs_value`
-  tagged union, reference-counted `vs_list` / `vs_map`, sentinels,
+- [`value.h`](./src/value.h) / [`value.c`](./src/value.c) — `voxgig_value`
+  tagged union, reference-counted `voxgig_list` / `voxgig_map`, sentinels,
   type bit-flags, predicates.
 - [`value_io.h`](./src/value_io.h) / [`value_io.c`](./src/value_io.c) — JSON
   parse / serialise via an in-tree, hand-written recursive-descent
   parser/printer (no third-party dependency).
 - [`utility.c`](./src/utility.c) — minor utilities plus `walk` / `merge`
   / `getpath` / `setpath`.
-- [`inject.c`](./src/inject.c) — `vs_injection` state machine, `_injectstr`,
+- [`inject.c`](./src/inject.c) — `voxgig_injection` state machine, `_injectstr`,
   `_injecthandler`.
 - [`transform.c`](./src/transform.c) — `transform` / `validate` / `select`
   and all transform commands / validate checkers / select operators.
 
-Symbol prefix `vs_`. Compiler: any C11-capable (gcc / clang). Dependencies:
+Symbol prefix `voxgig_`. Compiler: any C11-capable (gcc / clang). Dependencies:
 
 - **No third-party dependency.** JSON text is parsed/serialised by the
   in-tree recursive-descent code in `value_io.c`; runtime values use the
-  custom `vs_value` type.
+  custom `voxgig_value` type.
 - `libm` (the standard math library) for `floor` / `isfinite`.
 
 ```c
 #include "voxgig_struct.h"
 
 int main(void) {
-  vs_value* store = vs_parse_json("{\"db\":{\"host\":\"localhost\"}}", 0);
-  vs_value* path  = vs_new_string("db.host");
-  vs_value* host  = vs_getpath(store, path, NULL);
+  voxgig_value* store = voxgig_parse_json("{\"db\":{\"host\":\"localhost\"}}", 0);
+  voxgig_value* path  = voxgig_new_string("db.host");
+  voxgig_value* host  = voxgig_getpath(store, path, NULL);
   /* host is "localhost" */
-  vs_release(host);
-  vs_release(path);
-  vs_release(store);
+  voxgig_release(host);
+  voxgig_release(path);
+  voxgig_release(store);
   return 0;
 }
 ```
@@ -71,88 +71,88 @@ int main(void) {
 
 ## Calling convention
 
-All public functions take and return `vs_value*`. Pointers are
+All public functions take and return `voxgig_value*`. Pointers are
 explicitly reference-counted:
 
-- Constructors (`vs_new_*`) return an owned reference with refcount 1.
-- Functions that return a `vs_value*` transfer one owned reference to
-  the caller — call `vs_release()` when done.
-- Functions that take `vs_value*` parameters borrow them (caller still
+- Constructors (`voxgig_new_*`) return an owned reference with refcount 1.
+- Functions that return a `voxgig_value*` transfer one owned reference to
+  the caller — call `voxgig_release()` when done.
+- Functions that take `voxgig_value*` parameters borrow them (caller still
   owns its reference) unless documented otherwise.
-- `vs_retain(v)` adds a reference; `vs_release(v)` removes one (and
+- `voxgig_retain(v)` adds a reference; `voxgig_release(v)` removes one (and
   frees when the count reaches zero).
 
-`vs_list` and `vs_map` are reference-stable containers — mutation on
+`voxgig_list` and `voxgig_map` are reference-stable containers — mutation on
 one alias is visible through every alias.
 
 
 ## Function reference
 
-Namespace `vs_*`. Function names mirror the canonical API in lowercase.
+Namespace `voxgig_*`. Function names mirror the canonical API in lowercase.
 
 ### Minor utilities (25)
 
 ```c
-const char*  vs_typename(int t);
-vs_value*    vs_getdef(vs_value* val, vs_value* alt);
-bool         vs_isnode(const vs_value* v);
-bool         vs_ismap(const vs_value* v);
-bool         vs_islist(const vs_value* v);
-bool         vs_iskey(const vs_value* v);
-bool         vs_isempty(const vs_value* v);
-bool         vs_isfunc(const vs_value* v);
-int64_t      vs_size(const vs_value* v);
-vs_value*    vs_slice(vs_value* v, vs_value* start, vs_value* end, bool mutate);
-char*        vs_pad(vs_value* str, vs_value* padding, vs_value* padchar);
-int          vs_typify(const vs_value* v);
-vs_value*    vs_getelem(vs_value* val, vs_value* key, vs_value* alt);
-vs_value*    vs_getprop(vs_value* val, vs_value* key, vs_value* alt);
-char*        vs_strkey(vs_value* key);
-vs_strvec    vs_keysof(vs_value* val);
-bool         vs_haskey(vs_value* val, vs_value* key);
-vs_value*    vs_items_v(vs_value* val);
-vs_value*    vs_flatten(vs_value* list, vs_value* depth);
-vs_value*    vs_filter(vs_value* val, vs_itemcheck_fn check, void* ud);
-char*        vs_escre(vs_value* v);
-char*        vs_escurl(vs_value* v);
-char*        vs_join_v(vs_value* arr, vs_value* sep, vs_value* url);
-char*        vs_jsonify(vs_value* val, vs_value* flags);
-char*        vs_stringify(vs_value* val, int maxlen);
-char*        vs_pathify(vs_value* val, int startin, int endin);
-vs_value*    vs_clone(vs_value* v);
-vs_value*    vs_delprop(vs_value* parent, vs_value* key);
-vs_value*    vs_setprop(vs_value* parent, vs_value* key, vs_value* val);
+const char*  voxgig_typename(int t);
+voxgig_value*    voxgig_getdef(voxgig_value* val, voxgig_value* alt);
+bool         voxgig_isnode(const voxgig_value* v);
+bool         voxgig_ismap(const voxgig_value* v);
+bool         voxgig_islist(const voxgig_value* v);
+bool         voxgig_iskey(const voxgig_value* v);
+bool         voxgig_isempty(const voxgig_value* v);
+bool         voxgig_isfunc(const voxgig_value* v);
+int64_t      voxgig_size(const voxgig_value* v);
+voxgig_value*    voxgig_slice(voxgig_value* v, voxgig_value* start, voxgig_value* end, bool mutate);
+char*        voxgig_pad(voxgig_value* str, voxgig_value* padding, voxgig_value* padchar);
+int          voxgig_typify(const voxgig_value* v);
+voxgig_value*    voxgig_getelem(voxgig_value* val, voxgig_value* key, voxgig_value* alt);
+voxgig_value*    voxgig_getprop(voxgig_value* val, voxgig_value* key, voxgig_value* alt);
+char*        voxgig_strkey(voxgig_value* key);
+voxgig_strvec    voxgig_keysof(voxgig_value* val);
+bool         voxgig_haskey(voxgig_value* val, voxgig_value* key);
+voxgig_value*    voxgig_items_v(voxgig_value* val);
+voxgig_value*    voxgig_flatten(voxgig_value* list, voxgig_value* depth);
+voxgig_value*    voxgig_filter(voxgig_value* val, voxgig_itemcheck_fn check, void* ud);
+char*        voxgig_escre(voxgig_value* v);
+char*        voxgig_escurl(voxgig_value* v);
+char*        voxgig_join_v(voxgig_value* arr, voxgig_value* sep, voxgig_value* url);
+char*        voxgig_jsonify(voxgig_value* val, voxgig_value* flags);
+char*        voxgig_stringify(voxgig_value* val, int maxlen);
+char*        voxgig_pathify(voxgig_value* val, int startin, int endin);
+voxgig_value*    voxgig_clone(voxgig_value* v);
+voxgig_value*    voxgig_delprop(voxgig_value* parent, voxgig_value* key);
+voxgig_value*    voxgig_setprop(voxgig_value* parent, voxgig_value* key, voxgig_value* val);
 ```
 
 ### Major utilities (8)
 
 ```c
-vs_value*    vs_walk(vs_value* val, vs_walkapply_fn before,
-                     vs_walkapply_fn after, int maxdepth, void* ud);
-vs_value*    vs_merge(vs_value* val, int maxdepth);
-vs_value*    vs_getpath(vs_value* store, vs_value* path, vs_injection* injdef);
-vs_value*    vs_setpath(vs_value* store, vs_value* path, vs_value* val,
-                        vs_injection* injdef);
-vs_value*    vs_inject(vs_value* val, vs_value* store, vs_injection* injdef);
-vs_value*    vs_transform(vs_value* data, vs_value* spec, vs_injection* injdef);
-vs_value*    vs_validate(vs_value* data, vs_value* spec, vs_injection* injdef);
-vs_value*    vs_select(vs_value* children, vs_value* query);
+voxgig_value*    voxgig_walk(voxgig_value* val, voxgig_walkapply_fn before,
+                     voxgig_walkapply_fn after, int maxdepth, void* ud);
+voxgig_value*    voxgig_merge(voxgig_value* val, int maxdepth);
+voxgig_value*    voxgig_getpath(voxgig_value* store, voxgig_value* path, voxgig_injection* injdef);
+voxgig_value*    voxgig_setpath(voxgig_value* store, voxgig_value* path, voxgig_value* val,
+                        voxgig_injection* injdef);
+voxgig_value*    voxgig_inject(voxgig_value* val, voxgig_value* store, voxgig_injection* injdef);
+voxgig_value*    voxgig_transform(voxgig_value* data, voxgig_value* spec, voxgig_injection* injdef);
+voxgig_value*    voxgig_validate(voxgig_value* data, voxgig_value* spec, voxgig_injection* injdef);
+voxgig_value*    voxgig_select(voxgig_value* children, voxgig_value* query);
 ```
 
 ### Builder helpers (2)
 
 ```c
-vs_value*    vs_jm_va(int n, vs_value** kv);   /* JSON map from k,v,k,v,... */
-vs_value*    vs_jt_va(int n, vs_value** v);    /* JSON list from positional args */
+voxgig_value*    voxgig_jm_va(int n, voxgig_value** kv);   /* JSON map from k,v,k,v,... */
+voxgig_value*    voxgig_jt_va(int n, voxgig_value** v);    /* JSON list from positional args */
 ```
 
 ### Injection helpers (3)
 
 ```c
-bool          vs_check_placement(int modes, const char* ijname,
-                                 int parent_types, vs_injection* inj);
-vs_value*     vs_injector_args(const int* argTypes, size_t n, vs_value* args);
-vs_injection* vs_inject_child(vs_value* child, vs_value* store, vs_injection* inj);
+bool          voxgig_check_placement(int modes, const char* ijname,
+                                 int parent_types, voxgig_injection* inj);
+voxgig_value*     voxgig_injector_args(const int* argTypes, size_t n, voxgig_value* args);
+voxgig_injection* voxgig_inject_child(voxgig_value* child, voxgig_value* store, voxgig_injection* inj);
 ```
 
 
@@ -161,44 +161,44 @@ vs_injection* vs_inject_child(vs_value* child, vs_value* store, vs_injection* in
 ### Type bit-flags
 
 ```c
-VS_T_ANY, VS_T_NOVAL, VS_T_BOOLEAN, VS_T_DECIMAL, VS_T_INTEGER, VS_T_NUMBER,
-VS_T_STRING, VS_T_FUNCTION, VS_T_SYMBOL, VS_T_NULL, VS_T_LIST, VS_T_MAP,
-VS_T_INSTANCE, VS_T_SCALAR, VS_T_NODE
+VOXGIG_T_ANY, VOXGIG_T_NOVAL, VOXGIG_T_BOOLEAN, VOXGIG_T_DECIMAL, VOXGIG_T_INTEGER, VOXGIG_T_NUMBER,
+VOXGIG_T_STRING, VOXGIG_T_FUNCTION, VOXGIG_T_SYMBOL, VOXGIG_T_NULL, VOXGIG_T_LIST, VOXGIG_T_MAP,
+VOXGIG_T_INSTANCE, VOXGIG_T_SCALAR, VOXGIG_T_NODE
 ```
 
 ### Mode constants
 
 ```c
-VS_M_KEYPRE, VS_M_KEYPOST, VS_M_VAL
+VOXGIG_M_KEYPRE, VOXGIG_M_KEYPOST, VOXGIG_M_VAL
 ```
 
 ### Sentinels (pointer identity)
 
 ```c
-vs_skip_sentinel()    /* singleton; compare vs_is_skip(v) */
-vs_delete_sentinel()  /* singleton; compare vs_is_delete(v) */
+voxgig_skip_sentinel()    /* singleton; compare voxgig_is_skip(v) */
+voxgig_delete_sentinel()  /* singleton; compare voxgig_is_delete(v) */
 ```
 
 
 ## Object model
 
 ```
-vs_value
-├── kind: VS_VAL_UNDEF | VS_VAL_NULL | VS_VAL_BOOL | VS_VAL_INT |
-│         VS_VAL_DOUBLE | VS_VAL_STRING | VS_VAL_LIST | VS_VAL_MAP |
-│         VS_VAL_FUNC | VS_VAL_SENTINEL
+voxgig_value
+├── kind: VOXGIG_VAL_UNDEF | VOXGIG_VAL_NULL | VOXGIG_VAL_BOOL | VOXGIG_VAL_INT |
+│         VOXGIG_VAL_DOUBLE | VOXGIG_VAL_STRING | VOXGIG_VAL_LIST | VOXGIG_VAL_MAP |
+│         VOXGIG_VAL_FUNC | VOXGIG_VAL_SENTINEL
 ├── refcount: size_t
 └── as: union { bool b; int64_t i; double d; ... }
 ```
 
-- `vs_list` is a dynamic array of `vs_value*` slots; reference-stable.
-- `vs_map` is an insertion-ordered vector of key/value entries plus an
+- `voxgig_list` is a dynamic array of `voxgig_value*` slots; reference-stable.
+- `voxgig_map` is an insertion-ordered vector of key/value entries plus an
   open-addressing hash index. Insertion order is preserved (required by
   the inject machinery's `$`-suffix key partition).
-- `VS_VAL_UNDEF` and `VS_VAL_NULL` are distinct (mirrors TS `NONE` vs
+- `VOXGIG_VAL_UNDEF` and `VOXGIG_VAL_NULL` are distinct (mirrors TS `NONE` vs
   JSON null).
-- Function values box an injector (`vs_injector_fn`) or a modify
-  (`vs_modify_fn`) callback plus an opaque `void* ud` closure pointer.
+- Function values box an injector (`voxgig_injector_fn`) or a modify
+  (`voxgig_modify_fn`) callback plus an opaque `void* ud` closure pointer.
 
 
 ## Test status
@@ -231,22 +231,22 @@ kept out of scope to minimise dependencies).
 Uniform regex API (see `/design/REGEX_API.md`). The C port **ships its own
 RE2-subset Thompson NFA engine** in `src/regex.c` (~700 LOC) — no
 external dependency. The wrapper layer (`src/re_util.c`) exposes the
-shared `re_*` names alongside the lower-level `vs_regex_*` engine
+shared `re_*` names alongside the lower-level `voxgig_regex_*` engine
 API.
 
 ### API
 
 | Function | Returns |
 |---|---|
-| `vs_re_compile(pattern)`                       | `vs_regex*` (NULL on bad pattern) |
-| `vs_re_test(pattern, input)`                   | `bool` |
-| `vs_re_find(pattern, input)`                   | `vs_strvec` of `[whole, group1, …]` |
-| `vs_re_find_all(pattern, input)`               | `vs_strvec_vec` (one row per match) |
-| `vs_re_replace(pattern, input, replacement)`   | malloc'd `char*` |
-| `vs_re_replace_cb(re, input, cb, ud)`          | malloc'd `char*` (callback variant) |
-| `vs_re_escape(literal)`                        | malloc'd `char*` |
+| `voxgig_re_compile(pattern)`                       | `voxgig_regex*` (NULL on bad pattern) |
+| `voxgig_re_test(pattern, input)`                   | `bool` |
+| `voxgig_re_find(pattern, input)`                   | `voxgig_strvec` of `[whole, group1, …]` |
+| `voxgig_re_find_all(pattern, input)`               | `voxgig_strvec_vec` (one row per match) |
+| `voxgig_re_replace(pattern, input, replacement)`   | malloc'd `char*` |
+| `voxgig_re_replace_cb(re, input, cb, ud)`          | malloc'd `char*` (callback variant) |
+| `voxgig_re_escape(literal)`                        | malloc'd `char*` |
 
-The `_re` suffixed variants take an already-compiled `vs_regex*`.
+The `_re` suffixed variants take an already-compiled `voxgig_regex*`.
 
 ### Dialect
 
@@ -258,7 +258,7 @@ alternation.
 **Not supported** (by design — RE2 doesn't either): backreferences,
 lookaround, possessive quantifiers, atomic groups. Backref patterns
 compile (the parser treats `\1` as a literal `1`) but never match
-back-reference semantics, so `vs_re_test("^(a+)\\1$", "aaaa")` returns
+back-reference semantics, so `voxgig_re_test("^(a+)\\1$", "aaaa")` returns
 `false` rather than erroring. Don't rely on this — write portable
 patterns.
 
@@ -267,13 +267,13 @@ patterns.
 - **No catastrophic backtracking.** Thompson-NFA construction means
   P1/P2 from the discovery panel finish in microseconds regardless of
   input length.
-- **Captures cap.** `VS_REGEX_MAX_GROUPS = 16` in `regex.h`. Patterns
+- **Captures cap.** `VOXGIG_REGEX_MAX_GROUPS = 16` in `regex.h`. Patterns
   with more capturing groups silently truncate.
-- **Memory management.** `vs_regex*`, `vs_strvec`, `vs_strvec_vec`,
+- **Memory management.** `voxgig_regex*`, `voxgig_strvec`, `voxgig_strvec_vec`,
   and the `char*` returned by `re_replace` are all caller-owned. Use
-  `vs_regex_free`, `vs_strvec_free`, `vs_strvec_vec_free`, and `free`
+  `voxgig_regex_free`, `voxgig_strvec_free`, `voxgig_strvec_vec_free`, and `free`
   respectively.
-- **Zero-width `re_replace`.** `vs_re_replace("a*", "abc", "X")`
+- **Zero-width `re_replace`.** `voxgig_re_replace("a*", "abc", "X")`
   returns `"XXbXcX"` — the convention shared with PCRE/ECMA/Java/.NET
   and the other in-tree Thompson ports (Rust / Lua / Zig). Go (RE2)
   returns `"XbXcX"` instead. (Pre-fix the C engine produced
@@ -300,9 +300,9 @@ make clean      # remove built binaries / scoreboards
 ## Known issues
 
 - The corpus run reports leaks under AddressSanitizer. Tests all pass;
-  leaks are limited to top-level per-iteration `vs_select` /
-  `vs_validate` store maps. None of the leaks indicate use-after-free
-  or double-free — only forgotten `vs_release` calls in the
+  leaks are limited to top-level per-iteration `voxgig_select` /
+  `voxgig_validate` store maps. None of the leaks indicate use-after-free
+  or double-free — only forgotten `voxgig_release` calls in the
   higher-level helpers.
 - `$LIKE` uses substring containment instead of a full regular
   expression; the C standard library does not ship POSIX regex on every

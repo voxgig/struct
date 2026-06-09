@@ -10,19 +10,19 @@ static int total = 0;
 static void check(const char* pat, const char* input, bool expect, const char* label) {
   total++;
   char* err = NULL;
-  vs_regex* re = vs_regex_compile(pat, &err);
+  voxgig_regex* re = voxgig_regex_compile(pat, &err);
   if (!re) {
     fprintf(stderr, "FAIL %s: compile failed for /%s/: %s\n", label, pat, err ? err : "?");
     free(err);
     return;
   }
-  bool got = vs_regex_test(re, input, strlen(input));
+  bool got = voxgig_regex_test(re, input, strlen(input));
   if (got == expect) {
     passed++;
   } else {
     fprintf(stderr, "FAIL %s: /%s/ on %s — expected %d got %d\n", label, pat, input, expect, got);
   }
-  vs_regex_free(re);
+  voxgig_regex_free(re);
 }
 
 int main(void) {

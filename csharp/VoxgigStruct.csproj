@@ -22,7 +22,7 @@
 
     <!-- NuGet package metadata. -->
     <Version>0.1.0</Version>
-    <PackageId>VoxgigStruct</PackageId>
+    <PackageId>Voxgig.Struct</PackageId>
     <Authors>Voxgig</Authors>
     <Description>Uniform JSON-shaped data structure manipulations — C# port of @voxgig/struct</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>

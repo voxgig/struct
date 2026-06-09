@@ -14,14 +14,14 @@ only what is specific to the C port.
 ```
 c/
 ├── src/voxgig_struct.h   # umbrella public header (pulls in value/value_io/regex)
-├── src/value.h / value.c # vs_value tagged union; refcounted vs_list / vs_map
+├── src/value.h / value.c # voxgig_value tagged union; refcounted voxgig_list / voxgig_map
 │                         #   (insertion-ordered, hash-indexed); sentinels; T_ flags
-├── src/value_io.h/.c     # in-tree JSON parse/print (vs_parse_json / vs_to_json)
+├── src/value_io.h/.c     # in-tree JSON parse/print (voxgig_parse_json / voxgig_to_json)
 ├── src/utility.c         # minor utils + walk / merge / getpath / setpath / jsonify
-├── src/inject.c          # vs_injection state machine, _injectstr, _injecthandler
+├── src/inject.c          # voxgig_injection state machine, _injectstr, _injecthandler
 ├── src/transform.c       # transform / validate / select + all commands/checkers/ops
-├── src/regex.h / regex.c # in-tree RE2-subset Thompson NFA (vs_regex_*)
-├── src/re_util.c         # uniform vs_re_* wrappers over the engine
+├── src/regex.h / regex.c # in-tree RE2-subset Thompson NFA (voxgig_regex_*)
+├── src/re_util.c         # uniform voxgig_re_* wrappers over the engine
 ├── tests/struct_corpus_test.c  # corpus driver (loads ../build/test/test.json)
 ├── tests/smoke.c         # 13-check API smoke test
 ├── tests/regex_test.c    # regex unit checks
@@ -29,9 +29,9 @@ c/
 └── Makefile
 ```
 
-The public surface is the set of `vs_`-prefixed declarations in
-`voxgig_struct.h` (plus the `vs_new_*` constructors in `value.h`).
-`../tools/check_parity.py` checks this port by stripping the `vs_` prefix
+The public surface is the set of `voxgig_`-prefixed declarations in
+`voxgig_struct.h` (plus the `voxgig_new_*` constructors in `value.h`).
+`../tools/check_parity.py` checks this port by stripping the `voxgig_` prefix
 and the `_v` / `_va` suffixes, then matching against the canonical
 `export { … }` block.
 
@@ -53,42 +53,42 @@ tests/<driver>.c -lm`. `make test-c` from the repo root wraps `make test`.
 
 ## Conventions specific to this port
 
-- **Casing:** every public function is `vs_`-prefixed lowercase
-  (`vs_getpath`, `vs_setprop`, …). The regex engine is `vs_regex_*`; the
-  uniform wrappers are `vs_re_*` (canonical `re_*`).
+- **Casing:** every public function is `voxgig_`-prefixed lowercase
+  (`voxgig_getpath`, `voxgig_setprop`, …). The regex engine is `voxgig_regex_*`; the
+  uniform wrappers are `voxgig_re_*` (canonical `re_*`).
 - **`NULL` = omitted optional argument.** TS optional params become trailing
-  `NULL`s (e.g. `vs_getpath(store, path, NULL)`).
+  `NULL`s (e.g. `voxgig_getpath(store, path, NULL)`).
 - **`_v` / `_va` suffixes** disambiguate from C identifiers or mark variadic
-  builders: `vs_items_v`, `vs_join_v`, `vs_jm_va`, `vs_jt_va`. Parity
+  builders: `voxgig_items_v`, `voxgig_join_v`, `voxgig_jm_va`, `voxgig_jt_va`. Parity
   tooling strips them; keep them.
-- **Ownership is explicit, refcounted, and uniform.** Public `vs_*`
-  functions borrow their `vs_value*` inputs and return one owned reference;
-  the low-level container ops are the exception (`vs_map_set` / `vs_list_push`
-  *take* ownership, `vs_map_get` / `vs_list_get` return *borrowed*). Honour
+- **Ownership is explicit, refcounted, and uniform.** Public `voxgig_*`
+  functions borrow their `voxgig_value*` inputs and return one owned reference;
+  the low-level container ops are the exception (`voxgig_map_set` / `voxgig_list_push`
+  *take* ownership, `voxgig_map_get` / `voxgig_list_get` return *borrowed*). Honour
   the per-declaration `/* borrowed */` / `/* takes ownership */` comments.
 
 ## Gotchas
 
-- **Memory ownership is the #1 source of bugs.** Every `vs_value*` you
-  receive from a `vs_*` function must be `vs_release`d; every `char*`
-  (`vs_jsonify`, `vs_stringify`, `vs_pathify`, the `vs_re_*` results) must be
-  `free`d; `vs_strvec` / `vs_strvec_vec` / `vs_regex*` have their own
+- **Memory ownership is the #1 source of bugs.** Every `voxgig_value*` you
+  receive from a `voxgig_*` function must be `voxgig_release`d; every `char*`
+  (`voxgig_jsonify`, `voxgig_stringify`, `voxgig_pathify`, the `voxgig_re_*` results) must be
+  `free`d; `voxgig_strvec` / `voxgig_strvec_vec` / `voxgig_regex*` have their own
   `_free`. Run `make sanitize` and `make check_leak` after any change that
-  touches allocation. Known top-level leaks in `vs_select` / `vs_validate`
+  touches allocation. Known top-level leaks in `voxgig_select` / `voxgig_validate`
   are documented in [`README.md`](./README.md#known-issues) — no
   use-after-free / double-free.
-- **`null` is not `undefined`.** `VS_VAL_NULL` and `VS_VAL_UNDEF` are
+- **`null` is not `undefined`.** `VOXGIG_VAL_NULL` and `VOXGIG_VAL_UNDEF` are
   distinct kinds. Group A readers treat stored `null` as absent; Group B
-  processors preserve it (raw reads go through `vs_lookup`). Re-read
+  processors preserve it (raw reads go through `voxgig_lookup`). Re-read
   [`../UNDEF_SPEC.md`](../design/UNDEF_SPEC.md) before touching any read/merge/clone
   path.
-- **Don't reorder map keys.** `vs_map` is insertion-ordered on purpose (the
+- **Don't reorder map keys.** `voxgig_map` is insertion-ordered on purpose (the
   inject machinery partitions keys by `$`-suffix); order is observable via
-  `vs_keysof` / `vs_items_v` / `vs_jsonify`.
+  `voxgig_keysof` / `voxgig_items_v` / `voxgig_jsonify`.
 - **Regex is the in-tree NFA**, not a system library — no catastrophic
-  backtracking, captures cap at `VS_REGEX_MAX_GROUPS` (16), and zero-width
-  `vs_re_replace` is ECMA-style (`"XXbXcX"`). `$LIKE` dispatches through
-  `vs_re_test`. Don't "fix" the cross-engine differences in
+  backtracking, captures cap at `VOXGIG_REGEX_MAX_GROUPS` (16), and zero-width
+  `voxgig_re_replace` is ECMA-style (`"XXbXcX"`). `$LIKE` dispatches through
+  `voxgig_re_test`. Don't "fix" the cross-engine differences in
   [`../REGEX_PATHOLOGICAL.md`](../design/REGEX_PATHOLOGICAL.md).
 - **A behaviour change is a cross-port event.** Change the canonical TS and
   the corpus first; then port here, `make test` + `make lint` green, and

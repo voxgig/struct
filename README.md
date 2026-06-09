@@ -224,7 +224,7 @@ This is the canonical API surface, defined in TypeScript at
 [`typescript/src/StructUtility.ts`](./typescript/src/StructUtility.ts).  Every port
 exposes equivalents.  The casing varies by language convention
 (`getpath` in TS/JS/Py/Ruby/PHP/Lua/Perl/Java/Kotlin/Swift; `GetPath`
-in Go/C#; `get_path` in Rust; `vs_getpath` in C).
+in Go/C#; `get_path` in Rust; `voxgig_getpath` in C).
 
 ### Minor utilities (25)
 

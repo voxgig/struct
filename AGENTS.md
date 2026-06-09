@@ -124,7 +124,7 @@ into the directory and use its `Makefile`. First run installs deps.
 | PHP | `php/` | `vendor/bin/phpunit` (`composer install` first) | phpcs (PSR-12) + phpstan | PHPUnit 12 |
 | Ruby | `ruby/` | `ruby test_voxgig_struct.rb` | rubocop | |
 | Rust | `rust/` | `cargo test` | clippy + `cargo fmt --check` | snake_case; in-tree `OrderedMap`/regex |
-| C | `c/` | `make test` (gcc, no deps) | clang-tidy + clang-format | `vs_` prefix; vendored JSON + regex |
+| C | `c/` | `make test` (gcc, no deps) | clang-tidy + clang-format | `voxgig_` prefix; vendored JSON + regex |
 | C++ | `cpp/` | `make test` (needs `nlohmann/json` header) | clang-tidy + clang-format | `_v`/`_str` suffix variants |
 | C# | `csharp/` | `dotnet test` | Roslyn analyzers | PascalCase; SDK pinned to 8.0 on purpose |
 | Zig | `zig/` | `zig build test` | `zig build` + `zig fmt` | `allocator` is the first parameter |
@@ -167,7 +167,7 @@ markdownlint, plus each language's linters).
 ## Conventions
 
 - **Casing.** `getpath` (TS/JS/Py/Ruby/PHP/Lua/Perl/Java/Kotlin/Swift),
-  `GetPath` (Go/C#), `get_path` (Rust), `vs_getpath` (C — and C++ adds
+  `GetPath` (Go/C#), `get_path` (Rust), `voxgig_getpath` (C — and C++ adds
   `_v`/`_str` variants). Parity is checked case/underscore-insensitively.
 - **Absent vs. null ("Group A/B").** See [`UNDEF_SPEC.md`](design/UNDEF_SPEC.md).
   Group A readers (`getprop`, `getelem`, `haskey`, `isempty`, `isnode`)

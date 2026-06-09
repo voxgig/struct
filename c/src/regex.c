@@ -49,16 +49,16 @@ typedef enum {
   OP_EOL,   /* $                                            */
   OP_WB,    /* \b                                           */
   OP_NWB    /* \B                                           */
-} vs_op;
+} voxgig_op;
 
 /* Character class: a bitmap of 256 bits (32 bytes). Negation toggled at
  * compile time by inverting. */
 typedef struct {
   uint8_t bits[32];
-} vs_charclass;
+} voxgig_charclass;
 
-typedef struct vs_insn {
-  vs_op op;
+typedef struct voxgig_insn {
+  voxgig_op op;
   union {
     int c;    /* char for OP_CHAR */
     int slot; /* slot index for OP_SAVE */
@@ -66,16 +66,16 @@ typedef struct vs_insn {
     struct {
       int x, y; /* SPLIT targets */
     } split;
-    vs_charclass cc;
+    voxgig_charclass cc;
   } data;
-} vs_insn;
+} voxgig_insn;
 
 /* ===========================================================================
  * Compiled regex
  * ===========================================================================*/
 
-struct vs_regex {
-  vs_insn* code;
+struct voxgig_regex {
+  voxgig_insn* code;
   int code_len;
   int code_cap;
   int ngroups; /* including group 0 */
@@ -84,19 +84,19 @@ struct vs_regex {
   bool anchored_start;
 };
 
-static void code_reserve(vs_regex* re, int extra) {
+static void code_reserve(voxgig_regex* re, int extra) {
   if (re->code_len + extra <= re->code_cap)
     return;
   int nc = re->code_cap == 0 ? 32 : re->code_cap;
   while (nc < re->code_len + extra)
     nc *= 2;
-  re->code = (vs_insn*)realloc(re->code, (size_t)nc * sizeof(vs_insn));
+  re->code = (voxgig_insn*)realloc(re->code, (size_t)nc * sizeof(voxgig_insn));
   if (!re->code)
     abort();
   re->code_cap = nc;
 }
 
-static int code_emit(vs_regex* re, vs_op op) {
+static int code_emit(voxgig_regex* re, voxgig_op op) {
   code_reserve(re, 1);
   re->code[re->code_len].op = op;
   memset(&re->code[re->code_len].data, 0, sizeof(re->code[0].data));
@@ -107,14 +107,14 @@ static int code_emit(vs_regex* re, vs_op op) {
  * Character-class helpers
  * ===========================================================================*/
 
-static void cc_zero(vs_charclass* cc) {
+static void cc_zero(voxgig_charclass* cc) {
   memset(cc->bits, 0, sizeof(cc->bits));
 }
-static void cc_set(vs_charclass* cc, int ch) {
+static void cc_set(voxgig_charclass* cc, int ch) {
   ch &= 0xFF;
   cc->bits[ch >> 3] |= (uint8_t)(1u << (ch & 7));
 }
-static void cc_set_range(vs_charclass* cc, int lo, int hi) {
+static void cc_set_range(voxgig_charclass* cc, int lo, int hi) {
   if (lo > hi) {
     int t = lo;
     lo = hi;
@@ -123,15 +123,15 @@ static void cc_set_range(vs_charclass* cc, int lo, int hi) {
   for (int c = lo; c <= hi; c++)
     cc_set(cc, c);
 }
-static bool cc_has(const vs_charclass* cc, int ch) {
+static bool cc_has(const voxgig_charclass* cc, int ch) {
   ch &= 0xFF;
   return (cc->bits[ch >> 3] >> (ch & 7)) & 1u;
 }
-static void cc_negate(vs_charclass* cc) {
+static void cc_negate(voxgig_charclass* cc) {
   for (int i = 0; i < 32; i++)
     cc->bits[i] = (uint8_t)~cc->bits[i];
 }
-static void cc_predef(vs_charclass* cc, int c) {
+static void cc_predef(voxgig_charclass* cc, int c) {
   switch (c) {
   case 'd':
     cc_set_range(cc, '0', '9');
@@ -189,7 +189,7 @@ typedef struct {
   size_t pos;
   int next_group; /* group id allocator (0 = whole match) */
   char* err;
-  vs_regex* re;
+  voxgig_regex* re;
 } parser;
 
 static void perr(parser* p, const char* msg) {
@@ -272,7 +272,7 @@ static int parse_escape(parser* p, int* predef_ch) {
 static int parse_alt(parser* p);
 
 /* Parse a [...] class. Position is just after '['. */
-static void parse_class(parser* p, vs_charclass* out) {
+static void parse_class(parser* p, voxgig_charclass* out) {
   cc_zero(out);
   bool neg = false;
   if (p->pos < p->slen && p->src[p->pos] == '^') {
@@ -289,7 +289,7 @@ static void parse_class(parser* p, vs_charclass* out) {
       c = parse_escape(p, &predef);
       if (c == -1) {
         /* predefined class — merge into this class. */
-        vs_charclass sub;
+        voxgig_charclass sub;
         cc_zero(&sub);
         cc_predef(&sub, predef);
         for (int i = 0; i < 32; i++)
@@ -410,7 +410,7 @@ static int parse_atom(parser* p) {
  * stream. Returns the new start index. SAVE slots are NOT remapped, but RE2
  * also doesn't capture inside an unrolled iteration cleanly — the typical
  * convention is "last iteration's captures win", which falls out naturally. */
-static int code_clone(vs_regex* re, int from, int to) {
+static int code_clone(voxgig_regex* re, int from, int to) {
   int delta = re->code_len - from;
   int start = re->code_len;
   code_reserve(re, to - from);
@@ -437,7 +437,7 @@ static int code_clone(vs_regex* re, int from, int to) {
 /* Apply quantifier to the atom occupying code[start..end). end is current
  * code_len when called. The quantifier syntax has been consumed. */
 static void apply_quant(parser* p, int start, char q, int n_lo, int n_hi, bool lazy) {
-  vs_regex* re = p->re;
+  voxgig_regex* re = p->re;
   int end = re->code_len;
   int alen = end - start;
   if (alen <= 0)
@@ -448,7 +448,7 @@ static void apply_quant(parser* p, int start, char q, int n_lo, int n_hi, bool l
       /* SPLIT before atom, falling through after. */
       /* Insert SPLIT at `start` by shifting. */
       code_reserve(re, 1);
-      memmove(&re->code[start + 1], &re->code[start], (size_t)alen * sizeof(vs_insn));
+      memmove(&re->code[start + 1], &re->code[start], (size_t)alen * sizeof(voxgig_insn));
       re->code_len++;
       re->code[start].op = OP_SPLIT;
       re->code[start].data.split.x = lazy ? re->code_len : start + 1;
@@ -465,7 +465,7 @@ static void apply_quant(parser* p, int start, char q, int n_lo, int n_hi, bool l
     } else if (q == '*') {
       /* L0: SPLIT L1 L2; atom; JMP L0; L2: */
       code_reserve(re, 2);
-      memmove(&re->code[start + 1], &re->code[start], (size_t)alen * sizeof(vs_insn));
+      memmove(&re->code[start + 1], &re->code[start], (size_t)alen * sizeof(voxgig_insn));
       re->code_len++;
       re->code[start].op = OP_SPLIT;
       re->code[start].data.split.x = lazy ? re->code_len + 1 : start + 1;
@@ -593,7 +593,7 @@ static int parse_concat(parser* p) {
 }
 
 static int parse_alt(parser* p) {
-  vs_regex* re = p->re;
+  voxgig_regex* re = p->re;
   int start = parse_concat(p);
   if (p->err)
     return start;
@@ -606,7 +606,7 @@ static int parse_alt(parser* p) {
     /* Shift to insert SPLIT at `start`. */
     code_reserve(re, 1);
     memmove(&re->code[start + 1], &re->code[start],
-            (size_t)(re->code_len - start) * sizeof(vs_insn));
+            (size_t)(re->code_len - start) * sizeof(voxgig_insn));
     re->code_len++;
     /* Patch jumps inside the moved block. */
     for (int i = start + 1; i < re->code_len; i++) {
@@ -637,12 +637,12 @@ static int parse_alt(parser* p) {
  * Public compile
  * ===========================================================================*/
 
-vs_regex* vs_regex_compile(const char* pattern, char** err) {
+voxgig_regex* voxgig_regex_compile(const char* pattern, char** err) {
   if (err)
     *err = NULL;
   if (!pattern)
     return NULL;
-  vs_regex* re = (vs_regex*)calloc(1, sizeof(vs_regex));
+  voxgig_regex* re = (voxgig_regex*)calloc(1, sizeof(voxgig_regex));
   if (!re)
     return NULL;
   parser p = {0};
@@ -664,7 +664,7 @@ vs_regex* vs_regex_compile(const char* pattern, char** err) {
       *err = p.err;
     else
       free(p.err);
-    vs_regex_free(re);
+    voxgig_regex_free(re);
     return NULL;
   }
   if (p.pos < p.slen) {
@@ -673,7 +673,7 @@ vs_regex* vs_regex_compile(const char* pattern, char** err) {
       *err = (char*)malloc(64);
       snprintf(*err, 64, "regex parse error at %zu: %s", p.pos, msg);
     }
-    vs_regex_free(re);
+    voxgig_regex_free(re);
     return NULL;
   }
   int e = code_emit(re, OP_SAVE);
@@ -683,14 +683,14 @@ vs_regex* vs_regex_compile(const char* pattern, char** err) {
   return re;
 }
 
-void vs_regex_free(vs_regex* re) {
+void voxgig_regex_free(voxgig_regex* re) {
   if (!re)
     return;
   free(re->code);
   free(re);
 }
 
-int vs_regex_ngroups(const vs_regex* re) {
+int voxgig_regex_ngroups(const voxgig_regex* re) {
   return re ? re->ngroups : 0;
 }
 
@@ -715,7 +715,7 @@ typedef struct {
 static int g_gen = 0;
 
 static thread_t* tl_add(threadlist* tl, int pc, const int* slots, int nslots, int sp,
-                        const vs_regex* re, const char* input, size_t ilen) {
+                        const voxgig_regex* re, const char* input, size_t ilen) {
   if (pc < 0 || pc >= re->code_len)
     return NULL;
   if (tl->visited[pc] == g_gen)
@@ -723,7 +723,7 @@ static thread_t* tl_add(threadlist* tl, int pc, const int* slots, int nslots, in
   tl->visited[pc] = g_gen;
 
   /* Follow epsilon-edges (JMP, SPLIT, SAVE, anchors) eagerly. */
-  vs_insn* in = &re->code[pc];
+  voxgig_insn* in = &re->code[pc];
   if (in->op == OP_JMP) {
     return tl_add(tl, in->data.jmp, slots, nslots, sp, re, input, ilen);
   }
@@ -787,8 +787,8 @@ static void tl_clear(threadlist* tl) {
   tl->len = 0;
 }
 
-static bool match_at(const vs_regex* re, const char* input, size_t ilen, int start, int* out_slots,
-                     int nslots) {
+static bool match_at(const voxgig_regex* re, const char* input, size_t ilen, int start,
+                     int* out_slots, int nslots) {
   threadlist cur = {0};
   threadlist nxt = {0};
   cur.visited = (int*)calloc((size_t)re->code_len, sizeof(int));
@@ -814,7 +814,7 @@ static bool match_at(const vs_regex* re, const char* input, size_t ilen, int sta
     int c = (size_t)sp < ilen ? (unsigned char)input[sp] : -1;
     for (int i = 0; i < cur.len; i++) {
       thread_t* th = &cur.threads[i];
-      vs_insn* in = &re->code[th->pc];
+      voxgig_insn* in = &re->code[th->pc];
       if (in->op == OP_CHAR) {
         if (c == in->data.c)
           tl_add(&nxt, th->pc + 1, th->slots, nslots, sp + 1, re, input, ilen);
@@ -877,7 +877,8 @@ static bool match_at(const vs_regex* re, const char* input, size_t ilen, int sta
   return found;
 }
 
-bool vs_regex_find(const vs_regex* re, const char* input, size_t ilen, int* caps, int ncaps) {
+bool voxgig_regex_find(const voxgig_regex* re, const char* input, size_t ilen, int* caps,
+                       int ncaps) {
   if (!re || !input)
     return false;
   int nslots = re->ngroups * 2;
@@ -908,15 +909,15 @@ bool vs_regex_find(const vs_regex* re, const char* input, size_t ilen, int* caps
   return ok;
 }
 
-bool vs_regex_test(const vs_regex* re, const char* input, size_t ilen) {
-  return vs_regex_find(re, input, ilen, NULL, 0);
+bool voxgig_regex_test(const voxgig_regex* re, const char* input, size_t ilen) {
+  return voxgig_regex_find(re, input, ilen, NULL, 0);
 }
 
-int vs_regex_find_all(const vs_regex* re, const char* input, size_t ilen, int* caps,
-                      int max_matches) {
+int voxgig_regex_find_all(const voxgig_regex* re, const char* input, size_t ilen, int* caps,
+                          int max_matches) {
   if (!re || !input)
     return 0;
-  int per = 2 * VS_REGEX_MAX_GROUPS;
+  int per = 2 * VOXGIG_REGEX_MAX_GROUPS;
   int count = 0;
   size_t pos = 0;
   int nslots = re->ngroups * 2;
@@ -937,13 +938,13 @@ int vs_regex_find_all(const vs_regex* re, const char* input, size_t ilen, int* c
     if (caps) {
       int* row = caps + count * per;
       int copy = re->ngroups;
-      if (copy > VS_REGEX_MAX_GROUPS)
-        copy = VS_REGEX_MAX_GROUPS;
+      if (copy > VOXGIG_REGEX_MAX_GROUPS)
+        copy = VOXGIG_REGEX_MAX_GROUPS;
       for (int g = 0; g < copy; g++) {
         row[2 * g] = slots[2 * g];
         row[2 * g + 1] = slots[2 * g + 1];
       }
-      for (int g = copy; g < VS_REGEX_MAX_GROUPS; g++) {
+      for (int g = copy; g < VOXGIG_REGEX_MAX_GROUPS; g++) {
         row[2 * g] = -1;
         row[2 * g + 1] = -1;
       }
@@ -1015,8 +1016,8 @@ static char* expand_replacement(const char* repl, const int* caps, const char* i
   return out;
 }
 
-char* vs_regex_replace(const vs_regex* re, const char* input, size_t ilen,
-                       const char* replacement) {
+char* voxgig_regex_replace(const voxgig_regex* re, const char* input, size_t ilen,
+                           const char* replacement) {
   if (!re || !input)
     return NULL;
   int nslots = re->ngroups * 2;
@@ -1060,8 +1061,8 @@ char* vs_regex_replace(const vs_regex* re, const char* input, size_t ilen,
   return out;
 }
 
-char* vs_regex_replace_cb_fn(const vs_regex* re, const char* input, size_t ilen,
-                             vs_regex_replace_cb cb, void* ud) {
+char* voxgig_regex_replace_cb_fn(const voxgig_regex* re, const char* input, size_t ilen,
+                                 voxgig_regex_replace_cb cb, void* ud) {
   if (!re || !input)
     return NULL;
   int nslots = re->ngroups * 2;

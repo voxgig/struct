@@ -7,23 +7,23 @@
 #include <stdlib.h>
 #include <string.h>
 
-static vs_value* CORPUS = NULL;
+static voxgig_value* CORPUS = NULL;
 
-static vs_value* get_spec(const char* category, const char* name) {
+static voxgig_value* get_spec(const char* category, const char* name) {
   if (!CORPUS) {
-    CORPUS = vs_parse_json_file("../build/test/test.json");
+    CORPUS = voxgig_parse_json_file("../build/test/test.json");
   }
-  vs_value* sk = vs_new_string("struct");
-  vs_value* sv = vs_getprop(CORPUS, sk, NULL);
-  vs_release(sk);
-  vs_value* ck = vs_new_string(category);
-  vs_value* cat = vs_getprop(sv, ck, NULL);
-  vs_release(ck);
-  vs_release(sv);
-  vs_value* nk = vs_new_string(name);
-  vs_value* spec = vs_getprop(cat, nk, NULL);
-  vs_release(nk);
-  vs_release(cat);
+  voxgig_value* sk = voxgig_new_string("struct");
+  voxgig_value* sv = voxgig_getprop(CORPUS, sk, NULL);
+  voxgig_release(sk);
+  voxgig_value* ck = voxgig_new_string(category);
+  voxgig_value* cat = voxgig_getprop(sv, ck, NULL);
+  voxgig_release(ck);
+  voxgig_release(sv);
+  voxgig_value* nk = voxgig_new_string(name);
+  voxgig_value* spec = voxgig_getprop(cat, nk, NULL);
+  voxgig_release(nk);
+  voxgig_release(cat);
   return spec;
 }
 
@@ -51,420 +51,420 @@ static void sb_add(const char* key, runner_result r) {
 static void run(const char* cat, const char* name, bool null_flag, runner_subject_fn s, void* ud) {
   char full[256];
   snprintf(full, sizeof(full), "%s.%s", cat, name);
-  vs_value* spec = get_spec(cat, name);
+  voxgig_value* spec = get_spec(cat, name);
   runner_result r;
   runner_result_init(&r, full);
   run_subject(&r, spec, null_flag, s, ud);
-  vs_release(spec);
+  voxgig_release(spec);
   sb_add(full, r);
 }
 
 /* Helpers. */
-/* Raw map lookup for runner field extraction. Unlike vs_getprop (Group A,
+/* Raw map lookup for runner field extraction. Unlike voxgig_getprop (Group A,
  * which treats null at a key as "no value"), this returns the literal stored
  * value — including null — so tests for Group B functions like stringify and
  * pad receive their corpus input verbatim. */
-static vs_value* getp(vs_value* in, const char* key) {
-  if (!vs_is_map(in))
-    return vs_new_undef();
-  vs_value* v = vs_map_get(vs_as_map(in), key);
-  return v ? vs_retain(v) : vs_new_undef();
+static voxgig_value* getp(voxgig_value* in, const char* key) {
+  if (!voxgig_is_map(in))
+    return voxgig_new_undef();
+  voxgig_value* v = voxgig_map_get(voxgig_as_map(in), key);
+  return v ? voxgig_retain(v) : voxgig_new_undef();
 }
 
 /* Subject implementations. */
-static vs_value* subj_isnode(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_isnode(voxgig_value* in, char** err, void* ud) {
   (void)ud;
-  return vs_new_bool(vs_isnode(in));
+  return voxgig_new_bool(voxgig_isnode(in));
 }
-static vs_value* subj_ismap(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_ismap(voxgig_value* in, char** err, void* ud) {
   (void)ud;
-  return vs_new_bool(vs_ismap(in));
+  return voxgig_new_bool(voxgig_ismap(in));
 }
-static vs_value* subj_islist(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_islist(voxgig_value* in, char** err, void* ud) {
   (void)ud;
-  return vs_new_bool(vs_islist(in));
+  return voxgig_new_bool(voxgig_islist(in));
 }
-static vs_value* subj_iskey(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_iskey(voxgig_value* in, char** err, void* ud) {
   (void)ud;
-  return vs_new_bool(vs_iskey(in));
+  return voxgig_new_bool(voxgig_iskey(in));
 }
-static vs_value* subj_isempty(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_isempty(voxgig_value* in, char** err, void* ud) {
   (void)ud;
-  return vs_new_bool(vs_isempty(in));
+  return voxgig_new_bool(voxgig_isempty(in));
 }
-static vs_value* subj_isfunc(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_isfunc(voxgig_value* in, char** err, void* ud) {
   (void)ud;
-  return vs_new_bool(vs_isfunc(in));
+  return voxgig_new_bool(voxgig_isfunc(in));
 }
-static vs_value* subj_typify(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_typify(voxgig_value* in, char** err, void* ud) {
   (void)ud;
-  return vs_new_int(vs_typify(in));
+  return voxgig_new_int(voxgig_typify(in));
 }
-static vs_value* subj_typename(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_typename(voxgig_value* in, char** err, void* ud) {
   (void)ud;
-  if (vs_is_int(in))
-    return vs_new_string(vs_typename((int)vs_as_int(in)));
-  return vs_new_string(vs_typename(vs_typify(in)));
+  if (voxgig_is_int(in))
+    return voxgig_new_string(voxgig_typename((int)voxgig_as_int(in)));
+  return voxgig_new_string(voxgig_typename(voxgig_typify(in)));
 }
-static vs_value* subj_clone(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_clone(voxgig_value* in, char** err, void* ud) {
   (void)ud;
-  return vs_clone(in);
+  return voxgig_clone(in);
 }
-static vs_value* subj_size(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_size(voxgig_value* in, char** err, void* ud) {
   (void)ud;
-  return vs_new_int(vs_size(in));
+  return voxgig_new_int(voxgig_size(in));
 }
-static vs_value* subj_strkey(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_strkey(voxgig_value* in, char** err, void* ud) {
   (void)ud;
-  char* s = vs_strkey(in);
-  vs_value* v = vs_new_string(s);
+  char* s = voxgig_strkey(in);
+  voxgig_value* v = voxgig_new_string(s);
   free(s);
   return v;
 }
-static vs_value* subj_keysof(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_keysof(voxgig_value* in, char** err, void* ud) {
   (void)ud;
-  vs_strvec ks = vs_keysof(in);
-  vs_value* out = vs_new_list();
+  voxgig_strvec ks = voxgig_keysof(in);
+  voxgig_value* out = voxgig_new_list();
   for (size_t i = 0; i < ks.len; i++)
-    vs_list_push(vs_as_list(out), vs_new_string(ks.data[i]));
-  vs_strvec_free(&ks);
+    voxgig_list_push(voxgig_as_list(out), voxgig_new_string(ks.data[i]));
+  voxgig_strvec_free(&ks);
   return out;
 }
-static vs_value* subj_items(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_items(voxgig_value* in, char** err, void* ud) {
   (void)ud;
-  return vs_items_v(in);
+  return voxgig_items_v(in);
 }
-static vs_value* subj_haskey(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_haskey(voxgig_value* in, char** err, void* ud) {
   (void)ud;
-  vs_value* src = getp(in, "src");
-  vs_value* key = getp(in, "key");
-  bool r = vs_haskey(src, key);
-  vs_release(src);
-  vs_release(key);
-  return vs_new_bool(r);
+  voxgig_value* src = getp(in, "src");
+  voxgig_value* key = getp(in, "key");
+  bool r = voxgig_haskey(src, key);
+  voxgig_release(src);
+  voxgig_release(key);
+  return voxgig_new_bool(r);
 }
-static vs_value* subj_getprop(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_getprop(voxgig_value* in, char** err, void* ud) {
   (void)ud;
-  vs_value* val = getp(in, "val");
-  vs_value* key = getp(in, "key");
-  vs_value* altk = vs_new_string("alt");
-  vs_value* alt = vs_haskey(in, altk) ? vs_getprop(in, altk, NULL) : NULL;
-  vs_release(altk);
-  vs_value* r = vs_getprop(val, key, alt);
-  vs_release(val);
-  vs_release(key);
-  vs_release(alt);
+  voxgig_value* val = getp(in, "val");
+  voxgig_value* key = getp(in, "key");
+  voxgig_value* altk = voxgig_new_string("alt");
+  voxgig_value* alt = voxgig_haskey(in, altk) ? voxgig_getprop(in, altk, NULL) : NULL;
+  voxgig_release(altk);
+  voxgig_value* r = voxgig_getprop(val, key, alt);
+  voxgig_release(val);
+  voxgig_release(key);
+  voxgig_release(alt);
   return r;
 }
-static vs_value* subj_getelem(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_getelem(voxgig_value* in, char** err, void* ud) {
   (void)ud;
-  vs_value* val = getp(in, "val");
-  vs_value* key = getp(in, "key");
-  vs_value* altk = vs_new_string("alt");
-  vs_value* alt = vs_haskey(in, altk) ? vs_getprop(in, altk, NULL) : NULL;
-  vs_release(altk);
-  vs_value* r = vs_getelem(val, key, alt);
-  vs_release(val);
-  vs_release(key);
-  vs_release(alt);
+  voxgig_value* val = getp(in, "val");
+  voxgig_value* key = getp(in, "key");
+  voxgig_value* altk = voxgig_new_string("alt");
+  voxgig_value* alt = voxgig_haskey(in, altk) ? voxgig_getprop(in, altk, NULL) : NULL;
+  voxgig_release(altk);
+  voxgig_value* r = voxgig_getelem(val, key, alt);
+  voxgig_release(val);
+  voxgig_release(key);
+  voxgig_release(alt);
   return r;
 }
-static vs_value* subj_setprop(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_setprop(voxgig_value* in, char** err, void* ud) {
   (void)ud;
-  vs_value* parent = getp(in, "parent");
-  if (!parent || vs_is_undef(parent)) {
-    vs_release(parent);
-    parent = vs_new_null();
+  voxgig_value* parent = getp(in, "parent");
+  if (!parent || voxgig_is_undef(parent)) {
+    voxgig_release(parent);
+    parent = voxgig_new_null();
   }
-  vs_value* key = getp(in, "key");
-  vs_value* val = getp(in, "val");
-  vs_value* r = vs_setprop(parent, key, val);
-  vs_value* ret = r ? vs_retain(r) : vs_new_undef();
-  vs_release(parent);
-  vs_release(key);
-  vs_release(val);
+  voxgig_value* key = getp(in, "key");
+  voxgig_value* val = getp(in, "val");
+  voxgig_value* r = voxgig_setprop(parent, key, val);
+  voxgig_value* ret = r ? voxgig_retain(r) : voxgig_new_undef();
+  voxgig_release(parent);
+  voxgig_release(key);
+  voxgig_release(val);
   return ret;
 }
-static vs_value* subj_delprop(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_delprop(voxgig_value* in, char** err, void* ud) {
   (void)ud;
-  vs_value* parent = getp(in, "parent");
-  if (!parent || vs_is_undef(parent)) {
-    vs_release(parent);
-    parent = vs_new_null();
+  voxgig_value* parent = getp(in, "parent");
+  if (!parent || voxgig_is_undef(parent)) {
+    voxgig_release(parent);
+    parent = voxgig_new_null();
   }
-  vs_value* key = getp(in, "key");
-  vs_value* r = vs_delprop(parent, key);
-  vs_value* ret = r ? vs_retain(r) : vs_new_undef();
-  vs_release(parent);
-  vs_release(key);
+  voxgig_value* key = getp(in, "key");
+  voxgig_value* r = voxgig_delprop(parent, key);
+  voxgig_value* ret = r ? voxgig_retain(r) : voxgig_new_undef();
+  voxgig_release(parent);
+  voxgig_release(key);
   return ret;
 }
-static vs_value* subj_stringify(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_stringify(voxgig_value* in, char** err, void* ud) {
   (void)ud;
-  vs_value* val = getp(in, "val");
-  vs_value* max = getp(in, "max");
+  voxgig_value* val = getp(in, "val");
+  voxgig_value* max = getp(in, "max");
   int m = -1;
-  if (vs_is_int(max))
-    m = (int)vs_as_int(max);
-  char* s = vs_stringify(val, m);
-  vs_value* r = vs_new_string(s);
+  if (voxgig_is_int(max))
+    m = (int)voxgig_as_int(max);
+  char* s = voxgig_stringify(val, m);
+  voxgig_value* r = voxgig_new_string(s);
   free(s);
-  vs_release(val);
-  vs_release(max);
+  voxgig_release(val);
+  voxgig_release(max);
   return r;
 }
-static vs_value* subj_jsonify(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_jsonify(voxgig_value* in, char** err, void* ud) {
   (void)ud;
-  vs_value* val = getp(in, "val");
-  vs_value* flags = getp(in, "flags");
-  char* s = vs_jsonify(val, flags);
-  vs_value* r = vs_new_string(s);
+  voxgig_value* val = getp(in, "val");
+  voxgig_value* flags = getp(in, "flags");
+  char* s = voxgig_jsonify(val, flags);
+  voxgig_value* r = voxgig_new_string(s);
   free(s);
-  vs_release(val);
-  vs_release(flags);
+  voxgig_release(val);
+  voxgig_release(flags);
   return r;
 }
-static vs_value* subj_pathify(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_pathify(voxgig_value* in, char** err, void* ud) {
   (void)ud;
-  vs_value* path = getp(in, "path");
-  vs_value* from = getp(in, "from");
-  vs_value* to = getp(in, "to");
-  int f = vs_is_int(from) ? (int)vs_as_int(from) : 0;
-  int t = vs_is_int(to) ? (int)vs_as_int(to) : 0;
-  char* s = vs_pathify(path, f, t);
-  vs_value* r = vs_new_string(s);
+  voxgig_value* path = getp(in, "path");
+  voxgig_value* from = getp(in, "from");
+  voxgig_value* to = getp(in, "to");
+  int f = voxgig_is_int(from) ? (int)voxgig_as_int(from) : 0;
+  int t = voxgig_is_int(to) ? (int)voxgig_as_int(to) : 0;
+  char* s = voxgig_pathify(path, f, t);
+  voxgig_value* r = voxgig_new_string(s);
   free(s);
-  vs_release(path);
-  vs_release(from);
-  vs_release(to);
+  voxgig_release(path);
+  voxgig_release(from);
+  voxgig_release(to);
   return r;
 }
-static vs_value* subj_escre(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_escre(voxgig_value* in, char** err, void* ud) {
   (void)ud;
-  char* s = vs_escre(in);
-  vs_value* r = vs_new_string(s);
-  free(s);
-  return r;
-}
-static vs_value* subj_escurl(vs_value* in, char** err, void* ud) {
-  (void)ud;
-  char* s = vs_escurl(in);
-  vs_value* r = vs_new_string(s);
+  char* s = voxgig_escre(in);
+  voxgig_value* r = voxgig_new_string(s);
   free(s);
   return r;
 }
-static vs_value* subj_join(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_escurl(voxgig_value* in, char** err, void* ud) {
   (void)ud;
-  vs_value* val = getp(in, "val");
-  vs_value* sep = getp(in, "sep");
-  vs_value* url = getp(in, "url");
-  char* s = vs_join_v(val, sep, url);
-  vs_value* r = vs_new_string(s);
+  char* s = voxgig_escurl(in);
+  voxgig_value* r = voxgig_new_string(s);
   free(s);
-  vs_release(val);
-  vs_release(sep);
-  vs_release(url);
   return r;
 }
-static vs_value* subj_flatten(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_join(voxgig_value* in, char** err, void* ud) {
   (void)ud;
-  vs_value* val = getp(in, "val");
-  vs_value* depth = getp(in, "depth");
-  vs_value* r = vs_flatten(val, depth);
-  vs_release(val);
-  vs_release(depth);
+  voxgig_value* val = getp(in, "val");
+  voxgig_value* sep = getp(in, "sep");
+  voxgig_value* url = getp(in, "url");
+  char* s = voxgig_join_v(val, sep, url);
+  voxgig_value* r = voxgig_new_string(s);
+  free(s);
+  voxgig_release(val);
+  voxgig_release(sep);
+  voxgig_release(url);
+  return r;
+}
+static voxgig_value* subj_flatten(voxgig_value* in, char** err, void* ud) {
+  (void)ud;
+  voxgig_value* val = getp(in, "val");
+  voxgig_value* depth = getp(in, "depth");
+  voxgig_value* r = voxgig_flatten(val, depth);
+  voxgig_release(val);
+  voxgig_release(depth);
   return r;
 }
 
-static bool gt3(vs_value* pair, void* ud) {
+static bool gt3(voxgig_value* pair, void* ud) {
   (void)ud;
-  vs_value* one = vs_new_int(1);
-  vs_value* v = vs_getprop(pair, one, NULL);
-  vs_release(one);
-  bool ok = vs_is_number(v) && vs_as_double(v) > 3;
-  vs_release(v);
+  voxgig_value* one = voxgig_new_int(1);
+  voxgig_value* v = voxgig_getprop(pair, one, NULL);
+  voxgig_release(one);
+  bool ok = voxgig_is_number(v) && voxgig_as_double(v) > 3;
+  voxgig_release(v);
   return ok;
 }
-static bool lt3(vs_value* pair, void* ud) {
+static bool lt3(voxgig_value* pair, void* ud) {
   (void)ud;
-  vs_value* one = vs_new_int(1);
-  vs_value* v = vs_getprop(pair, one, NULL);
-  vs_release(one);
-  bool ok = vs_is_number(v) && vs_as_double(v) < 3;
-  vs_release(v);
+  voxgig_value* one = voxgig_new_int(1);
+  voxgig_value* v = voxgig_getprop(pair, one, NULL);
+  voxgig_release(one);
+  bool ok = voxgig_is_number(v) && voxgig_as_double(v) < 3;
+  voxgig_release(v);
   return ok;
 }
-static vs_value* subj_filter(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_filter(voxgig_value* in, char** err, void* ud) {
   (void)ud;
-  vs_value* val = getp(in, "val");
-  vs_value* checkk = vs_new_string("check");
-  vs_value* check = vs_getprop(in, checkk, NULL);
-  vs_release(checkk);
-  vs_itemcheck_fn pred = lt3;
-  if (vs_is_string(check) && strcmp(vs_as_string(check), "gt3") == 0)
+  voxgig_value* val = getp(in, "val");
+  voxgig_value* checkk = voxgig_new_string("check");
+  voxgig_value* check = voxgig_getprop(in, checkk, NULL);
+  voxgig_release(checkk);
+  voxgig_itemcheck_fn pred = lt3;
+  if (voxgig_is_string(check) && strcmp(voxgig_as_string(check), "gt3") == 0)
     pred = gt3;
-  vs_value* r = vs_filter(val, pred, NULL);
-  vs_release(val);
-  vs_release(check);
+  voxgig_value* r = voxgig_filter(val, pred, NULL);
+  voxgig_release(val);
+  voxgig_release(check);
   return r;
 }
-static vs_value* subj_slice(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_slice(voxgig_value* in, char** err, void* ud) {
   (void)ud;
-  vs_value* val = getp(in, "val");
-  vs_value* start = getp(in, "start");
-  vs_value* end = getp(in, "end");
-  vs_value* r = vs_slice(val, start, end, false);
-  vs_release(val);
-  vs_release(start);
-  vs_release(end);
+  voxgig_value* val = getp(in, "val");
+  voxgig_value* start = getp(in, "start");
+  voxgig_value* end = getp(in, "end");
+  voxgig_value* r = voxgig_slice(val, start, end, false);
+  voxgig_release(val);
+  voxgig_release(start);
+  voxgig_release(end);
   return r;
 }
-static vs_value* subj_pad(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_pad(voxgig_value* in, char** err, void* ud) {
   (void)ud;
-  vs_value* val = getp(in, "val");
-  vs_value* pd = getp(in, "pad");
-  vs_value* ch = getp(in, "char");
-  char* s = vs_pad(val, pd, ch);
-  vs_value* r = vs_new_string(s);
+  voxgig_value* val = getp(in, "val");
+  voxgig_value* pd = getp(in, "pad");
+  voxgig_value* ch = getp(in, "char");
+  char* s = voxgig_pad(val, pd, ch);
+  voxgig_value* r = voxgig_new_string(s);
   free(s);
-  vs_release(val);
-  vs_release(pd);
-  vs_release(ch);
+  voxgig_release(val);
+  voxgig_release(pd);
+  voxgig_release(ch);
   return r;
 }
-static vs_value* subj_setpath(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_setpath(voxgig_value* in, char** err, void* ud) {
   (void)ud;
-  vs_value* store = getp(in, "store");
-  vs_value* path = getp(in, "path");
-  vs_value* val = getp(in, "val");
-  vs_value* r = vs_setpath(store, path, val, NULL);
-  vs_value* ret = r ? vs_retain(r) : vs_new_undef();
-  vs_release(store);
-  vs_release(path);
-  vs_release(val);
+  voxgig_value* store = getp(in, "store");
+  voxgig_value* path = getp(in, "path");
+  voxgig_value* val = getp(in, "val");
+  voxgig_value* r = voxgig_setpath(store, path, val, NULL);
+  voxgig_value* ret = r ? voxgig_retain(r) : voxgig_new_undef();
+  voxgig_release(store);
+  voxgig_release(path);
+  voxgig_release(val);
   return ret;
 }
 
 /* walk depth subject: builds a parallel deep tree, controlled by maxdepth. */
 typedef struct walk_depth_state {
-  vs_value* top;
-  vs_value* cur;
+  voxgig_value* top;
+  voxgig_value* cur;
 } walk_depth_state;
 
-static vs_value* walk_depth_cb(vs_value* key, vs_value* val, vs_value* parent, vs_value* path,
-                               void* ud) {
+static voxgig_value* walk_depth_cb(voxgig_value* key, voxgig_value* val, voxgig_value* parent,
+                                   voxgig_value* path, void* ud) {
   (void)parent;
   (void)path;
   walk_depth_state* st = (walk_depth_state*)ud;
-  if (!key || vs_is_undef(key) || vs_isnode(val)) {
-    vs_value* child = vs_is_list(val) ? vs_new_list() : vs_new_map();
-    if (!key || vs_is_undef(key)) {
-      vs_release(st->top);
+  if (!key || voxgig_is_undef(key) || voxgig_isnode(val)) {
+    voxgig_value* child = voxgig_is_list(val) ? voxgig_new_list() : voxgig_new_map();
+    if (!key || voxgig_is_undef(key)) {
+      voxgig_release(st->top);
       st->top = child;
       st->cur = child;
     } else {
-      vs_setprop(st->cur, key, child);
+      voxgig_setprop(st->cur, key, child);
       st->cur = child;
     }
   } else {
-    vs_setprop(st->cur, key, val);
+    voxgig_setprop(st->cur, key, val);
   }
-  return vs_retain(val);
+  return voxgig_retain(val);
 }
-static vs_value* subj_walk_depth(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_walk_depth(voxgig_value* in, char** err, void* ud) {
   (void)err;
   (void)ud;
-  vs_value* src = getp(in, "src");
-  vs_value* mdv = getp(in, "maxdepth");
-  int md = vs_is_int(mdv) ? (int)vs_as_int(mdv) : VS_MAXDEPTH;
+  voxgig_value* src = getp(in, "src");
+  voxgig_value* mdv = getp(in, "maxdepth");
+  int md = voxgig_is_int(mdv) ? (int)voxgig_as_int(mdv) : VOXGIG_MAXDEPTH;
   walk_depth_state st = {NULL, NULL};
-  vs_value* w = vs_walk(src, walk_depth_cb, NULL, md, &st);
-  vs_release(w);
-  vs_release(src);
-  vs_release(mdv);
-  vs_value* out = st.top ? st.top : vs_new_map();
+  voxgig_value* w = voxgig_walk(src, walk_depth_cb, NULL, md, &st);
+  voxgig_release(w);
+  voxgig_release(src);
+  voxgig_release(mdv);
+  voxgig_value* out = st.top ? st.top : voxgig_new_map();
   return out;
 }
 
 /* getpath relative. */
-static vs_value* subj_getpath_relative(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_getpath_relative(voxgig_value* in, char** err, void* ud) {
   (void)err;
   (void)ud;
-  vs_value* store = getp(in, "store");
-  vs_value* path = getp(in, "path");
-  vs_injection* inj = vs_inj_new(NULL, NULL);
+  voxgig_value* store = getp(in, "store");
+  voxgig_value* path = getp(in, "path");
+  voxgig_injection* inj = voxgig_inj_new(NULL, NULL);
   inj->mode = 0;
   /* Apply dparent / dpath / base from input if present. */
-  vs_value* dparent = getp(in, "dparent");
-  if (dparent && !vs_is_undef(dparent)) {
-    vs_release(inj->dparent);
+  voxgig_value* dparent = getp(in, "dparent");
+  if (dparent && !voxgig_is_undef(dparent)) {
+    voxgig_release(inj->dparent);
     inj->dparent = dparent;
   } else {
-    vs_release(dparent);
+    voxgig_release(dparent);
   }
-  vs_value* dpath = getp(in, "dpath");
-  if (vs_is_list(dpath)) {
-    vs_strvec_clear(&inj->dpath);
-    vs_list* l = vs_as_list(dpath);
+  voxgig_value* dpath = getp(in, "dpath");
+  if (voxgig_is_list(dpath)) {
+    voxgig_strvec_clear(&inj->dpath);
+    voxgig_list* l = voxgig_as_list(dpath);
     for (size_t i = 0; i < l->len; i++) {
-      char* s = vs_strkey(l->items[i]);
-      vs_strvec_push(&inj->dpath, s);
+      char* s = voxgig_strkey(l->items[i]);
+      voxgig_strvec_push(&inj->dpath, s);
       free(s);
     }
-  } else if (vs_is_string(dpath)) {
-    vs_strvec_clear(&inj->dpath);
-    const char* s = vs_as_string(dpath);
-    size_t n = vs_string_len(dpath);
+  } else if (voxgig_is_string(dpath)) {
+    voxgig_strvec_clear(&inj->dpath);
+    const char* s = voxgig_as_string(dpath);
+    size_t n = voxgig_string_len(dpath);
     size_t i = 0;
     while (i <= n) {
       size_t j = i;
       while (j < n && s[j] != '.')
         j++;
-      vs_strvec_push_n(&inj->dpath, s + i, j - i);
+      voxgig_strvec_push_n(&inj->dpath, s + i, j - i);
       i = j + 1;
       if (j == n)
         break;
     }
   }
-  vs_release(dpath);
-  vs_value* base = getp(in, "base");
-  if (vs_is_string(base)) {
+  voxgig_release(dpath);
+  voxgig_value* base = getp(in, "base");
+  if (voxgig_is_string(base)) {
     free(inj->base);
-    inj->base = strdup(vs_as_string(base));
+    inj->base = strdup(voxgig_as_string(base));
   }
-  vs_release(base);
-  vs_value* r = vs_getpath(store, path, inj);
-  vs_inj_free(inj);
-  vs_release(store);
-  vs_release(path);
+  voxgig_release(base);
+  voxgig_value* r = voxgig_getpath(store, path, inj);
+  voxgig_inj_free(inj);
+  voxgig_release(store);
+  voxgig_release(path);
   return r;
 }
 
 /* Inject basic. */
-static vs_value* subj_inject_basic(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_inject_basic(voxgig_value* in, char** err, void* ud) {
   (void)err;
   (void)ud;
-  return vs_inject(in, in, NULL);
+  return voxgig_inject(in, in, NULL);
 }
 
 /* Walk subjects. */
-static vs_value* walk_basic_cb(vs_value* key, vs_value* val, vs_value* parent, vs_value* path,
-                               void* ud) {
+static voxgig_value* walk_basic_cb(voxgig_value* key, voxgig_value* val, voxgig_value* parent,
+                                   voxgig_value* path, void* ud) {
   (void)key;
   (void)parent;
   (void)ud;
-  if (vs_is_string(val)) {
+  if (voxgig_is_string(val)) {
     char* buf = NULL;
     size_t len = 0, cap = 0;
-    const char* s = vs_as_string(val);
-    size_t sl = vs_string_len(val);
+    const char* s = voxgig_as_string(val);
+    size_t sl = voxgig_string_len(val);
     /* val + "~" + path.join(".") */
     cap = sl + 16;
     buf = (char*)malloc(cap);
     memcpy(buf, s, sl);
     len = sl;
     buf[len++] = '~';
-    vs_list* pl = vs_as_list(path);
+    voxgig_list* pl = voxgig_as_list(path);
     for (size_t i = 0; i < pl->len; i++) {
       if (i > 0) {
         if (len + 1 >= cap) {
@@ -473,8 +473,8 @@ static vs_value* walk_basic_cb(vs_value* key, vs_value* val, vs_value* parent, v
         }
         buf[len++] = '.';
       }
-      const char* ps = vs_as_string(pl->items[i]);
-      size_t psl = vs_string_len(pl->items[i]);
+      const char* ps = voxgig_as_string(pl->items[i]);
+      size_t psl = voxgig_string_len(pl->items[i]);
       if (len + psl + 1 >= cap) {
         while (cap < len + psl + 1)
           cap *= 2;
@@ -484,80 +484,80 @@ static vs_value* walk_basic_cb(vs_value* key, vs_value* val, vs_value* parent, v
       len += psl;
     }
     buf[len] = '\0';
-    vs_value* r = vs_new_string(buf);
+    voxgig_value* r = voxgig_new_string(buf);
     free(buf);
     return r;
   }
-  return vs_retain(val);
+  return voxgig_retain(val);
 }
-static vs_value* subj_walk_basic(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_walk_basic(voxgig_value* in, char** err, void* ud) {
   (void)ud;
-  return vs_walk(in, walk_basic_cb, NULL, VS_MAXDEPTH, NULL);
+  return voxgig_walk(in, walk_basic_cb, NULL, VOXGIG_MAXDEPTH, NULL);
 }
 
 /* Merge subjects. */
-static vs_value* subj_merge(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_merge(voxgig_value* in, char** err, void* ud) {
   (void)ud;
-  return vs_merge(in, VS_MAXDEPTH);
+  return voxgig_merge(in, VOXGIG_MAXDEPTH);
 }
-static vs_value* subj_merge_depth(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_merge_depth(voxgig_value* in, char** err, void* ud) {
   (void)ud;
-  vs_value* val = getp(in, "val");
-  vs_value* depth = getp(in, "depth");
-  int d = vs_is_int(depth) ? (int)vs_as_int(depth) : VS_MAXDEPTH;
-  vs_value* r = vs_merge(val, d);
-  vs_release(val);
-  vs_release(depth);
+  voxgig_value* val = getp(in, "val");
+  voxgig_value* depth = getp(in, "depth");
+  int d = voxgig_is_int(depth) ? (int)voxgig_as_int(depth) : VOXGIG_MAXDEPTH;
+  voxgig_value* r = voxgig_merge(val, d);
+  voxgig_release(val);
+  voxgig_release(depth);
   return r;
 }
 
 /* getpath subjects. */
-static vs_value* subj_getpath_basic(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_getpath_basic(voxgig_value* in, char** err, void* ud) {
   (void)ud;
-  vs_value* store = getp(in, "store");
-  vs_value* path = getp(in, "path");
-  vs_value* r = vs_getpath(store, path, NULL);
-  vs_release(store);
-  vs_release(path);
+  voxgig_value* store = getp(in, "store");
+  voxgig_value* path = getp(in, "path");
+  voxgig_value* r = voxgig_getpath(store, path, NULL);
+  voxgig_release(store);
+  voxgig_release(path);
   return r;
 }
 
 /* inject subjects. */
-static vs_value* subj_inject(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_inject(voxgig_value* in, char** err, void* ud) {
   (void)ud;
-  vs_value* val = getp(in, "val");
-  vs_value* store = getp(in, "store");
-  vs_value* r = vs_inject(val, store, NULL);
-  vs_release(val);
-  vs_release(store);
+  voxgig_value* val = getp(in, "val");
+  voxgig_value* store = getp(in, "store");
+  voxgig_value* r = voxgig_inject(val, store, NULL);
+  voxgig_release(val);
+  voxgig_release(store);
   return r;
 }
 
 /* transform subjects. */
-static vs_value* subj_transform(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_transform(voxgig_value* in, char** err, void* ud) {
   (void)ud;
-  vs_value* data = getp(in, "data");
-  vs_value* spec = getp(in, "spec");
-  vs_value* r = vs_transform(data, spec, NULL);
-  vs_release(data);
-  vs_release(spec);
+  voxgig_value* data = getp(in, "data");
+  voxgig_value* spec = getp(in, "spec");
+  voxgig_value* r = voxgig_transform(data, spec, NULL);
+  voxgig_release(data);
+  voxgig_release(spec);
   return r;
 }
 
 /* Helper to collect errs from a validate/transform call. */
-static char* join_errs(vs_value* errs) {
-  if (!vs_is_list(errs))
+static char* join_errs(voxgig_value* errs) {
+  if (!voxgig_is_list(errs))
     return NULL;
-  vs_list* l = vs_as_list(errs);
+  voxgig_list* l = voxgig_as_list(errs);
   if (l->len == 0)
     return NULL;
   size_t cap = 256, len = 0;
   char* buf = malloc(cap);
   buf[0] = '\0';
   for (size_t i = 0; i < l->len; i++) {
-    if (!vs_is_string(l->items[i]))
+    if (!voxgig_is_string(l->items[i]))
       continue;
-    const char* s = vs_as_string(l->items[i]);
+    const char* s = voxgig_as_string(l->items[i]);
     size_t sl = strlen(s);
     if (len + sl + 8 > cap) {
       while (len + sl + 8 > cap)
@@ -575,34 +575,34 @@ static char* join_errs(vs_value* errs) {
 }
 
 /* validate subjects. */
-static vs_value* subj_validate(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_validate(voxgig_value* in, char** err, void* ud) {
   (void)ud;
-  vs_value* data = getp(in, "data");
-  vs_value* spec = getp(in, "spec");
+  voxgig_value* data = getp(in, "data");
+  voxgig_value* spec = getp(in, "spec");
   /* Build a config bag with errs to collect. */
-  vs_injection* sub = vs_inj_new(NULL, NULL);
+  voxgig_injection* sub = voxgig_inj_new(NULL, NULL);
   sub->mode = 0;
-  vs_release(sub->errs);
-  sub->errs = vs_new_list();
-  vs_value* r = vs_validate(data, spec, sub);
+  voxgig_release(sub->errs);
+  sub->errs = voxgig_new_list();
+  voxgig_value* r = voxgig_validate(data, spec, sub);
   /* If errs collected, set err. */
-  if (vs_list_len(vs_as_list(sub->errs)) > 0) {
+  if (voxgig_list_len(voxgig_as_list(sub->errs)) > 0) {
     *err = join_errs(sub->errs);
   }
-  vs_inj_free(sub);
-  vs_release(data);
-  vs_release(spec);
+  voxgig_inj_free(sub);
+  voxgig_release(data);
+  voxgig_release(spec);
   return r;
 }
 
 /* select subjects. */
-static vs_value* subj_select(vs_value* in, char** err, void* ud) {
+static voxgig_value* subj_select(voxgig_value* in, char** err, void* ud) {
   (void)ud;
-  vs_value* obj = getp(in, "obj");
-  vs_value* query = getp(in, "query");
-  vs_value* r = vs_select(obj, query);
-  vs_release(obj);
-  vs_release(query);
+  voxgig_value* obj = getp(in, "obj");
+  voxgig_value* query = getp(in, "query");
+  voxgig_value* r = voxgig_select(obj, query);
+  voxgig_release(obj);
+  voxgig_release(query);
   return r;
 }
 
@@ -764,6 +764,6 @@ int main(void) {
     free(SB[i].key);
   }
   free(SB);
-  vs_release(CORPUS);
+  voxgig_release(CORPUS);
   return 0;
 }

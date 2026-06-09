@@ -48,29 +48,29 @@ include the umbrella header:
 
 ### Your first program
 
-Every value is a `vs_value*` — a reference-counted tagged union. You build
-values with `vs_new_*` / `vs_parse_json`, pass them to the `vs_`-prefixed
-API, and release what you own with `vs_release`:
+Every value is a `voxgig_value*` — a reference-counted tagged union. You build
+values with `voxgig_new_*` / `voxgig_parse_json`, pass them to the `voxgig_`-prefixed
+API, and release what you own with `voxgig_release`:
 
 ```c
 #include "voxgig_struct.h"
 #include <stdlib.h>
 
 int main(void) {
-  vs_value* store = vs_parse_json("{\"db\":{\"host\":\"localhost\",\"port\":5432}}", 0);
-  vs_value* path  = vs_new_string("db.host");
-  vs_value* host  = vs_getpath(store, path, NULL);   /* owned: "localhost" */
+  voxgig_value* store = voxgig_parse_json("{\"db\":{\"host\":\"localhost\",\"port\":5432}}", 0);
+  voxgig_value* path  = voxgig_new_string("db.host");
+  voxgig_value* host  = voxgig_getpath(store, path, NULL);   /* owned: "localhost" */
 
   /* ... use host ... */
 
-  vs_release(host);    /* free what vs_getpath returned */
-  vs_release(path);
-  vs_release(store);
+  voxgig_release(host);    /* free what voxgig_getpath returned */
+  voxgig_release(path);
+  voxgig_release(store);
   return 0;
 }
 ```
 
-The third `vs_getpath` argument is an optional `vs_injection*` (relative-path
+The third `voxgig_getpath` argument is an optional `voxgig_injection*` (relative-path
 state used inside transforms) — pass `NULL` for a plain lookup. The C API
 follows one rule throughout: **optional TS arguments are passed as `NULL`**.
 
@@ -84,23 +84,23 @@ literal:
 
 ```c
 /* Reshape by example — the spec mirrors the output you want. */
-vs_value* data = vs_parse_json("{\"user\":{\"first\":\"Ada\",\"last\":\"Lovelace\"},\"age\":36}", 0);
-vs_value* spec = vs_parse_json("{\"name\":\"`user.first`\",\"surname\":\"`user.last`\",\"years\":\"`age`\"}", 0);
-vs_value* out  = vs_transform(data, spec, NULL);
-char* js = vs_jsonify(out, NULL);    /* {"name": "Ada","surname": "Lovelace","years": 36} */
+voxgig_value* data = voxgig_parse_json("{\"user\":{\"first\":\"Ada\",\"last\":\"Lovelace\"},\"age\":36}", 0);
+voxgig_value* spec = voxgig_parse_json("{\"name\":\"`user.first`\",\"surname\":\"`user.last`\",\"years\":\"`age`\"}", 0);
+voxgig_value* out  = voxgig_transform(data, spec, NULL);
+char* js = voxgig_jsonify(out, NULL);    /* {"name": "Ada","surname": "Lovelace","years": 36} */
 free(js);                            /* jsonify returns a malloc'd char* */
-vs_release(out); vs_release(spec); vs_release(data);
+voxgig_release(out); voxgig_release(spec); voxgig_release(data);
 
 /* Validate by example — leaves are type checkers. */
-vs_value* vspec = vs_parse_json("{\"name\":\"`$STRING`\",\"age\":\"`$INTEGER`\"}", 0);
-vs_value* ok = vs_validate(data2, vspec, NULL);  /* returns data on success */
+voxgig_value* vspec = voxgig_parse_json("{\"name\":\"`$STRING`\",\"age\":\"`$INTEGER`\"}", 0);
+voxgig_value* ok = voxgig_validate(data2, vspec, NULL);  /* returns data on success */
 
 /* Select children by query — each match tagged with its $KEY. */
-vs_value* q  = vs_parse_json("{\"age\":30}", 0);
-vs_value* hits = vs_select(children, q);          /* a new list */
+voxgig_value* q  = voxgig_parse_json("{\"age\":30}", 0);
+voxgig_value* hits = voxgig_select(children, q);          /* a new list */
 ```
 
-`vs_walk` and `vs_filter` take C **function pointers** rather than spec
+`voxgig_walk` and `voxgig_filter` take C **function pointers** rather than spec
 data — see the how-to guides below.
 
 ---
@@ -109,59 +109,59 @@ data — see the how-to guides below.
 
 ### Read a deep value, with a fallback
 ```c
-vs_value* v = vs_getprop(node, key, alt);  /* returns a retained copy of alt if key absent */
-vs_value* d = vs_getdef(maybe, alt);       /* alt only when maybe is undefined */
+voxgig_value* v = voxgig_getprop(node, key, alt);  /* returns a retained copy of alt if key absent */
+voxgig_value* d = voxgig_getdef(maybe, alt);       /* alt only when maybe is undefined */
 ```
-`vs_getprop`/`vs_getdef` return an **owned** reference (when they fall back
-to `alt`, they retain it for you) — `vs_release` the result.
+`voxgig_getprop`/`voxgig_getdef` return an **owned** reference (when they fall back
+to `alt`, they retain it for you) — `voxgig_release` the result.
 
 ### Walk the tree, replacing values on ascent
-`vs_walk` takes `before` / `after` C callbacks of type `vs_walkapply_fn`;
+`voxgig_walk` takes `before` / `after` C callbacks of type `voxgig_walkapply_fn`;
 pass `NULL` for either phase. Each callback returns the (possibly new) value
 for that slot:
 ```c
-static vs_value* deflt_null(vs_value* key, vs_value* val,
-                            vs_value* parent, vs_value* path, void* ud) {
-  return vs_is_null(val) ? vs_new_string("DEFAULT") : vs_retain(val);
+static voxgig_value* deflt_null(voxgig_value* key, voxgig_value* val,
+                            voxgig_value* parent, voxgig_value* path, void* ud) {
+  return voxgig_is_null(val) ? voxgig_new_string("DEFAULT") : voxgig_retain(val);
 }
-vs_value* result = vs_walk(tree, NULL, deflt_null, VS_MAXDEPTH, ud);
+voxgig_value* result = voxgig_walk(tree, NULL, deflt_null, VOXGIG_MAXDEPTH, ud);
 ```
-The `path` argument is a `vs_value` string-list; `ud` is your opaque
+The `path` argument is a `voxgig_value` string-list; `ud` is your opaque
 closure pointer (C has no captures).
 
 ### Filter entries with a predicate
 ```c
-static bool keep_nonempty(vs_value* pair, void* ud) {
-  vs_value* one = vs_new_int(1);                 /* element 1 of the [key, val] pair */
-  vs_value* val = vs_getprop(pair, one, NULL);   /* owned */
-  bool keep = !vs_isempty(val);
-  vs_release(val); vs_release(one);
+static bool keep_nonempty(voxgig_value* pair, void* ud) {
+  voxgig_value* one = voxgig_new_int(1);                 /* element 1 of the [key, val] pair */
+  voxgig_value* val = voxgig_getprop(pair, one, NULL);   /* owned */
+  bool keep = !voxgig_isempty(val);
+  voxgig_release(val); voxgig_release(one);
   return keep;
 }
-vs_value* kept = vs_filter(node, keep_nonempty, NULL);
+voxgig_value* kept = voxgig_filter(node, keep_nonempty, NULL);
 ```
-`vs_filter` calls `vs_itemcheck_fn` on each `[key, val]` pair value; `ud` is
+`voxgig_filter` calls `voxgig_itemcheck_fn` on each `[key, val]` pair value; `ud` is
 your opaque closure pointer.
 
 ### Run your own function during a transform (`$APPLY`)
-Register a callable `vs_value` (built with `vs_new_injector`) in the
+Register a callable `voxgig_value` (built with `voxgig_new_injector`) in the
 transform's `extra`, and reference it by name in the spec. A custom
 function may return the `SKIP` / `DELETE` sentinels (see below) to
 omit/remove the current key. The callback signature
-(`vs_injector_fn` / `vs_modify_fn`) is C-specific and covered by the
+(`voxgig_injector_fn` / `voxgig_modify_fn`) is C-specific and covered by the
 port's unit tests, not the JSON corpus — see [`../NOTES.md`](../design/NOTES.md).
 
 ### Collect all validation errors instead of aborting
-`vs_validate` returns the data on success. To gather errors rather than
-fail, supply an `errs` collector via the `vs_injection*` argument (the
+`voxgig_validate` returns the data on success. To gather errors rather than
+fail, supply an `errs` collector via the `voxgig_injection*` argument (the
 `errs` field on the injection state) — the canonical "collect errs"
 behaviour from [`../DOCS.md`](../DOCS.md#2-how-to-guides).
 
 ### Serialise
 ```c
-char* j  = vs_jsonify(value, NULL);              /* compact, insertion-ordered keys */
-char* jp = vs_jsonify(value, vs_new_int(2));     /* pretty, 2-space indent */
-char* s  = vs_stringify(value, 40);              /* truncated human form, for logs */
+char* j  = voxgig_jsonify(value, NULL);              /* compact, insertion-ordered keys */
+char* jp = voxgig_jsonify(value, voxgig_new_int(2));     /* pretty, 2-space indent */
+char* s  = voxgig_stringify(value, 40);              /* truncated human form, for logs */
 free(j); free(jp); free(s);                      /* all three are malloc'd */
 ```
 
@@ -183,28 +183,28 @@ checks this port against.
 
 C-specific points the signatures don't show:
 
-- **Two return disciplines.** Functions returning `vs_value*` give you an
-  **owned** reference — release with `vs_release`. Functions returning
-  `char*` (`vs_jsonify`, `vs_stringify`, `vs_pathify`, `vs_strkey`,
-  `vs_pad`, `vs_escre`, `vs_escurl`, `vs_join_v`) give you a **malloc'd**
-  string — release with `free`. `vs_keysof` returns a `vs_strvec` you free
-  with `vs_strvec_free`.
+- **Two return disciplines.** Functions returning `voxgig_value*` give you an
+  **owned** reference — release with `voxgig_release`. Functions returning
+  `char*` (`voxgig_jsonify`, `voxgig_stringify`, `voxgig_pathify`, `voxgig_strkey`,
+  `voxgig_pad`, `voxgig_escre`, `voxgig_escurl`, `voxgig_join_v`) give you a **malloc'd**
+  string — release with `free`. `voxgig_keysof` returns a `voxgig_strvec` you free
+  with `voxgig_strvec_free`.
 - **`getprop` vs `getelem`.** Both are Group A (a stored `null` reads as
-  absent). `vs_getelem` is list-specific, supports `-1`-from-the-end
-  indexing, and *invokes* a callable `alt`; `vs_getprop`/`vs_getdef` do not.
-- **`items` is `vs_items_v`** — it returns a `vs_value` list of `[key, val]`
+  absent). `voxgig_getelem` is list-specific, supports `-1`-from-the-end
+  indexing, and *invokes* a callable `alt`; `voxgig_getprop`/`voxgig_getdef` do not.
+- **`items` is `voxgig_items_v`** — it returns a `voxgig_value` list of `[key, val]`
   pair lists (owned). The C name carries a `_v` suffix because the value is
   boxed.
-- **`vs_lookup` is the Group B raw read.** It is the internal literal
+- **`voxgig_lookup` is the Group B raw read.** It is the internal literal
   lookup that preserves a stored `null`; the public readers
-  (`vs_getprop`/`vs_getelem`/`vs_haskey`) are Group A. Its result is
-  **borrowed** from the container (not retained) — `vs_retain` it if it must
+  (`voxgig_getprop`/`voxgig_getelem`/`voxgig_haskey`) are Group A. Its result is
+  **borrowed** from the container (not retained) — `voxgig_retain` it if it must
   outlive the parent.
-- **Type flags** combine bitwise: `vs_typify` of a string is
-  `VS_T_SCALAR | VS_T_STRING`; test with `0 < (VS_T_STRING & t)`.
-  `vs_typify(undefined)` is `VS_T_NOVAL` (not a scalar);
-  `vs_typify(null)` is `VS_T_SCALAR | VS_T_NULL`. Mode constants are
-  `VS_M_KEYPRE` / `VS_M_KEYPOST` / `VS_M_VAL`.
+- **Type flags** combine bitwise: `voxgig_typify` of a string is
+  `VOXGIG_T_SCALAR | VOXGIG_T_STRING`; test with `0 < (VOXGIG_T_STRING & t)`.
+  `voxgig_typify(undefined)` is `VOXGIG_T_NOVAL` (not a scalar);
+  `voxgig_typify(null)` is `VOXGIG_T_SCALAR | VOXGIG_T_NULL`. Mode constants are
+  `VOXGIG_M_KEYPRE` / `VOXGIG_M_KEYPOST` / `VOXGIG_M_VAL`.
 
 ---
 
@@ -212,22 +212,22 @@ C-specific points the signatures don't show:
 
 ### Memory ownership — the thing to get right in C
 
-Every `vs_value` carries an integer `refcount`. The model is documented at
+Every `voxgig_value` carries an integer `refcount`. The model is documented at
 the top of [`voxgig_struct.h`](./src/voxgig_struct.h) and holds uniformly:
 
-- **Constructors** (`vs_new_*`) and **`vs_parse_json`** return a fresh value
+- **Constructors** (`voxgig_new_*`) and **`voxgig_parse_json`** return a fresh value
   with refcount 1 — you own it.
-- A function that **returns** a `vs_value*` transfers one owned reference to
-  you. Always `vs_release` it when done (even on the `alt`/fallback path —
+- A function that **returns** a `voxgig_value*` transfers one owned reference to
+  you. Always `voxgig_release` it when done (even on the `alt`/fallback path —
   the API retains `alt` before returning it).
-- A function that **takes** `vs_value*` parameters **borrows** them: it does
+- A function that **takes** `voxgig_value*` parameters **borrows** them: it does
   not consume your reference, and you still release it yourself.
-- `vs_retain(v)` adds a reference; `vs_release(v)` removes one and frees the
+- `voxgig_retain(v)` adds a reference; `voxgig_release(v)` removes one and frees the
   value (and its container) when the count hits zero.
-- **Containers add a reference.** `vs_map_set` / `vs_list_push` (and the
+- **Containers add a reference.** `voxgig_map_set` / `voxgig_list_push` (and the
   ordered-`Map` setters in [`value.h`](./src/value.h)) **take ownership** of
   the one reference you pass in — do not release it afterwards. Reads like
-  `vs_map_get` / `vs_list_get` return a **borrowed** reference.
+  `voxgig_map_get` / `voxgig_list_get` return a **borrowed** reference.
 
 The header annotates each function (`/* borrowed */`, `/* takes
 ownership */`, `/* owned by caller */`); when in doubt, read the annotation.
@@ -236,15 +236,15 @@ precisely to catch ownership mistakes.
 
 ### `null` versus absent ("Group A/B")
 
-C distinguishes the two kinds in the value tag itself: `VS_VAL_UNDEF`
-(absent) is a separate kind from `VS_VAL_NULL` (the JSON null scalar). This
+C distinguishes the two kinds in the value tag itself: `VOXGIG_VAL_UNDEF`
+(absent) is a separate kind from `VOXGIG_VAL_NULL` (the JSON null scalar). This
 mirrors TS `undefined` vs `null` and is the language-neutral
 [Group A/B rule](../DOCS.md#null-versus-absent-group-ab):
 
-- **Group A — readers** (`vs_getprop`, `vs_getelem`, `vs_haskey`,
-  `vs_isempty`, `vs_isnode`): a stored `null` reads as *no value*.
-- **Group B — value processors** (`vs_setprop`, `vs_clone`, `vs_walk`,
-  `vs_merge`, `vs_inject`, `vs_transform`, `vs_validate`, `vs_select`, …):
+- **Group A — readers** (`voxgig_getprop`, `voxgig_getelem`, `voxgig_haskey`,
+  `voxgig_isempty`, `voxgig_isnode`): a stored `null` reads as *no value*.
+- **Group B — value processors** (`voxgig_setprop`, `voxgig_clone`, `voxgig_walk`,
+  `voxgig_merge`, `voxgig_inject`, `voxgig_transform`, `voxgig_validate`, `voxgig_select`, …):
   `null` is preserved literally.
 
 Full text in [`../UNDEF_SPEC.md`](../design/UNDEF_SPEC.md). This is the single most
@@ -252,8 +252,8 @@ common source of port bugs.
 
 ### Reference-stable containers
 
-`vs_list` and `vs_map` are reference-counted *containers*: aliasing one
-`vs_value*` that wraps a list and mutating through it is visible through
+`voxgig_list` and `voxgig_map` are reference-counted *containers*: aliasing one
+`voxgig_value*` that wraps a list and mutating through it is visible through
 every alias, exactly as JavaScript arrays/objects are shared by reference.
 `walk`, `merge`, `inject`, and `setpath` rely on this. The `Map` is
 insertion-ordered (keys held in a vector plus an open-addressing hash
@@ -263,10 +263,10 @@ needs stable order — never swap in an unordered map.
 ### Regex
 
 The canonical regex layer is the uniform six-function API. In C the
-shared `re_*` names are exposed as `vs_re_compile` / `vs_re_test` /
-`vs_re_find` / `vs_re_find_all` / `vs_re_replace` / `vs_re_escape` (with
-`_re` variants taking an already-compiled `vs_regex*`); the lower-level
-engine is `vs_regex_*` in [`regex.h`](./src/regex.h). It is an **in-tree
+shared `re_*` names are exposed as `voxgig_re_compile` / `voxgig_re_test` /
+`voxgig_re_find` / `voxgig_re_find_all` / `voxgig_re_replace` / `voxgig_re_escape` (with
+`_re` variants taking an already-compiled `voxgig_regex*`); the lower-level
+engine is `voxgig_regex_*` in [`regex.h`](./src/regex.h). It is an **in-tree
 Thompson NFA** implementing the RE2 subset (literals, classes, anchors,
 greedy/lazy quantifiers, groups, alternation; **no** backreferences or
 lookaround). Two consequences:
@@ -274,11 +274,11 @@ lookaround). Two consequences:
 - **Linear time, no catastrophic backtracking** — pathological inputs
   finish in microseconds. See
   [`../REGEX_PATHOLOGICAL.md`](../design/REGEX_PATHOLOGICAL.md).
-- **Zero-width `re_replace` is ECMA-style**: `vs_re_replace("a*", "abc",
+- **Zero-width `re_replace` is ECMA-style**: `voxgig_re_replace("a*", "abc",
   "X")` returns `"XXbXcX"` (the convention shared with the other in-tree
-  Thompson ports). Captures cap at `VS_REGEX_MAX_GROUPS` (16). Compiled
-  regexes and the returned `char*`/`vs_strvec` are caller-owned — free them
-  with `vs_regex_free` / `vs_strvec_free` / `free`.
+  Thompson ports). Captures cap at `VOXGIG_REGEX_MAX_GROUPS` (16). Compiled
+  regexes and the returned `char*`/`voxgig_strvec` are caller-owned — free them
+  with `voxgig_regex_free` / `voxgig_strvec_free` / `free`.
 
 ---
 
