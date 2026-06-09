@@ -13,8 +13,8 @@
 #include <string.h>
 
 /* Forward declarations of internal helpers from this file. */
-static vs_value* _injecthandler(vs_injection* inj, vs_value* val, const char* ref, vs_value* store,
-                                void* ud);
+static voxgig_value* _injecthandler(voxgig_injection* inj, voxgig_value* val, const char* ref,
+                                    voxgig_value* store, void* ud);
 
 /* Static helpers (copied from utility.c style; avoid duplicates by re-defining locally) */
 static char* xstrdup_s2(const char* s) {
@@ -42,61 +42,61 @@ static char* xstrndup_s2(const char* s, size_t n) {
  * Injection state — constructors / destructors / methods
  * ===========================================================================*/
 
-vs_injection* vs_inj_new(vs_value* val, vs_value* parent) {
-  vs_injection* inj = (vs_injection*)calloc(1, sizeof(vs_injection));
+voxgig_injection* voxgig_inj_new(voxgig_value* val, voxgig_value* parent) {
+  voxgig_injection* inj = (voxgig_injection*)calloc(1, sizeof(voxgig_injection));
   if (!inj)
     abort();
-  inj->val = val ? vs_retain(val) : vs_new_undef();
-  inj->parent = parent ? vs_retain(parent) : vs_new_undef();
-  inj->errs = vs_new_list();
+  inj->val = val ? voxgig_retain(val) : voxgig_new_undef();
+  inj->parent = parent ? voxgig_retain(parent) : voxgig_new_undef();
+  inj->errs = voxgig_new_list();
   inj->dparent = NULL;
-  vs_strvec_init(&inj->dpath);
-  vs_strvec_push(&inj->dpath, "$TOP");
-  inj->mode = VS_M_VAL;
+  voxgig_strvec_init(&inj->dpath);
+  voxgig_strvec_push(&inj->dpath, "$TOP");
+  inj->mode = VOXGIG_M_VAL;
   inj->full = false;
   inj->keyI = 0;
   inj->keyI_neg = false;
-  vs_strvec_init(&inj->keys);
-  vs_strvec_push(&inj->keys, "$TOP");
+  voxgig_strvec_init(&inj->keys);
+  voxgig_strvec_push(&inj->keys, "$TOP");
   inj->key = xstrdup_s2("$TOP");
-  vs_strvec_init(&inj->path);
-  vs_strvec_push(&inj->path, "$TOP");
+  voxgig_strvec_init(&inj->path);
+  voxgig_strvec_push(&inj->path, "$TOP");
   /* nodes stack: borrowed references. */
   inj->nodes_len = 0;
   inj->nodes_cap = 0;
   inj->nodes = NULL;
-  vs_inj_nodes_push(inj, parent);
-  inj->handler_val = vs_new_injector(_injecthandler, NULL);
+  voxgig_inj_nodes_push(inj, parent);
+  inj->handler_val = voxgig_new_injector(_injecthandler, NULL);
   inj->base = xstrdup_s2("$TOP");
-  inj->meta = vs_new_map();
+  inj->meta = voxgig_new_map();
   inj->modify_val = NULL;
   inj->prior = NULL;
   inj->extra = NULL;
   return inj;
 }
 
-void vs_inj_free(vs_injection* inj) {
+void voxgig_inj_free(voxgig_injection* inj) {
   if (!inj)
     return;
-  vs_release(inj->val);
-  vs_release(inj->parent);
-  vs_strvec_free(&inj->keys);
+  voxgig_release(inj->val);
+  voxgig_release(inj->parent);
+  voxgig_strvec_free(&inj->keys);
   free(inj->key);
-  vs_strvec_free(&inj->path);
+  voxgig_strvec_free(&inj->path);
   free(inj->nodes);
-  vs_release(inj->handler_val);
-  vs_release(inj->errs);
-  vs_release(inj->meta);
-  vs_strvec_free(&inj->dpath);
+  voxgig_release(inj->handler_val);
+  voxgig_release(inj->errs);
+  voxgig_release(inj->meta);
+  voxgig_strvec_free(&inj->dpath);
   free(inj->base);
-  vs_release(inj->modify_val);
+  voxgig_release(inj->modify_val);
   free(inj);
 }
 
-void vs_inj_nodes_push(vs_injection* inj, vs_value* n) {
+void voxgig_inj_nodes_push(voxgig_injection* inj, voxgig_value* n) {
   if (inj->nodes_len + 1 > inj->nodes_cap) {
     size_t nc = inj->nodes_cap == 0 ? 8 : inj->nodes_cap * 2;
-    vs_value** nn = (vs_value**)realloc(inj->nodes, nc * sizeof(vs_value*));
+    voxgig_value** nn = (voxgig_value**)realloc(inj->nodes, nc * sizeof(voxgig_value*));
     if (!nn)
       abort();
     inj->nodes = nn;
@@ -105,36 +105,36 @@ void vs_inj_nodes_push(vs_injection* inj, vs_value* n) {
   inj->nodes[inj->nodes_len++] = n;
 }
 
-void vs_inj_set_path(vs_injection* inj, const vs_strvec* path) {
-  vs_strvec_copy(&inj->path, path);
+void voxgig_inj_set_path(voxgig_injection* inj, const voxgig_strvec* path) {
+  voxgig_strvec_copy(&inj->path, path);
 }
 
-void vs_inj_set_dpath(vs_injection* inj, const vs_strvec* path) {
-  vs_strvec_copy(&inj->dpath, path);
+void voxgig_inj_set_dpath(voxgig_injection* inj, const voxgig_strvec* path) {
+  voxgig_strvec_copy(&inj->dpath, path);
 }
 
-void vs_inj_descend(vs_injection* inj) {
+void voxgig_inj_descend(voxgig_injection* inj) {
   /* meta.__d++ */
-  vs_value* d = vs_map_get(vs_as_map(inj->meta), "__d");
-  int64_t dv = (d && vs_is_int(d)) ? vs_as_int(d) : 0;
-  vs_map_set(vs_as_map(inj->meta), "__d", vs_new_int(dv + 1));
+  voxgig_value* d = voxgig_map_get(voxgig_as_map(inj->meta), "__d");
+  int64_t dv = (d && voxgig_is_int(d)) ? voxgig_as_int(d) : 0;
+  voxgig_map_set(voxgig_as_map(inj->meta), "__d", voxgig_new_int(dv + 1));
 
   /* parentkey = path[path.length-2] */
   const char* parentkey = NULL;
   if (inj->path.len >= 2)
     parentkey = inj->path.data[inj->path.len - 2];
 
-  if (!inj->dparent || vs_is_undef(inj->dparent)) {
+  if (!inj->dparent || voxgig_is_undef(inj->dparent)) {
     if (inj->dpath.len > 1 && parentkey) {
-      vs_strvec_push(&inj->dpath, parentkey);
+      voxgig_strvec_push(&inj->dpath, parentkey);
     }
   } else {
     if (parentkey) {
-      vs_value* k = vs_new_string(parentkey);
-      vs_value* lp = vs_lookup(inj->dparent, k);
-      vs_value* nd = lp ? vs_retain(lp) : vs_new_undef();
-      vs_release(k);
-      vs_release(inj->dparent);
+      voxgig_value* k = voxgig_new_string(parentkey);
+      voxgig_value* lp = voxgig_lookup(inj->dparent, k);
+      voxgig_value* nd = lp ? voxgig_retain(lp) : voxgig_new_undef();
+      voxgig_release(k);
+      voxgig_release(inj->dparent);
       inj->dparent = nd;
       /* Check dpath last segment. */
       char marker[256];
@@ -147,56 +147,57 @@ void vs_inj_descend(vs_injection* inj) {
           inj->dpath.len--;
         }
       } else {
-        vs_strvec_push(&inj->dpath, parentkey);
+        voxgig_strvec_push(&inj->dpath, parentkey);
       }
     }
   }
 }
 
-vs_injection* vs_inj_child(vs_injection* parent, size_t keyI, const vs_strvec* keys) {
+voxgig_injection* voxgig_inj_child(voxgig_injection* parent, size_t keyI,
+                                   const voxgig_strvec* keys) {
   /* key = strkey(keys[keyI]) */
   const char* keystr = (keyI < keys->len) ? keys->data[keyI] : "";
-  vs_value* keyv = vs_new_string(keystr);
-  vs_value* vp = vs_lookup(parent->val, keyv);
-  vs_value* val = vp ? vs_retain(vp) : vs_new_undef();
-  vs_release(keyv);
+  voxgig_value* keyv = voxgig_new_string(keystr);
+  voxgig_value* vp = voxgig_lookup(parent->val, keyv);
+  voxgig_value* val = vp ? voxgig_retain(vp) : voxgig_new_undef();
+  voxgig_release(keyv);
 
-  vs_injection* cinj = (vs_injection*)calloc(1, sizeof(vs_injection));
+  voxgig_injection* cinj = (voxgig_injection*)calloc(1, sizeof(voxgig_injection));
   if (!cinj)
     abort();
   cinj->val = val;
-  cinj->parent = vs_retain(parent->val);
-  cinj->errs = vs_retain(parent->errs);
-  cinj->dparent = parent->dparent ? vs_retain(parent->dparent) : vs_new_undef();
-  vs_strvec_init(&cinj->dpath);
-  vs_strvec_copy(&cinj->dpath, &parent->dpath);
+  cinj->parent = voxgig_retain(parent->val);
+  cinj->errs = voxgig_retain(parent->errs);
+  cinj->dparent = parent->dparent ? voxgig_retain(parent->dparent) : voxgig_new_undef();
+  voxgig_strvec_init(&cinj->dpath);
+  voxgig_strvec_copy(&cinj->dpath, &parent->dpath);
   cinj->mode = parent->mode;
   cinj->full = false;
   cinj->keyI = keyI;
   cinj->keyI_neg = false;
-  vs_strvec_init(&cinj->keys);
-  vs_strvec_copy(&cinj->keys, keys);
+  voxgig_strvec_init(&cinj->keys);
+  voxgig_strvec_copy(&cinj->keys, keys);
   cinj->key = xstrdup_s2(keystr);
-  vs_strvec_init(&cinj->path);
-  vs_strvec_copy(&cinj->path, &parent->path);
-  vs_strvec_push(&cinj->path, keystr);
+  voxgig_strvec_init(&cinj->path);
+  voxgig_strvec_copy(&cinj->path, &parent->path);
+  voxgig_strvec_push(&cinj->path, keystr);
   cinj->nodes_len = 0;
   cinj->nodes_cap = 0;
   cinj->nodes = NULL;
   for (size_t i = 0; i < parent->nodes_len; i++)
-    vs_inj_nodes_push(cinj, parent->nodes[i]);
-  vs_inj_nodes_push(cinj, parent->val);
-  cinj->handler_val = parent->handler_val ? vs_retain(parent->handler_val) : NULL;
+    voxgig_inj_nodes_push(cinj, parent->nodes[i]);
+  voxgig_inj_nodes_push(cinj, parent->val);
+  cinj->handler_val = parent->handler_val ? voxgig_retain(parent->handler_val) : NULL;
   cinj->base = parent->base ? xstrdup_s2(parent->base) : NULL;
-  cinj->meta = parent->meta ? vs_retain(parent->meta) : vs_new_map();
-  cinj->modify_val = parent->modify_val ? vs_retain(parent->modify_val) : NULL;
+  cinj->meta = parent->meta ? voxgig_retain(parent->meta) : voxgig_new_map();
+  cinj->modify_val = parent->modify_val ? voxgig_retain(parent->modify_val) : NULL;
   cinj->prior = parent;
   cinj->extra = parent->extra;
   return cinj;
 }
 
-vs_value* vs_inj_setval(vs_injection* inj, vs_value* val, int ancestor) {
-  vs_value* target = NULL;
+voxgig_value* voxgig_inj_setval(voxgig_injection* inj, voxgig_value* val, int ancestor) {
+  voxgig_value* target = NULL;
   const char* tkey = NULL;
   if (ancestor < 2) {
     target = inj->parent;
@@ -210,13 +211,13 @@ vs_value* vs_inj_setval(vs_injection* inj, vs_value* val, int ancestor) {
       return NULL;
     tkey = inj->path.data[inj->path.len - ancestor];
   }
-  vs_value* keyv = vs_new_string(tkey ? tkey : "");
-  if (!val || vs_is_undef(val)) {
-    vs_delprop(target, keyv);
+  voxgig_value* keyv = voxgig_new_string(tkey ? tkey : "");
+  if (!val || voxgig_is_undef(val)) {
+    voxgig_delprop(target, keyv);
   } else {
-    vs_setprop(target, keyv, val);
+    voxgig_setprop(target, keyv, val);
   }
-  vs_release(keyv);
+  voxgig_release(keyv);
   return target;
 }
 
@@ -224,25 +225,26 @@ vs_value* vs_inj_setval(vs_injection* inj, vs_value* val, int ancestor) {
  * checkPlacement
  * ===========================================================================*/
 
-bool vs_check_placement(int modes, const char* ijname, int parent_types, vs_injection* inj) {
+bool voxgig_check_placement(int modes, const char* ijname, int parent_types,
+                            voxgig_injection* inj) {
   if ((modes & inj->mode) == 0) {
-    const char* placement = (inj->mode == VS_M_VAL) ? "value" : "key";
+    const char* placement = (inj->mode == VOXGIG_M_VAL) ? "value" : "key";
     /* Build expected list. */
     char expected[64] = "";
     bool first = true;
-    if (modes & VS_M_KEYPRE) {
+    if (modes & VOXGIG_M_KEYPRE) {
       if (!first)
         strcat(expected, ",");
       strcat(expected, "key");
       first = false;
     }
-    if (modes & VS_M_KEYPOST) {
+    if (modes & VOXGIG_M_KEYPOST) {
       if (!first)
         strcat(expected, ",");
       strcat(expected, "key");
       first = false;
     }
-    if (modes & VS_M_VAL) {
+    if (modes & VOXGIG_M_VAL) {
       if (!first)
         strcat(expected, ",");
       strcat(expected, "value");
@@ -251,16 +253,16 @@ bool vs_check_placement(int modes, const char* ijname, int parent_types, vs_inje
     char msg[256];
     snprintf(msg, sizeof(msg), "$%s: invalid placement as %s, expected: %s.", ijname, placement,
              expected);
-    vs_list_push(vs_as_list(inj->errs), vs_new_string(msg));
+    voxgig_list_push(voxgig_as_list(inj->errs), voxgig_new_string(msg));
     return false;
   }
-  if (parent_types != 0 && parent_types != VS_T_ANY) {
-    int pt = vs_typify(inj->parent);
+  if (parent_types != 0 && parent_types != VOXGIG_T_ANY) {
+    int pt = voxgig_typify(inj->parent);
     if ((parent_types & pt) == 0) {
       char msg[256];
       snprintf(msg, sizeof(msg), "$%s: invalid placement in parent %s, expected: %s.", ijname,
-               vs_typename(pt), vs_typename(parent_types));
-      vs_list_push(vs_as_list(inj->errs), vs_new_string(msg));
+               voxgig_typename(pt), voxgig_typename(parent_types));
+      voxgig_list_push(voxgig_as_list(inj->errs), voxgig_new_string(msg));
       return false;
     }
   }
@@ -271,25 +273,25 @@ bool vs_check_placement(int modes, const char* ijname, int parent_types, vs_inje
  * injectorArgs
  * ===========================================================================*/
 
-vs_value* vs_injector_args(const int* argTypes, size_t n, vs_value* args) {
-  vs_value* found = vs_new_list();
-  vs_list_push(vs_as_list(found), vs_new_undef()); /* err slot */
+voxgig_value* voxgig_injector_args(const int* argTypes, size_t n, voxgig_value* args) {
+  voxgig_value* found = voxgig_new_list();
+  voxgig_list_push(voxgig_as_list(found), voxgig_new_undef()); /* err slot */
   for (size_t i = 0; i < n; i++) {
-    vs_value* arg = NULL;
-    if (vs_is_list(args)) {
-      arg = vs_list_get(vs_as_list(args), i);
+    voxgig_value* arg = NULL;
+    if (voxgig_is_list(args)) {
+      arg = voxgig_list_get(voxgig_as_list(args), i);
     }
-    int argt = vs_typify(arg);
+    int argt = voxgig_typify(arg);
     if ((argTypes[i] & argt) == 0) {
-      char* arepr = vs_stringify(arg, 22);
+      char* arepr = voxgig_stringify(arg, 22);
       char msg[512];
       snprintf(msg, sizeof(msg), "invalid argument: %s (%s at position %zu) is not of type: %s.",
-               arepr, vs_typename(argt), 1 + i, vs_typename(argTypes[i]));
+               arepr, voxgig_typename(argt), 1 + i, voxgig_typename(argTypes[i]));
       free(arepr);
-      vs_list_set(vs_as_list(found), 0, vs_new_string(msg));
+      voxgig_list_set(voxgig_as_list(found), 0, voxgig_new_string(msg));
       return found;
     }
-    vs_list_push(vs_as_list(found), arg ? vs_retain(arg) : vs_new_undef());
+    voxgig_list_push(voxgig_as_list(found), arg ? voxgig_retain(arg) : voxgig_new_undef());
   }
   return found;
 }
@@ -298,29 +300,30 @@ vs_value* vs_injector_args(const int* argTypes, size_t n, vs_value* args) {
  * injectChild
  * ===========================================================================*/
 
-vs_injection* vs_inject_child(vs_value* child, vs_value* store, vs_injection* inj) {
-  vs_injection* cinj = inj;
+voxgig_injection* voxgig_inject_child(voxgig_value* child, voxgig_value* store,
+                                      voxgig_injection* inj) {
+  voxgig_injection* cinj = inj;
 
   /* Replace ['$FORMAT', ...] in parent with child. */
   if (inj->prior) {
     if (inj->prior->prior) {
-      cinj = vs_inj_child(inj->prior->prior, inj->prior->keyI, &inj->prior->keys);
-      vs_release(cinj->val);
-      cinj->val = child ? vs_retain(child) : vs_new_undef();
-      vs_value* keyv = vs_new_string(inj->prior->key);
-      vs_setprop(cinj->parent, keyv, child);
-      vs_release(keyv);
+      cinj = voxgig_inj_child(inj->prior->prior, inj->prior->keyI, &inj->prior->keys);
+      voxgig_release(cinj->val);
+      cinj->val = child ? voxgig_retain(child) : voxgig_new_undef();
+      voxgig_value* keyv = voxgig_new_string(inj->prior->key);
+      voxgig_setprop(cinj->parent, keyv, child);
+      voxgig_release(keyv);
     } else {
-      cinj = vs_inj_child(inj->prior, inj->keyI, &inj->keys);
-      vs_release(cinj->val);
-      cinj->val = child ? vs_retain(child) : vs_new_undef();
-      vs_value* keyv = vs_new_string(inj->key);
-      vs_setprop(cinj->parent, keyv, child);
-      vs_release(keyv);
+      cinj = voxgig_inj_child(inj->prior, inj->keyI, &inj->keys);
+      voxgig_release(cinj->val);
+      cinj->val = child ? voxgig_retain(child) : voxgig_new_undef();
+      voxgig_value* keyv = voxgig_new_string(inj->key);
+      voxgig_setprop(cinj->parent, keyv, child);
+      voxgig_release(keyv);
     }
   }
 
-  vs_inject(child, store, cinj);
+  voxgig_inject(child, store, cinj);
   return cinj;
 }
 
@@ -331,10 +334,10 @@ vs_injection* vs_inject_child(vs_value* child, vs_value* store, vs_injection* in
 /* R_INJECTION_FULL: ^`(\$[A-Z]+|[^`]*)[0-9]*`$
  * Goes through the vendored regex engine so the call site reads the same as
  * the canonical TS. The captured group is returned via out_pathref. */
-static vs_regex* R_INJECTION_FULL_re(void) {
-  static vs_regex* re = NULL;
+static voxgig_regex* R_INJECTION_FULL_re(void) {
+  static voxgig_regex* re = NULL;
   if (!re)
-    re = vs_re_compile("^`(\\$[A-Z]+|[^`]*)[0-9]*`$");
+    re = voxgig_re_compile("^`(\\$[A-Z]+|[^`]*)[0-9]*`$");
   return re;
 }
 static bool match_injection_full(const char* val, size_t vlen, char** out_pathref) {
@@ -351,20 +354,20 @@ static bool match_injection_full(const char* val, size_t vlen, char** out_pathre
     tmp[vlen] = '\0';
     z = tmp;
   }
-  vs_strvec caps = vs_re_find_re(R_INJECTION_FULL_re(), z);
+  voxgig_strvec caps = voxgig_re_find_re(R_INJECTION_FULL_re(), z);
   bool ok = (caps.len >= 2);
   if (ok) {
     *out_pathref = xstrndup_s2(caps.data[1], strlen(caps.data[1]));
   }
-  vs_strvec_free(&caps);
+  voxgig_strvec_free(&caps);
   free(tmp);
   return ok;
 }
 
 /* Apply $BT and $DS escapes. */
 static char* apply_escapes(const char* s) {
-  char* a = vs_replace_str(s, "$BT", "`");
-  char* b = vs_replace_str(a, "$DS", "$");
+  char* a = voxgig_replace_str(s, "$BT", "`");
+  char* b = voxgig_replace_str(a, "$DS", "$");
   free(a);
   return b;
 }
@@ -380,9 +383,10 @@ static char* apply_escapes(const char* s) {
  *
  * The handler is invoked appropriately.
  */
-vs_value* vs_inject_str_v(const char* val, size_t vlen, vs_value* store, vs_injection* inj) {
+voxgig_value* voxgig_inject_str_v(const char* val, size_t vlen, voxgig_value* store,
+                                  voxgig_injection* inj) {
   if (!val || vlen == 0)
-    return vs_new_string("");
+    return voxgig_new_string("");
   char* pathref = NULL;
   if (match_injection_full(val, vlen, &pathref)) {
     if (inj)
@@ -393,9 +397,9 @@ vs_value* vs_inject_str_v(const char* val, size_t vlen, vs_value* store, vs_inje
       unescaped = apply_escapes(eff);
       eff = unescaped;
     }
-    vs_value* p = vs_new_string(eff);
-    vs_value* out = vs_getpath(store, p, inj);
-    vs_release(p);
+    voxgig_value* p = voxgig_new_string(eff);
+    voxgig_value* out = voxgig_getpath(store, p, inj);
+    voxgig_release(p);
     free(pathref);
     free(unescaped);
     return out;
@@ -421,22 +425,22 @@ vs_value* vs_inject_str_v(const char* val, size_t vlen, vs_value* store, vs_inje
         }
         if (inj)
           inj->full = false;
-        vs_value* p = vs_new_string(eff);
-        vs_value* found = vs_getpath(store, p, inj);
-        vs_release(p);
+        voxgig_value* p = voxgig_new_string(eff);
+        voxgig_value* found = voxgig_getpath(store, p, inj);
+        voxgig_release(p);
         free(unescaped);
         free(ref);
         char* sub;
-        if (!found || vs_is_undef(found))
+        if (!found || voxgig_is_undef(found))
           sub = xstrdup_s2("");
-        else if (vs_is_string(found))
-          sub = xstrdup_s2(vs_as_string(found));
+        else if (voxgig_is_string(found))
+          sub = xstrdup_s2(voxgig_as_string(found));
         else {
           /* JSON.stringify without indent — compact. */
-          vs_value* flags = vs_new_map();
-          vs_map_set(vs_as_map(flags), "indent", vs_new_int(0));
-          sub = vs_jsonify(found, flags);
-          vs_release(flags);
+          voxgig_value* flags = voxgig_new_map();
+          voxgig_map_set(voxgig_as_map(flags), "indent", voxgig_new_int(0));
+          sub = voxgig_jsonify(found, flags);
+          voxgig_release(flags);
         }
         size_t slen = strlen(sub);
         if (blen + slen + 1 > bcap) {
@@ -452,7 +456,7 @@ vs_value* vs_inject_str_v(const char* val, size_t vlen, vs_value* store, vs_inje
         blen += slen;
         buf[blen] = '\0';
         free(sub);
-        vs_release(found);
+        voxgig_release(found);
         i = j + 1;
       } else {
         /* No closing backtick; append literally. */
@@ -483,15 +487,15 @@ vs_value* vs_inject_str_v(const char* val, size_t vlen, vs_value* store, vs_inje
   if (!buf)
     buf = xstrdup_s2("");
   /* After replacement, run handler with full=true. */
-  vs_value* outv = vs_new_string(buf);
+  voxgig_value* outv = voxgig_new_string(buf);
   free(buf);
-  if (inj && inj->handler_val && vs_is_func(inj->handler_val)) {
+  if (inj && inj->handler_val && voxgig_is_func(inj->handler_val)) {
     inj->full = true;
     char* origref = xstrndup_s2(val, vlen);
-    vs_value* nv =
+    voxgig_value* nv =
         inj->handler_val->as.fn.fn.inj(inj, outv, origref, store, inj->handler_val->as.fn.ud);
     free(origref);
-    vs_release(outv);
+    voxgig_release(outv);
     outv = nv;
   }
   return outv;
@@ -501,42 +505,42 @@ vs_value* vs_inject_str_v(const char* val, size_t vlen, vs_value* store, vs_inje
  * _injecthandler / _validatehandler
  * ===========================================================================*/
 
-static vs_value* _injecthandler(vs_injection* inj, vs_value* val, const char* ref, vs_value* store,
-                                void* ud) {
+static voxgig_value* _injecthandler(voxgig_injection* inj, voxgig_value* val, const char* ref,
+                                    voxgig_value* store, void* ud) {
   (void)ud;
-  vs_value* out = val ? vs_retain(val) : vs_new_undef();
-  bool iscmd = vs_is_injector(val) && (ref == NULL || ref[0] == '$');
+  voxgig_value* out = val ? voxgig_retain(val) : voxgig_new_undef();
+  bool iscmd = voxgig_is_injector(val) && (ref == NULL || ref[0] == '$');
   if (iscmd) {
-    vs_release(out);
+    voxgig_release(out);
     out = val->as.fn.fn.inj(inj, val, ref, store, val->as.fn.ud);
-  } else if (inj->mode == VS_M_VAL && inj->full) {
-    vs_inj_setval(inj, val, 0);
+  } else if (inj->mode == VOXGIG_M_VAL && inj->full) {
+    voxgig_inj_setval(inj, val, 0);
   }
   return out;
 }
 
-vs_value* vs_validatehandler_internal(vs_injection* inj, vs_value* val, const char* ref,
-                                      vs_value* store, void* ud);
+voxgig_value* voxgig_validatehandler_internal(voxgig_injection* inj, voxgig_value* val,
+                                              const char* ref, voxgig_value* store, void* ud);
 
-vs_value* vs_validatehandler_internal(vs_injection* inj, vs_value* val, const char* ref,
-                                      vs_value* store, void* ud) {
+voxgig_value* voxgig_validatehandler_internal(voxgig_injection* inj, voxgig_value* val,
+                                              const char* ref, voxgig_value* store, void* ud) {
   /* Match R_META_PATH: ^([^$]+)\$([=~])(.+)$ */
   if (ref) {
     const char* dol = strchr(ref, '$');
     if (dol && dol != ref && (dol[1] == '=' || dol[1] == '~') && dol[2] != '\0') {
       char sep = dol[1];
       if (sep == '=') {
-        vs_value* pair = vs_new_list();
-        vs_list_push(vs_as_list(pair), vs_new_string("`$EXACT`"));
-        vs_list_push(vs_as_list(pair), val ? vs_retain(val) : vs_new_undef());
-        vs_inj_setval(inj, pair, 0);
-        vs_release(pair);
+        voxgig_value* pair = voxgig_new_list();
+        voxgig_list_push(voxgig_as_list(pair), voxgig_new_string("`$EXACT`"));
+        voxgig_list_push(voxgig_as_list(pair), val ? voxgig_retain(val) : voxgig_new_undef());
+        voxgig_inj_setval(inj, pair, 0);
+        voxgig_release(pair);
       } else {
-        vs_inj_setval(inj, val, 0);
+        voxgig_inj_setval(inj, val, 0);
       }
       inj->keyI_neg = true;
       inj->keyI = 0;
-      return vs_new_skip();
+      return voxgig_new_skip();
     }
   }
   return _injecthandler(inj, val, ref, store, ud);
@@ -546,44 +550,44 @@ vs_value* vs_validatehandler_internal(vs_injection* inj, vs_value* val, const ch
  * Main inject() loop
  * ===========================================================================*/
 
-vs_value* vs_inject(vs_value* val, vs_value* store, vs_injection* injdef) {
-  vs_injection* inj = injdef;
+voxgig_value* voxgig_inject(voxgig_value* val, voxgig_value* store, voxgig_injection* injdef) {
+  voxgig_injection* inj = injdef;
   /* Root if no injdef, or injdef.mode==0 (config bag). */
   bool root = (injdef == NULL) || (injdef->mode == 0);
-  vs_injection* allocated_inj = NULL;
+  voxgig_injection* allocated_inj = NULL;
 
   if (root) {
-    vs_value* holder = vs_new_map();
-    vs_map_set(vs_as_map(holder), "$TOP", val ? vs_retain(val) : vs_new_undef());
-    inj = vs_inj_new(val, holder);
-    vs_release(holder);
+    voxgig_value* holder = voxgig_new_map();
+    voxgig_map_set(voxgig_as_map(holder), "$TOP", val ? voxgig_retain(val) : voxgig_new_undef());
+    inj = voxgig_inj_new(val, holder);
+    voxgig_release(holder);
     allocated_inj = inj;
-    inj->dparent = store ? vs_retain(store) : vs_new_undef();
+    inj->dparent = store ? voxgig_retain(store) : voxgig_new_undef();
     /* errs = store.$ERRS or [] */
-    vs_value* serr = vs_map_get(vs_as_map(store), "$ERRS");
+    voxgig_value* serr = voxgig_map_get(voxgig_as_map(store), "$ERRS");
     if (serr) {
-      vs_release(inj->errs);
-      inj->errs = vs_retain(serr);
+      voxgig_release(inj->errs);
+      inj->errs = voxgig_retain(serr);
     }
     /* meta.__d = 0 */
-    vs_map_set(vs_as_map(inj->meta), "__d", vs_new_int(0));
+    voxgig_map_set(voxgig_as_map(inj->meta), "__d", voxgig_new_int(0));
     /* Carry over modify/handler/meta/extra/errs from caller config. */
     if (injdef) {
       if (injdef->modify_val) {
-        vs_release(inj->modify_val);
-        inj->modify_val = vs_retain(injdef->modify_val);
+        voxgig_release(inj->modify_val);
+        inj->modify_val = voxgig_retain(injdef->modify_val);
       }
       if (injdef->handler_val) {
-        vs_release(inj->handler_val);
-        inj->handler_val = vs_retain(injdef->handler_val);
+        voxgig_release(inj->handler_val);
+        inj->handler_val = voxgig_retain(injdef->handler_val);
       }
       if (injdef->meta) {
-        vs_release(inj->meta);
-        inj->meta = vs_retain(injdef->meta);
+        voxgig_release(inj->meta);
+        inj->meta = voxgig_retain(injdef->meta);
       }
-      if (injdef->errs && vs_is_list(injdef->errs)) {
-        vs_release(inj->errs);
-        inj->errs = vs_retain(injdef->errs);
+      if (injdef->errs && voxgig_is_list(injdef->errs)) {
+        voxgig_release(inj->errs);
+        inj->errs = voxgig_retain(injdef->errs);
       }
       if (injdef->extra) {
         inj->extra = injdef->extra;
@@ -591,108 +595,109 @@ vs_value* vs_inject(vs_value* val, vs_value* store, vs_injection* injdef) {
     }
   }
 
-  vs_inj_descend(inj);
+  voxgig_inj_descend(inj);
 
-  if (vs_is_node(val)) {
+  if (voxgig_is_node(val)) {
     /* Get keys; if map, partition non-$ then $. */
-    vs_strvec nodekeys = vs_keysof(val);
-    if (vs_is_map(val)) {
-      vs_strvec part1;
-      vs_strvec part2;
-      vs_strvec_init(&part1);
-      vs_strvec_init(&part2);
+    voxgig_strvec nodekeys = voxgig_keysof(val);
+    if (voxgig_is_map(val)) {
+      voxgig_strvec part1;
+      voxgig_strvec part2;
+      voxgig_strvec_init(&part1);
+      voxgig_strvec_init(&part2);
       for (size_t i = 0; i < nodekeys.len; i++) {
         const char* k = nodekeys.data[i];
         if (strchr(k, '$'))
-          vs_strvec_push(&part2, k);
+          voxgig_strvec_push(&part2, k);
         else
-          vs_strvec_push(&part1, k);
+          voxgig_strvec_push(&part1, k);
       }
-      vs_strvec_clear(&nodekeys);
+      voxgig_strvec_clear(&nodekeys);
       for (size_t i = 0; i < part1.len; i++)
-        vs_strvec_push(&nodekeys, part1.data[i]);
+        voxgig_strvec_push(&nodekeys, part1.data[i]);
       for (size_t i = 0; i < part2.len; i++)
-        vs_strvec_push(&nodekeys, part2.data[i]);
-      vs_strvec_free(&part1);
-      vs_strvec_free(&part2);
+        voxgig_strvec_push(&nodekeys, part2.data[i]);
+      voxgig_strvec_free(&part1);
+      voxgig_strvec_free(&part2);
     }
 
     for (size_t nkI = 0; nkI < nodekeys.len; nkI++) {
-      vs_injection* childinj = vs_inj_child(inj, nkI, &nodekeys);
+      voxgig_injection* childinj = voxgig_inj_child(inj, nkI, &nodekeys);
       /* Copy the key — nodekeys may be cleared and rewritten below. */
       char* nodekey = xstrndup_s2(nodekeys.data[nkI], strlen(nodekeys.data[nkI]));
-      childinj->mode = VS_M_KEYPRE;
+      childinj->mode = VOXGIG_M_KEYPRE;
 
       /* prekey = _injectstr(nodekey, store, childinj) */
-      vs_value* prekey = vs_inject_str_v(nodekey, strlen(nodekey), store, childinj);
+      voxgig_value* prekey = voxgig_inject_str_v(nodekey, strlen(nodekey), store, childinj);
 
       /* Re-read keyI / keys */
       nkI = childinj->keyI_neg ? (size_t)-1 : childinj->keyI;
-      vs_strvec_clear(&nodekeys);
+      voxgig_strvec_clear(&nodekeys);
       for (size_t i = 0; i < childinj->keys.len; i++)
-        vs_strvec_push(&nodekeys, childinj->keys.data[i]);
+        voxgig_strvec_push(&nodekeys, childinj->keys.data[i]);
 
-      bool prekey_valid = prekey && !vs_is_undef(prekey);
+      bool prekey_valid = prekey && !voxgig_is_undef(prekey);
       if (prekey_valid) {
-        char* pks = vs_strkey(prekey);
-        vs_value* pkv = vs_new_string(pks);
-        vs_release(childinj->val);
-        childinj->val = vs_getprop(val, pkv, NULL);
-        vs_release(pkv);
+        char* pks = voxgig_strkey(prekey);
+        voxgig_value* pkv = voxgig_new_string(pks);
+        voxgig_release(childinj->val);
+        childinj->val = voxgig_getprop(val, pkv, NULL);
+        voxgig_release(pkv);
         free(pks);
-        childinj->mode = VS_M_VAL;
+        childinj->mode = VOXGIG_M_VAL;
 
-        vs_inject(childinj->val, store, childinj);
-
-        nkI = childinj->keyI_neg ? (size_t)-1 : childinj->keyI;
-        vs_strvec_clear(&nodekeys);
-        for (size_t i = 0; i < childinj->keys.len; i++)
-          vs_strvec_push(&nodekeys, childinj->keys.data[i]);
-
-        childinj->mode = VS_M_KEYPOST;
-        vs_value* postv = vs_inject_str_v(nodekey, strlen(nodekey), store, childinj);
-        vs_release(postv);
+        voxgig_inject(childinj->val, store, childinj);
 
         nkI = childinj->keyI_neg ? (size_t)-1 : childinj->keyI;
-        vs_strvec_clear(&nodekeys);
+        voxgig_strvec_clear(&nodekeys);
         for (size_t i = 0; i < childinj->keys.len; i++)
-          vs_strvec_push(&nodekeys, childinj->keys.data[i]);
+          voxgig_strvec_push(&nodekeys, childinj->keys.data[i]);
+
+        childinj->mode = VOXGIG_M_KEYPOST;
+        voxgig_value* postv = voxgig_inject_str_v(nodekey, strlen(nodekey), store, childinj);
+        voxgig_release(postv);
+
+        nkI = childinj->keyI_neg ? (size_t)-1 : childinj->keyI;
+        voxgig_strvec_clear(&nodekeys);
+        for (size_t i = 0; i < childinj->keys.len; i++)
+          voxgig_strvec_push(&nodekeys, childinj->keys.data[i]);
       }
 
       free(nodekey);
-      vs_release(prekey);
-      vs_inj_free(childinj);
+      voxgig_release(prekey);
+      voxgig_inj_free(childinj);
     }
-    vs_strvec_free(&nodekeys);
-  } else if (vs_is_string(val)) {
-    inj->mode = VS_M_VAL;
-    vs_value* nv = vs_inject_str_v(vs_as_string(val), vs_string_len(val), store, inj);
-    if (!vs_is_skip(nv)) {
-      vs_inj_setval(inj, nv, 0);
+    voxgig_strvec_free(&nodekeys);
+  } else if (voxgig_is_string(val)) {
+    inj->mode = VOXGIG_M_VAL;
+    voxgig_value* nv =
+        voxgig_inject_str_v(voxgig_as_string(val), voxgig_string_len(val), store, inj);
+    if (!voxgig_is_skip(nv)) {
+      voxgig_inj_setval(inj, nv, 0);
     }
-    /* Replace inj->val and val (which is borrowed). vs_retain so caller's
+    /* Replace inj->val and val (which is borrowed). voxgig_retain so caller's
        reference is independent from inj->val's. */
-    vs_release(inj->val);
+    voxgig_release(inj->val);
     inj->val = nv;
     val = nv; /* borrowed alias; do not release again below */
   }
 
   /* Modify callback. */
-  if (inj->modify_val && vs_is_modify(inj->modify_val) && !vs_is_skip(val)) {
-    vs_value* keyv = vs_new_string(inj->key);
-    vs_value* mvp = vs_lookup(inj->parent, keyv);
-    vs_value* mval = mvp ? vs_retain(mvp) : vs_new_undef();
+  if (inj->modify_val && voxgig_is_modify(inj->modify_val) && !voxgig_is_skip(val)) {
+    voxgig_value* keyv = voxgig_new_string(inj->key);
+    voxgig_value* mvp = voxgig_lookup(inj->parent, keyv);
+    voxgig_value* mval = mvp ? voxgig_retain(mvp) : voxgig_new_undef();
     inj->modify_val->as.fn.fn.mod(mval, keyv, inj->parent, inj, store, inj->modify_val->as.fn.ud);
-    vs_release(mval);
-    vs_release(keyv);
+    voxgig_release(mval);
+    voxgig_release(keyv);
   }
 
   /* inj->val is already updated for string case; for node case we leave it
      unchanged (it pointed at val from the start). */
-  vs_value* out = vs_map_get(vs_as_map(inj->parent), "$TOP");
-  vs_value* result = out ? vs_retain(out) : vs_new_undef();
+  voxgig_value* out = voxgig_map_get(voxgig_as_map(inj->parent), "$TOP");
+  voxgig_value* result = out ? voxgig_retain(out) : voxgig_new_undef();
   if (allocated_inj) {
-    vs_inj_free(allocated_inj);
+    voxgig_inj_free(allocated_inj);
   }
   return result;
 }

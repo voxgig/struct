@@ -2,7 +2,7 @@
 """Check that every regex pattern in the shared test corpus stays inside the
 RE2 subset.
 
-The contract is documented in /REGEX.md: every port must support at least the
+The contract is documented in /design/REGEX.md: every port must support at least the
 Go (RE2) regex feature set, and no port may carry a runtime regex dependency
 beyond its stdlib. Some ports use weaker built-ins (Lua patterns) or
 hand-rolled matchers (C), so the corpus must not use features RE2 itself
@@ -194,7 +194,7 @@ def main() -> int:
     if bad:
         print(
             f"\n{len(bad)} corpus pattern(s) use features outside the RE2 subset.\n"
-            "Patterns must work in Go's `regexp` package; see /REGEX.md."
+            "Patterns must work in Go's `regexp` package; see /design/REGEX.md."
         )
         return 1
     print("\nall corpus regex patterns are inside the RE2 subset.")

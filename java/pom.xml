@@ -7,16 +7,57 @@
   <artifactId>struct-java</artifactId>
   <version>0.0.10</version>
   <name>voxgig-struct-java</name>
+  <description>Voxgig Struct — utilities for transforming JSON-like data structures (Java port).</description>
+  <url>https://github.com/voxgig/struct</url>
+
+  <licenses>
+    <license>
+      <name>MIT License</name>
+      <url>https://opensource.org/licenses/MIT</url>
+      <distribution>repo</distribution>
+    </license>
+  </licenses>
+
+  <developers>
+    <developer>
+      <id>voxgig</id>
+      <name>Voxgig</name>
+      <organization>Voxgig</organization>
+      <organizationUrl>https://voxgig.com</organizationUrl>
+    </developer>
+  </developers>
+
+  <scm>
+    <connection>scm:git:https://github.com/voxgig/struct.git</connection>
+    <developerConnection>scm:git:git@github.com:voxgig/struct.git</developerConnection>
+    <url>https://github.com/voxgig/struct</url>
+  </scm>
+
+  <!-- Maven Central / OSSRH release + snapshot repositories. The matching
+       server credentials (id = central / ossrh) live in the operator's
+       ~/.m2/settings.xml at release time. -->
+  <distributionManagement>
+    <repository>
+      <id>central</id>
+      <name>Central Repository OSSRH</name>
+      <url>https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/</url>
+    </repository>
+    <snapshotRepository>
+      <id>central</id>
+      <name>Central Repository OSSRH Snapshots</name>
+      <url>https://s01.oss.sonatype.org/content/repositories/snapshots/</url>
+    </snapshotRepository>
+  </distributionManagement>
 
   <properties>
     <maven.compiler.source>17</maven.compiler.source>
     <maven.compiler.target>17</maven.compiler.target>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <junit.jupiter.version>5.10.2</junit.jupiter.version>
-    <gson.version>2.11.0</gson.version>
+    <junit.jupiter.version>6.1.0</junit.jupiter.version>
+    <gson.version>2.14.0</gson.version>
     <checkstyle.plugin.version>3.6.0</checkstyle.plugin.version>
-    <checkstyle.version>10.20.1</checkstyle.version>
-    <spotbugs.plugin.version>4.8.6.6</spotbugs.plugin.version>
+    <checkstyle.version>13.5.0</checkstyle.version>
+    <spotbugs.plugin.version>4.9.8.3</spotbugs.plugin.version>
   </properties>
 
   <dependencies>
@@ -44,7 +85,7 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-compiler-plugin</artifactId>
-        <version>3.13.0</version>
+        <version>3.14.0</version>
         <configuration>
           <excludes>
             <exclude>test/**</exclude>
@@ -54,7 +95,7 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
-        <version>3.2.5</version>
+        <version>3.5.2</version>
         <configuration>
           <useModulePath>false</useModulePath>
         </configuration>
@@ -113,4 +154,84 @@
       </plugin>
     </plugins>
   </build>
+
+  <profiles>
+    <!-- Release profile: attaches the sources + javadoc jars (required by
+         Maven Central) and signs all artifacts with GPG. Signing is bound to
+         the `verify` phase, so a plain `mvn -Prelease package` produces the
+         three jars WITHOUT needing a GPG key; the key is only required once
+         the build reaches `verify`/`deploy` (see the Makefile `publish`
+         target). The GPG key + passphrase are operator-provided at release. -->
+    <profile>
+      <id>release</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-source-plugin</artifactId>
+            <version>3.3.1</version>
+            <configuration>
+              <!-- Test sources physically live under src/test (same source
+                   dir as the library); keep them out of the published jar. -->
+              <excludes>
+                <exclude>test/**</exclude>
+              </excludes>
+            </configuration>
+            <executions>
+              <execution>
+                <id>attach-sources</id>
+                <phase>package</phase>
+                <goals>
+                  <goal>jar-no-fork</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-javadoc-plugin</artifactId>
+            <version>3.11.2</version>
+            <configuration>
+              <!-- The ported source is large/dense; relax doclint and never
+                   fail the build on javadoc warnings so the jar still builds. -->
+              <doclint>none</doclint>
+              <failOnError>false</failOnError>
+              <!-- Exclude the test sources (they share the voxgig.struct
+                   package but sit in src/test and pull in test-scope deps),
+                   so javadoc documents only the library API. -->
+              <sourceFileExcludes>
+                <sourceFileExclude>test/**</sourceFileExclude>
+              </sourceFileExcludes>
+            </configuration>
+            <executions>
+              <execution>
+                <id>attach-javadoc</id>
+                <phase>package</phase>
+                <goals>
+                  <goal>jar</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-gpg-plugin</artifactId>
+            <version>3.2.7</version>
+            <executions>
+              <execution>
+                <id>sign-artifacts</id>
+                <!-- verify (not package) so `package` does NOT require a key. -->
+                <phase>verify</phase>
+                <goals>
+                  <goal>sign</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
 </project>

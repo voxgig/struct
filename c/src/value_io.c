@@ -19,12 +19,12 @@
  *
  * Accepts:
  *   - null / true / false
- *   - numbers (integer or decimal/exponent — split between vs_int and vs_double)
+ *   - numbers (integer or decimal/exponent — split between voxgig_int and voxgig_double)
  *   - strings, with the standard JSON escapes including \uXXXX (UTF-16
  *     surrogate pairs are decoded to UTF-8 bytes)
  *   - arrays and objects, with arbitrary whitespace between tokens
  *
- * Anything malformed → returns vs_new_undef() and leaves the cursor where it
+ * Anything malformed → returns voxgig_new_undef() and leaves the cursor where it
  * stopped. Mirrors cJSON's "best-effort, never throw" behaviour.
  * ===========================================================================*/
 
@@ -185,9 +185,9 @@ bad:
   return NULL;
 }
 
-static vs_value* jp_value(jp* p); /* fwd */
+static voxgig_value* jp_value(jp* p); /* fwd */
 
-static vs_value* jp_number(jp* p) {
+static voxgig_value* jp_number(jp* p) {
   size_t start = p->pos;
   if (jp_peek(p) == '-')
     p->pos++;
@@ -209,7 +209,7 @@ static vs_value* jp_number(jp* p) {
     }
   }
   if (p->pos == start)
-    return vs_new_undef();
+    return voxgig_new_undef();
   size_t n = p->pos - start;
   char tmp[64];
   if (n >= sizeof(tmp))
@@ -218,17 +218,17 @@ static vs_value* jp_number(jp* p) {
   tmp[n] = '\0';
   if (!has_dot && !has_exp) {
     long long ll = strtoll(tmp, NULL, 10);
-    return vs_new_int((int64_t)ll);
+    return voxgig_new_int((int64_t)ll);
   }
   double d = strtod(tmp, NULL);
-  return vs_new_double(d);
+  return voxgig_new_double(d);
 }
 
-static vs_value* jp_array(jp* p) {
+static voxgig_value* jp_array(jp* p) {
   if (jp_peek(p) != '[')
-    return vs_new_undef();
+    return voxgig_new_undef();
   p->pos++;
-  vs_value* lv = vs_new_list();
+  voxgig_value* lv = voxgig_new_list();
   jp_skip_ws(p);
   if (jp_peek(p) == ']') {
     p->pos++;
@@ -236,8 +236,8 @@ static vs_value* jp_array(jp* p) {
   }
   for (;;) {
     jp_skip_ws(p);
-    vs_value* item = jp_value(p);
-    vs_list_push(vs_as_list(lv), item);
+    voxgig_value* item = jp_value(p);
+    voxgig_list_push(voxgig_as_list(lv), item);
     jp_skip_ws(p);
     int c = jp_peek(p);
     if (c == ',') {
@@ -254,11 +254,11 @@ static vs_value* jp_array(jp* p) {
   return lv;
 }
 
-static vs_value* jp_object(jp* p) {
+static voxgig_value* jp_object(jp* p) {
   if (jp_peek(p) != '{')
-    return vs_new_undef();
+    return voxgig_new_undef();
   p->pos++;
-  vs_value* mv = vs_new_map();
+  voxgig_value* mv = voxgig_new_map();
   jp_skip_ws(p);
   if (jp_peek(p) == '}') {
     p->pos++;
@@ -277,8 +277,8 @@ static vs_value* jp_object(jp* p) {
     }
     p->pos++;
     jp_skip_ws(p);
-    vs_value* val = jp_value(p);
-    vs_map_set(vs_as_map(mv), key, val);
+    voxgig_value* val = jp_value(p);
+    voxgig_map_set(voxgig_as_map(mv), key, val);
     free(key);
     jp_skip_ws(p);
     int c = jp_peek(p);
@@ -295,20 +295,20 @@ static vs_value* jp_object(jp* p) {
   return mv;
 }
 
-static vs_value* jp_value(jp* p) {
+static voxgig_value* jp_value(jp* p) {
   jp_skip_ws(p);
   int c = jp_peek(p);
   if (c < 0)
-    return vs_new_undef();
+    return voxgig_new_undef();
   if (c == 'n' && jp_match(p, "null"))
-    return vs_new_null();
+    return voxgig_new_null();
   if (c == 't' && jp_match(p, "true"))
-    return vs_new_bool(true);
+    return voxgig_new_bool(true);
   if (c == 'f' && jp_match(p, "false"))
-    return vs_new_bool(false);
+    return voxgig_new_bool(false);
   if (c == '"') {
     char* s = jp_string(p);
-    vs_value* v = vs_new_string(s ? s : "");
+    voxgig_value* v = voxgig_new_string(s ? s : "");
     free(s);
     return v;
   }
@@ -320,47 +320,47 @@ static vs_value* jp_value(jp* p) {
     return jp_object(p);
   /* Unrecognised — advance to avoid infinite loop. */
   p->pos++;
-  return vs_new_undef();
+  return voxgig_new_undef();
 }
 
-vs_value* vs_parse_json(const char* text, size_t len) {
+voxgig_value* voxgig_parse_json(const char* text, size_t len) {
   if (!text)
-    return vs_new_undef();
+    return voxgig_new_undef();
   if (len == 0)
     len = strlen(text);
   jp p = {.src = text, .len = len, .pos = 0};
   return jp_value(&p);
 }
 
-vs_value* vs_parse_json_file(const char* path) {
+voxgig_value* voxgig_parse_json_file(const char* path) {
   FILE* f = fopen(path, "rb");
   if (!f)
-    return vs_new_undef();
+    return voxgig_new_undef();
   fseek(f, 0, SEEK_END);
   long sz = ftell(f);
   fseek(f, 0, SEEK_SET);
   if (sz < 0) {
     fclose(f);
-    return vs_new_undef();
+    return voxgig_new_undef();
   }
   char* buf = (char*)malloc((size_t)sz + 1);
   if (!buf) {
     fclose(f);
-    return vs_new_undef();
+    return voxgig_new_undef();
   }
   size_t rd = fread(buf, 1, (size_t)sz, f);
   buf[rd] = '\0';
   fclose(f);
-  vs_value* v = vs_parse_json(buf, rd);
+  voxgig_value* v = voxgig_parse_json(buf, rd);
   free(buf);
   return v;
 }
 
-/* Serializer: defer to the library's vs_jsonify (compact form). */
-char* vs_to_json(const vs_value* v) {
-  vs_value* flags = vs_new_map();
-  vs_map_set(vs_as_map(flags), "indent", vs_new_int(0));
-  char* s = vs_jsonify((vs_value*)v, flags);
-  vs_release(flags);
+/* Serializer: defer to the library's voxgig_jsonify (compact form). */
+char* voxgig_to_json(const voxgig_value* v) {
+  voxgig_value* flags = voxgig_new_map();
+  voxgig_map_set(voxgig_as_map(flags), "indent", voxgig_new_int(0));
+  char* s = voxgig_jsonify((voxgig_value*)v, flags);
+  voxgig_release(flags);
   return s;
 }

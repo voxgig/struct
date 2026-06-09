@@ -78,7 +78,7 @@ n/r = toolchain unavailable in this environment.
 
 4. **c — `re_find_all` missing from public header**
    (`c/src/voxgig_struct.h`, `c/src/re_util.c`). Added
-   `vs_strvec_vec` + `vs_re_find_all` / `vs_re_find_all_re`. The
+   `voxgig_strvec_vec` + `voxgig_re_find_all` / `voxgig_re_find_all_re`. The
    engine already supported the operation; only the wrapper was
    missing.
 

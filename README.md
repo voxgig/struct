@@ -38,11 +38,20 @@ syntax), and language-specific notes:
 | C#         | Complete   | [`csharp/README.md`](./csharp/README.md)              |
 | Zig        | Complete   | [`zig/README.md`](./zig/README.md)                    |
 | Java       | Partial    | [`java/README.md`](./java/README.md)                  |
+| Kotlin     | Partial    | [`kotlin/README.md`](./kotlin/README.md)              |
 | C++        | Complete   | [`cpp/README.md`](./cpp/README.md)                    |
 | Perl       | Complete   | [`perl/README.md`](./perl/README.md)                  |
 | Swift      | Complete   | [`swift/README.md`](./swift/README.md)                |
 
-The cross-language parity matrix lives in [`REPORT.md`](./REPORT.md).
+Each port directory also carries a `DOCS.md` (the comprehensive,
+four-part guide) and an `AGENTS.md` (notes for AI coding agents).
+
+The cross-language parity matrix lives in [`REPORT.md`](design/REPORT.md).
+
+For the in-depth, language-neutral guide — tutorial, how-to recipes, full
+reference, and design explanation — see [`DOCS.md`](./DOCS.md). If you (or
+an AI coding agent) are going to *modify* this repository, start with
+[`AGENTS.md`](./AGENTS.md).
 
 
 ## Motivation
@@ -214,8 +223,8 @@ names that match your language's casing convention.
 This is the canonical API surface, defined in TypeScript at
 [`typescript/src/StructUtility.ts`](./typescript/src/StructUtility.ts).  Every port
 exposes equivalents.  The casing varies by language convention
-(`getpath` in JS/Py/Lua/Rb/PHP; `GetPath` in Go/C#; `getPath` in
-Java).
+(`getpath` in TS/JS/Py/Ruby/PHP/Lua/Perl/Java/Kotlin/Swift; `GetPath`
+in Go/C#; `get_path` in Rust; `voxgig_getpath` in C).
 
 ### Minor utilities (25)
 
@@ -391,7 +400,9 @@ Quote the checker in backticks inside a `validate` spec, e.g. `` `$STRING` ``.
 ```
 .
 ├── README.md         # this file
-├── REPORT.md         # cross-language parity matrix
+├── DOCS.md           # comprehensive language-neutral guide
+├── AGENTS.md         # guidance for AI coding agents (+ CLAUDE.md pointer)
+├── design/           # reports & specs: REPORT, NOTES, REGEX*, UNDEF*
 ├── build/test/       # shared JSON test corpus (.jsonic)
 ├── typescript/  javascript/  python/   # canonical + JS-family ports
 ├── go/  ruby/  php/                     # other complete ports
@@ -406,7 +417,7 @@ Each language directory contains:
 - a test runner that consumes `build/test/*.jsonic`,
 - a `Makefile` with at minimum `make test` and `make lint` targets,
 - a `README.md` with the per-language quick-start. Cross-port quirks
-  go in the top-level [`NOTES.md`](./NOTES.md).
+  go in the top-level [`NOTES.md`](design/NOTES.md).
 
 `make lint` runs that language's industry-standard code-quality tooling
 (linter + formatter check):

@@ -3,7 +3,7 @@
 > C# / .NET port of the canonical TypeScript implementation.
 >
 > **Status: complete.**  Full TS-canonical parity: all 40 functions,
-> 15 type bit-flags, 3 mode constants (`M.KeyPre`/`M.KeyPost`/`M.Val`),
+> 15 type bit-flags, 3 mode constants (`M_KEYPRE`/`M_KEYPOST`/`M_VAL`),
 > `SKIP`/`DELETE` sentinels, and the `InjectState` machinery.
 > `Inject`/`Transform`/`Validate`/`Select` all dispatch through the
 > canonical injector machinery: 11 transform commands, 6 validate
@@ -24,14 +24,14 @@ parity matrix, see the [top-level README](../README.md).
 Inside the monorepo:
 
 ```bash
-cd cs
+cd csharp
 dotnet restore
 dotnet build
 ```
 
 - Project: `VoxgigStruct` targeting `net8.0`.
 - Namespace: `Voxgig.Struct`.
-- Static class: `StructUtils` (alias for `Struct`, used in tests).
+- Static class: `StructUtils` (all functions are static methods).
 
 
 ## Quick start
@@ -47,16 +47,16 @@ var store = new Dictionary<string, object?> {
     ["age"]  = 36,
 };
 
-var host = Struct.GetPath(store, "db.host");
+var host = StructUtils.GetPath(store, "db.host");
 // host == "localhost"
 
-var named = Struct.Transform(store, new Dictionary<string, object?> {
+var named = StructUtils.Transform(store, new Dictionary<string, object?> {
     ["name"]    = "`user.first`",
     ["surname"] = "`user.last`",
     ["years"]   = "`age`",
 });
 
-Struct.Validate(named, new Dictionary<string, object?> {
+StructUtils.Validate(named, new Dictionary<string, object?> {
     ["name"]    = "`$STRING`",
     ["surname"] = "`$STRING`",
     ["years"]   = "`$INTEGER`",
@@ -87,56 +87,56 @@ Source: [`Struct.cs`](./Struct.cs).
 ### Predicates
 
 ```csharp
-Struct.IsNode(object? val)    // bool
-Struct.IsMap(object? val)     // bool
-Struct.IsList(object? val)    // bool
-Struct.IsKey(object? val)     // bool
-Struct.IsEmpty(object? val)   // bool
-Struct.IsFunc(object? val)    // bool
+StructUtils.IsNode(object? val)    // bool
+StructUtils.IsMap(object? val)     // bool
+StructUtils.IsList(object? val)    // bool
+StructUtils.IsKey(object? val)     // bool
+StructUtils.IsEmpty(object? val)   // bool
+StructUtils.IsFunc(object? val)    // bool
 ```
 
 ### Type inspection
 
 ```csharp
-Struct.Typify(object? value)   // int — bit-field
-Struct.Typename(int t)          // string
+StructUtils.Typify(object? value)   // int — bit-field
+StructUtils.TypeName(int t)          // string
 ```
 
 ```csharp
-Struct.Typify(42);                       // T.Scalar | T.Number | T.Integer
-Struct.Typename(Struct.Typify("hi"));   // "string"
+StructUtils.Typify(42);                       // T.Scalar | T.Number | T.Integer
+StructUtils.TypeName(StructUtils.Typify("hi"));   // "string"
 ```
 
 ### Size, slice, pad
 
 ```csharp
-Struct.Size(object? val)
-Struct.Slice(object? val, int? start = null, int? end = null,
+StructUtils.Size(object? val)
+StructUtils.Slice(object? val, int? start = null, int? end = null,
              bool mutate = false)
-Struct.Pad(object? str, int? padding = null, string? padchar = null)
+StructUtils.Pad(object? str, int? padding = null, string? padchar = null)
 ```
 
 ### Property access
 
 ```csharp
-Struct.GetProp(object? val, object? key, object? alt = null)
-Struct.SetProp(object? parent, object? key, object? val)
-Struct.DelProp(object? parent, object? key)
-Struct.GetElem(object? val, object? key, object? alt = null)
-Struct.GetDef(object? val, object? alt)
-Struct.HasKey(object? val, object? key)
-Struct.KeysOf(object? val)
-Struct.Items(object? val)
-Struct.StrKey(object? key)
+StructUtils.GetProp(object? val, object? key, object? alt = null)
+StructUtils.SetProp(object? parent, object? key, object? val)
+StructUtils.DelProp(object? parent, object? key)
+StructUtils.GetElem(object? val, object? key, object? alt = null)
+StructUtils.GetDef(object? val, object? alt)
+StructUtils.HasKey(object? val, object? key)
+StructUtils.KeysOf(object? val)
+StructUtils.Items(object? val)
+StructUtils.StrKey(object? key)
 ```
 
 ### Path operations
 
 ```csharp
-Struct.GetPath(object? store, object? path,
+StructUtils.GetPath(object? store, object? path,
                object? current = null, InjectState? state = null)
-Struct.SetPath(object? store, object? path, object? val)
-Struct.Pathify(object? val, int? startin = null, int? endin = null)
+StructUtils.SetPath(object? store, object? path, object? val)
+StructUtils.Pathify(object? val, int? startin = null, int? endin = null)
 ```
 
 ```csharp
@@ -145,21 +145,21 @@ var store = new Dictionary<string, object?> {
         ["b"] = new Dictionary<string, object?> { ["c"] = 42 }
     }
 };
-Struct.GetPath(store, "a.b.c");        // 42
+StructUtils.GetPath(store, "a.b.c");        // 42
 
 var fresh = new Dictionary<string, object?>();
-Struct.SetPath(fresh, "db.host", "localhost");
+StructUtils.SetPath(fresh, "db.host", "localhost");
 ```
 
 ### Tree operations
 
 ```csharp
-Struct.Walk(object? val, WalkApply? before = null,
+StructUtils.Walk(object? val, WalkApply? before = null,
             WalkApply? after = null, int? maxdepth = null)
-Struct.Merge(object? val, int? maxdepth = null)
-Struct.Clone(object? val)
-Struct.Flatten(object? list, int? depth = null)
-Struct.Filter(object? val, Func<object?, bool> check)
+StructUtils.Merge(object? val, int? maxdepth = null)
+StructUtils.Clone(object? val)
+StructUtils.Flatten(object? list, int? depth = null)
+StructUtils.Filter(object? val, Func<object?, bool> check)
 
 public delegate object? WalkApply(
     object? key, object? val, object? parent, IList<string> path);
@@ -168,27 +168,27 @@ public delegate object? WalkApply(
 ### String / URL / JSON
 
 ```csharp
-Struct.EscRe(string s)
-Struct.EscUrl(string s)
-Struct.Join(IList<object?> arr, string? sep = null, bool? url = null)
-Struct.Jsonify(object? val, IDictionary<string, object?>? flags = null)
-Struct.Stringify(object? val, int? maxlen = null, object? pretty = null)
+StructUtils.EscRe(string s)
+StructUtils.EscUrl(string s)
+StructUtils.Join(IList<object?> arr, string? sep = null, bool? url = null)
+StructUtils.Jsonify(object? val, int indent = 2, int offset = 0)
+StructUtils.Stringify(object? val, int? maxlen = null, object? pretty = null)
 ```
 
 ### Inject / transform / validate / select
 
 ```csharp
-Struct.Inject(object? val, object? store, InjectState? state = null)
-Struct.Transform(object? data, object? spec, InjectState? state = null)
-Struct.Validate(object? data, object? spec, InjectState? state = null)
-Struct.Select(object? children, object? query)
+StructUtils.Inject(object? val, object? store, InjectState? state = null)
+StructUtils.Transform(object? data, object? spec, InjectState? state = null)
+StructUtils.Validate(object? data, object? spec, InjectState? state = null)
+StructUtils.Select(object? children, object? query)
 ```
 
 ### Builders
 
 ```csharp
-Struct.Jm(params object?[] kv)        // dictionary
-Struct.Jt(params object?[] v)         // list
+StructUtils.Jm(params object?[] kv)        // dictionary
+StructUtils.Jt(params object?[] v)         // list
 ```
 
 
@@ -197,11 +197,11 @@ Struct.Jt(params object?[] v)         // list
 ### Sentinels
 
 ```csharp
-Struct.SKIP        // emit nothing
-Struct.DELETE      // remove from parent
+StructUtils.SKIP        // emit nothing
+StructUtils.DELETE      // remove from parent
 ```
 
-### Type bit-flags (`Voxgig.Struct.T`)
+### Type bit-flags (`Voxgig.StructUtils.T`)
 
 ```csharp
 T.Any         T.NoVal       T.Boolean    T.Decimal
@@ -216,7 +216,7 @@ T.Instance    T.Scalar      T.Node
 ### Walk / inject phase flags
 
 ```csharp
-M.KeyPre   M.KeyPost   M.Val
+M_KEYPRE   M_KEYPOST   M_VAL
 ```
 
 
@@ -256,13 +256,14 @@ Behaviour is unchanged.
 
 ### Status
 
-In progress.  Coverage of canonical functions is broad; check
-[`../REPORT.md`](../REPORT.md) for the latest status.
+Complete: the full canonical API is present and the parity check
+([`../tools/check_parity.py`](../tools/check_parity.py)) reports C# `ok`.
+See [`../REPORT.md`](../design/REPORT.md) for the cross-port matrix.
 
 
 ## Regex
 
-Uniform six-function regex API (see `/REGEX_API.md`). The C# port
+Uniform six-function regex API (see `/design/REGEX_API.md`). The C# port
 wraps `System.Text.RegularExpressions.Regex`.
 
 ### API
@@ -278,7 +279,7 @@ wraps `System.Text.RegularExpressions.Regex`.
 
 ### Dialect
 
-Patterns must stay inside the **RE2 subset** documented in `/REGEX.md`.
+Patterns must stay inside the **RE2 subset** documented in `/design/REGEX.md`.
 .NET regex supports backreferences and lookaround; using them will not
 be portable.
 
@@ -291,15 +292,15 @@ be portable.
   untrusted patterns. Stay inside the RE2 subset and prefer flat
   patterns.
 - **Zero-width `replace`.** `ReReplace("a*", "abc", "X")` returns
-  `"XXbXcX"` — the ECMA convention shared by all PCRE/ECMA/.NET/Java/Onigmo engines plus the in-tree Thompson ports. Go (RE2) returns `"XbXcX"` instead; see `/REGEX_PATHOLOGICAL.md`.
+  `"XXbXcX"` — the ECMA convention shared by all PCRE/ECMA/.NET/Java/Onigmo engines plus the in-tree Thompson ports. Go (RE2) returns `"XbXcX"` instead; see `/design/REGEX_PATHOLOGICAL.md`.
 
-See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
+See `/design/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
 
 
 ## Build and test
 
 ```bash
-cd cs
+cd csharp
 dotnet restore
 dotnet test
 ```

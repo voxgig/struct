@@ -5,9 +5,9 @@ source 'https://rubygems.org'
 ruby '>= 2.7.0'
 
 # Minitest is used for the tests
-gem 'minitest', '~> 5.14'
+gem 'minitest', '~> 5.25'
 
 group :development do
   # Code quality: RuboCop linter/formatter.
-  gem 'rubocop', '~> 1.60', require: false
+  gem 'rubocop', '~> 1.69', require: false
 end

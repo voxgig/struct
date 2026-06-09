@@ -290,7 +290,7 @@ The rollout from this draft:
    call `delprop` explicitly rather than `setprop(parent, key, null)`.
 
 5. **rs / zig / cpp / c / java / cs / kt.** Internal `Noval` /
-   `monostate` / `VS_VAL_UNDEF` variants are fine for inject-state
+   `monostate` / `VOXGIG_VAL_UNDEF` variants are fine for inject-state
    bookkeeping. They must not leak through the public API in a way
    that distinguishes them from null on Group A function returns.
 

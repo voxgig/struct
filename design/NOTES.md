@@ -1,10 +1,10 @@
 # Cross-Port Implementation Notes
 
 > Cross-cutting quirks, edge cases, and follow-ups that don't fit
-> [`README.md`](./README.md) (user-facing), [`REPORT.md`](./REPORT.md)
-> (per-port parity matrix), [`UNDEF.md`](./UNDEF.md) /
-> [`UNDEF_SPEC.md`](./UNDEF_SPEC.md) (absent-vs-null), or
-> [`REGEX.md`](./REGEX.md) / [`REGEX_API.md`](./REGEX_API.md) (regex
+> [`README.md`](../README.md) (user-facing), [`REPORT.md`](REPORT.md)
+> (per-port parity matrix), [`UNDEF.md`](UNDEF.md) /
+> [`UNDEF_SPEC.md`](UNDEF_SPEC.md) (absent-vs-null), or
+> [`REGEX.md`](REGEX.md) / [`REGEX_API.md`](REGEX_API.md) (regex
 > dialect). Per-port adaptations that are still relevant live in each
 > port's own `README.md`; this file collects the leftovers.
 
@@ -14,7 +14,7 @@
 - **`getpath` trailing-dot ascending path is undocumented in the
   canonical TypeScript.** A path ending in one or more `.` (e.g.
   `.foo..`) ascends to an ancestor data parent; the implementation is
-  in [`typescript/src/StructUtility.ts`](./typescript/src/StructUtility.ts)
+  in [`typescript/src/StructUtility.ts`](../typescript/src/StructUtility.ts)
   (`for (let pI = 0; …; pI++) { … if (S_MT === part) { let ascends =
   0; while …` block), but there's no docstring or test naming the
   feature. The Perl, Rust, and other ports replicate the behaviour

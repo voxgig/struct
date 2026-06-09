@@ -12,7 +12,7 @@ TEST_SOURCES := $(wildcard tests/*.c)
 TEST_HEADERS := $(wildcard tests/*.h)
 ALL_SOURCES := $(C_SOURCES) $(C_HEADERS) $(TEST_SOURCES) $(TEST_HEADERS)
 
-.PHONY: build smoke test corpus check_leak sanitize lint tidy format format-check clean reset inspect
+.PHONY: build smoke test corpus check_leak sanitize lint tidy format format-check clean reset inspect publish
 
 # Default: compile and run the corpus driver.
 build: corpus
@@ -54,3 +54,14 @@ inspect:
 	@$(CC) --version | head -1
 	@echo ""
 	@echo "No third-party deps — JSON I/O is in src/value_io.c."
+
+# Release: C has no registry — publishing IS the git tag. The port lives in a
+# subdirectory, so the tag MUST be the `c/vX.Y.Z` form. Version is in the
+# VERSION file.
+VERSION := $(shell cat VERSION)
+publish: test
+	@if git rev-parse -q --verify "refs/tags/c/v$(VERSION)" >/dev/null; then \
+	  echo "tag c/v$(VERSION) already exists — bump c/VERSION first"; exit 1; fi
+	git tag -a "c/v$(VERSION)" -m "c v$(VERSION)"
+	git push origin "c/v$(VERSION)"
+	@echo "Published c/v$(VERSION). C has no central registry — the tag is the release (GitHub release / source tarball)."

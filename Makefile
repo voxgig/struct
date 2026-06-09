@@ -9,17 +9,27 @@
 #   make analyze       — lint + audit + scan
 #   make inspect       — show version info for all languages
 #   make clean         — clean all build artifacts
+#   make publish-rust  — publish ONE language to its registry + tag <lang>/vX.Y.Z
+#   make publish       — show the per-language publish targets (no publish-all)
 
-LANGS = ts js py go rb php lua zig java rs c
+# Target names are the port directory names, used verbatim as `make -C <dir>`.
+LANGS = typescript javascript python go ruby php lua zig java rust c
 
 # Languages that ship a `make lint` target (the test/build aggregates above
-# deliberately omit cpp/cs/kt, but their lint targets exist).
-LINT_LANGS = ts js py go rb php lua zig java rs c cpp cs kt
+# deliberately omit cpp/csharp/kotlin, but their lint targets exist).
+LINT_LANGS = typescript javascript python go ruby php lua zig java rust c cpp csharp kotlin
 
 # Languages whose ecosystem has a dependency / supply-chain audit tool wired up.
-AUDIT_LANGS = ts js py go rb php rs cs
+AUDIT_LANGS = typescript javascript python go ruby php rust csharp
 
-.PHONY: all inspect build test lint audit scan analyze clean reset \
+# Every port ships a `make publish` target: it publishes to that ecosystem's
+# library repository where one exists (npm, PyPI, crates.io, NuGet, RubyGems,
+# LuaRocks, Maven Central, CPAN) and ALWAYS creates + pushes a git tag
+# `<lang>/vX.Y.Z`. Registry-less ports (Go, PHP/Packagist, Swift, Zig, C, C++)
+# publish purely by that tag.
+PUBLISH_LANGS = typescript javascript python go ruby php lua zig java rust c cpp csharp kotlin perl swift
+
+.PHONY: all inspect build test lint audit scan analyze clean reset publish \
         scan-secrets scan-deps scan-sast scan-workflows scan-shell scan-spelling scan-docs scan-parity
 
 all: test
@@ -55,6 +65,15 @@ reset-%:
 	@echo "======== $* ========"
 	@$(MAKE) -C $* reset 2>/dev/null || echo "(no reset target)"
 
+# Publish ONE language: build/test, push to its registry (where one exists),
+# and create + push the git tag <lang>/vX.Y.Z. Registry uploads expect the
+# ecosystem's credentials in the environment (NPM_TOKEN, TWINE_*,
+# CARGO_REGISTRY_TOKEN, NUGET_API_KEY, GEM_HOST_API_KEY, LUAROCKS_API_KEY,
+# Maven settings.xml + GPG, PAUSE creds). See the port's README/DOCS.
+publish-%:
+	@echo "======== publish: $* ========"
+	@$(MAKE) -C $* publish
+
 # ---- Aggregate targets ----
 
 inspect: $(LANGS:%=inspect-%)
@@ -64,6 +83,14 @@ lint: $(LINT_LANGS:%=lint-%)
 audit: $(AUDIT_LANGS:%=audit-%)
 clean: $(LANGS:%=clean-%)
 reset: $(LANGS:%=reset-%)
+
+# Publishing is deliberately one-language-at-a-time (each upload is
+# irreversible and each cuts a version tag), so there is no publish-all.
+publish:
+	@echo "Publishing is per-language — pick one (each port versions independently):"
+	@echo "  make publish-<lang>   e.g.  make publish-rust"
+	@echo "Languages: $(PUBLISH_LANGS)"
+	@echo "Each runs the port's registry publish (where one exists) and pushes tag <lang>/vX.Y.Z."
 
 # ---- Repo-wide static analysis (not per-language) ----
 # These need their tools on PATH:

@@ -24,7 +24,7 @@ Port implementers may add `re_*` overloads (e.g. `re_find_at(pattern, input, sta
 
 ## Pattern dialect
 
-Every port supports the **RE2 subset** documented in `/REGEX.md`. The library's
+Every port supports the **RE2 subset** documented in `/design/REGEX.md`. The library's
 canonical patterns all live inside this subset, and the `$LIKE` test cases in
 the corpus exercise the operator's full advertised feature set. Specifically:
 

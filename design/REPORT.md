@@ -107,13 +107,13 @@ isempty / isnode, plus a stringify_null check. TS, JS, and Python
 each wire 6 sentinels-* tests; ports that haven't wired the category
 still pass their existing corpus.
 
-\*\* C: full TS-canonical parity. Reference-counted `vs_value` tagged
-union with `vs_list` / `vs_map` (insertion-ordered, hash-indexed) for
+\*\* C: full TS-canonical parity. Reference-counted `voxgig_value` tagged
+union with `voxgig_list` / `voxgig_map` (insertion-ordered, hash-indexed) for
 reference-stable containers. All 40 functions, 15 type bit-flags, 3
 mode constants, `SKIP` / `DELETE` sentinels (pointer identity), and
-the `vs_injection` state machine. All 11 transform commands, all 15
+the `voxgig_injection` state machine. All 11 transform commands, all 15
 validate checkers, all 4 select operators, the injection helpers
-(`vs_check_placement` / `vs_injector_args` / `vs_inject_child`) are
+(`voxgig_check_placement` / `voxgig_injector_args` / `voxgig_inject_child`) are
 wired. The full corpus runs via the `corpus.out` driver
 (`make build` / `make test`; `make lint` runs clang-format check +
 clang-tidy clean). The single remaining failure is the `$LIKE`
@@ -380,13 +380,13 @@ typename, validate, walk, checkPlacement, injectorArgs, injectChild.
 (minor / walk / merge / getpath / inject / transform / validate / select).
 
 **Exported Functions:** All 40 canonical functions present, prefixed with
-`vs_`. Reference-counted `vs_value*` pass-by-pointer convention. Optional
+`voxgig_`. Reference-counted `voxgig_value*` pass-by-pointer convention. Optional
 arguments accept `NULL` in place of an unset value.
 
-**Constants:** All 15 type bit-flags (`VS_T_*`), 3 mode constants (`VS_M_*`),
+**Constants:** All 15 type bit-flags (`VOXGIG_T_*`), 3 mode constants (`VOXGIG_M_*`),
 `SKIP` / `DELETE` sentinels (pointer-identity singletons) present.
 
-**Injection class:** `vs_injection` struct with full implementation of
+**Injection class:** `voxgig_injection` struct with full implementation of
 `descend` / `child` / `setval`, plus the inject / transform / validate /
 select dispatchers.
 
@@ -402,15 +402,15 @@ runtime helpers `$BT` / `$DS` / `$WHEN` / `$SPEC`.
 `$LTE` / `$LIKE`.
 
 **Language adaptations:**
-- Reference-counted `vs_value*` (no GC). `vs_retain` / `vs_release` for
-  manual ownership; `vs_clone` for deep-copy.
-- `VS_VAL_UNDEF` distinct from `VS_VAL_NULL`.
-- `vs_list` / `vs_map` are reference-stable containers (aliasing visible
+- Reference-counted `voxgig_value*` (no GC). `voxgig_retain` / `voxgig_release` for
+  manual ownership; `voxgig_clone` for deep-copy.
+- `VOXGIG_VAL_UNDEF` distinct from `VOXGIG_VAL_NULL`.
+- `voxgig_list` / `voxgig_map` are reference-stable containers (aliasing visible
   through every alias).
-- `vs_map` is insertion-ordered (vector + open-addressing hash index),
+- `voxgig_map` is insertion-ordered (vector + open-addressing hash index),
   required by the inject machinery's `$`-suffix key partition.
-- JSON I/O via `libcjson` bridge (`vs_parse_json` / `vs_to_json`); runtime
-  values are the custom `vs_value` type, not cJSON.
+- JSON I/O via `libcjson` bridge (`voxgig_parse_json` / `voxgig_to_json`); runtime
+  values are the custom `voxgig_value` type, not cJSON.
 - Function values box an injector or modify callback plus an opaque
   `void* ud` closure pointer.
 
@@ -425,8 +425,8 @@ runs under valgrind.
   operator uses substring containment instead of a full regex — the C
   standard library has no portable regex API and `libpcre` was kept
   out of scope to minimise dependencies.
-- ASan reports some forgotten `vs_release` calls in the top-level
-  `vs_select` / `vs_validate` helpers; no use-after-free or
+- ASan reports some forgotten `voxgig_release` calls in the top-level
+  `voxgig_select` / `voxgig_validate` helpers; no use-after-free or
   double-free. Will be cleaned up in a follow-up pass.
 
 **Gap count: 0**
@@ -489,7 +489,7 @@ all pass.
   reserved C++ keyword.
 
 `tools/check_parity.py` knows about both conventions (strips trailing
-`_v` and `_of` for the cpp port the way it strips `vs_` and trailing
+`_v` and `_of` for the cpp port the way it strips `voxgig_` and trailing
 `_v`/`_va` for the C port).
 
 **Constants:** All 15 type bit-flags (`T_*`), 3 mode constants

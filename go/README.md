@@ -4,7 +4,7 @@
 
 For motivation, language-neutral concepts, and the cross-language
 parity matrix, see the [top-level README](../README.md) and
-[REPORT.md](../REPORT.md).
+[REPORT.md](../design/REPORT.md).
 
 
 ## Install
@@ -301,7 +301,7 @@ internally by `merge` and `inject`; you only need it when writing
 custom modify callbacks that mutate lists.
 
 ```go
-ref := &voxgigstruct.ListRef[int]{Data: []int{1, 2, 3}}
+ref := &voxgigstruct.ListRef[int]{List: []int{1, 2, 3}}
 ```
 
 
@@ -369,7 +369,7 @@ $NULL  $NIL    $FUNCTION $INSTANCE $ANY       $CHILD    $ONE     $EXACT
 
 Go has only `nil`.  JSON null and "absent" both map to `nil` at the
 user-facing API.  Where the test corpus needs to distinguish them,
-the test runner uses string sentinels `__NULL__` and `__UNDEFMARK__`.
+the test runner uses string sentinels `__NULL__` and `__UNDEF__`.
 
 ### Multiple variants instead of optional parameters
 
@@ -403,7 +403,7 @@ canonical "lists are reference-stable" assumption.
 
 ## Regex
 
-Uniform six-function regex API (see `/REGEX_API.md`). The Go port
+Uniform six-function regex API (see `/design/REGEX_API.md`). The Go port
 wraps the stdlib `regexp` package — Go's `regexp` *is* the RE2
 reference implementation.
 
@@ -421,7 +421,7 @@ reference implementation.
 
 ### Dialect
 
-Patterns must stay inside the **RE2 subset** documented in `/REGEX.md`.
+Patterns must stay inside the **RE2 subset** documented in `/design/REGEX.md`.
 Since Go's regexp engine *is* RE2, this is the natural ceiling: there is
 no PCRE escape hatch.
 
@@ -446,7 +446,7 @@ no PCRE escape hatch.
   package and is **not** wrapped: portable callers should not depend
   on cross-port identity of zero-width replacement output.
 
-See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
+See `/design/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
 
 
 ## Build and test

@@ -1,4 +1,4 @@
-.PHONY: inspect build test lint clean reset
+.PHONY: inspect build test lint clean reset publish
 
 SWIFT ?= swift
 
@@ -33,3 +33,14 @@ clean:
 
 reset: clean
 	rm -rf Package.resolved
+
+# Release: SwiftPM has no upload step — publishing IS the git tag. The package
+# lives in a subdirectory, so the tag MUST be the `swift/vX.Y.Z` form. Version
+# is in the VERSION file.
+VERSION := $(shell cat VERSION)
+publish: test
+	@if git rev-parse -q --verify "refs/tags/swift/v$(VERSION)" >/dev/null; then \
+	  echo "tag swift/v$(VERSION) already exists — bump swift/VERSION first"; exit 1; fi
+	git tag -a "swift/v$(VERSION)" -m "swift v$(VERSION)"
+	git push origin "swift/v$(VERSION)"
+	@echo "Published swift/v$(VERSION). SwiftPM resolves by git tag."

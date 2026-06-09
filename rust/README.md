@@ -7,7 +7,7 @@
 > checkers), `select` (all operators), and the `primary.check` SDK test.
 
 For motivation, the language-neutral concepts, and the cross-language parity
-matrix, see the [top-level README](../README.md) and [`REPORT.md`](../REPORT.md).
+matrix, see the [top-level README](../README.md) and [`REPORT.md`](../design/REPORT.md).
 
 ## Build & test
 
@@ -49,7 +49,7 @@ pub enum Value {
     Num(f64),                                    // one numeric kind; integer-ness derived
     Str(String),
     List(Rc<RefCell<Vec<Value>>>),               // reference-stable, mutable in place
-    Map(Rc<RefCell<IndexMap<String, Value>>>),   // insertion-ordered, reference-stable
+    Map(Rc<RefCell<OrderedMap<Value>>>),   // insertion-ordered, reference-stable
     Func(Rc<dyn Fn(&Inj, &Value, &str, &Value) -> Value>),  // callable values in data
     Sentinel(&'static Sentinel),                 // SKIP / DELETE — pointer identity
 }
@@ -124,13 +124,13 @@ Rust has no optional/overloaded parameters, so:
   returns `Vec<(String, Value)>`. Likewise `keys_of` / `keysof_vec`, `filter` /
   `filter_vals`.
 
-See [`REPORT.md`](../REPORT.md#rust-rust) for the rust-port adaptations
-write-up, and [`../NOTES.md`](../NOTES.md) for cross-port quirks.
+See [`REPORT.md`](../design/REPORT.md#rust-rust) for the rust-port adaptations
+write-up, and [`../NOTES.md`](../design/NOTES.md) for cross-port quirks.
 
 
 ## Regex
 
-Uniform six-function regex API (see `/REGEX_API.md`). The Rust port
+Uniform six-function regex API (see `/design/REGEX_API.md`). The Rust port
 **ships its own RE2-subset engine** in `src/re.rs` — no `regex` crate
 dependency, no third-party crates at all (`Cargo.toml` lists none for
 runtime).
@@ -149,7 +149,7 @@ runtime).
 ### Dialect
 
 The in-tree engine implements the RE2 subset documented in
-`/REGEX.md`: literals + escapes, `.`, `^`/`$`, `* + ? {n} {n,} {n,m}`
+`/design/REGEX.md`: literals + escapes, `.`, `^`/`$`, `* + ? {n} {n,} {n,m}`
 (greedy + lazy), classes incl. `\d \w \s` and friends, `\b`/`\B`,
 `(...)` / `(?:...)`, alternation.
 
@@ -172,9 +172,9 @@ portable patterns.
 - **Zero-width `re_replace`.** `re_replace("a*", "abc", "X")` returns
   `"XXbXcX"` — the convention shared with all PCRE/ECMA/Java/.NET
   engines and the other in-tree Thompson ports (C / Lua / Zig). Go
-  (RE2) returns `"XbXcX"` instead; see `/REGEX_PATHOLOGICAL.md`.
+  (RE2) returns `"XbXcX"` instead; see `/design/REGEX_PATHOLOGICAL.md`.
 - **Single-threaded.** `Value` uses `Rc<RefCell<…>>` so it is
   `!Send + !Sync`. The regex statics use `std::sync::LazyLock` and
   are thread-safe in isolation, but the public API isn't.
 
-See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
+See `/design/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.

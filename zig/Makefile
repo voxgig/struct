@@ -1,4 +1,4 @@
-.PHONY: inspect build test lint fmt-check clean reset
+.PHONY: inspect build test lint fmt-check clean reset publish
 
 # Inspect: show language and project version info
 inspect:
@@ -43,3 +43,14 @@ clean:
 # Full reset: clean + remove fetched dependencies
 reset: clean
 	rm -rf .zig-cache
+
+# Release: Zig has no registry — publishing IS the git tag. The port lives in a
+# subdirectory, so the tag MUST be the `zig/vX.Y.Z` form. Version is read from
+# the build.zig.zon manifest (Zig's package version field).
+VERSION := $(shell grep -E '\.version' build.zig.zon | sed -E 's/.*"([^"]+)".*/\1/')
+publish: test
+	@if git rev-parse -q --verify "refs/tags/zig/v$(VERSION)" >/dev/null; then \
+	  echo "tag zig/v$(VERSION) already exists — bump .version in build.zig.zon first"; exit 1; fi
+	git tag -a "zig/v$(VERSION)" -m "zig v$(VERSION)"
+	git push origin "zig/v$(VERSION)"
+	@echo "Published zig/v$(VERSION). Zig consumers fetch this tag via build.zig.zon (URL + hash)."

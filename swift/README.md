@@ -9,7 +9,7 @@
 
 For motivation, the language-neutral concepts, and the cross-language
 parity matrix, see the [top-level README](../README.md) and
-[`REPORT.md`](../REPORT.md).
+[`REPORT.md`](../design/REPORT.md).
 
 
 ## Install
@@ -147,7 +147,7 @@ order. `JSON.stringify(value, indent: 2)` serialises back.
 
 ## Regex
 
-Uniform six-function regex API (see `/REGEX_API.md`). The Swift port
+Uniform six-function regex API (see `/design/REGEX_API.md`). The Swift port
 wraps `NSRegularExpression`.
 
 ### API
@@ -163,7 +163,7 @@ wraps `NSRegularExpression`.
 
 ### Dialect
 
-Patterns must stay inside the **RE2 subset** documented in `/REGEX.md`.
+Patterns must stay inside the **RE2 subset** documented in `/design/REGEX.md`.
 `NSRegularExpression` (ICU-based) supports backreferences and lookaround;
 using them will not be portable.
 
@@ -178,7 +178,7 @@ using them will not be portable.
   threads results through the in-tree `Value` enum (matching the
   rest of the API surface), not raw arrays.
 
-See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
+See `/design/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
 
 
 ## Tests

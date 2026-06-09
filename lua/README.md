@@ -4,7 +4,7 @@
 
 For motivation, language-neutral concepts, and the cross-language
 parity matrix, see the [top-level README](../README.md) and
-[REPORT.md](../REPORT.md).
+[REPORT.md](../design/REPORT.md).
 
 
 ## Setup
@@ -372,7 +372,7 @@ reference-stable" assumption holds without a wrapper.
 
 ## Regex
 
-Uniform six-function regex API (see `/REGEX_API.md`). The Lua port
+Uniform six-function regex API (see `/design/REGEX_API.md`). The Lua port
 **ships its own RE2-subset engine** in `src/regex.lua` (~500 LOC of
 pure Lua — Lua's built-in pattern language is intentionally not
 regex, so we vendor one). No LuaRocks dependency, no FFI.
@@ -391,7 +391,7 @@ regex, so we vendor one). No LuaRocks dependency, no FFI.
 ### Dialect
 
 The in-tree engine implements the RE2 subset documented in
-`/REGEX.md`: literals + escapes, `.`, `^`/`$`, `* + ? {n} {n,} {n,m}`
+`/design/REGEX.md`: literals + escapes, `.`, `^`/`$`, `* + ? {n} {n,} {n,m}`
 (greedy + lazy), classes incl. `\d \w \s` and friends, `\b`/`\B`,
 `(...)` / `(?:...)`, alternation.
 
@@ -415,7 +415,7 @@ back-reference semantics, so `re.re_test("^(a+)\\1$", "aaaa")` returns
   `"XaXbXcX"`; the `OP_MATCH` handler in `regex.lua` is now
   priority-correct, matching the C port's fix.)
 
-See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
+See `/design/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
 
 
 ## Build and test

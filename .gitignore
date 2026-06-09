@@ -158,6 +158,14 @@ package-lock.json
 csharp/**/bin/
 csharp/**/obj/
 
+# Release / packaging artifacts (created by `make publish`)
+python/dist/
+python/build/
+python/*.egg-info/
+ruby/*.gem
+perl/.release/
+lua/voxgig-struct-*.rockspec
+
 # Zig
 .zig-cache/
 zig-cache/

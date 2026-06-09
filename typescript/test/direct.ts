@@ -1,6 +1,6 @@
 import { transform, M_KEYPRE } from '..'
 
-let errs: any
+const errs: any = []
 
 // errs = []
 // out = transform(undefined, undefined, { errs })

@@ -17,7 +17,7 @@
  *   - Backreferences, lookaround, possessive quantifiers, atomic groups.
  *
  * The matcher is a Thompson-NFA driver with explicit instruction set.
- * Performance: O(n*m). Captures supported up to VS_REGEX_MAX_GROUPS.
+ * Performance: O(n*m). Captures supported up to VOXGIG_REGEX_MAX_GROUPS.
  */
 
 #ifndef VOXGIG_STRUCT_REGEX_H
@@ -30,50 +30,52 @@
 extern "C" {
 #endif
 
-#define VS_REGEX_MAX_GROUPS 16
+#define VOXGIG_REGEX_MAX_GROUPS 16
 
-typedef struct vs_regex vs_regex;
+typedef struct voxgig_regex voxgig_regex;
 
 /* Compile a pattern. Returns NULL on syntax error; if `err` is non-NULL it
  * receives a malloc'd diagnostic (caller frees). */
-vs_regex* vs_regex_compile(const char* pattern, char** err);
+voxgig_regex* voxgig_regex_compile(const char* pattern, char** err);
 
 /* Free a compiled regex. */
-void vs_regex_free(vs_regex* re);
+void voxgig_regex_free(voxgig_regex* re);
 
 /* Find the first match in `input[0..ilen)`. On success returns true and (if
  * `caps` non-NULL) fills caps with up to `ncaps` capture pairs:
  *   caps[2*i+0] = start offset (inclusive)
  *   caps[2*i+1] = end   offset (exclusive)
  * Group 0 is the whole match. Unmatched groups get (-1, -1). */
-bool vs_regex_find(const vs_regex* re, const char* input, size_t ilen, int* caps, int ncaps);
+bool voxgig_regex_find(const voxgig_regex* re, const char* input, size_t ilen, int* caps,
+                       int ncaps);
 
 /* Boolean shortcut. */
-bool vs_regex_test(const vs_regex* re, const char* input, size_t ilen);
+bool voxgig_regex_test(const voxgig_regex* re, const char* input, size_t ilen);
 
 /* Find all non-overlapping matches. Caller provides an integer array `caps`
- * of size `max_matches * 2 * VS_REGEX_MAX_GROUPS`. Returns the count.
- * caps[m * 2*VS_REGEX_MAX_GROUPS + 2*g + (0|1)] = group g's start/end for match m. */
-int vs_regex_find_all(const vs_regex* re, const char* input, size_t ilen, int* caps,
-                      int max_matches);
+ * of size `max_matches * 2 * VOXGIG_REGEX_MAX_GROUPS`. Returns the count.
+ * caps[m * 2*VOXGIG_REGEX_MAX_GROUPS + 2*g + (0|1)] = group g's start/end for match m. */
+int voxgig_regex_find_all(const voxgig_regex* re, const char* input, size_t ilen, int* caps,
+                          int max_matches);
 
 /* Replace every match in `input`. `replacement` may contain $& (whole match)
  * and $1..$9 (capture references). Returns a malloc'd C string (caller
  * frees). Returns NULL on allocation failure. */
-char* vs_regex_replace(const vs_regex* re, const char* input, size_t ilen, const char* replacement);
+char* voxgig_regex_replace(const voxgig_regex* re, const char* input, size_t ilen,
+                           const char* replacement);
 
 /* Callback variant: `cb` receives the captures array (length 2*ncaps where
  * ncaps is the number of groups in the regex + 1 for the whole match), the
  * input buffer, and `ud`. It returns a malloc'd replacement string for this
  * match. */
-typedef char* (*vs_regex_replace_cb)(const int* caps, int ncaps, const char* input, void* ud);
+typedef char* (*voxgig_regex_replace_cb)(const int* caps, int ncaps, const char* input, void* ud);
 
-char* vs_regex_replace_cb_fn(const vs_regex* re, const char* input, size_t ilen,
-                             vs_regex_replace_cb cb, void* ud);
+char* voxgig_regex_replace_cb_fn(const voxgig_regex* re, const char* input, size_t ilen,
+                                 voxgig_regex_replace_cb cb, void* ud);
 
 /* Number of capture groups in the compiled regex (group 0 plus parenthesised
  * non-passthrough groups; (?:...) is not counted). */
-int vs_regex_ngroups(const vs_regex* re);
+int voxgig_regex_ngroups(const voxgig_regex* re);
 
 #ifdef __cplusplus
 }

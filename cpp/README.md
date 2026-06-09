@@ -9,14 +9,14 @@
 > dispatch through the canonical injector machinery: 11 transform
 > commands, 6 validate checkers, 4 select operators.
 >
-> Passes the full shared corpus (1178/1178). Run locally with
-> `make build` from `cpp/`. Per-file pass counts are written to
-> `corpus-scoreboard.json` after each run; the committed baseline
-> lives at `test-baseline.json`.
+> Passes the full shared corpus. Run locally with `make test` from
+> `cpp/`. Per-file pass counts are written to `corpus-scoreboard.json`
+> after each run; the committed baseline lives at `test-baseline.json`.
 
 For motivation, language-neutral concepts, and the cross-language
 parity matrix, see the [top-level README](../README.md) and
-[REPORT.md](../REPORT.md).
+[REPORT.md](../design/REPORT.md).  For the in-depth guide (tutorial, recipes,
+explanation), see [`DOCS.md`](./DOCS.md).
 
 
 ## Install
@@ -25,217 +25,102 @@ In the monorepo:
 
 ```bash
 cd cpp
-make build       # smoke + corpus
+make test        # smoke + corpus driver (the default build target)
 make smoke       # just the smoke test
 make corpus      # just the corpus driver
 make sanitize    # build + run with ASan + UBSan
+make check_leak  # build + run under valgrind
 ```
 
 The library is header-only across three files in `src/`:
-- [`value.hpp`](./src/value.hpp) — `Value` (std::variant), `OrderedMap`,
-  `Sentinel`, type bit-flags, predicates.
-- [`value_io.hpp`](./src/value_io.hpp) — JSON parse/serialise via the
-  `nlohmann::json` bridge.
+- [`value.hpp`](./src/value.hpp) — `Value` (a `std::variant`-based tagged
+  type), the in-tree `OrderedMap`, `Sentinel`, type bit-flags, predicates.
+- [`value_io.hpp`](./src/value_io.hpp) — JSON parse/serialise via an
+  in-tree, hand-written recursive-descent parser/printer (no third-party
+  dependency).
 - [`voxgig_struct.hpp`](./src/voxgig_struct.hpp) — main API: utilities,
   `getpath`/`setpath`/`walk`/`merge`/`inject`/`transform`/`validate`/
   `select` plus all `transform_*`/`validate_*`/`select_*` injectors.
 
 Namespace `voxgig::structlib`.  Requires C++17 (for `std::variant` /
-structured bindings).  Depends on [nlohmann/json](https://github.com/nlohmann/json)
-only for the JSON-text parser/serialiser bridge — runtime values use
-the custom `Value` type.
-
-```cpp
-#include "voxgig_struct.hpp"
-#include <nlohmann/json.hpp>
-using nlohmann::json;
-using namespace VoxgigStruct;
-```
+structured bindings).  The library proper has **no third-party
+dependency** — runtime values use the custom `Value` type and JSON text is
+handled in-tree.  [nlohmann/json](https://github.com/nlohmann/json) is used
+only by the test harness (corpus loading), so `make test` expects its
+header on the include path (e.g. `/usr/include/nlohmann/json.hpp`).
 
 
 ## Quick start
 
 ```cpp
 #include "voxgig_struct.hpp"
-#include <nlohmann/json.hpp>
-
-using nlohmann::json;
-using namespace VoxgigStruct;
+using namespace voxgig::structlib;
 
 int main() {
-    json store = { {"db", {{"host", "localhost"}}} };
+    // Build a value and read a deep path.
+    Value store = Value::parse(R"({"db":{"host":"localhost","port":5432}})");
+    Value host = getpath_v(store, Value("db.host"));   // "localhost"
 
-    args_container args = { store, json("db") };
-    json db = getprop(std::move(args));
-    // db == { "host": "localhost" }
+    // Reshape by example.
+    Value out = transform(
+        Value::parse(R"({"user":{"first":"Ada"},"age":36})"),
+        Value::parse(R"({"name":"`user.first`","years":"`age`"})"));
+    // {"name":"Ada","years":36}
 
     return 0;
 }
 ```
 
-
-## Calling convention
-
-Most functions accept `args_container&&` (a `std::vector<json>`)
-rather than typed parameters.  This is a porting shortcut that
-mirrors the variadic shape of the canonical functions; it will be
-replaced with type-safe signatures.
+(Construct `Value`s with `Value::parse(json_text)` or the typed
+constructors; see [`DOCS.md`](./DOCS.md) and `src/value.hpp` for the full
+set.)
 
 
-## Function reference (currently implemented)
+## Function reference
 
-Source: [`src/voxgig_struct.hpp`](./src/voxgig_struct.hpp).
-Namespace `VoxgigStruct`.
+Functions take `const Value&` arguments and return `Value` (or
+`std::vector<Value>` for `select`). The full, example-by-example reference
+is in [`DOCS.md`](./DOCS.md); the canonical semantics for every function
+are in the [top-level reference](../DOCS.md#3-reference).
 
-20 of the 40 canonical functions are present:
+Two C++-specific naming points (the names are otherwise the canonical
+ones):
 
-### Predicates
+- **`_v` ("value-style") suffix** on `walk_v`, `merge_v`, `getpath_v`,
+  `setpath_v` — disambiguates the public value API from header-internal
+  helpers of the same root name.
+- **`typename_str`** instead of `typename` — `typename` is a reserved C++
+  keyword.
 
-```cpp
-bool isnode(args_container&& args);
-bool ismap(args_container&& args);
-bool islist(args_container&& args);
-bool iskey(args_container&& args);
-bool isempty(args_container&& args);
-bool isfunc(args_container&& args);
-```
-
-### Type inspection
-
-```cpp
-std::string typename_of(args_container&& args);
-int         typify(args_container&& args);
-```
-
-### Property access
-
-```cpp
-json getprop(args_container&& args);
-json setprop(args_container&& args);
-std::vector<std::string> keysof(args_container&& args);
-bool                      haskey(args_container&& args);
-std::vector<json>         items(args_container&& args);
-```
-
-### Tree operations
-
-```cpp
-json clone(args_container&& args);     // shallow currently — see notes
-json walk(args_container&& args);      // see notes (UB issue)
-json merge(args_container&& args);     // partial implementation
-```
-
-### Strings
-
-```cpp
-std::string escre(args_container&& args);
-std::string escurl(args_container&& args);
-std::string joinurl(args_container&& args);
-std::string stringify(args_container&& args);
-```
-
-
-## Function reference (not yet implemented)
-
-The following canonical functions are missing.  Items marked **P0**
-are foundational for the other missing pieces:
-
-### Path operations (P0)
-
-```cpp
-json getpath(...);     // missing
-json setpath(...);     // missing
-```
-
-### Major subsystems (P0)
-
-```cpp
-json              inject(...);     // missing
-json              transform(...);  // missing
-json              validate(...);   // missing
-std::vector<json> select(...);     // missing
-```
-
-### Minor utilities
-
-```cpp
-getdef, getelem, delprop, size, slice, flatten, filter,
-pad, replace, join, jsonify, strkey, pathify
-```
-
-### Builders
-
-```cpp
-jm, jt
-```
-
-### Injection helpers
-
-```cpp
-checkPlacement, injectorArgs, injectChild
-```
-
-### Sentinels and mode constants
-
-```cpp
-SKIP, DELETE
-M_KEYPRE, M_KEYPOST, M_VAL, MODENAME
-```
-
-(Type bit-flags `T_any`..`T_node` are present as `constexpr int`.)
-
-
-## Constants
-
-### Type bit-flags
-
-```cpp
-constexpr int VoxgigStruct::T_any
-constexpr int VoxgigStruct::T_noval
-// ... 15 total
-```
+The parity check (`../tools/check_parity.py`) maps these back to the
+canonical names, so the port reports full parity.
 
 
 ## Notes
 
-### Why partial?
-
-The C++ port covers value-shape utilities and basic `walk` /
-`merge`.  Major subsystems are not implemented yet.  Tracked as
-P0/P1/P2 in [`../REPORT.md`](../REPORT.md).
-
-### Known issues
-
-- **`walk()`** casts function pointers through `intptr_t` via the
-  JSON value -- this is undefined behaviour and needs replacing
-  with a proper callback type.
-- **`clone()`** is a shallow copy; canonical is deep.
-- **`merge()`** is partially implemented; significant blocks are
-  commented out.
-- All functions use `args_container&&` (`std::vector<json>`); types
-  are not yet enforced.
-- Debug `std::cout` calls remain in the source.
-
 ### Object model
 
-The port uses `nlohmann::json` for the container type.  This is
-reference-stable for nested values, which is the property the
-canonical algorithm requires.
+Runtime values are the in-tree `Value` type (a `std::variant` tagged
+union) with an in-tree insertion-ordered `OrderedMap`. Nested maps and
+lists are reference-stable — the property the canonical algorithm relies on
+for `walk`/`merge`/`inject`/`setpath`.
 
-### Path syntax not yet supported
+### JSON I/O
 
-`getpath` / `setpath` are missing.  Use repeated `getprop` calls
-to walk into nested data, or wait for the path API to land.
+`value.hpp`/`value_io.hpp` parse and serialise JSON in-tree; the library
+links no JSON dependency. `nlohmann/json` appears only in the test driver.
 
-### Test status
+### `null` versus absent
 
-Catch2 framework with limited test coverage.  See the
-[overview](./overview/) directory for current API examples.
+The port follows the shared Group A/B rule (see
+[`../UNDEF_SPEC.md`](../design/UNDEF_SPEC.md)): readers treat a stored null as
+"no value"; value-processors preserve it. `Value::undef()` is the absent
+sentinel used as the default `alt`.
 
 
 ## Regex
 
-Uniform six-function regex API (see `/REGEX_API.md`). The C++ port
+Uniform six-function regex API (see `/design/REGEX_API.md`). The C++ port
 wraps `<regex>` (C++11), which defaults to the ECMAScript dialect.
 
 ### API
@@ -251,7 +136,7 @@ wraps `<regex>` (C++11), which defaults to the ECMAScript dialect.
 
 ### Dialect
 
-Patterns must stay inside the **RE2 subset** documented in `/REGEX.md`.
+Patterns must stay inside the **RE2 subset** documented in `/design/REGEX.md`.
 `std::regex` defaults to ECMAScript syntax and supports backreferences
 and lookaround; using them will not be portable.
 
@@ -265,18 +150,19 @@ and lookaround; using them will not be portable.
   quantifiers; even then, performance won't match the dedicated
   engines.
 - **Zero-width `replace`.** `re_replace("a*", "abc", "X")` returns
-  `"XXbXcX"` — the ECMA convention shared by all PCRE/ECMA/.NET/Java/Onigmo engines plus the in-tree Thompson ports. Go (RE2) returns `"XbXcX"` instead; see `/REGEX_PATHOLOGICAL.md`.
+  `"XXbXcX"` — the ECMA convention shared by all PCRE/ECMA/.NET/Java/Onigmo engines plus the in-tree Thompson ports. Go (RE2) returns `"XbXcX"` instead; see `/design/REGEX_PATHOLOGICAL.md`.
 
-See `/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
+See `/design/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
 
 
 ## Build and test
 
 ```bash
 cd cpp
-make build
-make test
+make test        # compile + run the corpus driver
+make lint        # clang-tidy + clang-format check
 ```
 
-The overview / scratch examples in [`overview/`](./overview/) show
-the current API in use.
+Tests live in [`tests/`](./tests/); the corpus driver reads the shared
+fixtures from [`../build/test/`](../build/test/).
+</content>
