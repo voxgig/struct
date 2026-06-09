@@ -23,8 +23,10 @@ fmt-check:
 # The zig test framework sometimes crashes with signal 11 during cleanup
 # after all tests pass, due to *MapRef/*ListRef cross-references in arena
 # teardown. We filter the output: if "N/N tests passed" with N==total, success.
+# `--summary all` is required: without it, plain `zig build test` prints
+# `test success` with no count and the N/N grep below never matches.
 test:
-	@out=$$(zig build test 2>&1 || true); \
+	@out=$$(zig build test --summary all 2>&1 || true); \
 	echo "$$out"; \
 	passed=$$(echo "$$out" | grep -oE '[0-9]+/[0-9]+ tests passed' | head -1); \
 	if [ -n "$$passed" ]; then \
