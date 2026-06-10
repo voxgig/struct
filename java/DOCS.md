@@ -20,7 +20,7 @@ Then: [Build, test, extend](#build-test-and-extend).
 
 > **Status nuance.** The top-level [`README.md`](../README.md) lists Java
 > under *Partial*, but the port now defines the **full canonical API** (all
-> 40 functions, the `Injection` state machine, `SKIP`/`DELETE`, the mode
+> 48 functions, the `Injection` state machine, `SKIP`/`DELETE`, the mode
 > constants, all 11 transform commands, the validate checkers and select
 > operators) and `python3 ../tools/check_parity.py` reports it `ok`. Treat
 > "Partial" as a stale label; the parity tool and the source are ground
@@ -188,7 +188,7 @@ only the host literals differ.
 
 The Java signatures, with examples, are in
 [`README.md` → Function reference](./README.md#function-reference); the
-canonical public surface (40 names) is the `export { … }` block in
+canonical public surface (48 names) is the `export { … }` block in
 [`../typescript/src/StructUtility.ts`](../typescript/src/StructUtility.ts),
 which `../tools/check_parity.py` checks this port against.
 
@@ -201,7 +201,7 @@ Java-specific points the signatures don't show:
   `Object` for TS `undefined`; Group A readers return it (or your `alt`) for
   a missing slot, while a stored `null` is a distinct JSON value (see
   [`null` versus absent](#null-versus-absent)).
-- **`getprop` vs `getelem`.** `getprop` works on maps and lists; `getElem`
+- **`getprop` vs `getelem`.** `getprop` works on maps and lists; `getelem`
   is list-specific, supports `-1`-from-the-end indexing, and *invokes* a
   callable `alt` (`Function`) when the element is absent.
 - **Overloads stand in for optional params** (no default args): e.g.
@@ -217,13 +217,15 @@ Java-specific points the signatures don't show:
 
 ### Casing
 
-Single-word canonical names stay lowercase (`getprop`, `setprop`, `getpath`,
-`setpath`, `isnode`, `escre`, `escurl`, `keysof`, `pathify`, `jsonify`,
-`stringify`); only genuinely multi-word names are camelCased (`getElem`,
-`getDef`, `delProp`, `hasKey`, `strKey`, `joinUrl`, plus the regex layer
-`reCompile` / `reTest` / `reFind` / `reFindAll` / `reReplace` / `reEscape`).
-Parity is checked case/underscore-insensitively. (`getProp` / `escapeRegex`
-/ `escapeUrl` do **not** exist as methods — read by their real names above.)
+The core functions keep the canonical **lowercase** names exactly, even the
+compound ones (`getprop`, `setprop`, `getpath`, `setpath`, `getelem`,
+`getdef`, `delprop`, `haskey`, `strkey`, `join`, `isnode`, `escre`, `escurl`,
+`keysof`, `pathify`, `jsonify`, `stringify`); only the regex layer
+(`reCompile` / `reTest` / `reFind` / `reFindAll` / `reReplace` / `reEscape`)
+and the three injection helpers (`checkPlacement` / `injectorArgs` /
+`injectChild`) use camelCase. Parity is checked case/underscore-insensitively.
+(`getElem` / `getProp` / `joinUrl` / `escapeRegex` / `escapeUrl` do **not**
+exist as methods — read by their real lowercase names above.)
 
 ---
 
@@ -241,7 +243,7 @@ Java has only `null`, so the port introduces `Struct.UNDEF` (a singleton
 `Object`) to carry TypeScript's `undefined` and keep the
 [Group A/B rule](../DOCS.md#null-versus-absent-group-ab) intact:
 
-- **Group A — readers** (`getprop`, `getElem`, `hasKey`, `isempty`,
+- **Group A — readers** (`getprop`, `getelem`, `haskey`, `isempty`,
   `isnode`): a stored `null` reads as *no value* (you get `alt` or `false`);
   a truly missing slot returns `UNDEF`.
 - **Group B — value processors** (`setprop`, `clone`, `walk`, `merge`,

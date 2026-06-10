@@ -198,7 +198,7 @@ Kotlin-specific points the signatures don't show:
 
 The root [`README.md`](../README.md) and [`../AGENTS.md`](../AGENTS.md)
 classify Kotlin as a **Partial** port (the same bracket as Java), yet it
-already carries the entire canonical public surface — all 40 functions,
+already carries the entire canonical public surface — all 48 functions,
 15 type flags, the three mode constants, the sentinels, and the full
 `Injection` machine — and `check_parity.py` reports it `ok`. "Partial"
 reflects port maturity, not a missing API. Behavioural authority rests
@@ -218,8 +218,9 @@ language-neutral form:
   and Group B processors (`clone`, `merge`, `walk`, `transform`,
   `validate`, `select`, …) preserve it literally.
 
-[`../REPORT.md`](../design/REPORT.md) records this port as **already Group A**
-(135/135). If your data source returns `null` for "not set", decide which
+[`../REPORT.md`](../design/REPORT.md) records this port as **already Group A**;
+the shared corpus passes 1259/1259 assertions here. If your data source
+returns `null` for "not set", decide which
 you mean before handing it to `struct`. The corpus bridges the two with
 the `"__NULL__"` / `"__UNDEF__"` / `"__EXISTS__"` markers (see
 [`../UNDEF_SPEC.md`](../design/UNDEF_SPEC.md)).

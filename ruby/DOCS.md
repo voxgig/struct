@@ -100,15 +100,21 @@ warn errs.inspect unless errs.empty?
 
 ### Write a custom transform function (`$APPLY`)
 ```ruby
+sum = ->(resolved, store, inj) { resolved.is_a?(Array) ? resolved.sum : resolved }
 VoxgigStruct.transform(
   { 'items' => [1, 2, 3] },
-  { 'total' => { '`$APPLY`' => 'sum' } },
-  { 'extra' => { 'sum' => ->(resolved, store, inj) { store['$TOP']['items'].sum } } },
+  { 'total' => ['`$APPLY`', sum, '`items`'] },
 )
+# { 'total' => 6 }
 ```
-Register the callable under `extra`; reference it by name in the spec. The
-`$APPLY` callback is invoked as `(resolved, store, inj)`. A custom function
-may return the `SKIP` / `DELETE` sentinels to omit/remove the current key.
+`$APPLY` appears in **value** position as a list
+`['`$APPLY`', <function>, <childspec>]` — the callable goes inline at
+index 1 (it is *not* looked up by name from `extra`), and the third element
+is a child spec that is injected first and handed to the callback as
+`resolved`. Placing `$APPLY` in key position
+(`{ '`$APPLY`' => … }`) raises `$APPLY: invalid placement as key`. The
+callback is invoked as `(resolved, store, inj)` and its return value becomes
+the key's value.
 
 ### Keep a `walk` path past the callback
 ```ruby
@@ -180,9 +186,8 @@ Ruby-specific points the signatures don't show:
 - **Type flags** combine bitwise: `typify('hi')` is `T_scalar | T_string`;
   test with `0 < (T_string & t)`. `typify(UNDEF)` is `T_noval` (not a
   scalar); `typify(nil)` is `T_scalar | T_null`.
-- **Extras beyond the canonical 40.** This port also exposes `joinurl`,
-  `replace`, and the `select` operators (`AND`/`OR`/`NOT`/`CMP`); `validate`
-  additionally accepts the aliases `$OBJECT`/`$ARRAY` for `$MAP`/`$LIST`.
+- **Extras beyond the canonical 48.** This port also exposes `joinurl`,
+  `replace`, and the `select` operators (`AND`/`OR`/`NOT`/`CMP`).
 
 ---
 

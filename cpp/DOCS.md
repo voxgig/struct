@@ -35,13 +35,18 @@ The library is **header-only** and lives in three files under
   deps.
 - [`voxgig_struct.hpp`](./src/voxgig_struct.hpp) — the main API.
 
-There is nothing to compile to use it — just include the header and target
-C++17:
+There is nothing to compile to use it — just include the headers and target
+C++17. Include [`value_io.hpp`](./src/value_io.hpp) (it transitively pulls in
+`value.hpp` and `voxgig_struct.hpp`) so the JSON bridge `parse_json` /
+`dump_json` is in scope alongside the main API:
 
 ```cpp
-#include "voxgig_struct.hpp"
+#include "value_io.hpp"
 using namespace voxgig::structlib;
 ```
+
+(`voxgig_struct.hpp` on its own gives you the API but **not** `parse_json` —
+that lives in `value_io.hpp`.)
 
 Working from a clone (you'll do this to run the corpus or extend the port):
 
@@ -59,7 +64,7 @@ inspect` prints the compiler version and the located header.
 ### Your first program
 
 ```cpp
-#include "voxgig_struct.hpp"
+#include "value_io.hpp"
 using namespace voxgig::structlib;
 
 int main() {
@@ -215,7 +220,7 @@ only the host literals differ.
 
 ## 3. Reference
 
-The canonical public surface (40 names) is the `export { … }` block in
+The canonical public surface (48 names) is the `export { … }` block in
 [`typescript/src/StructUtility.ts`](../typescript/src/StructUtility.ts);
 `../tools/check_parity.py` checks every port against it. The C++
 implementations are declared near the top of

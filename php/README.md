@@ -80,11 +80,43 @@ Struct::isnode(['a' => 1]);          // true
 ```
 <!-- => true -->
 
+<!-- example: minor/ismap#map -->
+```php
+Struct::ismap(['a' => 1]);           // true
+```
+
+<!-- => true -->
+
 ```php
 Struct::ismap([1, 2]);                // false
+```
+
+<!-- example: minor/islist#list -->
+```php
 Struct::islist([1, 2]);               // true
+```
+
+<!-- => true -->
+
+<!-- example: minor/iskey#str -->
+```php
 Struct::iskey('name');                // true
+```
+
+<!-- => true -->
+
+```php
 Struct::iskey('');                    // false
+```
+
+<!-- example: minor/isempty#empty -->
+```php
+Struct::isempty([]);                  // true
+```
+
+<!-- => true -->
+
+```php
 Struct::isempty(null);                // true
 Struct::isfunc(fn() => 1);            // true
 ```
@@ -96,9 +128,26 @@ Struct::typify($value): int          // bit-field
 Struct::typename($t): string         // human name
 ```
 
+<!-- example: minor/typify#int -->
+```php
+Struct::typify(1);                    // T_scalar | T_number | T_integer  (201326720)
+```
+
+<!-- => 201326720 -->
+
 ```php
 Struct::typify(42);                   // T_scalar | T_number | T_integer
 Struct::typify('hi');                 // T_scalar | T_string
+```
+
+<!-- example: minor/typename#map -->
+```php
+Struct::typename(8192);               // 'map'  (8192 === T_map)
+```
+
+<!-- => "map" -->
+
+```php
 Struct::typename(Struct::typify('hi'));  // 'string'
 ```
 
@@ -147,7 +196,7 @@ Struct::pad('hi', -5, '*');            // '***hi'
 ```php
 Struct::getprop($val, $key, $alt = null)
 Struct::setprop(&$parent, $key, $val)        // by reference!
-Struct::delprop(&$parent, $key)              // by reference!
+Struct::delprop($parent, $key)               // by value; returns the parent
 Struct::getelem($val, $key, $alt = null)
 Struct::getdef($val, $alt)
 Struct::haskey($val, $key): bool
@@ -164,13 +213,37 @@ Struct::getprop(['a' => 1], 'a');                  // 1
 
 ```php
 Struct::getprop([], 'b', 'fallback');              // 'fallback'
+```
 
+<!-- example: minor/setprop#set -->
+```php
 $node = ['a' => 1];
 Struct::setprop($node, 'b', 2);
 // $node === ['a' => 1, 'b' => 2]
-
-Struct::getelem([1, 2, 3], -1);                    // 3
 ```
+
+<!-- => {"a": 1, "b": 2} -->
+
+<!-- example: minor/delprop#del -->
+```php
+Struct::delprop(['a' => 1, 'b' => 2], 'a');        // ['b' => 2]
+```
+
+<!-- => {"b": 2} -->
+
+<!-- example: minor/getelem#neg -->
+```php
+Struct::getelem([10, 20, 30], -1);                 // 30
+```
+
+<!-- => 30 -->
+
+<!-- example: minor/haskey#hit -->
+```php
+Struct::haskey(['a' => 1], 'a');                   // true
+```
+
+<!-- => true -->
 
 <!-- example: minor/keysof#sorted -->
 ```php
@@ -178,16 +251,26 @@ Struct::keysof(['b' => 4, 'a' => 5]);              // ['a', 'b']  (sorted)
 ```
 <!-- => ["a", "b"] -->
 
+<!-- example: minor/items#map -->
 ```php
 Struct::items(['a' => 1, 'b' => 2]);
 // [['a', 1], ['b', 2]]
 ```
 
+<!-- => [["a", 1], ["b", 2]] -->
+
+<!-- example: minor/strkey#num -->
+```php
+Struct::strkey(2.2);                               // '2'
+```
+
+<!-- => "2" -->
+
 ### Path operations
 
 ```php
 Struct::getpath($store, $path, $injdef = null)
-Struct::setpath(&$store, $path, $val, $injdef = null)
+Struct::setpath($store, $path, $val, $injdef = null)   // by value; returns the updated immediate parent
 Struct::pathify($val, $startin = null, $endin = null): string
 ```
 
@@ -200,12 +283,26 @@ Struct::getpath(['a' => ['b' => ['c' => 42]]], 'a.b.c');  // 42
 ```php
 Struct::getpath(['a' => [10, 20]], 'a.1');                // 20
 
+// setpath takes $store BY VALUE and returns the updated immediate parent,
+// so $store itself is NOT mutated — assign the return value.
 $store = [];
-Struct::setpath($store, 'db.host', 'localhost');
-// $store === ['db' => ['host' => 'localhost']]
+$parent = Struct::setpath($store, 'db.host', 'localhost');
+// $store stays []; $parent === (object)['host' => 'localhost']
+```
 
+<!-- example: minor/setpath#nested -->
+```php
+Struct::setpath(['a' => 1, 'b' => 2], 'b', 22);           // ['a' => 1, 'b' => 22]
+```
+
+<!-- => {"a": 1, "b": 22} -->
+
+<!-- example: minor/pathify#parts -->
+```php
 Struct::pathify(['a', 'b', 'c']);                          // 'a.b.c'
 ```
+
+<!-- => "a.b.c" -->
 
 ### Tree operations
 
@@ -223,15 +320,37 @@ Struct::filter($val, $check)
 Struct::walk($tree, null, function ($key, $val, $parent, $path) {
     return $val === null ? 'DEFAULT' : $val;
 });
+```
 
+Last input wins; maps deep-merge; lists merge by index:
+
+<!-- example: merge#basic -->
+```php
 Struct::merge([
-    ['a' => 1, 'b' => 2],
-    ['b' => 3, 'c' => 4],
+    ['a' => 1, 'b' => 2, 'k' => [10, 20], 'x' => ['y' => 5, 'z' => 6]],
+    ['b' => 3, 'd' => 4, 'e' => 8, 'k' => [11], 'x' => ['y' => 7]],
 ]);
-// ['a' => 1, 'b' => 3, 'c' => 4]
+// ['a' => 1, 'b' => 3, 'd' => 4, 'e' => 8, 'k' => [11, 20], 'x' => ['y' => 7, 'z' => 6]]
+```
 
-Struct::clone(['a' => [1, 2]]);
-Struct::flatten([1, [2, [3, [4]]]]);
+<!-- => {"a": 1, "b": 3, "d": 4, "e": 8, "k": [11, 20], "x": {"y": 7, "z": 6}} -->
+
+<!-- example: minor/clone#deep -->
+```php
+Struct::clone(['a' => ['b' => [1, 2]]]);   // ['a' => ['b' => [1, 2]]]  (a deep copy)
+```
+
+<!-- => {"a": {"b": [1, 2]}} -->
+
+<!-- example: minor/flatten#nested -->
+```php
+Struct::flatten([1, [2, [3]]]);            // [1, 2, [3]]  (one level by default)
+```
+
+<!-- => [1, 2, [3]] -->
+
+```php
+Struct::flatten([1, [2, [3, [4]]]]);       // [1, 2, [3, [4]]]
 ```
 
 `filter` passes each `[key, value]` pair to the check and returns the
@@ -256,11 +375,29 @@ Struct::stringify($val, $maxlen = null, $pretty = null): string
 Struct::replace($s, $from, $to): string
 ```
 
+<!-- example: minor/escre#dots -->
 ```php
 Struct::escre('a.b+c');                   // 'a\\.b\\+c'
-Struct::escurl('hello world');            // 'hello%20world'
+```
+
+<!-- => "a\\.b\\+c" -->
+
+<!-- example: minor/escurl#space -->
+```php
+Struct::escurl('hello world?');           // 'hello%20world%3F'
+```
+
+<!-- => "hello%20world%3F" -->
+
+<!-- example: minor/join#sep -->
+```php
 Struct::join(['a', 'b', 'c'], '/');       // 'a/b/c'
-Struct::joinurl(['http:', '/foo/']);      // 'http:/foo'
+```
+
+<!-- => "a/b/c" -->
+
+```php
+Struct::joinurl(['http:', '/foo/']);      // 'http:/foo/'
 ```
 
 `jsonify` pretty-prints by default (indent 2); pass `(object)['indent' => 0]`
@@ -318,6 +455,14 @@ Struct::validate($data, $spec, $injdef = null)
 Struct::select($children, $query): array
 ```
 
+<!-- example: inject#basic -->
+```php
+// Backtick refs in strings are replaced by store values.
+Struct::inject(['x' => '`a`', 'y' => 2], ['a' => 1]);   // ['x' => 1, 'y' => 2]
+```
+
+<!-- => {"x": 1, "y": 2} -->
+
 ```php
 Struct::inject(
     ['greeting' => 'hello `name`'],
@@ -356,27 +501,42 @@ Struct::transform([], ['x' => '`$APPLY`']);
 ```
 <!-- throws: invalid placement in parent map -->
 
+<!-- example: validate#shape -->
+```php
+// Validate against a shape (throws on mismatch).
+Struct::validate(['name' => 'Ada', 'age' => 36], ['name' => '`$STRING`', 'age' => '`$INTEGER`']);
+// ['name' => 'Ada', 'age' => 36]
+```
+
+<!-- => {"name": "Ada", "age": 36} -->
+
 ```php
 Struct::validate(['name' => 'Ada'], ['name' => '`$STRING`']);
-// throws \RuntimeException on mismatch (or accumulates if you pass
-// an errors array as the fourth arg)
+// throws \Exception on mismatch (or accumulates if you pass
+// an errs collector on the $injdef object)
+```
 
+<!-- example: select#query -->
+```php
+// Find children matching a query.
 Struct::select(
-    ['a' => ['age' => 30], 'b' => ['age' => 25]],
+    ['a' => ['name' => 'Alice', 'age' => 30], 'b' => ['name' => 'Bob', 'age' => 25]],
     ['age' => 30]
 );
-// [['age' => 30, '$KEY' => 'a']]
+// [['name' => 'Alice', 'age' => 30, '$KEY' => 'a']]
 ```
+
+<!-- => [{"name": "Alice", "age": 30, "$KEY": "a"}] -->
 
 ### Builders
 
 ```php
-Struct::jm(...$kv): array
+Struct::jm(...$kv): object   // builds a stdClass map
 Struct::jt(...$v): array
 ```
 
 ```php
-Struct::jm('a', 1, 'b', 2);   // ['a' => 1, 'b' => 2]
+Struct::jm('a', 1, 'b', 2);   // (object)['a' => 1, 'b' => 2]  (stdClass)
 Struct::jt(1, 2, 3);          // [1, 2, 3]
 ```
 
@@ -457,8 +617,9 @@ so you usually do not see it directly.
 PHP arrays copy on assignment.  Two adaptations preserve canonical
 "reference-stable list" semantics:
 
-1. `setprop`, `setpath`, `delprop`, and similar mutating calls take
-   their parent **by reference** (`&$parent`).
+1. `setprop` takes its parent **by reference** (`&$parent`) and mutates
+   in place. `setpath` and `delprop` take their argument **by value** and
+   **return** the updated structure — assign the result.
 2. The `ListRef` class wraps a list when it must be shared across
    calls (notably during `merge` and `inject`).
 
@@ -479,12 +640,13 @@ PHP method names match canonical lowercase: `getpath`, `setpath`,
 `Struct::validate`:
 
 - returns the value on success;
-- throws a `\RuntimeException` carrying the first error by default;
+- throws a plain `\Exception` carrying all accumulated errors (joined with
+  ` | `, prefixed `Invalid data: `) by default;
 - accumulates into a passed errors array when you supply one.
 
 ### Test status
 
-82/82 tests pass, 920 assertions.
+85/85 tests pass, 1022 assertions.
 
 
 ## Regex

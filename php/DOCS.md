@@ -111,14 +111,22 @@ into it instead of throwing. Internally the array is shared via an
 
 ### Write a custom transform function (`$APPLY`)
 ```php
-$extra = new \stdClass();
-$extra->extra = ['sum' => fn($inj, $val, $ref, $store) =>
-    array_sum($inj->dparent['items'] ?? [])];
+use Voxgig\Struct\ListRef;
 
-Struct::transform(['items' => [1, 2, 3]], ['total' => ['`$APPLY`' => 'sum']], $extra);
+// The function is the SECOND element of an `$APPLY` LIST; the third element
+// is the child spec whose injected result is passed to it.
+$sum = fn($resolved, $store, $cinj) =>
+    array_sum($resolved instanceof ListRef ? $resolved->list : (array) $resolved);
+
+Struct::transform(['items' => [1, 2, 3]], ['total' => ['`$APPLY`', $sum, '`items`']]);
+// ['total' => 6]
 ```
-Register the function under the `extra` map on the `$injdef` object; reference
-it by name in the spec. A custom function may return the `Struct::SKIP` /
+`$APPLY` must appear in **list-value** position — `['`$APPLY`', $fn, $child]` —
+not as a map key: `['total' => ['`$APPLY`' => 'sum']]` is rejected with
+`$APPLY: invalid placement in parent map, expected: list` (see the
+`transform/apply#badkey` example in `README.md`). The callback is invoked as
+`$fn($resolved, $store, $cinj)`, where `$resolved` is the injected child value
+(lists arrive wrapped in a `ListRef`). It may return the `Struct::SKIP` /
 `Struct::DELETE` sentinels to omit/remove the current key.
 
 ### Keep a `walk` path past the callback
@@ -288,7 +296,7 @@ Dev tooling: PHPUnit ^12, PHPStan ^2.1, PHP_CodeSniffer ^3.13 (config in
 There is no build step. Tests live in [`tests/`](./tests/) (PHPUnit suite
 configured in [`phpunit.xml`](./phpunit.xml)); the runner loads the shared
 corpus from [`../build/test/`](../build/test/). The port passes the shared corpus
-suite (82/82, 920 assertions — see [`../REPORT.md`](../design/REPORT.md)).
+suite (85/85, 1022 assertions — see [`../REPORT.md`](../design/REPORT.md)).
 
 **To change behaviour:** do it in canonical TypeScript first, adjust the corpus,
 then port the change here, run `make test` and `make lint`, and re-run

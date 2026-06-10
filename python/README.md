@@ -55,7 +55,8 @@ validate(
 
 ```python
 from voxgig_struct import (
-    # 40 canonical functions
+    # core canonical functions (the full canonical API is 48 names,
+    # including the builders, re_* helpers, and injection helpers below)
     clone, delprop, escre, escurl, filter, flatten,
     getdef, getelem, getpath, getprop, haskey,
     inject, isempty, isfunc, iskey, islist, ismap, isnode,
@@ -105,13 +106,52 @@ isnode({'a': 1})          # True
 ```
 <!-- => true -->
 
+<!-- example: minor/ismap#map -->
+```python
+ismap({'a': 1})           # True
+```
+
+<!-- => true -->
+
 ```python
 ismap([])                 # False
-islist([1])               # True
+```
+
+<!-- example: minor/islist#list -->
+```python
+islist([1, 2])            # True
+```
+
+<!-- => true -->
+
+```python
+islist({'a': 1})          # False
+```
+
+<!-- example: minor/iskey#str -->
+```python
 iskey('name')             # True
+```
+
+<!-- => true -->
+
+```python
+iskey(0)                  # True
 iskey('')                 # False
-isempty(None)             # True
+```
+
+<!-- example: minor/isempty#empty -->
+```python
 isempty([])               # True
+```
+
+<!-- => true -->
+
+```python
+isempty(None)             # True
+isempty('')               # True
+isempty({})               # True
+isempty(0)                # False
 isfunc(lambda: 1)         # True
 ```
 
@@ -122,12 +162,32 @@ def typify(value) -> int        # bit-field
 def typename(t: int) -> str     # human name
 ```
 
+`typify` returns a bit-field combining a "kind" flag (`T_scalar` or
+`T_node`) with a specific type flag.  `typename` looks up a
+human-friendly name.
+
+<!-- example: minor/typify#int -->
+```python
+typify(1)                 # T_scalar | T_number | T_integer  (201326720)
+```
+
+<!-- => 201326720 -->
+
 ```python
 typify(42)                # T_scalar | T_number | T_integer
 typify('hi')              # T_scalar | T_string
 typify(None)              # T_scalar | T_null
 typify({})                # T_node | T_map
+```
 
+<!-- example: minor/typename#map -->
+```python
+typename(8192)            # 'map'  (8192 == T_map)
+```
+
+<!-- => "map" -->
+
+```python
 typename(typify('hi'))    # 'string'
 ```
 
@@ -198,14 +258,58 @@ getprop({'x': 1}, 'x')                # 1
 
 ```python
 getprop({'a': 1}, 'b', 'def')         # 'def'
+getprop([10, 20, 30], 1)              # 20
+```
 
+<!-- example: minor/setprop#set -->
+```python
 setprop({'a': 1}, 'b', 2)             # {'a': 1, 'b': 2}
+```
+
+<!-- => {"a": 1, "b": 2} -->
+
+<!-- example: minor/delprop#del -->
+```python
 delprop({'a': 1, 'b': 2}, 'a')        # {'b': 2}
-getelem([1,2,3], -1)                  # 3
+```
+
+<!-- => {"b": 2} -->
+
+<!-- example: minor/getelem#neg -->
+```python
+getelem([10, 20, 30], -1)             # 30
+```
+
+<!-- => 30 -->
+
+```python
 getdef(None, 'fallback')              # 'fallback'
+```
+
+<!-- example: minor/haskey#hit -->
+```python
 haskey({'a': 1}, 'a')                 # True
-items({'a': 1, 'b': 2})               # [('a', 1), ('b', 2)]
+```
+
+<!-- => true -->
+
+<!-- example: minor/items#map -->
+```python
+items({'a': 1, 'b': 2})               # [['a', 1], ['b', 2]]
+```
+
+<!-- => [["a", 1], ["b", 2]] -->
+
+<!-- example: minor/strkey#num -->
+```python
+strkey(2.2)                           # '2'
+```
+
+<!-- => "2" -->
+
+```python
 strkey(1)                             # '1'
+strkey('foo')                         # 'foo'
 ```
 
 <!-- example: minor/keysof#sorted -->
@@ -234,15 +338,27 @@ getpath({'a': [10, 20]}, 'a.1')                # 20
 store = {}
 setpath(store, 'db.host', 'localhost')
 # store == {'db': {'host': 'localhost'}}
+```
 
+<!-- example: minor/setpath#nested -->
+```python
+setpath({'a': 1, 'b': 2}, 'b', 22)             # {'a': 1, 'b': 22}
+```
+
+<!-- => {"a": 1, "b": 22} -->
+
+<!-- example: minor/pathify#parts -->
+```python
 pathify(['a', 'b', 'c'])                       # 'a.b.c'
 ```
+
+<!-- => "a.b.c" -->
 
 ### Tree operations
 
 ```python
-def walk(val, before=None, after=None, maxdepth=None,
-         key=None, parent=None, path=None, pool=None) -> Any
+def walk(val, apply=None, key=UNDEF, parent=UNDEF, path=UNDEF,
+         *, before=None, after=None, maxdepth=None, pool=UNDEF) -> Any
 def merge(objs, maxdepth=None) -> Any
 def clone(val) -> Any
 def flatten(lst, depth=None) -> list
@@ -254,14 +370,36 @@ def visit(key, val, parent, path):
     return 'DEFAULT' if val is None else val
 
 walk(tree, after=visit)
+```
 
+Last input wins; maps deep-merge; lists merge by index:
+
+<!-- example: merge#basic -->
+```python
 merge([
-    {'a': 1, 'b': 2, 'x': {'y': 5, 'z': 6}},
-    {'b': 3,         'x': {'y': 7}        },
+    {'a': 1, 'b': 2, 'k': [10, 20], 'x': {'y': 5, 'z': 6}},
+    {'b': 3, 'd': 4, 'e': 8, 'k': [11], 'x': {'y': 7}},
 ])
-# {'a': 1, 'b': 3, 'x': {'y': 7, 'z': 6}}
+# {'a': 1, 'b': 3, 'd': 4, 'e': 8, 'k': [11, 20], 'x': {'y': 7, 'z': 6}}
+```
 
-clone({'a': [1, 2]})            # deep copy
+<!-- => {"a": 1, "b": 3, "d": 4, "e": 8, "k": [11, 20], "x": {"y": 7, "z": 6}} -->
+
+<!-- example: minor/clone#deep -->
+```python
+clone({'a': {'b': [1, 2]}})     # {'a': {'b': [1, 2]}}  (a deep copy)
+```
+
+<!-- => {"a": {"b": [1, 2]}} -->
+
+<!-- example: minor/flatten#nested -->
+```python
+flatten([1, [2, [3]]])          # [1, 2, [3]]  (one level by default)
+```
+
+<!-- => [1, 2, [3]] -->
+
+```python
 flatten([1, [2, [3, [4]]]])     # [1, 2, [3, [4]]]
 ```
 
@@ -287,11 +425,29 @@ def stringify(val, maxlen=UNDEF, pretty=None) -> str
 def replace(s, from_pat, to_str) -> str
 ```
 
+<!-- example: minor/escre#dots -->
 ```python
 escre('a.b+c')                       # 'a\\.b\\+c'
-escurl('hello world')                # 'hello%20world'
-join(['a','b','c'], '/')             # 'a/b/c'
-joinurl(['http:', '/foo/', '/bar']) # 'http:/foo/bar'
+```
+
+<!-- => "a\\.b\\+c" -->
+
+<!-- example: minor/escurl#space -->
+```python
+escurl('hello world?')               # 'hello%20world%3F'
+```
+
+<!-- => "hello%20world%3F" -->
+
+<!-- example: minor/join#sep -->
+```python
+join(['a', 'b', 'c'], '/')           # 'a/b/c'
+```
+
+<!-- => "a/b/c" -->
+
+```python
+joinurl(['http:', '/foo/', '/bar'])  # 'http:/foo/bar'
 ```
 
 `jsonify` pretty-prints by default (indent 2); pass `{'indent': 0}` for the
@@ -336,6 +492,14 @@ def validate(data, spec, injdef=UNDEF) -> Any
 def select(children, query) -> list
 ```
 
+<!-- example: inject#basic -->
+```python
+# Backtick refs in strings are replaced by store values.
+inject({'x': '`a`', 'y': 2}, {'a': 1})    # {'x': 1, 'y': 2}
+```
+
+<!-- => {"x": 1, "y": 2} -->
+
 ```python
 inject(
     {'greeting': 'hello `name`'},
@@ -343,20 +507,37 @@ inject(
 )
 # {'greeting': 'hello Ada'}
 
+# Build a result by example.
 transform(
     {'hold': {'x': 1}, 'top': 99},
     {'a': '`hold.x`', 'b': '`top`'}
 )
 # {'a': 1, 'b': 99}
+```
 
-validate({'name': 'Ada'}, {'name': '`$STRING`'})
+<!-- example: validate#shape -->
+```python
+# Validate against a shape (raises on mismatch).
+validate(
+    {'name': 'Ada', 'age': 36},
+    {'name': '`$STRING`', 'age': '`$INTEGER`'}
+)
+# {'name': 'Ada', 'age': 36}
+```
 
+<!-- => {"name": "Ada", "age": 36} -->
+
+<!-- example: select#query -->
+```python
+# Find children matching a query.
 select(
-    {'a': {'age': 30}, 'b': {'age': 25}},
+    {'a': {'name': 'Alice', 'age': 30}, 'b': {'name': 'Bob', 'age': 25}},
     {'age': 30}
 )
-# [{'age': 30, '$KEY': 'a'}]
+# [{'name': 'Alice', 'age': 30, '$KEY': 'a'}]
 ```
+
+<!-- => [{"name": "Alice", "age": 30, "$KEY": "a"}] -->
 
 Transform commands drive structural ops. A command like `$EACH` appears in
 **value** position — as the first element of a list `['`$EACH`', path, subspec]`
@@ -466,7 +647,7 @@ parity with other ports beats style here.
 
 ### Test status
 
-84/84 tests pass against the shared corpus.
+94 tests pass against the shared corpus (3 skipped).
 
 
 ## Regex

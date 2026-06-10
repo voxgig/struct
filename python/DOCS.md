@@ -180,7 +180,7 @@ Python-specific points the signatures don't show:
 - **`getprop` vs `getelem`.** `getprop` works on maps and lists; `getelem`
   is list-specific, supports `-1`-from-the-end indexing, and *invokes* a
   callable `alt` when the element is absent.
-- **`items(node, apply=None)`** returns `[(key, val), …]` pairs; pass
+- **`items(node, apply=None)`** returns `[[key, val], …]` list pairs; pass
   `apply` to map each pair through a function.
 - **`walk` takes keyword arguments** — `before=`, `after=`, `maxdepth=` —
   where canonical TypeScript uses positional optionals. The trailing

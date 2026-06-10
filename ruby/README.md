@@ -79,9 +79,41 @@ VoxgigStruct.isnode({'a' => 1})       # true
 
 ```ruby
 VoxgigStruct.isnode([1])              # true
+```
+
+<!-- example: minor/ismap#map -->
+```ruby
+VoxgigStruct.ismap({'a' => 1})        # true
+```
+
+<!-- => true -->
+
+```ruby
 VoxgigStruct.ismap([])                # false
+```
+
+<!-- example: minor/islist#list -->
+```ruby
 VoxgigStruct.islist([1, 2])           # true
+```
+
+<!-- => true -->
+
+<!-- example: minor/iskey#str -->
+```ruby
 VoxgigStruct.iskey('name')            # true
+```
+
+<!-- => true -->
+
+<!-- example: minor/isempty#empty -->
+```ruby
+VoxgigStruct.isempty([])              # true
+```
+
+<!-- => true -->
+
+```ruby
 VoxgigStruct.isempty(nil)             # true
 VoxgigStruct.isfunc(->(x) { x })      # true
 ```
@@ -93,10 +125,27 @@ VoxgigStruct.typify(value) -> Integer    # bit-field
 VoxgigStruct.typename(t)   -> String     # human name
 ```
 
+<!-- example: minor/typify#int -->
+```ruby
+VoxgigStruct.typify(1)                   # T_scalar | T_number | T_integer  (201326720)
+```
+
+<!-- => 201326720 -->
+
 ```ruby
 VoxgigStruct.typify(42)                  # T_scalar | T_number | T_integer
 VoxgigStruct.typify('hi')                # T_scalar | T_string
 VoxgigStruct.typify(nil)                 # T_scalar | T_null
+```
+
+<!-- example: minor/typename#map -->
+```ruby
+VoxgigStruct.typename(8192)              # 'map'  (8192 == T_map)
+```
+
+<!-- => "map" -->
+
+```ruby
 VoxgigStruct.typename(VoxgigStruct.typify('hi'))   # 'string'
 ```
 
@@ -162,11 +211,53 @@ VoxgigStruct.getprop({'x' => 1}, 'x')           # 1
 
 ```ruby
 VoxgigStruct.getprop({}, 'b', 'fallback')       # 'fallback'
+```
+
+<!-- example: minor/setprop#set -->
+```ruby
 VoxgigStruct.setprop({'a' => 1}, 'b', 2)        # {'a'=>1, 'b'=>2}
+```
+
+<!-- => {"a": 1, "b": 2} -->
+
+<!-- example: minor/delprop#del -->
+```ruby
 VoxgigStruct.delprop({'a' => 1, 'b' => 2}, 'a') # {'b'=>2}
-VoxgigStruct.getelem([1, 2, 3], -1)             # 3
+```
+
+<!-- => {"b": 2} -->
+
+<!-- example: minor/getelem#neg -->
+```ruby
+VoxgigStruct.getelem([10, 20, 30], -1)          # 30
+```
+
+<!-- => 30 -->
+
+<!-- example: minor/haskey#hit -->
+```ruby
 VoxgigStruct.haskey({'a' => 1}, 'a')            # true
+```
+
+<!-- => true -->
+
+<!-- example: minor/items#map -->
+```ruby
 VoxgigStruct.items({'a' => 1, 'b' => 2})        # [['a', 1], ['b', 2]]
+```
+
+<!-- => [["a", 1], ["b", 2]] -->
+
+<!-- example: minor/strkey#num -->
+```ruby
+VoxgigStruct.strkey(2.2)                         # '2'
+```
+
+<!-- => "2" -->
+
+```ruby
+VoxgigStruct.strkey(1)                           # '1'
+VoxgigStruct.strkey('foo')                       # 'foo'
 ```
 
 <!-- example: minor/keysof#sorted -->
@@ -195,9 +286,21 @@ VoxgigStruct.getpath({'a' => [10, 20]}, 'a.1')                 # 20
 store = {}
 VoxgigStruct.setpath(store, 'db.host', 'localhost')
 # store == {'db' => {'host' => 'localhost'}}
+```
 
+<!-- example: minor/setpath#nested -->
+```ruby
+VoxgigStruct.setpath({'a' => 1, 'b' => 2}, 'b', 22)            # {'a'=>1, 'b'=>22}
+```
+
+<!-- => {"a": 1, "b": 22} -->
+
+<!-- example: minor/pathify#parts -->
+```ruby
 VoxgigStruct.pathify(['a', 'b', 'c'])           # 'a.b.c'
 ```
+
+<!-- => "a.b.c" -->
 
 ### Tree operations
 
@@ -212,15 +315,37 @@ VoxgigStruct.filter(val, check)
 ```ruby
 after = ->(key, val, parent, path) { val.nil? ? 'DEFAULT' : val }
 VoxgigStruct.walk(tree, nil, after)
+```
 
+Last input wins; maps deep-merge; lists merge by index:
+
+<!-- example: merge#basic -->
+```ruby
 VoxgigStruct.merge([
-  { 'a' => 1, 'b' => 2 },
-  { 'b' => 3, 'c' => 4 },
+  { 'a' => 1, 'b' => 2, 'k' => [10, 20], 'x' => { 'y' => 5, 'z' => 6 } },
+  { 'b' => 3, 'd' => 4, 'e' => 8, 'k' => [11], 'x' => { 'y' => 7 } },
 ])
-# { 'a' => 1, 'b' => 3, 'c' => 4 }
+# { 'a' => 1, 'b' => 3, 'd' => 4, 'e' => 8, 'k' => [11, 20], 'x' => { 'y' => 7, 'z' => 6 } }
+```
 
-VoxgigStruct.clone({'a' => [1, 2]})
-VoxgigStruct.flatten([1, [2, [3, [4]]]])
+<!-- => {"a": 1, "b": 3, "d": 4, "e": 8, "k": [11, 20], "x": {"y": 7, "z": 6}} -->
+
+<!-- example: minor/clone#deep -->
+```ruby
+VoxgigStruct.clone({ 'a' => { 'b' => [1, 2] } })   # { 'a' => { 'b' => [1, 2] } }  (a deep copy)
+```
+
+<!-- => {"a": {"b": [1, 2]}} -->
+
+<!-- example: minor/flatten#nested -->
+```ruby
+VoxgigStruct.flatten([1, [2, [3]]])                # [1, 2, [3]]  (one level by default)
+```
+
+<!-- => [1, 2, [3]] -->
+
+```ruby
+VoxgigStruct.flatten([1, [2, [3, [4]]]])           # [1, 2, [3, [4]]]
 ```
 
 `filter` passes each `[key, value]` pair to the check and returns the
@@ -245,11 +370,26 @@ VoxgigStruct.stringify(val, maxlen = nil, pretty = nil) -> String
 VoxgigStruct.replace(s, from, to) -> String
 ```
 
+<!-- example: minor/escre#dots -->
 ```ruby
 VoxgigStruct.escre('a.b+c')                       # 'a\\.b\\+c'
-VoxgigStruct.escurl('hello world')                # 'hello%20world'
+```
+
+<!-- => "a\\.b\\+c" -->
+
+<!-- example: minor/escurl#space -->
+```ruby
+VoxgigStruct.escurl('hello world?')               # 'hello%20world%3F'
+```
+
+<!-- => "hello%20world%3F" -->
+
+<!-- example: minor/join#sep -->
+```ruby
 VoxgigStruct.join(['a', 'b', 'c'], '/')           # 'a/b/c'
 ```
+
+<!-- => "a/b/c" -->
 
 `jsonify` pretty-prints by default (indent 2); pass `{ 'indent' => 0 }` for
 the compact form:
@@ -293,6 +433,14 @@ VoxgigStruct.validate(data, spec, injdef = nil)
 VoxgigStruct.select(children, query) -> Array
 ```
 
+<!-- example: inject#basic -->
+```ruby
+# Backtick refs in strings are replaced by store values.
+VoxgigStruct.inject({ 'x' => '`a`', 'y' => 2 }, { 'a' => 1 })   # { 'x' => 1, 'y' => 2 }
+```
+
+<!-- => {"x": 1, "y": 2} -->
+
 ```ruby
 VoxgigStruct.inject(
   { 'greeting' => 'hello `name`' },
@@ -305,14 +453,6 @@ VoxgigStruct.transform(
   { 'a' => '`hold.x`', 'b' => '`top`' }
 )
 # { 'a' => 1, 'b' => 99 }
-
-VoxgigStruct.validate({'name' => 'Ada'}, {'name' => '`$STRING`'})
-
-VoxgigStruct.select(
-  { 'a' => { 'age' => 30 }, 'b' => { 'age' => 25 } },
-  { 'age' => 30 }
-)
-# [{ 'age' => 30, '$KEY' => 'a' }]
 ```
 
 Transform commands drive structural ops. A command like `$EACH` appears in
@@ -339,6 +479,30 @@ VoxgigStruct.transform({}, { 'x' => '`$APPLY`' })
 # raises: $APPLY: invalid placement in parent map, expected: list.
 ```
 <!-- throws: invalid placement in parent map -->
+
+<!-- example: validate#shape -->
+```ruby
+# Validate against a shape (raises on mismatch).
+VoxgigStruct.validate(
+  { 'name' => 'Ada', 'age' => 36 },
+  { 'name' => '`$STRING`', 'age' => '`$INTEGER`' }
+)
+# { 'name' => 'Ada', 'age' => 36 }
+```
+
+<!-- => {"name": "Ada", "age": 36} -->
+
+<!-- example: select#query -->
+```ruby
+# Find children matching a query.
+VoxgigStruct.select(
+  { 'a' => { 'name' => 'Alice', 'age' => 30 }, 'b' => { 'name' => 'Bob', 'age' => 25 } },
+  { 'age' => 30 }
+)
+# [{ 'name' => 'Alice', 'age' => 30, '$KEY' => 'a' }]
+```
+
+<!-- => [{"name": "Alice", "age": 30, "$KEY": "a"}] -->
 
 ### Builders
 
@@ -423,9 +587,6 @@ $MAP   $LIST   $STRING   $NUMBER   $INTEGER   $DECIMAL  $BOOLEAN
 $NULL  $NIL    $FUNCTION $INSTANCE $ANY       $CHILD    $ONE     $EXACT
 ```
 
-The Ruby port also accepts the JSON-conventional aliases `$OBJECT`
-and `$ARRAY` in place of `$MAP` and `$LIST`.
-
 
 ## Notes
 
@@ -451,7 +612,7 @@ and a `maxdepth` parameter, matching the canonical algorithm.
 
 ### Test status
 
-75/75 tests pass, 150 assertions.
+81 runs, 159 assertions, 0 failures.
 
 
 ## Regex

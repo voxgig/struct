@@ -39,8 +39,9 @@ The library uses regular expressions in two places:
 
    `[aA][bB][cC]` is just character classes — RE2-compatible.
 
-**Conclusion:** the corpus today is already inside the RE2 subset. We
-just need to lock that in and stop ports from accidentally widening it.
+**Conclusion:** the corpus is inside the RE2 subset, and every port now
+locks that in — the in-tree engines (rs, zig, c, lua) only implement the
+subset, so a port can't accidentally widen it.
 
 
 ## Per-port status
@@ -56,17 +57,17 @@ just need to lock that in and stop ports from accidentally widening it.
 | **cs** | `System.Text.RegularExpressions` | built-in | .NET | superset of RE2 |
 | **kt** | `kotlin.text.Regex` | built-in (uses Java backend) | Java regex | superset of RE2 |
 | **cpp** | `<regex>` (C++11) | built-in | ECMAScript by default | superset of RE2 |
-| **rs** | `regex` crate | **runtime dep** | RE2 (the crate is the source of RE2) | violates "no runtime deps" goal |
-| **zig** | `mvzr` package | **runtime dep** | small NFA subset | violates "no runtime deps" goal |
-| **c** | (none) | substring fallback | no patterns | sub-RE2 |
-| **lua** | `string.match` | built-in | Lua patterns, **not regex** | character classes work, but `\d` / `?` lazy / lookaround don't |
+| **perl** | native `qr//` (PCRE) | built-in | PCRE | superset of RE2 |
+| **swift** | `NSRegularExpression` (Foundation/ICU) | built-in | ICU | superset of RE2 |
+| **rs** | in-tree engine (`rust/src/re.rs`) | **none** | RE2 subset | zero runtime deps (`Cargo.toml` `[dependencies]` is empty) |
+| **zig** | in-tree engine (`zig/src/regex.zig`) | **none** | RE2 subset | zero runtime deps (`build.zig.zon` `.dependencies = .{}`) |
+| **c** | in-tree Thompson NFA (`c/src/regex.c`) | **none** | RE2 subset | wired into `$LIKE` + integer-key; no substring fallback |
+| **lua** | in-tree engine (`lua/src/regex.lua`) | **none** | RE2 subset | pure-Lua matcher; replaces `string.match` |
 
-Three groups need work:
-
-- **rs**, **zig** — drop the runtime regex dep (currently held by
-  external libraries).
-- **c** — add a minimal RE2-subset matcher (currently substring only).
-- **lua** — different syntax; document or remap.
+All ports now ship within the RE2 subset with **no runtime regex
+dependency beyond their stdlib**. The four ports that once needed work —
+**rs**, **zig**, **c**, **lua** — have each shipped an in-tree engine
+(see [Strategy by port](#strategy-by-port)).
 
 
 ## Recommended portable subset
@@ -101,100 +102,49 @@ NFA-derivative matcher can implement in a few hundred lines.
 
 ## Strategy by port
 
-### TypeScript / JavaScript / Python / Ruby / PHP / Java / Kotlin / C# / C++
+### TypeScript / JavaScript / Python / Ruby / PHP / Java / Kotlin / C# / C++ / Perl / Swift
 
-No action: stdlib engines already cover the subset. Keep using the
-built-in (`RegExp`, `re.compile`, `Pattern.compile`, etc.); just don't
-*write* tests that step outside the subset. A corpus-level check
-(see below) enforces this for the test suite.
+No action: stdlib engines already cover the subset. These ports use the
+built-in (`RegExp`, `re.compile`, `Pattern.compile`, Perl's `qr//`,
+Swift's `NSRegularExpression`, etc.); they just don't *write* tests that
+step outside the subset. A corpus-level check (see below) enforces this
+for the test suite.
 
 ### Go
 
 Already the baseline. No action.
 
-### Rust
+### Rust — shipped
 
-`rust/Cargo.toml` currently lists `regex = "1"` as a runtime dependency.
-Two routes:
+`rust/Cargo.toml` no longer lists `regex` (its `[dependencies]` section
+is empty). The regex engine is vendored in-tree at **`rust/src/re.rs`** —
+a hand-written matcher covering the subset above, exposing the small
+surface struct uses (`Regex::new` + `is_match` / `find` / `replace_all`).
+Zero runtime crates.
 
-1. **Vendor a minimal matcher.** Implement `voxgig_struct::_regex` —
-   roughly an NFA with the subset above. About 400–600 LOC. Drops the
-   `regex` crate entirely.
-2. **Use `regex-lite`** (~50 KB compiled, same syntax minus a few
-   esoteric bits). Still a third-party crate but ~10× smaller and
-   no Unicode tables. Doesn't satisfy "no runtime deps" but it's the
-   smallest possible delta.
+### Zig — shipped
 
-Recommend option 1 — the surface used by struct is so small (`Regex::new`
-+ `is_match` / `find` / `replace_all`) that the vendored matcher needs
-maybe four public methods.
+`zig/build.zig.zon` no longer depends on `mvzr` (its `.dependencies` is
+`.{}`). The matcher is vendored in-tree at **`zig/src/regex.zig`** — a
+small Thompson NFA for the subset. No network dependency, no `.zon` hash.
 
-### Zig
+### C — shipped
 
-`zig/build.zig.zon` currently depends on `mvzr` (≈1500 LOC). Two
-routes:
+The C port no longer uses substring containment for `$LIKE`. It ships a
+Thompson-NFA matcher in **`c/src/regex.c`** (~1105 LOC) with a small
+header (`c/src/regex.h`), wired into both `$LIKE` and integer-key
+detection. The API is compact: `voxgig_regex_compile`,
+`voxgig_regex_match`, `voxgig_regex_free`. No `libpcre`, no
+`libregex.h` (which isn't portable to non-POSIX targets), and no
+substring fallback.
 
-1. **Vendor mvzr in-tree.** Copy `mvzr.zig` into `zig/src/vendor/` and
-   drop the dependency entry. Zig licences allow this; mvzr is MIT.
-2. **Write a tiny matcher** for the subset (Zig is well-suited to NFA
-   work; ~400 LOC).
+### Lua — shipped
 
-Recommend option 1 — same code, just inlined. Removes the network
-dependency and the `.zon` hash without adding new code to maintain.
-
-### C
-
-My port currently uses substring containment for `$LIKE`. Add a
-minimal NFA matcher in `c/src/regex.c` / `c/src/regex.h`. A reasonable
-prior-art reference is `tiny-regex-c`
-(<https://github.com/kokke/tiny-regex-c>, public domain, ~500 LOC) — its
-feature set is *almost* the subset above (it's missing `{n,m}`
-quantifiers and lazy modifiers). Either:
-
-1. **Vendor tiny-regex-c** and extend it for `{n,m}` + lazy quantifiers
-   (~50 extra LOC).
-2. **Write fresh** — Russ Cox's "regular expression matching can be
-   simple and fast" approach builds a Thompson NFA in ~200 LOC plus
-   another ~100 for the parser.
-
-Either way, the API is small: `voxgig_regex_compile`, `voxgig_regex_match`,
-`voxgig_regex_free`. No `libpcre`, no `libregex.h` (which isn't portable
-to non-POSIX targets).
-
-### Lua
-
-`string.match` / `string.find` use **Lua patterns**, not regex. The
-syntax differences for the corpus subset:
-
-| Subset | Lua pattern | Lua-compatible? |
-|---|---|---|
-| `.` | `.` | yes |
-| `^`, `$` | `^`, `$` | yes (anchors only at ends of pattern) |
-| `[abc]`, `[^abc]`, `[a-z]` | same | yes |
-| `*`, `+`, `?` | `*`, `+`, `?` (no lazy `*?`) | partial |
-| `\d` | `%d` | no — different syntax |
-| `\w`, `\s`, `\b` | `%w`, `%s` (no `\b`) | partial |
-| `(...)` capture | `(...)` | yes |
-| `a|b` alternation | not supported | **no** |
-| `{n,m}` | not supported | **no** |
-
-So Lua's built-in pattern engine can't express the full subset.
-Options:
-
-1. **Accept the divergence.** The corpus only exercises character
-   classes via `$LIKE`, which Lua patterns support natively. Document
-   the limitation in `lua/README.md`. If a future test needs `|` or
-   `{n,m}` it must come with a Lua-friendly equivalent.
-2. **Add a Lua-native pattern compiler.** Implement a tiny pattern
-   matcher in pure Lua (around 400 LOC). Same approach as the C/Zig
-   recommendations.
-3. **Vendor LPeg as a source file.** LPeg is the standard Lua parsing
-   library and supports more general grammars. Not a "regex engine"
-   exactly but covers the subset. ~1500 LOC.
-
-Recommend option 1 for now — the cost/benefit ratio of writing a Lua
-regex engine to support one test pattern is poor. If the corpus later
-grows a pattern that Lua patterns can't express, revisit then.
+The Lua port no longer relies on `string.match` / Lua patterns (which
+are intentionally not regex and can't express the full subset — no
+alternation, no `{n,m}`, different `\d`/`%d` syntax). It ships a
+pure-Lua RE2-subset matcher in **`lua/src/regex.lua`** (~658 LOC),
+following the same approach as the C and Zig engines.
 
 
 ## Test-corpus enforcement
@@ -215,27 +165,29 @@ To keep the corpus inside the portable subset:
 3. **Add a tests-only Go program** `tools/check_regex.go` that
    compiles all known patterns. CI runs `make scan-regex`.
 
-## Suggested rollout order
+## Rollout — completed
 
-1. **Now (docs only):**
-   - Land this document at `REGEX.md` or in `REPORT.md`.
-   - Document the subset constraint in `build/test/.../README.md`.
-   - Add the parity scanner check.
+All of the staged work below has shipped:
 
-2. **Next (small code touches):**
-   - C port: implement `voxgig_regex_*` matcher (~500 LOC). Wire `$LIKE`
-     to it. Drop the substring fallback and update the parity-matrix
-     entry from `Y*` to `Y`.
-   - Lua: add an explicit divergence note in `lua/README.md`. No code
-     change.
+1. **Docs:**
+   - This document landed at `REGEX.md`.
+   - The subset constraint is documented for the corpus.
+   - The parity scanner check is in place.
 
-3. **Later (larger refactors):**
-   - Zig: copy `mvzr.zig` in-tree under `zig/src/vendor/` (MIT licence
-     allows). Remove the `.zon` dependency.
-   - Rust: replace the `regex` crate with a vendored matcher. ~600 LOC
-     in `rust/src/regex.rs`.
+2. **C and Lua:**
+   - C port: the `voxgig_regex_*` Thompson-NFA matcher
+     (`c/src/regex.c`, ~1105 LOC) is wired into `$LIKE` and integer-key
+     detection. The substring fallback is gone.
+   - Lua port: the pure-Lua RE2-subset matcher (`lua/src/regex.lua`,
+     ~658 LOC) replaced the Lua-pattern path.
 
-Once the four affected ports (rs, zig, c, lua) are done, every port
+3. **Zig and Rust:**
+   - Zig: the in-tree matcher lives at `zig/src/regex.zig`; the `mvzr`
+     `.zon` dependency is removed (`.dependencies = .{}`).
+   - Rust: the in-tree matcher lives at `rust/src/re.rs`; the `regex`
+     crate is removed (`[dependencies]` is empty).
+
+With the four formerly-affected ports (rs, zig, c, lua) done, every port
 guarantees the subset and **no port carries a runtime regex dep beyond
 its stdlib**.
 

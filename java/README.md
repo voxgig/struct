@@ -2,7 +2,7 @@
 
 > Java port of the canonical TypeScript implementation.
 >
-> **Status: complete.**  Full TS-canonical parity: all 40 functions,
+> **Status: complete.**  Full TS-canonical parity: all 48 functions,
 > 15 type bit-flags, 3 mode constants (`M_KEYPRE`/`M_KEYPOST`/`M_VAL`),
 > `SKIP`/`DELETE` sentinel marker maps, and the `Injection` state
 > machine. `inject()`/`transform()`/`validate()`/`select()` all dispatch
@@ -87,7 +87,7 @@ overloads:
 
 ```java
 public interface WalkApply {
-    Object apply(Object key, Object val, Object parent, List<String> path);
+    Object apply(String key, Object val, Object parent, List<String> path);
 }
 public static Object walk(Object val, WalkApply before, WalkApply after, int maxdepth)
 ```
@@ -103,6 +103,40 @@ Predicates — `isnode` is true for maps and lists:
 ```java
 Struct.isnode(Struct.jm("a", 1));        // true
 ```
+<!-- => true -->
+
+`ismap` is true only for maps; `islist` only for lists:
+
+<!-- example: minor/ismap#map -->
+```java
+Struct.ismap(Struct.jm("a", 1));         // true
+```
+
+<!-- => true -->
+
+<!-- example: minor/islist#list -->
+```java
+Struct.islist(Struct.jt(1, 2));          // true
+```
+
+<!-- => true -->
+
+`iskey` is true for non-empty strings and numbers (usable as keys):
+
+<!-- example: minor/iskey#str -->
+```java
+Struct.iskey("name");                    // true
+```
+
+<!-- => true -->
+
+`isempty` is true for null, empty strings, and empty nodes:
+
+<!-- example: minor/isempty#empty -->
+```java
+Struct.isempty(Struct.jt());             // true
+```
+
 <!-- => true -->
 
 Size of a node is its element count:
@@ -143,6 +177,60 @@ Struct.pad("a", 3, null);                // "a  "
 Struct.getprop(Struct.jm("x", 1), "x");  // 1
 ```
 <!-- => 1 -->
+
+`getelem` is list-specific and supports negative-from-the-end indexing:
+
+<!-- example: minor/getelem#neg -->
+```java
+Struct.getelem(Struct.jt(10, 20, 30), -1);   // 30
+```
+
+<!-- => 30 -->
+
+`setprop` returns the parent with the key set:
+
+<!-- example: minor/setprop#set -->
+```java
+Struct.setprop(Struct.jm("a", 1), "b", 2);   // {a=1, b=2}
+```
+
+<!-- => {"a": 1, "b": 2} -->
+
+`delprop` returns the parent with the key removed:
+
+<!-- example: minor/delprop#del -->
+```java
+Struct.delprop(Struct.jm("a", 1, "b", 2), "a");   // {b=2}
+```
+
+<!-- => {"b": 2} -->
+
+`haskey` is true when the key holds a value:
+
+<!-- example: minor/haskey#hit -->
+```java
+Struct.haskey(Struct.jm("a", 1), "a");   // true
+```
+
+<!-- => true -->
+
+`items` returns the `[key, value]` pairs of a map or list:
+
+<!-- example: minor/items#map -->
+```java
+Struct.items(Struct.jm("a", 1, "b", 2));   // [[a, 1], [b, 2]]
+```
+
+<!-- => [["a", 1], ["b", 2]] -->
+
+`strkey` coerces a key to its canonical string form (numbers truncate):
+
+<!-- example: minor/strkey#num -->
+```java
+Struct.strkey(2.2);                      // "2"
+```
+
+<!-- => "2" -->
 
 `keysof` returns map keys sorted:
 
@@ -202,6 +290,130 @@ Struct.stringify("verylongstring", 5);   // ve...
 Struct.getpath(Struct.jm("a", Struct.jm("b", Struct.jm("c", 42))), "a.b.c");   // 42
 ```
 <!-- => 42 -->
+
+`setpath` writes a deep value, returning the (mutated) store:
+
+<!-- example: minor/setpath#nested -->
+```java
+Struct.setpath(Struct.jm("a", 1, "b", 2), "b", 22);   // {a=1, b=22}
+```
+
+<!-- => {"a": 1, "b": 22} -->
+
+`pathify` renders a path list as a dot-string:
+
+<!-- example: minor/pathify#parts -->
+```java
+Struct.pathify(Struct.jt("a", "b", "c"));   // "a.b.c"
+```
+
+<!-- => "a.b.c" -->
+
+`typify` returns a bit-field combining a kind flag with a specific type;
+`typename` looks up the human-friendly name:
+
+<!-- example: minor/typify#int -->
+```java
+Struct.typify(1);                        // T_scalar | T_number | T_integer  (201326720)
+```
+
+<!-- => 201326720 -->
+
+<!-- example: minor/typename#map -->
+```java
+Struct.typename(8192);                    // "map"  (8192 == T_map)
+```
+
+<!-- => "map" -->
+
+`escre` escapes regex metacharacters; `escurl` percent-encodes for URLs:
+
+<!-- example: minor/escre#dots -->
+```java
+Struct.escre("a.b+c");                    // "a\\.b\\+c"
+```
+
+<!-- => "a\\.b\\+c" -->
+
+<!-- example: minor/escurl#space -->
+```java
+Struct.escurl("hello world?");            // "hello%20world%3F"
+```
+
+<!-- => "hello%20world%3F" -->
+
+`join` concatenates a list with a separator (the third arg is URL-collapse
+mode):
+
+<!-- example: minor/join#sep -->
+```java
+Struct.join(Struct.jt("a", "b", "c"), "/", false);   // "a/b/c"
+```
+
+<!-- => "a/b/c" -->
+
+`clone` deep-copies a node:
+
+<!-- example: minor/clone#deep -->
+```java
+Struct.clone(Struct.jm("a", Struct.jm("b", Struct.jt(1, 2))));   // {a={b=[1, 2]}}  (a deep copy)
+```
+
+<!-- => {"a": {"b": [1, 2]}} -->
+
+`flatten` collapses nested lists one level by default:
+
+<!-- example: minor/flatten#nested -->
+```java
+Struct.flatten(Struct.jt(1, Struct.jt(2, Struct.jt(3))));   // [1, 2, [3]]  (one level by default)
+```
+
+<!-- => [1, 2, [3]] -->
+
+`merge` deep-merges a list of nodes — last input wins, maps deep-merge,
+lists merge by index:
+
+<!-- example: merge#basic -->
+```java
+Struct.merge(Struct.jt(
+    Struct.jm("a", 1, "b", 2, "k", Struct.jt(10, 20), "x", Struct.jm("y", 5, "z", 6)),
+    Struct.jm("b", 3, "d", 4, "e", 8, "k", Struct.jt(11), "x", Struct.jm("y", 7))));
+// {a=1, b=3, d=4, e=8, k=[11, 20], x={y=7, z=6}}
+```
+
+<!-- => {"a": 1, "b": 3, "d": 4, "e": 8, "k": [11, 20], "x": {"y": 7, "z": 6}} -->
+
+`inject` replaces backtick refs in strings with values from the store:
+
+<!-- example: inject#basic -->
+```java
+Struct.inject(Struct.jm("x", "`a`", "y", 2), Struct.jm("a", 1));   // {x=1, y=2}
+```
+
+<!-- => {"x": 1, "y": 2} -->
+
+`validate` checks data against a shape spec (throws on mismatch):
+
+<!-- example: validate#shape -->
+```java
+Struct.validate(Struct.jm("name", "Ada", "age", 36),
+    Struct.jm("name", "`$STRING`", "age", "`$INTEGER`"));   // {name=Ada, age=36}
+```
+
+<!-- => {"name": "Ada", "age": 36} -->
+
+`select` finds children matching a query, tagging each with its `$KEY`:
+
+<!-- example: select#query -->
+```java
+Struct.select(
+    Struct.jm("a", Struct.jm("name", "Alice", "age", 30),
+              "b", Struct.jm("name", "Bob", "age", 25)),
+    Struct.jm("age", 30));
+// [{name=Alice, age=30, $KEY=a}]
+```
+
+<!-- => [{"name": "Alice", "age": 30, "$KEY": "a"}] -->
 
 
 ## Constants

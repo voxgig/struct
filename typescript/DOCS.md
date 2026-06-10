@@ -102,15 +102,37 @@ if (errs.length) console.error(errs)
 ```
 
 ### Write a custom transform function (`$APPLY`)
+
+`$APPLY` is a list command: place it in **value** position as the first
+element of a list, followed by a literal function. The function is called
+as `(resolvedChild, store, childInj)` and its return value replaces the
+node. (`$APPLY` with a bare name string — e.g. `['`$APPLY`', 'sum']` — or in
+map-key position throws.)
+
 ```ts
 transform(
   { items: [1, 2, 3] },
-  { total: { '`$APPLY`': 'sum' } },
-  { extra: { sum: (_key: any, val: any, parent: any) => parent.items.reduce((a: number, b: number) => a + b, 0) } },
+  { total: ['`$APPLY`', (val: any, store: any) =>
+    store.$TOP.items.reduce((a: number, b: number) => a + b, 0)] },
 )
+// { total: 6 }
 ```
-Register the function under `extra`; reference it by name in the spec. A
-custom function may return the `SKIP` / `DELETE` sentinels to omit/remove
+
+Alternatively, register a **named** command under `extra` (its key must
+start with `$`) and reference it as its own token. The function is called
+as `(inj, val, ref, store)`:
+
+```ts
+transform(
+  { items: [1, 2, 3] },
+  { total: ['`$sum`'] },
+  { extra: { $sum: (_inj: any, _val: any, _ref: any, store: any) =>
+    store.$TOP.items.reduce((a: number, b: number) => a + b, 0) } },
+)
+// { total: [6] }
+```
+
+A custom function may return the `SKIP` / `DELETE` sentinels to omit/remove
 the current key.
 
 ### Keep a `walk` path past the callback

@@ -43,6 +43,11 @@ syntax), and language-specific notes:
 | Perl       | Complete   | [`perl/README.md`](./perl/README.md)                  |
 | Swift      | Complete   | [`swift/README.md`](./swift/README.md)                |
 
+"Partial" (Java, Kotlin) denotes project maturity / release-lag — the
+JVM family trails the canonical by a release — **not** missing API: both
+report full canonical parity under `tools/check_parity.py`. See each
+port's `README.md` for details.
+
 Each port directory also carries a `DOCS.md` (the comprehensive,
 four-part guide) and an `AGENTS.md` (notes for AI coding agents).
 
@@ -226,7 +231,7 @@ exposes equivalents.  The casing varies by language convention
 (`getpath` in TS/JS/Py/Ruby/PHP/Lua/Perl/Java/Kotlin/Swift; `GetPath`
 in Go/C#; `get_path` in Rust; `voxgig_getpath` in C).
 
-### Minor utilities (25)
+### Minor utilities (29)
 
 | Function                            | Returns         | Description                                                                 |
 |-------------------------------------|-----------------|-----------------------------------------------------------------------------|
@@ -253,7 +258,7 @@ in Go/C#; `get_path` in Rust; `voxgig_getpath` in C).
 | `escre(s)`                          | string          | Escape regex metacharacters in a string.                                    |
 | `escurl(s)`                         | string          | URL-encode a string.                                                        |
 | `join(arr, sep?, urlmode?)`         | string          | Join string parts with `sep`; in URL mode, collapse repeated separators.    |
-| `jsonify(val, flags?)`              | string          | Strict JSON serialisation of a value, optionally pretty-printed.            |
+| `jsonify(val, flags?)`              | string          | Strict JSON serialisation of a value; pretty-printed (indent 2) by default, pass `flags` `{indent:0}` for compact output. |
 | `stringify(val, maxlen?)`           | string          | Compact, human-friendly string form of a value, truncated to `maxlen`.      |
 | `pathify(val, from?, to?)`          | string          | Render a path (string or array) as a canonical dotted string.               |
 | `clone(val)`                        | any             | Deep copy of a JSON-shaped value.                                           |
@@ -369,6 +374,24 @@ Quote the checker in backticks inside a `validate` spec, e.g. `` `$STRING` ``.
 | `$CHILD`    | Apply a sub-spec to every direct child of the current node.              |
 | `$ONE`      | The value must match exactly one of a list of alternative sub-specs.     |
 | `$EXACT`    | The value must equal a literal value exactly (no shape coercion).        |
+
+### Regex API (6)
+
+A uniform six-function regex layer wraps each host engine so internal
+call sites read the same in every port. Patterns must stay inside the
+**RE2 subset** (no backreferences, no lookaround). Full spec:
+[`REGEX_API.md`](design/REGEX_API.md), [`REGEX.md`](design/REGEX.md);
+cross-engine edge cases:
+[`REGEX_PATHOLOGICAL.md`](design/REGEX_PATHOLOGICAL.md).
+
+| Function                                  | Returns        | Description                                                                 |
+|-------------------------------------------|----------------|-----------------------------------------------------------------------------|
+| `re_compile(pattern, flags?)`             | regex          | Compile a pattern (or return it as-is if already compiled); caching is port-defined. |
+| `re_test(pattern, input)`                 | bool           | True if `pattern` matches anywhere in `input`.                              |
+| `re_find(pattern, input)`                 | match \| null  | First match as `[whole, capture1, ...]`, or null if none.                  |
+| `re_find_all(pattern, input)`             | match[]        | All non-overlapping matches, left to right, each shaped like `re_find`.    |
+| `re_replace(pattern, input, replacement)` | string         | Replace every match; `replacement` is a string (with `$&`/`$1`..`$9`) or a callback. |
+| `re_escape(s)`                            | string         | Escape regex metacharacters in `s` (alias of `escre`).                     |
 
 
 ## Design notes

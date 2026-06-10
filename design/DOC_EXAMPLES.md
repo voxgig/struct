@@ -2,10 +2,19 @@
 
 **Status:** implemented (2026-06). `tools/check_doc_examples.py` + `tools/gen_doc_examples.py`
 are wired into `make corpus` / `make gen-docs` / `make scan-docs-examples` and the
-`docs-examples` + `corpus-freshness` CI jobs. 250 example anchors across all 16 ports validate
-against the shared corpus; all 16 port test suites pass the doc-example corpus entries. The
-sections below are the design as built (the original per-port `render_value` of Layer 3 proved
-unnecessary — see §3 Layer 3).
+`docs-examples` + `corpus-freshness` CI jobs. **618 example anchors across all 16 ports** validate
+against the shared corpus (39 of the 48 canonical functions now have `doc:true` corpus-backed
+examples); all 16 port test suites pass the doc-example corpus entries. The sections below are the
+design as built (the original per-port `render_value` of Layer 3 proved unnecessary — see §3 Layer 3).
+
+**Coverage / residual.** The 9 canonical functions without a corpus-backed anchored example are the
+ones that have no clean standalone corpus entry under the existing per-function harness dispatch:
+the two builders (`jm`, `jt`), the six regex wrappers (`re_*`, exercised by the separate
+`regex_pathological` suite rather than the shared corpus), and `walk` (callback-shaped). `getdef`
+and the three injection helpers (`checkPlacement`, `injectorArgs`, `injectChild`) are documented in
+the per-port function reference but are likewise not corpus-anchored. Extending to these would mean
+adding new corpus groups + per-port harness dispatch for them — tracked as future work, not a gap
+in the mechanism.
 **Problem it solves:** the documentation review of 2026-06 confirmed 108 source-contradicted
 claims, dominated by *example outputs that were never re-run* (`jsonify` shown compact but
 defaults to pretty; `filter` shown returning `[k,v]` pairs but returns values; `slice(...,-3)`

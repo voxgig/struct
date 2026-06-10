@@ -85,7 +85,7 @@ because they don't preserve insertion order.
 
 ### What's wired
 
-- All 25 **minor utilities**: `isnode`, `ismap`, `islist`, `iskey`,
+- All 29 **minor utilities**: `isnode`, `ismap`, `islist`, `iskey`,
   `isempty`, `isfunc`, `size`, `slice`, `pad`, `typify`, `getelem`,
   `getprop`, `strkey`, `keysof`, `haskey`, `items`, `flatten`,
   `filter`, `escre`, `escurl`, `join`, `jsonify`, `stringify`,
@@ -129,6 +129,53 @@ call returns.
 Voxgig::Struct::isnode(Voxgig::Struct::jm(a => 1));   # true (a map is a node)
 ```
 <!-- => true -->
+
+<!-- example: minor/ismap#map -->
+```perl
+Voxgig::Struct::ismap(Voxgig::Struct::jm(a => 1));   # true
+```
+
+<!-- => true -->
+
+<!-- example: minor/islist#list -->
+```perl
+Voxgig::Struct::islist([1, 2]);   # true
+```
+
+<!-- => true -->
+
+<!-- example: minor/iskey#str -->
+```perl
+Voxgig::Struct::iskey('name');   # true
+```
+
+<!-- => true -->
+
+<!-- example: minor/isempty#empty -->
+```perl
+Voxgig::Struct::isempty([]);   # true
+```
+
+<!-- => true -->
+
+### Type inspection
+
+`typify` returns a bit-field combining a kind flag (`T_scalar` or `T_node`)
+with a specific type flag; `typename` looks up a human-friendly name:
+
+<!-- example: minor/typify#int -->
+```perl
+Voxgig::Struct::typify(1);   # T_scalar | T_number | T_integer (201326720)
+```
+
+<!-- => 201326720 -->
+
+<!-- example: minor/typename#map -->
+```perl
+Voxgig::Struct::typename(8192);   # 'map' (8192 == T_map)
+```
+
+<!-- => "map" -->
 
 ### Size, slice, pad
 
@@ -175,6 +222,60 @@ Voxgig::Struct::keysof(Voxgig::Struct::jm(b => 4, a => 5));   # ['a', 'b']
 ```
 <!-- => ["a", "b"] -->
 
+`getelem` is list-specific and supports negative-from-the-end indexing:
+
+<!-- example: minor/getelem#neg -->
+```perl
+Voxgig::Struct::getelem([10, 20, 30], -1);   # 30
+```
+
+<!-- => 30 -->
+
+`setprop` returns the parent with the key set; `delprop` returns it with the
+key removed:
+
+<!-- example: minor/setprop#set -->
+```perl
+Voxgig::Struct::setprop(Voxgig::Struct::jm(a => 1), 'b', 2);   # { a => 1, b => 2 }
+```
+
+<!-- => {"a": 1, "b": 2} -->
+
+<!-- example: minor/delprop#del -->
+```perl
+Voxgig::Struct::delprop(Voxgig::Struct::jm(a => 1, b => 2), 'a');   # { b => 2 }
+```
+
+<!-- => {"b": 2} -->
+
+`haskey` reports whether a key is present (and not null/absent):
+
+<!-- example: minor/haskey#hit -->
+```perl
+Voxgig::Struct::haskey(Voxgig::Struct::jm(a => 1), 'a');   # true
+```
+
+<!-- => true -->
+
+`items` returns `[key, value]` pairs in canonical order:
+
+<!-- example: minor/items#map -->
+```perl
+Voxgig::Struct::items(Voxgig::Struct::jm(a => 1, b => 2));   # [['a', 1], ['b', 2]]
+```
+
+<!-- => [["a", 1], ["b", 2]] -->
+
+`strkey` coerces a key to its canonical string form (numbers truncate toward
+zero; invalid keys become `''`):
+
+<!-- example: minor/strkey#num -->
+```perl
+Voxgig::Struct::strkey(2.2);   # '2'
+```
+
+<!-- => "2" -->
+
 ### Filter
 
 `filter` passes each `[key, value]` pair to the check and returns the
@@ -188,6 +289,90 @@ Voxgig::Struct::filter([1, 2, 3, 4, 5], sub {
 });   # [4, 5]
 ```
 <!-- => [4, 5] -->
+
+### Path operations
+
+`setpath` sets a deep value by dot path (store first, then path, then value)
+and returns the store:
+
+<!-- example: minor/setpath#nested -->
+```perl
+Voxgig::Struct::setpath(Voxgig::Struct::jm(a => 1, b => 2), 'b', 22);   # { a => 1, b => 22 }
+```
+
+<!-- => {"a": 1, "b": 22} -->
+
+`pathify` renders a path arrayref as a dotted string:
+
+<!-- example: minor/pathify#parts -->
+```perl
+Voxgig::Struct::pathify(['a', 'b', 'c']);   # 'a.b.c'
+```
+
+<!-- => "a.b.c" -->
+
+### Tree operations
+
+`merge` combines a list of nodes — last input wins, maps deep-merge, lists
+merge by index:
+
+<!-- example: merge#basic -->
+```perl
+Voxgig::Struct::merge([
+  Voxgig::Struct::jm(a => 1, b => 2, k => [10, 20],
+                     x => Voxgig::Struct::jm(y => 5, z => 6)),
+  Voxgig::Struct::jm(b => 3, d => 4, e => 8, k => [11],
+                     x => Voxgig::Struct::jm(y => 7)),
+]);
+# { a => 1, b => 3, d => 4, e => 8, k => [11, 20], x => { y => 7, z => 6 } }
+```
+
+<!-- => {"a": 1, "b": 3, "d": 4, "e": 8, "k": [11, 20], "x": {"y": 7, "z": 6}} -->
+
+`clone` makes a deep copy:
+
+<!-- example: minor/clone#deep -->
+```perl
+Voxgig::Struct::clone(Voxgig::Struct::jm(a => Voxgig::Struct::jm(b => [1, 2])));
+# { a => { b => [1, 2] } }  (a deep copy)
+```
+
+<!-- => {"a": {"b": [1, 2]}} -->
+
+`flatten` collapses one level of nested lists by default:
+
+<!-- example: minor/flatten#nested -->
+```perl
+Voxgig::Struct::flatten([1, [2, [3]]]);   # [1, 2, [3]]  (one level by default)
+```
+
+<!-- => [1, 2, [3]] -->
+
+### String / URL
+
+`escre` escapes regex metacharacters; `escurl` percent-encodes URL-unsafe
+characters; `join` joins list parts with a separator:
+
+<!-- example: minor/escre#dots -->
+```perl
+Voxgig::Struct::escre('a.b+c');   # 'a\.b\+c'
+```
+
+<!-- => "a\\.b\\+c" -->
+
+<!-- example: minor/escurl#space -->
+```perl
+Voxgig::Struct::escurl('hello world?');   # 'hello%20world%3F'
+```
+
+<!-- => "hello%20world%3F" -->
+
+<!-- example: minor/join#sep -->
+```perl
+Voxgig::Struct::join(['a', 'b', 'c'], '/');   # 'a/b/c'
+```
+
+<!-- => "a/b/c" -->
 
 ### JSON serialisation
 
@@ -250,6 +435,48 @@ Voxgig::Struct::transform(
 # dies: $APPLY: invalid placement in parent map.
 ```
 <!-- throws: invalid placement in parent map -->
+
+### Injection / validate / select
+
+`inject` replaces backtick references in strings with values from the store:
+
+<!-- example: inject#basic -->
+```perl
+Voxgig::Struct::inject(
+  Voxgig::Struct::jm(x => '`a`', y => 2),
+  Voxgig::Struct::jm(a => 1),
+);   # { x => 1, y => 2 }
+```
+
+<!-- => {"x": 1, "y": 2} -->
+
+`validate` checks data against a shape spec (the leaves are type checkers)
+and dies on mismatch:
+
+<!-- example: validate#shape -->
+```perl
+Voxgig::Struct::validate(
+  Voxgig::Struct::jm(name => 'Ada', age => 36),
+  Voxgig::Struct::jm(name => '`$STRING`', age => '`$INTEGER`'),
+);   # { name => 'Ada', age => 36 }  (dies on mismatch)
+```
+
+<!-- => {"name": "Ada", "age": 36} -->
+
+`select` finds children matching a query, tagging each with its `$KEY`:
+
+<!-- example: select#query -->
+```perl
+Voxgig::Struct::select(
+  Voxgig::Struct::jm(
+    a => Voxgig::Struct::jm(name => 'Alice', age => 30),
+    b => Voxgig::Struct::jm(name => 'Bob',   age => 25),
+  ),
+  Voxgig::Struct::jm(age => 30),
+);   # [ { name => 'Alice', age => 30, '$KEY' => 'a' } ]
+```
+
+<!-- => [{"name": "Alice", "age": 30, "$KEY": "a"}] -->
 
 
 ## Regex

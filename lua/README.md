@@ -64,7 +64,10 @@ local out = struct.transform(store, {
 })
 -- out == { name = 'Ada', surname = 'Lovelace', years = 36 }
 
+-- validate is closed by default: the spec must cover every key in
+-- the data, so include `db` (otherwise it errors on the extra key).
 struct.validate(store, {
+  db = { host = '`$STRING`' },
   user = {
     first = '`$STRING`',
     last  = '`$STRING`',
@@ -95,11 +98,39 @@ struct.isnode({ a = 1 })             -- true
 ```
 <!-- => true -->
 
+<!-- example: minor/ismap#map -->
 ```lua
 struct.ismap({ a = 1 })              -- true
-struct.islist({ 1, 2, 3 })           -- true
+```
+
+<!-- => true -->
+
+<!-- example: minor/islist#list -->
+```lua
+struct.islist({ 1, 2 })              -- true
+```
+
+<!-- => true -->
+
+<!-- example: minor/iskey#str -->
+```lua
 struct.iskey('name')                 -- true
+```
+
+<!-- => true -->
+
+```lua
 struct.iskey('')                     -- false
+```
+
+<!-- example: minor/isempty#empty -->
+```lua
+struct.isempty({})                   -- true
+```
+
+<!-- => true -->
+
+```lua
 struct.isempty(nil)                  -- true
 struct.isfunc(function() end)        -- true
 ```
@@ -111,10 +142,27 @@ struct.typify(val)        -- -> integer (bit-field)
 struct.typename(t)        -- -> string
 ```
 
+<!-- example: minor/typify#int -->
+```lua
+struct.typify(1)                     -- T_scalar | T_number | T_integer  (201326720)
+```
+
+<!-- => 201326720 -->
+
 ```lua
 struct.typify(42)                    -- T_scalar | T_number | T_integer
 struct.typify('hi')                  -- T_scalar | T_string
-struct.typify(nil)                   -- T_noval (Lua has no separate null)
+struct.typify(nil)                   -- T_null (Lua's nil maps to JSON null)
+```
+
+<!-- example: minor/typename#map -->
+```lua
+struct.typename(8192)                -- 'map'  (8192 == T_map)
+```
+
+<!-- => "map" -->
+
+```lua
 struct.typename(struct.typify('hi')) -- 'string'
 ```
 
@@ -180,11 +228,51 @@ struct.getprop({ x = 1 }, 'x')              -- 1
 
 ```lua
 struct.getprop({}, 'b', 'fallback')         -- 'fallback'
+```
+
+<!-- example: minor/setprop#set -->
+```lua
 struct.setprop({ a = 1 }, 'b', 2)           -- { a = 1, b = 2 }
+```
+
+<!-- => {"a": 1, "b": 2} -->
+
+<!-- example: minor/delprop#del -->
+```lua
 struct.delprop({ a = 1, b = 2 }, 'a')       -- { b = 2 }
-struct.getelem({ 1, 2, 3 }, -1)             -- 3
+```
+
+<!-- => {"b": 2} -->
+
+<!-- example: minor/getelem#neg -->
+```lua
+struct.getelem({ 10, 20, 30 }, -1)          -- 30
+```
+
+<!-- => 30 -->
+
+<!-- example: minor/haskey#hit -->
+```lua
 struct.haskey({ a = 1 }, 'a')               -- true
+```
+
+<!-- => true -->
+
+<!-- example: minor/items#map -->
+```lua
 struct.items({ a = 1, b = 2 })              -- { {'a', 1}, {'b', 2} }
+```
+
+<!-- => [["a", 1], ["b", 2]] -->
+
+<!-- example: minor/strkey#num -->
+```lua
+struct.strkey(2.2)                          -- '2'
+```
+
+<!-- => "2" -->
+
+```lua
 struct.strkey(1)                            -- '1'
 ```
 
@@ -215,9 +303,21 @@ struct.getpath({}, 'missing')                         -- nil
 local store = {}
 struct.setpath(store, 'db.host', 'localhost')
 -- store.db.host == 'localhost'
+```
 
+<!-- example: minor/setpath#nested -->
+```lua
+struct.setpath({ a = 1, b = 2 }, 'b', 22)             -- { a = 1, b = 22 }
+```
+
+<!-- => {"a": 1, "b": 22} -->
+
+<!-- example: minor/pathify#parts -->
+```lua
 struct.pathify({ 'a', 'b', 'c' })                     -- 'a.b.c'
 ```
+
+<!-- => "a.b.c" -->
 
 ### Tree operations
 
@@ -236,16 +336,34 @@ struct.walk(tree, nil, function(key, val, parent, path)
   end
   return val
 end)
-
-struct.merge({
-  { a = 1, b = 2 },
-  { b = 3, c = 4 },
-})
--- { a = 1, b = 3, c = 4 }
-
-struct.clone({ a = { 1, 2 } })
-struct.flatten({ 1, { 2, { 3 } } })
 ```
+
+Last input wins; maps deep-merge; lists merge by index:
+
+<!-- example: merge#basic -->
+```lua
+struct.merge(struct.jt(
+  struct.jm('a', 1, 'b', 2, 'k', struct.jt(10, 20), 'x', struct.jm('y', 5, 'z', 6)),
+  struct.jm('b', 3, 'd', 4, 'e', 8, 'k', struct.jt(11), 'x', struct.jm('y', 7))
+))
+-- { a = 1, b = 3, d = 4, e = 8, k = { 11, 20 }, x = { y = 7, z = 6 } }
+```
+
+<!-- => {"a": 1, "b": 3, "d": 4, "e": 8, "k": [11, 20], "x": {"y": 7, "z": 6}} -->
+
+<!-- example: minor/clone#deep -->
+```lua
+struct.clone({ a = { b = { 1, 2 } } })       -- { a = { b = { 1, 2 } } }  (a deep copy)
+```
+
+<!-- => {"a": {"b": [1, 2]}} -->
+
+<!-- example: minor/flatten#nested -->
+```lua
+struct.flatten(struct.jt(1, struct.jt(2, struct.jt(3))))  -- { 1, 2, { 3 } }  (one level by default)
+```
+
+<!-- => [1, 2, [3]] -->
 
 `filter` passes each `{ key, value }` pair to the check and returns the
 matching **values** (not the pairs):
@@ -269,11 +387,26 @@ struct.stringify(val, maxlen, pretty)
 struct.replace(s, from, to)
 ```
 
+<!-- example: minor/escre#dots -->
 ```lua
-struct.escre('a.b+c')                    -- 'a%.b%+c'  (Lua patterns)
-struct.escurl('hello world')             -- 'hello%20world'
+struct.escre('a.b+c')                    -- 'a\.b\+c'
+```
+
+<!-- => "a\\.b\\+c" -->
+
+<!-- example: minor/escurl#space -->
+```lua
+struct.escurl('hello world?')            -- 'hello%20world%3F'
+```
+
+<!-- => "hello%20world%3F" -->
+
+<!-- example: minor/join#sep -->
+```lua
 struct.join({ 'a', 'b', 'c' }, '/')      -- 'a/b/c'
 ```
+
+<!-- => "a/b/c" -->
 
 `jsonify` pretty-prints by default (indent 2); pass `{ indent = 0 }` for the
 compact form:
@@ -317,6 +450,14 @@ struct.validate(data, spec, injdef)
 struct.select(children, query)
 ```
 
+<!-- example: inject#basic -->
+```lua
+-- Backtick refs in strings are replaced by store values.
+struct.inject({ x = '`a`', y = 2 }, { a = 1 })   -- { x = 1, y = 2 }
+```
+
+<!-- => {"x": 1, "y": 2} -->
+
 ```lua
 struct.inject(
   { greeting = 'hello `name`' },
@@ -329,14 +470,31 @@ struct.transform(
   { a = '`hold.x`', b = '`top`' }
 )
 -- { a = 1, b = 99 }
+```
 
-struct.validate({ name = 'Ada' }, { name = '`$STRING`' })
+<!-- example: validate#shape -->
+```lua
+-- Validate against a shape (errors on mismatch).
+struct.validate(
+  { name = 'Ada', age = 36 },
+  { name = '`$STRING`', age = '`$INTEGER`' }
+)
+-- { name = 'Ada', age = 36 }
+```
 
+<!-- => {"name": "Ada", "age": 36} -->
+
+<!-- example: select#query -->
+```lua
+-- Find children matching a query.
 struct.select(
-  { a = { age = 30 }, b = { age = 25 } },
+  { a = { name = 'Alice', age = 30 }, b = { name = 'Bob', age = 25 } },
   { age = 30 }
 )
+-- { { name = 'Alice', age = 30, ['$KEY'] = 'a' } }
 ```
+
+<!-- => [{"name": "Alice", "age": 30, "$KEY": "a"}] -->
 
 Transform commands drive structural ops. A command like `$EACH` appears in
 **value** position — as the first element of a list
@@ -372,8 +530,8 @@ struct.jt(...)   -- list (JSON array)
 ```
 
 ```lua
-struct.jm('a', 1, 'b', 2)        -- { a = 1, b = 2 } with array metatable
-struct.jt(1, 2, 3)               -- { 1, 2, 3 } with array metatable
+struct.jm('a', 1, 'b', 2)        -- { a = 1, b = 2 } (plain map table, no metatable)
+struct.jt(1, 2, 3)               -- { 1, 2, 3 } with __jsontype='array' metatable
 ```
 
 ### Injection helpers
@@ -458,12 +616,14 @@ inside the port.
 than `[[key, val], ...]` (array-of-arrays), matching Lua idioms.
 The keys and values match canonical positions.
 
-### `escre` escapes Lua patterns
+### `escre` escapes for the RE2 engine, not Lua patterns
 
-Lua does not have full PCRE; it has Lua patterns.  `escre` escapes
-the metacharacters used in Lua patterns, not in PCRE.  The function
-exists for callers handing the result to `string.match` /
-`string.gsub`.
+`escre` **backslash**-escapes regex metacharacters (`. * + ? ^ $ { }
+( ) [ ] | \`), matching canonical TS (`re_replace` with `'\\$&'`).  So
+`escre('a.b')` is `'a\.b'`.  This is PCRE/RE2 syntax, **not** a valid
+Lua pattern (Lua patterns escape with `%`), so the result is for the
+port's own `re_*` engine — `string.match('a.b', escre('a.b'))` returns
+`nil`.
 
 ### `nil` is "absent"
 
@@ -478,7 +638,7 @@ reference-stable" assumption holds without a wrapper.
 
 ### Test status
 
-75/75 tests pass against the shared corpus.
+74/74 tests pass against the shared corpus.
 
 
 ## Regex

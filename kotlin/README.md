@@ -3,17 +3,18 @@
 > Kotlin/JVM port of the canonical TypeScript implementation.
 >
 > **Status: partial port** (alongside Java) — but it currently carries
-> the **full** TS-canonical public API: all 40 functions, 15 type
+> the **full** TS-canonical public API: all 48 functions, 15 type
 > bit-flags, 3 mode constants (`M_KEYPRE`/`M_KEYPOST`/`M_VAL`),
 > `SKIP`/`DELETE` sentinels, and the `Injection` state machine.
 > `inject()`/`transform()`/`validate()`/`select()` all dispatch through
-> the canonical injector machinery: 11 transform commands
+> the canonical injector machinery: 10 transform commands
 > (`$DELETE`/`$COPY`/`$KEY`/`$ANNO`/`$MERGE`/`$EACH`/`$PACK`/`$REF`/
 > `$FORMAT`/`$APPLY`), 6 validate checkers (`$STRING`/`$TYPE`/`$ANY`/
 > `$CHILD`/`$ONE`/`$EXACT`), and 4 select operators (`$AND`/`$OR`/
 > `$NOT`/`$CMP`). `python3 ../tools/check_parity.py` reports it `ok`.
 >
-> Passes the shared corpus suite (135/135). Run locally with
+> Passes the shared corpus suite (1259/1259 assertions across 8
+> files, run as 60 dynamic corpus subtests). Run locally with
 > `./gradlew test` from `kotlin/`.
 
 For motivation, language-neutral concepts, and the cross-language
@@ -84,7 +85,7 @@ the three injection helpers. Parity is checked case-insensitively
 Source: [`src/main/kotlin/voxgig/struct/Struct.kt`](./src/main/kotlin/voxgig/struct/Struct.kt).
 Package `voxgig.struct`; everything is a member of `object Struct`. The
 data model is JSON-shaped `Any?`: `null` is the JSON null scalar and the
-`Struct.UNDEF` marker stands for "absent" (see [Notes](#notes)). All 40
+`Struct.UNDEF` marker stands for "absent" (see [Notes](#notes)). All 48
 canonical functions are present.
 
 ### Predicates
@@ -104,12 +105,58 @@ Struct.isnode(linkedMapOf("a" to 1))   // true
 ```
 <!-- => true -->
 
+<!-- example: minor/ismap#map -->
+```kotlin
+Struct.ismap(linkedMapOf("a" to 1))   // true
+```
+
+<!-- => true -->
+
+<!-- example: minor/islist#list -->
+```kotlin
+Struct.islist(listOf(1, 2))   // true
+```
+
+<!-- => true -->
+
+<!-- example: minor/iskey#str -->
+```kotlin
+Struct.iskey("name")   // true
+```
+
+<!-- => true -->
+
+<!-- example: minor/isempty#empty -->
+```kotlin
+Struct.isempty(listOf<Any?>())   // true
+```
+
+<!-- => true -->
+
 ### Type inspection
 
 ```kotlin
 fun typify(value: Any?): Int
 fun typename(typeValue: Any?): String
 ```
+
+`typify` returns a bit-field combining a "kind" flag (`T_SCALAR` or
+`T_NODE`) with a specific type flag. `typename` looks up a
+human-friendly name.
+
+<!-- example: minor/typify#int -->
+```kotlin
+Struct.typify(1)   // T_SCALAR or T_NUMBER or T_INTEGER  (201326720)
+```
+
+<!-- => 201326720 -->
+
+<!-- example: minor/typename#map -->
+```kotlin
+Struct.typename(8192)   // "map"  (8192 == T_MAP)
+```
+
+<!-- => "map" -->
 
 ### Property access
 
@@ -133,11 +180,53 @@ Struct.getprop(linkedMapOf("x" to 1), "x")   // 1
 ```
 <!-- => 1 -->
 
+<!-- example: minor/setprop#set -->
+```kotlin
+Struct.setprop(linkedMapOf("a" to 1), "b", 2)   // {a=1, b=2}
+```
+
+<!-- => {"a": 1, "b": 2} -->
+
+<!-- example: minor/delprop#del -->
+```kotlin
+Struct.delprop(linkedMapOf("a" to 1, "b" to 2), "a")   // {b=2}
+```
+
+<!-- => {"b": 2} -->
+
+<!-- example: minor/getelem#neg -->
+```kotlin
+Struct.getelem(listOf(10, 20, 30), -1)   // 30
+```
+
+<!-- => 30 -->
+
+<!-- example: minor/haskey#hit -->
+```kotlin
+Struct.haskey(linkedMapOf("a" to 1), "a")   // true
+```
+
+<!-- => true -->
+
 <!-- example: minor/keysof#sorted -->
 ```kotlin
 Struct.keysof(linkedMapOf("b" to 4, "a" to 5))   // ["a", "b"]  (sorted)
 ```
 <!-- => ["a", "b"] -->
+
+<!-- example: minor/items#map -->
+```kotlin
+Struct.items(linkedMapOf("a" to 1, "b" to 2))   // [[a, 1], [b, 2]]
+```
+
+<!-- => [["a", 1], ["b", 2]] -->
+
+<!-- example: minor/strkey#num -->
+```kotlin
+Struct.strkey(2.2)   // "2"
+```
+
+<!-- => "2" -->
 
 ### Path operations
 
@@ -155,6 +244,20 @@ fun pathify(value: Any?, startIn: Any?, endIn: Any?): String
 Struct.getpath(linkedMapOf("a" to linkedMapOf("b" to linkedMapOf("c" to 42))), "a.b.c")   // 42
 ```
 <!-- => 42 -->
+
+<!-- example: minor/setpath#nested -->
+```kotlin
+Struct.setpath(linkedMapOf("a" to 1, "b" to 2), "b", 22)   // {a=1, b=22}
+```
+
+<!-- => {"a": 1, "b": 22} -->
+
+<!-- example: minor/pathify#parts -->
+```kotlin
+Struct.pathify(listOf("a", "b", "c"))   // "a.b.c"
+```
+
+<!-- => "a.b.c" -->
 
 ### Tree operations
 
@@ -177,6 +280,33 @@ fun interface WalkApply {
     fun apply(key: String?, value: Any?, parent: Any?, path: List<String>): Any?
 }
 ```
+
+Last input wins; maps deep-merge; lists merge by index:
+
+<!-- example: merge#basic -->
+```kotlin
+Struct.merge(listOf(
+    linkedMapOf("a" to 1, "b" to 2, "k" to listOf(10, 20), "x" to linkedMapOf("y" to 5, "z" to 6)),
+    linkedMapOf("b" to 3, "d" to 4, "e" to 8, "k" to listOf(11), "x" to linkedMapOf("y" to 7)),
+))
+// {a=1, b=3, d=4, e=8, k=[11, 20], x={y=7, z=6}}
+```
+
+<!-- => {"a": 1, "b": 3, "d": 4, "e": 8, "k": [11, 20], "x": {"y": 7, "z": 6}} -->
+
+<!-- example: minor/clone#deep -->
+```kotlin
+Struct.clone(linkedMapOf("a" to linkedMapOf("b" to listOf(1, 2))))   // {a={b=[1, 2]}}  (a deep copy)
+```
+
+<!-- => {"a": {"b": [1, 2]}} -->
+
+<!-- example: minor/flatten#nested -->
+```kotlin
+Struct.flatten(listOf(1, listOf(2, listOf(3))))   // [1, 2, [3]]  (one level by default)
+```
+
+<!-- => [1, 2, [3]] -->
 
 <!-- example: minor/size#three -->
 ```kotlin
@@ -230,6 +360,15 @@ fun select(children: Any?, query: Any?): MutableList<Any?>
 `modify`, `handler`, `meta`, and `errs` (an `errs` `MutableList`
 collects errors instead of throwing).
 
+Backtick refs in strings are replaced by store values:
+
+<!-- example: inject#basic -->
+```kotlin
+Struct.inject(linkedMapOf("x" to "`a`", "y" to 2), linkedMapOf("a" to 1))   // {x=1, y=2}
+```
+
+<!-- => {"x": 1, "y": 2} -->
+
 A transform command like `$EACH` appears in **value** position — as the
 first element of a list `['`$EACH`', path, subspec]` — mapping the
 sub-spec over every entry at `path` (in Kotlin source the `$` is escaped
@@ -256,6 +395,33 @@ Struct.transform(linkedMapOf<String, Any?>(), linkedMapOf("x" to "`\$APPLY`"))
 ```
 <!-- throws: invalid placement in parent map -->
 
+Validate against a shape (throws on mismatch):
+
+<!-- example: validate#shape -->
+```kotlin
+Struct.validate(
+    linkedMapOf("name" to "Ada", "age" to 36),
+    linkedMapOf("name" to "`\$STRING`", "age" to "`\$INTEGER`"),
+)
+// {name=Ada, age=36}  (throws on mismatch)
+```
+
+<!-- => {"name": "Ada", "age": 36} -->
+
+Find children matching a query:
+
+<!-- example: select#query -->
+```kotlin
+Struct.select(
+    linkedMapOf("a" to linkedMapOf("name" to "Alice", "age" to 30),
+                "b" to linkedMapOf("name" to "Bob", "age" to 25)),
+    linkedMapOf("age" to 30),
+)
+// [{name=Alice, age=30, $KEY=a}]
+```
+
+<!-- => [{"name": "Alice", "age": 30, "$KEY": "a"}] -->
+
 ### Strings / URL / JSON
 
 ```kotlin
@@ -269,6 +435,27 @@ fun join(arr: Any?, sep: Any?, url: Any?): String
 fun replace(s: Any?, from: Any?, to: Any?): String
 fun pathify(value: Any?): String                     // (also above)
 ```
+
+<!-- example: minor/escre#dots -->
+```kotlin
+Struct.escre("a.b+c")   // "a\.b\+c"
+```
+
+<!-- => "a\\.b\\+c" -->
+
+<!-- example: minor/escurl#space -->
+```kotlin
+Struct.escurl("hello world?")   // "hello%20world%3F"
+```
+
+<!-- => "hello%20world%3F" -->
+
+<!-- example: minor/join#sep -->
+```kotlin
+Struct.join(listOf("a", "b", "c"), "/", false)   // "a/b/c"
+```
+
+<!-- => "a/b/c" -->
 
 `jsonify` pretty-prints by default (indent 2); pass `mapOf("indent" to 0)`
 for the compact form:
@@ -349,7 +536,7 @@ Struct.MODENAME     // Map<Int,String> of mode -> name
 
 ## Transform commands
 
-Inside backticks in a `transform` spec, the 11 canonical commands are
+Inside backticks in a `transform` spec, the 10 canonical commands are
 implemented as `Injector` values (`transform_DELETE`, `transform_COPY`,
 …) and registered in the store by `transform()`:
 
@@ -393,7 +580,7 @@ distinct sentinel `Struct.UNDEF` (a private `Any()` identity) represents
 Group A readers (`getprop`, `getelem`, `haskey`, `isempty`, `isnode`)
 treat a stored `null` as no value; Group B processors (`clone`, `merge`,
 `walk`, `transform`, …) preserve it literally. REPORT.md lists Kotlin as
-"already Group A" (135/135).
+"already Group A"; the shared corpus passes 1259/1259 assertions here.
 
 ### Object model
 

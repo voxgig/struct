@@ -118,20 +118,26 @@ Unlike canonical TS, the optional fourth argument is folded into a single
 ```lua
 struct.transform(
   { items = { 1, 2, 3 } },
-  { total = { ['`$APPLY`'] = { 'sum', '`items`' } } },
-  { extra = { sum = function(resolved, store, inj)
-                      local s = 0
-                      for _, n in ipairs(resolved) do s = s + n end
-                      return s
-                    end } }
+  { total = struct.jt('`$APPLY`',
+      function(resolved, store, inj)
+        local s = 0
+        for _, n in ipairs(resolved) do s = s + n end
+        return s
+      end,
+      '`items`') }
 )
+-- { total = 6 }
 ```
-Register the function under `injdef.extra`; reference it by name in the
-spec. The Lua `$APPLY` function is invoked as `fn(resolved, store, inj)` —
-the resolved child value, the injection store, and the child injection
-object. A custom function may return the `SKIP` / `DELETE` sentinels to
-omit/remove the current key. Function-value signatures are port-local and
-covered by unit tests, not the JSON corpus — see [`../NOTES.md`](../design/NOTES.md).
+`$APPLY` must sit in **value** position as the first element of a list —
+`{ '`$APPLY`', fn, child }` — so build the list with `struct.jt(...)`. A
+map-key form (`{ total = { ['`$APPLY`'] = ... } }`) errors with `$APPLY:
+invalid placement as key, expected: value.`. The function value is passed
+**inline** (it must be a callable, not a name string), followed by the child
+spec; here `'`items`'` resolves to `{ 1, 2, 3 }`. The function is invoked as
+`fn(resolved, store, inj)` — the resolved child value, the injection store,
+and the child injection object — and its return value becomes the key's
+value (so `total = 6`). Function-value signatures are port-local and covered
+by unit tests, not the JSON corpus — see [`../NOTES.md`](../design/NOTES.md).
 
 ### Keep a `walk` path past the callback
 ```lua
@@ -201,12 +207,14 @@ Lua-specific points the signatures don't show:
 - **`injdef` collapses the trailing args.** `transform`/`validate` take a
   single optional `injdef` table (`{ extra =, errs =, modify = }`) where
   canonical TS spreads `extra`/`modify`/`collecterrs` across parameters.
-- **`escre` escapes Lua patterns, not PCRE** — it is for callers handing the
-  result to `string.match` / `string.gsub`, distinct from the `re_*` engine
-  (see [Regex](#regex)).
+- **`escre` backslash-escapes for the RE2 engine, not Lua patterns** — it
+  emits PCRE/RE2 syntax (`escre('a.b')` is `'a\.b'`), matching canonical TS.
+  That is *not* a valid Lua pattern (Lua escapes with `%`), so feed the result
+  to the port's `re_*` engine, not `string.match` / `string.gsub` (see
+  [Regex](#regex)).
 - **Type flags** combine bitwise: `typify('hi')` is `T_scalar | T_string`;
-  test with `0 < (T_string & t)`. `typify(nil)` is `T_noval` (Lua has no
-  separate null), so the `null`-vs-absent split below is muted in Lua.
+  test with `0 < (T_string & t)`. `typify(nil)` is `T_null` (Lua's `nil`
+  maps to JSON null), so the `null`-vs-absent split below is muted in Lua.
 
 ---
 
@@ -279,7 +287,7 @@ make bench           # WALK_BENCH=1 lua test/walk_bench.lua
 make clean           # rm luacov.* .busted
 ```
 
-The corpus suite reports **75/75 cases passing** (per
+The corpus suite reports **74/74 cases passing** (per
 [`../REPORT.md`](../design/REPORT.md)). Tests live in
 [`test/`](./test/); [`test/struct_test.lua`](./test/struct_test.lua) is the
 busted suite and [`test/runner.lua`](./test/runner.lua) is the JSONIC driver

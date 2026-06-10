@@ -2,7 +2,7 @@
 
 > C# / .NET port of the canonical TypeScript implementation.
 >
-> **Status: complete.**  Full TS-canonical parity: all 40 functions,
+> **Status: complete.**  Full TS-canonical parity: all 48 functions,
 > 15 type bit-flags, 3 mode constants (`M_KEYPRE`/`M_KEYPOST`/`M_VAL`),
 > `SKIP`/`DELETE` sentinels, and the `InjectState` machinery.
 > `Inject`/`Transform`/`Validate`/`Select` all dispatch through the
@@ -10,7 +10,7 @@
 > checkers, 4 select operators.
 >
 > Passes the full shared corpus (1178/1178). The xUnit suite
-> (`StructTest.cs`, 78 tests) is the green-bar regression baseline;
+> (`StructTest.cs`, 74 tests) is the green-bar regression baseline;
 > the `CorpusScoreboard` test mirrors the Java/C++ runners and writes
 > `corpus-scoreboard.json` after each run with per-`.jsonic`-file pass
 > counts. The committed baseline lives at `test-baseline.json`.
@@ -101,6 +101,34 @@ StructUtils.IsNode(StructUtils.Jm("a", 1));   // true
 ```
 <!-- => true -->
 
+<!-- example: minor/ismap#map -->
+```csharp
+StructUtils.IsMap(StructUtils.Jm("a", 1));    // true
+```
+
+<!-- => true -->
+
+<!-- example: minor/islist#list -->
+```csharp
+StructUtils.IsList(StructUtils.Jt(1, 2));     // true
+```
+
+<!-- => true -->
+
+<!-- example: minor/iskey#str -->
+```csharp
+StructUtils.IsKey("name");                    // true
+```
+
+<!-- => true -->
+
+<!-- example: minor/isempty#empty -->
+```csharp
+StructUtils.IsEmpty(new List<object?>());     // true
+```
+
+<!-- => true -->
+
 ### Type inspection
 
 ```csharp
@@ -108,8 +136,25 @@ StructUtils.Typify(object? value)   // int — bit-field
 StructUtils.TypeName(int t)          // string
 ```
 
+<!-- example: minor/typify#int -->
+```csharp
+StructUtils.Typify(1);                        // T.Scalar | T.Number | T.Integer  (201326720)
+```
+
+<!-- => 201326720 -->
+
 ```csharp
 StructUtils.Typify(42);                       // T.Scalar | T.Number | T.Integer
+```
+
+<!-- example: minor/typename#map -->
+```csharp
+StructUtils.TypeName(8192);                   // "map"  (8192 == T.Map)
+```
+
+<!-- => "map" -->
+
+```csharp
 StructUtils.TypeName(StructUtils.Typify("hi"));   // "string"
 ```
 
@@ -119,7 +164,7 @@ StructUtils.TypeName(StructUtils.Typify("hi"));   // "string"
 StructUtils.Size(object? val)
 StructUtils.Slice(object? val, int? start = null, int? end = null,
              bool mutate = false)
-StructUtils.Pad(object? str, int? padding = null, string? padchar = null)
+StructUtils.Pad(object? str, int padding = 44, string? padchar = null)
 ```
 
 <!-- example: minor/size#three -->
@@ -169,6 +214,34 @@ StructUtils.GetProp(StructUtils.Jm("x", 1), "x");   // 1
 ```
 <!-- => 1 -->
 
+<!-- example: minor/setprop#set -->
+```csharp
+StructUtils.SetProp(StructUtils.Jm("a", 1), "b", 2);   // { a = 1, b = 2 }
+```
+
+<!-- => {"a": 1, "b": 2} -->
+
+<!-- example: minor/delprop#del -->
+```csharp
+StructUtils.DelProp(StructUtils.Jm("a", 1, "b", 2), "a");   // { b = 2 }
+```
+
+<!-- => {"b": 2} -->
+
+<!-- example: minor/getelem#neg -->
+```csharp
+StructUtils.GetElem(StructUtils.Jt(10, 20, 30), -1);   // 30
+```
+
+<!-- => 30 -->
+
+<!-- example: minor/haskey#hit -->
+```csharp
+StructUtils.HasKey(StructUtils.Jm("a", 1), "a");   // true
+```
+
+<!-- => true -->
+
 `KeysOf` returns map keys in sorted order:
 
 <!-- example: minor/keysof#sorted -->
@@ -177,13 +250,27 @@ StructUtils.KeysOf(StructUtils.Jm("b", 4, "a", 5));   // ["a", "b"]  (sorted)
 ```
 <!-- => ["a", "b"] -->
 
+<!-- example: minor/items#map -->
+```csharp
+StructUtils.Items(StructUtils.Jm("a", 1, "b", 2));   // [["a", 1], ["b", 2]]
+```
+
+<!-- => [["a", 1], ["b", 2]] -->
+
+<!-- example: minor/strkey#num -->
+```csharp
+StructUtils.StrKey(2.2);                             // "2"
+```
+
+<!-- => "2" -->
+
 ### Path operations
 
 ```csharp
 StructUtils.GetPath(object? store, object? path,
                object? current = null, InjectState? state = null)
 StructUtils.SetPath(object? store, object? path, object? val)
-StructUtils.Pathify(object? val, int? startin = null, int? endin = null)
+StructUtils.Pathify(object? val, int startIn = 0, int endIn = 0)
 ```
 
 <!-- example: getpath/basic#deep -->
@@ -202,6 +289,20 @@ var fresh = new Dictionary<string, object?>();
 StructUtils.SetPath(fresh, "db.host", "localhost");
 ```
 
+<!-- example: minor/setpath#nested -->
+```csharp
+StructUtils.SetPath(StructUtils.Jm("a", 1, "b", 2), "b", 22);   // { a = 1, b = 22 }
+```
+
+<!-- => {"a": 1, "b": 22} -->
+
+<!-- example: minor/pathify#parts -->
+```csharp
+StructUtils.Pathify(StructUtils.Jt("a", "b", "c"));             // "a.b.c"
+```
+
+<!-- => "a.b.c" -->
+
 ### Tree operations
 
 ```csharp
@@ -209,12 +310,40 @@ StructUtils.Walk(object? val, WalkApply? before = null,
             WalkApply? after = null, int? maxdepth = null)
 StructUtils.Merge(object? val, int? maxdepth = null)
 StructUtils.Clone(object? val)
-StructUtils.Flatten(object? list, int? depth = null)
+StructUtils.Flatten(List<object?> list, int depth = 1)
 StructUtils.Filter(object? val, Func<List<object?>, bool> check)
 
 public delegate object? WalkApply(
-    object? key, object? val, object? parent, IList<string> path);
+    object? key, object? val, object? parent, List<object?> path);
 ```
+
+Last input wins; maps deep-merge; lists merge by index:
+
+<!-- example: merge#basic -->
+```csharp
+StructUtils.Merge(StructUtils.Jt(
+    StructUtils.Jm("a", 1, "b", 2, "k", StructUtils.Jt(10, 20), "x", StructUtils.Jm("y", 5, "z", 6)),
+    StructUtils.Jm("b", 3, "d", 4, "e", 8, "k", StructUtils.Jt(11), "x", StructUtils.Jm("y", 7))));
+// { a = 1, b = 3, d = 4, e = 8, k = [11, 20], x = { y = 7, z = 6 } }
+```
+
+<!-- => {"a": 1, "b": 3, "d": 4, "e": 8, "k": [11, 20], "x": {"y": 7, "z": 6}} -->
+
+<!-- example: minor/clone#deep -->
+```csharp
+StructUtils.Clone(StructUtils.Jm("a", StructUtils.Jm("b", StructUtils.Jt(1, 2))));
+// { a = { b = [1, 2] } }  (a deep copy)
+```
+
+<!-- => {"a": {"b": [1, 2]}} -->
+
+<!-- example: minor/flatten#nested -->
+```csharp
+StructUtils.Flatten(StructUtils.Jt(1, StructUtils.Jt(2, StructUtils.Jt(3))));
+// [1, 2, [3]]  (one level by default)
+```
+
+<!-- => [1, 2, [3]] -->
 
 `Filter` passes each `[key, value]` pair to the check and returns the
 matching **values** (not the pairs):
@@ -233,8 +362,29 @@ StructUtils.EscRe(string s)
 StructUtils.EscUrl(string s)
 StructUtils.Join(IList<object?> arr, string? sep = null, bool? url = null)
 StructUtils.Jsonify(object? val, int indent = 2, int offset = 0)
-StructUtils.Stringify(object? val, int? maxlen = null, object? pretty = null)
+StructUtils.Stringify(object? val, int? maxlen = null)
 ```
+
+<!-- example: minor/escre#dots -->
+```csharp
+StructUtils.EscRe("a.b+c");                  // "a\\.b\\+c"
+```
+
+<!-- => "a\\.b\\+c" -->
+
+<!-- example: minor/escurl#space -->
+```csharp
+StructUtils.EscUrl("hello world?");          // "hello%20world%3F"
+```
+
+<!-- => "hello%20world%3F" -->
+
+<!-- example: minor/join#sep -->
+```csharp
+StructUtils.Join(StructUtils.Jt("a", "b", "c"), "/");   // "a/b/c"
+```
+
+<!-- => "a/b/c" -->
 
 `Jsonify` pretty-prints by default (indent 2); pass `indent: 0` for the
 compact form:
@@ -277,6 +427,37 @@ StructUtils.Transform(object? data, object? spec, InjectState? state = null)
 StructUtils.Validate(object? data, object? spec, InjectState? state = null)
 StructUtils.Select(object? children, object? query)
 ```
+
+<!-- example: inject#basic -->
+```csharp
+// Backtick refs in strings are replaced by store values.
+StructUtils.Inject(StructUtils.Jm("x", "`a`", "y", 2), StructUtils.Jm("a", 1));   // { x = 1, y = 2 }
+```
+
+<!-- => {"x": 1, "y": 2} -->
+
+<!-- example: validate#shape -->
+```csharp
+// Validate against a shape (throws on mismatch).
+StructUtils.Validate(
+    StructUtils.Jm("name", "Ada", "age", 36),
+    StructUtils.Jm("name", "`$STRING`", "age", "`$INTEGER`"));
+// { name = "Ada", age = 36 }
+```
+
+<!-- => {"name": "Ada", "age": 36} -->
+
+<!-- example: select#query -->
+```csharp
+// Find children matching a query.
+StructUtils.Select(
+    StructUtils.Jm("a", StructUtils.Jm("name", "Alice", "age", 30),
+                   "b", StructUtils.Jm("name", "Bob", "age", 25)),
+    StructUtils.Jm("age", 30));
+// [{ name = "Alice", age = 30, $KEY = "a" }]
+```
+
+<!-- => [{"name": "Alice", "age": 30, "$KEY": "a"}] -->
 
 ### Builders
 

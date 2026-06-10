@@ -186,7 +186,7 @@ spec syntax is identical; only the host literals and the leading
 
 The full Zig signatures are in
 [`README.md` → Function reference](./README.md#function-reference). The
-canonical public surface (the 40 names the parity tool checks) is defined
+canonical public surface (the 48 names the parity tool checks) is defined
 once in TypeScript; this port exposes them from
 [`src/struct.zig`](./src/struct.zig), in lowercase canonical names
 (`getpath`, `setpath`, …).

@@ -51,8 +51,10 @@ port should do the same so the source can be diff-read against the canonical.
 This prevents drift where one port quietly hand-rolls something the canonical
 delegates to regex (or vice versa).
 
-A side benefit: when a port needs to swap its regex backend (e.g. removing the
-`regex` crate from the Rust port), only the wrapper module changes.
+A side benefit: when a port swaps its regex backend, only the wrapper module
+changes. This is exactly how the Rust port dropped the `regex` crate for its
+in-tree `rust/src/re.rs` engine (and Zig dropped `mvzr` for `zig/src/regex.zig`)
+without touching any call sites.
 
 ## Per-port backend
 
@@ -71,17 +73,24 @@ Ports group into three categories:
 | cs | `System.Text.RegularExpressions` |
 | kt | `kotlin.text.Regex` (Java backend) |
 | cpp | `<regex>` (C++11 ECMAScript) |
-| zig | currently `mvzr`; long-term: vendored or in-tree engine |
-| rs | currently `regex` crate; long-term: vendored or in-tree engine |
+| perl | native `qr//` (PCRE) |
+| swift | `NSRegularExpression` (Foundation/ICU) |
 
 For each, the `re_*` wrappers are five-to-ten-line functions that delegate.
 
-**B. Host language has no regex engine.**
+The zig and rs ports formerly fell here against third-party engines
+(`mvzr` / the `regex` crate). Both have since shipped their own
+in-tree RE2-subset engines (`zig/src/regex.zig`, `rust/src/re.rs`) with
+zero runtime dependencies, so they now sit alongside category B below.
+
+**B. Host language has no suitable regex engine, so the port ships its own in-tree.**
 
 | Port | Backend |
 |---|---|
-| c | Vendored RE2-subset engine in `c/src/regex.c` (~700 LOC). No external dep. |
-| lua | RE2-subset engine in pure Lua in `lua/src/regex.lua` (~500 LOC). No external dep. |
+| c | In-tree RE2-subset engine in `c/src/regex.c` (~1105 LOC). No external dep. |
+| lua | In-tree RE2-subset engine in pure Lua in `lua/src/regex.lua` (~658 LOC). No external dep. |
+| zig | In-tree RE2-subset engine in `zig/src/regex.zig`. No external dep. |
+| rs | In-tree RE2-subset engine in `rust/src/re.rs`. No external dep. |
 
 These ports include a compact Thompson-NFA matcher covering the dialect above.
 Performance is not the goal — correctness on the RE2 subset is.
@@ -96,7 +105,7 @@ language is intentionally not regex.
 Function names follow the host language's convention but always map to the
 same underlying operation:
 
-| TS canonical | py / rb / lua / php / c | go / cs / cpp | java / kt / js |
+| TS canonical | py / rb / lua / php / c / perl / swift | go / cs / cpp | java / kt / js |
 |---|---|---|---|
 | `re_compile` | `re_compile` | `ReCompile` | `reCompile` |
 | `re_find` | `re_find` | `ReFind` | `reFind` |

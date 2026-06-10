@@ -2,11 +2,11 @@
 
 > C++ port of the canonical TypeScript implementation.
 >
-> **Status: complete.**  Full TS-canonical parity: all 40 functions,
+> **Status: complete.**  Full TS-canonical parity: all 48 functions,
 > 15 type bit-flags, 3 mode constants (`M_KEYPRE`/`M_KEYPOST`/`M_VAL`),
 > `SKIP`/`DELETE` sentinels (pointer-identity), and the `Injection`
 > state machine.  `inject`/`transform`/`validate`/`select` all
-> dispatch through the canonical injector machinery: 11 transform
+> dispatch through the canonical injector machinery: 10 transform
 > commands, 6 validate checkers, 4 select operators.
 >
 > Passes the full shared corpus. Run locally with `make test` from
@@ -53,27 +53,27 @@ header on the include path (e.g. `/usr/include/nlohmann/json.hpp`).
 ## Quick start
 
 ```cpp
-#include "voxgig_struct.hpp"
+#include "value_io.hpp"   // pulls in value.hpp + voxgig_struct.hpp, plus parse_json
 using namespace voxgig::structlib;
 
 int main() {
     // Build a value and read a deep path.
-    Value store = Value::parse(R"({"db":{"host":"localhost","port":5432}})");
+    Value store = parse_json(R"({"db":{"host":"localhost","port":5432}})");
     Value host = getpath_v(store, Value("db.host"));   // "localhost"
 
     // Reshape by example.
     Value out = transform(
-        Value::parse(R"({"user":{"first":"Ada"},"age":36})"),
-        Value::parse(R"({"name":"`user.first`","years":"`age`"})"));
+        parse_json(R"({"user":{"first":"Ada"},"age":36})"),
+        parse_json(R"({"name":"`user.first`","years":"`age`"})"));
     // {"name":"Ada","years":36}
 
     return 0;
 }
 ```
 
-(Construct `Value`s with `Value::parse(json_text)` or the typed
-constructors; see [`DOCS.md`](./DOCS.md) and `src/value.hpp` for the full
-set.)
+(Construct `Value`s with `parse_json(json_text)` (declared in
+[`value_io.hpp`](./src/value_io.hpp)) or the typed constructors; see
+[`DOCS.md`](./DOCS.md) and `src/value.hpp` for the full set.)
 
 
 ## Function reference
@@ -94,6 +94,243 @@ ones):
 
 The parity check (`../tools/check_parity.py`) maps these back to the
 canonical names, so the port reports full parity.
+
+Build `Value`s with the typed constructors, `jm({...})` (map) and
+`jt({...})` (list), or `parse_json(text)`. The examples below use whichever
+is clearest.
+
+### Predicates
+
+```cpp
+bool ismap(const Value& v);
+bool islist(const Value& v);
+bool iskey(const Value& v);
+bool isempty(const Value& v);
+```
+
+<!-- example: minor/ismap#map -->
+```cpp
+ismap(jm({"a", 1}));        // true
+```
+
+<!-- => true -->
+
+<!-- example: minor/islist#list -->
+```cpp
+islist(jt({1, 2}));         // true
+```
+
+<!-- => true -->
+
+<!-- example: minor/iskey#str -->
+```cpp
+iskey(Value("name"));       // true
+```
+
+<!-- => true -->
+
+<!-- example: minor/isempty#empty -->
+```cpp
+isempty(jt({}));            // true
+```
+
+<!-- => true -->
+
+### Type inspection
+
+```cpp
+int typify(const Value& value);
+std::string typename_str(int t);          // also: typename_str(const Value&)
+```
+
+<!-- example: minor/typify#int -->
+```cpp
+typify(Value(int64_t(1)));  // T_scalar | T_number | T_integer  (201326720)
+```
+
+<!-- => 201326720 -->
+
+<!-- example: minor/typename#map -->
+```cpp
+typename_str(8192);         // "map"  (8192 == T_map)
+```
+
+<!-- => "map" -->
+
+### Property access
+
+```cpp
+std::string strkey(const Value& key);
+Value getelem(const Value& val, const Value& key, const Value& alt = Value::undef());
+Value setprop(Value parent, const Value& key, const Value& val);
+Value delprop(Value parent, const Value& key);
+bool haskey(const Value& v, const Value& key);
+std::vector<Value> items(const Value& v);   // [key, val] pairs
+```
+
+<!-- example: minor/strkey#num -->
+```cpp
+strkey(Value(2.2));                  // "2"
+```
+
+<!-- => "2" -->
+
+<!-- example: minor/getelem#neg -->
+```cpp
+getelem(jt({10, 20, 30}), Value(-1));   // 30
+```
+
+<!-- => 30 -->
+
+<!-- example: minor/setprop#set -->
+```cpp
+setprop(jm({"a", 1}), Value("b"), Value(2));    // {a:1, b:2}
+```
+
+<!-- => {"a": 1, "b": 2} -->
+
+<!-- example: minor/delprop#del -->
+```cpp
+delprop(jm({"a", 1, "b", 2}), Value("a"));      // {b:2}
+```
+
+<!-- => {"b": 2} -->
+
+<!-- example: minor/haskey#hit -->
+```cpp
+haskey(jm({"a", 1}), Value("a"));    // true
+```
+
+<!-- => true -->
+
+<!-- example: minor/items#map -->
+```cpp
+items(jm({"a", 1, "b", 2}));         // {{"a", 1}, {"b", 2}}
+```
+
+<!-- => [["a", 1], ["b", 2]] -->
+
+### Path operations
+
+```cpp
+Value setpath_v(const Value& store, const Value& path, const Value& val);
+std::string pathify(const Value& v, int startin = 0, int endin = 0);
+```
+
+<!-- example: minor/setpath#nested -->
+```cpp
+setpath_v(jm({"a", 1, "b", 2}), Value("b"), Value(22));   // {a:1, b:22}
+```
+
+<!-- => {"a": 1, "b": 22} -->
+
+<!-- example: minor/pathify#parts -->
+```cpp
+pathify(jt({"a", "b", "c"}));        // "a.b.c"
+```
+
+<!-- => "a.b.c" -->
+
+### Tree operations
+
+```cpp
+Value merge_v(const Value& list, int maxdepth = MAXDEPTH);
+Value clone(const Value& v);
+Value flatten(const Value& list, int depth = 1);
+```
+
+Last input wins; maps deep-merge; lists merge by index:
+
+<!-- example: merge#basic -->
+```cpp
+merge_v(jt({
+  jm({"a", 1, "b", 2, "k", jt({10, 20}), "x", jm({"y", 5, "z", 6})}),
+  jm({"b", 3, "d", 4, "e", 8, "k", jt({11}), "x", jm({"y", 7})}),
+}));
+// {a:1, b:3, d:4, e:8, k:[11, 20], x:{y:7, z:6}}
+```
+
+<!-- => {"a": 1, "b": 3, "d": 4, "e": 8, "k": [11, 20], "x": {"y": 7, "z": 6}} -->
+
+<!-- example: minor/clone#deep -->
+```cpp
+clone(jm({"a", jm({"b", jt({1, 2})})}));   // {a:{b:[1,2]}}  (a deep copy)
+```
+
+<!-- => {"a": {"b": [1, 2]}} -->
+
+<!-- example: minor/flatten#nested -->
+```cpp
+flatten(jt({1, jt({2, jt({3})})}));        // [1, 2, [3]]  (one level by default)
+```
+
+<!-- => [1, 2, [3]] -->
+
+### String / URL / JSON
+
+```cpp
+std::string escre(const Value& v);
+std::string escurl(const Value& v);
+std::string join(const Value& arr, const std::string& sep = ",", bool url = false);
+```
+
+<!-- example: minor/escre#dots -->
+```cpp
+escre(Value("a.b+c"));               // "a\\.b\\+c"
+```
+
+<!-- => "a\\.b\\+c" -->
+
+<!-- example: minor/escurl#space -->
+```cpp
+escurl(Value("hello world?"));       // "hello%20world%3F"
+```
+
+<!-- => "hello%20world%3F" -->
+
+<!-- example: minor/join#sep -->
+```cpp
+join(jt({"a", "b", "c"}), "/");      // "a/b/c"
+```
+
+<!-- => "a/b/c" -->
+
+### Injection / merge / validate / select
+
+```cpp
+Value inject(const Value& val, const Value& store, Injection* injdef = nullptr);
+Value validate(const Value& data, const Value& spec, const Value& options = Value::undef());
+std::vector<Value> select(const Value& children, const Value& query);
+```
+
+<!-- example: inject#basic -->
+```cpp
+// Backtick refs in strings are replaced by store values.
+inject(jm({"x", "`a`", "y", 2}), jm({"a", 1}));   // {x:1, y:2}
+```
+
+<!-- => {"x": 1, "y": 2} -->
+
+<!-- example: validate#shape -->
+```cpp
+// Validate against a shape (throws on mismatch).
+validate(jm({"name", "Ada", "age", 36}),
+         jm({"name", "`$STRING`", "age", "`$INTEGER`"}));
+// {name:"Ada", age:36}
+```
+
+<!-- => {"name": "Ada", "age": 36} -->
+
+<!-- example: select#query -->
+```cpp
+// Find children matching a query.
+select(jm({"a", jm({"name", "Alice", "age", 30}),
+           "b", jm({"name", "Bob", "age", 25})}),
+       jm({"age", 30}));
+// [{name:"Alice", age:30, $KEY:"a"}]
+```
+
+<!-- => [{"name": "Alice", "age": 30, "$KEY": "a"}] -->
 
 
 ## Notes

@@ -2,14 +2,14 @@
 
 > C99/C11 port of the canonical TypeScript implementation.
 >
-> **Status: complete.** Full TS-canonical parity: all 40 functions, 15 type
+> **Status: complete.** Full TS-canonical parity: all 48 functions, 15 type
 > bit-flags, 3 mode constants (`VOXGIG_M_KEYPRE` / `VOXGIG_M_KEYPOST` / `VOXGIG_M_VAL`),
 > `SKIP` / `DELETE` sentinels (pointer-identity), and the `voxgig_injection`
 > state machine. `inject` / `transform` / `validate` / `select` all dispatch
-> through the canonical injector machinery: 11 transform commands, 15
-> validate checkers, 4 select operators.
+> through the canonical injector machinery: 13 transform commands, 15
+> validate checkers, 8 select operators.
 >
-> Passes the shared corpus (1109/1110). Run locally with `make build`
+> Passes the shared corpus (1232/1232). Run locally with `make build`
 > from `c/`. Per-test pass counts are written to `corpus-scoreboard.json`
 > after each run.
 
@@ -90,7 +90,7 @@ one alias is visible through every alias.
 
 Namespace `voxgig_*`. Function names mirror the canonical API in lowercase.
 
-### Minor utilities (25)
+### Minor utilities (29)
 
 ```c
 const char*  voxgig_typename(int t);
@@ -136,6 +136,64 @@ voxgig_value* node = voxgig_parse_json("{\"a\":1}", 0);
 bool yes = voxgig_isnode(node);                 /* true */
 ```
 <!-- => true -->
+
+`voxgig_ismap` is true only for maps; `voxgig_islist` only for lists:
+
+<!-- example: minor/ismap#map -->
+```c
+voxgig_value* m = voxgig_parse_json("{\"a\":1}", 0);
+bool yes = voxgig_ismap(m);                     /* true */
+```
+
+<!-- => true -->
+
+<!-- example: minor/islist#list -->
+```c
+voxgig_value* l = voxgig_parse_json("[1,2]", 0);
+bool yes = voxgig_islist(l);                     /* true */
+```
+
+<!-- => true -->
+
+`voxgig_iskey` is true for non-empty strings and integers (valid keys):
+
+<!-- example: minor/iskey#str -->
+```c
+voxgig_value* k = voxgig_new_string("name");
+bool yes = voxgig_iskey(k);                      /* true */
+```
+
+<!-- => true -->
+
+`voxgig_isempty` is true for null, empty string, empty list, or empty map:
+
+<!-- example: minor/isempty#empty -->
+```c
+voxgig_value* l = voxgig_new_list();
+bool yes = voxgig_isempty(l);                    /* true */
+```
+
+<!-- => true -->
+
+`voxgig_typify` returns a bit-field combining a kind flag (`VOXGIG_T_SCALAR` /
+`VOXGIG_T_NODE`) with a specific type flag:
+
+<!-- example: minor/typify#int -->
+```c
+voxgig_value* one = voxgig_new_int(1);
+int t = voxgig_typify(one);     /* VOXGIG_T_SCALAR | VOXGIG_T_NUMBER | VOXGIG_T_INTEGER  (201326720) */
+```
+
+<!-- => 201326720 -->
+
+`voxgig_typename` looks up the human-friendly name for a type flag:
+
+<!-- example: minor/typename#map -->
+```c
+const char* name = voxgig_typename(8192);        /* "map"  (8192 == VOXGIG_T_MAP) */
+```
+
+<!-- => "map" -->
 
 `voxgig_size` counts list elements, map entries, or string bytes:
 
@@ -186,6 +244,66 @@ voxgig_value* m = voxgig_parse_json("{\"x\":1}", 0);
 voxgig_value* x = voxgig_getprop(m, voxgig_new_string("x"), NULL);   /* 1 */
 ```
 <!-- => 1 -->
+
+`voxgig_setprop` sets a key, returning the (mutated) parent:
+
+<!-- example: minor/setprop#set -->
+```c
+voxgig_value* m = voxgig_parse_json("{\"a\":1}", 0);
+voxgig_value* out = voxgig_setprop(m, voxgig_new_string("b"), voxgig_new_int(2));   /* {a:1,b:2} */
+```
+
+<!-- => {"a": 1, "b": 2} -->
+
+`voxgig_delprop` removes a key, returning the (mutated) parent:
+
+<!-- example: minor/delprop#del -->
+```c
+voxgig_value* m = voxgig_parse_json("{\"a\":1,\"b\":2}", 0);
+voxgig_value* out = voxgig_delprop(m, voxgig_new_string("a"));   /* {b:2} */
+```
+
+<!-- => {"b": 2} -->
+
+`voxgig_getelem` is list-specific and supports `-1`-from-the-end indexing:
+
+<!-- example: minor/getelem#neg -->
+```c
+voxgig_value* list = voxgig_parse_json("[10,20,30]", 0);
+voxgig_value* last = voxgig_getelem(list, voxgig_new_int(-1), NULL);   /* 30 */
+```
+
+<!-- => 30 -->
+
+`voxgig_haskey` is true when the key is present (a stored null reads as absent):
+
+<!-- example: minor/haskey#hit -->
+```c
+voxgig_value* m = voxgig_parse_json("{\"a\":1}", 0);
+bool yes = voxgig_haskey(m, voxgig_new_string("a"));   /* true */
+```
+
+<!-- => true -->
+
+`voxgig_items_v` returns the map entries as a list of `[key, value]` pairs:
+
+<!-- example: minor/items#map -->
+```c
+voxgig_value* m = voxgig_parse_json("{\"a\":1,\"b\":2}", 0);
+voxgig_value* pairs = voxgig_items_v(m);         /* [["a",1],["b",2]] */
+```
+
+<!-- => [["a", 1], ["b", 2]] -->
+
+`voxgig_strkey` coerces a key to its string form (a double truncates):
+
+<!-- example: minor/strkey#num -->
+```c
+voxgig_value* k = voxgig_new_double(2.2);
+char* s = voxgig_strkey(k);                      /* "2" */
+```
+
+<!-- => "2" -->
 
 `voxgig_keysof` returns the keys of a map in sorted order:
 
@@ -244,6 +362,68 @@ char* s = voxgig_stringify(str, 5);             /* "ve..." */
 ```
 <!-- => "ve..." -->
 
+`voxgig_clone` makes a deep copy — nested nodes are independent:
+
+<!-- example: minor/clone#deep -->
+```c
+voxgig_value* m = voxgig_parse_json("{\"a\":{\"b\":[1,2]}}", 0);
+voxgig_value* copy = voxgig_clone(m);            /* {a:{b:[1,2]}}  (a deep copy) */
+```
+
+<!-- => {"a": {"b": [1, 2]}} -->
+
+`voxgig_flatten` flattens nested lists one level by default; pass a boxed
+integer `depth` for more:
+
+<!-- example: minor/flatten#nested -->
+```c
+voxgig_value* list = voxgig_parse_json("[1,[2,[3]]]", 0);
+voxgig_value* flat = voxgig_flatten(list, NULL);   /* [1, 2, [3]]  (one level by default) */
+```
+
+<!-- => [1, 2, [3]] -->
+
+`voxgig_pathify` joins a string-list into a dot-path:
+
+<!-- example: minor/pathify#parts -->
+```c
+voxgig_value* parts = voxgig_parse_json("[\"a\",\"b\",\"c\"]", 0);
+char* path = voxgig_pathify(parts, 0, 0);        /* "a.b.c" */
+```
+
+<!-- => "a.b.c" -->
+
+`voxgig_escre` escapes regex metacharacters:
+
+<!-- example: minor/escre#dots -->
+```c
+voxgig_value* s = voxgig_new_string("a.b+c");
+char* esc = voxgig_escre(s);                     /* "a\\.b\\+c" */
+```
+
+<!-- => "a\\.b\\+c" -->
+
+`voxgig_escurl` percent-encodes a string for use in a URL:
+
+<!-- example: minor/escurl#space -->
+```c
+voxgig_value* s = voxgig_new_string("hello world?");
+char* esc = voxgig_escurl(s);                    /* "hello%20world%3F" */
+```
+
+<!-- => "hello%20world%3F" -->
+
+`voxgig_join_v` joins a list with a separator (the optional `url` flag
+collapses slashes):
+
+<!-- example: minor/join#sep -->
+```c
+voxgig_value* list = voxgig_parse_json("[\"a\",\"b\",\"c\"]", 0);
+char* joined = voxgig_join_v(list, voxgig_new_string("/"), NULL);   /* "a/b/c" */
+```
+
+<!-- => "a/b/c" -->
+
 ### Major utilities (8)
 
 ```c
@@ -268,6 +448,41 @@ voxgig_value* store = voxgig_parse_json("{\"a\":{\"b\":{\"c\":42}}}", 0);
 voxgig_value* v = voxgig_getpath(store, voxgig_new_string("a.b.c"), NULL);   /* 42 */
 ```
 <!-- => 42 -->
+
+`voxgig_setpath` writes a deep value, returning the (mutated) store:
+
+<!-- example: minor/setpath#nested -->
+```c
+voxgig_value* store = voxgig_parse_json("{\"a\":1,\"b\":2}", 0);
+voxgig_value* out = voxgig_setpath(store, voxgig_new_string("b"), voxgig_new_int(22), NULL);   /* {a:1,b:22} */
+```
+
+<!-- => {"a": 1, "b": 22} -->
+
+`voxgig_merge` deep-merges a list of nodes — last input wins, maps
+deep-merge, lists merge by index:
+
+<!-- example: merge#basic -->
+```c
+voxgig_value* vals = voxgig_parse_json(
+    "[{\"a\":1,\"b\":2,\"k\":[10,20],\"x\":{\"y\":5,\"z\":6}},"
+    " {\"b\":3,\"d\":4,\"e\":8,\"k\":[11],\"x\":{\"y\":7}}]", 0);
+voxgig_value* out = voxgig_merge(vals, VOXGIG_MAXDEPTH);
+/* {a:1,b:3,d:4,e:8,k:[11,20],x:{y:7,z:6}} */
+```
+
+<!-- => {"a": 1, "b": 3, "d": 4, "e": 8, "k": [11, 20], "x": {"y": 7, "z": 6}} -->
+
+`voxgig_inject` replaces backtick references in strings with store values:
+
+<!-- example: inject#basic -->
+```c
+voxgig_value* val   = voxgig_parse_json("{\"x\":\"`a`\",\"y\":2}", 0);
+voxgig_value* store = voxgig_parse_json("{\"a\":1}", 0);
+voxgig_value* out   = voxgig_inject(val, store, NULL);   /* {x:1,y:2} */
+```
+
+<!-- => {"x": 1, "y": 2} -->
 
 `voxgig_transform` builds a result by example. A command like `$EACH`
 appears in **value** position — as the first element of a list
@@ -294,6 +509,31 @@ voxgig_value* out  = voxgig_transform(voxgig_new_map(), spec, NULL);
 /* error: $APPLY: invalid placement in parent map, expected: list. */
 ```
 <!-- throws: invalid placement in parent map -->
+
+`voxgig_validate` checks data against a shape spec (leaves are type
+checkers); it returns the data on success and errors on mismatch:
+
+<!-- example: validate#shape -->
+```c
+voxgig_value* data = voxgig_parse_json("{\"name\":\"Ada\",\"age\":36}", 0);
+voxgig_value* spec = voxgig_parse_json("{\"name\":\"`$STRING`\",\"age\":\"`$INTEGER`\"}", 0);
+voxgig_value* out  = voxgig_validate(data, spec, NULL);   /* {name:"Ada",age:36}  (throws on mismatch) */
+```
+
+<!-- => {"name": "Ada", "age": 36} -->
+
+`voxgig_select` finds the children matching a query — each match is tagged
+with its `$KEY`:
+
+<!-- example: select#query -->
+```c
+voxgig_value* children = voxgig_parse_json(
+    "{\"a\":{\"name\":\"Alice\",\"age\":30},\"b\":{\"name\":\"Bob\",\"age\":25}}", 0);
+voxgig_value* query = voxgig_parse_json("{\"age\":30}", 0);
+voxgig_value* hits  = voxgig_select(children, query);   /* [{name:"Alice",age:30,$KEY:"a"}] */
+```
+
+<!-- => [{"name": "Alice", "age": 30, "$KEY": "a"}] -->
 
 ### Builder helpers (2)
 
@@ -361,25 +601,23 @@ voxgig_value
 
 The corpus runner (`tests/struct_corpus_test.c`) loads
 `../build/test/test.json` and runs every category and named test it
-supports. Current score: **1109 / 1110**. Per-file:
+supports. Current score: **1232 / 1232**. Per-file:
 
 ```
-minor.*              522 / 522
-walk.*                29 / 29    (basic + depth subset)
-merge.*              133 / 133
-getpath.*             65 / 72    (basic full; relative subset)
+minor.*              553 / 553
+walk.*                40 / 40    (basic + depth)
+merge.*              141 / 141
+getpath.*             79 / 79    (basic + relative)
 inject.string         19 / 19
 inject.deep           22 / 22
-transform.*          161 / 161   (paths, cmds, each, pack, ref)
-validate.*           113 / 113
-select.*              46 / 47    ($LIKE uses substring approximation
-                                  in place of full regex)
+transform.*          166 / 166   (paths, cmds, each, pack, ref)
+validate.*           124 / 124
+select.*              88 / 88    (basic, operators, edge, alts)
 ```
 
-The single remaining failure is `select.operators[15]`: the `$LIKE`
-operator uses substring containment instead of full regex matching
-(the C standard library has no portable regex API and `libpcre` was
-kept out of scope to minimise dependencies).
+All categories pass with no remaining failures; `$LIKE` matches via the
+in-tree Thompson NFA regex engine (`voxgig_re_test`), so the
+`select.operators` regex cases pass in full.
 
 
 ## Regex
@@ -460,6 +698,3 @@ make clean      # remove built binaries / scoreboards
   `voxgig_validate` store maps. None of the leaks indicate use-after-free
   or double-free — only forgotten `voxgig_release` calls in the
   higher-level helpers.
-- `$LIKE` uses substring containment instead of a full regular
-  expression; the C standard library does not ship POSIX regex on every
-  target and adding `libpcre` was deemed out of scope.

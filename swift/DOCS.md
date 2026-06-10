@@ -110,18 +110,31 @@ if !inj.errs.items.isEmpty { /* report inj.errs.items */ }
 ```
 
 ### Write a custom transform function (`$APPLY`)
-Register a `.function` under `extra`; reference it by name in the spec. The
-closure has the `Injector` shape `(Injection, Value, String, Value) -> Value`
-and may return `.sentinel(SKIP)` / `.sentinel(DELETE)` to omit/remove the key:
+`$APPLY` lives in **value** position as the first element of a list,
+``["`$APPLY`", fn, arg]``. The function value goes in the list *directly* —
+there is no name lookup, so the spec can't be a pure JSON string; build it as a
+`Value`. The closure has the `Injector` shape
+`(Injection, Value, String, Value) -> Value`; its second argument is the
+resolved `arg`, and it may return `.sentinel(SKIP)` / `.sentinel(DELETE)` to
+omit/remove the key:
 
 ```swift
-let extra = jm("sum", .function { _, resolved, _, _ in
+let sum: Injector = { _, resolved, _, _ in
   guard case .list(let l) = resolved else { return .int(0) }
   return .int(l.items.reduce(0) { $0 + ($1.asInt ?? 0) })
-})
-let inj = Injection(val: .noval, parent: .noval); inj.extra = extra
-transform(data, try JSON.parse(#"{"total":{"`$APPLY`":["sum","`items`"]}}"#), inj)
+}
+let inj = Injection(val: .noval, parent: .noval)
+let spec: Value = .map([
+  ("total", .list([.string("`$APPLY`"), .function(sum), .string("`items`")]))
+])
+transform(try JSON.parse(#"{"items":[1,2,3]}"#), spec, inj)
+// { total: 6 }
 ```
+
+Putting ``$APPLY`` in **key** position (e.g.
+``{"total":{"`$APPLY`":[…]}}``) is the invalid-placement case shown in the
+anchored `transform/apply#badkey` example below — the spec passes through
+literally and the error lands on `inj.errs`.
 
 ### Read with a fallback, distinguish absent from null
 A plain hit returns the stored value:

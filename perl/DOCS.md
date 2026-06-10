@@ -64,7 +64,9 @@ full language-neutral walkthrough; the Perl-flavoured version (aliasing the
 package to keep it readable):
 
 ```perl
-*S:: = \*Voxgig::Struct::;   # local alias; or just type Voxgig::Struct::
+BEGIN { *S:: = \*Voxgig::Struct::; }   # alias; must be a BEGIN block so the
+                                       # S::... calls compile (or just type
+                                       # Voxgig::Struct:: in full)
 
 # Reshape by example — the spec mirrors the output you want.
 S::transform(
@@ -107,19 +109,21 @@ collect into it instead of calling `die`.
 
 ### Write a custom transform function (`$APPLY`)
 ```perl
+my $sum = sub {
+    my ($resolved, $store, $cinj) = @_;
+    my $items = Voxgig::Struct::getpath($store, '$TOP.items');
+    my $t = 0; $t += $_ for @$items; return $t;
+};
 Voxgig::Struct::transform(
   Voxgig::Struct::jm(items => Voxgig::Struct::jt(1, 2, 3)),
-  Voxgig::Struct::jm(total => Voxgig::Struct::jm('`$APPLY`' => 'sum')),
-  { extra => Voxgig::Struct::jm(sum => sub {
-      my ($resolved, $store, $cinj) = @_;
-      my $items = Voxgig::Struct::getpath($store, '$TOP.items');
-      my $t = 0; $t += $_ for @$items; return $t;
-  }) },
-);
+  Voxgig::Struct::jm(total => Voxgig::Struct::jt('`$APPLY`', $sum)),
+);   # { total => 6 }
 ```
-Register the coderef under `extra`; reference it by name in the spec. A
-custom function may return the `SKIP` / `DELETE` sentinels (or `NONE`) to
-omit/remove the current key.
+`$APPLY` must be the **first element of a list** (a value, never a map key);
+the coderef is passed **directly** as the second list element — it is not
+resolved by name. The callback receives `($resolved, $store, $cinj)` and
+may return the `SKIP` / `DELETE` sentinels (or `NONE`) to omit/remove the
+current key.
 
 ### Keep a `walk` path past the callback
 ```perl
@@ -141,7 +145,7 @@ Voxgig::Struct::is_none($v)    # true only for the NONE ("absent") sentinel
 ### Serialise deterministically
 ```perl
 Voxgig::Struct::jsonify($value);                  # pretty, 2-space indent (default)
-Voxgig::Struct::jsonify($value, jm(indent => 0)); # compact, insertion-ordered keys
+Voxgig::Struct::jsonify($value, Voxgig::Struct::jm(indent => 0)); # compact, insertion-ordered keys
 Voxgig::Struct::stringify($value, 80);            # truncated human form, for logs
 ```
 
@@ -193,8 +197,10 @@ Perl-specific points the signatures don't show:
   helpers keep canonical camelCase: `checkPlacement`, `injectorArgs`,
   `injectChild`.
 - **`getprop` vs `getelem`.** `getprop` works on maps and lists; `getelem`
-  is list-specific, supports `-1`-from-the-end indexing, and *invokes* a
-  callable `alt` (a coderef) when the element is absent.
+  is list-specific and supports `-1`-from-the-end indexing. It *invokes* a
+  callable `alt` (a coderef) when an **in-range** slot holds null/absent;
+  for an **out-of-bounds** index it returns the `alt` value verbatim (an
+  un-invoked coderef is returned as-is).
 - **`items` is overloaded** — `items($node)` returns `[[k, v], …]`;
   `items($node, $coderef)` maps each `[k, v]` pair through the coderef.
 - **`join` shadows the builtin.** `Voxgig::Struct::join` is the library
@@ -283,10 +289,10 @@ make inspect         # print the Perl + module version
 
 `perlcritic` is soft-skipped locally when it is not on `PATH`; CI hardens
 this (it is required when `CI=true`). There is no build step (`make build`
-just says so). Per REPORT.md, the runner exercises 121 corpus subtests
-(700+ individual cases), loading the shared corpus from
-[`../build/test/`](../build/test/) (`test.json`) via the in-tree
-insertion-ordered `parse_json`. Tests live in [`t/`](./t/):
+just says so). `t/struct.t` (the corpus runner) emits 145 subtests, and the
+full suite is 151 tests across 3 files (700+ individual cases), loading the
+shared corpus from [`../build/test/`](../build/test/) (`test.json`) via the
+in-tree insertion-ordered `parse_json`. Tests live in [`t/`](./t/):
 `t/struct.t` (corpus runner), `t/regex_pathological.t` (regex panel), and
 `t/00-load.t` (load/sanity).
 

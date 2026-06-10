@@ -193,10 +193,14 @@ S.transform({ a: { b: { c: 1 } } }, { a: '`$COPY`' })
 ```js
 S.transform(
   { items: { x: { v: 1 }, y: { v: 2 } } },
-  { items: { '`$EACH`': ['`items`', { id: '`$KEY`', value: '`.v`' }] } }
+  { out: ['`$EACH`', 'items', { id: '`$KEY`', value: '`.v`' }] }
 )
-// applies the sub-spec to every entry; $KEY is that entry's key
+// { out: [ { id: 'x', value: 1 }, { id: 'y', value: 2 } ] }
 ```
+`$EACH` is a **list directive**: it must be the first element of a list
+value, followed by the source path and a per-entry sub-spec. It applies the
+sub-spec to every child of the source; `$KEY` is that child's key and a
+leading-dot reference (`` `.v` ``) reads from inside that child.
 
 ### Deep-merge sub-specs into a node
 ```js
@@ -204,11 +208,22 @@ S.transform({ a: { b: 3 } }, { a: { '`$MERGE`': '`a`', c: 3 } })
 // { a: { b: 3, c: 3 } }
 ```
 
-### Format a templated string
+### Reformat a value with a named formatter
 ```js
 S.transform({ first: 'Ada', last: 'Lovelace' },
-            { name: { '`$FORMAT`': '{first} {last}' } })
+            { name: ['`$FORMAT`', 'upper', '`first`'] })
+// { name: 'ADA' }
 ```
+`$FORMAT` is a **list directive** — `['`$FORMAT`', <formatter>, <valueSpec>]`
+— that runs a *registered, named* formatter over the resolved value spec.
+Built-in formatters include `upper`, `lower`, `string`, `number`, `integer`
+and `concat` (which joins a list of scalars):
+```js
+S.transform({ first: 'Ada', last: 'Lovelace' },
+            { name: ['`$FORMAT`', 'concat', ['`first`', ' ', '`last`']] })
+// { name: 'Ada Lovelace' }
+```
+There is no brace-template form; `{first}` text is passed through verbatim.
 
 ### Run your own function during a transform
 ```js
@@ -234,8 +249,11 @@ if (errs.length) { /* report them */ }
 
 ### Validate "one of several shapes"
 ```js
-S.validate(value, { '`$ONE`': ['`$STRING`', '`$NUMBER`'] })
+S.validate(value, ['`$ONE`', '`$STRING`', '`$NUMBER`'])
+// passes if value is a string OR a number; throws otherwise
 ```
+`$ONE` is a **flat list directive**: the first element is the directive and
+each remaining element is an alternative spec — not a map key over a list.
 
 ### Require an exact literal (no type coercion)
 ```js
@@ -264,10 +282,13 @@ S.select(list,  {})                        // all children (empty query matches 
 
 ### Build a JSON string deterministically
 ```js
-S.jsonify(value)        // compact, insertion-ordered keys
-S.jsonify(value, 2)     // pretty, 2-space indent
-S.stringify(value, 40)  // compact human form, truncated to 40 chars (for logs)
+S.jsonify(value)               // pretty, 2-space indent (the default)
+S.jsonify(value, { indent: 0 })// compact, insertion-ordered keys
+S.jsonify(value, { indent: 4 })// pretty, 4-space indent
+S.stringify(value, 40)         // compact human form, truncated to 40 chars (for logs)
 ```
+The second argument is an options object `{ indent, offset }`; a bare
+number is ignored, so `jsonify(value, 2)` is still the default pretty form.
 
 ### Test a value's shape
 ```js
@@ -353,7 +374,7 @@ stored `null` counts as "no value". See [Explanation](#null-versus-absent-group-
 | `escre(s)` | string | Escape regex metacharacters. |
 | `escurl(s)` | string | URL-encode. |
 | `join(arr, sep?, urlmode?)` | string | Join parts with `sep`; URL mode collapses repeated separators. |
-| `jsonify(val, flags?)` | string | Strict JSON; `flags` is the indent (0 = compact). Insertion-ordered keys; `%g`-style doubles. |
+| `jsonify(val, flags?)` | string | Strict JSON; `flags` is an options object `{ indent, offset }` (`indent` defaults to 2; `{ indent: 0 }` is compact). Insertion-ordered keys; `%g`-style doubles. |
 | `stringify(val, maxlen?)` | string | Compact, human-friendly form for logs, truncated to `maxlen`. |
 
 ### Builders and injection helpers

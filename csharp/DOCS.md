@@ -184,7 +184,7 @@ StructUtils.Walk(tree, (key, val, parent, path) => {
 
 ```csharp
 StructUtils.Jsonify(value);               // indent defaults to 2 (pretty)
-StructUtils.Jsonify(value, indent: 0);    // compact, insertion-ordered keys
+StructUtils.Jsonify(value, indent: 0);    // compact, keys sorted (ordinal)
 StructUtils.Stringify(value, 80);         // truncated human form, for logs
 ```
 
@@ -221,7 +221,7 @@ only the host literals differ.
 
 The full C# signatures, with examples for every function, are in
 [`README.md` → Function reference](./README.md#function-reference). The
-canonical public surface (the 40 functions, 15 type flags, 2 sentinels)
+canonical public surface (the 48 functions, 15 type flags, 2 sentinels)
 is checked against the canonical TypeScript by
 [`../tools/check_parity.py`](../tools/check_parity.py), case- and
 underscore-insensitively (`GetPath` ↔ `getpath`).
@@ -282,8 +282,10 @@ honoured by behaviour:
 `Walk`, `Merge`, `Inject`, and `SetPath` rely on `Dictionary`/`List` being
 reference types — a mutation through one handle is visible through every
 alias. C# gives this for free, so (unlike Go, PHP, Rust, C) this port needs
-no `ListRef`-style wrapper. Map key order is insertion order via
-`Dictionary<string, object?>`, which `Jsonify`/`KeysOf`/`Items` observe.
+no `ListRef`-style wrapper. Maps are `Dictionary<string, object?>`, but
+`Jsonify`/`KeysOf`/`Items` do not observe insertion order — each emits
+keys in ordinal-sorted order (`Jsonify` via `SortKeys`, `KeysOf` via
+`keys.Sort(StringComparer.Ordinal)`, and `Items` is built from `KeysOf`).
 
 ### Regex
 

@@ -30,7 +30,7 @@ with zero runtime dependencies. The published package name is in
 directly:
 
 ```js
-const { getpath } = require('@voxgig/struct')
+const { getpath } = require('@voxgig/structjs')
 // or, from a clone:
 const { getpath } = require('./javascript/src/struct.js')
 ```
@@ -46,7 +46,7 @@ npm test           # node --test — no build step
 ### Your first program
 
 ```js
-const { getpath, merge } = require('@voxgig/struct')
+const { getpath, merge } = require('@voxgig/structjs')
 
 const config = merge([
   { db: { host: 'localhost', port: 5432 }, debug: false }, // defaults
@@ -64,7 +64,7 @@ changes. Read [`../DOCS.md`](../DOCS.md#1-tutorial-a-guided-tour) for the
 full language-neutral walkthrough; the JavaScript-flavoured version:
 
 ```js
-const S = require('@voxgig/struct')
+const S = require('@voxgig/structjs')
 
 // Reshape by example — the spec mirrors the output you want.
 S.transform(
@@ -91,7 +91,7 @@ S.select({ a: { age: 30 }, b: { age: 25 } }, { age: 30 })
 ### Inject the API as an object (for stubbing in tests)
 
 ```js
-const { StructUtility } = require('@voxgig/struct')
+const { StructUtility } = require('@voxgig/structjs')
 const su = new StructUtility()
 su.getpath({ a: { b: 1 } }, 'a.b') // 1
 ```
@@ -110,17 +110,25 @@ if (errs.length) console.error(errs)
 
 ### Write a custom transform function (`$APPLY`)
 
+`$APPLY` must sit in **value** position as a three-element list
+`['`$APPLY`', fn, child]`: the second element must resolve to a function,
+and the third is the child spec passed to it (here a `'`items`'` path that
+copies the source array). The function receives `(resolvedChild, store, inj)`
+and its return value replaces the slot:
+
 ```js
+const sum = (val) => val.reduce((a, b) => a + b, 0)
+
 transform(
   { items: [1, 2, 3] },
-  { total: { '`$APPLY`': 'sum' } },
-  { extra: { sum: (key, val, parent) => parent.items.reduce((a, b) => a + b, 0) } }
+  { total: ['`$APPLY`', sum, '`items`'] }
 )
+// { total: 6 }
 ```
 
-Register the function under `extra`; reference it by name in the spec. A
-custom function may return the `SKIP` / `DELETE` sentinels to omit/remove
-the current key.
+Putting `$APPLY` in key position (`{ '`$APPLY`': 'sum' }`) or directly under
+a map (`{ x: '`$APPLY`' }`) is an error — it must be a list value, and the
+function has to be an actual function value, not a name looked up elsewhere.
 
 ### Keep a `walk` path past the callback
 

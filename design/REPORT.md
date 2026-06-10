@@ -41,21 +41,21 @@ NFA engine in-tree (c/cpp/lua/rust/zig).
 
 | Language | Functions | Type Constants | Sentinels | Tests | Status |
 |----------|-----------|---------------|-----------|-------|--------|
-| **typescript** (canonical) | 40 | 15 | 2 | 89/89 pass | Reference (Group A/B) |
-| **javascript** | 40 | 15 | 2 | 90/90 pass | Group A/B applied |
-| **python** | 40+ | 15 | 2 | 90/93 pass (3 skip) | Group A/B applied |
+| **typescript** (canonical) | 48 | 15 | 2 | 89/89 pass | Reference (Group A/B) |
+| **javascript** | 48 | 15 | 2 | 90/90 pass | Group A/B applied |
+| **python** | 48+ | 15 | 2 | 90/93 pass (3 skip) | Group A/B applied |
 | **go** | 50+ | 15 | 2 | 92/92 pass | already Group A |
-| **php** | 46 | 15 | 2 | 84/84 pass | already Group A |
-| **ruby** | 40+ | 15 | 2 | 81/81 pass | Group A/B + UNDEF setval |
-| **lua** | 40+ | 15 | 2 | 74/74 pass | already Group A |
-| **rust** | 40+ | 15 | 2 | corpus pass | already Group A |
-| **c** | 40 | 15 | 2 | 1177/1177 corpus | Group A/B applied |
-| **java** | 40 | 15 | 2 | 1245/1245 corpus | already Group A |
+| **php** | 48 | 15 | 2 | 84/84 pass | already Group A |
+| **ruby** | 48+ | 15 | 2 | 81/81 pass | Group A/B + UNDEF setval |
+| **lua** | 48+ | 15 | 2 | 74/74 pass | already Group A |
+| **rust** | 48+ | 15 | 2 | corpus pass | already Group A |
+| **c** | 48 | 15 | 2 | 1177/1177 corpus | Group A/B applied |
+| **java** | 48 | 15 | 2 | 1300/1300 corpus | full TS-canonical parity |
 | **cpp** | 48 | 15 | 2 | 1268/1268 corpus | full TS-canonical parity |
-| **csharp** | 40 | 15 | 2 | 78/78 corpus | already Group A |
-| **kotlin** | 40 | 15 | 2 | 135/135 | already Group A |
-| **zig** | 40 | 15 | 2 | 60/60 corpus sets \*1 | cycle-break + 7 latent-bug fixes |
-| **perl** | 40 | 15 | 2 | full corpus (700+ cases) | full canonical parity |
+| **csharp** | 48 | 15 | 2 | 78/78 corpus | already Group A |
+| **kotlin** | 48 | 15 | 2 | 135/135 | full TS-canonical parity |
+| **zig** | 48 | 15 | 2 | 60/60 corpus sets \*1 | cycle-break + 7 latent-bug fixes |
+| **perl** | 48 | 15 | 2 | full corpus (700+ cases) | full canonical parity |
 | **swift** | 48 | 15 | 2 | full corpus (700+ cases) | full canonical parity |
 
 \*1 Zig: previously reported "60/60 passing with a SIGSEGV" was
@@ -109,7 +109,7 @@ still pass their existing corpus.
 
 \*\* C: full TS-canonical parity. Reference-counted `voxgig_value` tagged
 union with `voxgig_list` / `voxgig_map` (insertion-ordered, hash-indexed) for
-reference-stable containers. All 40 functions, 15 type bit-flags, 3
+reference-stable containers. All 48 functions, 15 type bit-flags, 3
 mode constants, `SKIP` / `DELETE` sentinels (pointer identity), and
 the `voxgig_injection` state machine. All 11 transform commands, all 15
 validate checkers, all 4 select operators, the injection helpers
@@ -161,15 +161,18 @@ only as a JSON-text parse/serialise bridge.
 
 ## TypeScript Canonical API (Reference)
 
-### Exported Functions (40)
+### Exported Functions (48)
 
-**Minor utilities (25):**
+**Minor utilities (29):**
 typename, getdef, isnode, ismap, islist, iskey, isempty, isfunc, size, slice,
 pad, typify, getelem, getprop, strkey, keysof, haskey, items, flatten, filter,
 escre, escurl, join, jsonify, stringify, pathify, clone, delprop, setprop
 
 **Major utilities (8):**
 walk, merge, setpath, getpath, inject, transform, validate, select
+
+**Regex helpers (6):**
+re_compile, re_find, re_find_all, re_replace, re_test, re_escape
 
 **Builder helpers (2):**
 jm, jt
@@ -216,7 +219,7 @@ Wraps all functions, constants, and sentinels as instance properties.
 
 **Tests:** 84/84 passing.
 
-**Exported Functions:** All 40 canonical functions present with matching signatures.
+**Exported Functions:** All 48 canonical functions present with matching signatures.
 Also exports `replace` as a public function (internal-only in TS).
 
 **Constants:** All type constants, mode constants, sentinels, and MODENAME present.
@@ -239,7 +242,7 @@ Also exports `replace` as a public function (internal-only in TS).
 
 **Tests:** 84/84 passing.
 
-**Exported Functions:** All 40 canonical functions present. Additionally exports:
+**Exported Functions:** All 48 canonical functions present. Additionally exports:
 - `replace(s, from_pat, to_str)` -- explicit string/regex replace (internal in TS)
 - `joinurl(sarr)` -- convenience wrapper for `join(arr, '/', True)`
 - `jo(...)` / `ja(...)` -- aliases for `jm` / `jt`
@@ -264,7 +267,7 @@ Also exports `replace` as a public function (internal-only in TS).
 
 **Tests:** 92/92 passing.
 
-**Exported Functions:** All 40 canonical functions present, plus Go-idiomatic variants:
+**Exported Functions:** All 48 canonical functions present, plus Go-idiomatic variants:
 - `ItemsApply()` -- separate function (TS uses overloaded `items`)
 - `CloneFlags()` -- clone with options (Go lacks optional params)
 - `TransformModify()`, `TransformModifyHandler()`, `TransformCollect()` -- variants
@@ -295,9 +298,8 @@ Also exports `replace` as a public function (internal-only in TS).
 
 **Tests:** 82/82 passing, 920 assertions.
 
-**Exported Functions:** 46 public static methods. All 40 canonical functions present
-plus: replace, joinurl, cloneWrap, cloneUnwrap, checkPlacement, injectorArgs,
-injectChild.
+**Exported Functions:** All 48 canonical functions present (public static
+methods) plus extras such as replace, joinurl, cloneWrap, cloneUnwrap.
 
 **Constants:** All type constants, mode constants, sentinels (SKIP, DELETE), and
 MODENAME present.
@@ -321,8 +323,8 @@ MODENAME present.
 
 **Tests:** 75/75 passing, 150 assertions.
 
-**Exported Functions:** All 40 canonical functions present plus replace, joinurl,
-checkPlacement, injectorArgs, injectChild, select operators (AND, OR, NOT, CMP).
+**Exported Functions:** All 48 canonical functions present plus replace, joinurl,
+select operators (AND, OR, NOT, CMP).
 
 **Constants:** All type constants, mode constants (M_KEYPRE, M_KEYPOST, M_VAL),
 sentinels (SKIP, DELETE), and MODENAME present.
@@ -350,7 +352,7 @@ sentinels (SKIP, DELETE), and MODENAME present.
 
 **Tests:** 75/75 passing.
 
-**Exported Functions:** All 40 canonical functions present plus `replace` (internal
+**Exported Functions:** All 48 canonical functions present plus `replace` (internal
 in TS). Full list: clone, delprop, escre, escurl, filter, flatten, getdef,
 getelem, getpath, getprop, haskey, inject, isempty, isfunc, iskey, islist,
 ismap, isnode, items, join, jm, jt, jsonify, keysof, merge, pad, pathify,
@@ -379,7 +381,7 @@ typename, validate, walk, checkPlacement, injectorArgs, injectChild.
 **Tests:** 1107/1110 passing across all 8 categories
 (minor / walk / merge / getpath / inject / transform / validate / select).
 
-**Exported Functions:** All 40 canonical functions present, prefixed with
+**Exported Functions:** All 48 canonical functions present, prefixed with
 `voxgig_`. Reference-counted `voxgig_value*` pass-by-pointer convention. Optional
 arguments accept `NULL` in place of an unset value.
 
@@ -434,40 +436,38 @@ runs under valgrind.
 
 ### Java (`java/`)
 
-**Status: INCOMPLETE** -- Basic utilities only; major subsystems missing.
+**Status: COMPLETE** -- Full TS-canonical parity. All 48 canonical
+functions, the `Injection` state machine, all 11 transform commands,
+all 15 validate checkers, and all 4 select operators are wired and pass
+the corpus.
 
-**Tests:** No standard test runner configured. `StructTest.java` exists but minimal.
+**Tests:** `make test-java` passes (1300/1300 corpus checks across the
+minor / walk / merge / getpath / inject / transform / validate / select
+sets).
 
-**Exported Functions (22 of 40):**
-Present: typify, typename, isFunc, isNode, isMap, isList, isEmpty, isKey,
-getProp, setProp, hasKey, keysof, items, pathify, stringify, escapeRegex,
-escapeUrl, joinUrl, clone, walk (2 overloads).
+**Exported Functions:** All 48 canonical functions present in
+`java/src/Struct.java`, including getpath, setpath, inject, transform,
+validate, select and the `re_*` regex wrappers (re_compile, re_find,
+re_find_all, re_replace, re_test, re_escape).
 
-Missing (18):
-- **Path operations:** getpath, setpath
-- **Major subsystems:** inject, transform, validate, select
-- **Minor utilities:** getdef, getelem, delprop, size, slice, flatten, filter,
-  pad, replace, join, jsonify, strkey, merge (stubbed)
-- **Builders:** jm, jt
-- **Injection helpers:** checkPlacement, injectorArgs, injectChild
+**Constants:** All 15 type constants present (bitfield integers), the 3
+mode constants (M_KEYPRE, M_KEYPOST, M_VAL), MODENAME, and the SKIP /
+DELETE sentinels (identity-compared marker maps).
 
-**Constants:** All 15 type constants present (bitfield integers).
-- Missing: SKIP, DELETE sentinels.
-- Missing: M_KEYPRE, M_KEYPOST, M_VAL mode constants (enum exists but unused).
-- Missing: MODENAME.
+**Injection class:** Full `Injection` implementation with descend /
+child / setval plus the inject / transform / validate / select
+dispatchers.
 
-**No Injection class.** InjectMode enum defined but not used.
+**Transform commands:** All 11 present (`$DELETE`, `$COPY`, `$KEY`,
+`$META`, `$ANNO`, `$MERGE`, `$EACH`, `$PACK`, `$REF`, `$FORMAT`,
+`$APPLY`).
+**Validate checkers:** All 15 present (`$MAP`, `$LIST`, `$STRING`,
+`$NUMBER`, `$INTEGER`, `$DECIMAL`, `$BOOLEAN`, `$NULL`, `$NIL`,
+`$FUNCTION`, `$INSTANCE`, `$ANY`, `$CHILD`, `$ONE`, `$EXACT`).
+**Select operators:** `$AND`, `$OR`, `$NOT`, and the `$GT` / `$LT` /
+`$GTE` / `$LTE` / `$LIKE` comparator family.
 
-**Transform commands:** None implemented.
-**Validate checkers:** None implemented.
-
-**Implementation issues:**
-- `keysof()` bug: returns list of zeros for Lists instead of string indices.
-- `walk()` post-order only; no `before`/`after` callbacks or `maxdepth`.
-- `escapeRegex()` uses `Pattern.quote()` wrapping instead of char-by-char escaping.
-- `stringify()` format differs from canonical.
-
-**Gap count: ~30** (18 missing functions + 6 missing subsystem commands + 4 missing constants + bugs)
+**Gap count: 0**
 
 
 ### C++ (`cpp/`)
@@ -525,7 +525,7 @@ plus the runtime helpers `$BT` / `$DS` / `$WHEN` / `$SPEC`.
 
 ### Perl (`perl/`)
 
-**Status: COMPLETE** -- Full canonical parity. All 25 minor
+**Status: COMPLETE** -- Full canonical parity. All 29 minor
 utilities, walk, merge, setpath, getpath, inject, transform,
 validate, and select are wired and pass the corpus tests.
 
@@ -544,7 +544,7 @@ loads `../build/test/test.json` and exercises every wired set:
 - `select.basic` 12/12 + `select.operators` 58/58 +
   `select.edge` 11/11 + `select.alts` 7/7.
 
-**Wired:** all 25 minor utilities; `walk`, `merge`, `setpath`,
+**Wired:** all 29 minor utilities; `walk`, `merge`, `setpath`,
 `getpath`; `inject`, `_injectstr`, `_injecthandler`,
 `_validatehandler`; `transform` and the 11 transform commands
 (`$DELETE`, `$COPY`, `$KEY`, `$META`, `$ANNO`, `$MERGE`, `$EACH`,
@@ -582,7 +582,7 @@ constants, both sentinels, boolean and null singletons.
 
 ### Swift (`swift/`)
 
-**Status: COMPLETE** -- Full TS-canonical parity. All 25 minor
+**Status: COMPLETE** -- Full TS-canonical parity. All 29 minor
 utilities, walk, merge, setpath, getpath, inject, transform,
 validate, and select are wired and pass the corpus tests.
 
@@ -638,108 +638,108 @@ constants, `SKIP` / `DELETE` sentinels.
 
 ## Function Parity Matrix
 
-| Function | ts | js | py | go | php | lua | rb | c | java | cpp |
-|----------|----|----|----|----|-----|-----|----|---|------|-----|
-| **Minor utilities** | | | | | | | | | | |
-| typename | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
-| getdef | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| isnode | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
-| ismap | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
-| islist | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
-| iskey | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
-| isempty | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
-| isfunc | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
-| size | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| slice | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| pad | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| typify | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
-| getelem | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| getprop | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
-| strkey | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| keysof | Y | Y | Y | Y | Y | Y | Y | Y | Y* | Y |
-| haskey | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
-| items | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
-| flatten | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| filter | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| escre | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
-| escurl | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
-| join | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| jsonify | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| stringify | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
-| pathify | Y | Y | Y | Y | Y | Y | Y | Y | Y | - |
-| clone | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y* |
-| delprop | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| setprop | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
-| **Major utilities** | | | | | | | | | | |
-| walk | Y | Y | Y | Y | Y | Y | Y* | Y | Y* | Y* |
-| merge | Y | Y | Y | Y | Y | Y | Y | Y | - | Y* |
-| setpath | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| getpath | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| inject | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| transform | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| validate | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| select | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| **Builders** | | | | | | | | | | |
-| jm | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| jt | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| **Injection helpers** | | | | | | | | | | |
-| checkPlacement | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| injectorArgs | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| injectChild | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| Function | ts | js | py | go | php | lua | rb | c | java | cpp | rust | zig | csharp | kotlin | perl | swift |
+|----------|----|----|----|----|-----|-----|----|---|------|-----|------|-----|--------|--------|------|-------|
+| **Minor utilities** | | | | | | | | | | | | | | | | |
+| typename | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| getdef | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| isnode | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| ismap | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| islist | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| iskey | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| isempty | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| isfunc | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| size | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| slice | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| pad | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| typify | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| getelem | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| getprop | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| strkey | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| keysof | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| haskey | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| items | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| flatten | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| filter | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| escre | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| escurl | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| join | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| jsonify | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| stringify | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| pathify | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| clone | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y* | Y | Y | Y | Y | Y | Y |
+| delprop | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| setprop | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| **Major utilities** | | | | | | | | | | | | | | | | |
+| walk | Y | Y | Y | Y | Y | Y | Y* | Y | Y | Y* | Y | Y | Y | Y | Y | Y |
+| merge | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y* | Y | Y | Y | Y | Y | Y |
+| setpath | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| getpath | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| inject | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| transform | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| validate | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| select | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| **Builders** | | | | | | | | | | | | | | | | |
+| jm | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| jt | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| **Injection helpers** | | | | | | | | | | | | | | | | |
+| checkPlacement | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| injectorArgs | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| injectChild | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
 
 **Legend:** Y = present and aligned, Y* = present with issues (see notes), - = missing
 
 
 ## Transform Command Parity
 
-| Command | ts | js | py | go | php | lua | rb | c | java | cpp |
-|---------|----|----|----|----|-----|-----|----|---|------|-----|
-| $DELETE | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $COPY | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $KEY | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $META | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $ANNO | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $MERGE | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $EACH | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $PACK | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $REF | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $FORMAT | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $APPLY | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| Command | ts | js | py | go | php | lua | rb | c | java | cpp | rust | zig | csharp | kotlin | perl | swift |
+|---------|----|----|----|----|-----|-----|----|---|------|-----|------|-----|--------|--------|------|-------|
+| $DELETE | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| $COPY | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| $KEY | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| $META | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| $ANNO | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| $MERGE | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| $EACH | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| $PACK | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| $REF | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| $FORMAT | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| $APPLY | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
 
 ## Validate Checker Parity
 
-| Checker | ts | js | py | go | php | lua | rb | c | java | cpp |
-|---------|----|----|----|----|-----|-----|----|---|------|-----|
-| $MAP | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $LIST | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $STRING | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $NUMBER | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $INTEGER | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $DECIMAL | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $BOOLEAN | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $NULL | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $NIL | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $FUNCTION | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $INSTANCE | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $ANY | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $CHILD | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $ONE | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| $EXACT | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| Checker | ts | js | py | go | php | lua | rb | c | java | cpp | rust | zig | csharp | kotlin | perl | swift |
+|---------|----|----|----|----|-----|-----|----|---|------|-----|------|-----|--------|--------|------|-------|
+| $MAP | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| $LIST | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| $STRING | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| $NUMBER | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| $INTEGER | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| $DECIMAL | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| $BOOLEAN | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| $NULL | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| $NIL | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| $FUNCTION | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| $INSTANCE | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| $ANY | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| $CHILD | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| $ONE | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| $EXACT | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
 
 ^ Ruby uses `$OBJECT`/`$ARRAY` naming instead of `$MAP`/`$LIST`.
 
 
 ## Constant Parity
 
-| Constant | ts | js | py | go | php | lua | rb | c | java | cpp |
-|----------|----|----|----|----|-----|-----|----|---|------|-----|
-| T_any..T_node (15) | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
-| M_KEYPRE | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| M_KEYPOST | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| M_VAL | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| MODENAME | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| SKIP | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
-| DELETE | Y | Y | Y | Y | Y | Y | Y | Y | - | - |
+| Constant | ts | js | py | go | php | lua | rb | c | java | cpp | rust | zig | csharp | kotlin | perl | swift |
+|----------|----|----|----|----|-----|-----|----|---|------|-----|------|-----|--------|--------|------|-------|
+| T_any..T_node (15) | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| M_KEYPRE | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| M_KEYPOST | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| M_VAL | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| MODENAME | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| SKIP | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| DELETE | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
 
 
 ---
@@ -754,27 +754,33 @@ No remaining issues. Full parity achieved.
 No remaining issues. Full parity achieved.
 
 ### Java
-1. **P0 - Missing subsystems**: No inject, transform, validate, select.
-2. **P0 - Missing path ops**: No getpath, setpath.
-3. **P1 - No Injection class**: Cannot support injection state management.
-4. **P1 - No sentinels**: SKIP, DELETE not defined.
-5. **P2 - keysof() bug**: Returns zeros for list indices.
-6. **P2 - walk()**: Post-order only, no before/after or maxdepth.
+No remaining issues. Full parity achieved.
+
+### Rust, Zig, C#, Kotlin, Perl, Swift
+No remaining issues. Full parity achieved.
 
 ---
 
 
 ## Completeness Ranking
 
+All 16 ports are at 100% TS-canonical parity (`tools/check_parity.py`
+reports every port ok against the 48-function canonical API).
+
 1. **javascript** -- 100% parity. Identical runtime semantics. 84/84 tests passing.
 2. **go** -- 100% parity. Idiomatic Go adaptations. 92/92 tests passing.
 3. **python** -- 100% parity. All functions, constants, and commands present. 84/84 tests passing.
 4. **lua** -- 100% parity. All functions and commands present. 75/75 tests passing.
 5. **php** -- 100% parity. All functions, constants, and commands present. 82/82 tests passing.
-6. **ruby** -- 100% parity. All 40 functions, Injection class, all 11 transform commands, all 15 validators, select with operators. 75/75 tests passing.
+6. **ruby** -- 100% parity. All 48 functions, Injection class, all 11 transform commands, all 15 validators, select with operators. 75/75 tests passing.
 7. **cpp** -- 100% parity. All 48 canonical functions, full `Injection` state, all 11 transform commands, 15 validate checkers, 4 select operators. 1268/1268 corpus checks passing.
 8. **swift** -- 100% parity. All 48 canonical functions, `Injection` reference class, all 11 transform commands, 15 validate checkers, 4 select operators. Full corpus passing.
-9. **java** -- ~45% parity. Basic utilities only; all major subsystems missing.
+9. **java** -- 100% parity. All 48 canonical functions, `Injection` state machine, all 11 transform commands, 15 validate checkers, 4 select operators. 1300/1300 corpus checks passing (`make test-java`).
+10. **rust** -- 100% parity. Idiomatic `snake_case` API, all 11 transform commands, 15 validate checkers, 4 select operators. Full corpus passing.
+11. **zig** -- 100% parity. Allocator-first API, all transform commands, validate checkers and select operators. 60/60 corpus test blocks passing.
+12. **csharp** -- 100% parity. All 48 canonical functions, full Injection state, all commands/checkers/operators. Corpus passing.
+13. **kotlin** -- 100% parity. All 48 canonical functions, `Injection` class, all 11 transform commands, 15 validate checkers, 4 select operators. Corpus passing.
+14. **perl** -- 100% parity. All 48 canonical functions, all 11 transform commands, 15 validate checkers, 4 select operators. Full corpus passing.
 
 
 ---
@@ -782,12 +788,10 @@ No remaining issues. Full parity achieved.
 
 ## Recommendations
 
-### Immediate (P0)
-- **Java**: Implement getpath, setpath as foundation for inject/transform/validate.
-
-### Short-term (P1)
-- **Java**: Implement Injection class and SKIP/DELETE sentinels.
-- **Java**: Implement inject, transform, validate, select subsystems.
-
-### Medium-term (P2)
-- **Java**: Fix keysof() bug, improve walk() to support before/after callbacks.
+All 16 ports (typescript canonical plus javascript, python, go, php,
+lua, ruby, rust, c, java, cpp, csharp, kotlin, zig, perl, swift) are at
+full TS-canonical parity against the 48-function canonical API. There
+is no outstanding per-language parity work; `tools/check_parity.py`
+reports every port ok. Future work is limited to keeping the ports in
+lockstep when the canonical TypeScript source changes (change canonical
+first, then propagate to every port and re-test).

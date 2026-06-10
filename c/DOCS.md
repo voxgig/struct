@@ -87,7 +87,13 @@ literal:
 voxgig_value* data = voxgig_parse_json("{\"user\":{\"first\":\"Ada\",\"last\":\"Lovelace\"},\"age\":36}", 0);
 voxgig_value* spec = voxgig_parse_json("{\"name\":\"`user.first`\",\"surname\":\"`user.last`\",\"years\":\"`age`\"}", 0);
 voxgig_value* out  = voxgig_transform(data, spec, NULL);
-char* js = voxgig_jsonify(out, NULL);    /* {"name": "Ada","surname": "Lovelace","years": 36} */
+char* js = voxgig_jsonify(out, NULL);    /* pretty-printed (indent 2) by default:
+                                          {
+                                            "name": "Ada",
+                                            "surname": "Lovelace",
+                                            "years": 36
+                                          }
+                                          pass {"indent":0} flags for compact form */
 free(js);                            /* jsonify returns a malloc'd char* */
 voxgig_release(out); voxgig_release(spec); voxgig_release(data);
 
@@ -327,9 +333,8 @@ make clean       # remove built binaries / scoreboard
 
 The corpus runner ([`tests/struct_corpus_test.c`](./tests/struct_corpus_test.c))
 loads the shared corpus from [`../build/test/`](../build/test/) — the same
-contract every port runs. This port passes the corpus (1177/1177 per
-[`../REPORT.md`](../design/REPORT.md)); per-test counts are written to
-`corpus-scoreboard.json` after each run.
+contract every port runs. This port passes the corpus (1232/1232); per-test
+counts are written to `corpus-scoreboard.json` after each run.
 
 **To change behaviour:** this is a port, so behaviour changes start in the
 canonical TypeScript, flow to the corpus, then to every port. To fix a C

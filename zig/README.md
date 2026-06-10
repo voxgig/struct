@@ -106,12 +106,63 @@ struct_lib.isnode(m)                                  // true
 ```
 <!-- => true -->
 
+<!-- example: minor/ismap#map -->
+```zig
+var mm = try struct_lib.JsonValue.makeMap(allocator);
+try mm.object.put("a", .{ .integer = 1 });
+struct_lib.ismap(mm)                                  // true
+```
+
+<!-- => true -->
+
+<!-- example: minor/islist#list -->
+```zig
+var ll = try struct_lib.JsonValue.makeList(allocator);
+try ll.array.append(.{ .integer = 1 });
+try ll.array.append(.{ .integer = 2 });
+struct_lib.islist(ll)                                 // true
+```
+
+<!-- => true -->
+
+<!-- example: minor/iskey#str -->
+```zig
+struct_lib.iskey(.{ .string = "name" })               // true
+```
+
+<!-- => true -->
+
+<!-- example: minor/isempty#empty -->
+```zig
+var empty = try struct_lib.JsonValue.makeList(allocator);
+struct_lib.isempty(empty)                             // true
+```
+
+<!-- => true -->
+
 ### Type inspection
 
 ```zig
 pub fn typify(val: JsonValue) i64
 pub fn typename(t: i64) []const u8
 ```
+
+`typify` returns a bit-field combining a kind flag (`T_scalar` or `T_node`)
+with a specific type flag; `typename` looks up a human-friendly name:
+
+<!-- example: minor/typify#int -->
+```zig
+struct_lib.typify(.{ .integer = 1 })   // T_scalar | T_number | T_integer (201326720)
+```
+
+<!-- => 201326720 -->
+
+<!-- example: minor/typename#map -->
+```zig
+struct_lib.typename(8192)              // "map" (8192 == T_map)
+```
+
+<!-- => "map" -->
 
 ### Size, slice, pad
 
@@ -189,6 +240,36 @@ const got = try struct_lib.getprop(allocator, xm, .{ .string = "x" }, .null); //
 ```
 <!-- => 1 -->
 
+<!-- example: minor/setprop#set -->
+```zig
+var sp = try struct_lib.JsonValue.makeMap(allocator);
+try sp.object.put("a", .{ .integer = 1 });
+const set = try struct_lib.setprop(allocator, sp, .{ .string = "b" }, .{ .integer = 2 }); // { a: 1, b: 2 }
+```
+
+<!-- => {"a": 1, "b": 2} -->
+
+<!-- example: minor/delprop#del -->
+```zig
+var dp = try struct_lib.JsonValue.makeMap(allocator);
+try dp.object.put("a", .{ .integer = 1 });
+try dp.object.put("b", .{ .integer = 2 });
+const del = try struct_lib.delprop(allocator, dp, .{ .string = "a" }); // { b: 2 }
+```
+
+<!-- => {"b": 2} -->
+
+<!-- example: minor/getelem#neg -->
+```zig
+var ge = try struct_lib.JsonValue.makeList(allocator);
+try ge.array.append(.{ .integer = 10 });
+try ge.array.append(.{ .integer = 20 });
+try ge.array.append(.{ .integer = 30 });
+const last = try struct_lib.getelem(allocator, ge, .{ .integer = -1 }, .null); // 30
+```
+
+<!-- => 30 -->
+
 `keysof` returns map keys **sorted** (list keys are the indices as strings):
 
 <!-- example: minor/keysof#sorted -->
@@ -199,6 +280,32 @@ try bm.object.put("a", .{ .integer = 5 });
 const ks = try struct_lib.keysof(allocator, bm);          // ['a', 'b']
 ```
 <!-- => ["a", "b"] -->
+
+<!-- example: minor/haskey#hit -->
+```zig
+var hk = try struct_lib.JsonValue.makeMap(allocator);
+try hk.object.put("a", .{ .integer = 1 });
+const has = try struct_lib.haskey(allocator, hk, .{ .string = "a" }); // true
+```
+
+<!-- => true -->
+
+<!-- example: minor/items#map -->
+```zig
+var im = try struct_lib.JsonValue.makeMap(allocator);
+try im.object.put("a", .{ .integer = 1 });
+try im.object.put("b", .{ .integer = 2 });
+const pairs = try struct_lib.items(allocator, im);        // [['a', 1], ['b', 2]]
+```
+
+<!-- => [["a", 1], ["b", 2]] -->
+
+<!-- example: minor/strkey#num -->
+```zig
+const sk = try struct_lib.strkey(allocator, .{ .float = 2.2 });   // '2'
+```
+
+<!-- => "2" -->
 
 ### Path operations
 
@@ -224,6 +331,27 @@ const deep = try struct_lib.getpath(allocator, path, store);   // 42
 ```
 <!-- => 42 -->
 
+<!-- example: minor/setpath#nested -->
+```zig
+var sp2 = try struct_lib.JsonValue.makeMap(allocator);
+try sp2.object.put("a", .{ .integer = 1 });
+try sp2.object.put("b", .{ .integer = 2 });
+const updated = try struct_lib.setpath(allocator, sp2, .{ .string = "b" }, .{ .integer = 22 }); // { a: 1, b: 22 }
+```
+
+<!-- => {"a": 1, "b": 22} -->
+
+<!-- example: minor/pathify#parts -->
+```zig
+var parts = try struct_lib.JsonValue.makeList(allocator);
+try parts.array.append(.{ .string = "a" });
+try parts.array.append(.{ .string = "b" });
+try parts.array.append(.{ .string = "c" });
+const dotted = try struct_lib.pathify(allocator, parts, 0, 0);  // 'a.b.c'
+```
+
+<!-- => "a.b.c" -->
+
 ### Tree operations
 
 ```zig
@@ -234,6 +362,36 @@ pub fn clone(allocator: Allocator, val: JsonValue) !JsonValue
 pub fn flatten(allocator: Allocator, val: JsonValue,
                depth: i64) !JsonValue
 ```
+
+Last input wins; maps deep-merge; lists merge by index:
+
+<!-- example: merge#basic -->
+```zig
+// chain == [ { a:1, b:2, k:[10,20], x:{y:5,z:6} },
+//            { b:3, d:4, e:8, k:[11], x:{y:7} } ]
+const merged = try struct_lib.merge(allocator, chain, struct_lib.MAXDEPTH);
+// merged == { a:1, b:3, d:4, e:8, k:[11,20], x:{y:7,z:6} }
+```
+
+<!-- => {"a": 1, "b": 3, "d": 4, "e": 8, "k": [11, 20], "x": {"y": 7, "z": 6}} -->
+
+<!-- example: minor/clone#deep -->
+```zig
+// src == { a: { b: [1, 2] } }
+const copy = try struct_lib.clone(allocator, src);   // { a: { b: [1, 2] } } (a deep copy)
+```
+
+<!-- => {"a": {"b": [1, 2]}} -->
+
+`flatten` collapses nested lists one level by default:
+
+<!-- example: minor/flatten#nested -->
+```zig
+// nested == [1, [2, [3]]]
+const flat = try struct_lib.flatten(allocator, nested, 1);   // [1, 2, [3]]
+```
+
+<!-- => [1, 2, [3]] -->
 
 ### String / URL / JSON
 
@@ -251,6 +409,31 @@ pub fn stringify(allocator: Allocator, val: JsonValue,
 pub fn stringifyPretty(allocator: Allocator, val: JsonValue,
                        maxlen: ?usize, pretty: bool) ![]const u8
 ```
+
+<!-- example: minor/escre#dots -->
+```zig
+const re = try struct_lib.escre(allocator, "a.b+c");      // 'a\.b\+c'
+```
+
+<!-- => "a\\.b\\+c" -->
+
+<!-- example: minor/escurl#space -->
+```zig
+const url = try struct_lib.escurl(allocator, "hello world?"); // 'hello%20world%3F'
+```
+
+<!-- => "hello%20world%3F" -->
+
+<!-- example: minor/join#sep -->
+```zig
+var parts = try struct_lib.JsonValue.makeList(allocator);
+try parts.array.append(.{ .string = "a" });
+try parts.array.append(.{ .string = "b" });
+try parts.array.append(.{ .string = "c" });
+const joined = try struct_lib.join(allocator, parts, "/", false); // 'a/b/c'
+```
+
+<!-- => "a/b/c" -->
 
 `jsonify` with `indent_size = 2` pretty-prints (the canonical default);
 pass `indent_size = 0` for the compact form:
@@ -304,6 +487,17 @@ pub fn transform(allocator: Allocator, data: JsonValue,
 // validate, select also present — see source
 ```
 
+Backtick refs in strings are replaced by store values:
+
+<!-- example: inject#basic -->
+```zig
+// val   == { x: "`a`", y: 2 }
+// store == { a: 1 }
+const injected = try struct_lib.inject(allocator, val, store, null); // { x: 1, y: 2 }
+```
+
+<!-- => {"x": 1, "y": 2} -->
+
 A transform command like `$EACH` appears in **value** position — as the
 first element of a list `['`$EACH`', path, subspec]` — mapping the sub-spec
 over every entry at `path`:
@@ -329,6 +523,32 @@ const r = try struct_lib.transform(allocator, data_empty, bad_spec);
 ```
 <!-- throws: invalid placement in parent map -->
 
+`validate` checks the shape against checker tokens. On a match the data is
+returned with `err == null`; on a mismatch `err` carries the message (the
+canonical TS throws instead):
+
+<!-- example: validate#shape -->
+```zig
+// data == { name: "Ada", age: 36 }
+// spec == { name: "`$STRING`", age: "`$INTEGER`" }
+const res = try struct_lib.validate(allocator, data, spec);
+// res.out == { name: "Ada", age: 36 }, res.err == null
+```
+
+<!-- => {"name": "Ada", "age": 36} -->
+
+`select` finds children matching a query, tagging each match with its `$KEY`:
+
+<!-- example: select#query -->
+```zig
+// children == { a: { name: "Alice", age: 30 }, b: { name: "Bob", age: 25 } }
+// query    == { age: 30 }
+const hits = try struct_lib.select(allocator, children, query);
+// hits == [{ name: "Alice", age: 30, $KEY: "a" }]
+```
+
+<!-- => [{"name": "Alice", "age": 30, "$KEY": "a"}] -->
+
 ### `std.json` interop
 
 ```zig
@@ -343,14 +563,12 @@ encoder) and stay in `JsonValue` everywhere else.
 ## Constants
 
 ```zig
-pub const T_any: i64
-pub const T_noval: i64
+pub const T_any: i32
+pub const T_noval: i32
 // ... 15 type bit-flags total
-pub const M_KEYPRE: i64
-pub const M_KEYPOST: i64
-pub const M_VAL: i64
-pub const SKIP: JsonValue
-pub const DELETE: JsonValue
+pub const M_KEYPRE: i32
+pub const M_KEYPOST: i32
+pub const M_VAL: i32
 ```
 
 

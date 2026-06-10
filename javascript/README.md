@@ -17,7 +17,7 @@ The JS source is a single CommonJS module:
 const struct = require('./javascript/src/struct.js')
 ```
 
-When packaged the public name is `@voxgig/struct` (see
+When packaged the public name is `@voxgig/structjs` (see
 [`package.json`](./package.json)).
 
 
@@ -52,11 +52,14 @@ validate(
 module.exports = {
   StructUtility, Injection,
 
-  // 41 functions (40 canonical + replace exposed)
+  // 6 regex functions
+  re_compile, re_find, re_find_all, re_replace, re_test, re_escape,
+
+  // 42 utility functions (48 canonical = these 42 + the 6 re_* above)
   clone, delprop, escre, escurl, filter, flatten, getdef, getelem,
   getpath, getprop, haskey, inject, isempty, isfunc, iskey, islist,
   ismap, isnode, items, join, jsonify, keysof, merge, pad, pathify,
-  replace, select, setpath, setprop, size, slice, strkey, stringify,
+  select, setpath, setprop, size, slice, strkey, stringify,
   transform, typify, typename, validate, walk, jm, jt,
   checkPlacement, injectorArgs, injectChild,
 
@@ -98,12 +101,51 @@ isnode({ a: 1 })          // true
 ```js
 isnode([1])               // true
 isnode('x')               // false
-ismap({})                 // true
-islist([])                // true
+```
+
+<!-- example: minor/ismap#map -->
+```js
+ismap({ a: 1 })           // true
+```
+
+<!-- => true -->
+
+```js
+ismap([1])                // false
+```
+
+<!-- example: minor/islist#list -->
+```js
+islist([1, 2])            // true
+```
+
+<!-- => true -->
+
+```js
+islist({ a: 1 })          // false
+```
+
+<!-- example: minor/iskey#str -->
+```js
+iskey('name')             // true
+```
+
+<!-- => true -->
+
+```js
 iskey(0)                  // true
 iskey('')                 // false
-isempty(null)             // true
+```
+
+<!-- example: minor/isempty#empty -->
+```js
 isempty([])               // true
+```
+
+<!-- => true -->
+
+```js
+isempty(null)             // true
 isempty(0)                // false
 isfunc(() => 1)           // true
 ```
@@ -115,12 +157,28 @@ typify(val)               // -> int bitfield
 typename(t)               // -> human-friendly type name
 ```
 
+<!-- example: minor/typify#int -->
+```js
+typify(1)                 // T_scalar | T_number | T_integer  (201326720)
+```
+
+<!-- => 201326720 -->
+
 ```js
 typify(42)                // T_scalar | T_number | T_integer
 typify('hi')              // T_scalar | T_string
 typify(undefined)         // T_noval
 typify(null)              // T_scalar | T_null
+```
 
+<!-- example: minor/typename#map -->
+```js
+typename(8192)            // 'map'  (8192 === T_map)
+```
+
+<!-- => "map" -->
+
+```js
 typename(typify('hi'))    // 'string'
 typename(typify({}))      // 'map'
 ```
@@ -193,14 +251,55 @@ getprop({x:1}, 'x')               // 1
 
 ```js
 getprop({a:1}, 'b', 'def')        // 'def'
+```
 
+<!-- example: minor/setprop#set -->
+```js
 setprop({a:1}, 'b', 2)            // { a:1, b:2 }
-delprop({a:1, b:2}, 'a')          // { b:2 }
+```
 
-getelem([1,2,3], -1)              // 3
+<!-- => {"a": 1, "b": 2} -->
+
+<!-- example: minor/delprop#del -->
+```js
+delprop({a:1, b:2}, 'a')          // { b:2 }
+```
+
+<!-- => {"b": 2} -->
+
+<!-- example: minor/getelem#neg -->
+```js
+getelem([10,20,30], -1)           // 30
+```
+
+<!-- => 30 -->
+
+```js
 getdef(undefined, 'fb')           // 'fb'
+```
+
+<!-- example: minor/haskey#hit -->
+```js
 haskey({a:1}, 'a')                // true
+```
+
+<!-- => true -->
+
+<!-- example: minor/items#map -->
+```js
 items({a:1, b:2})                 // [['a',1], ['b',2]]
+```
+
+<!-- => [["a", 1], ["b", 2]] -->
+
+<!-- example: minor/strkey#num -->
+```js
+strkey(2.2)                       // '2'
+```
+
+<!-- => "2" -->
+
+```js
 strkey(1)                         // '1'
 ```
 
@@ -231,9 +330,21 @@ getpath({}, 'missing')                      // undefined
 const store = {}
 setpath(store, 'db.host', 'localhost')
 // store === { db: { host: 'localhost' } }
+```
 
+<!-- example: minor/setpath#nested -->
+```js
+setpath({ a: 1, b: 2 }, 'b', 22)            // { a: 1, b: 22 }
+```
+
+<!-- => {"a": 1, "b": 22} -->
+
+<!-- example: minor/pathify#parts -->
+```js
 pathify(['a','b','c'])                      // 'a.b.c'
 ```
+
+<!-- => "a.b.c" -->
 
 ### Tree operations
 
@@ -248,14 +359,36 @@ filter(val, check)
 
 ```js
 walk(tree, undefined, (k, v) => v == null ? 'X' : v)
+```
 
+Last input wins; maps deep-merge; lists merge by index:
+
+<!-- example: merge#basic -->
+```js
 merge([
-  { a:1, b:2, x:{y:5,z:6} },
-  { b:3,     x:{y:7}     },
+  { a:1, b:2, k:[10,20], x:{y:5,z:6} },
+  { b:3, d:4, e:8, k:[11], x:{y:7} },
 ])
-// { a:1, b:3, x:{y:7,z:6} }
+// { a:1, b:3, d:4, e:8, k:[11,20], x:{y:7,z:6} }
+```
 
-clone({ a:[1,2] })              // deep copy
+<!-- => {"a": 1, "b": 3, "d": 4, "e": 8, "k": [11, 20], "x": {"y": 7, "z": 6}} -->
+
+<!-- example: minor/clone#deep -->
+```js
+clone({ a:{ b:[1,2] } })        // { a:{ b:[1,2] } }  (a deep copy)
+```
+
+<!-- => {"a": {"b": [1, 2]}} -->
+
+<!-- example: minor/flatten#nested -->
+```js
+flatten([1,[2,[3]]])            // [1, 2, [3]]  (one level by default)
+```
+
+<!-- => [1, 2, [3]] -->
+
+```js
 flatten([1,[2,[3,[4]]]])        // [1, 2, [3, [4]]]
 flatten([1,[2,[3,[4]]]], 2)     // [1, 2, 3, [4]]
 ```
@@ -278,14 +411,31 @@ escurl(s)                          // URL-encode
 join(arr, sep?, url?)              // join parts
 jsonify(val, flags?)               // JSON serialise
 stringify(val, maxlen?, pretty?)   // human-friendly compact
-replace(s, from, to)               // string/regex replace
 ```
 
+<!-- example: minor/escre#dots -->
 ```js
 escre('a.b+c')                      // 'a\\.b\\+c'
-escurl('hello world')               // 'hello%20world'
+```
+
+<!-- => "a\\.b\\+c" -->
+
+<!-- example: minor/escurl#space -->
+```js
+escurl('hello world?')              // 'hello%20world%3F'
+```
+
+<!-- => "hello%20world%3F" -->
+
+<!-- example: minor/join#sep -->
+```js
 join(['a','b','c'], '/')            // 'a/b/c'
-join(['http:', '/foo/'], '/', true) // 'http:/foo'
+```
+
+<!-- => "a/b/c" -->
+
+```js
+join(['http:', '/foo/'], '/', true) // 'http:/foo/'
 ```
 
 `jsonify` pretty-prints by default (indent 2); pass `{ indent: 0 }` for the
@@ -330,6 +480,13 @@ validate(data, spec, injdef?)
 select(children, query)
 ```
 
+<!-- example: inject#basic -->
+```js
+inject({ x: '`a`', y: 2 }, { a: 1 })    // { x: 1, y: 2 }
+```
+
+<!-- => {"x": 1, "y": 2} -->
+
 ```js
 inject(
   { greeting: 'hello `name`' },
@@ -342,16 +499,29 @@ transform(
   { a: '`hold.x`', b: '`top`' }
 )
 // { a: 1, b: 99 }
+```
 
-validate({ name: 'Ada' }, { name: '`$STRING`' })
-// { name: 'Ada' }    (throws on mismatch)
+<!-- example: validate#shape -->
+```js
+validate(
+  { name: 'Ada', age: 36 },
+  { name: '`$STRING`', age: '`$INTEGER`' }
+)
+// { name: 'Ada', age: 36 }    (throws on mismatch)
+```
 
+<!-- => {"name": "Ada", "age": 36} -->
+
+<!-- example: select#query -->
+```js
 select(
-  { a: { age:30 }, b: { age:25 } },
+  { a: { name: 'Alice', age: 30 }, b: { name: 'Bob', age: 25 } },
   { age: 30 }
 )
-// [{ age: 30, $KEY: 'a' }]
+// [{ name: 'Alice', age: 30, $KEY: 'a' }]
 ```
+
+<!-- => [{"name": "Alice", "age": 30, "$KEY": "a"}] -->
 
 Transform commands drive structural ops. A command like `$EACH` appears in
 **value** position — as the first element of a list `['`$EACH`', path, subspec]`
@@ -467,12 +637,15 @@ JavaScript arrays satisfy this natively.
 
 ### Difference from canonical TypeScript
 
-The JS port additionally exports `replace` (internal-only in TS).
-Otherwise functionally identical -- both run on V8.
+The exported function surface is identical (48 canonical functions,
+including the six `re_*` regex helpers). The only export difference is
+`Injection`: the JS port exports it as a runtime value, whereas TypeScript
+exports it only as a type. Otherwise functionally identical -- both run on
+V8.
 
 ### Test status
 
-84/84 tests pass against the shared corpus.
+90/90 tests pass against the shared corpus.
 
 
 ## Regex

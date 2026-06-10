@@ -72,7 +72,7 @@ full language-neutral walkthrough; the Go-flavoured version:
 
 ```go
 // Reshape by example — the spec mirrors the output you want.
-out, _ := voxgigstruct.Transform(
+out := voxgigstruct.Transform(
   map[string]any{"user": map[string]any{"first": "Ada", "last": "Lovelace"}, "age": 36},
   map[string]any{"name": "`user.first`", "surname": "`user.last`", "years": "`age`"},
 )
@@ -203,9 +203,11 @@ Go-specific points the signatures don't show:
   `func(key *string, val any, parent any, path []string) any`. The key is a
   `*string` — `nil` at the root, otherwise the map key or the string form of
   a list index.
-- **`(any, error)` for fallible calls.** `Transform`, `Validate`, and their
-  variants return `(any, error)` per Go idiom; the error carries the first
-  mismatch message (or an aggregate).
+- **`(any, error)` for fallible calls.** Only `Validate` returns
+  `(any, error)` per Go idiom; the error carries the first mismatch message
+  (or an aggregate). `Transform`, `TransformModify`, and
+  `TransformModifyHandler` return a plain `any`; `TransformCollect` returns
+  `(any, []string)` (the data plus any collected error strings).
 - **Type flags** combine bitwise: `Typify("hi")` is `T_scalar | T_string`;
   test with `0 < (T_string & t)`. `Typify(nil)` is `T_scalar | T_null`.
 

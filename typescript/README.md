@@ -53,7 +53,7 @@ validate(
 
 ```ts
 import {
-  // 25 minor utilities
+  // 29 minor utilities
   typename, getdef, isnode, ismap, islist, iskey, isempty, isfunc,
   size, slice, pad, typify, getelem, getprop, strkey, keysof,
   haskey, items, flatten, filter, escre, escurl, join, jsonify,
@@ -114,21 +114,53 @@ isnode({ a: 1 })          // true
 ```ts
 isnode([1, 2])            // true
 isnode('a')               // false
+```
 
+<!-- example: minor/ismap#map -->
+```ts
 ismap({ a: 1 })           // true
+```
+
+<!-- => true -->
+
+```ts
 ismap([1])                // false
+```
 
+<!-- example: minor/islist#list -->
+```ts
 islist([1, 2])            // true
-islist({ a: 1 })          // false
+```
 
+<!-- => true -->
+
+```ts
+islist({ a: 1 })          // false
+```
+
+<!-- example: minor/iskey#str -->
+```ts
 iskey('name')             // true
+```
+
+<!-- => true -->
+
+```ts
 iskey(0)                  // true
 iskey('')                 // false
 iskey(true)               // false
+```
 
+<!-- example: minor/isempty#empty -->
+```ts
+isempty([])               // true
+```
+
+<!-- => true -->
+
+```ts
 isempty(null)             // true
 isempty('')               // true
-isempty([])               // true
 isempty({})               // true
 isempty(0)                // false
 
@@ -147,6 +179,13 @@ function typename(t: number): string
 `T_node`) with a specific type flag.  `typename` looks up a
 human-friendly name.
 
+<!-- example: minor/typify#int -->
+```ts
+typify(1)                 // T_scalar | T_number | T_integer  (201326720)
+```
+
+<!-- => 201326720 -->
+
 ```ts
 typify(42)                // T_scalar | T_number | T_integer
 typify('hi')              // T_scalar | T_string
@@ -154,7 +193,16 @@ typify(null)              // T_scalar | T_null
 typify(undefined)         // T_noval
 typify({})                // T_node | T_map
 typify([])                // T_node | T_list
+```
 
+<!-- example: minor/typename#map -->
+```ts
+typename(8192)            // "map"  (8192 === T_map)
+```
+
+<!-- => "map" -->
+
+```ts
 typename(typify(42))      // "integer"
 typename(typify('hi'))    // "string"
 typename(typify({}))      // "map"
@@ -196,7 +244,7 @@ slice('abcdef', -3)            // 'abc'  (drops the last 3)
 <!-- => "abc" -->
 
 ```ts
-slice(10, 0, 5)                // 5  (number bounding)
+slice(10, 0, 5)                // 4  (number bounding; end is exclusive)
 ```
 
 <!-- example: minor/pad#right -->
@@ -235,19 +283,48 @@ getprop({ x: 1 }, 'x')               // 1
 ```ts
 getprop({ a: 1 }, 'b', 'default')    // 'default'
 getprop([10, 20, 30], 1)             // 20
+```
 
+<!-- example: minor/setprop#set -->
+```ts
 setprop({ a: 1 }, 'b', 2)            // { a: 1, b: 2 }
+```
+
+<!-- => {"a": 1, "b": 2} -->
+
+```ts
 setprop([1, 2, 3], 0, 9)             // [9, 2, 3]
+```
 
+<!-- example: minor/delprop#del -->
+```ts
 delprop({ a: 1, b: 2 }, 'a')         // { b: 2 }
+```
 
-getelem([1, 2, 3], -1)               // 3
+<!-- => {"b": 2} -->
+
+<!-- example: minor/getelem#neg -->
+```ts
+getelem([10, 20, 30], -1)            // 30
+```
+
+<!-- => 30 -->
+
+```ts
 getelem([1, 2, 3], 5, 'none')        // 'none'
 
 getdef(undefined, 'fallback')        // 'fallback'
 getdef('value', 'fallback')          // 'value'
+```
 
+<!-- example: minor/haskey#hit -->
+```ts
 haskey({ a: 1 }, 'a')                // true
+```
+
+<!-- => true -->
+
+```ts
 haskey({ a: undefined }, 'a')        // false
 
 keysof([10, 20, 30])                 // ['0', '1', '2']
@@ -259,13 +336,27 @@ keysof({ b: 4, a: 5 })               // ['a', 'b']  (sorted)
 ```
 <!-- => ["a", "b"] -->
 
+<!-- example: minor/items#map -->
 ```ts
-
 items({ a: 1, b: 2 })                // [['a', 1], ['b', 2]]
+```
+
+<!-- => [["a", 1], ["b", 2]] -->
+
+```ts
 items([10, 20])                      // [['0', 10], ['1', 20]]
 items({ a: 1 }, ([k, v]) => `${k}=${v}`)
                                      // ['a=1']
+```
 
+<!-- example: minor/strkey#num -->
+```ts
+strkey(2.2)                          // '2'
+```
+
+<!-- => "2" -->
+
+```ts
 strkey(1)                            // '1'
 strkey('foo')                        // 'foo'
 strkey(true)                         // ''  (invalid keys -> '')
@@ -296,9 +387,24 @@ setpath(store, 'db.host', 'localhost')
 
 setpath({ a: [1, 2, 3] }, 'a.1', 99)
 // { a: [1, 99, 3] }
+```
 
+<!-- example: minor/setpath#nested -->
+```ts
+setpath({ a: 1, b: 2 }, 'b', 22)                // { a: 1, b: 22 }
+```
+
+<!-- => {"a": 1, "b": 22} -->
+
+<!-- example: minor/pathify#parts -->
+```ts
 pathify(['a', 'b', 'c'])                        // 'a.b.c'
-pathify('a.b.c')                                // 'a.b.c'
+```
+
+<!-- => "a.b.c" -->
+
+```ts
+pathify('a.b.c')                                // 'abc'  (a plain string is not split on dots)
 pathify(['a', 'b', 'c'], 1)                     // 'b.c'
 ```
 
@@ -332,19 +438,38 @@ type WalkApply = (
 walk(tree, undefined, (key, val, parent, path) =>
   val === null ? 'DEFAULT' : val
 )
+```
 
-// Last input wins; maps deep-merge; lists merge by index.
+Last input wins; maps deep-merge; lists merge by index:
+
+<!-- example: merge#basic -->
+```ts
 merge([
-  { a: 1, b: 2, x: { y: 5, z: 6 } },
-  { b: 3,       x: { y: 7 }       },
+  { a: 1, b: 2, k: [10, 20], x: { y: 5, z: 6 } },
+  { b: 3, d: 4, e: 8, k: [11], x: { y: 7 } },
 ])
-// { a: 1, b: 3, x: { y: 7, z: 6 } }
+// { a: 1, b: 3, d: 4, e: 8, k: [11, 20], x: { y: 7, z: 6 } }
+```
 
-clone({ a: { b: [1, 2] } })             // deep copy
+<!-- => {"a": 1, "b": 3, "d": 4, "e": 8, "k": [11, 20], "x": {"y": 7, "z": 6}} -->
 
+<!-- example: minor/clone#deep -->
+```ts
+clone({ a: { b: [1, 2] } })             // { a: { b: [1, 2] } }  (a deep copy)
+```
+
+<!-- => {"a": {"b": [1, 2]}} -->
+
+<!-- example: minor/flatten#nested -->
+```ts
+flatten([1, [2, [3]]])                  // [1, 2, [3]]  (one level by default)
+```
+
+<!-- => [1, 2, [3]] -->
+
+```ts
 flatten([1, [2, [3, [4]]]])             // [1, 2, [3, [4]]]
 flatten([1, [2, [3, [4]]]], 2)          // [1, 2, 3, [4]]
-
 ```
 
 `filter` passes each `[key, value]` pair to the check and returns the
@@ -365,14 +490,30 @@ function escurl(s: string): string
 function join(arr: any[], sep?: string, url?: boolean): string
 function jsonify(val: any, flags?: { indent?: number, offset?: number }): string
 function stringify(val: any, maxlen?: number, pretty?: any): string
-function replace(s: string, from: string | RegExp, to: any): string
 ```
 
+<!-- example: minor/escre#dots -->
 ```ts
 escre('a.b+c')                          // 'a\\.b\\+c'
-escurl('hello world?')                  // 'hello%20world%3F'
+```
 
+<!-- => "a\\.b\\+c" -->
+
+<!-- example: minor/escurl#space -->
+```ts
+escurl('hello world?')                  // 'hello%20world%3F'
+```
+
+<!-- => "hello%20world%3F" -->
+
+<!-- example: minor/join#sep -->
+```ts
 join(['a', 'b', 'c'], '/')              // 'a/b/c'
+```
+
+<!-- => "a/b/c" -->
+
+```ts
 join(['http:', '/foo/', '/bar'], '/', true)
                                         // 'http:/foo/bar'  (URL-mode collapses)
 ```
@@ -434,8 +575,15 @@ function validate(
 function select(children: any, query: any): any[]
 ```
 
+<!-- example: inject#basic -->
 ```ts
 // Backtick refs in strings are replaced by store values.
+inject({ x: '`a`', y: 2 }, { a: 1 })    // { x: 1, y: 2 }
+```
+
+<!-- => {"x": 1, "y": 2} -->
+
+```ts
 inject(
   { greeting: 'hello `name`', age: '`years`' },
   { name: 'Ada', years: 36 }
@@ -474,13 +622,20 @@ transform({}, { x: '`$APPLY`' })
 ```
 <!-- throws: invalid placement in parent map -->
 
+<!-- example: validate#shape -->
 ```ts
-// Validate against a shape.
+// Validate against a shape (throws on mismatch).
 validate(
   { name: 'Ada', age: 36 },
   { name: '`$STRING`', age: '`$INTEGER`' }
 )
+// { name: 'Ada', age: 36 }
+```
 
+<!-- => {"name": "Ada", "age": 36} -->
+
+<!-- example: select#query -->
+```ts
 // Find children matching a query.
 select(
   { a: { name: 'Alice', age: 30 }, b: { name: 'Bob', age: 25 } },
@@ -488,6 +643,8 @@ select(
 )
 // [{ name: 'Alice', age: 30, $KEY: 'a' }]
 ```
+
+<!-- => [{"name": "Alice", "age": 30, "$KEY": "a"}] -->
 
 ### Builders
 
@@ -582,7 +739,6 @@ Quote inside a `transform` spec, e.g. `` '`$COPY`' ``.
 | `$DELETE` | Remove the current key from the output.                           |
 | `$COPY`   | Copy the matching value from `data` at the current path.          |
 | `$KEY`    | Emit the current key under another name.                          |
-| `$META`   | Read or attach meta about the current path.                       |
 | `$ANNO`   | Annotate the current node with extra fields.                      |
 | `$MERGE`  | Deep-merge several sub-specs into the current node.               |
 | `$EACH`   | Apply a sub-spec to every entry of a list or map.                 |
@@ -590,6 +746,8 @@ Quote inside a `transform` spec, e.g. `` '`$COPY`' ``.
 | `$REF`    | Resolve a named reference inside the spec.                        |
 | `$FORMAT` | Render a templated string using values from `data`.               |
 | `$APPLY`  | Call a function (from `extra` / `injdef`) on the current value.   |
+| `$DS`     | Emit a literal `$` (escape the dollar sign).                      |
+| `$WHEN`   | Insert the current date and time as an ISO-8601 string.           |
 
 
 ## Validate checkers

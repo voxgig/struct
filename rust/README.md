@@ -1,9 +1,9 @@
 # Struct for Rust
 
 > Rust port of the canonical TypeScript implementation.
-> Status: **complete** — the full shared corpus passes (`cargo test` → 1187
+> Status: **complete** — the full shared corpus passes (`cargo test` → 1309
 > checks; `cargo clippy` clean): minor utilities, `walk`, `merge`, `getpath`,
-> `setpath`, `inject`, `transform` (all 11 commands), `validate` (all 15
+> `setpath`, `inject`, `transform` (all 10 commands), `validate` (all 15
 > checkers), `select` (all operators), and the `primary.check` SDK test.
 
 For motivation, the language-neutral concepts, and the cross-language parity
@@ -141,6 +141,37 @@ is_node(&Value::map_of([("a".into(), Value::Num(1.0))])); // true
 ```
 <!-- => true -->
 
+`is_map` / `is_list` distinguish the two node kinds; `is_key` accepts a
+non-empty string or a number; `is_empty` reports the empty/absent values:
+
+<!-- example: minor/ismap#map -->
+```rust
+is_map(&Value::map_of([("a".into(), Value::Num(1.0))])); // true
+```
+
+<!-- => true -->
+
+<!-- example: minor/islist#list -->
+```rust
+is_list(&Value::list(vec![Value::Num(1.0), Value::Num(2.0)])); // true
+```
+
+<!-- => true -->
+
+<!-- example: minor/iskey#str -->
+```rust
+is_key(&Value::str("name")); // true
+```
+
+<!-- => true -->
+
+<!-- example: minor/isempty#empty -->
+```rust
+is_empty(&Value::empty_list()); // true
+```
+
+<!-- => true -->
+
 `size` counts entries of a list/map (or the length of a string):
 
 <!-- example: minor/size#three -->
@@ -179,6 +210,23 @@ pad(Value::str("a"), Some(3), None); // "a  "
 ```
 <!-- => "a  " -->
 
+`typify` returns an `i64` bit-field (a "kind" flag OR'd with a specific type
+flag); `type_name` maps a flag back to a human name:
+
+<!-- example: minor/typify#int -->
+```rust
+typify(&Value::Num(1.0)); // 201326720  (T_SCALAR | T_NUMBER | T_INTEGER)
+```
+
+<!-- => 201326720 -->
+
+<!-- example: minor/typename#map -->
+```rust
+type_name(8192); // "map"  (8192 == T_MAP)
+```
+
+<!-- => "map" -->
+
 `get_prop` reads a key from a map or list:
 
 <!-- example: minor/getprop#hit -->
@@ -186,6 +234,68 @@ pad(Value::str("a"), Some(3), None); // "a  "
 get_prop(&Value::map_of([("x".into(), Value::Num(1.0))]), &Value::str("x"), Value::Noval); // Value::Num(1.0)
 ```
 <!-- => 1 -->
+
+`set_prop` / `del_prop` return the parent with the key set/removed:
+
+<!-- example: minor/setprop#set -->
+```rust
+set_prop(Value::map_of([("a".into(), Value::Num(1.0))]), &Value::str("b"), Value::Num(2.0));
+// Value::Map({ a: 1, b: 2 })
+```
+
+<!-- => {"a": 1, "b": 2} -->
+
+<!-- example: minor/delprop#del -->
+```rust
+del_prop(
+    Value::map_of([("a".into(), Value::Num(1.0)), ("b".into(), Value::Num(2.0))]),
+    &Value::str("a"),
+);
+// Value::Map({ b: 2 })
+```
+
+<!-- => {"b": 2} -->
+
+`get_elem` is list-specific and supports negative indexing from the end:
+
+<!-- example: minor/getelem#neg -->
+```rust
+get_elem(
+    &Value::list(vec![Value::Num(10.0), Value::Num(20.0), Value::Num(30.0)]),
+    &Value::Num(-1.0),
+    Value::Noval,
+); // Value::Num(30.0)
+```
+
+<!-- => 30 -->
+
+`has_key` tests presence of a key (a stored `Null` counts as absent):
+
+<!-- example: minor/haskey#hit -->
+```rust
+has_key(&Value::map_of([("a".into(), Value::Num(1.0))]), &Value::str("a")); // true
+```
+
+<!-- => true -->
+
+`items` returns the `[key, value]` pairs of a map (or list) as a `Value::List`:
+
+<!-- example: minor/items#map -->
+```rust
+items(&Value::map_of([("a".into(), Value::Num(1.0)), ("b".into(), Value::Num(2.0))]));
+// Value::List([["a", 1], ["b", 2]])
+```
+
+<!-- => [["a", 1], ["b", 2]] -->
+
+`str_key` coerces a key to its canonical string form (numbers truncate):
+
+<!-- example: minor/strkey#num -->
+```rust
+str_key(Value::Num(2.2)); // "2"
+```
+
+<!-- => "2" -->
 
 `keys_of` returns sorted string keys of a map:
 
@@ -210,6 +320,168 @@ filter(
 // Value::List([4, 5])
 ```
 <!-- => [4, 5] -->
+
+`set_path` writes a value at a dot path, returning the (mutated) store;
+`pathify` renders a path list back to a dot string:
+
+<!-- example: minor/setpath#nested -->
+```rust
+set_path(
+    &Value::map_of([("a".into(), Value::Num(1.0)), ("b".into(), Value::Num(2.0))]),
+    &Value::str("b"),
+    Value::Num(22.0),
+    None,
+);
+// Value::Map({ a: 1, b: 22 })
+```
+
+<!-- => {"a": 1, "b": 22} -->
+
+<!-- example: minor/pathify#parts -->
+```rust
+pathify(&Value::list(vec![Value::str("a"), Value::str("b"), Value::str("c")]), None, None);
+// "a.b.c"
+```
+
+<!-- => "a.b.c" -->
+
+`merge` folds a list of nodes — last input wins, maps deep-merge, lists merge
+by index; `clone` makes a deep copy; `flatten` removes one level of nesting:
+
+<!-- example: merge#basic -->
+```rust
+merge(
+    &Value::list(vec![
+        Value::map_of([
+            ("a".into(), Value::Num(1.0)),
+            ("b".into(), Value::Num(2.0)),
+            ("k".into(), Value::list(vec![Value::Num(10.0), Value::Num(20.0)])),
+            ("x".into(), Value::map_of([
+                ("y".into(), Value::Num(5.0)), ("z".into(), Value::Num(6.0)),
+            ])),
+        ]),
+        Value::map_of([
+            ("b".into(), Value::Num(3.0)),
+            ("d".into(), Value::Num(4.0)),
+            ("e".into(), Value::Num(8.0)),
+            ("k".into(), Value::list(vec![Value::Num(11.0)])),
+            ("x".into(), Value::map_of([("y".into(), Value::Num(7.0))])),
+        ]),
+    ]),
+    None,
+);
+// Value::Map({ a: 1, b: 3, d: 4, e: 8, k: [11, 20], x: { y: 7, z: 6 } })
+```
+
+<!-- => {"a": 1, "b": 3, "d": 4, "e": 8, "k": [11, 20], "x": {"y": 7, "z": 6}} -->
+
+<!-- example: minor/clone#deep -->
+```rust
+clone(&Value::map_of([(
+    "a".into(),
+    Value::map_of([("b".into(), Value::list(vec![Value::Num(1.0), Value::Num(2.0)]))]),
+)]));
+// Value::Map({ a: { b: [1, 2] } })  (a deep copy)
+```
+
+<!-- => {"a": {"b": [1, 2]}} -->
+
+<!-- example: minor/flatten#nested -->
+```rust
+flatten(
+    &Value::list(vec![
+        Value::Num(1.0),
+        Value::list(vec![
+            Value::Num(2.0),
+            Value::list(vec![Value::Num(3.0)]),
+        ]),
+    ]),
+    None,
+);
+// Value::List([1, 2, [3]])  (one level by default)
+```
+
+<!-- => [1, 2, [3]] -->
+
+`esc_re` / `esc_url` escape for regex / URL contexts; `join` concatenates with
+a separator:
+
+<!-- example: minor/escre#dots -->
+```rust
+esc_re(&Value::str("a.b+c")); // "a\\.b\\+c"
+```
+
+<!-- => "a\\.b\\+c" -->
+
+<!-- example: minor/escurl#space -->
+```rust
+esc_url(&Value::str("hello world?")); // "hello%20world%3F"
+```
+
+<!-- => "hello%20world%3F" -->
+
+<!-- example: minor/join#sep -->
+```rust
+join(
+    &Value::list(vec![Value::str("a"), Value::str("b"), Value::str("c")]),
+    Some("/"),
+    false,
+); // "a/b/c"
+```
+
+<!-- => "a/b/c" -->
+
+`inject` replaces backtick refs in strings with store values; `validate`
+checks data against a by-example shape (`Err` on mismatch); `select` finds
+children matching a query, each tagged with its `$KEY`:
+
+<!-- example: inject#basic -->
+```rust
+inject(
+    Value::map_of([("x".into(), Value::str("`a`")), ("y".into(), Value::Num(2.0))]),
+    &Value::map_of([("a".into(), Value::Num(1.0))]),
+    None,
+);
+// Value::Map({ x: 1, y: 2 })
+```
+
+<!-- => {"x": 1, "y": 2} -->
+
+<!-- example: validate#shape -->
+```rust
+validate(
+    &Value::map_of([
+        ("name".into(), Value::str("Ada")),
+        ("age".into(), Value::Num(36.0)),
+    ]),
+    &Value::map_of([
+        ("name".into(), Value::str("`$STRING`")),
+        ("age".into(), Value::str("`$INTEGER`")),
+    ]),
+    None,
+).unwrap();
+// Value::Map({ name: "Ada", age: 36 })  (Err on mismatch)
+```
+
+<!-- => {"name": "Ada", "age": 36} -->
+
+<!-- example: select#query -->
+```rust
+select(
+    &Value::map_of([
+        ("a".into(), Value::map_of([
+            ("name".into(), Value::str("Alice")), ("age".into(), Value::Num(30.0)),
+        ])),
+        ("b".into(), Value::map_of([
+            ("name".into(), Value::str("Bob")), ("age".into(), Value::Num(25.0)),
+        ])),
+    ]),
+    &Value::map_of([("age".into(), Value::Num(30.0))]),
+);
+// Value::List([{ name: "Alice", age: 30, $KEY: "a" }])
+```
+
+<!-- => [{"name": "Alice", "age": 30, "$KEY": "a"}] -->
 
 
 ## Regex

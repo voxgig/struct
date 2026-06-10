@@ -34,7 +34,7 @@ real, distinct value.
 ### Group A — "is there a value?" — null is absent
 
 These functions cannot reliably distinguish null from absent on input
-across all 13 host languages. They treat the two as identical:
+across all 15 host languages. They treat the two as identical:
 
 | Function | null behaviour |
 |---|---|
