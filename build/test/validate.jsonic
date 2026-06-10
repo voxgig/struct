@@ -2,6 +2,7 @@
 
 basic: {
   set: [
+    { id:'validate#shape', doc:true, in: { data:{name:'Ada',age:36}, spec:{name:'`$STRING`',age:'`$INTEGER`'} }, out:{name:'Ada',age:36} }
     { in: { data: 1000, spec: 1000 }, out: 1000 }
     { in: { data: 1002, spec: 1001 }, out: 1002 }
 

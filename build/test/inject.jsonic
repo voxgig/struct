@@ -1,5 +1,6 @@
 
 basic: {
+  id:'inject#basic', doc:true,
   in: { val: {x: '`a`', y: 2}, store: {a:1} }
   out: {x:1,y:2}
 }

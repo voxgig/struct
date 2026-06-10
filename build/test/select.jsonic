@@ -2,7 +2,7 @@
 basic: {
   set: [
     # Basic equality matching
-    { in: { query: {age:30}, obj: {a:{name:'Alice',age:30}, b:{name:'Bob',age:25}} }, 
+    { id:'select#query', doc:true, in: { query: {age:30}, obj: {a:{name:'Alice',age:30}, b:{name:'Bob',age:25}} },
       out: [{name:'Alice',age:30,'$KEY':'a'}] }
 
       { in: { query: {name:'Bob'}, obj: {a:{name:'Alice',age:30}, b:{name:'Bob',age:25}} }, 

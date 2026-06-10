@@ -47,6 +47,14 @@
       "ismap": {
         "set": [
           {
+            "id": "minor/ismap#map",
+            "doc": true,
+            "in": {
+              "a": 1
+            },
+            "out": true
+          },
+          {
             "in": {
               "a": 1
             },
@@ -82,6 +90,15 @@
       "islist": {
         "set": [
           {
+            "id": "minor/islist#list",
+            "doc": true,
+            "in": [
+              1,
+              2
+            ],
+            "out": true
+          },
+          {
             "in": {
               "a": 1
             },
@@ -116,6 +133,12 @@
       },
       "iskey": {
         "set": [
+          {
+            "id": "minor/iskey#str",
+            "doc": true,
+            "in": "name",
+            "out": true
+          },
           {
             "in": 1,
             "out": true
@@ -177,6 +200,12 @@
       },
       "strkey": {
         "set": [
+          {
+            "id": "minor/strkey#num",
+            "doc": true,
+            "in": 2.2,
+            "out": "2"
+          },
           {
             "in": "a",
             "out": "a"
@@ -242,6 +271,12 @@
       },
       "isempty": {
         "set": [
+          {
+            "id": "minor/isempty#empty",
+            "doc": true,
+            "in": [],
+            "out": true
+          },
           {
             "in": "",
             "out": true
@@ -863,6 +898,19 @@
       "getelem": {
         "set": [
           {
+            "id": "minor/getelem#neg",
+            "doc": true,
+            "in": {
+              "val": [
+                10,
+                20,
+                30
+              ],
+              "key": -1
+            },
+            "out": 30
+          },
+          {
             "in": {
               "val": [
                 101,
@@ -1094,6 +1142,26 @@
       "clone": {
         "set": [
           {
+            "id": "minor/clone#deep",
+            "doc": true,
+            "in": {
+              "a": {
+                "b": [
+                  1,
+                  2
+                ]
+              }
+            },
+            "out": {
+              "a": {
+                "b": [
+                  1,
+                  2
+                ]
+              }
+            }
+          },
+          {
             "in": {
               "a": 1
             },
@@ -1214,6 +1282,24 @@
       },
       "items": {
         "set": [
+          {
+            "id": "minor/items#map",
+            "doc": true,
+            "in": {
+              "a": 1,
+              "b": 2
+            },
+            "out": [
+              [
+                "a",
+                1
+              ],
+              [
+                "b",
+                2
+              ]
+            ]
+          },
           {
             "in": {
               "a": 11
@@ -1606,6 +1692,17 @@
       "haskey": {
         "set": [
           {
+            "id": "minor/haskey#hit",
+            "doc": true,
+            "in": {
+              "src": {
+                "a": 1
+              },
+              "key": "a"
+            },
+            "out": true
+          },
+          {
             "in": {
               "src": {
                 "a": 1
@@ -1774,6 +1871,21 @@
       },
       "setprop": {
         "set": [
+          {
+            "id": "minor/setprop#set",
+            "doc": true,
+            "in": {
+              "parent": {
+                "a": 1
+              },
+              "key": "b",
+              "val": 2
+            },
+            "out": {
+              "a": 1,
+              "b": 2
+            }
+          },
           {
             "in": {
               "parent": {},
@@ -2059,6 +2171,20 @@
       },
       "delprop": {
         "set": [
+          {
+            "id": "minor/delprop#del",
+            "doc": true,
+            "in": {
+              "parent": {
+                "a": 1,
+                "b": 2
+              },
+              "key": "a"
+            },
+            "out": {
+              "b": 2
+            }
+          },
           {
             "in": {
               "parent": {},
@@ -2694,6 +2820,18 @@
       "pathify": {
         "set": [
           {
+            "id": "minor/pathify#parts",
+            "doc": true,
+            "in": {
+              "path": [
+                "a",
+                "b",
+                "c"
+              ]
+            },
+            "out": "a.b.c"
+          },
+          {
             "in": {
               "path": [
                 "a"
@@ -3050,6 +3188,12 @@
       "escre": {
         "set": [
           {
+            "id": "minor/escre#dots",
+            "doc": true,
+            "in": "a.b+c",
+            "out": "a\\.b\\+c"
+          },
+          {
             "in": "a0_",
             "out": "a0_"
           },
@@ -3062,6 +3206,12 @@
       "escurl": {
         "set": [
           {
+            "id": "minor/escurl#space",
+            "doc": true,
+            "in": "hello world?",
+            "out": "hello%20world%3F"
+          },
+          {
             "in": "a-B_0.",
             "out": "a-B_0."
           },
@@ -3073,6 +3223,19 @@
       },
       "join": {
         "set": [
+          {
+            "id": "minor/join#sep",
+            "doc": true,
+            "in": {
+              "val": [
+                "a",
+                "b",
+                "c"
+              ],
+              "sep": "/"
+            },
+            "out": "a/b/c"
+          },
           {
             "out": "a",
             "in": {
@@ -3209,6 +3372,28 @@
       "flatten": {
         "set": [
           {
+            "id": "minor/flatten#nested",
+            "doc": true,
+            "in": {
+              "val": [
+                1,
+                [
+                  2,
+                  [
+                    3
+                  ]
+                ]
+              ]
+            },
+            "out": [
+              1,
+              2,
+              [
+                3
+              ]
+            ]
+          },
+          {
             "in": {
               "val": [
                 1,
@@ -3320,6 +3505,12 @@
       "typename": {
         "set": [
           {
+            "id": "minor/typename#map",
+            "doc": true,
+            "in": 8192,
+            "out": "map"
+          },
+          {
             "in": 8192,
             "out": "map"
           },
@@ -3347,6 +3538,12 @@
       },
       "typify": {
         "set": [
+          {
+            "id": "minor/typify#int",
+            "doc": true,
+            "in": 1,
+            "out": 201326720
+          },
           {
             "in": {
               "a": 1
@@ -4855,6 +5052,8 @@
             }
           },
           {
+            "id": "minor/setpath#nested",
+            "doc": true,
             "in": {
               "store": {
                 "a": 1,
@@ -6129,6 +6328,8 @@
     },
     "inject": {
       "basic": {
+        "id": "inject#basic",
+        "doc": true,
         "in": {
           "val": {
             "x": "`a`",
@@ -6635,6 +6836,8 @@
     },
     "merge": {
       "basic": {
+        "id": "merge#basic",
+        "doc": true,
         "in": [
           {
             "a": 1,
@@ -13681,6 +13884,24 @@
       "basic": {
         "set": [
           {
+            "id": "validate#shape",
+            "doc": true,
+            "in": {
+              "data": {
+                "name": "Ada",
+                "age": 36
+              },
+              "spec": {
+                "name": "`$STRING`",
+                "age": "`$INTEGER`"
+              }
+            },
+            "out": {
+              "name": "Ada",
+              "age": 36
+            }
+          },
+          {
             "in": {
               "data": 1000,
               "spec": 1000
@@ -15789,6 +16010,8 @@
       "basic": {
         "set": [
           {
+            "id": "select#query",
+            "doc": true,
             "in": {
               "query": {
                 "age": 30

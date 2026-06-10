@@ -2,6 +2,7 @@
 
 
 basic: {
+  id:'merge#basic', doc:true,
   in: [
     { a:1, b:2, k:[10,20], x:{y:5,z:6} }
     { b:3, d:4, e:8, k:[11], x:{y:7} }

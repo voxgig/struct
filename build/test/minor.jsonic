@@ -15,6 +15,7 @@ isnode: {
 
 ismap: {
   set: [
+    { id:'minor/ismap#map', doc:true, in:{a:1}, out:true }
     { in: {a:1}, out: true }
     { in: [1], out: false }
     { in: 1, out: false }
@@ -28,6 +29,7 @@ ismap: {
 
 islist: {
   set: [
+    { id:'minor/islist#list', doc:true, in:[1,2], out:true }
     { in: {a:1}, out: false }
     { in: [1], out: true }
     { in: 1, out: false }
@@ -41,6 +43,7 @@ islist: {
 
 iskey: {
   set: [
+    { id:'minor/iskey#str', doc:true, in:'name', out:true }
     { in: 1, out: true }
     { in: 2.2, out: true }
     { in: 'a', out: true }
@@ -60,6 +63,7 @@ iskey: {
 
 strkey: {
   set: [
+    { id:'minor/strkey#num', doc:true, in:2.2, out:'2' }
     { in: 'a', out: 'a' }
     { in: 1, out: '1' }
     { in: 2.2, out: '2' }
@@ -80,6 +84,7 @@ strkey: {
 
 isempty: {
   set: [
+    { id:'minor/isempty#empty', doc:true, in:[], out:true }
     { in: '', out: true }
     { in: [], out: true }
     { in: {}, out: true }
@@ -177,6 +182,7 @@ getprop: {
 
 getelem: {
   set: [
+    { id:'minor/getelem#neg', doc:true, in:{val:[10,20,30], key:-1}, out:30 }
     { in: { val: [101,102], key: 0 }, out: 101}
     { in: { val: [101,102], key: 1 }, out: 102}
     { in: { val: [101,102], key: -1 }, out: 102}
@@ -213,6 +219,7 @@ getelem: {
 
 clone: {
   set: [
+    { id:'minor/clone#deep', doc:true, in:{a:{b:[1,2]}}, out:{a:{b:[1,2]}} }
     { in: {a:1}, out: {a:1} }
     { in: [11], out: [11] }
     { in: 2, out: 2 }
@@ -232,6 +239,7 @@ clone: {
 
 items: {
   set: [
+    { id:'minor/items#map', doc:true, in:{a:1,b:2}, out:[['a',1],['b',2]] }
     { in: {a:11}, out: [['a',11]] }
     { in: {a:1,b:2}, out: [['a',1],['b',2]] }
 
@@ -276,6 +284,7 @@ keysof: {
 
 haskey: {
   set: [
+    { id:'minor/haskey#hit', doc:true, in:{ src:{a:1}, key:a }, out:true }
     { in: { src: {a:1}, key:a}, out: true }
     { in: { src: {a:2}, key:b}, out: false }
     { in: { src: {a:11,c:12}, key:a}, out: true }
@@ -302,6 +311,7 @@ haskey: {
 
 setprop: {
   set: [
+    { id:'minor/setprop#set', doc:true, in:{ parent:{a:1}, key:b, val:2 }, out:{a:1,b:2} }
     { in: { parent: {}, key: x, val: 1,  }, out: {x:1} }
     { in: { key: x, val: 1 } }
     { in: { parent: {}, val: 1 }, out: {} }
@@ -337,6 +347,7 @@ setprop: {
 
 delprop: {
   set: [
+    { id:'minor/delprop#del', doc:true, in:{ parent:{a:1,b:2}, key:a }, out:{b:2} }
     { in: { parent: {}, key: x }, out: {} }
     { in: { key: x } }
     { in: { parent: {} }, out: {} }
@@ -442,6 +453,7 @@ jsonify: {
 
 pathify: {
   set: [
+    { id:'minor/pathify#parts', doc:true, in:{ path:[a,b,c] }, out:'a.b.c' }
     { in: { path: [a] }, out:'a' }
     { in: { path: [a,b] }, out:'a.b' }
     { in: { path: [a,b,c] }, out:'a.b.c' }
@@ -488,6 +500,7 @@ pathify: {
 
 escre: {
   set: [
+    { id:'minor/escre#dots', doc:true, in:'a.b+c', out:'a\\.b\\+c' }
     { in: 'a0_', out: 'a0_' }
     { in: '.*+?^${}()|[]\\', out: '\\.\\*\\+\\?\\^\\$\\{\\}\\(\\)\\|\\[\\]\\\\' }
   ]
@@ -496,6 +509,7 @@ escre: {
 
 escurl: {
   set: [
+    { id:'minor/escurl#space', doc:true, in:'hello world?', out:'hello%20world%3F' }
     { in: 'a-B_0.', out: 'a-B_0.' }
     { in: ' ?:', out: '%20%3F%3A' }
   ]
@@ -504,6 +518,7 @@ escurl: {
 
 join: {
   set: [
+    { id:'minor/join#sep', doc:true, in:{ val:['a','b','c'], sep:'/' }, out:'a/b/c' }
     { out: 'a' in: { val: ['a'] } }
     { out: 'cQdQe' in: { val: [c,d,e] sep:'Q'} }
     { out: 'C|D|E' in: { val: [C,D,E] sep:'|'} }
@@ -525,6 +540,7 @@ join: {
 
 flatten: {
   set: [
+    { id:'minor/flatten#nested', doc:true, in:{ val:[1,[2,[3]]] }, out:[1,2,[3]] }
     { in: {val:[1,2,3]}, out: [1,2,3] }
     { in: {val:[1,[2],3]}, out: [1,2,3] }
     { in: {val:[1,[[2],3]]}, out: [1,[2],3] }
@@ -543,6 +559,7 @@ filter: {
 
 typename: {
   set: [
+    { id:'minor/typename#map', doc:true, in:8192, out:'map' }
     { in: 8192, out: 'map' }
     { in: 8192+64, out: 'map' }
     { in: 16384, out: 'list' }
@@ -555,6 +572,7 @@ typename: {
 
 typify: {
   set: [
+    { id:'minor/typify#int', doc:true, in:1, out:201326720 }
     { in: {a:1}, out: 8192+64 }
     { in: [1], out: 16384+64 }
     { in: 1, out: 201326720 }
@@ -799,7 +817,7 @@ setpath: {
     { in: { store:{x:1} val:7 },
       match:args:0:store:x:1 }
 
-    { in: { store:{a:1,b:2} path:'b', val:22 }, out: {a:1,b:22},
+    { id:'minor/setpath#nested', doc:true, in: { store:{a:1,b:2} path:'b', val:22 }, out: {a:1,b:22},
       match:args:0:store:{a:1,b:22} }
 
     { in: { store:{a:{b:{c:1}}} path:'a.b.c', val:99 }, out: {c:99},
