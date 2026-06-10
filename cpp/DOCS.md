@@ -76,6 +76,14 @@ int main() {
 Note the `_v` suffix on `merge_v` / `getpath_v` — see
 [Casing](#casing-and-the-_v--_str-renames).
 
+`getpath_v` takes the store first, then a dot-path, and reads the deep value:
+
+<!-- example: getpath/basic#deep -->
+```cpp
+getpath_v(parse_json(R"({"a":{"b":{"c":42}}})"), Value("a.b.c"));   // 42
+```
+<!-- => 42 -->
+
 ### Build up the rest of the API
 
 Each call has the same meaning in every port; only the spelling changes.
@@ -96,6 +104,18 @@ validate(parse_json(R"({"name":"Ada","age":36})"),
 select(parse_json(R"({"a":{"age":30},"b":{"age":25}})"), parse_json(R"({"age":30})"));
 // [ {"age":30,"$KEY":"a"} ]
 ```
+
+A transform command like `$EACH` appears in **value** position — the first
+element of a list `["`$EACH`", path, subspec]` — mapping the sub-spec over
+every entry at `path`:
+
+<!-- example: transform/each#basic -->
+```cpp
+transform(parse_json(R"({"v":1,"a":[{"q":13},{"q":23}]})"),
+          parse_json(R"({"x":{"y":["`$EACH`","a",{"q":"`$COPY`","r":"`.q`","p":"`...v`"}]}})"));
+// {"x":{"y":[{"q":13,"r":13,"p":1},{"q":23,"r":23,"p":1}]}}
+```
+<!-- => {"x": {"y": [{"q": 13, "r": 13, "p": 1}, {"q": 23, "r": 23, "p": 1}]}} -->
 
 ---
 
@@ -123,11 +143,50 @@ Value l = jt({Value(1), Value(2), Value(3)});
 ```
 
 ### Serialise deterministically
+
+`jsonify` pretty-prints by default (2-space indent, insertion-ordered keys);
+pass `0` for the compact form. `stringify` is the quote-light human form, for
+logs.
+
+<!-- example: minor/jsonify#map -->
 ```cpp
-jsonify(value);            // compact, insertion-ordered keys (indent 0)
-jsonify(value, 2);         // pretty, 2-space indent
-stringify(value, 80);      // truncated human form, for logs
+jsonify(parse_json(R"({"a":1})"));
+// {
+//   "a": 1
+// }
 ```
+<!-- => "{\n  \"a\": 1\n}" -->
+
+<!-- example: minor/jsonify#brace -->
+```cpp
+jsonify(parse_json(R"({"a":1,"b":[2,3]})"));
+// {
+//   "a": 1,
+//   "b": [
+//     2,
+//     3
+//   ]
+// }
+```
+<!-- => "{\n  \"a\": 1,\n  \"b\": [\n    2,\n    3\n  ]\n}" -->
+
+<!-- example: minor/jsonify#compact -->
+```cpp
+jsonify(parse_json(R"({"a":1,"b":2})"), 0);   // {"a":1,"b":2}
+```
+<!-- => "{\"a\":1,\"b\":2}" -->
+
+<!-- example: minor/stringify#brace -->
+```cpp
+stringify(parse_json(R"({"a":1,"b":[2,3]})"));   // {a:1,b:[2,3]}
+```
+<!-- => "{a:1,b:[2,3]}" -->
+
+<!-- example: minor/stringify#max -->
+```cpp
+stringify(Value("verylongstring"), 5);   // ve...
+```
+<!-- => "ve..." -->
 
 `parse_json` / `dump_json` in [`value_io.hpp`](./src/value_io.hpp) are the
 text bridge; `jsonify` is the canonical printer they share.
@@ -136,6 +195,16 @@ text bridge; `jsonify` is the canonical printer they share.
 Register an `Injector` (`std::function`) and reference it by name in the
 spec. The function may return the `SKIP()` / `DELETE_V()` sentinels to omit
 or remove the current key.
+
+A transform command must sit in **value** position. Putting `$APPLY`
+directly under a map (in **key** position) is an error:
+
+<!-- example: transform/apply#badkey -->
+```cpp
+transform(parse_json("{}"), parse_json(R"({"x":"`$APPLY`"})"));
+// throws: $APPLY: invalid placement in parent map, expected: list.
+```
+<!-- throws: invalid placement in parent map -->
 
 For the full recipe set (merge configs, rename fields, `$EACH`, `$MERGE`,
 `$FORMAT`, `$ONE`, `$EXACT`, …) see the language-neutral

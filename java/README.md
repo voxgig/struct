@@ -92,6 +92,117 @@ public interface WalkApply {
 public static Object walk(Object val, WalkApply before, WalkApply after, int maxdepth)
 ```
 
+### Minor utility examples
+
+Each call uses the mutable `jm` / `jt` builders so output ordering is
+deterministic. The result of every example is also a tested corpus entry.
+
+Predicates — `isnode` is true for maps and lists:
+
+<!-- example: minor/isnode#map -->
+```java
+Struct.isnode(Struct.jm("a", 1));        // true
+```
+<!-- => true -->
+
+Size of a node is its element count:
+
+<!-- example: minor/size#three -->
+```java
+Struct.size(Struct.jt(1, 2, 3));         // 3
+```
+<!-- => 3 -->
+
+`slice` keeps the first *N*; a negative `start` drops the last *|start|*
+items, and `end` is exclusive:
+
+<!-- example: minor/slice#mid -->
+```java
+Struct.slice(Struct.jt(1, 2, 3, 4, 5), 1, 4);   // [2, 3, 4]
+```
+<!-- => [2, 3, 4] -->
+
+<!-- example: minor/slice#strhead -->
+```java
+Struct.slice("abcdef", -3, null);        // "abc"  (drops the last 3)
+```
+<!-- => "abc" -->
+
+`pad` extends to the right (a negative width pads on the left):
+
+<!-- example: minor/pad#right -->
+```java
+Struct.pad("a", 3, null);                // "a  "
+```
+<!-- => "a  " -->
+
+`getprop` reads a key from a map or list:
+
+<!-- example: minor/getprop#hit -->
+```java
+Struct.getprop(Struct.jm("x", 1), "x");  // 1
+```
+<!-- => 1 -->
+
+`keysof` returns map keys sorted:
+
+<!-- example: minor/keysof#sorted -->
+```java
+Struct.keysof(Struct.jm("b", 4, "a", 5));   // ["a", "b"]  (sorted)
+```
+<!-- => ["a", "b"] -->
+
+`filter` passes each `[key, value]` pair to the check and returns the
+matching **values** (not the pairs):
+
+<!-- example: minor/filter#gt3 -->
+```java
+Struct.filter(Struct.jt(1, 2, 3, 4, 5),
+    item -> ((Number) item.get(1)).intValue() > 3);   // [4, 5]
+```
+<!-- => [4, 5] -->
+
+`jsonify` pretty-prints by default (indent 2); pass `{ "indent": 0 }` for
+the compact form:
+
+<!-- example: minor/jsonify#map -->
+```java
+Struct.jsonify(Struct.jm("a", 1));
+// {
+//   "a": 1
+// }
+```
+<!-- => "{\n  \"a\": 1\n}" -->
+
+<!-- example: minor/jsonify#compact -->
+```java
+Struct.jsonify(Struct.jm("a", 1, "b", 2), Map.of("indent", 0));  // {"a":1,"b":2}
+```
+<!-- => "{\"a\":1,\"b\":2}" -->
+
+`stringify` is the compact, quote-light form — keys are sorted and object
+braces are kept; the second argument caps the length (the `...` counts):
+
+<!-- example: minor/stringify#brace -->
+```java
+Struct.stringify(Struct.jm("a", 1, "b", Struct.jt(2, 3)));   // {a:1,b:[2,3]}
+```
+<!-- => "{a:1,b:[2,3]}" -->
+
+<!-- example: minor/stringify#max -->
+```java
+Struct.stringify("verylongstring", 5);   // ve...
+```
+<!-- => "ve..." -->
+
+`getpath` reads a deep value by dot-path (arg order: `getpath(store, path)`):
+
+<!-- example: getpath/basic#deep -->
+```java
+Struct.getpath(Struct.jm("a", Struct.jm("b", Struct.jm("c", 42))), "a.b.c");   // 42
+```
+<!-- => 42 -->
+
 
 ## Constants
 

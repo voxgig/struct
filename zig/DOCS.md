@@ -153,6 +153,28 @@ const log     = try S.stringify(allocator, value, 80);       // truncated human 
 `JSON.stringify`); `stringify` emits sorted keys for a stable human form.
 Both are pinned by the `minor.jsonify` corpus set.
 
+For `{ a: 1, b: [2, 3] }`, `jsonify` with indent 2 pretty-prints across
+lines, while `stringify` gives the quote-light one-liner:
+
+<!-- example: minor/jsonify#brace -->
+```zig
+var v = try S.JsonValue.makeMap(allocator);
+try v.object.put("a", .{ .integer = 1 });
+var b = try S.JsonValue.makeList(allocator);
+try b.array.append(.{ .integer = 2 });
+try b.array.append(.{ .integer = 3 });
+try v.object.put("b", b);
+const pretty = try S.jsonify(allocator, v, 2, 0);
+// pretty == "{\n  \"a\": 1,\n  \"b\": [\n    2,\n    3\n  ]\n}"
+```
+<!-- => "{\n  \"a\": 1,\n  \"b\": [\n    2,\n    3\n  ]\n}" -->
+
+<!-- example: minor/stringify#brace -->
+```zig
+const human = try S.stringify(allocator, v, null);   // {a:1,b:[2,3]}
+```
+<!-- => "{a:1,b:[2,3]}" -->
+
 For more task recipes (`$EACH`, `$MERGE`, `$FORMAT`, `$ONE`, `$EXACT`, …)
 see the language-neutral [How-to guides](../DOCS.md#2-how-to-guides) — the
 spec syntax is identical; only the host literals and the leading

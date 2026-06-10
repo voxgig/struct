@@ -124,6 +124,126 @@ voxgig_value*    voxgig_delprop(voxgig_value* parent, voxgig_value* key);
 voxgig_value*    voxgig_setprop(voxgig_value* parent, voxgig_value* key, voxgig_value* val);
 ```
 
+Worked examples. Each builds its inputs as `voxgig_value*`, calls the
+function, and shows the result in C's native notation; optional TS
+arguments are passed as `NULL`.
+
+`voxgig_isnode` is true for maps and lists, false for scalars:
+
+<!-- example: minor/isnode#map -->
+```c
+voxgig_value* node = voxgig_parse_json("{\"a\":1}", 0);
+bool yes = voxgig_isnode(node);                 /* true */
+```
+<!-- => true -->
+
+`voxgig_size` counts list elements, map entries, or string bytes:
+
+<!-- example: minor/size#three -->
+```c
+voxgig_value* list = voxgig_parse_json("[1,2,3]", 0);
+int64_t n = voxgig_size(list);                  /* 3 */
+```
+<!-- => 3 -->
+
+`voxgig_slice` keeps the first *N*; a list slice takes a `start`/`end`
+pair of boxed integers, `end` exclusive:
+
+<!-- example: minor/slice#mid -->
+```c
+voxgig_value* list = voxgig_parse_json("[1,2,3,4,5]", 0);
+voxgig_value* mid  = voxgig_slice(list, voxgig_new_int(1), voxgig_new_int(4), false);
+/* [2, 3, 4] */
+```
+<!-- => [2, 3, 4] -->
+
+A negative `start` with no `end` drops the last *|start|* items, so on a
+string it returns the head:
+
+<!-- example: minor/slice#strhead -->
+```c
+voxgig_value* str  = voxgig_new_string("abcdef");
+voxgig_value* head = voxgig_slice(str, voxgig_new_int(-3), NULL, false);
+/* "abc"  (drops the last 3) */
+```
+<!-- => "abc" -->
+
+`voxgig_pad` right-pads to the given width (negative width left-pads):
+
+<!-- example: minor/pad#right -->
+```c
+voxgig_value* a = voxgig_new_string("a");
+char* padded = voxgig_pad(a, voxgig_new_int(3), NULL);   /* "a  " */
+```
+<!-- => "a  " -->
+
+`voxgig_getprop` reads a key from a map or list, returning an owned
+reference:
+
+<!-- example: minor/getprop#hit -->
+```c
+voxgig_value* m = voxgig_parse_json("{\"x\":1}", 0);
+voxgig_value* x = voxgig_getprop(m, voxgig_new_string("x"), NULL);   /* 1 */
+```
+<!-- => 1 -->
+
+`voxgig_keysof` returns the keys of a map in sorted order:
+
+<!-- example: minor/keysof#sorted -->
+```c
+voxgig_value* m = voxgig_parse_json("{\"b\":4,\"a\":5}", 0);
+voxgig_strvec keys = voxgig_keysof(m);          /* ["a", "b"]  (sorted) */
+```
+<!-- => ["a", "b"] -->
+
+`voxgig_filter` passes each `[key, value]` pair to the check and returns
+the matching **values** (not the pairs):
+
+<!-- example: minor/filter#gt3 -->
+```c
+/* check returns true when element 1 (the value) is > 3 */
+voxgig_value* list = voxgig_parse_json("[1,2,3,4,5]", 0);
+voxgig_value* kept = voxgig_filter(list, gt3, NULL);   /* [4, 5] */
+```
+<!-- => [4, 5] -->
+
+`voxgig_jsonify` pretty-prints by default (indent 2); pass a `flags` map
+with `{"indent":0}` for the compact form:
+
+<!-- example: minor/jsonify#map -->
+```c
+voxgig_value* m = voxgig_parse_json("{\"a\":1}", 0);
+char* pretty = voxgig_jsonify(m, NULL);
+/* "{\n  \"a\": 1\n}" */
+```
+<!-- => "{\n  \"a\": 1\n}" -->
+
+<!-- example: minor/jsonify#compact -->
+```c
+voxgig_value* m     = voxgig_parse_json("{\"a\":1,\"b\":2}", 0);
+voxgig_value* flags = voxgig_parse_json("{\"indent\":0}", 0);
+char* compact = voxgig_jsonify(m, flags);       /* "{\"a\":1,\"b\":2}" */
+```
+<!-- => "{\"a\":1,\"b\":2}" -->
+
+`voxgig_stringify` is the compact, quote-light form — keys are sorted and
+object braces are kept; the second argument caps the length (the `...`
+counts, `-1` means no cap):
+
+<!-- example: minor/stringify#brace -->
+```c
+voxgig_value* m = voxgig_parse_json("{\"a\":1,\"b\":[2,3]}", 0);
+char* s = voxgig_stringify(m, -1);              /* "{a:1,b:[2,3]}" */
+```
+<!-- => "{a:1,b:[2,3]}" -->
+
+<!-- example: minor/stringify#max -->
+```c
+voxgig_value* str = voxgig_new_string("verylongstring");
+char* s = voxgig_stringify(str, 5);             /* "ve..." */
+```
+<!-- => "ve..." -->
+
 ### Major utilities (8)
 
 ```c
@@ -138,6 +258,42 @@ voxgig_value*    voxgig_transform(voxgig_value* data, voxgig_value* spec, voxgig
 voxgig_value*    voxgig_validate(voxgig_value* data, voxgig_value* spec, voxgig_injection* injdef);
 voxgig_value*    voxgig_select(voxgig_value* children, voxgig_value* query);
 ```
+
+`voxgig_getpath` reads a deep value — argument order is `(store, path)`,
+the path a dot-string or string-list:
+
+<!-- example: getpath/basic#deep -->
+```c
+voxgig_value* store = voxgig_parse_json("{\"a\":{\"b\":{\"c\":42}}}", 0);
+voxgig_value* v = voxgig_getpath(store, voxgig_new_string("a.b.c"), NULL);   /* 42 */
+```
+<!-- => 42 -->
+
+`voxgig_transform` builds a result by example. A command like `$EACH`
+appears in **value** position — as the first element of a list
+`["`$EACH`", path, subspec]` — mapping the sub-spec over every entry at
+`path`:
+
+<!-- example: transform/each#basic -->
+```c
+voxgig_value* data = voxgig_parse_json("{\"v\":1,\"a\":[{\"q\":13},{\"q\":23}]}", 0);
+voxgig_value* spec = voxgig_parse_json(
+    "{\"x\":{\"y\":[\"`$EACH`\",\"a\",{\"q\":\"`$COPY`\",\"r\":\"`.q`\",\"p\":\"`...v`\"}]}}", 0);
+voxgig_value* out = voxgig_transform(data, spec, NULL);
+/* { x: { y: [ { q: 13, r: 13, p: 1 }, { q: 23, r: 23, p: 1 } ] } } */
+```
+<!-- => {"x": {"y": [{"q": 13, "r": 13, "p": 1}, {"q": 23, "r": 23, "p": 1}]}} -->
+
+Putting a command in **key** position (or, for `$APPLY`, directly under a
+map) is an error — commands must be list values:
+
+<!-- example: transform/apply#badkey -->
+```c
+voxgig_value* spec = voxgig_parse_json("{\"x\":\"`$APPLY`\"}", 0);
+voxgig_value* out  = voxgig_transform(voxgig_new_map(), spec, NULL);
+/* error: $APPLY: invalid placement in parent map, expected: list. */
+```
+<!-- throws: invalid placement in parent map -->
 
 ### Builder helpers (2)
 

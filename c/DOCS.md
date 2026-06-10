@@ -158,12 +158,42 @@ fail, supply an `errs` collector via the `voxgig_injection*` argument (the
 behaviour from [`../DOCS.md`](../DOCS.md#2-how-to-guides).
 
 ### Serialise
+`voxgig_jsonify` pretty-prints by default (indent 2); pass a `flags` map
+with `{"indent":0}` for the compact form. `voxgig_stringify` is the
+quote-light human form (keys sorted), for logs.
+
 ```c
-char* j  = voxgig_jsonify(value, NULL);              /* compact, insertion-ordered keys */
-char* jp = voxgig_jsonify(value, voxgig_new_int(2));     /* pretty, 2-space indent */
-char* s  = voxgig_stringify(value, 40);              /* truncated human form, for logs */
-free(j); free(jp); free(s);                      /* all three are malloc'd */
+char* jp = voxgig_jsonify(value, NULL);                              /* pretty, 2-space indent */
+voxgig_value* compact_flags = voxgig_parse_json("{\"indent\":0}", 0);
+char* jc = voxgig_jsonify(value, compact_flags);                    /* compact, no spaces */
+char* s  = voxgig_stringify(value, 40);                             /* truncated human form, for logs */
+free(jp); free(jc); free(s);                                    /* all three are malloc'd */
 ```
+
+A nested map pretty-prints with each scalar on its own indented line:
+
+<!-- example: minor/jsonify#brace -->
+```c
+voxgig_value* m = voxgig_parse_json("{\"a\":1,\"b\":[2,3]}", 0);
+char* pretty = voxgig_jsonify(m, NULL);
+/* {
+     "a": 1,
+     "b": [
+       2,
+       3
+     ]
+   } */
+```
+<!-- => "{\n  \"a\": 1,\n  \"b\": [\n    2,\n    3\n  ]\n}" -->
+
+`voxgig_stringify` keeps object braces and sorts keys, quote-light:
+
+<!-- example: minor/stringify#brace -->
+```c
+voxgig_value* m = voxgig_parse_json("{\"a\":1,\"b\":[2,3]}", 0);
+char* s = voxgig_stringify(m, -1);              /* "{a:1,b:[2,3]}" */
+```
+<!-- => "{a:1,b:[2,3]}" -->
 
 For more task recipes (merge configs, `$EACH`, `$MERGE`, `$FORMAT`, `$ONE`,
 `$EXACT`, …) see the language-neutral

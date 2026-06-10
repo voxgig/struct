@@ -71,8 +71,13 @@ VoxgigStruct.isempty(val)     # bool
 VoxgigStruct.isfunc(val)      # bool — Proc/lambda
 ```
 
+<!-- example: minor/isnode#map -->
 ```ruby
 VoxgigStruct.isnode({'a' => 1})       # true
+```
+<!-- => true -->
+
+```ruby
 VoxgigStruct.isnode([1])              # true
 VoxgigStruct.ismap([])                # false
 VoxgigStruct.islist([1, 2])           # true
@@ -103,9 +108,34 @@ VoxgigStruct.slice(val, start = nil, finish = nil, mutate = false)
 VoxgigStruct.pad(str, padding = nil, padchar = nil) -> String
 ```
 
+<!-- example: minor/size#three -->
 ```ruby
 VoxgigStruct.size([1, 2, 3])             # 3
+```
+<!-- => 3 -->
+
+`slice` keeps the first *N*; a negative `start` drops the last *|start|*
+items, and `finish` is exclusive:
+
+<!-- example: minor/slice#mid -->
+```ruby
 VoxgigStruct.slice([1, 2, 3, 4, 5], 1, 4)  # [2, 3, 4]
+```
+<!-- => [2, 3, 4] -->
+
+<!-- example: minor/slice#strhead -->
+```ruby
+VoxgigStruct.slice('abcdef', -3)         # 'abc'  (drops the last 3)
+```
+<!-- => "abc" -->
+
+<!-- example: minor/pad#right -->
+```ruby
+VoxgigStruct.pad('a', 3)                 # 'a  '
+```
+<!-- => "a  " -->
+
+```ruby
 VoxgigStruct.pad('hi', 5)                # 'hi   '
 VoxgigStruct.pad('hi', -5, '*')          # '***hi'
 ```
@@ -124,16 +154,26 @@ VoxgigStruct.items(val) -> Array
 VoxgigStruct.strkey(key) -> String
 ```
 
+<!-- example: minor/getprop#hit -->
 ```ruby
-VoxgigStruct.getprop({'a' => 1}, 'a')           # 1
+VoxgigStruct.getprop({'x' => 1}, 'x')           # 1
+```
+<!-- => 1 -->
+
+```ruby
 VoxgigStruct.getprop({}, 'b', 'fallback')       # 'fallback'
 VoxgigStruct.setprop({'a' => 1}, 'b', 2)        # {'a'=>1, 'b'=>2}
 VoxgigStruct.delprop({'a' => 1, 'b' => 2}, 'a') # {'b'=>2}
 VoxgigStruct.getelem([1, 2, 3], -1)             # 3
 VoxgigStruct.haskey({'a' => 1}, 'a')            # true
-VoxgigStruct.keysof({'b' => 1, 'a' => 2})       # ['a', 'b']
 VoxgigStruct.items({'a' => 1, 'b' => 2})        # [['a', 1], ['b', 2]]
 ```
+
+<!-- example: minor/keysof#sorted -->
+```ruby
+VoxgigStruct.keysof({'b' => 4, 'a' => 5})       # ['a', 'b']  (sorted)
+```
+<!-- => ["a", "b"] -->
 
 ### Path operations
 
@@ -143,8 +183,13 @@ VoxgigStruct.setpath(store, path, val, injdef = nil)
 VoxgigStruct.pathify(val, startin = nil, endin = nil) -> String
 ```
 
+<!-- example: getpath/basic#deep -->
 ```ruby
 VoxgigStruct.getpath({'a' => {'b' => {'c' => 42}}}, 'a.b.c')   # 42
+```
+<!-- => 42 -->
+
+```ruby
 VoxgigStruct.getpath({'a' => [10, 20]}, 'a.1')                 # 20
 
 store = {}
@@ -176,9 +221,17 @@ VoxgigStruct.merge([
 
 VoxgigStruct.clone({'a' => [1, 2]})
 VoxgigStruct.flatten([1, [2, [3, [4]]]])
-VoxgigStruct.filter({'a' => 1, 'b' => 2}, ->(kv) { kv[1] > 1 })
-# [['b', 2]]
 ```
+
+`filter` passes each `[key, value]` pair to the check and returns the
+matching **values** (not the pairs):
+
+<!-- example: minor/filter#gt3 -->
+```ruby
+VoxgigStruct.filter([1, 2, 3, 4, 5], ->(kv) { kv[1] > 3 })
+# [4, 5]
+```
+<!-- => [4, 5] -->
 
 ### String / URL / JSON
 
@@ -196,9 +249,40 @@ VoxgigStruct.replace(s, from, to) -> String
 VoxgigStruct.escre('a.b+c')                       # 'a\\.b\\+c'
 VoxgigStruct.escurl('hello world')                # 'hello%20world'
 VoxgigStruct.join(['a', 'b', 'c'], '/')           # 'a/b/c'
-VoxgigStruct.jsonify({'a' => 1})                  # '{"a":1}'
-VoxgigStruct.stringify({'a' => 1})                # 'a:1'
 ```
+
+`jsonify` pretty-prints by default (indent 2); pass `{ 'indent' => 0 }` for
+the compact form:
+
+<!-- example: minor/jsonify#map -->
+```ruby
+VoxgigStruct.jsonify({'a' => 1})
+# {
+#   "a": 1
+# }
+```
+<!-- => "{\n  \"a\": 1\n}" -->
+
+<!-- example: minor/jsonify#compact -->
+```ruby
+VoxgigStruct.jsonify({'a' => 1, 'b' => 2}, { 'indent' => 0 })  # '{"a":1,"b":2}'
+```
+<!-- => "{\"a\":1,\"b\":2}" -->
+
+`stringify` is the compact, quote-light form — keys are sorted and object
+braces are kept; the second argument caps the length (the `...` counts):
+
+<!-- example: minor/stringify#brace -->
+```ruby
+VoxgigStruct.stringify({'a' => 1, 'b' => [2, 3]})  # '{a:1,b:[2,3]}'
+```
+<!-- => "{a:1,b:[2,3]}" -->
+
+<!-- example: minor/stringify#max -->
+```ruby
+VoxgigStruct.stringify('verylongstring', 5)        # 've...'
+```
+<!-- => "ve..." -->
 
 ### Inject / transform / validate / select
 
@@ -230,6 +314,31 @@ VoxgigStruct.select(
 )
 # [{ 'age' => 30, '$KEY' => 'a' }]
 ```
+
+Transform commands drive structural ops. A command like `$EACH` appears in
+**value** position — as the first element of a list
+`['`$EACH`', path, subspec]` — mapping the sub-spec over every entry at
+`path`:
+
+<!-- example: transform/each#basic -->
+```ruby
+VoxgigStruct.transform(
+  { 'v' => 1, 'a' => [{ 'q' => 13 }, { 'q' => 23 }] },
+  { 'x' => { 'y' => ['`$EACH`', 'a', { 'q' => '`$COPY`', 'r' => '`.q`', 'p' => '`...v`' }] } }
+)
+# { 'x' => { 'y' => [{ 'q' => 13, 'r' => 13, 'p' => 1 }, { 'q' => 23, 'r' => 23, 'p' => 1 }] } }
+```
+<!-- => {"x": {"y": [{"q": 13, "r": 13, "p": 1}, {"q": 23, "r": 23, "p": 1}]}} -->
+
+Putting a command in **key** position (or, for `$APPLY`, directly under a
+map) is an error — commands must be list values:
+
+<!-- example: transform/apply#badkey -->
+```ruby
+VoxgigStruct.transform({}, { 'x' => '`$APPLY`' })
+# raises: $APPLY: invalid placement in parent map, expected: list.
+```
+<!-- throws: invalid placement in parent map -->
 
 ### Builders
 

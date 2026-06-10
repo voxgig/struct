@@ -139,9 +139,30 @@ voxgigstruct.Walk(tree, func(key *string, val, parent any, path []string) any {
 ```
 
 ### Serialise deterministically
+`Jsonify` pretty-prints by default (indent 2); pass `{"indent": 0}` for compact.
+`Stringify` is the quote-light human form (keys sorted), for logs.
+
+<!-- example: minor/jsonify#brace -->
 ```go
-voxgigstruct.Jsonify(value)                                  // compact, insertion-ordered keys
-voxgigstruct.Jsonify(value, map[string]any{"indent": 2})     // pretty (flags map carries the indent)
+voxgigstruct.Jsonify(map[string]any{"a": 1, "b": []any{2, 3}})
+// {
+//   "a": 1,
+//   "b": [
+//     2,
+//     3
+//   ]
+// }
+```
+<!-- => "{\n  \"a\": 1,\n  \"b\": [\n    2,\n    3\n  ]\n}" -->
+
+<!-- example: minor/stringify#brace -->
+```go
+voxgigstruct.Stringify(map[string]any{"a": 1, "b": []any{2, 3}})  // "{a:1,b:[2,3]}"
+```
+<!-- => "{a:1,b:[2,3]}" -->
+
+```go
+voxgigstruct.Jsonify(value, map[string]any{"indent": 0})     // compact JSON
 voxgigstruct.Stringify(value, 80)                            // truncated human form, for logs
 ```
 

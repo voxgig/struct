@@ -89,8 +89,13 @@ struct.isempty(val)
 struct.isfunc(val)     -- callable
 ```
 
+<!-- example: minor/isnode#map -->
 ```lua
 struct.isnode({ a = 1 })             -- true
+```
+<!-- => true -->
+
+```lua
 struct.ismap({ a = 1 })              -- true
 struct.islist({ 1, 2, 3 })           -- true
 struct.iskey('name')                 -- true
@@ -121,9 +126,34 @@ struct.slice(val, start, finish, mutate)
 struct.pad(str, padding, padchar)
 ```
 
+<!-- example: minor/size#three -->
 ```lua
 struct.size({ 1, 2, 3 })             -- 3
+```
+<!-- => 3 -->
+
+`slice` keeps the first *N*; a negative `start` drops the last *|start|*
+items, and `finish` is exclusive:
+
+<!-- example: minor/slice#mid -->
+```lua
 struct.slice({ 1, 2, 3, 4, 5 }, 1, 4)  -- { 2, 3, 4 }
+```
+<!-- => [2, 3, 4] -->
+
+<!-- example: minor/slice#strhead -->
+```lua
+struct.slice('abcdef', -3)           -- 'abc'  (drops the last 3)
+```
+<!-- => "abc" -->
+
+<!-- example: minor/pad#right -->
+```lua
+struct.pad('a', 3)                   -- 'a  '
+```
+<!-- => "a  " -->
+
+```lua
 struct.pad('hi', 5)                  -- 'hi   '
 struct.pad('hi', -5, '*')            -- '***hi'
 ```
@@ -142,17 +172,27 @@ struct.items(val)        -- { {key, val}, ... }
 struct.strkey(key)
 ```
 
+<!-- example: minor/getprop#hit -->
 ```lua
-struct.getprop({ a = 1 }, 'a')              -- 1
+struct.getprop({ x = 1 }, 'x')              -- 1
+```
+<!-- => 1 -->
+
+```lua
 struct.getprop({}, 'b', 'fallback')         -- 'fallback'
 struct.setprop({ a = 1 }, 'b', 2)           -- { a = 1, b = 2 }
 struct.delprop({ a = 1, b = 2 }, 'a')       -- { b = 2 }
 struct.getelem({ 1, 2, 3 }, -1)             -- 3
 struct.haskey({ a = 1 }, 'a')               -- true
-struct.keysof({ b = 1, a = 2 })             -- { 'a', 'b' }
 struct.items({ a = 1, b = 2 })              -- { {'a', 1}, {'b', 2} }
 struct.strkey(1)                            -- '1'
 ```
+
+<!-- example: minor/keysof#sorted -->
+```lua
+struct.keysof({ b = 4, a = 5 })             -- { 'a', 'b' }  (sorted)
+```
+<!-- => ["a", "b"] -->
 
 ### Path operations
 
@@ -162,8 +202,13 @@ struct.setpath(store, path, val, injdef)
 struct.pathify(val, startin, endin)
 ```
 
+<!-- example: getpath/basic#deep -->
 ```lua
 struct.getpath({ a = { b = { c = 42 } } }, 'a.b.c')   -- 42
+```
+<!-- => 42 -->
+
+```lua
 struct.getpath({ a = { 10, 20 } }, 'a.0')             -- 10
 struct.getpath({}, 'missing')                         -- nil
 
@@ -200,9 +245,18 @@ struct.merge({
 
 struct.clone({ a = { 1, 2 } })
 struct.flatten({ 1, { 2, { 3 } } })
-struct.filter({ a = 1, b = 2, c = 3 },
-              function(kv) return kv[2] > 1 end)
 ```
+
+`filter` passes each `{ key, value }` pair to the check and returns the
+matching **values** (not the pairs):
+
+<!-- example: minor/filter#gt3 -->
+```lua
+struct.filter({ 1, 2, 3, 4, 5 },
+              function(kv) return kv[2] > 3 end)
+-- { 4, 5 }
+```
+<!-- => [4, 5] -->
 
 ### String / URL / JSON
 
@@ -219,9 +273,40 @@ struct.replace(s, from, to)
 struct.escre('a.b+c')                    -- 'a%.b%+c'  (Lua patterns)
 struct.escurl('hello world')             -- 'hello%20world'
 struct.join({ 'a', 'b', 'c' }, '/')      -- 'a/b/c'
-struct.jsonify({ a = 1 })                -- '{"a":1}'
-struct.stringify({ a = 1 })              -- 'a:1'
 ```
+
+`jsonify` pretty-prints by default (indent 2); pass `{ indent = 0 }` for the
+compact form:
+
+<!-- example: minor/jsonify#map -->
+```lua
+struct.jsonify({ a = 1 })
+-- {
+--   "a": 1
+-- }
+```
+<!-- => "{\n  \"a\": 1\n}" -->
+
+<!-- example: minor/jsonify#compact -->
+```lua
+struct.jsonify({ a = 1, b = 2 }, { indent = 0 })  -- '{"a":1,"b":2}'
+```
+<!-- => "{\"a\":1,\"b\":2}" -->
+
+`stringify` is the compact, quote-light form — keys are sorted and object
+braces are kept; the second argument caps the length (the `...` counts):
+
+<!-- example: minor/stringify#brace -->
+```lua
+struct.stringify({ a = 1, b = { 2, 3 } })  -- '{a:1,b:[2,3]}'
+```
+<!-- => "{a:1,b:[2,3]}" -->
+
+<!-- example: minor/stringify#max -->
+```lua
+struct.stringify('verylongstring', 5)    -- 've...'
+```
+<!-- => "ve..." -->
 
 ### Inject / transform / validate / select
 
@@ -252,6 +337,32 @@ struct.select(
   { age = 30 }
 )
 ```
+
+Transform commands drive structural ops. A command like `$EACH` appears in
+**value** position — as the first element of a list
+`{ '`$EACH`', path, subspec }` — mapping the sub-spec over every entry at
+`path`:
+
+<!-- example: transform/each#basic -->
+```lua
+struct.transform(
+  { v = 1, a = struct.jt({ q = 13 }, { q = 23 }) },
+  { x = { y = struct.jt('`$EACH`', 'a',
+              { q = '`$COPY`', r = '`.q`', p = '`...v`' }) } }
+)
+-- { x = { y = { { q = 13, r = 13, p = 1 }, { q = 23, r = 23, p = 1 } } } }
+```
+<!-- => {"x": {"y": [{"q": 13, "r": 13, "p": 1}, {"q": 23, "r": 23, "p": 1}]}} -->
+
+Putting a command in **key** position (or, for `$APPLY`, directly under a map)
+is an error — commands must be list values:
+
+<!-- example: transform/apply#badkey -->
+```lua
+struct.transform({}, { x = '`$APPLY`' })
+-- errors: $APPLY: invalid placement in parent map, expected: list.
+```
+<!-- throws: invalid placement in parent map -->
 
 ### Builders
 

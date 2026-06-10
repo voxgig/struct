@@ -55,6 +55,14 @@ getpath(config, .string("db.host"))   // .string("db.internal")
 getpath(config, .string("db.port"))   // .int(5432)  (survived the deep merge)
 ```
 
+`getpath(store, path)` descends a dotted path (store first, then the path):
+
+<!-- example: getpath/basic#deep -->
+```swift
+getpath(.map([("a", .map([("b", .map([("c", .int(42))]))]))]), .string("a.b.c"))   // .int(42)
+```
+<!-- => 42 -->
+
 `JSON.parse(_:)` throws on malformed input (the only throwing function in the
 API). The parser builds `OrderedDictionary`-backed maps so object key order
 survives.
@@ -116,6 +124,14 @@ transform(data, try JSON.parse(#"{"total":{"`$APPLY`":["sum","`items`"]}}"#), in
 ```
 
 ### Read with a fallback, distinguish absent from null
+A plain hit returns the stored value:
+
+<!-- example: minor/getprop#hit -->
+```swift
+getprop(.map([("x", .int(1))]), .string("x"))   // .int(1)
+```
+<!-- => 1 -->
+
 ```swift
 getprop(node, .string("timeout"), .int(30))   // .int(30) if key is absent OR stored null (Group A)
 getdef(maybeNoval, .string("fallback"))        // fallback only when value is .noval
@@ -129,12 +145,80 @@ setpath(store, .list([.string("list"), .int(2)]), .string("x"))  // grows a list
 ```
 
 ### Serialise deterministically
+`jsonify` defaults to compact (`indent: 0`); pass `indent: 2` for the pretty,
+two-space form.
+
+<!-- example: minor/jsonify#compact -->
 ```swift
-jsonify(value)                 // compact, insertion-ordered keys
-jsonify(value, indent: 2)      // pretty
-JSON.stringify(value, indent: 2)
-stringify(value, 80)           // truncated human form, for logs (sorts map keys)
+jsonify(.map([("a", .int(1)), ("b", .int(2))]))   // {"a":1,"b":2}
 ```
+<!-- => "{\"a\":1,\"b\":2}" -->
+
+<!-- example: minor/jsonify#map -->
+```swift
+jsonify(.map([("a", .int(1))]), indent: 2)
+// {
+//   "a": 1
+// }
+```
+<!-- => "{\n  \"a\": 1\n}" -->
+
+<!-- example: minor/jsonify#brace -->
+```swift
+jsonify(.map([("a", .int(1)), ("b", .list([.int(2), .int(3)]))]), indent: 2)
+// {
+//   "a": 1,
+//   "b": [
+//     2,
+//     3
+//   ]
+// }
+```
+<!-- => "{\n  \"a\": 1,\n  \"b\": [\n    2,\n    3\n  ]\n}" -->
+
+`stringify` is the quote-light human form (map keys sorted, braces kept); the
+second argument caps the length and the `...` counts toward it.
+
+<!-- example: minor/stringify#brace -->
+```swift
+stringify(.map([("a", .int(1)), ("b", .list([.int(2), .int(3)]))]))   // {a:1,b:[2,3]}
+```
+<!-- => "{a:1,b:[2,3]}" -->
+
+<!-- example: minor/stringify#max -->
+```swift
+stringify(.string("verylongstring"), 5)   // ve...
+```
+<!-- => "ve..." -->
+
+`JSON.stringify(value, indent: 2)` is the underlying serialiser that `jsonify`
+wraps.
+
+### Map a sub-spec over a list (`$EACH`)
+A `$EACH` command sits in **value** position as the first element of a list
+`["`$EACH`", path, subspec]`, mapping the sub-spec over every entry at `path`:
+
+<!-- example: transform/each#basic -->
+```swift
+transform(
+  try JSON.parse(#"{"v":1,"a":[{"q":13},{"q":23}]}"#),
+  try JSON.parse(#"{"x":{"y":["`$EACH`","a",{"q":"`$COPY`","r":"`.q`","p":"`...v`"}]}}"#))
+// { x: { y: [ { q: 13, r: 13, p: 1 }, { q: 23, r: 23, p: 1 } ] } }
+```
+<!-- => {"x": {"y": [{"q": 13, "r": 13, "p": 1}, {"q": 23, "r": 23, "p": 1}]}} -->
+
+Putting a command in **key** position (or, for `$APPLY`, directly under a map)
+is an error — commands must be list values. This port does not throw; the
+message lands on `inj.errs`:
+
+<!-- example: transform/apply#badkey -->
+```swift
+let inj = Injection(val: .noval, parent: .noval)
+transform(.map([]), try JSON.parse(#"{"x":"`$APPLY`"}"#), inj)
+// inj.errs.items contains:
+//   "$APPLY: invalid placement in parent map, expected: list."
+```
+<!-- throws: invalid placement in parent map -->
 
 For more task recipes (`$EACH`, `$MERGE`, `$FORMAT`, `$ONE`, `$EXACT`,
 `select` operators, …) see the language-neutral

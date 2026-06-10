@@ -120,6 +120,22 @@ returns `Value::Noval`.
 ## 2. How-to guides
 
 ### Read a deep value, with a default
+
+`get_path(store, path, injdef)` walks a dot path into the store:
+
+<!-- example: getpath/basic#deep -->
+```rust
+let store = Value::map_of([(
+    "a".into(),
+    Value::map_of([(
+        "b".into(),
+        Value::map_of([("c".into(), Value::Num(42.0))]),
+    )]),
+)]);
+get_path(&store, &Value::str("a.b.c"), None); // Value::Num(42.0)
+```
+<!-- => 42 -->
+
 ```rust
 get_path(&store, &Value::str("a.b.c"), None);          // Noval if missing
 get_prop(&node, &Value::str("c"), Value::str("alt"));  // alt if the single key is missing
@@ -139,6 +155,43 @@ validate(&payload, &spec, Some(&def)).ok();
 ```
 Supply an `errs` collector via `InjectDef` and `validate` returns `Ok`
 instead of `Err`, accumulating messages into the list you passed.
+
+### Map a sub-spec over a list (`$EACH`)
+
+A command like `$EACH` appears in **value** position — as the first element of a
+list `["`$EACH`", path, subspec]` — mapping the sub-spec over every entry at
+`path`:
+
+<!-- example: transform/each#basic -->
+```rust
+transform(
+    &Value::map_of([
+        ("v".into(), Value::Num(1.0)),
+        ("a".into(), Value::list(vec![
+            Value::map_of([("q".into(), Value::Num(13.0))]),
+            Value::map_of([("q".into(), Value::Num(23.0))]),
+        ])),
+    ]),
+    &Value::map_of([(
+        "x".into(),
+        Value::map_of([(
+            "y".into(),
+            Value::list(vec![
+                Value::str("`$EACH`"),
+                Value::str("a"),
+                Value::map_of([
+                    ("q".into(), Value::str("`$COPY`")),
+                    ("r".into(), Value::str("`.q`")),
+                    ("p".into(), Value::str("`...v`")),
+                ]),
+            ]),
+        )]),
+    )]),
+    None,
+).unwrap();
+// { x: { y: [ { q: 13, r: 13, p: 1 }, { q: 23, r: 23, p: 1 } ] } }
+```
+<!-- => {"x": {"y": [{"q": 13, "r": 13, "p": 1}, {"q": 23, "r": 23, "p": 1}]}} -->
 
 ### Write a custom transform function (`$APPLY`)
 ```rust
@@ -160,6 +213,17 @@ return the `SKIP` / `DELETE` sentinels to omit/remove the current key. See
 the [function-value table](./README.md#function-values) for the exact call
 shape per command — it differs slightly from TS.
 
+A command must be a **list value**. Putting `$APPLY` directly under a map (in
+key/value position rather than as the first element of a list) is an error —
+`transform` returns `Err`:
+
+<!-- example: transform/apply#badkey -->
+```rust
+transform(&Value::empty_map(), &Value::map_of([("x".into(), Value::str("`$APPLY`"))]), None);
+// Err: "$APPLY: invalid placement in parent map, expected: list."
+```
+<!-- throws: invalid placement in parent map -->
+
 ### Keep a `walk` path past the callback
 ```rust
 let mut seen: Vec<Vec<String>> = Vec::new();
@@ -171,13 +235,63 @@ walk(tree, Some(&mut before), None, None);
 ```
 
 ### Serialise deterministically
-```rust
-use voxgig_struct::{jsonify, stringify, JsonFlags, Value};
 
-jsonify(&value, None);                                       // 2-space indent (the default)
-jsonify(&value, Some(&JsonFlags { indent: 0, offset: 0 }));  // compact, insertion-ordered keys
-stringify(&value, Some(80), false);                          // truncated human form, for logs
+`jsonify` pretty-prints by default (2-space indent); pass `JsonFlags { indent: 0, .. }`
+for the compact form. `stringify` is the quote-light human form (keys sorted), for logs.
+
+<!-- example: minor/jsonify#map -->
+```rust
+jsonify(&Value::map_of([("a".into(), Value::Num(1.0))]), None);
+// "{\n  \"a\": 1\n}"   (pretty, indent 2)
 ```
+<!-- => "{\n  \"a\": 1\n}" -->
+
+<!-- example: minor/jsonify#compact -->
+```rust
+jsonify(
+    &Value::map_of([("a".into(), Value::Num(1.0)), ("b".into(), Value::Num(2.0))]),
+    Some(&JsonFlags { indent: 0, offset: 0 }),
+);
+// "{\"a\":1,\"b\":2}"
+```
+<!-- => "{\"a\":1,\"b\":2}" -->
+
+<!-- example: minor/jsonify#brace -->
+```rust
+jsonify(
+    &Value::map_of([
+        ("a".into(), Value::Num(1.0)),
+        ("b".into(), Value::list(vec![Value::Num(2.0), Value::Num(3.0)])),
+    ]),
+    None,
+);
+// "{\n  \"a\": 1,\n  \"b\": [\n    2,\n    3\n  ]\n}"   (pretty, indent 2)
+```
+<!-- => "{\n  \"a\": 1,\n  \"b\": [\n    2,\n    3\n  ]\n}" -->
+
+`stringify` keeps object braces and sorts keys; the second argument caps the
+length (the `...` counts):
+
+<!-- example: minor/stringify#brace -->
+```rust
+stringify(
+    &Value::map_of([
+        ("a".into(), Value::Num(1.0)),
+        ("b".into(), Value::list(vec![Value::Num(2.0), Value::Num(3.0)])),
+    ]),
+    None,
+    false,
+);
+// "{a:1,b:[2,3]}"
+```
+<!-- => "{a:1,b:[2,3]}" -->
+
+<!-- example: minor/stringify#max -->
+```rust
+stringify(&Value::str("verylongstring"), Some(5), false);
+// "ve..."
+```
+<!-- => "ve..." -->
 
 For more task recipes (merge configs, rename fields, `$EACH`, `$MERGE`,
 `$FORMAT`, `$ONE`, `$EXACT`, …) see the language-neutral

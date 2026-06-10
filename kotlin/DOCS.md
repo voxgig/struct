@@ -127,6 +127,28 @@ S.jsonify(value, mapOf("indent" to 0)) // compact
 S.stringify(value, 80)                 // truncated human form, for logs
 ```
 
+`jsonify` pretty-prints by default (indent 2); pass `mapOf("indent" to 0)`
+for compact. `stringify` is the quote-light human form (keys sorted), for logs.
+
+<!-- example: minor/jsonify#brace -->
+```kotlin
+S.jsonify(linkedMapOf("a" to 1, "b" to listOf(2, 3)))
+// {
+//   "a": 1,
+//   "b": [
+//     2,
+//     3
+//   ]
+// }
+```
+<!-- => "{\n  \"a\": 1,\n  \"b\": [\n    2,\n    3\n  ]\n}" -->
+
+<!-- example: minor/stringify#brace -->
+```kotlin
+S.stringify(linkedMapOf("a" to 1, "b" to listOf(2, 3)))   // {a:1,b:[2,3]}
+```
+<!-- => "{a:1,b:[2,3]}" -->
+
 For more task recipes (rename fields, `$COPY`, `$EACH`, `$MERGE`,
 `$FORMAT`, `$ONE`, `$EXACT`, …) see the language-neutral
 [How-to guides](../DOCS.md#2-how-to-guides) — the spec syntax is

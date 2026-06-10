@@ -86,8 +86,13 @@ func IsEmpty(val any) bool
 func IsFunc(val any) bool
 ```
 
+<!-- example: minor/isnode#map -->
 ```go
 voxgigstruct.IsNode(map[string]any{"a": 1})   // true
+```
+<!-- => true -->
+
+```go
 voxgigstruct.IsMap([]any{1})                  // false
 voxgigstruct.IsList([]any{1, 2})              // true
 voxgigstruct.IsKey("name")                    // true
@@ -122,9 +127,36 @@ func Pad(str any, args ...any) string
 `args` carries optional `(start, end, mutate)` for `Slice` and
 `(padding, padchar)` for `Pad`.
 
+<!-- example: minor/size#three -->
 ```go
 voxgigstruct.Size([]any{1, 2, 3})            // 3
-voxgigstruct.Slice([]any{1, 2, 3, 4}, 1, 3)  // []any{2, 3}
+```
+<!-- => 3 -->
+
+`Slice` keeps the first *N*; a negative `start` drops the last *|start|*
+items (so `("abcdef", -3)` keeps the first three), and `end` is exclusive:
+
+<!-- example: minor/slice#mid -->
+```go
+voxgigstruct.Slice([]any{1, 2, 3, 4, 5}, 1, 4)  // []any{2, 3, 4}
+```
+<!-- => [2, 3, 4] -->
+
+<!-- example: minor/slice#strhead -->
+```go
+voxgigstruct.Slice("abcdef", -3)             // "abc"  (drops the last 3)
+```
+<!-- => "abc" -->
+
+`Pad` right-pads to the target width with spaces by default:
+
+<!-- example: minor/pad#right -->
+```go
+voxgigstruct.Pad("a", 3)                     // "a  "
+```
+<!-- => "a  " -->
+
+```go
 voxgigstruct.Pad("hi", 5)                    // "hi   "
 voxgigstruct.Pad("hi", -5, "*")              // "***hi"
 ```
@@ -144,16 +176,28 @@ func ItemsApply(val any, apply func([2]any) any) []any
 func StrKey(key any) string
 ```
 
+<!-- example: minor/getprop#hit -->
 ```go
-voxgigstruct.GetProp(map[string]any{"a": 1}, "a")           // 1
+voxgigstruct.GetProp(map[string]any{"x": 1}, "x")           // 1
+```
+<!-- => 1 -->
+
+```go
 voxgigstruct.GetProp(map[string]any{}, "b", "fallback")     // "fallback"
 voxgigstruct.GetElem([]any{1, 2, 3}, -1)                    // 3
 voxgigstruct.GetDef(nil, "fb")                              // "fb"
 voxgigstruct.HasKey(map[string]any{"a": 1}, "a")            // true
-voxgigstruct.KeysOf(map[string]any{"b": 1, "a": 2})         // [a b]
 voxgigstruct.Items(map[string]any{"a": 1})                  // [[a 1]]
 voxgigstruct.StrKey(1)                                       // "1"
 ```
+
+`KeysOf` returns map keys sorted:
+
+<!-- example: minor/keysof#sorted -->
+```go
+voxgigstruct.KeysOf(map[string]any{"b": 4, "a": 5})         // [a b]  (sorted)
+```
+<!-- => ["a", "b"] -->
 
 ### Path operations
 
@@ -163,13 +207,17 @@ func SetPath(store any, path any, val any, injdefs ...map[string]any) any
 func Pathify(val any, args ...any) string
 ```
 
+<!-- example: getpath/basic#deep -->
 ```go
 voxgigstruct.GetPath(
-    map[string]any{"a": map[string]any{"b": 42}},
-    "a.b",
+    map[string]any{"a": map[string]any{"b": map[string]any{"c": 42}}},
+    "a.b.c",
 )
 // 42
+```
+<!-- => 42 -->
 
+```go
 voxgigstruct.GetPath(map[string]any{"a": []any{10, 20}}, "a.1")
 // 20
 
@@ -209,9 +257,18 @@ voxgigstruct.Merge([]any{
 
 voxgigstruct.Clone(map[string]any{"a": []any{1, 2}})
 voxgigstruct.Flatten([]any{1, []any{2, []any{3}}})
-voxgigstruct.Filter([][2]any{{"a", 1}, {"b", 2}},
-    func(kv [2]any) bool { return kv[1].(int) > 1 })
 ```
+
+`Filter` passes each `[key, value]` pair to the check and returns the
+matching **values** (not the pairs):
+
+<!-- example: minor/filter#gt3 -->
+```go
+voxgigstruct.Filter([]any{1, 2, 3, 4, 5},
+    func(kv [2]any) bool { return kv[1].(int) > 3 })
+// []any{4, 5}
+```
+<!-- => [4, 5] -->
 
 ### String / URL / JSON
 
@@ -230,9 +287,41 @@ voxgigstruct.EscUrl("hello world")            // "hello%20world"
 voxgigstruct.Join([]any{"a", "b"}, "/")       // "a/b"
 voxgigstruct.JoinUrl([]any{"http:", "/foo/", "/bar"})
                                               // "http:/foo/bar"
-voxgigstruct.Jsonify(map[string]any{"a": 1})  // `{"a":1}`
-voxgigstruct.Stringify(map[string]any{"a": 1})// "a:1"
 ```
+
+`Jsonify` pretty-prints by default (indent 2); pass `{"indent": 0}` for the
+compact form:
+
+<!-- example: minor/jsonify#map -->
+```go
+voxgigstruct.Jsonify(map[string]any{"a": 1})
+// {
+//   "a": 1
+// }
+```
+<!-- => "{\n  \"a\": 1\n}" -->
+
+<!-- example: minor/jsonify#compact -->
+```go
+voxgigstruct.Jsonify(map[string]any{"a": 1, "b": 2}, map[string]any{"indent": 0})
+// {"a":1,"b":2}
+```
+<!-- => "{\"a\":1,\"b\":2}" -->
+
+`Stringify` is the compact, quote-light form — keys are sorted and object
+braces are kept; a second argument caps the length (the `...` counts):
+
+<!-- example: minor/stringify#brace -->
+```go
+voxgigstruct.Stringify(map[string]any{"a": 1, "b": []any{2, 3}})  // "{a:1,b:[2,3]}"
+```
+<!-- => "{a:1,b:[2,3]}" -->
+
+<!-- example: minor/stringify#max -->
+```go
+voxgigstruct.Stringify("verylongstring", 5)   // "ve..."
+```
+<!-- => "ve..." -->
 
 ### Inject / transform / validate / select
 
@@ -272,6 +361,32 @@ voxgigstruct.Select(
 )
 // [map[$KEY:a age:30]]
 ```
+
+Transform commands drive structural ops. A command like `$EACH` appears in
+**value** position — as the first element of a list
+`[]any{"`$EACH`", path, subspec}` — mapping the sub-spec over every entry at
+`path`:
+
+<!-- example: transform/each#basic -->
+```go
+out, _ := voxgigstruct.Transform(
+    map[string]any{"v": 1, "a": []any{map[string]any{"q": 13}, map[string]any{"q": 23}}},
+    map[string]any{"x": map[string]any{"y": []any{"`$EACH`", "a",
+        map[string]any{"q": "`$COPY`", "r": "`.q`", "p": "`...v`"}}}},
+)
+// out == map[x:map[y:[map[p:1 q:13 r:13] map[p:1 q:23 r:23]]]]
+```
+<!-- => {"x": {"y": [{"q": 13, "r": 13, "p": 1}, {"q": 23, "r": 23, "p": 1}]}} -->
+
+Putting a command in **key** position (or, for `$APPLY`, directly under a
+map) is an error — commands must be list values:
+
+<!-- example: transform/apply#badkey -->
+```go
+_, err := voxgigstruct.Transform(map[string]any{}, map[string]any{"x": "`$APPLY`"})
+// err: $APPLY: invalid placement in parent map, expected: list.
+```
+<!-- throws: invalid placement in parent map -->
 
 ### Builders
 

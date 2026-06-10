@@ -139,7 +139,8 @@ each: {
             spec: {x:y:['`$EACH`','',{q:'`$COPY`',r:'`.q`',p:'`...v`'}]} },
       out: {x:y:[{q:12,r:12},{q:22,r:22}]} }
 
-    { in: { data: {v:1,a:[{q:13},{q:23}]},
+    { id:'transform/each#basic', doc:true,
+      in: { data: {v:1,a:[{q:13},{q:23}]},
             spec: {x:y:['`$EACH`','a',{q:'`$COPY`',r:'`.q`',p:'`...v`'}]} },
       out: {x:y:[{q:13,r:13,p:1},{q:23,r:23,p:1}]} }
 
@@ -550,7 +551,7 @@ apply: {
     { in: { data: {}, spec:{'`$APPLY`':1} }
       err: '$APPLY: invalid placement as key, expected: value.' }
 
-    { in: { data: {}, spec:{x:'`$APPLY`'} }
+    { id:'transform/apply#badkey', doc:true, in: { data: {}, spec:{x:'`$APPLY`'} }
       err: '$APPLY: invalid placement in parent map, expected: list.' }
       
   ]

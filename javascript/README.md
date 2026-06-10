@@ -89,8 +89,13 @@ isempty(val)   // true for null/undefined/''/{}/[]
 isfunc(val)    // true for functions
 ```
 
+<!-- example: minor/isnode#map -->
 ```js
 isnode({ a: 1 })          // true
+```
+<!-- => true -->
+
+```js
 isnode([1])               // true
 isnode('x')               // false
 ismap({})                 // true
@@ -128,14 +133,39 @@ slice(val, start?, end?, mutate?)    // sub-section of list/string/number
 pad(str, padding?, padchar?)         // pad to width; negative -> left
 ```
 
+<!-- example: minor/size#three -->
 ```js
 size([1,2,3])             // 3
+```
+<!-- => 3 -->
+
+```js
 size({a:1,b:2})           // 2
 size('abc')               // 3
+```
 
+`slice` keeps the first *N*; a negative `start` drops the last *|start|*
+items, and `end` is exclusive:
+
+<!-- example: minor/slice#mid -->
+```js
 slice([1,2,3,4,5], 1, 4)  // [2, 3, 4]
-slice('abcdef', -3)       // 'def'
+```
+<!-- => [2, 3, 4] -->
 
+<!-- example: minor/slice#strhead -->
+```js
+slice('abcdef', -3)       // 'abc'  (drops the last 3)
+```
+<!-- => "abc" -->
+
+<!-- example: minor/pad#right -->
+```js
+pad('a', 3)               // 'a  '
+```
+<!-- => "a  " -->
+
+```js
 pad('hi', 5)              // 'hi   '
 pad('hi', -5, '*')        // '***hi'
 ```
@@ -155,8 +185,13 @@ items(val, fn)                    // map over entries
 strkey(key)                       // canonical string form
 ```
 
+<!-- example: minor/getprop#hit -->
 ```js
-getprop({a:1}, 'a')               // 1
+getprop({x:1}, 'x')               // 1
+```
+<!-- => 1 -->
+
+```js
 getprop({a:1}, 'b', 'def')        // 'def'
 
 setprop({a:1}, 'b', 2)            // { a:1, b:2 }
@@ -165,10 +200,15 @@ delprop({a:1, b:2}, 'a')          // { b:2 }
 getelem([1,2,3], -1)              // 3
 getdef(undefined, 'fb')           // 'fb'
 haskey({a:1}, 'a')                // true
-keysof({b:1, a:2})                // ['a','b']
 items({a:1, b:2})                 // [['a',1], ['b',2]]
 strkey(1)                         // '1'
 ```
+
+<!-- example: minor/keysof#sorted -->
+```js
+keysof({b:4, a:5})                // ['a','b']  (sorted)
+```
+<!-- => ["a", "b"] -->
 
 ### Path operations
 
@@ -178,8 +218,13 @@ setpath(store, path, val, injdef?) // mutates and returns store
 pathify(val, startin?, endin?)     // canonical dotted string
 ```
 
+<!-- example: getpath/basic#deep -->
 ```js
 getpath({ a: { b: { c: 42 } } }, 'a.b.c')   // 42
+```
+<!-- => 42 -->
+
+```js
 getpath({ a: [10,20] }, 'a.1')              // 20
 getpath({}, 'missing')                      // undefined
 
@@ -213,9 +258,17 @@ merge([
 clone({ a:[1,2] })              // deep copy
 flatten([1,[2,[3,[4]]]])        // [1, 2, [3, [4]]]
 flatten([1,[2,[3,[4]]]], 2)     // [1, 2, 3, [4]]
-filter({a:1,b:2,c:3}, ([,v]) => v > 1)
-// [['b',2], ['c',3]]
 ```
+
+`filter` passes each `[key, value]` pair to the check and returns the
+matching **values** (not the pairs):
+
+<!-- example: minor/filter#gt3 -->
+```js
+filter([1, 2, 3, 4, 5], ([k, v]) => v > 3)
+// [4, 5]
+```
+<!-- => [4, 5] -->
 
 ### String / URL / JSON
 
@@ -233,9 +286,40 @@ escre('a.b+c')                      // 'a\\.b\\+c'
 escurl('hello world')               // 'hello%20world'
 join(['a','b','c'], '/')            // 'a/b/c'
 join(['http:', '/foo/'], '/', true) // 'http:/foo'
-jsonify({a:1,b:[2,3]})              // '{"a":1,"b":[2,3]}'
-stringify({a:1})                    // 'a:1'
 ```
+
+`jsonify` pretty-prints by default (indent 2); pass `{ indent: 0 }` for the
+compact form:
+
+<!-- example: minor/jsonify#map -->
+```js
+jsonify({ a: 1 })
+// {
+//   "a": 1
+// }
+```
+<!-- => "{\n  \"a\": 1\n}" -->
+
+<!-- example: minor/jsonify#compact -->
+```js
+jsonify({ a: 1, b: 2 }, { indent: 0 })  // '{"a":1,"b":2}'
+```
+<!-- => "{\"a\":1,\"b\":2}" -->
+
+`stringify` is the compact, quote-light form — keys are sorted and object
+braces are kept; the second argument caps the length (the `...` counts):
+
+<!-- example: minor/stringify#brace -->
+```js
+stringify({ a: 1, b: [2, 3] })          // '{a:1,b:[2,3]}'
+```
+<!-- => "{a:1,b:[2,3]}" -->
+
+<!-- example: minor/stringify#max -->
+```js
+stringify('verylongstring', 5)          // 've...'
+```
+<!-- => "ve..." -->
 
 ### Inject / transform / validate / select
 
@@ -268,6 +352,30 @@ select(
 )
 // [{ age: 30, $KEY: 'a' }]
 ```
+
+Transform commands drive structural ops. A command like `$EACH` appears in
+**value** position — as the first element of a list `['`$EACH`', path, subspec]`
+— mapping the sub-spec over every entry at `path`:
+
+<!-- example: transform/each#basic -->
+```js
+transform(
+  { v: 1, a: [{ q: 13 }, { q: 23 }] },
+  { x: { y: ['`$EACH`', 'a', { q: '`$COPY`', r: '`.q`', p: '`...v`' }] } }
+)
+// { x: { y: [ { q: 13, r: 13, p: 1 }, { q: 23, r: 23, p: 1 } ] } }
+```
+<!-- => {"x": {"y": [{"q": 13, "r": 13, "p": 1}, {"q": 23, "r": 23, "p": 1}]}} -->
+
+Putting a command in **key** position (or, for `$APPLY`, directly under a map)
+is an error — commands must be list values:
+
+<!-- example: transform/apply#badkey -->
+```js
+transform({}, { x: '`$APPLY`' })
+// throws: $APPLY: invalid placement in parent map, expected: list.
+```
+<!-- throws: invalid placement in parent map -->
 
 ### Builders
 

@@ -33,8 +33,9 @@ AUDIT_LANGS = typescript javascript python go ruby php rust csharp
 # publish purely by that tag.
 PUBLISH_LANGS = typescript javascript python go ruby php lua zig java rust c cpp csharp kotlin perl swift
 
-.PHONY: all inspect build test lint audit scan analyze clean reset publish \
-        scan-secrets scan-deps scan-sast scan-workflows scan-shell scan-spelling scan-docs scan-parity
+.PHONY: all inspect build test lint audit scan analyze clean reset publish corpus gen-docs \
+        scan-secrets scan-deps scan-sast scan-workflows scan-shell scan-spelling scan-docs \
+        scan-parity scan-regex scan-docs-examples
 
 all: test
 
@@ -96,11 +97,29 @@ publish:
 	@echo "Languages: $(PUBLISH_LANGS)"
 	@echo "Each runs the port's registry publish (where one exists) and pushes tag <lang>/vX.Y.Z."
 
+# ---- Shared test corpus ----
+# build/test/test.json is a COMMITTED artifact compiled from build/test/*.jsonic
+# by @voxgig/model. Every port's test runner reads it directly. After editing any
+# *.jsonic source (e.g. adding a doc-example entry), run `make corpus` and commit
+# the regenerated test.json — CI's corpus-freshness check fails on a stale JSON.
+corpus:
+	@echo "======== corpus: regenerate build/test/test.json from *.jsonic ========"
+	cd build && npm install --no-audit --no-fund --silent && npm run --silent test-model
+	@echo "Regenerated build/test/test.json"
+
+# Fill in / refresh the canonical `<!-- => json -->` output markers on every
+# documentation example anchor (`<!-- example: id -->`) from the corpus. Authors
+# write only the anchor; this types the hand-escaped JSON for them. CI runs the
+# --check form (see scan-docs-examples) so a missing or stale marker fails the build.
+gen-docs:
+	@echo "======== gen: documentation example output markers from corpus ========"
+	python3 tools/gen_doc_examples.py
+
 # ---- Repo-wide static analysis (not per-language) ----
 # These need their tools on PATH:
 #   gitleaks, osv-scanner, semgrep, actionlint, shellcheck, cspell, markdownlint
 
-scan: scan-secrets scan-deps scan-sast scan-workflows scan-shell scan-parity scan-regex scan-spelling scan-docs
+scan: scan-secrets scan-deps scan-sast scan-workflows scan-shell scan-parity scan-regex scan-docs-examples scan-spelling scan-docs
 
 scan-secrets:
 	@echo "======== scan: secrets (gitleaks) ========"
@@ -138,6 +157,11 @@ scan-parity:
 scan-regex:
 	@echo "======== scan: corpus regex stays inside RE2 subset ========"
 	python3 tools/check_corpus_regex.py
+
+scan-docs-examples:
+	@echo "======== scan: documentation examples match the corpus ========"
+	python3 tools/check_doc_examples.py
+	python3 tools/gen_doc_examples.py --check
 
 # Everything: linters/formatters + dependency audits + repo-wide scans.
 analyze: lint audit scan

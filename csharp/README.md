@@ -95,6 +95,12 @@ StructUtils.IsEmpty(object? val)   // bool
 StructUtils.IsFunc(object? val)    // bool
 ```
 
+<!-- example: minor/isnode#map -->
+```csharp
+StructUtils.IsNode(StructUtils.Jm("a", 1));   // true
+```
+<!-- => true -->
+
 ### Type inspection
 
 ```csharp
@@ -116,6 +122,33 @@ StructUtils.Slice(object? val, int? start = null, int? end = null,
 StructUtils.Pad(object? str, int? padding = null, string? padchar = null)
 ```
 
+<!-- example: minor/size#three -->
+```csharp
+StructUtils.Size(StructUtils.Jt(1, 2, 3));   // 3
+```
+<!-- => 3 -->
+
+`Slice` keeps the first *N*; a negative `start` drops the last *|start|*
+items, and `end` is exclusive:
+
+<!-- example: minor/slice#mid -->
+```csharp
+StructUtils.Slice(StructUtils.Jt(1, 2, 3, 4, 5), 1, 4);   // [2, 3, 4]
+```
+<!-- => [2, 3, 4] -->
+
+<!-- example: minor/slice#strhead -->
+```csharp
+StructUtils.Slice("abcdef", -3);   // "abc"  (drops the last 3)
+```
+<!-- => "abc" -->
+
+<!-- example: minor/pad#right -->
+```csharp
+StructUtils.Pad("a", 3);   // "a  "
+```
+<!-- => "a  " -->
+
 ### Property access
 
 ```csharp
@@ -130,6 +163,20 @@ StructUtils.Items(object? val)
 StructUtils.StrKey(object? key)
 ```
 
+<!-- example: minor/getprop#hit -->
+```csharp
+StructUtils.GetProp(StructUtils.Jm("x", 1), "x");   // 1
+```
+<!-- => 1 -->
+
+`KeysOf` returns map keys in sorted order:
+
+<!-- example: minor/keysof#sorted -->
+```csharp
+StructUtils.KeysOf(StructUtils.Jm("b", 4, "a", 5));   // ["a", "b"]  (sorted)
+```
+<!-- => ["a", "b"] -->
+
 ### Path operations
 
 ```csharp
@@ -139,6 +186,7 @@ StructUtils.SetPath(object? store, object? path, object? val)
 StructUtils.Pathify(object? val, int? startin = null, int? endin = null)
 ```
 
+<!-- example: getpath/basic#deep -->
 ```csharp
 var store = new Dictionary<string, object?> {
     ["a"] = new Dictionary<string, object?> {
@@ -146,7 +194,10 @@ var store = new Dictionary<string, object?> {
     }
 };
 StructUtils.GetPath(store, "a.b.c");        // 42
+```
+<!-- => 42 -->
 
+```csharp
 var fresh = new Dictionary<string, object?>();
 StructUtils.SetPath(fresh, "db.host", "localhost");
 ```
@@ -159,11 +210,21 @@ StructUtils.Walk(object? val, WalkApply? before = null,
 StructUtils.Merge(object? val, int? maxdepth = null)
 StructUtils.Clone(object? val)
 StructUtils.Flatten(object? list, int? depth = null)
-StructUtils.Filter(object? val, Func<object?, bool> check)
+StructUtils.Filter(object? val, Func<List<object?>, bool> check)
 
 public delegate object? WalkApply(
     object? key, object? val, object? parent, IList<string> path);
 ```
+
+`Filter` passes each `[key, value]` pair to the check and returns the
+matching **values** (not the pairs):
+
+<!-- example: minor/filter#gt3 -->
+```csharp
+StructUtils.Filter(StructUtils.Jt(1, 2, 3, 4, 5), kv => Convert.ToInt32(kv[1]) > 3);
+// [4, 5]
+```
+<!-- => [4, 5] -->
 
 ### String / URL / JSON
 
@@ -174,6 +235,39 @@ StructUtils.Join(IList<object?> arr, string? sep = null, bool? url = null)
 StructUtils.Jsonify(object? val, int indent = 2, int offset = 0)
 StructUtils.Stringify(object? val, int? maxlen = null, object? pretty = null)
 ```
+
+`Jsonify` pretty-prints by default (indent 2); pass `indent: 0` for the
+compact form:
+
+<!-- example: minor/jsonify#map -->
+```csharp
+StructUtils.Jsonify(StructUtils.Jm("a", 1));
+// {
+//   "a": 1
+// }
+```
+<!-- => "{\n  \"a\": 1\n}" -->
+
+<!-- example: minor/jsonify#compact -->
+```csharp
+StructUtils.Jsonify(StructUtils.Jm("a", 1, "b", 2), indent: 0);   // {"a":1,"b":2}
+```
+<!-- => "{\"a\":1,\"b\":2}" -->
+
+`Stringify` is the compact, quote-light form — keys are sorted and object
+braces are kept; the second argument caps the length (the `...` counts):
+
+<!-- example: minor/stringify#brace -->
+```csharp
+StructUtils.Stringify(StructUtils.Jm("a", 1, "b", StructUtils.Jt(2, 3)));   // {a:1,b:[2,3]}
+```
+<!-- => "{a:1,b:[2,3]}" -->
+
+<!-- example: minor/stringify#max -->
+```csharp
+StructUtils.Stringify("verylongstring", 5);   // ve...
+```
+<!-- => "ve..." -->
 
 ### Inject / transform / validate / select
 

@@ -2,6 +2,7 @@
 
 basic: {
   set: [
+    { id:'getpath/basic#deep', doc:true, in: { path: 'a.b.c', store: {a:{b:{c:42}}} }, out: 42 }
     { in: { path: 'a', store: {a:10} }, out: 10 }
     { in: { path: 'a.b', store: {a:{b:11}} }, out: 11 }
     { in: { path: 'a.b.c', store: {a:{b:{c:12}}} }, out: 12 }

@@ -98,6 +98,14 @@ pub fn isempty(val: JsonValue) bool
 pub fn isfunc(val: JsonValue) bool
 ```
 
+<!-- example: minor/isnode#map -->
+```zig
+var m = try struct_lib.JsonValue.makeMap(allocator);
+try m.object.put("a", .{ .integer = 1 });
+struct_lib.isnode(m)                                  // true
+```
+<!-- => true -->
+
 ### Type inspection
 
 ```zig
@@ -116,6 +124,43 @@ pub fn sliceMut(allocator: Allocator, val: JsonValue,
 pub fn pad(allocator: Allocator, s: []const u8,
            padding: i64, padchar: u8) ![]const u8
 ```
+
+`size` counts list/map entries (and string bytes):
+
+<!-- example: minor/size#three -->
+```zig
+var lst = try struct_lib.JsonValue.makeList(allocator);
+try lst.array.append(.{ .integer = 1 });
+try lst.array.append(.{ .integer = 2 });
+try lst.array.append(.{ .integer = 3 });
+struct_lib.size(lst)                                  // 3
+```
+<!-- => 3 -->
+
+`slice` keeps the first *N*; a negative `start` drops the last *|start|*
+items, and `end` is exclusive:
+
+<!-- example: minor/slice#mid -->
+```zig
+// slice([1,2,3,4,5], 1, 4) -> [2, 3, 4]
+const mid = try struct_lib.slice(allocator, lst5, 1, 4);  // [2, 3, 4]
+```
+<!-- => [2, 3, 4] -->
+
+<!-- example: minor/slice#strhead -->
+```zig
+// negative start keeps the head: slice('abcdef', -3) drops the last 3
+const head = try struct_lib.slice(allocator, .{ .string = "abcdef" }, -3, null); // 'abc'
+```
+<!-- => "abc" -->
+
+`pad` right-pads to the given width (negative width pads on the left):
+
+<!-- example: minor/pad#right -->
+```zig
+const p = try struct_lib.pad(allocator, "a", 3, ' ');     // 'a  '
+```
+<!-- => "a  " -->
 
 ### Property access
 
@@ -136,6 +181,25 @@ pub fn items(allocator: Allocator, val: JsonValue) !JsonValue
 pub fn strkey(allocator: Allocator, key: JsonValue) ![]const u8
 ```
 
+<!-- example: minor/getprop#hit -->
+```zig
+var xm = try struct_lib.JsonValue.makeMap(allocator);
+try xm.object.put("x", .{ .integer = 1 });
+const got = try struct_lib.getprop(allocator, xm, .{ .string = "x" }, .null); // 1
+```
+<!-- => 1 -->
+
+`keysof` returns map keys **sorted** (list keys are the indices as strings):
+
+<!-- example: minor/keysof#sorted -->
+```zig
+var bm = try struct_lib.JsonValue.makeMap(allocator);
+try bm.object.put("b", .{ .integer = 4 });
+try bm.object.put("a", .{ .integer = 5 });
+const ks = try struct_lib.keysof(allocator, bm);          // ['a', 'b']
+```
+<!-- => ["a", "b"] -->
+
 ### Path operations
 
 ```zig
@@ -148,6 +212,17 @@ pub fn setpath(allocator: Allocator, store: JsonValue,
 pub fn pathify(allocator: Allocator, val: JsonValue,
                from: usize, end: usize) ![]const u8
 ```
+
+Note the Zig order `getpath(allocator, path, store)`. For store
+`{ a: { b: { c: 42 } } }` and path `'a.b.c'`:
+
+<!-- example: getpath/basic#deep -->
+```zig
+// store == { a: { b: { c: 42 } } }
+const path = struct_lib.JsonValue{ .string = "a.b.c" };
+const deep = try struct_lib.getpath(allocator, path, store);   // 42
+```
+<!-- => 42 -->
 
 ### Tree operations
 
@@ -177,6 +252,48 @@ pub fn stringifyPretty(allocator: Allocator, val: JsonValue,
                        maxlen: ?usize, pretty: bool) ![]const u8
 ```
 
+`jsonify` with `indent_size = 2` pretty-prints (the canonical default);
+pass `indent_size = 0` for the compact form:
+
+<!-- example: minor/jsonify#map -->
+```zig
+var jm = try struct_lib.JsonValue.makeMap(allocator);
+try jm.object.put("a", .{ .integer = 1 });
+const pretty = try struct_lib.jsonify(allocator, jm, 2, 0);
+// pretty == "{\n  \"a\": 1\n}"
+```
+<!-- => "{\n  \"a\": 1\n}" -->
+
+<!-- example: minor/jsonify#compact -->
+```zig
+var jm2 = try struct_lib.JsonValue.makeMap(allocator);
+try jm2.object.put("a", .{ .integer = 1 });
+try jm2.object.put("b", .{ .integer = 2 });
+const compact = try struct_lib.jsonify(allocator, jm2, 0, 0); // {"a":1,"b":2}
+```
+<!-- => "{\"a\":1,\"b\":2}" -->
+
+`stringify` is the compact, quote-light form — keys are sorted and object
+braces are kept; the `maxlen` argument caps the length (the `...` counts):
+
+<!-- example: minor/stringify#brace -->
+```zig
+var sm = try struct_lib.JsonValue.makeMap(allocator);
+try sm.object.put("a", .{ .integer = 1 });
+var inner = try struct_lib.JsonValue.makeList(allocator);
+try inner.array.append(.{ .integer = 2 });
+try inner.array.append(.{ .integer = 3 });
+try sm.object.put("b", inner);
+const s = try struct_lib.stringify(allocator, sm, null);  // {a:1,b:[2,3]}
+```
+<!-- => "{a:1,b:[2,3]}" -->
+
+<!-- example: minor/stringify#max -->
+```zig
+const sx = try struct_lib.stringify(allocator, .{ .string = "verylongstring" }, 5); // ve...
+```
+<!-- => "ve..." -->
+
 ### Inject / transform / validate / select
 
 ```zig
@@ -186,6 +303,31 @@ pub fn transform(allocator: Allocator, data: JsonValue,
                  spec: JsonValue) !JsonValue
 // validate, select also present — see source
 ```
+
+A transform command like `$EACH` appears in **value** position — as the
+first element of a list `['`$EACH`', path, subspec]` — mapping the sub-spec
+over every entry at `path`:
+
+<!-- example: transform/each#basic -->
+```zig
+// data == { v: 1, a: [{ q: 13 }, { q: 23 }] }
+// spec == { x: { y: ['`$EACH`', 'a', { q: '`$COPY`', r: '`.q`', p: '`...v`' }] } }
+const out = try struct_lib.transform(allocator, data, spec);
+// jsonifyCompact(out) == "{\"x\":{\"y\":[{\"q\":13,\"r\":13,\"p\":1},{\"q\":23,\"r\":23,\"p\":1}]}}"
+```
+<!-- => {"x": {"y": [{"q": 13, "r": 13, "p": 1}, {"q": 23, "r": 23, "p": 1}]}} -->
+
+Putting `$APPLY` directly under a map (key position) is an error — commands
+must be list values. The canonical TS throws; this port records the same
+message (collected internally rather than raised as a Zig `error`):
+
+<!-- example: transform/apply#badkey -->
+```zig
+// data == {}, spec == { x: '`$APPLY`' }  (invalid placement)
+const r = try struct_lib.transform(allocator, data_empty, bad_spec);
+// records error: "$APPLY: invalid placement in parent map, expected: list."
+```
+<!-- throws: invalid placement in parent map -->
 
 ### `std.json` interop
 

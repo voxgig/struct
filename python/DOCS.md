@@ -120,12 +120,28 @@ select(some_list, {})              # all children (empty query matches all)
 ```
 
 ### Serialise deterministically
+`jsonify` pretty-prints by default (indent 2); pass `{'indent': 0}` for compact.
+`stringify` is the quote-light human form (keys sorted), for logs.
+
 ```python
 from voxgig_struct import jsonify, stringify
-jsonify(value)             # compact, insertion-ordered keys
-jsonify(value, 2)          # pretty, 2-space indent
-stringify(value, 40)       # truncated human form, for logs
+jsonify(value)                    # pretty, 2-space indent (default)
+jsonify(value, {'indent': 0})     # compact, insertion-ordered keys
+stringify(value, 40)              # truncated human form, for logs
 ```
+
+<!-- example: minor/jsonify#brace -->
+```python
+jsonify({'a': 1, 'b': [2, 3]})
+# {
+#   "a": 1,
+#   "b": [
+#     2,
+#     3
+#   ]
+# }
+```
+<!-- => "{\n  \"a\": 1,\n  \"b\": [\n    2,\n    3\n  ]\n}" -->
 
 ### Build a URL from parts (Python extra)
 ```python

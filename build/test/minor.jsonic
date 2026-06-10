@@ -1,6 +1,7 @@
 
 isnode: {
   set: [
+    { id:'minor/isnode#map', doc:true, in:{a:1}, out:true }
     { in: {a:1}, out: true }
     { in: [1], out: true }
     { in: 1, out: false }
@@ -116,6 +117,7 @@ isfunc: {
 
 getprop: {
   set: [
+    { id:'minor/getprop#hit', doc:true, in: { val: {x:1}, key: x }, out: 1 }
     { in: { val: {x:1}, key: x }, out: 1 }
     { in: { val: {x:[11]}, key: x }, out: [11] }
     { in: { val: {x:{z:22}}, key: x }, out: {z:22} }
@@ -258,6 +260,7 @@ items: {
 
 keysof: {
   set: [
+    { id:'minor/keysof#sorted', doc:true, in:{b:4,a:5}, out:[a,b] }
     { out: [] }
     { in: null, out: [] }
     { in: {}, out: [] }
@@ -370,6 +373,8 @@ delprop: {
 
 stringify: {
   set: [
+    { id:'minor/stringify#brace', doc:true, in:{val:{a:1,b:[2,3]}}, out:'{a:1,b:[2,3]}' }
+    { id:'minor/stringify#max',   doc:true, in:{val:'verylongstring', max:5}, out:'ve...' }
     { in: { val: 1 }, out: '1' }
     { in: { val: 'a' }, out: 'a' }
     { in: { val: '"' }, out: '"' }
@@ -388,6 +393,9 @@ stringify: {
 
 jsonify: {
   set: [
+    { id:'minor/jsonify#map',     doc:true, in:{val:{a:1}}, out:'{\n  "a": 1\n}' }
+    { id:'minor/jsonify#brace',   doc:true, in:{val:{a:1,b:[2,3]}}, out:'{\n  "a": 1,\n  "b": [\n    2,\n    3\n  ]\n}' }
+    { id:'minor/jsonify#compact', doc:true, in:{val:{a:1,b:2}, flags:{indent:0}}, out:'{"a":1,"b":2}' }
     { in: {val:1} out: '1' }
     { in: {val:'a'} out: '"a"' }
     { in: {val:true} out: 'true' }
@@ -527,7 +535,7 @@ flatten: {
 
 filter: {
   set: [
-    { in: {val:[1,2,3,4,5],check:'gt3'}, out: [4,5] }
+    { id:'minor/filter#gt3', doc:true, in: {val:[1,2,3,4,5],check:'gt3'}, out: [4,5] }
     { in: {val:[1,2,3,4,5],check:'lt3'}, out: [1,2] }
   ]
 }
@@ -563,6 +571,7 @@ typify: {
 
 size: {
   set: [
+    { id:'minor/size#three', doc:true, in:[1,2,3], out:3 }
     { in: [], out: 0 }
     { in: {}, out: 0 }
 
@@ -595,6 +604,8 @@ size: {
 
 slice: {
   set: [
+    { id:'minor/slice#mid',     doc:true, in:{val:[1,2,3,4,5], start:1, end:4}, out:[2,3,4] }
+    { id:'minor/slice#strhead', doc:true, in:{val:'abcdef', start:-3}, out:'abc' }
     { in: {val:[10,20,30], start:0, end:0}, out: [] }
     { in: {val:[11,21,31], start:0, end:1}, out: [11] }
     { in: {val:[12,22,32], start:0, end:2}, out: [12,22] }
@@ -705,6 +716,7 @@ slice: {
 
 pad: {
   set: [
+    { id:'minor/pad#right', doc:true, in:{val:'a', pad:3}, out:'a  ' }
     { in: {val:'a', pad:0}, out: 'a' }
     { in: {val:'a', pad:1}, out: 'a' }
     { in: {val:'a', pad:2}, out: 'a ' }

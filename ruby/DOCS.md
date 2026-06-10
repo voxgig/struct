@@ -120,11 +120,28 @@ VoxgigStruct.walk(tree, ->(key, val, parent, path) {
 ```
 
 ### Serialise deterministically
+`jsonify` pretty-prints by default (indent 2); pass `{ 'indent' => 0 }` for compact.
+`stringify` is the quote-light human form (keys sorted), for logs.
+
+<!-- example: minor/jsonify#brace -->
 ```ruby
-VoxgigStruct.jsonify(value)                    # pretty, 2-space indent (default); insertion-ordered keys
-VoxgigStruct.jsonify(value, { 'indent' => 0 }) # compact single line
-VoxgigStruct.stringify(value, 80)              # truncated human form, for logs
+VoxgigStruct.jsonify({ 'a' => 1, 'b' => [2, 3] })
+# {
+#   "a": 1,
+#   "b": [
+#     2,
+#     3
+#   ]
+# }
 ```
+<!-- => "{\n  \"a\": 1,\n  \"b\": [\n    2,\n    3\n  ]\n}" -->
+
+<!-- example: minor/stringify#brace -->
+```ruby
+VoxgigStruct.stringify({ 'a' => 1, 'b' => [2, 3] })   # '{a:1,b:[2,3]}'
+```
+<!-- => "{a:1,b:[2,3]}" -->
+
 `jsonify`'s second argument is a flags **Hash** (`'indent'`, `'offset'`),
 not a positional indent.
 

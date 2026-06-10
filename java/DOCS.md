@@ -131,12 +131,51 @@ inlined as element 1 (not a name — `injectorArgs` type-checks it as
 inside a `WalkApply` callback is reused — copy it (`new ArrayList<>(path)`)
 to retain it past the call.
 
+A transform command like `$EACH` appears in **value** position — as the
+first element of a list `["`$EACH`", path, subspec]` — mapping the sub-spec
+over every entry at `path`:
+
+<!-- example: transform/each#basic -->
+```java
+Struct.transform(
+    Struct.jm("v", 1, "a", Struct.jt(Struct.jm("q", 13), Struct.jm("q", 23))),
+    Struct.jm("x", Struct.jm("y", Struct.jt("`$EACH`", "a",
+        Struct.jm("q", "`$COPY`", "r", "`.q`", "p", "`...v`")))));
+// { x={ y=[{ q=13, r=13, p=1 }, { q=23, r=23, p=1 }] } }
+```
+<!-- => {"x": {"y": [{"q": 13, "r": 13, "p": 1}, {"q": 23, "r": 23, "p": 1}]}} -->
+
+Putting a command in **key** position (or, for `$APPLY`, directly under a
+map) is an error — commands must be list values:
+
+<!-- example: transform/apply#badkey -->
+```java
+Struct.transform(new LinkedHashMap<>(), Struct.jm("x", "`$APPLY`"));
+// throws: $APPLY: invalid placement in parent map, expected: list.
+```
+<!-- throws: invalid placement in parent map -->
+
 ### Serialise deterministically
 ```java
 Struct.jsonify(value);                       // pretty (2-space), insertion-ordered keys
 Struct.jsonify(value, Map.of("indent", 0));  // compact — flags are a Map (indent/offset)
 Struct.stringify(value, 80);                 // truncated human form, for logs
 ```
+
+`jsonify` pretty-prints by default (indent 2), nesting lists and maps:
+
+<!-- example: minor/jsonify#brace -->
+```java
+Struct.jsonify(Struct.jm("a", 1, "b", Struct.jt(2, 3)));
+// {
+//   "a": 1,
+//   "b": [
+//     2,
+//     3
+//   ]
+// }
+```
+<!-- => "{\n  \"a\": 1,\n  \"b\": [\n    2,\n    3\n  ]\n}" -->
 
 For more task recipes (rename fields, `$EACH`, `$MERGE`, `$FORMAT`, `$ONE`,
 `$EXACT`, …) see the language-neutral

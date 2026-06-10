@@ -74,8 +74,13 @@ Struct::isempty($val)     // null/''/[]
 Struct::isfunc($val)      // callable
 ```
 
+<!-- example: minor/isnode#map -->
 ```php
 Struct::isnode(['a' => 1]);          // true
+```
+<!-- => true -->
+
+```php
 Struct::ismap([1, 2]);                // false
 Struct::islist([1, 2]);               // true
 Struct::iskey('name');                // true
@@ -105,9 +110,34 @@ Struct::slice($val, $start = null, $end = null, $mutate = false)
 Struct::pad($str, $padding = null, $padchar = null): string
 ```
 
+<!-- example: minor/size#three -->
 ```php
 Struct::size([1, 2, 3]);               // 3
+```
+<!-- => 3 -->
+
+`slice` keeps the first *N*; a negative `$start` drops the last *|start|*
+items, and `$end` is exclusive:
+
+<!-- example: minor/slice#mid -->
+```php
 Struct::slice([1, 2, 3, 4, 5], 1, 4);  // [2, 3, 4]
+```
+<!-- => [2, 3, 4] -->
+
+<!-- example: minor/slice#strhead -->
+```php
+Struct::slice('abcdef', -3);           // 'abc'  (drops the last 3)
+```
+<!-- => "abc" -->
+
+<!-- example: minor/pad#right -->
+```php
+Struct::pad('a', 3);                   // 'a  '
+```
+<!-- => "a  " -->
+
+```php
 Struct::pad('hi', 5);                  // 'hi   '
 Struct::pad('hi', -5, '*');            // '***hi'
 ```
@@ -126,8 +156,13 @@ Struct::items($val): array
 Struct::strkey($key): string
 ```
 
+<!-- example: minor/getprop#hit -->
 ```php
 Struct::getprop(['a' => 1], 'a');                  // 1
+```
+<!-- => 1 -->
+
+```php
 Struct::getprop([], 'b', 'fallback');              // 'fallback'
 
 $node = ['a' => 1];
@@ -135,7 +170,15 @@ Struct::setprop($node, 'b', 2);
 // $node === ['a' => 1, 'b' => 2]
 
 Struct::getelem([1, 2, 3], -1);                    // 3
-Struct::keysof(['b' => 1, 'a' => 2]);              // ['a', 'b']
+```
+
+<!-- example: minor/keysof#sorted -->
+```php
+Struct::keysof(['b' => 4, 'a' => 5]);              // ['a', 'b']  (sorted)
+```
+<!-- => ["a", "b"] -->
+
+```php
 Struct::items(['a' => 1, 'b' => 2]);
 // [['a', 1], ['b', 2]]
 ```
@@ -148,8 +191,13 @@ Struct::setpath(&$store, $path, $val, $injdef = null)
 Struct::pathify($val, $startin = null, $endin = null): string
 ```
 
+<!-- example: getpath/basic#deep -->
 ```php
 Struct::getpath(['a' => ['b' => ['c' => 42]]], 'a.b.c');  // 42
+```
+<!-- => 42 -->
+
+```php
 Struct::getpath(['a' => [10, 20]], 'a.1');                // 20
 
 $store = [];
@@ -184,10 +232,17 @@ Struct::merge([
 
 Struct::clone(['a' => [1, 2]]);
 Struct::flatten([1, [2, [3, [4]]]]);
-Struct::filter(['a' => 1, 'b' => 2, 'c' => 3],
-    fn($kv) => $kv[1] > 1);
-// [['b', 2], ['c', 3]]
 ```
+
+`filter` passes each `[key, value]` pair to the check and returns the
+matching **values** (not the pairs):
+
+<!-- example: minor/filter#gt3 -->
+```php
+Struct::filter([1, 2, 3, 4, 5], fn($kv) => $kv[1] > 3);
+// [4, 5]
+```
+<!-- => [4, 5] -->
 
 ### String / URL / JSON
 
@@ -206,9 +261,53 @@ Struct::escre('a.b+c');                   // 'a\\.b\\+c'
 Struct::escurl('hello world');            // 'hello%20world'
 Struct::join(['a', 'b', 'c'], '/');       // 'a/b/c'
 Struct::joinurl(['http:', '/foo/']);      // 'http:/foo'
-Struct::jsonify(['a' => 1]);              // '{"a":1}'
-Struct::stringify(['a' => 1]);            // 'a:1'
 ```
+
+`jsonify` pretty-prints by default (indent 2); pass `(object)['indent' => 0]`
+for the compact form:
+
+<!-- example: minor/jsonify#map -->
+```php
+Struct::jsonify(['a' => 1]);
+// {
+//   "a": 1
+// }
+```
+<!-- => "{\n  \"a\": 1\n}" -->
+
+<!-- example: minor/jsonify#brace -->
+```php
+Struct::jsonify(['a' => 1, 'b' => [2, 3]]);
+// {
+//   "a": 1,
+//   "b": [
+//     2,
+//     3
+//   ]
+// }
+```
+<!-- => "{\n  \"a\": 1,\n  \"b\": [\n    2,\n    3\n  ]\n}" -->
+
+<!-- example: minor/jsonify#compact -->
+```php
+Struct::jsonify(['a' => 1, 'b' => 2], (object)['indent' => 0]);  // '{"a":1,"b":2}'
+```
+<!-- => "{\"a\":1,\"b\":2}" -->
+
+`stringify` is the compact, quote-light form — keys are sorted and object
+braces are kept; the second argument caps the length (the `...` counts):
+
+<!-- example: minor/stringify#brace -->
+```php
+Struct::stringify(['a' => 1, 'b' => [2, 3]]);   // '{a:1,b:[2,3]}'
+```
+<!-- => "{a:1,b:[2,3]}" -->
+
+<!-- example: minor/stringify#max -->
+```php
+Struct::stringify('verylongstring', 5);          // 've...'
+```
+<!-- => "ve..." -->
 
 ### Inject / transform / validate / select
 
@@ -231,7 +330,33 @@ Struct::transform(
     ['a' => '`hold.x`', 'b' => '`top`']
 );
 // ['a' => 1, 'b' => 99]
+```
 
+A transform command like `$EACH` appears in **value** position — as the first
+element of a list `['`$EACH`', path, subspec]` — mapping the sub-spec over every
+entry at `path`:
+
+<!-- example: transform/each#basic -->
+```php
+Struct::transform(
+    ['v' => 1, 'a' => [['q' => 13], ['q' => 23]]],
+    ['x' => ['y' => ['`$EACH`', 'a', ['q' => '`$COPY`', 'r' => '`.q`', 'p' => '`...v`']]]]
+);
+// ['x' => ['y' => [['q' => 13, 'r' => 13, 'p' => 1], ['q' => 23, 'r' => 23, 'p' => 1]]]]
+```
+<!-- => {"x": {"y": [{"q": 13, "r": 13, "p": 1}, {"q": 23, "r": 23, "p": 1}]}} -->
+
+Putting a command in **key** position (or, for `$APPLY`, directly under a map)
+is an error — commands must be list values:
+
+<!-- example: transform/apply#badkey -->
+```php
+Struct::transform([], ['x' => '`$APPLY`']);
+// throws \Exception: $APPLY: invalid placement in parent map, expected: list.
+```
+<!-- throws: invalid placement in parent map -->
+
+```php
 Struct::validate(['name' => 'Ada'], ['name' => '`$STRING`']);
 // throws \RuntimeException on mismatch (or accumulates if you pass
 // an errors array as the fourth arg)

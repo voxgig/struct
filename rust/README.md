@@ -128,6 +128,90 @@ See [`REPORT.md`](../design/REPORT.md#rust-rust) for the rust-port adaptations
 write-up, and [`../NOTES.md`](../design/NOTES.md) for cross-port quirks.
 
 
+## Minor utility examples
+
+Concrete examples for the most-used minor utilities. Each call is the Rust
+expression of the canonical input; the comment shows the Rust-native result.
+
+`is_node` reports whether a value is a node (map or list):
+
+<!-- example: minor/isnode#map -->
+```rust
+is_node(&Value::map_of([("a".into(), Value::Num(1.0))])); // true
+```
+<!-- => true -->
+
+`size` counts entries of a list/map (or the length of a string):
+
+<!-- example: minor/size#three -->
+```rust
+size(&Value::list(vec![Value::Num(1.0), Value::Num(2.0), Value::Num(3.0)])); // 3
+```
+<!-- => 3 -->
+
+`slice` keeps the first *N*; a negative `start` drops the last *|start|* items,
+and `end` is exclusive:
+
+<!-- example: minor/slice#mid -->
+```rust
+slice(
+    Value::list(vec![
+        Value::Num(1.0), Value::Num(2.0), Value::Num(3.0), Value::Num(4.0), Value::Num(5.0),
+    ]),
+    Some(1),
+    Some(4),
+    false,
+); // Value::List([2, 3, 4])
+```
+<!-- => [2, 3, 4] -->
+
+<!-- example: minor/slice#strhead -->
+```rust
+slice(Value::str("abcdef"), Some(-3), None, false); // Value::Str("abc")  (drops the last 3)
+```
+<!-- => "abc" -->
+
+`pad` pads on the right (negative padding pads on the left):
+
+<!-- example: minor/pad#right -->
+```rust
+pad(Value::str("a"), Some(3), None); // "a  "
+```
+<!-- => "a  " -->
+
+`get_prop` reads a key from a map or list:
+
+<!-- example: minor/getprop#hit -->
+```rust
+get_prop(&Value::map_of([("x".into(), Value::Num(1.0))]), &Value::str("x"), Value::Noval); // Value::Num(1.0)
+```
+<!-- => 1 -->
+
+`keys_of` returns sorted string keys of a map:
+
+<!-- example: minor/keysof#sorted -->
+```rust
+keys_of(&Value::map_of([("b".into(), Value::Num(4.0)), ("a".into(), Value::Num(5.0))]));
+// Value::List(["a", "b"])  (sorted)
+```
+<!-- => ["a", "b"] -->
+
+`filter` passes each `(key, value)` pair to the check and returns the matching
+**values** (not the pairs), as a `Value::List`:
+
+<!-- example: minor/filter#gt3 -->
+```rust
+filter(
+    &Value::list(vec![
+        Value::Num(1.0), Value::Num(2.0), Value::Num(3.0), Value::Num(4.0), Value::Num(5.0),
+    ]),
+    |(_k, v)| matches!(v, Value::Num(n) if *n > 3.0),
+);
+// Value::List([4, 5])
+```
+<!-- => [4, 5] -->
+
+
 ## Regex
 
 Uniform six-function regex API (see `/design/REGEX_API.md`). The Rust port

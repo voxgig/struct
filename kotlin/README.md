@@ -98,6 +98,12 @@ fun isempty(value: Any?): Boolean
 fun isfunc(value: Any?): Boolean
 ```
 
+<!-- example: minor/isnode#map -->
+```kotlin
+Struct.isnode(linkedMapOf("a" to 1))   // true
+```
+<!-- => true -->
+
 ### Type inspection
 
 ```kotlin
@@ -121,6 +127,18 @@ fun items(value: Any?): List<List<Any?>>
 fun strkey(key: Any?): String
 ```
 
+<!-- example: minor/getprop#hit -->
+```kotlin
+Struct.getprop(linkedMapOf("x" to 1), "x")   // 1
+```
+<!-- => 1 -->
+
+<!-- example: minor/keysof#sorted -->
+```kotlin
+Struct.keysof(linkedMapOf("b" to 4, "a" to 5))   // ["a", "b"]  (sorted)
+```
+<!-- => ["a", "b"] -->
+
 ### Path operations
 
 ```kotlin
@@ -131,6 +149,12 @@ fun pathify(value: Any?): String
 fun pathify(value: Any?, from: Any?): String
 fun pathify(value: Any?, startIn: Any?, endIn: Any?): String
 ```
+
+<!-- example: getpath/basic#deep -->
+```kotlin
+Struct.getpath(linkedMapOf("a" to linkedMapOf("b" to linkedMapOf("c" to 42))), "a.b.c")   // 42
+```
+<!-- => 42 -->
 
 ### Tree operations
 
@@ -154,6 +178,42 @@ fun interface WalkApply {
 }
 ```
 
+<!-- example: minor/size#three -->
+```kotlin
+Struct.size(listOf(1, 2, 3))   // 3
+```
+<!-- => 3 -->
+
+`slice` keeps the first *N*; a negative `start` drops the last *|start|*
+items, and `end` is exclusive (pass `null` for an open end):
+
+<!-- example: minor/slice#mid -->
+```kotlin
+Struct.slice(listOf(1, 2, 3, 4, 5), 1, 4)   // [2, 3, 4]
+```
+<!-- => [2, 3, 4] -->
+
+<!-- example: minor/slice#strhead -->
+```kotlin
+Struct.slice("abcdef", -3, null)   // "abc"  (drops the last 3)
+```
+<!-- => "abc" -->
+
+<!-- example: minor/pad#right -->
+```kotlin
+Struct.pad("a", 3, null)   // "a  "
+```
+<!-- => "a  " -->
+
+`filter` passes each `[key, value]` pair to the check and returns the
+matching **values** (not the pairs):
+
+<!-- example: minor/filter#gt3 -->
+```kotlin
+Struct.filter(listOf(1, 2, 3, 4, 5)) { (it[1] as Int) > 3 }   // [4, 5]
+```
+<!-- => [4, 5] -->
+
 ### Composition: inject, transform, validate, select
 
 ```kotlin
@@ -170,6 +230,32 @@ fun select(children: Any?, query: Any?): MutableList<Any?>
 `modify`, `handler`, `meta`, and `errs` (an `errs` `MutableList`
 collects errors instead of throwing).
 
+A transform command like `$EACH` appears in **value** position — as the
+first element of a list `['`$EACH`', path, subspec]` — mapping the
+sub-spec over every entry at `path` (in Kotlin source the `$` is escaped
+as `\$` because it starts a string template):
+
+<!-- example: transform/each#basic -->
+```kotlin
+Struct.transform(
+    linkedMapOf("v" to 1, "a" to listOf(linkedMapOf("q" to 13), linkedMapOf("q" to 23))),
+    linkedMapOf("x" to linkedMapOf("y" to listOf("`\$EACH`", "a",
+        linkedMapOf("q" to "`\$COPY`", "r" to "`.q`", "p" to "`...v`")))),
+)
+// { x: { y: [ { q: 13, r: 13, p: 1 }, { q: 23, r: 23, p: 1 } ] } }
+```
+<!-- => {"x": {"y": [{"q": 13, "r": 13, "p": 1}, {"q": 23, "r": 23, "p": 1}]}} -->
+
+Putting a command in **key** position (or, for `$APPLY`, directly under a
+map) is an error — commands must be list values:
+
+<!-- example: transform/apply#badkey -->
+```kotlin
+Struct.transform(linkedMapOf<String, Any?>(), linkedMapOf("x" to "`\$APPLY`"))
+// throws: $APPLY: invalid placement in parent map, expected: list.
+```
+<!-- throws: invalid placement in parent map -->
+
 ### Strings / URL / JSON
 
 ```kotlin
@@ -183,6 +269,33 @@ fun join(arr: Any?, sep: Any?, url: Any?): String
 fun replace(s: Any?, from: Any?, to: Any?): String
 fun pathify(value: Any?): String                     // (also above)
 ```
+
+`jsonify` pretty-prints by default (indent 2); pass `mapOf("indent" to 0)`
+for the compact form:
+
+<!-- example: minor/jsonify#map -->
+```kotlin
+Struct.jsonify(linkedMapOf("a" to 1))
+// {
+//   "a": 1
+// }
+```
+<!-- => "{\n  \"a\": 1\n}" -->
+
+<!-- example: minor/jsonify#compact -->
+```kotlin
+Struct.jsonify(linkedMapOf("a" to 1, "b" to 2), mapOf("indent" to 0))   // {"a":1,"b":2}
+```
+<!-- => "{\"a\":1,\"b\":2}" -->
+
+`stringify` is the compact, quote-light form — keys are sorted and object
+braces are kept; the second argument caps the length (the `...` counts):
+
+<!-- example: minor/stringify#max -->
+```kotlin
+Struct.stringify("verylongstring", 5)   // "ve..."
+```
+<!-- => "ve..." -->
 
 ### Builders and injection helpers
 

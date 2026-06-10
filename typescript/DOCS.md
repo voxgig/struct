@@ -123,11 +123,27 @@ walk(tree, (key, val, parent, path) => {
 ```
 
 ### Serialise deterministically
+`jsonify` pretty-prints by default (indent 2); pass `{ indent: 0 }` for compact.
+`stringify` is the quote-light human form (keys sorted), for logs.
+
+<!-- example: minor/jsonify#brace -->
 ```ts
-jsonify(value)              // compact, insertion-ordered keys
-jsonify(value, { indent: 2 })
-stringify(value, 80)        // truncated human form, for logs
+jsonify({ a: 1, b: [2, 3] })
+// {
+//   "a": 1,
+//   "b": [
+//     2,
+//     3
+//   ]
+// }
 ```
+<!-- => "{\n  \"a\": 1,\n  \"b\": [\n    2,\n    3\n  ]\n}" -->
+
+<!-- example: minor/stringify#brace -->
+```ts
+stringify({ a: 1, b: [2, 3] })   // '{a:1,b:[2,3]}'
+```
+<!-- => "{a:1,b:[2,3]}" -->
 
 For more task recipes (merge configs, rename fields, `$EACH`, `$MERGE`,
 `$FORMAT`, `$ONE`, `$EXACT`, …) see the language-neutral

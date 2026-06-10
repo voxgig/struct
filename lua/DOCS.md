@@ -143,11 +143,27 @@ end)
 ```
 
 ### Serialise deterministically
+`jsonify` pretty-prints by default (indent 2); pass `{ indent = 0 }` for compact.
+`stringify` is the quote-light human form (keys sorted), for logs.
+
+<!-- example: minor/jsonify#brace -->
 ```lua
-struct.jsonify(value)        -- compact, insertion-ordered keys
-struct.jsonify(value, 2)     -- pretty, 2-space indent
-struct.stringify(value, 80)  -- truncated human form, for logs
+struct.jsonify({ a = 1, b = { 2, 3 } })
+-- {
+--   "a": 1,
+--   "b": [
+--     2,
+--     3
+--   ]
+-- }
 ```
+<!-- => "{\n  \"a\": 1,\n  \"b\": [\n    2,\n    3\n  ]\n}" -->
+
+<!-- example: minor/stringify#brace -->
+```lua
+struct.stringify({ a = 1, b = { 2, 3 } })   -- '{a:1,b:[2,3]}'
+```
+<!-- => "{a:1,b:[2,3]}" -->
 
 For more task recipes (merge configs, rename fields, `$EACH`, `$MERGE`,
 `$FORMAT`, `$ONE`, `$EXACT`, …) see the language-neutral

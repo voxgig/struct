@@ -132,11 +132,28 @@ across siblings — clone it (`array_values($path)`) inside the callback if you
 need to retain it past the visit.
 
 ### Serialise deterministically
+`jsonify` pretty-prints by default (indent 2); pass `(object)['indent' => 0]` for compact.
+`stringify` is the quote-light human form (keys sorted), for logs.
+
+<!-- example: minor/jsonify#brace -->
 ```php
-Struct::jsonify(['a' => 1]);                                  // compact-ish, insertion order
-Struct::jsonify($value, (object)['indent' => 2]);             // pretty
-Struct::stringify($value, 80);                                // truncated human form, for logs
+Struct::jsonify(['a' => 1, 'b' => [2, 3]]);
+// {
+//   "a": 1,
+//   "b": [
+//     2,
+//     3
+//   ]
+// }
 ```
+<!-- => "{\n  \"a\": 1,\n  \"b\": [\n    2,\n    3\n  ]\n}" -->
+
+<!-- example: minor/stringify#brace -->
+```php
+Struct::stringify(['a' => 1, 'b' => [2, 3]]);   // '{a:1,b:[2,3]}'
+```
+<!-- => "{a:1,b:[2,3]}" -->
+
 `jsonify` reads its options off a flags object (`indent`, `offset`).
 
 For more task recipes (merge configs, rename fields, `$EACH`, `$MERGE`,

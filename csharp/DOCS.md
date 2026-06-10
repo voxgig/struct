@@ -140,6 +140,33 @@ StructUtils.Transform(
     state);
 ```
 
+### Drive structural ops with transform commands
+
+A command like `$EACH` appears in **value** position — as the first element
+of a list `["`$EACH`", path, subspec]` — mapping the sub-spec over every
+entry at `path`:
+
+<!-- example: transform/each#basic -->
+```csharp
+StructUtils.Transform(
+    StructUtils.Jm("v", 1, "a", StructUtils.Jt(StructUtils.Jm("q", 13), StructUtils.Jm("q", 23))),
+    StructUtils.Jm("x", StructUtils.Jm("y",
+        StructUtils.Jt("`$EACH`", "a", StructUtils.Jm("q", "`$COPY`", "r", "`.q`", "p", "`...v`")))));
+// { x = { y = [ { q = 13, r = 13, p = 1 }, { q = 23, r = 23, p = 1 } ] } }
+```
+<!-- => {"x": {"y": [{"q": 13, "r": 13, "p": 1}, {"q": 23, "r": 23, "p": 1}]}} -->
+
+Putting a command in **key** position (or, for `$APPLY`, directly under a
+map) is an error — commands must be list values:
+
+<!-- example: transform/apply#badkey -->
+```csharp
+StructUtils.Transform(new Dictionary<string, object?>(),
+    StructUtils.Jm("x", "`$APPLY`"));
+// throws: $APPLY: invalid placement in parent map, expected: list.
+```
+<!-- throws: invalid placement in parent map -->
+
 ### Keep a `Walk` path past the callback
 
 The `path` argument is one mutable `List<object?>` reused for the whole
@@ -160,6 +187,28 @@ StructUtils.Jsonify(value);               // indent defaults to 2 (pretty)
 StructUtils.Jsonify(value, indent: 0);    // compact, insertion-ordered keys
 StructUtils.Stringify(value, 80);         // truncated human form, for logs
 ```
+
+`Jsonify` pretty-prints by default (indent 2); `Stringify` is the
+quote-light human form (keys sorted), for logs.
+
+<!-- example: minor/jsonify#brace -->
+```csharp
+StructUtils.Jsonify(StructUtils.Jm("a", 1, "b", StructUtils.Jt(2, 3)));
+// {
+//   "a": 1,
+//   "b": [
+//     2,
+//     3
+//   ]
+// }
+```
+<!-- => "{\n  \"a\": 1,\n  \"b\": [\n    2,\n    3\n  ]\n}" -->
+
+<!-- example: minor/stringify#brace -->
+```csharp
+StructUtils.Stringify(StructUtils.Jm("a", 1, "b", StructUtils.Jt(2, 3)));   // {a:1,b:[2,3]}
+```
+<!-- => "{a:1,b:[2,3]}" -->
 
 For more task recipes (merge configs, rename fields, `$EACH`, `$MERGE`,
 `$FORMAT`, `$ONE`, `$EXACT`, …) see the language-neutral

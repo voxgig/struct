@@ -121,6 +121,36 @@ jobs:
           python-version: '3.12'
       - run: python3 tools/check_parity.py
 
+  docs-examples:
+    name: documentation examples match corpus
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # 1. every anchored example binds to a tested corpus entry and its declared
+      #    output matches. 2. every anchor has an up-to-date canonical marker
+      #    (the generator would not change anything).
+      - run: python3 tools/check_doc_examples.py
+      - run: python3 tools/gen_doc_examples.py --check
+
+  corpus-freshness:
+    name: corpus regenerates from *.jsonic
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+      - name: Recompile build/test/test.json from the *.jsonic sources
+        working-directory: ./build
+        run: |
+          npm install --no-audit --no-fund
+          npm run test-model
+      - name: Fail if the committed test.json is stale
+        run: git diff --exit-code build/test/test.json
+
   # ---- Per-language dependency / security audits ----
 
   audit-typescript:

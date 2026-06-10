@@ -4,6 +4,14 @@
       "isnode": {
         "set": [
           {
+            "id": "minor/isnode#map",
+            "doc": true,
+            "in": {
+              "a": 1
+            },
+            "out": true
+          },
+          {
             "in": {
               "a": 1
             },
@@ -335,6 +343,17 @@
       },
       "getprop": {
         "set": [
+          {
+            "id": "minor/getprop#hit",
+            "doc": true,
+            "in": {
+              "val": {
+                "x": 1
+              },
+              "key": "x"
+            },
+            "out": 1
+          },
           {
             "in": {
               "val": {
@@ -1510,6 +1529,18 @@
       "keysof": {
         "set": [
           {
+            "id": "minor/keysof#sorted",
+            "doc": true,
+            "in": {
+              "b": 4,
+              "a": 5
+            },
+            "out": [
+              "a",
+              "b"
+            ]
+          },
+          {
             "out": []
           },
           {
@@ -2290,6 +2321,29 @@
       "stringify": {
         "set": [
           {
+            "id": "minor/stringify#brace",
+            "doc": true,
+            "in": {
+              "val": {
+                "a": 1,
+                "b": [
+                  2,
+                  3
+                ]
+              }
+            },
+            "out": "{a:1,b:[2,3]}"
+          },
+          {
+            "id": "minor/stringify#max",
+            "doc": true,
+            "in": {
+              "val": "verylongstring",
+              "max": 5
+            },
+            "out": "ve..."
+          },
+          {
             "in": {
               "val": 1
             },
@@ -2398,6 +2452,44 @@
       },
       "jsonify": {
         "set": [
+          {
+            "id": "minor/jsonify#map",
+            "doc": true,
+            "in": {
+              "val": {
+                "a": 1
+              }
+            },
+            "out": "{\n  \"a\": 1\n}"
+          },
+          {
+            "id": "minor/jsonify#brace",
+            "doc": true,
+            "in": {
+              "val": {
+                "a": 1,
+                "b": [
+                  2,
+                  3
+                ]
+              }
+            },
+            "out": "{\n  \"a\": 1,\n  \"b\": [\n    2,\n    3\n  ]\n}"
+          },
+          {
+            "id": "minor/jsonify#compact",
+            "doc": true,
+            "in": {
+              "val": {
+                "a": 1,
+                "b": 2
+              },
+              "flags": {
+                "indent": 0
+              }
+            },
+            "out": "{\"a\":1,\"b\":2}"
+          },
           {
             "in": {
               "val": 1
@@ -3190,6 +3282,8 @@
       "filter": {
         "set": [
           {
+            "id": "minor/filter#gt3",
+            "doc": true,
             "in": {
               "val": [
                 1,
@@ -3301,6 +3395,16 @@
       "size": {
         "set": [
           {
+            "id": "minor/size#three",
+            "doc": true,
+            "in": [
+              1,
+              2,
+              3
+            ],
+            "out": 3
+          },
+          {
             "in": [],
             "out": 0
           },
@@ -3389,6 +3493,35 @@
       },
       "slice": {
         "set": [
+          {
+            "id": "minor/slice#mid",
+            "doc": true,
+            "in": {
+              "val": [
+                1,
+                2,
+                3,
+                4,
+                5
+              ],
+              "start": 1,
+              "end": 4
+            },
+            "out": [
+              2,
+              3,
+              4
+            ]
+          },
+          {
+            "id": "minor/slice#strhead",
+            "doc": true,
+            "in": {
+              "val": "abcdef",
+              "start": -3
+            },
+            "out": "abc"
+          },
           {
             "in": {
               "val": [
@@ -4262,6 +4395,15 @@
       "pad": {
         "set": [
           {
+            "id": "minor/pad#right",
+            "doc": true,
+            "in": {
+              "val": "a",
+              "pad": 3
+            },
+            "out": "a  "
+          },
+          {
             "in": {
               "val": "a",
               "pad": 0
@@ -4773,6 +4915,21 @@
     "getpath": {
       "basic": {
         "set": [
+          {
+            "id": "getpath/basic#deep",
+            "doc": true,
+            "in": {
+              "path": "a.b.c",
+              "store": {
+                "a": {
+                  "b": {
+                    "c": 42
+                  }
+                }
+              }
+            },
+            "out": 42
+          },
           {
             "in": {
               "path": "a",
@@ -9674,6 +9831,8 @@
             }
           },
           {
+            "id": "transform/each#basic",
+            "doc": true,
             "in": {
               "data": {
                 "v": 1,
@@ -12779,6 +12938,8 @@
             "err": "$APPLY: invalid placement as key, expected: value."
           },
           {
+            "id": "transform/apply#badkey",
+            "doc": true,
             "in": {
               "data": {},
               "spec": {
