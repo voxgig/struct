@@ -34,6 +34,18 @@ my $val   = Voxgig::Struct::getpath($store, 'db.host');
 # $val eq "localhost"
 ```
 
+`getpath($store, $path)` reads a deep value by dot path (store first, then
+path — matching the canonical TS argument order):
+
+<!-- example: getpath/basic#deep -->
+```perl
+Voxgig::Struct::getpath(
+  Voxgig::Struct::jm(a => Voxgig::Struct::jm(b => Voxgig::Struct::jm(c => 42))),
+  'a.b.c',
+);   # 42
+```
+<!-- => 42 -->
+
 
 ## Function reference
 
@@ -103,6 +115,142 @@ because they don't preserve insertion order.
   `injectorArgs`, `injectChild`.
 - Builder helpers: `jm` (insertion-ordered map literal), `jt`
   (list literal).
+
+## Examples
+
+Each example below uses `jm` (insertion-ordered map literal) and `jt`
+(list literal) to build inputs; the inline comment shows the value the
+call returns.
+
+### Predicates
+
+<!-- example: minor/isnode#map -->
+```perl
+Voxgig::Struct::isnode(Voxgig::Struct::jm(a => 1));   # true (a map is a node)
+```
+<!-- => true -->
+
+### Size, slice, pad
+
+<!-- example: minor/size#three -->
+```perl
+Voxgig::Struct::size([1, 2, 3]);   # 3
+```
+<!-- => 3 -->
+
+`slice` keeps the first *N*; a negative `start` drops the last *|start|*
+items, and `end` is exclusive:
+
+<!-- example: minor/slice#mid -->
+```perl
+Voxgig::Struct::slice([1, 2, 3, 4, 5], 1, 4);   # [2, 3, 4]
+```
+<!-- => [2, 3, 4] -->
+
+<!-- example: minor/slice#strhead -->
+```perl
+Voxgig::Struct::slice('abcdef', -3);   # 'abc'  (keeps the first 3)
+```
+<!-- => "abc" -->
+
+<!-- example: minor/pad#right -->
+```perl
+Voxgig::Struct::pad('a', 3);   # 'a  '  (pad right to width 3)
+```
+<!-- => "a  " -->
+
+### Property access
+
+<!-- example: minor/getprop#hit -->
+```perl
+Voxgig::Struct::getprop(Voxgig::Struct::jm(x => 1), 'x');   # 1
+```
+<!-- => 1 -->
+
+`keysof` returns map keys sorted alphabetically:
+
+<!-- example: minor/keysof#sorted -->
+```perl
+Voxgig::Struct::keysof(Voxgig::Struct::jm(b => 4, a => 5));   # ['a', 'b']
+```
+<!-- => ["a", "b"] -->
+
+### Filter
+
+`filter` passes each `[key, value]` pair to the check and returns the
+matching **values** (not the pairs):
+
+<!-- example: minor/filter#gt3 -->
+```perl
+Voxgig::Struct::filter([1, 2, 3, 4, 5], sub {
+  my ($pair) = @_;
+  return $pair->[1] > 3;
+});   # [4, 5]
+```
+<!-- => [4, 5] -->
+
+### JSON serialisation
+
+`jsonify($value)` pretty-prints with a 2-space indent by default; pass
+`jm(indent => 0)` for the compact form:
+
+<!-- example: minor/jsonify#map -->
+```perl
+Voxgig::Struct::jsonify(Voxgig::Struct::jm(a => 1));
+# {
+#   "a": 1
+# }
+```
+<!-- => "{\n  \"a\": 1\n}" -->
+
+<!-- example: minor/jsonify#compact -->
+```perl
+Voxgig::Struct::jsonify(Voxgig::Struct::jm(a => 1, b => 2), Voxgig::Struct::jm(indent => 0));
+# '{"a":1,"b":2}'
+```
+<!-- => "{\"a\":1,\"b\":2}" -->
+
+`stringify` is the compact, quote-light human form — keys are sorted and
+object braces are kept; the second argument caps the length (the `...`
+counts):
+
+<!-- example: minor/stringify#max -->
+```perl
+Voxgig::Struct::stringify('verylongstring', 5);   # 've...'
+```
+<!-- => "ve..." -->
+
+### Transform commands
+
+A command like `$EACH` appears in **value** position — as the first element
+of a list — mapping the sub-spec over every entry at `path`:
+
+<!-- example: transform/each#basic -->
+```perl
+Voxgig::Struct::transform(
+  Voxgig::Struct::jm(v => 1, a => Voxgig::Struct::jt(
+    Voxgig::Struct::jm(q => 13), Voxgig::Struct::jm(q => 23))),
+  Voxgig::Struct::jm(x => Voxgig::Struct::jm(y => Voxgig::Struct::jt(
+    '`$EACH`', 'a',
+    Voxgig::Struct::jm(q => '`$COPY`', r => '`.q`', p => '`...v`')))),
+);
+# { x => { y => [ { q => 13, r => 13, p => 1 }, { q => 23, r => 23, p => 1 } ] } }
+```
+<!-- => {"x": {"y": [{"q": 13, "r": 13, "p": 1}, {"q": 23, "r": 23, "p": 1}]}} -->
+
+Putting a command in **key** position (or, for `$APPLY`, directly under a
+map) is an error — commands must be list values:
+
+<!-- example: transform/apply#badkey -->
+```perl
+Voxgig::Struct::transform(
+  Voxgig::Struct::jm(),
+  Voxgig::Struct::jm(x => '`$APPLY`'),
+);
+# dies: $APPLY: invalid placement in parent map.
+```
+<!-- throws: invalid placement in parent map -->
+
 
 ## Regex
 

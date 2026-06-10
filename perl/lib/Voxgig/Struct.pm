@@ -174,21 +174,23 @@ use constant S_VIZ => ': ';
 # Type bit flags. Same numeric layout as the canonical TS:
 # T_any is all-bits-below set; the others are distinct bits decreasing
 # down the list. The order matches TYPENAME below for table-driven lookup.
-use constant T_any      => (1 << 13) - 1;
-use constant T_noval    => 1 << 13;
-use constant T_boolean  => 1 << 12;
-use constant T_decimal  => 1 << 11;
-use constant T_integer  => 1 << 10;
-use constant T_number   => 1 << 9;
-use constant T_string   => 1 << 8;
-use constant T_function => 1 << 7;
-use constant T_symbol   => 1 << 6;
-use constant T_null     => 1 << 5;
-use constant T_list     => 1 << 4;
-use constant T_map      => 1 << 3;
-use constant T_instance => 1 << 2;
-use constant T_scalar   => 1 << 1;
-use constant T_node     => 1 << 0;
+# Type bit-flags. Values match the canonical TypeScript scheme exactly so that
+# typify()/typename() return the same numbers the shared corpus pins.
+use constant T_any      => (1 << 31) - 1;
+use constant T_noval    => 1 << 30;
+use constant T_boolean  => 1 << 29;
+use constant T_decimal  => 1 << 28;
+use constant T_integer  => 1 << 27;
+use constant T_number   => 1 << 26;
+use constant T_string   => 1 << 25;
+use constant T_function => 1 << 24;
+use constant T_symbol   => 1 << 23;
+use constant T_null     => 1 << 22;
+use constant T_list     => 1 << 14;
+use constant T_map      => 1 << 13;
+use constant T_instance => 1 << 12;
+use constant T_scalar   => 1 << 7;
+use constant T_node     => 1 << 6;
 
 our %TYPENAME = (
     T_noval()    => S_nil,
@@ -344,9 +346,29 @@ sub _ensure_ordered {
 # Type predicates
 # ============================================================================
 
+# TYPENAME indexed by clz32(typebit): the human name of a type bit-field is the
+# name of its highest set bit (matches canonical getelem(TYPENAME, clz32(t))).
+our @TYPENAME = (
+    S_any, S_nil, S_boolean, S_decimal, S_integer, S_number, S_string,
+    S_function, S_symbol, S_null,
+    '', '', '', '', '', '', '',
+    S_list, S_map, S_instance,
+    '', '', '', '',
+    S_scalar, S_node,
+);
+
 sub typename {
     my ($t) = @_;
-    return $TYPENAME{$t} // S_any;
+    $t = 0 unless defined $t;
+    $t = int($t) & 0xFFFFFFFF;
+    return $TYPENAME[0] if $t == 0;
+    # clz32: index of the highest set bit, counted from the top of 32 bits.
+    my $hb = 0;
+    my $v = $t;
+    while ($v > 1) { $v >>= 1; $hb++ }
+    my $clz = 31 - $hb;
+    my $name = $TYPENAME[$clz];
+    return (defined $name && $name ne '') ? $name : $TYPENAME[0];
 }
 
 sub getdef {
@@ -489,10 +511,12 @@ sub slice {
 
 sub pad {
     my ($str, $padding, $padchar) = @_;
-    $padchar = ' ' unless defined $padchar;
-    return $str unless defined $padding;
-    return $str if $padding == 0;
-    my $s = defined $str ? "$str" : '';
+    $str = _is_string_sv($str) ? $str : stringify($str);
+    $padding = 44 unless defined $padding;
+    # Use the first character of padchar (or a space); a multi-char padchar
+    # collapses to its first char, matching the canonical TS implementation.
+    $padchar = (defined $padchar && length $padchar) ? substr($padchar, 0, 1) : ' ';
+    my $s = "$str";
     my $need = abs($padding) - length($s);
     return $s if $need <= 0;
     my $fill = $padchar x $need;
@@ -502,22 +526,24 @@ sub pad {
 # Compute a bit-flag describing the type of value.
 sub typify {
     my ($value) = @_;
-    return T_noval    if !defined $value || is_none($value);
-    return T_null     if is_jnull($value);
-    if (is_jbool($value)) { return T_boolean }
-    if (is_sentinel($value)) { return T_map }
+    return T_noval if !defined $value || is_none($value);
+    return T_scalar | T_null if is_jnull($value);
+    if (is_jbool($value)) { return T_scalar | T_boolean }
+    if (is_sentinel($value)) { return T_node | T_map }
     if (ref $value) {
-        if (islist($value)) { return T_list }
-        if (ismap($value))  { return T_map }
-        if (isfunc($value)) { return T_function }
-        return T_instance;
+        if (islist($value)) { return T_node | T_list }
+        if (isfunc($value)) { return T_scalar | T_function }
+        if (ismap($value))  { return T_node | T_map }
+        return T_node | T_instance;
     }
     # Scalar.
     if (_is_number_sv($value)) {
-        if ($value =~ /[.eE]/ || (int($value) != $value)) { return T_decimal }
-        return T_integer;
+        if ($value =~ /[.eE]/ || (int($value) != $value)) {
+            return T_scalar | T_number | T_decimal;
+        }
+        return T_scalar | T_number | T_integer;
     }
-    return T_string;
+    return T_scalar | T_string;
 }
 
 # Get an element from a list with negative-index support and a fallback.
@@ -537,7 +563,12 @@ sub getelem {
     $k = $len + $k if $k < 0;
     return $alt if $k < 0 || $k >= $len;
     my $v = $val->[$k];
-    return is_none($v) ? $alt : (defined $v ? $v : $alt);
+    # A null (or absent/NONE) slot counts as "no value" → alt, the same
+    # Group A rule getprop applies; a function alt is called.
+    if (!defined $v || is_none($v) || is_jnull($v)) {
+        return (typify($alt) & T_function) ? $alt->() : $alt;
+    }
+    return $v;
 }
 
 sub getprop {
@@ -583,17 +614,15 @@ sub _lookup {
 
 sub strkey {
     my ($key) = @_;
-    return '' unless defined $key;
-    return '' if is_none($key) || is_jnull($key);
-    if (!ref $key) {
-        if (looks_like_number($key)) {
-            # Integer-ish keys formatted without trailing zeros.
-            if ($key == int($key) && $key !~ /[.eE]/) { return "" . int($key) }
-            return "$key";
-        }
-        return "$key";
+    return S_MT if !defined $key || is_none($key);
+    my $t = typify($key);
+    if ($t & T_string)  { return $key }
+    if ($t & T_boolean) { return S_MT }
+    if ($t & T_number)  {
+        # Integers stringify as-is; non-integers truncate toward zero.
+        return ($key == int($key)) ? "" . $key : "" . int($key);
     }
-    return '';
+    return S_MT;
 }
 
 sub keysof {
@@ -635,31 +664,31 @@ sub haskey {
 # items: return [ [k0,v0], [k1,v1] ... ]. With $apply, apply to each pair.
 sub items {
     my ($val, $apply) = @_;
+    my $islist = islist($val);
     my @out;
-    if (islist($val)) {
-        for (my $i = 0; $i < @$val; $i++) {
-            my $pair = [ "$i", $val->[$i] ];
-            push @out, defined $apply ? $apply->($pair) : $pair;
-        }
-    }
-    elsif (ismap($val)) {
-        for my $k (_map_keys($val)) {
-            my $pair = [ "$k", $val->{$k} ];
-            push @out, defined $apply ? $apply->($pair) : $pair;
-        }
+    # keysof() returns sorted map keys (and '0','1',… for lists), so items are
+    # in the same order the canonical implementation produces.
+    for my $k (@{ keysof($val) }) {
+        my $v = $islist ? $val->[$k] : $val->{$k};
+        my $pair = [ "$k", $v ];
+        push @out, defined $apply ? $apply->($pair) : $pair;
     }
     return \@out;
 }
 
 sub flatten {
-    my ($val) = @_;
-    return [] unless islist($val);
+    my ($list, $depth) = @_;
+    return $list unless islist($list);
+    $depth = getdef($depth, 1);
+    return _flatten_depth($list, $depth);
+}
+
+sub _flatten_depth {
+    my ($list, $depth) = @_;
     my @out;
-    my @stack = reverse @$val;
-    while (@stack) {
-        my $item = pop @stack;
-        if (islist($item)) {
-            push @stack, reverse @$item;
+    for my $item (@$list) {
+        if ($depth > 0 && islist($item)) {
+            push @out, @{ _flatten_depth($item, $depth - 1) };
         }
         else {
             push @out, $item;
@@ -676,13 +705,13 @@ sub filter {
     if (islist($val)) {
         for (my $i = 0; $i < @$val; $i++) {
             my $pair = [ "$i", $val->[$i] ];
-            push @out, $pair if $pred->($pair);
+            push @out, $val->[$i] if $pred->($pair);
         }
     }
     elsif (ismap($val)) {
         for my $k (_map_keys($val)) {
             my $pair = [ "$k", $val->{$k} ];
-            push @out, $pair if $pred->($pair);
+            push @out, $val->{$k} if $pred->($pair);
         }
     }
     return \@out;
@@ -708,31 +737,127 @@ sub escurl {
 
 # Join list parts with a separator. With trailing-separator option.
 sub join {
-    my ($parts, $sep, $strip_empty) = @_;
-    $sep = '' unless defined $sep;
-    return '' unless islist($parts);
-    my @list = grep { defined $_ && !is_none($_) && $_ ne '' || !$strip_empty } @$parts;
-    return CORE::join($sep, map { defined $_ ? "$_" : '' } @list);
+    my ($arr, $sep, $url) = @_;
+    my $sarr = size($arr);
+    my $sepdef = getdef($sep, S_CM);
+    my $sepre = (size($sepdef) == 1) ? escre($sepdef) : $NONE;
+
+    # Keep only the non-empty string elements.
+    my $inner = filter($arr, sub {
+        my $n = $_[0];
+        return (0 < (T_string & typify($n->[1]))) && (S_MT ne $n->[1]);
+    });
+
+    # Strip the separator at element boundaries and collapse internal runs of
+    # the separator to a single one, so a single sep ends up between elements.
+    my $mapped = items($inner, sub {
+        my $n = $_[0];
+        my $i = 0 + $n->[0];
+        my $s = $n->[1];
+        if (!is_none($sepre) && S_MT ne $sepre) {
+            if ($url && 0 == $i) {
+                return re_replace($sepre . '+$', $s, S_MT);
+            }
+            if (0 < $i) {
+                $s = re_replace('^' . $sepre . '+', $s, S_MT);
+            }
+            if ($i < $sarr - 1 || !$url) {
+                $s = re_replace($sepre . '+$', $s, S_MT);
+            }
+            $s = re_replace(
+                '([^' . $sepre . '])' . $sepre . '+([^' . $sepre . '])',
+                $s,
+                sub { $_[0][1] . $sepdef . $_[0][2] },
+            );
+        }
+        return $s;
+    });
+
+    my $result = filter($mapped, sub { S_MT ne $_[0]->[1] });
+    return CORE::join($sepdef, @$result);
 }
 
 # Convert a path to a dotted string. depth>0 → start at that depth.
 sub pathify {
-    my ($val, $depth) = @_;
-    $depth = 0 unless defined $depth;
-    my @parts;
-    if (islist($val)) { @parts = @$val }
-    elsif (!ref $val && defined $val) {
-        @parts = split /\./, "$val";
+    my ($val, $startin, $endin) = @_;
+    my $pathstr = $NONE;
+
+    my $path;
+    if (islist($val)) {
+        $path = $val;
     }
-    @parts = @parts[$depth .. $#parts] if $depth && @parts > $depth;
-    return CORE::join('.', map { defined $_ ? "$_" : '' } @parts);
+    elsif (!ref($val) && defined($val) && _is_string_sv($val)) {
+        $path = [$val];
+    }
+    elsif (!ref($val) && defined($val) && _is_number_sv($val)) {
+        $path = [$val];
+    }
+    else {
+        $path = $NONE;
+    }
+
+    my $start = (!defined $startin) ? 0 : ($startin > -1 ? $startin : 0);
+    my $end   = (!defined $endin)   ? 0 : ($endin   > -1 ? $endin   : 0);
+
+    if (!is_none($path) && $start >= 0) {
+        $path = slice($path, $start, scalar(@$path) - $end);
+        if (scalar(@$path) == 0) {
+            $pathstr = '<root>';
+        }
+        else {
+            # Drop non-key segments (booleans, null, nodes); render numbers as
+            # truncated integers and strip dots out of string segments.
+            my $kept = filter($path, sub { iskey($_[0]->[1]) });
+            my $segs = items($kept, sub {
+                my $p = $_[0]->[1];
+                if (!ref($p) && _is_number_sv($p)) { return S_MT . int($p) }
+                my $s = "$p";
+                $s =~ s/\.//g;
+                return $s;
+            });
+            $pathstr = Voxgig::Struct::join($segs, S_DT);
+        }
+    }
+
+    if (is_none($pathstr)) {
+        # Canonical NONE is `undefined`, so an absent value renders the same as
+        # NONE (no trailing ":value").
+        my $absent = is_none($val) || !defined($val);
+        $pathstr = '<unknown-path'
+            . ($absent ? S_MT : (S_CN . stringify($val, 47)))
+            . '>';
+    }
+
+    return $pathstr;
 }
 
 # Compact-format a JSON-like value to a string (no whitespace).
 sub jsonify {
-    my ($val, $indent) = @_;
-    $indent = 0 unless defined $indent;
-    return _jsonify_inner($val, $indent, 0);
+    my ($val, $flags) = @_;
+    # Canonical signature: jsonify(val, { indent => N, offset => M }). Default
+    # indent is 2 (pretty). A bare numeric second arg is also accepted as the
+    # indent for backward compatibility.
+    my $indent = 2;
+    my $offset = 0;
+    if (defined $flags) {
+        if (ismap($flags)) {
+            $indent = $flags->{indent} if defined $flags->{indent};
+            $offset = $flags->{offset} if defined $flags->{offset};
+        }
+        elsif (!ref $flags && Scalar::Util::looks_like_number($flags)) {
+            $indent = $flags;
+        }
+    }
+    my $str = _jsonify_inner($val, $indent, 0);
+    if (defined $offset && $offset > 0) {
+        # Left-offset the entire indented JSON so it aligns with surrounding
+        # code indented by $offset. The first brace stays on the assignment line.
+        my @lines = split /\n/, $str, -1;
+        shift @lines;
+        my @padded = map { (' ' x $offset) . $_ } @lines;
+        $str = "{\n" . CORE::join("\n", @padded);
+    }
+    return $str;
 }
 
 sub _jsonify_inner {
@@ -910,7 +1035,7 @@ sub delprop {
         return $val unless defined $key && !ref($key) && looks_like_number($key);
         my $k = int($key);
         my $len = scalar @$val;
-        $k = $len + $k if $k < 0;
+        # A negative or out-of-bounds index is a no-op (no end-relative delete).
         return $val if $k < 0 || $k >= $len;
         splice(@$val, $k, 1);
         return $val;
@@ -938,11 +1063,15 @@ sub setprop {
         return $val unless defined $key && !ref($key) && looks_like_number($key);
         my $k = int($key);
         my $len = scalar @$val;
-        $k = $len + $k if $k < 0;
-        if ($k >= $len) {
-            $val->[$_] = $JNULL for $len .. $k - 1;
+        if ($k >= 0) {
+            # Set or append; an out-of-bounds index clamps to the end (append).
+            $k = $len if $k > $len;
+            $val->[$k] = $newval;
         }
-        $val->[$k] = $newval;
+        else {
+            # A negative index prepends.
+            unshift @$val, $newval;
+        }
         return $val;
     }
     if (ismap($val)) {
@@ -1639,20 +1768,28 @@ sub jt {
 # injectors (mirrors TS exports).
 # ============================================================================
 
+# Placement names for error messages (a key-mode is "key", value-mode "value").
+our %PLACEMENT = (
+    M_VAL()     => 'value',
+    M_KEYPRE()  => S_key,
+    M_KEYPOST() => S_key,
+);
+
 sub checkPlacement {
     my ($modes, $name, $parent_types, $inj) = @_;
     # modes can be a single mode bitmask. parent_types is a type-flag mask.
     if (!($inj->{mode} & $modes)) {
         push @{ $inj->{errs} }, '$' . $name . ': invalid placement as '
-            . ($MODENAME{ $inj->{mode} } // 'unknown') . ', expected: '
-            . CORE::join(',', map { $MODENAME{$_} // '?' } grep { $modes & $_ } (M_KEYPRE, M_KEYPOST, M_VAL));
+            . ($PLACEMENT{ $inj->{mode} } // 'unknown') . ', expected: '
+            . CORE::join(',', map { $PLACEMENT{$_} // '?' } grep { $modes & $_ } (M_KEYPRE, M_KEYPOST, M_VAL))
+            . '.';
         return 0;
     }
     if ($parent_types) {
         my $ptype = typify($inj->{parent});
         if (!($ptype & $parent_types)) {
             push @{ $inj->{errs} }, '$' . $name . ': invalid placement in parent '
-                . typename($ptype) . '.';
+                . typename($ptype) . ', expected: ' . typename($parent_types) . '.';
             return 0;
         }
     }
@@ -1668,7 +1805,11 @@ sub injectorArgs {
         my $arg = $args->[$i];
         my $atype = typify($arg);
         if ($expected != T_any && !($atype & $expected)) {
-            return ('argument ' . $i . ' not of type: ' . typename($expected), @$args);
+            return (
+                'invalid argument: ' . stringify($arg, 22) . ' (' . typename($atype)
+                    . ' at position ' . ($i + 1) . ') is not of type: ' . typename($expected) . '.',
+                @$args,
+            );
         }
         push @out, $arg;
     }
@@ -2111,9 +2252,12 @@ sub transform {
 
 sub _invalid_type_msg {
     my ($path, $needtype, $vt, $v, $whence) = @_;
-    my $vs = (!defined $v) ? 'no value' : stringify($v);
+    # Canonical: `null == v` (null OR undefined) renders as "no value", with no
+    # "typename: " prefix. Absent (NONE) and JSON null both count.
+    my $novalue = (!defined $v || is_none($v) || is_jnull($v));
+    my $vs = $novalue ? 'no value' : stringify($v);
     my $field = (size($path) > 1) ? ('field ' . pathify($path, 1) . ' to be ') : '';
-    my $extra = (defined $v) ? (typename($vt) . S_VIZ) : '';
+    my $extra = $novalue ? '' : (typename($vt) . S_VIZ);
     return 'Expected ' . $field . $needtype . ', but found ' . $extra . $vs . '.';
 }
 
@@ -2366,8 +2510,10 @@ sub _validation {
         }
         my $ckeys = keysof($cval);
         my $pkeys = keysof($pval);
+        # A map is open only if `$OPEN` is literally true; an absent flag (NONE,
+        # which is itself truthy in Perl) leaves the map closed.
         my $open_flag = getprop($pval, '`$OPEN`');
-        my $is_open = is_jbool($open_flag) ? !!$$open_flag : ($open_flag ? 1 : 0);
+        my $is_open = (is_jbool($open_flag) && ${$open_flag}) ? 1 : 0;
         if (size($pkeys) > 0 && !$is_open) {
             my @badkeys;
             for my $ck (@$ckeys) {

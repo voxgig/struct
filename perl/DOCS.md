@@ -140,10 +140,35 @@ Voxgig::Struct::is_none($v)    # true only for the NONE ("absent") sentinel
 
 ### Serialise deterministically
 ```perl
-Voxgig::Struct::jsonify($value);        # compact, insertion-ordered keys
-Voxgig::Struct::jsonify($value, 2);     # pretty, 2-space indent
-Voxgig::Struct::stringify($value, 80);  # truncated human form, for logs
+Voxgig::Struct::jsonify($value);                  # pretty, 2-space indent (default)
+Voxgig::Struct::jsonify($value, jm(indent => 0)); # compact, insertion-ordered keys
+Voxgig::Struct::stringify($value, 80);            # truncated human form, for logs
 ```
+
+`jsonify($value)` pretty-prints with a 2-space indent by default (lists and
+nested maps each gain a level):
+
+<!-- example: minor/jsonify#brace -->
+```perl
+Voxgig::Struct::jsonify(Voxgig::Struct::jm(a => 1, b => [2, 3]));
+# {
+#   "a": 1,
+#   "b": [
+#     2,
+#     3
+#   ]
+# }
+```
+<!-- => "{\n  \"a\": 1,\n  \"b\": [\n    2,\n    3\n  ]\n}" -->
+
+`stringify` is the quote-light human form with map keys sorted and object
+braces kept:
+
+<!-- example: minor/stringify#brace -->
+```perl
+Voxgig::Struct::stringify(Voxgig::Struct::jm(a => 1, b => [2, 3]));   # '{a:1,b:[2,3]}'
+```
+<!-- => "{a:1,b:[2,3]}" -->
 
 For more task recipes (merge configs, rename fields, `$EACH`, `$MERGE`,
 `$FORMAT`, `$ONE`, `$EXACT`, …) see the language-neutral
