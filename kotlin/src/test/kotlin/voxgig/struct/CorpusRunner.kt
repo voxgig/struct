@@ -57,6 +57,39 @@ object CorpusRunner {
         fun apply(input: Any?): Any?
     }
 
+    // NULLMARK convention (mirrors java/src/test/Runner.java + canonical TS
+    // runner.ts). When a set runs with nullFlag=true (the canonical default),
+    // every JSON null in the input and expected output is encoded as the
+    // sentinel string "__NULL__", and the function result is encoded the same
+    // way before comparison — preserving null-vs-absent across the round-trip.
+    const val NULLMARK = "__NULL__"
+
+    fun fixJSON(v: Any?): Any? {
+        if (v == null || v === Struct.UNDEF) return NULLMARK
+        return when (v) {
+            is Map<*, *> -> v.entries.associateTo(LinkedHashMap<String, Any?>()) { (it.key?.toString() ?: "") to fixJSON(it.value) }
+            is List<*> -> v.mapTo(mutableListOf<Any?>()) { fixJSON(it) }
+            else -> v
+        }
+    }
+
+    /** Modify callback: swap NULLMARK back to real null / literal "null" text. */
+    @Suppress("UNCHECKED_CAST")
+    val NULL_MODIFIER =
+        Struct.Modify { value, key, parent, _, _ ->
+            if (value !is String) return@Modify
+            val repl: Any? =
+                when {
+                    value == NULLMARK -> null
+                    value.contains(NULLMARK) -> value.replace(NULLMARK, "null")
+                    else -> return@Modify
+                }
+            when {
+                parent is MutableMap<*, *> && key != null -> (parent as MutableMap<String, Any?>)[key.toString()] = repl
+                parent is MutableList<*> && key is Number -> (parent as MutableList<Any?>)[key.toInt()] = repl
+            }
+        }
+
     class Result(val name: String) {
         var passed: Int = 0
         var total: Int = 0
@@ -83,8 +116,8 @@ object CorpusRunner {
         for ((i, eo) in set.withIndex()) {
             if (eo !is Map<*, *>) continue
             val entry = eo as Map<String, Any?>
-            val input = if (entry.containsKey("in")) Struct.clone(entry["in"]) else Struct.UNDEF
-            val expected: Any? =
+            var input = if (entry.containsKey("in")) Struct.clone(entry["in"]) else Struct.UNDEF
+            var expected: Any? =
                 if (entry.containsKey("out")) {
                     entry["out"]
                 } else if (nullFlag) {
@@ -92,9 +125,19 @@ object CorpusRunner {
                 } else {
                     Struct.UNDEF
                 }
+            // NULLMARK round-trip: encode JSON nulls in input and expected when
+            // nullFlag is set, matching the canonical runner (flags.null). A
+            // genuinely-absent "in" stays UNDEF (the canonical subject receives
+            // `undefined`, not the "__NULL__" sentinel) so walk/inject of a
+            // missing value behave like the reference runner.
+            if (nullFlag) {
+                if (entry.containsKey("in")) input = fixJSON(input)
+                expected = fixJSON(expected)
+            }
             res.total++
             try {
-                val got = subject.apply(input)
+                var got = subject.apply(input)
+                if (nullFlag) got = fixJSON(got)
                 if (entry.containsKey("err")) {
                     res.failures.add("[$i] expected err='${brief(entry["err"])}' but call returned ${brief(got)}")
                     continue

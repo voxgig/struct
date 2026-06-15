@@ -331,7 +331,7 @@ object Struct {
 
     fun items(value: Any?): List<List<Any?>> {
         if (!isnode(value)) return emptyList()
-        return keysof(value).map { k -> listOf(k, getprop(value, k, UNDEF)) }
+        return keysof(value).map { k -> listOf(k, lookup(value, k)) }
     }
 
     fun getelem(
@@ -349,7 +349,10 @@ object Struct {
         val useIdx = if (idx < 0) value.size + idx else idx
         if (useIdx < 0 || useIdx >= value.size) return resolveAlt(alt)
         val out = value[useIdx]
-        return if (out === UNDEF) alt else out
+        // Group A null-unification: a JSON null (or absent) slot counts as "no
+        // value" — return the alt (canonical TS getelem `if (null == out)`).
+        if (out == null || out === UNDEF) return resolveAlt(alt)
+        return out
     }
 
     fun getprop(
@@ -363,16 +366,47 @@ object Struct {
         alt: Any?,
     ): Any? {
         if (value == null || value === UNDEF || key == null || key === UNDEF) return alt
+        var out: Any? = UNDEF
+        when (value) {
+            is Map<*, *> -> {
+                val sk = strkey(key)
+                if (value.containsKey(sk)) out = value[sk]
+            }
+            is List<*> -> {
+                val idx = parseIntKey(key)
+                if (idx != null && idx >= 0 && idx < value.size) out = value[idx]
+            }
+            else -> {}
+        }
+        // Group A null-unification: a stored JSON null (or absent) counts as
+        // "no value" → return the alt. Group B callers needing the raw stored
+        // null use `lookup`.
+        if (out == null || out === UNDEF) return alt
+        return out
+    }
+
+    /**
+     * Group B raw value lookup (canonical TS `_lookup`): read the literally
+     * stored value at a slot, preserving JSON null; UNDEF when absent. Used by
+     * the validate checkers, closed-map check, transform command handlers and
+     * select operators that must distinguish a stored null from absence.
+     */
+    fun lookup(
+        value: Any?,
+        key: Any?,
+    ): Any? {
+        if (value == null || value === UNDEF || key == null || key === UNDEF) return UNDEF
         return when (value) {
             is Map<*, *> -> {
                 val sk = strkey(key)
-                if (value.containsKey(sk)) value[sk] else alt
+                if (value.containsKey(sk)) value[sk] else UNDEF
             }
             is List<*> -> {
-                val idx = parseIntKey(key) ?: return alt
-                if (idx < 0 || idx >= value.size) alt else value[idx]
+                val idx = parseIntKey(key) ?: return UNDEF
+                val i = if (idx < 0) value.size + idx else idx
+                if (i < 0 || i >= value.size) UNDEF else value[i]
             }
-            else -> alt
+            else -> UNDEF
         }
     }
 
@@ -1191,7 +1225,7 @@ object Struct {
         }
 
         inj.`val` = v
-        return getprop(inj.parent, S_DTOP)
+        return lookup(inj.parent, S_DTOP)
     }
 
     /**
@@ -1356,7 +1390,7 @@ object Struct {
     val transform_COPY: Injector =
         Injector { inj, _, _, _ ->
             if (!checkPlacement(M_VAL, "COPY", T_ANY, inj)) return@Injector UNDEF
-            val out = getprop(inj.dparent, inj.key)
+            val out = lookup(inj.dparent, inj.key)
             inj.setval(out)
             out
         }
@@ -1365,13 +1399,17 @@ object Struct {
     val transform_KEY: Injector =
         Injector { inj, _, _, _ ->
             if (inj.mode != M_VAL) return@Injector UNDEF
-            val keyspec = getprop(inj.parent, "`\$KEY`", UNDEF)
+            // Group B: the $KEY/$ANNO spec markers are read raw (TS _lookup).
+            val keyspec = lookup(inj.parent, "`\$KEY`")
             if (keyspec !== UNDEF) {
                 delprop(inj.parent, "`\$KEY`")
                 return@Injector getprop(inj.dparent, keyspec)
             }
-            val anno = getprop(inj.parent, "`\$ANNO`", UNDEF)
-            getprop(anno, "KEY", getelem(inj.path, -2))
+            val anno = lookup(inj.parent, "`\$ANNO`")
+            // TS: _lookup(_lookup(parent,$ANNO),KEY) ?? getelem(path,-2) — fall
+            // back only when absent or JSON null.
+            val annoKey = lookup(anno, "KEY")
+            if (annoKey === UNDEF || annoKey == null) getelem(inj.path, -2) else annoKey
         }
 
     /** $ANNO: drop the annotation marker. */
@@ -1475,8 +1513,8 @@ object Struct {
             }
             if (inj.mode != M_VAL) return@Injector UNDEF
 
-            val name = getprop(inj.parent, 1)
-            val child = getprop(inj.parent, 2)
+            val name = lookup(inj.parent, 1)
+            val child = lookup(inj.parent, 2)
 
             val tkey = getelem(inj.path, -2)
             var target = getelem(inj.nodes, -2)
@@ -1780,7 +1818,7 @@ object Struct {
         Injector { inj, value, _, store ->
             if (inj.mode != M_VAL) return@Injector UNDEF
 
-            val refpath = getprop(inj.parent, 1)
+            val refpath = lookup(inj.parent, 1)
             inj.keyI = size(inj.keys)
 
             val specHolder = getprop(store, S_DSPEC)
@@ -2089,7 +2127,7 @@ object Struct {
     /** $STRING: require a non-empty string. */
     val validate_STRING: Injector =
         Injector { inj, _, _, _ ->
-            val out = getprop(inj.dparent, inj.key)
+            val out = lookup(inj.dparent, inj.key)
             val t = typify(out)
             when {
                 (T_STRING and t) == 0 -> {
@@ -2119,7 +2157,7 @@ object Struct {
                 UNDEF
             } else {
                 val typev = 1 shl (31 - idx)
-                val out = getprop(inj.dparent, inj.key)
+                val out = lookup(inj.dparent, inj.key)
                 val t = typify(out)
                 if ((t and typev) == 0) {
                     inj.errs.add(_invalidTypeMsg(inj.path, tname, t, out, "V1001"))
@@ -2131,7 +2169,7 @@ object Struct {
         }
 
     /** $ANY: accept any value. */
-    val validate_ANY: Injector = Injector { inj, _, _, _ -> getprop(inj.dparent, inj.key) }
+    val validate_ANY: Injector = Injector { inj, _, _, _ -> lookup(inj.dparent, inj.key) }
 
     /** $CHILD: validate every direct child of the current node against a template. */
     val validate_CHILD: Injector =
@@ -2161,7 +2199,7 @@ object Struct {
                         inj.errs.add("Invalid \$CHILD as value")
                         return@Injector UNDEF
                     }
-                    val childtm = getprop(inj.parent, 1)
+                    val childtm = lookup(inj.parent, 1)
                     if (inj.dparent === UNDEF || inj.dparent == null) {
                         @Suppress("UNCHECKED_CAST")
                         (inj.parent as MutableList<Any?>).clear()
@@ -2343,7 +2381,9 @@ object Struct {
                 val pkeys = keysof(pval)
                 if (size(pkeys) > 0 && getprop(pval, "`\$OPEN`") != true) {
                     val badkeys = mutableListOf<String>()
-                    for (ck in ckeys) if (!haskey(pval, ck)) badkeys.add(ck)
+                    // Group B: a key present with a JSON null value is NOT a bad
+                    // key, so test raw presence (TS _lookup(pval,ck) === UNDEF).
+                    for (ck in ckeys) if (lookup(pval, ck) === UNDEF) badkeys.add(ck)
                     if (badkeys.isNotEmpty()) {
                         inj.errs.add("Unexpected keys at field " + pathify(inj.path, 1) + ": " + badkeys.joinToString(", "))
                     }
@@ -2482,7 +2522,7 @@ object Struct {
     val select_AND: Injector =
         Injector { inj, _, _, store ->
             if (inj.mode != M_KEYPRE) return@Injector UNDEF
-            val terms = getprop(inj.parent, inj.key)
+            val terms = lookup(inj.parent, inj.key)
             if (terms !is List<*>) return@Injector UNDEF
             val ppath = slice(inj.path, -1, null)
             val point = getpath(store, ppath)
@@ -2508,7 +2548,7 @@ object Struct {
     val select_OR: Injector =
         Injector { inj, _, _, store ->
             if (inj.mode != M_KEYPRE) return@Injector UNDEF
-            val terms = getprop(inj.parent, inj.key)
+            val terms = lookup(inj.parent, inj.key)
             if (terms !is List<*>) return@Injector UNDEF
             val ppath = slice(inj.path, -1, null)
             val point = getpath(store, ppath)
@@ -2535,7 +2575,7 @@ object Struct {
     val select_NOT: Injector =
         Injector { inj, _, _, store ->
             if (inj.mode != M_KEYPRE) return@Injector UNDEF
-            val term = getprop(inj.parent, inj.key)
+            val term = lookup(inj.parent, inj.key)
             val ppath = slice(inj.path, -1, null)
             val point = getpath(store, ppath)
             val terrs = mutableListOf<Any?>()
@@ -2558,7 +2598,7 @@ object Struct {
     val select_CMP: Injector =
         Injector { inj, _, ref, store ->
             if (inj.mode != M_KEYPRE) return@Injector UNDEF
-            val term = getprop(inj.parent, inj.key)
+            val term = lookup(inj.parent, inj.key)
             val gkey = getelem(inj.path, -2)
             val ppath = slice(inj.path, -1, null)
             val point = getpath(store, ppath)

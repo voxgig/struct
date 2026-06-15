@@ -305,9 +305,11 @@ class StructTests {
 
     @Test
     fun injectString() {
-        runSet(injectSpec["string"] as Map<String, Any?>) { v ->
+        runSetNull(injectSpec["string"] as Map<String, Any?>) { v ->
             val m = v as Map<*, *>
-            Struct.inject(m["val"], m["store"])
+            val inj = Struct.Injection(null, null)
+            inj.modify = nullModifier
+            Struct.inject(m["val"], m["store"], inj)
         }
     }
 
@@ -478,7 +480,7 @@ class StructTests {
 
     @Test
     fun selectBasic() {
-        runSet(selectSpec["basic"] as Map<String, Any?>) { v ->
+        runSetNull(selectSpec["basic"] as Map<String, Any?>) { v ->
             val m = v as Map<*, *>
             Struct.select(m["obj"], m["query"])
         }
@@ -486,7 +488,7 @@ class StructTests {
 
     @Test
     fun selectOperators() {
-        runSet(selectSpec["operators"] as Map<String, Any?>) { v ->
+        runSetNull(selectSpec["operators"] as Map<String, Any?>) { v ->
             val m = v as Map<*, *>
             Struct.select(m["obj"], m["query"])
         }
@@ -494,7 +496,7 @@ class StructTests {
 
     @Test
     fun selectEdge() {
-        runSet(selectSpec["edge"] as Map<String, Any?>) { v ->
+        runSetNull(selectSpec["edge"] as Map<String, Any?>) { v ->
             val m = v as Map<*, *>
             Struct.select(m["obj"], m["query"])
         }
@@ -502,7 +504,7 @@ class StructTests {
 
     @Test
     fun selectAlts() {
-        runSet(selectSpec["alts"] as Map<String, Any?>) { v ->
+        runSetNull(selectSpec["alts"] as Map<String, Any?>) { v ->
             val m = v as Map<*, *>
             Struct.select(m["obj"], m["query"])
         }
@@ -700,7 +702,13 @@ class StructTests {
         }
 
     private fun normalize(v: Any?): Any? {
-        if (v === Struct.UNDEF) return "__UNDEF__"
+        // Treat the "no value" sentinel (UNDEF) and JSON null as equal, mirroring
+        // canonical JS where `undefined == null`. The shared corpus uses null to
+        // denote a "no value" result (e.g. getpath/inject of a null-valued slot,
+        // which the Group A null-unification rule resolves to "no value"). Sets
+        // that must distinguish stored null from absence use the NULLMARK fixup
+        // (fixNull) to turn null into a distinct sentinel string before this runs.
+        if (v === Struct.UNDEF || v == null) return null
         return when (v) {
             is Number -> {
                 val d = v.toDouble()
@@ -709,6 +717,58 @@ class StructTests {
             is List<*> -> v.map { normalize(it) }
             is Map<*, *> -> v.entries.associate { it.key.toString() to normalize(it.value) }.toSortedMap()
             else -> v
+        }
+    }
+
+    // NULLMARK convention (mirrors java/src/test/StructTests.java + js runner).
+    // The shared corpus encodes "value is JSON null" by relying on the runner to
+    // replace every JSON null with the sentinel string "__NULL__" before running
+    // (flags.null=true), then a nullModifier callback swaps it back: a bare
+    // "__NULL__" becomes a real null, and "__NULL__" embedded in a larger string
+    // is rewritten to the literal text "null". This preserves null-vs-absent
+    // across the round-trip (inject of a null-valued ref into a partial string
+    // renders "null"; exact-mode select has a concrete value to compare).
+    private val nullmark = "__NULL__"
+
+    private fun fixJSON(v: Any?): Any? {
+        if (v == null || v === Struct.UNDEF) return nullmark
+        return when (v) {
+            is Map<*, *> -> v.entries.associateTo(linkedMapOf<String, Any?>()) { (it.key?.toString() ?: "") to fixJSON(it.value) }
+            is List<*> -> v.mapTo(mutableListOf<Any?>()) { fixJSON(it) }
+            else -> v
+        }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private val nullModifier =
+        Struct.Modify { value, key, parent, _, _ ->
+            if (value !is String) return@Modify
+            val repl: Any? =
+                when {
+                    value == nullmark -> null
+                    value.contains(nullmark) -> value.replace(nullmark, "null")
+                    else -> return@Modify
+                }
+            when {
+                parent is MutableMap<*, *> && key != null -> (parent as MutableMap<String, Any?>)[key.toString()] = repl
+                parent is MutableList<*> && key is Number -> (parent as MutableList<Any?>)[key.toInt()] = repl
+            }
+        }
+
+    /** runSet variant that applies the NULLMARK fixup to inputs, result and expected. */
+    private fun runSetNull(
+        testspec: Map<String, Any?>,
+        fn: (Any?) -> Any?,
+    ) {
+        val set = testspec["set"] as List<*>
+        for (eo in set) {
+            if (eo !is Map<*, *>) continue
+            if (!eo.containsKey("in") || !eo.containsKey("out")) continue
+            if (eo.containsKey("err")) continue
+            val input = fixJSON(Struct.clone(eo["in"]))
+            val out = fixJSON(eo["out"])
+            val got = fixJSON(fn(input))
+            assertTrue(normalize(out) == normalize(got), "Mismatch in=${json(input)} expected=${json(out)} got=${json(got)}")
         }
     }
 }

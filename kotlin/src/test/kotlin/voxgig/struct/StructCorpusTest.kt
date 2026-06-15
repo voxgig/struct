@@ -32,6 +32,7 @@ class StructCorpusTest {
                 "transform" to "transform.jsonic",
                 "validate" to "validate.jsonic",
                 "select" to "select.jsonic",
+                "sentinels" to "sentinels.jsonic",
             )
 
         @JvmStatic
@@ -111,13 +112,13 @@ class StructCorpusTest {
         add(tests, "minor", "strkey", false) { Struct.strkey(it) }
         add(tests, "minor", "isempty", false) { Struct.isempty(it) }
         add(tests, "minor", "isfunc", true) { Struct.isfunc(it) }
-        add(tests, "minor", "getprop", true) {
+        add(tests, "minor", "getprop", false) {
             val v = getp(it, "val")
             val k = getp(it, "key")
             val a = getpDef(it, "alt", Struct.UNDEF)
             if (a === Struct.UNDEF) Struct.getprop(v, k) else Struct.getprop(v, k, a)
         }
-        add(tests, "minor", "getelem", true) {
+        add(tests, "minor", "getelem", false) {
             val v = getp(it, "val")
             val k = getp(it, "key")
             val a = getpDef(it, "alt", Struct.UNDEF)
@@ -126,7 +127,7 @@ class StructCorpusTest {
         add(tests, "minor", "clone", false) { Struct.clone(it) }
         add(tests, "minor", "items", true) { Struct.items(it) }
         add(tests, "minor", "keysof", true) { Struct.keysof(it) }
-        add(tests, "minor", "haskey", true) { Struct.haskey(getp(it, "src"), getp(it, "key")) }
+        add(tests, "minor", "haskey", false) { Struct.haskey(getp(it, "src"), getp(it, "key")) }
         add(tests, "minor", "setprop", true) {
             val parent = getpDef(it, "parent", Struct.UNDEF)
             Struct.setprop(if (parent === Struct.UNDEF) null else parent, getp(it, "key"), getp(it, "val"))
@@ -178,7 +179,7 @@ class StructCorpusTest {
             Struct.walk(it, Struct.WalkApply { _, v, _, p -> if (v is String) v + "~" + p.joinToString(".") else v })
         }
         add(tests, "walk", "log", true) { Struct.clone(it) }
-        add(tests, "walk", "depth", true) {
+        add(tests, "walk", "depth", false) {
             val src = getp(it, "src")
             val maxdepth = (getp(it, "maxdepth") as? Number)?.toInt()
             val top = arrayOfNulls<Any>(1)
@@ -258,7 +259,13 @@ class StructCorpusTest {
         }
 
         // ===== inject =====
-        add(tests, "inject", "string", true) { Struct.inject(getp(it, "val"), getp(it, "store")) }
+        // inject.string passes the nullModifier so a resolved JSON null (encoded
+        // by fixJSON as "__NULL__") renders as the literal text "null".
+        add(tests, "inject", "string", true) {
+            val inj = Struct.Injection(null, null)
+            inj.modify = CorpusRunner.NULL_MODIFIER
+            Struct.inject(getp(it, "val"), getp(it, "store"), inj)
+        }
         add(tests, "inject", "deep", true) { Struct.inject(getp(it, "val"), getp(it, "store")) }
 
         // ===== transform =====
@@ -293,11 +300,11 @@ class StructCorpusTest {
         }
 
         // ===== validate =====
-        add(tests, "validate", "basic", true) { Struct.validate(getp(it, "data"), getp(it, "spec")) }
+        add(tests, "validate", "basic", false) { Struct.validate(getp(it, "data"), getp(it, "spec")) }
         add(tests, "validate", "child", true) { Struct.validate(getp(it, "data"), getp(it, "spec")) }
         add(tests, "validate", "one", true) { Struct.validate(getp(it, "data"), getp(it, "spec")) }
         add(tests, "validate", "exact", true) { Struct.validate(getp(it, "data"), getp(it, "spec")) }
-        add(tests, "validate", "invalid", true) { Struct.validate(getp(it, "data"), getp(it, "spec")) }
+        add(tests, "validate", "invalid", false) { Struct.validate(getp(it, "data"), getp(it, "spec")) }
         add(tests, "validate", "special", true) {
             val inj = (getp(it, "inj") as? Map<String, Any?>)
             Struct.validate(getp(it, "data"), getp(it, "spec"), inj)
@@ -308,6 +315,17 @@ class StructCorpusTest {
         add(tests, "select", "operators", true) { Struct.select(getp(it, "obj"), getp(it, "query")) }
         add(tests, "select", "edge", true) { Struct.select(getp(it, "obj"), getp(it, "query")) }
         add(tests, "select", "alts", true) { Struct.select(getp(it, "obj"), getp(it, "query")) }
+
+        // ===== sentinels =====
+        // Group A null-unification + null-aware scalar behaviour. All run with
+        // nullFlag=false (raw nulls preserved) so the Group A rule is exercised
+        // directly — mirrors canonical StructUtility.test.ts sentinels-* tests.
+        add(tests, "sentinels", "getprop_unify", false) { Struct.getprop(getp(it, "val"), getp(it, "key"), getp(it, "alt")) }
+        add(tests, "sentinels", "getelem_absent", false) { Struct.getelem(getp(it, "val"), getp(it, "key"), getp(it, "alt")) }
+        add(tests, "sentinels", "haskey_unify", false) { Struct.haskey(getp(it, "val"), getp(it, "key")) }
+        add(tests, "sentinels", "isempty_unify", false) { Struct.isempty(it) }
+        add(tests, "sentinels", "isnode_unify", false) { Struct.isnode(it) }
+        add(tests, "sentinels", "stringify_null", false) { Struct.stringify(it) }
 
         return tests
     }
