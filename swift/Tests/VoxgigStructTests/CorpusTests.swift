@@ -163,6 +163,90 @@ final class CorpusTests: XCTestCase {
         }
         return .string(stringify($0))
       })
+
+    func mset(_ name: String) -> Value { getprop(.map(minor), .string(name)) |> setProp("set") }
+    runset("minor.isfunc", mset("isfunc"), { .bool(isfunc($0)) })
+    runset("minor.typify", mset("typify"), { .int(Int64(typify($0))) })
+    runset("minor.typename", mset("typename"), { .string(typename(Int($0.asInt ?? 0))) })
+    runset("minor.strkey", mset("strkey"), { .string(strkey($0)) })
+    runset("minor.getelem", mset("getelem"), {
+      getelem(getprop($0, .string("val")), getprop($0, .string("key")), getprop($0, .string("alt")))
+    })
+    runset("minor.items", mset("items"), { .list(items($0).map { Value.list($0) }) })
+    runset("minor.flatten", mset("flatten"), {
+      flatten(getprop($0, .string("val")), getprop($0, .string("depth")).asInt.map(Int.init))
+    })
+    let filterChecks: [String: (Value, Value) -> Bool] = [
+      "gt3": { _, v in (v.asDouble ?? 0) > 3 },
+      "lt3": { _, v in (v.asDouble ?? 0) < 3 },
+    ]
+    runset("minor.filter", mset("filter"), {
+      let check = strkey(getprop($0, .string("check")))
+      return filter(getprop($0, .string("val")), filterChecks[check] ?? { _, _ in false })
+    })
+    runset("minor.join", mset("join"), {
+      let sep: String
+      if case .string(let s) = getprop($0, .string("sep")) { sep = s } else { sep = "," }
+      var url = false
+      if case .bool(let b) = getprop($0, .string("url")) { url = b }
+      return .string(join(getprop($0, .string("val")), sep, url))
+    })
+    runset("minor.jsonify", mset("jsonify"), {
+      var indent = 2
+      var offset = 0
+      let flags = getprop($0, .string("flags"))
+      if case .map = flags {
+        if case .int(let n) = getprop(flags, .string("indent")) { indent = Int(n) }
+        if case .int(let n) = getprop(flags, .string("offset")) { offset = Int(n) }
+      }
+      return .string(jsonify(lookup($0, .string("val")), indent: indent, offset: offset))
+    })
+    runset("minor.pathify", mset("pathify"), {
+      .string(pathify(lookup($0, .string("path")), getprop($0, .string("from")).asInt.map(Int.init)))
+    })
+    runset("minor.slice", mset("slice"), {
+      slice(
+        getprop($0, .string("val")),
+        getprop($0, .string("start")).asInt.map(Int.init),
+        getprop($0, .string("end")).asInt.map(Int.init))
+    })
+    runset("minor.pad", mset("pad"), {
+      let padding = getprop($0, .string("pad")).asInt.map(Int.init)
+      let padchar: Character
+      if case .string(let c) = getprop($0, .string("char")), let f = c.first { padchar = f } else {
+        padchar = " "
+      }
+      return pad(lookup($0, .string("val")), padding, padchar)
+    })
+    runset("minor.setprop", mset("setprop"), {
+      setprop(clone(getprop($0, .string("parent"))), getprop($0, .string("key")), lookup($0, .string("val")))
+    })
+    runset("minor.delprop", mset("delprop"), {
+      delprop(clone(getprop($0, .string("parent"))), getprop($0, .string("key")))
+    })
+    runset("minor.setpath", mset("setpath"), {
+      setpath(clone(getprop($0, .string("store"))), getprop($0, .string("path")), lookup($0, .string("val")))
+    })
+  }
+
+  // MARK: - Sentinels (null / absent unification across the readers)
+
+  func testSentinels() {
+    let s = loadStructSpec()
+    guard case .map(let sn) = getprop(s, .string("sentinels")) else { return }
+    func sset(_ name: String) -> Value { getprop(.map(sn), .string(name)) |> setProp("set") }
+    runset("sentinels.getprop_unify", sset("getprop_unify"), {
+      getprop(getprop($0, .string("val")), getprop($0, .string("key")), getprop($0, .string("alt")))
+    })
+    runset("sentinels.getelem_absent", sset("getelem_absent"), {
+      getelem(getprop($0, .string("val")), getprop($0, .string("key")), getprop($0, .string("alt")))
+    })
+    runset("sentinels.haskey_unify", sset("haskey_unify"), {
+      .bool(haskey(getprop($0, .string("val")), getprop($0, .string("key"))))
+    })
+    runset("sentinels.isempty_unify", sset("isempty_unify"), { .bool(isempty($0)) })
+    runset("sentinels.isnode_unify", sset("isnode_unify"), { .bool(isnode($0)) })
+    runset("sentinels.stringify_null", sset("stringify_null"), { .string(stringify($0)) })
   }
 
   // MARK: - Walk

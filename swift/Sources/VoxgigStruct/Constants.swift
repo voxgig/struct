@@ -73,37 +73,33 @@ public let S_VIZ = ": "
 // the others are distinct bits decreasing down the list (the order
 // matches TYPENAME below for table-driven lookup).
 
-public let T_any: Int = (1 << 13) - 1
-public let T_noval: Int = 1 << 13
-public let T_boolean: Int = 1 << 12
-public let T_decimal: Int = 1 << 11
-public let T_integer: Int = 1 << 10
-public let T_number: Int = 1 << 9
-public let T_string: Int = 1 << 8
-public let T_function: Int = 1 << 7
-public let T_symbol: Int = 1 << 6
-public let T_null: Int = 1 << 5
-public let T_list: Int = 1 << 4
-public let T_map: Int = 1 << 3
-public let T_instance: Int = 1 << 2
-public let T_scalar: Int = 1 << 1
-public let T_node: Int = 1 << 0
+// Type bit-flag values match the canonical TypeScript scheme exactly so that
+// typify()/typename() return the same numbers the shared corpus pins.
+public let T_any: Int = (1 << 31) - 1
+public let T_noval: Int = 1 << 30
+public let T_boolean: Int = 1 << 29
+public let T_decimal: Int = 1 << 28
+public let T_integer: Int = 1 << 27
+public let T_number: Int = 1 << 26
+public let T_string: Int = 1 << 25
+public let T_function: Int = 1 << 24
+public let T_symbol: Int = 1 << 23
+public let T_null: Int = 1 << 22
+public let T_list: Int = 1 << 14
+public let T_map: Int = 1 << 13
+public let T_instance: Int = 1 << 12
+public let T_scalar: Int = 1 << 7
+public let T_node: Int = 1 << 6
 
-public let TYPENAME: [Int: String] = [
-  T_noval: S_nil,
-  T_boolean: S_boolean,
-  T_decimal: S_decimal,
-  T_integer: S_integer,
-  T_number: S_number,
-  T_string: S_string,
-  T_function: S_function,
-  T_symbol: S_symbol,
-  T_null: S_null,
-  T_list: S_list,
-  T_map: S_map,
-  T_instance: S_instance,
-  T_scalar: S_scalar,
-  T_node: S_node,
+// TYPENAME indexed by clz32(typebit): the human name of a type bit-field is the
+// name of its highest set bit (canonical getelem(TYPENAME, clz32(t))).
+public let TYPENAME_ARR: [String] = [
+  S_any, S_nil, S_boolean, S_decimal, S_integer, S_number, S_string,
+  S_function, S_symbol, S_null,
+  "", "", "", "", "", "", "",
+  S_list, S_map, S_instance,
+  "", "", "", "",
+  S_scalar, S_node,
 ]
 
 // MARK: - Regex patterns

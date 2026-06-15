@@ -6,7 +6,23 @@ import Foundation
 
 // MARK: - typename / typify / getdef
 
-public func typename(_ t: Int) -> String { TYPENAME[t] ?? S_any }
+public func typename(_ t: Int) -> String {
+  let masked = t & 0x7FFF_FFFF
+  if masked == 0 { return TYPENAME_ARR[0] }
+  // clz32: the human name is the name of the highest set bit.
+  var hb = 0
+  var v = masked
+  while v > 1 {
+    v >>= 1
+    hb += 1
+  }
+  let clz = 31 - hb
+  if clz >= 0, clz < TYPENAME_ARR.count {
+    let name = TYPENAME_ARR[clz]
+    if !name.isEmpty { return name }
+  }
+  return S_any
+}
 
 public func getdef(_ v: Value, _ alt: Value) -> Value {
   return v.isNoval ? alt : v
@@ -15,14 +31,14 @@ public func getdef(_ v: Value, _ alt: Value) -> Value {
 public func typify(_ v: Value) -> Int {
   switch v {
   case .noval: return T_noval
-  case .null: return T_null
-  case .bool: return T_boolean
-  case .int: return T_integer
-  case .double: return T_decimal
-  case .string: return T_string
-  case .list: return T_list
-  case .map, .sentinel: return T_map
-  case .function: return T_function
+  case .null: return T_scalar | T_null
+  case .bool: return T_scalar | T_boolean
+  case .int: return T_scalar | T_number | T_integer
+  case .double: return T_scalar | T_number | T_decimal
+  case .string: return T_scalar | T_string
+  case .list: return T_node | T_list
+  case .map, .sentinel: return T_node | T_map
+  case .function: return T_scalar | T_function
   }
 }
 
@@ -136,12 +152,12 @@ public func slice(_ val: Value, _ start: Int? = nil, _ end: Int? = nil, mutate: 
 // MARK: - pad
 
 public func pad(_ str: Value, _ padding: Int? = nil, _ padchar: Character = " ") -> Value {
-  guard let padding = padding, padding != 0 else { return str }
+  let p = padding ?? 44
   let s = stringify(str)
-  let need = abs(padding) - s.count
+  let need = abs(p) - s.count
   if need <= 0 { return .string(s) }
   let fill = String(repeating: String(padchar), count: need)
-  return .string(padding < 0 ? fill + s : s + fill)
+  return .string(p < 0 ? fill + s : s + fill)
 }
 
 // MARK: - strkey
@@ -151,7 +167,11 @@ public func strkey(_ key: Value) -> String {
   case .noval, .null: return ""
   case .string(let s): return s
   case .int(let n): return String(n)
-  case .double(let d): return JSON.formatDouble(d)
+  case .double(let d):
+    // Integers stringify as-is; non-integers truncate via floor (canonical
+    // strkey: key % 1 === 0 ? String(key) : String(Math.floor(key))).
+    if d == d.rounded() { return String(Int64(d)) }
+    return String(Int64(d.rounded(.down)))
   default: return ""
   }
 }
@@ -171,7 +191,8 @@ public func getelem(_ val: Value, _ key: Value, _ alt: Value = .noval) -> Value 
   if idx < 0 { idx = l.items.count + idx }
   guard idx >= 0, idx < l.items.count else { return alt }
   let v = l.items[idx]
-  return v.isNoval ? alt : v
+  // Group A: a null (or absent) slot counts as "no value" → alt.
+  return (v.isNoval || v.isNull) ? alt : v
 }
 
 // MARK: - getprop (Group A: stored null counts as absent)
@@ -239,13 +260,14 @@ public func setprop(_ val: Value, _ key: Value, _ newval: Value) -> Value {
     case .string(let s): k = Int(s)
     default: break
     }
-    guard var idx = k else { return val }
-    if idx < 0 { idx = l.items.count + idx }
-    if idx >= l.items.count {
-      while l.items.count < idx { l.items.append(.null) }
-      l.items.append(newval)
-    } else if idx >= 0 {
-      l.items[idx] = newval
+    guard let idx = k else { return val }
+    if idx >= 0 {
+      // Set or append; an out-of-range index clamps to the end (no null gap).
+      let target = min(idx, l.items.count)
+      if target < l.items.count { l.items[target] = newval } else { l.items.append(newval) }
+    } else {
+      // A negative index prepends.
+      l.items.insert(newval, at: 0)
     }
     return val
   case .map(let m):
@@ -269,8 +291,8 @@ public func delprop(_ val: Value, _ key: Value) -> Value {
     case .string(let s): k = Int(s)
     default: break
     }
-    guard var idx = k else { return val }
-    if idx < 0 { idx = l.items.count + idx }
+    guard let idx = k else { return val }
+    // A negative or out-of-range index is a no-op (no end-relative delete).
     if idx >= 0, idx < l.items.count { l.items.remove(at: idx) }
     return val
   case .map(let m):
@@ -316,51 +338,36 @@ public func haskey(_ v: Value, _ key: Value) -> Bool {
 }
 
 public func items(_ v: Value) -> [[Value]] {
-  var out: [[Value]] = []
-  switch v {
-  case .list(let l):
-    for (i, it) in l.items.enumerated() {
-      out.append([.string(String(i)), it])
-    }
-  case .map(let m):
-    for (k, it) in m.entries {
-      out.append([.string(k), it])
-    }
-  default: break
-  }
-  return out
+  // keysof() sorts map keys (and yields "0","1",… for lists), so items are in
+  // the same order the canonical implementation produces. lookup preserves a
+  // stored JSON null in the tuple.
+  if !isnode(v) { return [] }
+  return keysof(v).map { k in [.string(k), lookup(v, .string(k))] }
 }
 
-public func flatten(_ v: Value) -> Value {
-  guard case .list(let l) = v else { return .list([]) }
+public func flatten(_ v: Value, _ depth: Int? = nil) -> Value {
+  guard case .list(let l) = v else { return v }
+  return .list(flattenDepth(l.items, depth ?? 1))
+}
+
+private func flattenDepth(_ items: [Value], _ depth: Int) -> [Value] {
   var out: [Value] = []
-  var stack: [Value] = l.items.reversed()
-  while let item = stack.popLast() {
-    if case .list(let inner) = item {
-      stack.append(contentsOf: inner.items.reversed())
+  for item in items {
+    if depth > 0, case .list(let inner) = item {
+      out.append(contentsOf: flattenDepth(inner.items, depth - 1))
     } else {
       out.append(item)
     }
   }
-  return .list(out)
+  return out
 }
 
 public func filter(_ v: Value, _ pred: (Value, Value) -> Bool) -> Value {
+  // Canonical filter passes each [key,value] pair to the check and returns the
+  // matched VALUES (not the pairs).
   var out: [Value] = []
-  switch v {
-  case .list(let l):
-    for (i, it) in l.items.enumerated() {
-      if pred(.string(String(i)), it) {
-        out.append(.list([.string(String(i)), it]))
-      }
-    }
-  case .map(let m):
-    for (k, it) in m.entries {
-      if pred(.string(k), it) {
-        out.append(.list([.string(k), it]))
-      }
-    }
-  default: break
+  for pair in items(v) where pred(pair[0], pair[1]) {
+    out.append(pair[1])
   }
   return .list(out)
 }
@@ -390,33 +397,116 @@ public func escurl(_ v: Value) -> String {
 
 // Named `join` to match the canonical TS export. Free function, doesn't
 // shadow `Array.joined(separator:)` (different signature, different name).
-public func join(_ parts: Value, _ sep: String = "") -> String {
+public func join(_ parts: Value, _ sep: String = ",", _ url: Bool = false) -> String {
   guard case .list(let l) = parts else { return "" }
-  return l.items.map { stringify($0) }.joined(separator: sep)
+  let sarr = l.items.count
+  let sc: Character? = sep.count == 1 ? sep.first : nil
+  // Keep only the non-empty string elements.
+  var inner: [String] = []
+  for it in l.items {
+    if case .string(let s) = it, !s.isEmpty { inner.append(s) }
+  }
+  var mapped: [String] = []
+  for (i, orig) in inner.enumerated() {
+    var s = orig
+    if let sc = sc {
+      let scs = String(sc)
+      if url && i == 0 {
+        while s.hasSuffix(scs) { s.removeLast() }
+        mapped.append(s)
+        continue
+      }
+      if i > 0 {
+        while s.hasPrefix(scs) { s.removeFirst() }
+      }
+      if i < sarr - 1 || !url {
+        while s.hasSuffix(scs) { s.removeLast() }
+      }
+      s = collapseSep(s, sc, sep)
+    }
+    mapped.append(s)
+  }
+  return mapped.filter { !$0.isEmpty }.joined(separator: sep)
 }
 
-public func pathify(_ v: Value, _ depth: Int = 0) -> String {
-  var parts: [String] = []
-  switch v {
-  case .list(let l):
-    parts = l.items.compactMap { iv -> String? in
-      if iv.isNoval { return nil }
-      return stringify(iv)
+// Collapse internal runs of the separator (when bounded by non-separator chars
+// on both sides) down to a single separator. Mirrors the canonical regex
+// `([^sep])sep+([^sep]) -> $1 sepdef $2`.
+private func collapseSep(_ s: String, _ sc: Character, _ sepdef: String) -> String {
+  let chars = Array(s)
+  var out = ""
+  var i = 0
+  while i < chars.count {
+    if chars[i] == sc {
+      var j = i
+      while j < chars.count && chars[j] == sc { j += 1 }
+      let prevNon = i > 0 && chars[i - 1] != sc
+      let nextNon = j < chars.count && chars[j] != sc
+      if prevNon && nextNon {
+        out += sepdef
+      } else {
+        out += String(repeating: String(sc), count: j - i)
+      }
+      i = j
+    } else {
+      out.append(chars[i])
+      i += 1
     }
-  case .string(let s): parts = s.split(separator: ".").map(String.init)
-  case .int(let n): parts = [String(n)]
-  case .double(let d): parts = [JSON.formatDouble(d)]
-  default: return "<unknown-path>"
   }
-  if depth > 0, parts.count > depth { parts.removeFirst(depth) }
-  if parts.isEmpty { return "<root>" }
-  return parts.joined(separator: ".")
+  return out
+}
+
+public func pathify(_ v: Value, _ startin: Int? = nil, _ endin: Int? = nil) -> String {
+  var path: [Value]? = nil
+  switch v {
+  case .list(let l): path = l.items
+  case .string, .int, .double: path = [v]
+  default: path = nil
+  }
+  let start = startin == nil ? 0 : (startin! > -1 ? startin! : 0)
+  let end = endin == nil ? 0 : (endin! > -1 ? endin! : 0)
+
+  var pathstr: String? = nil
+  if let p = path, start >= 0 {
+    let lo = min(start, p.count)
+    let hiRaw = p.count - end
+    let hi = hiRaw < lo ? lo : min(hiRaw, p.count)
+    let sliced = lo < hi ? Array(p[lo..<hi]) : []
+    if sliced.isEmpty {
+      pathstr = "<root>"
+    } else {
+      // Keep only key segments; floor numbers and strip dots from strings.
+      let segs = sliced.filter { iskey($0) }.map { seg -> String in
+        switch seg {
+        case .int(let n): return String(n)
+        case .double(let d): return String(Int64(d.rounded(.down)))
+        case .string(let s): return s.replacingOccurrences(of: ".", with: "")
+        default: return ""
+        }
+      }
+      pathstr = segs.joined(separator: ".")
+    }
+  }
+  if pathstr == nil {
+    let suffix = v.isNoval ? "" : (":" + stringify(v, 47))
+    pathstr = "<unknown-path" + suffix + ">"
+  }
+  return pathstr!
 }
 
 // MARK: - jsonify / stringify
 
-public func jsonify(_ v: Value, indent: Int = 0) -> String {
-  JSON.stringify(v, indent: indent)
+public func jsonify(_ v: Value, indent: Int = 2, offset: Int = 0) -> String {
+  var str = JSON.stringify(v, indent: indent)
+  if offset > 0 {
+    // Left-offset the entire indented JSON so it aligns with surrounding code
+    // indented by `offset`; the first brace stays on the assignment line.
+    var lines = str.components(separatedBy: "\n")
+    if !lines.isEmpty { lines.removeFirst() }
+    let pad = String(repeating: " ", count: offset)
+    str = "{\n" + lines.map { pad + $0 }.joined(separator: "\n")
+  }
+  return str
 }
 
 // Human-friendly stringification — sorts map keys alphabetically and

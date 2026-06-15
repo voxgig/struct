@@ -9,42 +9,34 @@ import Foundation
 
 @discardableResult
 public func setpath(_ store: Value, _ pathIn: Value, _ val: Value) -> Value {
-  var parts: [String] = []
+  // Keep each segment's original Value so the int-vs-string distinction
+  // (which decides list-vs-map for an intermediate node) is preserved.
+  var parts: [Value] = []
   if case .list(let l) = pathIn {
-    parts = l.items.map { strkey($0) }
+    parts = l.items
   } else if let s = pathIn.asString {
-    parts = s.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
+    parts = s.split(separator: ".", omittingEmptySubsequences: false).map { Value.string(String($0)) }
   } else {
-    return store
+    return .noval
   }
-  if parts.isEmpty { return store }
+  if parts.isEmpty { return .noval }
   var node = store
   for i in 0..<(parts.count - 1) {
     let k = parts[i]
     let nxt = parts[i + 1]
-    var child: Value = .noval
-    if case .list(let l) = node {
-      var idx = Int(k) ?? 0
-      if idx < 0 { idx = l.items.count + idx }
-      if idx >= 0, idx < l.items.count { child = l.items[idx] }
-      if !isnode(child) {
-        child = Int(nxt) != nil ? .list(VList()) : .map(VMap())
-        setprop(node, .string(k), child)
-      }
-    } else if case .map(let m) = node {
-      child = m.entries[k] ?? .noval
-      if !isnode(child) {
-        child = Int(nxt) != nil ? .list(VList()) : .map(VMap())
-        m.entries[k] = child
-      }
-    } else {
-      return store
+    // An intermediate node is a list only when the NEXT segment is an integer
+    // value; a string-digit segment (e.g. "0") makes a map.
+    let nxtIsInt = (T_integer & typify(nxt)) != 0
+    var child = lookup(node, k)
+    if !isnode(child) {
+      child = nxtIsInt ? .list(VList()) : .map(VMap())
+      setprop(node, k, child)
     }
     node = child
   }
-  let last = parts.last!
-  setprop(node, .string(last), val)
-  return store
+  // Canonical setpath returns the leaf key's PARENT node, not the whole store.
+  setprop(node, parts.last!, val)
+  return node
 }
 
 // MARK: - getpath

@@ -65,7 +65,9 @@ public func _injectstr(_ raw: String, _ store: Value, _ inj: Injection?) -> Valu
         case .bool(let b): out += b ? "true" : "false"
         case .int(let n): out += String(n)
         case .double(let d): out += JSON.formatDouble(d)
-        case .list, .map: out += jsonify(found)
+        // A node interpolated into a string uses compact JSON (canonical TS
+        // uses JSON.stringify(found), not the pretty default jsonify).
+        case .list, .map: out += jsonify(found, indent: 0)
         case .function: out += "<function>"
         case .sentinel(let s): out += s.marker
         }
