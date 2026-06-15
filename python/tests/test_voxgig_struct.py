@@ -5,20 +5,19 @@ import unittest
 
 try:
     from .runner import (
-        NULLMARK,
         makeRunner,
         nullModifier,
     )
     from .sdk import SDK
 except ImportError:
     from runner import (
-        NULLMARK,
         makeRunner,
         nullModifier,
     )
     from sdk import SDK
 
 from voxgig_struct.voxgig_struct import (
+    _ABSENT,
     T_function,
     T_noval,
     T_null,
@@ -163,12 +162,19 @@ class TestStruct(unittest.TestCase):
         runset(minorSpec['escurl'], escurl)
 
     def test_minor_stringify(self):
-        runset(
-            minorSpec['stringify'],
-            lambda vin: stringify(
-                'null' if vin.get('val') == NULLMARK else vin.get('val'), vin.get('max')
-            ),
-        )
+        # Drive stringify raw: when the corpus omits `val` the value is absent
+        # (undefined) and stringify must return ""; when `val` is JSON null the
+        # cloned `in` carries the key with value None and stringify must return
+        # "null". Key presence is the only thing that distinguishes the two in
+        # Python (None == absent == null at the value level).
+        def stringify_wrapper(vin):
+            if 'val' in vin:
+                return stringify(vin['val'], vin.get('max'))
+            return stringify()
+
+        # null:False keeps a JSON-null `val` as a real None (not NULLMARK) so
+        # stringify renders it as "null"; absent `val` stays a missing key.
+        runsetflags(minorSpec['stringify'], {'null': False}, stringify_wrapper)
 
     def test_minor_jsonify(self):
         runsetflags(
@@ -252,14 +258,17 @@ class TestStruct(unittest.TestCase):
         runsetflags(minorSpec['pad'], {'null': False}, pad_wrapper)
 
     def test_minor_pathify(self):
-        def pathify_wrapper(vin=None):
-            path = vin.get('path')
-            path = None if path == NULLMARK else path
-            pathstr = pathify(path, vin.get('from')).replace('__NULL__.', '')
-            pathstr = pathstr.replace('>', ':null>') if vin.get('path') == NULLMARK else pathstr
-            return pathstr
+        # Run with null:False so the runner does NOT rewrite input nulls to the
+        # NULLMARK string: a JSON-null `path` then arrives as real None and an
+        # absent `path` arrives as a missing key. pathify distinguishes them
+        # (None -> "<unknown-path:null>", absent -> "<unknown-path>") via its
+        # _ABSENT default, so no output patching is needed.
+        def pathify_wrapper(vin):
+            if 'path' in vin:
+                return pathify(vin['path'], vin.get('from'))
+            return pathify(_ABSENT, vin.get('from'))
 
-        runsetflags(minorSpec['pathify'], {'null': True}, pathify_wrapper)
+        runsetflags(minorSpec['pathify'], {'null': False}, pathify_wrapper)
 
     def test_minor_items(self):
         runset(minorSpec['items'], items)
@@ -365,13 +374,16 @@ class TestStruct(unittest.TestCase):
         log = []
 
         def walklog(key, val, parent, path):
+            # At the walk root the key and parent are canonically *undefined*
+            # (Python's walk uses None for that slot). Render undefined as ""
+            # (stringify of absent), matching TS where stringify(undefined)="".
             log.append(
                 'k='
-                + stringify(key)
+                + (stringify() if key is None else stringify(key))
                 + ', v='
                 + stringify(val)
                 + ', p='
-                + stringify(parent)
+                + (stringify() if parent is None else stringify(parent))
                 + ', t='
                 + pathify(path)
             )
@@ -827,16 +839,13 @@ class TestStruct(unittest.TestCase):
         runsetflags(spec['sentinels']['isnode_unify'], {'null': False}, isnode)
 
     def test_sentinels_stringify_null(self):
-        # Python conflates None=absent=null at the value level, so the
-        # corpus null entry would arrive as None — same as a missing key.
-        # Run with the runner's default null substitution and convert the
-        # marker back to the literal string 'null' so stringify can render
-        # it the same way TS/JS do for actual null.
-        from tests.runner import NULLMARK
-
-        runset(
+        # Run with null:False so the JSON-null input arrives as a real None
+        # (not the NULLMARK string). stringify(None) renders "null" the same way
+        # TS/JS render an actual null, so the function is exercised raw.
+        runsetflags(
             spec['sentinels']['stringify_null'],
-            lambda vin: stringify('null' if vin == NULLMARK else vin),
+            {'null': False},
+            lambda vin: stringify(vin),
         )
 
 

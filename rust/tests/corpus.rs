@@ -53,8 +53,13 @@ fn test_json() -> Value {
 
 // ---- value helpers -----------------------------------------------------
 
+// Raw field extraction from corpus entries: preserves a stored JSON null so a
+// field declared `null` (e.g. `in: null`, `{val:null}`) reaches the subject as
+// Value::Null and is not silently dropped (Group A null-unification only
+// applies to the public get_prop API under test, not to test-harness plumbing).
+// Mirrors the canonical TS runner reading entry fields by direct property access.
 fn vget(v: &Value, key: &str) -> Value {
-    get_prop(v, &Value::str(key), Value::Noval)
+    lookup(v, &Value::str(key))
 }
 
 fn vget_path(v: &Value, keys: &[&str]) -> Value {
@@ -581,6 +586,53 @@ fn corpus() {
             None,
         )
     });
+
+    // -------- sentinels (Group A null-unification; UNDEF_SPEC.md) ----
+    // null_flag is false so a literal JSON null survives into the subject
+    // (these tests exercise getprop/getelem/haskey/isempty/isnode/stringify
+    // against stored null directly; mirrors perl/t/struct.t sentinels block).
+    run.run_set(
+        &set!("sentinels", "getprop_unify"),
+        false,
+        "sentinels-getprop_unify",
+        |vin| {
+            let alt = vget(&vin, "alt");
+            get_prop(&vget(&vin, "val"), &vget(&vin, "key"), alt)
+        },
+    );
+    run.run_set(
+        &set!("sentinels", "getelem_absent"),
+        false,
+        "sentinels-getelem_absent",
+        |vin| {
+            let alt = vget(&vin, "alt");
+            get_elem(&vget(&vin, "val"), &vget(&vin, "key"), alt)
+        },
+    );
+    run.run_set(
+        &set!("sentinels", "haskey_unify"),
+        false,
+        "sentinels-haskey_unify",
+        |vin| b(has_key(&vget(&vin, "val"), &vget(&vin, "key"))),
+    );
+    run.run_set(
+        &set!("sentinels", "isempty_unify"),
+        false,
+        "sentinels-isempty_unify",
+        |v| b(is_empty(&v)),
+    );
+    run.run_set(
+        &set!("sentinels", "isnode_unify"),
+        false,
+        "sentinels-isnode_unify",
+        |v| b(is_node(&v)),
+    );
+    run.run_set(
+        &set!("sentinels", "stringify_null"),
+        false,
+        "sentinels-stringify_null",
+        |v| Value::str(stringify(&v, None, false)),
+    );
 
     // -------- walk ---------------------------------------------------
     run.run_set(&set!("walk", "basic"), true, "walk-basic", |vin| {

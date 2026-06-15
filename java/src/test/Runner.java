@@ -9,6 +9,7 @@ import java.lang.reflect.Type;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -116,9 +117,22 @@ public class Runner {
               ? entry.get("out")
               : (nullFlag ? null : Struct.UNDEF);
 
+      // NULLMARK convention (mirrors js runner fixJSON): when nullFlag is set,
+      // every JSON null in the input and expected output is encoded as the
+      // sentinel string "__NULL__", and the function result is encoded the same
+      // way before comparison. This preserves the null-vs-absent distinction
+      // across the round-trip exactly as the canonical cross-port runner does.
+      if (nullFlag) {
+        in = fixJSON(in);
+        expected = fixJSON(expected);
+      }
+
       res.total++;
       try {
         Object got = subject.apply(in);
+        if (nullFlag) {
+          got = fixJSON(got);
+        }
 
         if (entry.containsKey("err")) {
           res.failures.add(
@@ -164,6 +178,59 @@ public class Runner {
   public static boolean deepEqual(Object a, Object b) {
     return Objects.equals(normalize(a), normalize(b));
   }
+
+  /**
+   * Encode JSON null (and the {@link Struct#UNDEF} "no value" sentinel) as the
+   * {@link #NULLMARK} string throughout a cloned structure. Mirrors
+   * {@code fixJSON} in js/test/runner.js when {@code flags.null} is true.
+   */
+  @SuppressWarnings("unchecked")
+  public static Object fixJSON(Object v) {
+    if (v == null || v == Struct.UNDEF) {
+      return NULLMARK;
+    }
+    if (v instanceof Map<?, ?> m) {
+      Map<String, Object> out = new LinkedHashMap<>();
+      for (Map.Entry<?, ?> e : m.entrySet()) {
+        out.put(Objects.toString(e.getKey()), fixJSON(e.getValue()));
+      }
+      return out;
+    }
+    if (v instanceof List<?> l) {
+      List<Object> out = new ArrayList<>(l.size());
+      for (Object x : l) {
+        out.add(fixJSON(x));
+      }
+      return out;
+    }
+    return v;
+  }
+
+  /**
+   * Modify callback mirroring {@code nullModifier} in js/test/runner.js: a bare
+   * {@link #NULLMARK} becomes a real null, and an embedded {@link #NULLMARK}
+   * inside a larger string is rewritten to the literal text {@code "null"}.
+   */
+  @SuppressWarnings("unchecked")
+  public static final Struct.Modify NULL_MODIFIER =
+      (val, key, parent, inj, store) -> {
+        if (!(val instanceof String s)) {
+          return;
+        }
+        Object repl;
+        if (NULLMARK.equals(s)) {
+          repl = null;
+        } else if (s.contains(NULLMARK)) {
+          repl = s.replace(NULLMARK, "null");
+        } else {
+          return;
+        }
+        if (parent instanceof Map<?, ?> m) {
+          ((Map<String, Object>) m).put(Objects.toString(key), repl);
+        } else if (parent instanceof List<?> l && key instanceof Number n) {
+          ((List<Object>) l).set(n.intValue(), repl);
+        }
+      };
 
   /**
    * Canonicalize a value for comparison:

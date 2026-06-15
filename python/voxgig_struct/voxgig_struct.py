@@ -157,6 +157,21 @@ SKIP = {'`$SKIP`': True}
 DELETE = {'`$DELETE`': True}
 
 
+# Python collapses the canonical "undefined" (TS `undefined`) and JSON `null`
+# both onto None, which loses a distinction the corpus depends on (e.g.
+# stringify(null) is "null" but stringify(undefined) is ""). _ABSENT is a
+# private sentinel used ONLY as a default argument value so a function can tell
+# "no argument supplied" (undefined) apart from an explicit None (JSON null).
+class _Absent:
+    __slots__ = ()
+
+    def __repr__(self):
+        return '<absent>'
+
+
+_ABSENT = _Absent()
+
+
 class Injection:
     """
     Injection state used for recursive injection into JSON-like data structures.
@@ -1039,18 +1054,17 @@ def select(children: Any, query: Any) -> list[Any]:
     return results
 
 
-def stringify(val: Any, maxlen: int = UNDEF, pretty: Any = None):
+def stringify(val: Any = _ABSENT, maxlen: int = UNDEF, pretty: Any = None):
     "Safely stringify a value for printing (NOT JSON!)."
 
     pretty = bool(pretty)
     valstr = S_MT
 
-    # Python collapses UNDEF and JSON null to None, so stringify(None)
-    # cannot reliably tell them apart. The existing minor.stringify
-    # corpus expects "" for the absent case ({in:{}, out:''}); the
-    # sentinels stringify_null wrapper substitutes the NULLMARK string
-    # for callers that want the explicit "null" rendering of JSON null.
-    if val == UNDEF:
+    # Canonical: stringify(undefined) is "" (or "<>" pretty), while
+    # stringify(null) is "null". Python conflates both onto None, so we use the
+    # _ABSENT sentinel to mean "no value supplied" (undefined). An explicit None
+    # is JSON null and falls through to json.dumps below, which yields "null".
+    if val is _ABSENT:
         return '<>' if pretty else valstr
 
     if isinstance(val, str):
@@ -1089,7 +1103,7 @@ def stringify(val: Any, maxlen: int = UNDEF, pretty: Any = None):
     return valstr
 
 
-def pathify(val: Any = UNDEF, startin: int = UNDEF, endin: int = UNDEF) -> str:
+def pathify(val: Any = _ABSENT, startin: int = UNDEF, endin: int = UNDEF) -> str:
     pathstr = UNDEF
 
     # Convert input to a path array
@@ -1121,9 +1135,12 @@ def pathify(val: Any = UNDEF, startin: int = UNDEF, endin: int = UNDEF) -> str:
 
             pathstr = S_DT.join(mapped_path)
 
-    # Handle the case where we couldn't create a path
-    if pathstr == UNDEF:
-        pathstr = f'<unknown-path{S_MT if val == UNDEF else S_CN + stringify(val, 47)}>'
+    # Handle the case where we couldn't create a path.
+    # Canonical: an absent (undefined) value renders "<unknown-path>", while an
+    # explicit JSON null renders "<unknown-path:null>". _ABSENT distinguishes
+    # the two (Python conflates both onto None otherwise).
+    if pathstr is UNDEF:
+        pathstr = f'<unknown-path{S_MT if val is _ABSENT else S_CN + stringify(val, 47)}>'
 
     return pathstr
 

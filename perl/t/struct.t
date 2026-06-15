@@ -181,6 +181,25 @@ if (Voxgig::Struct::ismap($minor)) {
            sub { my $in = $_[0]; Voxgig::Struct::setprop(Voxgig::Struct::clone($in->{parent}), $in->{key}, $in->{val}) });
     runset('minor.delprop',   $minor->{delprop}{set},
            sub { my $in = $_[0]; Voxgig::Struct::delprop(Voxgig::Struct::clone($in->{parent}), $in->{key}) });
+    # setpath returns the leaf key's PARENT node (canonical). The entry's
+    # `match.args.0.store` records the store AFTER in-place mutation; verify it
+    # here since runset only compares the return value to `out`.
+    runset('minor.setpath',   $minor->{setpath}{set},
+           sub {
+               my ($in, $entry) = @_;
+               my $store = $in->{store};
+               my $r = Voxgig::Struct::setpath($store, $in->{path}, $in->{val});
+               my $want_store = eval { $entry->{match}{args}{'0'}{store} };
+               if (defined $want_store) {
+                   my $got = canon($store);
+                   my $exp = canon($want_store);
+                   if ($got ne $exp) {
+                       diag("[minor.setpath store-mutation] expected=$exp got=$got");
+                       die "minor.setpath store mutation mismatch\n";
+                   }
+               }
+               Voxgig::Struct::is_none($r) ? undef : $r;
+           });
     runset('minor.strkey',    $minor->{strkey}{set},
            sub { Voxgig::Struct::strkey($_[0]) });
     runset('minor.pathify',   $minor->{pathify}{set},

@@ -364,36 +364,92 @@ class StructTest extends TestCase
         $this->testSet(
             $this->testSpec->minor->pathify,
             function (stdClass $entry) {
-                // 1) If the JSON had no "path" key at all, use our UNDEF marker.
-                //    Otherwise take whatever value was there (could be null).
-                $raw = property_exists($entry, 'path')
+                // 1) An absent "path" key is canonical NONE/undefined, which the
+                //    PHP port models with the undef() sentinel. A present JSON
+                //    null stays a PHP null — pathify distinguishes the two
+                //    (<unknown-path> vs <unknown-path:null>).
+                $path = property_exists($entry, 'path')
                     ? $entry->path
                     : Struct::undef();
 
-                // 2) TS does: path = (vin.path === NULLMARK ? undefined : vin.path)
-                //    Our "undefined" is PHP null, so:
-                $path = ($raw === Struct::undef()) ? null : $raw;
-
-                // 3) Optional slice offset
+                // 2) Optional slice offset
                 $from = property_exists($entry, 'from')
                     ? $entry->from
                     : null;
 
-                // 4) Run PHP port of pathify
-                $s = Struct::pathify($path, $from);
-
-                // 5) Strip out any UNDEF fragments (no-op with sentinel object)
-
-                // 6) TS does: if vin.path === NULLMARK then add ":null>"
-                //    In our convention, JSON null => raw === null (not UNDEF),
-                //    so we inject only when raw === null.
-                if ($raw === null) {
-                    $s = str_replace('>', ':null>', $s);
-                }
-
-                return $s;
+                // 3) Run PHP port of pathify. The function is compared raw with
+                //    no normalization (no masking hack).
+                return Struct::pathify($path, $from);
             },
             /* deep‐equal = */ true
+        );
+    }
+
+    // ——— sentinels: Group A null-unification and stringify(null) ———
+    // Mirrors perl/t/struct.t sentinels dispatch. These groups exercise the
+    // canonical absent-vs-null rule: a stored JSON null counts as "no value"
+    // for getprop/getelem/haskey/isempty/isnode, while stringify renders it.
+    public function testSentinelsGetpropUnify(): void
+    {
+        $this->testSet(
+            $this->testSpec->sentinels->getprop_unify,
+            function ($input) {
+                $val = property_exists($input, 'val') ? $input->val : Struct::undef();
+                $key = property_exists($input, 'key') ? $input->key : Struct::undef();
+                $alt = property_exists($input, 'alt') ? $input->alt : Struct::undef();
+                return Struct::getprop($val, $key, $alt);
+            }
+        );
+    }
+
+    public function testSentinelsGetelemAbsent(): void
+    {
+        $this->testSet(
+            $this->testSpec->sentinels->getelem_absent,
+            function ($input) {
+                $val = property_exists($input, 'val') ? $input->val : Struct::undef();
+                $key = property_exists($input, 'key') ? $input->key : Struct::undef();
+                $alt = property_exists($input, 'alt') ? $input->alt : Struct::undef();
+                return $alt === Struct::undef()
+                    ? Struct::getelem($val, $key)
+                    : Struct::getelem($val, $key, $alt);
+            }
+        );
+    }
+
+    public function testSentinelsHaskeyUnify(): void
+    {
+        $this->testSet(
+            $this->testSpec->sentinels->haskey_unify,
+            function ($input) {
+                $val = property_exists($input, 'val') ? $input->val : Struct::undef();
+                $key = property_exists($input, 'key') ? $input->key : Struct::undef();
+                return Struct::haskey($val, $key);
+            }
+        );
+    }
+
+    public function testSentinelsIsemptyUnify(): void
+    {
+        $this->testSet(
+            $this->testSpec->sentinels->isempty_unify,
+            fn($in) => Struct::isempty($in)
+        );
+    }
+
+    public function testSentinelsIsnodeUnify(): void
+    {
+        $this->testSet(
+            $this->testSpec->sentinels->isnode_unify,
+            fn($in) => Struct::isnode($in)
+        );
+    }
+
+    public function testSentinelsStringifyNull(): void
+    {
+        $this->testSet(
+            $this->testSpec->sentinels->stringify_null,
+            fn($in) => Struct::stringify($in)
         );
     }
 

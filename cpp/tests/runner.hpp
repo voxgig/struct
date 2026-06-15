@@ -56,11 +56,63 @@ inline Value get_spec(const std::string& category, const std::string& name) {
   return getprop(cat, Value(name));
 }
 
-// Normalise: integer-valued doubles -> int64; map keys sorted; sentinels and
-// undefined collapse to null for stable comparison.
+// fix_json: bridge JSON null to the cross-port "__NULL__" string marker, the
+// same transform the canonical runner (typescript/test/runner.ts:fixJSON)
+// applies to every test input, every result, and every expected `out` when the
+// null flag is set. This is what lets the corpus encode "value is JSON null"
+// (distinct from "value is absent") without the test harness having to special
+// case it: every observed null becomes the literal string "__NULL__", and the
+// subjects that care (inject.string) swap it back via null_modifier(). A node's
+// own identity is preserved; only null *values* are rewritten.
+inline Value fix_json(const Value& v, bool null_flag) {
+  if (v.is_undef())
+    return v;
+  if (v.is_null())
+    return null_flag ? Value(NULLMARK()) : v;
+  if (v.is_list()) {
+    auto out = std::make_shared<List>();
+    for (const auto& e : *v.as_list())
+      out->push_back(fix_json(e, null_flag));
+    return Value(out);
+  }
+  if (v.is_map()) {
+    auto out = std::shared_ptr<Map>(new Map());
+    for (const auto& [k, e] : *v.as_map())
+      out->set(k, fix_json(e, null_flag));
+    return Value(out);
+  }
+  return v;
+}
+
+// null_modifier: the inject `modify` callback used by the inject.string subject.
+// Mirrors typescript/test/runner.ts:nullModifier — a slot whose injected value
+// is exactly "__NULL__" becomes JSON null; a string that merely *contains*
+// "__NULL__" has the marker rewritten to the literal text "null".
+inline void null_modifier(const Value& val, const Value& key, const Value& parent, Injection&,
+                          const Value&) {
+  if (!val.is_string())
+    return;
+  const std::string& s = val.as_string();
+  if (s == NULLMARK()) {
+    setprop(parent, key, Value(nullptr));
+    return;
+  }
+  if (s.find(NULLMARK()) != std::string::npos) {
+    std::string out = s;
+    std::string::size_type pos = 0;
+    while ((pos = out.find(NULLMARK(), pos)) != std::string::npos) {
+      out.replace(pos, NULLMARK().size(), "null");
+      pos += 4;
+    }
+    setprop(parent, key, Value(out));
+  }
+}
+
+// Normalise for comparison: integer-valued doubles -> int64. Map key order and
+// null/undef are NOT collapsed here — null is carried as the "__NULL__" marker
+// (see fix_json) and key order must match canonical insertion order, so the
+// comparison stays faithful instead of masking those distinctions.
 inline Value normalize(const Value& v) {
-  if (v.is_undef() || v.is_null())
-    return Value(nullptr);
   if (v.is_double()) {
     double d = v.as_double();
     if (std::isfinite(d) && std::floor(d) == d)
@@ -74,12 +126,9 @@ inline Value normalize(const Value& v) {
     return Value(out);
   }
   if (v.is_map()) {
-    std::map<std::string, Value> sorted;
-    for (const auto& [k, e] : *v.as_map())
-      sorted[k] = normalize(e);
     auto out = std::shared_ptr<Map>(new Map());
-    for (const auto& [k, e] : sorted)
-      out->set(k, e);
+    for (const auto& [k, e] : *v.as_map())
+      out->set(k, normalize(e));
     return Value(out);
   }
   return v;
@@ -112,13 +161,22 @@ inline Result runsetflags(const std::string& full_name, const Value& testspec, b
     const Value& eo = (*set)[i];
     if (!eo.is_map())
       continue;
-    bool has_in = haskey(eo, Value("in"));
-    Value in_raw = getprop(eo, Value("in"));
-    Value in = has_in ? clone(in_raw) : Value::undef();
-    bool has_out = haskey(eo, Value("out"));
-    Value expected =
-        has_out ? getprop(eo, Value("out")) : (null_flag ? Value(nullptr) : Value::undef());
-    Value err_v = haskey(eo, Value("err")) ? getprop(eo, Value("err")) : Value::undef();
+    // Extract in/out/err with the null-preserving lookup_v rather than Group A
+    // getprop/haskey: a test entry whose `in` (or `out`) is literally JSON null
+    // (e.g. the sentinels groups) must keep that null, not be read as absent.
+    Value in_raw = lookup_v(eo, Value("in"));
+    bool has_in = !in_raw.is_undef();
+    // Bridge JSON null -> "__NULL__" on the input the same way the canonical
+    // runner does, so subjects observe the marker (and inject.string can swap
+    // it back through null_modifier).
+    Value in = has_in ? fix_json(clone(in_raw), null_flag) : Value::undef();
+    Value out_raw = lookup_v(eo, Value("out"));
+    bool has_out = !out_raw.is_undef();
+    // resolveEntry: an absent/null expected out becomes the null marker.
+    Value expected = has_out ? fix_json(out_raw, null_flag)
+                             : (null_flag ? Value(NULLMARK()) : Value::undef());
+    Value err_raw = lookup_v(eo, Value("err"));
+    Value err_v = err_raw.is_undef() ? Value::undef() : err_raw;
 
     res.total++;
     Value got;

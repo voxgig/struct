@@ -46,11 +46,12 @@ class TestVoxgigStruct < Minitest::Test
     @runset       = @runpack[:runset]
     @runsetflags  = @runpack[:runsetflags]
     @struct       = @client.utility.struct
-    @minor_spec   = @spec['minor']
-    @walk_spec    = @spec['walk']
-    @merge_spec   = @spec['merge']
-    @getpath_spec = @spec['getpath']
-    @inject_spec  = @spec['inject']
+    @minor_spec     = @spec['minor']
+    @walk_spec      = @spec['walk']
+    @merge_spec     = @spec['merge']
+    @getpath_spec   = @spec['getpath']
+    @inject_spec    = @spec['inject']
+    @sentinels_spec = @spec['sentinels']
   end
 
   def test_exists
@@ -263,6 +264,45 @@ class TestVoxgigStruct < Minitest::Test
     assert_equal 2, VoxgigStruct.getdef(nil, 2)
     assert_equal 'a', VoxgigStruct.getdef('a', 'b')
     assert_equal 'b', VoxgigStruct.getdef(nil, 'b')
+  end
+
+  # --- Sentinels tests (Group A null/absent unification, UNDEF_SPEC.md) ---
+  #
+  # These exercise the readers against a stored JSON null. The runner's
+  # nested NULLMARK substitution is turned OFF ({ 'null' => false }) so the
+  # corpus's real `null` reaches the function as a genuine nil — otherwise
+  # the marker string would mask the very null-handling this group checks.
+
+  def test_sentinels_getprop_unify
+    @runsetflags.call(@sentinels_spec['getprop_unify'], { 'null' => false }, lambda { |vin|
+      VoxgigStruct.getprop(vin['val'], vin['key'], vin['alt'])
+    })
+  end
+
+  def test_sentinels_getelem_absent
+    @runsetflags.call(@sentinels_spec['getelem_absent'], { 'null' => false }, lambda { |vin|
+      VoxgigStruct.getelem(vin['val'], vin['key'], vin['alt'])
+    })
+  end
+
+  def test_sentinels_haskey_unify
+    @runsetflags.call(@sentinels_spec['haskey_unify'], { 'null' => false }, lambda { |vin|
+      VoxgigStruct.haskey(vin['val'], vin['key'])
+    })
+  end
+
+  def test_sentinels_isempty_unify
+    @runsetflags.call(@sentinels_spec['isempty_unify'], { 'null' => false }, VoxgigStruct.method(:isempty))
+  end
+
+  def test_sentinels_isnode_unify
+    @runsetflags.call(@sentinels_spec['isnode_unify'], { 'null' => false }, VoxgigStruct.method(:isnode))
+  end
+
+  def test_sentinels_stringify_null
+    @runsetflags.call(@sentinels_spec['stringify_null'], { 'null' => false }, lambda { |vin|
+      VoxgigStruct.stringify(vin)
+    })
   end
 
   # --- Walk tests ---

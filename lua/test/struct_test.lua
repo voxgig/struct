@@ -3,8 +3,7 @@ package.path = package.path .. ";./test/?.lua"
 local assert = require("luassert")
 
 local runnerModule = require("runner")
-local makeRunner, nullModifier, NULLMARK, JSON_NULL =
-  runnerModule.makeRunner, runnerModule.nullModifier, runnerModule.NULLMARK, runnerModule.JSON_NULL
+local makeRunner, nullModifier = runnerModule.makeRunner, runnerModule.nullModifier
 
 local SDK = require("sdk").SDK
 
@@ -237,36 +236,28 @@ describe("struct", function()
   end)
 
   test("minor-escurl", function()
-    runset(minorSpec.escurl, function(vin)
-      -- Ensure spaces are properly replaced like in the Go implementation
-      return escurl(vin):gsub("+", "%%20")
-    end)
+    runset(minorSpec.escurl, escurl)
   end)
 
   test("minor-stringify", function()
-    runset(minorSpec.stringify, function(vin)
-      if NULLMARK == vin.val then
-        return stringify("null", vin.max)
-      else
-        return stringify(vin.val, vin.max)
-      end
+    -- null = true so a JSON null `val` arrives as NULLMARK; stringify(NULLMARK)
+    -- is "null" (canonical TS stringify(null) === "null"), while an absent val
+    -- (nil) is "".
+    runsetflags(minorSpec.stringify, {
+      null = true,
+    }, function(vin)
+      return stringify(vin.val, vin.max)
     end)
   end)
 
   test("minor-pathify", function()
+    -- null = true so a JSON null path arrives as NULLMARK. pathify treats
+    -- NULLMARK as a scalar (not a key), so null path elements are dropped via
+    -- iskey and a top-level null renders as <unknown-path:null>.
     runsetflags(minorSpec.pathify, {
       null = true,
     }, function(vin)
-      local path
-      if NULLMARK == vin.path then
-        path = nil
-      else
-        path = vin.path
-      end
-
-      local pathstr = pathify(path, vin.from):gsub("__NULL__%.", "")
-      pathstr = NULLMARK == vin.path and pathstr:gsub(">", ":null>") or pathstr
-      return pathstr
+      return pathify(vin.path, vin.from)
     end)
   end)
 
@@ -351,16 +342,11 @@ describe("struct", function()
   end)
 
   test("minor-typify", function()
-    -- Filter out JSON null 'in' entries: Lua typify(nil) returns T_null,
-    -- but TS typify(null) returns T_scalar|T_null.
-    local filtered = { set = {} }
-    setmetatable(filtered.set, { __jsontype = "array" })
-    for _, entry in ipairs(minorSpec.typify.set) do
-      if entry["in"] ~= JSON_NULL then
-        table.insert(filtered.set, entry)
-      end
-    end
-    runsetflags(filtered, {
+    -- null = false so a JSON null `in` arrives as nil; typify(nil) is
+    -- T_scalar|T_null (4194432), matching canonical TS typify(null). (The
+    -- typify(undefined)==T_noval corpus entry has no `in` and is skipped, as
+    -- Lua cannot distinguish absent from null at the value level.)
+    runsetflags(minorSpec.typify, {
       null = false,
     }, typify)
   end)
@@ -914,5 +900,52 @@ describe("struct", function()
     runset(selectSpec.alts, function(vin)
       return select_fn(vin.obj, vin.query)
     end)
+  end)
+
+  ----------------------------------------------------------
+  -- Sentinel (JSON null) Tests
+  ----------------------------------------------------------
+  -- These pin the JSON-null unification rules. Lua has no value distinct from
+  -- nil for JSON null, so the flag choice depends on where the null sits:
+  --   * In a MAP value / scalar position, null = false renders it as nil
+  --     (an absent map key), which getprop/haskey/isempty/isnode already
+  --     unify the canonical way. This mirrors canonical TS (sentinels run
+  --     with null:false there too).
+  --   * In a LIST element, nil would create an array hole, so the harness
+  --     carries the null as the NULLMARK ("__NULL__") sentinel under
+  --     null = true; getelem treats NULLMARK as no-value.
+  --   * stringify must distinguish JSON null ("null") from absent (""), which
+  --     it can only see via the NULLMARK sentinel, so it runs with null = true.
+
+  local sentinelsSpec = spec.sentinels
+
+  test("sentinels-getprop_unify", function()
+    runsetflags(sentinelsSpec.getprop_unify, { null = false }, function(vin)
+      return getprop(vin.val, vin.key, vin.alt)
+    end)
+  end)
+
+  test("sentinels-getelem_absent", function()
+    runsetflags(sentinelsSpec.getelem_absent, { null = true }, function(vin)
+      return getelem(vin.val, vin.key, vin.alt)
+    end)
+  end)
+
+  test("sentinels-haskey_unify", function()
+    runsetflags(sentinelsSpec.haskey_unify, { null = false }, function(vin)
+      return haskey(vin.val, vin.key)
+    end)
+  end)
+
+  test("sentinels-isempty_unify", function()
+    runsetflags(sentinelsSpec.isempty_unify, { null = false }, isempty)
+  end)
+
+  test("sentinels-isnode_unify", function()
+    runsetflags(sentinelsSpec.isnode_unify, { null = false }, isnode)
+  end)
+
+  test("sentinels-stringify_null", function()
+    runsetflags(sentinelsSpec.stringify_null, { null = true }, stringify)
   end)
 end)

@@ -411,9 +411,12 @@ class Struct
     public static function getprop(mixed $val, mixed $key, mixed $alt = null): mixed
     {
         $altExplicit = func_num_args() >= 3;
+        $resolvedAlt = $altExplicit ? $alt : null;
         $out = self::_getprop($val, $key, self::undef());
-        if ($out === self::undef()) {
-            return $altExplicit ? $alt : null;
+        // Group A null rule (canonical TS: `if (null == out) return alt`):
+        // a stored JSON null (or the undef sentinel) counts as "no value".
+        if ($out === self::undef() || $out === null) {
+            return $resolvedAlt;
         }
         return $out;
     }
@@ -518,19 +521,9 @@ class Struct
      */
     public static function haskey(mixed $val = null, mixed $key = null): bool
     {
-        // 1. Validate $val is a node
-        if (!self::isnode($val)) {
-            return false;
-        }
-
-        // 2. Validate $key is a valid key
-        if (!self::iskey($key)) {
-            return false;
-        }
-
-        // 3. Check property existence
-        $marker = new \stdClass();
-        return self::_getprop($val, $key, $marker) !== $marker;
+        // Canonical TS: `null != getprop(val, key)`. getprop applies the
+        // Group A null rule, so a present-but-null key counts as absent.
+        return self::getprop($val, $key) !== null;
     }
 
     public static function items(mixed $val, ?callable $apply = null): array
@@ -979,13 +972,11 @@ class Struct
         }
 
         if ($pathstr === $UNDEF) {
-            if ($val === $UNDEF || $val === null) {
+            // Canonical TS: only NONE/undefined omits the ":value" suffix.
+            // A JSON null renders stringify(null)="null" → <unknown-path:null>.
+            if ($val === $UNDEF) {
                 $pathstr = '<unknown-path>';
-            } elseif (is_object($val) && count(get_object_vars($val)) === 0) {
-                // empty object
-                $pathstr = '<unknown-path:{}>';
             } else {
-                // booleans, numbers, non-empty objects, etc.
                 $pathstr = '<unknown-path' . $S_CN . self::stringify($val, 47) . '>';
             }
         }
@@ -3311,7 +3302,9 @@ class Struct
             }
         }
 
-        if ($out === self::undef()) {
+        // Group A null rule (canonical TS: `if (null == out) return ... alt`):
+        // a null (or absent/undef) slot value counts as "no value".
+        if ($out === self::undef() || $out === null) {
             if ($altIsDefault) {
                 return null;
             }

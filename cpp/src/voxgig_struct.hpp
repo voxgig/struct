@@ -179,6 +179,7 @@ class Injection;
 inline std::string strkey(const Value& key);
 inline Value getprop(const Value& val, const Value& key, const Value& alt = Value::undef());
 inline Value getelem(const Value& val, const Value& key, const Value& alt = Value::undef());
+inline Value lookup_v(const Value& val, const Value& key);
 inline Value setprop(Value parent, const Value& key, const Value& val);
 inline Value delprop(Value parent, const Value& key);
 inline std::vector<std::string> keysof(const Value& v);
@@ -236,7 +237,9 @@ inline Value getprop(const Value& val, const Value& key, const Value& alt) {
     Value* found = m->find(sk);
     if (!found)
       return alt;
-    if (found->is_undef())
+    // Group A: a stored JSON null counts as "no value" (canonical `null == out`
+    // is true for both undefined and null), so the alt is substituted.
+    if (found->is_undef() || found->is_null())
       return alt;
     return *found;
   }
@@ -264,7 +267,8 @@ inline Value getprop(const Value& val, const Value& key, const Value& alt) {
     if (idx < 0 || idx >= static_cast<int>(l->size()))
       return alt;
     Value v = (*l)[idx];
-    if (v.is_undef())
+    // Group A: a stored JSON null counts as "no value" — substitute the alt.
+    if (v.is_undef() || v.is_null())
       return alt;
     return v;
   }
@@ -312,9 +316,61 @@ inline Value getelem(const Value& val, const Value& key, const Value& alt) {
       return alt;
     out = (*l)[nkey];
   }
-  if (out.is_undef())
+  // Group A: a stored JSON null at the slot counts as "no value" (canonical
+  // `null == out` is true for both undefined and null) — substitute the alt.
+  if (out.is_undef() || out.is_null())
     return alt;
   return out;
+}
+
+// Internal Group B lookup: read the raw stored value at a slot, preserving a
+// stored JSON null. Mirrors canonical `_lookup` (StructUtility.ts). The public
+// getprop / getelem / haskey treat a stored null as absent (Group A); the
+// validate / transform / inject internals that need the literal value (e.g. to
+// validate against $NULL or echo a null back through an injector) use this.
+inline Value lookup_v(const Value& val, const Value& key) {
+  if (val.is_undef() || key.is_undef())
+    return Value::undef();
+  if (val.is_list()) {
+    auto l = val.as_list();
+    if (!l)
+      return Value::undef();
+    int idx;
+    if (key.is_int()) {
+      idx = static_cast<int>(key.as_int());
+    } else if (key.is_double()) {
+      idx = static_cast<int>(key.as_double());
+    } else if (key.is_string()) {
+      if (!std::regex_match(key.as_string(), R_INTEGER_KEY()))
+        return Value::undef();
+      try {
+        idx = std::stoi(key.as_string());
+      } catch (...) {
+        return Value::undef();
+      }
+    } else {
+      return Value::undef();
+    }
+    if (idx < 0)
+      idx = static_cast<int>(l->size()) + idx;
+    if (idx < 0 || idx >= static_cast<int>(l->size()))
+      return Value::undef();
+    Value v = (*l)[idx];
+    return v.is_undef() ? Value::undef() : v;
+  }
+  if (val.is_map()) {
+    auto m = val.as_map();
+    if (!m)
+      return Value::undef();
+    std::string sk = strkey(key);
+    if (sk.empty())
+      return Value::undef();
+    Value* found = m->find(sk);
+    if (!found)
+      return Value::undef();
+    return *found;
+  }
+  return Value::undef();
 }
 
 inline Value setprop(Value parent, const Value& key, const Value& val) {
@@ -410,7 +466,10 @@ inline std::vector<std::string> keysof(const Value& v) {
 }
 
 inline bool haskey(const Value& v, const Value& key) {
-  return !getprop(v, key).is_undef();
+  // Canonical: `null != getprop(val, key)`. A present-but-null key is false
+  // (getprop already substitutes its undef default for a stored null).
+  Value r = getprop(v, key);
+  return !r.is_undef() && !r.is_null();
 }
 
 // items returns list of [key, value] pairs as Value-list-of-Value-lists.
@@ -1860,7 +1919,7 @@ inline Value inject(const Value& val, const Value& store, Injection* injdef) {
   }
 
   inj->val = cur;
-  return getprop(inj->parent, Value(S_DTOP()));
+  return lookup_v(inj->parent, Value(S_DTOP()));
 }
 
 // injectChild definition (after inject is declared).
@@ -1902,7 +1961,7 @@ inline Value DELETE_FN(Injection& inj, const Value& val, const std::string& ref,
 inline Value COPY_FN(Injection& inj, const Value& val, const std::string& ref, const Value& store) {
   if (!checkPlacement(M_VAL, "COPY", T_any, inj))
     return Value::undef();
-  Value out = getprop(inj.dparent, Value(inj.key));
+  Value out = lookup_v(inj.dparent, Value(inj.key));
   inj.setval(out);
   return out;
 }
@@ -1910,14 +1969,18 @@ inline Value COPY_FN(Injection& inj, const Value& val, const std::string& ref, c
 inline Value KEY_FN(Injection& inj, const Value& val, const std::string& ref, const Value& store) {
   if (inj.mode != M_VAL)
     return Value::undef();
-  Value keyspec = getprop(inj.parent, Value(S_BKEY()));
+  Value keyspec = lookup_v(inj.parent, Value(S_BKEY()));
   if (!keyspec.is_undef()) {
     delprop(inj.parent, Value(S_BKEY()));
     return getprop(inj.dparent, keyspec);
   }
-  Value anno = getprop(inj.parent, Value(S_BANNO()));
+  Value anno = lookup_v(inj.parent, Value(S_BANNO()));
   Value alt = inj.path.size() >= 2 ? Value(inj.path[inj.path.size() - 2]) : Value::undef();
-  return getprop(anno, Value("KEY"), alt);
+  // Canonical: `_lookup(anno, S_KEY) ?? getelem(path, -2)` — null/undef -> alt.
+  Value k = lookup_v(anno, Value("KEY"));
+  if (k.is_undef() || k.is_null())
+    return alt;
+  return k;
 }
 
 inline Value ANNO_FN(Injection& inj, const Value& val, const std::string& ref, const Value& store) {
@@ -2053,8 +2116,8 @@ inline Value FORMAT_FN(Injection& inj, const Value& val, const std::string& ref,
   if (inj.mode != M_VAL)
     return Value::undef();
 
-  Value name = getprop(inj.parent, Value(int64_t(1)));
-  Value child = getprop(inj.parent, Value(int64_t(2)));
+  Value name = lookup_v(inj.parent, Value(int64_t(1)));
+  Value child = lookup_v(inj.parent, Value(int64_t(2)));
 
   Value tkey = inj.path.size() >= 2 ? Value(inj.path[inj.path.size() - 2]) : Value::undef();
   Value target;
@@ -2414,7 +2477,7 @@ inline Value PACK_FN(Injection& inj, const Value& val, const std::string& ref, c
 inline Value REF_FN(Injection& inj, const Value& val, const std::string& ref, const Value& store) {
   if (inj.mode != M_VAL)
     return Value::undef();
-  Value refpath = getprop(inj.parent, Value(int64_t(1)));
+  Value refpath = lookup_v(inj.parent, Value(int64_t(1)));
   inj.keyI = static_cast<int>(inj.keys ? inj.keys->size() : 0);
 
   Value spec_holder = getprop(store, Value(S_DSPEC()));
@@ -2623,7 +2686,7 @@ namespace validators {
 
 inline Value STRING_FN(Injection& inj, const Value& val, const std::string& ref,
                        const Value& store) {
-  Value out = getprop(inj.dparent, Value(inj.key));
+  Value out = lookup_v(inj.dparent, Value(inj.key));
   int t = typify(out);
   if ((T_string & t) == 0) {
     inj.errs->push_back(Value(invalid_type_msg(inj.path, "string", t, out, "V1010")));
@@ -2653,7 +2716,7 @@ inline Value TYPE_FN(Injection& inj, const Value& val, const std::string& ref, c
   if (idx < 0)
     return Value::undef();
   int typev = 1 << (31 - idx);
-  Value out = getprop(inj.dparent, Value(inj.key));
+  Value out = lookup_v(inj.dparent, Value(inj.key));
   int t = typify(out);
   if ((t & typev) == 0) {
     inj.errs->push_back(Value(invalid_type_msg(inj.path, tname, t, out, "V1001")));
@@ -2663,7 +2726,7 @@ inline Value TYPE_FN(Injection& inj, const Value& val, const std::string& ref, c
 }
 
 inline Value ANY_FN(Injection& inj, const Value& val, const std::string& ref, const Value& store) {
-  return getprop(inj.dparent, Value(inj.key));
+  return lookup_v(inj.dparent, Value(inj.key));
 }
 
 inline Value CHILD_FN(Injection& inj, const Value& val, const std::string& ref,
@@ -2697,7 +2760,7 @@ inline Value CHILD_FN(Injection& inj, const Value& val, const std::string& ref,
       inj.errs->push_back(Value("Invalid $CHILD as value"));
       return Value::undef();
     }
-    Value childtm = getprop(inj.parent, Value(int64_t(1)));
+    Value childtm = lookup_v(inj.parent, Value(int64_t(1)));
     if (inj.dparent.is_undef() || inj.dparent.is_null()) {
       inj.parent.as_list()->clear();
       return Value::undef();
@@ -2923,7 +2986,10 @@ inline void _validation(const Value& pval, const Value& key, const Value& parent
     if (!pkeys.empty() && !is_open) {
       std::vector<std::string> badkeys;
       for (auto& ck : ckeys) {
-        if (!haskey(pval, Value(ck)))
+        // Canonical uses `NONE === _lookup(pval, ckey)`: the shape's literal
+        // presence, so a key whose validator stored null still counts as
+        // declared (Group A haskey would miss a null-valued slot).
+        if (lookup_v(pval, Value(ck)).is_undef())
           badkeys.push_back(ck);
       }
       if (!badkeys.empty()) {
@@ -3109,7 +3175,7 @@ inline std::shared_ptr<Map> recOpts(const Value& store, const Value& point,
 inline Value AND_FN(Injection& inj, const Value& val, const std::string& ref, const Value& store) {
   if (inj.mode != M_KEYPRE)
     return Value::undef();
-  Value terms = getprop(inj.parent, Value(inj.key));
+  Value terms = lookup_v(inj.parent, Value(inj.key));
   if (!terms.is_list())
     return Value::undef();
 
@@ -3142,7 +3208,7 @@ inline Value AND_FN(Injection& inj, const Value& val, const std::string& ref, co
 inline Value OR_FN(Injection& inj, const Value& val, const std::string& ref, const Value& store) {
   if (inj.mode != M_KEYPRE)
     return Value::undef();
-  Value terms = getprop(inj.parent, Value(inj.key));
+  Value terms = lookup_v(inj.parent, Value(inj.key));
   if (!terms.is_list())
     return Value::undef();
 
@@ -3176,7 +3242,7 @@ inline Value OR_FN(Injection& inj, const Value& val, const std::string& ref, con
 inline Value NOT_FN(Injection& inj, const Value& val, const std::string& ref, const Value& store) {
   if (inj.mode != M_KEYPRE)
     return Value::undef();
-  Value term = getprop(inj.parent, Value(inj.key));
+  Value term = lookup_v(inj.parent, Value(inj.key));
   auto ppath = std::make_shared<List>();
   for (size_t i = 0; i + 1 < inj.path.size(); i++)
     ppath->push_back(Value(inj.path[i]));
@@ -3203,7 +3269,7 @@ inline Value NOT_FN(Injection& inj, const Value& val, const std::string& ref, co
 inline Value CMP_FN(Injection& inj, const Value& val, const std::string& ref, const Value& store) {
   if (inj.mode != M_KEYPRE)
     return Value::undef();
-  Value term = getprop(inj.parent, Value(inj.key));
+  Value term = lookup_v(inj.parent, Value(inj.key));
   Value gkey = inj.path.size() >= 2 ? Value(inj.path[inj.path.size() - 2]) : Value::undef();
   auto ppath = std::make_shared<List>();
   for (size_t i = 0; i + 1 < inj.path.size(); i++)

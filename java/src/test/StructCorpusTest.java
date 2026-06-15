@@ -71,7 +71,7 @@ class StructCorpusTest {
     add(tests, "minor", "strkey", false, in -> Struct.strkey(in));
     add(tests, "minor", "isempty", false, in -> Struct.isempty(in));
     add(tests, "minor", "isfunc", true, in -> Struct.isfunc(in));
-    add(tests, "minor", "getprop", true, in -> {
+    add(tests, "minor", "getprop", false, in -> {
       Object val = getp(in, "val");
       Object key = getp(in, "key");
       Object alt = getpDef(in, "alt", Struct.UNDEF);
@@ -79,7 +79,7 @@ class StructCorpusTest {
           ? Struct.getprop(val, key)
           : Struct.getprop(val, key, alt);
     });
-    add(tests, "minor", "getelem", true, in -> {
+    add(tests, "minor", "getelem", false, in -> {
       Object val = getp(in, "val");
       Object key = getp(in, "key");
       Object alt = getpDef(in, "alt", Struct.UNDEF);
@@ -90,7 +90,7 @@ class StructCorpusTest {
     add(tests, "minor", "clone", false, in -> Struct.clone(in));
     add(tests, "minor", "items", true, in -> Struct.items(in));
     add(tests, "minor", "keysof", true, in -> Struct.keysof(in));
-    add(tests, "minor", "haskey", true, in -> Struct.haskey(getp(in, "src"), getp(in, "key")));
+    add(tests, "minor", "haskey", false, in -> Struct.haskey(getp(in, "src"), getp(in, "key")));
     add(tests, "minor", "setprop", true, in -> {
       Object parent = getpDef(in, "parent", Struct.UNDEF);
       Object key = getp(in, "key");
@@ -109,7 +109,7 @@ class StructCorpusTest {
       Integer m = max instanceof Number n ? n.intValue() : null;
       return Struct.stringify(val, m);
     });
-    add(tests, "minor", "jsonify", true, in -> {
+    add(tests, "minor", "jsonify", false, in -> {
       Object val = getp(in, "val");
       Object flags = getp(in, "flags");
       return Struct.jsonify(val, flags);
@@ -124,7 +124,7 @@ class StructCorpusTest {
     });
     add(tests, "minor", "escre", true, in -> Struct.escre(in));
     add(tests, "minor", "escurl", true, in -> Struct.escurl(in));
-    add(tests, "minor", "join", true, in -> {
+    add(tests, "minor", "join", false, in -> {
       Object val = getp(in, "val");
       Object sep = getp(in, "sep");
       Object url = getp(in, "url");
@@ -151,15 +151,15 @@ class StructCorpusTest {
       return Struct.filter(val, pred);
     });
     add(tests, "minor", "typename", true, in -> Struct.typename(in));
-    add(tests, "minor", "typify", true, in -> Struct.typify(in));
-    add(tests, "minor", "size", true, in -> Struct.size(in));
-    add(tests, "minor", "slice", true, in -> {
+    add(tests, "minor", "typify", false, in -> Struct.typify(in));
+    add(tests, "minor", "size", false, in -> Struct.size(in));
+    add(tests, "minor", "slice", false, in -> {
       Object val = getp(in, "val");
       Object start = getp(in, "start");
       Object end = getp(in, "end");
       return Struct.slice(val, start, end);
     });
-    add(tests, "minor", "pad", true, in -> {
+    add(tests, "minor", "pad", false, in -> {
       Object val = getp(in, "val");
       Object pad = getp(in, "pad");
       Object pc = getp(in, "char");
@@ -258,7 +258,13 @@ class StructCorpusTest {
     });
 
     // ===== inject =====
-    add(tests, "inject", "string", true, in -> Struct.inject(getp(in, "val"), getp(in, "store")));
+    // inject.string passes the nullModifier so a resolved JSON null (encoded by
+    // the runner's fixJSON as "__NULL__") renders as the literal text "null".
+    add(tests, "inject", "string", true, in -> {
+      Map<String, Object> opts = new LinkedHashMap<>();
+      opts.put("modify", Runner.NULL_MODIFIER);
+      return Struct.inject(getp(in, "val"), getp(in, "store"), opts);
+    });
     add(tests, "inject", "deep", true, in -> Struct.inject(getp(in, "val"), getp(in, "store")));
 
     // ===== transform =====
@@ -292,11 +298,11 @@ class StructCorpusTest {
     });
 
     // ===== validate =====
-    add(tests, "validate", "basic", true, in -> Struct.validate(getp(in, "data"), getp(in, "spec")));
+    add(tests, "validate", "basic", false, in -> Struct.validate(getp(in, "data"), getp(in, "spec")));
     add(tests, "validate", "child", true, in -> Struct.validate(getp(in, "data"), getp(in, "spec")));
     add(tests, "validate", "one", true, in -> Struct.validate(getp(in, "data"), getp(in, "spec")));
     add(tests, "validate", "exact", true, in -> Struct.validate(getp(in, "data"), getp(in, "spec")));
-    add(tests, "validate", "invalid", true, in -> Struct.validate(getp(in, "data"), getp(in, "spec")));
+    add(tests, "validate", "invalid", false, in -> Struct.validate(getp(in, "data"), getp(in, "spec")));
     add(tests, "validate", "special", true, in -> {
       Map<String, Object> inj = null;
       if (in instanceof Map<?, ?> m) {

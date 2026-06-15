@@ -162,6 +162,24 @@ fn wrap_getprop(allocator: Allocator, val: JsonValue) JsonValue {
     return voxgig_struct.getprop(allocator, v, key, alt) catch return .null;
 }
 
+// Sentinels: haskey called with { val, key } (the sentinels group uses
+// `val`, whereas the minor group uses `src`).
+fn wrap_haskey_val(allocator: Allocator, val: JsonValue) JsonValue {
+    if (val != .object) return JsonValue{ .bool = false };
+    const m = val.object;
+    const v = m.get("val") orelse .null;
+    const key = m.get("key") orelse .null;
+    const result = voxgig_struct.haskey(allocator, v, key) catch return JsonValue{ .bool = false };
+    return JsonValue{ .bool = result };
+}
+
+// Sentinels: stringify called on the raw input value (e.g. `in: null`),
+// not on a { val, max } wrapper object.
+fn wrap_stringify_raw(allocator: Allocator, val: JsonValue) JsonValue {
+    const result = voxgig_struct.stringify(allocator, val, null) catch return JsonValue{ .string = voxgig_struct.S_MT };
+    return JsonValue{ .string = result };
+}
+
 fn wrap_clone(allocator: Allocator, val: JsonValue) JsonValue {
     // Handle UNDEF marker - return empty object
     if (val == .string) {
@@ -1081,4 +1099,42 @@ test "select-alts" {
     var r = try runner.makeRunner(testing.allocator);
     defer r.deinit();
     try r.runsetAllocFlags(try getSubSpec(r, "select", "alts"), .{ .null_flag = false }, wrap_select);
+}
+
+// ---- sentinels: Group A null/undefined unification across the readers ----
+
+test "sentinels-getprop_unify" {
+    var r = try runner.makeRunner(testing.allocator);
+    defer r.deinit();
+    try r.runsetAllocFlags(try getSubSpec(r, "sentinels", "getprop_unify"), .{ .null_flag = false }, wrap_getprop);
+}
+
+test "sentinels-getelem_absent" {
+    var r = try runner.makeRunner(testing.allocator);
+    defer r.deinit();
+    try r.runsetAllocFlags(try getSubSpec(r, "sentinels", "getelem_absent"), .{ .null_flag = false }, wrap_getelem);
+}
+
+test "sentinels-haskey_unify" {
+    var r = try runner.makeRunner(testing.allocator);
+    defer r.deinit();
+    try r.runsetAllocFlags(try getSubSpec(r, "sentinels", "haskey_unify"), .{ .null_flag = false }, wrap_haskey_val);
+}
+
+test "sentinels-isempty_unify" {
+    var r = try runner.makeRunner(testing.allocator);
+    defer r.deinit();
+    try r.runsetAllocFlags(try getSubSpec(r, "sentinels", "isempty_unify"), .{ .null_flag = false }, wrap_isempty);
+}
+
+test "sentinels-isnode_unify" {
+    var r = try runner.makeRunner(testing.allocator);
+    defer r.deinit();
+    try r.runsetAllocFlags(try getSubSpec(r, "sentinels", "isnode_unify"), .{ .null_flag = false }, wrap_isnode);
+}
+
+test "sentinels-stringify_null" {
+    var r = try runner.makeRunner(testing.allocator);
+    defer r.deinit();
+    try r.runsetAllocFlags(try getSubSpec(r, "sentinels", "stringify_null"), .{ .null_flag = false }, wrap_stringify_raw);
 }

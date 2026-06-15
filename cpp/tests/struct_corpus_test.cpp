@@ -44,11 +44,16 @@ void run(const std::string& cat, const std::string& name, bool null_flag, const 
   SCOREBOARD[full] = r;
 }
 
+// Extract a named field from a test-spec object. This mirrors the canonical
+// runner's raw JS property access (`vin.val`): a present-but-null field yields
+// JSON null, an absent field yields undefined. We therefore use the
+// null-preserving lookup_v rather than the Group A getprop/haskey (which would
+// drop a stored null and corrupt the test input).
 inline Value getp(const Value& in, const std::string& k) {
-  return getprop(in, Value(k));
+  return lookup_v(in, Value(k));
 }
 inline Value getpDef(const Value& in, const std::string& k, const Value& def) {
-  return haskey(in, Value(k)) ? getprop(in, Value(k)) : def;
+  return lookup_v(in, Value(k)).is_undef() ? def : lookup_v(in, Value(k));
 }
 
 } // namespace

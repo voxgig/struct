@@ -324,6 +324,9 @@ public class Struct {
   }
 
   public static boolean haskey(Object val, Object key) {
+    // Group A rule: a key whose stored value is JSON null counts as "no value".
+    // getprop unifies null/absent to the alt (UNDEF here), so a present-but-null
+    // key yields UNDEF → false. Mirrors canonical TS `null != getprop(val,key)`.
     return getprop(val, key, UNDEF) != UNDEF;
   }
 
@@ -335,7 +338,9 @@ public class Struct {
     for (String k : keysof(val)) {
       List<Object> item = new ArrayList<>(2);
       item.add(k);
-      item.add(getprop(val, k, UNDEF));
+      // Group B raw read: canonical items uses val[k], preserving a stored
+      // JSON null (the Group A getprop would unify it to UNDEF).
+      item.add(lookup(val, k));
       out.add(item);
     }
     return out;
@@ -372,7 +377,15 @@ public class Struct {
     }
 
     Object out = list.get(idx);
-    return out == UNDEF ? alt : out;
+    // Group A null-unification: a JSON null (or absent) slot counts as "no
+    // value" — return the alt. Mirrors canonical TS getelem `if (null == out)`.
+    if (out == null || out == UNDEF) {
+      if (alt instanceof Function<?, ?> f) {
+        return ((Function<Object, Object>) f).apply(null);
+      }
+      return alt;
+    }
+    return out;
   }
 
   public static Object getprop(Object val, Object key) {
@@ -384,26 +397,58 @@ public class Struct {
       return alt;
     }
 
+    Object out = UNDEF;
+
     if (val instanceof Map<?, ?> m) {
       String sk = strkey(key);
       if (m.containsKey(sk)) {
-        return ((Map<Object, Object>) m).get(sk);
+        out = ((Map<Object, Object>) m).get(sk);
       }
+    } else if (val instanceof List<?> l) {
+      Integer idx = parseIntKey(key);
+      if (idx != null && idx >= 0 && idx < l.size()) {
+        out = l.get(idx);
+      }
+    }
+
+    // Group A null-unification: a stored JSON null (or absent) at the key is
+    // treated as "no value" — return the alternative. Mirrors canonical TS
+    // getprop `if (null == out) return alt`. Group B callers needing the raw
+    // stored null use {@link #lookup}.
+    if (out == null || out == UNDEF) {
       return alt;
     }
 
+    return out;
+  }
+
+  /**
+   * Group B raw value lookup: read the literally-stored value at a slot,
+   * preserving JSON {@code null}. Returns {@link #UNDEF} when the key is absent
+   * or the container is not a node. Mirrors canonical TS {@code _lookup} — used
+   * by validate / transform / inject internals that must distinguish a stored
+   * null from absence (where the public getprop/getelem unify the two).
+   */
+  public static Object lookup(Object val, Object key) {
+    if (val == null || val == UNDEF || key == null || key == UNDEF) {
+      return UNDEF;
+    }
+    if (val instanceof Map<?, ?> m) {
+      String sk = strkey(key);
+      return m.containsKey(sk) ? ((Map<Object, Object>) m).get(sk) : UNDEF;
+    }
     if (val instanceof List<?> l) {
       Integer idx = parseIntKey(key);
       if (idx == null) {
-        return alt;
+        return UNDEF;
       }
-      if (idx < 0 || idx >= l.size()) {
-        return alt;
+      int i = idx < 0 ? l.size() + idx : idx;
+      if (i < 0 || i >= l.size()) {
+        return UNDEF;
       }
-      return l.get(idx);
+      return l.get(i);
     }
-
-    return alt;
+    return UNDEF;
   }
 
   public static Object setprop(Object parent, Object key, Object val) {
@@ -1515,7 +1560,9 @@ public class Struct {
     }
 
     inj.val = val;
-    return getprop(inj.parent, S_DTOP);
+    // Group B: the top-level result must preserve a stored JSON null (e.g.
+    // injecting `$NULL`), so read the raw value. Mirrors TS _lookup(parent,$TOP).
+    return lookup(inj.parent, S_DTOP);
   }
 
 
@@ -1787,7 +1834,8 @@ public class Struct {
       (injObj, val, ref, store) -> {
         if (!(injObj instanceof Injection inj)) return UNDEF;
         if (!checkPlacement(M_VAL, "COPY", T_any, inj)) return UNDEF;
-        Object out = getprop(inj.dparent, inj.key);
+        // Group B: $COPY copies the raw stored value, preserving JSON null.
+        Object out = lookup(inj.dparent, inj.key);
         inj.setval(out);
         return out;
       };
@@ -1797,13 +1845,17 @@ public class Struct {
       (injObj, val, ref, store) -> {
         if (!(injObj instanceof Injection inj)) return UNDEF;
         if (inj.mode != M_VAL) return UNDEF;
-        Object keyspec = getprop(inj.parent, "`$KEY`", UNDEF);
+        // Group B: the $KEY/$ANNO spec markers are read raw (TS _lookup).
+        Object keyspec = lookup(inj.parent, "`$KEY`");
         if (keyspec != UNDEF) {
           delprop(inj.parent, "`$KEY`");
           return getprop(inj.dparent, keyspec);
         }
-        Object anno = getprop(inj.parent, "`$ANNO`", UNDEF);
-        return getprop(anno, "KEY", getelem(inj.path, -2));
+        Object anno = lookup(inj.parent, "`$ANNO`");
+        Object annoKey = lookup(anno, "KEY");
+        // TS: _lookup(_lookup(parent,$ANNO),KEY) ?? getelem(path,-2) — fall
+        // back only when absent or JSON null.
+        return (annoKey == UNDEF || annoKey == null) ? getelem(inj.path, -2) : annoKey;
       };
 
   /** $ANNO: drop the annotation marker. */
@@ -1913,8 +1965,10 @@ public class Struct {
         }
         if (inj.mode != M_VAL) return UNDEF;
 
-        Object name = getprop(inj.parent, 1);
-        Object child = getprop(inj.parent, 2);
+        // Group B: $FORMAT args ['`$FORMAT`','name',child] are read raw so a
+        // null child reaches the formatter (TS _lookup(parent,1/2)).
+        Object name = lookup(inj.parent, 1);
+        Object child = lookup(inj.parent, 2);
 
         Object tkey = getelem(inj.path, -2);
         Object target = getelem(inj.nodes, -2, getelem(inj.nodes, -1));
@@ -2293,7 +2347,8 @@ public class Struct {
         if (!(injObj instanceof Injection inj)) return UNDEF;
         if (inj.mode != M_VAL) return UNDEF;
 
-        Object refpath = getprop(inj.parent, 1);
+        // Group B: $REF arg ['`$REF`','ref-path'] read raw (TS _lookup(parent,1)).
+        Object refpath = lookup(inj.parent, 1);
         inj.keyI = size(inj.keys);
 
         // $SPEC is stored as a Supplier<Object> that returns the original spec.
@@ -2472,7 +2527,9 @@ public class Struct {
   public static final Injector validate_STRING =
       (injObj, val, ref, store) -> {
         if (!(injObj instanceof Injection inj)) return UNDEF;
-        Object out = getprop(inj.dparent, inj.key);
+        // Group B: validate inspects the raw data value (a stored null must be
+        // type-checked, not unified away). Mirrors TS _lookup(dparent,key).
+        Object out = lookup(inj.dparent, inj.key);
         int t = typify(out);
         if ((T_string & t) == 0) {
           inj.errs.add(_invalidTypeMsg(inj.path, "string", t, out, "V1010"));
@@ -2499,7 +2556,8 @@ public class Struct {
         }
         if (idx < 0) return UNDEF;
         int typev = 1 << (31 - idx);
-        Object out = getprop(inj.dparent, inj.key);
+        // Group B: type-check the raw data value (TS _lookup(dparent,key)).
+        Object out = lookup(inj.dparent, inj.key);
         int t = typify(out);
         if ((t & typev) == 0) {
           inj.errs.add(_invalidTypeMsg(inj.path, tname, t, out, "V1001"));
@@ -2512,7 +2570,9 @@ public class Struct {
   public static final Injector validate_ANY =
       (injObj, val, ref, store) -> {
         if (!(injObj instanceof Injection inj)) return UNDEF;
-        return getprop(inj.dparent, inj.key);
+        // Group B: $ANY returns the raw data value, preserving a stored null
+        // (TS _lookup(dparent,key)).
+        return lookup(inj.dparent, inj.key);
       };
 
   /**
@@ -2552,7 +2612,8 @@ public class Struct {
             inj.errs.add("Invalid $CHILD as value");
             return UNDEF;
           }
-          Object childtm = getprop(inj.parent, 1);
+          // Group B: the child template is read raw (TS _lookup(parent,1)).
+          Object childtm = lookup(inj.parent, 1);
 
           if (inj.dparent == UNDEF || inj.dparent == null) {
             ((List<Object>) inj.parent).clear();
@@ -2789,7 +2850,10 @@ public class Struct {
           if (size(pkeys) > 0 && !Boolean.TRUE.equals(getprop(pval, "`$OPEN`"))) {
             List<String> badkeys = new ArrayList<>();
             for (String ck : ckeys) {
-              if (!haskey(pval, ck)) badkeys.add(ck);
+              // Group B literal presence: a key the SHAPE declares is allowed
+              // even when its declared value is JSON null (TS _lookup, not the
+              // Group A haskey which would miss null-valued shape slots).
+              if (lookup(pval, ck) == UNDEF) badkeys.add(ck);
             }
             if (!badkeys.isEmpty()) {
               inj.errs.add(
@@ -2883,7 +2947,8 @@ public class Struct {
       (injObj, val, ref, store) -> {
         if (!(injObj instanceof Injection inj)) return UNDEF;
         if (inj.mode != M_KEYPRE) return UNDEF;
-        Object terms = getprop(inj.parent, inj.key);
+        // Group B: select operator terms are read raw (TS _lookup(parent,key)).
+        Object terms = lookup(inj.parent, inj.key);
         if (!(terms instanceof List<?> tl)) return UNDEF;
         Object ppath = slice(inj.path, -1, null);
         Object point = getpath(store, ppath);
@@ -2911,7 +2976,8 @@ public class Struct {
       (injObj, val, ref, store) -> {
         if (!(injObj instanceof Injection inj)) return UNDEF;
         if (inj.mode != M_KEYPRE) return UNDEF;
-        Object terms = getprop(inj.parent, inj.key);
+        // Group B: select operator terms are read raw (TS _lookup(parent,key)).
+        Object terms = lookup(inj.parent, inj.key);
         if (!(terms instanceof List<?> tl)) return UNDEF;
         Object ppath = slice(inj.path, -1, null);
         Object point = getpath(store, ppath);
@@ -2940,7 +3006,8 @@ public class Struct {
       (injObj, val, ref, store) -> {
         if (!(injObj instanceof Injection inj)) return UNDEF;
         if (inj.mode != M_KEYPRE) return UNDEF;
-        Object term = getprop(inj.parent, inj.key);
+        // Group B: select $NOT term is read raw (TS _lookup(parent,key)).
+        Object term = lookup(inj.parent, inj.key);
         Object ppath = slice(inj.path, -1, null);
         Object point = getpath(store, ppath);
         List<Object> terrs = new ArrayList<>();
@@ -2965,7 +3032,8 @@ public class Struct {
       (injObj, val, ref, store) -> {
         if (!(injObj instanceof Injection inj)) return UNDEF;
         if (inj.mode != M_KEYPRE) return UNDEF;
-        Object term = getprop(inj.parent, inj.key);
+        // Group B: select $CMP term is read raw (TS _lookup(parent,key)).
+        Object term = lookup(inj.parent, inj.key);
         Object gkey = getelem(inj.path, -2);
         Object ppath = slice(inj.path, -1, null);
         Object point = getpath(store, ppath);

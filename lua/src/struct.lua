@@ -104,6 +104,12 @@ local S_key = "key"
 local S_any = "any"
 local S_nil = "nil"
 local S_null = "null"
+
+-- JSON null sentinel value. Lua has no value distinct from nil for JSON
+-- null, so (as the file header notes) the string "__NULL__" carries a JSON
+-- null through code and the test harness. This is distinct from nil, which
+-- represents an absent/undefined value (the canonical TS `undefined`/NONE).
+local NULLMARK = "__NULL__"
 local S_number = "number"
 local S_object = "object"
 local S_string = "string"
@@ -314,7 +320,7 @@ end
 -- @return (boolean) True if key is valid
 local function iskey(key)
   local keytype = type(key)
-  return (keytype == S_string and key ~= S_MT and key ~= S_null) or keytype == S_number
+  return (keytype == S_string and key ~= S_MT and key ~= NULLMARK) or keytype == S_number
 end
 
 -- Get a defined value. Returns alt if val is nil.
@@ -354,8 +360,8 @@ end
 -- @param val (any) The value to check
 -- @return (boolean) True if value is empty
 local function isempty(val)
-  -- Check if the value is nil
-  if val == nil or val == S_null then
+  -- Check if the value is absent (nil) or JSON null (NULLMARK).
+  if val == nil or val == NULLMARK then
     return true
   end
 
@@ -384,8 +390,12 @@ end
 -- @param value (any) The value to check
 -- @return (number) The type as a bit flag
 local function typify(value)
+  -- Lua's nil is the (only) representation of JSON null. Canonical TS
+  -- typify(null) === T_scalar | T_null. (TS typify(undefined) === T_noval,
+  -- but Lua cannot distinguish null from undefined at the value level, so
+  -- nil is treated as JSON null here.)
   if value == nil then
-    return T_null
+    return T_scalar | T_null
   end
 
   local luatype = type(value)
@@ -456,7 +466,8 @@ local function getprop(val, key, alt)
     end
   end
 
-  -- Return alternative if out is nil
+  -- Return alternative if out is absent. Lua's nil is JSON null/undefined;
+  -- canonical TS `if (null == out) return alt` unifies null and undefined.
   if out == nil then
     return alt
   end
@@ -484,7 +495,11 @@ local function getelem(val, key, alt)
     end
   end
 
-  if NONE == out then
+  -- A nil/JSON-null slot counts as "no value" → alt. Lua arrays cannot hold
+  -- a nil hole, so the test harness carries a JSON null list element as the
+  -- NULLMARK ("__NULL__") sentinel; treat it as no-value here too.
+  -- Canonical TS: `if (null == out) return alt`.
+  if NONE == out or NULLMARK == out then
     if NONE ~= alt and type(alt) == S_function then
       return alt()
     end
@@ -502,7 +517,7 @@ end
 -- @param key (any) The key to convert
 -- @return (string) The string representation of the key
 local function strkey(key)
-  if key == NONE or key == S_null then
+  if key == NONE or key == NULLMARK then
     return S_MT
   end
 
@@ -857,7 +872,11 @@ local function join(arr, sep, url)
   for i = 1, #arr do
     local v = arr[i]
     local ts = typify(v)
-    if (0 < (T_string & ts)) and v ~= S_MT and v ~= S_null then
+    -- Canonical: keep only non-empty string parts and drop JSON nulls. Lua
+    -- arrays cannot hold a nil hole, so a JSON null list element is carried as
+    -- the placeholder string S_null ("null", null=false) or NULLMARK
+    -- ("__NULL__", null=true); both are dropped here.
+    if (0 < (T_string & ts)) and v ~= S_MT and v ~= S_null and v ~= NULLMARK then
       table.insert(string_items, { i - 1, v }) -- 0-based index, value
     end
   end
@@ -909,8 +928,14 @@ stringify = function(val, maxlen, pretty)
   local valstr = S_MT
   pretty = pretty and true or false
 
+  -- Absent/undefined (canonical TS NONE): empty string (or "<>" pretty).
   if val == nil then
     return pretty and "<>" or valstr
+  end
+
+  -- JSON null (canonical TS null): JSON.stringify(null) === "null".
+  if val == NULLMARK then
+    return "null"
   end
 
   if type(val) == S_string then
@@ -934,7 +959,7 @@ stringify = function(val, maxlen, pretty)
 
       local obj_type = type(obj)
 
-      if obj == nil then
+      if obj == nil or obj == NULLMARK then
         return "null"
       elseif obj_type == S_number then
         if obj ~= obj then
@@ -1138,9 +1163,13 @@ local function pathify(val, startin, endin)
   local pathstr = NONE
   local path = NONE
 
-  -- Convert input to path array
+  -- Convert input to path array. A JSON null (NULLMARK) is a scalar value,
+  -- not a string path, so it falls through to the <unknown-path:null> branch
+  -- (canonical TS: pathify(null) === '<unknown-path:null>').
   if islist(val) then
     path = val
+  elseif val == NULLMARK then
+    path = NONE
   elseif type(val) == S_string then
     path = { val }
     setmetatable(path, {

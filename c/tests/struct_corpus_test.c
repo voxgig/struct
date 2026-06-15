@@ -440,6 +440,163 @@ static voxgig_value* subj_getpath_relative(voxgig_value* in, char** err, void* u
   return r;
 }
 
+/* getpath special: an `inj` map carries key/meta/dparent/dpath. Mirrors the
+ * cpp port's getpath.special dispatch. */
+static voxgig_value* subj_getpath_special(voxgig_value* in, char** err, void* ud) {
+  (void)err;
+  (void)ud;
+  voxgig_value* store = getp(in, "store");
+  voxgig_value* path = getp(in, "path");
+  voxgig_value* injv = getp(in, "inj");
+  if (!voxgig_is_map(injv)) {
+    voxgig_value* r = voxgig_getpath(store, path, NULL);
+    voxgig_release(store);
+    voxgig_release(path);
+    voxgig_release(injv);
+    return r;
+  }
+  voxgig_injection* inj = voxgig_inj_new(NULL, NULL);
+  inj->mode = 0;
+  voxgig_value* k = getp(injv, "key");
+  if (voxgig_is_string(k)) {
+    free(inj->key);
+    inj->key = strdup(voxgig_as_string(k));
+  }
+  voxgig_release(k);
+  voxgig_value* m = getp(injv, "meta");
+  if (voxgig_is_map(m)) {
+    voxgig_release(inj->meta);
+    inj->meta = voxgig_retain(m);
+  }
+  voxgig_release(m);
+  voxgig_value* dparent = getp(injv, "dparent");
+  if (dparent && !voxgig_is_undef(dparent)) {
+    voxgig_release(inj->dparent);
+    inj->dparent = dparent;
+  } else {
+    voxgig_release(dparent);
+  }
+  voxgig_value* dpath = getp(injv, "dpath");
+  if (voxgig_is_list(dpath)) {
+    voxgig_strvec_clear(&inj->dpath);
+    voxgig_list* l = voxgig_as_list(dpath);
+    for (size_t i = 0; i < l->len; i++) {
+      char* s = voxgig_strkey(l->items[i]);
+      voxgig_strvec_push(&inj->dpath, s);
+      free(s);
+    }
+  }
+  voxgig_release(dpath);
+  voxgig_value* r = voxgig_getpath(store, path, inj);
+  voxgig_inj_free(inj);
+  voxgig_release(store);
+  voxgig_release(path);
+  voxgig_release(injv);
+  return r;
+}
+
+/* getpath handler: store gets a $FOO injector returning "foo"; a custom handler
+ * invokes the injector. Mirrors perl t/struct.t getpath.handler dispatch. */
+static voxgig_value* foo_injector(voxgig_injection* inj, voxgig_value* val, const char* ref,
+                                  voxgig_value* store, void* ud) {
+  (void)inj;
+  (void)val;
+  (void)ref;
+  (void)store;
+  (void)ud;
+  return voxgig_new_string("foo");
+}
+static voxgig_value* handler_invoke(voxgig_injection* inj, voxgig_value* val, const char* ref,
+                                    voxgig_value* store, void* ud) {
+  (void)inj;
+  (void)ref;
+  (void)ud;
+  /* Custom handler: invoke the injector value directly (perl: $val->()). */
+  if (voxgig_is_injector(val))
+    return val->as.fn.fn.inj(inj, val, ref, store, val->as.fn.ud);
+  return val ? voxgig_retain(val) : voxgig_new_undef();
+}
+static voxgig_value* subj_getpath_handler(voxgig_value* in, char** err, void* ud) {
+  (void)err;
+  (void)ud;
+  voxgig_value* store_in = getp(in, "store");
+  voxgig_value* path = getp(in, "path");
+  /* Build { '$TOP': store, '$FOO': <injector> }. */
+  voxgig_value* store = voxgig_new_map();
+  voxgig_map_set(voxgig_as_map(store), "$TOP", store_in ? voxgig_retain(store_in) : voxgig_new_null());
+  voxgig_map_set(voxgig_as_map(store), "$FOO", voxgig_new_injector(foo_injector, NULL));
+  voxgig_injection* inj = voxgig_inj_new(NULL, NULL);
+  inj->mode = 0;
+  voxgig_release(inj->handler_val);
+  inj->handler_val = voxgig_new_injector(handler_invoke, NULL);
+  voxgig_value* r = voxgig_getpath(store, path, inj);
+  voxgig_inj_free(inj);
+  voxgig_release(store);
+  voxgig_release(store_in);
+  voxgig_release(path);
+  return r;
+}
+
+/* Sentinels: getprop/getelem with val/key/alt. */
+static voxgig_value* subj_sent_getprop(voxgig_value* in, char** err, void* ud) {
+  (void)err;
+  (void)ud;
+  voxgig_value* val = getp(in, "val");
+  voxgig_value* key = getp(in, "key");
+  voxgig_value* altk = voxgig_new_string("alt");
+  voxgig_value* alt = (voxgig_map_get(voxgig_as_map(in), "alt")) ? voxgig_getprop(in, altk, NULL)
+                                                                 : NULL;
+  voxgig_release(altk);
+  voxgig_value* r = voxgig_getprop(val, key, alt);
+  voxgig_release(val);
+  voxgig_release(key);
+  voxgig_release(alt);
+  return r;
+}
+static voxgig_value* subj_sent_getelem(voxgig_value* in, char** err, void* ud) {
+  (void)err;
+  (void)ud;
+  voxgig_value* val = getp(in, "val");
+  voxgig_value* key = getp(in, "key");
+  voxgig_value* altk = voxgig_new_string("alt");
+  voxgig_value* alt = (voxgig_map_get(voxgig_as_map(in), "alt")) ? voxgig_getprop(in, altk, NULL)
+                                                                 : NULL;
+  voxgig_release(altk);
+  voxgig_value* r = voxgig_getelem(val, key, alt);
+  voxgig_release(val);
+  voxgig_release(key);
+  voxgig_release(alt);
+  return r;
+}
+static voxgig_value* subj_sent_haskey(voxgig_value* in, char** err, void* ud) {
+  (void)err;
+  (void)ud;
+  voxgig_value* val = getp(in, "val");
+  voxgig_value* key = getp(in, "key");
+  bool r = voxgig_haskey(val, key);
+  voxgig_release(val);
+  voxgig_release(key);
+  return voxgig_new_bool(r);
+}
+static voxgig_value* subj_sent_isempty(voxgig_value* in, char** err, void* ud) {
+  (void)err;
+  (void)ud;
+  return voxgig_new_bool(voxgig_isempty(in));
+}
+static voxgig_value* subj_sent_isnode(voxgig_value* in, char** err, void* ud) {
+  (void)err;
+  (void)ud;
+  return voxgig_new_bool(voxgig_isnode(in));
+}
+static voxgig_value* subj_sent_stringify(voxgig_value* in, char** err, void* ud) {
+  (void)err;
+  (void)ud;
+  char* s = voxgig_stringify(in, -1);
+  voxgig_value* r = voxgig_new_string(s);
+  free(s);
+  return r;
+}
+
 /* Inject basic. */
 static voxgig_value* subj_inject_basic(voxgig_value* in, char** err, void* ud) {
   (void)err;
@@ -624,6 +781,8 @@ static const char* category_to_file(const char* cat) {
     return "validate.jsonic";
   if (strcmp(cat, "select") == 0)
     return "select.jsonic";
+  if (strcmp(cat, "sentinels") == 0)
+    return "sentinels.jsonic";
   return cat;
 }
 
@@ -673,6 +832,16 @@ int main(void) {
   /* getpath */
   run("getpath", "basic", true, subj_getpath_basic, NULL);
   run("getpath", "relative", true, subj_getpath_relative, NULL);
+  run("getpath", "special", true, subj_getpath_special, NULL);
+  run("getpath", "handler", true, subj_getpath_handler, NULL);
+
+  /* sentinels */
+  run("sentinels", "getprop_unify", true, subj_sent_getprop, NULL);
+  run("sentinels", "getelem_absent", true, subj_sent_getelem, NULL);
+  run("sentinels", "haskey_unify", true, subj_sent_haskey, NULL);
+  run("sentinels", "isempty_unify", true, subj_sent_isempty, NULL);
+  run("sentinels", "isnode_unify", true, subj_sent_isnode, NULL);
+  run("sentinels", "stringify_null", true, subj_sent_stringify, NULL);
 
   /* inject */
   run("inject", "basic", true, subj_inject_basic, NULL);

@@ -145,8 +145,7 @@ public class StructTests
     public void MinorEscUrl()
     {
         Runner.RunSet(_minor["escurl"],
-            input => StructUtils.EscUrl(input as string)
-                         ?.Replace("+", "%20"));
+            input => StructUtils.EscUrl(input as string));
     }
 
     [Fact]
@@ -160,7 +159,7 @@ public class StructTests
             // Absent "val" key -> NONE (TS undefined) so Stringify returns "".
             // Present-but-null -> JSON null (Stringify returns "null").
             object? val = m.ContainsKey("val") ? m["val"] : StructUtils.NONE;
-            if (val is string s && s == Runner.NULLMARK) val = "null";
+            if (val is string s && s == Runner.NULLMARK) val = null;
 
             if (m.TryGetValue("max", out object? maxObj) && maxObj != null)
                 return StructUtils.Stringify(val, (int)Convert.ToInt64(maxObj));
@@ -188,14 +187,7 @@ public class StructTests
                 if (m.TryGetValue("from", out object? fv) && fv != null)
                     from = (int)Convert.ToInt64(fv);
 
-                string result = StructUtils.Pathify(path, from);
-
-                // Match TS/Go behaviour: replace __NULL__. in path.
-                if (hasPath && m["path"] is string origPath && origPath == Runner.NULLMARK)
-                    result = result.Replace(">", ":null>");
-
-                result = result.Replace(Runner.NULLMARK + ".", "");
-                return result;
+                return StructUtils.Pathify(path, from);
             },
             flags: new() { ["null"] = true });
     }
@@ -313,6 +305,86 @@ public class StructTests
                 object? key = m.TryGetValue("key", out object? k) ? k : null;
                 return StructUtils.HasKey(val, key);
             });
+    }
+
+
+    // ========================================================================
+    // Sentinels — null / undefined unification across the readers.
+    // (Group A: a stored JSON null counts as "no value".)
+    // ========================================================================
+
+    private Dictionary<string, object?> Sentinels =>
+        _spec["sentinels"] as Dictionary<string, object?> ?? [];
+
+    [Fact]
+    public void SentinelsGetPropUnify()
+    {
+        Runner.RunSet(Sentinels["getprop_unify"],
+            input =>
+            {
+                var m = input as Dictionary<string, object?>;
+                if (m == null) return null;
+                object? val = m.TryGetValue("val", out object? v) ? v : null;
+                object? key = m.TryGetValue("key", out object? k) ? k : null;
+                object? alt = m.TryGetValue("alt", out object? a) ? a : null;
+                return StructUtils.GetProp(val, key, alt);
+            },
+            flags: new() { ["null"] = true });
+    }
+
+    [Fact]
+    public void SentinelsGetElemAbsent()
+    {
+        Runner.RunSet(Sentinels["getelem_absent"],
+            input =>
+            {
+                var m = input as Dictionary<string, object?>;
+                if (m == null) return null;
+                object? val = m.TryGetValue("val", out object? v) ? v : null;
+                object? key = m.TryGetValue("key", out object? k) ? k : null;
+                object? alt = m.TryGetValue("alt", out object? a) ? a : null;
+                return StructUtils.GetElem(val, key, alt);
+            },
+            flags: new() { ["null"] = true });
+    }
+
+    [Fact]
+    public void SentinelsHasKeyUnify()
+    {
+        Runner.RunSet(Sentinels["haskey_unify"],
+            input =>
+            {
+                var m = input as Dictionary<string, object?>;
+                if (m == null) return false;
+                object? val = m.TryGetValue("val", out object? v) ? v : null;
+                object? key = m.TryGetValue("key", out object? k) ? k : null;
+                return StructUtils.HasKey(val, key);
+            },
+            flags: new() { ["null"] = true });
+    }
+
+    [Fact]
+    public void SentinelsIsEmptyUnify()
+    {
+        Runner.RunSet(Sentinels["isempty_unify"],
+            input => StructUtils.IsEmpty(input),
+            flags: new() { ["null"] = true });
+    }
+
+    [Fact]
+    public void SentinelsIsNodeUnify()
+    {
+        Runner.RunSet(Sentinels["isnode_unify"],
+            input => StructUtils.IsNode(input),
+            flags: new() { ["null"] = true });
+    }
+
+    [Fact]
+    public void SentinelsStringifyNull()
+    {
+        Runner.RunSet(Sentinels["stringify_null"],
+            input => StructUtils.Stringify(input),
+            flags: new() { ["null"] = true });
     }
 
     [Fact]

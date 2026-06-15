@@ -938,7 +938,9 @@ fn inject_inj(mut val: Value, store: &Value, inj: &Inj) -> Value {
 
     inj.borrow_mut().val = val;
     let parent = inj.borrow().parent.clone();
-    get_prop(&parent, &Value::str(S_DTOP), Value::Noval)
+    // Read back the root via raw lookup (canonical TS `_lookup(inj.parent,
+    // S_DTOP)`) so a null result is preserved, not dropped by Group A.
+    lookup(&parent, &Value::str(S_DTOP))
 }
 
 // ---- transform commands ----------------------------------------------
@@ -1133,8 +1135,8 @@ fn transform_format(inj: &Inj, _val: &Value, _r: &str, store: &Value) -> Value {
         let b = inj.borrow();
         (b.parent.clone(), b.path.clone(), b.nodes.clone())
     };
-    let name = get_prop(&parent, &Value::Num(1.0), Value::Noval);
-    let child = get_prop(&parent, &Value::Num(2.0), Value::Noval);
+    let name = lookup(&parent, &Value::Num(1.0));
+    let child = lookup(&parent, &Value::Num(2.0));
     let tkey = path
         .get(path.len().saturating_sub(2))
         .cloned()
@@ -1239,7 +1241,8 @@ fn transform_copy(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
         let b = inj.borrow();
         (b.dparent.clone(), b.key.clone())
     };
-    let out = get_prop(&dparent, &Value::str(key), Value::Noval);
+    // Group B: preserve a stored null (canonical `_lookup(inj.dparent, inj.key)`).
+    let out = lookup(&dparent, &Value::str(key));
     Injection::setval(inj, out.clone(), None);
     out
 }
@@ -1253,7 +1256,9 @@ fn transform_key(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
     if mode != M_VAL {
         return Value::Noval;
     }
-    let keyspec = get_prop(&parent, &Value::str(S_BKEY), Value::Noval);
+    // Literal presence of the $KEY meta (canonical `_lookup(parent, S_BKEY)`):
+    // a null keyspec still counts as declared, so use the raw lookup.
+    let keyspec = lookup(&parent, &Value::str(S_BKEY));
     if !keyspec.is_noval() {
         del_prop(parent.clone(), &Value::str(S_BKEY));
         return get_prop(&dparent, &keyspec, Value::Noval);
@@ -1319,7 +1324,8 @@ fn transform_ref(inj: &Inj, val: &Value, _r: &str, store: &Value) -> Value {
     if mode != M_VAL {
         return Value::Noval;
     }
-    let refpath = get_prop(&parent, &Value::Num(1.0), Value::Noval);
+    // Group B raw read of the ref arg (canonical `_lookup(inj.parent, 1)`).
+    let refpath = lookup(&parent, &Value::Num(1.0));
     {
         let keylen = inj.borrow().keys.borrow().len() as i64;
         inj.borrow_mut().key_i = keylen;
@@ -1862,7 +1868,7 @@ fn validate_string(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
         let b = inj.borrow();
         (b.dparent.clone(), b.key.clone(), b.path.clone())
     };
-    let out = get_prop(&dparent, &Value::str(key), Value::Noval);
+    let out = lookup(&dparent, &Value::str(key));
     let t = typify(&out);
     if t & (T_STRING as i64) == 0 {
         errs_push(inj, invalid_type_msg(&path, "string", t, &out));
@@ -1891,7 +1897,7 @@ fn validate_type(inj: &Inj, _v: &Value, r: &str, _store: &Value) -> Value {
         let b = inj.borrow();
         (b.dparent.clone(), b.key.clone(), b.path.clone())
     };
-    let out = get_prop(&dparent, &Value::str(key), Value::Noval);
+    let out = lookup(&dparent, &Value::str(key));
     let t = typify(&out);
     if t & typev == 0 {
         errs_push(inj, invalid_type_msg(&path, &tname, t, &out));
@@ -1905,7 +1911,7 @@ fn validate_any(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
         let b = inj.borrow();
         (b.dparent.clone(), b.key.clone())
     };
-    get_prop(&dparent, &Value::str(key), Value::Noval)
+    lookup(&dparent, &Value::str(key))
 }
 
 /// Render a list of tvals as `"a, b, c"`, lowering `` `$NAME` `` -> `name`.
@@ -1970,7 +1976,9 @@ fn validate_child(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
             errs_push(inj, "Invalid $CHILD as value".to_string());
             return Value::Noval;
         }
-        let childtm = get_prop(&parent, &Value::Num(1.0), Value::Noval);
+        // List $CHILD template (canonical `_lookup(parent, 1)`): preserve a
+        // null template literally rather than dropping it as Group A would.
+        let childtm = lookup(&parent, &Value::Num(1.0));
         if dparent.is_noval() {
             slice(parent.clone(), Some(0), Some(0), true); // empty default
             return Value::Noval;
@@ -2211,9 +2219,12 @@ fn validation_modify(pval: &Value, key: &Value, parent: &Value, inj: &Inj, _stor
             Value::Bool(true)
         );
         if !pkeys.is_empty() && !open {
+            // Literal presence: the shape must be checked with a raw lookup
+            // (canonical TS `NONE === _lookup(pval, ckey)`); the Group A
+            // has_key would treat a null-valued shape slot as absent.
             let badkeys: Vec<String> = ckeys
                 .iter()
-                .filter(|ck| !has_key(pval, &Value::str((*ck).clone())))
+                .filter(|ck| lookup(pval, &Value::str((*ck).clone())).is_noval())
                 .cloned()
                 .collect();
             if !badkeys.is_empty() {
@@ -2426,7 +2437,7 @@ fn select_and(inj: &Inj, _v: &Value, _r: &str, store: &Value) -> Value {
             b.meta.clone(),
         )
     };
-    let terms: Vec<Value> = get_prop(&parent, &Value::str(key), Value::Noval)
+    let terms: Vec<Value> = lookup(&parent, &Value::str(key))
         .as_list()
         .map(|l| l.borrow().clone())
         .unwrap_or_default();
@@ -2471,7 +2482,7 @@ fn select_or(inj: &Inj, _v: &Value, _r: &str, store: &Value) -> Value {
             b.meta.clone(),
         )
     };
-    let terms: Vec<Value> = get_prop(&parent, &Value::str(key), Value::Noval)
+    let terms: Vec<Value> = lookup(&parent, &Value::str(key))
         .as_list()
         .map(|l| l.borrow().clone())
         .unwrap_or_default();
@@ -2517,7 +2528,7 @@ fn select_not(inj: &Inj, _v: &Value, _r: &str, store: &Value) -> Value {
             b.meta.clone(),
         )
     };
-    let term = get_prop(&parent, &Value::str(key), Value::Noval);
+    let term = lookup(&parent, &Value::str(key));
     let ppath = slice_str_vec(&path, Some(-1), None);
     let point = get_path_inj(store, &path_value(&ppath), None);
     if select_subvalidate(&point, &term, store, &meta) {
@@ -2556,7 +2567,7 @@ fn select_cmp(inj: &Inj, _v: &Value, r: &str, store: &Value) -> Value {
             b.nodes.clone(),
         )
     };
-    let term = get_prop(&parent, &Value::str(key), Value::Noval);
+    let term = lookup(&parent, &Value::str(key));
     let gkey = path
         .get(path.len().saturating_sub(2))
         .cloned()

@@ -234,7 +234,7 @@ pub fn pad(s: Value, padding: Option<i64>, padchar: Option<String>) -> String {
 /// mirroring the canonical `alt()` call.
 pub fn get_elem(val: &Value, key: &Value, alt: Value) -> Value {
     let out = get_elem_or_else(val, key, || Value::Noval);
-    if !out.is_noval() {
+    if !out.is_nullish() {
         return out;
     }
     match &alt {
@@ -273,7 +273,9 @@ pub fn get_elem_or_else<F: FnOnce() -> Value>(val: &Value, key: &Value, alt: F) 
     } else {
         Value::Noval
     };
-    if out.is_noval() {
+    // Group A rule: a null (or absent) slot counts as "no value" -> alt
+    // (canonical TS getelem `if (null == out) return alt`).
+    if out.is_nullish() {
         alt()
     } else {
         out
@@ -309,10 +311,60 @@ pub fn get_prop(val: &Value, key: &Value, alt: Value) -> Value {
         }
         _ => Value::Noval,
     };
-    if out.is_noval() {
+    // Group A rule: a stored JSON null at a key counts as "no value", same as
+    // absent (canonical TS `if (null == out) return alt`).
+    if out.is_nullish() {
         alt
     } else {
         out
+    }
+}
+
+/// Internal raw lookup that PRESERVES a stored JSON null (Group B). Mirrors the
+/// canonical TS `_lookup` (StructUtility.ts:477): Group B callers — validate /
+/// transform commands / builders / inject internals — use this when they need
+/// the raw stored value at a slot regardless of whether it is null. The public
+/// `get_prop` / `get_elem` / `has_key` APIs treat null as absent (Group A) per
+/// UNDEF_SPEC.md. Returns `Noval` only when the key is genuinely absent.
+pub fn lookup(val: &Value, key: &Value) -> Value {
+    if val.is_noval() || key.is_noval() {
+        return Value::Noval;
+    }
+    match val {
+        Value::List(l) => {
+            let lb = l.borrow();
+            let keystr = js_string(key);
+            if R_INTEGER_KEY.is_match(&keystr) {
+                match keystr.parse::<i64>() {
+                    Ok(mut n) => {
+                        if n < 0 {
+                            n += lb.len() as i64;
+                        }
+                        if n >= 0 && (n as usize) < lb.len() {
+                            lb[n as usize].clone()
+                        } else {
+                            Value::Noval
+                        }
+                    }
+                    Err(_) => Value::Noval,
+                }
+            } else {
+                Value::Noval
+            }
+        }
+        Value::Map(m) => m
+            .borrow()
+            .get(&js_string(key))
+            .cloned()
+            .unwrap_or(Value::Noval),
+        Value::Sentinel(s) => {
+            if js_string(key) == s.tag {
+                Value::Bool(true)
+            } else {
+                Value::Noval
+            }
+        }
+        _ => Value::Noval,
     }
 }
 
@@ -358,12 +410,14 @@ pub fn has_key(val: &Value, key: &Value) -> bool {
     !get_prop(val, key, Value::Noval).is_noval()
 }
 
-/// `items(node)` — `[key, value]` pairs (keys sorted, as strings).
+/// `items(node)` — `[key, value]` pairs (keys sorted, as strings). Group B:
+/// preserves a stored JSON null in the value slot (canonical TS uses `val[k]`
+/// direct access), so `lookup` is used rather than the null-unifying get_prop.
 pub fn items_vec(val: &Value) -> Vec<(String, Value)> {
     keysof_vec(val)
         .into_iter()
         .map(|k| {
-            let v = get_prop(val, &Value::str(k.clone()), Value::Noval);
+            let v = lookup(val, &Value::str(k.clone()));
             (k, v)
         })
         .collect()

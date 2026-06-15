@@ -235,10 +235,13 @@ module VoxgigStruct
   end
 
   # --- Public getprop ---
-  # Wraps _getprop. If the result equals UNDEF, returns the provided alt.
+  # Group A reader: a stored JSON null (nil) at the key counts as "no value",
+  # indistinguishable from absent, so it falls back to alt (canonical TS:
+  # `if (null == out) return alt`). Group B callers that must preserve a
+  # stored null use _getprop directly.
   def self.getprop(val, key, alt = nil)
-    result = _getprop(val, key, alt.nil? ? UNDEF : alt)
-    result.equal?(UNDEF) ? alt : result
+    result = _getprop(val, key, UNDEF)
+    result.equal?(UNDEF) || result.nil? ? alt : result
   end
 
   def self.isempty(val)
@@ -465,7 +468,9 @@ module VoxgigStruct
       rescue StandardError
       end
     end
-    if out.equal?(UNDEF)
+    # A null (or absent) slot counts as "no value" — the same Group A rule
+    # getprop applies (canonical TS: `if (null == out) return alt`).
+    if out.equal?(UNDEF) || out.nil?
       return isfunc(alt) ? alt.call : (alt.equal?(UNDEF) ? nil : alt)
     end
 
@@ -635,9 +640,10 @@ module VoxgigStruct
     end
   end
 
-  # Public haskey uses getprop (so that missing keys yield nil)
+  # Group A reader: a key whose stored value is JSON null (nil) counts as
+  # "no value", same rule as getprop (canonical TS: `null != getprop(val, key)`).
   def self.haskey(val = UNDEF, key = UNDEF)
-    _getprop(val, key, UNDEF) != UNDEF
+    !getprop(val, key).nil?
   end
 
   # NOTE: this is a second, simpler joinurl definition that intentionally

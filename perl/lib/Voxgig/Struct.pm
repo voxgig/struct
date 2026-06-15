@@ -1349,42 +1349,51 @@ sub _merge_pair {
 # ============================================================================
 
 sub setpath {
-    my ($store, $path_in, $val) = @_;
+    my ($store, $path_in, $val, $injdef) = @_;
+
+    # Coerce the path into a parts list via typify, matching canonical:
+    # a list path is used as-is, a string path is dot-split, a number path
+    # becomes a single-element list; anything else returns NONE.
+    my $ptype = typify($path_in);
     my @parts;
-    if (islist($path_in)) { @parts = @$path_in }
-    elsif (defined $path_in && !ref $path_in) {
-        @parts = split /\./, "$path_in";
+    if ($ptype & T_list) {
+        @parts = @$path_in;
     }
-    return $store unless @parts;
-    my $node = $store;
-    for (my $i = 0; $i < $#parts; $i++) {
-        my $k = $parts[$i];
-        my $nxt = $parts[$i + 1];
-        my $child;
-        if (islist($node)) {
-            my $idx = int($k);
-            $idx = scalar(@$node) + $idx if $idx < 0;
-            $child = $node->[$idx];
-            if (!isnode($child)) {
-                $child = (defined $nxt && $nxt =~ /^-?\d+$/) ? [] : _mkmap();
-                $node->[$idx] = $child;
-            }
-        }
-        elsif (ismap($node)) {
-            $child = $node->{$k};
-            if (!isnode($child)) {
-                $child = (defined $nxt && $nxt =~ /^-?\d+$/) ? [] : _mkmap();
-                $node->{$k} = $child;
-            }
-        }
-        else {
-            return $store;
-        }
-        $node = $child;
+    elsif ($ptype & T_string) {
+        @parts = split /\./, "$path_in", -1;
     }
-    my $last = $parts[-1];
-    setprop($node, $last, $val);
-    return $store;
+    elsif ($ptype & T_number) {
+        @parts = ($path_in);
+    }
+    else {
+        return NONE();
+    }
+
+    my $base = getprop($injdef, S_base);
+    my $numparts = scalar @parts;
+    # parent = store[base] (defaulting to store), the node we descend from.
+    my $parent = getprop($store, $base, $store);
+
+    for (my $i = 0; $i < $numparts - 1; $i++) {
+        my $part_key = getelem(\@parts, $i);
+        my $next_parent = getprop($parent, $part_key);
+        if (!isnode($next_parent)) {
+            # A list part is created only when the NEXT path part is a real
+            # number; a string-digit (e.g. "0" from a dotted path) makes a map.
+            my $nexttype = typify(getelem(\@parts, $i + 1));
+            $next_parent = ($nexttype & T_number) ? [] : _mkmap();
+            setprop($parent, $part_key, $next_parent);
+        }
+        $parent = $next_parent;
+    }
+
+    # setprop already routes a DELETE sentinel (and NONE) to delprop, matching
+    # canonical's `DELETE === val ? delprop(...) : setprop(...)`.
+    my $last = getelem(\@parts, -1);
+    setprop($parent, $last, $val);
+
+    # Return the leaf key's PARENT node (canonical), not the whole store.
+    return $parent;
 }
 
 # ============================================================================

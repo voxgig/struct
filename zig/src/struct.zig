@@ -389,7 +389,10 @@ pub fn getelem(allocator: Allocator, val: JsonValue, key: JsonValue, alt: JsonVa
     }
 
     if (nkey >= 0 and nkey < @as(i64, @intCast(list.len))) {
-        return list[@intCast(nkey)];
+        const v = list[@intCast(nkey)];
+        // Group A: a stored JSON null counts as "no value" → alt.
+        if (v == .null) return resolveAlt(allocator, alt);
+        return v;
     }
 
     return resolveAlt(allocator, alt);
@@ -408,6 +411,8 @@ pub fn getprop(allocator: Allocator, val: JsonValue, key: JsonValue, alt: JsonVa
     if (val == .object) {
         const ks = try strkey(allocator, key);
         if (val.object.get(ks)) |v| {
+            // Group A: a stored JSON null counts as "no value" → alt.
+            if (v == .null) return alt;
             return v;
         }
         return alt;
@@ -425,7 +430,10 @@ pub fn getprop(allocator: Allocator, val: JsonValue, key: JsonValue, alt: JsonVa
         }
         if (ki) |idx| {
             if (idx >= 0 and idx < @as(i64, @intCast(val.array.data.items.len))) {
-                return val.array.data.items[@intCast(idx)];
+                const v = val.array.data.items[@intCast(idx)];
+                // Group A: a stored JSON null counts as "no value" → alt.
+                if (v == .null) return alt;
+                return v;
             }
         }
         return alt;

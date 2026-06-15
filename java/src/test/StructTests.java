@@ -43,6 +43,7 @@ class StructTests {
   private static Map<String, Object> validateInvalidSpec;
   private static Map<String, Object> validateSpecialSpec;
   private static Map<String, Object> selectSpec;
+  private static Map<String, Object> sentinelsSpec;
 
   @BeforeAll
   static void init() throws IOException {
@@ -66,6 +67,7 @@ class StructTests {
     validateInvalidSpec = (Map<String, Object>) validateSpec.get("invalid");
     validateSpecialSpec = (Map<String, Object>) validateSpec.get("special");
     selectSpec = (Map<String, Object>) struct.get("select");
+    sentinelsSpec = (Map<String, Object>) struct.get("sentinels");
   }
 
   private static String slog(Object v) {
@@ -76,8 +78,12 @@ class StructTests {
   }
 
   private static Object normalize(Object v) {
-    if (v == Struct.UNDEF) {
-      return "__UNDEF__";
+    // Treat the "no value" sentinel (UNDEF) and JSON null as equal, mirroring
+    // canonical JS where `undefined == null`. The shared corpus uses null to
+    // denote a "no value" result (e.g. getpath/inject of a null-valued slot,
+    // which the Group A null-unification rule resolves to "no value").
+    if (v == Struct.UNDEF || v == null) {
+      return null;
     }
     if (v instanceof Number n) {
       double d = n.doubleValue();
@@ -106,6 +112,63 @@ class StructTests {
   private static boolean equalNorm(Object a, Object b) {
     return Objects.equals(normalize(a), normalize(b));
   }
+
+  // ---------------------------------------------------------------------------
+  // NULLMARK convention (mirrors js/test/runner.js fixJSON + nullModifier).
+  //
+  // The shared corpus encodes "value is JSON null" by relying on the runner to
+  // replace every JSON null with the sentinel string "__NULL__" before running
+  // (flags.null=true), then a nullModifier callback swaps it back: a bare
+  // "__NULL__" becomes a real null, and "__NULL__" embedded in a larger string
+  // is rewritten to the literal text "null". This preserves the null-vs-absent
+  // distinction across the cross-port fixJSON round-trip (e.g. injecting a
+  // null-valued ref into a partial string renders "null", and exact-mode select
+  // has a concrete value to compare instead of a "key missing" state).
+  // ---------------------------------------------------------------------------
+  private static final String NULLMARK = "__NULL__";
+
+  /** Replace every JSON null in a cloned structure with the NULLMARK sentinel. */
+  private static Object fixJSON(Object v) {
+    if (v == null || v == Struct.UNDEF) {
+      return NULLMARK;
+    }
+    if (v instanceof Map<?, ?> m) {
+      Map<String, Object> out = new LinkedHashMap<>();
+      for (Map.Entry<?, ?> e : m.entrySet()) {
+        out.put(Objects.toString(e.getKey()), fixJSON(e.getValue()));
+      }
+      return out;
+    }
+    if (v instanceof List<?> l) {
+      List<Object> out = new ArrayList<>(l.size());
+      for (Object x : l) {
+        out.add(fixJSON(x));
+      }
+      return out;
+    }
+    return v;
+  }
+
+  /** Modify callback: swap NULLMARK back to real null / literal "null" text. */
+  private static final Struct.Modify NULL_MODIFIER =
+      (val, key, parent, inj, store) -> {
+        if (!(val instanceof String s)) {
+          return;
+        }
+        Object repl;
+        if (NULLMARK.equals(s)) {
+          repl = null;
+        } else if (s.contains(NULLMARK)) {
+          repl = s.replace(NULLMARK, "null");
+        } else {
+          return;
+        }
+        if (parent instanceof Map<?, ?> m) {
+          ((Map<String, Object>) m).put(Objects.toString(key), repl);
+        } else if (parent instanceof List<?> l && key instanceof Number n) {
+          ((List<Object>) l).set(n.intValue(), repl);
+        }
+      };
 
   private static String json(Object v) {
     try {
@@ -667,12 +730,30 @@ class StructTests {
 
   @Test
   void injectString() {
-    runSet(
-        (Map<String, Object>) injectSpec.get("string"),
-        v -> {
-          Map<String, Object> m = (Map<String, Object>) v;
-          return Struct.inject(m.get("val"), m.get("store"));
-        });
+    // NULLMARK round-trip: encode JSON nulls as "__NULL__" in the inputs, pass
+    // the nullModifier so a resolved null renders as the literal text "null",
+    // then compare against the fixJSON'd expected output. Mirrors js runner /
+    // perl t/struct.t inject.string dispatch.
+    List<Object> set = (List<Object>) ((Map<String, Object>) injectSpec.get("string")).get("set");
+    for (Object eo : set) {
+      if (!(eo instanceof Map<?, ?> em)) {
+        continue;
+      }
+      Map<String, Object> entry = (Map<String, Object>) em;
+      if (!entry.containsKey("in") || !entry.containsKey("out") || entry.containsKey("err")) {
+        continue;
+      }
+      Map<String, Object> in = (Map<String, Object>) Struct.clone(entry.get("in"));
+      Object val = fixJSON(in.get("val"));
+      Object store = fixJSON(in.get("store"));
+      Map<String, Object> opts = new LinkedHashMap<>();
+      opts.put("modify", NULL_MODIFIER);
+      Object got = fixJSON(Struct.inject(val, store, opts));
+      Object out = fixJSON(entry.get("out"));
+      assertTrue(
+          equalNorm(out, got),
+          () -> "Mismatch inject.string in=" + json(in) + " expected=" + json(out) + " got=" + json(got));
+    }
   }
 
   @Test
@@ -932,44 +1013,50 @@ class StructTests {
     assertEquals(List.of("Not an integer at a: A"), errs);
   }
 
+  // Select: apply the NULLMARK fixup to obj, query, and the expected out (the
+  // canonical runner does this with flags.null=true so a stored null encodes as
+  // "__NULL__" and exact-match has a value to compare). Mirrors perl t/struct.t.
+  private static void runSelectSet(String section) {
+    Map<String, Object> testspec = (Map<String, Object>) selectSpec.get(section);
+    List<Object> set = (List<Object>) testspec.get("set");
+    for (Object eo : set) {
+      if (!(eo instanceof Map<?, ?> em)) {
+        continue;
+      }
+      Map<String, Object> entry = (Map<String, Object>) em;
+      if (!entry.containsKey("in") || !entry.containsKey("out") || entry.containsKey("err")) {
+        continue;
+      }
+      Map<String, Object> in = (Map<String, Object>) Struct.clone(entry.get("in"));
+      Object obj = fixJSON(in.get("obj"));
+      Object query = fixJSON(in.get("query"));
+      Object got = fixJSON(Struct.select(obj, query));
+      Object out = fixJSON(entry.get("out"));
+      assertTrue(
+          equalNorm(out, got),
+          () -> "Mismatch select." + section + " in=" + json(in)
+              + " expected=" + json(out) + " got=" + json(got));
+    }
+  }
+
   @Test
   void selectBasic() {
-    runSet(
-        (Map<String, Object>) selectSpec.get("basic"),
-        v -> {
-          Map<String, Object> m = (Map<String, Object>) v;
-          return Struct.select(m.get("obj"), m.get("query"));
-        });
+    runSelectSet("basic");
   }
 
   @Test
   void selectOperators() {
-    runSet(
-        (Map<String, Object>) selectSpec.get("operators"),
-        v -> {
-          Map<String, Object> m = (Map<String, Object>) v;
-          return Struct.select(m.get("obj"), m.get("query"));
-        });
+    runSelectSet("operators");
   }
 
   @Test
   void selectEdge() {
-    runSet(
-        (Map<String, Object>) selectSpec.get("edge"),
-        v -> {
-          Map<String, Object> m = (Map<String, Object>) v;
-          return Struct.select(m.get("obj"), m.get("query"));
-        });
+    runSelectSet("edge");
   }
 
   @Test
   void selectAlts() {
-    runSet(
-        (Map<String, Object>) selectSpec.get("alts"),
-        v -> {
-          Map<String, Object> m = (Map<String, Object>) v;
-          return Struct.select(m.get("obj"), m.get("query"));
-        });
+    runSelectSet("alts");
   }
 
   @Test

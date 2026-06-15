@@ -43,6 +43,7 @@ func TestStruct(t *testing.T) {
 	var transformSpec = spec["transform"].(map[string]any)
 	var validateSpec = spec["validate"].(map[string]any)
 	var selectSpec = spec["select"].(map[string]any)
+	var sentinelsSpec = spec["sentinels"].(map[string]any)
 
 	// minor tests
 	// ===========
@@ -158,17 +159,24 @@ func TestStruct(t *testing.T) {
 
 	t.Run("minor-escurl", func(t *testing.T) {
 		runset(t, minorSpec["escurl"], func(in string) string {
-			return strings.ReplaceAll(voxgigstruct.EscUrl(fmt.Sprint(in)), "+", "%20")
+			return voxgigstruct.EscUrl(fmt.Sprint(in))
 		})
 	})
 
 	t.Run("minor-stringify", func(t *testing.T) {
 		runset(t, minorSpec["stringify"], func(v any) any {
 			m := v.(map[string]any)
-			val := m["val"]
+			val, hasVal := m["val"]
 
+			// An absent `val` key is the canonical undefined, which
+			// stringifies to "". A present JSON null arrives as the
+			// "__NULL__" sentinel (null:true flag); restore it to Go nil
+			// so Stringify(nil) is exercised raw and yields "null".
+			if !hasVal {
+				return ""
+			}
 			if "__NULL__" == val {
-				val = "null"
+				val = nil
 			}
 
 			max, hasMax := m["max"]
@@ -572,6 +580,64 @@ func TestStruct(t *testing.T) {
 		}
 	})
 
+	// sentinels tests
+	// ===============
+	//
+	// Group A null-unification readers (getprop, getelem, haskey, isempty,
+	// isnode) treat a stored JSON null as "no value"; stringify (Group B)
+	// preserves null as a real value. Dispatched with null:false so the
+	// bare/nested JSON nulls survive fixJSON as Go nil rather than being
+	// rewritten to the "__NULL__" sentinel. Mirrors perl/t/struct.t.
+
+	t.Run("sentinels-getprop_unify", func(t *testing.T) {
+		runsetFlags(t, sentinelsSpec["getprop_unify"], map[string]bool{"null": false}, func(v any) any {
+			m := v.(map[string]any)
+			val := m["val"]
+			key := m["key"]
+			alt, hasAlt := m["alt"]
+			if !hasAlt || alt == nil {
+				return voxgigstruct.GetProp(val, key)
+			}
+			return voxgigstruct.GetProp(val, key, alt)
+		})
+	})
+
+	t.Run("sentinels-getelem_absent", func(t *testing.T) {
+		runsetFlags(t, sentinelsSpec["getelem_absent"], map[string]bool{"null": false}, func(v any) any {
+			m := v.(map[string]any)
+			val := m["val"]
+			key := m["key"]
+			alt, hasAlt := m["alt"]
+			if !hasAlt || alt == nil {
+				return voxgigstruct.GetElem(val, key)
+			}
+			return voxgigstruct.GetElem(val, key, alt)
+		})
+	})
+
+	t.Run("sentinels-haskey_unify", func(t *testing.T) {
+		runsetFlags(t, sentinelsSpec["haskey_unify"], map[string]bool{"null": false}, func(v any) any {
+			m := v.(map[string]any)
+			val := m["val"]
+			key := m["key"]
+			return voxgigstruct.HasKey(val, key)
+		})
+	})
+
+	t.Run("sentinels-isempty_unify", func(t *testing.T) {
+		runsetFlags(t, sentinelsSpec["isempty_unify"], map[string]bool{"null": false}, voxgigstruct.IsEmpty)
+	})
+
+	t.Run("sentinels-isnode_unify", func(t *testing.T) {
+		runsetFlags(t, sentinelsSpec["isnode_unify"], map[string]bool{"null": false}, voxgigstruct.IsNode)
+	})
+
+	t.Run("sentinels-stringify_null", func(t *testing.T) {
+		runsetFlags(t, sentinelsSpec["stringify_null"], map[string]bool{"null": false}, func(v any) any {
+			return voxgigstruct.Stringify(v)
+		})
+	})
+
 	// walk tests
 	// ==========
 
@@ -592,9 +658,17 @@ func TestStruct(t *testing.T) {
 			} else {
 				ks = *k
 			}
+			// At the root the parent is the canonical undefined (no parent).
+			// Go conflates undefined with JSON null, so render the absent
+			// root parent as "" to mirror the canonical stringify(undefined),
+			// while Stringify(nil) itself yields "null" per the corpus.
+			ps := ""
+			if nil != p {
+				ps = voxgigstruct.Stringify(p)
+			}
 			entry := "k=" + voxgigstruct.Stringify(ks) +
 				", v=" + voxgigstruct.Stringify(v) +
-				", p=" + voxgigstruct.Stringify(p) +
+				", p=" + ps +
 				", t=" + voxgigstruct.Pathify(t)
 			return entry
 		}

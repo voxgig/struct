@@ -529,6 +529,7 @@ namespace Voxgig.Struct
                 return alt;
             }
 
+            object? out2 = alt;
             if (val is List<object?> list)
             {
                 if (!int.TryParse(key?.ToString(), out int nkey))
@@ -546,9 +547,19 @@ namespace Voxgig.Struct
                     nkey = list.Count + nkey;
                 }
 
-                return nkey < 0 || nkey >= list.Count ? alt : list[nkey];
+                if (nkey >= 0 && nkey < list.Count)
+                {
+                    out2 = list[nkey];
+                }
             }
-            return alt is Delegate d2 ? d2.DynamicInvoke() : alt;
+
+            // null at a slot counts as "no value" — same Group A rule as getprop.
+            if (out2 == null)
+            {
+                return alt is Delegate d2 ? d2.DynamicInvoke() : alt;
+            }
+
+            return out2;
         }
 
         // Safely get a property of a node.
@@ -559,13 +570,16 @@ namespace Voxgig.Struct
                 return alt;
             }
 
+            object? out2 = alt;
             if (val is Dictionary<string, object?> map)
             {
                 string k = StrKey(key) ?? S_MT;
-                // Key present with JSON null → return null (TS: missing vs null).
-                return map.TryGetValue(k, out object? v) ? v : alt;
+                if (map.TryGetValue(k, out object? v))
+                {
+                    out2 = v;
+                }
             }
-            if (val is List<object?> list)
+            else if (val is List<object?> list)
             {
                 string? ks = key?.ToString();
                 if (ks != null && int.TryParse(ks, out int i))
@@ -577,13 +591,55 @@ namespace Voxgig.Struct
 
                     if (i >= 0 && i < list.Count)
                     {
-                        return list[i];
+                        out2 = list[i];
                     }
                 }
+            }
+
+            // JSON null at a key is treated as "no value" for the default-substitution
+            // rule (Group A). This unifies cross-port behaviour.
+            if (out2 == null)
+            {
                 return alt;
             }
 
-            return alt;
+            return out2;
+        }
+
+        // Internal: literal value lookup that preserves stored JSON null. Group B
+        // callers (validate / transform commands / builders / inject internals) use
+        // this when they need to inspect the raw stored value at a slot regardless
+        // of whether it is null. The public GetProp / GetElem / HasKey APIs treat
+        // null as absent (Group A) per UNDEF_SPEC.md. Returns NONE when truly absent.
+        public static object? Lookup(object? val, object? key)
+        {
+            if (val == null || key == null || ReferenceEquals(val, NONE))
+            {
+                return NONE;
+            }
+
+            if (val is Dictionary<string, object?> map)
+            {
+                string k = StrKey(key) ?? S_MT;
+                return map.TryGetValue(k, out object? v) ? v : NONE;
+            }
+            if (val is List<object?> list)
+            {
+                string? ks = key.ToString();
+                if (ks != null && int.TryParse(ks, out int i))
+                {
+                    if (i < 0)
+                    {
+                        i = list.Count + i;
+                    }
+                    if (i >= 0 && i < list.Count)
+                    {
+                        return list[i];
+                    }
+                }
+                return NONE;
+            }
+            return NONE;
         }
 
         // Convert a key to its string representation.
@@ -630,33 +686,11 @@ namespace Voxgig.Struct
         }
 
         // True if the key exists with a non-null value in val.
+        // Canonical: haskey is `null != getprop(val, key)`, so a present-but-null
+        // key is false (Group A null unification).
         public static bool HasKey(object? val, object? key)
         {
-            if (val == null || key == null)
-            {
-                return false;
-            }
-
-            if (val is Dictionary<string, object?> map)
-            {
-                string k = StrKey(key) ?? S_MT;
-                return map.ContainsKey(k);
-            }
-            if (val is List<object?> list)
-            {
-                string? ks = key?.ToString();
-                if (ks != null && int.TryParse(ks, out int i))
-                {
-                    if (i < 0)
-                    {
-                        i = list.Count + i;
-                    }
-
-                    return i >= 0 && i < list.Count;
-                }
-                return false;
-            }
-            return false;
+            return GetProp(val, key) != null;
         }
 
         // Items of a map/list as [[key, value], ...] pairs.
@@ -3096,7 +3130,11 @@ namespace Voxgig.Struct
                     var badkeys = new List<string>();
                     foreach (string ck in ckeys)
                     {
-                        if (!HasKey(pval, ck))
+                        // Literal presence: validation needs to know if the SHAPE
+                        // declares this key, regardless of whether the validator
+                        // stored null in that slot. Group A HasKey would miss
+                        // null-valued slots (canonical uses _lookup here).
+                        if (ReferenceEquals(Lookup(pval, ck), NONE))
                         {
                             badkeys.Add(ck);
                         }

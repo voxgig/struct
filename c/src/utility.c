@@ -517,7 +517,14 @@ voxgig_value* voxgig_getelem(voxgig_value* val, voxgig_value* key, voxgig_value*
       return alt ? voxgig_retain(alt) : voxgig_new_undef();
     }
     voxgig_value* v = voxgig_list_get(l, (size_t)nk);
-    return v ? voxgig_retain(v) : (alt ? voxgig_retain(alt) : voxgig_new_undef());
+    /* Group A: null at a slot counts as "no value" — same rule as getprop.
+       Canonical TS getelem returns alt when the slot is null/absent. */
+    if (v && !voxgig_is_undef(v) && !voxgig_is_null(v))
+      return voxgig_retain(v);
+    if (alt && voxgig_is_injector(alt)) {
+      return alt->as.fn.fn.inj(NULL, alt, "", NULL, alt->as.fn.ud);
+    }
+    return alt ? voxgig_retain(alt) : voxgig_new_undef();
   }
   if (alt && voxgig_is_injector(alt)) {
     return alt->as.fn.fn.inj(NULL, alt, "", NULL, alt->as.fn.ud);

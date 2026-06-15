@@ -56,7 +56,6 @@ import (
 	"fmt"
 	"math"
 	"math/bits"
-	"net/url"
 	"reflect"
 	"regexp"
 	"sort"
@@ -1021,9 +1020,23 @@ func ReTest(pattern, input string) bool {
 // ReEscape is an alias for EscRe.
 func ReEscape(s string) string { return EscRe(s) }
 
-// Escape URLs.
+// Escape URLs. Mirrors the canonical encodeURIComponent: every byte is
+// percent-encoded except the unreserved set A-Za-z0-9 and -_.!~*'().
+// In particular a space encodes as %20 (url.QueryEscape would emit '+').
 func EscUrl(s string) string {
-	return url.QueryEscape(s)
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c >= 'A' && c <= 'Z') ||
+			(c >= 'a' && c <= 'z') ||
+			(c >= '0' && c <= '9') ||
+			strings.IndexByte("-_.!~*'()", c) >= 0 {
+			b.WriteByte(c)
+		} else {
+			fmt.Fprintf(&b, "%%%02X", c)
+		}
+	}
+	return b.String()
 }
 
 var (
@@ -1188,9 +1201,13 @@ func Jsonify(val any, flags ...map[string]any) string {
 }
 
 // Safely stringify a value for humans (NOT JSON!).
+//
+// In Go, nil represents a JSON null (there is no separate undefined),
+// so it stringifies to the literal "null" — matching the canonical
+// JSON.stringify(null) === "null".
 func Stringify(val any, maxlen ...int) string {
 	if nil == val {
-		return S_MT
+		return S_null
 	}
 
 	if lr, ok := val.(*ListRef[any]); ok {
