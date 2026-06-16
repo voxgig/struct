@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const __1 = require("..");
-let errs;
+const errs = [];
 // errs = []
 // out = transform(undefined, undefined, { errs })
 // console.log('transform-OUT', out, errs)
