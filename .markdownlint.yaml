@@ -12,6 +12,8 @@ MD003: false   # heading style (atx vs setext) — author's choice
 MD004: false   # unordered-list bullet style
 MD007: false   # unordered-list indentation
 MD009: false   # trailing spaces
+MD010:         # hard tabs — allow inside code blocks (Makefile recipes need real tabs)
+  code_blocks: false
 MD012: false   # multiple consecutive blank lines
 MD013: false   # line length — tables and code blocks are wide
 MD020: false   # space inside closed atx heading

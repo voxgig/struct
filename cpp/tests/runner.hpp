@@ -173,8 +173,8 @@ inline Result runsetflags(const std::string& full_name, const Value& testspec, b
     Value out_raw = lookup_v(eo, Value("out"));
     bool has_out = !out_raw.is_undef();
     // resolveEntry: an absent/null expected out becomes the null marker.
-    Value expected = has_out ? fix_json(out_raw, null_flag)
-                             : (null_flag ? Value(NULLMARK()) : Value::undef());
+    Value expected =
+        has_out ? fix_json(out_raw, null_flag) : (null_flag ? Value(NULLMARK()) : Value::undef());
     Value err_raw = lookup_v(eo, Value("err"));
     Value err_v = err_raw.is_undef() ? Value::undef() : err_raw;
 

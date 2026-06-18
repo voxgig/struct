@@ -108,11 +108,11 @@ VoxgigStruct.transform(
 # { 'total' => 6 }
 ```
 `$APPLY` appears in **value** position as a list
-`['`$APPLY`', <function>, <childspec>]` — the callable goes inline at
+`['$APPLY', <function>, <childspec>]` — the callable goes inline at
 index 1 (it is *not* looked up by name from `extra`), and the third element
 is a child spec that is injected first and handed to the callback as
 `resolved`. Placing `$APPLY` in key position
-(`{ '`$APPLY`' => … }`) raises `$APPLY: invalid placement as key`. The
+(`{ '$APPLY' => … }`) raises `$APPLY: invalid placement as key`. The
 callback is invoked as `(resolved, store, inj)` and its return value becomes
 the key's value.
 

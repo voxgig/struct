@@ -102,7 +102,7 @@ getpath('db.host', store)   // 'localhost'   ← human-illustrative, native nota
 ### Layer 2 — The shared checker `tools/check_doc_examples.py` *(shared, mandatory)*
 Stdlib-only Python 3, modelled exactly on `tools/check_parity.py` / `check_corpus_regex.py`
 (`from __future__ import annotations`, `ROOT = Path(__file__).resolve().parent.parent`, contract
-docstring with documented exit codes, `main() -> int` returning 0/1, `  ok ` / `  FAIL ` per-item
+docstring with documented exit codes, `main() -> int` returning 0/1, `ok` / `FAIL` per-item
 lines + summary). It:
 
 1. Loads `build/test/test.json`; recursively collects every entry with `doc:true` into an
@@ -125,7 +125,7 @@ docs; 1 otherwise.
 Hand-escaping the canonical JSON in a `<!-- => … -->` marker (e.g. `jsonify`'s
 `"{\n  \"a\": 1\n}"`) is itself error-prone. `tools/gen_doc_examples.py` removes that step: an
 author writes only the `<!-- example: id -->` anchor before a code fence and runs `make gen-docs`;
-the tool looks up the corpus entry and writes (or refreshes) the single-line canonical `=> ` marker
+the tool looks up the corpus entry and writes (or refreshes) the single-line canonical `=>` marker
 right after the fence. Because the marker is the shared corpus value rendered as canonical JSON, it
 is **identical for every port and needs no per-language code** — the original plan's per-port
 `render_value` turned out to be unnecessary. The human-visible *native* output stays as an inline
@@ -195,7 +195,7 @@ propagate to every port's prose.
   fixing outputs as the checker flags them. Each port's prose now shows outputs pinned to entries
   its own test suite executes.
 - **Phase D — generation.** `tools/gen_doc_examples.py` (`make gen-docs`) fills/refreshes the
-  canonical `=> ` markers from the corpus for every port at once; CI's `--check` form gates them.
+  canonical `=>` markers from the corpus for every port at once; CI's `--check` form gates them.
 
 A practical target for "every example is validated": the §6 invariant becomes a merge gate — a new
 example without a passing, anchored corpus entry fails `scan-docs-examples` in CI.

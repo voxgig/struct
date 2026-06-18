@@ -641,7 +641,7 @@ PHP method names match canonical lowercase: `getpath`, `setpath`,
 
 - returns the value on success;
 - throws a plain `\Exception` carrying all accumulated errors (joined with
-  ` | `, prefixed `Invalid data: `) by default;
+  ` | `, prefixed `Invalid data:`) by default;
 - accumulates into a passed errors array when you supply one.
 
 ### Test status
