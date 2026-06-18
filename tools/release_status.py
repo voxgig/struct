@@ -1,0 +1,178 @@
+#!/usr/bin/env python3
+"""release_status.py — a release dashboard for every voxgig/struct language port.
+
+For each port it reports four things:
+  LOCAL     the version in the port's manifest (package.json, Cargo.toml, …)
+  TAG       the latest published git tag for that port (<lang>/vX.Y.Z)
+  REGISTRY  the latest version live on the port's package registry (best-effort)
+  STATUS    released / publish-pending / unpublished / mismatch
+
+The git tag is this repo's authoritative "released" marker — every port's
+`make publish` pushes <lang>/vX.Y.Z — so STATUS is computed from LOCAL vs TAG;
+REGISTRY is an independent cross-check.
+
+Stdlib only; runs on Python 3.9+. Network lookups time out quickly and degrade
+to '?' so the report always prints. Pass --no-net to skip them entirely.
+
+Usage:
+    python3 tools/release_status.py [--no-net]
+"""
+
+from __future__ import annotations
+
+import glob
+import json
+import re
+import subprocess
+import sys
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+TIMEOUT = 6
+NET = "--no-net" not in sys.argv
+UA = {"User-Agent": "voxgig-struct-release-status"}
+
+# port, version-source, registry-kind, registry-id
+#   version-source: ("file", path) whole file | ("re", path, pat) | ("glob", pat, re)
+PORTS = [
+    ("typescript", ("re", "typescript/package.json", r'"version"\s*:\s*"([^"]+)"'), "npm", "@voxgig/struct"),
+    ("javascript", ("re", "javascript/package.json", r'"version"\s*:\s*"([^"]+)"'), "npm", "@voxgig/structjs"),
+    ("python", ("re", "python/pyproject.toml", r'(?m)^version\s*=\s*"([^"]+)"'), "pypi", "voxgig-struct"),
+    ("go", ("file", "go/VERSION"), "go", "github.com/voxgig/struct/go"),
+    ("ruby", ("re", "ruby/voxgig_struct.gemspec", r"version\s*=\s*['\"]([^'\"]+)"), "rubygems", "voxgig_struct"),
+    ("rust", ("re", "rust/Cargo.toml", r'(?m)^version\s*=\s*"([^"]+)"'), "crates", "voxgig-struct"),
+    ("csharp", ("glob", "csharp/*.csproj", r"<Version>([^<]+)</Version>"), "nuget", "VoxgigStruct"),
+    ("perl", ("re", "perl/lib/Voxgig/Struct.pm", r"VERSION\s*=\s*['\"]v?([0-9][^'\"]*)"), "cpan", "Voxgig-Struct"),
+    ("java", ("re", "java/pom.xml", r"<version>([^<]+)</version>"), "maven", None),
+    ("kotlin", ("re", "kotlin/build.gradle.kts", r'version\s*=\s*"([^"]+)"'), "maven", None),
+    ("lua", ("re", "lua/struct.rockspec", r'version\s*=\s*"([^"]+)"'), "luarocks", None),
+    ("php", ("file", "php/VERSION"), "tag", None),
+    ("zig", ("re", "zig/build.zig.zon", r'\.version\s*=\s*"([^"]+)"'), "tag", None),
+    ("c", ("file", "c/VERSION"), "tag", None),
+    ("cpp", ("file", "cpp/VERSION"), "tag", None),
+    ("swift", ("file", "swift/VERSION"), "tag", None),
+]
+
+
+def local_version(src) -> str:
+    """Extract the manifest version for a port, or '?' if it can't be read."""
+    kind = src[0]
+    try:
+        if kind == "file":
+            return (ROOT / src[1]).read_text().strip()
+        if kind == "re":
+            m = re.search(src[2], (ROOT / src[1]).read_text())
+            return m.group(1) if m else "?"
+        if kind == "glob":
+            for p in glob.glob(str(ROOT / src[1])):
+                m = re.search(src[2], Path(p).read_text())
+                if m:
+                    return m.group(1)
+        return "?"
+    except OSError:
+        return "?"
+
+
+def git_tags() -> dict:
+    """Map port -> latest published <lang>/vX.Y.Z version, from origin if
+    reachable else local tags."""
+    refs = []
+    if NET:
+        out = run(["git", "ls-remote", "--tags", "origin"])
+        refs = [ln.split("refs/tags/")[-1] for ln in out.splitlines() if "refs/tags/" in ln]
+    if not refs:
+        refs = run(["git", "tag", "-l"]).splitlines()
+    latest: dict = {}
+    for ref in refs:
+        ref = ref.strip().replace("^{}", "")
+        m = re.match(r"^([a-z+]+)/v(.+)$", ref)
+        if not m:
+            continue
+        port, ver = m.group(1), m.group(2)
+        if port not in latest or vkey(ver) > vkey(latest[port]):
+            latest[port] = ver
+    return latest
+
+
+def registry_version(kind: str, ident) -> str:
+    """Best-effort latest version from the port's package registry."""
+    if not NET or kind == "tag" or ident is None:
+        return "—"
+    try:
+        if kind == "npm":
+            d = fetch(f"https://registry.npmjs.org/{ident.replace('/', '%2F')}/latest")
+            return d["version"]
+        if kind == "pypi":
+            return fetch(f"https://pypi.org/pypi/{ident}/json")["info"]["version"]
+        if kind == "rubygems":
+            return fetch(f"https://rubygems.org/api/v1/gems/{ident}.json")["version"]
+        if kind == "go":
+            return fetch(f"https://proxy.golang.org/{ident}/@latest")["Version"].lstrip("v")
+        if kind == "crates":
+            return fetch(f"https://crates.io/api/v1/crates/{ident}")["crate"]["max_stable_version"]
+        if kind == "nuget":
+            return fetch(f"https://api.nuget.org/v3-flatcontainer/{ident.lower()}/index.json")["versions"][-1]
+        if kind == "cpan":
+            return fetch(f"https://fastapi.metacpan.org/v1/release/{ident}")["version"]
+    except (urllib.error.HTTPError,) as e:
+        return "absent" if e.code == 404 else "?"
+    except Exception:
+        return "?"
+    return "—"  # maven / luarocks: not queried (use TAG)
+
+
+def fetch(url: str):
+    req = urllib.request.Request(url, headers=UA)
+    with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+        return json.load(r)
+
+
+def run(args) -> str:
+    try:
+        return subprocess.run(args, cwd=ROOT, capture_output=True, text=True, timeout=20).stdout
+    except Exception:
+        return ""
+
+
+def vkey(v: str):
+    """Sortable key from the numeric components of a version string."""
+    return tuple(int(n) for n in re.findall(r"\d+", v)) or (0,)
+
+
+def status(local: str, tag) -> str:
+    if not tag:
+        return "unpublished"
+    if vkey(local) == vkey(tag):
+        return "released"
+    if vkey(local) > vkey(tag):
+        return "publish-pending"
+    return "tag>local!"
+
+
+def main() -> int:
+    tags = git_tags()
+    rows = []
+    for name, src, kind, ident in PORTS:
+        loc = local_version(src)
+        tag = tags.get(name)
+        rows.append((name, loc, tag or "—", registry_version(kind, ident), status(loc, tag)))
+
+    w = [max(len(str(r[i])) for r in rows + [("PORT", "LOCAL", "TAG", "REGISTRY", "STATUS")]) for i in range(5)]
+    hdr = ("PORT", "LOCAL", "TAG", "REGISTRY", "STATUS")
+    line = "  ".join(h.ljust(w[i]) for i, h in enumerate(hdr))
+    print(line)
+    print("  ".join("-" * w[i] for i in range(5)))
+    for r in rows:
+        print("  ".join(str(c).ljust(w[i]) for i, c in enumerate(r)))
+
+    released = sum(1 for r in rows if r[4] == "released")
+    pending = sum(1 for r in rows if r[4] == "publish-pending")
+    print(f"\n{released} released · {pending} publish-pending · {len(rows) - released - pending} unpublished"
+          + ("" if NET else "  (--no-net: tags from local only, registries skipped)"))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

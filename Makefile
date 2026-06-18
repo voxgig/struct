@@ -33,7 +33,7 @@ AUDIT_LANGS = typescript javascript python go ruby php rust csharp
 # publish purely by that tag.
 PUBLISH_LANGS = typescript javascript python go ruby php lua zig java rust c cpp csharp kotlin perl swift
 
-.PHONY: all inspect build test lint audit scan analyze clean reset publish corpus gen-docs \
+.PHONY: all inspect build test lint audit scan analyze clean reset publish status corpus gen-docs \
         scan-secrets scan-deps scan-sast scan-workflows scan-shell scan-spelling scan-docs \
         scan-parity scan-regex scan-docs-examples
 
@@ -96,6 +96,10 @@ publish:
 	@echo "  make publish-<lang>   e.g.  make publish-rust"
 	@echo "Languages: $(PUBLISH_LANGS)"
 	@echo "Each runs the port's registry publish (where one exists) and pushes tag <lang>/vX.Y.Z."
+
+# Release dashboard: per-port local version vs latest published tag vs registry.
+status:
+	@python3 tools/release_status.py
 
 # ---- Shared test corpus ----
 # build/test/test.json is a COMMITTED artifact compiled from build/test/*.jsonic
