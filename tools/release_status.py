@@ -137,8 +137,14 @@ def registry_version(kind: str, ident) -> str:
 
 
 def fetch(url: str):
+    # URLs come only from the hardcoded https registry endpoints in
+    # registry_version() (no user input). Reject any non-https scheme
+    # defensively so urllib can never be steered at file:// or similar.
+    if not url.startswith("https://"):
+        raise ValueError("refusing non-https url")
     req = urllib.request.Request(url, headers=UA)
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+    # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected
+    with urllib.request.urlopen(req, timeout=TIMEOUT) as r:  # noqa: S310
         return json.load(r)
 
 
