@@ -3,7 +3,8 @@
 
 # ---- Build backend ----
 [build-system]
-requires = ["setuptools>=61"]
+# setuptools>=77 enables the PEP 639 SPDX `license` string in [project].
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 # ---- Project metadata ----
@@ -13,7 +14,7 @@ version = "0.1.0"
 description = "Uniform JSON-shaped data structure manipulations — Python port of @voxgig/struct"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = "MIT"
 authors = [{ name = "Voxgig" }]
 keywords = ["voxgig", "struct", "json", "data"]
 
