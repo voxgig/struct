@@ -523,7 +523,8 @@ static voxgig_value* subj_getpath_handler(voxgig_value* in, char** err, void* ud
   voxgig_value* path = getp(in, "path");
   /* Build { '$TOP': store, '$FOO': <injector> }. */
   voxgig_value* store = voxgig_new_map();
-  voxgig_map_set(voxgig_as_map(store), "$TOP", store_in ? voxgig_retain(store_in) : voxgig_new_null());
+  voxgig_map_set(voxgig_as_map(store), "$TOP",
+                 store_in ? voxgig_retain(store_in) : voxgig_new_null());
   voxgig_map_set(voxgig_as_map(store), "$FOO", voxgig_new_injector(foo_injector, NULL));
   voxgig_injection* inj = voxgig_inj_new(NULL, NULL);
   inj->mode = 0;
@@ -544,8 +545,8 @@ static voxgig_value* subj_sent_getprop(voxgig_value* in, char** err, void* ud) {
   voxgig_value* val = getp(in, "val");
   voxgig_value* key = getp(in, "key");
   voxgig_value* altk = voxgig_new_string("alt");
-  voxgig_value* alt = (voxgig_map_get(voxgig_as_map(in), "alt")) ? voxgig_getprop(in, altk, NULL)
-                                                                 : NULL;
+  voxgig_value* alt =
+      (voxgig_map_get(voxgig_as_map(in), "alt")) ? voxgig_getprop(in, altk, NULL) : NULL;
   voxgig_release(altk);
   voxgig_value* r = voxgig_getprop(val, key, alt);
   voxgig_release(val);
@@ -559,8 +560,8 @@ static voxgig_value* subj_sent_getelem(voxgig_value* in, char** err, void* ud) {
   voxgig_value* val = getp(in, "val");
   voxgig_value* key = getp(in, "key");
   voxgig_value* altk = voxgig_new_string("alt");
-  voxgig_value* alt = (voxgig_map_get(voxgig_as_map(in), "alt")) ? voxgig_getprop(in, altk, NULL)
-                                                                 : NULL;
+  voxgig_value* alt =
+      (voxgig_map_get(voxgig_as_map(in), "alt")) ? voxgig_getprop(in, altk, NULL) : NULL;
   voxgig_release(altk);
   voxgig_value* r = voxgig_getelem(val, key, alt);
   voxgig_release(val);

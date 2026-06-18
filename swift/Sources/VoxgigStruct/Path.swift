@@ -15,7 +15,9 @@ public func setpath(_ store: Value, _ pathIn: Value, _ val: Value) -> Value {
   if case .list(let l) = pathIn {
     parts = l.items
   } else if let s = pathIn.asString {
-    parts = s.split(separator: ".", omittingEmptySubsequences: false).map { Value.string(String($0)) }
+    parts = s.split(separator: ".", omittingEmptySubsequences: false).map {
+      Value.string(String($0))
+    }
   } else {
     return .noval
   }
