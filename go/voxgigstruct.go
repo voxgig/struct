@@ -808,7 +808,7 @@ func GetProp(val any, key any, alts ...any) any {
 
 	} else {
 		valRef := reflect.ValueOf(val)
-		if valRef.Kind() == reflect.Ptr {
+		if valRef.Kind() == reflect.Pointer {
 			valRef = valRef.Elem()
 		}
 
