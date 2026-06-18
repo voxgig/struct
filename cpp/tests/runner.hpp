@@ -84,6 +84,32 @@ inline Value fix_json(const Value& v, bool null_flag) {
   return v;
 }
 
+// collapse_absent: treat NOVAL (absent) as JSON null for comparison. The
+// canonical TS runner roundtrips both the result and the expected `out` through
+// JSON.stringify, which erases the null/undef distinction at the value level
+// (swift CorpusTests.canon does the same via normaliseAbsent). Applying this to
+// BOTH sides — together with fix_json — lets a port that correctly returns
+// "absent" for a missing getprop/getelem/getpath match a corpus entry that
+// records the result as null. The stored-null vs absent distinction that the
+// sentinels groups exercise is preserved earlier, on the *input*, via fix_json.
+inline Value collapse_absent(const Value& v) {
+  if (v.is_undef())
+    return Value(nullptr);
+  if (v.is_list()) {
+    auto out = std::make_shared<List>();
+    for (const auto& e : *v.as_list())
+      out->push_back(collapse_absent(e));
+    return Value(out);
+  }
+  if (v.is_map()) {
+    auto out = std::shared_ptr<Map>(new Map());
+    for (const auto& [k, e] : *v.as_map())
+      out->set(k, collapse_absent(e));
+    return Value(out);
+  }
+  return v;
+}
+
 // null_modifier: the inject `modify` callback used by the inject.string subject.
 // Mirrors typescript/test/runner.ts:nullModifier — a slot whose injected value
 // is exactly "__NULL__" becomes JSON null; a string that merely *contains*
@@ -134,8 +160,36 @@ inline Value normalize(const Value& v) {
   return v;
 }
 
-inline bool deep_equal(const Value& a, const Value& b) {
-  return normalize(a) == normalize(b);
+// Order-insensitive deep equality. JSON objects are unordered, so two maps with
+// the same entries in a different key order are equal (swift CorpusTests.canon
+// compares via stringify with sorted keys for the same reason). Lists stay
+// order-sensitive. Scalars fall back to Value::operator== after normalize().
+inline bool deep_equal(const Value& a0, const Value& b0) {
+  Value a = normalize(a0);
+  Value b = normalize(b0);
+  if (a.is_map() && b.is_map()) {
+    auto am = a.as_map();
+    auto bm = b.as_map();
+    if (am->size() != bm->size())
+      return false;
+    for (const auto& [k, av] : *am) {
+      const Value* bv = bm->find(k);
+      if (bv == nullptr || !deep_equal(av, *bv))
+        return false;
+    }
+    return true;
+  }
+  if (a.is_list() && b.is_list()) {
+    auto al = a.as_list();
+    auto bl = b.as_list();
+    if (al->size() != bl->size())
+      return false;
+    for (size_t i = 0; i < al->size(); i++)
+      if (!deep_equal((*al)[i], (*bl)[i]))
+        return false;
+    return true;
+  }
+  return a == b;
 }
 
 inline std::string brief(const Value& v) {
@@ -172,9 +226,9 @@ inline Result runsetflags(const std::string& full_name, const Value& testspec, b
     Value in = has_in ? fix_json(clone(in_raw), null_flag) : Value::undef();
     Value out_raw = lookup_v(eo, Value("out"));
     bool has_out = !out_raw.is_undef();
-    // resolveEntry: an absent/null expected out becomes the null marker.
-    Value expected =
-        has_out ? fix_json(out_raw, null_flag) : (null_flag ? Value(NULLMARK()) : Value::undef());
+    // resolveEntry: an absent expected `out` collapses to null, then both sides
+    // run through collapse_absent + fix_json so an absent result matches it.
+    Value expected = fix_json(collapse_absent(has_out ? out_raw : Value::undef()), null_flag);
     Value err_raw = lookup_v(eo, Value("err"));
     Value err_v = err_raw.is_undef() ? Value::undef() : err_raw;
 
@@ -236,12 +290,13 @@ inline Result runsetflags(const std::string& full_name, const Value& testspec, b
       continue;
     }
 
-    if (deep_equal(got, expected)) {
+    Value got_c = fix_json(collapse_absent(got), null_flag);
+    if (deep_equal(got_c, expected)) {
       res.passed++;
     } else {
       std::ostringstream oss;
       oss << "[" << i << "] in=" << brief(in_raw) << " expected=" << brief(expected)
-          << " got=" << brief(got);
+          << " got=" << brief(got_c);
       res.failures.push_back(oss.str());
     }
   }
