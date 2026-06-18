@@ -162,6 +162,8 @@ csharp/**/obj/
 python/dist/
 python/build/
 python/*.egg-info/
+python/.venv/
+python/uv.lock
 ruby/*.gem
 perl/.release/
 lua/voxgig-struct-*.rockspec
