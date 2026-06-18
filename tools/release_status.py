@@ -76,24 +76,37 @@ def local_version(src) -> str:
 
 
 def git_tags() -> dict:
-    """Map port -> latest published <lang>/vX.Y.Z version, from origin if
-    reachable else local tags."""
-    refs = []
-    if NET:
-        out = run(["git", "ls-remote", "--tags", "origin"])
-        refs = [ln.split("refs/tags/")[-1] for ln in out.splitlines() if "refs/tags/" in ln]
-    if not refs:
-        refs = run(["git", "tag", "-l"]).splitlines()
+    """Map port -> {full, ver, date} for the latest <lang>/vX.Y.Z tag.
+
+    Dates come from local annotated tags (when the release was cut); a
+    remote-only tag with no local copy gets date '?'.
+    """
     latest: dict = {}
-    for ref in refs:
-        ref = ref.strip().replace("^{}", "")
-        m = re.match(r"^([a-z+]+)/v(.+)$", ref)
-        if not m:
-            continue
-        port, ver = m.group(1), m.group(2)
-        if port not in latest or vkey(ver) > vkey(latest[port]):
-            latest[port] = ver
+    # Local tags carry the publish timestamp (annotated tagger date, or the
+    # commit date for a lightweight tag).
+    fmt = "%(refname:short)\t%(taggerdate:format:%Y-%m-%d %H:%M:%S)\t%(creatordate:format:%Y-%m-%d %H:%M:%S)"
+    for ln in run(["git", "for-each-ref", "refs/tags/", "--format=" + fmt]).splitlines():
+        parts = ln.split("\t")
+        if len(parts) >= 3:
+            _add_tag(latest, parts[0].strip(), parts[1].strip() or parts[2].strip() or "?")
+    # Remote tags catch anything not present locally (no date available).
+    if NET:
+        for ln in run(["git", "ls-remote", "--tags", "origin"]).splitlines():
+            if "refs/tags/" in ln:
+                _add_tag(latest, ln.split("refs/tags/")[-1].replace("^{}", "").strip(), "?")
     return latest
+
+
+def _add_tag(latest: dict, full: str, date: str) -> None:
+    """Record `full` (e.g. 'go/v0.1.3') as a port's latest tag, keeping the
+    highest version; an earlier dated entry wins over a later dateless one."""
+    m = re.match(r"^([a-z+]+)/v(.+)$", full)
+    if not m:
+        return
+    port, ver = m.group(1), m.group(2)
+    cur = latest.get(port)
+    if cur is None or vkey(ver) > vkey(cur["ver"]):
+        latest[port] = {"full": full, "ver": ver, "date": date}
 
 
 def registry_version(kind: str, ident) -> str:
@@ -153,22 +166,29 @@ def status(local: str, tag) -> str:
 
 def main() -> int:
     tags = git_tags()
+    hdr = ("PORT", "LOCAL", "TAG", "PUBLISHED", "REGISTRY", "STATUS")
     rows = []
     for name, src, kind, ident in PORTS:
         loc = local_version(src)
-        tag = tags.get(name)
-        rows.append((name, loc, tag or "—", registry_version(kind, ident), status(loc, tag)))
+        t = tags.get(name)
+        rows.append((
+            name,
+            loc,
+            t["full"] if t else "—",
+            t["date"] if t else "—",
+            registry_version(kind, ident),
+            status(loc, t["ver"] if t else None),
+        ))
 
-    w = [max(len(str(r[i])) for r in rows + [("PORT", "LOCAL", "TAG", "REGISTRY", "STATUS")]) for i in range(5)]
-    hdr = ("PORT", "LOCAL", "TAG", "REGISTRY", "STATUS")
-    line = "  ".join(h.ljust(w[i]) for i, h in enumerate(hdr))
-    print(line)
-    print("  ".join("-" * w[i] for i in range(5)))
+    cols = len(hdr)
+    w = [max(len(str(r[i])) for r in rows + [hdr]) for i in range(cols)]
+    print("  ".join(h.ljust(w[i]) for i, h in enumerate(hdr)))
+    print("  ".join("-" * w[i] for i in range(cols)))
     for r in rows:
         print("  ".join(str(c).ljust(w[i]) for i, c in enumerate(r)))
 
-    released = sum(1 for r in rows if r[4] == "released")
-    pending = sum(1 for r in rows if r[4] == "publish-pending")
+    released = sum(1 for r in rows if r[-1] == "released")
+    pending = sum(1 for r in rows if r[-1] == "publish-pending")
     print(f"\n{released} released · {pending} publish-pending · {len(rows) - released - pending} unpublished"
           + ("" if NET else "  (--no-net: tags from local only, registries skipped)"))
     return 0
