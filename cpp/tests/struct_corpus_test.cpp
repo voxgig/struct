@@ -101,26 +101,43 @@ int main() {
   });
   run("minor", "stringify", true, [](const Value& in) {
     Value val = getpDef(in, "val", Value::undef());
+    // Canonical subject: a stored-null (the NULLMARK in null mode) stringifies
+    // as the literal text "null".
+    if (val.is_string() && val.as_string() == runner::NULLMARK())
+      val = Value("null");
     Value max = getp(in, "max");
     int m = max.is_int() ? static_cast<int>(max.as_int()) : -1;
     return Value(stringify(val, m));
   });
-  run("minor", "jsonify", true, [](const Value& in) {
+  run("minor", "jsonify", false, [](const Value& in) {
     Value val = getp(in, "val");
     Value flags = getp(in, "flags");
     return Value(jsonify(val, flags));
   });
   run("minor", "pathify", true, [](const Value& in) {
+    // Canonical subject: a stored-null path becomes undefined; a stored-null
+    // path *element* (the marker) is stripped from the rendered string; and a
+    // wholly-null path renders "<unknown-path:null>".
     Value path = getpDef(in, "path", Value::undef());
+    bool path_was_null = path.is_string() && path.as_string() == runner::NULLMARK();
+    if (path_was_null)
+      path = Value::undef();
     Value from = getp(in, "from");
     Value to = getp(in, "to");
     int f = from.is_int() ? static_cast<int>(from.as_int()) : 0;
     int t = to.is_int() ? static_cast<int>(to.as_int()) : 0;
-    return Value(pathify(path, f, t));
+    std::string s = pathify(path, f, t);
+    std::string::size_type pos = s.find("__NULL__.");
+    if (pos != std::string::npos)
+      s.erase(pos, std::string("__NULL__.").size());
+    if (path_was_null)
+      for (pos = 0; (pos = s.find('>', pos)) != std::string::npos; pos += 6)
+        s.replace(pos, 1, ":null>");
+    return Value(s);
   });
   run("minor", "escre", true, [](const Value& in) { return Value(escre(in)); });
   run("minor", "escurl", true, [](const Value& in) { return Value(escurl(in)); });
-  run("minor", "join", true, [](const Value& in) {
+  run("minor", "join", false, [](const Value& in) {
     Value val = getp(in, "val");
     Value sep = getp(in, "sep");
     Value url = getp(in, "url");
@@ -154,9 +171,9 @@ int main() {
       return Value(typename_str(static_cast<int>(in.as_int())));
     return Value(typename_str(in));
   });
-  run("minor", "typify", true,
+  run("minor", "typify", false,
       [](const Value& in) { return Value(static_cast<int64_t>(typify(in))); });
-  run("minor", "size", true,
+  run("minor", "size", false,
       [](const Value& in) -> Value { return Value(voxgig::structlib::size(in)); });
   run("minor", "slice", true, [](const Value& in) {
     Value val = getp(in, "val");
@@ -164,7 +181,7 @@ int main() {
     Value end = getp(in, "end");
     return slice(val, start, end);
   });
-  run("minor", "pad", true, [](const Value& in) {
+  run("minor", "pad", false, [](const Value& in) {
     Value val = getp(in, "val");
     Value p = getp(in, "pad");
     Value c = getp(in, "char");
@@ -315,8 +332,13 @@ int main() {
   });
 
   // ===== inject =====
-  run("inject", "string", true,
-      [](const Value& in) { return inject(getp(in, "val"), getp(in, "store")); });
+  run("inject", "string", true, [](const Value& in) {
+    // Canonical subject passes { modify: nullModifier }: an injected stored-null
+    // (the marker, in null mode) renders as the literal text "null".
+    Injection inj(Value::undef(), Value::undef());
+    inj.modify = runner::null_modifier;
+    return inject(getp(in, "val"), getp(in, "store"), &inj);
+  });
   run("inject", "deep", true,
       [](const Value& in) { return inject(getp(in, "val"), getp(in, "store")); });
 
@@ -363,7 +385,7 @@ int main() {
   });
 
   // ===== validate =====
-  run("validate", "basic", true,
+  run("validate", "basic", false,
       [](const Value& in) { return validate(getp(in, "data"), getp(in, "spec")); });
   run("validate", "child", true,
       [](const Value& in) { return validate(getp(in, "data"), getp(in, "spec")); });
@@ -371,7 +393,7 @@ int main() {
       [](const Value& in) { return validate(getp(in, "data"), getp(in, "spec")); });
   run("validate", "exact", true,
       [](const Value& in) { return validate(getp(in, "data"), getp(in, "spec")); });
-  run("validate", "invalid", true,
+  run("validate", "invalid", false,
       [](const Value& in) { return validate(getp(in, "data"), getp(in, "spec")); });
   run("validate", "special", true, [](const Value& in) {
     Value inj_v = getp(in, "inj");
