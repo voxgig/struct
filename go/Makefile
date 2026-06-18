@@ -46,13 +46,26 @@ audit:
 # (not the remote URL), so it never lands in the URL, in .git/config, or in
 # plaintext argv. With no token we fall back to the `origin` remote (SSH for
 # local dev). The token is read from the environment and never echoed.
+#
+# Dry-run cooperation: `aql vault exec --dry-run` injects the fixed filler
+# value in place of the real secret, so a full publish command can be
+# rehearsed without credentials. When the token is that filler, we run every
+# step up to (but not including) tagging/pushing, report what would happen,
+# and exit 0 — no tag is created and nothing is pushed.
 VERSION := $(shell cat VERSION)
 TAG := go/v$(VERSION)
+AQL_DRY_RUN_FILLER := AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET
 publish: test
 	@if git rev-parse -q --verify "refs/tags/$(TAG)" >/dev/null; then \
 	  echo "tag $(TAG) already exists — bump go/VERSION first"; exit 1; fi
-	git tag -a "$(TAG)" -m "go v$(VERSION)"
 	@token="$${GITHUB_TOKEN:-$$GH_TOKEN}"; \
+	if [ "$$token" = "$(AQL_DRY_RUN_FILLER)" ]; then \
+	  echo "[dry-run] aql filler token detected: would tag $(TAG) and push it over"; \
+	  echo "[dry-run] HTTPS to github.com/voxgig/struct — no tag created, nothing pushed."; \
+	  exit 0; \
+	fi; \
+	echo "tag: $(TAG)"; \
+	git tag -a "$(TAG)" -m "go v$(VERSION)"; \
 	if [ -n "$$token" ]; then \
 	  echo "push: $(TAG) -> github.com/voxgig/struct (HTTPS, token auth)"; \
 	  hdr="AUTHORIZATION: basic $$(printf 'x-access-token:%s' "$$token" | base64 | tr -d '\n')"; \
@@ -60,5 +73,5 @@ publish: test
 	else \
 	  echo "push: $(TAG) -> origin (ssh)"; \
 	  git push origin "$(TAG)"; \
-	fi
-	@echo "Published $(TAG). Consumers: go get github.com/voxgig/struct/go@v$(VERSION)"
+	fi; \
+	echo "Published $(TAG). Consumers: go get github.com/voxgig/struct/go@v$(VERSION)"
