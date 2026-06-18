@@ -143,8 +143,7 @@ def fetch(url: str):
     if not url.startswith("https://"):
         raise ValueError("refusing non-https url")
     req = urllib.request.Request(url, headers=UA)
-    # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as r:  # noqa: S310
+    with urllib.request.urlopen(req, timeout=TIMEOUT) as r:  # nosemgrep  # noqa: S310
         return json.load(r)
 
 
