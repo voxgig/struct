@@ -32,12 +32,41 @@ audit:
 	bundle-audit check --update
 
 # Release: publish to RubyGems, then tag ruby/vX.Y.Z (version from the gemspec).
-# Needs RubyGems auth (GEM_HOST_API_KEY env var or ~/.gem/credentials).
+#
+# RubyGems auth: `gem push` reads GEM_HOST_API_KEY, which a headless run
+# supplies with `aql vault exec --for=gem <alias> -- make publish-ruby`. The
+# git tag push needs GitHub auth: with GH_TOKEN/GITHUB_TOKEN present we push
+# over HTTPS carrying the credential in an Authorization header (kept out of
+# the URL, .git/config, and argv); otherwise we fall back to the `origin`
+# remote (SSH for local dev).
+#
+# Dry-run cooperation: `aql vault exec --dry-run` injects a fixed filler in
+# place of the real token, so the publish can be rehearsed without
+# credentials. When the gem or GitHub token is that filler we build the gem
+# (validating packaging), then stop — nothing pushed, no tag.
 VERSION := $(shell grep -E "\.version\s*=" voxgig_struct.gemspec | sed -E "s/.*[\"']([^\"']+)[\"'].*/\1/")
+TAG := ruby/v$(VERSION)
+GEM := voxgig_struct-$(VERSION).gem
+AQL_DRY_RUN_FILLER := AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET
 publish: test
+	@if git rev-parse -q --verify "refs/tags/$(TAG)" >/dev/null; then \
+	  echo "tag $(TAG) already exists — bump gemspec version first"; exit 1; fi
 	gem build voxgig_struct.gemspec
-	gem push voxgig_struct-$(VERSION).gem
-	@if git rev-parse -q --verify "refs/tags/ruby/v$(VERSION)" >/dev/null; then \
-	  echo "tag ruby/v$(VERSION) already exists — bump gemspec version first"; exit 1; fi
-	git tag -a "ruby/v$(VERSION)" -m "ruby v$(VERSION)"
-	git push origin "ruby/v$(VERSION)"
+	@gemtok="$$GEM_HOST_API_KEY"; ghtok="$${GITHUB_TOKEN:-$$GH_TOKEN}"; \
+	if [ "$$gemtok" = "$(AQL_DRY_RUN_FILLER)" ] || [ "$$ghtok" = "$(AQL_DRY_RUN_FILLER)" ]; then \
+	  echo "[dry-run] aql filler token detected: built $(GEM); nothing pushed, no $(TAG) tag."; \
+	  rm -f "$(GEM)"; \
+	  exit 0; \
+	fi; \
+	gem push "$(GEM)"; \
+	echo "tag: $(TAG)"; \
+	git tag -a "$(TAG)" -m "ruby v$(VERSION)"; \
+	if [ -n "$$ghtok" ]; then \
+	  echo "push: $(TAG) -> github.com/voxgig/struct (HTTPS, token auth)"; \
+	  hdr="AUTHORIZATION: basic $$(printf 'x-access-token:%s' "$$ghtok" | base64 | tr -d '\n')"; \
+	  git -c http.extraheader="$$hdr" push https://github.com/voxgig/struct.git "$(TAG)"; \
+	else \
+	  echo "push: $(TAG) -> origin (ssh)"; \
+	  git push origin "$(TAG)"; \
+	fi; \
+	echo "Published $(GEM) + tag $(TAG)."
