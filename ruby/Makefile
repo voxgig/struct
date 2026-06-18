@@ -52,7 +52,8 @@ publish: test
 	@if git rev-parse -q --verify "refs/tags/$(TAG)" >/dev/null; then \
 	  echo "tag $(TAG) already exists — bump gemspec version first"; exit 1; fi
 	gem build voxgig_struct.gemspec
-	@gemtok="$$GEM_HOST_API_KEY"; ghtok="$${GITHUB_TOKEN:-$$GH_TOKEN}"; \
+	@set -e; \
+	gemtok="$$GEM_HOST_API_KEY"; ghtok="$${GITHUB_TOKEN:-$$GH_TOKEN}"; \
 	if [ "$$gemtok" = "$(AQL_DRY_RUN_FILLER)" ] || [ "$$ghtok" = "$(AQL_DRY_RUN_FILLER)" ]; then \
 	  echo "[dry-run] aql filler token detected: built $(GEM); nothing pushed, no $(TAG) tag."; \
 	  rm -f "$(GEM)"; \

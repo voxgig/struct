@@ -58,7 +58,8 @@ AQL_DRY_RUN_FILLER := AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET
 publish: build test
 	@if git rev-parse -q --verify "refs/tags/$(TAG)" >/dev/null; then \
 	  echo "tag $(TAG) already exists — bump package.json version first"; exit 1; fi
-	@npmtok="$$(printenv 'npm_config_//registry.npmjs.org/:_authToken' 2>/dev/null || true)"; \
+	@set -e; \
+	npmtok="$$(printenv 'npm_config_//registry.npmjs.org/:_authToken' 2>/dev/null || true)"; \
 	ghtok="$${GITHUB_TOKEN:-$$GH_TOKEN}"; \
 	if [ "$$npmtok" = "$(AQL_DRY_RUN_FILLER)" ] || [ "$$ghtok" = "$(AQL_DRY_RUN_FILLER)" ]; then \
 	  echo "[dry-run] aql filler token detected: rehearsing the package; nothing published, no $(TAG) tag."; \

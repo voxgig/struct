@@ -58,7 +58,8 @@ AQL_DRY_RUN_FILLER := AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET
 publish: test
 	@if git rev-parse -q --verify "refs/tags/$(TAG)" >/dev/null; then \
 	  echo "tag $(TAG) already exists — bump go/VERSION first"; exit 1; fi
-	@token="$${GITHUB_TOKEN:-$$GH_TOKEN}"; \
+	@set -e; \
+	token="$${GITHUB_TOKEN:-$$GH_TOKEN}"; \
 	if [ "$$token" = "$(AQL_DRY_RUN_FILLER)" ]; then \
 	  echo "[dry-run] aql filler token detected: would tag $(TAG) and push it over"; \
 	  echo "[dry-run] HTTPS to github.com/voxgig/struct — no tag created, nothing pushed."; \
