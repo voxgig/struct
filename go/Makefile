@@ -39,10 +39,26 @@ audit:
 # lives in a subdirectory, so the tag MUST be the `go/vX.Y.Z` submodule form
 # for `go get github.com/voxgig/struct/go@vX.Y.Z` to resolve it. Version is in
 # the VERSION file (Go has no manifest version field).
+#
+# Push auth: a headless/CI run (e.g. `aql vault exec --for=github <alias> --
+# make publish-go`) injects GH_TOKEN/GITHUB_TOKEN. When a token is present we
+# push the tag over HTTPS, carrying the credential in an Authorization header
+# (not the remote URL), so it never lands in the URL, in .git/config, or in
+# plaintext argv. With no token we fall back to the `origin` remote (SSH for
+# local dev). The token is read from the environment and never echoed.
 VERSION := $(shell cat VERSION)
+TAG := go/v$(VERSION)
 publish: test
-	@if git rev-parse -q --verify "refs/tags/go/v$(VERSION)" >/dev/null; then \
-	  echo "tag go/v$(VERSION) already exists — bump go/VERSION first"; exit 1; fi
-	git tag -a "go/v$(VERSION)" -m "go v$(VERSION)"
-	git push origin "go/v$(VERSION)"
-	@echo "Published go/v$(VERSION). Consumers: go get github.com/voxgig/struct/go@v$(VERSION)"
+	@if git rev-parse -q --verify "refs/tags/$(TAG)" >/dev/null; then \
+	  echo "tag $(TAG) already exists — bump go/VERSION first"; exit 1; fi
+	git tag -a "$(TAG)" -m "go v$(VERSION)"
+	@token="$${GITHUB_TOKEN:-$$GH_TOKEN}"; \
+	if [ -n "$$token" ]; then \
+	  echo "push: $(TAG) -> github.com/voxgig/struct (HTTPS, token auth)"; \
+	  hdr="AUTHORIZATION: basic $$(printf 'x-access-token:%s' "$$token" | base64 | tr -d '\n')"; \
+	  git -c http.extraheader="$$hdr" push https://github.com/voxgig/struct.git "$(TAG)"; \
+	else \
+	  echo "push: $(TAG) -> origin (ssh)"; \
+	  git push origin "$(TAG)"; \
+	fi
+	@echo "Published $(TAG). Consumers: go get github.com/voxgig/struct/go@v$(VERSION)"
