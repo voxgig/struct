@@ -100,7 +100,7 @@ public func slice(_ val: Value, _ start: Int? = nil, _ end: Int? = nil, mutate: 
   }
   let vlen = size(val)
   var s = start
-  var e = end
+  let e = end
   if e != nil, s == nil { s = 0 }
   guard var ss = s else { return val }
   var ee = e ?? vlen

@@ -599,8 +599,7 @@ static int parse_alt(parser* p) {
     return start;
   while (p->pos < p->slen && p->src[p->pos] == '|') {
     /* Insert SPLIT at `start`, with x=start+1 and y=after-current. */
-    int branch1_end = re->code_len;
-    /* Emit JMP at branch1_end to skip over the second branch. */
+    /* Emit a JMP after the first branch to skip over the second branch. */
     int jmp_ix = code_emit(re, OP_JMP);
     int branch2_start = re->code_len;
     /* Shift to insert SPLIT at `start`. */
@@ -623,7 +622,6 @@ static int parse_alt(parser* p) {
     re->code[start].op = OP_SPLIT;
     re->code[start].data.split.x = start + 1;
     re->code[start].data.split.y = branch2_start + 1;
-    branch1_end += 1;
     jmp_ix += 1;
     re->code[jmp_ix].data.jmp = -1; /* placeholder, patched after parsing second branch */
     p->pos++;

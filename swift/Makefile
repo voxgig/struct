@@ -13,7 +13,7 @@ build:
 	$(SWIFT) build
 
 test:
-	$(SWIFT) test --enable-test-discovery
+	$(SWIFT) test
 
 # `swift format` is bundled with the Swift toolchain (`swift-format`).
 # Local soft-skip when not on PATH; CI hardens this by setting CI=true
