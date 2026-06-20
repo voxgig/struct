@@ -15,7 +15,7 @@ both pretty (`indent=2`) and compact (`indent=0`) forms.
 
 | Lib third-party | Test-runner third-party |
 |---|---|
-| **zero runtime third-party deps in any port.** Every port either uses its language's stdlib JSON (typescript/javascript/python/go/ruby/php/csharp/zig), hand-rolls a small JSON printer (c/cpp/java/kotlin/lua/swift/perl/rust/clojure/ocaml/scala), or pipes the corpus through the language's stdlib parser at test time. clojure, ocaml and scala additionally ship an in-tree JSON reader for their test runners (no JSON library); ocaml also vendors a small RE2-subset regex engine (`vregex.ml`), while scala uses the JVM stdlib `java.util.regex` and dart uses the core `RegExp` (its runner reads the corpus with the SDK `dart:convert`). elixir keeps its mutable, reference-stable nodes in an ETS-backed heap (OTP stdlib) and uses the core `Regex`; its test runner ships a small hand-written JSON parser (no `Jason`/`Poison`). | c: **none** (vendored JSON parser in `src/value_io.c`); cpp: **none** (vendored JSON parser in `src/value_io.hpp`); java/kotlin: gson (test-scope only); lua: dkjson + luafilesystem (test-scope only); rust: serde_json (dev-dep only) |
+| **zero runtime third-party deps in any port.** Every port either uses its language's stdlib JSON (typescript/javascript/python/go/ruby/php/csharp/zig), hand-rolls a small JSON printer (c/cpp/java/kotlin/lua/swift/perl/rust/clojure/ocaml/scala), or pipes the corpus through the language's stdlib parser at test time. clojure, ocaml and scala additionally ship an in-tree JSON reader for their test runners (no JSON library); ocaml also vendors a small RE2-subset regex engine (`vregex.ml`), while scala uses the JVM stdlib `java.util.regex` and dart uses the core `RegExp` (its runner reads the corpus with the SDK `dart:convert`). elixir keeps its mutable, reference-stable nodes in an ETS-backed heap (OTP stdlib) and uses the core `Regex`; its test runner ships a small hand-written JSON parser (no `Jason`/`Poison`). haskell keeps its mutable, reference-stable nodes in `IORef` cells (the whole API runs in `IO`), vendors a small RE2-subset regex engine (`Vregex.hs`), and ships a hand-written JSON reader in its test runner; it uses only GHC boot libraries (base, array) — no Hackage dependencies. | c: **none** (vendored JSON parser in `src/value_io.c`); cpp: **none** (vendored JSON parser in `src/value_io.hpp`); java/kotlin: gson (test-scope only); lua: dkjson + luafilesystem (test-scope only); rust: serde_json (dev-dep only) |
 
 Languages whose stdlib lacks an insertion-ordered map (C, C++, Zig,
 Rust, Perl, Swift) all hand-roll one in-tree — `Map` inside
@@ -62,6 +62,7 @@ NFA engine in-tree (c/cpp/lua/rust/zig).
 | **scala** | 48 | 15 | 2 | 1329/1329 corpus | full TS-canonical parity |
 | **dart** | 48 | 15 | 2 | 1329/1329 corpus | full TS-canonical parity |
 | **elixir** | 48 | 15 | 2 | 1329/1329 corpus | full TS-canonical parity |
+| **haskell** | 48 | 15 | 2 | 1329/1329 corpus | full TS-canonical parity |
 
 \*1 Zig: previously reported "60/60 passing with a SIGSEGV" was
 misleading — the test process actually died at test 47/60

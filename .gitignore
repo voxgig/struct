@@ -232,3 +232,9 @@ elixir/.elixir_ls/
 elixir/deps/
 elixir/**/*.beam
 elixir/erl_crash.dump
+
+# Haskell
+haskell/.hsbuild/
+haskell/**/*.hi
+haskell/**/*.o
+haskell/dist-newstyle/

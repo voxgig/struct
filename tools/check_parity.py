@@ -32,7 +32,7 @@ ROOT = Path(__file__).resolve().parent.parent
 COMPLETE_PORTS = [
     "javascript", "python", "go", "php", "ruby", "lua",
     "rust", "c", "zig", "csharp", "perl", "cpp", "swift", "clojure", "ocaml", "scala",
-    "java", "kotlin", "dart", "elixir",
+    "java", "kotlin", "dart", "elixir", "haskell",
 ]
 PARTIAL_PORTS: list[str] = []
 
@@ -82,6 +82,7 @@ SOURCES = {
     "scala": ["scala/src/voxgig_struct.scala"],
     "dart": ["dart/lib/voxgig_struct.dart"],
     "elixir": ["elixir/lib/voxgig_struct.ex"],
+    "haskell": ["haskell/src/VoxgigStruct.hs"],
     "swift": [
         "swift/Sources/VoxgigStruct/Value.swift",
         "swift/Sources/VoxgigStruct/Constants.swift",
@@ -146,6 +147,11 @@ _OCAML_DECL = re.compile(r"^\s*(?:let\s+(?:rec\s+)?|and\s+)([A-Za-z_][A-Za-z0-9_
 # camelCased (getpath, ismap, re_find, checkPlacement), matched by norm().
 _SCALA_DECL = re.compile(r"\bdef\s+([A-Za-z_][A-Za-z0-9_]*)", re.M)
 
+# Haskell top-level type signatures: `name :: ...` at column 0. Every public
+# function has one, so this is a superset of the port's public names. Canonical
+# names are lower-smushed / snake_cased (getpath, ismap, re_find, getprop).
+_HASKELL_DECL = re.compile(r"^([a-z][A-Za-z0-9_']*)\s*::", re.M)
+
 
 def defined_keys(port: str) -> set[str]:
     """Comparison keys for every identifier a port's source defines/re-exports.
@@ -176,6 +182,9 @@ def defined_keys(port: str) -> set[str]:
                 keys.add(norm(ident))
         if port == "scala":
             for ident in _SCALA_DECL.findall(text):
+                keys.add(norm(ident))
+        if port == "haskell":
+            for ident in _HASKELL_DECL.findall(text):
                 keys.add(norm(ident))
     # The C port uses a `voxgig_` prefix on every public function. Strip it so
     # `voxgig_getpath` matches canonical `getpath`. Trailing `_v` / `_va`

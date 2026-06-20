@@ -47,6 +47,7 @@ syntax), and language-specific notes:
 | Scala      | Complete   | [`scala/README.md`](./scala/README.md)                |
 | Dart       | Complete   | [`dart/README.md`](./dart/README.md)                  |
 | Elixir     | Complete   | [`elixir/README.md`](./elixir/README.md)              |
+| Haskell    | Complete   | [`haskell/README.md`](./haskell/README.md)            |
 
 Every listed port reports full canonical parity under
 `tools/check_parity.py` and passes the shared `build/test/` corpus. See each
@@ -433,7 +434,7 @@ cross-engine edge cases:
 ├── build/test/       # shared JSON test corpus (.jsonic)
 ├── typescript/  javascript/  python/   # canonical + JS-family ports
 ├── go/  ruby/  php/                     # other complete ports
-├── lua/  csharp/  zig/  rust/  c/  perl/  kotlin/  cpp/  swift/  clojure/  ocaml/  scala/  dart/  elixir/
+├── lua/  csharp/  zig/  rust/  c/  perl/  kotlin/  cpp/  swift/  clojure/  ocaml/  scala/  dart/  elixir/  haskell/
 ├── java/                                # JVM ports (also kotlin/ scala/ clojure/)
 └── LICENSE
 ```
@@ -469,6 +470,7 @@ Each language directory contains:
 | Scala      | type-check (`scalac`)             | (scalafmt optional)   |
 | Dart       | `dart analyze`                    | `dart format`         |
 | Elixir     | compile check (`elixirc`)         | (`mix format` optional)|
+| Haskell    | type-check (`ghc -fno-code`)      | (`ormolu` optional)   |
 
 Run everything with `make lint` at the repo root, or one language with
 `make lint-<lang>` (e.g. `make lint-go`).

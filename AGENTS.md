@@ -39,7 +39,7 @@ matrix in [`REPORT.md`](design/REPORT.md)):
 
 | Canonical | Complete | Partial |
 |---|---|---|
-| typescript | javascript, python, go, php, ruby, lua, rust, c, csharp, zig, cpp, perl, swift, clojure, ocaml, scala, java, kotlin, dart, elixir | — |
+| typescript | javascript, python, go, php, ruby, lua, rust, c, csharp, zig, cpp, perl, swift, clojure, ocaml, scala, java, kotlin, dart, elixir, haskell | — |
 
 
 ## Prime directives (do not break these)
@@ -137,6 +137,7 @@ into the directory and use its `Makefile`. First run installs deps.
 | Scala | `scala/` | `make test` (`scalac`/`scala`) | type-check (`scalac`) | `Value` ADT; distinct Noval/VNull (like TS); `java.util.regex` |
 | Dart | `dart/` | `dart run test/runner.dart` | `dart analyze` | native `Map`/`List` nodes; single `null` (like Python); core `RegExp` |
 | Elixir | `elixir/` | `elixir test/runner.exs` | compile check (`elixirc`) | ETS-backed heap nodes (`{:vmap,_}`/`{:vlist,_}`); single `nil` (like Python); core `Regex` |
+| Haskell | `haskell/` | `ghc … test/Runner.hs` | type-check (`ghc -fno-code`) | `IORef`-backed nodes (whole API in `IO`); distinct `VNoval`/`VNull` (like OCaml); in-tree Vregex |
 
 Repo-wide: `make test` / `make lint` / `make audit` (supply-chain) /
 `make scan` (secrets, SAST, parity, regex, spelling, markdown) /
@@ -171,7 +172,7 @@ markdownlint, plus each language's linters).
 
 ## Conventions
 
-- **Casing.** `getpath` (TS/JS/Py/Ruby/PHP/Lua/Perl/Java/Kotlin/Swift/Clojure/OCaml/Scala/Dart/Elixir),
+- **Casing.** `getpath` (TS/JS/Py/Ruby/PHP/Lua/Perl/Java/Kotlin/Swift/Clojure/OCaml/Scala/Dart/Elixir/Haskell),
   `GetPath` (Go/C#), `get_path` (Rust), `voxgig_getpath` (C — and C++ adds
   `_v`/`_str` variants). Parity is checked case/underscore-insensitively.
 - **Absent vs. null ("Group A/B").** See [`UNDEF_SPEC.md`](design/UNDEF_SPEC.md).
