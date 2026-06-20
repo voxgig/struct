@@ -31,7 +31,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # so it is trivially in parity and is not checked.)
 COMPLETE_PORTS = [
     "javascript", "python", "go", "php", "ruby", "lua",
-    "rust", "c", "zig", "csharp", "perl", "cpp", "swift", "clojure",
+    "rust", "c", "zig", "csharp", "perl", "cpp", "swift", "clojure", "ocaml",
 ]
 PARTIAL_PORTS = ["java", "kotlin"]
 
@@ -77,6 +77,7 @@ SOURCES = {
     "kotlin": ["kotlin/src/main/kotlin/voxgig/struct/Struct.kt"],
     "perl": ["perl/lib/Voxgig/Struct.pm"],
     "clojure": ["clojure/src/voxgig/struct.clj"],
+    "ocaml": ["ocaml/src/voxgig_struct.ml"],
     "swift": [
         "swift/Sources/VoxgigStruct/Value.swift",
         "swift/Sources/VoxgigStruct/Constants.swift",
@@ -133,6 +134,10 @@ _PERL_SUB_DECL = re.compile(r"^\s*sub\s+([A-Za-z_][A-Za-z0-9_]*)", re.M)
 # so the same case/underscore-insensitive norm() applies. Clojure idents allow
 # extra symbol chars, none of which appear in canonical names.
 _CLJ_DEFN_DECL = re.compile(r"\(defn?-?\s+([A-Za-z_][A-Za-z0-9_*+!?<>=-]*)", re.M)
+# OCaml `let [rec] NAME` / `and NAME` bindings. The library uses lower-smushed
+# canonical names (getpath, ismap, re_find, check_placement), matched
+# case/underscore-insensitively by norm().
+_OCAML_DECL = re.compile(r"^\s*(?:let\s+(?:rec\s+)?|and\s+)([A-Za-z_][A-Za-z0-9_']*)", re.M)
 
 
 def defined_keys(port: str) -> set[str]:
@@ -158,6 +163,9 @@ def defined_keys(port: str) -> set[str]:
                 keys.add(norm(ident))
         if port == "clojure":
             for ident in _CLJ_DEFN_DECL.findall(text):
+                keys.add(norm(ident))
+        if port == "ocaml":
+            for ident in _OCAML_DECL.findall(text):
                 keys.add(norm(ident))
     # The C port uses a `voxgig_` prefix on every public function. Strip it so
     # `voxgig_getpath` matches canonical `getpath`. Trailing `_v` / `_va`

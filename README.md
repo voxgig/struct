@@ -43,6 +43,7 @@ syntax), and language-specific notes:
 | Perl       | Complete   | [`perl/README.md`](./perl/README.md)                  |
 | Swift      | Complete   | [`swift/README.md`](./swift/README.md)                |
 | Clojure    | Complete   | [`clojure/README.md`](./clojure/README.md)            |
+| OCaml      | Complete   | [`ocaml/README.md`](./ocaml/README.md)                |
 
 "Partial" (Java, Kotlin) denotes project maturity / release-lag — the
 JVM family trails the canonical by a release — **not** missing API: both
@@ -430,7 +431,7 @@ cross-engine edge cases:
 ├── build/test/       # shared JSON test corpus (.jsonic)
 ├── typescript/  javascript/  python/   # canonical + JS-family ports
 ├── go/  ruby/  php/                     # other complete ports
-├── lua/  csharp/  zig/  rust/  c/  perl/  kotlin/  cpp/  swift/  clojure/
+├── lua/  csharp/  zig/  rust/  c/  perl/  kotlin/  cpp/  swift/  clojure/  ocaml/
 ├── java/                                # partial port
 └── LICENSE
 ```
@@ -462,6 +463,7 @@ Each language directory contains:
 | C#         | Roslyn analyzers                  | `dotnet format`       |
 | Kotlin     | detekt                            | ktlint                |
 | Clojure    | namespace compile check           | (clj-kondo optional)  |
+| OCaml      | type-check (`ocamlc -c`)          | (ocamlformat optional)|
 
 Run everything with `make lint` at the repo root, or one language with
 `make lint-<lang>` (e.g. `make lint-go`).

@@ -207,3 +207,10 @@ clojure/.cpcache/
 clojure/.clj-kondo/
 clojure/classes/
 clojure/target/
+
+# OCaml
+ocaml/run_tests
+ocaml/**/*.cmi
+ocaml/**/*.cmo
+ocaml/**/*.cmx
+ocaml/**/*.o

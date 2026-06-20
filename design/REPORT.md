@@ -15,7 +15,7 @@ both pretty (`indent=2`) and compact (`indent=0`) forms.
 
 | Lib third-party | Test-runner third-party |
 |---|---|
-| **zero runtime third-party deps in any port.** Every port either uses its language's stdlib JSON (typescript/javascript/python/go/ruby/php/csharp/zig), hand-rolls a small JSON printer (c/cpp/java/kotlin/lua/swift/perl/rust/clojure), or pipes the corpus through the language's stdlib parser at test time. clojure additionally ships an in-tree JSON reader for its test runner (no JSON library). | c: **none** (vendored JSON parser in `src/value_io.c`); cpp: **none** (vendored JSON parser in `src/value_io.hpp`); java/kotlin: gson (test-scope only); lua: dkjson + luafilesystem (test-scope only); rust: serde_json (dev-dep only) |
+| **zero runtime third-party deps in any port.** Every port either uses its language's stdlib JSON (typescript/javascript/python/go/ruby/php/csharp/zig), hand-rolls a small JSON printer (c/cpp/java/kotlin/lua/swift/perl/rust/clojure/ocaml), or pipes the corpus through the language's stdlib parser at test time. clojure and ocaml additionally ship an in-tree JSON reader for their test runners (no JSON library); ocaml also vendors a small RE2-subset regex engine (`vregex.ml`). | c: **none** (vendored JSON parser in `src/value_io.c`); cpp: **none** (vendored JSON parser in `src/value_io.hpp`); java/kotlin: gson (test-scope only); lua: dkjson + luafilesystem (test-scope only); rust: serde_json (dev-dep only) |
 
 Languages whose stdlib lacks an insertion-ordered map (C, C++, Zig,
 Rust, Perl, Swift) all hand-roll one in-tree — `Map` inside
@@ -58,6 +58,7 @@ NFA engine in-tree (c/cpp/lua/rust/zig).
 | **perl** | 48 | 15 | 2 | full corpus (700+ cases) | full canonical parity |
 | **swift** | 48 | 15 | 2 | full corpus (700+ cases) | full canonical parity |
 | **clojure** | 48 | 15 | 2 | 1329/1329 corpus | full TS-canonical parity |
+| **ocaml** | 48 | 15 | 2 | 1329/1329 corpus | full TS-canonical parity |
 
 \*1 Zig: previously reported "60/60 passing with a SIGSEGV" was
 misleading — the test process actually died at test 47/60
