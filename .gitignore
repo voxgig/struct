@@ -225,3 +225,10 @@ dart/.dart_tool/
 dart/.packages
 dart/pubspec.lock
 dart/*.dill
+
+# Elixir
+elixir/_build/
+elixir/.elixir_ls/
+elixir/deps/
+elixir/**/*.beam
+elixir/erl_crash.dump
