@@ -214,3 +214,8 @@ ocaml/**/*.cmi
 ocaml/**/*.cmo
 ocaml/**/*.cmx
 ocaml/**/*.o
+
+# Scala
+scala/out/
+scala/out-lint/
+scala/**/*.tasty

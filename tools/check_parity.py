@@ -31,7 +31,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # so it is trivially in parity and is not checked.)
 COMPLETE_PORTS = [
     "javascript", "python", "go", "php", "ruby", "lua",
-    "rust", "c", "zig", "csharp", "perl", "cpp", "swift", "clojure", "ocaml",
+    "rust", "c", "zig", "csharp", "perl", "cpp", "swift", "clojure", "ocaml", "scala",
 ]
 PARTIAL_PORTS = ["java", "kotlin"]
 
@@ -78,6 +78,7 @@ SOURCES = {
     "perl": ["perl/lib/Voxgig/Struct.pm"],
     "clojure": ["clojure/src/voxgig/struct.clj"],
     "ocaml": ["ocaml/src/voxgig_struct.ml"],
+    "scala": ["scala/src/voxgig_struct.scala"],
     "swift": [
         "swift/Sources/VoxgigStruct/Value.swift",
         "swift/Sources/VoxgigStruct/Constants.swift",
@@ -138,6 +139,9 @@ _CLJ_DEFN_DECL = re.compile(r"\(defn?-?\s+([A-Za-z_][A-Za-z0-9_*+!?<>=-]*)", re.
 # canonical names (getpath, ismap, re_find, check_placement), matched
 # case/underscore-insensitively by norm().
 _OCAML_DECL = re.compile(r"^\s*(?:let\s+(?:rec\s+)?|and\s+)([A-Za-z_][A-Za-z0-9_']*)", re.M)
+# Scala `def NAME` method definitions. Canonical names are lower-smushed /
+# camelCased (getpath, ismap, re_find, checkPlacement), matched by norm().
+_SCALA_DECL = re.compile(r"\bdef\s+([A-Za-z_][A-Za-z0-9_]*)", re.M)
 
 
 def defined_keys(port: str) -> set[str]:
@@ -166,6 +170,9 @@ def defined_keys(port: str) -> set[str]:
                 keys.add(norm(ident))
         if port == "ocaml":
             for ident in _OCAML_DECL.findall(text):
+                keys.add(norm(ident))
+        if port == "scala":
+            for ident in _SCALA_DECL.findall(text):
                 keys.add(norm(ident))
     # The C port uses a `voxgig_` prefix on every public function. Strip it so
     # `voxgig_getpath` matches canonical `getpath`. Trailing `_v` / `_va`

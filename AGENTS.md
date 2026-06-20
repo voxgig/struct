@@ -39,7 +39,7 @@ matrix in [`REPORT.md`](design/REPORT.md)):
 
 | Canonical | Complete | Partial |
 |---|---|---|
-| typescript | javascript, python, go, php, ruby, lua, rust, c, csharp, zig, cpp, perl, swift, clojure, ocaml | java, kotlin |
+| typescript | javascript, python, go, php, ruby, lua, rust, c, csharp, zig, cpp, perl, swift, clojure, ocaml, scala | java, kotlin |
 
 
 ## Prime directives (do not break these)
@@ -134,6 +134,7 @@ into the directory and use its `Makefile`. First run installs deps.
 | Swift | `swift/` | `swift test` | swift-format | `allocator`-free; in-tree ordered dict |
 | Clojure | `clojure/` | `clojure -M:test` | namespace compile check | mutable `LinkedHashMap`/`ArrayList` nodes; lower-smushed names |
 | OCaml | `ocaml/` | `make test` (`ocamlc`) | type-check (`ocamlc -c`) | `value` variant; distinct Noval/Null (like TS); in-tree regex engine |
+| Scala | `scala/` | `make test` (`scalac`/`scala`) | type-check (`scalac`) | `Value` ADT; distinct Noval/VNull (like TS); `java.util.regex` |
 
 Repo-wide: `make test` / `make lint` / `make audit` (supply-chain) /
 `make scan` (secrets, SAST, parity, regex, spelling, markdown) /
@@ -168,7 +169,7 @@ markdownlint, plus each language's linters).
 
 ## Conventions
 
-- **Casing.** `getpath` (TS/JS/Py/Ruby/PHP/Lua/Perl/Java/Kotlin/Swift/Clojure/OCaml),
+- **Casing.** `getpath` (TS/JS/Py/Ruby/PHP/Lua/Perl/Java/Kotlin/Swift/Clojure/OCaml/Scala),
   `GetPath` (Go/C#), `get_path` (Rust), `voxgig_getpath` (C — and C++ adds
   `_v`/`_str` variants). Parity is checked case/underscore-insensitively.
 - **Absent vs. null ("Group A/B").** See [`UNDEF_SPEC.md`](design/UNDEF_SPEC.md).
