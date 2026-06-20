@@ -16,7 +16,7 @@
 # `make -C <dir>`. Each port ships at least `test` and `lint`; `build`,
 # `inspect`, `clean` and `reset` are invoked tolerantly (a port without one
 # just reports "(no <t> target)").
-LANGS = typescript javascript python go ruby php lua zig java rust c cpp csharp kotlin perl swift
+LANGS = typescript javascript python go ruby php lua zig java rust c cpp csharp kotlin perl swift clojure
 
 # Every port ships a `make lint` target, so lint covers the full set.
 LINT_LANGS = $(LANGS)
@@ -31,7 +31,7 @@ AUDIT_LANGS = typescript javascript python go ruby php rust csharp
 # LuaRocks, Maven Central, CPAN) and ALWAYS creates + pushes a git tag
 # `<lang>/vX.Y.Z`. Registry-less ports (Go, PHP/Packagist, Swift, Zig, C, C++)
 # publish purely by that tag.
-PUBLISH_LANGS = typescript javascript python go ruby php lua zig java rust c cpp csharp kotlin perl swift
+PUBLISH_LANGS = typescript javascript python go ruby php lua zig java rust c cpp csharp kotlin perl swift clojure
 
 .PHONY: all inspect build test lint audit scan analyze clean reset publish status corpus gen-docs \
         scan-secrets scan-deps scan-sast scan-workflows scan-shell scan-spelling scan-docs \

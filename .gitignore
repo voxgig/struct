@@ -201,3 +201,9 @@ rust/target/
 .eslintcache
 .detekt/
 
+
+# Clojure
+clojure/.cpcache/
+clojure/.clj-kondo/
+clojure/classes/
+clojure/target/

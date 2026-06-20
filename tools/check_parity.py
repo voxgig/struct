@@ -31,7 +31,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # so it is trivially in parity and is not checked.)
 COMPLETE_PORTS = [
     "javascript", "python", "go", "php", "ruby", "lua",
-    "rust", "c", "zig", "csharp", "perl", "cpp", "swift",
+    "rust", "c", "zig", "csharp", "perl", "cpp", "swift", "clojure",
 ]
 PARTIAL_PORTS = ["java", "kotlin"]
 
@@ -76,6 +76,7 @@ SOURCES = {
     "zig": ["zig/src/struct.zig"],
     "kotlin": ["kotlin/src/main/kotlin/voxgig/struct/Struct.kt"],
     "perl": ["perl/lib/Voxgig/Struct.pm"],
+    "clojure": ["clojure/src/voxgig/struct.clj"],
     "swift": [
         "swift/Sources/VoxgigStruct/Value.swift",
         "swift/Sources/VoxgigStruct/Constants.swift",
@@ -127,6 +128,11 @@ _IDENT_DECL = re.compile(r"^\s*(?:(?:export|public|static|const|let|var|local)\s
 # doesn't put `(` after the function name in the definition, so neither of
 # the patterns above catches them.
 _PERL_SUB_DECL = re.compile(r"^\s*sub\s+([A-Za-z_][A-Za-z0-9_]*)", re.M)
+# Clojure `(defn name` / `(defn- name` / `(def name` definitions. The library
+# uses lower-smushed canonical names (getpath, ismap, re_find, checkPlacement),
+# so the same case/underscore-insensitive norm() applies. Clojure idents allow
+# extra symbol chars, none of which appear in canonical names.
+_CLJ_DEFN_DECL = re.compile(r"\(defn?-?\s+([A-Za-z_][A-Za-z0-9_*+!?<>=-]*)", re.M)
 
 
 def defined_keys(port: str) -> set[str]:
@@ -149,6 +155,9 @@ def defined_keys(port: str) -> set[str]:
             keys.add(norm(ident))
         if port == "perl":
             for ident in _PERL_SUB_DECL.findall(text):
+                keys.add(norm(ident))
+        if port == "clojure":
+            for ident in _CLJ_DEFN_DECL.findall(text):
                 keys.add(norm(ident))
     # The C port uses a `voxgig_` prefix on every public function. Strip it so
     # `voxgig_getpath` matches canonical `getpath`. Trailing `_v` / `_va`
