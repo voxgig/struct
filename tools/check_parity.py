@@ -32,7 +32,7 @@ ROOT = Path(__file__).resolve().parent.parent
 COMPLETE_PORTS = [
     "javascript", "python", "go", "php", "ruby", "lua",
     "rust", "c", "zig", "csharp", "perl", "cpp", "swift", "clojure", "ocaml", "scala",
-    "java", "kotlin",
+    "java", "kotlin", "dart",
 ]
 PARTIAL_PORTS: list[str] = []
 
@@ -80,6 +80,7 @@ SOURCES = {
     "clojure": ["clojure/src/voxgig/struct.clj"],
     "ocaml": ["ocaml/src/voxgig_struct.ml"],
     "scala": ["scala/src/voxgig_struct.scala"],
+    "dart": ["dart/lib/voxgig_struct.dart"],
     "swift": [
         "swift/Sources/VoxgigStruct/Value.swift",
         "swift/Sources/VoxgigStruct/Constants.swift",

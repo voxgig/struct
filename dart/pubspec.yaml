@@ -1,0 +1,6 @@
+name: voxgig_struct
+description: A faithful Dart port of the canonical voxgig/struct library.
+version: 0.2.1
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+# Zero third-party runtime dependencies (by project policy).

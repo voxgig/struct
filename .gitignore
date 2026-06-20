@@ -219,3 +219,9 @@ ocaml/**/*.o
 scala/out/
 scala/out-lint/
 scala/**/*.tasty
+
+# Dart
+dart/.dart_tool/
+dart/.packages
+dart/pubspec.lock
+dart/*.dill
