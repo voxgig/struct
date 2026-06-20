@@ -102,8 +102,9 @@ class StructCorpusTest {
       Object key = getp(in, "key");
       return Struct.delprop(parent == Struct.UNDEF ? null : parent, key);
     });
-    add(tests, "minor", "stringify", true, in -> {
-      // Use UNDEF for absent val so stringify renders "" instead of "null".
+    add(tests, "minor", "stringify", false, in -> {
+      // null:false keeps a JSON-null val as a real null (rendered "null"); an
+      // absent val is UNDEF (rendered ""). Mirrors the canonical harness.
       Object val = getpDef(in, "val", Struct.UNDEF);
       Object max = getp(in, "max");
       Integer m = max instanceof Number n ? n.intValue() : null;
@@ -114,9 +115,9 @@ class StructCorpusTest {
       Object flags = getp(in, "flags");
       return Struct.jsonify(val, flags);
     });
-    add(tests, "minor", "pathify", true, in -> {
-      // Use UNDEF for absent keys so pathify renders "<unknown-path>" instead
-      // of "<unknown-path:null>" (matches JS undefined-vs-null semantics).
+    add(tests, "minor", "pathify", false, in -> {
+      // null:false keeps a JSON-null path as a real null ("<unknown-path:null>")
+      // and an absent path as UNDEF ("<unknown-path>"); null parts are dropped.
       Object path = getpDef(in, "path", Struct.UNDEF);
       Object from = getp(in, "from");
       Object to = getp(in, "to");

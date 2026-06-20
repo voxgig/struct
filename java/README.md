@@ -19,10 +19,9 @@ parity matrix, see the [top-level README](../README.md) and
 [REPORT.md](../design/REPORT.md).  For the in-depth guide (tutorial, recipes,
 explanation), see [`DOCS.md`](./DOCS.md).
 
-> **Maturity note.** The top-level README lists Java as a *partial* port.
-> That label is about project maturity (and the JVM family lagging the
-> canonical by a release), **not** missing API: the full canonical surface
-> is present and the parity check reports Java `ok`.
+> **Status: complete.** The full canonical surface is present, the parity
+> check reports Java `ok`, and the shared `build/test/` corpus passes in
+> full (1300/1300, `make test-java`).
 
 
 ## Install

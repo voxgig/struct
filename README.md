@@ -37,8 +37,8 @@ syntax), and language-specific notes:
 | C          | Complete   | [`c/README.md`](./c/README.md)                        |
 | C#         | Complete   | [`csharp/README.md`](./csharp/README.md)              |
 | Zig        | Complete   | [`zig/README.md`](./zig/README.md)                    |
-| Java       | Partial    | [`java/README.md`](./java/README.md)                  |
-| Kotlin     | Partial    | [`kotlin/README.md`](./kotlin/README.md)              |
+| Java       | Complete   | [`java/README.md`](./java/README.md)                  |
+| Kotlin     | Complete   | [`kotlin/README.md`](./kotlin/README.md)              |
 | C++        | Complete   | [`cpp/README.md`](./cpp/README.md)                    |
 | Perl       | Complete   | [`perl/README.md`](./perl/README.md)                  |
 | Swift      | Complete   | [`swift/README.md`](./swift/README.md)                |
@@ -46,9 +46,8 @@ syntax), and language-specific notes:
 | OCaml      | Complete   | [`ocaml/README.md`](./ocaml/README.md)                |
 | Scala      | Complete   | [`scala/README.md`](./scala/README.md)                |
 
-"Partial" (Java, Kotlin) denotes project maturity / release-lag — the
-JVM family trails the canonical by a release — **not** missing API: both
-report full canonical parity under `tools/check_parity.py`. See each
+Every listed port reports full canonical parity under
+`tools/check_parity.py` and passes the shared `build/test/` corpus. See each
 port's `README.md` for details.
 
 Each port directory also carries a `DOCS.md` (the comprehensive,
@@ -433,7 +432,7 @@ cross-engine edge cases:
 ├── typescript/  javascript/  python/   # canonical + JS-family ports
 ├── go/  ruby/  php/                     # other complete ports
 ├── lua/  csharp/  zig/  rust/  c/  perl/  kotlin/  cpp/  swift/  clojure/  ocaml/  scala/
-├── java/                                # partial port
+├── java/                                # JVM ports (also kotlin/ scala/ clojure/)
 └── LICENSE
 ```
 

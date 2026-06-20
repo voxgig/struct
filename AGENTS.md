@@ -39,7 +39,7 @@ matrix in [`REPORT.md`](design/REPORT.md)):
 
 | Canonical | Complete | Partial |
 |---|---|---|
-| typescript | javascript, python, go, php, ruby, lua, rust, c, csharp, zig, cpp, perl, swift, clojure, ocaml, scala | java, kotlin |
+| typescript | javascript, python, go, php, ruby, lua, rust, c, csharp, zig, cpp, perl, swift, clojure, ocaml, scala, java, kotlin | — |
 
 
 ## Prime directives (do not break these)
@@ -128,8 +128,8 @@ into the directory and use its `Makefile`. First run installs deps.
 | C++ | `cpp/` | `make test` (needs `nlohmann/json` header) | clang-tidy + clang-format | `_v`/`_str` suffix variants |
 | C# | `csharp/` | `dotnet test` | Roslyn analyzers | PascalCase; SDK pinned to 8.0 on purpose |
 | Zig | `zig/` | `zig build test` | `zig build` + `zig fmt` | `allocator` is the first parameter |
-| Java | `java/` | `mvn test` | checkstyle + spotbugs | lowercase names; partial port (JUnit 6) |
-| Kotlin | `kotlin/` | `./gradlew test` | detekt + ktlint | partial port |
+| Java | `java/` | `mvn test` | checkstyle + spotbugs | lowercase names; JUnit 6 |
+| Kotlin | `kotlin/` | `./gradlew test` | detekt + ktlint | |
 | Perl | `perl/` | `prove -Ilib t/` | perlcritic | `Tie::IxHash`-style ordered hash |
 | Swift | `swift/` | `swift test` | swift-format | `allocator`-free; in-tree ordered dict |
 | Clojure | `clojure/` | `clojure -M:test` | namespace compile check | mutable `LinkedHashMap`/`ArrayList` nodes; lower-smushed names |

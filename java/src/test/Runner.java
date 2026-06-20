@@ -123,7 +123,12 @@ public class Runner {
       // way before comparison. This preserves the null-vs-absent distinction
       // across the round-trip exactly as the canonical cross-port runner does.
       if (nullFlag) {
-        in = fixJSON(in);
+        // Only encode a *present* input; an absent `in` stays UNDEF so the
+        // subject sees "undefined" (matches the canonical runner, which clones
+        // the absent value rather than a null marker).
+        if (entry.containsKey("in")) {
+          in = fixJSON(in);
+        }
         expected = fixJSON(expected);
       }
 

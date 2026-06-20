@@ -32,8 +32,9 @@ ROOT = Path(__file__).resolve().parent.parent
 COMPLETE_PORTS = [
     "javascript", "python", "go", "php", "ruby", "lua",
     "rust", "c", "zig", "csharp", "perl", "cpp", "swift", "clojure", "ocaml", "scala",
+    "java", "kotlin",
 ]
-PARTIAL_PORTS = ["java", "kotlin"]
+PARTIAL_PORTS: list[str] = []
 
 # Accepted, documented divergences (normalised name keys).  Anything NOT listed
 # here is treated as a parity gap and fails the check; this list should only
