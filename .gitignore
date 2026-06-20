@@ -201,3 +201,40 @@ rust/target/
 .eslintcache
 .detekt/
 
+
+# Clojure
+clojure/.cpcache/
+clojure/.clj-kondo/
+clojure/classes/
+clojure/target/
+
+# OCaml
+ocaml/run_tests
+ocaml/**/*.cmi
+ocaml/**/*.cmo
+ocaml/**/*.cmx
+ocaml/**/*.o
+
+# Scala
+scala/out/
+scala/out-lint/
+scala/**/*.tasty
+
+# Dart
+dart/.dart_tool/
+dart/.packages
+dart/pubspec.lock
+dart/*.dill
+
+# Elixir
+elixir/_build/
+elixir/.elixir_ls/
+elixir/deps/
+elixir/**/*.beam
+elixir/erl_crash.dump
+
+# Haskell
+haskell/.hsbuild/
+haskell/**/*.hi
+haskell/**/*.o
+haskell/dist-newstyle/

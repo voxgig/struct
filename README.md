@@ -37,15 +37,20 @@ syntax), and language-specific notes:
 | C          | Complete   | [`c/README.md`](./c/README.md)                        |
 | C#         | Complete   | [`csharp/README.md`](./csharp/README.md)              |
 | Zig        | Complete   | [`zig/README.md`](./zig/README.md)                    |
-| Java       | Partial    | [`java/README.md`](./java/README.md)                  |
-| Kotlin     | Partial    | [`kotlin/README.md`](./kotlin/README.md)              |
+| Java       | Complete   | [`java/README.md`](./java/README.md)                  |
+| Kotlin     | Complete   | [`kotlin/README.md`](./kotlin/README.md)              |
 | C++        | Complete   | [`cpp/README.md`](./cpp/README.md)                    |
 | Perl       | Complete   | [`perl/README.md`](./perl/README.md)                  |
 | Swift      | Complete   | [`swift/README.md`](./swift/README.md)                |
+| Clojure    | Complete   | [`clojure/README.md`](./clojure/README.md)            |
+| OCaml      | Complete   | [`ocaml/README.md`](./ocaml/README.md)                |
+| Scala      | Complete   | [`scala/README.md`](./scala/README.md)                |
+| Dart       | Complete   | [`dart/README.md`](./dart/README.md)                  |
+| Elixir     | Complete   | [`elixir/README.md`](./elixir/README.md)              |
+| Haskell    | Complete   | [`haskell/README.md`](./haskell/README.md)            |
 
-"Partial" (Java, Kotlin) denotes project maturity / release-lag — the
-JVM family trails the canonical by a release — **not** missing API: both
-report full canonical parity under `tools/check_parity.py`. See each
+Every listed port reports full canonical parity under
+`tools/check_parity.py` and passes the shared `build/test/` corpus. See each
 port's `README.md` for details.
 
 Each port directory also carries a `DOCS.md` (the comprehensive,
@@ -429,8 +434,8 @@ cross-engine edge cases:
 ├── build/test/       # shared JSON test corpus (.jsonic)
 ├── typescript/  javascript/  python/   # canonical + JS-family ports
 ├── go/  ruby/  php/                     # other complete ports
-├── lua/  csharp/  zig/  rust/  c/  perl/  kotlin/  cpp/  swift/
-├── java/                                # partial port
+├── lua/  csharp/  zig/  rust/  c/  perl/  kotlin/  cpp/  swift/  clojure/  ocaml/  scala/  dart/  elixir/  haskell/
+├── java/                                # JVM ports (also kotlin/ scala/ clojure/)
 └── LICENSE
 ```
 
@@ -460,6 +465,12 @@ Each language directory contains:
 | Zig        | `zig build` (compiler)            | `zig fmt`             |
 | C#         | Roslyn analyzers                  | `dotnet format`       |
 | Kotlin     | detekt                            | ktlint                |
+| Clojure    | namespace compile check           | (clj-kondo optional)  |
+| OCaml      | type-check (`ocamlc -c`)          | (ocamlformat optional)|
+| Scala      | type-check (`scalac`)             | (scalafmt optional)   |
+| Dart       | `dart analyze`                    | `dart format`         |
+| Elixir     | compile check (`elixirc`)         | (`mix format` optional)|
+| Haskell    | type-check (`ghc -fno-code`)      | (`ormolu` optional)   |
 
 Run everything with `make lint` at the repo root, or one language with
 `make lint-<lang>` (e.g. `make lint-go`).

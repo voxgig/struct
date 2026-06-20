@@ -1,0 +1,8 @@
+{:paths ["src"]
+ :deps {org.clojure/clojure {:mvn/version "1.12.5"}}
+ :aliases
+ {:test
+  {:extra-paths ["test"]
+   :main-opts ["-m" "voxgig.struct-runner"]}
+  :lint
+  {:extra-paths ["test"]}}}

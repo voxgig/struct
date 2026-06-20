@@ -13,12 +13,10 @@ covers only what is specific to the Kotlin port.
 
 ## Status
 
-Classified **Partial** in [`../README.md`](../README.md) and
-[`../REPORT.md`](../design/REPORT.md) (same bracket as Java). In practice the
-full canonical surface is present (40 functions, 15 type flags, 3 mode
-constants, the sentinels, the `Injection` machine) and
-`../tools/check_parity.py` reports it `ok`. REPORT.md records it as
-**already Group A**, passing 135/135.
+**Complete.** The full canonical surface is present (40 functions, 15 type
+flags, 3 mode constants, the sentinels, the `Injection` machine),
+`../tools/check_parity.py` reports it `ok`, and the shared corpus passes in
+full (1315/1315).
 
 ## Layout
 

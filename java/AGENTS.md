@@ -12,16 +12,12 @@ only what is specific to the Java port.
 
 ## Status (read this)
 
-The top-level [`../README.md`](../README.md) still lists Java as **Partial**,
-and [`../REPORT.md`](../design/REPORT.md)'s per-language section echoes an older
-"22 of 40 / no test runner" snapshot. Both are **stale**. The current source
-defines the **full canonical API** — all 40 functions, the `Injection` state
-machine, `SKIP`/`DELETE`, mode constants + `MODENAME`, all 11 transform
-commands, the validate checkers, and the 4 select operators — and
-`python3 ../tools/check_parity.py` reports it `ok`; the committed baseline
-([`test-baseline.json`](./test-baseline.json)) passes the shared corpus
-suite across all eight files. Trust the source and the parity tool over the
-prose tables.
+**Complete.** The source defines the **full canonical API** — all 40
+functions, the `Injection` state machine, `SKIP`/`DELETE`, mode constants +
+`MODENAME`, all 11 transform commands, the validate checkers, and the 4
+select operators — `python3 ../tools/check_parity.py` reports it `ok`, and
+the shared corpus passes in full (1300/1300; the committed baseline
+[`test-baseline.json`](./test-baseline.json) records the per-file counts).
 
 ## Layout
 

@@ -2,8 +2,8 @@
 
 > Kotlin/JVM port of the canonical TypeScript implementation.
 >
-> **Status: partial port** (alongside Java) — but it currently carries
-> the **full** TS-canonical public API: all 48 functions, 15 type
+> **Status: complete.** Carries the **full** TS-canonical public API and
+> passes the shared corpus in full (1315/1315). All 48 functions, 15 type
 > bit-flags, 3 mode constants (`M_KEYPRE`/`M_KEYPOST`/`M_VAL`),
 > `SKIP`/`DELETE` sentinels, and the `Injection` state machine.
 > `inject()`/`transform()`/`validate()`/`select()` all dispatch through
@@ -563,14 +563,12 @@ Inside backticks in a `validate` spec (implemented as `validate_STRING`,
 
 ## Notes
 
-### Why partial?
+### Status
 
-The Kotlin port is classified **Partial** in the parity matrix
-([`../REPORT.md`](../design/REPORT.md)) in the same bracket as Java. In
-practice it implements the entire canonical public surface and
-`check_parity.py` reports it `ok`; the classification reflects port
-maturity rather than a missing API. Treat behavioural authority as
-resting with the canonical TypeScript and the shared corpus.
+The Kotlin port is **Complete**: it implements the entire canonical public
+surface, `check_parity.py` reports it `ok`, and it passes the shared corpus
+in full (1315/1315). Treat behavioural authority as resting with the
+canonical TypeScript and the shared corpus.
 
 ### `null` conventions
 

@@ -31,9 +31,10 @@ ROOT = Path(__file__).resolve().parent.parent
 # so it is trivially in parity and is not checked.)
 COMPLETE_PORTS = [
     "javascript", "python", "go", "php", "ruby", "lua",
-    "rust", "c", "zig", "csharp", "perl", "cpp", "swift",
+    "rust", "c", "zig", "csharp", "perl", "cpp", "swift", "clojure", "ocaml", "scala",
+    "java", "kotlin", "dart", "elixir", "haskell",
 ]
-PARTIAL_PORTS = ["java", "kotlin"]
+PARTIAL_PORTS: list[str] = []
 
 # Accepted, documented divergences (normalised name keys).  Anything NOT listed
 # here is treated as a parity gap and fails the check; this list should only
@@ -76,6 +77,12 @@ SOURCES = {
     "zig": ["zig/src/struct.zig"],
     "kotlin": ["kotlin/src/main/kotlin/voxgig/struct/Struct.kt"],
     "perl": ["perl/lib/Voxgig/Struct.pm"],
+    "clojure": ["clojure/src/voxgig/struct.clj"],
+    "ocaml": ["ocaml/src/voxgig_struct.ml"],
+    "scala": ["scala/src/voxgig_struct.scala"],
+    "dart": ["dart/lib/voxgig_struct.dart"],
+    "elixir": ["elixir/lib/voxgig_struct.ex"],
+    "haskell": ["haskell/src/VoxgigStruct.hs"],
     "swift": [
         "swift/Sources/VoxgigStruct/Value.swift",
         "swift/Sources/VoxgigStruct/Constants.swift",
@@ -127,6 +134,23 @@ _IDENT_DECL = re.compile(r"^\s*(?:(?:export|public|static|const|let|var|local)\s
 # doesn't put `(` after the function name in the definition, so neither of
 # the patterns above catches them.
 _PERL_SUB_DECL = re.compile(r"^\s*sub\s+([A-Za-z_][A-Za-z0-9_]*)", re.M)
+# Clojure `(defn name` / `(defn- name` / `(def name` definitions. The library
+# uses lower-smushed canonical names (getpath, ismap, re_find, checkPlacement),
+# so the same case/underscore-insensitive norm() applies. Clojure idents allow
+# extra symbol chars, none of which appear in canonical names.
+_CLJ_DEFN_DECL = re.compile(r"\(defn?-?\s+([A-Za-z_][A-Za-z0-9_*+!?<>=-]*)", re.M)
+# OCaml `let [rec] NAME` / `and NAME` bindings. The library uses lower-smushed
+# canonical names (getpath, ismap, re_find, check_placement), matched
+# case/underscore-insensitively by norm().
+_OCAML_DECL = re.compile(r"^\s*(?:let\s+(?:rec\s+)?|and\s+)([A-Za-z_][A-Za-z0-9_']*)", re.M)
+# Scala `def NAME` method definitions. Canonical names are lower-smushed /
+# camelCased (getpath, ismap, re_find, checkPlacement), matched by norm().
+_SCALA_DECL = re.compile(r"\bdef\s+([A-Za-z_][A-Za-z0-9_]*)", re.M)
+
+# Haskell top-level type signatures: `name :: ...` at column 0. Every public
+# function has one, so this is a superset of the port's public names. Canonical
+# names are lower-smushed / snake_cased (getpath, ismap, re_find, getprop).
+_HASKELL_DECL = re.compile(r"^([a-z][A-Za-z0-9_']*)\s*::", re.M)
 
 
 def defined_keys(port: str) -> set[str]:
@@ -149,6 +173,18 @@ def defined_keys(port: str) -> set[str]:
             keys.add(norm(ident))
         if port == "perl":
             for ident in _PERL_SUB_DECL.findall(text):
+                keys.add(norm(ident))
+        if port == "clojure":
+            for ident in _CLJ_DEFN_DECL.findall(text):
+                keys.add(norm(ident))
+        if port == "ocaml":
+            for ident in _OCAML_DECL.findall(text):
+                keys.add(norm(ident))
+        if port == "scala":
+            for ident in _SCALA_DECL.findall(text):
+                keys.add(norm(ident))
+        if port == "haskell":
+            for ident in _HASKELL_DECL.findall(text):
                 keys.add(norm(ident))
     # The C port uses a `voxgig_` prefix on every public function. Strip it so
     # `voxgig_getpath` matches canonical `getpath`. Trailing `_v` / `_va`
