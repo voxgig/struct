@@ -7,9 +7,26 @@ under test and never asserts. It answers one question — *"what are the cases,
 and for each, what goes in and what is expected out?"* — and offers a few pure
 helpers for comparing an expectation to a result.
 
-> Status: prototype. Implemented for `ts`, `python`, `go`, `rust` (this first
-> pass). Canonical behaviour is the TypeScript version (`ts/provider.ts`); the
-> others are ports of it, same as the rest of this repo.
+> Status: prototype, ported to all 22 languages (see the matrix below).
+> Canonical behaviour is the TypeScript version (`ts/provider.ts`); the others
+> are ports of it, same as the rest of this repo.
+>
+> **Dependency-free.** Every port is stdlib-only. Where the standard library has
+> no JSON parser (java, c, cpp, rust, lua, kotlin, scala, clojure, elixir,
+> haskell, ocaml) — or has one that reorders object keys (swift) — the port
+> hand-rolls a minimal, order-preserving JSON parser (`functions()`/`groups()`
+> must return corpus order). Ports with an order-preserving stdlib parser use it
+> directly (python, go, js, php, ruby, perl, dart, csharp, zig).
+>
+> **Verification.** Ports whose toolchain is available in the dev/CI image were
+> run and reproduce the canonical numbers exactly — **1325 entries** (value
+> 1181, absent 84, error 59, match 1): `ts, js, python, go, ruby, php, perl, c,
+> cpp, java, rust`. The remainder (`csharp, zig, swift, dart, lua, ocaml,
+> haskell, kotlin, scala, clojure, elixir`) are faithful ports whose
+> normalization was validated against the corpus via a Python replica but were
+> **not** locally executed (toolchain absent); each is meant to run under its
+> port's own test job. The marker is each port's `smoke` file printing the
+> numbers above.
 
 See [`AGENTS.md`](./AGENTS.md) for how a coding agent should *use* this to write
 real tests.
