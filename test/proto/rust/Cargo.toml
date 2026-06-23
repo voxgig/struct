@@ -11,12 +11,9 @@ name = "structproto"
 path = "src/lib.rs"
 
 [dependencies]
-# Test harness is allowed a JSON crate (mirrors rust/Cargo.toml dev-dep).
-# `preserve_order` keeps object key insertion order, so `functions()` returns
-# the corpus order ("minor","getpath",…) rather than sorted keys.
-serde_json = { version = "1", features = ["preserve_order"] }
-
-# NOTE: the workspace `rust/` crate has no `regex` dependency (it ships its own
-# regex engine in src/re.rs). To keep this prototype self-contained with no
-# extra deps, regex matching is implemented with a tiny dependency-free matcher
-# (see `mini_regex` below). See `// PROTOTYPE: regex simplified` comments.
+# DEPENDENCY-FREE: this prototype uses NO third-party crates. JSON is parsed by
+# a small hand-written recursive-descent parser (see the `json` module in
+# src/lib.rs); its object variant preserves key insertion order so `functions()`
+# and `groups()` return corpus order ("minor","getpath",…) rather than sorted
+# keys. Regex matching for "/re/" specs uses the tiny dependency-free matcher
+# (see the `mini_regex` module). See `// PROTOTYPE` comments for the scope.

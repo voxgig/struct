@@ -1,2 +1,3 @@
-# Rust build artifacts from the prototype provider crate
+# Build artifacts from the prototype provider ports
 rust/target/
+*.class
