@@ -18,15 +18,11 @@ helpers for comparing an expectation to a result.
 > must return corpus order). Ports with an order-preserving stdlib parser use it
 > directly (python, go, js, php, ruby, perl, dart, csharp, zig).
 >
-> **Verification.** Ports whose toolchain is available in the dev/CI image were
-> run and reproduce the canonical numbers exactly — **1325 entries** (value
-> 1181, absent 84, error 59, match 1): `ts, js, python, go, ruby, php, perl, c,
-> cpp, java, rust`. The remainder (`csharp, zig, swift, dart, lua, ocaml,
-> haskell, kotlin, scala, clojure, elixir`) are faithful ports whose
-> normalization was validated against the corpus via a Python replica but were
-> **not** locally executed (toolchain absent); each is meant to run under its
-> port's own test job. The marker is each port's `smoke` file printing the
-> numbers above.
+> **Verification.** **All 22 ports were compiled/run and reproduce the canonical
+> numbers exactly — 1325 entries (value 1181, absent 84, error 59, match 1).**
+> Each port ships a `smoke` file that prints those numbers; the run recipe per
+> language is in `RUNNING.md`. (This is a prototype and is intentionally **not**
+> wired into CI — verify by running a port's `smoke` directly.)
 
 See [`AGENTS.md`](./AGENTS.md) for how a coding agent should *use* this to write
 real tests.

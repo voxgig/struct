@@ -1,7 +1,7 @@
-<!-- Test Provider (prototype) — C# port of test/proto/ts/provider.ts.
+<!-- Test Provider (prototype): C# port of test/proto/ts/provider.ts.
      DEPENDENCY-FREE: .NET standard library only. System.Text.Json is part of
      the BCL (no NuGet packages). Build/run the smoke target with:
-       dotnet run --project StructProto.csproj -->
+       dotnet run (from this directory). -->
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
