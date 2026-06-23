@@ -1,0 +1,18 @@
+# Build artifacts from running the prototype smokes — never commit these.
+# Rust
+rust/target/
+# Java / JVM
+*.class
+*.jar
+# C# / .NET
+csharp/bin/
+csharp/obj/
+# OCaml
+*.cmi
+*.cmo
+*.cmt
+*.cmx
+*.o
+# Native binaries
+*.out
+smoke

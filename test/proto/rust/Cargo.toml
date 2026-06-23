@@ -1,0 +1,19 @@
+[package]
+name = "structproto"
+version = "0.1.0"
+edition = "2021"
+description = "Test Provider (prototype) — Rust port of test/proto/ts/provider.ts"
+license = "MIT"
+publish = false
+
+[lib]
+name = "structproto"
+path = "src/lib.rs"
+
+[dependencies]
+# DEPENDENCY-FREE: this prototype uses NO third-party crates. JSON is parsed by
+# a small hand-written recursive-descent parser (see the `json` module in
+# src/lib.rs); its object variant preserves key insertion order so `functions()`
+# and `groups()` return corpus order ("minor","getpath",…) rather than sorted
+# keys. Regex matching for "/re/" specs uses the tiny dependency-free matcher
+# (see the `mini_regex` module). See `// PROTOTYPE` comments for the scope.

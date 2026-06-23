@@ -1,0 +1,16 @@
+<!-- Test Provider (prototype): C# port of test/proto/ts/provider.ts.
+     DEPENDENCY-FREE: .NET standard library only. System.Text.Json is part of
+     the BCL (no NuGet packages). Build/run the smoke target with:
+       dotnet run (from this directory). -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>12</LangVersion>
+    <StartupObject>Voxgig.Struct.Proto.Smoke</StartupObject>
+    <AssemblyName>structproto-smoke</AssemblyName>
+    <RootNamespace>Voxgig.Struct.Proto</RootNamespace>
+  </PropertyGroup>
+</Project>
