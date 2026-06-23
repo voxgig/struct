@@ -146,6 +146,11 @@ aontu types** and unified onto the data, so that (a) malformed entries fail at
 build time, (b) defaults are centralised, and (c) the structure documents
 itself.
 
+> The complete structure as runnable-shaped code is in
+> [`testspec-schema.jsonic`](./testspec-schema.jsonic) — base types, wiring,
+> per-function refinements, a worked entry, and the fixtures slot. The sections
+> below explain it piece by piece.
+
 The aontu features used below are confirmed from
 [`rjrodger/aontu`](https://github.com/rjrodger/aontu) `docs/reference-language.md`:
 
