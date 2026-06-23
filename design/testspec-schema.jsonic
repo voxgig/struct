@@ -1,0 +1,178 @@
+# testspec-schema.jsonic — REFERENCE DESIGN ARTIFACT (not wired into the build)
+#
+# Companion to design/TESTSPEC_MODEL.md. Expresses the proposed type-based,
+# *adaptive* structure for the build/test corpus in concrete aontu. It is a
+# single readable file here; in the real layout sections 1–5 live in the files
+# named in their headers.
+#
+# [VERIFY] tags mark the two pinned-@voxgig/model behaviours from §7 — both are
+# caught by the migration's zero-diff check, both have a stated fallback.
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 1. BASE TYPES                                                  (schema.jsonic)
+#    Schema marks (type()): constrain via unification, are not emitted as data.
+#    [VERIFY] that type()-marked top-level defs don't surface in test.json;
+#    if they do, wrap in hide() — they still unify, just never emit.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Adaptive base entry. Every field is optional and *-defaulted: an entry is
+# whatever subset of these it sets — the type ADDS constraints/defaults, it
+# never excludes a combination. close() restricts the NAME vocabulary only, so
+# a typo (otu:, pth:) is a build error while any mix of valid fields is fine.
+Entry: type(close({
+
+  # ── metadata ──
+  id?:     string            # doc anchor, "<fn>/<group>#<label>"
+  doc?:    *false & boolean  # extract this entry as a documentation example?
+
+  # ── inputs (the runner applies a precedence: ctx → args → in) ──
+  in?:     *top              # single argument, cloned before the call
+  args?:   list              # explicit positional argument vector
+  ctx?:    map               # context-map invocation (makeContext)
+
+  # ── expectations ──
+  out?:    *top              # deep-equal expected result
+  err?:    string | boolean  # true = any error, or substring / /regex/ of message
+  match?:  map               # structural matcher (regex, __UNDEF__, __EXISTS__)
+
+  # ── routing ──
+  client?: string            # named client from the group's DEF.client
+}))
+
+
+# A group: a bucket of entries, plus optional shared data and definitions.
+Group: type(close({
+  set:       [ &:Entry ]     # &: list template — Entry unified into every element
+  fixtures?: map             # shared data, referenced by .fixtures.<name>
+  DEF?:      map             # group-scoped definitions (e.g. client configs)
+}))
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 2. WIRING                                                        (test.jsonic)
+#    Import the schema, then stamp Group onto every group of every function.
+# ═══════════════════════════════════════════════════════════════════════════
+
+@"schema.jsonic"             # brings Entry / Group into scope (emit nothing)
+
+struct: &: {                 # '&:' applies to EVERY child of struct = each function
+  name: key()                # function name = its own key      (existing behaviour)
+  &: Group                   # each function's children = each GROUP, typed as Group
+}
+
+struct: minor:    @"minor.jsonic"
+struct: getpath:  @"getpath.jsonic"
+struct: inject:   @"inject.jsonic"
+struct: merge:    @"merge.jsonic"
+struct: transform:@"transform.jsonic"
+struct: walk:     @"walk.jsonic"
+struct: validate: @"validate.jsonic"
+struct: select:   @"select.jsonic"
+struct: sentinels:@"sentinels.jsonic"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 3. PER-FUNCTION ADAPTATION                                  (top of <fn>.jsonic)
+#    Each function REFINES the base Entry to its own input/output shape by
+#    unifying through the &: template. Refinement is additive — it layers onto
+#    Entry, never replaces it; metadata/expectation fields + defaults are
+#    inherited. The inner close() then guards the function's own field names.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# getpath.jsonic — path lookup into a store
+struct: getpath: &: &: {                 # each group → each entry
+  in?:  close({ path?: string | list,  store?: top })
+  out?: *top
+}
+
+# validate.jsonic — by-example validation: data checked against spec
+struct: validate: &: &: {
+  in?:  close({ data?: top,  spec?: top })
+}
+
+# transform.jsonic — by-example transform: data shaped by spec
+struct: transform: &: &: {
+  in?:  close({ data?: top,  spec?: top,  modify?: top })
+}
+
+# merge.jsonic — deep-merge a single list of objects
+struct: merge: &: &: {
+  in?:  list
+}
+
+# inject.jsonic — store-driven value injection
+struct: inject: &: &: {
+  in?:  close({ val?: top,  store?: top })
+}
+
+# select.jsonic — query a collection (uses fixtures, §5)
+struct: select: &: &: {
+  in?:  close({ query?: top,  obj?: top })
+}
+
+# walk.jsonic — walk a single structure (callback-shaped; input stays open)
+struct: walk: &: &: {
+  in?:  top
+}
+
+# minor.jsonic — many small functions; refine per sibling, not per file:
+struct: minor: isnode: &: { in?: *top,  out?: boolean }
+struct: minor: ismap:  &: { in?: *top,  out?: boolean }
+struct: minor: clone:  &: { in?: *top,  out?: top }
+# … heterogeneous helpers (slice, pad, …) keep the base Entry unrefined.
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 4. HOW ONE ENTRY ADAPTS        Entry' = Entry & getpath-refinement (§3)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Source data (UNCHANGED — this is exactly today's corpus entry):
+#
+#   { id:'getpath/basic#deep', doc:true,
+#     in:{ path:'a.b.c', store:{a:{b:{c:42}}} }, out:42 }
+#
+# Effective type the build unifies it against:
+#
+#   close({
+#     id?:   string                                  → 'getpath/basic#deep'
+#     doc?:  *false & boolean                         → true     (overrides default)
+#     in?:   close({ path?: string|list, store?: top })
+#                                                     → { path:'a.b.c', store:{…} }
+#     out?:  *top                                     → 42
+#     args? ctx? err? match? client?  (all unset)     → dropped (optional, [VERIFY])
+#   })
+#
+# Typo guard in action (both impossible to express today):
+#
+#   { in:{ pth:'a.b.c' }, out:42 }   → BUILD ERROR: "pth" not allowed in closed in?
+#   { otu:42 }                       → BUILD ERROR: "otu" not allowed in closed Entry
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 5. FIXTURES AS A TYPED SLOT                            (select.jsonic, alts group)
+# ═══════════════════════════════════════════════════════════════════════════
+
+alts: {
+  fixtures: {
+    obj0: [ { select:{foo_id:true}, x:1 }, { select:{bar_id:true}, x:2 } ]
+  }
+  set: [
+    { in:  { query:{ select:{ foo_id:true } },  obj: .fixtures.obj0 }   # relative ref
+      out: [ { '$KEY':0, select:{foo_id:true}, x:1 } ] }
+  ]
+}
+# was:  obj: $.struct.select.alts.data.obj0     (root-absolute path, repeated in full)
+# now:  obj: .fixtures.obj0                      (relative; fixtures typed, not a fake group)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# NOTE on defaults & zero-diff ([VERIFY], §7 / migration step 2)
+#   '*' defaults (doc?:*false, in?:*top) are for validation/documentation
+#   semantics. For test.json to stay byte-equivalent, an unset optional field
+#   must NOT materialise its default into output. aontu drops unresolved
+#   optionals — confirm the '*' default doesn't count as "resolved". If it
+#   does, either (a) drop the '*' from optionals and keep them pure
+#   constraints, or (b) accept a one-time normalisation of test.json (the
+#   runner already treats absent ≡ default, so every port still passes).
+# ═══════════════════════════════════════════════════════════════════════════
