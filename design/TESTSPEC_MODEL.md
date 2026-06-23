@@ -166,31 +166,35 @@ The aontu features used below are confirmed from
 
 The two in bold are what make this both safe and worthwhile: `hide()` keeps the
 schema out of the compiled `test.json` (so the contract stays byte-equivalent),
-and `close()` is what actually rejects a typoed field.
+and `close()` is what catches a typoed *field name* — without forbidding any
+*combination* of the known fields (§4.2).
 
-### 4.1 A shared, hidden schema unit
+### 4.1 A shared, hidden, adaptive base type
 
-Add one `build/test/schema.jsonic`, imported by `test.jsonic`, defining the
-types under a `hide()`-marked block so they participate in unification but emit
-nothing:
+Add one `build/test/schema.jsonic`, imported by `test.jsonic`, defining the base
+`Entry` under a `hide()`-marked block so it contributes constraints but emits
+nothing. Every field is **optional with a default** — the type *adapts* to
+whichever fields an entry supplies rather than demanding a fixed shape:
 
 ```jsonic
 # schema.jsonic — hidden definitions; contribute constraints, emit no JSON.
 
+# Adaptive base: all fields optional, all defaulted. An entry is whatever
+# subset of these it sets; the type adds constraints/defaults, never excludes.
 Entry: close({
-  # metadata (optional, defaulted)
+  # metadata
   id?:     string
   doc?:    *false & boolean
 
-  # input mode — exactly one of in | args | ctx (see §4.2)
-  in?:     top
-  args?:   list
-  ctx?:    map
+  # inputs — any of in | args | ctx (the runner's precedence picks one)
+  in?:     *top
+  args?:   *[] & list
+  ctx?:    *{} & map
 
-  # expectation mode — at least one of out | err | match
-  out?:    top
-  err?:    string | boolean
-  match?:  map
+  # expectations — any of out | err | match
+  out?:    *top
+  err?:    *false & (string | boolean)
+  match?:  *{} & map
 
   # routing
   client?: string
@@ -204,25 +208,38 @@ Group: close({
 ```
 
 `close(...)` makes `{ otu: 42 }` a **build error** (unknown field in a closed
-struct) instead of a silent no-op test. `[ &:Entry ]` is aontu's list-template
-form: the leading `&:Entry` is consumed (not emitted) and unified into every
-real element — exactly the high-value guarantee the model lacks today.
+struct) — but `{ in:1, out:2, id:'x' }` and `{ ctx:{…}, match:{…} }` are both
+fine, because closedness is about the *vocabulary of field names*, not which of
+them co-occur. `[ &:Entry ]` is aontu's list-template form: the leading
+`&:Entry` is consumed (not emitted) and unified into every real element.
 
-### 4.2 Express the exclusive input / expectation modes
+### 4.2 Adaptive entries, not mutually-exclusive modes
 
-Disjunction of closed structs makes the "exactly-one-input" rule — which today
-lives only in `resolveArgs`' precedence ladder — declarative:
+The earlier draft modelled inputs as a closed disjunction
+`({in} | {args} | {ctx})` so a build would *prove* "exactly one input mode."
+That is the wrong tool here, for two reasons:
 
-```jsonic
-Entry: close(
-  ( { in: top } | { args: list } | { ctx: map } ) & {
-    id?: string,  doc?: *false & boolean,  client?: string
-    out?: top,    err?: string | boolean,  match?: map
-  }
-)
-```
+1. **It doesn't match the runner.** `resolveArgs` does not reject
+   `{ in, args }` — it applies a precedence (`ctx` → `args` → `in`). A schema
+   that forbids what the runtime quietly tolerates is a second, conflicting
+   source of truth.
+2. **It fights unification.** Aontu has no conditionals, no field
+   interdependence, and no comprehensions (confirmed in
+   `reference-language.md`); its model is *monotonic, additive* unification.
+   Disjunction of closed structs is brittle under that model — adding any
+   shared field (a new `id`, a `doc` flag) must be threaded into every arm, and
+   a mistake silently changes which arm an entry selects.
 
-A green build then *proves* no entry sets two input modes at once.
+So the entry is **adaptive**: one open-ended-but-closed-on-names base (§4.1)
+whose fields are all optional and `*`-defaulted. Presence of a field *adds* its
+constraint; absence *falls back* to the default. Nothing is excluded. This is
+exactly the grain of aontu — defaults via `*`/`pref()`, refinement via `&`,
+generalisation via `super()` — and it mirrors the runner instead of contradicting
+it.
+
+The positive expression of structure then comes from **refinement, not
+exclusion**: each function adapts the base `Entry` to its own input/output shape
+by unifying a refinement through the `&:` template (§4.3) — see §4.3.1.
 
 ### 4.3 Centralise defaults via the existing `&:` mechanism
 
@@ -241,6 +258,43 @@ Per-field defaults move into `Entry` via `*value` (e.g. `doc?: *false`). The
 emitted `test.json` is unchanged **iff** each default equals what the runner
 already assumes (`doc` absent ≡ `doc:false`, `set` absent ≡ `[]`) — which it
 does, and which step 2 below verifies by diff.
+
+#### 4.3.1 Per-function adaptation — the structure that earns the keep
+
+Today `in`/`out` are `top`: the model says nothing about what a `getpath` input
+or a `validate` input *looks like*. The adaptive lever is to let each function
+**refine** the base `Entry` through the same `&:` template, so the entry type
+adapts to the function under test:
+
+```jsonic
+# in getpath.jsonic — refine every entry of every getpath group
+struct: getpath: &: &: {           # each group → each entry
+  in?:  { path?: string | list,  store?: top }
+  out?: top
+}
+
+# in validate.jsonic
+struct: validate: &: &: {
+  in?:  { data?: top,  spec?: top }
+}
+
+# in merge.jsonic — merge takes a single list argument
+struct: merge: &: &: {
+  in?:  list
+}
+```
+
+Each refinement is unified *onto* the shared `Entry` (it never replaces it), so
+metadata/expectation fields and their defaults are inherited while the
+function-specific input shape is layered on. A `getpath` entry that writes
+`in:{ pth:'a.b' }` now fails the build (if the inner shape is `close()`d),
+catching the field-level typo the base type alone can't see. This is "adaptive
+structure" in the aontu idiom: a base type generalises, per-function templates
+specialise, and unification composes the two — no disjunction, no exclusion.
+
+`minor.jsonic` (many functions per file) refines per sibling rather than per
+file: `struct: minor: isnode: &: { in?: top, out?: boolean }`, etc., or leaves
+the base as-is where inputs are genuinely heterogeneous.
 
 ### 4.4 Promote fixtures to a named, referenced slot
 
@@ -266,16 +320,17 @@ fixture must *not* appear in `test.json`, wrap it in `hide()`.
 
 ```
 struct : Spec
-└── <function> : Function          name=key(), set defaulted, &:Group applied
-    └── <group> : Group  (closed)   { set:[&:Entry], fixtures?:map, DEF?:map }
+└── <function> : Function          name=key(); refines Entry → function's in/out shape (§4.3.1)
+    └── <group> : Group  (closed)   { set:[&:Entry'], fixtures?:map, DEF?:map }
         ├── fixtures?              declared data slot (was ad-hoc siblings)
         ├── DEF?                   declared definitions slot (was one-off)
-        └── set : [ &:Entry ]      each element typed (closed) & defaulted
+        └── set : [ &:Entry' ]     Entry' = base Entry & the function's refinement
 ```
 
-Same three levels as today — but each level is a **named, closed type**,
-defaults live in one place, fixtures and definitions are first-class, and a
-malformed entry fails the build.
+Same three levels as today — but each level is a **named type**, defaults live
+in one place, fixtures and definitions are first-class, and the entry type is
+**adaptive**: a closed-on-names base that each function specialises by
+unification (`Entry'`), never a disjunction that forbids field combinations.
 
 
 ## 5. Migration (test.json must not move)
@@ -299,8 +354,11 @@ be empty after each step. Recommended order, smallest-blast-radius first:
    schema.
 4. **Migrate fixtures (§4.4)** file by file (`select`, then `transform`).
    Regenerate; confirm zero diff per file.
-5. **Add the exclusivity disjunction (§4.2)** last; it only *rejects* bad
-   input, so a green build proves the existing corpus already satisfies it.
+5. **Layer per-function refinements (§4.3.1)** last, one function at a time —
+   `struct: getpath: &: &: { in?: {…} }`, etc. These only *add* constraints to
+   already-valid data, so a green build proves each function's entries already
+   fit their declared input/output shape; the first build per function is where
+   a stray inner typo (`pth:` for `path:`) surfaces.
 
 Each step is independently revertible and gated by the same `make corpus`
 freshness check that CI already runs (`corpus-freshness` job, see
@@ -315,14 +373,18 @@ the model, keep the contract" is mechanically enforced rather than trusted.
 
 * **One source of truth for the entry shape** — declared in `schema.jsonic`,
   not reverse-engineered from `runner.ts`. New ports/tools read the type.
-* **Build-time rejection** of typoed/!malformed entries (the `otu:` class of
-  silent no-op test).
-* **Centralised defaults** — entries stop repeating `doc`, and the input/
-  expectation contract is written down once.
+* **Build-time rejection** of typoed field names (the `otu:`/`pth:` class of
+  silent no-op test) via `close()` — at both the entry and per-function level.
+* **Adaptive, not exclusive** — the entry type *refines* per function instead of
+  forbidding field combinations, so it tracks the runner's precedence semantics
+  rather than contradicting them, and stays robust under aontu's additive
+  unification (no arms to re-thread when a shared field is added).
+* **Centralised defaults** — entries stop repeating `doc`; defaults live once in
+  the base type.
 * **First-class fixtures & defs** — no more root-absolute `$` paths or
   name-special-cased `data` siblings.
-* **Aontu earns its keep** — the model uses unification to guard itself instead
-  of being JSON behind an `@include`.
+* **Aontu earns its keep** — the model uses unification (base + `&:` refinement
+  + `*` defaults) to guard itself instead of being JSON behind an `@include`.
 
 ## 7. Loose ends to confirm against the **pinned** `@voxgig/model`
 
@@ -332,9 +394,13 @@ version- and integration-specific, all checkable in minutes during step 1:
 1. **Does this aontu build's `hide()` exclude from `voxgig-model`'s emitted
    JSON?** Gates the zero-diff strategy. Confirmed by the step-1 diff itself;
    fallback is the out-of-band `tools/check_testspec.py`.
-2. **Does `close()` compose with the `&:` map/list templates** the way §4.1/§4.3
-   assume (template fields don't count against closedness)? If not, declare the
-   closed type at the leaf (`set: [ &:Entry ]`) and leave groups open.
+2. **Does `close()` compose with the `&:` map/list templates and with
+   refinement** the way §4.1/§4.3.1 assume — i.e. unifying a per-function
+   refinement *into* a closed base adds the refinement's fields rather than
+   tripping closedness? This is the crux of the adaptive design. If aontu treats
+   `close()` as final (no later additions), the fix is to close *after*
+   refinement: keep the base and refinements open, and `close()` the composed
+   `Entry'` at the leaf where the `&:Entry` list template is applied.
 3. **`voxgig-model` import resolution for a non-spec file** — `schema.jsonic` is
    imported for types only, not as a `struct.<fn>`. Confirm the builder doesn't
    try to treat it as a function spec.
