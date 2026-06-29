@@ -53,6 +53,12 @@ PORTS = [
     ("c", ("file", "c/VERSION"), "tag", None),
     ("cpp", ("file", "cpp/VERSION"), "tag", None),
     ("swift", ("file", "swift/VERSION"), "tag", None),
+    ("clojure", ("file", "clojure/VERSION"), "tag", None),
+    ("ocaml", ("file", "ocaml/VERSION"), "tag", None),
+    ("scala", ("file", "scala/VERSION"), "tag", None),
+    ("dart", ("re", "dart/pubspec.yaml", r'(?m)^version:\s*([0-9][^\s]*)'), "tag", None),
+    ("elixir", ("file", "elixir/VERSION"), "tag", None),
+    ("haskell", ("file", "haskell/VERSION"), "tag", None),
 ]
 
 
