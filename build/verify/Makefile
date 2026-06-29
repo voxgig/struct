@@ -11,7 +11,7 @@
 # install, so we always exercise the live published artifact — never a stale
 # local copy or cached resolution.
 
-PORTS := go typescript javascript python ruby rust
+PORTS := go typescript javascript python ruby rust php zig c cpp swift
 
 # Ruby toolchain. The published gem requires Ruby >= 2.7; some systems ship
 # an older /usr/bin/ruby. Override with `make RUBY=... GEM=... verify-ruby`,
@@ -20,8 +20,29 @@ RUBY   ?= ruby
 GEM    ?= gem
 PYTHON ?= python3
 
+# Toolchains for the tag-only ports (no package registry: the "published"
+# artifact IS the git tag, so these targets download the tagged source
+# tarball from GitHub and build the smoke against that vendored source).
+PHP    ?= php
+SWIFT  ?= swiftc
+CC     ?= cc
+CXX    ?= g++
+# Zig is often not on PATH; fall back to the pinned local toolchain.
+ZIG    ?= $(shell command -v zig 2>/dev/null || echo $(HOME)/.local/zig/0.13.0/zig)
+
+# GitHub source tarball for a slash-tag: tags/<lang>/v<ver>.tar.gz
+TARBALL = https://github.com/voxgig/struct/archive/refs/tags
+
+# Versions, read straight from the repo (relative to build/verify/).
+PHP_VER   := $(shell cat ../../php/VERSION)
+C_VER     := $(shell cat ../../c/VERSION)
+CPP_VER   := $(shell cat ../../cpp/VERSION)
+SWIFT_VER := $(shell cat ../../swift/VERSION)
+ZIG_VER   := $(shell sed -n 's/.*\.version *= *"\([^"]*\)".*/\1/p' ../../zig/build.zig.zon)
+
 .PHONY: verify verify-go verify-typescript verify-javascript \
-        verify-python verify-ruby verify-rust clean
+        verify-python verify-ruby verify-rust \
+        verify-php verify-zig verify-c verify-cpp verify-swift clean
 
 # Each target removes its own artifacts first, then installs fresh from the
 # registry with cache-revalidation flags (--prefer-online / --refresh /
@@ -42,6 +63,72 @@ verify-ruby:
 verify-python:
 	cd python && uv run --refresh --no-project --with voxgig-struct python smoke.py
 
+# --- Tag-only ports -------------------------------------------------------
+# These ports have NO package registry: the published artifact is the git
+# tag <lang>/v<ver>. Each target reads the version from the repo, downloads
+# the GitHub source tarball at that tag into a fresh, gitignored .build/
+# temp dir, extracts it, locates the GitHub-named top-level dir robustly,
+# and builds the smoke against the DOWNLOADED (vendored) source — never the
+# working tree. Each starts by wiping its own .build/ so the run is live.
+
+verify-php:
+	@d=php/.build; url="$(TARBALL)/php/v$(PHP_VER).tar.gz"; \
+	rm -rf $$d && mkdir -p $$d; \
+	echo "downloading $$url"; \
+	curl -fsSL "$$url" -o $$d/src.tgz; \
+	top=$$(tar tzf $$d/src.tgz | head -1 | cut -d/ -f1); \
+	tar xzf $$d/src.tgz -C $$d; \
+	command -v $(PHP) >/dev/null || { echo "FAIL php: php toolchain not found"; exit 1; }; \
+	$(PHP) php/smoke.php "$$d/$$top/php"
+
+verify-c:
+	@d=c/.build; url="$(TARBALL)/c/v$(C_VER).tar.gz"; \
+	rm -rf $$d && mkdir -p $$d; \
+	echo "downloading $$url"; \
+	curl -fsSL "$$url" -o $$d/src.tgz; \
+	top=$$(tar tzf $$d/src.tgz | head -1 | cut -d/ -f1); \
+	tar xzf $$d/src.tgz -C $$d; \
+	src="$$d/$$top/c"; \
+	command -v $(CC) >/dev/null || { echo "FAIL c: cc toolchain not found"; exit 1; }; \
+	$(CC) -std=c11 -I "$$src/src" c/smoke.c $$src/src/*.c -lm -o $$d/smoke && \
+	$$d/smoke
+
+verify-cpp:
+	@d=cpp/.build; url="$(TARBALL)/cpp/v$(CPP_VER).tar.gz"; \
+	rm -rf $$d && mkdir -p $$d; \
+	echo "downloading $$url"; \
+	curl -fsSL "$$url" -o $$d/src.tgz; \
+	top=$$(tar tzf $$d/src.tgz | head -1 | cut -d/ -f1); \
+	tar xzf $$d/src.tgz -C $$d; \
+	src="$$d/$$top/cpp"; \
+	command -v $(CXX) >/dev/null || { echo "FAIL cpp: g++ toolchain not found"; exit 1; }; \
+	$(CXX) -std=c++17 -I "$$src/src" cpp/smoke.cpp -o $$d/smoke && \
+	$$d/smoke
+
+verify-swift:
+	@d=swift/.build; url="$(TARBALL)/swift/v$(SWIFT_VER).tar.gz"; \
+	rm -rf $$d && mkdir -p $$d; \
+	echo "downloading $$url"; \
+	curl -fsSL "$$url" -o $$d/src.tgz; \
+	top=$$(tar tzf $$d/src.tgz | head -1 | cut -d/ -f1); \
+	tar xzf $$d/src.tgz -C $$d; \
+	src="$$d/$$top/swift"; \
+	command -v $(SWIFT) >/dev/null || { echo "FAIL swift: swiftc toolchain not found"; exit 1; }; \
+	$(SWIFT) -o $$d/smoke swift/smoke.swift $$src/Sources/VoxgigStruct/*.swift && \
+	$$d/smoke
+
+verify-zig:
+	@d=zig/.build; url="$(TARBALL)/zig/v$(ZIG_VER).tar.gz"; \
+	rm -rf $$d && mkdir -p $$d; \
+	echo "downloading $$url"; \
+	curl -fsSL "$$url" -o $$d/src.tgz; \
+	top=$$(tar tzf $$d/src.tgz | head -1 | cut -d/ -f1); \
+	tar xzf $$d/src.tgz -C $$d; \
+	src="$$d/$$top/zig"; \
+	[ -x "$(ZIG)" ] || command -v $(ZIG) >/dev/null || { echo "FAIL zig: zig toolchain not found"; exit 1; }; \
+	$(ZIG) run -lc --dep voxgig-struct \
+	  -Mroot=zig/smoke.zig -Mvoxgig-struct=$$src/src/struct.zig --cache-dir $$d/zig-cache
+
 verify-rust:
 	cd rust && rm -rf target && cargo update --quiet && cargo run --quiet
 
@@ -56,5 +143,6 @@ clean:
 	rm -f go/go.sum
 	rm -rf ruby/.gems
 	rm -rf rust/target
+	rm -rf php/.build zig/.build c/.build cpp/.build swift/.build
 	rm -rf */.venv
 	find . -name '__pycache__' -type d -prune -exec rm -rf {} +

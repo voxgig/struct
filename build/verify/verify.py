@@ -27,7 +27,13 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
-HARNESS = ["go", "typescript", "javascript", "python", "ruby", "rust"]
+# Registry ports: published == a real version on the package registry.
+HARNESS_REGISTRY = ["go", "typescript", "javascript", "python", "ruby", "rust"]
+# Tag-only ports: the release IS the git tag (no registry). Published == the
+# tag exists (release_status STATUS == released). Verified by fetching the
+# source at the live tag and building a smoke client against it.
+HARNESS_TAG = ["php", "zig", "c", "cpp", "swift"]
+HARNESS = HARNESS_REGISTRY + HARNESS_TAG
 RETRIES = int(sys.argv[sys.argv.index("--retries") + 1]) if "--retries" in sys.argv else 3
 
 # Output substrings that signal a TRANSIENT registry/network problem (retry),
@@ -39,6 +45,18 @@ TRANSIENT = re.compile(
     r"could not resolve host|connection (refused|reset|timed)|"
     r"tls|handshake|failed to (download|fetch|connect|resolve)|unreachable|"
     r"spurious network error|error sending request|registry .*(down|unavailable)",
+    re.I,
+)
+
+# A LOCAL toolchain problem (missing tool, or a link/SDK incompatibility) is not
+# the published package's fault — the source fetched + compiled, the machine
+# just can't finish the build. Report TOOLCHAIN (non-failing), like transient.
+# NB: only link/SDK-stage errors qualify; a compile error in the fetched source
+# falls through to FAIL (that WOULD be a broken release).
+TOOLCHAIN = re.compile(
+    r"toolchain not found|command not found|not found.*toolchain|"
+    r"unable to (link|create)|\bld:|linker|lld|undefined symbol: _|"
+    r"libsystem|\bsdk\b|posix_memalign|incompatible.*sdk|no such file or directory.*(zig|swiftc)",
     re.I,
 )
 
@@ -54,13 +72,23 @@ def live_status() -> dict:
         return {}
 
 
-def published(entry) -> bool:
+def registry_published(entry) -> bool:
     """A real version string in the REGISTRY column means it is installable."""
     return bool(re.match(r"^\d", (entry or {}).get("registry") or ""))
 
 
-def registry_unknown(entry) -> bool:
-    return (entry or {}).get("registry") in ("?", None)
+def is_published(port: str, entry) -> bool:
+    """Is the port's release live? Registry ports: a registry version. Tag-only
+    ports: the git tag exists (release_status STATUS == released)."""
+    if port in HARNESS_TAG:
+        return (entry or {}).get("status") == "released"
+    return registry_published(entry)
+
+
+def registry_unknown(port: str, entry) -> bool:
+    # Only registry ports can have an indeterminate (network-flaky) probe;
+    # tag status comes from git and is always known.
+    return port not in HARNESS_TAG and (entry or {}).get("registry") in ("?", None)
 
 
 def run_verify(port: str):
@@ -73,10 +101,13 @@ def run_verify(port: str):
         out = (p.stdout + p.stderr).strip()
         tail = out.splitlines()[-1] if out else ""
         if p.returncode == 0 and "OK" in p.stdout:
-            return ("OK", tail)
+            ok = [ln for ln in p.stdout.splitlines() if ln.lstrip().startswith("OK")]
+            return ("OK", ok[-1] if ok else tail)
         if TRANSIENT.search(out):
             time.sleep(2 * attempt)  # back off and retry
             continue
+        if TOOLCHAIN.search(out):
+            return ("TOOLCHAIN", tail)  # local toolchain can't build — not the package
         return ("FAIL", tail)  # deterministic — the published package is broken
     return ("UNAVAILABLE", f"transient registry/network error after {RETRIES} tries")
 
@@ -91,39 +122,44 @@ def main() -> int:
     results = {}  # only the harness ports get a smoke result
     for port in HARNESS:
         e = st.get(port)
-        if published(e):
-            print(f"\n== verify {port} (published {e['registry']}) — fresh online install ==")
+        if is_published(port, e):
+            how = "fresh online install" if port in HARNESS_REGISTRY else "build from live tag source"
+            print(f"\n== verify {port} (published) — {how} ==")
             results[port] = run_verify(port)
-        elif registry_unknown(e):
+        elif registry_unknown(port, e):
             results[port] = ("UNAVAILABLE", "registry status probe failed")
         else:
             results[port] = ("SKIPPED", "not published")
 
-    def released(e) -> str:
-        if (e or {}).get("status") == "released":
-            ver = e["registry"] if published(e) else (e.get("local") or "")
+    def released(port, e) -> str:
+        if is_published(port, e):
+            ver = e["registry"] if registry_published(e) else (e.get("local") or "")
             return f"yes {ver}".rstrip()
         return "no"
 
-    # Full report: EVERY port, not just the harness. Non-harness ports have no
-    # smoke client (tag-only/source consumption), shown as 'no-client'.
-    print("\n" + "=" * 70)
-    print(f"{'PORT':<12}{'PUBLISHED':<14}{'VERIFY':<14}NOTE")
-    print("-" * 70)
+    def kind(port, e) -> str:
+        rk = (e or {}).get("registry_kind", "?")
+        return "tag" if rk == "tag" else rk
+
+    # Full report: EVERY port. KIND shows the channel (registry name vs `tag`).
+    # Non-harness ports have no smoke client (shown 'no-client').
+    print("\n" + "=" * 78)
+    print(f"{'PORT':<12}{'KIND':<11}{'PUBLISHED':<13}{'VERIFY':<13}NOTE")
+    print("-" * 78)
     for port, e in st.items():
         if port in results:
             res, note = results[port]
         else:
             res, note = "no-client", "not in verify harness (no smoke client)"
-        print(f"{port:<12}{released(e):<14}{res:<14}{note[:46]}")
-    print("=" * 70)
+        print(f"{port:<12}{kind(port, e):<11}{released(port, e):<13}{res:<13}{note[:38]}")
+    print("=" * 78)
 
     n = lambda k: sum(1 for r in results.values() if r[0] == k)  # noqa: E731
     no_client = len(st) - len(results)
     print(
         f"{n('OK')} verified · {n('SKIPPED')} skipped(unpublished) · "
-        f"{n('UNAVAILABLE')} unavailable(transient) · {n('FAIL')} failed · "
-        f"{no_client} no-client"
+        f"{n('UNAVAILABLE')} unavailable(transient) · {n('TOOLCHAIN')} toolchain-blocked · "
+        f"{n('FAIL')} failed · {no_client} no-client"
     )
     return 1 if n("FAIL") else 0
 

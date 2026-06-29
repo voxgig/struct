@@ -5,3 +5,5 @@ ruby/.gems/
 rust/target/
 */.venv/
 **/__pycache__/
+# Tag-only ports download + build the tagged source under a per-port .build/
+*/.build/
