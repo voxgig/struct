@@ -33,7 +33,7 @@ AUDIT_LANGS = typescript javascript python go ruby php rust csharp
 # publish purely by that tag.
 PUBLISH_LANGS = typescript javascript python go ruby php lua zig java rust c cpp csharp kotlin perl swift clojure ocaml scala dart elixir haskell
 
-.PHONY: all inspect build test lint audit scan analyze clean reset publish status corpus gen-docs \
+.PHONY: all inspect build test lint audit scan analyze clean reset publish status verify corpus gen-docs \
         scan-secrets scan-deps scan-sast scan-workflows scan-shell scan-spelling scan-docs \
         scan-parity scan-regex scan-docs-examples
 
@@ -100,6 +100,12 @@ publish:
 # Release dashboard: per-port local version vs latest published tag vs registry.
 status:
 	@python3 tools/release_status.py
+
+# Post-publish verification: install each PUBLISHED package fresh from its
+# registry (or build the live tag source) and smoke-test it. Status-aware —
+# only verifies ports actually published; see build/verify/.
+verify:
+	@$(MAKE) -C build/verify verify
 
 # ---- Shared test corpus ----
 # build/test/test.json is a COMMITTED artifact compiled from build/test/*.jsonic

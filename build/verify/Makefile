@@ -11,14 +11,16 @@
 # install, so we always exercise the live published artifact — never a stale
 # local copy or cached resolution.
 
-PORTS := go typescript javascript python ruby rust php zig c cpp swift
+PORTS := go typescript javascript python ruby rust csharp perl php zig c cpp swift
 
-# Ruby toolchain. The published gem requires Ruby >= 2.7; some systems ship
-# an older /usr/bin/ruby. Override with `make RUBY=... GEM=... verify-ruby`,
-# e.g. RUBY=/opt/homebrew/opt/ruby/bin/ruby GEM=/opt/homebrew/opt/ruby/bin/gem.
-RUBY   ?= ruby
-GEM    ?= gem
+# Ruby toolchain. The published gem requires Ruby >= 2.7; some systems ship an
+# older /usr/bin/ruby (e.g. macOS 2.6). Prefer a Homebrew ruby when present
+# (mirrors the zig fallback below); override with `make RUBY=... GEM=...`.
+RUBY   ?= $(shell command -v /opt/homebrew/opt/ruby/bin/ruby 2>/dev/null || command -v ruby)
+GEM    ?= $(shell command -v /opt/homebrew/opt/ruby/bin/gem 2>/dev/null || command -v gem)
 PYTHON ?= python3
+DOTNET ?= dotnet
+PERL   ?= perl
 
 # Toolchains for the tag-only ports (no package registry: the "published"
 # artifact IS the git tag, so these targets download the tagged source
@@ -49,7 +51,7 @@ SWIFT_VER := $(shell cat ../../swift/VERSION)
 ZIG_VER   := $(shell sed -n 's/.*\.version *= *"\([^"]*\)".*/\1/p' ../../zig/build.zig.zon)
 
 .PHONY: verify verify-go verify-typescript verify-javascript \
-        verify-python verify-ruby verify-rust \
+        verify-python verify-ruby verify-rust verify-csharp verify-perl \
         verify-php verify-zig verify-c verify-cpp verify-swift clean
 
 # Each target removes its own artifacts first, then installs fresh from the
@@ -70,6 +72,25 @@ verify-ruby:
 
 verify-python:
 	cd python && uv run --refresh --no-project --with voxgig-struct python smoke.py
+
+# NuGet: float to the newest published Voxgig.Struct and force a fresh restore
+# (--no-cache bypasses the HTTP cache so `Version="*"` re-resolves online).
+verify-csharp:
+	@command -v $(DOTNET) >/dev/null || { echo "FAIL csharp: dotnet toolchain not found"; exit 1; }
+	cd csharp && rm -rf bin obj && $(DOTNET) restore --force --no-cache && $(DOTNET) run --no-restore -c Release
+
+# CPAN: pure-Perl dist, so the published artifact is its tarball. Resolve the
+# live download_url from MetaCPAN, fetch + extract into a fresh .build/, and
+# smoke against the dist's own lib/ (equivalent to install for a no-XS module).
+verify-perl:
+	@command -v $(PERL) >/dev/null || { echo "FAIL perl: perl toolchain not found"; exit 1; }
+	@d=perl/.build; rm -rf $$d && mkdir -p $$d; \
+	url=$$($(PYTHON) -c "import urllib.request,json; print(json.load(urllib.request.urlopen('https://fastapi.metacpan.org/v1/download_url/Voxgig::Struct'))['download_url'])"); \
+	echo "downloading $$url"; \
+	curl -fsSL "$$url" -o $$d/src.tgz; \
+	top=$$(tar tzf $$d/src.tgz | head -1 | cut -d/ -f1); \
+	tar xzf $$d/src.tgz -C $$d; \
+	$(PERL) -I "$$d/$$top/lib" perl/smoke.pl
 
 # --- Tag-only ports -------------------------------------------------------
 # These ports have NO package registry: the published artifact is the git
@@ -151,6 +172,7 @@ clean:
 	rm -f go/go.sum
 	rm -rf ruby/.gems
 	rm -rf rust/target
+	rm -rf csharp/bin csharp/obj perl/.build
 	rm -rf php/.build zig/.build c/.build cpp/.build swift/.build
 	rm -rf */.venv
 	find . -name '__pycache__' -type d -prune -exec rm -rf {} +

@@ -28,7 +28,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 # Registry ports: published == a real version on the package registry.
-HARNESS_REGISTRY = ["go", "typescript", "javascript", "python", "ruby", "rust"]
+HARNESS_REGISTRY = ["go", "typescript", "javascript", "python", "ruby", "rust", "csharp", "perl"]
 # Tag-only ports: the release IS the git tag (no registry). Published == the
 # tag exists (release_status STATUS == released). Verified by fetching the
 # source at the live tag and building a smoke client against it.
@@ -44,7 +44,8 @@ TRANSIENT = re.compile(
     r"\b50[0-9]\b|service unavailable|bad gateway|gateway time|"
     r"could not resolve host|connection (refused|reset|timed)|"
     r"tls|handshake|failed to (download|fetch|connect|resolve)|unreachable|"
-    r"spurious network error|error sending request|registry .*(down|unavailable)",
+    r"spurious network error|error sending request|registry .*(down|unavailable)|"
+    r"\bNU1301\b|unable to load the service index|service index for source",
     re.I,
 )
 
@@ -56,7 +57,10 @@ TRANSIENT = re.compile(
 TOOLCHAIN = re.compile(
     r"toolchain not found|command not found|not found.*toolchain|"
     r"unable to (link|create)|\bld:|linker|lld|undefined symbol: _|"
-    r"libsystem|\bsdk\b|posix_memalign|incompatible.*sdk|no such file or directory.*(zig|swiftc)",
+    r"libsystem|\bsdk\b|posix_memalign|incompatible.*sdk|no such file or directory.*(zig|swiftc)|"
+    # a too-old local interpreter/runtime can't install the package — not a
+    # package defect (e.g. system ruby 2.6 vs a gem requiring >= 2.7).
+    r"requires ruby version|requires .* version >=|current ruby version",
     re.I,
 )
 
