@@ -43,7 +43,7 @@ PORTS = [
     ("go", ("file", "go/VERSION"), "go", "github.com/voxgig/struct/go"),
     ("ruby", ("re", "ruby/voxgig_struct.gemspec", r"version\s*=\s*['\"]([^'\"]+)"), "rubygems", "voxgig_struct"),
     ("rust", ("re", "rust/Cargo.toml", r'(?m)^version\s*=\s*"([^"]+)"'), "crates", "voxgig-struct"),
-    ("csharp", ("glob", "csharp/*.csproj", r"<Version>([^<]+)</Version>"), "nuget", "VoxgigStruct"),
+    ("csharp", ("glob", "csharp/*.csproj", r"<Version>([^<]+)</Version>"), "nuget", "Voxgig.Struct"),
     ("perl", ("re", "perl/lib/Voxgig/Struct.pm", r"VERSION\s*=\s*['\"]v?([0-9][^'\"]*)"), "cpan", "Voxgig-Struct"),
     ("java", ("re", "java/pom.xml", r"<version>([^<]+)</version>"), "maven", None),
     ("kotlin", ("re", "kotlin/build.gradle.kts", r'version\s*=\s*"([^"]+)"'), "maven", None),
