@@ -48,6 +48,16 @@ reset: clean
 VERSION := $(shell $(PERL) -Ilib -MVoxgig::Struct -e 'print $$Voxgig::Struct::VERSION')
 TAG := perl/v$(VERSION)
 AQL_DRY_RUN_FILLER := AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET
+# cpan-upload POSTs to PAUSE over HTTPS via HTTP::Tiny, which needs a CA bundle
+# to verify the server cert — otherwise it dies with "Can't verify SSL peers
+# without knowing which Certificate Authorities to trust". The robust fix is to
+# install the Mozilla::CA module (`cpan Mozilla::CA`), which HTTP::Tiny auto-
+# discovers regardless of HOME. As a belt-and-suspenders for newer HTTP::Tiny
+# (>= 0.080, which honours SSL_CERT_FILE — 0.076 does NOT), also point it at the
+# system CA bundle. NB: the temp ~/.pause HOME below is what exposes a missing
+# CA, since HTTP::Tiny's fallback discovery is tied to the real HOME.
+CA_BUNDLE := $(firstword $(wildcard $(SSL_CERT_FILE) /etc/ssl/cert.pem /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt /opt/homebrew/etc/ca-certificates/cert.pem))
+CA_ENV := $(if $(CA_BUNDLE),SSL_CERT_FILE=$(CA_BUNDLE))
 publish: test
 	@if git rev-parse -q --verify "refs/tags/$(TAG)" >/dev/null; then \
 	  echo "tag $(TAG) already exists — bump $$VERSION in lib/Voxgig/Struct.pm first"; exit 1; fi
@@ -65,9 +75,9 @@ publish: test
 	if [ -n "$$PAUSE_USER" ] && [ -n "$$PAUSE_PASSWORD" ]; then \
 	  ph=$$(mktemp -d); printf 'user %s\npassword %s\n' "$$PAUSE_USER" "$$PAUSE_PASSWORD" > "$$ph/.pause"; \
 	  chmod 600 "$$ph/.pause"; \
-	  HOME="$$ph" cpan-upload *.tar.gz; rc=$$?; rm -rf "$$ph"; [ "$$rc" -eq 0 ]; \
+	  $(CA_ENV) HOME="$$ph" cpan-upload *.tar.gz; rc=$$?; rm -rf "$$ph"; [ "$$rc" -eq 0 ]; \
 	else \
-	  cpan-upload *.tar.gz; \
+	  $(CA_ENV) cpan-upload *.tar.gz; \
 	fi; \
 	cd ..; \
 	git tag -a "$(TAG)" -m "perl v$(VERSION)"; \
