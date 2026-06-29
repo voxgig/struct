@@ -30,6 +30,14 @@ CXX    ?= g++
 # Zig is often not on PATH; fall back to the pinned local toolchain.
 ZIG    ?= $(shell command -v zig 2>/dev/null || echo $(HOME)/.local/zig/0.13.0/zig)
 
+# zig 0.13 cannot link against very new Xcode SDKs (macOS 26 / Xcode 26): every
+# libc symbol comes back undefined. The Command Line Tools SDK still works, so
+# point zig at it (mirrors zig/Makefile). macOS-only; no-op where CLT is absent
+# (Linux CI, minimal runners).
+ifneq ($(wildcard /Library/Developer/CommandLineTools/.),)
+export DEVELOPER_DIR := /Library/Developer/CommandLineTools
+endif
+
 # GitHub source tarball for a slash-tag: tags/<lang>/v<ver>.tar.gz
 TARBALL = https://github.com/voxgig/struct/archive/refs/tags
 

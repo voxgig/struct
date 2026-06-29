@@ -103,9 +103,10 @@ Override any of them on the command line, e.g.
 `make verify-php PHP=/opt/homebrew/bin/php`. A missing toolchain makes the
 target fail loudly rather than silently passing.
 
-> **macOS note:** `verify-zig` requires a Zig toolchain that can link
-> against the host's macOS SDK. Zig 0.13.0 (the version the port pins)
-> cannot link `libSystem` on recent macOS SDKs — the same limitation breaks
-> the zig port's own `zig build test` there — so `verify-zig` will fail at
-> the final link step on those systems. The download + compile-from-tag
-> steps still run; only the host link is affected.
+> **macOS note:** Zig 0.13.0 (the version the port pins) cannot link
+> `libSystem` against very new Xcode SDKs (macOS 26 / Xcode 26) — every libc
+> symbol comes back undefined. Like the zig port's own Makefile, this harness
+> points zig at the Command Line Tools SDK (`DEVELOPER_DIR=/Library/Developer/
+> CommandLineTools`) when present, which links cleanly. If CLT is absent and
+> Xcode's SDK is too new for Zig 0.13, the driver reports `verify-zig` as
+> `TOOLCHAIN` (a local-toolchain limitation, not a broken release), not `FAIL`.
