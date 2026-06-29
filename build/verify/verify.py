@@ -136,7 +136,10 @@ def main() -> int:
             results[port] = ("SKIPPED", "not published")
 
     def released(port, e) -> str:
-        if is_published(port, e):
+        # The dashboard STATUS is the authority on whether a release is live —
+        # this covers published ports with no smoke client (e.g. lua), whose
+        # registry we don't query, so PUBLISHED isn't tied to harness membership.
+        if (e or {}).get("status") == "released":
             ver = e["registry"] if registry_published(e) else (e.get("local") or "")
             return f"yes {ver}".rstrip()
         return "no"
@@ -158,7 +161,7 @@ def main() -> int:
     # Full report: EVERY port. KIND shows the channel (registry name vs `tag`).
     header = f"{'PORT':<12}{'KIND':<11}{'PUBLISHED':<13}{'VERIFY':<13}NOTE"
     body = []
-    for port, e in st.items():
+    for port, e in sorted(st.items()):
         res, raw = results.get(port, ("no-client", ""))
         body.append(
             f"{port:<12}{kind(port, e):<11}{released(port, e):<13}{res:<13}{note_for(res, raw)}".rstrip()

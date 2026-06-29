@@ -47,7 +47,8 @@ PORTS = [
     ("perl", ("re", "perl/lib/Voxgig/Struct.pm", r"VERSION\s*=\s*['\"]v?([0-9][^'\"]*)"), "cpan", "Voxgig-Struct"),
     ("java", ("re", "java/pom.xml", r"<version>([^<]+)</version>"), "maven", None),
     ("kotlin", ("re", "kotlin/build.gradle.kts", r'version\s*=\s*"([^"]+)"'), "maven", None),
-    ("lua", ("re", "lua/struct.rockspec", r'version\s*=\s*"([^"]+)"'), "luarocks", None),
+    # capture only the version, dropping the rockspec "-<rev>" suffix (0.1.0-1 -> 0.1.0)
+    ("lua", ("re", "lua/struct.rockspec", r'version\s*=\s*"([0-9.]+)'), "luarocks", None),
     ("php", ("file", "php/VERSION"), "tag", None),
     ("zig", ("re", "zig/build.zig.zon", r'\.version\s*=\s*"([^"]+)"'), "tag", None),
     ("c", ("file", "c/VERSION"), "tag", None),
@@ -174,11 +175,12 @@ def status(local: str, tag, kind: str, reg: str) -> str:
         return "publish-pending"  # local manifest is ahead of the latest tag
     if vkey(local) < vkey(tag):
         return "tag>local!"
-    # local == tag: the release is cut. A tag-only port is done; a registry
-    # port is "released" once the registry shows the version, else it was just
-    # pushed and the registry hasn't indexed it yet (npm/nuget/pypi/cpan/crates
-    # all index asynchronously after the upload returns).
-    if kind == "tag" or re.match(r"^v?\d", reg or ""):
+    # local == tag: the release is cut. Released if it's a tag-only port, if we
+    # don't query this registry (luarocks/maven ident None, or --no-net → reg
+    # "—", so the tag IS the release), or if the registry already shows the
+    # version. Otherwise the upload landed but the registry hasn't finished
+    # indexing yet (npm/nuget/pypi/cpan/crates all index asynchronously).
+    if kind == "tag" or reg == "—" or re.match(r"^v?\d", reg or ""):
         return "released"
     return "pending-index"
 
@@ -204,6 +206,7 @@ def main() -> int:
         print(json.dumps(json_rows, indent=2))
         return 0
 
+    rows.sort(key=lambda r: r[0])  # alphabetical by port name
     cols = len(hdr)
     w = [max(len(str(r[i])) for r in rows + [hdr]) for i in range(cols)]
     print("  ".join(h.ljust(w[i]) for i, h in enumerate(hdr)))
