@@ -141,18 +141,30 @@ def main() -> int:
         rk = (e or {}).get("registry_kind", "?")
         return "tag" if rk == "tag" else rk
 
+    def note_for(res, raw) -> str:
+        # OK is self-evident (PUBLISHED + VERIFY say it); only annotate the rest.
+        if res == "OK":
+            return ""
+        if res == "no-client":
+            return "no smoke client"
+        if res == "SKIPPED":
+            return "not published"
+        return raw[:40]  # FAIL / TOOLCHAIN / UNAVAILABLE: the reason
+
     # Full report: EVERY port. KIND shows the channel (registry name vs `tag`).
-    # Non-harness ports have no smoke client (shown 'no-client').
-    print("\n" + "=" * 78)
-    print(f"{'PORT':<12}{'KIND':<11}{'PUBLISHED':<13}{'VERIFY':<13}NOTE")
-    print("-" * 78)
+    header = f"{'PORT':<12}{'KIND':<11}{'PUBLISHED':<13}{'VERIFY':<13}NOTE"
+    body = []
     for port, e in st.items():
-        if port in results:
-            res, note = results[port]
-        else:
-            res, note = "no-client", "not in verify harness (no smoke client)"
-        print(f"{port:<12}{kind(port, e):<11}{released(port, e):<13}{res:<13}{note[:38]}")
-    print("=" * 78)
+        res, raw = results.get(port, ("no-client", ""))
+        body.append(
+            f"{port:<12}{kind(port, e):<11}{released(port, e):<13}{res:<13}{note_for(res, raw)}".rstrip()
+        )
+    width = max(len(header), *(len(r) for r in body))  # rule spans the widest row
+    print("\n" + "=" * width)
+    print(header)
+    print("-" * width)
+    print("\n".join(body))
+    print("=" * width)
 
     n = lambda k: sum(1 for r in results.values() if r[0] == k)  # noqa: E731
     no_client = len(st) - len(results)
