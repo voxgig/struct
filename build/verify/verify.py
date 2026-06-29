@@ -88,7 +88,7 @@ def main() -> int:
         print("!! could not determine status (release_status.py --json failed)")
         return 2
 
-    results = {}
+    results = {}  # only the harness ports get a smoke result
     for port in HARNESS:
         e = st.get(port)
         if published(e):
@@ -99,20 +99,31 @@ def main() -> int:
         else:
             results[port] = ("SKIPPED", "not published")
 
-    print("\n" + "=" * 64)
-    print(f"{'PORT':<12}{'PUBLISHED':<12}{'RESULT':<14}NOTE")
-    print("-" * 64)
-    for port in HARNESS:
-        e = st.get(port) or {}
-        res, note = results[port]
-        pub = e.get("registry") if published(e) else "-"
-        print(f"{port:<12}{str(pub):<12}{res:<14}{note[:64]}")
-    print("=" * 64)
+    def released(e) -> str:
+        if (e or {}).get("status") == "released":
+            ver = e["registry"] if published(e) else (e.get("local") or "")
+            return f"yes {ver}".rstrip()
+        return "no"
+
+    # Full report: EVERY port, not just the harness. Non-harness ports have no
+    # smoke client (tag-only/source consumption), shown as 'no-client'.
+    print("\n" + "=" * 70)
+    print(f"{'PORT':<12}{'PUBLISHED':<14}{'VERIFY':<14}NOTE")
+    print("-" * 70)
+    for port, e in st.items():
+        if port in results:
+            res, note = results[port]
+        else:
+            res, note = "no-client", "not in verify harness (no smoke client)"
+        print(f"{port:<12}{released(e):<14}{res:<14}{note[:46]}")
+    print("=" * 70)
 
     n = lambda k: sum(1 for r in results.values() if r[0] == k)  # noqa: E731
+    no_client = len(st) - len(results)
     print(
         f"{n('OK')} verified · {n('SKIPPED')} skipped(unpublished) · "
-        f"{n('UNAVAILABLE')} unavailable(transient) · {n('FAIL')} failed"
+        f"{n('UNAVAILABLE')} unavailable(transient) · {n('FAIL')} failed · "
+        f"{no_client} no-client"
     )
     return 1 if n("FAIL") else 0
 
