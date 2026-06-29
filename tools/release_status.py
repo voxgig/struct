@@ -134,7 +134,9 @@ def registry_version(kind: str, ident) -> str:
         if kind == "nuget":
             return fetch(f"https://api.nuget.org/v3-flatcontainer/{ident.lower()}/index.json")["versions"][-1]
         if kind == "cpan":
-            return fetch(f"https://fastapi.metacpan.org/v1/release/{ident}")["version"]
+            # MetaCPAN reports Perl versions v-prefixed ("v0.1.0"); strip it so
+            # the REGISTRY column matches LOCAL/TAG (which are plain "0.1.0").
+            return str(fetch(f"https://fastapi.metacpan.org/v1/release/{ident}")["version"]).lstrip("v")
     except (urllib.error.HTTPError,) as e:
         return "absent" if e.code == 404 else "?"
     except Exception:
@@ -165,14 +167,20 @@ def vkey(v: str):
     return tuple(int(n) for n in re.findall(r"\d+", v)) or (0,)
 
 
-def status(local: str, tag) -> str:
+def status(local: str, tag, kind: str, reg: str) -> str:
     if not tag:
         return "unpublished"
-    if vkey(local) == vkey(tag):
-        return "released"
     if vkey(local) > vkey(tag):
-        return "publish-pending"
-    return "tag>local!"
+        return "publish-pending"  # local manifest is ahead of the latest tag
+    if vkey(local) < vkey(tag):
+        return "tag>local!"
+    # local == tag: the release is cut. A tag-only port is done; a registry
+    # port is "released" once the registry shows the version, else it was just
+    # pushed and the registry hasn't indexed it yet (npm/nuget/pypi/cpan/crates
+    # all index asynchronously after the upload returns).
+    if kind == "tag" or re.match(r"^v?\d", reg or ""):
+        return "released"
+    return "pending-index"
 
 
 def main() -> int:
@@ -184,7 +192,7 @@ def main() -> int:
         loc = local_version(src)
         t = tags.get(name)
         reg = registry_version(kind, ident)
-        st = status(loc, t["ver"] if t else None)
+        st = status(loc, t["ver"] if t else None, kind, reg)
         rows.append((name, loc, t["full"] if t else "—", t["date"] if t else "—", reg, st))
         json_rows.append({
             "port": name, "local": loc,
@@ -203,9 +211,14 @@ def main() -> int:
     for r in rows:
         print("  ".join(str(c).ljust(w[i]) for i, c in enumerate(r)))
 
-    released = sum(1 for r in rows if r[-1] == "released")
-    pending = sum(1 for r in rows if r[-1] == "publish-pending")
-    print(f"\n{released} released · {pending} publish-pending · {len(rows) - released - pending} unpublished"
+    c = lambda s: sum(1 for r in rows if r[-1] == s)  # noqa: E731
+    parts = [f"{c('released')} released"]
+    if c("pending-index"):
+        parts.append(f"{c('pending-index')} pending-index")
+    if c("publish-pending"):
+        parts.append(f"{c('publish-pending')} publish-pending")
+    parts.append(f"{c('unpublished')} unpublished")
+    print("\n" + " · ".join(parts)
           + ("" if NET else "  (--no-net: tags from local only, registries skipped)"))
     return 0
 
