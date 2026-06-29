@@ -46,7 +46,7 @@ luarocks install luafilesystem
 
 ```lua
 package.path = './src/?.lua;' .. package.path
-local struct = require('struct')
+local struct = require('voxgig.struct')
 
 local store = {
   db   = { host = 'localhost' },

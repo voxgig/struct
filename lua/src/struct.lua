@@ -5,7 +5,12 @@
 -- RE2-subset regex engine — pure Lua, no external deps. Lua's built-in
 -- string.match uses Lua patterns (not regex), so for cross-port uniformity
 -- we use this engine. See /REGEX_API.md.
-local _regex_ok, _regex = pcall(require, "regex")
+-- Installed (namespaced) layout: voxgig/struct.lua + voxgig/struct/regex.lua.
+local _regex_ok, _regex = pcall(require, "voxgig.struct.regex")
+if not _regex_ok then
+  -- Flat dev layout / the regex-only specs, which put src/ on package.path.
+  _regex_ok, _regex = pcall(require, "regex")
+end
 if not _regex_ok then
   -- When loaded from a sibling test file with package.path tweaked.
   _regex_ok, _regex = pcall(dofile, (debug.getinfo(1, "S").source:sub(2):gsub("struct%.lua$", "regex.lua")))

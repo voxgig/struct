@@ -35,11 +35,13 @@ test_dependencies = {
 }
 build = {
    type = "builtin",
-   -- struct.lua require()s the bundled regex engine; both must ship or the
-   -- regex-backed matchers silently degrade to nil at runtime.
+   -- Namespaced under voxgig.* so the public module is `require("voxgig.struct")`
+   -- (a bare `struct`/`regex` would collide with existing LuaRocks modules).
+   -- regex is struct's private RE2-subset engine, scoped as a submodule rather
+   -- than a top-level name; both must ship or the regex matchers degrade to nil.
    modules = {
-      struct = "src/struct.lua",
-      regex = "src/regex.lua"
+      ["voxgig.struct"] = "src/struct.lua",
+      ["voxgig.struct.regex"] = "src/regex.lua"
    },
    copy_directories = {"test"}
 }

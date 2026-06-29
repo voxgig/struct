@@ -39,17 +39,17 @@ Put `src/` on the module path, then `require` the module table:
 
 ```lua
 package.path = './src/?.lua;' .. package.path
-local struct = require('struct')
+local struct = require('voxgig.struct')
 ```
 
-`require('struct')` returns a table; every function is a field on it
+`require('voxgig.struct')` returns a table; every function is a field on it
 (`struct.getpath(...)`), and so is the `StructUtility` class (see
 [How-to](#2-how-to-guides)).
 
 ### Your first program
 
 ```lua
-local struct = require('struct')
+local struct = require('voxgig.struct')
 
 local config = struct.merge({
   { db = { host = 'localhost', port = 5432 }, debug = false }, -- defaults
@@ -67,7 +67,7 @@ changes. Read [`../DOCS.md`](../DOCS.md#1-tutorial-a-guided-tour) for the
 full language-neutral walkthrough; the Lua-flavoured version:
 
 ```lua
-local struct = require('struct')
+local struct = require('voxgig.struct')
 
 -- Reshape by example — the spec mirrors the output you want.
 struct.transform(
@@ -94,7 +94,7 @@ struct.select({ a = { age = 30 }, b = { age = 25 } }, { age = 30 })
 
 ### Inject the API as an object (for stubbing in tests)
 ```lua
-local struct = require('struct')
+local struct = require('voxgig.struct')
 local su = struct.StructUtility:new()
 su:getpath({ a = { b = 1 } }, 'a.b')   -- 1  (called with ':' — self-style)
 ```
