@@ -1,0 +1,10 @@
+{
+  "name": "verify-javascript",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Smoke test for the published @voxgig/structjs package (not yet published)",
+  "type": "commonjs",
+  "dependencies": {
+    "@voxgig/structjs": "latest"
+  }
+}

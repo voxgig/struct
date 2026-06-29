@@ -1,0 +1,7 @@
+*/node_modules/
+*/package-lock.json
+go/go.sum
+ruby/.gems/
+rust/target/
+*/.venv/
+**/__pycache__/
