@@ -35,8 +35,12 @@ reset: clean
 # Release: build a CPAN dist and upload to PAUSE, then tag perl/vX.Y.Z
 # (version from $VERSION in lib/Voxgig/Struct.pm).
 #
-# Auth: `cpan-upload` reads PAUSE credentials from ~/.pause
-#   (user PAUSE_ID / password SECRET). See `man cpan-upload`.
+# Auth: `cpan-upload` reads PAUSE credentials from ~/.pause. A headless run
+# supplies them from the vault as PAUSE_USER + PAUSE_PASSWORD env vars; we then
+# write a temporary ~/.pause under a throwaway HOME and delete it after upload
+# (no persistent on-disk creds, no password on argv). With those env vars unset
+# it falls back to your existing ~/.pause. The github token for the tag push
+# comes via `aql vault exec --for=github`. See `man cpan-upload`.
 #
 # ExtUtils::MakeMaker's `perl Makefile.PL` generates a file called
 # `Makefile`, which would OVERWRITE this hand-written Makefile. So we
@@ -56,7 +60,15 @@ publish: test
 	rm -rf .release && mkdir -p .release; \
 	cp -r lib t Makefile.PL .release/; \
 	{ [ -f README.md ] && cp README.md .release/ || true; }; \
-	cd .release && $(PERL) Makefile.PL && make manifest && make dist && cpan-upload *.tar.gz; \
+	cd .release; \
+	$(PERL) Makefile.PL && make manifest && make dist; \
+	if [ -n "$$PAUSE_USER" ] && [ -n "$$PAUSE_PASSWORD" ]; then \
+	  ph=$$(mktemp -d); printf 'user %s\npassword %s\n' "$$PAUSE_USER" "$$PAUSE_PASSWORD" > "$$ph/.pause"; \
+	  chmod 600 "$$ph/.pause"; \
+	  HOME="$$ph" cpan-upload *.tar.gz; rc=$$?; rm -rf "$$ph"; [ "$$rc" -eq 0 ]; \
+	else \
+	  cpan-upload *.tar.gz; \
+	fi; \
 	cd ..; \
 	git tag -a "$(TAG)" -m "perl v$(VERSION)"; \
 	if [ -n "$$token" ]; then \
