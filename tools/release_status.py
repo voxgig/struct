@@ -179,17 +179,22 @@ def main() -> int:
     tags = git_tags()
     hdr = ("PORT", "LOCAL", "TAG", "PUBLISHED", "REGISTRY", "STATUS")
     rows = []
+    json_rows = []
     for name, src, kind, ident in PORTS:
         loc = local_version(src)
         t = tags.get(name)
-        rows.append((
-            name,
-            loc,
-            t["full"] if t else "—",
-            t["date"] if t else "—",
-            registry_version(kind, ident),
-            status(loc, t["ver"] if t else None),
-        ))
+        reg = registry_version(kind, ident)
+        st = status(loc, t["ver"] if t else None)
+        rows.append((name, loc, t["full"] if t else "—", t["date"] if t else "—", reg, st))
+        json_rows.append({
+            "port": name, "local": loc,
+            "tag": t["full"] if t else None, "published": t["date"] if t else None,
+            "registry_kind": kind, "registry": reg, "status": st,
+        })
+
+    if "--json" in sys.argv:
+        print(json.dumps(json_rows, indent=2))
+        return 0
 
     cols = len(hdr)
     w = [max(len(str(r[i])) for r in rows + [hdr]) for i in range(cols)]
