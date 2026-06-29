@@ -33,9 +33,23 @@ reset: clean
 # Needs auth: <server> credentials (id=central) in ~/.m2/settings.xml plus a
 # GPG signing key (the release profile signs in the verify phase).
 VERSION := $(shell grep -m1 "<version>" pom.xml | sed -E "s/.*<version>([^<]+)<.*/\1/")
+TAG := java/v$(VERSION)
+AQL_DRY_RUN_FILLER := AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET
 publish: test
-	mvn -q -Prelease deploy
-	@if git rev-parse -q --verify "refs/tags/java/v$(VERSION)" >/dev/null; then \
-	  echo "tag java/v$(VERSION) already exists — bump pom.xml version first"; exit 1; fi
-	git tag -a "java/v$(VERSION)" -m "java v$(VERSION)"
-	git push origin "java/v$(VERSION)"
+	@if git rev-parse -q --verify "refs/tags/$(TAG)" >/dev/null; then \
+	  echo "tag $(TAG) already exists — bump pom.xml first"; exit 1; fi
+	@set -e; \
+	token="$${GITHUB_TOKEN:-$$GH_TOKEN}"; \
+	if [ "$$token" = "$(AQL_DRY_RUN_FILLER)" ]; then \
+	  echo "[dry-run] aql filler token detected: would publish artifact and tag $(TAG); nothing pushed."; \
+	  exit 0; \
+	fi; \
+	mvn -q -Prelease deploy; \
+	git tag -a "$(TAG)" -m "java v$(VERSION)"; \
+	if [ -n "$$token" ]; then \
+	  hdr="AUTHORIZATION: basic $$(printf 'x-access-token:%s' "$$token" | base64 | tr -d '\n')"; \
+	  git -c http.extraheader="$$hdr" push https://github.com/voxgig/struct.git "$(TAG)"; \
+	else \
+	  git push origin "$(TAG)"; \
+	fi; \
+	echo "Published artifact + tag $(TAG)."
