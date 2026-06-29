@@ -33,6 +33,11 @@ clean:
 # stripping the rockspec revision suffix). Needs LuaRocks auth (LUAROCKS_API_KEY).
 # LuaRocks requires the rockspec *filename* to be name-version-revision, so we
 # upload a canonically-named copy of the in-tree struct.rockspec.
+#
+# `--skip-pack`: upload the rockspec ONLY, never a packed .src.rock. Packing
+# would fetch the source at `source.tag = lua/vX.Y.Z` — but that tag is pushed
+# in the LAST step (kept last so a failed upload never orphans a tag). Install
+# fetches the git source at the tag, which exists by then. So we must not pack.
 VERSION := $(shell grep -E '^version' struct.rockspec | sed -E 's/.*"([0-9.]+)-[0-9]+".*/\1/')
 ROCKREV := $(shell grep -E '^version' struct.rockspec | sed -E 's/.*"([0-9.]+-[0-9]+)".*/\1/')
 TAG := lua/v$(VERSION)
@@ -47,7 +52,7 @@ publish: test
 	  exit 0; \
 	fi; \
 	cp struct.rockspec "voxgig-struct-$(ROCKREV).rockspec"; \
-	luarocks upload "voxgig-struct-$(ROCKREV).rockspec" --api-key=$$LUAROCKS_API_KEY; \
+	luarocks upload --skip-pack "voxgig-struct-$(ROCKREV).rockspec" --api-key=$$LUAROCKS_API_KEY; \
 	rm -f "voxgig-struct-$(ROCKREV).rockspec"; \
 	git tag -a "$(TAG)" -m "lua v$(VERSION)"; \
 	if [ -n "$$token" ]; then \
