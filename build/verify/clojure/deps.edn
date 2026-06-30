@@ -1,0 +1,4 @@
+;; The struct-clojure dependency + Clojars repo are injected by the verify-clojure
+;; target via -Sdeps (pinned to the repo's VERSION) so the smoke resolves the
+;; LIVE published artifact. Here we only put smoke.clj on the classpath.
+{:paths ["."]}

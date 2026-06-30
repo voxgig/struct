@@ -11,7 +11,7 @@
 # install, so we always exercise the live published artifact — never a stale
 # local copy or cached resolution.
 
-PORTS := go typescript javascript python ruby rust csharp perl java lua php zig c cpp swift
+PORTS := go typescript javascript python ruby rust csharp perl java lua clojure php zig c cpp swift
 
 # Ruby toolchain. The published gem requires Ruby >= 2.7; some systems ship an
 # older /usr/bin/ruby (e.g. macOS 2.6). Prefer a Homebrew ruby when present
@@ -24,6 +24,7 @@ PERL   ?= perl
 MVN    ?= mvn
 LUAROCKS ?= luarocks
 LUA      ?= lua
+CLOJURE  ?= clojure
 
 # Toolchains for the tag-only ports (no package registry: the "published"
 # artifact IS the git tag, so these targets download the tagged source
@@ -55,7 +56,7 @@ ZIG_VER   := $(shell sed -n 's/.*\.version *= *"\([^"]*\)".*/\1/p' ../../zig/bui
 
 .PHONY: verify verify-go verify-typescript verify-javascript \
         verify-python verify-ruby verify-rust verify-csharp verify-perl verify-java verify-lua \
-        verify-php verify-zig verify-c verify-cpp verify-swift clean
+        verify-clojure verify-php verify-zig verify-c verify-cpp verify-swift clean
 
 # Each target removes its own artifacts first, then installs fresh from the
 # registry with cache-revalidation flags (--prefer-online / --refresh /
@@ -111,6 +112,17 @@ verify-lua:
 	cd lua && rm -rf .build && \
 	  $(LUAROCKS) install voxgig-struct --tree=.build/tree --force >/dev/null && \
 	  eval "$$($(LUAROCKS) path --tree=.build/tree)" && $(LUA) smoke.lua
+
+# Clojars: resolve the published com.voxgig/struct-clojure fresh (drop the cached
+# artifact + -Sforce = live re-download) at the repo's VERSION, then run the
+# smoke via (require 'voxgig.struct).
+verify-clojure:
+	@command -v $(CLOJURE) >/dev/null || { echo "FAIL clojure: clojure CLI not found"; exit 1; }
+	ver=$$(cat ../../clojure/VERSION); \
+	rm -rf "$$HOME/.m2/repository/com/voxgig/struct-clojure"; \
+	cd clojure && $(CLOJURE) -Sforce \
+	  -Sdeps "{:deps {com.voxgig/struct-clojure {:mvn/version \"$$ver\"}} :mvn/repos {\"clojars\" {:url \"https://repo.clojars.org/\"}}}" \
+	  -M -m smoke
 
 # --- Tag-only ports -------------------------------------------------------
 # These ports have NO package registry: the published artifact is the git
@@ -192,7 +204,7 @@ clean:
 	rm -f go/go.sum
 	rm -rf ruby/.gems
 	rm -rf rust/target
-	rm -rf csharp/bin csharp/obj perl/.build java/.build java/target lua/.build
+	rm -rf csharp/bin csharp/obj perl/.build java/.build java/target lua/.build clojure/.cpcache
 	rm -rf php/.build zig/.build c/.build cpp/.build swift/.build
 	rm -rf */.venv
 	find . -name '__pycache__' -type d -prune -exec rm -rf {} +

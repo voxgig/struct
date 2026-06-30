@@ -54,7 +54,7 @@ PORTS = [
     ("c", ("file", "c/VERSION"), "tag", None),
     ("cpp", ("file", "cpp/VERSION"), "tag", None),
     ("swift", ("file", "swift/VERSION"), "tag", None),
-    ("clojure", ("file", "clojure/VERSION"), "tag", None),
+    ("clojure", ("file", "clojure/VERSION"), "clojars", "com.voxgig/struct-clojure"),
     ("ocaml", ("file", "ocaml/VERSION"), "tag", None),
     ("scala", ("file", "scala/VERSION"), "tag", None),
     ("dart", ("re", "dart/pubspec.yaml", r'(?m)^version:\s*([0-9][^\s]*)'), "tag", None),
@@ -137,9 +137,11 @@ def registry_version(kind: str, ident) -> str:
         if kind == "maven":
             # Maven Central metadata is XML, not JSON — fetch raw and pull <release>.
             g, a = ident.split(":")
-            xml = fetch_text(f"https://repo1.maven.org/maven2/{g.replace('.', '/')}/{a}/maven-metadata.xml")
-            m = re.search(r"<release>([^<]+)</release>", xml) or re.search(r"<latest>([^<]+)</latest>", xml)
-            return m.group(1) if m else "absent"
+            return maven_metadata_version(f"https://repo1.maven.org/maven2/{g.replace('.', '/')}/{a}")
+        if kind == "clojars":
+            # Clojars is a Maven repo; same metadata format, coords are group/artifact.
+            g, a = ident.split("/")
+            return maven_metadata_version(f"https://repo.clojars.org/{g.replace('.', '/')}/{a}")
         if kind == "cpan":
             # MetaCPAN reports Perl versions v-prefixed ("v0.1.0"); strip it so
             # the REGISTRY column matches LOCAL/TAG (which are plain "0.1.0").
@@ -170,6 +172,14 @@ def fetch_text(url: str) -> str:
     req = urllib.request.Request(url, headers=UA)
     with urllib.request.urlopen(req, timeout=TIMEOUT) as r:  # nosemgrep  # noqa: S310
         return r.read().decode("utf-8", "replace")
+
+
+def maven_metadata_version(base: str) -> str:
+    """Latest <release> (else <latest>) from a Maven-style repo's
+    maven-metadata.xml at <base>/maven-metadata.xml (Maven Central, Clojars)."""
+    xml = fetch_text(f"{base}/maven-metadata.xml")
+    m = re.search(r"<release>([^<]+)</release>", xml) or re.search(r"<latest>([^<]+)</latest>", xml)
+    return m.group(1) if m else "absent"
 
 
 def run(args) -> str:
