@@ -29,7 +29,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 # Registry ports we QUERY: published == a real version on the package registry,
 # so we only smoke-test once the registry actually serves it (not mid-indexing).
-HARNESS_REGISTRY = ["go", "typescript", "javascript", "python", "ruby", "rust", "csharp", "perl", "java", "kotlin", "scala", "clojure"]
+HARNESS_REGISTRY = ["go", "typescript", "javascript", "python", "ruby", "rust", "csharp", "perl", "java", "kotlin", "scala", "clojure", "dart"]
 # Tag-only ports: the release IS the git tag (no registry). Published == the
 # tag exists (release_status STATUS == released). Verified by fetching the
 # source at the live tag and building a smoke client against it.

@@ -1,0 +1,9 @@
+name: struct_dart_smoke
+description: Smoke client that resolves the published voxgig_struct from pub.dev.
+publish_to: none
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+dependencies:
+  # `any` floats to the newest published release; the verify target clears the
+  # pub cache + lockfile so each run re-resolves from pub.dev.
+  voxgig_struct: any
