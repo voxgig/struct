@@ -46,7 +46,7 @@ PORTS = [
     ("csharp", ("glob", "csharp/*.csproj", r"<Version>([^<]+)</Version>"), "nuget", "Voxgig.Struct"),
     ("perl", ("re", "perl/lib/Voxgig/Struct.pm", r"VERSION\s*=\s*['\"]v?([0-9][^'\"]*)"), "cpan", "Voxgig-Struct"),
     ("java", ("re", "java/pom.xml", r"<version>([^<]+)</version>"), "maven", "com.voxgig:struct-java"),
-    ("kotlin", ("re", "kotlin/build.gradle.kts", r'version\s*=\s*"([^"]+)"'), "maven", None),
+    ("kotlin", ("re", "kotlin/build.gradle.kts", r'version\s*=\s*"([^"]+)"'), "maven", "com.voxgig:struct-kotlin"),
     # capture only the version, dropping the rockspec "-<rev>" suffix (0.1.0-1 -> 0.1.0)
     ("lua", ("re", "lua/struct.rockspec", r'version\s*=\s*"([0-9.]+)'), "luarocks", None),
     ("php", ("file", "php/VERSION"), "tag", None),
