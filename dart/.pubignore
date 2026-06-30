@@ -1,0 +1,3 @@
+# Dev-only files — keep them out of the published pub.dev package.
+AGENTS.md
+Makefile

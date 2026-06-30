@@ -1,6 +1,9 @@
 name: voxgig_struct
-description: A faithful Dart port of the canonical voxgig/struct library.
+description: >-
+  A faithful Dart port of voxgig/struct: utilities for transforming and
+  validating JSON-like data structures (getpath, merge, inject, transform).
 version: 0.2.1
+repository: https://github.com/voxgig/struct
 environment:
   sdk: '>=3.0.0 <4.0.0'
 # Zero third-party runtime dependencies (by project policy).

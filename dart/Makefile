@@ -26,13 +26,14 @@ clean:
 
 reset: clean
 
-# Release: pub.dev registry upload is a documented manual step for now; this
-# target cuts the dart/vX.Y.Z git tag headlessly.
-# Headless: `aql vault exec --for=github <alias> -- make publish-dart` injects
-# GH_TOKEN/GITHUB_TOKEN; the tag is pushed over HTTPS via an Authorization header
-# (kept out of the URL, .git/config, and argv), else the origin SSH remote.
-# `aql vault exec --dry-run` injects a filler we detect to rehearse (no tag).
-# set -e: a failed push never leaves a tag behind.
+# Release: publish to pub.dev (dart pub publish --force), then tag dart/vX.Y.Z
+# (version from pubspec.yaml).
+# Auth: pub.dev uses OAuth — a one-time `dart pub login` writes a credentials
+# JSON (with a refresh token) to ~/Library/Application Support/dart/pub-
+# credentials.json. Headless, the vault supplies that JSON as PUB_CREDENTIALS
+# (single line, no newline issues) and we write it to the config path before
+# publishing; the github token pushes the tag. set -e + tag-last: a failed
+# upload never leaves a tag behind.
 VERSION := $(shell grep -E '^version:' pubspec.yaml | sed -E 's/.*version:[[:space:]]*([0-9][^[:space:]]*).*/\1/')
 TAG := dart/v$(VERSION)
 AQL_DRY_RUN_FILLER := AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET
@@ -42,18 +43,21 @@ publish: test
 	@set -e; \
 	token="$${GITHUB_TOKEN:-$$GH_TOKEN}"; \
 	if [ "$$token" = "$(AQL_DRY_RUN_FILLER)" ]; then \
-	  echo "[dry-run] aql filler token detected: would tag $(TAG) and push it over"; \
-	  echo "[dry-run] HTTPS to github.com/voxgig/struct — no tag created, nothing pushed."; \
+	  echo "[dry-run] aql filler token detected: would publish to pub.dev and tag $(TAG); nothing pushed."; \
 	  exit 0; \
 	fi; \
-	echo "tag: $(TAG)"; \
+	if [ -n "$$PUB_CREDENTIALS" ]; then \
+	  creddir="$$HOME/Library/Application Support/dart"; \
+	  [ -d "$$HOME/Library/Application Support" ] || creddir="$${XDG_CONFIG_HOME:-$$HOME/.config}/dart"; \
+	  mkdir -p "$$creddir"; \
+	  printf '%s' "$$PUB_CREDENTIALS" > "$$creddir/pub-credentials.json"; \
+	fi; \
+	dart pub publish --force; \
 	git tag -a "$(TAG)" -m "dart v$(VERSION)"; \
 	if [ -n "$$token" ]; then \
-	  echo "push: $(TAG) -> github.com/voxgig/struct (HTTPS, token auth)"; \
 	  hdr="AUTHORIZATION: basic $$(printf 'x-access-token:%s' "$$token" | base64 | tr -d '\n')"; \
 	  git -c http.extraheader="$$hdr" push https://github.com/voxgig/struct.git "$(TAG)"; \
 	else \
-	  echo "push: $(TAG) -> origin (ssh)"; \
 	  git push origin "$(TAG)"; \
 	fi; \
-	echo "Tagged $(TAG). pub.dev upload (manual): dart pub publish"
+	echo "Published to pub.dev + tag $(TAG)."
