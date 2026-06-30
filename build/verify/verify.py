@@ -27,13 +27,17 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
-# Registry ports: published == a real version on the package registry.
+# Registry ports we QUERY: published == a real version on the package registry,
+# so we only smoke-test once the registry actually serves it (not mid-indexing).
 HARNESS_REGISTRY = ["go", "typescript", "javascript", "python", "ruby", "rust", "csharp", "perl"]
 # Tag-only ports: the release IS the git tag (no registry). Published == the
 # tag exists (release_status STATUS == released). Verified by fetching the
 # source at the live tag and building a smoke client against it.
 HARNESS_TAG = ["php", "zig", "c", "cpp", "swift"]
-HARNESS = HARNESS_REGISTRY + HARNESS_TAG
+# Registry ports whose registry we DON'T query (luarocks): the dashboard STATUS
+# is the published signal (tag-confirmed); install from the registry to verify.
+HARNESS_STATUS = ["lua"]
+HARNESS = HARNESS_REGISTRY + HARNESS_TAG + HARNESS_STATUS
 RETRIES = int(sys.argv[sys.argv.index("--retries") + 1]) if "--retries" in sys.argv else 3
 
 # Output substrings that signal a TRANSIENT registry/network problem (retry),
@@ -82,17 +86,18 @@ def registry_published(entry) -> bool:
 
 
 def is_published(port: str, entry) -> bool:
-    """Is the port's release live? Registry ports: a registry version. Tag-only
-    ports: the git tag exists (release_status STATUS == released)."""
-    if port in HARNESS_TAG:
-        return (entry or {}).get("status") == "released"
-    return registry_published(entry)
+    """Is the port's release live? Queried-registry ports: a registry version.
+    Everything else (tag-only + unqueried-registry like lua): the dashboard
+    STATUS == released (the git tag is the published signal)."""
+    if port in HARNESS_REGISTRY:
+        return registry_published(entry)
+    return (entry or {}).get("status") == "released"
 
 
 def registry_unknown(port: str, entry) -> bool:
-    # Only registry ports can have an indeterminate (network-flaky) probe;
-    # tag status comes from git and is always known.
-    return port not in HARNESS_TAG and (entry or {}).get("registry") in ("?", None)
+    # Only queried-registry ports can have an indeterminate (network-flaky)
+    # probe; tag/status-confirmed ports come from git and are always known.
+    return port in HARNESS_REGISTRY and (entry or {}).get("registry") in ("?", None)
 
 
 def run_verify(port: str):
@@ -127,7 +132,7 @@ def main() -> int:
     for port in HARNESS:
         e = st.get(port)
         if is_published(port, e):
-            how = "fresh online install" if port in HARNESS_REGISTRY else "build from live tag source"
+            how = "build from live tag source" if port in HARNESS_TAG else "fresh online install"
             print(f"\n== verify {port} (published) — {how} ==")
             results[port] = run_verify(port)
         elif registry_unknown(port, e):

@@ -11,7 +11,7 @@
 # install, so we always exercise the live published artifact — never a stale
 # local copy or cached resolution.
 
-PORTS := go typescript javascript python ruby rust csharp perl php zig c cpp swift
+PORTS := go typescript javascript python ruby rust csharp perl lua php zig c cpp swift
 
 # Ruby toolchain. The published gem requires Ruby >= 2.7; some systems ship an
 # older /usr/bin/ruby (e.g. macOS 2.6). Prefer a Homebrew ruby when present
@@ -21,6 +21,8 @@ GEM    ?= $(shell command -v /opt/homebrew/opt/ruby/bin/gem 2>/dev/null || comma
 PYTHON ?= python3
 DOTNET ?= dotnet
 PERL   ?= perl
+LUAROCKS ?= luarocks
+LUA      ?= lua
 
 # Toolchains for the tag-only ports (no package registry: the "published"
 # artifact IS the git tag, so these targets download the tagged source
@@ -51,7 +53,7 @@ SWIFT_VER := $(shell cat ../../swift/VERSION)
 ZIG_VER   := $(shell sed -n 's/.*\.version *= *"\([^"]*\)".*/\1/p' ../../zig/build.zig.zon)
 
 .PHONY: verify verify-go verify-typescript verify-javascript \
-        verify-python verify-ruby verify-rust verify-csharp verify-perl \
+        verify-python verify-ruby verify-rust verify-csharp verify-perl verify-lua \
         verify-php verify-zig verify-c verify-cpp verify-swift clean
 
 # Each target removes its own artifacts first, then installs fresh from the
@@ -91,6 +93,15 @@ verify-perl:
 	top=$$(tar tzf $$d/src.tgz | head -1 | cut -d/ -f1); \
 	tar xzf $$d/src.tgz -C $$d; \
 	$(PERL) -I "$$d/$$top/lib" perl/smoke.pl
+
+# LuaRocks: install the published rock fresh into a throwaway tree (--force +
+# a clean tree each run = live install; luarocks fetches the git source at the
+# pinned tag), set the module path, and smoke require("voxgig.struct").
+verify-lua:
+	@command -v $(LUAROCKS) >/dev/null || { echo "FAIL lua: luarocks toolchain not found"; exit 1; }
+	cd lua && rm -rf .build && \
+	  $(LUAROCKS) install voxgig-struct --tree=.build/tree --force >/dev/null && \
+	  eval "$$($(LUAROCKS) path --tree=.build/tree)" && $(LUA) smoke.lua
 
 # --- Tag-only ports -------------------------------------------------------
 # These ports have NO package registry: the published artifact is the git
@@ -172,7 +183,7 @@ clean:
 	rm -f go/go.sum
 	rm -rf ruby/.gems
 	rm -rf rust/target
-	rm -rf csharp/bin csharp/obj perl/.build
+	rm -rf csharp/bin csharp/obj perl/.build lua/.build
 	rm -rf php/.build zig/.build c/.build cpp/.build swift/.build
 	rm -rf */.venv
 	find . -name '__pycache__' -type d -prune -exec rm -rf {} +
