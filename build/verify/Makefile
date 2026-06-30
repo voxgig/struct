@@ -11,7 +11,7 @@
 # install, so we always exercise the live published artifact — never a stale
 # local copy or cached resolution.
 
-PORTS := go typescript javascript python ruby rust csharp perl java lua clojure php zig c cpp swift
+PORTS := go typescript javascript python ruby rust csharp perl java kotlin lua clojure php zig c cpp swift
 
 # Ruby toolchain. The published gem requires Ruby >= 2.7; some systems ship an
 # older /usr/bin/ruby (e.g. macOS 2.6). Prefer a Homebrew ruby when present
@@ -55,8 +55,8 @@ SWIFT_VER := $(shell cat ../../swift/VERSION)
 ZIG_VER   := $(shell sed -n 's/.*\.version *= *"\([^"]*\)".*/\1/p' ../../zig/build.zig.zon)
 
 .PHONY: verify verify-go verify-typescript verify-javascript \
-        verify-python verify-ruby verify-rust verify-csharp verify-perl verify-java verify-lua \
-        verify-clojure verify-php verify-zig verify-c verify-cpp verify-swift clean
+        verify-python verify-ruby verify-rust verify-csharp verify-perl verify-java verify-kotlin \
+        verify-lua verify-clojure verify-php verify-zig verify-c verify-cpp verify-swift clean
 
 # Each target removes its own artifacts first, then installs fresh from the
 # registry with cache-revalidation flags (--prefer-online / --refresh /
@@ -102,6 +102,12 @@ verify-perl:
 verify-java:
 	@command -v $(MVN) >/dev/null || { echo "FAIL java: maven toolchain not found"; exit 1; }
 	cd java && rm -rf .build target && \
+	  $(MVN) -q -Dmaven.repo.local=.build/m2 -U compile exec:java -Dexec.mainClass=Smoke
+
+# Maven Central (Kotlin artifact, consumed from Java via Struct.INSTANCE).
+verify-kotlin:
+	@command -v $(MVN) >/dev/null || { echo "FAIL kotlin: maven toolchain not found"; exit 1; }
+	cd kotlin && rm -rf .build target && \
 	  $(MVN) -q -Dmaven.repo.local=.build/m2 -U compile exec:java -Dexec.mainClass=Smoke
 
 # LuaRocks: install the published rock fresh into a throwaway tree (--force +
@@ -204,7 +210,7 @@ clean:
 	rm -f go/go.sum
 	rm -rf ruby/.gems
 	rm -rf rust/target
-	rm -rf csharp/bin csharp/obj perl/.build java/.build java/target lua/.build clojure/.cpcache
+	rm -rf csharp/bin csharp/obj perl/.build java/.build java/target kotlin/.build kotlin/target lua/.build clojure/.cpcache
 	rm -rf php/.build zig/.build c/.build cpp/.build swift/.build
 	rm -rf */.venv
 	find . -name '__pycache__' -type d -prune -exec rm -rf {} +

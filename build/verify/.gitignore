@@ -12,8 +12,9 @@ rust/target/
 csharp/bin/
 csharp/obj/
 
-# java smoke build output (compiled fresh each run)
+# java/kotlin smoke build output (compiled fresh each run)
 java/target/
+kotlin/target/
 
 # clojure smoke classpath cache
 clojure/.cpcache/
