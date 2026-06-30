@@ -56,7 +56,7 @@ PORTS = [
     ("swift", ("file", "swift/VERSION"), "tag", None),
     ("clojure", ("file", "clojure/VERSION"), "clojars", "com.voxgig/struct-clojure"),
     ("ocaml", ("file", "ocaml/VERSION"), "tag", None),
-    ("scala", ("file", "scala/VERSION"), "tag", None),
+    ("scala", ("file", "scala/VERSION"), "maven", "com.voxgig:struct-scala_3"),
     ("dart", ("re", "dart/pubspec.yaml", r'(?m)^version:\s*([0-9][^\s]*)'), "tag", None),
     ("elixir", ("file", "elixir/VERSION"), "tag", None),
     ("haskell", ("file", "haskell/VERSION"), "tag", None),
