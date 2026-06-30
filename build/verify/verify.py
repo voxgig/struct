@@ -9,9 +9,9 @@ Flow:
      always exercise the live published artifact, never a stale local copy.
   3. Transient registry/network errors are retried, then reported as
      UNAVAILABLE (never FAIL) — a registry outage must not read as a broken
-     package. Unpublished ports are SKIPPED.
-  4. Print a full report for every harness port; exit non-zero ONLY on a real
-     verification FAILURE (package published but smoke broke).
+     package. Ports not yet published are reported as WARN (never FAIL).
+  4. Print a full report for EVERY target (published or not); exit non-zero
+     ONLY on a real verification FAILURE (package published but smoke broke).
 
 Usage: python3 verify.py [--retries N]
 """
@@ -129,7 +129,8 @@ def main() -> int:
         print("!! could not determine status (release_status.py --json failed)")
         return 2
 
-    results = {}  # only the harness ports get a smoke result
+    results = {}
+    # Smoke-test every PUBLISHED harness port; everything else just warns.
     for port in HARNESS:
         e = st.get(port)
         if is_published(port, e):
@@ -139,7 +140,16 @@ def main() -> int:
         elif registry_unknown(port, e):
             results[port] = ("UNAVAILABLE", "registry status probe failed")
         else:
-            results[port] = ("SKIPPED", "not published")
+            results[port] = ("WARN", "not published yet")
+    # Cover EVERY remaining target too, so the report accounts for all ports:
+    # unpublished -> WARN (never a failure); a published port with no smoke
+    # client -> no-client (a gap to fill at that port's publish time).
+    for port, e in st.items():
+        if port in results:
+            continue
+        results[port] = (("no-client", "published, no smoke client")
+                         if (e or {}).get("status") == "released"
+                         else ("WARN", "not published yet"))
 
     def released(port, e) -> str:
         # The dashboard STATUS is the authority on whether a release is live —
@@ -158,10 +168,10 @@ def main() -> int:
         # OK is self-evident (PUBLISHED + VERIFY say it); only annotate the rest.
         if res == "OK":
             return ""
+        if res == "WARN":
+            return "not published yet"
         if res == "no-client":
             return "no smoke client"
-        if res == "SKIPPED":
-            return "not published"
         return raw[:40]  # FAIL / TOOLCHAIN / UNAVAILABLE: the reason
 
     # Full report: EVERY port. KIND shows the channel (registry name vs `tag`).
@@ -180,11 +190,10 @@ def main() -> int:
     print("=" * width)
 
     n = lambda k: sum(1 for r in results.values() if r[0] == k)  # noqa: E731
-    no_client = len(st) - len(results)
     print(
-        f"{n('OK')} verified · {n('SKIPPED')} skipped(unpublished) · "
+        f"{n('OK')} verified · {n('WARN')} warned(unpublished) · "
         f"{n('UNAVAILABLE')} unavailable(transient) · {n('TOOLCHAIN')} toolchain-blocked · "
-        f"{n('FAIL')} failed · {no_client} no-client"
+        f"{n('FAIL')} failed · {n('no-client')} no-client"
     )
     return 1 if n("FAIL") else 0
 
