@@ -1,0 +1,6 @@
+; Public library: voxgig_struct.ml is the main module (matches the library
+; name), so the public API is Voxgig_struct.*; vregex.ml stays an internal
+; (wrapped) module. The test runner builds separately with raw ocamlc.
+(library
+ (name voxgig_struct)
+ (public_name voxgig-struct))

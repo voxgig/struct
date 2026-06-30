@@ -1,0 +1,28 @@
+(lang dune 3.0)
+
+(name voxgig-struct)
+(version 0.1.0)
+(generate_opam_files true)
+
+(source
+ (github voxgig/struct))
+
+(license MIT)
+(authors "Voxgig")
+(maintainers "Voxgig <richard.rodger@voxgig.com>")
+(homepage "https://github.com/voxgig/struct")
+(bug_reports "https://github.com/voxgig/struct/issues")
+
+(package
+ (name voxgig-struct)
+ (synopsis "OCaml port of voxgig/struct: JSON-like data structure utilities")
+ (description
+  "A faithful OCaml port of the canonical voxgig/struct library: utilities for \
+   walking, merging, transforming, injecting into, and validating JSON-like \
+   data structures (getpath, merge, inject, transform, validate, walk). No \
+   third-party dependencies.")
+ (depends
+  (ocaml
+   (>= 4.14))
+  (dune
+   (>= 3.0))))
