@@ -25,13 +25,16 @@ clean:
 
 reset: clean
 
-# Release: Clojars registry upload is a documented manual step for now; this
-# target cuts the clojure/vX.Y.Z git tag headlessly.
-# Headless: `aql vault exec --for=github <alias> -- make publish-clojure` injects
-# GH_TOKEN/GITHUB_TOKEN; the tag is pushed over HTTPS via an Authorization header
-# (kept out of the URL, .git/config, and argv), else the origin SSH remote.
-# `aql vault exec --dry-run` injects a filler we detect to rehearse (no tag).
-# set -e: a failed push never leaves a tag behind.
+# Release: build the jar + pom and deploy to Clojars (clojure -T:build deploy,
+# see build.clj), then cut + push the clojure/vX.Y.Z git tag.
+# Auth (from the aql vault at release time, none persisted on disk):
+#   CLOJARS_USERNAME / CLOJARS_PASSWORD  Clojars deploy token (deps-deploy reads
+#                                        these from the env; password = token)
+#   GITHUB_TOKEN                         pushes the git tag over HTTPS
+# Headless: `aql vault exec ... -- make publish-clojure`. `--dry-run` injects a
+# filler we detect to rehearse (no deploy, no tag). set -e + tag-last: a failed
+# Clojars upload aborts before any tag is created.
+# Prereq: the com.voxgig group verified on Clojars (clojars.org/verify).
 VERSION := $(shell cat VERSION)
 TAG := clojure/v$(VERSION)
 AQL_DRY_RUN_FILLER := AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET
@@ -41,18 +44,15 @@ publish: test
 	@set -e; \
 	token="$${GITHUB_TOKEN:-$$GH_TOKEN}"; \
 	if [ "$$token" = "$(AQL_DRY_RUN_FILLER)" ]; then \
-	  echo "[dry-run] aql filler token detected: would tag $(TAG) and push it over"; \
-	  echo "[dry-run] HTTPS to github.com/voxgig/struct — no tag created, nothing pushed."; \
+	  echo "[dry-run] aql filler token detected: would deploy to Clojars and tag $(TAG); nothing pushed."; \
 	  exit 0; \
 	fi; \
-	echo "tag: $(TAG)"; \
+	clojure -T:build deploy; \
 	git tag -a "$(TAG)" -m "clojure v$(VERSION)"; \
 	if [ -n "$$token" ]; then \
-	  echo "push: $(TAG) -> github.com/voxgig/struct (HTTPS, token auth)"; \
 	  hdr="AUTHORIZATION: basic $$(printf 'x-access-token:%s' "$$token" | base64 | tr -d '\n')"; \
 	  git -c http.extraheader="$$hdr" push https://github.com/voxgig/struct.git "$(TAG)"; \
 	else \
-	  echo "push: $(TAG) -> origin (ssh)"; \
 	  git push origin "$(TAG)"; \
 	fi; \
-	echo "Tagged $(TAG). Clojars upload (manual): deps-deploy to Clojars"
+	echo "Published to Clojars + tag $(TAG)."

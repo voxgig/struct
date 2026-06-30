@@ -5,4 +5,9 @@
   {:extra-paths ["test"]
    :main-opts ["-m" "voxgig.struct-runner"]}
   :lint
-  {:extra-paths ["test"]}}}
+  {:extra-paths ["test"]}
+  ;; Release tooling: build the jar/pom and deploy to Clojars (see build.clj).
+  :build
+  {:deps {io.github.clojure/tools.build {:mvn/version "0.10.5"}
+          slipset/deps-deploy {:mvn/version "0.2.2"}}
+   :ns-default build}}}
