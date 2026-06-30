@@ -28,10 +28,15 @@ clean:
 
 reset: clean
 
-# Release: deploy to Maven Central (OSSRH) via the `release` profile, then
-# tag java/vX.Y.Z (version = first <version> in pom.xml, the project version).
-# Needs auth: <server> credentials (id=central) in ~/.m2/settings.xml plus a
-# GPG signing key (the release profile signs in the verify phase).
+# Release: deploy to the Sonatype Central Portal via the `release` profile
+# (central-publishing-maven-plugin; OSSRH was retired 2025-06-30), then tag
+# java/vX.Y.Z (version = first <version> in pom.xml, the project version).
+# Auth (all from the aql vault at release time, none persisted on disk):
+#   CENTRAL_USERNAME / CENTRAL_PASSWORD  Portal user token (release-settings.xml)
+#   MAVEN_GPG_PASSPHRASE                 unlocks the GPG signing key
+#   GITHUB_TOKEN                         pushes the git tag over HTTPS
+# Prereqs: the com.voxgig namespace verified on the Portal, and the GPG secret
+# key imported into the local keyring + its public key on a keyserver.
 VERSION := $(shell grep -m1 "<version>" pom.xml | sed -E "s/.*<version>([^<]+)<.*/\1/")
 TAG := java/v$(VERSION)
 AQL_DRY_RUN_FILLER := AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET
@@ -44,7 +49,7 @@ publish: test
 	  echo "[dry-run] aql filler token detected: would publish artifact and tag $(TAG); nothing pushed."; \
 	  exit 0; \
 	fi; \
-	mvn -q -Prelease deploy; \
+	mvn -q -Prelease -s release-settings.xml deploy; \
 	git tag -a "$(TAG)" -m "java v$(VERSION)"; \
 	if [ -n "$$token" ]; then \
 	  hdr="AUTHORIZATION: basic $$(printf 'x-access-token:%s' "$$token" | base64 | tr -d '\n')"; \

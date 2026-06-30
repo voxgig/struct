@@ -5,7 +5,7 @@
 
   <groupId>com.voxgig</groupId>
   <artifactId>struct-java</artifactId>
-  <version>0.0.10</version>
+  <version>0.1.0</version>
   <name>voxgig-struct-java</name>
   <description>Voxgig Struct — utilities for transforming JSON-like data structures (Java port).</description>
   <url>https://github.com/voxgig/struct</url>
@@ -33,21 +33,12 @@
     <url>https://github.com/voxgig/struct</url>
   </scm>
 
-  <!-- Maven Central / OSSRH release + snapshot repositories. The matching
-       server credentials (id = central / ossrh) live in the operator's
-       ~/.m2/settings.xml at release time. -->
-  <distributionManagement>
-    <repository>
-      <id>central</id>
-      <name>Central Repository OSSRH</name>
-      <url>https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/</url>
-    </repository>
-    <snapshotRepository>
-      <id>central</id>
-      <name>Central Repository OSSRH Snapshots</name>
-      <url>https://s01.oss.sonatype.org/content/repositories/snapshots/</url>
-    </snapshotRepository>
-  </distributionManagement>
+  <!-- Publishing goes through the Sonatype Central Portal via the
+       central-publishing-maven-plugin (see the `release` profile) — NOT the
+       legacy OSSRH/Nexus staging API, which Sonatype shut down on 2025-06-30.
+       The plugin uploads the bundle to the Portal; there is no
+       distributionManagement repository. Portal user-token credentials
+       (server id = central) come from a settings.xml at release time. -->
 
   <properties>
     <maven.compiler.source>17</maven.compiler.source>
@@ -58,6 +49,7 @@
     <checkstyle.plugin.version>3.6.0</checkstyle.plugin.version>
     <checkstyle.version>13.5.0</checkstyle.version>
     <spotbugs.plugin.version>4.9.8.3</spotbugs.plugin.version>
+    <central.publishing.plugin.version>0.7.0</central.publishing.plugin.version>
   </properties>
 
   <dependencies>
@@ -219,6 +211,15 @@
             <groupId>org.apache.maven.plugins</groupId>
             <artifactId>maven-gpg-plugin</artifactId>
             <version>3.2.7</version>
+            <configuration>
+              <!-- Headless signing: read the passphrase from the environment
+                   (MAVEN_GPG_PASSPHRASE) and drive gpg with loopback pinentry
+                   so it never prompts on a TTY. -->
+              <gpgArguments>
+                <arg>--pinentry-mode</arg>
+                <arg>loopback</arg>
+              </gpgArguments>
+            </configuration>
             <executions>
               <execution>
                 <id>sign-artifacts</id>
@@ -229,6 +230,23 @@
                 </goals>
               </execution>
             </executions>
+          </plugin>
+
+          <!-- Upload + release to the Sonatype Central Portal (replaces the
+               retired OSSRH staging API). autoPublish=true releases without a
+               manual gate; waitUntil=published blocks until Central finishes
+               so a failed release fails the build (and we never tag). The
+               `central` server token comes from the release settings.xml. -->
+          <plugin>
+            <groupId>org.sonatype.central</groupId>
+            <artifactId>central-publishing-maven-plugin</artifactId>
+            <version>${central.publishing.plugin.version}</version>
+            <extensions>true</extensions>
+            <configuration>
+              <publishingServerId>central</publishingServerId>
+              <autoPublish>true</autoPublish>
+              <waitUntil>published</waitUntil>
+            </configuration>
           </plugin>
         </plugins>
       </build>

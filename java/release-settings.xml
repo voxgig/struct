@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Headless Maven settings for publishing to the Sonatype Central Portal.
+     Used via `mvn -s release-settings.xml -Prelease deploy` (see the Makefile).
+
+     The `central` server is the publishingServerId the central-publishing-
+     maven-plugin reads. Credentials are a Central Portal USER TOKEN (generated
+     at central.sonatype.com -> Account -> Generate User Token) — NOT your
+     login. They are injected from the environment at release time (from the
+     aql vault), so no secrets live on disk:
+       CENTRAL_USERNAME / CENTRAL_PASSWORD  -> the token's user/pass pair
+     The GPG passphrase is read separately from MAVEN_GPG_PASSPHRASE by the
+     maven-gpg-plugin. -->
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0
+                              https://maven.apache.org/xsd/settings-1.0.0.xsd">
+  <servers>
+    <server>
+      <id>central</id>
+      <username>${env.CENTRAL_USERNAME}</username>
+      <password>${env.CENTRAL_PASSWORD}</password>
+    </server>
+  </servers>
+</settings>
