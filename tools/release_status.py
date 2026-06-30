@@ -45,7 +45,7 @@ PORTS = [
     ("rust", ("re", "rust/Cargo.toml", r'(?m)^version\s*=\s*"([^"]+)"'), "crates", "voxgig-struct"),
     ("csharp", ("glob", "csharp/*.csproj", r"<Version>([^<]+)</Version>"), "nuget", "Voxgig.Struct"),
     ("perl", ("re", "perl/lib/Voxgig/Struct.pm", r"VERSION\s*=\s*['\"]v?([0-9][^'\"]*)"), "cpan", "Voxgig-Struct"),
-    ("java", ("re", "java/pom.xml", r"<version>([^<]+)</version>"), "maven", None),
+    ("java", ("re", "java/pom.xml", r"<version>([^<]+)</version>"), "maven", "com.voxgig:struct-java"),
     ("kotlin", ("re", "kotlin/build.gradle.kts", r'version\s*=\s*"([^"]+)"'), "maven", None),
     # capture only the version, dropping the rockspec "-<rev>" suffix (0.1.0-1 -> 0.1.0)
     ("lua", ("re", "lua/struct.rockspec", r'version\s*=\s*"([0-9.]+)'), "luarocks", None),
@@ -134,6 +134,12 @@ def registry_version(kind: str, ident) -> str:
             return fetch(f"https://crates.io/api/v1/crates/{ident}")["crate"]["max_stable_version"]
         if kind == "nuget":
             return fetch(f"https://api.nuget.org/v3-flatcontainer/{ident.lower()}/index.json")["versions"][-1]
+        if kind == "maven":
+            # Maven Central metadata is XML, not JSON — fetch raw and pull <release>.
+            g, a = ident.split(":")
+            xml = fetch_text(f"https://repo1.maven.org/maven2/{g.replace('.', '/')}/{a}/maven-metadata.xml")
+            m = re.search(r"<release>([^<]+)</release>", xml) or re.search(r"<latest>([^<]+)</latest>", xml)
+            return m.group(1) if m else "absent"
         if kind == "cpan":
             # MetaCPAN reports Perl versions v-prefixed ("v0.1.0"); strip it so
             # the REGISTRY column matches LOCAL/TAG (which are plain "0.1.0").
@@ -142,7 +148,7 @@ def registry_version(kind: str, ident) -> str:
         return "absent" if e.code == 404 else "?"
     except Exception:
         return "?"
-    return "—"  # maven / luarocks: not queried (use TAG)
+    return "—"  # luarocks: not queried (use TAG)
 
 
 def fetch(url: str):
@@ -154,6 +160,16 @@ def fetch(url: str):
     req = urllib.request.Request(url, headers=UA)
     with urllib.request.urlopen(req, timeout=TIMEOUT) as r:  # nosemgrep  # noqa: S310
         return json.load(r)
+
+
+def fetch_text(url: str) -> str:
+    # Same hardcoded-https guard as fetch(), but returns the raw body (for XML
+    # endpoints like Maven Central's maven-metadata.xml).
+    if not url.startswith("https://"):
+        raise ValueError("refusing non-https url")
+    req = urllib.request.Request(url, headers=UA)
+    with urllib.request.urlopen(req, timeout=TIMEOUT) as r:  # nosemgrep  # noqa: S310
+        return r.read().decode("utf-8", "replace")
 
 
 def run(args) -> str:
