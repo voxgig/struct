@@ -64,7 +64,7 @@ publish: test
 	  --license "MIT:https://opensource.org/licenses/MIT" \
 	  --vcs "github:voxgig/struct" --developer "voxgig|Voxgig|https://voxgig.com" \
 	  --publish-repository central \
-	  --user "$$CENTRAL_USERNAME" --password "env:CENTRAL_PASSWORD" \
+	  --user "env:CENTRAL_USERNAME" --password "env:CENTRAL_PASSWORD" \
 	  --signer bc --secret-key "file:$$keyfile" --secret-key-password "env:GPG_PASS"; \
 	git tag -a "$(TAG)" -m "scala v$(VERSION)"; \
 	if [ -n "$$token" ]; then \
