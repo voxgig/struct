@@ -11,7 +11,7 @@
 # install, so we always exercise the live published artifact — never a stale
 # local copy or cached resolution.
 
-PORTS := go typescript javascript python ruby rust csharp perl java kotlin lua clojure php zig c cpp swift
+PORTS := go typescript javascript python ruby rust csharp perl java kotlin scala lua clojure php zig c cpp swift
 
 # Ruby toolchain. The published gem requires Ruby >= 2.7; some systems ship an
 # older /usr/bin/ruby (e.g. macOS 2.6). Prefer a Homebrew ruby when present
@@ -25,6 +25,7 @@ MVN    ?= mvn
 LUAROCKS ?= luarocks
 LUA      ?= lua
 CLOJURE  ?= clojure
+SCALA_CLI ?= scala-cli
 
 # Toolchains for the tag-only ports (no package registry: the "published"
 # artifact IS the git tag, so these targets download the tagged source
@@ -56,7 +57,7 @@ ZIG_VER   := $(shell sed -n 's/.*\.version *= *"\([^"]*\)".*/\1/p' ../../zig/bui
 
 .PHONY: verify verify-go verify-typescript verify-javascript \
         verify-python verify-ruby verify-rust verify-csharp verify-perl verify-java verify-kotlin \
-        verify-lua verify-clojure verify-php verify-zig verify-c verify-cpp verify-swift clean
+        verify-scala verify-lua verify-clojure verify-php verify-zig verify-c verify-cpp verify-swift clean
 
 # Each target removes its own artifacts first, then installs fresh from the
 # registry with cache-revalidation flags (--prefer-online / --refresh /
@@ -118,6 +119,16 @@ verify-lua:
 	cd lua && rm -rf .build && \
 	  $(LUAROCKS) install voxgig-struct --tree=.build/tree --force >/dev/null && \
 	  eval "$$($(LUAROCKS) path --tree=.build/tree)" && $(LUA) smoke.lua
+
+# Maven Central (Scala 3 artifact; getpath works on the Value ADT). scala-cli
+# resolves struct-scala_3 fresh from Central (cleared coursier cache) at the
+# repo's VERSION; smoke.scala builds VMap/VStr Values and unwraps the result.
+verify-scala:
+	@command -v $(SCALA_CLI) >/dev/null || { echo "FAIL scala: scala-cli not found"; exit 1; }
+	ver=$$(cat ../../scala/VERSION); \
+	rm -rf "$$HOME/Library/Caches/Coursier/v1/https/repo1.maven.org/maven2/com/voxgig/struct-scala_3" \
+	       "$$HOME/.cache/coursier/v1/https/repo1.maven.org/maven2/com/voxgig/struct-scala_3"; \
+	cd scala && $(SCALA_CLI) run smoke.scala --dep "com.voxgig::struct-scala:$$ver"
 
 # Clojars: resolve the published com.voxgig/struct-clojure fresh (drop the cached
 # artifact + -Sforce = live re-download) at the repo's VERSION, then run the
@@ -210,7 +221,7 @@ clean:
 	rm -f go/go.sum
 	rm -rf ruby/.gems
 	rm -rf rust/target
-	rm -rf csharp/bin csharp/obj perl/.build java/.build java/target kotlin/.build kotlin/target lua/.build clojure/.cpcache
+	rm -rf csharp/bin csharp/obj perl/.build java/.build java/target kotlin/.build kotlin/target lua/.build clojure/.cpcache scala/.scala-build scala/.bsp
 	rm -rf php/.build zig/.build c/.build cpp/.build swift/.build
 	rm -rf */.venv
 	find . -name '__pycache__' -type d -prune -exec rm -rf {} +
