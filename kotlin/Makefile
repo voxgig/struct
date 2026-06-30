@@ -29,10 +29,14 @@ reset: clean
 # build.gradle.kts). Auth (from the aql vault at release time, none on disk),
 # as ORG_GRADLE_PROJECT_* env vars the plugin reads as Gradle properties:
 #   ORG_GRADLE_PROJECT_mavenCentralUsername / ...Password   Portal user token
-#   ORG_GRADLE_PROJECT_signingInMemoryKey / ...Password     ASCII-armored GPG key
+#   ORG_GRADLE_PROJECT_signingInMemoryKeyPassword           GPG key passphrase
+#   SIGNING_KEY_B64                                          base64 of the armored
+#       GPG secret key; decoded below into ORG_GRADLE_PROJECT_signingInMemoryKey.
+#       base64 (not raw armor) so the multi-line key survives the vault->env
+#       hop intact — Gradle's signer rejects a key whose newlines got mangled.
 #   GITHUB_TOKEN                                             pushes the git tag
-# Prereq: the com.voxgig namespace verified on the Portal; export the GPG secret
-# key with `gpg --armor --export-secret-keys <KEYID>` for signingInMemoryKey.
+# Prereq: the com.voxgig namespace verified on the Portal; produce SIGNING_KEY_B64
+# with `gpg --armor --export-secret-keys <KEYID> | base64`.
 VERSION := $(shell grep -E "^version" build.gradle.kts | sed -E "s/.*\"([^\"]+)\".*/\1/")
 TAG := kotlin/v$(VERSION)
 AQL_DRY_RUN_FILLER := AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET
@@ -44,6 +48,10 @@ publish: test
 	if [ "$$token" = "$(AQL_DRY_RUN_FILLER)" ]; then \
 	  echo "[dry-run] aql filler token detected: would publish artifact and tag $(TAG); nothing pushed."; \
 	  exit 0; \
+	fi; \
+	if [ -n "$$SIGNING_KEY_B64" ]; then \
+	  ORG_GRADLE_PROJECT_signingInMemoryKey=$$(printf '%s' "$$SIGNING_KEY_B64" | base64 -d); \
+	  export ORG_GRADLE_PROJECT_signingInMemoryKey; \
 	fi; \
 	$(GRADLE) publishToMavenCentral; \
 	git tag -a "$(TAG)" -m "kotlin v$(VERSION)"; \
