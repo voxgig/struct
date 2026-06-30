@@ -11,7 +11,7 @@
 # install, so we always exercise the live published artifact — never a stale
 # local copy or cached resolution.
 
-PORTS := go typescript javascript python ruby rust csharp perl java kotlin scala lua clojure dart php zig c cpp swift
+PORTS := go typescript javascript python ruby rust csharp perl java kotlin scala lua clojure dart elixir php zig c cpp swift
 
 # Ruby toolchain. The published gem requires Ruby >= 2.7; some systems ship an
 # older /usr/bin/ruby (e.g. macOS 2.6). Prefer a Homebrew ruby when present
@@ -27,6 +27,7 @@ LUA      ?= lua
 CLOJURE  ?= clojure
 SCALA_CLI ?= scala-cli
 DART     ?= dart
+ELIXIR   ?= elixir
 
 # Toolchains for the tag-only ports (no package registry: the "published"
 # artifact IS the git tag, so these targets download the tagged source
@@ -58,7 +59,7 @@ ZIG_VER   := $(shell sed -n 's/.*\.version *= *"\([^"]*\)".*/\1/p' ../../zig/bui
 
 .PHONY: verify verify-go verify-typescript verify-javascript \
         verify-python verify-ruby verify-rust verify-csharp verify-perl verify-java verify-kotlin \
-        verify-scala verify-lua verify-clojure verify-dart \
+        verify-scala verify-lua verify-clojure verify-dart verify-elixir \
         verify-php verify-zig verify-c verify-cpp verify-swift clean
 
 # Each target removes its own artifacts first, then installs fresh from the
@@ -131,6 +132,12 @@ verify-scala:
 	rm -rf "$$HOME/Library/Caches/Coursier/v1/https/repo1.maven.org/maven2/com/voxgig/struct-scala_3" \
 	       "$$HOME/.cache/coursier/v1/https/repo1.maven.org/maven2/com/voxgig/struct-scala_3"; \
 	cd scala && $(SCALA_CLI) run smoke.scala --dep "com.voxgig::struct-scala:$$ver"
+
+# Hex: Mix.install resolves the published voxgig_struct fresh (MIX_INSTALL_FORCE
+# re-fetches from Hex) and runs the smoke (store built with the public jm/1).
+verify-elixir:
+	@command -v $(ELIXIR) >/dev/null || { echo "FAIL elixir: elixir not found"; exit 1; }
+	cd elixir && MIX_INSTALL_FORCE=1 $(ELIXIR) smoke.exs
 
 # pub.dev: resolve the published voxgig_struct fresh (clear the pub cache entry
 # + lockfile so dart pub get re-downloads) and run the smoke.

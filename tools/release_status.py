@@ -58,7 +58,7 @@ PORTS = [
     ("ocaml", ("file", "ocaml/VERSION"), "tag", None),
     ("scala", ("file", "scala/VERSION"), "maven", "com.voxgig:struct-scala_3"),
     ("dart", ("re", "dart/pubspec.yaml", r'(?m)^version:\s*([0-9][^\s]*)'), "pub", "voxgig_struct"),
-    ("elixir", ("file", "elixir/VERSION"), "tag", None),
+    ("elixir", ("file", "elixir/VERSION"), "hex", "voxgig_struct"),
     ("haskell", ("file", "haskell/VERSION"), "tag", None),
 ]
 
@@ -144,6 +144,8 @@ def registry_version(kind: str, ident) -> str:
             return maven_metadata_version(f"https://repo.clojars.org/{g.replace('.', '/')}/{a}")
         if kind == "pub":
             return fetch(f"https://pub.dev/api/packages/{ident}")["latest"]["version"]
+        if kind == "hex":
+            return fetch(f"https://hex.pm/api/packages/{ident}")["latest_stable_version"]
         if kind == "cpan":
             # MetaCPAN reports Perl versions v-prefixed ("v0.1.0"); strip it so
             # the REGISTRY column matches LOCAL/TAG (which are plain "0.1.0").
