@@ -3,9 +3,8 @@ plugins {
     // Code quality
     id("io.gitlab.arturbosch.detekt") version "1.23.8"
     id("org.jlleitschuh.gradle.ktlint") version "12.1.2"
-    // Maven Central publishing + GPG signing of the published artifacts.
-    `maven-publish`
-    signing
+    // Maven Central publishing via the Sonatype Central Portal (+ GPG signing).
+    id("com.vanniktech.maven.publish") version "0.37.0"
 }
 
 group = "com.voxgig"
@@ -54,75 +53,43 @@ tasks.register("lint") {
     dependsOn("detekt", "ktlintCheck")
 }
 
-// ---- Maven Central publishing ----
-// Attach the sources + javadoc jars that Maven Central requires. The
-// kotlin("jvm") plugin wires up the `java` software component, so adding
-// these here means components["java"] carries main + sources + javadoc.
-java {
-    withSourcesJar()
-    withJavadocJar()
-}
-
-publishing {
-    publications {
-        create<MavenPublication>("maven") {
-            from(components["java"])
-            pom {
-                name.set("voxgig-struct-kotlin")
-                description.set(
-                    "Voxgig Struct — utilities for transforming JSON-like data structures (Kotlin port).",
-                )
-                url.set("https://github.com/voxgig/struct")
-                licenses {
-                    license {
-                        name.set("MIT License")
-                        url.set("https://opensource.org/licenses/MIT")
-                        distribution.set("repo")
-                    }
-                }
-                developers {
-                    developer {
-                        id.set("voxgig")
-                        name.set("Voxgig")
-                        organization.set("Voxgig")
-                        organizationUrl.set("https://voxgig.com")
-                    }
-                }
-                scm {
-                    connection.set("scm:git:https://github.com/voxgig/struct.git")
-                    developerConnection.set("scm:git:git@github.com:voxgig/struct.git")
-                    url.set("https://github.com/voxgig/struct")
-                }
+// ---- Maven Central publishing via the Sonatype Central Portal ----
+// OSSRH/Nexus staging was retired 2025-06-30, so publish through the Central
+// Portal with the vanniktech plugin. It builds the sources + javadoc jars,
+// signs every artifact, uploads the bundle, and (automaticRelease) releases it.
+// Auth comes from ORG_GRADLE_PROJECT_* env vars at release time (see Makefile):
+//   mavenCentralUsername / mavenCentralPassword   Portal user token
+//   signingInMemoryKey / signingInMemoryKeyPassword   ASCII-armored GPG key
+// publishToMavenLocal needs no key (signing only applies to the remote publish).
+mavenPublishing {
+    publishToMavenCentral(automaticRelease = true)
+    signAllPublications()
+    coordinates("com.voxgig", "struct-kotlin", version.toString())
+    pom {
+        name.set("voxgig-struct-kotlin")
+        description.set(
+            "Voxgig Struct — utilities for transforming JSON-like data structures (Kotlin port).",
+        )
+        url.set("https://github.com/voxgig/struct")
+        licenses {
+            license {
+                name.set("MIT License")
+                url.set("https://opensource.org/licenses/MIT")
+                distribution.set("repo")
             }
         }
-    }
-    repositories {
-        // Maven Central / OSSRH. Release vs. snapshot URL is chosen from the
-        // version suffix. The matching credentials are operator-provided at
-        // release time via Gradle properties (ossrhUsername / ossrhPassword)
-        // or the OSSRH_USERNAME / OSSRH_PASSWORD environment variables.
-        maven {
-            name = "central"
-            val releasesUrl =
-                uri("https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/")
-            val snapshotsUrl =
-                uri("https://s01.oss.sonatype.org/content/repositories/snapshots/")
-            url = if (version.toString().endsWith("SNAPSHOT")) snapshotsUrl else releasesUrl
-            credentials {
-                username = (project.findProperty("ossrhUsername") as String?)
-                    ?: System.getenv("OSSRH_USERNAME")
-                password = (project.findProperty("ossrhPassword") as String?)
-                    ?: System.getenv("OSSRH_PASSWORD")
+        developers {
+            developer {
+                id.set("voxgig")
+                name.set("Voxgig")
+                organization.set("Voxgig")
+                organizationUrl.set("https://voxgig.com")
             }
         }
+        scm {
+            connection.set("scm:git:https://github.com/voxgig/struct.git")
+            developerConnection.set("scm:git:git@github.com:voxgig/struct.git")
+            url.set("https://github.com/voxgig/struct")
+        }
     }
-}
-
-signing {
-    // Only require a signing key when actually publishing to the remote
-    // repository, so `publishToMavenLocal` (and ordinary builds) need no key.
-    // The GPG key + passphrase are operator-provided at release time via the
-    // standard signing.* Gradle properties or in-memory key env vars.
-    isRequired = gradle.taskGraph.allTasks.any { it.name == "publish" }
-    sign(publishing.publications["maven"])
 }

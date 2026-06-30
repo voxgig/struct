@@ -24,10 +24,15 @@ clean:
 reset: clean
 	rm -rf .gradle build
 
-# Release: publish to Maven Central (OSSRH), then tag kotlin/vX.Y.Z (version
-# from build.gradle.kts). Needs auth: OSSRH credentials (ossrhUsername /
-# ossrhPassword Gradle properties or OSSRH_USERNAME / OSSRH_PASSWORD env vars)
-# plus a GPG signing key (signing.* Gradle properties / in-memory key env).
+# Release: publish to the Sonatype Central Portal via the vanniktech plugin
+# (OSSRH was retired 2025-06-30), then tag kotlin/vX.Y.Z (version from
+# build.gradle.kts). Auth (from the aql vault at release time, none on disk),
+# as ORG_GRADLE_PROJECT_* env vars the plugin reads as Gradle properties:
+#   ORG_GRADLE_PROJECT_mavenCentralUsername / ...Password   Portal user token
+#   ORG_GRADLE_PROJECT_signingInMemoryKey / ...Password     ASCII-armored GPG key
+#   GITHUB_TOKEN                                             pushes the git tag
+# Prereq: the com.voxgig namespace verified on the Portal; export the GPG secret
+# key with `gpg --armor --export-secret-keys <KEYID>` for signingInMemoryKey.
 VERSION := $(shell grep -E "^version" build.gradle.kts | sed -E "s/.*\"([^\"]+)\".*/\1/")
 TAG := kotlin/v$(VERSION)
 AQL_DRY_RUN_FILLER := AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET
@@ -40,7 +45,7 @@ publish: test
 	  echo "[dry-run] aql filler token detected: would publish artifact and tag $(TAG); nothing pushed."; \
 	  exit 0; \
 	fi; \
-	$(GRADLE) publish; \
+	$(GRADLE) publishToMavenCentral; \
 	git tag -a "$(TAG)" -m "kotlin v$(VERSION)"; \
 	if [ -n "$$token" ]; then \
 	  hdr="AUTHORIZATION: basic $$(printf 'x-access-token:%s' "$$token" | base64 | tr -d '\n')"; \
