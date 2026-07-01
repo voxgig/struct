@@ -254,4 +254,5 @@ jobs:
         with:
           ocaml-compiler: '5'
       - working-directory: ./ocaml
-        run: make lint
+        # ocamlc lives in the opam switch; opam exec puts it on PATH.
+        run: opam exec -- make lint

@@ -241,6 +241,11 @@ jobs:
         uses: mlugg/setup-zig@v1
         with:
           version: ${{ matrix.zig-version }}
+      # zig 0.13 cannot link against the newer Xcode SDK on macOS runners
+      # (undefined libc symbols); the Command Line Tools SDK still works.
+      - name: Use Command Line Tools SDK (macOS)
+        if: runner.os == 'macOS'
+        run: echo "DEVELOPER_DIR=/Library/Developer/CommandLineTools" >> "$GITHUB_ENV"
       - name: Build and test
         working-directory: ./zig
         shell: bash
@@ -446,4 +451,5 @@ jobs:
       - name: Run tests
         working-directory: ./ocaml
         shell: bash
-        run: make test
+        # ocamlc lives in the opam switch; opam exec puts it on PATH.
+        run: opam exec -- make test
