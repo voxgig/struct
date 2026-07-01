@@ -1,3 +1,4 @@
 *.out
 *.o
 corpus-scoreboard.json
+*.dSYM/
