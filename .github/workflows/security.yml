@@ -98,7 +98,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 'lts/*'
+          node-version: '24'
       - run: npx --yes cspell --no-progress --no-summary --gitignore "**/*.md"
 
   markdown:
@@ -108,7 +108,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 'lts/*'
+          node-version: '24'
       - run: npx --yes markdownlint-cli '**/*.md'
 
   parity:
@@ -142,7 +142,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 'lts/*'
+          node-version: '24'
       - name: Recompile build/test/test.json from the *.jsonic sources
         working-directory: ./build
         run: |
@@ -160,7 +160,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 'lts/*'
+          node-version: '24'
       - working-directory: ./typescript
         run: npm install --package-lock-only && make audit
 
@@ -171,7 +171,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 'lts/*'
+          node-version: '24'
       - working-directory: ./javascript
         run: npm install --package-lock-only && make audit
 

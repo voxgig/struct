@@ -1,5 +1,5 @@
 # Makefile for the Scala port of voxgig/struct.
-# Requires `scalac` (build/lint) and `scala-cli` (test/publish) + a JDK on PATH.
+# Requires `scala-cli` + a JDK on PATH (build/lint/test/publish all use it).
 # No third-party libraries.
 
 SRC = src/voxgig_struct.scala
@@ -14,15 +14,15 @@ test:
 	scala-cli run $(TESTSRC) --main-class Runner
 
 build:
-	rm -rf out && mkdir out && scalac $(TESTSRC) -d out
+	scala-cli compile $(TESTSRC)
 
 # "Lint": compile the library (a clean compile means the code type-checks).
 # scalafmt/scalafix can be wired into this target if available.
 lint:
-	rm -rf out-lint && mkdir out-lint && scalac $(SRC) -d out-lint && echo ok
+	scala-cli compile $(SRC) && echo ok
 
 inspect:
-	@scalac -version 2>&1 | head -1
+	@scala-cli version 2>&1 | head -2
 
 clean:
 	rm -rf out out-lint .scala-build .bsp src/.scala-build src/.bsp
