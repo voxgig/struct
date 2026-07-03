@@ -2,7 +2,7 @@
 # Requires GHC (`ghc` / `runghc`) on PATH. No third-party dependencies
 # (only the GHC boot libraries: base, array, etc.).
 
-.PHONY: test lint build inspect clean reset publish format
+.PHONY: test lint build inspect clean reset publish publish-candidate format
 
 BUILDDIR := .hsbuild
 
@@ -33,7 +33,10 @@ reset: clean
 
 # Release: build the source distribution and publish to Hackage (cabal upload
 # --publish), then tag haskell/vX.Y.Z. NB Hackage releases are permanent (a
-# version can be deprecated but never deleted). The .cabal version must match
+# version can be deprecated but never deleted). ALWAYS dry-run the real thing
+# with `make publish-candidate` first: a candidate is changeable/removable, so
+# use it to confirm the package page renders, the sdist builds, and Haddock is
+# clean before committing to the permanent index. The .cabal version must match
 # VERSION (guarded below) since the sdist tarball name comes from the .cabal.
 # Auth (from the aql vault at release time, none persisted on disk):
 #   HACKAGE_TOKEN  Hackage API token (hackage.haskell.org -> account -> tokens)
@@ -43,6 +46,23 @@ VERSION := $(shell cat VERSION)
 TAG := haskell/v$(VERSION)
 SDIST := dist-newstyle/sdist/voxgig-struct-$(VERSION).tar.gz
 AQL_DRY_RUN_FILLER := AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET
+
+# Upload a *candidate* (non-permanent, changeable, removable) so you can verify
+# the package page, dependency bounds, and Haddock rendering before the one-way
+# `make publish`. Lives at hackage.haskell.org/package/voxgig-struct-X.Y.Z/candidate.
+# No git tag is created for a candidate. Only HACKAGE_TOKEN is needed.
+publish-candidate: test
+	@cabalver=$$(sed -nE 's/^version:[[:space:]]*([0-9.]+).*/\1/p' voxgig-struct.cabal); \
+	  [ "$$cabalver" = "$(VERSION)" ] || { echo "version mismatch: VERSION=$(VERSION) vs .cabal=$$cabalver — bump both"; exit 1; }
+	@set -e; \
+	if [ "$$HACKAGE_TOKEN" = "$(AQL_DRY_RUN_FILLER)" ] || [ "$${GITHUB_TOKEN:-$$GH_TOKEN}" = "$(AQL_DRY_RUN_FILLER)" ]; then \
+	  echo "[dry-run] aql filler token detected: would upload candidate voxgig-struct-$(VERSION); nothing uploaded."; \
+	  exit 0; \
+	fi; \
+	cabal sdist; \
+	cabal upload --token="$$HACKAGE_TOKEN" "$(SDIST)"; \
+	echo "Uploaded candidate: https://hackage.haskell.org/package/voxgig-struct-$(VERSION)/candidate"
+
 publish: test
 	@if git rev-parse -q --verify "refs/tags/$(TAG)" >/dev/null; then \
 	  echo "tag $(TAG) already exists — bump haskell/VERSION first"; exit 1; fi
