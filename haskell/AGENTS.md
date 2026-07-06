@@ -20,6 +20,27 @@ runtime dependencies** — no Cabal/Stack packages, no `aeson`, no `regex-*`. Th
 test runner ships a hand-written JSON reader; the library vendors a small
 RE2-subset regex engine (`src/Vregex.hs`).
 
+## Releasing to Hackage
+
+The package is `voxgig-struct` (`voxgig-struct.cabal`); the version lives in
+`VERSION` and is mirrored in the `.cabal` (the `publish` targets guard that the
+two match). **Hackage uploads are permanent** — a version can be deprecated but
+never changed or removed — so the workflow is candidate-first:
+
+```
+make publish-candidate   # changeable/removable candidate; verify the page + Haddock
+make publish             # permanent upload + git tag haskell/vX.Y.Z
+```
+
+Both need `HACKAGE_TOKEN` (account → tokens); `publish` also needs a token to
+push the tag. With the aql dry-run filler token in the env, both targets no-op
+loudly instead of touching the network.
+
+Dependency bounds follow PVP — **lower AND upper on every unique dependency**,
+declared once (`base >=4.14 && <5`, `array >=0.5 && <0.6` in the `library`
+stanza; there is no separate `test-suite` stanza to duplicate them into).
+Re-run `cabal gen-bounds` if the dependency set ever changes.
+
 ## The value model
 
 The canonical algorithm mutates nodes in place and relies on reference-stable

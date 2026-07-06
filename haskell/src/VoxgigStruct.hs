@@ -1,21 +1,44 @@
 -- Copyright (c) 2025-2026 Voxgig Ltd. MIT LICENSE.
---
--- Voxgig Struct — Haskell port.
---
--- A faithful port of the canonical TypeScript implementation
--- (typescript/src/StructUtility.ts). Like TypeScript (and the OCaml / Rust
--- ports), this port keeps `undefined` (VNoval) and JSON `null` (VNull)
--- distinct, so it mirrors the canonical TS logic directly. The canonical
--- algorithm mutates nodes in place and relies on reference-stable nodes
--- (shared references seen by walk / merge / inject). Haskell has no mutable
--- native collection, so nodes carry an `IORef` to their contents (lists are
--- `IORef [Value]`, maps an `IORef` of ordered key/value pairs) — the analog of
--- the OCaml `ref` or Rust `Rc<RefCell>` — and the whole API runs in `IO`.
--- Zero third-party runtime dependencies; the regex helper is the in-tree
--- Vregex engine (RE2 subset).
 
 {-# LANGUAGE LambdaCase #-}
 
+-- |
+-- Module      : VoxgigStruct
+-- Copyright   : (c) 2025-2026 Voxgig Ltd.
+-- License     : MIT
+-- Maintainer  : richard.rodger\@voxgig.com
+-- Stability   : experimental
+--
+-- Utilities for walking, merging, transforming, injecting into and validating
+-- JSON-like data structures — the Haskell port of the canonical
+-- @voxgig\/struct@ library (TypeScript @typescript\/src\/StructUtility.ts@).
+--
+-- Values are modelled by the 'Value' type. Like the canonical TypeScript (and
+-- the OCaml \/ Rust ports) this port keeps @undefined@ ('VNoval') and JSON
+-- @null@ ('VNull') distinct, so it mirrors the canonical logic directly.
+--
+-- The canonical algorithm mutates nodes in place and relies on
+-- reference-stable nodes (shared references observed by 'walk', 'merge' and
+-- 'inject'). Haskell has no mutable native collection, so a node carries an
+-- 'Data.IORef.IORef' to its contents — lists are @'IORef' ['Value']@, maps an
+-- @'IORef'@ of ordered key\/value pairs, the analog of OCaml's @ref@ or Rust's
+-- @Rc\<RefCell\>@. A consequence is that __the whole API runs in 'IO'__: every
+-- reader and mutator returns @IO@. Build nodes with 'jm' \/ 'jt', or by running
+-- the 'transform' \/ 'inject' engines.
+--
+-- There are zero third-party runtime dependencies; the regex helper is the
+-- in-tree @Vregex@ engine (an RE2 subset).
+--
+-- == Example
+--
+-- @
+-- import VoxgigStruct
+--
+-- demo :: IO ()
+-- demo = do
+--   a <- 'jm' ['VStr' \"a\", 'VNum' 1]; b <- 'jm' ['VStr' \"b\", 'VNum' 2]; xs <- 'jt' [a, b]
+--   putStrLn =<< 'stringify' =<< 'merge' xs            -- {a:1,b:2}
+-- @
 module VoxgigStruct where
 
 import Control.Exception (Exception, throwIO)
@@ -25,7 +48,7 @@ import Data.Char (toLower, toUpper)
 import Data.IORef
 import Data.List (findIndex, intercalate, isPrefixOf, sort)
 import qualified Data.List as L
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (fromMaybe)
 import Numeric (showHex)
 import System.IO.Unsafe (unsafePerformIO)
 import Text.Printf (printf)
@@ -38,56 +61,62 @@ import Prelude hiding (filter)
 -- Value model
 -- ---------------------------------------------------------------------------
 
+-- | The universal JSON-like value: scalars, mutable 'IORef'-backed nodes, functions and sentinels.
 data Value
-  = VNoval                       -- TS undefined — property absent
-  | VNull                        -- JSON null
-  | VBool !Bool
-  | VNum !Double
-  | VStr !String
-  | VList !(IORef [Value])
-  | VMap !(IORef [(String, Value)])
-  | VFunc Injector
-  | VSentinel !String            -- SKIP / DELETE, by tag
+  = VNoval                          -- ^ canonical @undefined@ — property absent
+  | VNull                           -- ^ JSON @null@
+  | VBool !Bool                     -- ^ boolean
+  | VNum !Double                    -- ^ number (integers are whole 'Double's)
+  | VStr !String                    -- ^ string
+  | VList !(IORef [Value])          -- ^ list \/ array node (mutable, reference-stable)
+  | VMap !(IORef [(String, Value)]) -- ^ map \/ object node (ordered, mutable, reference-stable)
+  | VFunc Injector                  -- ^ function (a custom injector)
+  | VSentinel !String               -- ^ SKIP \/ DELETE marker, compared by tag
 
+-- | A custom @$@-directive handler: injection state, value, key and parent to a result.
 type Injector = Inj -> Value -> String -> Value -> IO Value
+-- | A post-injection mutation hook (used by validation).
 type ModifyFn = Value -> Value -> Value -> Inj -> IO ()
 
+-- | Mutable injection state threaded through the inject\/transform\/validate engines.
 data Inj = Inj
-  { iMode :: IORef Int
-  , iFull :: IORef Bool
-  , iKeyi :: IORef Int
-  , iKeys :: IORef Value
-  , iKey :: IORef Value
-  , iIval :: IORef Value
-  , iParent :: IORef Value
-  , iPath :: IORef Value
-  , iNodes :: IORef Value
-  , iHandler :: IORef Injector
-  , iErrs :: IORef Value
-  , iMeta :: IORef Value
-  , iDparent :: IORef Value
-  , iDpath :: IORef Value
-  , iBase :: IORef Value
-  , iModify :: IORef (Maybe ModifyFn)
-  , iPrior :: IORef (Maybe Inj)
-  , iExtra :: IORef Value
+  { iMode :: IORef Int              -- ^ current pass (key-pre \/ key-post \/ value)
+  , iFull :: IORef Bool             -- ^ whether the string is a whole-value injection
+  , iKeyi :: IORef Int              -- ^ index of the current key among its siblings
+  , iKeys :: IORef Value            -- ^ the sibling keys being iterated
+  , iKey :: IORef Value             -- ^ the current key
+  , iIval :: IORef Value            -- ^ the current (injected) value
+  , iParent :: IORef Value          -- ^ the parent node of the current value
+  , iPath :: IORef Value            -- ^ path from the root to the current value
+  , iNodes :: IORef Value           -- ^ ancestor nodes along the current path
+  , iHandler :: IORef Injector      -- ^ the active @$@-directive handler
+  , iErrs :: IORef Value            -- ^ accumulated validation errors
+  , iMeta :: IORef Value            -- ^ caller metadata bag
+  , iDparent :: IORef Value         -- ^ parent within the data store
+  , iDpath :: IORef Value           -- ^ path within the data store
+  , iBase :: IORef Value            -- ^ base name for @$@ lookups
+  , iModify :: IORef (Maybe ModifyFn) -- ^ post-injection mutation hook
+  , iPrior :: IORef (Maybe Inj)     -- ^ the enclosing injection state, if any
+  , iExtra :: IORef Value           -- ^ extra store merged into lookups
   }
 
--- injdef: the loose Partial<Injection> the public API accepts.
+-- | The loose @Partial<Injection>@ record the public API accepts.
 data InjDef = InjDef
-  { dMeta :: Value
-  , dExtra :: Value
-  , dErrs :: Value
-  , dModify :: Maybe ModifyFn
-  , dHandler :: Maybe Injector
-  , dBase :: Value
-  , dDparent :: Value
-  , dDpath :: Value
-  , dKey :: Value
+  { dMeta :: Value                  -- ^ caller metadata bag
+  , dExtra :: Value                 -- ^ extra store merged into lookups
+  , dErrs :: Value                  -- ^ collector for validation errors
+  , dModify :: Maybe ModifyFn       -- ^ post-injection mutation hook
+  , dHandler :: Maybe Injector      -- ^ custom @$@-directive handler
+  , dBase :: Value                  -- ^ base name for @$@ lookups
+  , dDparent :: Value               -- ^ parent within the data store
+  , dDpath :: Value                 -- ^ path within the data store
+  , dKey :: Value                   -- ^ the current key
   }
 
+-- | How callers pass injection state: 'INone', a caller 'InjDef', or a live 'Inj'.
 data InjArg = IInj Inj | IDef InjDef | INone
 
+-- | The exception thrown on an unrecoverable structure error.
 newtype StructError = StructError String
 instance Show StructError where show (StructError m) = m
 instance Exception StructError
@@ -96,11 +125,13 @@ instance Exception StructError
 -- Constants
 -- ---------------------------------------------------------------------------
 
+-- | Injection-mode bitmask flags: the key-prefix, key-postfix and value passes.
 m_keypre, m_keypost, m_val :: Int
 m_keypre = 1
 m_keypost = 2
 m_val = 4
 
+-- | Dollar-directive name constants (@$KEY@, @$TOP@, @$ERRS@, @$SPEC@ ...) the engines recognise.
 s_dkey, s_banno, s_dtop, s_derrs, s_dspec, s_bexact, s_bval, s_bkey, s_bopen :: String
 s_dkey = "$KEY"
 s_banno = "`$ANNO`"
@@ -112,6 +143,7 @@ s_bval = "`$VAL`"
 s_bkey = "`$KEY`"
 s_bopen = "`$OPEN`"
 
+-- | Single-token syntax constants: empty, backtick, @$@, dot, colon, slash, the literal @"KEY"@ and the @": "@ path separator.
 s_mt, s_bt, s_ds, s_dt, s_cn, s_fs, s_key, s_viz :: String
 s_mt = ""
 s_bt = "`"
@@ -122,6 +154,7 @@ s_fs = "/"
 s_key = "KEY"
 s_viz = ": "
 
+-- | Canonical type-name string constants (@"string"@, @"object"@, @"list"@, @"map"@, @"nil"@, @"null"@).
 s_string, s_object, s_list, s_map, s_nil, s_null :: String
 s_string = "string"
 s_object = "object"
@@ -130,10 +163,13 @@ s_map = "map"
 s_nil = "nil"
 s_null = "null"
 
+-- | The U+2A2F cross mark used in 'select' error messages.
 cross :: String
 cross = "\10799"  -- U+2A2F vector cross product (select error messages)
 
+-- | Type-tag bitmask constants (part 1): the wildcard and scalar leaf types.
 t_any, t_noval, t_boolean, t_decimal, t_integer, t_number, t_string :: Int
+-- | Type-tag bitmask constants (part 2): function, null and the composite @list@/@map@/@node@/@scalar@ groups.
 t_function, t_null, t_list, t_map, t_instance, t_scalar, t_node :: Int
 t_any = 0x7FFFFFFF
 t_noval = 0x40000000
@@ -150,16 +186,19 @@ t_instance = 0x00001000
 t_scalar = 0x00000080
 t_node = 0x00000040
 
+-- | Ordered table mapping type-tag indices to their canonical type names.
 typenameTbl :: [String]
 typenameTbl =
   [ "any", "nil", "boolean", "decimal", "integer", "number", "string", "function"
   , "symbol", "null", "", "", "", "", "", "", "", "list", "map", "instance"
   , "", "", "", "", "scalar", "node" ]
 
+-- | The SKIP and DELETE sentinel values (compared by tag via 'is_skip' \/ 'is_delete').
 skip, delete :: Value
 skip = VSentinel "skip"
 delete = VSentinel "delete"
 
+-- | Maximum recursion depth for 'walk' and the engines (32).
 maxdepth :: Int
 maxdepth = 32
 
@@ -167,86 +206,108 @@ maxdepth = 32
 -- Small helpers
 -- ---------------------------------------------------------------------------
 
+-- | Build a fresh list node from the given elements.
 mkList :: [Value] -> IO Value
 mkList xs = VList <$> newIORef xs
 
+-- | Build a fresh map node from the given key\/value pairs (insertion order preserved).
 mkMap :: [(String, Value)] -> IO Value
 mkMap es = VMap <$> newIORef es
 
+-- | A fresh empty list node.
 emptyList :: IO Value
 emptyList = mkList []
 
+-- | A fresh empty map node.
 emptyMap :: IO Value
 emptyMap = mkMap []
 
+-- | Wrap an 'Int' as a numeric 'Value'.
 vint :: Int -> Value
 vint i = VNum (fromIntegral i)
 
+-- | Read the elements of a list node (@[]@ for non-lists).
 listItems :: Value -> IO [Value]
 listItems (VList r) = readIORef r
 listItems _ = return []
 
+-- | Read the key\/value entries of a map node (@[]@ for non-maps).
 mapEntries :: Value -> IO [(String, Value)]
 mapEntries (VMap m) = readIORef m
 mapEntries _ = return []
 
+-- | True for 'VNoval' (canonical @undefined@).
 isNoval :: Value -> Bool
 isNoval VNoval = True
 isNoval _ = False
 
+-- | True for 'VNoval' or 'VNull' — the "no value" test shared by the readers.
 isNullish :: Value -> Bool
 isNullish VNoval = True
 isNullish VNull = True
 isNullish _ = False
 
+-- | True for the SKIP sentinel.
 is_skip :: Value -> Bool
 is_skip (VSentinel "skip") = True
 is_skip _ = False
 
+-- | True for the DELETE sentinel.
 is_delete :: Value -> Bool
 is_delete (VSentinel "delete") = True
 is_delete _ = False
 
+-- | True when the value is a string equal to the given text.
 vStrEq :: Value -> String -> Bool
 vStrEq (VStr s) t = s == t
 vStrEq _ _ = False
 
+-- | JavaScript-style truthiness of a value.
 vIsTrue :: Value -> Bool
 vIsTrue (VBool True) = True
 vIsTrue _ = False
 
+-- | True for a string value.
 isStr :: Value -> Bool
 isStr (VStr _) = True
 isStr _ = False
 
+-- | Parse a string as an 'Int', or 'Nothing'.
 readIntOpt :: String -> Maybe Int
 readIntOpt s = readMaybe (dropPlus s)
   where dropPlus ('+':r) = r
         dropPlus x = x
 
+-- | Return the list with the element at the given index replaced.
 setAt :: Int -> a -> [a] -> [a]
 setAt i v xs = [if j == i then v else x | (j, x) <- zip [0 ..] xs]
 
+-- | Insert or update a key in an association list, keeping insertion order.
 opPut :: String -> Value -> [(String, Value)] -> [(String, Value)]
 opPut k v es =
   if any ((== k) . fst) es
     then map (\(k', v') -> if k' == k then (k, v) else (k', v')) es
     else es ++ [(k, v)]
 
+-- | Remove a key from an association list.
 opDel :: String -> [(String, Value)] -> [(String, Value)]
 opDel k = L.filter ((/= k) . fst)
 
+-- | Monadic 'any': True when the predicate holds for some element.
 anyM :: (a -> IO Bool) -> [a] -> IO Bool
 anyM _ [] = return False
 anyM f (x:xs) = do b <- f x; if b then return True else anyM f xs
 
+-- | Short-circuiting monadic conjunction of a list of @IO Bool@s.
 andM :: [IO Bool] -> IO Bool
 andM [] = return True
 andM (m:ms) = do b <- m; if b then andM ms else return False
 
+-- | True when a 'Double' holds an exact integer value.
 isIntegerF :: Double -> Bool
 isIntegerF n = not (isNaN n) && not (isInfinite n) && n == fromIntegral (truncate n :: Integer)
 
+-- | Render a 'Double' as JavaScript @String(n)@ does (integral values drop the trailing @.0@).
 numToString :: Double -> String
 numToString n
   | isNaN n = "NaN"
@@ -259,10 +320,12 @@ numToString n
           let s = printf ("%." ++ show (p :: Int) ++ "g") n :: String
           in if (readMaybe s :: Maybe Double) == Just n then s else shortest (p + 1)
 
+-- | Render @floor n@ as a JavaScript-style number string.
 floorNumStr :: Double -> String
 floorNumStr n = numToString (fromIntegral (floor n :: Integer))
 
 -- JS `'' + v` / String(v) for keys and concatenation.
+-- | JavaScript @String(v)@ for any value (in 'IO' because nodes are read).
 jsString :: Value -> IO String
 jsString v = case v of
   VNoval -> return "undefined"
@@ -274,11 +337,12 @@ jsString v = case v of
   VSentinel s -> return s
   VMap _ -> return "[object Object]"
   VList r -> do
-    items <- readIORef r
-    parts <- mapM (\x -> case x of VNoval -> return ""; VNull -> return ""; _ -> jsString x) items
+    elems <- readIORef r
+    parts <- mapM (\x -> case x of VNoval -> return ""; VNull -> return ""; _ -> jsString x) elems
     return (intercalate "," parts)
 
 -- pure String(v) for scalar values (the node cases never reach here)
+-- | Pure @String(v)@ for scalar values (node cases never reach here).
 jsstrPure :: Value -> String
 jsstrPure v = case v of
   VNoval -> "undefined"
@@ -290,9 +354,11 @@ jsstrPure v = case v of
   VSentinel s -> s
   _ -> ""
 
+-- | True when a string is a valid non-negative integer list index.
 isIntKey :: String -> Bool
 isIntKey s = not (null s) && all (\c -> (c >= '0' && c <= '9') || c == '-') s
 
+-- | Count leading zero bits of a 32-bit word (JavaScript @Math.clz32@).
 clz32 :: Int -> Int
 clz32 n0 =
   let n = n0 .&. 0xFFFFFFFF
@@ -300,14 +366,17 @@ clz32 n0 =
   where
     go n r = if (n .&. 0x80000000) /= 0 then r else go ((n `shiftL` 1) .&. 0xFFFFFFFF) (r + 1)
 
+-- | Split a string on a delimiter character.
 splitOn :: Char -> String -> [String]
 splitOn c s = case break (== c) s of
   (a, []) -> [a]
   (a, _:rest) -> a : splitOn c rest
 
+-- | True when the first string is a prefix of the second.
 isPrefixOf' :: String -> String -> Bool
 isPrefixOf' = isPrefixOf
 
+-- | Replace every occurrence of a substring within a string.
 replaceAll :: String -> String -> String -> String
 replaceAll s find_ repl
   | null find_ = s
@@ -322,28 +391,34 @@ replaceAll s find_ repl
 -- Minor utilities
 -- ---------------------------------------------------------------------------
 
+-- | True when the value is a node (map or list).
 isnode :: Value -> Bool
 isnode (VMap _) = True
 isnode (VList _) = True
 isnode _ = False
 
+-- | True when the value is a map node.
 ismap :: Value -> Bool
 ismap (VMap _) = True
 ismap _ = False
 
+-- | True when the value is a list node.
 islist :: Value -> Bool
 islist (VList _) = True
 islist _ = False
 
+-- | True when the value is a function ('VFunc').
 isfunc :: Value -> Bool
 isfunc (VFunc _) = True
 isfunc _ = False
 
+-- | True when the value can serve as a key (non-empty string or a number).
 iskey :: Value -> Bool
 iskey (VStr s) = s /= ""
 iskey (VNum _) = True
 iskey _ = False
 
+-- | True for empty\/absent values: noval, null, empty string, or an empty node.
 isempty :: Value -> IO Bool
 isempty v = case v of
   VNoval -> return True
@@ -353,9 +428,11 @@ isempty v = case v of
   VMap m -> null <$> readIORef m
   _ -> return False
 
+-- | Return the first value unless it is nullish, otherwise the default.
 getdef :: Value -> Value -> Value
 getdef v alt = if isNoval v then alt else v
 
+-- | The canonical integer type tag of a value.
 typify :: Value -> Int
 typify v = case v of
   VNoval -> t_noval
@@ -370,11 +447,13 @@ typify v = case v of
   VMap _ -> t_node .|. t_map
   VSentinel _ -> t_node .|. t_map
 
+-- | The canonical type name for a type-tag index.
 typename :: Int -> String
 typename t =
   let i = clz32 t
   in if i >= 0 && i < length typenameTbl then typenameTbl !! i else head typenameTbl
 
+-- | Number of entries in a node (0 for non-nodes).
 size :: Value -> IO Int
 size v = case v of
   VList r -> length <$> readIORef r
@@ -384,6 +463,7 @@ size v = case v of
   VNum n -> return (floor n)
   _ -> return 0
 
+-- | Coerce a value to its string-key form.
 strkey :: Value -> String
 strkey key = case key of
   VNoval -> s_mt
@@ -392,20 +472,23 @@ strkey key = case key of
   VNum n -> if isIntegerF n then numToString n else floorNumStr n
   _ -> s_mt
 
+-- | Sorted map keys, or list indices as strings; @[]@ for non-nodes.
 keysof :: Value -> IO [String]
 keysof v = case v of
   VMap m -> sort . map fst <$> readIORef m
-  VList r -> do items <- readIORef r; return [show i | i <- [0 .. length items - 1]]
+  VList r -> do elems <- readIORef r; return [show i | i <- [0 .. length elems - 1]]
   _ -> return []
 
+-- | Read a list element by numeric\/string key ('VNoval' when out of range).
 listIndex :: IORef [Value] -> Value -> IO Value
 listIndex r key = do
   let ks = case key of VStr s -> s; VNum n -> numToString n; _ -> ""
-  items <- readIORef r
+  elems <- readIORef r
   case readIntOpt ks of
-    Just i | i >= 0 && i < length items -> return (items !! i)
+    Just i | i >= 0 && i < length elems -> return (elems !! i)
     _ -> return VNoval
 
+-- | Read a node property by key, returning the alt value when absent.
 getpropAlt :: Value -> Value -> Value -> IO Value
 getpropAlt alt v key
   | isNoval v || isNoval key = return alt
@@ -416,9 +499,11 @@ getpropAlt alt v key
         _ -> return VNoval
       return (if isNullish out then alt else out)
 
+-- | Read a node property by key ('VNoval' when absent).
 getprop :: Value -> Value -> IO Value
 getprop = getpropAlt VNoval
 
+-- | Internal raw property reader that preserves 'VNull' literally.
 lookup_ :: Value -> Value -> IO Value
 lookup_ v key
   | isNoval v || isNoval key = return VNoval
@@ -427,9 +512,11 @@ lookup_ v key
       VList r -> listIndex r key
       _ -> return VNoval
 
+-- | True when a node has a (non-nullish) value at the given key.
 haskey :: Value -> Value -> IO Bool
 haskey v key = (not . isNullish) <$> getprop v key
 
+-- | Read a list element by key, returning the alt value when absent.
 getelemAlt :: Value -> Value -> Value -> IO Value
 getelemAlt alt v key
   | isNoval v || isNoval key = return alt
@@ -439,11 +526,11 @@ getelemAlt alt v key
           let ks = case key of VStr s -> s; VNum n -> numToString n; _ -> ""
           if isIntKey ks
             then do
-              items <- readIORef r
-              let len = length items
+              elems <- readIORef r
+              let len = length elems
               case readIntOpt ks of
                 Just nk0 -> let nk = if nk0 < 0 then len + nk0 else nk0
-                            in return (if nk >= 0 && nk < len then items !! nk else VNoval)
+                            in return (if nk >= 0 && nk < len then elems !! nk else VNoval)
                 Nothing -> return VNoval
             else return VNoval
         _ -> return VNoval
@@ -451,33 +538,39 @@ getelemAlt alt v key
         then case alt of VFunc f -> f dummyInj VNoval "" VNoval; _ -> return alt
         else return out
 
+-- | Read a list element by key ('VNoval' when absent).
 getelem :: Value -> Value -> IO Value
 getelem = getelemAlt VNoval
 
+-- | Internal string-keyed property reader.
 getpropRaw :: Value -> String -> IO Value
 getpropRaw v k = case v of
   VMap m -> fromMaybe VNoval . lookup k <$> readIORef m
   VList r -> do
-    items <- readIORef r
+    elems <- readIORef r
     case readIntOpt k of
-      Just i | i >= 0 && i < length items -> return (items !! i)
+      Just i | i >= 0 && i < length elems -> return (elems !! i)
       _ -> return VNoval
   _ -> return VNoval
 
+-- | Node entries as @(key, value)@ pairs — map entries or indexed list elements.
 itemsPairs :: Value -> IO [(String, Value)]
 itemsPairs v =
   if not (isnode v) then return []
   else do ks <- keysof v; mapM (\k -> (,) k <$> getpropRaw v k) ks
 
+-- | Node entries as a list node of @[key, value]@ pairs.
 items :: Value -> IO Value
 items v = do
   ps <- itemsPairs v
   xs <- mapM (\(k, x) -> mkList [VStr k, x]) ps
   mkList xs
 
+-- | Map each node entry through a function, collecting the results into a list node.
 itemsV :: Value -> ((String, Value) -> Value) -> IO Value
 itemsV v f = do ps <- itemsPairs v; mkList (map f ps)
 
+-- | Flatten nested lists up to the given depth.
 flatten :: Int -> Value -> IO Value
 flatten depth l =
   if not (islist l) then return l
@@ -491,11 +584,13 @@ flatten depth l =
         then do f <- flatten (depth - 1) item; fis <- listItems f; return (acc ++ fis)
         else return (acc ++ [item])
 
+-- | Keep the node entries satisfying the predicate (shadows 'Prelude.filter').
 filter :: Value -> ((String, Value) -> Bool) -> IO Value
 filter v check = do
   ps <- itemsPairs v
   mkList [x | (k, x) <- ps, check (k, x)]
 
+-- | Set, or (with a nullish value) delete, a node property; returns the node.
 setprop :: Value -> Value -> Value -> IO Value
 setprop parent key v
   | not (iskey key) = return parent
@@ -516,6 +611,7 @@ setprop parent key v
         _ -> return ()
       return parent
 
+-- | Delete a node property; returns the node.
 delprop :: Value -> Value -> IO Value
 delprop parent key
   | not (iskey key) = return parent
@@ -532,12 +628,14 @@ delprop parent key
         _ -> return ()
       return parent
 
+-- | Deep copy a value into fresh, independent nodes.
 clone :: Value -> IO Value
 clone v = case v of
   VList r -> do its <- readIORef r; xs <- mapM clone its; mkList xs
   VMap m -> do es <- readIORef m; es' <- mapM (\(k, x) -> (,) k <$> clone x) es; mkMap es'
   _ -> return v
 
+-- | Sub-list\/substring by start\/end with an inclusive-end flag.
 sliceM :: Value -> Value -> Value -> Bool -> IO Value
 sliceM v start stop mutate = case v of
   VNum n -> do
@@ -572,20 +670,25 @@ sliceM v start stop mutate = case v of
           _ -> return v
   _ -> return v
 
+-- | Sub-list\/substring over the half-open range @[start, end)@.
 slice :: Value -> Value -> Value -> IO Value
 slice v start stop = sliceM v start stop False
 
 -- ----- regex helpers (uniform re_* API + in-tree Vregex) -----
 
+-- | Coerce a value to the source text of a regular expression.
 reStr :: Value -> IO String
 reStr p = case p of VStr s -> return s; _ -> jsString p
 
+-- | Compile a pattern value into a regex value.
 re_compile :: Value -> IO Value
 re_compile p = case p of VStr _ -> return p; _ -> VStr <$> jsString p
 
+-- | True when the regex matches the subject.
 re_test :: Value -> Value -> IO Value
 re_test p input = do ps <- reStr p; is <- reStr input; return (VBool (Vregex.testStr ps is))
 
+-- | First match of the regex in the subject.
 re_find :: Value -> Value -> IO Value
 re_find p input = do
   ps <- reStr p
@@ -594,20 +697,25 @@ re_find p input = do
     Just (s, e) -> mkList [VStr (take (e - s) (drop s is))]
     Nothing -> return VNull
 
+-- | All matches of the regex in the subject.
 re_find_all :: Value -> Value -> IO Value
 re_find_all _ _ = emptyList
 
+-- | Replace regex matches within the subject.
 re_replace :: Value -> Value -> Value -> IO Value
 re_replace _ input _ = return input
 
+-- | Escape a value for literal use in a regex.
 re_escape :: Value -> IO Value
 re_escape = escre
 
+-- | Escape a string for literal use in a regular expression.
 escre :: Value -> IO Value
 escre s = do
   str <- case s of VStr x -> return x; VNoval -> return s_mt; _ -> jsString s
   return $ VStr $ concatMap (\c -> if c `elem` ".*+?^${}()|[]\\" then ['\\', c] else [c]) str
 
+-- | Percent-encode a string for use in a URL.
 escurl :: Value -> IO Value
 escurl s = do
   str <- case s of VStr x -> return x; VNoval -> return s_mt; _ -> jsString s
@@ -619,9 +727,11 @@ escurl s = do
 
 -- ----- json_encode / stringify / jsonify / pad / join / pathify -----
 
+-- | Format an 'Int' as a zero-padded four-digit hex string.
 pad4hex :: Int -> String
 pad4hex n = let h = showHex n "" in replicate (4 - length h) '0' ++ h
 
+-- | Core JSON encoder (sort-keys and optional indent) shared by 'stringify' \/ 'jsonify'.
 jsonEncode :: Bool -> Maybe Int -> Value -> IO String
 jsonEncode srt indent = \v -> enc v 0
   where
@@ -646,9 +756,9 @@ jsonEncode srt indent = \v -> enc v 0
         its <- readIORef r
         if null its then return "[]" else case indent of
           Just ind -> do
-            let pad = replicate (ind * (level + 1)) ' '
+            let padStr = replicate (ind * (level + 1)) ' '
                 cpad = replicate (ind * level) ' '
-            parts <- mapM (\x -> (pad ++) <$> enc x (level + 1)) its
+            parts <- mapM (\x -> (padStr ++) <$> enc x (level + 1)) its
             return ("[\n" ++ intercalate ",\n" parts ++ "\n" ++ cpad ++ "]")
           Nothing -> do
             parts <- mapM (\x -> enc x (level + 1)) its
@@ -659,11 +769,11 @@ jsonEncode srt indent = \v -> enc v 0
             ks = if srt then sort ks0 else ks0
         if null ks then return "{}" else case indent of
           Just ind -> do
-            let pad = replicate (ind * (level + 1)) ' '
+            let padStr = replicate (ind * (level + 1)) ' '
                 cpad = replicate (ind * level) ' '
             parts <- mapM (\k -> do x <- maybe (return VNoval) return (lookup k es)
                                     xs <- enc x (level + 1)
-                                    return (pad ++ esc k ++ ": " ++ xs)) ks
+                                    return (padStr ++ esc k ++ ": " ++ xs)) ks
             return ("{\n" ++ intercalate ",\n" parts ++ "\n" ++ cpad ++ "}")
           Nothing -> do
             parts <- mapM (\k -> do x <- maybe (return VNoval) return (lookup k es)
@@ -671,6 +781,7 @@ jsonEncode srt indent = \v -> enc v 0
                                     return (esc k ++ ":" ++ xs)) ks
             return ("{" ++ intercalate "," parts ++ "}")
 
+-- | True when the value graph contains a reference cycle.
 hasCycle :: Value -> IO Bool
 hasCycle v0 = do
   seen <- newIORef []
@@ -689,6 +800,7 @@ hasCycle v0 = do
         _ -> return False
   go v0
 
+-- | Wrap a string in an ANSI 256-colour escape for pretty output.
 prettyColor :: String -> String
 prettyColor valstr =
   let colors = [81, 118, 213, 39, 208, 201, 45, 190, 129, 51, 160, 121, 226, 33, 207, 69]
@@ -702,6 +814,7 @@ prettyColor valstr =
       (_, _, res) = foldl step (0 :: Int, head c, head c) valstr
   in res ++ r
 
+-- | Compact JSON-ish rendering with sort and max-length options.
 stringifyFull :: Value -> Value -> Bool -> IO String
 stringifyFull v maxlen pretty = case v of
   VNoval -> return (if pretty then "<>" else s_mt)
@@ -718,12 +831,15 @@ stringifyFull v maxlen pretty = case v of
           _ -> valstr
     if pretty then return (prettyColor valstr2) else return valstr2
 
+-- | Compact, human-readable JSON-ish rendering of a value.
 stringify :: Value -> IO String
 stringify v = stringifyFull v VNoval False
 
+-- | 'stringify' truncated to a maximum length.
 stringifyMax :: Value -> Value -> IO String
 stringifyMax v maxlen = stringifyFull v maxlen False
 
+-- | Pretty, indented JSON rendering of a value.
 jsonify :: Value -> Value -> IO String
 jsonify v flags = case v of
   VNoval -> return s_null
@@ -739,6 +855,7 @@ jsonify v flags = case v of
         [] -> return str
       else return str
 
+-- | Pad a value's string form to a width with a fill character.
 pad :: Value -> Value -> Value -> IO String
 pad s padding padchar = do
   str <- case s of VStr x -> return x; VNull -> return "null"; _ -> stringify s
@@ -748,6 +865,7 @@ pad s padding padchar = do
     then let n = p - length str in if n > 0 then str ++ concat (replicate n pc) else str
     else let n = (-p) - length str in if n > 0 then concat (replicate n pc) ++ str else str
 
+-- | Join a list's elements into a string with a separator.
 join :: Value -> Value -> Bool -> IO String
 join arr sep url =
   if not (islist arr) then return s_mt
@@ -783,9 +901,11 @@ join arr sep url =
         out = concat [process idx s0v | (idx, s0v) <- zip [0 ..] its]
     return (intercalate sepdef out)
 
+-- | Join path parts into a normalised URL.
 joinurl :: Value -> IO String
 joinurl arr = join arr (VStr "/") True
 
+-- | Substring\/regex replacement over a value's string form.
 replace :: Value -> Value -> Value -> IO String
 replace s from_ to_ = do
   let ts = typify s
@@ -797,6 +917,7 @@ replace s from_ to_ = do
     VStr f | f /= "" -> return (replaceAll rs f to_s)
     _ -> return rs
 
+-- | Render a path value as a dotted string, with an absent-path marker option.
 pathifyFull :: Value -> Value -> Value -> Bool -> IO String
 pathifyFull v startin endin absent = do
   mpath <- if islist v then Just <$> listItems v
@@ -824,6 +945,7 @@ pathifyFull v startin endin absent = do
       tl <- if absent then return s_mt else do st <- stringifyMax v (VNum 47); return (s_cn ++ st)
       return ("<unknown-path" ++ tl ++ ">")
 
+-- | Render a path value as a human-readable dotted string.
 pathify :: Value -> IO String
 pathify v = pathifyFull v VNoval VNoval False
 
@@ -831,11 +953,14 @@ pathify v = pathifyFull v VNoval VNoval False
 -- walk / merge
 -- ---------------------------------------------------------------------------
 
+-- | A 'walk' callback: key, value, parent and path to a replacement value.
 type WalkFn = Value -> Value -> Value -> Value -> IO Value
 
+-- | Depth-first walk applying optional before\/after transforms at each node.
 walk :: Maybe WalkFn -> Maybe WalkFn -> Value -> Value -> IO Value
 walk before after md v = walkImpl before after md VNoval VNoval Nothing v
 
+-- | Recursive worker behind 'walk' (carries parent, path and depth).
 walkImpl :: Maybe WalkFn -> Maybe WalkFn -> Value -> Value -> Value -> Maybe Value -> Value -> IO Value
 walkImpl before after md key parent mpath v = do
   path <- maybe emptyList return mpath
@@ -853,10 +978,11 @@ walkImpl before after md key parent mpath v = do
           result <- walkImpl before after (VNum (fromIntegral mdv)) (VStr ckey) out0 (Just childpath) child
           case out0 of
             VMap m -> modifyIORef' m (opPut ckey result)
-            VList r -> modifyIORef' r (\xs -> [if i == read ckey then result else x | (i, x) <- zip [0 ..] xs])
+            VList r -> modifyIORef' r (\xs -> [if i == (read ckey :: Int) then result else x | (i, x) <- zip [0 :: Int ..] xs])
             _ -> return ()
       case after of Nothing -> return out0; Just f -> f key out0 parent path
 
+-- | Deep-merge the source node into the destination in place.
 mergeD :: Value -> Value -> IO Value
 mergeD objs maxd = do
   let md = case maxd of VNum n -> if n < 0 then 0 else truncate n; _ -> 32
@@ -916,6 +1042,7 @@ mergeD objs maxd = do
         writeIORef outRef nn
       readIORef outRef
 
+-- | Deep-merge a list of nodes left-to-right (later values win); returns the merged node.
 merge :: Value -> IO Value
 merge objs = mergeD objs VNoval
 
@@ -923,6 +1050,7 @@ merge objs = mergeD objs VNoval
 -- getpath / setpath
 -- ---------------------------------------------------------------------------
 
+-- | Accessors reading the @base@\/@dparent@\/@meta@\/@key@\/@dpath@ fields out of an 'InjArg'.
 iaBase, iaDparent, iaMeta, iaKey, iaDpath :: InjArg -> IO Value
 iaBase ia = case ia of IInj i -> readIORef (iBase i); IDef d -> return (dBase d); INone -> return VNoval
 iaDparent ia = case ia of IInj i -> readIORef (iDparent i); IDef d -> return (dDparent d); INone -> return VNoval
@@ -930,13 +1058,16 @@ iaMeta ia = case ia of IInj i -> readIORef (iMeta i); IDef d -> return (dMeta d)
 iaKey ia = case ia of IInj i -> readIORef (iKey i); IDef d -> return (dKey d); INone -> return VNoval
 iaDpath ia = case ia of IInj i -> readIORef (iDpath i); IDef d -> return (dDpath d); INone -> return VNoval
 
+-- | The custom injector handler carried by an 'InjArg', if any.
 iaHandler :: InjArg -> IO (Maybe Injector)
 iaHandler ia = case ia of IInj i -> Just <$> readIORef (iHandler i); IDef d -> return (dHandler d); INone -> return Nothing
 
+-- | True unless the 'InjArg' is 'INone'.
 iaIsSome :: InjArg -> Bool
 iaIsSome INone = False
 iaIsSome _ = True
 
+-- | Split a @meta$...@ style string into its @(prefix, name, suffix)@ parts.
 metaPathMatch :: String -> Maybe (String, String, String)
 metaPathMatch s = case break (== '$') s of
   (pre, '$':rest) | not (null pre) ->
@@ -945,6 +1076,7 @@ metaPathMatch s = case break (== '$') s of
        _ -> Nothing
   _ -> Nothing
 
+-- | Resolve a dotted\/list path against a store; the by-example @\`$...\`@ path reader.
 getpath :: InjArg -> Value -> Value -> IO Value
 getpath inj store path = do
   mpa <- case path of
@@ -1025,6 +1157,7 @@ getpath inj store path = do
         _ -> return ()
       readIORef vRef
 
+-- | Set the value at a path within a node, creating intermediate nodes as needed.
 setpath :: Value -> Value -> Value -> IO Value
 setpath store path v = do
   let ptype = typify path
@@ -1055,6 +1188,7 @@ setpath store path v = do
 -- string-pattern helpers (RE2-subset-free)
 -- ---------------------------------------------------------------------------
 
+-- | Recognise a whole-string @\`...\`@ injection and return its inner expression.
 injectionFull :: String -> Maybe String
 injectionFull s =
   let n = length s
@@ -1074,15 +1208,20 @@ injectionFull s =
       in le > 1 && lettersDigits inner le == length inner
     takeDollarName inner = take (lengthLetters inner 1) inner
 
+-- | Replace each @\`...\`@ backtick injection inside a string via the given expander.
 injectionPartialReplace :: String -> (String -> IO String) -> IO String
 injectionPartialReplace s f = go s
   where
     go [] = return []
     go ('`':rest) = case break (== '`') rest of
       (inner, '`':rest2) -> do r <- f inner; rs <- go rest2; return (r ++ rs)
-      (_, []) -> do rs <- go rest; return ('`' : rs)
+      -- no closing backtick: break's second element is empty here, so emit the
+      -- literal '`' and carry on. A catch-all (not `(_, [])`) keeps GHC's
+      -- exhaustiveness checker happy since it can't prove the suffix is empty.
+      _ -> do rs <- go rest; return ('`' : rs)
     go (c:rest) = (c :) <$> go rest
 
+-- | Rewrite @$NAME@ transform directives to their canonical spellings.
 replaceTransformNames :: String -> String
 replaceTransformNames = go
   where
@@ -1099,6 +1238,7 @@ replaceTransformNames = go
 -- Injection state
 -- ---------------------------------------------------------------------------
 
+-- | Create a fresh injection state ('Inj') for a value and store.
 newInj :: Value -> Value -> IO Inj
 newInj v parent = do
   keys <- mkList [VStr s_dtop]
@@ -1114,6 +1254,7 @@ newInj v parent = do
       <*> newIORef VNoval <*> newIORef dpath <*> newIORef (VStr s_dtop)
       <*> newIORef Nothing <*> newIORef Nothing <*> newIORef VNoval
 
+-- | Recurse the injection engine into a node's children.
 injDescend :: Inj -> IO Value
 injDescend inj = do
   meta <- readIORef (iMeta inj)
@@ -1140,6 +1281,7 @@ injDescend inj = do
       else do its <- listItems dpath; nl <- mkList (its ++ [parentkey]); writeIORef (iDpath inj) nl
   readIORef (iDparent inj)
 
+-- | Derive the child injection state for one entry of a node.
 injChild :: Inj -> Int -> Value -> IO Inj
 injChild inj keyi keys = do
   kv <- getelem keys (VNum (fromIntegral keyi))
@@ -1159,6 +1301,7 @@ injChild inj keyi keys = do
       <*> newIORef dparent <*> newIORef ndpath <*> newIORef base
       <*> newIORef modify <*> newIORef (Just inj) <*> newIORef extra
 
+-- | Write a value into an ancestor of the current injection target.
 injSetval :: Int -> Inj -> Value -> IO Value
 injSetval ancestor inj v = do
   (target, key) <- if ancestor < 2
@@ -1169,9 +1312,11 @@ injSetval ancestor inj v = do
             return (t, k)
   if isNoval v then delprop target key else setprop target key v
 
+-- | Write a value into the immediate parent of the injection target.
 injSetval1 :: Inj -> Value -> IO Value
 injSetval1 = injSetval 1
 
+-- | Placeholder 'Inj' for the two corpus-unreached paths that need one (built with 'unsafePerformIO'; do not rely on its state).
 dummyInj :: Inj
 dummyInj = unsafePerformIO $ do
   parent <- mkMap [(s_dtop, VNoval)]
@@ -1182,6 +1327,7 @@ dummyInj = unsafePerformIO $ do
 -- inject
 -- ---------------------------------------------------------------------------
 
+-- | Run the injection engine: expand @\`...\`@ references in a spec against a store.
 inject :: InjArg -> Value -> Value -> IO Value
 inject injarg v store = do
   state <- case injarg of
@@ -1262,6 +1408,7 @@ inject injarg v store = do
   parentS <- readIORef (iParent state)
   lookup_ parentS (VStr s_dtop)
 
+-- | Default injector handler dispatching @$@ directives during injection.
 injectHandler :: Injector
 injectHandler inj v refstr store = do
   let iscmd = isfunc v && (refstr == "" || s_ds `isPrefixOf` refstr)
@@ -1270,6 +1417,7 @@ injectHandler inj v refstr store = do
     mode <- readIORef (iMode inj); full <- readIORef (iFull inj)
     if mode == m_val && full then do _ <- injSetval1 inj v; return v else return v
 
+-- | Expand the injections within a single string.
 injectstr :: String -> Value -> Maybe Inj -> IO Value
 injectstr v store injOpt =
   if v == s_mt then return (VStr s_mt)
@@ -1298,15 +1446,18 @@ injectstr v store injOpt =
 -- transform commands
 -- ---------------------------------------------------------------------------
 
+-- | @$DELETE@ transform: remove the target key.
 transformDelete :: Injector
 transformDelete inj _ _ _ = do p <- readIORef (iParent inj); k <- readIORef (iKey inj); _ <- delprop p k; return VNoval
 
+-- | @$COPY@ transform: copy the same-named value from the data.
 transformCopy :: Injector
 transformCopy inj _ _ _ = do
   mode <- readIORef (iMode inj)
   if mode == m_keypre || mode == m_keypost then readIORef (iKey inj)
   else do dp <- readIORef (iDparent inj); k <- readIORef (iKey inj); out <- lookup_ dp k; _ <- injSetval1 inj out; return out
 
+-- | @$KEY@ transform: inject the current key.
 transformKey :: Injector
 transformKey inj _ _ _ = do
   mode <- readIORef (iMode inj)
@@ -1321,9 +1472,11 @@ transformKey inj _ _ _ = do
       if not (isNoval fromanno) then return fromanno
       else do pa <- readIORef (iPath inj); getelem pa (VNum (-2))
 
+-- | @\`$ANNO\`@ annotation transform.
 transformAnno :: Injector
 transformAnno inj _ _ _ = do p <- readIORef (iParent inj); _ <- delprop p (VStr s_banno); return VNoval
 
+-- | @$MERGE@ transform: merge nodes into the target.
 transformMerge :: Injector
 transformMerge inj _ _ _ = do
   mode <- readIORef (iMode inj)
@@ -1342,6 +1495,7 @@ transformMerge inj _ _ _ = do
     readIORef (iKey inj)
   else return VNoval
 
+-- | @$EACH@ transform: expand a template across a collection.
 transformEach :: Injector
 transformEach inj _ _ store = do
   keys <- readIORef (iKeys inj)
@@ -1413,6 +1567,7 @@ transformEach inj _ _ store = do
     rsz <- size rval
     if islist rval && rsz > 0 then getelem rval (VNum 0) else return VNoval
 
+-- | @$PACK@ transform: pack a collection into a keyed map.
 transformPack :: Injector
 transformPack inj _ _ store = do
   mode <- readIORef (iMode inj)
@@ -1498,6 +1653,7 @@ transformPack inj _ _ store = do
         _ <- setprop target tkey rval
         return VNoval
 
+-- | @$REF@ transform: resolve a reference within the store.
 transformRef :: Injector
 transformRef inj v _ store = do
   mode <- readIORef (iMode inj)
@@ -1547,17 +1703,21 @@ transformRef inj v _ store = do
 -- formatters / transform_format / transform_apply / transform
 -- ---------------------------------------------------------------------------
 
+-- | @String(v)@ used by the transform formatters (@null@ prints as @"null"@).
 jsstr :: Value -> IO String
 jsstr v = case v of
   VNull -> return "null"
   VBool b -> return (if b then "true" else "false")
   _ -> jsString v
 
+-- | Parse a string as a 'Double', defaulting to 0.
 readDoubleOr0 :: String -> Double
 readDoubleOr0 s = fromMaybe 0 (readMaybe s :: Maybe Double)
 
+-- | A @$FORMAT@ value formatter.
 type Formatter = Value -> Value -> IO Value
 
+-- | Table of named @$FORMAT@ value formatters.
 formatterTbl :: [(String, Formatter)]
 formatterTbl =
   [ ("identity", \_ v -> return v)
@@ -1573,6 +1733,7 @@ formatterTbl =
                        else return v)
   ]
 
+-- | Decide whether a directive fires on the current key-pre\/key-post\/value pass.
 check_placement :: Int -> String -> Int -> Inj -> IO Bool
 check_placement modes ijname parenttypes inj = do
   modenum <- readIORef (iMode inj)
@@ -1595,6 +1756,7 @@ check_placement modes ijname parenttypes inj = do
       else return True
     else return True
 
+-- | Collect the argument values a custom injector declares it needs.
 injector_args :: [Int] -> Value -> IO [Value]
 injector_args argtypes args = do
   let numargs = length argtypes
@@ -1610,6 +1772,7 @@ injector_args argtypes args = do
   go (zip [0 ..] argtypes)
   readIORef foundRef
 
+-- | Build the child injection state a custom injector operates on.
 inject_child :: Value -> Value -> Inj -> IO Inj
 inject_child child store inj = do
   prior <- readIORef (iPrior inj)
@@ -1635,6 +1798,7 @@ inject_child child store inj = do
   _ <- inject (IInj cinj) child store
   return cinj
 
+-- | @$FORMAT@ transform: format a value via a named formatter.
 transformFormat :: Injector
 transformFormat inj _ _ store = do
   keys <- readIORef (iKeys inj); _ <- sliceM keys (VNum 0) (VNum 1) True
@@ -1661,6 +1825,7 @@ transformFormat inj _ _ store = do
         _ <- setprop target tkey out
         return out
 
+-- | @$APPLY@ transform: apply a named transform.
 transformApply :: Injector
 transformApply inj _ _ store = do
   ok <- check_placement m_val "APPLY" t_list inj
@@ -1682,11 +1847,13 @@ transformApply inj _ _ store = do
       _ <- setprop target tkey out
       return out
 
+-- | The default 'InjDef' used when the public API is called with 'INone'.
 defaultInjDef :: Value -> InjDef
 defaultInjDef errs = InjDef
   { dMeta = VNoval, dExtra = VNoval, dErrs = errs, dModify = Nothing, dHandler = Nothing
   , dBase = VNoval, dDparent = VNoval, dDpath = VNoval, dKey = VNoval }
 
+-- | Run the transform engine: build output from a spec mirroring the shape, pulling from data via @\`...\`@.
 transform :: InjArg -> Value -> Value -> IO Value
 transform injarg dat spec0 = do
   let origspec = spec0
@@ -1737,9 +1904,11 @@ transform injarg dat spec0 = do
 -- validate
 -- ---------------------------------------------------------------------------
 
+-- | Append a validation error message to the injection state.
 pushErr :: Inj -> String -> IO ()
 pushErr inj msg = do errs <- readIORef (iErrs inj); esz <- size errs; _ <- setprop errs (VNum (fromIntegral esz)) (VStr msg); return ()
 
+-- | Format the standard "invalid type" validation error message.
 invalidTypeMsg :: Value -> String -> Int -> Value -> String -> IO String
 invalidTypeMsg path needtype vt v _whence = do
   vs <- if isNullish v then return "no value" else stringify v
@@ -1748,6 +1917,7 @@ invalidTypeMsg path needtype vt v _whence = do
   let typePart = if not (isNullish v) then typename vt ++ s_viz else ""
   return ("Expected " ++ fieldPart ++ needtype ++ ", but found " ++ typePart ++ vs ++ ".")
 
+-- | @$STRING@ validation rule.
 validateString :: Injector
 validateString inj _ _ _ = do
   dp <- readIORef (iDparent inj); k <- readIORef (iKey inj)
@@ -1757,6 +1927,7 @@ validateString inj _ _ _ = do
   else if vStrEq out s_mt then do path <- readIORef (iPath inj); p <- pathifyFull path (VNum 1) VNoval False; pushErr inj ("Empty string at " ++ p); return VNoval
   else return out
 
+-- | Type-checking validation rule (@$NUMBER@, @$BOOLEAN@, ...).
 validateType :: Injector
 validateType inj _ refstr _ = do
   let tname = if length refstr > 1 then map toLower (drop 1 refstr) else "any"
@@ -1769,9 +1940,11 @@ validateType inj _ refstr _ = do
   if (t .&. typev) == 0 then do path <- readIORef (iPath inj); m <- invalidTypeMsg path tname t out "V1001"; pushErr inj m; return VNoval
   else return out
 
+-- | @$ANY@ validation rule (accept any value).
 validateAny :: Injector
 validateAny inj _ _ _ = do dp <- readIORef (iDparent inj); k <- readIORef (iKey inj); lookup_ dp k
 
+-- | @$CHILD@ validation rule (validate each child against a template).
 validateChild :: Injector
 validateChild inj _ _ _ = do
   parent <- readIORef (iParent inj); key <- readIORef (iKey inj); path <- readIORef (iPath inj); keys <- readIORef (iKeys inj)
@@ -1811,6 +1984,7 @@ validateChild inj _ _ _ = do
         getprop dp (VNum 0)
   else return VNoval
 
+-- | @$ONE@ validation rule (value must match one of the alternatives).
 validateOne :: Injector
 validateOne inj _ _ store = do
   mode <- readIORef (iMode inj)
@@ -1854,6 +2028,7 @@ validateOne inj _ _ store = do
         return VNoval
   else return VNoval
 
+-- | @\`$EXACT\`@ validation rule (value must equal exactly).
 validateExact :: Injector
 validateExact inj _ _ _ = do
   mode <- readIORef (iMode inj)
@@ -1884,6 +2059,7 @@ validateExact inj _ _ _ = do
         return VNoval
   else do p <- readIORef (iParent inj); k <- readIORef (iKey inj); _ <- delprop p k; return VNoval
 
+-- | Deep structural equality of two values.
 veq :: Value -> Value -> IO Bool
 veq a b = case (a, b) of
   (VNoval, VNoval) -> return True
@@ -1896,6 +2072,7 @@ veq a b = case (a, b) of
   (VMap x, VMap y) -> do xs <- readIORef x; ys <- readIORef y; if length xs /= length ys then return False else andM (map (\(k, vv) -> case lookup k ys of Just w -> veq vv w; Nothing -> return False) xs)
   _ -> return False
 
+-- | The 'ModifyFn' that runs shape validation as the transform mutates.
 validation :: ModifyFn
 validation pval key parent inj = do
   when (not (is_skip pval)) $ do
@@ -1933,6 +2110,7 @@ validation pval key parent inj = do
             pushErr inj ("Value " ++ pathmsg ++ cjs ++ " should equal " ++ pjs2 ++ ".")
         else do _ <- setprop parent key cval; return ()
 
+-- | Injector handler used while validating.
 validateHandler :: Injector
 validateHandler inj v refstr store = case metaPathMatch refstr of
   Just (_, g2, _) -> do
@@ -1941,6 +2119,7 @@ validateHandler inj v refstr store = case metaPathMatch refstr of
     return skip
   Nothing -> injectHandler inj v refstr store
 
+-- | Validate data against a shape, collecting errors; returns the (possibly defaulted) value.
 validate :: InjArg -> Value -> Value -> IO Value
 validate injarg dat spec = do
   let extra = case injarg of IDef d -> dExtra d; _ -> VNoval
@@ -1970,6 +2149,7 @@ validate injarg dat spec = do
 -- select
 -- ---------------------------------------------------------------------------
 
+-- | @$AND@ query operator.
 selectAnd :: Injector
 selectAnd inj _ _ store = do
   mode <- readIORef (iMode inj)
@@ -1993,6 +2173,7 @@ selectAnd inj _ _ store = do
     _ <- setprop gp gkey point; return ()
   return VNoval
 
+-- | @$OR@ query operator.
 selectOr :: Injector
 selectOr inj _ _ store = do
   mode <- readIORef (iMode inj)
@@ -2021,6 +2202,7 @@ selectOr inj _ _ store = do
     when (not done) $ do pp <- pathify ppath; sp <- stringify point; st <- stringify terms; pushErr inj ("OR:" ++ pp ++ cross ++ sp ++ " fail:" ++ st)
   return VNoval
 
+-- | @$NOT@ query operator.
 selectNot :: Injector
 selectNot inj _ _ store = do
   mode <- readIORef (iMode inj)
@@ -2042,9 +2224,11 @@ selectNot inj _ _ store = do
     _ <- setprop gp gkey point; return ()
   return VNoval
 
+-- | Apply a numeric comparison to two values (False unless both are numbers).
 numCmp :: Value -> Value -> (Double -> Double -> Bool) -> Bool
 numCmp a b op = case (a, b) of (VNum x, VNum y) -> op x y; _ -> False
 
+-- | The @$LT@\/@$GT@\/@$LTE@\/@$GTE@\/@$EQ@ comparison query operators.
 selectCmp :: Injector
 selectCmp inj _ refstr store = do
   mode <- readIORef (iMode inj)
@@ -2065,6 +2249,7 @@ selectCmp inj _ refstr store = do
     else do pp <- pathify ppath; sp <- stringify point; st <- stringify term; pushErr inj ("CMP: " ++ pp ++ cross ++ sp ++ " fail:" ++ refstr ++ " " ++ st)
   return VNoval
 
+-- | Query a data structure with a by-example selection expression.
 select :: Value -> Value -> IO Value
 select children0 query =
   if not (isnode children0) then emptyList
@@ -2092,6 +2277,7 @@ select children0 query =
 -- builders
 -- ---------------------------------------------------------------------------
 
+-- | Build a map node from a flat @[k1, v1, k2, v2, ...]@ value list.
 jm :: [Value] -> IO Value
 jm kv = do
   m <- emptyMap
@@ -2104,8 +2290,10 @@ jm kv = do
   go kv
   return m
 
+-- | Build a list node from the given values.
 jt :: [Value] -> IO Value
 jt = mkList
 
+-- | Alias for 'typename'.
 tn :: Int -> String
 tn = typename
