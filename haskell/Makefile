@@ -2,7 +2,7 @@
 # Requires GHC (`ghc` / `runghc`) on PATH. No third-party dependencies
 # (only the GHC boot libraries: base, array, etc.).
 
-.PHONY: test lint build inspect clean reset publish format
+.PHONY: test lint build inspect clean reset publish publish-candidate format
 
 BUILDDIR := .hsbuild
 
@@ -64,3 +64,23 @@ publish: test
 	  git push origin "$(TAG)"; \
 	fi; \
 	echo "Published to Hackage + tag $(TAG)."
+
+# Live-registry rehearsal: upload a *candidate* to Hackage (same real auth and
+# tarball as `publish`, but WITHOUT `--publish`, so it lands in the package's
+# candidates area instead of cutting a permanent release). Nothing is tagged or
+# pushed to git. Review/test-install it at the candidate URL below, then either
+# publish for real (`make publish`) or delete the candidate on Hackage. Only the
+# Hackage token is needed (no git tag => no GitHub token). Dry-run: aql injects
+# the filler as HACKAGE_TOKEN and this makes NO upload.
+CANDURL := https://hackage.haskell.org/package/voxgig-struct-$(VERSION)/candidate
+publish-candidate: test
+	@cabalver=$$(sed -nE 's/^version:[[:space:]]*([0-9.]+).*/\1/p' voxgig-struct.cabal); \
+	  [ "$$cabalver" = "$(VERSION)" ] || { echo "version mismatch: VERSION=$(VERSION) vs .cabal=$$cabalver — bump both"; exit 1; }
+	@set -e; \
+	if [ "$$HACKAGE_TOKEN" = "$(AQL_DRY_RUN_FILLER)" ]; then \
+	  echo "[dry-run] aql filler token detected: would upload candidate voxgig-struct-$(VERSION) to Hackage; nothing uploaded."; \
+	  exit 0; \
+	fi; \
+	cabal sdist; \
+	cabal upload --token="$$HACKAGE_TOKEN" "$(SDIST)"; \
+	echo "Uploaded candidate. Review at $(CANDURL)"

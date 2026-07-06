@@ -48,7 +48,7 @@ PORTS = [
     ("java", ("re", "java/pom.xml", r"<version>([^<]+)</version>"), "maven", "com.voxgig:struct-java"),
     ("kotlin", ("re", "kotlin/build.gradle.kts", r'version\s*=\s*"([^"]+)"'), "maven", "com.voxgig:struct-kotlin"),
     # capture only the version, dropping the rockspec "-<rev>" suffix (0.1.0-1 -> 0.1.0)
-    ("lua", ("re", "lua/struct.rockspec", r'version\s*=\s*"([0-9.]+)'), "luarocks", None),
+    ("lua", ("re", "lua/struct.rockspec", r'version\s*=\s*"([0-9.]+)'), "luarocks", "rjrodger/voxgig-struct"),
     ("php", ("file", "php/VERSION"), "tag", None),
     ("zig", ("re", "zig/build.zig.zon", r'\.version\s*=\s*"([^"]+)"'), "tag", None),
     ("c", ("file", "c/VERSION"), "tag", None),
@@ -59,7 +59,7 @@ PORTS = [
     ("scala", ("file", "scala/VERSION"), "maven", "com.voxgig:struct-scala_3"),
     ("dart", ("re", "dart/pubspec.yaml", r'(?m)^version:\s*([0-9][^\s]*)'), "pub", "voxgig_struct"),
     ("elixir", ("file", "elixir/VERSION"), "hex", "voxgig_struct"),
-    ("haskell", ("file", "haskell/VERSION"), "tag", None),
+    ("haskell", ("file", "haskell/VERSION"), "hackage", "voxgig-struct"),
 ]
 
 
@@ -117,9 +117,15 @@ def _add_tag(latest: dict, full: str, date: str) -> None:
 
 
 def registry_version(kind: str, ident) -> str:
-    """Best-effort latest version from the port's package registry."""
-    if not NET or kind == "tag" or ident is None:
-        return "—"
+    """Best-effort latest version from the port's package registry, or a short
+    label naming how the port is distributed when there is nothing to query
+    (tag-only ports, --no-net, or a registry we don't auto-check)."""
+    if kind == "tag":
+        return "git-tag"        # no package registry — the git tag IS the release
+    if not NET:
+        return "(offline)"      # --no-net: registries not queried
+    if ident is None:
+        return f"({kind})"      # lives on this registry, but we don't auto-query it (luarocks)
     try:
         if kind == "npm":
             d = fetch(f"https://registry.npmjs.org/{ident.replace('/', '%2F')}/latest")
@@ -146,6 +152,27 @@ def registry_version(kind: str, ident) -> str:
             return fetch(f"https://pub.dev/api/packages/{ident}")["latest"]["version"]
         if kind == "hex":
             return fetch(f"https://hex.pm/api/packages/{ident}")["latest_stable_version"]
+        if kind == "hackage":
+            # /package/<name>.json -> {"0.1.0": "normal", "0.0.9": "deprecated"}.
+            # Take the highest version still "normal" (published, not deprecated).
+            d = fetch(f"https://hackage.haskell.org/package/{ident}.json")
+            normal = [v for v, s in d.items() if s == "normal"]
+            return max(normal, key=vkey) if normal else "absent"
+        if kind == "luarocks":
+            # luarocks.org has no JSON API; parse the owner's Lua-table manifest.
+            # ident is "<user>/<rock>". Scope to the rock's block (its 3-space-
+            # indented ["name"] key, up to the next such key), take the highest
+            # version, and drop the rockspec "-<rev>" suffix (0.1.0-1 -> 0.1.0)
+            # so the column matches LOCAL/TAG.
+            user, rock = ident.split("/", 1)
+            text = fetch_text(f"https://luarocks.org/manifests/{user}/manifest")
+            i = text.find(f'["{rock}"]')
+            if i < 0:
+                return "absent"
+            nxt = re.search(r'\n {3}\["', text[i + 1:])
+            block = text[i: i + 1 + nxt.start()] if nxt else text[i:]
+            vers = re.findall(r'\["(\d[^"]*)"\]', block)
+            return max((v.split("-")[0] for v in vers), key=vkey) if vers else "absent"
         if kind == "cpan":
             # MetaCPAN reports Perl versions v-prefixed ("v0.1.0"); strip it so
             # the REGISTRY column matches LOCAL/TAG (which are plain "0.1.0").
@@ -154,7 +181,7 @@ def registry_version(kind: str, ident) -> str:
         return "absent" if e.code == 404 else "?"
     except Exception:
         return "?"
-    return "—"  # luarocks: not queried (use TAG)
+    return "?"  # unrecognized kind
 
 
 def fetch(url: str):
@@ -198,21 +225,21 @@ def vkey(v: str):
     return tuple(int(n) for n in re.findall(r"\d+", v)) or (0,)
 
 
-def status(local: str, tag, kind: str, reg: str) -> str:
+def status(local: str, tag, reg: str) -> str:
     if not tag:
         return "unpublished"
     if vkey(local) > vkey(tag):
         return "publish-pending"  # local manifest is ahead of the latest tag
     if vkey(local) < vkey(tag):
         return "tag>local!"
-    # local == tag: the release is cut. Released if it's a tag-only port, if we
-    # don't query this registry (luarocks/maven ident None, or --no-net → reg
-    # "—", so the tag IS the release), or if the registry already shows the
-    # version. Otherwise the upload landed but the registry hasn't finished
-    # indexing yet (npm/nuget/pypi/cpan/crates all index asynchronously).
-    if kind == "tag" or reg == "—" or re.match(r"^v?\d", reg or ""):
-        return "released"
-    return "pending-index"
+    # local == tag: the release is tagged. A registry we actually queried can
+    # still lag (npm/nuget/pypi/cpan/crates/hackage index asynchronously) — that
+    # surfaces as "absent"/"?". Everything else — a version match, a tag-only
+    # "git-tag", or a not-queried registry label like "(luarocks)"/"(offline)" —
+    # means the tag IS the release, so: released.
+    if reg in ("absent", "?"):
+        return "pending-index"
+    return "released"
 
 
 def main() -> int:
@@ -224,7 +251,7 @@ def main() -> int:
         loc = local_version(src)
         t = tags.get(name)
         reg = registry_version(kind, ident)
-        st = status(loc, t["ver"] if t else None, kind, reg)
+        st = status(loc, t["ver"] if t else None, reg)
         rows.append((name, loc, t["full"] if t else "—", t["date"] if t else "—", reg, st))
         json_rows.append({
             "port": name, "local": loc,
@@ -253,6 +280,9 @@ def main() -> int:
     parts.append(f"{c('unpublished')} unpublished")
     print("\n" + " · ".join(parts)
           + ("" if NET else "  (--no-net: tags from local only, registries skipped)"))
+    print("REGISTRY: a version = live on the registry · git-tag = no registry, "
+          "released via the git tag · (name) = on that registry, not auto-checked · "
+          "absent/? = queried, not indexed yet")
     return 0
 
 
