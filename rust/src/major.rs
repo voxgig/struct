@@ -610,7 +610,11 @@ pub fn get_path_inj(store: &Value, path: &Value, injdef: Option<&Inj>) -> Value 
                     }
                 }
 
-                part = part.replace("$$", "$");
+                // str::replace allocates a fresh String even with no match, so
+                // skip it for the common no-`$$` segment.
+                if part.contains("$$") {
+                    part = part.replace("$$", "$");
+                }
 
                 if part.is_empty() {
                     let mut ascends = 0i64;
