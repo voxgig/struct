@@ -242,6 +242,7 @@ haskell/dist-newstyle/
 # performance harness outputs (generated, machine-specific)
 build/bench/results.json
 build/bench/REPORT.md
+build/bench/report.html
 
 # performance harness per-port build artifacts
 java/bench/build/

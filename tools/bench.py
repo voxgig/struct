@@ -216,7 +216,20 @@ def main(argv):
     with open(os.path.join(outdir, "REPORT.md"), "w") as f:
         f.write(report)
 
-    sys.stderr.write(f"\nwrote {outdir}/results.json and {outdir}/REPORT.md\n")
+    # Also render the self-contained HTML report (best-effort).
+    html_out = os.path.join(outdir, "report.html")
+    try:
+        subprocess.run(
+            [sys.executable, os.path.join(ROOT, "tools", "bench_report_html.py"),
+             os.path.join(outdir, "results.json"), html_out],
+            check=True, capture_output=True, text=True,
+        )
+    except (subprocess.CalledProcessError, OSError) as e:
+        sys.stderr.write(f"(html report skipped: {e})\n")
+        html_out = None
+
+    outs = "results.json, REPORT.md" + (", report.html" if html_out else "")
+    sys.stderr.write(f"\nwrote {outdir}/{{{outs}}}\n")
     if not results:
         sys.stderr.write("no ports produced results\n")
         return 1

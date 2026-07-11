@@ -18,7 +18,9 @@ BENCH_RUNS=11 make bench         # override the workload
 Outputs (git-ignored):
 
 - `build/bench/results.json` — raw measurements from every port.
-- `build/bench/REPORT.md` — rendered comparison (ranking per op, ms matrix).
+- `build/bench/REPORT.md` — rendered Markdown comparison (ranking per op, ms matrix).
+- `build/bench/report.html` — self-contained visual report (log-scale bars per
+  operation + a heatmap matrix; rendered by `tools/bench_report_html.py`).
 
 ## Workload (identical across ports)
 
