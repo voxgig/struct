@@ -66,4 +66,8 @@ for (op, uc, f) in specs {
 
 let runtime = ProcessInfo.processInfo.environment["BENCH_SWIFT"] ?? "swift"
 FileHandle.standardError.write("swift: sink=\(sink)\n".data(using: .utf8)!)
-print("{\"lang\":\"swift\",\"runtime\":\"\(runtime)\",\"nodes\":\(nodes),\"params\":{\"width\":\(W),\"depth\":\(D),\"warmup\":\(WARM),\"runs\":\(RUNS),\"getpath_iters\":\(GP)},\"ops\":[\(parts.joined(separator: ","))]}")
+let head = "{\"lang\":\"swift\",\"runtime\":\"\(runtime)\",\"nodes\":\(nodes),"
+let params = "\"params\":{\"width\":\(W),\"depth\":\(D),\"warmup\":\(WARM)," +
+    "\"runs\":\(RUNS),\"getpath_iters\":\(GP)},"
+let opsJson = "\"ops\":[\(parts.joined(separator: ","))]}"
+print(head + params + opsJson)

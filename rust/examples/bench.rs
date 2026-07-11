@@ -7,7 +7,10 @@ use std::time::Instant;
 use voxgig_struct::{clone, get_path, merge, stringify, walk, Value};
 
 fn envi(k: &str, d: i64) -> i64 {
-    std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d)
+    std::env::var(k)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(d)
 }
 
 fn build(w: i64, d: i64, leaf: i64) -> Value {
@@ -59,9 +62,7 @@ fn main() {
     let tree = build(w, d, 0);
     let nodes = nodecount(w, d);
     let mlist = Value::list(vec![build(w, d, 1), build(w, d, 2)]);
-    let path = Value::str(
-        vec!["k0"; d as usize].join("."),
-    );
+    let path = Value::str(vec!["k0"; d as usize].join("."));
 
     let t_clone = measure(warm, runs, || {
         black_box(clone(black_box(&tree)));

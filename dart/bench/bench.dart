@@ -64,7 +64,7 @@ void main() {
     ['clone', nodes, () => sink += s.clone(tree) != null ? 1 : 0],
     ['walk', nodes, () => s.walk(tree, before: cb)],
     ['merge', nodes, () => sink += s.merge([treeA, treeB]) != null ? 1 : 0],
-    ['stringify', nodes, () => sink += s.stringify(tree).length as int],
+    ['stringify', nodes, () => sink += s.stringify(tree).length],
     ['getpath', GP, () {
       var acc = 0;
       for (var i = 0; i < GP; i++) {
