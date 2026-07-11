@@ -238,3 +238,11 @@ haskell/.hsbuild/
 haskell/**/*.hi
 haskell/**/*.o
 haskell/dist-newstyle/
+
+# performance harness outputs (generated, machine-specific)
+build/bench/results.json
+build/bench/REPORT.md
+
+# performance harness per-port build artifacts
+java/bench/build/
+c/bench/bench.out

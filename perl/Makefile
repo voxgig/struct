@@ -1,4 +1,4 @@
-.PHONY: inspect build test lint clean reset publish
+.PHONY: inspect build test lint bench clean reset publish
 
 PERL ?= perl
 
@@ -15,6 +15,10 @@ build:
 
 test:
 	prove -Ilib t/
+
+# Cross-port performance harness (JSON contract; see build/bench/README.md).
+bench:
+	@perl -Ilib bench/bench.pl
 
 # perlcritic is the de-facto Perl linter. Local soft-skip when not on
 # PATH; CI hardens this via the `CI=true` env var GitHub Actions sets.

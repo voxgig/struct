@@ -1,4 +1,4 @@
-.PHONY: inspect build test lint clean reset audit publish
+.PHONY: inspect build test lint bench walk-bench clean reset audit publish
 
 inspect:
 	@echo "PHP version:"
@@ -18,7 +18,12 @@ lint:
 	vendor/bin/phpcs
 	vendor/bin/phpstan analyse --no-progress
 
+# Cross-port performance harness (JSON contract; see build/bench/README.md).
 bench:
+	@php -d memory_limit=512M bench/bench.php
+
+# Port-local walk-only micro-benchmark (human-readable).
+walk-bench:
 	WALK_BENCH=1 php -d memory_limit=512M tests/WalkBench.php
 
 clean:

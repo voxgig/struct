@@ -1,4 +1,4 @@
-.PHONY: inspect build test lint typecheck format-check clean reset audit publish
+.PHONY: inspect build test bench lint typecheck format-check clean reset audit publish
 
 inspect:
 	@echo "Node.js version:"
@@ -12,6 +12,14 @@ build:
 
 test:
 	npm test
+
+# Performance bench: build the library (src project only; the test project
+# needs @types/node which isn't required here) quietly to stderr, then emit one
+# JSON line to stdout. Falls back to an existing dist/ if the build can't run.
+# Driven by tools/bench.py; see build/bench/README.md.
+bench:
+	@npx tsc --build src 1>&2 || echo "tsc build skipped; using existing dist/" 1>&2
+	@node bench/bench.js
 
 # Code quality: ESLint + Prettier format check.
 lint:
