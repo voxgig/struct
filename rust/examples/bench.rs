@@ -60,7 +60,7 @@ fn main() {
     let nodes = nodecount(w, d);
     let mlist = Value::list(vec![build(w, d, 1), build(w, d, 2)]);
     let path = Value::str(
-        std::iter::repeat("k0").take(d as usize).collect::<Vec<_>>().join("."),
+        vec!["k0"; d as usize].join("."),
     );
 
     let t_clone = measure(warm, runs, || {

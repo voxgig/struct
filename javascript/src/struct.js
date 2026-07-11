@@ -684,7 +684,7 @@ function clone(val) {
         'Object' !== v.constructor.name &&
         'Array' !== v.constructor.name)
     ) {
-      return refs.push(v), '`$REF:' + (refs.length - 1) + '`'
+      return (refs.push(v), '`$REF:' + (refs.length - 1) + '`')
     }
     return v
   }
