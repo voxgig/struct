@@ -1153,6 +1153,15 @@ def clone(val: Any = UNDEF):
     if val == UNDEF:
         return UNDEF
 
+    try:
+        # Fast path: plain JSON data round-trips directly, avoiding the two full
+        # recursive passes (replacer + reviver) the ref-capturing path below
+        # needs. Non-serialisable values (functions / instances) raise TypeError
+        # and fall through to that path.
+        return json.loads(json.dumps(val, separators=(',', ':')))
+    except TypeError:
+        pass
+
     refs = []
 
     def replacer(item):
@@ -1473,8 +1482,12 @@ def getpath(store, path, injdef=UNDEF):
                     # $META:metapath$ -> get meta value, use as path part (string)
                     part = stringify(getpath(inj_meta, part[6:-1]))
 
-                # $$ escapes $ (path parts can be int e.g. list indices)
-                part = R_DOUBLE_DOLLAR.sub('$', part) if isinstance(part, str) else strkey(part)
+                # $$ escapes $ (path parts can be int e.g. list indices).
+                # Skip the regex for the common segment with no '$$'.
+                if not isinstance(part, str):
+                    part = strkey(part)
+                elif '$$' in part:
+                    part = R_DOUBLE_DOLLAR.sub('$', part)
 
                 if part == S_MT:
                     ascends = 0
