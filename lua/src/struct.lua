@@ -1672,8 +1672,8 @@ getpath = function(store, path, injdef)
           part = stringify(getpath(getprop(injdef, "meta"), slice(part, 6, -1)))
         end
 
-        -- $$ escapes $
-        if part and type(part) == S_string then
+        -- $$ escapes $ (skip the pattern gsub for the common no-"$$" segment)
+        if part and type(part) == S_string and part:find("$$", 1, true) then
           part = part:gsub("%$%$", "$")
         end
 

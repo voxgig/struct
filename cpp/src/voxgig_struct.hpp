@@ -1548,8 +1548,10 @@ inline Value getpath_inner(const Value& store, const Value& path, std::vector<st
         part = stringify(res);
       }
 
-      // $$ -> $
-      part = std::regex_replace(part, R_DOUBLE_DOLLAR(), "$");
+      // $$ -> $ (skip the std::regex for the common no-"$$" segment)
+      if (part.find("$$") != std::string::npos) {
+        part = std::regex_replace(part, R_DOUBLE_DOLLAR(), "$");
+      }
 
       if (part.empty()) {
         int ascends = 0;
