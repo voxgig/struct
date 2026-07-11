@@ -544,10 +544,15 @@ object struct {
   }
 
   private def hasCycle(v: Value): Boolean = {
-    val seen = ArrayBuffer.empty[AnyRef]
+    // Identity set: O(1) membership by reference. `add` returns false when the
+    // node was already present, matching the previous linear `exists(_ eq _)`
+    // scan (same add-never-remove semantics) but O(n) overall, not O(n^2).
+    val seen = java.util.Collections.newSetFromMap(
+      new java.util.IdentityHashMap[AnyRef, java.lang.Boolean]()
+    )
     def go(v: Value): Boolean = v match {
-      case VList(b) => if (seen.exists(_ eq b)) true else { seen.append(b); b.exists(go) }
-      case VMap(m) => if (seen.exists(_ eq m)) true else { seen.append(m); m.valuesIterator.exists(go) }
+      case VList(b) => if (!seen.add(b)) true else b.exists(go)
+      case VMap(m) => if (!seen.add(m)) true else m.valuesIterator.exists(go)
       case _ => false
     }
     go(v)

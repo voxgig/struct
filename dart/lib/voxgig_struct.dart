@@ -646,16 +646,17 @@ String jsonEncode(dynamic v, {bool sort = false, int? indent}) {
 }
 
 bool _hasCycle(dynamic v) {
-  var seen = <dynamic>[];
+  // Identity set: O(1) membership. `add` returns false if already present,
+  // which is exactly the previous "seen before" test (same add-never-remove
+  // semantics as the old linear-scan list, but O(n) overall instead of O(n^2)).
+  var seen = Set<dynamic>.identity();
   bool go(dynamic v) {
     if (v is List) {
-      if (seen.any((s) => identical(s, v))) return true;
-      seen.add(v);
+      if (!seen.add(v)) return true;
       return v.any(go);
     }
     if (v is Map) {
-      if (seen.any((s) => identical(s, v))) return true;
-      seen.add(v);
+      if (!seen.add(v)) return true;
       return v.values.any(go);
     }
     return false;
