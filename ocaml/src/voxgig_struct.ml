@@ -856,8 +856,10 @@ and getpath ?(inj = INone) store path =
                Str (stringify (getpath ~inj:INone inj_meta (slice ~start:(Num 6.0) ~stop:(Num (-1.0)) (Str s))))
              | _ -> raw
            in
+           (* $$ escapes $; skip replace_all (which rebuilds via a Buffer) when
+              the segment has no '$' at all — the common case. *)
            let part = (match part with
-               | Str s -> Str (replace_all s "$$" "$")
+               | Str s -> Str (if String.contains s '$' then replace_all s "$$" "$" else s)
                | _ -> Str (strkey ~key:part ())) in
            if part = Str s_mt then begin
              let ascends = ref 0 in

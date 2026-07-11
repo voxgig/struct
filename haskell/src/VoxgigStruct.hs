@@ -46,7 +46,7 @@ import Control.Monad (filterM, foldM, forM_, when)
 import Data.Bits (shiftL, (.&.), (.|.))
 import Data.Char (toLower, toUpper)
 import Data.IORef
-import Data.List (findIndex, intercalate, isPrefixOf, sort)
+import Data.List (findIndex, intercalate, isInfixOf, isPrefixOf, sort)
 import qualified Data.List as L
 import Data.Maybe (fromMaybe)
 import Numeric (showHex)
@@ -1146,7 +1146,11 @@ getpath inj store path = do
                       VStr s | "$REF:" `isPrefixOf` s -> do sl <- sliceM (VStr s) (VNum 5) (VNum (-1)) False; sp <- getprop store (VStr s_dspec); gp <- getpath INone sp sl; VStr <$> stringify gp
                       VStr s | iaIsSome inj && "$META:" `isPrefixOf` s -> do sl <- sliceM (VStr s) (VNum 6) (VNum (-1)) False; gp <- getpath INone injMeta sl; VStr <$> stringify gp
                       _ -> return raw
-                    let part = case part0 of VStr s -> VStr (replaceAll s "$$" "$"); _ -> VStr (strkey part0)
+                    -- $$ escapes $; skip replaceAll (which rebuilds the whole
+                    -- string) for the common segment that has no "$$".
+                    let part = case part0 of
+                          VStr s -> VStr (if "$$" `isInfixOf` s then replaceAll s "$$" "$" else s)
+                          _ -> VStr (strkey part0)
                     if vStrEq part s_mt then do
                       (ascends0, pii2) <- countAsc pii 0
                       if iaIsSome inj && ascends0 > 0 then do

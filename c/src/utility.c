@@ -1893,10 +1893,12 @@ voxgig_value* voxgig_getpath(voxgig_value* store, voxgig_value* path, voxgig_inj
           }
         }
 
-        /* $$ escapes $ */
-        char* unescaped = voxgig_replace_str(part, "$$", "$");
-        free(part);
-        part = unescaped;
+        /* $$ escapes $ (skip the alloc+free for the common no-`$$` segment) */
+        if (strstr(part, "$$")) {
+          char* unescaped = voxgig_replace_str(part, "$$", "$");
+          free(part);
+          part = unescaped;
+        }
 
         if (part[0] == '\0') {
           int ascends = 0;
