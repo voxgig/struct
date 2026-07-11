@@ -945,8 +945,8 @@ module VoxgigStruct
             part = stringify(getpath(inj_meta, part[6..-2]))
           end
 
-          # $$ escapes $
-          part = part.gsub('$$', '$') if part.is_a?(String)
+          # $$ escapes $ (skip the gsub allocation for the common no-`$$` part)
+          part = part.gsub('$$', '$') if part.is_a?(String) && part.include?('$$')
 
           if part == S_MT
             ascends = 0

@@ -107,8 +107,11 @@ public func getpath(_ store: Value, _ pathIn: Value, _ inj: Injection? = nil) ->
             part = stringify(getpath(.map(inj.meta), .string(sub), inj))
           }
         }
-        // $$ → $ escape.
-        part = part.replacingOccurrences(of: "$$", with: "$")
+        // $$ → $ escape (skip Foundation's replacingOccurrences for the common
+        // no-`$$` segment).
+        if part.contains("$$") {
+          part = part.replacingOccurrences(of: "$$", with: "$")
+        }
         if part == S_MT {
           var ascends = 0
           while pI + 1 < numparts && parts[pI + 1] == S_MT {
