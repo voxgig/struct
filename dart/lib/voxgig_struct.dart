@@ -1075,7 +1075,9 @@ dynamic getpath(dynamic store, dynamic path, [dynamic injdef]) {
         } else {
           part = raw;
         }
-        part = part is String ? part.replaceAll('\$\$', '\$') : strkey(part);
+        part = part is String
+            ? (part.contains('\$') ? part.replaceAll('\$\$', '\$') : part)
+            : strkey(part);
         if (part == S_MT) {
           var ascends = 0;
           while (pi + 1 < parts.length && parts[pi + 1] == S_MT) {
