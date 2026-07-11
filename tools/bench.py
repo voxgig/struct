@@ -31,13 +31,13 @@ import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Ports with a bench runner that can be built + run in this environment.
-# Others (lua swift csharp clojure ocaml scala dart elixir zig kotlin) can be
-# added later: drop a bench/ runner + `bench` Makefile target following the
-# same contract and list them here.
+# Every port has a bench runner + `bench` Makefile target following the
+# build/bench/README.md contract.
 DEFAULT_LANGS = [
     "typescript", "javascript", "python", "ruby", "php",
-    "go", "rust", "java", "c", "perl", "haskell",
+    "go", "rust", "java", "c", "cpp", "perl", "haskell",
+    "lua", "dart", "csharp", "clojure", "ocaml", "elixir",
+    "zig", "swift", "kotlin", "scala",
 ]
 
 DEFAULTS = {

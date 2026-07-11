@@ -1,11 +1,15 @@
 # Makefile for the Dart port of voxgig/struct.
 # Requires the Dart SDK (`dart`) on PATH. No third-party dependencies.
 
-.PHONY: test lint build inspect clean reset publish format
+.PHONY: test bench lint build inspect clean reset publish format
 
 # Run the shared JSON corpus through the Dart implementation.
 test:
 	dart run test/runner.dart
+
+# Cross-port performance harness (JSON contract; see build/bench/README.md).
+bench:
+	@dart run bench/bench.dart
 
 # "Lint": static analysis (a clean `dart analyze` means the code is sound).
 lint:

@@ -83,6 +83,18 @@ ns/unit.
    only the JSON on stdout (send compiler output to stderr).
 3. Add the port to `DEFAULT_LANGS` in `tools/bench.py`.
 
-Ports currently wired: typescript, javascript, python, ruby, php, go, rust,
-java, c, perl, haskell. Not yet wired: lua, swift, csharp, clojure, ocaml,
-scala, dart, elixir, zig, kotlin.
+All 22 ports are wired: typescript, javascript, python, ruby, php, go, rust,
+java, c, cpp, perl, haskell, lua, dart, csharp, clojure, ocaml, elixir, zig,
+swift, kotlin, scala.
+
+A few ports' bench targets use a standalone compiler rather than the port's
+usual build tool, so the harness runs without network access, and expose an
+override:
+
+- **kotlin** — `kotlinc` + `java` (not Gradle). `KOTLIN_STDLIB` is the runtime
+  jar (defaults to a standard kotlinc `lib/`).
+- **scala** — `scalac` + `java` (not scala-cli). `SCALA_RUNTIME` is the run
+  classpath (scala3 + scala2 stdlib jars).
+- **clojure** — `clojure.main` with `src:bench` on the classpath.
+- **ocaml** — native `ocamlopt`; **cpp** — `g++ -O2`; **zig** —
+  `zig build perfbench -Doptimize=ReleaseFast`; **swift** — `swift run -c release`.

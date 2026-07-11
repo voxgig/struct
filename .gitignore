@@ -247,3 +247,15 @@ build/bench/report.html
 # performance harness per-port build artifacts
 java/bench/build/
 c/bench/bench.out
+
+# performance harness per-port build artifacts (new ports)
+csharp/bench/out/
+kotlin/bench/out/
+kotlin/bench/*.jar
+scala/bench/out/
+ocaml/bench/bench
+ocaml/bench/*.cm*
+ocaml/bench/*.o
+ocaml/src/*.cm*
+ocaml/src/*.o
+cpp/bench/bench.out

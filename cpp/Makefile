@@ -6,7 +6,7 @@ CXXFLAGS_COMMON := --std=c++17 -Wall -Wextra -Wno-unused-parameter
 
 CPP_SOURCES := $(wildcard src/*.hpp tests/*.hpp tests/*.cpp)
 
-.PHONY: build smoke test corpus check_leak sanitize lint tidy format-check clean reset inspect publish
+.PHONY: build smoke test bench corpus check_leak sanitize lint tidy format-check clean reset inspect publish
 
 # Default: compile and run the smoke test plus the full corpus driver.
 build: smoke corpus
@@ -18,6 +18,12 @@ corpus:
 	g++ tests/struct_corpus_test.cpp $(CXXFLAGS_COMMON) -I ./src -I ./tests $(EXTRA_INC) -o corpus.out && ./corpus.out
 
 test: build
+
+# Cross-port performance harness (JSON contract; see build/bench/README.md).
+# -O2 for representative timings; compile log to stderr.
+bench:
+	@g++ bench/bench.cpp $(CXXFLAGS_COMMON) -O2 -I ./src $(EXTRA_INC) -o bench/bench.out 1>&2
+	@./bench/bench.out
 
 # Backwards-compatible alias used by existing CI scripts.
 compile_and_run_tests: corpus

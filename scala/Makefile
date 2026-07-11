@@ -5,13 +5,24 @@
 SRC = src/voxgig_struct.scala
 TESTSRC = $(SRC) test/runner.scala
 
-.PHONY: test lint build inspect clean reset publish
+.PHONY: test bench lint build inspect clean reset publish
 
 # Run the shared JSON corpus through the Scala implementation via scala-cli.
 # (The classic `scala -cp out Runner` runner was removed in Scala 3.5+, where
 # `scala` is the scala-cli launcher and no longer runs a main from a classpath.)
 test:
 	scala-cli run $(TESTSRC) --main-class Runner
+
+# Cross-port performance harness (JSON contract; see build/bench/README.md).
+# Uses the Scala 3 compiler (scalac) + java rather than scala-cli, so it runs
+# without network access. SCALA_RUNTIME is the run classpath (scala3 + scala2
+# stdlib jars); override for your install.
+SCALAC ?= scalac
+SCALA_RUNTIME ?= /opt/scala3/lib/scala3-library_3.jar:/opt/scala3/lib/scala-library.jar
+bench:
+	@mkdir -p bench/out
+	@$(SCALAC) -d bench/out $(SRC) bench/bench.scala 1>&2
+	@java -cp "bench/out:$(SCALA_RUNTIME)" bench
 
 build:
 	scala-cli compile $(TESTSRC)

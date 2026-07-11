@@ -5,7 +5,7 @@ OCAMLC = ocamlc
 SRC = src/vregex.ml src/voxgig_struct.ml
 TESTSRC = $(SRC) test/runner.ml
 
-.PHONY: test lint build inspect clean reset publish
+.PHONY: test bench lint build inspect clean reset publish
 
 # Build and run the shared JSON corpus through the OCaml implementation.
 test: run_tests
@@ -13,6 +13,12 @@ test: run_tests
 
 run_tests: $(TESTSRC)
 	$(OCAMLC) -I src $(TESTSRC) -o run_tests
+
+# Cross-port performance harness (JSON contract; see build/bench/README.md).
+# Native (ocamlopt) for representative timings; build log to stderr.
+bench:
+	@ocamlopt -I src -I +unix unix.cmxa $(SRC) bench/bench.ml -o bench/bench 1>&2
+	@./bench/bench
 
 # "Lint": type-check the library (a clean compile means it is sound). No
 # third-party linter is required; ocamlformat can be wired into this target.

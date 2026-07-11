@@ -1,11 +1,16 @@
 # Makefile for the Clojure port of voxgig/struct.
 # Requires the Clojure CLI (`clojure` / `clj`) and a JDK on PATH.
 
-.PHONY: test lint build inspect clean reset publish
+.PHONY: test bench lint build inspect clean reset publish
 
 # Run the shared JSON corpus through the Clojure implementation.
 test:
 	clojure -M:test
+
+# Cross-port performance harness (JSON contract; see build/bench/README.md).
+# Runs clojure.main with src + bench on the classpath.
+bench:
+	@clojure -cp src:bench -m voxgig.bench
 
 # "Lint": compile the library + runner namespaces. A clean load means the
 # code is syntactically and structurally sound. (No third-party linter is

@@ -1,4 +1,4 @@
-.PHONY: inspect build test lint fmt-check clean reset publish
+.PHONY: inspect build test bench lint fmt-check clean reset publish
 
 # zig 0.13 cannot link against very new Xcode SDKs on macOS (e.g. the Xcode 26
 # SDK): every libc symbol (_malloc, _sigaction, __availability_version_check…)
@@ -50,6 +50,11 @@ test:
 		fi; \
 	fi; \
 	exit 1
+
+# Cross-port performance harness (JSON contract; see build/bench/README.md).
+# ReleaseFast for representative timings; zig's build log goes to stderr.
+bench:
+	@zig build perfbench -Doptimize=ReleaseFast
 
 # Clean build artifacts
 clean:

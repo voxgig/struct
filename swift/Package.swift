@@ -12,6 +12,12 @@ let package = Package(
     ],
     targets: [
         .target(name: "VoxgigStruct", path: "Sources/VoxgigStruct"),
+        // Cross-port performance bench (see build/bench/README.md).
+        .executableTarget(
+            name: "bench",
+            dependencies: ["VoxgigStruct"],
+            path: "Sources/bench"
+        ),
         .testTarget(
             name: "VoxgigStructTests",
             dependencies: ["VoxgigStruct"],
