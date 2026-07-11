@@ -12,7 +12,7 @@ W = envi('BENCH_WIDTH', 5)
 D = envi('BENCH_DEPTH', 6)
 WARM = envi('BENCH_WARMUP', 3)
 RUNS = envi('BENCH_RUNS', 21)
-GP = envi('BENCH_GETPATH_ITERS', 50000)
+GP = envi('BENCH_GETPATH_ITERS', 2000)
 
 def build(w, d, leaf)
   return leaf if d == 0

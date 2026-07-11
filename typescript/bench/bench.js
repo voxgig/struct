@@ -15,7 +15,7 @@ function runBench(lang, S, runtime) {
   const D = envi('BENCH_DEPTH', 6)
   const WARM = envi('BENCH_WARMUP', 3)
   const RUNS = envi('BENCH_RUNS', 21)
-  const GP = envi('BENCH_GETPATH_ITERS', 50000)
+  const GP = envi('BENCH_GETPATH_ITERS', 2000)
 
   const buildTree = (w, d, leaf) => {
     if (0 === d) return leaf

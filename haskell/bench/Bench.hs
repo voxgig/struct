@@ -58,7 +58,7 @@ main = do
   d <- envi "BENCH_DEPTH" 6
   warm <- envi "BENCH_WARMUP" 3
   runs <- envi "BENCH_RUNS" 21
-  gp <- envi "BENCH_GETPATH_ITERS" 50000
+  gp <- envi "BENCH_GETPATH_ITERS" 2000
   let nodes = nodecount w d
   tree <- buildTree w d 0
   treeA <- buildTree w d 1

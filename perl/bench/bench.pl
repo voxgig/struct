@@ -19,7 +19,7 @@ my $W    = envi('BENCH_WIDTH', 5);
 my $D    = envi('BENCH_DEPTH', 6);
 my $WARM = envi('BENCH_WARMUP', 3);
 my $RUNS = envi('BENCH_RUNS', 21);
-my $GP   = envi('BENCH_GETPATH_ITERS', 50000);
+my $GP   = envi('BENCH_GETPATH_ITERS', 2000);
 
 sub build {
     my ($w, $d, $leaf) = @_;

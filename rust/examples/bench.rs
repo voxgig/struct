@@ -54,7 +54,7 @@ fn main() {
     let d = envi("BENCH_DEPTH", 6);
     let warm = envi("BENCH_WARMUP", 3);
     let runs = envi("BENCH_RUNS", 21);
-    let gp = envi("BENCH_GETPATH_ITERS", 50000);
+    let gp = envi("BENCH_GETPATH_ITERS", 2000);
 
     let tree = build(w, d, 0);
     let nodes = nodecount(w, d);

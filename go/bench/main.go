@@ -76,7 +76,7 @@ func main() {
 	D := envi("BENCH_DEPTH", 6)
 	WARM := envi("BENCH_WARMUP", 3)
 	RUNS := envi("BENCH_RUNS", 21)
-	GP := envi("BENCH_GETPATH_ITERS", 50000)
+	GP := envi("BENCH_GETPATH_ITERS", 2000)
 
 	tree := build(W, D, 0)
 	nodes := nodecount(W, D)
