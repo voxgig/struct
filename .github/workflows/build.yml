@@ -233,7 +233,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # Pin macOS to macos-14: zig 0.13 cannot link against the macOS 26
+        # SDK now shipped by macos-latest (undefined libc symbols such as
+        # _getcwd/_malloc), and even the Command Line Tools SDK on that image
+        # is too new. macos-14 (arm64, SDK 14) is the last image zig 0.13 links.
+        os: [ubuntu-latest, macos-14, windows-latest]
         zig-version: ['0.13.0']
     steps:
       - uses: actions/checkout@v4
