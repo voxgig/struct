@@ -1,4 +1,4 @@
-.PHONY: inspect build test lint format-check typecheck bench clean reset audit publish
+.PHONY: inspect build test lint format-check typecheck bench walk-bench walk-bench-quick clean reset audit publish
 
 inspect:
 	@echo "Python version:"
@@ -25,10 +25,15 @@ format-check:
 typecheck:
 	mypy
 
+# Cross-port performance harness (JSON contract; see build/bench/README.md).
 bench:
+	@python3 bench/bench.py
+
+# Port-local walk-only micro-benchmark (human-readable).
+walk-bench:
 	WALK_BENCH=1 python3 -m unittest discover -s tests -p 'test_walk_bench.py' -v
 
-bench-quick:
+walk-bench-quick:
 	WALK_BENCH=1 \
 	  WALK_BENCH_VD_DEPTH=16 WALK_BENCH_RUNS_VD=3 WALK_BENCH_WARMUP=1 \
 	  WALK_BENCH_RUNS_WD=5 WALK_BENCH_RUNS_VW=5 \

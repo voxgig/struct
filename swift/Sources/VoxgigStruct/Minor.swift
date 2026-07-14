@@ -524,7 +524,7 @@ public func stringify(_ v: Value, _ maxlen: Int? = nil) -> String {
   case .function: s = "<function>"
   case .list, .map:
     s = emitSorted(v)
-    s = s.replacingOccurrences(of: "\"", with: "")
+    s = String(String.UnicodeScalarView(s.unicodeScalars.filter { $0 != "\"" }))
   }
   if let m = maxlen, m > 0, s.count > m {
     if m < 3 {
@@ -537,23 +537,41 @@ public func stringify(_ v: Value, _ maxlen: Int? = nil) -> String {
 }
 
 private func emitSorted(_ v: Value) -> String {
+  // Append into a single buffer instead of concatenating/joining a fresh
+  // string at every level (which re-copied the whole subtree per ancestor —
+  // O(n * depth)). Output is byte-identical; this is O(n).
+  var out = ""
+  emitSortedInto(v, &out)
+  return out
+}
+
+private func emitSortedInto(_ v: Value, _ out: inout String) {
   switch v {
   case .list(let l):
-    if l.items.isEmpty { return "[]" }
-    return "[" + l.items.map { emitSorted($0) }.joined(separator: ",") + "]"
+    if l.items.isEmpty { out += "[]"; return }
+    out += "["
+    for (i, item) in l.items.enumerated() {
+      if i > 0 { out += "," }
+      emitSortedInto(item, &out)
+    }
+    out += "]"
   case .map(let m):
-    if m.entries.isEmpty { return "{}" }
-    let keys = m.entries.keys.sorted()
-    return "{"
-      + keys.map { JSON.quotedKey($0) + ":" + emitSorted(m.entries[$0]!) }.joined(separator: ",")
-      + "}"
-  case .noval, .null: return "null"
-  case .bool(let b): return b ? "true" : "false"
-  case .int(let n): return String(n)
-  case .double(let d): return JSON.formatDouble(d)
-  case .string(let s): return JSON.quotedKey(s)
-  case .sentinel(let s): return "\"" + s.marker + "\""
-  case .function: return "\"<function>\""
+    if m.entries.isEmpty { out += "{}"; return }
+    out += "{"
+    for (i, k) in m.entries.keys.sorted().enumerated() {
+      if i > 0 { out += "," }
+      out += JSON.quotedKey(k)
+      out += ":"
+      emitSortedInto(m.entries[k]!, &out)
+    }
+    out += "}"
+  case .noval, .null: out += "null"
+  case .bool(let b): out += b ? "true" : "false"
+  case .int(let n): out += String(n)
+  case .double(let d): out += JSON.formatDouble(d)
+  case .string(let s): out += JSON.quotedKey(s)
+  case .sentinel(let s): out += "\"" + s.marker + "\""
+  case .function: out += "\"<function>\""
   }
 }
 

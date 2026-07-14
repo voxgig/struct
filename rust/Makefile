@@ -1,4 +1,4 @@
-.PHONY: inspect build test lint clippy fmt-check clean reset audit publish
+.PHONY: inspect build test bench lint clippy fmt-check clean reset audit publish
 
 inspect:
 	@echo "Rust toolchain:"
@@ -13,6 +13,11 @@ build:
 
 test:
 	cargo test
+
+# Cross-port performance harness (JSON contract; see build/bench/README.md).
+# --release for realistic numbers; -q keeps cargo's build chatter off stdout.
+bench:
+	@BENCH_RUSTC="$$(rustc --version | cut -d' ' -f1,2)" cargo run -q --release --example bench
 
 # Code quality: Clippy (treat warnings as errors) + rustfmt check.
 lint: clippy fmt-check

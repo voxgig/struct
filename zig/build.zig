@@ -48,4 +48,18 @@ pub fn build(b: *std.Build) void {
 
     const bench_step = b.step("bench", "Run walk benchmark (requires WALK_BENCH=1)");
     bench_step.dependOn(&run_bench.step);
+
+    // Cross-port performance bench (JSON to stdout). See build/bench/README.md.
+    // Invoke with: zig build perfbench -Doptimize=ReleaseFast
+    const perfbench = b.addExecutable(.{
+        .name = "perfbench",
+        .root_source_file = b.path("bench/bench.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    perfbench.root_module.addImport("voxgig-struct", lib_mod);
+    const run_perfbench = b.addRunArtifact(perfbench);
+    run_perfbench.has_side_effects = true;
+    const perfbench_step = b.step("perfbench", "Cross-port performance bench (JSON)");
+    perfbench_step.dependOn(&run_perfbench.step);
 }

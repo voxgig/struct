@@ -1469,7 +1469,8 @@ sub getpath {
                     $part = stringify(getpath($inj->{meta}, $sub));
                 }
                 $part = '' unless defined $part;
-                $part =~ s/\$\$/\$/g;
+                # $$ escapes $ (skip the regex for the common no-'$$' segment)
+                $part =~ s/\$\$/\$/g if index($part, '$$') >= 0;
                 if ($part eq S_MT) {
                     my $ascends = 0;
                     while ($pI + 1 < $numparts && $parts[$pI + 1] eq S_MT) {

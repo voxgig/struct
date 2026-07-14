@@ -1,10 +1,14 @@
-.PHONY: build test lint vet fmt fmt-check clean all audit publish
+.PHONY: build test bench lint vet fmt fmt-check clean all audit publish
 
 build:
 	go build ./...
 
 test:
 	go test -v ./...
+
+# Cross-port performance harness (JSON contract; see build/bench/README.md).
+bench:
+	@go run ./bench
 
 # Code quality: golangci-lint (errcheck/govet/ineffassign/staticcheck/unused),
 # plus a gofmt formatting check.

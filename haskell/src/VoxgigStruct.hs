@@ -46,7 +46,7 @@ import Control.Monad (filterM, foldM, forM_, when)
 import Data.Bits (shiftL, (.&.), (.|.))
 import Data.Char (toLower, toUpper)
 import Data.IORef
-import Data.List (findIndex, intercalate, isPrefixOf, sort)
+import Data.List (findIndex, intercalate, isInfixOf, isPrefixOf, sort)
 import qualified Data.List as L
 import Data.Maybe (fromMaybe)
 import Numeric (showHex)
@@ -733,53 +733,60 @@ pad4hex n = let h = showHex n "" in replicate (4 - length h) '0' ++ h
 
 -- | Core JSON encoder (sort-keys and optional indent) shared by 'stringify' \/ 'jsonify'.
 jsonEncode :: Bool -> Maybe Int -> Value -> IO String
-jsonEncode srt indent = \v -> enc v 0
+jsonEncode srt indent = \v -> do s <- enc v 0; return (s "")
   where
-    esc s = '"' : concatMap escc s ++ "\""
-    escc c = case c of
-      '"' -> "\\\""
-      '\\' -> "\\\\"
-      '\n' -> "\\n"
-      '\r' -> "\\r"
-      '\t' -> "\\t"
-      _ | fromEnum c < 32 -> "\\u" ++ pad4hex (fromEnum c)
-        | otherwise -> [c]
+    -- Build with ShowS (difference lists): composition is O(1) and the string
+    -- is rendered once at the end, so a deep tree is not re-copied once per
+    -- ancestor level the way `++` / intercalate on [Char] did (O(n*depth)).
+    escS s = showChar '"' . foldr (\c acc -> esccS c . acc) id s . showChar '"'
+    esccS c = case c of
+      '"' -> showString "\\\""
+      '\\' -> showString "\\\\"
+      '\n' -> showString "\\n"
+      '\r' -> showString "\\r"
+      '\t' -> showString "\\t"
+      _ | fromEnum c < 32 -> showString ("\\u" ++ pad4hex (fromEnum c))
+        | otherwise -> showChar c
+    interS _ [] = id
+    interS _ [x] = x
+    interS sep (x : xs) = x . sep . interS sep xs
+    enc :: Value -> Int -> IO ShowS
     enc val level = case val of
-      VNoval -> return "null"
-      VNull -> return "null"
-      VBool b -> return (if b then "true" else "false")
-      VNum n -> return (numToString n)
-      VStr s -> return (esc s)
-      VFunc _ -> return "null"
-      VSentinel _ -> return "null"
+      VNoval -> return (showString "null")
+      VNull -> return (showString "null")
+      VBool b -> return (showString (if b then "true" else "false"))
+      VNum n -> return (showString (numToString n))
+      VStr s -> return (escS s)
+      VFunc _ -> return (showString "null")
+      VSentinel _ -> return (showString "null")
       VList r -> do
         its <- readIORef r
-        if null its then return "[]" else case indent of
+        if null its then return (showString "[]") else case indent of
           Just ind -> do
-            let padStr = replicate (ind * (level + 1)) ' '
-                cpad = replicate (ind * level) ' '
-            parts <- mapM (\x -> (padStr ++) <$> enc x (level + 1)) its
-            return ("[\n" ++ intercalate ",\n" parts ++ "\n" ++ cpad ++ "]")
+            let padStr = showString (replicate (ind * (level + 1)) ' ')
+                cpad = showString (replicate (ind * level) ' ')
+            parts <- mapM (\x -> (padStr .) <$> enc x (level + 1)) its
+            return (showString "[\n" . interS (showString ",\n") parts . showChar '\n' . cpad . showChar ']')
           Nothing -> do
             parts <- mapM (\x -> enc x (level + 1)) its
-            return ("[" ++ intercalate "," parts ++ "]")
+            return (showChar '[' . interS (showChar ',') parts . showChar ']')
       VMap m -> do
         es <- readIORef m
         let ks0 = map fst es
             ks = if srt then sort ks0 else ks0
-        if null ks then return "{}" else case indent of
+        if null ks then return (showString "{}") else case indent of
           Just ind -> do
-            let padStr = replicate (ind * (level + 1)) ' '
-                cpad = replicate (ind * level) ' '
+            let padStr = showString (replicate (ind * (level + 1)) ' ')
+                cpad = showString (replicate (ind * level) ' ')
             parts <- mapM (\k -> do x <- maybe (return VNoval) return (lookup k es)
                                     xs <- enc x (level + 1)
-                                    return (padStr ++ esc k ++ ": " ++ xs)) ks
-            return ("{\n" ++ intercalate ",\n" parts ++ "\n" ++ cpad ++ "}")
+                                    return (padStr . escS k . showString ": " . xs)) ks
+            return (showString "{\n" . interS (showString ",\n") parts . showChar '\n' . cpad . showChar '}')
           Nothing -> do
             parts <- mapM (\k -> do x <- maybe (return VNoval) return (lookup k es)
                                     xs <- enc x (level + 1)
-                                    return (esc k ++ ":" ++ xs)) ks
-            return ("{" ++ intercalate "," parts ++ "}")
+                                    return (escS k . showChar ':' . xs)) ks
+            return (showChar '{' . interS (showChar ',') parts . showChar '}')
 
 -- | True when the value graph contains a reference cycle.
 hasCycle :: Value -> IO Bool
@@ -788,15 +795,28 @@ hasCycle v0 = do
   let sameNode (VList a) (VList b) = a == b
       sameNode (VMap a) (VMap b) = a == b
       sameNode _ _ = False
+      -- Track only the current recursion PATH (push on entry, pop on exit), so
+      -- the `any (sameNode …)` scan runs over a depth-sized list — O(n*depth)
+      -- rather than O(n^2). A node on its own ancestor path is a real cycle.
       go v = case v of
         VList r -> do
           s <- readIORef seen
           if any (sameNode v) s then return True
-          else do modifyIORef' seen (v :); xs <- readIORef r; anyM go xs
+          else do
+            modifyIORef' seen (v :)
+            xs <- readIORef r
+            res <- anyM go xs
+            modifyIORef' seen tail
+            return res
         VMap m -> do
           s <- readIORef seen
           if any (sameNode v) s then return True
-          else do modifyIORef' seen (v :); es <- readIORef m; anyM (go . snd) es
+          else do
+            modifyIORef' seen (v :)
+            es <- readIORef m
+            res <- anyM (go . snd) es
+            modifyIORef' seen tail
+            return res
         _ -> return False
   go v0
 
@@ -1126,7 +1146,11 @@ getpath inj store path = do
                       VStr s | "$REF:" `isPrefixOf` s -> do sl <- sliceM (VStr s) (VNum 5) (VNum (-1)) False; sp <- getprop store (VStr s_dspec); gp <- getpath INone sp sl; VStr <$> stringify gp
                       VStr s | iaIsSome inj && "$META:" `isPrefixOf` s -> do sl <- sliceM (VStr s) (VNum 6) (VNum (-1)) False; gp <- getpath INone injMeta sl; VStr <$> stringify gp
                       _ -> return raw
-                    let part = case part0 of VStr s -> VStr (replaceAll s "$$" "$"); _ -> VStr (strkey part0)
+                    -- $$ escapes $; skip replaceAll (which rebuilds the whole
+                    -- string) for the common segment that has no "$$".
+                    let part = case part0 of
+                          VStr s -> VStr (if "$$" `isInfixOf` s then replaceAll s "$$" "$" else s)
+                          _ -> VStr (strkey part0)
                     if vStrEq part s_mt then do
                       (ascends0, pii2) <- countAsc pii 0
                       if iaIsSome inj && ascends0 > 0 then do

@@ -1463,8 +1463,10 @@ class Struct
                         $part = self::stringify(self::getpath(self::_getprop($injdef, 'meta'), substr($part, 6, -1)));
                     }
 
-                    // $$ escapes $
-                    $part = str_replace('$$', '$', $part);
+                    // $$ escapes $ (skip str_replace for the common no-`$$` part)
+                    if (strpos($part, '$$') !== false) {
+                        $part = str_replace('$$', '$', $part);
+                    }
 
                     if ($part === '') {
                         $ascends = 0;

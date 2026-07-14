@@ -1,4 +1,4 @@
-.PHONY: inspect build test lint clean reset publish
+.PHONY: inspect build test bench lint clean reset publish
 
 SWIFT ?= swift
 
@@ -14,6 +14,12 @@ build:
 
 test:
 	$(SWIFT) test
+
+# Cross-port performance harness (JSON contract; see build/bench/README.md).
+# Release build (SwiftPM logs to stderr; stdout carries only the JSON line).
+bench:
+	@BENCH_SWIFT="$$($(SWIFT) --version 2>/dev/null | head -1 | cut -c1-24)" \
+	  $(SWIFT) run -c release bench
 
 # `swift format` is bundled with the Swift toolchain (`swift-format`).
 # Local soft-skip when not on PATH; CI hardens this by setting CI=true

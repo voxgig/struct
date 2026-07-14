@@ -526,11 +526,19 @@ and json_encode ?(sort = false) ?indent v =
   enc v 0; Buffer.contents buf
 
 and has_cycle v =
+  (* Track only the current recursion PATH (push on entry, pop on exit) rather
+     than every node ever seen. `memq` then scans a depth-sized list, so this is
+     O(n * depth) instead of O(n^2). A node reachable on its own ancestor path
+     is a genuine cycle; a shared-but-acyclic subtree is simply revisited. *)
   let seen = ref [] in
   let rec go v =
     match v with
-    | List r -> if List.memq v !seen then true else (seen := v :: !seen; List.exists go !r)
-    | Map m -> if List.memq v !seen then true else (seen := v :: !seen; List.exists (fun (_, x) -> go x) m.entries)
+    | List r ->
+        if List.memq v !seen then true
+        else (seen := v :: !seen; let c = List.exists go !r in seen := List.tl !seen; c)
+    | Map m ->
+        if List.memq v !seen then true
+        else (seen := v :: !seen; let c = List.exists (fun (_, x) -> go x) m.entries in seen := List.tl !seen; c)
     | _ -> false
   in go v
 
@@ -848,8 +856,10 @@ and getpath ?(inj = INone) store path =
                Str (stringify (getpath ~inj:INone inj_meta (slice ~start:(Num 6.0) ~stop:(Num (-1.0)) (Str s))))
              | _ -> raw
            in
+           (* $$ escapes $; skip replace_all (which rebuilds via a Buffer) when
+              the segment has no '$' at all — the common case. *)
            let part = (match part with
-               | Str s -> Str (replace_all s "$$" "$")
+               | Str s -> Str (if String.contains s '$' then replace_all s "$$" "$" else s)
                | _ -> Str (strkey ~key:part ())) in
            if part = Str s_mt then begin
              let ascends = ref 0 in

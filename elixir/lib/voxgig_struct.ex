@@ -1267,7 +1267,12 @@ defmodule Voxgig.Struct do
           true -> raw
         end
 
-      part = if is_binary(part0), do: String.replace(part0, "$$", "$"), else: strkey(part0)
+      part =
+        cond do
+          not is_binary(part0) -> strkey(part0)
+          String.contains?(part0, "$") -> String.replace(part0, "$$", "$")
+          true -> part0
+        end
 
       if part == @s_mt do
         {ascends, pi2} = count_ascends(parts, pi, 0)

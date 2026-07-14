@@ -1,4 +1,4 @@
-.PHONY: inspect build test lint checkstyle spotbugs clean reset publish
+.PHONY: inspect build test bench lint checkstyle spotbugs clean reset publish
 
 inspect:
 	@echo "Java version:"
@@ -12,6 +12,13 @@ build:
 
 test:
 	mvn -q test
+
+# Cross-port performance harness (JSON contract; see build/bench/README.md).
+# Compiles the default-package Struct alongside the bench (no Maven needed).
+bench:
+	@mkdir -p bench/build
+	@javac -d bench/build src/Struct.java bench/Bench.java 1>&2
+	@java -cp bench/build Bench
 
 # Code quality: Checkstyle (style) + SpotBugs (bug pattern detection).
 lint:

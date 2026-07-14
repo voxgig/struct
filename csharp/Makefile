@@ -1,4 +1,4 @@
-.PHONY: inspect build test lint format-check clean reset audit publish
+.PHONY: inspect build test bench lint format-check clean reset audit publish
 
 inspect:
 	@echo ".NET SDK version:"
@@ -9,6 +9,12 @@ build:
 
 test:
 	dotnet test tests/VoxgigStructTest.csproj
+
+# Cross-port performance harness (JSON contract; see build/bench/README.md).
+# Build quietly to stderr, then run the compiled dll so stdout is only JSON.
+bench:
+	@dotnet build -c Release bench/bench.csproj -v q -o bench/out 1>&2
+	@dotnet bench/out/bench.dll
 
 # Code quality: Roslyn analyzers (run as part of build, warnings-as-info) +
 # `dotnet format` style verification.

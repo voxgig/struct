@@ -1,6 +1,6 @@
 # Makefile - Common commands for Lua project
 
-.PHONY: setup test lint format-check bench clean publish
+.PHONY: setup test lint format-check bench walk-bench clean publish
 
 # Setup the environment
 setup:
@@ -21,8 +21,13 @@ lint:
 format-check:
 	stylua --check src test
 
-# Run walk() benchmark. Gated on WALK_BENCH=1 inside the script.
+# Cross-port performance harness (JSON contract; see build/bench/README.md).
+LUA ?= lua5.4
 bench:
+	@$(LUA) bench/bench.lua
+
+# Port-local walk-only micro-benchmark (human-readable).
+walk-bench:
 	WALK_BENCH=1 lua test/walk_bench.lua
 
 # Clean artifacts

@@ -5,8 +5,11 @@ module VoxgigStruct
   # --- Debug Logging Configuration ---
   DEBUG = false
 
-  def self.log(msg)
-    puts "[DEBUG] #{msg}" if DEBUG
+  # Lazy: the message block is only evaluated when DEBUG is on, so hot paths
+  # never pay to build (and `.inspect`-serialise whole nodes into) a debug
+  # string that would just be discarded.
+  def self.log
+    puts "[DEBUG] #{yield}" if DEBUG
   end
 
   # --- Helper to convert internal undefined marker to Ruby nil ---
@@ -202,34 +205,34 @@ module VoxgigStruct
   # --- Internal getprop ---
   # Returns the value if found; otherwise returns alt (default is UNDEF)
   def self._getprop(val, key, alt = UNDEF)
-    log("(_getprop) called with val=#{val.inspect} and key=#{key.inspect}")
+    log { "(_getprop) called with val=#{val.inspect} and key=#{key.inspect}" }
     return alt if val.nil? || key.nil?
 
     if islist(val)
       key = key.to_i if key.to_s =~ /\A\d+\z/
       unless key.is_a?(Numeric) && key >= 0 && key < val.size
-        log("(_getprop) index #{key.inspect} out of bounds; returning alt")
+        log { "(_getprop) index #{key.inspect} out of bounds; returning alt" }
         return alt
       end
       result = val[key]
-      log("(_getprop) returning #{result.inspect} from array for key #{key}")
+      log { "(_getprop) returning #{result.inspect} from array for key #{key}" }
       result
     elsif ismap(val)
       key_str = key.to_s
       if val.key?(key_str)
         result = val[key_str]
-        log("(_getprop) found key #{key_str.inspect} in hash, returning #{result.inspect}")
+        log { "(_getprop) found key #{key_str.inspect} in hash, returning #{result.inspect}" }
         result
       elsif key.is_a?(String) && val.key?(key.to_sym)
         result = val[key.to_sym]
-        log("(_getprop) found symbol key #{key.to_sym.inspect} in hash, returning #{result.inspect}")
+        log { "(_getprop) found symbol key #{key.to_sym.inspect} in hash, returning #{result.inspect}" }
         result
       else
-        log("(_getprop) key #{key.inspect} not found; returning alt")
+        log { "(_getprop) key #{key.inspect} not found; returning alt" }
         alt
       end
     else
-      log('(_getprop) value is not a node; returning alt')
+      log { '(_getprop) value is not a node; returning alt' }
       alt
     end
   end
@@ -280,7 +283,7 @@ module VoxgigStruct
   end
 
   def self.setprop(parent, key, val = :no_val_provided)
-    log(">>> setprop called with parent=#{parent.inspect}, key=#{key.inspect}, val=#{val.inspect}")
+    log { ">>> setprop called with parent=#{parent.inspect}, key=#{key.inspect}, val=#{val.inspect}" }
     return parent unless iskey(key)
 
     if ismap(parent)
@@ -305,7 +308,7 @@ module VoxgigStruct
         parent.unshift(val)
       end
     end
-    log("<<< setprop result: #{parent.inspect}")
+    log { "<<< setprop result: #{parent.inspect}" }
     parent
   end
 
@@ -942,8 +945,8 @@ module VoxgigStruct
             part = stringify(getpath(inj_meta, part[6..-2]))
           end
 
-          # $$ escapes $
-          part = part.gsub('$$', '$') if part.is_a?(String)
+          # $$ escapes $ (skip the gsub allocation for the common no-`$$` part)
+          part = part.gsub('$$', '$') if part.is_a?(String) && part.include?('$$')
 
           if part == S_MT
             ascends = 0

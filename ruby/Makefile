@@ -1,4 +1,4 @@
-.PHONY: inspect build test lint walk-bench clean reset audit publish
+.PHONY: inspect build test lint bench walk-bench clean reset audit publish
 
 inspect:
 	@echo "Ruby version:"
@@ -12,6 +12,10 @@ build:
 
 test:
 	ruby test_voxgig_struct.rb
+
+# Cross-port performance harness (JSON contract; see build/bench/README.md).
+bench:
+	@ruby bench/bench.rb
 
 # Code quality: RuboCop linter/formatter.
 lint:

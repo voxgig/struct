@@ -1,11 +1,15 @@
 # Makefile for the Elixir port of voxgig/struct.
 # Requires Elixir (`elixir` / `elixirc`) on PATH. No third-party dependencies.
 
-.PHONY: test lint build inspect clean reset publish format
+.PHONY: test bench lint build inspect clean reset publish format
 
 # Run the shared JSON corpus through the Elixir implementation.
 test:
 	elixir test/runner.exs
+
+# Cross-port performance harness (JSON contract; see build/bench/README.md).
+bench:
+	@elixir bench/bench.exs
 
 # "Lint": compile the library with warnings (a clean compile means it is sound).
 lint:

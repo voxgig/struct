@@ -2,7 +2,7 @@
 # Requires GHC (`ghc` / `runghc`) on PATH. No third-party dependencies
 # (only the GHC boot libraries: base, array, etc.).
 
-.PHONY: test lint build inspect clean reset publish publish-candidate format
+.PHONY: test bench lint build inspect clean reset publish publish-candidate format
 
 BUILDDIR := .hsbuild
 
@@ -11,6 +11,13 @@ test:
 	@mkdir -p $(BUILDDIR)
 	ghc -O0 -isrc -itest -outputdir $(BUILDDIR) -o $(BUILDDIR)/runner test/Runner.hs
 	$(BUILDDIR)/runner ../build/test/test.json
+
+# Cross-port performance harness (JSON contract; see build/bench/README.md).
+# Optimised build; compiler chatter to stderr so stdout is only the JSON line.
+bench:
+	@mkdir -p $(BUILDDIR)
+	@ghc -O2 -isrc -ibench -outputdir $(BUILDDIR) -o $(BUILDDIR)/bench bench/Bench.hs 1>&2
+	@$(BUILDDIR)/bench
 
 # "Lint": type-check the library and runner (a clean compile = pass).
 lint:

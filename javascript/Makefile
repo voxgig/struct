@@ -1,4 +1,4 @@
-.PHONY: inspect build test lint format-check clean reset audit publish
+.PHONY: inspect build test bench lint format-check clean reset audit publish
 
 inspect:
 	@echo "Node.js version:"
@@ -12,6 +12,10 @@ build:
 
 test:
 	npm test
+
+# Performance bench: emit one JSON line to stdout (see build/bench/README.md).
+bench:
+	@node bench/bench.js
 
 # Code quality: ESLint + Prettier format check.
 lint:

@@ -747,10 +747,14 @@ function stringify(val: any, maxlen?: number, pretty?: any): string {
     try {
       valstr = JSON.stringify(val, function (_key: string, val: any) {
         if (val !== null && typeof val === 'object' && !Array.isArray(val)) {
+          // Emit map keys in sorted order (deterministic output). Building the
+          // sorted copy directly avoids the intermediate key/tuple arrays that
+          // items() would allocate for every node.
+          const keys = Object.keys(val).sort()
           const sortedObj: any = {}
-          items(val, (n) => {
-            sortedObj[n[0]] = val[n[0]]
-          })
+          for (let i = 0; i < keys.length; i++) {
+            sortedObj[keys[i]] = val[keys[i]]
+          }
           return sortedObj
         }
         return val
@@ -839,13 +843,37 @@ function pathify(val: any, startin?: number, endin?: number) {
 // NOTE: function and instance values are copied, *not* cloned.
 function clone(val: any): any {
   const refs: any[] = []
-  const reftype = T_function | T_instance
-  const replacer: any = (_k: any, v: any) =>
-    0 < (reftype & typify(v)) ? (refs.push(v), '`$REF:' + (refs.length - 1) + '`') : v
+  // Copy (don't clone) functions and non-plain-object instances by reference.
+  // This inlines `0 < ((T_function | T_instance) & typify(v))` — the same set
+  // of values (functions, class instances, bigints) — without a typify() call
+  // per value, which dominated clone's cost.
+  const replacer: any = (_k: any, v: any) => {
+    const t = typeof v
+    if (
+      S_function === t ||
+      'bigint' === t ||
+      (S_object === t &&
+        null !== v &&
+        !Array.isArray(v) &&
+        v.constructor instanceof Function &&
+        'Object' !== v.constructor.name &&
+        'Array' !== v.constructor.name)
+    ) {
+      return (refs.push(v), '`$REF:' + (refs.length - 1) + '`')
+    }
+    return v
+  }
   const reviver: any = (_k: any, v: any, m: any) =>
     S_string === typeof v ? ((m = re_find(R_CLONE_REF, v)), m ? refs[m[1]] : v) : v
-  const out = NONE === val ? NONE : JSON.parse(JSON.stringify(val, replacer), reviver)
-  return out
+  if (NONE === val) {
+    return NONE
+  }
+  const json = JSON.stringify(val, replacer)
+  // A reviver forces V8 off its native JSON.parse fast path (a large cost). It
+  // is only needed to swap `$REF:n` placeholders back for the copied-by-ref
+  // functions/instances the replacer captured — so when none were captured,
+  // parse without it.
+  return 0 === refs.length ? JSON.parse(json) : JSON.parse(json, reviver)
 }
 
 // Define a JSON Object using function arguments.
@@ -1006,9 +1034,18 @@ function walk(
       childPath[i] = path[i]
     }
 
-    for (const [ckey, child] of items(out)) {
+    // Iterate the sorted keys directly (as items() would order them) without
+    // building the intermediate [key, value] tuple array items() allocates for
+    // every node.
+    const ckeys = keysof(out)
+    for (let cI = 0; cI < ckeys.length; cI++) {
+      const ckey = ckeys[cI]
       childPath[depth] = S_MT + ckey
-      setprop(out, ckey, walk(child, before, after, maxdepth, ckey, out, childPath, pool))
+      setprop(
+        out,
+        ckey,
+        walk((out as any)[ckey], before, after, maxdepth, ckey, out, childPath, pool),
+      )
     }
   }
 
@@ -1074,13 +1111,15 @@ function merge(val: any, maxdepth?: number): any {
           dst[pI] = 0 < pI ? getprop(dst[pI - 1], key) : dst[pI]
           const tval = dst[pI]
 
+          const vtype = typify(val)
+
           // Destination empty, so create node (unless override is class instance).
-          if (NONE === tval && 0 === (T_instance & typify(val))) {
+          if (NONE === tval && 0 === (T_instance & vtype)) {
             cur[pI] = islist(val) ? [] : {}
           }
 
           // Matching override and destination so continue with their values.
-          else if (typify(val) === typify(tval)) {
+          else if (vtype === typify(tval)) {
             cur[pI] = tval
           }
 
@@ -1229,8 +1268,10 @@ function getpath(store: any, path: number | string | string[], injdef?: Partial<
           part = stringify(getpath(getprop(injdef, 'meta'), slice(part, 6, -1)))
         }
 
-        // $$ escapes $
-        part = re_replace(R_DOUBLE_DOLLAR, part, '$')
+        // $$ escapes $ (skip the regex for the common no-`$$` segment).
+        if (-1 !== part.indexOf('$$')) {
+          part = re_replace(R_DOUBLE_DOLLAR, part, '$')
+        }
 
         if (S_MT === part) {
           let ascends = 0

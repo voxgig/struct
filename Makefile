@@ -2,6 +2,8 @@
 # Usage:
 #   make test          — run tests for all languages
 #   make test-zig      — run tests for one language
+#   make bench         — run the performance harness (build/bench/REPORT.md)
+#   make bench-go      — run the performance harness for one language
 #   make lint          — run code-quality tooling (linters/formatters) for all languages
 #   make lint-go       — run code-quality tooling for one language
 #   make audit         — run dependency / supply-chain audits for all languages
@@ -33,7 +35,7 @@ AUDIT_LANGS = typescript javascript python go ruby php rust csharp
 # publish purely by that tag.
 PUBLISH_LANGS = typescript javascript python go ruby php lua zig java rust c cpp csharp kotlin perl swift clojure ocaml scala dart elixir haskell
 
-.PHONY: all inspect build test lint audit scan analyze clean reset publish status verify corpus gen-docs \
+.PHONY: all inspect build test bench lint audit scan analyze clean reset publish status verify corpus gen-docs \
         scan-secrets scan-deps scan-sast scan-workflows scan-shell scan-spelling scan-docs \
         scan-parity scan-regex scan-docs-examples
 
@@ -88,6 +90,18 @@ lint: $(LINT_LANGS:%=lint-%)
 audit: $(AUDIT_LANGS:%=audit-%)
 clean: $(LANGS:%=clean-%)
 reset: $(LANGS:%=reset-%)
+
+# ---- Performance harness ----
+# Build a fixed in-memory workload in each port and time the core ops
+# (clone/walk/merge/stringify/getpath) in-process, then aggregate into
+# build/bench/REPORT.md. Driven by tools/bench.py; see build/bench/README.md.
+# `make bench` runs every wired port; `make bench-go` runs one; workload knobs
+# are BENCH_RUNS / BENCH_WIDTH / BENCH_DEPTH / … (passed through the env).
+bench:
+	python3 tools/bench.py
+
+bench-%:
+	python3 tools/bench.py $*
 
 # Publishing is deliberately one-language-at-a-time (each upload is
 # irreversible and each cuts a version tag), so there is no publish-all.

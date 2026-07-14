@@ -1,4 +1,4 @@
-.PHONY: inspect build test lint clean reset publish
+.PHONY: inspect build test bench lint clean reset publish
 
 GRADLE ?= ./gradlew
 
@@ -13,6 +13,17 @@ build:
 
 test:
 	$(GRADLE) test
+
+# Cross-port performance harness (JSON contract; see build/bench/README.md).
+# Compiles the library + bench with the standalone Kotlin compiler (no Gradle,
+# so it runs without network). KOTLIN_STDLIB is the runtime jar; override for
+# your install (a standard kotlinc ships it under its lib/).
+KOTLINC ?= kotlinc
+KOTLIN_STDLIB ?= /opt/kotlinc/lib/kotlin-stdlib.jar
+bench:
+	@mkdir -p bench/out
+	@$(KOTLINC) src/main/kotlin/voxgig/struct/Struct.kt bench/bench.kt -d bench/out 1>&2
+	@java -cp "bench/out:$(KOTLIN_STDLIB)" BenchKt
 
 # Code quality: detekt (static analysis) + ktlint (style).
 lint:

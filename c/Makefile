@@ -12,7 +12,7 @@ TEST_SOURCES := $(wildcard tests/*.c)
 TEST_HEADERS := $(wildcard tests/*.h)
 ALL_SOURCES := $(C_SOURCES) $(C_HEADERS) $(TEST_SOURCES) $(TEST_HEADERS)
 
-.PHONY: build smoke test corpus check_leak sanitize lint tidy format format-check clean reset inspect publish
+.PHONY: build smoke test bench corpus check_leak sanitize lint tidy format format-check clean reset inspect publish
 
 # Default: compile and run the corpus driver.
 build: corpus
@@ -24,6 +24,12 @@ corpus:
 	$(CC) tests/struct_corpus_test.c $(C_SOURCES) $(CFLAGS_COMMON) $(CFLAGS_DEBUG) -I ./src $(EXTRA_INC) -o corpus.out $(LDLIBS) && ./corpus.out
 
 test: corpus
+
+# Cross-port performance harness (JSON contract; see build/bench/README.md).
+# Release-optimised; build log to stderr so stdout is only the JSON line.
+bench:
+	@$(CC) bench/bench.c $(C_SOURCES) $(CFLAGS_COMMON) $(CFLAGS_RELEASE) -I ./src $(EXTRA_INC) -o bench/bench.out $(LDLIBS) 1>&2
+	@./bench/bench.out
 
 check_leak: corpus
 	valgrind --leak-check=full --show-leak-kinds=all --error-exitcode=1 ./corpus.out
