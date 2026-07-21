@@ -245,7 +245,18 @@
     "vinj",
     "vmap",
     "vregex",
-    "walkcb"
+    "walkcb",
+    "aql",
+    "canonicalname",
+    "concatenative",
+    "emitlang",
+    "minilang",
+    "nullary",
+    "upcase",
+    "variadics",
+    "fnarg",
+    "myfn",
+    "derefs"
   ],
   "ignoreRegExpList": [
     "/`\\$[A-Z]+`/",

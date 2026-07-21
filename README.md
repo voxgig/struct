@@ -48,6 +48,7 @@ syntax), and language-specific notes:
 | Dart       | Complete   | [`dart/README.md`](./dart/README.md)                  |
 | Elixir     | Complete   | [`elixir/README.md`](./elixir/README.md)              |
 | Haskell    | Complete   | [`haskell/README.md`](./haskell/README.md)            |
+| AQL        | Complete   | [`aql/README.md`](./aql/README.md)                    |
 
 Every listed port reports full canonical parity under
 `tools/check_parity.py` and passes the shared `build/test/` corpus. See each
@@ -434,7 +435,7 @@ cross-engine edge cases:
 ├── build/test/       # shared JSON test corpus (.jsonic)
 ├── typescript/  javascript/  python/   # canonical + JS-family ports
 ├── go/  ruby/  php/                     # other complete ports
-├── lua/  csharp/  zig/  rust/  c/  perl/  kotlin/  cpp/  swift/  clojure/  ocaml/  scala/  dart/  elixir/  haskell/
+├── lua/  csharp/  zig/  rust/  c/  perl/  kotlin/  cpp/  swift/  clojure/  ocaml/  scala/  dart/  elixir/  haskell/  aql/
 ├── java/                                # JVM ports (also kotlin/ scala/ clojure/)
 └── LICENSE
 ```
@@ -471,6 +472,7 @@ Each language directory contains:
 | Dart       | `dart analyze`                    | `dart format`         |
 | Elixir     | compile check (`elixirc`)         | (`mix format` optional)|
 | Haskell    | type-check (`ghc -fno-code`)      | (`ormolu` optional)   |
+| AQL        | `aql check` + module load smoke   | (`aql fmt` optional)  |
 
 Run everything with `make lint` at the repo root, or one language with
 `make lint-<lang>` (e.g. `make lint-go`).

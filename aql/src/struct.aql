@@ -1,0 +1,3589 @@
+# ============================================================================
+# voxgig/struct — the AQL port.
+#
+# A faithful port of the canonical TypeScript implementation
+# (typescript/src/StructUtility.ts) to the AQL language itself.
+# The shared corpus build/test/test.json is the behavioural contract;
+# the runner lives in ../test/runner.aql.
+#
+# Port model (like the Python / Dart / Elixir ports):
+#   - single null: AQL `none` plays both JSON null and undefined.
+#   - a distinct no-argument sentinel (vg-noarg) marks "argument absent",
+#     which is different from "argument is null" (see typify / stringify).
+#   - all nodes are flex (FlexMap / FlexList): reference semantics, in-place
+#     mutation — the same aliasing model the canonical TS relies on.
+#   - regex: the uniform re_* API is built over the engine's RE2 matcher
+#     (aql:minilang `mini re`), the same dialect the corpus is limited to.
+#
+# House rules of this module:
+#   - iteration is by tail-recursive MODULE-LEVEL loop functions (vgl-*)
+#     with explicit parameters. Named function-valued defs inside fn
+#     bodies are avoided: a re-entrant frame's same-named lambda def
+#     collides with the outer frame's binding (InstallDef overlap
+#     removal), which silently corrupts recursion. Anonymous lambdas
+#     passed directly as arguments are safe (params shadow properly).
+#   - every internal call is fully parenthesised.
+#   - node truthiness is never used bare ({} and "" and 0 are falsy in
+#     AQL); predicates are explicit.
+#
+# Internal words carry a `vg-` prefix (canonical names like `size`, `slice`,
+# `filter`, `flatten` are live core AQL words and cannot be rebound); the
+# canonical public names are the keys of the `Struct` export map at the end
+# of this file.
+# ============================================================================
+
+import "aql:string-util"
+import "aql:math-util"
+import "aql:bin-util"
+import "aql:minilang"
+import "aql:emitlang"
+import "aql:time-util"
+
+# ----------------------------------------------------------------------------
+# Mode values for the inject step (bitfield), and type bit codes.
+# Values mirror the canonical TS constants exactly.
+# ----------------------------------------------------------------------------
+def vg-m-keypre 1
+def vg-m-keypost 2
+def vg-m-val 4
+
+def vg-t-any 2147483647
+def vg-t-noval 1073741824
+def vg-t-boolean 536870912
+def vg-t-decimal 268435456
+def vg-t-integer 134217728
+def vg-t-number 67108864
+def vg-t-string 33554432
+def vg-t-function 16777216
+def vg-t-symbol 8388608
+def vg-t-null 4194304
+def vg-t-list 16384
+def vg-t-map 8192
+def vg-t-instance 4096
+def vg-t-scalar 128
+def vg-t-node 64
+
+# TYPENAME[clz32(t)] — indexed by the number of leading zero bits.
+def vg-typename-table ["any" "nil" "boolean" "decimal" "integer" "number" "string" "function" "symbol" "null" "" "" "" "" "" "" "" "list" "map" "instance" "" "" "" "" "scalar" "node"]
+
+def vg-modename-table {"4": "val" "1": "key:pre" "2": "key:post"}
+def vg-placement-table {"4": "value" "1": "key" "2": "key"}
+
+# ----------------------------------------------------------------------------
+# Sentinels.
+#   vg-noarg         — "no argument given" (like the Dart port's _noarg).
+#   vg-skip-marker   — the SKIP marker (compared by identity via eq).
+#   vg-delete-marker — the DELETE marker.
+# ----------------------------------------------------------------------------
+def vg-noarg (quote vg__noarg__)
+def vg-skip-marker (flex {"`$SKIP`": true})
+def vg-delete-marker (flex {"`$DELETE`": true})
+
+def vg-is-noarg fn [[v:Any] [Boolean] [
+  if (v is Atom) [v eq vg-noarg] [false]
+]]
+
+def vg-is-skip fn [[v:Any] [Boolean] [
+  v eq vg-skip-marker
+]]
+def vg-is-delete fn [[v:Any] [Boolean] [
+  v eq vg-delete-marker
+]]
+
+# ----------------------------------------------------------------------------
+# Small helpers (JS-semantics shims, as in every port).
+# ----------------------------------------------------------------------------
+
+# Bit test: 0 < (mask & t)
+def vg-bit fn [[mask:Integer t:Integer] [Boolean] [
+  (BinUtil.band mask t) gt 0
+]]
+
+# Render a number the way JavaScript does: whole floats print as integers.
+def vg-num-to-string fn [[n:Any] [String] [
+  if (n is Float) [
+    if (MathUtil.is-nan n) ["NaN"] [
+      if (MathUtil.is-inf n) [if (n gt 0.0) ["Infinity"] ["-Infinity"]] [
+        def fl (MathUtil.floor n)
+        if ((fl eq n) and ((MathUtil.abs n) lt 1e16)) [convert String fl] [convert String n]
+      ]
+    ]
+  ] [convert String n]
+]]
+
+# Join a list of strings with a separator. NOTE: the core `join` word
+# merges separator RUNS (join "/" ["a//" "b"] collapses the slashes), so
+# this is a plain interleave-and-concat instead. The public canonical
+# join with URL semantics is vg-join below.
+def vgl-join-list fn [[i:Integer xs:Any sep:String acc:Any] [Any] [
+  if (i gte (size xs)) [acc] [
+    if (i gt 0) [(append [sep] acc) drop none] [none] drop
+    def e (xs get i)
+    (append [e] acc) drop
+    def i1 (i add 1)
+    def r (vgl-join-list i1 xs sep acc)
+    r
+  ]
+]]
+def vgi-join-list fn [[xs:Any sep:String] [String] [
+  def acc0 (flex [])
+  def parts (vgl-join-list 0 xs sep acc0)
+  StringUtil.concat (make List parts)
+]]
+
+# JavaScript String(v) coercion.
+def vgl-jsstr-list fn [[i:Integer v:Any acc:Any] [Any] [
+  if (i gte (size v)) [acc] [
+    def e (v get i)
+    def es (if (e is None) [""] [vg-js-string e])
+    (append [es] acc) drop
+    def i1 (i add 1)
+    def r (vgl-jsstr-list i1 v acc)
+    r
+  ]
+]]
+def vg-js-string fn [[v:Any] [String] [
+  if (v is None) ["null"] [
+    if (v is Boolean) [if v ["true"] ["false"]] [
+      if (v is Number) [vg-num-to-string v] [
+        if (v is String) [v] [
+          if (v is Function) ["function"] [
+            if (v is List) [
+              def btr1 (vgi-join-list (vgl-jsstr-list 0 v (flex [])) ",")
+              btr1
+            ] [
+              if (v is Map) ["[object Object]"] [convert String v]
+            ]
+          ]
+        ]
+      ]
+    ]
+  ]
+]]
+
+# Map keys are strings: JS coerces every map key through String(k).
+def vgi-map-key fn [[k:Any] [String] [
+  if (k is String) [k] [
+    if (k is Number) [vg-num-to-string k] [vg-js-string k]
+  ]
+]]
+
+# Strict integer parse of a trimmed string; none when not an integer.
+def vgi-parse-int fn [[s:Any] [Any] [
+  if (s is String) [
+    do [convert Integer (StringUtil.trim s)] error [drop none]
+  ] [none]
+]]
+
+# JS-ish list-index coercion: int as-is, float floored, numeric string parsed.
+def vgi-to-int fn [[k:Any] [Any] [
+  if (k is Boolean) [none] [
+    if (k is Integer) [k] [
+      if (k is Float) [MathUtil.floor k] [
+        if (k is String) [vgi-parse-int k] [none]
+      ]
+    ]
+  ]
+]]
+
+# JS truthiness (Boolean(v)): none/false/0/NaN/"" are false, all else true.
+def vgi-js-truthy fn [[v:Any] [Boolean] [
+  if ((v is None) or (vg-is-noarg v)) [false] [
+    if (v is Boolean) [v] [
+      if (v is Number) [
+        if (v is Float) [
+          if (MathUtil.is-nan v) [false] [(v eq 0.0) not]
+        ] [(v eq 0) not]
+      ] [
+        if (v is String) [(size v) gt 0] [true]
+      ]
+    ]
+  ]
+]]
+
+def vgi-starts-with fn [[s:String prefix:String] [Boolean] [
+  def n (size prefix)
+  if ((size s) gte n) [(s slice 0 n) eq prefix] [false]
+]]
+
+# Call a function value (the check-clean apply idiom). apply binds the
+# stack TOP to the function's FIRST parameter, so arguments push in
+# reverse. The Function parameter is deliberately LAST: a trailing
+# `(f/r)` argument reaches it through the stack, which is the one
+# placement a function reference can occupy in a call (references
+# never feed forward collection). Zero-argument apply refuses to
+# compile, so nullary callables in this port take one ignored argument
+# (invoked via vgi-call1 with none).
+# NOTE: every helper binds the apply result before returning it. A fn
+# body that ENDS in a bare call loses a none result at the return
+# boundary (engine quirk); `def r (...) r` keeps the value alive.
+def vgi-call1 fn [[a:Any f:Function] [Any] [
+  def r (a f/r apply)
+  r
+]]
+def vgi-call2 fn [[a:Any b:Any f:Function] [Any] [
+  def r (b a f/r apply)
+  r
+]]
+def vgi-call4 fn [[a:Any b:Any c:Any d:Any f:Function] [Any] [
+  def r (d c b a f/r apply)
+  r
+]]
+def vgi-call5 fn [[a:Any b:Any c:Any d:Any e:Any f:Function] [Any] [
+  def r (e d c b a f/r apply)
+  r
+]]
+
+# Function values never travel bare in this port: a bare Function-valued
+# name auto-dispatches when stepped, so functions ride inside carriers.
+# Two carriers exist:
+#   - the FN BOX, a map {"`$FN`": f} — the general "function as data"
+#     representation (store commands, handlers, callable alternatives);
+#     vg-isfunc recognises it, mirroring the canonical isfunc.
+#   - the one-element list [f/r] — used for pure callback slots (walk
+#     before/after, filter checks, modify) where canonical code never
+#     isfunc-tests the value.
+# vgi-fnarg unwraps either carrier to the raw Function (safe to bind
+# with def; only bare stepping is unsafe — call via `arg f/r apply`).
+def vg-fn-key "`$FN`"
+def vgi-fnarg fn [[fw:Any] [Any] [
+  if (fw is Map) [
+    fw get (vg-fn-key)
+  ] [
+    if (fw is List) [
+      if ((size fw) eq 1) [fw get 0] [fw]
+    ] [fw]
+  ]
+]]
+
+# ----------------------------------------------------------------------------
+# Minor utilities (canonical order follows the TS source).
+# ----------------------------------------------------------------------------
+
+# Value is a node — a map or list (flex or plain; fn boxes are not nodes).
+def vg-isnode fn [[v:Any] [Boolean] [
+  if (v is List) [true] [
+    if (v is Map) [(vg-isfunc v) not] [false]
+  ]
+]]
+
+# Value is a map (fn boxes are functions, not maps).
+def vg-ismap fn [[v:Any] [Boolean] [
+  if (v is Map) [(vg-isfunc v) not] [false]
+]]
+
+# Value is a list.
+def vg-islist fn [[v:Any] [Boolean] [
+  v is List
+]]
+
+# Value is a non-empty string or a number.
+def vg-iskey fn [[v:Any] [Boolean] [
+  if (v is String) [(size v) gt 0] [
+    if (v is Boolean) [false] [v is Number]
+  ]
+]]
+
+# Value is "empty": null/none, empty string, empty list, empty map.
+def vg-isempty fn [[v:Any] [Boolean] [
+  if ((v is None) or (vg-is-noarg v)) [true] [
+    if (v is String) [(size v) eq 0] [
+      if (vg-isnode v) [(size v) eq 0] [false]
+    ]
+  ]
+]]
+
+# Value is a function (an FN BOX in this port — see vgi-fnarg).
+def vg-isfunc fn [[v:Any] [Boolean] [
+  if (v is Map) [
+    (typeof (v get (vg-fn-key))) teq Function
+  ] [false]
+]]
+
+# Natural size of a value (JS Math.floor for numbers — NOT the magnitude).
+# vgz is the heavily-used internal spelling; exported as `size`.
+def vgz fn [[v:Any] [Integer] [
+  if (vg-isnode v) [size v] [
+    if (v is String) [size v] [
+      if (v is Boolean) [if v [1] [0]] [
+        if (v is Integer) [v] [
+          if (v is Float) [
+            if ((MathUtil.is-nan v) or (MathUtil.is-inf v)) [0] [MathUtil.floor v]
+          ] [0]
+        ]
+      ]
+    ]
+  ]
+]]
+def vg-size fn [[v:Any] [Integer] [vgz v]]
+
+# Determine the type of a value as a bit code.
+def vg-typify fn [[v:Any] [Integer] [
+  if (vg-is-noarg v) [vg-t-noval] [
+    if (v is None) [BinUtil.bor vg-t-scalar vg-t-null] [
+      if (v is Boolean) [BinUtil.bor vg-t-scalar vg-t-boolean] [
+        if (v is Integer) [BinUtil.bor vg-t-scalar (BinUtil.bor vg-t-number vg-t-integer)] [
+          if (v is Float) [
+            if (MathUtil.is-nan v) [vg-t-noval] [
+              if (MathUtil.is-inf v) [BinUtil.bor vg-t-scalar (BinUtil.bor vg-t-number vg-t-decimal)] [
+                if ((MathUtil.floor v) eq v) [
+                  BinUtil.bor vg-t-scalar (BinUtil.bor vg-t-number vg-t-integer)
+                ] [
+                  BinUtil.bor vg-t-scalar (BinUtil.bor vg-t-number vg-t-decimal)
+                ]
+              ]
+            ]
+          ] [
+            if (v is String) [BinUtil.bor vg-t-scalar vg-t-string] [
+              if (v is Function) [BinUtil.bor vg-t-scalar vg-t-function] [
+                if (v is Atom) [BinUtil.bor vg-t-scalar vg-t-symbol] [
+                  if (v is List) [BinUtil.bor vg-t-node vg-t-list] [
+                    if (v is Map) [
+                      if (vg-isfunc v) [BinUtil.bor vg-t-scalar vg-t-function] [
+                        BinUtil.bor vg-t-node vg-t-map
+                      ]
+                    ] [
+                      BinUtil.bor vg-t-node vg-t-instance
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      ]
+    ]
+  ]
+]]
+
+# clz32 — leading zeros of a 32-bit value (bit-length complement).
+def vgl-bits fn [[x:Integer n:Integer] [Integer] [
+  if (x lte 0) [n] [
+    def x2 (x div 2)
+    def n1 (n add 1)
+    def r (vgl-bits x2 n1)
+    r
+  ]
+]]
+def vgi-clz32 fn [[t:Integer] [Integer] [
+  if (t lte 0) [32] [32 sub (vgl-bits t 0)]
+]]
+
+# Type name for the narrowest type bit (fn-body references resolve at
+# call time, so the forward use of vg-getelem here is fine).
+def vg-typename fn [[t:Any] [String] [
+  def ti (if (t is Integer) [t] [if (t is Float) [MathUtil.floor t] [0]])
+  def btr2 (vg-getelem vg-typename-table (vgi-clz32 ti) "any")
+  btr2
+]]
+
+# Get a defined value: alt when val is null/none.
+def vg-getdef fn [[v:Any alt:Any] [Any] [
+  if ((v is None) or (vg-is-noarg v)) [alt] [v]
+]]
+
+# Convert a key to its string form: strings as-is, numbers rendered
+# (floats floored), everything else the empty string.
+def vg-strkey fn [[k:Any] [String] [
+  if ((k is None) or (vg-is-noarg k)) [""] [
+    if (k is String) [k] [
+      if (k is Boolean) [""] [
+        if (k is Integer) [vg-num-to-string k] [
+          if (k is Float) [vg-num-to-string (MathUtil.floor k)] [""]
+        ]
+      ]
+    ]
+  ]
+]]
+
+# Sorted keys of a map, or stringified indexes of a list.
+def vgl-idx-keys fn [[i:Integer n:Integer acc:Any] [Any] [
+  if (i gte n) [acc] [
+    def ky (vg-num-to-string i)
+    (append [ky] acc) drop
+    def i1 (i add 1)
+    def r (vgl-idx-keys i1 n acc)
+    r
+  ]
+]]
+def vg-keysof fn [[v:Any] [Any] [
+  if (vg-ismap v) [
+    def sk (sort (keys v))
+    make FlexList sk
+  ] [
+    if (vg-islist v) [
+      def n (size v)
+      def acc0 (flex [])
+      def r (vgl-idx-keys 0 n acc0)
+      r
+    ] [flex []]
+  ]
+]]
+
+# Safely get a property; stored null and absent both fall to alt (Group A).
+def vg-getprop fn [[v:Any k:Any alt:Any] [Any] [
+  def alt2 (if (vg-is-noarg alt) [none] [alt])
+  if ((v is None) or (k is None) or (vg-is-noarg v) or (vg-is-noarg k)) [alt2] [
+    def found (
+      if (vg-ismap v) [v get (vgi-map-key k)] [
+        if (vg-islist v) [
+          def ki (vgi-to-int k)
+          if (ki is None) [none] [
+            if ((ki gte 0) and (ki lt (size v))) [v get ki] [none]
+          ]
+        ] [none]
+      ]
+    )
+    if (found is None) [alt2] [found]
+  ]
+]]
+
+# Raw slot lookup for internal Group B callers. With the single-null model
+# a stored null IS none, so this is getprop without an alternative.
+def vgi-lookup fn [[v:Any k:Any] [Any] [
+  def r (vg-getprop v k none)
+  r
+]]
+
+# Property with name key is defined (stored null counts as no value).
+def vg-haskey fn [[v:Any k:Any] [Boolean] [
+  ((vg-getprop v k none) is None) not
+]]
+
+# ^[-0-9]+$ — integer-looking key (mirrors R_INTEGER_KEY).
+def vgi-intkey-ok fn [[s:String] [Boolean] [
+  if ((size s) eq 0) [false] [
+    (s mini re `^[-0-9]+$` {}).ok
+  ]
+]]
+
+# Get a list element by integer(ish) key; negative counts from the end.
+# A function alt is called lazily when the slot is empty.
+def vg-getelem fn [[v:Any k:Any alt:Any] [Any] [
+  def alt2 (if (vg-is-noarg alt) [none] [alt])
+  if ((v is None) or (k is None) or (vg-is-noarg v) or (vg-is-noarg k)) [alt2] [
+    def found (
+      if (vg-islist v) [
+        def ks (if (k is String) [k] [if (k is Number) [vg-num-to-string k] [""]])
+        if (vgi-intkey-ok ks) [
+          def n0 (vgi-parse-int ks)
+          def n (if (n0 lt 0) [(size v) add n0] [n0])
+          if ((n gte 0) and (n lt (size v))) [v get n] [none]
+        ] [none]
+      ] [none]
+    )
+    if (found is None) [
+      if (vg-isfunc alt2) [
+        def f (vgi-fnarg alt2)
+        none f/r apply
+      ] [alt2]
+    ] [found]
+  ]
+]]
+
+# Raw indexed read: map by string key, list by numeric string.
+def vgi-raw fn [[v:Any k:String] [Any] [
+  if (vg-ismap v) [v get (k)] [
+    if (vg-islist v) [
+      def ki (vgi-parse-int k)
+      if (ki is None) [none] [
+        if ((ki gte 0) and (ki lt (size v))) [v get ki] [none]
+      ]
+    ] [none]
+  ]
+]]
+
+# Sorted [key, value] pairs of a map or list.
+def vgl-items fn [[i:Integer ks:Any v:Any acc:Any] [Any] [
+  if (i gte (size ks)) [acc] [
+    def k (ks get i)
+    def pair (flex [])
+    (append [k] pair) drop
+    (append [(vgi-raw v k)] pair) drop
+    (append [pair] acc) drop
+    def i1 (i add 1)
+    def r (vgl-items i1 ks v acc)
+    r
+  ]
+]]
+def vg-items fn [[v:Any] [Any] [
+  if (vg-isnode v) [
+    def ks (vg-keysof v)
+    def acc0 (flex [])
+    def r (vgl-items 0 ks v acc0)
+    r
+  ] [flex []]
+]]
+
+# items + apply: map each [k,v] pair through a function.
+def vgl-items-apply fn [[i:Integer prs:Any fw:Any acc:Any] [Any] [
+  if (i gte (size prs)) [acc] [
+    def pr (prs get i)
+    def f (vgi-fnarg fw)
+    def fv (pr f/r apply)
+    (append [fv] acc) drop
+    def i1 (i add 1)
+    def r (vgl-items-apply i1 prs fw acc)
+    r
+  ]
+]]
+def vgi-items-apply fn [[v:Any fw:Any] [Any] [
+  def prs (vg-items v)
+  def acc0 (flex [])
+  def r (vgl-items-apply 0 prs fw acc0)
+  r
+]]
+
+# Filter item values by a check function over [k,v] pairs.
+def vgl-filter fn [[i:Integer prs:Any fw:Any acc:Any] [Any] [
+  if (i gte (size prs)) [acc] [
+    def pair (prs get i)
+    def f (vgi-fnarg fw)
+    def keepv (pair f/r apply)
+    if (keepv eq true) [
+      def pv (pair get 1)
+      (append [pv] acc) drop
+      none
+    ] [none] drop
+    def i1 (i add 1)
+    def r (vgl-filter i1 prs fw acc)
+    r
+  ]
+]]
+def vg-filter fn [[v:Any fw:Any] [Any] [
+  def prs (vg-items v)
+  def acc0 (flex [])
+  def r (vgl-filter 0 prs fw acc0)
+  r
+]]
+
+# Flatten nested lists (one level by default; JS Array.flat semantics).
+def vgl-append-all fn [[j:Integer xs2:Any acc:Any] [Any] [
+  if (j gte (size xs2)) [acc] [
+    def sv (xs2 get j)
+    (append [sv] acc) drop
+    def j1 (j add 1)
+    def r (vgl-append-all j1 xs2 acc)
+    r
+  ]
+]]
+def vgl-flatten fn [[i:Integer l:Any d:Integer acc:Any] [Any] [
+  if (i gte (size l)) [acc] [
+    def it (l get i)
+    if ((vg-islist it) and (d gt 0)) [
+      (vgl-append-all 0 (vg-flatten it (d sub 1)) acc) drop
+      none
+    ] [
+      (append [it] acc) drop
+      none
+    ] drop
+    def i1 (i add 1)
+    def r (vgl-flatten i1 l d acc)
+    r
+  ]
+]]
+def vg-flatten fn [[l:Any dep:Any] [Any] [
+  def d (if (dep is Number) [vgz dep] [1])
+  if (vg-islist l) [
+    def acc0 (flex [])
+    def r (vgl-flatten 0 l d acc0)
+    r
+  ] [l]
+]]
+
+# Deep clone building flex nodes; functions are copied by reference.
+def vgl-clone-map fn [[i:Integer ks:Any v:Any o:Any] [Any] [
+  if (i gte (size ks)) [o] [
+    def k (ks get i)
+    def cv (v get (k))
+    def cc (vg-clone cv)
+    (o set (k) cc) drop
+    def i1 (i add 1)
+    def r (vgl-clone-map i1 ks v o)
+    r
+  ]
+]]
+def vgl-clone-list fn [[i:Integer v:Any acc:Any] [Any] [
+  if (i gte (size v)) [acc] [
+    def cv (v get i)
+    def cc (vg-clone cv)
+    (append [cc] acc) drop
+    def i1 (i add 1)
+    def r (vgl-clone-list i1 v acc)
+    r
+  ]
+]]
+def vg-clone fn [[v:Any] [Any] [
+  if (vg-is-noarg v) [none] [
+    if (vg-ismap v) [
+      def ks (keys v)
+      def o0 (flex {})
+      def r (vgl-clone-map 0 ks v o0)
+      r
+    ] [
+      if (vg-islist v) [
+        def acc0 (flex [])
+        def r (vgl-clone-list 0 v acc0)
+        r
+      ] [v]
+    ]
+  ]
+]]
+
+# Safely set a property in place. Lists: int keys only; above-size appends,
+# negative prepends. Returns the (possibly modified) parent.
+def vg-setprop fn [[parent:Any k:Any v:Any] [Any] [
+  if (vg-iskey k) [
+    if (vg-ismap parent) [
+      (parent set (vgi-map-key k) v) drop
+      none
+    ] [
+      if (vg-islist parent) [
+        def ki (vgi-to-int k)
+        if (ki is None) [none] [
+          def n (size parent)
+          if (ki gte 0) [
+            if (ki gte n) [(append [v] parent) drop none] [(parent set ki v) drop none]
+          ] [
+            (unshift v parent) drop
+            none
+          ]
+        ]
+      ] [none]
+    ]
+  ] [none] drop
+  parent
+]]
+
+# Safely delete a property in place. Lists shift down.
+def vgl-shift-down fn [[i:Integer n:Integer parent:Any] [Any] [
+  if (i lt (n sub 1)) [
+    def nx (parent get (i add 1))
+    (parent set i nx) drop
+    def i1 (i add 1)
+    def r (vgl-shift-down i1 n parent)
+    r
+  ] [none]
+]]
+def vg-delprop fn [[parent:Any k:Any] [Any] [
+  if (vg-iskey k) [
+    if (vg-ismap parent) [
+      (parent del (vg-strkey k)) drop
+      none
+    ] [
+      if (vg-islist parent) [
+        def ki (vgi-to-int k)
+        if (ki is None) [none] [
+          def n (size parent)
+          if ((ki gte 0) and (ki lt n)) [
+            (vgl-shift-down ki n parent) drop
+            (pop parent) drop drop
+            none
+          ] [none]
+        ]
+      ] [none]
+    ]
+  ] [none] drop
+  parent
+]]
+
+# ----------------------------------------------------------------------------
+# The uniform re_* regex API, over the engine's RE2 matcher (mini re).
+# A "compiled" pattern is the map {vgre:true src:<pattern>}; the string
+# form is accepted everywhere. The only supported flag is "i".
+# ----------------------------------------------------------------------------
+def vgi-re-src fn [[p:Any] [String] [
+  if (p is Map) [
+    if ((p get "vgre") eq true) [p get "src"] ["[object Object]"]
+  ] [
+    if (p is String) [p] [vg-js-string p]
+  ]
+]]
+
+def vg-re-compile fn [[p:Any flags:Any] [Any] [
+  def done (if (p is Map) [(p get "vgre") eq true] [false])
+  if (done eq true) [p] [
+    def fl (if (flags is String) [flags] [""])
+    def src0 (vgi-re-src p)
+    def src (if (StringUtil.contains "i" fl) [StringUtil.concat ["(?i)" src0]] [src0])
+    ("" mini re (src) {}) drop
+    def o (flex {})
+    (o set "vgre" true) drop
+    (o set "src" src) drop
+    o
+  ]
+]]
+
+# Build the [whole, capture...] match list (absent groups become '').
+def vgl-matchlist fn [[i:Integer gs:Any out:Any] [Any] [
+  if (i gte (size gs)) [out] [
+    def g (gs get i)
+    def gv (if (g is None) [""] [g])
+    (append [gv] out) drop
+    def i1 (i add 1)
+    def r (vgl-matchlist i1 gs out)
+    r
+  ]
+]]
+def vgi-re-matchlist fn [[m:Any] [Any] [
+  def out (flex [])
+  def whole (m get "m")
+  (append [whole] out) drop
+  def gs (m get "g")
+  def r (vgl-matchlist 0 gs out)
+  r
+]]
+
+def vg-re-test fn [[p:Any input:Any] [Boolean] [
+  def s (if (input is String) [input] [vg-js-string input])
+  (s mini re ((vgi-re-src p)) {}).ok
+]]
+
+def vg-re-find fn [[p:Any input:Any] [Any] [
+  def s (if (input is String) [input] [vg-js-string input])
+  def r (s mini re ((vgi-re-src p)) {})
+  if ((r get "ok") eq true) [vgi-re-matchlist (r get "fst")] [none]
+]]
+
+def vgl-find-all fn [[i:Integer ms:Any out:Any] [Any] [
+  if (i gte (size ms)) [out] [
+    def m (ms get i)
+    def ml (vgi-re-matchlist m)
+    (append [ml] out) drop
+    def i1 (i add 1)
+    def r (vgl-find-all i1 ms out)
+    r
+  ]
+]]
+def vg-re-find-all fn [[p:Any input:Any] [Any] [
+  def s (if (input is String) [input] [vg-js-string input])
+  def r (s mini re ((vgi-re-src p)) {all: true})
+  if ((r get "ok") eq true) [
+    def ms (r get "ms")
+    def acc0 (flex [])
+    def rr (vgl-find-all 0 ms acc0)
+    rr
+  ] [flex []]
+]]
+
+# Expand a JS replacement template ($&, $1..$9, $$) against one match.
+def vgl-re-expand fn [[i:Integer tmpl:String ml:Any acc:Any] [Any] [
+  if (i gte (size tmpl)) [acc] [
+    def c (tmpl slice i (i add 1))
+    if ((c eq "$") and ((i add 1) lt (size tmpl))) [
+      def c2 (tmpl slice (i add 1) (i add 2))
+      if (c2 eq "$") [
+        (append ["$"] acc) drop
+        def i2 (i add 2)
+        def r (vgl-re-expand i2 tmpl ml acc)
+        r
+      ] [
+        if (c2 eq "&") [
+          def whole (ml get 0)
+          (append [whole] acc) drop
+          def i2 (i add 2)
+          def r (vgl-re-expand i2 tmpl ml acc)
+          r
+        ] [
+          def d (vgi-parse-int c2)
+          if (d is None) [
+            (append [c] acc) drop
+            def i1 (i add 1)
+            def r (vgl-re-expand i1 tmpl ml acc)
+            r
+          ] [
+            if ((d gte 1) and (d lte 9) and (d lt (size ml))) [
+              def grp (ml get d)
+              (append [grp] acc) drop
+              def i2 (i add 2)
+              def r (vgl-re-expand i2 tmpl ml acc)
+              r
+            ] [
+              (append [c] acc) drop
+              def i1 (i add 1)
+              def r (vgl-re-expand i1 tmpl ml acc)
+              r
+            ]
+          ]
+        ]
+      ]
+    ] [
+      (append [c] acc) drop
+      def i1 (i add 1)
+      def r (vgl-re-expand i1 tmpl ml acc)
+      r
+    ]
+  ]
+]]
+def vgi-re-expand fn [[tmpl:String ml:Any] [String] [
+  def acc0 (flex [])
+  def parts (vgl-re-expand 0 tmpl ml acc0)
+  def btr3 (vgi-join-list parts "")
+  btr3
+]]
+
+def vgl-re-replace fn [[i:Integer ms:Any s:String repl:Any acc:Any posbox:Any] [Any] [
+  if (i gte (size ms)) [acc] [
+    def m (ms get i)
+    def mi (m get "i")
+    def me (m get "e")
+    (append [(s slice (posbox get 0) mi)] acc) drop
+    def ml (vgi-re-matchlist m)
+    def rep (
+      if (vg-isfunc repl) [
+        def f (vgi-fnarg repl)
+        def rr (ml f/r apply)
+        def btr4 (vg-js-string rr)
+        btr4
+      ] [
+        def rt (vg-js-string repl)
+        def btr5 (vgi-re-expand rt ml)
+        btr5
+      ]
+    )
+    (append [rep] acc) drop
+    (posbox set 0 me) drop
+    def i1 (i add 1)
+    def r (vgl-re-replace i1 ms s repl acc posbox)
+    r
+  ]
+]]
+def vg-re-replace fn [[p:Any input:Any repl:Any] [String] [
+  def s (if (input is String) [input] [vg-js-string input])
+  def r (s mini re ((vgi-re-src p)) {all: true})
+  if ((r get "ok") eq true) [
+    def acc (flex [])
+    def posbox (flex [0])
+    def ms (r get "ms")
+    (vgl-re-replace 0 ms s repl acc posbox) drop
+    def pend (posbox get 0)
+    def slen (size s)
+    def tailtxt (s slice pend slen)
+    (append [tailtxt] acc) drop
+    def btr6 (vgi-join-list acc "")
+    btr6
+  ] [s]
+]]
+
+def vgl-escre fn [[i:Integer str:String acc:Any] [Any] [
+  if (i gte (size str)) [acc] [
+    def c (str slice i (i add 1))
+    if (StringUtil.contains c ".*+?^$}{)(|][\\") [(append ["\\"] acc) drop none] [none] drop
+    (append [c] acc) drop
+    def i1 (i add 1)
+    def r (vgl-escre i1 str acc)
+    r
+  ]
+]]
+def vg-escre fn [[s:Any] [String] [
+  def str (if (s is String) [s] [if ((s is None) or (vg-is-noarg s)) [""] [vg-js-string s]])
+  def acc0 (flex [])
+  def parts (vgl-escre 0 str acc0)
+  def btr7 (vgi-join-list parts "")
+  btr7
+]]
+def vg-re-escape fn [[s:Any] [String] [vg-escre s]]
+
+def vg-url-unreserved "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.!~*'()"
+def vgl-escurl-hex fn [[j:Integer hx:String acc:Any] [Any] [
+  if (j gte ((size hx) div 2)) [acc] [
+    def h0 (j mul 2)
+    def h1 (h0 add 2)
+    def hb (hx slice h0 h1)
+    def pct (StringUtil.concat ["%" hb])
+    (append [pct] acc) drop
+    def j1 (j add 1)
+    def r (vgl-escurl-hex j1 hx acc)
+    r
+  ]
+]]
+def vgl-escurl fn [[i:Integer str:String acc:Any] [Any] [
+  if (i gte (size str)) [acc] [
+    def c (str slice i (i add 1))
+    if (StringUtil.contains c vg-url-unreserved) [(append [c] acc) drop none] [
+      def hx (StringUtil.upper (BinUtil.hex-encode c))
+      (vgl-escurl-hex 0 hx acc) drop
+      none
+    ] drop
+    def i1 (i add 1)
+    def r (vgl-escurl i1 str acc)
+    r
+  ]
+]]
+def vg-escurl fn [[s:Any] [String] [
+  def str (if (s is String) [s] [if ((s is None) or (vg-is-noarg s)) [""] [vg-js-string s]])
+  def acc0 (flex [])
+  def parts (vgl-escurl 0 str acc0)
+  def btr8 (vgi-join-list parts "")
+  btr8
+]]
+
+# ----------------------------------------------------------------------------
+# JSON-style serialization: one encoder drives both stringify (sorted,
+# compact, quotes stripped) and jsonify (indented, JSON.stringify format).
+# AQL map keys always iterate sorted.
+# ----------------------------------------------------------------------------
+def vgl-esc-json fn [[i:Integer s:String acc:Any] [Any] [
+  if (i gte (size s)) [acc] [
+    def c (s slice i (i add 1))
+    def piece (
+      if (c eq "\"") ["\\\""] [
+        if (c eq "\\") ["\\\\"] [
+          if (c eq `\n`) ["\\n"] [
+            if (c eq `\r`) ["\\r"] [
+              if (c eq `\t`) ["\\t"] [
+                if (c lt " ") [
+                  def hx (BinUtil.hex-encode c)
+                  if (hx eq "08") ["\\b"] [
+                    if (hx eq "0c") ["\\f"] [StringUtil.concat ["\\u00" hx]]
+                  ]
+                ] [c]
+              ]
+            ]
+          ]
+        ]
+      ]
+    )
+    (append [piece] acc) drop
+    def i1 (i add 1)
+    def r (vgl-esc-json i1 s acc)
+    r
+  ]
+]]
+def vgi-esc-json fn [[s:String] [String] [
+  def acc (flex ["\""])
+  (vgl-esc-json 0 s acc) drop
+  (append ["\""] acc) drop
+  def btr9 (vgi-join-list acc "")
+  btr9
+]]
+
+def vgi-repeat fn [[s:String n:Integer] [String] [
+  if (n lte 0) [""] [StringUtil.repeat n s]
+]]
+
+def vgl-jenc-list fn [[i:Integer v:Any parts:Any] [Any] [
+  if (i gte (size v)) [parts] [
+    def e (v get i)
+    def ev (vgi-json-encode e)
+    (append [ev] parts) drop
+    def i1 (i add 1)
+    def r (vgl-jenc-list i1 v parts)
+    r
+  ]
+]]
+def vgl-jenc-keys fn [[i:Integer ks0:Any v:Any ks:Any] [Any] [
+  if (i gte (size ks0)) [ks] [
+    def k (ks0 get i)
+    def kv (v get (k))
+    if (vg-isfunc kv) [none] [(append [k] ks) drop none] drop
+    def i1 (i add 1)
+    def r (vgl-jenc-keys i1 ks0 v ks)
+    r
+  ]
+]]
+def vgl-jenc-map fn [[i:Integer ks:Any v:Any parts:Any] [Any] [
+  if (i gte (size ks)) [parts] [
+    def k (ks get i)
+    def ek (vgi-esc-json k)
+    def kv (v get (k))
+    def ev (vgi-json-encode kv)
+    def piece (StringUtil.concat [ek ":" ev])
+    (append [piece] parts) drop
+    def i1 (i add 1)
+    def r (vgl-jenc-map i1 ks v parts)
+    r
+  ]
+]]
+
+# Encode v as compact JSON text with SORTED map keys — the shape stringify
+# needs (jsonify uses the engine emitter instead, which preserves stored
+# key order like JSON.stringify does). Function-valued map entries are
+# dropped and functions elsewhere render as null, mirroring JSON.stringify.
+def vgi-json-encode fn [[v:Any] [String] [
+  if ((v is None) or (vg-is-noarg v)) ["null"] [
+    if (v is Boolean) [if v ["true"] ["false"]] [
+      if (v is Number) [
+        if (v is Float) [
+          if ((MathUtil.is-nan v) or (MathUtil.is-inf v)) ["null"] [vg-num-to-string v]
+        ] [vg-num-to-string v]
+      ] [
+        if (v is String) [vgi-esc-json v] [
+          if (vg-islist v) [
+            if ((size v) eq 0) ["[]"] [
+              def parts0 (flex [])
+              def parts (vgl-jenc-list 0 v parts0)
+              def body (vgi-join-list parts ",")
+              StringUtil.concat ["[" body "]"]
+            ]
+          ] [
+            if (vg-ismap v) [
+              def ks0 (sort (keys v))
+              def kacc (flex [])
+              def ks (vgl-jenc-keys 0 ks0 v kacc)
+              if ((size ks) eq 0) ["{}"] [
+                def pacc (flex [])
+                def parts (vgl-jenc-map 0 ks v pacc)
+                def body (vgi-join-list parts ",")
+                StringUtil.concat ["{" body "}"]
+              ]
+            ] ["null"]
+          ]
+        ]
+      ]
+    ]
+  ]
+]]
+
+# ANSI colour prefix for stringify's pretty mode.
+def vg-pretty-colors [81 118 213 39 208 201 45 190 129 51 160 121 226 33 207 69]
+def vgi-colof fn [[d:Integer] [String] [
+  def dd (if (d lt 0) [(d mod 16) add 16] [d mod 16])
+  StringUtil.concat [(BinUtil.hex-decode "1b") "[38;5;" (vg-num-to-string (vg-pretty-colors get (dd mod 16))) "m"]
+]]
+def vgl-prettify fn [[i:Integer valstr:String dbox:Any acc:Any] [Any] [
+  if (i gte (size valstr)) [acc] [
+    def c (valstr slice i (i add 1))
+    if ((c eq "{") or (c eq "[")) [
+      (dbox set 0 ((dbox get 0) add 1)) drop
+      (append [(StringUtil.concat [(vgi-colof (dbox get 0)) c])] acc) drop
+      none
+    ] [
+      if ((c eq "}") or (c eq "]")) [
+        (append [(StringUtil.concat [(vgi-colof (dbox get 0)) c])] acc) drop
+        (dbox set 0 ((dbox get 0) sub 1)) drop
+        none
+      ] [
+        (append [(StringUtil.concat [(vgi-colof (dbox get 0)) c])] acc) drop
+        none
+      ]
+    ] drop
+    def i1 (i add 1)
+    def r (vgl-prettify i1 valstr dbox acc)
+    r
+  ]
+]]
+
+# Safely stringify a value for humans (NOT JSON!): sorted keys, compact,
+# double quotes removed.
+def vg-stringify fn [[val:Any maxlen:Any pretty:Any] [String] [
+  def pr (vgi-js-truthy pretty)
+  if (vg-is-noarg val) [if (pr eq true) ["<>"] [""]] [
+    def valstr0 (
+      if (val is String) [val] [
+        def enc (vgi-json-encode val)
+        StringUtil.replace "\"" "" enc {scope: "all"}
+      ]
+    )
+    def valstr (
+      if (maxlen is Number) [
+        def ml (vgz maxlen)
+        if (ml gt -1) [
+          if (ml lt (size valstr0)) [
+            def cut (if ((ml sub 3) lt 0) [0] [ml sub 3])
+            StringUtil.concat [(valstr0 slice 0 cut) "..."]
+          ] [valstr0]
+        ] [valstr0]
+      ] [valstr0]
+    )
+    if (pr eq true) [
+      def c0 (vgi-colof 0)
+      def acc (flex [c0])
+      def dbox (flex [0])
+      (vgl-prettify 0 valstr dbox acc) drop
+      def esc0 (BinUtil.hex-decode "1b")
+      def reset (StringUtil.concat [esc0 "[0m"])
+      (append [reset] acc) drop
+      def btr10 (vgi-join-list acc "")
+      btr10
+    ] [valstr]
+  ]
+]]
+
+# Left-pad each remaining jsonify line to the offset width.
+def vgl-jsonify-pad fn [[i:Integer lines:Any offn:Integer acc:Any] [Any] [
+  if (i gte (size lines)) [acc] [
+    def ln (lines get i)
+    def w (0 sub (offn add (size ln)))
+    def pv (vg-pad ln w vg-noarg)
+    (append [pv] acc) drop
+    def i1 (i add 1)
+    def r (vgl-jsonify-pad i1 lines offn acc)
+    r
+  ]
+]]
+
+# Output JSON in the standard JSON.stringify(val, null, indent) format.
+# The engine JSON emitter is byte-compatible with JSON.stringify for
+# JSON-safe values (whole floats print as integers, none prints as null,
+# stored key order is preserved).
+def vg-jsonify fn [[val:Any flags:Any] [String] [
+  if ((val is None) or (vg-is-noarg val)) ["null"] [
+    def ind (vg-getprop flags "indent" 2)
+    def indn (if (ind is Number) [vgz ind] [2])
+    def str0 (
+      if (indn gt 0) [emit json {indent: (indn)} val] [emit json val]
+    )
+    def offset (vg-getprop flags "offset" 0)
+    def offn (if (offset is Number) [vgz offset] [0])
+    if (offn gt 0) [
+      def lines (make FlexList (StringUtil.split "\n" str0 {keepEmpty: true}))
+      def rest (vg-slice lines 1 vg-noarg vg-noarg)
+      def acc0 (flex [])
+      def padded (vgl-jsonify-pad 0 rest offn acc0)
+      def body (vg-join padded "\n" vg-noarg)
+      StringUtil.concat ["{\n" body]
+    ] [str0]
+  ]
+]]
+
+# ----------------------------------------------------------------------------
+# slice / pad / join / pathify
+# ----------------------------------------------------------------------------
+def vgl-slice-copy fn [[i:Integer cnt:Integer s:Integer val:Any] [Any] [
+  if (i lt cnt) [
+    (val set i (val get (s add i))) drop
+    def btr11 (vgl-slice-copy (i add 1) cnt s val)
+    btr11
+  ] [none]
+]]
+def vgl-slice-shrink fn [[val:Any cnt:Integer] [Any] [
+  if ((size val) gt cnt) [
+    (pop val) drop drop
+    def r (vgl-slice-shrink val cnt)
+    r
+  ] [none]
+]]
+def vgl-slice-collect fn [[i:Integer e:Integer val:Any acc:Any] [Any] [
+  if (i lt e) [
+    def sv (val get i)
+    (append [sv] acc) drop
+    def i1 (i add 1)
+    def r (vgl-slice-collect i1 e val acc)
+    r
+  ] [acc]
+]]
+def vg-slice fn [[val:Any start:Any endv:Any mutate:Any] [Any] [
+  def startn (if (start is Number) [start] [none])
+  def endn (if (endv is Number) [endv] [none])
+  if (val is Number) [
+    def lo (if (startn is None) [-9007199254740991] [startn])
+    def hi ((if (endn is None) [9007199254740991] [endn]) sub 1)
+    if (val gt hi) [hi] [if (val lt lo) [lo] [val]]
+  ] [
+    if ((vg-islist val) or (val is String)) [
+      def vlen (vgz val)
+      def st0 (if ((startn is None) and ((endn is None) not)) [0] [startn])
+      if (st0 is None) [val] [
+        def sbox (flex [(vgz st0)])
+        def ebox (flex [0])
+        if ((sbox get 0) lt 0) [
+          def e1 (vlen add (sbox get 0))
+          (ebox set 0 (if (e1 lt 0) [0] [e1])) drop
+          (sbox set 0 0) drop
+          none
+        ] [
+          if (endn is None) [
+            (ebox set 0 vlen) drop
+            none
+          ] [
+            def e2 (vgz endn)
+            if (e2 lt 0) [
+              def e3 (vlen add e2)
+              (ebox set 0 (if (e3 lt 0) [0] [e3])) drop
+              none
+            ] [
+              (ebox set 0 (if (vlen lt e2) [vlen] [e2])) drop
+              none
+            ]
+          ]
+        ] drop
+        if (vlen lt (sbox get 0)) [(sbox set 0 vlen) drop none] [none] drop
+        def s (sbox get 0)
+        def e (ebox get 0)
+        if ((s gt -1) and (s lte e) and (e lte vlen)) [
+          if (vg-islist val) [
+            if (vgi-js-truthy mutate) [
+              def cnt (e sub s)
+              (vgl-slice-copy 0 cnt s val) drop
+              (vgl-slice-shrink val cnt) drop
+              val
+            ] [
+              def btr12 (vgl-slice-collect s e val (flex []))
+              btr12
+            ]
+          ] [val slice s e]
+        ] [
+          # Invalid range: canonical returns a FRESH empty list/string and
+          # leaves the input untouched even when mutate was requested.
+          if (vg-islist val) [flex []] [""]
+        ]
+      ]
+    ] [val]
+  ]
+]]
+
+def vgl-pad-end fn [[cur:String pd:Integer pc:String] [String] [
+  if ((size cur) lt pd) [
+    def c2 (StringUtil.concat [cur pc])
+    def r (vgl-pad-end c2 pd pc)
+    r
+  ] [cur]
+]]
+def vgl-pad-start fn [[cur:String w:Integer pc:String] [String] [
+  if ((size cur) lt w) [
+    def c2 (StringUtil.concat [pc cur])
+    def r (vgl-pad-start c2 w pc)
+    r
+  ] [cur]
+]]
+def vg-pad fn [[s:Any padding:Any padchar:Any] [String] [
+  def str (if (s is String) [s] [vg-stringify s vg-noarg vg-noarg])
+  def pd (if (padding is Number) [vgz padding] [44])
+  def pc0 (if (padchar is String) [StringUtil.concat [padchar " "]] [" "])
+  def pc (pc0 slice 0 1)
+  if (pd gt -1) [
+    def btr13 (vgl-pad-end str pd pc)
+    btr13
+  ] [
+    def btr14 (vgl-pad-start str (0 sub pd) pc)
+    btr14
+  ]
+]]
+
+# Concatenate url part strings, merging sep chars as needed.
+def vgi-join-map-part fn [[pair:Any sarr:Integer sepdef:String sepre:Any urlq:Boolean] [Any] [
+  def pi0 (vgi-parse-int (pair get 0))
+  def i (if (pi0 is None) [0] [pi0])
+  def sbox (flex [(pair get 1)])
+  def hassep (if (sepre is None) [false] [(sepre eq "") not])
+  if (hassep eq true) [
+    if ((urlq eq true) and (i eq 0)) [
+      def re1 (StringUtil.concat [sepre "+$"])
+      def s1 (vg-re-replace re1 (sbox get 0) "")
+      (sbox set 0 s1) drop
+      none
+    ] [
+      if (i gt 0) [
+        def re2 (StringUtil.concat ["^" sepre "+"])
+        def s2 (vg-re-replace re2 (sbox get 0) "")
+        (sbox set 0 s2) drop
+        none
+      ] [none] drop
+      if ((i lt (sarr sub 1)) or (urlq not)) [
+        def re3 (StringUtil.concat [sepre "+$"])
+        def s3 (vg-re-replace re3 (sbox get 0) "")
+        (sbox set 0 s3) drop
+        none
+      ] [none] drop
+      def re4 (StringUtil.concat ["([^" sepre "])" sepre "+([^" sepre "])"])
+      def rep4 (StringUtil.concat ["$1" sepdef "$2"])
+      def s4 (vg-re-replace re4 (sbox get 0) rep4)
+      (sbox set 0 s4) drop
+      none
+    ] drop
+    none
+  ] [none] drop
+  sbox get 0
+]]
+# Keep the non-empty string values of arr's items, in order.
+def vgl-join-strs fn [[i:Integer prs:Any acc:Any] [Any] [
+  if (i gte (size prs)) [acc] [
+    def pair (prs get i)
+    def pv (pair get 1)
+    if (pv is String) [
+      if ((size pv) gt 0) [(append [pv] acc) drop none] [none]
+    ] [none] drop
+    def i1 (i add 1)
+    def r (vgl-join-strs i1 prs acc)
+    r
+  ]
+]]
+# Map each kept string through the sep-merging part transform.
+def vgl-join-parts fn [[i:Integer strs:Any sarr:Integer sepdef:String sepre:Any urlq:Boolean acc:Any] [Any] [
+  if (i gte (size strs)) [acc] [
+    def sv (strs get i)
+    def pair (flex [])
+    def istr (vg-num-to-string i)
+    (append [istr] pair) drop
+    (append [sv] pair) drop
+    def mv (vgi-join-map-part pair sarr sepdef sepre urlq)
+    if (mv is String) [
+      if ((size mv) gt 0) [(append [mv] acc) drop none] [none]
+    ] [none] drop
+    def i1 (i add 1)
+    def r (vgl-join-parts i1 strs sarr sepdef sepre urlq acc)
+    r
+  ]
+]]
+def vg-join fn [[arr:Any sep:Any url:Any] [String] [
+  def sarr (vgz arr)
+  def sep2 (if (vg-is-noarg sep) [none] [sep])
+  def sepdef (vg-getdef sep2 ",")
+  def sepre (if ((vgz sepdef) eq 1) [vg-escre sepdef] [none])
+  def urlq (vgi-js-truthy url)
+  def prs (vg-items arr)
+  def strs0 (flex [])
+  def strs (vgl-join-strs 0 prs strs0)
+  def acc0 (flex [])
+  def keep (vgl-join-parts 0 strs sarr sepdef sepre urlq acc0)
+  def btr15 (vgi-join-list keep sepdef)
+  btr15
+]]
+
+# Collect the key-ish parts of a sliced path as strings (numbers floored,
+# dots stripped from string parts).
+def vgl-pathify-strs fn [[i:Integer prs:Any acc:Any] [Any] [
+  if (i gte (size prs)) [acc] [
+    def pair (prs get i)
+    def p (pair get 1)
+    if (vg-iskey p) [
+      def sv (
+        if (p is Number) [
+          def pn (if (p is Float) [MathUtil.floor p] [p])
+          def btr16 (vg-num-to-string pn)
+          btr16
+        ] [
+          StringUtil.replace "." "" p {scope: "all"}
+        ]
+      )
+      (append [sv] acc) drop
+      none
+    ] [none] drop
+    def i1 (i add 1)
+    def r (vgl-pathify-strs i1 prs acc)
+    r
+  ]
+]]
+def vg-pathify fn [[val:Any startin:Any endin:Any] [String] [
+  def path (
+    if (vg-islist val) [val] [
+      if (val is String) [flex [val]] [
+        if (val is Number) [flex [val]] [none]
+      ]
+    ]
+  )
+  def start (if (startin is Number) [if (startin gt -1) [vgz startin] [0]] [0])
+  def endx (if (endin is Number) [if (endin gt -1) [vgz endin] [0]] [0])
+  def pathstr (
+    if (path is None) [none] [
+      def slend ((vgz path) sub endx)
+      def sliced (vg-slice path start slend vg-noarg)
+      if ((vgz sliced) eq 0) ["<root>"] [
+        def prs (vg-items sliced)
+        def acc0 (flex [])
+        def strs (vgl-pathify-strs 0 prs acc0)
+        def btr17 (vg-join strs "." vg-noarg)
+        btr17
+      ]
+    ]
+  )
+  if (pathstr is None) [
+    def desc (if (vg-is-noarg val) [""] [
+      def vs (vg-stringify val 47 vg-noarg)
+      StringUtil.concat [":" vs]
+    ])
+    StringUtil.concat ["<unknown-path" desc ">"]
+  ] [pathstr]
+]]
+
+
+# ----------------------------------------------------------------------------
+# walk — depth-first traversal applying before/after callbacks.
+# Callbacks travel wrapped ([f/r]); vg-noarg / none means "no callback".
+# Paths are fresh lists per visit (the canonical TS shares one mutable
+# array per depth purely as an allocation optimisation).
+# ----------------------------------------------------------------------------
+def vgi-has-cb fn [[fw:Any] [Boolean] [
+  if ((fw is None) or (vg-is-noarg fw)) [false] [true]
+]]
+def vgi-cb4 fn [[fw:Any a:Any b:Any c:Any d:Any] [Any] [
+  def f (vgi-fnarg fw)
+  def r (vgi-call4 a b c d (f/r))
+  r
+]]
+def vgl-walk-children fn [[ci:Integer ckeys:Any out:Any fwb:Any fwa:Any md:Integer pth:Any] [Any] [
+  if (ci gte (size ckeys)) [none] [
+    def ckey (ckeys get ci)
+    def cpth (vg-clone pth)
+    (append [ckey] cpth) drop
+    def cval (vgi-raw out ckey)
+    def walked (vgi-walk-rec cval fwb fwa md ckey out cpth)
+    (vg-setprop out ckey walked) drop
+    def ci1 (ci add 1)
+    def r (vgl-walk-children ci1 ckeys out fwb fwa md pth)
+    r
+  ]
+]]
+def vgi-walk-rec fn [[val:Any fwb:Any fwa:Any md:Integer key:Any parent:Any pth:Any] [Any] [
+  def dep (size pth)
+  def out0 (
+    if (vgi-has-cb fwb) [vgi-cb4 fwb key val parent pth] [val]
+  )
+  def stop (
+    if (md eq 0) [true] [
+      if ((md gt 0) and (md lte dep)) [true] [false]
+    ]
+  )
+  if (stop eq true) [out0] [
+    def obox (flex [none])
+    (obox set 0 out0) drop
+    if (vg-isnode out0) [
+      def ckeys (vg-keysof out0)
+      (vgl-walk-children 0 ckeys out0 fwb fwa md pth) drop
+      none
+    ] [none] drop
+    def out1 (obox get 0)
+    def out2 (
+      if (vgi-has-cb fwa) [vgi-cb4 fwa key out1 parent pth] [out1]
+    )
+    out2
+  ]
+]]
+def vg-walk fn [[val:Any fwb:Any fwa:Any maxdepth:Any] [Any] [
+  def md (
+    if (maxdepth is Number) [
+      if ((vgz maxdepth) gte 0) [vgz maxdepth] [32]
+    ] [32]
+  )
+  def pth0 (flex [])
+  def r (vgi-walk-rec val fwb fwa md none none pth0)
+  r
+]]
+
+# ----------------------------------------------------------------------------
+# merge — deep merge of a list of values; later values win; the first
+# element is modified in place. Ported over walk with an explicit state
+# stack (cur/dst frames) instead of the canonical TS closures, so the
+# walker callbacks stay capture-free (and merge stays re-entrant).
+# ----------------------------------------------------------------------------
+def vgi-merge-stack (flex [])
+def vgi-merge-state fn [[ig:Any] [Any] [
+  def n (size vgi-merge-stack)
+  def btr18 (vgi-merge-stack get (n sub 1))
+  btr18
+]]
+def vg-merge-before fn [[key:Any val:Any parent:Any pth:Any] [Any] [
+  def st (vgi-merge-state none)
+  def cur (st get "cur")
+  def dst (st get "dst")
+  def md (st get "md")
+  def pi (vgz pth)
+  if (md lte pi) [
+    def tgt (vg-getprop cur (pi sub 1) vg-noarg)
+    (vg-setprop tgt key val) drop
+    val
+  ] [
+    if ((vg-isnode val) not) [
+      (vg-setprop cur pi val) drop
+      val
+    ] [
+      def dprev (if (pi gt 0) [vg-getprop dst (pi sub 1) vg-noarg] [vg-getprop dst pi vg-noarg])
+      def tval (if (pi gt 0) [vg-getprop dprev key vg-noarg] [vg-getprop dst pi vg-noarg])
+      (vg-setprop dst pi tval) drop
+      def vtype (vg-typify val)
+      if ((tval is None) and ((vg-bit vg-t-instance vtype) not)) [
+        def fresh (if (vg-islist val) [flex []] [flex {}])
+        (vg-setprop cur pi fresh) drop
+        val
+      ] [
+        if (vtype eq (vg-typify tval)) [
+          (vg-setprop cur pi tval) drop
+          val
+        ] [
+          (vg-setprop cur pi val) drop
+          none
+        ]
+      ]
+    ]
+  ]
+]]
+def vg-merge-after fn [[key:Any val:Any parent:Any pth:Any] [Any] [
+  def st (vgi-merge-state none)
+  def cur (st get "cur")
+  def ci (vgz pth)
+  def target (vg-getprop cur (ci sub 1) vg-noarg)
+  def value (vg-getprop cur ci vg-noarg)
+  (vg-setprop target key value) drop
+  value
+]]
+def vgl-merge-list fn [[oi:Integer lst:Any md:Integer obox:Any] [Any] [
+  if (oi gte (size lst)) [none] [
+    def obj (lst get oi)
+    if ((vg-isnode obj) not) [
+      (obox set 0 obj) drop
+      none
+    ] [
+      def st (flex {})
+      def cur (flex [])
+      def out0 (obox get 0)
+      (append [out0] cur) drop
+      def dst (flex [])
+      (append [out0] dst) drop
+      (st set "cur" cur) drop
+      (st set "dst" dst) drop
+      (st set "md" md) drop
+      (append [st] vgi-merge-stack) drop
+      def walked (vg-walk obj [vg-merge-before/r] [vg-merge-after/r] md)
+      (pop vgi-merge-stack) drop drop
+      (obox set 0 walked) drop
+      none
+    ] drop
+    def oi1 (oi add 1)
+    def r (vgl-merge-list oi1 lst md obox)
+    r
+  ]
+]]
+def vg-merge fn [[val:Any maxdepth:Any] [Any] [
+  def mdv (if (vg-is-noarg maxdepth) [none] [maxdepth])
+  def md0 (vg-getdef mdv 32)
+  def md (vg-slice md0 0 vg-noarg vg-noarg)
+  if ((vg-islist val) not) [val] [
+    def lenlist (size val)
+    if (lenlist eq 0) [none] [
+      if (lenlist eq 1) [val get 0] [
+        def first (vg-getprop val 0 vg-noarg)
+        def out0 (if (first is None) [flex {}] [first])
+        def obox (flex [none])
+        (obox set 0 out0) drop
+        def rest (vg-slice val 1 vg-noarg vg-noarg)
+        (vgl-merge-list 0 rest md obox) drop
+        def merged (obox get 0)
+        if (md eq 0) [
+          def lastv (vg-getelem val -1 vg-noarg)
+          if (vg-islist lastv) [flex []] [
+            if (vg-ismap lastv) [flex {}] [lastv]
+          ]
+        ] [merged]
+      ]
+    ]
+  ]
+]]
+
+# ----------------------------------------------------------------------------
+# getpath / setpath — path reads and writes with the injection extensions
+# ($KEY, $GET:, $REF:, $META:, $$ escapes, empty-part ascents).
+# The optional injdef is a map (or an Injection state map).
+# ----------------------------------------------------------------------------
+def vgi-idef fn [[injdef:Any k:String] [Any] [
+  if (injdef is Map) [injdef get (k)] [none]
+]]
+
+def vgl-getpath-parts fn [[pi:Integer parts:Any vbox:Any store:Any src:Any injdef:Any dparent:Any dpath:Any contbox:Any] [Any] [
+  def numparts (size parts)
+  def going (
+    if ((contbox get 0) eq true) [
+      if (((vbox get 0) is None) not) [pi lt numparts] [false]
+    ] [false]
+  )
+  if (going eq false) [none] [
+    def raw (parts get pi)
+    def hasinj (injdef is Map)
+    def part0 (
+      if ((hasinj eq true) and (raw eq "$KEY")) [
+        def kv (vgi-idef injdef "key")
+        if (kv is None) [raw] [kv]
+      ] [
+        if (raw is String) [
+          if ((hasinj eq true) and (vgi-starts-with raw "$GET:")) [
+            def gp (vg-slice raw 5 -1 vg-noarg)
+            def gv (vg-getpath src gp vg-noarg)
+            def btr19 (if (gv is None) [""] [vg-stringify gv vg-noarg vg-noarg])
+            btr19
+          ] [
+            if ((hasinj eq true) and (vgi-starts-with raw "$REF:")) [
+              def rp (vg-slice raw 5 -1 vg-noarg)
+              def spec (vg-getprop store "$SPEC" vg-noarg)
+              def rv (vg-getpath spec rp vg-noarg)
+              def btr20 (if (rv is None) [""] [vg-stringify rv vg-noarg vg-noarg])
+              btr20
+            ] [
+              if ((hasinj eq true) and (vgi-starts-with raw "$META:")) [
+                def mp (vg-slice raw 6 -1 vg-noarg)
+                def mv0 (vgi-idef injdef "meta")
+                def mv (vg-getpath mv0 mp vg-noarg)
+                def btr21 (if (mv is None) [""] [vg-stringify mv vg-noarg vg-noarg])
+                btr21
+              ] [raw]
+            ]
+          ]
+        ] [raw]
+      ]
+    )
+    def part (
+      if (part0 is String) [
+        if (StringUtil.contains "$$" part0) [
+          StringUtil.replace "$$" "$" part0 {scope: "all"}
+        ] [part0]
+      ] [vg-strkey part0]
+    )
+    if (part eq "") [
+      def abox (flex [0])
+      def pbox (flex [pi])
+      (vgl-count-ascends parts pbox abox) drop
+      def ascends (abox get 0)
+      def npi (pbox get 0)
+      if ((hasinj eq true) and (ascends gt 0)) [
+        def asc2 (if (npi eq (numparts sub 1)) [ascends sub 1] [ascends])
+        if (asc2 eq 0) [
+          (vbox set 0 dparent) drop
+          (pbox set 0 (npi add 1)) drop
+          def r (vgl-getpath-parts (pbox get 0) parts vbox store src injdef dparent dpath contbox)
+          r
+        ] [
+          def dslice (vg-slice dpath (0 sub asc2) vg-noarg vg-noarg)
+          def tail2 (vg-slice parts (npi add 1) vg-noarg vg-noarg)
+          def fp0 (flex [])
+          (append [dslice] fp0) drop
+          (append [tail2] fp0) drop
+          def fullpath (vg-flatten fp0 1)
+          if (asc2 lte (vgz dpath)) [
+            def fv (vg-getpath store fullpath vg-noarg)
+            (vbox set 0 fv) drop
+            none
+          ] [
+            (vbox set 0 none) drop
+            none
+          ] drop
+          (contbox set 0 false) drop
+          none
+        ]
+      ] [
+        (vbox set 0 dparent) drop
+        def npi1 (npi add 1)
+        def r (vgl-getpath-parts npi1 parts vbox store src injdef dparent dpath contbox)
+        r
+      ]
+    ] [
+      def cv (vg-getprop (vbox get 0) part vg-noarg)
+      (vbox set 0 cv) drop
+      def pi1 (pi add 1)
+      def r (vgl-getpath-parts pi1 parts vbox store src injdef dparent dpath contbox)
+      r
+    ]
+  ]
+]]
+# Count the run of empty parts starting AFTER pbox's index; advances pbox.
+def vgl-count-ascends fn [[parts:Any pbox:Any abox:Any] [Any] [
+  def pi (pbox get 0)
+  def nxt (pi add 1)
+  if (nxt lt (size parts)) [
+    def np (parts get nxt)
+    if (np eq "") [
+      (abox set 0 ((abox get 0) add 1)) drop
+      (pbox set 0 nxt) drop
+      def r (vgl-count-ascends parts pbox abox)
+      r
+    ] [none]
+  ] [none]
+]]
+
+def vg-getpath fn [[store:Any path:Any injdef:Any] [Any] [
+  def idf (if (vg-is-noarg injdef) [none] [injdef])
+  def parts (
+    if (vg-islist path) [vg-clone path] [
+      if (path is String) [
+        make FlexList (StringUtil.split "." path {keepEmpty: true})
+      ] [
+        if (path is Number) [flex [(vg-strkey path)]] [none]
+      ]
+    ]
+  )
+  if (parts is None) [none] [
+    def ibase (vgi-idef idf "base")
+    def src (vg-getprop store ibase store)
+    def numparts (size parts)
+    def dparent (vgi-idef idf "dparent")
+    def dpath (vgi-idef idf "dpath")
+    def pathnone ((path is None) or (vg-is-noarg path))
+    def emptyroot (
+      if (pathnone eq true) [true] [
+        if ((store is None) or (vg-is-noarg store)) [true] [
+          if (numparts eq 1) [(parts get 0) eq ""] [false]
+        ]
+      ]
+    )
+    def vbox (flex [none])
+    (vbox set 0 store) drop
+    if (emptyroot eq true) [
+      (vbox set 0 src) drop
+      none
+    ] [
+      if (numparts gt 0) [
+        if (numparts eq 1) [
+          def av (vg-getprop store (parts get 0) vg-noarg)
+          (vbox set 0 av) drop
+          none
+        ] [none] drop
+        if (vg-isfunc (vbox get 0)) [none] [
+          (vbox set 0 src) drop
+          def p0 (parts get 0)
+          if (p0 is String) [
+            def m (vg-re-find "^([^$]+)\\$([=~])(.+)$" p0)
+            def metav (vgi-idef idf "meta")
+            if ((m is None) not and ((metav is None) not)) [
+              def mkey (m get 1)
+              def mv (vg-getprop metav mkey vg-noarg)
+              (vbox set 0 mv) drop
+              def mrest (m get 3)
+              (parts set 0 mrest) drop
+              none
+            ] [none] drop
+            none
+          ] [none] drop
+          def contbox (flex [true])
+          def r (vgl-getpath-parts 0 parts vbox store src idf dparent dpath contbox)
+          r
+        ] drop
+        none
+      ] [none]
+    ] drop
+    def handler (vgi-idef idf "handler")
+    if (vg-isfunc handler) [
+      def iref (vg-pathify path vg-noarg vg-noarg)
+      def hv (vgi-cb4 handler idf (vbox get 0) iref store)
+      (vbox set 0 hv) drop
+      none
+    ] [none] drop
+    vbox get 0
+  ]
+]]
+
+def vgl-setpath-descend fn [[pi:Integer parts:Any pbox:Any] [Any] [
+  def numparts (size parts)
+  if (pi gte (numparts sub 1)) [none] [
+    def partkey (vg-getelem parts pi vg-noarg)
+    def parent (pbox get 0)
+    def np0 (vg-getprop parent partkey vg-noarg)
+    def np (
+      if (vg-isnode np0) [np0] [
+        def nxt (vg-getelem parts (pi add 1) vg-noarg)
+        def fresh (
+          if (vg-bit vg-t-number (vg-typify nxt)) [flex []] [flex {}]
+        )
+        (vg-setprop parent partkey fresh) drop
+        fresh
+      ]
+    )
+    (pbox set 0 np) drop
+    def pi1 (pi add 1)
+    def r (vgl-setpath-descend pi1 parts pbox)
+    r
+  ]
+]]
+def vg-setpath fn [[store:Any path:Any val:Any injdef:Any] [Any] [
+  def idf (if (vg-is-noarg injdef) [none] [injdef])
+  def ptype (vg-typify path)
+  def parts (
+    if (vg-bit vg-t-list ptype) [path] [
+      if (vg-bit vg-t-string ptype) [
+        make FlexList (StringUtil.split "." path {keepEmpty: true})
+      ] [
+        if (vg-bit vg-t-number ptype) [flex [path]] [none]
+      ]
+    ]
+  )
+  if (parts is None) [none] [
+    def ibase (vgi-idef idf "base")
+    def parent0 (
+      if (vg-iskey ibase) [vg-getprop store ibase store] [store]
+    )
+    def pbox (flex [none])
+    (pbox set 0 parent0) drop
+    (vgl-setpath-descend 0 parts pbox) drop
+    def parent (pbox get 0)
+    def lastkey (vg-getelem parts -1 vg-noarg)
+    if (vg-is-delete val) [
+      (vg-delprop parent lastkey) drop
+      none
+    ] [
+      (vg-setprop parent lastkey val) drop
+      none
+    ] drop
+    parent
+  ]
+]]
+
+
+# ----------------------------------------------------------------------------
+# Injection state — the recursive engine behind inject / transform /
+# validate / select. An Injection is a flex map with the canonical
+# fields (mode full keyi keys key val parent path nodes handler errs
+# meta dparent dpath base modify prior root). Command functions and
+# handlers are fn boxes (see vgi-fnarg).
+# ----------------------------------------------------------------------------
+def vgi-inj-new fn [[val:Any parent:Any] [Any] [
+  def inj (flex {})
+  (inj set "mode" 4) drop
+  (inj set "full" false) drop
+  (inj set "keyi" 0) drop
+  def ik (flex [])
+  (append ["$TOP"] ik) drop
+  (inj set "keys" ik) drop
+  (inj set "key" "$TOP") drop
+  (inj set "val" val) drop
+  (inj set "parent" parent) drop
+  def ip (flex [])
+  (append ["$TOP"] ip) drop
+  (inj set "path" ip) drop
+  def inn (flex [])
+  (append [parent] inn) drop
+  (inj set "nodes" inn) drop
+  (inj set "handler" vg-injecthandler-box) drop
+  (inj set "errs" (flex [])) drop
+  (inj set "meta" (flex {})) drop
+  (inj set "dparent" none) drop
+  def dp (flex [])
+  (append ["$TOP"] dp) drop
+  (inj set "dpath" dp) drop
+  (inj set "base" "$TOP") drop
+  (inj set "modify" none) drop
+  (inj set "prior" none) drop
+  (inj set "root" none) drop
+  inj
+]]
+
+def vgi-inj-descend fn [[inj:Any] [Any] [
+  def meta (inj get "meta")
+  if (vg-ismap meta) [
+    def d0 (vg-getprop meta "__d" 0)
+    def d (if (d0 is Number) [d0] [0])
+    (vg-setprop meta "__d" (d add 1)) drop
+    none
+  ] [none] drop
+  def pth (inj get "path")
+  def parentkey (vg-getelem pth -2 vg-noarg)
+  def dparent (inj get "dparent")
+  def dpath (inj get "dpath")
+  if (dparent is None) [
+    if ((vgz dpath) gt 1) [
+      def ndp (vg-clone dpath)
+      (append [parentkey] ndp) drop
+      (inj set "dpath" ndp) drop
+      none
+    ] [none] drop
+    none
+  ] [
+    if ((parentkey is None) not) [
+      def ndparent (vg-getprop dparent parentkey vg-noarg)
+      (inj set "dparent" ndparent) drop
+      def lastpart (vg-getelem dpath -1 vg-noarg)
+      def pk (vg-js-string parentkey)
+      def marker (StringUtil.concat ["$:" pk])
+      if (lastpart eq marker) [
+        def ndp (vg-slice dpath -1 vg-noarg vg-noarg)
+        (inj set "dpath" ndp) drop
+        none
+      ] [
+        def ndp (vg-clone dpath)
+        (append [parentkey] ndp) drop
+        (inj set "dpath" ndp) drop
+        none
+      ] drop
+      none
+    ] [none] drop
+    none
+  ] drop
+  inj get "dparent"
+]]
+
+def vgi-inj-child fn [[inj:Any keyi:Integer ikeys:Any] [Any] [
+  def key (vg-strkey (vg-getelem ikeys keyi vg-noarg))
+  def val (inj get "val")
+  def c (flex {})
+  (c set "mode" (inj get "mode")) drop
+  (c set "full" (inj get "full")) drop
+  (c set "keyi" keyi) drop
+  (c set "keys" ikeys) drop
+  (c set "key" key) drop
+  (c set "val" (vg-getprop val key vg-noarg)) drop
+  (c set "parent" val) drop
+  def npth (vg-clone (inj get "path"))
+  (append [key] npth) drop
+  (c set "path" npth) drop
+  def nnodes (vg-clone-shallow (inj get "nodes"))
+  (append [val] nnodes) drop
+  (c set "nodes" nnodes) drop
+  (c set "handler" (inj get "handler")) drop
+  (c set "errs" (inj get "errs")) drop
+  (c set "meta" (inj get "meta")) drop
+  (c set "base" (inj get "base")) drop
+  (c set "modify" (inj get "modify")) drop
+  (c set "prior" inj) drop
+  (c set "dpath" (vg-clone (inj get "dpath"))) drop
+  (c set "dparent" (inj get "dparent")) drop
+  (c set "root" (inj get "root")) drop
+  c
+]]
+
+# Shallow list copy: fresh flex list sharing the same element references
+# (clone would copy the ancestor nodes themselves, breaking identity).
+def vgl-shallow fn [[i:Integer xs:Any acc:Any] [Any] [
+  if (i gte (size xs)) [acc] [
+    def e (xs get i)
+    (append [e] acc) drop
+    def i1 (i add 1)
+    def r (vgl-shallow i1 xs acc)
+    r
+  ]
+]]
+def vg-clone-shallow fn [[xs:Any] [Any] [
+  def acc0 (flex [])
+  def r (vgl-shallow 0 xs acc0)
+  r
+]]
+
+def vgi-inj-setval fn [[inj:Any val:Any ancestor:Integer] [Any] [
+  def tgt (
+    if (ancestor lt 2) [inj get "parent"] [
+      def btr22 (vg-getelem (inj get "nodes") (0 sub ancestor) vg-noarg)
+      btr22
+    ]
+  )
+  def tkey (
+    if (ancestor lt 2) [inj get "key"] [
+      def btr23 (vg-getelem (inj get "path") (0 sub ancestor) vg-noarg)
+      btr23
+    ]
+  )
+  if (val is None) [
+    def r (vg-delprop tgt tkey)
+    r
+  ] [
+    def r (vg-setprop tgt tkey val)
+    r
+  ]
+]]
+
+# ----------------------------------------------------------------------------
+# _injectstr — inject store values into a string via `path` markers.
+# ----------------------------------------------------------------------------
+def vgl-injectstr-parts fn [[i:Integer ms:Any s:String store:Any inj:Any acc:Any posbox:Any] [Any] [
+  if (i gte (size ms)) [acc] [
+    def m (ms get i)
+    def mi (m get "i")
+    def me (m get "e")
+    (append [(s slice (posbox get 0) mi)] acc) drop
+    def gs (m get "g")
+    def ref0 (gs get 0)
+    def iref (
+      if ((size ref0) gt 3) [
+        def r1 (StringUtil.replace "$BT" "`" ref0 {scope: "all"})
+        StringUtil.replace "$DS" "$" r1 {scope: "all"}
+      ] [ref0]
+    )
+    if (inj is Map) [(inj set "full" false) drop none] [none] drop
+    def found (vg-getpath store iref inj)
+    def rep (
+      if (found is None) [""] [
+        if (found is String) [
+          if (found eq "__NULL__") ["null"] [found]
+        ] [
+          if (vg-isfunc found) [""] [vgi-json-encode found]
+        ]
+      ]
+    )
+    (append [rep] acc) drop
+    (posbox set 0 me) drop
+    def i1 (i add 1)
+    def r (vgl-injectstr-parts i1 ms s store inj acc posbox)
+    r
+  ]
+]]
+def vgi-injectstr fn [[val:Any store:Any inj:Any] [Any] [
+  if ((val is String) not) [""] [
+    if (val eq "") [""] [
+      def fm (vg-re-find "^`(\\$[A-Z]+|[^`]*)[0-9]*`$" val)
+      if ((fm is None) not) [
+        if (inj is Map) [(inj set "full" true) drop none] [none] drop
+        def pathref0 (fm get 1)
+        def pathref (
+          if ((size pathref0) gt 3) [
+            def r1 (StringUtil.replace "$BT" "`" pathref0 {scope: "all"})
+            StringUtil.replace "$DS" "$" r1 {scope: "all"}
+          ] [pathref0]
+        )
+        def r (vg-getpath store pathref inj)
+        r
+      ] [
+        def mr ((val) mini re "`([^`]+)`" {all: true})
+        def out0 (
+          if ((mr get "ok") eq true) [
+            def acc (flex [])
+            def posbox (flex [0])
+            def ms (mr get "ms")
+            (vgl-injectstr-parts 0 ms val store inj acc posbox) drop
+            def pend (posbox get 0)
+            (append [(val slice pend (size val))] acc) drop
+            def btr24 (vgi-join-list acc "")
+            btr24
+          ] [val]
+        )
+        def handler (if (inj is Map) [inj get "handler"] [none])
+        if (vg-isfunc handler) [
+          (inj set "full" true) drop
+          def hv (vgi-cb4 handler inj out0 val store)
+          hv
+        ] [out0]
+      ]
+    ]
+  ]
+]]
+
+# ----------------------------------------------------------------------------
+# inject — the recursive injection engine.
+# ----------------------------------------------------------------------------
+def vgi-strkeys fn [[i:Integer xs:Any acc:Any] [Any] [
+  if (i gte (size xs)) [acc] [
+    def e (xs get i)
+    (append [(vg-js-string e)] acc) drop
+    def i1 (i add 1)
+    def r (vgi-strkeys i1 xs acc)
+    r
+  ]
+]]
+# Partition sorted keys into non-$ then $ groups (both sorted).
+def vgl-part-keys fn [[i:Integer ks:Any nodollar:Any dollar:Any] [Any] [
+  if (i gte (size ks)) [none] [
+    def k (ks get i)
+    if (StringUtil.contains "$" k) [(append [k] dollar) drop none] [(append [k] nodollar) drop none] drop
+    def i1 (i add 1)
+    def r (vgl-part-keys i1 ks nodollar dollar)
+    r
+  ]
+]]
+def vgi-inject-nodekeys fn [[val:Any] [Any] [
+  if (vg-ismap val) [
+    def ks (sort (keys val))
+    def nodollar (flex [])
+    def dollar (flex [])
+    (vgl-part-keys 0 ks nodollar dollar) drop
+    (vgl-shallow 0 dollar nodollar) drop
+    nodollar
+  ] [
+    def acc0 (flex [])
+    def r (vgl-idx-keys 0 (size val) acc0)
+    r
+  ]
+]]
+
+def vgl-inject-children fn [[nki:Integer nodekeys:Any val:Any store:Any inj:Any] [Any] [
+  if (nki gte (size nodekeys)) [none] [
+    def childinj (vgi-inj-child inj nki nodekeys)
+    def nodekey (childinj get "key")
+    (childinj set "mode" 1) drop
+    def prekey (vgi-injectstr (vg-js-string nodekey) store childinj)
+    def ks1 (vgi-strkeys 0 (childinj get "keys") (flex []))
+    if ((prekey is None) not) [
+      (childinj set "val" (vg-getprop val prekey vg-noarg)) drop
+      (childinj set "mode" 4) drop
+      (vg-inject (childinj get "val") store childinj) drop
+      (childinj set "mode" 2) drop
+      (vgi-injectstr (vg-js-string nodekey) store childinj) drop
+      none
+    ] [none] drop
+    def ks2 (vgi-strkeys 0 (childinj get "keys") (flex []))
+    def nki1 ((childinj get "keyi") add 1)
+    def r (vgl-inject-children nki1 ks2 val store inj)
+    r
+  ]
+]]
+
+def vg-inject fn [[val:Any store:Any injdef:Any] [Any] [
+  def idf (if (vg-is-noarg injdef) [none] [injdef])
+  def isinj (
+    if (idf is Map) [((idf get "mode") is None) not] [false]
+  )
+  def inj (
+    if (isinj eq true) [idf] [
+      def rootparent (flex {})
+      (rootparent set "$TOP" val) drop
+      def ninj (vgi-inj-new val rootparent)
+      (ninj set "dparent" store) drop
+      def errs0 (vg-getprop store "$ERRS" vg-noarg)
+      def errs (if (errs0 is None) [flex []] [errs0])
+      (ninj set "errs" errs) drop
+      def meta (ninj get "meta")
+      (vg-setprop meta "__d" 0) drop
+      (ninj set "root" rootparent) drop
+      if (idf is Map) [
+        def imod (idf get "modify")
+        if ((imod is None) not) [(ninj set "modify" imod) drop none] [none] drop
+        def iextra (idf get "extra")
+        if ((iextra is None) not) [(ninj set "extra" iextra) drop none] [none] drop
+        def imeta (idf get "meta")
+        if ((imeta is None) not) [(ninj set "meta" imeta) drop none] [none] drop
+        def ihandler (idf get "handler")
+        if ((ihandler is None) not) [(ninj set "handler" ihandler) drop none] [none] drop
+        none
+      ] [none] drop
+      ninj
+    ]
+  )
+  (vgi-inj-descend inj) drop
+  def rv (
+    if (vg-isnode val) [
+      def nodekeys (vgi-inject-nodekeys val)
+      (vgl-inject-children 0 nodekeys val store inj) drop
+      val
+    ] [
+      if (val is String) [
+        (inj set "mode" 4) drop
+        def nv (vgi-injectstr val store inj)
+        if (vg-is-skip nv) [none] [
+          (vgi-inj-setval inj nv 1) drop
+          none
+        ] drop
+        nv
+      ] [val]
+    ]
+  )
+  def imod (inj get "modify")
+  def skiprv (vg-is-skip rv)
+  if ((vg-isfunc imod) and (skiprv not)) [
+    def mkey (inj get "key")
+    def mparent (inj get "parent")
+    def mval (vg-getprop mparent mkey vg-noarg)
+    def mf (vgi-fnarg imod)
+    (vgi-call5 mval mkey mparent inj store (mf/r)) drop
+    none
+  ] [none] drop
+  (inj set "val" rv) drop
+  def prior (inj get "prior")
+  def root (inj get "root")
+  if ((prior is None) and ((root is None) not)) [
+    if (vg-haskey root "$TOP") [vg-getprop root "$TOP" vg-noarg] [
+      def btr25 (vgi-lookup root "$TOP")
+      btr25
+    ]
+  ] [
+    def ikey (inj get "key")
+    def iparent (inj get "parent")
+    if ((ikey eq "$TOP") and (vg-ismap iparent)) [
+      def btr26 (vgi-lookup iparent "$TOP")
+      btr26
+    ] [rv]
+  ]
+]]
+
+
+# ----------------------------------------------------------------------------
+# Handler utilities: placement checks, argument validation, child injection.
+# ----------------------------------------------------------------------------
+def vg-checkplacement fn [[modes:Integer ijname:String parenttypes:Integer inj:Any] [Boolean] [
+  def imode (inj get "mode")
+  def errs (inj get "errs")
+  if ((BinUtil.band modes imode) eq 0) [
+    def want (flex [])
+    if ((BinUtil.band modes 1) gt 0) [(append ["key"] want) drop none] [none] drop
+    if ((BinUtil.band modes 2) gt 0) [(append ["key"] want) drop none] [none] drop
+    if ((BinUtil.band modes 4) gt 0) [(append ["value"] want) drop none] [none] drop
+    def wantstr (vgi-join-list want ",")
+    def pl (vg-getprop vg-placement-table imode "value")
+    def msg (StringUtil.concat ["$" ijname ": invalid placement as " pl ", expected: " wantstr "."])
+    (append [msg] errs) drop
+    false
+  ] [
+    if (parenttypes eq 0) [true] [
+      def ptype (vg-typify (inj get "parent"))
+      if ((BinUtil.band parenttypes ptype) eq 0) [
+        def pn (vg-typename ptype)
+        def wn (vg-typename parenttypes)
+        def msg (StringUtil.concat ["$" ijname ": invalid placement in parent " pn ", expected: " wn "."])
+        (append [msg] errs) drop
+        false
+      ] [true]
+    ]
+  ]
+]]
+
+def vgl-injectorargs fn [[argi:Integer argtypes:Any iargs:Any found:Any] [Any] [
+  if (argi gte (size argtypes)) [found] [
+    # An absent slot is canonical `undefined`: type nil, rendered empty.
+    def absent (argi gte (vgz iargs))
+    def arg (if (absent eq true) [none] [vg-getprop iargs argi vg-noarg])
+    def argtype (if (absent eq true) [vg-t-noval] [vg-typify arg])
+    def want (argtypes get argi)
+    if ((BinUtil.band want argtype) eq 0) [
+      def as2 (if (absent eq true) [""] [vg-stringify arg 22 vg-noarg])
+      def tn (vg-typename argtype)
+      def wn (vg-typename want)
+      def pos (vg-num-to-string (argi add 1))
+      def msg (StringUtil.concat ["invalid argument: " as2 " (" tn " at position " pos ") is not of type: " wn "."])
+      (found set 0 msg) drop
+      found
+    ] [
+      (found set (argi add 1) arg) drop
+      def a1 (argi add 1)
+      def r (vgl-injectorargs a1 argtypes iargs found)
+      r
+    ]
+  ]
+]]
+def vgl-pad-nones fn [[i:Integer n:Integer found:Any] [Any] [
+  if (i lt n) [
+    (append [none] found) drop
+    def r (vgl-pad-nones (i add 1) n found)
+    r
+  ] [found]
+]]
+def vg-injectorargs fn [[argtypes:Any iargs:Any] [Any] [
+  # found has 1+numargs slots, all none; slot 0 carries the error message.
+  def found (flex [])
+  def n ((size argtypes) add 1)
+  (vgl-pad-nones 0 n found) drop
+  def r (vgl-injectorargs 0 argtypes iargs found)
+  r
+]]
+
+def vg-injectchild fn [[child:Any store:Any inj:Any] [Any] [
+  def prior (inj get "prior")
+  def cinj (
+    if (prior is None) [inj] [
+      def pprior (prior get "prior")
+      if ((pprior is None) not) [
+        def c (vgi-inj-child pprior (prior get "keyi") (prior get "keys"))
+        (c set "val" child) drop
+        (vg-setprop (c get "parent") (prior get "key") child) drop
+        c
+      ] [
+        def c (vgi-inj-child prior (inj get "keyi") (inj get "keys"))
+        (c set "val" child) drop
+        (vg-setprop (c get "parent") (inj get "key") child) drop
+        c
+      ]
+    ]
+  )
+  (vg-inject child store cinj) drop
+  cinj
+]]
+
+# ----------------------------------------------------------------------------
+# The transform command handlers ($DELETE, $COPY, $KEY, …). Each takes
+# (inj, val, ref, store); they live in the store as fn boxes.
+# ----------------------------------------------------------------------------
+def vg-t-delete fn [[inj:Any val:Any iref:Any store:Any] [Any] [
+  (vgi-inj-setval inj none 1) drop
+  none
+]]
+
+def vg-t-copy fn [[inj:Any val:Any iref:Any store:Any] [Any] [
+  if (vg-checkplacement 4 "COPY" vg-t-any inj) [
+    def tcout (vgi-lookup (inj get "dparent") (inj get "key"))
+    (vgi-inj-setval inj tcout 1) drop
+    tcout
+  ] [none]
+]]
+
+def vg-t-key fn [[inj:Any val:Any iref:Any store:Any] [Any] [
+  if (((inj get "mode") eq 4) not) [none] [
+    def parent (inj get "parent")
+    def keyspec (vgi-lookup parent "`$KEY`")
+    if ((keyspec is None) not) [
+      (vg-delprop parent "`$KEY`") drop
+      def r (vg-getprop (inj get "dparent") keyspec vg-noarg)
+      r
+    ] [
+      def anno (vgi-lookup parent "`$ANNO`")
+      def kv (vgi-lookup anno "KEY")
+      if ((kv is None) not) [kv] [
+        def r (vg-getelem (inj get "path") -2 vg-noarg)
+        r
+      ]
+    ]
+  ]
+]]
+
+def vg-t-anno fn [[inj:Any val:Any iref:Any store:Any] [Any] [
+  (vg-delprop (inj get "parent") "`$ANNO`") drop
+  none
+]]
+
+def vg-t-merge fn [[inj:Any val:Any iref:Any store:Any] [Any] [
+  def imode (inj get "mode")
+  def ikey (inj get "key")
+  def parent (inj get "parent")
+  if (imode eq 1) [ikey] [
+    if (imode eq 2) [
+      def margs0 (vg-getprop parent ikey vg-noarg)
+      def margs (
+        if (vg-islist margs0) [margs0] [
+          def w (flex [])
+          (append [margs0] w) drop
+          w
+        ]
+      )
+      (vgi-inj-setval inj none 1) drop
+      def ml (flex [])
+      (append [parent] ml) drop
+      (vgl-shallow 0 margs ml) drop
+      (append [(vg-clone parent)] ml) drop
+      (vg-merge ml vg-noarg) drop
+      ikey
+    ] [none]
+  ]
+]]
+
+def vg-t-each fn [[inj:Any val:Any iref:Any store:Any] [Any] [
+  if (vg-checkplacement 4 "EACH" vg-t-list inj) [
+    def ikeys (inj get "keys")
+    (vg-slice ikeys 0 1 true) drop
+    def parent (inj get "parent")
+    def cargs (vg-slice parent 1 vg-noarg vg-noarg)
+    def want (flex [])
+    (append [vg-t-string] want) drop
+    (append [vg-t-any] want) drop
+    def found (vg-injectorargs want cargs)
+    def errv (found get 0)
+    if ((errv is None) not) [
+      def msg (StringUtil.concat ["$EACH: " errv])
+      (append [msg] (inj get "errs")) drop
+      none
+    ] [
+      def srcpath (found get 1)
+      def child (found get 2)
+      def ibase (inj get "base")
+      def srcstore (vg-getprop store ibase store)
+      def src (vg-getpath srcstore srcpath inj)
+      def srctype (vg-typify src)
+      def ipath (inj get "path")
+      def inodes (inj get "nodes")
+      def tkey (vg-getelem ipath -2 vg-noarg)
+      def target0 (vg-getelem inodes -2 vg-noarg)
+      def target (if (target0 is None) [vg-getelem inodes -1 vg-noarg] [target0])
+      def tval (
+        if (vg-bit vg-t-list srctype) [
+          def acc (flex [])
+          def prs (vg-items src)
+          def mkcopy ([pr:Any] => [vg-clone child])
+          def ter1 (vgl-items-apply 0 prs [mkcopy/r] acc)
+          ter1
+        ] [
+          if (vg-bit vg-t-map srctype) [
+            def acc (flex [])
+            def prs (vg-items src)
+            def mkcopy2 ([pr:Any] => [
+              def c2 (vg-clone child)
+              def annok (flex {})
+              def kv (flex {})
+              (vg-setprop kv "KEY" (pr get 0)) drop
+              (vg-setprop annok "`$ANNO`" kv) drop
+              def ml (flex [])
+              (append [c2] ml) drop
+              (append [annok] ml) drop
+              def r2 (vg-merge ml 1)
+              r2
+            ])
+            def ter2 (vgl-items-apply 0 prs [mkcopy2/r] acc)
+            ter2
+          ] [flex []]
+        ]
+      )
+      def rvalbox (flex [none])
+      (rvalbox set 0 (flex [])) drop
+      if ((vgz tval) gt 0) [
+        def tcur0 (
+          if (src is None) [none] [
+            def acc2 (flex [])
+            def prs2 (vg-items src)
+            def getv ([pr:Any] => [pr get 1])
+            def ter3 (vgl-items-apply 0 prs2 [getv/r] acc2)
+            ter3
+          ]
+        )
+        def ckey (vg-getelem ipath -2 vg-noarg)
+        def tpath (vg-slice ipath -1 vg-noarg vg-noarg)
+        def dpath (flex [])
+        (append ["$TOP"] dpath) drop
+        def sparts (make FlexList (StringUtil.split "." srcpath {keepEmpty: true}))
+        (vgl-shallow 0 sparts dpath) drop
+        (append [(StringUtil.concat ["$:" (vg-js-string ckey)])] dpath) drop
+        def tcur1 (flex {})
+        (vg-setprop tcur1 ckey tcur0) drop
+        def tcurbox (flex [none])
+        (tcurbox set 0 tcur1) drop
+        if ((vgz tpath) gt 1) [
+          def pkey (vg-getelem ipath -3 "$TOP")
+          def tcur2 (flex {})
+          (vg-setprop tcur2 pkey (tcurbox get 0)) drop
+          (tcurbox set 0 tcur2) drop
+          (append [(StringUtil.concat ["$:" (vg-js-string pkey)])] dpath) drop
+          none
+        ] [none] drop
+        def ck1 (flex [])
+        (append [ckey] ck1) drop
+        def tinj (vgi-inj-child inj 0 ck1)
+        (tinj set "path" tpath) drop
+        (tinj set "nodes" (vg-slice inodes -1 vg-noarg vg-noarg)) drop
+        (tinj set "parent" (vg-getelem (tinj get "nodes") -1 vg-noarg)) drop
+        (vg-setprop (tinj get "parent") ckey tval) drop
+        (tinj set "val" tval) drop
+        (tinj set "dpath" dpath) drop
+        (tinj set "dparent" (tcurbox get 0)) drop
+        (vg-inject tval store tinj) drop
+        (rvalbox set 0 (tinj get "val")) drop
+        none
+      ] [none] drop
+      def rval (rvalbox get 0)
+      (vg-setprop target tkey rval) drop
+      def ter4 (vg-getprop rval 0 vg-noarg)
+      ter4
+    ]
+  ] [none]
+]]
+
+def vg-t-pack fn [[inj:Any val:Any iref:Any store:Any] [Any] [
+  if (vg-checkplacement 1 "EACH" vg-t-map inj) [
+    def ikey (inj get "key")
+    def ipath (inj get "path")
+    def parent (inj get "parent")
+    def inodes (inj get "nodes")
+    def cargs (vg-getprop parent ikey vg-noarg)
+    def want (flex [])
+    (append [vg-t-string] want) drop
+    (append [vg-t-any] want) drop
+    def found (vg-injectorargs want cargs)
+    def errv (found get 0)
+    if ((errv is None) not) [
+      def msg (StringUtil.concat ["$EACH: " errv])
+      (append [msg] (inj get "errs")) drop
+      none
+    ] [
+      def srcpath (found get 1)
+      def origchildspec (found get 2)
+      def tkey (vg-getelem ipath -2 vg-noarg)
+      def pathsize (vgz ipath)
+      def target0 (vg-getelem inodes (pathsize sub 2) vg-noarg)
+      def target (if (target0 is None) [vg-getelem inodes (pathsize sub 1) vg-noarg] [target0])
+      def ibase (inj get "base")
+      def srcstore (vg-getprop store ibase store)
+      def src0 (vg-getpath srcstore srcpath inj)
+      def src (
+        if (vg-islist src0) [src0] [
+          if (vg-ismap src0) [
+            def acc (flex [])
+            def prs (vg-items src0)
+            def tag ([pr:Any] => [
+              def nd (pr get 1)
+              def kv (flex {})
+              (vg-setprop kv "KEY" (pr get 0)) drop
+              (vg-setprop nd "`$ANNO`" kv) drop
+              nd
+            ])
+            def r (vgl-items-apply 0 prs [tag/r] acc)
+            r
+          ] [none]
+        ]
+      )
+      if (src is None) [none] [
+        def keypath (vg-getprop origchildspec "`$KEY`" vg-noarg)
+        def childspec (vg-delprop origchildspec "`$KEY`")
+        def child (vg-getprop childspec "`$VAL`" childspec)
+        def tval (flex {})
+        def mkentry ([pr:Any] => [
+          def srckey (pr get 0)
+          def srcnode (pr get 1)
+          def nkey (
+            if (keypath is None) [srckey] [
+              if (vgi-starts-with keypath "`") [
+                def ms (flex [])
+                (append [(flex {})] ms) drop
+                (append [store] ms) drop
+                def topm (flex {})
+                (vg-setprop topm "$TOP" srcnode) drop
+                (append [topm] ms) drop
+                def vstore (vg-merge ms 1)
+                def r2 (vg-inject keypath vstore vg-noarg)
+                r2
+              ] [
+                def r2 (vg-getpath srcnode keypath vg-noarg)
+                r2
+              ]
+            ]
+          )
+          def tchild (vg-clone child)
+          (vg-setprop tval nkey tchild) drop
+          def anno (vg-getprop srcnode "`$ANNO`" vg-noarg)
+          if (anno is None) [
+            (vg-delprop tchild "`$ANNO`") drop
+            none
+          ] [
+            (vg-setprop tchild "`$ANNO`" anno) drop
+            none
+          ] drop
+          none
+        ])
+        (vgl-items-apply 0 (vg-items src) [mkentry/r] (flex [])) drop
+        def rvalbox (flex [none])
+        (rvalbox set 0 (flex {})) drop
+        if ((vg-isempty tval) not) [
+          def tsrc (flex {})
+          def ibox (flex [0])
+          def addsrc ([pr:Any] => [
+            def n2 (pr get 1)
+            def i2 (ibox get 0)
+            def kn (
+              if (keypath is None) [i2] [
+                if (vgi-starts-with keypath "`") [
+                  def ms (flex [])
+                  (append [(flex {})] ms) drop
+                  (append [store] ms) drop
+                  def topm (flex {})
+                  (vg-setprop topm "$TOP" n2) drop
+                  (append [topm] ms) drop
+                  def vstore (vg-merge ms 1)
+                  def r2 (vg-inject keypath vstore vg-noarg)
+                  r2
+                ] [
+                  def r2 (vg-getpath n2 keypath vg-noarg)
+                  r2
+                ]
+              ]
+            )
+            (vg-setprop tsrc kn n2) drop
+            (ibox set 0 (i2 add 1)) drop
+            none
+          ])
+          (vgl-items-apply 0 (vg-items src) [addsrc/r] (flex [])) drop
+          def tpath (vg-slice ipath -1 vg-noarg vg-noarg)
+          def ckey (vg-getelem ipath -2 vg-noarg)
+          def dpath (flex [])
+          (append ["$TOP"] dpath) drop
+          def sparts (make FlexList (StringUtil.split "." srcpath {keepEmpty: true}))
+          (vgl-shallow 0 sparts dpath) drop
+          (append [(StringUtil.concat ["$:" (vg-js-string ckey)])] dpath) drop
+          def tcur1 (flex {})
+          (vg-setprop tcur1 ckey tsrc) drop
+          def tcurbox (flex [none])
+          (tcurbox set 0 tcur1) drop
+          if ((vgz tpath) gt 1) [
+            def pkey (vg-getelem ipath -3 "$TOP")
+            def tcur2 (flex {})
+            (vg-setprop tcur2 pkey (tcurbox get 0)) drop
+            (tcurbox set 0 tcur2) drop
+            (append [(StringUtil.concat ["$:" (vg-js-string pkey)])] dpath) drop
+            none
+          ] [none] drop
+          def ck1 (flex [])
+          (append [ckey] ck1) drop
+          def tinj (vgi-inj-child inj 0 ck1)
+          (tinj set "path" tpath) drop
+          (tinj set "nodes" (vg-slice inodes -1 vg-noarg vg-noarg)) drop
+          (tinj set "parent" (vg-getelem (tinj get "nodes") -1 vg-noarg)) drop
+          (tinj set "val" tval) drop
+          (tinj set "dpath" dpath) drop
+          (tinj set "dparent" (tcurbox get 0)) drop
+          (vg-inject tval store tinj) drop
+          (rvalbox set 0 (tinj get "val")) drop
+          none
+        ] [none] drop
+        (vg-setprop target tkey (rvalbox get 0)) drop
+        none
+      ]
+    ]
+  ] [none]
+]]
+
+def vg-t-ref fn [[inj:Any val:Any iref:Any store:Any] [Any] [
+  if (((inj get "mode") eq 4) not) [none] [
+    def inodes (inj get "nodes")
+    def ipath (inj get "path")
+    def refpath (vgi-lookup (inj get "parent") 1)
+    (inj set "keyi" (vgz (inj get "keys"))) drop
+    def specbox (vg-getprop store "$SPEC" vg-noarg)
+    def sf (vgi-fnarg specbox)
+    def spec (none sf/r apply)
+    def dpath (vg-slice ipath 1 vg-noarg vg-noarg)
+    def rinj (flex {})
+    (rinj set "dpath" dpath) drop
+    (rinj set "dparent" (vg-getpath spec dpath vg-noarg)) drop
+    def refv (vg-getpath spec refpath rinj)
+    def subrefbox (flex [false])
+    if (vg-isnode refv) [
+      def cb ([k2:Any v2:Any p2:Any pth2:Any] => [
+        if (v2 eq "`$REF`") [(subrefbox set 0 true) drop none] [none] drop
+        v2
+      ])
+      (vg-walk refv [cb/r] vg-noarg vg-noarg) drop
+      none
+    ] [none] drop
+    def hassubref (subrefbox get 0)
+    def tref (vg-clone refv)
+    def cpath (vg-slice ipath -3 vg-noarg vg-noarg)
+    def tpath (vg-slice ipath -1 vg-noarg vg-noarg)
+    def tcur (vg-getpath store cpath vg-noarg)
+    def tval (vg-getpath store tpath vg-noarg)
+    def rvalbox (flex [none])
+    if ((hassubref not) or ((tval is None) not)) [
+      def lk (flex [])
+      (append [(vg-getelem tpath -1 vg-noarg)] lk) drop
+      def tinj (vgi-inj-child inj 0 lk)
+      (tinj set "path" tpath) drop
+      (tinj set "nodes" (vg-slice inodes -1 vg-noarg vg-noarg)) drop
+      (tinj set "parent" (vg-getelem inodes -2 vg-noarg)) drop
+      (tinj set "val" tref) drop
+      def cp2 (flex [])
+      (append [cpath] cp2) drop
+      (tinj set "dpath" (vg-flatten cp2 1)) drop
+      (tinj set "dparent" tcur) drop
+      (vg-inject tref store tinj) drop
+      (rvalbox set 0 (tinj get "val")) drop
+      none
+    ] [none] drop
+    def grandparent (vgi-inj-setval inj (rvalbox get 0) 2)
+    def prior (inj get "prior")
+    if ((vg-islist grandparent) and ((prior is None) not)) [
+      (prior set "keyi" ((prior get "keyi") sub 1)) drop
+      none
+    ] [none] drop
+    val
+  ]
+]]
+
+# The $FORMAT formatter callbacks (walk appliers).
+def vg-fmt-identity fn [[k:Any v:Any p:Any pth:Any] [Any] [v]]
+def vg-fmt-upper fn [[k:Any v:Any p:Any pth:Any] [Any] [
+  if (vg-isnode v) [v] [StringUtil.upper (vg-js-string v)]
+]]
+def vg-fmt-lower fn [[k:Any v:Any p:Any pth:Any] [Any] [
+  if (vg-isnode v) [v] [StringUtil.lower (vg-js-string v)]
+]]
+def vg-fmt-string fn [[k:Any v:Any p:Any pth:Any] [Any] [
+  if (vg-isnode v) [v] [vg-js-string v]
+]]
+def vgi-tonum fn [[v:Any] [Any] [
+  if (v is Number) [v] [
+    if (v is Boolean) [if v [1] [0]] [
+      if (v is None) [0] [
+        if (v is String) [
+          def n (do [convert Float (StringUtil.trim v)] error [drop none])
+          if (n is None) [
+            def n2 (vgi-parse-int v)
+            if (n2 is None) [0] [n2]
+          ] [n]
+        ] [0]
+      ]
+    ]
+  ]
+]]
+def vg-fmt-number fn [[k:Any v:Any p:Any pth:Any] [Any] [
+  if (vg-isnode v) [v] [
+    def n (vgi-tonum v)
+    if (n is Float) [
+      def fl (MathUtil.floor n)
+      if (fl eq n) [fl] [n]
+    ] [n]
+  ]
+]]
+def vg-fmt-integer fn [[k:Any v:Any p:Any pth:Any] [Any] [
+  if (vg-isnode v) [v] [
+    def n (vgi-tonum v)
+    if (n is Float) [MathUtil.trunc n] [n]
+  ]
+]]
+def vg-fmt-concat fn [[k:Any v:Any p:Any pth:Any] [Any] [
+  if ((k is None) and (vg-islist v)) [
+    def acc (flex [])
+    def prs (vg-items v)
+    def pickfmt ([pr:Any] => [
+      def e (pr get 1)
+      if (vg-isnode e) [""] [vg-js-string e]
+    ])
+    def strs (vgl-items-apply 0 prs [pickfmt/r] acc)
+    def btr27 (vg-join strs "" vg-noarg)
+    btr27
+  ] [v]
+]]
+def vg-formatter-table {
+  identity: {"`$FN`": vg-fmt-identity/r}
+  upper: {"`$FN`": vg-fmt-upper/r}
+  lower: {"`$FN`": vg-fmt-lower/r}
+  string: {"`$FN`": vg-fmt-string/r}
+  number: {"`$FN`": vg-fmt-number/r}
+  integer: {"`$FN`": vg-fmt-integer/r}
+  concat: {"`$FN`": vg-fmt-concat/r}
+}
+
+def vg-t-format fn [[inj:Any val:Any iref:Any store:Any] [Any] [
+  (vg-slice (inj get "keys") 0 1 true) drop
+  if (((inj get "mode") eq 4) not) [none] [
+    def parent (inj get "parent")
+    def fname (vgi-lookup parent 1)
+    def child (vgi-lookup parent 2)
+    def ipath (inj get "path")
+    def inodes (inj get "nodes")
+    def tkey (vg-getelem ipath -2 vg-noarg)
+    def target0 (vg-getelem inodes -2 vg-noarg)
+    def target (if (target0 is None) [vg-getelem inodes -1 vg-noarg] [target0])
+    def cinj (vg-injectchild child store inj)
+    def resolved (cinj get "val")
+    def formatter (
+      if (vg-isfunc fname) [fname] [vg-getprop vg-formatter-table fname vg-noarg]
+    )
+    if (formatter is None) [
+      def msg (StringUtil.concat ["$FORMAT: unknown format: " (vg-js-string fname) "."])
+      (append [msg] (inj get "errs")) drop
+      none
+    ] [
+      def out (vg-walk resolved formatter vg-noarg vg-noarg)
+      (vg-setprop target tkey out) drop
+      out
+    ]
+  ]
+]]
+
+def vg-t-apply fn [[inj:Any val:Any iref:Any store:Any] [Any] [
+  if (vg-checkplacement 4 "APPLY" vg-t-list inj) [
+    def parent (inj get "parent")
+    def cargs (vg-slice parent 1 vg-noarg vg-noarg)
+    def want (flex [])
+    (append [vg-t-function] want) drop
+    (append [vg-t-any] want) drop
+    def found (vg-injectorargs want cargs)
+    def errv (found get 0)
+    if ((errv is None) not) [
+      def msg (StringUtil.concat ["$APPLY: " errv])
+      (append [msg] (inj get "errs")) drop
+      none
+    ] [
+      def af (found get 1)
+      def child (found get 2)
+      def ipath (inj get "path")
+      def inodes (inj get "nodes")
+      def tkey (vg-getelem ipath -2 vg-noarg)
+      def target0 (vg-getelem inodes -2 vg-noarg)
+      def target (if (target0 is None) [vg-getelem inodes -1 vg-noarg] [target0])
+      def cinj (vg-injectchild child store inj)
+      def resolved (cinj get "val")
+      def f (vgi-fnarg af)
+      def out (vgi-call2 resolved store (f/r))
+      (vg-setprop target tkey out) drop
+      out
+    ]
+  ] [none]
+]]
+
+def vg-t-bt fn [[inj:Any val:Any iref:Any store:Any] [Any] ["`"]]
+def vg-t-ds fn [[inj:Any val:Any iref:Any store:Any] [Any] ["$"]]
+def vg-t-when fn [[inj:Any val:Any iref:Any store:Any] [Any] [
+  # JS Date.toISOString() has exactly millisecond precision; trim the
+  # engine's nanosecond rendering to match (2026-01-02T03:04:05.678Z).
+  def s (convert String (TimeUtil.now))
+  if ((size s) gt 24) [StringUtil.concat [(s slice 0 23) "Z"]] [s]
+]]
+
+# The default inject handler: call store command functions; otherwise
+# write full-string injection results back into the parent.
+def vg-injecthandler fn [[inj:Any val:Any iref:Any store:Any] [Any] [
+  def iscmd (
+    if (vg-isfunc val) [
+      if (iref is None) [true] [
+        if (iref is String) [vgi-starts-with iref "$"] [false]
+      ]
+    ] [false]
+  )
+  if (iscmd eq true) [
+    def f (vgi-fnarg val)
+    def out (vgi-call4 inj val iref store (f/r))
+    out
+  ] [
+    if (((inj get "mode") eq 4) and ((inj get "full") eq true)) [
+      (vgi-inj-setval inj val 1) drop
+      val
+    ] [val]
+  ]
+]]
+def vg-injecthandler-box {"`$FN`": vg-injecthandler/r}
+
+# ----------------------------------------------------------------------------
+# transform — by-example transformation of data via a spec.
+# ----------------------------------------------------------------------------
+def vg-transform fn [[data:Any spec:Any injdef:Any] [Any] [
+  def idf (if (vg-is-noarg injdef) [none] [injdef])
+  def origspec spec
+  def spec2 (vg-clone spec)
+  def extra (vgi-idef idf "extra")
+  def ierrs (vgi-idef idf "errs")
+  def collect ((ierrs is None) not)
+  def errs (if (ierrs is None) [flex []] [ierrs])
+  def extratransforms (flex {})
+  def extradata (flex {})
+  if ((extra is None) not) [
+    def prs (vg-items extra)
+    def split1 ([pr:Any] => [
+      def k (pr get 0)
+      def v2 (pr get 1)
+      if (vgi-starts-with k "$") [
+        (vg-setprop extratransforms k v2) drop
+        none
+      ] [
+        (vg-setprop extradata k v2) drop
+        none
+      ] drop
+      none
+    ])
+    (vgl-items-apply 0 prs [split1/r] (flex [])) drop
+    none
+  ] [none] drop
+  def ml (flex [])
+  def ed (
+    if (vg-isempty extradata) [none] [vg-clone extradata]
+  )
+  (append [ed] ml) drop
+  (append [(vg-clone data)] ml) drop
+  def dataclone (vg-merge ml vg-noarg)
+  def specfn ([ig:Any] => [origspec])
+  def basestore (do {
+    "$TOP": (dataclone)
+    "$SPEC": ({} set "`$FN`" (specfn/r))
+    "$BT": (vg-t-bt-box)
+    "$DS": (vg-t-ds-box)
+    "$WHEN": (vg-t-when-box)
+    "$DELETE": (vg-t-delete-box)
+    "$COPY": (vg-t-copy-box)
+    "$KEY": (vg-t-key-box)
+    "$ANNO": (vg-t-anno-box)
+    "$MERGE": (vg-t-merge-box)
+    "$EACH": (vg-t-each-box)
+    "$PACK": (vg-t-pack-box)
+    "$REF": (vg-t-ref-box)
+    "$FORMAT": (vg-t-format-box)
+    "$APPLY": (vg-t-apply-box)
+  })
+  def sl (flex [])
+  (append [basestore] sl) drop
+  (append [extratransforms] sl) drop
+  def errsm (flex {})
+  (vg-setprop errsm "$ERRS" errs) drop
+  (append [errsm] sl) drop
+  def store (vg-merge sl 1)
+  def out (vg-inject spec2 store idf)
+  if (((vgz errs) gt 0) and (collect not)) [
+    def msg (vg-join errs " | " vg-noarg)
+    raise {code: struct_error/q message: (msg)}
+  ] [none] drop
+  out
+]]
+def vg-t-delete-box {"`$FN`": vg-t-delete/r}
+def vg-t-copy-box {"`$FN`": vg-t-copy/r}
+def vg-t-key-box {"`$FN`": vg-t-key/r}
+def vg-t-anno-box {"`$FN`": vg-t-anno/r}
+def vg-t-merge-box {"`$FN`": vg-t-merge/r}
+def vg-t-each-box {"`$FN`": vg-t-each/r}
+def vg-t-pack-box {"`$FN`": vg-t-pack/r}
+def vg-t-ref-box {"`$FN`": vg-t-ref/r}
+def vg-t-format-box {"`$FN`": vg-t-format/r}
+def vg-t-apply-box {"`$FN`": vg-t-apply/r}
+def vg-t-bt-box {"`$FN`": vg-t-bt/r}
+def vg-t-ds-box {"`$FN`": vg-t-ds/r}
+def vg-t-when-box {"`$FN`": vg-t-when/r}
+
+# ----------------------------------------------------------------------------
+# validate — shape validation via the transform machinery.
+# Command handlers mirror the canonical validate_* injectors.
+# ----------------------------------------------------------------------------
+
+# TYPENAME.indexOf(tname) → 1 << (31 - idx): identical to the T_* constants.
+def vg-vtype-map {any: 2147483647 nil: 1073741824 boolean: 536870912 decimal: 268435456 integer: 134217728 number: 67108864 string: 33554432 function: 16777216 symbol: 8388608 null: 4194304 list: 16384 map: 8192 instance: 4096 scalar: 128 node: 64}
+
+# Build a type validation error message (canonical _invalidTypeMsg).
+def vgi-invalid-type-msg fn [[path:Any needtype:String vt:Integer v:Any] [String] [
+  def vs (if (v is None) ["no value"] [vg-stringify v vg-noarg vg-noarg])
+  def fieldpart (
+    if ((vgz path) gt 1) [StringUtil.concat ["field " (vg-pathify path 1 vg-noarg) " to be "]] [""]
+  )
+  def typepart (
+    if ((v is None) not) [StringUtil.concat [(vg-typename vt) ": "]] [""]
+  )
+  def msg (StringUtil.concat ["Expected " fieldpart needtype ", but found " typepart vs "."])
+  msg
+]]
+
+# Lowercase `$NAME` transform names inside a description string.
+def vg-lower-tname-cb fn [[ml:Any] [Any] [
+  def low (StringUtil.lower (ml get 1))
+  low
+]]
+def vg-lower-tname-box {"`$FN`": vg-lower-tname-cb/r}
+def vgi-valdesc fn [[tvals:Any] [String] [
+  def prs (vg-items tvals)
+  def acc (flex [])
+  def pickv ([pr:Any] => [vg-stringify (pr get 1) vg-noarg vg-noarg])
+  (vgl-items-apply 0 prs [pickv/r] acc) drop
+  def joined (vgi-join-list acc ", ")
+  def low (vg-re-replace "`\\$([A-Z]+)`" joined vg-lower-tname-box)
+  low
+]]
+
+# Strict-ish scalar equality: deep-equal plus same type bits (mirrors ===).
+def vgi-exact-eq fn [[a:Any b:Any] [Boolean] [
+  if (a deq b) [(vg-typify a) eq (vg-typify b)] [false]
+]]
+
+def vg-v-string fn [[inj:Any val:Any iref:Any store:Any] [Any] [
+  def fout (vgi-lookup (inj get "dparent") (inj get "key"))
+  def t (vg-typify fout)
+  if ((BinUtil.band vg-t-string t) eq 0) [
+    (append [(vgi-invalid-type-msg (inj get "path") "string" t fout)] (inj get "errs")) drop
+    none
+  ] [
+    if (fout eq "") [
+      (append [(StringUtil.concat ["Empty string at " (vg-pathify (inj get "path") 1 vg-noarg)])] (inj get "errs")) drop
+      none
+    ] [fout]
+  ]
+]]
+
+# Literal slot presence (a stored null still counts as present) — lets
+# the single-null port recover canonical undefined-vs-null for $NIL/$NULL.
+def vgi-haslit fn [[v:Any k:Any] [Boolean] [
+  if (vg-ismap v) [v has (vgi-map-key k)] [
+    if (vg-islist v) [
+      def ki (vgi-to-int k)
+      if (ki is None) [false] [(ki gte 0) and (ki lt (size v))]
+    ] [false]
+  ]
+]]
+
+def vg-v-type fn [[inj:Any val:Any iref:Any store:Any] [Any] [
+  def tname (StringUtil.lower (iref slice 1 (size iref)))
+  def typev (vg-getprop vg-vtype-map tname 0)
+  def fout (vgi-lookup (inj get "dparent") (inj get "key"))
+  # An ABSENT slot is canonical undefined (nil); a PRESENT null slot is
+  # canonical null. Literal presence recovers the distinction none folds.
+  def t (
+    if (fout is None) [
+      if (vgi-haslit (inj get "dparent") (inj get "key")) [vg-t-null] [vg-t-noval]
+    ] [vg-typify fout]
+  )
+  if ((BinUtil.band t typev) eq 0) [
+    (append [(vgi-invalid-type-msg (inj get "path") tname t fout)] (inj get "errs")) drop
+    none
+  ] [fout]
+]]
+
+def vg-v-any fn [[inj:Any val:Any iref:Any store:Any] [Any] [
+  def fout (vgi-lookup (inj get "dparent") (inj get "key"))
+  fout
+]]
+
+def vgl-vchild-keys fn [[i:Integer ckeys:Any parent:Any childtm:Any vkeys:Any] [Any] [
+  if (i gte (size ckeys)) [none] [
+    def ckey (ckeys get i)
+    (vg-setprop parent ckey (vg-clone childtm)) drop
+    (append [ckey] vkeys) drop
+    def r (vgl-vchild-keys (i add 1) ckeys parent childtm vkeys)
+    r
+  ]
+]]
+def vgl-vchild-elems fn [[i:Integer n:Integer parent:Any childtm:Any] [Any] [
+  if (i gte n) [none] [
+    (vg-setprop parent i (vg-clone childtm)) drop
+    def r (vgl-vchild-elems (i add 1) n parent childtm)
+    r
+  ]
+]]
+
+def vg-v-child fn [[inj:Any val:Any iref:Any store:Any] [Any] [
+  def mode (inj get "mode")
+  if (mode eq 1) [
+    def parent (inj get "parent")
+    def key (inj get "key")
+    def vkeys (inj get "keys")
+    def path (inj get "path")
+    def childtm (vg-getprop parent key vg-noarg)
+    def pkey (vg-getelem path -2 vg-noarg)
+    def tval0 (vg-getprop (inj get "dparent") pkey vg-noarg)
+    if (((tval0 is None) not) and ((vg-ismap tval0) not)) [
+      (append [(vgi-invalid-type-msg (vg-slice path -1 vg-noarg vg-noarg) "object" (vg-typify tval0) tval0)] (inj get "errs")) drop
+      none
+    ] [
+      def tval (if (tval0 is None) [flex {}] [tval0])
+      def ckeys (vg-keysof tval)
+      (vgl-vchild-keys 0 ckeys parent childtm vkeys) drop
+      (vgi-inj-setval inj none 1) drop
+      none
+    ]
+  ] [
+    if (mode eq 4) [
+      def parent (inj get "parent")
+      if ((vg-islist parent) not) [
+        (append ["Invalid $CHILD as value"] (inj get "errs")) drop
+        none
+      ] [
+        def childtm (vgi-lookup parent 1)
+        def dparent (inj get "dparent")
+        if (dparent is None) [
+          (vg-slice parent 0 0 true) drop
+          none
+        ] [
+          if ((vg-islist dparent) not) [
+            def msg (vgi-invalid-type-msg (vg-slice (inj get "path") -1 vg-noarg vg-noarg) "list" (vg-typify dparent) dparent)
+            (append [msg] (inj get "errs")) drop
+            (inj set "keyi" (vgz parent)) drop
+            dparent
+          ] [
+            (vgl-vchild-elems 0 (vgz dparent) parent childtm) drop
+            (vg-slice parent 0 (vgz dparent) true) drop
+            (inj set "keyi" 0) drop
+            def fout (vg-getprop dparent 0 vg-noarg)
+            fout
+          ]
+        ]
+      ]
+    ] [none]
+  ]
+]]
+
+# Try each $ONE alternative; true as soon as one validates clean.
+def vgl-vone-alts fn [[i:Integer tvals:Any inj:Any store:Any] [Boolean] [
+  if (i gte (size tvals)) [false] [
+    def tval (tvals get i)
+    def terrs (flex [])
+    def ml (flex [])
+    (append [(flex {})] ml) drop
+    (append [store] ml) drop
+    def vstore (vg-merge ml 1)
+    (vg-setprop vstore "$TOP" (inj get "dparent")) drop
+    def idf (flex {})
+    (idf set "extra" vstore) drop
+    (idf set "errs" terrs) drop
+    (idf set "meta" (inj get "meta")) drop
+    def vcurrent (vg-validate (inj get "dparent") tval idf)
+    (vgi-inj-setval inj vcurrent -2) drop
+    if ((vgz terrs) eq 0) [true] [
+      def r (vgl-vone-alts (i add 1) tvals inj store)
+      r
+    ]
+  ]
+]]
+
+def vg-v-one fn [[inj:Any val:Any iref:Any store:Any] [Any] [
+  if ((inj get "mode") eq 4) [
+    def parent (inj get "parent")
+    def keyi (inj get "keyi")
+    if (((vg-islist parent) not) or ((keyi eq 0) not)) [
+      (append [(StringUtil.concat ["The $ONE validator at field " (vg-pathify (inj get "path") 1 1) " must be the first element of an array."])] (inj get "errs")) drop
+      none
+    ] [
+      (inj set "keyi" (vgz (inj get "keys"))) drop
+      (vgi-inj-setval inj (inj get "dparent") 2) drop
+      (inj set "path" (vg-slice (inj get "path") -1 vg-noarg vg-noarg)) drop
+      (inj set "key" (vg-getelem (inj get "path") -1 vg-noarg)) drop
+      def tvals (vg-slice parent 1 vg-noarg vg-noarg)
+      if ((vgz tvals) eq 0) [
+        (append [(StringUtil.concat ["The $ONE validator at field " (vg-pathify (inj get "path") 1 1) " must have at least one argument."])] (inj get "errs")) drop
+        none
+      ] [
+        def matched (vgl-vone-alts 0 tvals inj store)
+        if (matched eq true) [none] [
+          def valdesc (vgi-valdesc tvals)
+          def pref (if ((vgz tvals) gt 1) ["one of "] [""])
+          def need (StringUtil.concat [pref valdesc])
+          (append [(vgi-invalid-type-msg (inj get "path") need (vg-typify (inj get "dparent")) (inj get "dparent"))] (inj get "errs")) drop
+          none
+        ]
+      ]
+    ]
+  ] [none]
+]]
+
+def vgl-vexact-alts fn [[i:Integer tvals:Any dp:Any] [Boolean] [
+  if (i gte (size tvals)) [false] [
+    def tval (tvals get i)
+    def em (
+      if (vgi-exact-eq tval dp) [true] [
+        if (vg-isnode tval) [
+          (vg-stringify tval vg-noarg vg-noarg) eq (vg-stringify dp vg-noarg vg-noarg)
+        ] [false]
+      ]
+    )
+    if (em eq true) [true] [
+      def r (vgl-vexact-alts (i add 1) tvals dp)
+      r
+    ]
+  ]
+]]
+
+def vg-v-exact fn [[inj:Any val:Any iref:Any store:Any] [Any] [
+  if ((inj get "mode") eq 4) [
+    def parent (inj get "parent")
+    def keyi (inj get "keyi")
+    if (((vg-islist parent) not) or ((keyi eq 0) not)) [
+      (append [(StringUtil.concat ["The $EXACT validator at field " (vg-pathify (inj get "path") 1 1) " must be the first element of an array."])] (inj get "errs")) drop
+      none
+    ] [
+      (inj set "keyi" (vgz (inj get "keys"))) drop
+      (vgi-inj-setval inj (inj get "dparent") 2) drop
+      (inj set "path" (vg-slice (inj get "path") 0 -1 vg-noarg)) drop
+      (inj set "key" (vg-getelem (inj get "path") -1 vg-noarg)) drop
+      def tvals (vg-slice parent 1 vg-noarg vg-noarg)
+      if ((vgz tvals) eq 0) [
+        (append [(StringUtil.concat ["The $EXACT validator at field " (vg-pathify (inj get "path") 1 1) " must have at least one argument."])] (inj get "errs")) drop
+        none
+      ] [
+        def matched (vgl-vexact-alts 0 tvals (inj get "dparent"))
+        if (matched eq true) [none] [
+          def valdesc (vgi-valdesc tvals)
+          def p1 (if ((vgz (inj get "path")) gt 1) [""] ["value "])
+          def p2 (if ((vgz tvals) eq 1) [""] ["one of "])
+          def need (StringUtil.concat [p1 "exactly equal to " p2 valdesc])
+          (append [(vgi-invalid-type-msg (inj get "path") need (vg-typify (inj get "dparent")) (inj get "dparent"))] (inj get "errs")) drop
+          none
+        ]
+      ]
+    ]
+  ] [
+    (vg-delprop (inj get "parent") (inj get "key")) drop
+    none
+  ]
+]]
+
+# Literal key presence (stored null still counts as declared).
+def vgl-badkeys fn [[i:Integer ckeys:Any pval:Any acc:Any] [Any] [
+  if (i gte (size ckeys)) [acc] [
+    def ckey (ckeys get i)
+    if (pval has (ckey)) [none] [
+      (append [ckey] acc) drop
+      none
+    ] drop
+    def r (vgl-badkeys (i add 1) ckeys pval acc)
+    r
+  ]
+]]
+
+# The generic validation modify hook (canonical _validation).
+def vg-validation fn [[pval:Any key:Any parent:Any inj:Any store:Any] [Any] [
+  if (inj is None) [none] [
+    if (vg-is-skip pval) [none] [
+      def exact (vg-getprop (inj get "meta") "`$EXACT`" false)
+      def cval (vg-getprop (inj get "dparent") key vg-noarg)
+      if ((exact eq false) and (cval is None)) [none] [
+        def ptype (vg-typify pval)
+        if (((BinUtil.band vg-t-string ptype) gt 0) and (StringUtil.contains "$" (vg-js-string pval))) [none] [
+          def ctype (vg-typify cval)
+          if (((ptype eq ctype) not) and ((pval is None) not)) [
+            (append [(vgi-invalid-type-msg (inj get "path") (vg-typename ptype) ctype cval)] (inj get "errs")) drop
+            none
+          ] [
+            if (vg-ismap cval) [
+              if ((vg-ismap pval) not) [
+                (append [(vgi-invalid-type-msg (inj get "path") (vg-typename ptype) ctype cval)] (inj get "errs")) drop
+                none
+              ] [
+                def ckeys (vg-keysof cval)
+                def pkeys (vg-keysof pval)
+                if (((vgz pkeys) gt 0) and (((vg-getprop pval "`$OPEN`" vg-noarg) eq true) not)) [
+                  def badkeys (vgl-badkeys 0 ckeys pval (flex []))
+                  if ((vgz badkeys) gt 0) [
+                    (append [(StringUtil.concat ["Unexpected keys at field " (vg-pathify (inj get "path") 1 vg-noarg) ": " (vg-join badkeys ", " vg-noarg)])] (inj get "errs")) drop
+                    none
+                  ] [none]
+                ] [
+                  def ml (flex [])
+                  (append [pval] ml) drop
+                  (append [cval] ml) drop
+                  (vg-merge ml vg-noarg) drop
+                  if (vg-isnode pval) [(vg-delprop pval "`$OPEN`") drop none] [none] drop
+                  none
+                ]
+              ]
+            ] [
+              if (vg-islist cval) [
+                if ((vg-islist pval) not) [
+                  (append [(vgi-invalid-type-msg (inj get "path") (vg-typename ptype) ctype cval)] (inj get "errs")) drop
+                  none
+                ] [none]
+              ] [
+                if (exact eq true) [
+                  if (vgi-exact-eq cval pval) [none] [
+                    def pathmsg (
+                      if ((vgz (inj get "path")) gt 1) [StringUtil.concat ["at field " (vg-pathify (inj get "path") 1 vg-noarg) ": "]] [""]
+                    )
+                    (append [(StringUtil.concat ["Value " pathmsg (vg-js-string cval) " should equal " (vg-js-string pval) "."])] (inj get "errs")) drop
+                    none
+                  ]
+                ] [
+                  (vg-setprop parent key cval) drop
+                  none
+                ]
+              ]
+            ]
+          ]
+        ]
+      ]
+    ]
+  ]
+]]
+def vg-validation-box {"`$FN`": vg-validation/r}
+
+# The validate inject handler: meta paths get special treatment, everything
+# else defers to the standard inject handler.
+def vg-validatehandler fn [[inj:Any val:Any iref:Any store:Any] [Any] [
+  def m (
+    if (iref is String) [(iref mini re "^([^$]+)\\$([=~])(.+)$" {})] [do {ok: false}]
+  )
+  if ((m get "ok") eq true) [
+    def g2 (((m get "fst") get "g") get 1)
+    if (g2 eq "=") [
+      def pairlist (flex [])
+      (append ["`$EXACT`"] pairlist) drop
+      (append [val] pairlist) drop
+      (vgi-inj-setval inj pairlist 1) drop
+      none
+    ] [
+      (vgi-inj-setval inj val 1) drop
+      none
+    ] drop
+    (inj set "keyi" -1) drop
+    vg-skip-marker
+  ] [
+    def fout (vg-injecthandler inj val iref store)
+    fout
+  ]
+]]
+def vg-validatehandler-box {"`$FN`": vg-validatehandler/r}
+
+def vg-v-string-box {"`$FN`": vg-v-string/r}
+def vg-v-type-box {"`$FN`": vg-v-type/r}
+def vg-v-any-box {"`$FN`": vg-v-any/r}
+def vg-v-child-box {"`$FN`": vg-v-child/r}
+def vg-v-one-box {"`$FN`": vg-v-one/r}
+def vg-v-exact-box {"`$FN`": vg-v-exact/r}
+
+def vg-validate fn [[data:Any spec:Any injdef:Any] [Any] [
+  def idf (if (vg-is-noarg injdef) [none] [injdef])
+  def vextra (vgi-idef idf "extra")
+  def ierrs (vgi-idef idf "errs")
+  def collect ((ierrs is None) not)
+  def errs (if (ierrs is None) [flex []] [ierrs])
+  def cmds (do {
+    "$DELETE": (none)
+    "$COPY": (none)
+    "$KEY": (none)
+    "$META": (none)
+    "$MERGE": (none)
+    "$EACH": (none)
+    "$PACK": (none)
+    "$STRING": (vg-v-string-box)
+    "$NUMBER": (vg-v-type-box)
+    "$INTEGER": (vg-v-type-box)
+    "$DECIMAL": (vg-v-type-box)
+    "$BOOLEAN": (vg-v-type-box)
+    "$NULL": (vg-v-type-box)
+    "$NIL": (vg-v-type-box)
+    "$MAP": (vg-v-type-box)
+    "$LIST": (vg-v-type-box)
+    "$FUNCTION": (vg-v-type-box)
+    "$INSTANCE": (vg-v-type-box)
+    "$ANY": (vg-v-any-box)
+    "$CHILD": (vg-v-child-box)
+    "$ONE": (vg-v-one-box)
+    "$EXACT": (vg-v-exact-box)
+  })
+  def sl (flex [])
+  (append [cmds] sl) drop
+  (append [(if (vextra is None) [flex {}] [vextra])] sl) drop
+  def errsm (flex {})
+  (vg-setprop errsm "$ERRS" errs) drop
+  (append [errsm] sl) drop
+  def store (vg-merge sl 1)
+  def meta0 (vgi-idef idf "meta")
+  def meta (if (meta0 is None) [flex {}] [meta0])
+  (vg-setprop meta "`$EXACT`" (vg-getprop meta "`$EXACT`" false)) drop
+  def tidf (flex {})
+  (tidf set "meta" meta) drop
+  (tidf set "extra" store) drop
+  (tidf set "modify" vg-validation-box) drop
+  (tidf set "handler" vg-validatehandler-box) drop
+  (tidf set "errs" errs) drop
+  def vout (vg-transform data spec tidf)
+  if (((vgz errs) gt 0) and (collect not)) [
+    def msg (vg-join errs " | " vg-noarg)
+    raise {code: struct_error/q message: (msg)}
+  ] [none] drop
+  vout
+]]
+
+# ----------------------------------------------------------------------------
+# select — MongoDB-style child selection built on validate.
+# ----------------------------------------------------------------------------
+def vgl-sel-terms fn [[i:Integer terms:Any inj:Any store:Any point:Any ppath:Any anyfail:Any] [Any] [
+  if (i gte (size terms)) [none] [
+    def term (terms get i)
+    def terrs (flex [])
+    def ml (flex [])
+    (append [(flex {})] ml) drop
+    (append [store] ml) drop
+    def vstore (vg-merge ml 1)
+    (vg-setprop vstore "$TOP" point) drop
+    def idf (flex {})
+    (idf set "extra" vstore) drop
+    (idf set "errs" terrs) drop
+    (idf set "meta" (inj get "meta")) drop
+    (vg-validate point term idf) drop
+    if ((vgz terrs) gt 0) [(append [true] anyfail) drop none] [(append [false] anyfail) drop none] drop
+    def r (vgl-sel-terms (i add 1) terms inj store point ppath anyfail)
+    r
+  ]
+]]
+
+def vg-s-and fn [[inj:Any val:Any iref:Any store:Any] [Any] [
+  if ((inj get "mode") eq 1) [
+    def terms (vgi-lookup (inj get "parent") (inj get "key"))
+    def ppath (vg-slice (inj get "path") -1 vg-noarg vg-noarg)
+    def point (vg-getpath store ppath vg-noarg)
+    def fails (flex [])
+    (vgl-sel-terms 0 terms inj store point ppath fails) drop
+    def failed (vg-filter fails [vgi-istrue/r])
+    if ((vgz failed) gt 0) [
+      (append [(StringUtil.concat ["AND:" (vg-pathify ppath vg-noarg vg-noarg) ": " (vg-stringify point vg-noarg vg-noarg) " fail:" (vg-stringify terms vg-noarg vg-noarg)])] (inj get "errs")) drop
+      none
+    ] [none] drop
+    def gkey (vg-getelem (inj get "path") -2 vg-noarg)
+    def gp (vg-getelem (inj get "nodes") -2 vg-noarg)
+    (vg-setprop gp gkey point) drop
+    none
+  ] [none]
+]]
+
+def vg-s-or fn [[inj:Any val:Any iref:Any store:Any] [Any] [
+  if ((inj get "mode") eq 1) [
+    def terms (vgi-lookup (inj get "parent") (inj get "key"))
+    def ppath (vg-slice (inj get "path") -1 vg-noarg vg-noarg)
+    def point (vg-getpath store ppath vg-noarg)
+    def fails (flex [])
+    (vgl-sel-terms 0 terms inj store point ppath fails) drop
+    def passed (vg-filter fails [vgi-isfalse/r])
+    if ((vgz passed) gt 0) [
+      def gkey (vg-getelem (inj get "path") -2 vg-noarg)
+      def gp (vg-getelem (inj get "nodes") -2 vg-noarg)
+      (vg-setprop gp gkey point) drop
+      none
+    ] [
+      (append [(StringUtil.concat ["OR:" (vg-pathify ppath vg-noarg vg-noarg) ": " (vg-stringify point vg-noarg vg-noarg) " fail:" (vg-stringify terms vg-noarg vg-noarg)])] (inj get "errs")) drop
+      none
+    ]
+  ] [none]
+]]
+
+def vg-s-not fn [[inj:Any val:Any iref:Any store:Any] [Any] [
+  if ((inj get "mode") eq 1) [
+    def term (vgi-lookup (inj get "parent") (inj get "key"))
+    def ppath (vg-slice (inj get "path") -1 vg-noarg vg-noarg)
+    def point (vg-getpath store ppath vg-noarg)
+    def terms1 (flex [])
+    (append [term] terms1) drop
+    def fails (flex [])
+    (vgl-sel-terms 0 terms1 inj store point ppath fails) drop
+    if ((fails get 0) eq false) [
+      (append [(StringUtil.concat ["NOT:" (vg-pathify ppath vg-noarg vg-noarg) ": " (vg-stringify point vg-noarg vg-noarg) " fail:" (vg-stringify term vg-noarg vg-noarg)])] (inj get "errs")) drop
+      none
+    ] [none] drop
+    def gkey (vg-getelem (inj get "path") -2 vg-noarg)
+    def gp (vg-getelem (inj get "nodes") -2 vg-noarg)
+    (vg-setprop gp gkey point) drop
+    none
+  ] [none]
+]]
+
+def vg-s-cmp fn [[inj:Any val:Any iref:Any store:Any] [Any] [
+  if ((inj get "mode") eq 1) [
+    def term (vgi-lookup (inj get "parent") (inj get "key"))
+    def gkey (vg-getelem (inj get "path") -2 vg-noarg)
+    def ppath (vg-slice (inj get "path") -1 vg-noarg vg-noarg)
+    def point (vg-getpath store ppath vg-noarg)
+    def pass (
+      if (iref eq "$GT") [do [point gt term] error [var [[e] false]]] [
+        if (iref eq "$LT") [do [point lt term] error [var [[e] false]]] [
+          if (iref eq "$GTE") [do [point gte term] error [var [[e] false]]] [
+            if (iref eq "$LTE") [do [point lte term] error [var [[e] false]]] [
+              if (iref eq "$LIKE") [vg-re-test term (vg-stringify point vg-noarg vg-noarg)] [false]
+            ]
+          ]
+        ]
+      ]
+    )
+    if (pass eq true) [
+      def gp (vg-getelem (inj get "nodes") -2 vg-noarg)
+      (vg-setprop gp gkey point) drop
+      none
+    ] [
+      (append [(StringUtil.concat ["CMP: " (vg-pathify ppath vg-noarg vg-noarg) ": " (vg-stringify point vg-noarg vg-noarg) " fail:" iref " " (vg-stringify term vg-noarg vg-noarg)])] (inj get "errs")) drop
+      none
+    ]
+  ] [none]
+]]
+
+def vgi-istrue fn [[pr:Any] [Boolean] [(pr get 1) eq true]]
+def vgi-isfalse fn [[pr:Any] [Boolean] [(pr get 1) eq false]]
+
+def vg-s-and-box {"`$FN`": vg-s-and/r}
+def vg-s-or-box {"`$FN`": vg-s-or/r}
+def vg-s-not-box {"`$FN`": vg-s-not/r}
+def vg-s-cmp-box {"`$FN`": vg-s-cmp/r}
+
+def vgl-select-kids fn [[i:Integer prs:Any intkeys:Boolean acc:Any] [Any] [
+  if (i gte (size prs)) [acc] [
+    def pr (prs get i)
+    def v (pr get 1)
+    def k (if (intkeys eq true) [vgi-to-int (pr get 0)] [pr get 0])
+    (vg-setprop v "$KEY" k) drop
+    (append [v] acc) drop
+    def r (vgl-select-kids (i add 1) prs intkeys acc)
+    r
+  ]
+]]
+
+def vg-open-cb fn [[k:Any v:Any p:Any pth:Any] [Any] [
+  if (vg-ismap v) [
+    (vg-setprop v "`$OPEN`" (vg-getprop v "`$OPEN`" true)) drop
+    none
+  ] [none] drop
+  v
+]]
+
+def vgl-select-match fn [[i:Integer kids:Any q:Any results:Any] [Any] [
+  if (i gte (size kids)) [results] [
+    def child (kids get i)
+    def errs (flex [])
+    def meta (flex {})
+    (vg-setprop meta "`$EXACT`" true) drop
+    def extra (do {
+      "$AND": (vg-s-and-box)
+      "$OR": (vg-s-or-box)
+      "$NOT": (vg-s-not-box)
+      "$GT": (vg-s-cmp-box)
+      "$LT": (vg-s-cmp-box)
+      "$GTE": (vg-s-cmp-box)
+      "$LTE": (vg-s-cmp-box)
+      "$LIKE": (vg-s-cmp-box)
+    })
+    def idf (flex {})
+    (idf set "errs" errs) drop
+    (idf set "meta" meta) drop
+    (idf set "extra" extra) drop
+    (vg-validate child (vg-clone q) idf) drop
+    if ((vgz errs) eq 0) [(append [child] results) drop none] [none] drop
+    def r (vgl-select-match (i add 1) kids q results)
+    r
+  ]
+]]
+
+def vg-select fn [[children:Any query:Any] [Any] [
+  if ((vg-isnode children) not) [flex []] [
+    def prs (vg-items children)
+    def kids (vgl-select-kids 0 prs (vg-islist children) (flex []))
+    def q (vg-clone query)
+    (vg-walk q vg-noarg [vg-open-cb/r] vg-noarg) drop
+    def results (vgl-select-match 0 kids q (flex []))
+    results
+  ]
+]]
+
+# ----------------------------------------------------------------------------
+# jm / jt — build a JSON map / list from a flat argument list.
+# ----------------------------------------------------------------------------
+def vgl-jm fn [[i:Integer kv:Any o:Any] [Any] [
+  if (i gte (size kv)) [o] [
+    def k0 (kv get i)
+    def k (if (k0 is String) [k0] [vg-stringify k0 vg-noarg vg-noarg])
+    def v (if ((i add 1) lt (size kv)) [kv get (i add 1)] [none])
+    (o set (k) v) drop
+    def r (vgl-jm (i add 2) kv o)
+    r
+  ]
+]]
+def vg-jm fn [[kv:Any] [Any] [
+  def o (flex {})
+  def r (vgl-jm 0 kv o)
+  r
+]]
+def vgl-jt fn [[i:Integer v:Any a:Any] [Any] [
+  if (i gte (size v)) [a] [
+    (append [(v get i)] a) drop
+    def r (vgl-jt (i add 1) v a)
+    r
+  ]
+]]
+def vg-jt fn [[v:Any] [Any] [
+  def a (flex [])
+  def r (vgl-jt 0 v a)
+  r
+]]
+
+# ----------------------------------------------------------------------------
+# Export (canonical names are the map keys; grows as the port fills out).
+# ----------------------------------------------------------------------------
+export "Struct" {
+  isnode: vg-isnode/r
+  ismap: vg-ismap/r
+  islist: vg-islist/r
+  iskey: vg-iskey/r
+  isempty: vg-isempty/r
+  isfunc: vg-isfunc/r
+  size: vg-size/r
+  typify: vg-typify/r
+  typename: vg-typename/r
+  getdef: vg-getdef/r
+  strkey: vg-strkey/r
+  keysof: vg-keysof/r
+  getprop: vg-getprop/r
+  haskey: vg-haskey/r
+  getelem: vg-getelem/r
+  items: vg-items/r
+  filter: vg-filter/r
+  flatten: vg-flatten/r
+  clone: vg-clone/r
+  setprop: vg-setprop/r
+  delprop: vg-delprop/r
+  stringify: vg-stringify/r
+  jsonify: vg-jsonify/r
+  pathify: vg-pathify/r
+  slice: vg-slice/r
+  pad: vg-pad/r
+  join: vg-join/r
+  escre: vg-escre/r
+  escurl: vg-escurl/r
+  re_compile: vg-re-compile/r
+  re_find: vg-re-find/r
+  re_find_all: vg-re-find-all/r
+  re_replace: vg-re-replace/r
+  re_test: vg-re-test/r
+  re_escape: vg-re-escape/r
+  walk: vg-walk/r
+  merge: vg-merge/r
+  getpath: vg-getpath/r
+  setpath: vg-setpath/r
+  inject: vg-inject/r
+  transform: vg-transform/r
+  validate: vg-validate/r
+  select: vg-select/r
+  jm: vg-jm/r
+  jt: vg-jt/r
+  checkPlacement: vg-checkplacement/r
+  injectorArgs: vg-injectorargs/r
+  injectChild: vg-injectchild/r
+  NOARG: vg-noarg
+  SKIP: vg-skip-marker
+  DELETE: vg-delete-marker
+  T_any: vg-t-any
+  T_noval: vg-t-noval
+  T_boolean: vg-t-boolean
+  T_decimal: vg-t-decimal
+  T_integer: vg-t-integer
+  T_number: vg-t-number
+  T_string: vg-t-string
+  T_function: vg-t-function
+  T_symbol: vg-t-symbol
+  T_null: vg-t-null
+  T_list: vg-t-list
+  T_map: vg-t-map
+  T_instance: vg-t-instance
+  T_scalar: vg-t-scalar
+  T_node: vg-t-node
+  M_KEYPRE: vg-m-keypre
+  M_KEYPOST: vg-m-keypost
+  M_VAL: vg-m-val
+  MODENAME: vg-modename-table
+}

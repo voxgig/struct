@@ -74,3 +74,32 @@ language-specific unit tests instead.
 If you're adding a new injector that takes a user callback, mirror the
 existing patterns and add a unit test in the port-specific test suite
 (not in the JSON corpus).
+
+## AQL port quirks
+
+The AQL port is written in the AQL language itself (not Go) and does not
+wrap the engine's native `aql:struct-util` module. Its quirks are
+engine-driven; the full list lives in `aql/AGENTS.md` ("Engine caveats").
+The load-bearing ones:
+
+- **Function carriers.** A bare Function-valued name auto-dispatches when
+  stepped, so function values travel in carriers: an fn box
+  `` {"`$FN`": f/r} `` where the canonical code `isfunc`-tests the value
+  (store commands, `handler`, `modify`, formatters), or a one-element
+  list `[f/r]` for pure callback slots. `isfunc` recognises the box.
+- **bind-then-return everywhere.** A fn body that ends in a bare call
+  loses a `none` result at the return boundary in deep `apply` chains
+  (and a paired `drop` then corrupts an ancestor frame), so every body
+  ends `def r (...)` `r`.
+- **No `and`/`or` short-circuit** and **no variadics** (`jm`/`jt` take
+  one list argument; canonical optional parameters are explicit `NOARG`
+  sentinel arguments).
+- **Interpreter-pinned tests, checker-clean source.** The corpus runs
+  `aql run -no-check -no-compile` for deterministic runs, but the module
+  now also passes `aql check` with 0 errors and the full corpus passes
+  under the default compiled mode. `make lint` runs the checker plus a
+  module-load smoke. Reaching this took engine fixes in aql (store-shaped
+  flex-carrier checker nil-derefs, guard-fact/narrowing precision,
+  forward-reference placeholders, multi-result `pop` poly, dynamic-pattern
+  `mini re` compilation); an older `aql` binary crashes or reports phantom
+  errors on it.
