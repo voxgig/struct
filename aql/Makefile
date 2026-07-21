@@ -18,11 +18,14 @@ build:
 test:
 	$(AQL) run -no-check -no-compile test/runner.aql
 
-# Lint = a load smoke: parse both source files and install the module
-# (every def executes, the export map resolves). A clean load is the
-# strongest static gate the aql toolchain offers this module today
-# (see AGENTS.md "Engine caveats" for why `aql check` is not used).
+# Lint = the aql static checker over the library (0 errors required;
+# advisory warnings pass) plus a load smoke that parses both source files
+# and installs the module (every def executes, the export map resolves).
+# The module checks clean under a recent aql — see AGENTS.md "Engine
+# caveats" for the version note (an older binary crashes / reports phantom
+# errors on it).
 lint:
+	$(AQL) check src/struct.aql
 	$(AQL) run -no-check -no-compile test/lint.aql
 
 clean:

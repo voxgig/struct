@@ -16,7 +16,7 @@ a from-scratch implementation of the canonical algorithms in AQL itself.
 ```
 cd aql
 make test    # aql run -no-check -no-compile test/runner.aql
-make lint    # aql run -no-check -no-compile test/lint.aql  (load smoke)
+make lint    # aql check src/struct.aql + a module load smoke
 ```
 
 Requires only the `aql` CLI (`make test AQL=/path/to/aql` to point at a
@@ -93,10 +93,16 @@ Idioms in this codebase that look redundant are load-bearing:
    `base` cannot be parameter/local names; `keys`, `pick`, `filter`,
    `join`, `slice`, `size`, `walk`, `select`, `flatten`, `pad` are core
    words that module fns must not redefine.
-6. **Interpreter only** — `make test` runs `-no-check -no-compile`. The
-   bytecode compiler miscompiles deep encoder recursion in this module,
-   and `aql check` currently crashes on it (nil-pointer in check mode),
-   which is why lint is a load smoke.
+6. **Interpreter-pinned tests, checker-clean source** — `make test` runs
+   `-no-check -no-compile` for deterministic corpus runs, but the module
+   now also passes `aql check` with 0 errors (`make lint` runs it) and the
+   full corpus passes under the default compiled mode too. Getting there
+   took a series of aql-engine fixes (checker nil-derefs on store-shaped
+   flex carriers, guard-fact/narrowing precision, forward-reference
+   placeholder handling, multi-result poly for `pop`, dynamic-pattern
+   `mini re` compilation) — an older `aql` binary will crash or report
+   phantom errors on this module; build from an aql checkout that includes
+   them.
 
 ## Canonical-name mapping
 

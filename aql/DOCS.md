@@ -134,6 +134,9 @@ reference runner (`typescript/test/runner.ts`): the same `__NULL__`
 fixups, error-substring matching, `match` walking and set drivers. The
 run must end `PASS <n>  FAIL 0`.
 
+`make lint` additionally runs the aql static checker over the library
+(the module checks clean — 0 errors) and a load smoke.
+
 For engine-level idioms (bind-then-return, module-level loops,
 no-short-circuit `and`, carrier rules) read
 [`AGENTS.md`](./AGENTS.md) before changing the source.

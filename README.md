@@ -472,7 +472,7 @@ Each language directory contains:
 | Dart       | `dart analyze`                    | `dart format`         |
 | Elixir     | compile check (`elixirc`)         | (`mix format` optional)|
 | Haskell    | type-check (`ghc -fno-code`)      | (`ormolu` optional)   |
-| AQL        | module load smoke (`aql run`)     | (`aql fmt` optional)  |
+| AQL        | `aql check` + module load smoke   | (`aql fmt` optional)  |
 
 Run everything with `make lint` at the repo root, or one language with
 `make lint-<lang>` (e.g. `make lint-go`).
