@@ -45,9 +45,15 @@ corpus.
   `JSON.stringify(null)` for injected nulls). Validation's `$NIL`/`$NULL`
   recover the absent-vs-stored-null distinction via literal slot
   presence (`vgi-haslit`).
-- Map literals and parsed JSON keep **sorted key order** in AQL; `set`
-  appends new keys in insertion order. The corpus has been audited to be
-  key-order-insensitive under the runner's `deq` comparison.
+- Map literals keep **sorted key order** in AQL (a plain `{b:1,a:2}` is
+  key-sorted at parse, before any port code runs); `set` on a `flex` node
+  appends in insertion order. `jsonify` uses the engine JSON emitter, so it
+  preserves a flex node's stored (insertion) key order — and every node the
+  port builds (parsed input, `clone`, the injectors) is flex, so real output
+  keeps order. The one reordering case is `jsonify` on a plain
+  non-alphabetical map literal, whose source order is already lost at parse.
+  The corpus has been audited to be key-order-insensitive under the runner's
+  `deq` comparison, and its `jsonify` fixtures use alphabetical keys.
 
 ## Function-value carriers (IMPORTANT)
 
