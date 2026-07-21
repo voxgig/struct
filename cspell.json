@@ -255,7 +255,8 @@
     "upcase",
     "variadics",
     "fnarg",
-    "myfn"
+    "myfn",
+    "derefs"
   ],
   "ignoreRegExpList": [
     "/`\\$[A-Z]+`/",
