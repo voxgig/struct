@@ -18,7 +18,7 @@
 # `make -C <dir>`. Each port ships at least `test` and `lint`; `build`,
 # `inspect`, `clean` and `reset` are invoked tolerantly (a port without one
 # just reports "(no <t> target)").
-LANGS = typescript javascript python go ruby php lua zig java rust c cpp csharp kotlin perl swift clojure ocaml scala dart elixir haskell
+LANGS = typescript javascript python go ruby php lua zig java rust c cpp csharp kotlin perl swift clojure ocaml scala dart elixir haskell aql
 
 # Every port ships a `make lint` target, so lint covers the full set.
 LINT_LANGS = $(LANGS)
@@ -28,11 +28,12 @@ LINT_LANGS = $(LANGS)
 # they are intentionally excluded from `make audit`.
 AUDIT_LANGS = typescript javascript python go ruby php rust csharp
 
-# Every port ships a `make publish` target: it publishes to that ecosystem's
-# library repository where one exists (npm, PyPI, crates.io, NuGet, RubyGems,
-# LuaRocks, Maven Central, CPAN) and ALWAYS creates + pushes a git tag
-# `<lang>/vX.Y.Z`. Registry-less ports (Go, PHP/Packagist, Swift, Zig, C, C++)
-# publish purely by that tag.
+# Every port except aql ships a `make publish` target: it publishes to that
+# ecosystem's library repository where one exists (npm, PyPI, crates.io,
+# NuGet, RubyGems, LuaRocks, Maven Central, CPAN) and ALWAYS creates + pushes
+# a git tag `<lang>/vX.Y.Z`. Registry-less ports (Go, PHP/Packagist, Swift,
+# Zig, C, C++) publish purely by that tag. The aql port has no registry and
+# no tag flow yet, so it is not in PUBLISH_LANGS.
 PUBLISH_LANGS = typescript javascript python go ruby php lua zig java rust c cpp csharp kotlin perl swift clojure ocaml scala dart elixir haskell
 
 .PHONY: all inspect build test bench lint audit scan analyze clean reset publish status verify corpus gen-docs \

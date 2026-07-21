@@ -1,0 +1,921 @@
+# ============================================================================
+# voxgig/struct AQL port — corpus runner module.
+#
+# All runner logic lives in this module (imported by runner.aql) because
+# module-mediated code is the engine's well-behaved path; the top-level
+# runner script stays minimal. Mirrors the reference runner
+# (typescript/test/runner.ts) the way dart/test/runner.dart does.
+#
+# Function values travel wrapped in one-element lists ([f/r]) — see the
+# port notes in ../src/struct.aql.
+# ============================================================================
+
+import "aql:io"
+import "aql:string-util"
+import "aql:minilang"
+import "../src/struct.aql"
+
+def rl-nullmark "__NULL__"
+def rl-undefmark "__UNDEF__"
+def rl-existsmark "__EXISTS__"
+
+# --- tallies -----------------------------------------------------------------
+def rl-tally (flex {npass: 0 nfail: 0})
+def rl-failures (flex [])
+
+def rl-record fn [[group:Any nm:Any ok:Any msg:Any] [Any] [
+  if (ok eq true) [
+    def np ((rl-tally get "npass") add 1)
+    (rl-tally set "npass" np) drop
+    none
+  ] [
+    def nf ((rl-tally get "nfail") add 1)
+    (rl-tally set "nfail" nf) drop
+    def line `FAIL ${group} ${nm} - ${msg}`
+    (append [line] rl-failures) drop
+    none
+  ]
+]]
+
+# --- corpus normalisation ------------------------------------------------------
+# Deep-copy into flex nodes; with flagnull, JSON nulls become "__NULL__".
+def rl-fix-map fn [[i:Integer ks:Any v:Any flagnull:Boolean o:Any] [Any] [
+  if (i gte (size ks)) [o] [
+    def k (ks get i)
+    def cv (v get (k))
+    def fv (rl-fix cv flagnull)
+    (o set (k) fv) drop
+    def i1 (i add 1)
+    def r (rl-fix-map i1 ks v flagnull o)
+    r
+  ]
+]]
+def rl-fix-list fn [[i:Integer v:Any flagnull:Boolean acc:Any] [Any] [
+  if (i gte (size v)) [acc] [
+    def cv (v get i)
+    def fv (rl-fix cv flagnull)
+    (append [fv] acc) drop
+    def i1 (i add 1)
+    def r (rl-fix-list i1 v flagnull acc)
+    r
+  ]
+]]
+def rl-fix fn [[v:Any flagnull:Boolean] [Any] [
+  if (v is None) [
+    if (flagnull eq true) [rl-nullmark] [none]
+  ] [
+    if (v is Map) [
+      def ks (keys v)
+      def o0 (flex {})
+      def r (rl-fix-map 0 ks v flagnull o0)
+      r
+    ] [
+      if (v is List) [
+        def acc0 (flex [])
+        def r (rl-fix-list 0 v flagnull acc0)
+        r
+      ] [v]
+    ]
+  ]
+]]
+
+# --- entry helpers -------------------------------------------------------------
+def rl-eget fn [[e:Any k:String] [Any] [
+  if (e is Map) [e get (k)] [none]
+]]
+def rl-ehas fn [[e:Any k:String] [Boolean] [
+  if (e is Map) [e has (k)] [false]
+]]
+# Missing map slots become NOARG ("argument not given"), present ones pass.
+def rl-vgetn fn [[vin:Any k:String] [Any] [
+  if (vin is Map) [
+    if (vin has (k)) [vin get (k)] [Struct.NOARG]
+  ] [Struct.NOARG]
+]]
+
+def rl-resolve-args fn [[entry:Any] [Any] [
+  if (rl-ehas entry "ctx") [
+    def c (rl-eget entry "ctx")
+    flex [c]
+  ] [
+    if (rl-ehas entry "args") [
+      def a (rl-eget entry "args")
+      if (a is List) [a] [flex []]
+    ] [
+      if (rl-ehas entry "in") [
+        def iv (rl-eget entry "in")
+        def cl (Struct.clone iv)
+        flex [cl]
+      ] [flex []]
+    ]
+  ]
+]]
+
+# --- leaf match ------------------------------------------------------------------
+def rl-matchval fn [[check0:Any mb:Any] [Boolean] [
+  def chk (if ((check0 eq rl-undefmark) or (check0 eq rl-nullmark)) [none] [check0])
+  if (chk deq mb) [true] [
+    if (chk is String) [
+      def basestr (Struct.stringify mb Struct.NOARG Struct.NOARG)
+      def n (size chk)
+      def isre (
+        if (n gte 2) [
+          def c0 (chk slice 0 1)
+          def cn (chk slice (n sub 1) n)
+          (c0 eq "/") and (cn eq "/")
+        ] [false]
+      )
+      if (isre eq true) [
+        def pat (chk slice 1 (n sub 1))
+        Struct.re_test pat basestr
+      ] [
+        def chkstr (Struct.stringify chk Struct.NOARG Struct.NOARG)
+        def chklow (StringUtil.lower chkstr)
+        def baselow (StringUtil.lower basestr)
+        StringUtil.contains chklow baselow
+      ]
+    ] [
+      if (chk is Function) [true] [false]
+    ]
+  ]
+]]
+
+# --- structural match ------------------------------------------------------------
+# The walker runs INSIDE the struct module (cross-module callbacks execute
+# in the callee's registry), so its body may only use core words, the
+# library's internal vg-* words, and values captured from this fn's frame.
+def rl-do-match fn [[chk:Any base0:Any] [Any] [
+  def mb (Struct.clone base0)
+  def walker ([k:Any v:Any parent:Any pth:Any] => [
+    if ((vg-isnode v) not) [
+      def baseval (vg-getpath mb pth vg-noarg)
+      if (baseval deq v) [none] [
+        if ((v eq "__UNDEF__") and (baseval is None)) [none] [
+          if ((v eq "__EXISTS__") and ((baseval is None) not)) [none] [
+            def chk2 (if ((v eq "__UNDEF__") or (v eq "__NULL__")) [none] [v])
+            def leafok (
+              if (chk2 deq baseval) [true] [
+                if (chk2 is String) [
+                  def basestr (vg-stringify baseval vg-noarg vg-noarg)
+                  def n (size chk2)
+                  def isre (
+                    if (n gte 2) [
+                      def c0 (chk2 slice 0 1)
+                      def cn (chk2 slice (n sub 1) n)
+                      (c0 eq "/") and (cn eq "/")
+                    ] [false]
+                  )
+                  if (isre eq true) [
+                    def pat (chk2 slice 1 (n sub 1))
+                    def btr28 (vg-re-test pat basestr)
+                    btr28
+                  ] [
+                    def chkstr (vg-stringify chk2 vg-noarg vg-noarg)
+                    def chklow (StringUtil.lower chkstr)
+                    def baselow (StringUtil.lower basestr)
+                    StringUtil.contains chklow baselow
+                  ]
+                ] [false]
+              ]
+            )
+            if (leafok eq true) [none] [
+              def ps (vg-pathify pth vg-noarg vg-noarg)
+              def vs (vg-stringify v vg-noarg vg-noarg)
+              def bs (vg-stringify baseval vg-noarg vg-noarg)
+              raise {code: match_fail/q message: `MATCH: ${ps}: [${vs}] <=> [${bs}]`}
+            ]
+          ]
+        ]
+      ] drop
+      none
+    ] [none] drop
+    v
+  ])
+  (Struct.walk chk [walker/r] Struct.NOARG Struct.NOARG) drop
+  none
+]]
+
+# --- result / error checking ------------------------------------------------------
+def rl-check-result fn [[entry:Any alist:Any res:Any] [Any] [
+  # The reference runner fails outright when an expected error did not occur.
+  if (rl-ehas entry "err") [
+    def ee (Struct.stringify (rl-eget entry "err") Struct.NOARG Struct.NOARG)
+    raise {code: check_fail/q message: `Expected error did not occur: ${ee}`}
+  ] [none] drop
+  def matched (
+    if (rl-ehas entry "match") [
+      def mbase (flex {})
+      def einv (rl-eget entry "in")
+      (mbase set "in" einv) drop
+      (mbase set "args" alist) drop
+      def eres (rl-eget entry "res")
+      (mbase set "out" eres) drop
+      def ectx (rl-eget entry "ctx")
+      (mbase set "ctx" ectx) drop
+      def emch (rl-eget entry "match")
+      (rl-do-match emch mbase) drop
+      true
+    ] [false]
+  )
+  def out (rl-eget entry "out")
+  if (out deq res) [none] [
+    if ((matched eq true) and ((out eq rl-nullmark) or (out is None))) [none] [
+      def os (Struct.stringify out Struct.NOARG Struct.NOARG)
+      def rs (Struct.stringify res Struct.NOARG Struct.NOARG)
+      raise {code: check_fail/q message: `Expected: ${os}, got: ${rs}`}
+    ]
+  ] drop
+  none
+]]
+
+def rl-handle-error fn [[entry:Any emsg:Any] [Any] [
+  # An assertion raised by the checker itself is never a subject error —
+  # re-raise it (mirrors the reference runner re-throwing AssertionError).
+  if (StringUtil.contains "Expected error did not occur" (Struct.stringify emsg Struct.NOARG Struct.NOARG)) [
+    raise {code: check_fail/q message: (emsg)}
+  ] [none] drop
+  if (rl-ehas entry "err") [
+    def entryerr (rl-eget entry "err")
+    def okerr (
+      if (entryerr eq true) [true] [rl-matchval entryerr emsg]
+    )
+    if (okerr eq true) [
+      if (rl-ehas entry "match") [
+        def mbase (flex {})
+        def einv (rl-eget entry "in")
+        (mbase set "in" einv) drop
+        def eres (rl-eget entry "res")
+        (mbase set "out" eres) drop
+        def ectx (rl-eget entry "ctx")
+        (mbase set "ctx" ectx) drop
+        (mbase set "err" emsg) drop
+        def emch (rl-eget entry "match")
+        (rl-do-match emch mbase) drop
+        none
+      ] [none] drop
+      none
+    ] [
+      def es (Struct.stringify entryerr Struct.NOARG Struct.NOARG)
+      raise {code: errmatch_fail/q message: `ERROR MATCH: [${es}] <=> [${emsg}]`}
+    ]
+  ] [
+    raise {code: unexpected_err/q message: `unexpected error: ${emsg}`}
+  ]
+]]
+
+# --- the set runner ----------------------------------------------------------------
+def rl-run-entry fn [[group:Any entry:Any subj:Any flagnull:Boolean] [Any] [
+  def nm (
+    if (rl-ehas entry "id") [
+      def idv (rl-eget entry "id")
+      if (idv is String) [idv] [""]
+    ] [""]
+  )
+  if (((rl-ehas entry "out") not) and (flagnull eq true)) [
+    (entry set "out" rl-nullmark) drop
+    none
+  ] [none] drop
+  def outcome (do [
+    def alist (rl-resolve-args entry)
+    def f (vgi-fnarg-rl subj)
+    def res0 (alist f/r apply)
+    def res (rl-fix res0 flagnull)
+    (entry set "res" res) drop
+    (rl-check-result entry alist res) drop
+    {ok: true}
+  ] error [var [[e]
+    def o (flex {})
+    (o set "ok" false) drop
+    def em (e get "message")
+    (o set "emsg" em) drop
+    o
+  ]])
+  if ((outcome get "ok") eq true) [
+    def btr29 (rl-record group nm true "")
+    btr29
+  ] [
+    def emsg1 (outcome get "emsg")
+    def outcome2 (do [
+      (rl-handle-error entry emsg1) drop
+      {ok: true}
+    ] error [var [[e2]
+      def o2 (flex {})
+      (o2 set "ok" false) drop
+      def em2 (e2 get "message")
+      (o2 set "emsg" em2) drop
+      o2
+    ]])
+    if ((outcome2 get "ok") eq true) [
+      def btr30 (rl-record group nm true "")
+      btr30
+    ] [
+      def emsg2 (outcome2 get "emsg")
+      def btr31 (rl-record group nm false emsg2)
+      btr31
+    ]
+  ]
+]]
+
+def rl-run-set-loop fn [[i:Integer group:Any testset:Any subj:Any flagnull:Boolean] [Any] [
+  if (i gte (size testset)) [none] [
+    def entry (testset get i)
+    (rl-run-entry group entry subj flagnull) drop
+    def i1 (i add 1)
+    def r (rl-run-set-loop i1 group testset subj flagnull)
+    r
+  ]
+]]
+
+# Unwrap a wrapped function argument ([f/r] list) to the Function.
+def vgi-fnarg-rl fn [[fw:Any] [Any] [
+  if (fw is List) [
+    if ((size fw) eq 1) [fw get 0] [fw]
+  ] [fw]
+]]
+
+def rl-run-set fn [[group:Any nd:Any subj:Any flagnull:Boolean] [Any] [
+  if (nd is Map) [
+    def fixed (rl-fix nd flagnull)
+    def testset (fixed get "set")
+    if (testset is List) [
+      def r (rl-run-set-loop 0 group testset subj flagnull)
+      r
+    ] [none]
+  ] [none]
+]]
+
+# Single-entry runner (merge.basic / transform.basic / inject.basic style).
+def rl-run-single fn [[group:Any nd:Any subj:Any] [Any] [
+  if (nd is Map) [
+    def fixed (rl-fix nd false)
+    def outcome (do [
+      def iv (fixed get "in")
+      def f (vgi-fnarg-rl subj)
+      def actual (iv f/r apply)
+      def expected (fixed get "out")
+      if (expected deq actual) [{ok: true}] [
+        def es (Struct.stringify expected Struct.NOARG Struct.NOARG)
+        def as2 (Struct.stringify actual Struct.NOARG Struct.NOARG)
+        raise {code: check_fail/q message: `Expected: ${es}, got: ${as2}`}
+      ]
+    ] error [var [[e]
+      def o (flex {})
+      (o set "ok" false) drop
+      def em (e get "message")
+      (o set "emsg" em) drop
+      o
+    ]])
+    if ((outcome get "ok") eq true) [rl-record group "single" true ""] [
+      def em2 (outcome get "emsg")
+      def btr32 (rl-record group "single" false em2)
+      btr32
+    ]
+  ] [none]
+]]
+
+# --- subjects -----------------------------------------------------------------------
+# Every subject takes the resolved args LIST and returns the call result.
+def rl-arg0 fn [[alist:Any] [Any] [
+  if ((size alist) gt 0) [alist get 0] [none]
+]]
+def rl-arg0n fn [[alist:Any] [Any] [
+  if ((size alist) gt 0) [alist get 0] [Struct.NOARG]
+]]
+
+def rs-isnode fn [[alist:Any] [Any] [Struct.isnode (rl-arg0 alist)]]
+def rs-ismap fn [[alist:Any] [Any] [Struct.ismap (rl-arg0 alist)]]
+def rs-islist fn [[alist:Any] [Any] [Struct.islist (rl-arg0 alist)]]
+def rs-iskey fn [[alist:Any] [Any] [Struct.iskey (rl-arg0n alist)]]
+def rs-strkey fn [[alist:Any] [Any] [Struct.strkey (rl-arg0n alist)]]
+def rs-isempty fn [[alist:Any] [Any] [Struct.isempty (rl-arg0n alist)]]
+def rs-isfunc fn [[alist:Any] [Any] [Struct.isfunc (rl-arg0 alist)]]
+def rs-clone fn [[alist:Any] [Any] [Struct.clone (rl-arg0n alist)]]
+def rs-items fn [[alist:Any] [Any] [Struct.items (rl-arg0 alist)]]
+def rs-keysof fn [[alist:Any] [Any] [Struct.keysof (rl-arg0 alist)]]
+def rs-typify fn [[alist:Any] [Any] [Struct.typify (rl-arg0n alist)]]
+def rs-size fn [[alist:Any] [Any] [Struct.size (rl-arg0n alist)]]
+def rs-getprop fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  def v (rl-eget vin "val")
+  def k (rl-eget vin "key")
+  def alt (rl-vgetn vin "alt")
+  Struct.getprop v k alt
+]]
+def rs-getelem fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  def v (rl-eget vin "val")
+  def k (rl-eget vin "key")
+  def alt (rl-vgetn vin "alt")
+  Struct.getelem v k alt
+]]
+def rs-haskey fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  def src (rl-eget vin "src")
+  def k (rl-eget vin "key")
+  Struct.haskey src k
+]]
+def rs-setprop fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  def p (rl-eget vin "parent")
+  def k (rl-eget vin "key")
+  def v (rl-eget vin "val")
+  Struct.setprop p k v
+]]
+def rs-delprop fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  def p (rl-eget vin "parent")
+  def k (rl-eget vin "key")
+  Struct.delprop p k
+]]
+def rs-flatten fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  def v (rl-eget vin "val")
+  def d (rl-eget vin "depth")
+  Struct.flatten v d
+]]
+def rs-typename fn [[alist:Any] [Any] [
+  def v (rl-arg0 alist)
+  def t (if (v is Number) [v] [0])
+  Struct.typename t
+]]
+def rs-stringify fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  if (rl-ehas vin "val") [
+    # Reference subject: stringify(NULLMARK === vin.val ? 'null' : vin.val, vin.max)
+    def v0 (vin get "val")
+    def v (if (v0 eq rl-nullmark) ["null"] [v0])
+    def mx (rl-vgetn vin "max")
+    Struct.stringify v mx Struct.NOARG
+  ] [
+    Struct.stringify Struct.NOARG Struct.NOARG Struct.NOARG
+  ]
+]]
+def rs-stringify-null fn [[alist:Any] [Any] [
+  def v (rl-arg0 alist)
+  Struct.stringify v Struct.NOARG Struct.NOARG
+]]
+def rs-jsonify fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  def v (rl-vgetn vin "val")
+  def fl (rl-eget vin "flags")
+  Struct.jsonify v fl
+]]
+def rs-pathify fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  def p (if (rl-ehas vin "path") [vin get "path"] [Struct.NOARG])
+  def fr (rl-eget vin "from")
+  Struct.pathify p fr Struct.NOARG
+]]
+def rs-slice fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  def v (rl-eget vin "val")
+  def st (rl-eget vin "start")
+  def en (rl-eget vin "end")
+  Struct.slice v st en Struct.NOARG
+]]
+def rs-pad fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  def v (rl-eget vin "val")
+  def pd (rl-eget vin "pad")
+  def ch (rl-eget vin "char")
+  Struct.pad v pd ch
+]]
+def rs-escre fn [[alist:Any] [Any] [Struct.escre (rl-arg0 alist)]]
+def rs-escurl fn [[alist:Any] [Any] [Struct.escurl (rl-arg0 alist)]]
+def rs-join fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  def v (rl-eget vin "val")
+  def sp (rl-vgetn vin "sep")
+  def u (rl-eget vin "url")
+  Struct.join v sp u
+]]
+def rs-getpath fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  def st (rl-eget vin "store")
+  def p (rl-eget vin "path")
+  Struct.getpath st p Struct.NOARG
+]]
+def rs-setpath fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  def st (rl-eget vin "store")
+  def p (rl-vgetn vin "path")
+  def v (rl-eget vin "val")
+  Struct.setpath st p v Struct.NOARG
+]]
+def rs-filter-gt3 fn [[pair:Any] [Any] [
+  def pv (pair get 1)
+  if (pv is Number) [pv gt 3] [false]
+]]
+def rs-filter-lt3 fn [[pair:Any] [Any] [
+  def pv (pair get 1)
+  if (pv is Number) [pv lt 3] [false]
+]]
+def rs-filter-none fn [[pair:Any] [Any] [false]]
+def rs-filter fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  def v (rl-eget vin "val")
+  def c (rl-eget vin "check")
+  def chk (
+    if (c eq "gt3") [[rs-filter-gt3/r]] [
+      if (c eq "lt3") [[rs-filter-lt3/r]] [[rs-filter-none/r]]
+    ]
+  )
+  Struct.filter v chk
+]]
+
+
+# --- tranche-3 subjects: getpath / setpath / merge / walk ---------------------
+def rs-getpath fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  def st (rl-eget vin "store")
+  def p (rl-eget vin "path")
+  Struct.getpath st p Struct.NOARG
+]]
+def rs-getpath-relative fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  def st (rl-eget vin "store")
+  def p (rl-eget vin "path")
+  def dp0 (rl-eget vin "dpath")
+  def dpath (
+    if (dp0 is String) [make FlexList (StringUtil.split "." dp0 {keepEmpty: true})] [none]
+  )
+  def dparent (rl-eget vin "dparent")
+  def idf (flex {})
+  (idf set "dparent" dparent) drop
+  (idf set "dpath" dpath) drop
+  Struct.getpath st p idf
+]]
+def rs-getpath-special fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  def st (rl-eget vin "store")
+  def p (rl-eget vin "path")
+  def idf (rl-eget vin "inj")
+  Struct.getpath st p idf
+]]
+def rs-foo fn [[ig:Any] [Any] ["foo"]]
+def rl-foo-box {"`$FN`": rs-foo/r}
+def rs-gp-handler fn [[inj:Any val:Any iref:Any st:Any] [Any] [
+  if (vg-isfunc val) [
+    def f (val get "`$FN`")
+    none f/r apply
+  ] [val]
+]]
+def rl-gph-box {"`$FN`": rs-gp-handler/r}
+def rs-getpath-handler fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  def sv (rl-eget vin "store")
+  def st (do {"$TOP": (sv) "$FOO": (rl-foo-box)})
+  def p (rl-eget vin "path")
+  def idf (do {"handler": (rl-gph-box)})
+  Struct.getpath st p idf
+]]
+def rs-setpath fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  def st (rl-eget vin "store")
+  def p (rl-vgetn vin "path")
+  def v (rl-eget vin "val")
+  Struct.setpath st p v Struct.NOARG
+]]
+def rs-merge fn [[alist:Any] [Any] [
+  Struct.merge (rl-arg0 alist) Struct.NOARG
+]]
+def rs-merge-basic fn [[iv:Any] [Any] [
+  def cl (Struct.clone iv)
+  Struct.merge cl Struct.NOARG
+]]
+def rs-merge-depth fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  def v (rl-eget vin "val")
+  def d (rl-vgetn vin "depth")
+  Struct.merge v d
+]]
+
+# walk.basic: append "~" + dotted path to every string leaf (after phase).
+def rs-walk-basic fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  def cb ([k:Any v:Any parent:Any pth:Any] => [
+    if (v is String) [
+      def ps (vgi-join-list pth ".")
+      StringUtil.concat [v "~" ps]
+    ] [v]
+  ])
+  Struct.walk vin [cb/r] Struct.NOARG Struct.NOARG
+]]
+
+# walk.log: record k/v/p/t at each after-visit.
+def rl-run-walk-log fn [[group:Any nd:Any] [Any] [
+  if (nd is Map) [
+    def fixed (rl-fix nd false)
+    def outcome (do [
+      def logacc (flex [])
+      def cb ([k:Any v:Any parent:Any pth:Any] => [
+        def ks (if (k is None) [vg-stringify vg-noarg vg-noarg vg-noarg] [vg-stringify k vg-noarg vg-noarg])
+        def vs (vg-stringify v vg-noarg vg-noarg)
+        def ps (if (parent is None) [vg-stringify vg-noarg vg-noarg vg-noarg] [vg-stringify parent vg-noarg vg-noarg])
+        def ts (vg-pathify pth vg-noarg vg-noarg)
+        def line `k=${ks}, v=${vs}, p=${ps}, t=${ts}`
+        (append [line] logacc) drop
+        v
+      ])
+      def iv (fixed get "in")
+      def td (Struct.clone iv)
+      (Struct.walk td Struct.NOARG [cb/r] Struct.NOARG) drop
+      def expa ((fixed get "out") get "after")
+      if (expa deq logacc) [none] [
+        def es (Struct.stringify expa Struct.NOARG Struct.NOARG)
+        def gs (Struct.stringify logacc Struct.NOARG Struct.NOARG)
+        raise {code: check_fail/q message: `after: Expected: ${es}, got: ${gs}`}
+      ] drop
+      (Struct.slice logacc 0 0 true) drop
+      (Struct.walk td [cb/r] Struct.NOARG Struct.NOARG) drop
+      def expb ((fixed get "out") get "before")
+      if (expb deq logacc) [none] [
+        def es (Struct.stringify expb Struct.NOARG Struct.NOARG)
+        def gs (Struct.stringify logacc Struct.NOARG Struct.NOARG)
+        raise {code: check_fail/q message: `before: Expected: ${es}, got: ${gs}`}
+      ] drop
+      (Struct.slice logacc 0 0 true) drop
+      (Struct.walk td [cb/r] [cb/r] Struct.NOARG) drop
+      def expc ((fixed get "out") get "both")
+      if (expc deq logacc) [{ok: true}] [
+        def es (Struct.stringify expc Struct.NOARG Struct.NOARG)
+        def gs (Struct.stringify logacc Struct.NOARG Struct.NOARG)
+        raise {code: check_fail/q message: `both: Expected: ${es}, got: ${gs}`}
+      ]
+    ] error [var [[e]
+      def o (flex {})
+      (o set "ok" false) drop
+      def em (e get "message")
+      (o set "emsg" em) drop
+      o
+    ]])
+    if ((outcome get "ok") eq true) [rl-record group "log" true ""] [
+      def em2 (outcome get "emsg")
+      def btr33 (rl-record group "log" false em2)
+      btr33
+    ]
+  ] [none]
+]]
+
+# walk.copy: rebuild the tree from before-visits (level-indexed cursor list).
+def rs-walk-copy fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  def c (flex [])
+  def cb ([k:Any v:Any parent:Any pth:Any] => [
+    if (k is None) [
+      def top (
+        if (vg-ismap v) [flex {}] [
+          if (vg-islist v) [flex []] [v]
+        ]
+      )
+      if ((size c) gt 0) [(c set 0 top) drop none] [(append [top] c) drop none] drop
+      v
+    ] [
+      def i (size pth)
+      def nv (
+        if (vg-isnode v) [
+          if ((size c) lte i) [(append [none] c) drop none] [none] drop
+          def child (if (vg-ismap v) [flex {}] [flex []])
+          (c set i child) drop
+          child
+        ] [v]
+      )
+      def tgt (vg-getelem c (i sub 1) vg-noarg)
+      (vg-setprop tgt k nv) drop
+      v
+    ]
+  ])
+  (Struct.walk vin [cb/r] Struct.NOARG Struct.NOARG) drop
+  Struct.getelem c 0 Struct.NOARG
+]]
+
+# walk.depth: copy with a maxdepth cut.
+def rs-walk-depth fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  def src (rl-eget vin "src")
+  def md (rl-vgetn vin "maxdepth")
+  def st (flex {})
+  (st set "top" none) drop
+  (st set "cur" none) drop
+  def cb ([k:Any v:Any parent:Any pth:Any] => [
+    if ((k is None) or (vg-isnode v)) [
+      def child (if (vg-islist v) [flex []] [flex {}])
+      if (k is None) [
+        (st set "top" child) drop
+        (st set "cur" child) drop
+        none
+      ] [
+        def cur (st get "cur")
+        (vg-setprop cur k child) drop
+        (st set "cur" child) drop
+        none
+      ] drop
+      none
+    ] [
+      def cur (st get "cur")
+      (vg-setprop cur k v) drop
+      none
+    ] drop
+    v
+  ])
+  (Struct.walk src [cb/r] Struct.NOARG md) drop
+  st get "top"
+]]
+
+# --- tranche-4 subjects: inject / transform -----------------------------------
+def rs-inject-basic fn [[iv:Any] [Any] [
+  Struct.inject (rl-eget iv "val") (rl-eget iv "store") Struct.NOARG
+]]
+def rs-inject fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  Struct.inject (rl-eget vin "val") (rl-eget vin "store") Struct.NOARG
+]]
+
+# nullModifier: after each injection step, convert the corpus NULL marker
+# back into a real null (single-null port; runs in the callee's registry so
+# only core + vg-* + StringUtil words are used).
+def rs-nullmod fn [[mval:Any mkey:Any mparent:Any inj:Any st:Any] [Any] [
+  if (mval eq "__NULL__") [
+    (mparent set (mkey) none) drop none
+  ] [
+    if (mval is String) [
+      def nv (vg-re-replace "__NULL__" mval "null")
+      (mparent set (mkey) nv) drop none
+    ] [none]
+  ] drop
+  none
+]]
+def rl-nullmod-box {"`$FN`": rs-nullmod/r}
+def rs-inject-modify fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  def idf (do {"modify": (rl-nullmod-box)})
+  Struct.inject (rl-eget vin "val") (rl-eget vin "store") idf
+]]
+
+def rs-transform-basic fn [[iv:Any] [Any] [
+  Struct.transform (rl-eget iv "data") (rl-eget iv "spec") Struct.NOARG
+]]
+def rs-transform fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  Struct.transform (rl-eget vin "data") (rl-eget vin "spec") Struct.NOARG
+]]
+
+# transform.modify: prefix every injected string value with "@".
+def rs-atmod fn [[mval:Any mkey:Any mparent:Any inj:Any st:Any] [Any] [
+  if (((mkey is None) not) and ((mparent is None) not)) [
+    if (mval is String) [
+      def nv (StringUtil.concat ["@" mval])
+      (mparent set (mkey) nv) drop none
+    ] [none]
+  ] [none] drop
+  none
+]]
+def rl-atmod-box {"`$FN`": rs-atmod/r}
+def rs-transform-modify fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  def idf (do {"modify": (rl-atmod-box)})
+  Struct.transform (rl-eget vin "data") (rl-eget vin "spec") idf
+]]
+
+# --- tranche-5 subjects: validate / select / sentinels ------------------------
+def rs-validate fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  Struct.validate (rl-eget vin "data") (rl-eget vin "spec") Struct.NOARG
+]]
+def rs-validate-inj fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  def idf (rl-vgetn vin "inj")
+  Struct.validate (rl-eget vin "data") (rl-eget vin "spec") idf
+]]
+def rs-select fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  Struct.select (rl-eget vin "obj") (rl-eget vin "query")
+]]
+def rs-getprop-vka fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  Struct.getprop (rl-vgetn vin "val") (rl-vgetn vin "key") (rl-vgetn vin "alt")
+]]
+def rs-getelem-vka fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  Struct.getelem (rl-vgetn vin "val") (rl-vgetn vin "key") (rl-vgetn vin "alt")
+]]
+def rs-haskey-vk fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  Struct.haskey (rl-vgetn vin "val") (rl-vgetn vin "key")
+]]
+
+# --- driving the sets ----------------------------------------------------------------
+def rl-minor fn [[spec:Any nm:String] [Any] [
+  def mn (spec get "minor")
+  if (mn is Map) [mn get (nm)] [none]
+]]
+
+def rl-print-failures fn [[i:Integer] [Any] [
+  if (i gte (size rl-failures)) [none] [
+    print (rl-failures get i)
+    def i1 (i add 1)
+    def r (rl-print-failures i1)
+    r
+  ]
+]]
+
+def rl-main fn [[ig:Any] [Any] [
+  def alltests (IO.read (make Pathon "../build/test/test.json"))
+  def spec (alltests get "struct")
+
+  (rl-run-set "minor.isnode" (rl-minor spec "isnode") [rs-isnode/r] true) drop
+  (rl-run-set "minor.ismap" (rl-minor spec "ismap") [rs-ismap/r] true) drop
+  (rl-run-set "minor.islist" (rl-minor spec "islist") [rs-islist/r] true) drop
+  (rl-run-set "minor.iskey" (rl-minor spec "iskey") [rs-iskey/r] false) drop
+  (rl-run-set "minor.strkey" (rl-minor spec "strkey") [rs-strkey/r] false) drop
+  (rl-run-set "minor.isempty" (rl-minor spec "isempty") [rs-isempty/r] false) drop
+  (rl-run-set "minor.isfunc" (rl-minor spec "isfunc") [rs-isfunc/r] true) drop
+  (rl-run-set "minor.clone" (rl-minor spec "clone") [rs-clone/r] false) drop
+  (rl-run-set "minor.items" (rl-minor spec "items") [rs-items/r] true) drop
+  (rl-run-set "minor.keysof" (rl-minor spec "keysof") [rs-keysof/r] true) drop
+  (rl-run-set "minor.typify" (rl-minor spec "typify") [rs-typify/r] false) drop
+  (rl-run-set "minor.size" (rl-minor spec "size") [rs-size/r] false) drop
+  (rl-run-set "minor.getprop" (rl-minor spec "getprop") [rs-getprop/r] false) drop
+  (rl-run-set "minor.getelem" (rl-minor spec "getelem") [rs-getelem/r] false) drop
+  (rl-run-set "minor.haskey" (rl-minor spec "haskey") [rs-haskey/r] false) drop
+  (rl-run-set "minor.setprop" (rl-minor spec "setprop") [rs-setprop/r] true) drop
+  (rl-run-set "minor.delprop" (rl-minor spec "delprop") [rs-delprop/r] true) drop
+  (rl-run-set "minor.flatten" (rl-minor spec "flatten") [rs-flatten/r] true) drop
+  (rl-run-set "minor.typename" (rl-minor spec "typename") [rs-typename/r] true) drop
+  (rl-run-set "minor.filter" (rl-minor spec "filter") [rs-filter/r] true) drop
+  (rl-run-set "minor.stringify" (rl-minor spec "stringify") [rs-stringify/r] true) drop
+  (rl-run-set "minor.jsonify" (rl-minor spec "jsonify") [rs-jsonify/r] false) drop
+  (rl-run-set "minor.pathify" (rl-minor spec "pathify") [rs-pathify/r] false) drop
+  (rl-run-set "minor.slice" (rl-minor spec "slice") [rs-slice/r] false) drop
+  (rl-run-set "minor.pad" (rl-minor spec "pad") [rs-pad/r] false) drop
+  (rl-run-set "minor.escre" (rl-minor spec "escre") [rs-escre/r] true) drop
+  (rl-run-set "minor.escurl" (rl-minor spec "escurl") [rs-escurl/r] true) drop
+  (rl-run-set "minor.join" (rl-minor spec "join") [rs-join/r] false) drop
+  (rl-run-set "minor.setpath" (rl-minor spec "setpath") [rs-setpath/r] false) drop
+
+  def gp (spec get "getpath")
+  (rl-run-set "getpath.basic" (gp get "basic") [rs-getpath/r] true) drop
+  (rl-run-set "getpath.relative" (gp get "relative") [rs-getpath-relative/r] true) drop
+  (rl-run-set "getpath.special" (gp get "special") [rs-getpath-special/r] true) drop
+  (rl-run-set "getpath.handler" (gp get "handler") [rs-getpath-handler/r] true) drop
+
+  def mg2 (spec get "merge")
+  (rl-run-single "merge.basic" (mg2 get "basic") [rs-merge-basic/r]) drop
+  (rl-run-set "merge.cases" (mg2 get "cases") [rs-merge/r] true) drop
+  (rl-run-set "merge.array" (mg2 get "array") [rs-merge/r] true) drop
+  (rl-run-set "merge.integrity" (mg2 get "integrity") [rs-merge/r] true) drop
+  (rl-run-set "merge.depth" (mg2 get "depth") [rs-merge-depth/r] true) drop
+
+  def wk (spec get "walk")
+  (rl-run-walk-log "walk.log" (wk get "log")) drop
+  (rl-run-set "walk.basic" (wk get "basic") [rs-walk-basic/r] true) drop
+  (rl-run-set "walk.copy" (wk get "copy") [rs-walk-copy/r] true) drop
+  (rl-run-set "walk.depth" (wk get "depth") [rs-walk-depth/r] false) drop
+
+  def ij (spec get "inject")
+  (rl-run-single "inject.basic" (ij get "basic") [rs-inject-basic/r]) drop
+  (rl-run-set "inject.string" (ij get "string") [rs-inject-modify/r] true) drop
+  (rl-run-set "inject.deep" (ij get "deep") [rs-inject/r] true) drop
+
+  def tf (spec get "transform")
+  (rl-run-single "transform.basic" (tf get "basic") [rs-transform-basic/r]) drop
+  (rl-run-set "transform.paths" (tf get "paths") [rs-transform/r] true) drop
+  (rl-run-set "transform.cmds" (tf get "cmds") [rs-transform/r] true) drop
+  (rl-run-set "transform.each" (tf get "each") [rs-transform/r] true) drop
+  (rl-run-set "transform.pack" (tf get "pack") [rs-transform/r] true) drop
+  (rl-run-set "transform.modify" (tf get "modify") [rs-transform-modify/r] true) drop
+  (rl-run-set "transform.ref" (tf get "ref") [rs-transform/r] true) drop
+  (rl-run-set "transform.format" (tf get "format") [rs-transform/r] false) drop
+  (rl-run-set "transform.apply" (tf get "apply") [rs-transform/r] true) drop
+
+  def vd (spec get "validate")
+  (rl-run-set "validate.basic" (vd get "basic") [rs-validate/r] false) drop
+  (rl-run-set "validate.child" (vd get "child") [rs-validate/r] true) drop
+  (rl-run-set "validate.one" (vd get "one") [rs-validate/r] true) drop
+  (rl-run-set "validate.exact" (vd get "exact") [rs-validate/r] true) drop
+  (rl-run-set "validate.invalid" (vd get "invalid") [rs-validate/r] false) drop
+  (rl-run-set "validate.special" (vd get "special") [rs-validate-inj/r] true) drop
+
+  def sl (spec get "select")
+  (rl-run-set "select.basic" (sl get "basic") [rs-select/r] true) drop
+  (rl-run-set "select.operators" (sl get "operators") [rs-select/r] true) drop
+  (rl-run-set "select.edge" (sl get "edge") [rs-select/r] true) drop
+  (rl-run-set "select.alts" (sl get "alts") [rs-select/r] true) drop
+
+  def sn (spec get "sentinels")
+  (rl-run-set "sentinels.getprop_unify" (sn get "getprop_unify") [rs-getprop-vka/r] false) drop
+  (rl-run-set "sentinels.getelem_absent" (sn get "getelem_absent") [rs-getelem-vka/r] false) drop
+  (rl-run-set "sentinels.haskey_unify" (sn get "haskey_unify") [rs-haskey-vk/r] false) drop
+  (rl-run-set "sentinels.isempty_unify" (sn get "isempty_unify") [rs-isempty/r] false) drop
+  (rl-run-set "sentinels.isnode_unify" (sn get "isnode_unify") [rs-isnode/r] false) drop
+  (rl-run-set "sentinels.stringify_null" (sn get "stringify_null") [rs-stringify-null/r] false) drop
+
+  (rl-print-failures 0) drop
+  def np (rl-tally get "npass")
+  def nf (rl-tally get "nfail")
+  print `PASS ${np}  FAIL ${nf}`
+  if (nf gt 0) [raise {code: corpus_fail/q message: `${nf} corpus failures`}] [none] drop
+  none
+]]
+
+export "RunnerLib" {main: rl-main/r}

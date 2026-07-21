@@ -1,0 +1,6 @@
+# voxgig/struct AQL port — corpus runner entry point.
+# Run from the aql/ port directory:  aql run -no-check -no-compile test/runner.aql
+# (The heavy lifting lives in runner-lib.aql; this top level stays minimal —
+# module-namespace calls are the engine's well-behaved path.)
+import "./test/runner-lib.aql" end
+(RunnerLib.main none) drop

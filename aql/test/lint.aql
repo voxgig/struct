@@ -1,0 +1,12 @@
+# Lint smoke: load the library module (parses the source, executes every
+# def, resolves the export map) and probe one word from each command family.
+import "./src/struct.aql" end
+def ok1 (Struct.getpath (flex {a: {b: 2}}) "a.b" Struct.NOARG)
+def ok2 (Struct.transform (flex {a: 1}) (flex {x: "`a`"}) Struct.NOARG)
+def ok3 (Struct.validate (flex {a: 1}) (flex {a: "`$INTEGER`"}) Struct.NOARG)
+def ok4 (Struct.select (flex [{x: 1}]) (flex {x: 1}))
+if ((ok1 eq 2) and ((ok2 deq {x: 1}) and ((ok3 deq {a: 1}) and ((size ok4) eq 1)))) [
+  print "lint ok"
+] [
+  raise {code: lint_fail/q message: "module load smoke failed"}
+]
