@@ -1433,6 +1433,15 @@ func TestStruct(t *testing.T) {
 		})
 	})
 
+	// null:false keeps JSON null as an actual nil (not the "__NULL__" marker) so
+	// Select sees a present-null field — the present-null unexpected-keys defect.
+	t.Run("select-nullkey", func(t *testing.T) {
+		runsetFlags(t, selectSpec["nullkey"], map[string]bool{"null": false}, func(v any) any {
+			m := v.(map[string]any)
+			return voxgigstruct.Select(m["obj"], m["query"])
+		})
+	})
+
 	// JSON Builder
 	// ============
 

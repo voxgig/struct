@@ -18981,6 +18981,58 @@
           }
         ]
       },
+      "nullkey": {
+        "set": [
+          {
+            "in": {
+              "query": {
+                "`$AND`": []
+              },
+              "obj": {
+                "a": {
+                  "opt": "x"
+                },
+                "b": {
+                  "opt": null
+                }
+              }
+            },
+            "out": [
+              {
+                "opt": "x",
+                "$KEY": "a"
+              },
+              {
+                "opt": null,
+                "$KEY": "b"
+              }
+            ]
+          },
+          {
+            "in": {
+              "query": {},
+              "obj": {
+                "a": {
+                  "opt": "x"
+                },
+                "b": {
+                  "opt": null
+                }
+              }
+            },
+            "out": [
+              {
+                "opt": "x",
+                "$KEY": "a"
+              },
+              {
+                "opt": null,
+                "$KEY": "b"
+              }
+            ]
+          }
+        ]
+      },
       "name": "select",
       "set": []
     },

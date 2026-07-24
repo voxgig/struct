@@ -4017,9 +4017,15 @@ func makeValidation(exact bool) Modify {
 
 			// Empty spec object {} means object can be open (any keys).
 			if len(pkeys) > 0 && GetProp(pval, "`$OPEN`") != true {
+				// Literal presence: the shape DECLARES ckey even when its value
+				// is nil. Canonical uses `NONE === _lookup`; HasKey is Group A
+				// (value-based) and would drop records with a nil field from an
+				// open ($AND) select. Test map key presence on the shape (pval).
 				badkeys := []string{}
+				pvalMap, pvalIsMap := pval.(map[string]any)
 				for _, ckey := range ckeys {
-					if !HasKey(val, ckey) {
+					_, present := pvalMap[ckey]
+					if !pvalIsMap || !present {
 						badkeys = append(badkeys, ckey)
 					}
 				}

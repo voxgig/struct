@@ -2630,7 +2630,12 @@ def _validation(pval, key, parent, inj):
         if len(pkeys) > 0 and getprop(pval, '`$OPEN`') is not True:
             badkeys = []
             for ckey in ckeys:
-                if not haskey(pval, ckey):
+                # Literal presence: the shape DECLARES ckey even when its value
+                # is null. Canonical uses `NONE === _lookup(pval, ckey)`; here
+                # `haskey` is Group A (value-based) and would wrongly flag a
+                # null-valued shape slot as unexpected — dropping records with a
+                # null field from an open ($AND) select. Test map presence.
+                if str(ckey) not in pval:
                     badkeys.append(ckey)
             if size(badkeys) > 0:
                 msg = (

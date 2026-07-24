@@ -256,7 +256,10 @@
     "variadics",
     "fnarg",
     "myfn",
-    "derefs"
+    "derefs",
+    "pval",
+    "ckey",
+    "ckeys"
   ],
   "ignoreRegExpList": [
     "/`\\$[A-Z]+`/",

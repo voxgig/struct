@@ -488,6 +488,11 @@ void runAll(dynamic spec) {
         arg1((vin) => s.select(vget(vin, 'obj'), vget(vin, 'query'))));
   }
 
+  // null:false keeps JSON null as an actual null (not the "__NULL__" marker) so
+  // select sees a present-null field — the present-null unexpected-keys defect.
+  runSet('select.nullkey', s.getprop(selects, 'nullkey'),
+      arg1((vin) => s.select(vget(vin, 'obj'), vget(vin, 'query'))), false);
+
   runSet(
       'sentinels.getprop_unify',
       s.getprop(sentinels, 'getprop_unify'),

@@ -1923,7 +1923,10 @@ module VoxgigStruct
       pkeys = keysof(pval)
 
       if pkeys.length.positive? && getprop(pval, '`$OPEN`') != true
-        badkeys = ckeys.reject { |ck| haskey(pval, ck) }
+        # Literal presence: the shape DECLARES ck even when its value is nil.
+        # Canonical uses `NONE === _lookup`; `haskey` is Group A (value-based)
+        # and would drop records with a nil field from an open ($AND) select.
+        badkeys = ckeys.reject { |ck| pval.is_a?(Hash) && pval.key?(strkey(ck)) }
         if badkeys.length.positive?
           inj.errs << "Unexpected keys at field #{pathify(inj.path, 1)}#{S_VIZ}#{join(badkeys, ', ')}"
         end

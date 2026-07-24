@@ -396,6 +396,11 @@
       (run-set (str "select." g) (gp selectS g)
                (fn [vin] (s/select (vget vin "obj") (vget vin "query")))))
 
+    ;; null:false keeps JSON null as an actual nil (not the "__NULL__" marker) so
+    ;; select sees a present-null field — the present-null unexpected-keys defect.
+    (run-set "select.nullkey" (gp selectS "nullkey") {"null" false}
+             (fn [vin] (s/select (vget vin "obj") (vget vin "query"))))
+
     ;; sentinels
     (run-set "sentinels.getprop_unify" (gp sentinels "getprop_unify") {"null" false}
              (fn [vin] (s/getprop (vget vin "val") (vget vin "key") (vget vin "alt"))))

@@ -778,6 +778,14 @@ class TestStruct(unittest.TestCase):
 
         runset(selectSpec['alts'], select_wrapper)
 
+    def test_select_nullkey(self):
+        # {'null': False} keeps JSON null as an actual None (not "__NULL__"), so
+        # select sees a present-null field — the present-null defect case.
+        def select_wrapper(vin):
+            return select(vin.get('obj'), vin.get('query'))
+
+        runsetflags(selectSpec['nullkey'], {'null': False}, select_wrapper)
+
     # -------------------------------------------------
     # JSON Builder tests
     # -------------------------------------------------
