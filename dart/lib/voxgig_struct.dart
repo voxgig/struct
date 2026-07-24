@@ -2133,8 +2133,9 @@ void _validation(dynamic pval, dynamic key, dynamic parent, dynamic inj0) {
         // Literal presence: the shape declares ck even when its value is null.
         // Canonical uses `NONE === _lookup`; `_lookup(...) == null` conflates
         // present-null with absent and drops null-field records from open selects.
-        var badkeys = ckeys.where((ck) =>
-            !(pval is Map && (pval as Map).containsKey(_mapKey(ck)))).toList();
+        var badkeys = ckeys
+            .where((ck) => !(pval is Map && pval.containsKey(_mapKey(ck))))
+            .toList();
         if (badkeys.isNotEmpty) {
           _pushErr(
               inj,
