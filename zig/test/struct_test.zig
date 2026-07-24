@@ -1101,6 +1101,14 @@ test "select-alts" {
     try r.runsetAllocFlags(try getSubSpec(r, "select", "alts"), .{ .null_flag = false }, wrap_select);
 }
 
+// null_flag = false keeps JSON null as an actual null (not the "__NULL__"
+// marker) so select sees a present-null field — the present-null defect.
+test "select-nullkey" {
+    var r = try runner.makeRunner(testing.allocator);
+    defer r.deinit();
+    try r.runsetAllocFlags(try getSubSpec(r, "select", "nullkey"), .{ .null_flag = false }, wrap_select);
+}
+
 // ---- sentinels: Group A null/undefined unification across the readers ----
 
 test "sentinels-getprop_unify" {

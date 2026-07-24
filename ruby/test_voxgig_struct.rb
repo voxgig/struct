@@ -711,6 +711,14 @@ class TestVoxgigStruct < Minitest::Test
     })
   end
 
+  def test_select_nullkey
+    # null:false keeps JSON null as an actual nil (not the "__NULL__" marker) so
+    # select sees a present-null field — the present-null unexpected-keys defect.
+    @runsetflags.call(@spec['select']['nullkey'], { 'null' => false }, lambda { |vin|
+      VoxgigStruct.select(vin['obj'], vin['query'])
+    })
+  end
+
   # --- json-builder tests ---
 
   def test_json_builder

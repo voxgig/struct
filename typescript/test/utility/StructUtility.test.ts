@@ -774,6 +774,14 @@ describe('StructUtility', async () => {
     await runset(spec.select.alts, (vin: any) => struct.select(vin.obj, vin.query))
   })
 
+  test('select-nullkey', async () => {
+    // { null: false } keeps JSON null as an ACTUAL null (not the "__NULL__"
+    // marker) so select sees a present-null field — the case that exercises the
+    // Group-A/literal-presence unexpected-keys defect.
+    await runsetflags(spec.select.nullkey, { null: false },
+      (vin: any) => struct.select(vin.obj, vin.query))
+  })
+
   // JSON Builder
   // ============
 

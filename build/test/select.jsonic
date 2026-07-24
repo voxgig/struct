@@ -25,11 +25,6 @@ basic: {
     { in: { query: {}, obj: {a:{x:1}, b:{x:2}} },
       out: [{x:1,'$KEY':'a'}, {x:2,'$KEY':'b'}] }
 
-    # Empty query over records with a PRESENT-BUT-NULL field — the null must not
-    # drop `b` (design/SELECT_NULL_KEY_BACKPORT.md).
-    { in: { query: {}, obj: {a:{opt:'x'}, b:{opt:null}} },
-      out: [{opt:'x','$KEY':'a'}, {opt:null,'$KEY':'b'}] }
-    
     # Non-object input
     { in: { query: {x:1}, obj: 'hello' }, out: [] }
     { in: { query: {x:1}, obj: 42 }, out: [] }
@@ -100,14 +95,6 @@ operators: {
     # Empty `$AND` array (should match all)
     { in: { query: {'`$AND`':[]}, obj: {a:{x:1}, b:{x:2}} },
       out: [{x:1,'$KEY':'a'}, {x:2,'$KEY':'b'}] }
-
-    # Empty `$AND` over records with a PRESENT-BUT-NULL field: the null slot must
-    # not make the record's own key "unexpected" under the open match, so `b` is
-    # kept. Regression for design/SELECT_NULL_KEY_BACKPORT.md — value-based
-    # `haskey`/`_lookup == null` ports (go, python, ruby, php, clojure, zig,
-    # elixir) drop `b`; canonical uses literal presence (`NONE === _lookup`).
-    { in: { query: {'`$AND`':[]}, obj: {a:{opt:'x'}, b:{opt:null}} },
-      out: [{opt:'x','$KEY':'a'}, {opt:null,'$KEY':'b'}] }
 
     # Empty `$OR` array (should match none)
     { in: { query: {'`$OR`':[]}, obj: {a:{x:1}, b:{x:2}} },
@@ -452,5 +439,24 @@ alts: {
      { in: { query: {z:99}, obj: {a:{x:1},b:{x:2}} },
        out: [] }
 
+  ]
+}
+
+
+# select over records with a PRESENT-BUT-NULL field. Run by each port with the
+# runner's `null: false` flag, so the JSON `null` reaches select as an ACTUAL
+# null (not the "__NULL__" marker) — that is what exercises the present-null
+# defect. A value-based `haskey` / `_lookup == null` port drops `b` under the
+# open match; canonical keeps it (literal presence, `NONE === _lookup`).
+# See design/SELECT_NULL_KEY_BACKPORT.md.
+nullkey: {
+  set: [
+    # empty `$AND` open match — the null slot must not make `b`'s key unexpected
+    { in: { query: {'`$AND`':[]}, obj: {a:{opt:'x'}, b:{opt:null}} },
+      out: [{opt:'x','$KEY':'a'}, {opt:null,'$KEY':'b'}] }
+
+    # empty query open match
+    { in: { query: {}, obj: {a:{opt:'x'}, b:{opt:null}} },
+      out: [{opt:'x','$KEY':'a'}, {opt:null,'$KEY':'b'}] }
   ]
 }

@@ -580,6 +580,12 @@ const { equal, deepEqual } = node_assert_1.default;
     (0, node_test_1.test)('select-alts', async () => {
         await runset(spec.select.alts, (vin) => struct.select(vin.obj, vin.query));
     });
+    (0, node_test_1.test)('select-nullkey', async () => {
+        // { null: false } keeps JSON null as an ACTUAL null (not the "__NULL__"
+        // marker) so select sees a present-null field — the case that exercises the
+        // Group-A/literal-presence unexpected-keys defect.
+        await runsetflags(spec.select.nullkey, { null: false }, (vin) => struct.select(vin.obj, vin.query));
+    });
     // JSON Builder
     // ============
     (0, node_test_1.test)('json-builder', async () => {

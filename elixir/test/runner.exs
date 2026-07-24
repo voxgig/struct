@@ -677,6 +677,10 @@ defmodule Runner do
       run_set("select.#{gn}", S.getprop(selects, gn), arg1(fn vin -> S.select(vget(vin, "obj"), vget(vin, "query")) end))
     end)
 
+    # null:false keeps JSON null as an actual nil (not the "__NULL__" marker) so
+    # select sees a present-null field — the present-null unexpected-keys defect.
+    run_set("select.nullkey", S.getprop(selects, "nullkey"), arg1(fn vin -> S.select(vget(vin, "obj"), vget(vin, "query")) end), false)
+
     run_set("sentinels.getprop_unify", S.getprop(sentinels, "getprop_unify"), arg1(fn vin -> S.getprop(vget(vin, "val"), vget(vin, "key"), vget(vin, "alt")) end), false)
     run_set("sentinels.getelem_absent", S.getprop(sentinels, "getelem_absent"), arg1(fn vin -> S.getelem(vget(vin, "val"), vget(vin, "key"), vget(vin, "alt")) end), false)
     run_set("sentinels.haskey_unify", S.getprop(sentinels, "haskey_unify"), arg1(fn vin -> S.haskey(vget(vin, "val"), vget(vin, "key")) end), false)
