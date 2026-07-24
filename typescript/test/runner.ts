@@ -1,4 +1,4 @@
-// VERSION: @voxgig/struct 0.2.1
+// VERSION: @voxgig/struct 0.2.2
 // This test utility runs the JSON-specified tests in build/test/test.json.
 // (or .sdk/test/test.json if used in a @voxgig/sdkgen project)
 
