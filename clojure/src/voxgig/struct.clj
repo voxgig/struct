@@ -1534,7 +1534,14 @@
                   (.add ^List (ig inj :errs) (_invalidTypeMsg (ig inj :path) (typename ptype) ctype cval "V0020"))
                   (let [ckeys (keysof cval) pkeys (keysof pval)]
                     (if (and (> (count pkeys) 0) (not (true? (getprop pval "`$OPEN`"))))
-                      (let [badkeys (clojure.core/filter #(not (haskey pval %)) ckeys)]
+                      ;; Literal presence: the shape DECLARES the key even when
+                      ;; its value is nil. Canonical uses `NONE === _lookup`;
+                      ;; `haskey` is Group A (value-based) and would drop records
+                      ;; with a nil field from an open ($AND) select.
+                      (let [badkeys (clojure.core/filter
+                                     #(not (and (instance? Map pval)
+                                                (.containsKey ^Map pval (str %))))
+                                     ckeys)]
                         (when (> (size badkeys) 0)
                           (.add ^List (ig inj :errs)
                                 (str "Unexpected keys at field " (pathify (ig inj :path) 1) S-VIZ (join (alist-of badkeys) ", ")))))
