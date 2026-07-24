@@ -778,8 +778,9 @@ describe('StructUtility', async () => {
     // { null: false } keeps JSON null as an ACTUAL null (not the "__NULL__"
     // marker) so select sees a present-null field — the case that exercises the
     // Group-A/literal-presence unexpected-keys defect.
-    await runsetflags(spec.select.nullkey, { null: false },
-      (vin: any) => struct.select(vin.obj, vin.query))
+    await runsetflags(spec.select.nullkey, { null: false }, (vin: any) =>
+      struct.select(vin.obj, vin.query),
+    )
   })
 
   // JSON Builder
@@ -875,17 +876,14 @@ describe('StructUtility', async () => {
   })
 
   test('sentinels-isempty_unify', async () => {
-    const { isempty } = struct
     await runsetflags(spec.sentinels.isempty_unify, { null: false }, struct.isempty)
   })
 
   test('sentinels-isnode_unify', async () => {
-    const { isnode } = struct
     await runsetflags(spec.sentinels.isnode_unify, { null: false }, struct.isnode)
   })
 
   test('sentinels-stringify_null', async () => {
-    const { stringify } = struct
     await runsetflags(spec.sentinels.stringify_null, { null: false }, struct.stringify)
   })
 })

@@ -646,15 +646,12 @@ const { equal, deepEqual } = node_assert_1.default;
         await runsetflags(spec.sentinels.haskey_unify, { null: false }, (vin) => haskey(vin.val, vin.key));
     });
     (0, node_test_1.test)('sentinels-isempty_unify', async () => {
-        const { isempty } = struct;
         await runsetflags(spec.sentinels.isempty_unify, { null: false }, struct.isempty);
     });
     (0, node_test_1.test)('sentinels-isnode_unify', async () => {
-        const { isnode } = struct;
         await runsetflags(spec.sentinels.isnode_unify, { null: false }, struct.isnode);
     });
     (0, node_test_1.test)('sentinels-stringify_null', async () => {
-        const { stringify } = struct;
         await runsetflags(spec.sentinels.stringify_null, { null: false }, struct.stringify);
     });
 });
