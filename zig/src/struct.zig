@@ -3724,7 +3724,12 @@ fn validationModify(allocator: Allocator, _: JsonValue, key: []const u8, parent:
                 var bad = std.ArrayList([]const u8).init(allocator);
                 for (ckeys.array.data.items) |ck| {
                     if (ck != .string) continue;
-                    if (!((haskey(allocator, pval, ck) catch false))) {
+                    // Literal presence: the shape DECLARES ck even when its value
+                    // is JSON null. Canonical uses `NONE === _lookup`; haskey is
+                    // Group A (value-based) and would drop records with a null
+                    // field from an open ($AND) select. Test object key presence.
+                    const present = (pval == .object) and (pval.object.get(ck.string) != null);
+                    if (!present) {
                         bad.append(ck.string) catch {};
                     }
                 }

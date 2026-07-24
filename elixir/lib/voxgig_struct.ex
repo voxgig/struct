@@ -2366,7 +2366,15 @@ defmodule Voxgig.Struct do
                 pkeys = keysof(pval)
 
                 if pkeys != [] and getprop(pval, @s_bopen) != true do
-                  badkeys = Enum.filter(ckeys, fn ck -> lookup_(pval, ck) == nil end)
+                  # Literal presence: the shape DECLARES ck even when its value
+                  # is nil. Canonical uses `NONE === _lookup`; `lookup_` here
+                  # returns nil for BOTH absent and present-nil, so testing
+                  # `== nil` (Group A) would drop records with a nil field from
+                  # an open ($AND) select. Test omap key presence instead.
+                  badkeys =
+                    Enum.filter(ckeys, fn ck ->
+                      match?(:error, omap_get(map_pairs(pval), mapkey(ck)))
+                    end)
                   if badkeys != [], do: push_err(inj, "Unexpected keys at field " <> pathify(ig(inj, :path), 1) <> @s_viz <> Enum.join(badkeys, ", "))
                 else
                   merge(vlist_new([pval, cval]))

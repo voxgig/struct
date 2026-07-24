@@ -2894,9 +2894,17 @@ class Struct
 
             // Empty spec object {} means object can be open (any keys).
             if (0 < count($pkeys) && true !== self::_getprop($pval, '`$OPEN`')) {
+                // Literal presence: the shape DECLARES $ckey even when its value
+                // is null. Canonical uses `NONE === _lookup`; `haskey` is Group A
+                // (value-based) and would drop records with a null field from an
+                // open ($AND) select. Test key presence, mirroring getprop's
+                // array + object handling (a php map is either).
                 $badkeys = [];
                 foreach ($ckeys as $ckey) {
-                    if (!self::haskey($pval, $ckey)) {
+                    $k = (string) $ckey;
+                    $present = (is_array($pval) && array_key_exists($k, $pval))
+                        || (is_object($pval) && property_exists($pval, $k));
+                    if (!$present) {
                         $badkeys[] = $ckey;
                     }
                 }

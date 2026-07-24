@@ -1,8 +1,20 @@
 # Design Note: `select` drops records with a present-but-null field (open-match "unexpected keys")
 
-Status: **Proposed** — back-port required across ports
+Status: **Implemented** — all ports fixed on this branch (see audit below)
 Origin: field failure in the Voxgig SDK generator (bluefin fleet, Dart target)
 Scope: the `validate` "unexpected keys" check used by `select` under an open (`$AND`) shape
+
+> **Update.** All previously-buggy ports (go, python, ruby, php, clojure, zig,
+> elixir) **and the canonical dart port** are now fixed on
+> `fix/select-null-key-backport`, verified against the corpus (each port's
+> `make test` green; `tools/check_parity.py` green). Where a port's `_lookup`
+> collapses absent→null (python `UNDEF=None`, clojure/elixir/dart return nil),
+> the fix uses **native map-presence** (dict `in`, `Hash#key?`, `array_key_exists`
+> + `property_exists`, `map[key]` comma-ok, `.containsKey`, omap `:error`,
+> object `.get() != null`) — semantically identical to canonical `NONE ===
+> _lookup` for the map branch that reaches this check. Correction to the earlier
+> roll-out note: **no port reads `test-baseline.json` as its corpus** — every
+> port loads `build/test/test.json`, so no baseline regeneration is needed.
 
 ---
 
