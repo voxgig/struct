@@ -267,6 +267,37 @@ if (Voxgig::Struct::ismap($struct_spec->{getpath})) {
 }
 
 # Sentinels — null / undefined unification across the readers.
+# regex (parity floor: Go stdlib regexp -- see design/REGEX_API.md)
+if (Voxgig::Struct::ismap($struct_spec->{regex})) {
+    my $rx = $struct_spec->{regex};
+    runset('regex.test', $rx->{test}{set},
+           sub {
+               my $in = $_[0];
+               Voxgig::Struct::re_test($in->{pattern}, $in->{input})
+                   ? Voxgig::Struct::JTRUE() : Voxgig::Struct::JFALSE();
+           });
+    runset('regex.find', $rx->{find}{set},
+           sub {
+               my $in = $_[0];
+               Voxgig::Struct::re_find($in->{pattern}, $in->{input});
+           });
+    runset('regex.find_all', $rx->{find_all}{set},
+           sub {
+               my $in = $_[0];
+               Voxgig::Struct::re_find_all($in->{pattern}, $in->{input});
+           });
+    runset('regex.replace', $rx->{replace}{set},
+           sub {
+               my $in = $_[0];
+               Voxgig::Struct::re_replace($in->{pattern}, $in->{input}, $in->{replacement});
+           });
+    runset('regex.escape', $rx->{escape}{set},
+           sub {
+               my $in = $_[0];
+               Voxgig::Struct::re_escape($in->{val});
+           });
+}
+
 if (Voxgig::Struct::ismap($struct_spec->{sentinels})) {
     my $sn = $struct_spec->{sentinels};
     runset('sentinels.getprop_unify', $sn->{getprop_unify}{set},

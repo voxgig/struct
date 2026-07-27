@@ -90,7 +90,8 @@ Names are the canonical names, lower-smushed or camelCased:
 - **Strings:** `stringify`, `jsonify`, `escre`, `escurl`, `join`, `joinurl`,
   `pad`, `strkey`, `getdef`
 - **Regex:** `reCompile`, `reFind`, `reFindAll`, `reReplace`, `reTest`,
-  `reEscape` (backed by the in-tree `Vregex` RE2-subset engine)
+  `reEscape` (backed by the in-tree `Vregex` RE2-subset engine with capture
+  tracking, at the Go-stdlib minimum of `design/REGEX_API.md`)
 - **Builders:** `jm` (map from alternating key/value list), `jt` (list)
 - **Injection internals (canonical):** `checkPlacement`, `injectorArgs`,
   `injectChild`
@@ -118,7 +119,7 @@ prints as `"1.1"`, not `"1.100000"`.
 ## Testing
 
 ```
-make test    # lake build + run ../build/test/test.json (1329 cases)
+make test    # lake build + run ../build/test/test.json (1360 cases)
 make lint    # clean, warnings-free compile = pass
 ```
 

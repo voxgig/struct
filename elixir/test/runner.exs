@@ -512,6 +512,7 @@ defmodule Runner do
     validates = g.("validate")
     selects = g.("select")
     sentinels = g.("sentinels")
+    regexs = g.("regex")
     mg = fn n -> S.getprop(minor, n) end
 
     run_set("minor.isnode", mg.("isnode"), arg1(fn v -> S.isnode(v) end))
@@ -680,6 +681,13 @@ defmodule Runner do
     # null:false keeps JSON null as an actual nil (not the "__NULL__" marker) so
     # select sees a present-null field — the present-null unexpected-keys defect.
     run_set("select.nullkey", S.getprop(selects, "nullkey"), arg1(fn vin -> S.select(vget(vin, "obj"), vget(vin, "query")) end), false)
+
+    # regex (parity floor: Go stdlib regexp -- see design/REGEX_API.md)
+    run_set("regex.test", S.getprop(regexs, "test"), arg1(fn vin -> S.re_test(vget(vin, "pattern"), vget(vin, "input")) end))
+    run_set("regex.find", S.getprop(regexs, "find"), arg1(fn vin -> S.re_find(vget(vin, "pattern"), vget(vin, "input")) end))
+    run_set("regex.find_all", S.getprop(regexs, "find_all"), arg1(fn vin -> S.re_find_all(vget(vin, "pattern"), vget(vin, "input")) end))
+    run_set("regex.replace", S.getprop(regexs, "replace"), arg1(fn vin -> S.re_replace(vget(vin, "pattern"), vget(vin, "input"), vget(vin, "replacement")) end))
+    run_set("regex.escape", S.getprop(regexs, "escape"), arg1(fn vin -> S.re_escape(vget(vin, "val")) end))
 
     run_set("sentinels.getprop_unify", S.getprop(sentinels, "getprop_unify"), arg1(fn vin -> S.getprop(vget(vin, "val"), vget(vin, "key"), vget(vin, "alt")) end), false)
     run_set("sentinels.getelem_absent", S.getprop(sentinels, "getelem_absent"), arg1(fn vin -> S.getelem(vget(vin, "val"), vget(vin, "key"), vget(vin, "alt")) end), false)

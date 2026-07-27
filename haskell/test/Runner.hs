@@ -363,6 +363,7 @@ runAll c spec = do
   minor <- g "minor"; walks <- g "walk"; merges <- g "merge"
   getpaths <- g "getpath"; injects <- g "inject"; transforms <- g "transform"
   validates <- g "validate"; selects <- g "select"; sentinels <- g "sentinels"
+  regexs <- g "regex"
   let mg k = getpropRaw minor k
       rs group nd subj fl = do n <- nd; runSet c group n subj fl
       rsT group nd subj = rs group nd subj True
@@ -473,6 +474,13 @@ runAll c spec = do
 
   forM_ ["basic", "operators", "edge", "alts"] $ \gn ->
     rsT ("select." ++ gn) (getpropRaw selects gn) (arg1 (\vin -> do obj <- vget vin "obj"; qry <- vget vin "query"; select obj qry))
+
+  -- regex (parity floor: Go stdlib regexp — see design/REGEX_API.md)
+  rsT "regex.test" (getpropRaw regexs "test") (arg1 (\vin -> do p <- vget vin "pattern"; i <- vget vin "input"; re_test p i))
+  rsT "regex.find" (getpropRaw regexs "find") (arg1 (\vin -> do p <- vget vin "pattern"; i <- vget vin "input"; re_find p i))
+  rsT "regex.find_all" (getpropRaw regexs "find_all") (arg1 (\vin -> do p <- vget vin "pattern"; i <- vget vin "input"; re_find_all p i))
+  rsT "regex.replace" (getpropRaw regexs "replace") (arg1 (\vin -> do p <- vget vin "pattern"; i <- vget vin "input"; r <- vget vin "replacement"; re_replace p i r))
+  rsT "regex.escape" (getpropRaw regexs "escape") (arg1 (\vin -> do v <- vget vin "val"; re_escape v))
 
   rsF "sentinels.getprop_unify" (getpropRaw sentinels "getprop_unify") (arg1 (\vin -> do alt <- vget vin "alt"; val <- vget vin "val"; key <- vget vin "key"; getpropAlt alt val key))
   rsF "sentinels.getelem_absent" (getpropRaw sentinels "getelem_absent") (arg1 (\vin -> do alt <- vget vin "alt"; val <- vget vin "val"; key <- vget vin "key"; getelemAlt alt val key))

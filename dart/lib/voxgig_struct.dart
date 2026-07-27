@@ -487,7 +487,17 @@ dynamic re_replace(dynamic p, dynamic input, dynamic repl) {
       return (repl(groups)).toString();
     });
   }
-  return s;
+  // String replacement with JS-style refs: $& (whole), $1..$9, $$ (literal $).
+  var template = repl is String ? repl : jsString(repl);
+  return s.replaceAllMapped(_rx(p), (m) {
+    return template.replaceAllMapped(RegExp(r'\$(\$|&|[1-9])'), (t) {
+      var ref = t.group(1)!;
+      if (ref == r'$') return r'$';
+      if (ref == '&') return m.group(0) ?? '';
+      var gi = int.parse(ref);
+      return gi <= m.groupCount ? (m.group(gi) ?? '') : '';
+    });
+  });
 }
 
 dynamic re_escape(dynamic s) => escre(s);

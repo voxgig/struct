@@ -636,6 +636,24 @@ def runAll (spec : Value) : SIO Unit := do
     runSet ("select." ++ gn) (← getpropRawPub selects gn)
       (arg1 (fun vin => do select (← vget vin "obj") (← vget vin "query")))
 
+  -- regex (parity floor: Go stdlib regexp — see design/REGEX_API.md)
+  let regexs ← g "regex"
+  runSet "regex.test" (← getpropRawPub regexs "test")
+    (arg1 (fun vin => do
+      reTest (← vget vin "pattern") (← vget vin "input")))
+  runSet "regex.find" (← getpropRawPub regexs "find")
+    (arg1 (fun vin => do
+      reFind (← vget vin "pattern") (← vget vin "input")))
+  runSet "regex.find_all" (← getpropRawPub regexs "find_all")
+    (arg1 (fun vin => do
+      reFindAll (← vget vin "pattern") (← vget vin "input")))
+  runSet "regex.replace" (← getpropRawPub regexs "replace")
+    (arg1 (fun vin => do
+      reReplace (← vget vin "pattern") (← vget vin "input") (← vget vin "replacement")))
+  runSet "regex.escape" (← getpropRawPub regexs "escape")
+    (arg1 (fun vin => do
+      reEscape (← vget vin "val")))
+
   -- sentinels
   runSet "sentinels.getprop_unify" (← getpropRawPub sentinels "getprop_unify")
     (arg1 (fun vin => do

@@ -33,6 +33,7 @@ const std::map<std::string, std::string>& category_to_file() {
       {"merge", "merge.jsonic"},       {"getpath", "getpath.jsonic"},
       {"inject", "inject.jsonic"},     {"transform", "transform.jsonic"},
       {"validate", "validate.jsonic"}, {"select", "select.jsonic"},
+      {"regex", "regex.jsonic"},
   };
   return M;
 }
@@ -425,6 +426,35 @@ int main() {
     for (const auto& v : select(getp(in, "obj"), getp(in, "query")))
       out->push_back(v);
     return Value(out);
+  });
+
+  // ===== regex (parity floor: Go stdlib regexp; REGEX_API.md) =====
+  auto rxs = [](const Value& v) { return v.is_string() ? v.as_string() : std::string(); };
+  run("regex", "test", true, [&](const Value& in) {
+    return Value(re_test(rxs(getp(in, "pattern")), rxs(getp(in, "input"))));
+  });
+  run("regex", "find", true, [&](const Value& in) {
+    auto m = re_find(rxs(getp(in, "pattern")), rxs(getp(in, "input")));
+    if (m.empty()) return Value(nullptr);
+    auto out = std::make_shared<List>();
+    for (const auto& g : m) out->push_back(Value(g));
+    return Value(out);
+  });
+  run("regex", "find_all", true, [&](const Value& in) {
+    auto out = std::make_shared<List>();
+    for (const auto& m : re_find_all(rxs(getp(in, "pattern")), rxs(getp(in, "input")))) {
+      auto row = std::make_shared<List>();
+      for (const auto& g : m) row->push_back(Value(g));
+      out->push_back(Value(row));
+    }
+    return Value(out);
+  });
+  run("regex", "replace", true, [&](const Value& in) {
+    return Value(re_replace(rxs(getp(in, "pattern")), rxs(getp(in, "input")),
+                            rxs(getp(in, "replacement"))));
+  });
+  run("regex", "escape", true, [&](const Value& in) {
+    return Value(re_escape(rxs(getp(in, "val"))));
   });
 
   // Aggregate per-file scoreboard.

@@ -841,8 +841,8 @@ pub fn re_find_all(allocator: Allocator, pattern: []const u8, input: []const u8)
 }
 
 /// re_replace — replace every match in `input` with `replacement`. The
-/// replacement string is taken literally; $& / $1.. substitution is not
-/// expanded in this minimal wrapper (matches the engine's current shape).
+/// replacement string supports JS-style refs: $& (whole match), $1..$9
+/// (captures) and $$ (a literal $); anything else is copied verbatim.
 /// On zero-width match the current rune is emitted and we advance by one
 /// byte, mirroring the ECMAScript convention used by other ports.
 pub fn re_replace(allocator: Allocator, pattern: []const u8, input: []const u8, replacement: []const u8) ![]u8 {
@@ -862,7 +862,31 @@ pub fn re_replace(allocator: Allocator, pattern: []const u8, input: []const u8, 
         const mstart = @as(usize, @intCast(slots[0]));
         const mend = @as(usize, @intCast(slots[1]));
         try out.appendSlice(input[pos..mstart]);
-        try out.appendSlice(replacement);
+        var ri: usize = 0;
+        while (ri < replacement.len) {
+            const ch = replacement[ri];
+            if (ch == '$' and ri + 1 < replacement.len) {
+                const nc = replacement[ri + 1];
+                if (nc == '$') {
+                    try out.append('$');
+                    ri += 2;
+                    continue;
+                } else if (nc == '&' or (nc >= '0' and nc <= '9')) {
+                    const gi: usize = if (nc == '&') 0 else @as(usize, nc - '0');
+                    if (gi < re.ngroups) {
+                        const gs = slots[2 * gi];
+                        const ge = slots[2 * gi + 1];
+                        if (gs >= 0 and ge >= gs) {
+                            try out.appendSlice(input[@as(usize, @intCast(gs))..@as(usize, @intCast(ge))]);
+                        }
+                    }
+                    ri += 2;
+                    continue;
+                }
+            }
+            try out.append(ch);
+            ri += 1;
+        }
         if (mend == mstart) {
             if (mstart < input.len) {
                 try out.append(input[mstart]);

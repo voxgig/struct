@@ -455,7 +455,12 @@ object struct {
     }
     VList(out)
   }
-  def re_replace(p: Value, input: Value, repl: Value): Value = input
+  def re_replace(p: Value, input: Value, repl: Value): Value = {
+    // String replacement with JS-style refs: translate $& to Java's $0;
+    // $1..$9 are native java.util.regex syntax.
+    val jrepl = reStr(repl).replace("$&", "$0")
+    VStr(java.util.regex.Pattern.compile(reStr(p)).matcher(reStr(input)).replaceAll(jrepl))
+  }
   def re_escape(s: Value): Value = escre(s)
 
   def escre(s: Value): Value = {

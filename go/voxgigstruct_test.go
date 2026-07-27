@@ -44,6 +44,7 @@ func TestStruct(t *testing.T) {
 	var validateSpec = spec["validate"].(map[string]any)
 	var selectSpec = spec["select"].(map[string]any)
 	var sentinelsSpec = spec["sentinels"].(map[string]any)
+	var regexSpec = spec["regex"].(map[string]any)
 
 	// minor tests
 	// ===========
@@ -578,6 +579,60 @@ func TestStruct(t *testing.T) {
 		if tFunc != expected2 {
 			t.Errorf("Typify(func): Expected: %v, Got: %v", expected2, tFunc)
 		}
+	})
+
+	// regex tests (parity floor: Go stdlib regexp — see design/REGEX_API.md)
+	// =====================================================================
+
+	t.Run("regex-test", func(t *testing.T) {
+		runset(t, regexSpec["test"], func(v any) any {
+			m := v.(map[string]any)
+			return voxgigstruct.ReTest(m["pattern"].(string), m["input"].(string))
+		})
+	})
+
+	t.Run("regex-find", func(t *testing.T) {
+		runset(t, regexSpec["find"], func(v any) any {
+			m := v.(map[string]any)
+			found := voxgigstruct.ReFind(m["pattern"].(string), m["input"].(string))
+			if found == nil {
+				return nil
+			}
+			out := make([]any, len(found))
+			for i, g := range found {
+				out[i] = g
+			}
+			return out
+		})
+	})
+
+	t.Run("regex-find_all", func(t *testing.T) {
+		runset(t, regexSpec["find_all"], func(v any) any {
+			m := v.(map[string]any)
+			out := []any{}
+			for _, match := range voxgigstruct.ReFindAll(m["pattern"].(string), m["input"].(string)) {
+				row := make([]any, len(match))
+				for i, g := range match {
+					row[i] = g
+				}
+				out = append(out, row)
+			}
+			return out
+		})
+	})
+
+	t.Run("regex-replace", func(t *testing.T) {
+		runset(t, regexSpec["replace"], func(v any) any {
+			m := v.(map[string]any)
+			return voxgigstruct.ReReplace(m["pattern"].(string), m["input"].(string), m["replacement"].(string))
+		})
+	})
+
+	t.Run("regex-escape", func(t *testing.T) {
+		runset(t, regexSpec["escape"], func(v any) any {
+			m := v.(map[string]any)
+			return voxgigstruct.ReEscape(m["val"].(string))
+		})
 	})
 
 	// sentinels tests

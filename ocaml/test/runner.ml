@@ -407,6 +407,19 @@ let rec run_all spec =
         (arg1 (fun vin -> select (vget vin "obj") (vget vin "query"))))
     ["basic"; "operators"; "edge"; "alts"];
 
+  (* regex (parity floor: Go stdlib regexp — see design/REGEX_API.md) *)
+  let regexs = g "regex" in
+  run_set "regex.test" (getprop_raw_pub regexs "test")
+    (arg1 (fun vin -> re_test (vget vin "pattern") (vget vin "input")));
+  run_set "regex.find" (getprop_raw_pub regexs "find")
+    (arg1 (fun vin -> re_find (vget vin "pattern") (vget vin "input")));
+  run_set "regex.find_all" (getprop_raw_pub regexs "find_all")
+    (arg1 (fun vin -> re_find_all (vget vin "pattern") (vget vin "input")));
+  run_set "regex.replace" (getprop_raw_pub regexs "replace")
+    (arg1 (fun vin -> re_replace (vget vin "pattern") (vget vin "input") (vget vin "replacement")));
+  run_set "regex.escape" (getprop_raw_pub regexs "escape")
+    (arg1 (fun vin -> re_escape (vget vin "val")));
+
   (* sentinels *)
   run_set "sentinels.getprop_unify" ~flags:["null", false] (getprop_raw_pub sentinels "getprop_unify")
     (arg1 (fun vin -> getprop ~alt:(vget vin "alt") (vget vin "val") (vget vin "key")));

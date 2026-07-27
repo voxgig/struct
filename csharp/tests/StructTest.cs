@@ -309,6 +309,65 @@ public class StructTests
 
 
     // ========================================================================
+    // Regex — parity floor: Go stdlib regexp (design/REGEX_API.md).
+
+    private Dictionary<string, object?> RegexSpec =>
+        _spec["regex"] as Dictionary<string, object?> ?? [];
+
+    private static string RStr(object? input, string key)
+    {
+        var m = input as Dictionary<string, object?>;
+        return m != null && m.TryGetValue(key, out object? v) && v is string s ? s : "";
+    }
+
+    [Fact]
+    public void RegexTest()
+    {
+        Runner.RunSet(RegexSpec["test"],
+            input => StructUtils.ReTest(RStr(input, "pattern"), RStr(input, "input")));
+    }
+
+    [Fact]
+    public void RegexFind()
+    {
+        Runner.RunSet(RegexSpec["find"],
+            input =>
+            {
+                var found = StructUtils.ReFind(RStr(input, "pattern"), RStr(input, "input"));
+                return found == null ? null : new List<object?>(found);
+            });
+    }
+
+    [Fact]
+    public void RegexFindAll()
+    {
+        Runner.RunSet(RegexSpec["find_all"],
+            input =>
+            {
+                var outList = new List<object?>();
+                foreach (var row in StructUtils.ReFindAll(RStr(input, "pattern"), RStr(input, "input")))
+                {
+                    outList.Add(new List<object?>(row));
+                }
+                return outList;
+            });
+    }
+
+    [Fact]
+    public void RegexReplace()
+    {
+        Runner.RunSet(RegexSpec["replace"],
+            input => StructUtils.ReReplace(
+                RStr(input, "pattern"), RStr(input, "input"), RStr(input, "replacement")));
+    }
+
+    [Fact]
+    public void RegexEscape()
+    {
+        Runner.RunSet(RegexSpec["escape"],
+            input => StructUtils.ReEscape(RStr(input, "val")));
+    }
+
     // Sentinels — null / undefined unification across the readers.
     // (Group A: a stored JSON null counts as "no value".)
     // ========================================================================

@@ -11,14 +11,15 @@ JSON `null` as distinct values.
 
 ```
 cd lean
-make test    # lake build + runs build/test/test.json (expect 1329/1329)
+make test    # lake build + runs build/test/test.json (expect 1360/1360)
 make lint    # type-checks the library (a clean, warnings-free compile = pass)
 ```
 
 Requires only the Lean 4 toolchain via elan (`lean-toolchain` pins the
 version; `lake` auto-fetches it). **Zero third-party dependencies** — no
 lake `require` lines, ever. The test runner has an in-tree JSON reader, and
-regex is the in-tree `src/Vregex.lean` engine.
+regex is the in-tree `src/Vregex.lean` engine (captures tracked; the corpus
+`regex` group holds it to the Go-stdlib floor of `design/REGEX_API.md`).
 
 ## The value model
 

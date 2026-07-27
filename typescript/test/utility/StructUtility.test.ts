@@ -854,6 +854,40 @@ describe('StructUtility', async () => {
   // Group A conformance — null and absent unified on observation.
   // ============================================================
 
+  // regex (parity floor: Go stdlib regexp — see design/REGEX_API.md)
+
+  test('regex-test', async () => {
+    const { re_test } = struct
+    await runset(spec.regex.test, (vin: any) => re_test(vin.pattern, vin.input))
+  })
+
+  test('regex-find', async () => {
+    const { re_find } = struct
+    await runset(spec.regex.find, (vin: any) => {
+      const m = re_find(vin.pattern, vin.input)
+      return m ? Array.from(m) : null
+    })
+  })
+
+  test('regex-find_all', async () => {
+    const { re_find_all } = struct
+    await runset(spec.regex.find_all, (vin: any) =>
+      re_find_all(vin.pattern, vin.input).map((m: any) => Array.from(m)),
+    )
+  })
+
+  test('regex-replace', async () => {
+    const { re_replace } = struct
+    await runset(spec.regex.replace, (vin: any) =>
+      re_replace(vin.pattern, vin.input, vin.replacement),
+    )
+  })
+
+  test('regex-escape', async () => {
+    const { re_escape } = struct
+    await runset(spec.regex.escape, (vin: any) => re_escape(vin.val))
+  })
+
   test('sentinels-getprop_unify', async () => {
     const { getprop } = struct
     await runsetflags(spec.sentinels.getprop_unify, { null: false }, (vin: any) =>

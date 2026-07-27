@@ -901,15 +901,21 @@ def reStr (p : Value) : SIO String := do
   | _ => jsString p
 
 partial def reFind (p input : Value) : SIO Value := do
-  let ps ← reStr p
-  let is ← reStr input
-  match Vregex.findBounds (Vregex.compile ps) is with
-  | some (s, e) => newList #[.str (strSub is s e)]
+  let re := Vregex.compile (← reStr p)
+  match Vregex.find re (← reStr input) with
+  | some groups => newList (groups.map (fun g => Value.str g)).toArray
   | none => pure .null
 
-partial def reFindAll (_p _input : Value) : SIO Value := emptyList
+partial def reFindAll (p input : Value) : SIO Value := do
+  let re := Vregex.compile (← reStr p)
+  let mut out : Array Value := #[]
+  for m in Vregex.findAll re (← reStr input) do
+    out := out.push (← newList (m.map (fun g => Value.str g)).toArray)
+  newList out
 
-partial def reReplace (_p : Value) (input : Value) (_r : Value) : SIO Value := pure input
+partial def reReplace (p input r : Value) : SIO Value := do
+  let re := Vregex.compile (← reStr p)
+  pure (.str (Vregex.replaceAll re (← reStr input) (← reStr r)))
 
 partial def reTest (p input : Value) : SIO Value := do
   return .bool (Vregex.testStr (← reStr p) (← reStr input))

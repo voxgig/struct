@@ -5,6 +5,29 @@
 > code uses these helpers instead of the host language's native regex
 > machinery. That way the canonical TS source and every port read the same.
 
+## Minimum functionality: the Go standard library
+
+**Decision.** The Go port's stdlib `regexp` (RE2) behaviour is the **minimum
+regexp functionality every port must provide** for the six `re_*` functions:
+
+- `re_find` returns `[whole, capture1, ...]` (Go `FindStringSubmatch`), or
+  null/none when there is no match;
+- `re_find_all` returns every non-overlapping match left-to-right, each in
+  the same shape (Go `FindAllStringSubmatch`);
+- `re_replace` replaces every match and expands `$1`..`$9` capture
+  references in string replacements (Go `ReplaceAllString`);
+- `re_test` and `re_escape` behave as Go `MatchString` / the shared `escre`.
+
+The corpus group `build/test/regex.jsonic` enforces this floor in every
+port's test runner; its expected values were generated with Go and
+cross-checked against the canonical TS. Ports may exceed the floor (native
+engines usually do), but may not fall below it.
+
+**Portable replacement references.** Cross-engine replacement templates must
+use only `$1`..`$9` and literal text: `$&` (JS whole-match) is written `$0`
+by Go and is not portable, so the corpus does not use it — ports should
+still support `$&` where their backend allows, as the canonical TS does.
+
 ## The API
 
 The library needs five operations on regex. Every port exposes them at the

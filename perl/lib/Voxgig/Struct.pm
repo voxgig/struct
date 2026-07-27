@@ -2888,8 +2888,22 @@ sub re_replace {
         }ge;
         return $s;
     }
+    # String replacement: expand $& and $1..$9 (JS-style; $$ is a literal $).
     my $s = $input;
-    $s =~ s/$re/$replacement/g;
+    $s =~ s{$re}{
+        my $whole = substr($input, $-[0], $+[0] - $-[0]);
+        my @caps;
+        for (my $i = 1; $i < scalar @-; $i++) {
+            push @caps, defined $-[$i]
+                ? substr($input, $-[$i], $+[$i] - $-[$i])
+                : '';
+        }
+        my $r = $replacement;
+        $r =~ s/\$(\$|&|[1-9])/
+            '$' eq $1 ? '$' : '&' eq $1 ? $whole : ($caps[$1 - 1] \/\/ '')
+        /ge;
+        $r;
+    }ge;
     return $s;
 }
 

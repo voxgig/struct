@@ -33,6 +33,7 @@ class StructCorpusTest {
                 "validate" to "validate.jsonic",
                 "select" to "select.jsonic",
                 "sentinels" to "sentinels.jsonic",
+                "regex" to "regex.jsonic",
             )
 
         @JvmStatic
@@ -315,6 +316,13 @@ class StructCorpusTest {
         add(tests, "select", "operators", true) { Struct.select(getp(it, "obj"), getp(it, "query")) }
         add(tests, "select", "edge", true) { Struct.select(getp(it, "obj"), getp(it, "query")) }
         add(tests, "select", "alts", true) { Struct.select(getp(it, "obj"), getp(it, "query")) }
+
+        // ===== regex (parity floor: Go stdlib regexp; REGEX_API.md) =====
+        add(tests, "regex", "test", true) { Struct.reTest(getp(it, "pattern") as String, getp(it, "input") as String) }
+        add(tests, "regex", "find", true) { Struct.reFind(getp(it, "pattern") as String, getp(it, "input") as String) }
+        add(tests, "regex", "find_all", true) { Struct.reFindAll(getp(it, "pattern") as String, getp(it, "input") as String) }
+        add(tests, "regex", "replace", true) { Struct.reReplace(getp(it, "pattern") as String, getp(it, "input") as String, getp(it, "replacement") as String) }
+        add(tests, "regex", "escape", true) { Struct.reEscape(getp(it, "val") as String) }
 
         // ===== sentinels =====
         // Group A null-unification + null-aware scalar behaviour. All run with

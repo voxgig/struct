@@ -13,6 +13,7 @@ struct: walk: @"walk.jsonic"
 struct: validate: @"validate.jsonic"
 struct: select: @"select.jsonic"
 struct: sentinels: @"sentinels.jsonic"
+struct: regex: @"regex.jsonic"
 
 primary: check: {
   DEF: {

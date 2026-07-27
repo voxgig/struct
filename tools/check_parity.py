@@ -38,16 +38,9 @@ PARTIAL_PORTS: list[str] = []
 
 # Accepted, documented divergences (normalised name keys).  Anything NOT listed
 # here is treated as a parity gap and fails the check; this list should only
-# shrink.
-#
-# zig: the regex helper module exports `re_compile`/`re_test`/`re_escape` but
-#   not the canonical `re_find`/`re_find_all`/`re_replace` (the in-tree NFA
-#   engine has the primitives, no top-level wrapper has been wired). Track
-#   them as known gaps so the parity check can still fail on *new* gaps;
-#   this list should only shrink.
-KNOWN_GAPS: dict[str, set[str]] = {
-    "zig": {"refind", "refindall", "rereplace"},
-}
+# shrink.  (zig's former re_find/re_find_all/re_replace gaps were filled when
+# the Go-stdlib regex floor landed — see design/REGEX_API.md.)
+KNOWN_GAPS: dict[str, set[str]] = {}
 
 # Source files per port (implementation only — not tests).
 SOURCES = {

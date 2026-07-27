@@ -186,7 +186,10 @@ markdownlint, plus each language's linters).
 - **Ordered maps.** Map key order must match insertion order (TS object
   semantics). Languages without an ordered-map stdlib type hand-roll one
   in-tree (see `REPORT.md`); never swap in an unordered map.
-- **Regex.** Patterns must stay inside the **RE2 subset**
+- **Regex.** The Go stdlib `regexp` behaviour is the minimum `re_*`
+  functionality for every port (find with captures, find_all, replace with
+  `$1`..`$9` expansion) — enforced by the corpus `regex` group; see
+  [`REGEX_API.md`](design/REGEX_API.md). Patterns must stay inside the **RE2 subset**
   ([`REGEX.md`](design/REGEX.md)); the uniform six-function API is in
   [`REGEX_API.md`](design/REGEX_API.md). `python3 tools/check_corpus_regex.py`
   enforces the corpus stays in-subset. Backtracking-engine ports

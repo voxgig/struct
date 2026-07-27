@@ -587,6 +587,41 @@ fn corpus() {
         )
     });
 
+    // -------- regex (parity floor: Go stdlib regexp; REGEX_API.md) ----
+    run.run_set(&set!("regex", "test"), true, "regex-test", |vin| {
+        let p = as_str_opt(&vget(&vin, "pattern")).unwrap_or_default();
+        let i = as_str_opt(&vget(&vin, "input")).unwrap_or_default();
+        Value::Bool(re_test(&p, &i))
+    });
+    run.run_set(&set!("regex", "find"), true, "regex-find", |vin| {
+        let p = as_str_opt(&vget(&vin, "pattern")).unwrap_or_default();
+        let i = as_str_opt(&vget(&vin, "input")).unwrap_or_default();
+        match re_find(&p, &i) {
+            Some(groups) => Value::list(groups.into_iter().map(Value::Str).collect()),
+            None => Value::Null,
+        }
+    });
+    run.run_set(&set!("regex", "find_all"), true, "regex-find_all", |vin| {
+        let p = as_str_opt(&vget(&vin, "pattern")).unwrap_or_default();
+        let i = as_str_opt(&vget(&vin, "input")).unwrap_or_default();
+        Value::list(
+            re_find_all(&p, &i)
+                .into_iter()
+                .map(|m| Value::list(m.into_iter().map(Value::Str).collect()))
+                .collect(),
+        )
+    });
+    run.run_set(&set!("regex", "replace"), true, "regex-replace", |vin| {
+        let p = as_str_opt(&vget(&vin, "pattern")).unwrap_or_default();
+        let i = as_str_opt(&vget(&vin, "input")).unwrap_or_default();
+        let r = as_str_opt(&vget(&vin, "replacement")).unwrap_or_default();
+        Value::Str(re_replace(&p, &i, &r))
+    });
+    run.run_set(&set!("regex", "escape"), true, "regex-escape", |vin| {
+        let v = as_str_opt(&vget(&vin, "val")).unwrap_or_default();
+        Value::Str(re_escape(&v))
+    });
+
     // -------- sentinels (Group A null-unification; UNDEF_SPEC.md) ----
     // null_flag is false so a literal JSON null survives into the subject
     // (these tests exercise getprop/getelem/haskey/isempty/isnode/stringify
