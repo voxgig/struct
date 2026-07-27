@@ -1,0 +1,16 @@
+name = "voxgig-struct"
+version = "0.1.0"
+defaultTargets = ["VoxgigStruct", "runner"]
+
+[[lean_lib]]
+name = "Vregex"
+srcDir = "src"
+
+[[lean_lib]]
+name = "VoxgigStruct"
+srcDir = "src"
+
+[[lean_exe]]
+name = "runner"
+srcDir = "test"
+root = "Runner"

@@ -63,6 +63,7 @@ NFA engine in-tree (c/cpp/lua/rust/zig).
 | **dart** | 48 | 15 | 2 | 1329/1329 corpus | full TS-canonical parity |
 | **elixir** | 48 | 15 | 2 | 1329/1329 corpus | full TS-canonical parity |
 | **haskell** | 48 | 15 | 2 | 1329/1329 corpus | full TS-canonical parity |
+| **lean** | 48 | 15 | 2 | 1329/1329 corpus | full TS-canonical parity |
 | **aql** | 48 | 15 | 2 | 1329/1329 corpus | full TS-canonical parity |
 
 \*1 Zig: previously reported "60/60 passing with a SIGSEGV" was

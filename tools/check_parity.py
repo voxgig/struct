@@ -32,7 +32,7 @@ ROOT = Path(__file__).resolve().parent.parent
 COMPLETE_PORTS = [
     "javascript", "python", "go", "php", "ruby", "lua",
     "rust", "c", "zig", "csharp", "perl", "cpp", "swift", "clojure", "ocaml", "scala",
-    "java", "kotlin", "dart", "elixir", "haskell", "aql",
+    "java", "kotlin", "dart", "elixir", "haskell", "lean", "aql",
 ]
 PARTIAL_PORTS: list[str] = []
 
@@ -83,6 +83,7 @@ SOURCES = {
     "dart": ["dart/lib/voxgig_struct.dart"],
     "elixir": ["elixir/lib/voxgig_struct.ex"],
     "haskell": ["haskell/src/VoxgigStruct.hs"],
+    "lean": ["lean/src/VoxgigStruct.lean", "lean/src/Vregex.lean"],
     "aql": ["aql/src/struct.aql"],
     "swift": [
         "swift/Sources/VoxgigStruct/Value.swift",
@@ -146,6 +147,9 @@ _CLJ_DEFN_DECL = re.compile(r"\(defn?-?\s+([A-Za-z_][A-Za-z0-9_*+!?<>=-]*)", re.
 _OCAML_DECL = re.compile(r"^\s*(?:let\s+(?:rec\s+)?|and\s+)([A-Za-z_][A-Za-z0-9_']*)", re.M)
 # Scala `def NAME` method definitions. Canonical names are lower-smushed /
 # camelCased (getpath, ismap, re_find, checkPlacement), matched by norm().
+# Lean 4 `def NAME` / `partial def NAME` definitions have the same shape, so
+# the lean port reuses this pattern (names are lower-smushed / camelCased:
+# getpath, ismap, reFindAll, checkPlacement).
 _SCALA_DECL = re.compile(r"\bdef\s+([A-Za-z_][A-Za-z0-9_]*)", re.M)
 
 # Haskell top-level type signatures: `name :: ...` at column 0. Every public
@@ -181,7 +185,7 @@ def defined_keys(port: str) -> set[str]:
         if port == "ocaml":
             for ident in _OCAML_DECL.findall(text):
                 keys.add(norm(ident))
-        if port == "scala":
+        if port in ("scala", "lean"):
             for ident in _SCALA_DECL.findall(text):
                 keys.add(norm(ident))
         if port == "haskell":
