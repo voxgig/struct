@@ -251,7 +251,12 @@ def callModify (mid : Nat) (v key parent : Value) (inj : InjId) : SIO Unit := do
 def M_KEYPRE : Nat := 1
 def M_KEYPOST : Nat := 2
 def M_VAL : Nat := 4
-def MODENAME : List String := ["key:pre", "key:post", "val"]
+/-- Canonical MODENAME is keyed by the mode flag values, not positions. -/
+def MODENAME (m : Nat) : String :=
+  if m == M_VAL then "val"
+  else if m == M_KEYPRE then "key:pre"
+  else if m == M_KEYPOST then "key:post"
+  else ""
 
 def S_DKEY : String := "$KEY"
 def S_BANNO : String := "`$ANNO`"
@@ -496,6 +501,32 @@ def parseFloatJS (s : String) : Option Float := Id.run do
            else Float.ofScientific mant false exp10.toNat
   return some (if neg then -a else a)
 
+/-- JS `Number(v)` coercion for scalars (canonical formatter behaviour):
+    booleans map to 1/0, null to 0, trimmed decimal strings parse ("" is 0),
+    everything else is NaN. -/
+def jsNumberOfString (str : String) : Float :=
+  let t := str.trimAscii.toString
+  if t == "" then 0.0
+  else match parseFloatJS t with
+    | some f => f
+    | none => (0.0 : Float) / 0.0
+
+def jsNumber (v : Value) : Float :=
+  match v with
+  | .num n => n
+  | .bool b => if b then 1.0 else 0.0
+  | .null => 0.0
+  | .str str => jsNumberOfString str
+  | _ => (0.0 : Float) / 0.0
+
+/-- JS `n | 0`: truncate toward zero, wrap into signed 32-bit. -/
+def toInt32 (f : Float) : Float :=
+  if !f.isFinite || f.abs >= 9.2e18 then 0.0
+  else
+    let t : Int := fToInt f
+    let m : Int := ((t % 4294967296) + 4294967296) % 4294967296
+    intToFloat (if m >= 2147483648 then m - 4294967296 else m)
+
 def clz32 (t : Int) : Nat :=
   let n : Nat := ((t % (2 ^ 32 : Int) + 2 ^ 32) % 2 ^ 32).toNat
   if n == 0 then 32 else 31 - Nat.log2 n
@@ -728,13 +759,10 @@ partial def setprop (parent key v : Value) : SIO Value := do
   match parent with
   | .map id => mapSetKV id (← jsString key) v
   | .list id => do
-    let ks := match key with
-      | .str s => s
-      | .num n => numToString n.floor
-      | _ => ""
-    match strToInt? ks with
-    | none => pure ()
-    | some ki0 => do
+    let keyF : Float := jsNumber key
+    if keyF.isNaN then pure ()
+    else do
+      let ki0 : Int := fToInt keyF.floor
       let xs ← listItems id
       let len : Int := xs.size
       if ki0 >= 0 then
@@ -751,17 +779,14 @@ partial def delprop (parent key : Value) : SIO Value := do
   match parent with
   | .map id => mapDelK id (← jsString key)
   | .list id => do
-    let ks := match key with
-      | .str s => s
-      | .num n => numToString n.floor
-      | _ => ""
-    match strToInt? ks with
-    | some ki =>
+    let keyF : Float := jsNumber key
+    if keyF.isNaN then pure ()
+    else do
+      let ki : Int := fToInt keyF.floor
       if ki >= 0 then do
         let xs ← listItems id
         if ki < (xs.size : Int) then
           setListItems id ((xs.toList.eraseIdx ki.toNat).toArray)
-    | none => pure ()
   | _ => pure ()
   return parent
 
@@ -917,7 +942,7 @@ where
     match v with
     | .noval | .null => pure "null"
     | .bool b => pure (if b then "true" else "false")
-    | .num n => pure (numToString n)
+    | .num n => pure (if n.isFinite then numToString n else "null")
     | .str s => pure (jsonEscapeStr s)
     | .func _ | .sentinel _ => pure "null"
     | .list id => do
@@ -940,7 +965,13 @@ where
           pure (b ++ "]")
     | .map id => do
       let es ← mapEntries id
-      let ks := es.map (·.1)
+      -- JSON.stringify omits properties whose value is undefined, a function
+      -- or a symbol; only real values (null included) are serialized.
+      let keep := fun (k : String) =>
+        match omapGet es k with
+        | some .noval | some (.func _) | some (.sentinel _) | none => false
+        | some _ => true
+      let ks := (es.map (·.1)).filter keep
       let ks := if sort then ks.qsort strLtB else ks
       if ks.isEmpty then pure "{}"
       else match indent with
@@ -1033,6 +1064,10 @@ partial def jsonify (v : Value) (flags : Value := .noval) : SIO String := do
   match v with
   | .noval => return S_NULL
   | _ =>
+    -- Canonical JSON.stringify throws on circular structures and jsonify
+    -- reports that as __JSONIFY_FAILED__. A recursion-based encoder cannot
+    -- recover from the resulting stack overflow, so check up front.
+    if ← hasCycle v then return "__JSONIFY_FAILED__"
     let indent ← do
       match (← getprop flags (.str "indent") (.num 2.0)) with
       | .num n => pure (fToInt n)
@@ -1051,7 +1086,7 @@ partial def jsonify (v : Value) (flags : Value := .noval) : SIO String := do
           return "{\n" ++ String.intercalate "\n" (rest.map (fun l => pad ++ l))
         | [] => return str
       else return str
-    catch _ => return S_NULL
+    catch _ => return "__JSONIFY_FAILED__"
 
 partial def pad (s : Value) (padding : Value := .noval) (padchar : Value := .noval) :
     SIO String := do
@@ -1086,7 +1121,11 @@ partial def join (arr : Value) (sep : Value := .noval) (url : Bool := false) :
   let single := sepdef.length == 1
   let sc : Char := if single then sepdef.toList.headD ' ' else ' '
   let itemsArr ← listItemsOf arr
-  let sarr := itemsArr.size
+  let sarr := itemsArr.size          -- canonical sarr: the ORIGINAL size
+  let survivors := itemsArr.filterMap fun v =>
+    match v with
+    | .str s => if s != S_MT then some s else none
+    | _ => none
   let stripTrailing (s : String) : String := Id.run do
     let a := s.toList.toArray
     let mut i := a.size
@@ -1121,20 +1160,17 @@ partial def join (arr : Value) (sep : Value := .noval) (url : Bool := false) :
         i := j
     return b
   let mut out : List String := []
-  for idx in [0:sarr] do
-    match itemsArr[idx]! with
-    | .str s =>
-      if s != S_MT then
-        let s :=
-          if single then
-            if url && idx == 0 then stripTrailing s
-            else
-              let s := if idx > 0 then stripLeading s else s
-              let s := if idx < sarr - 1 || !url then stripTrailing s else s
-              collapse s
-          else s
-        if s != S_MT then out := s :: out
-    | _ => pure ()
+  for idx in [0:survivors.size] do
+    let s := survivors[idx]!
+    let s :=
+      if single then
+        if url && idx == 0 then stripTrailing s
+        else
+          let s := if idx > 0 then stripLeading s else s
+          let s := if (idx : Int) < (sarr : Int) - 1 || !url then stripTrailing s else s
+          collapse s
+      else s
+    if s != S_MT then out := s :: out
   return String.intercalate sepdef out.reverse
 
 partial def joinurl (arr : Value) : SIO String :=
@@ -1496,10 +1532,10 @@ partial def getpath (store path : Value) (inj : InjArg := .inone) : SIO Value :=
             | .str s =>
               if iaIsSome inj && s == S_DKEY then
                 pure (if !(isNoval injKey) then injKey else raw)
-              else if s.startsWith "$GET:" then do
+              else if iaIsSome inj && s.startsWith "$GET:" then do
                 let sub ← slice (.str s) (start := .num 5.0) (stop := .num (-1.0))
                 pure (Value.str (← stringify (← getpath src sub)))
-              else if s.startsWith "$REF:" then do
+              else if iaIsSome inj && s.startsWith "$REF:" then do
                 let sub ← slice (.str s) (start := .num 5.0) (stop := .num (-1.0))
                 pure (Value.str (← stringify (← getpath (← getprop store (.str S_DSPEC)) sub)))
               else if iaIsSome inj && s.startsWith "$META:" then do
@@ -2115,15 +2151,15 @@ partial def formatterTbl : List (String × (Value → Value → SIO Value)) := [
   ("number", fun _k v => do
     if isnode v then pure v
     else do
-      let n := (parseFloatJS (← jsString v)).getD 0.0
+      let n := jsNumber v
       let n := if n.isNaN then 0.0 else n
       pure (.num n)),
   ("integer", fun _k v => do
     if isnode v then pure v
     else do
-      let n := (parseFloatJS (← jsString v)).getD 0.0
+      let n := jsNumber v
       let n := if n.isNaN then 0.0 else n
-      pure (.num (intToFloat (fToInt n)))),
+      pure (.num (toInt32 n))),
   ("concat", fun k v => do
     if isNoval k && islist v then do
       let parts ← itemsV v (fun (_, x) => do

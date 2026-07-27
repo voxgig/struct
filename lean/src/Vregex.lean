@@ -1,8 +1,8 @@
 /- Minimal backtracking regex engine for the Lean port of voxgig/struct.
    Supports the RE2 subset the corpus exercises: literals, '.', anchors ^ $,
-   \b, character classes [..] / [^..] with ranges and \d \w \s \D \W \S,
-   groups (..) and (?:..), alternation |, quantifiers * + ? and {n}/{n,}/{n,m}
-   with optional lazy '?'. No third-party dependency. The struct library uses
+   \b and \B, character classes [..] / [^..] with ranges and \d \w \s \D \W \S,
+   groups (..), (?:..) and (?P<name>..), alternation |, quantifiers * + ? and
+   {n}/{n,}/{n,m} with optional lazy '?'. No third-party dependency. The struct library uses
    `test` for $LIKE; `find` backs the public re_* API (not corpus-tested). -/
 
 namespace Vregex
@@ -19,6 +19,7 @@ inductive Node where
   | start
   | stop
   | wordb
+  | nwordb
   | cls (neg : Bool) (items : List CItem)
   | grp (alts : List (List Node))      -- alternation of sequences
   | star (greedy : Bool) (atom : Node)
@@ -164,8 +165,17 @@ partial def parseAtom (s0 : PState) : Option (Node × PState) :=
   | none => none
   | some '(' =>
     let s := adv s0
-    -- non-capturing?
-    let s := if peekAt s == some '?' && peekAt s 1 == some ':' then adv (adv s) else s
+    -- non-capturing (?: or RE2 named group (?P<name> — names are not tracked,
+    -- both parse as a plain group
+    let s :=
+      if peekAt s == some '?' && peekAt s 1 == some ':' then adv (adv s)
+      else if peekAt s == some '?' && peekAt s 1 == some 'P' && peekAt s 2 == some '<' then
+        Id.run do
+          let mut t := adv (adv (adv s))
+          while peekAt t != none && peekAt t != some '>' do
+            t := adv t
+          if peekAt t == some '>' then return adv t else return t
+      else s
     let (alts, s) := parseAlt s
     let s := if peekAt s == some ')' then adv s else s
     some (.grp alts, s)
@@ -183,6 +193,7 @@ partial def parseAtom (s0 : PState) : Option (Node × PState) :=
     | some 'W' => some (.cls false [.cnw], adv s)
     | some 'S' => some (.cls false [.cns], adv s)
     | some 'b' => some (.wordb, adv s)
+    | some 'B' => some (.nwordb, adv s)
     | some 'n' => some (.char '\n', adv s)
     | some 't' => some (.char '\t', adv s)
     | some 'r' => some (.char '\r', adv s)
@@ -227,6 +238,10 @@ partial def mNode (input : Array Char) (len : Nat) (node : Node) (pos : Nat)
     let before := pos > 0 && isWord input[pos - 1]!
     let after := pos < len && isWord input[pos]!
     if before != after then k pos else none
+  | .nwordb =>
+    let before := pos > 0 && isWord input[pos - 1]!
+    let after := pos < len && isWord input[pos]!
+    if before == after then k pos else none
   | .cls neg items =>
     if pos < len then
       let c := input[pos]!
