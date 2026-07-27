@@ -280,7 +280,10 @@ final class CorpusTests: XCTestCase {
       { re_find_all(.string(str($0, "pattern")), str($0, "input")) })
     runset(
       "regex.replace", rset("replace"),
-      { .string(re_replace(.string(str($0, "pattern")), str($0, "input"), str($0, "replacement"))) })
+      {
+        .string(
+          re_replace(.string(str($0, "pattern")), str($0, "input"), str($0, "replacement")))
+      })
     runset(
       "regex.escape", rset("escape"),
       { .string(re_escape(getprop($0, .string("val")))) })

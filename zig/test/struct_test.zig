@@ -1116,9 +1116,10 @@ fn rxStr(val: JsonValue) []const u8 {
 }
 
 fn rxGroupsValue(allocator: Allocator, groups: [][]const u8) JsonValue {
-    var row = std.json.Array.init(allocator);
+    const row = allocator.create(voxgig_struct.ListRef) catch return .null;
+    row.* = .{ .data = voxgig_struct.ListData.init(allocator) };
     for (groups) |g| row.append(.{ .string = g }) catch return .null;
-    return .{ .array = row };
+    return JsonValue{ .array = row };
 }
 
 fn wrap_re_test(allocator: Allocator, val: JsonValue) JsonValue {
@@ -1144,10 +1145,11 @@ fn wrap_re_find_all(allocator: Allocator, val: JsonValue) JsonValue {
     const m = val.object;
     const p = rxStr(m.get("pattern") orelse .null);
     const i = rxStr(m.get("input") orelse .null);
-    var out = std.json.Array.init(allocator);
-    const all = voxgig_struct.re_find_all(allocator, p, i) orelse return .{ .array = out };
+    const out = allocator.create(voxgig_struct.ListRef) catch return .null;
+    out.* = .{ .data = voxgig_struct.ListData.init(allocator) };
+    const all = voxgig_struct.re_find_all(allocator, p, i) orelse return JsonValue{ .array = out };
     for (all) |mt| out.append(rxGroupsValue(allocator, mt)) catch return .null;
-    return .{ .array = out };
+    return JsonValue{ .array = out };
 }
 
 fn wrap_re_replace(allocator: Allocator, val: JsonValue) JsonValue {

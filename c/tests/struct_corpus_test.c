@@ -796,12 +796,14 @@ static const char* rx_str(voxgig_value* v) {
 }
 
 static voxgig_value* subj_re_test(voxgig_value* in, char** err, void* ud) {
-  (void)err; (void)ud;
+  (void)err;
+  (void)ud;
   voxgig_value* pv = getp(in, "pattern");
   voxgig_value* iv = getp(in, "input");
   voxgig_regex* re = voxgig_regex_compile(rx_str(pv), NULL);
   bool r = re != NULL && voxgig_regex_test(re, rx_str(iv), strlen(rx_str(iv)));
-  if (re != NULL) voxgig_regex_free(re);
+  if (re != NULL)
+    voxgig_regex_free(re);
   voxgig_release(pv);
   voxgig_release(iv);
   return voxgig_new_bool(r);
@@ -826,7 +828,8 @@ static voxgig_value* rx_groups_value(const char* input, const int* caps, int ngr
 }
 
 static voxgig_value* subj_re_find(voxgig_value* in, char** err, void* ud) {
-  (void)err; (void)ud;
+  (void)err;
+  (void)ud;
   voxgig_value* pv = getp(in, "pattern");
   voxgig_value* iv = getp(in, "input");
   const char* input = rx_str(iv);
@@ -840,14 +843,16 @@ static voxgig_value* subj_re_find(voxgig_value* in, char** err, void* ud) {
     }
     voxgig_regex_free(re);
   }
-  if (out == NULL) out = voxgig_new_null();
+  if (out == NULL)
+    out = voxgig_new_null();
   voxgig_release(pv);
   voxgig_release(iv);
   return out;
 }
 
 static voxgig_value* subj_re_find_all(voxgig_value* in, char** err, void* ud) {
-  (void)err; (void)ud;
+  (void)err;
+  (void)ud;
   voxgig_value* pv = getp(in, "pattern");
   voxgig_value* iv = getp(in, "input");
   const char* input = rx_str(iv);
@@ -870,7 +875,8 @@ static voxgig_value* subj_re_find_all(voxgig_value* in, char** err, void* ud) {
 }
 
 static voxgig_value* subj_re_replace(voxgig_value* in, char** err, void* ud) {
-  (void)err; (void)ud;
+  (void)err;
+  (void)ud;
   voxgig_value* pv = getp(in, "pattern");
   voxgig_value* iv = getp(in, "input");
   voxgig_value* rv = getp(in, "replacement");
@@ -885,7 +891,8 @@ static voxgig_value* subj_re_replace(voxgig_value* in, char** err, void* ud) {
     }
     voxgig_regex_free(re);
   }
-  if (out == NULL) out = voxgig_new_string(input);
+  if (out == NULL)
+    out = voxgig_new_string(input);
   voxgig_release(pv);
   voxgig_release(iv);
   voxgig_release(rv);
@@ -893,7 +900,8 @@ static voxgig_value* subj_re_replace(voxgig_value* in, char** err, void* ud) {
 }
 
 static voxgig_value* subj_re_escape(voxgig_value* in, char** err, void* ud) {
-  (void)err; (void)ud;
+  (void)err;
+  (void)ud;
   voxgig_value* v = getp(in, "val");
   char* s = voxgig_escre(v);
   voxgig_value* r = voxgig_new_string(s);

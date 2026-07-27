@@ -22,7 +22,6 @@ from voxgig_struct.voxgig_struct import (
     T_noval,
     T_null,
     T_scalar,
-    re_compile,
     re_escape,
     re_find,
     re_find_all,
@@ -848,8 +847,7 @@ class TestStruct(unittest.TestCase):
     def test_regex_replace(self):
         runset(
             spec['regex']['replace'],
-            lambda vin: re_replace(
-                vin.get('pattern'), vin.get('input'), vin.get('replacement')),
+            lambda vin: re_replace(vin.get('pattern'), vin.get('input'), vin.get('replacement')),
         )
 
     def test_regex_escape(self):

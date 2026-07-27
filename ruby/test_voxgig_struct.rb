@@ -52,7 +52,7 @@ class TestVoxgigStruct < Minitest::Test
     @getpath_spec   = @spec['getpath']
     @inject_spec    = @spec['inject']
     @sentinels_spec = @spec['sentinels']
-@regex_spec = @spec['regex']
+    @regex_spec = @spec['regex']
   end
 
   def test_exists

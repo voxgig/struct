@@ -435,27 +435,29 @@ int main() {
   });
   run("regex", "find", true, [&](const Value& in) {
     auto m = re_find(rxs(getp(in, "pattern")), rxs(getp(in, "input")));
-    if (m.empty()) return Value(nullptr);
+    if (m.empty())
+      return Value(nullptr);
     auto out = std::make_shared<List>();
-    for (const auto& g : m) out->push_back(Value(g));
+    for (const auto& g : m)
+      out->push_back(Value(g));
     return Value(out);
   });
   run("regex", "find_all", true, [&](const Value& in) {
     auto out = std::make_shared<List>();
     for (const auto& m : re_find_all(rxs(getp(in, "pattern")), rxs(getp(in, "input")))) {
       auto row = std::make_shared<List>();
-      for (const auto& g : m) row->push_back(Value(g));
+      for (const auto& g : m)
+        row->push_back(Value(g));
       out->push_back(Value(row));
     }
     return Value(out);
   });
   run("regex", "replace", true, [&](const Value& in) {
-    return Value(re_replace(rxs(getp(in, "pattern")), rxs(getp(in, "input")),
-                            rxs(getp(in, "replacement"))));
+    return Value(
+        re_replace(rxs(getp(in, "pattern")), rxs(getp(in, "input")), rxs(getp(in, "replacement"))));
   });
-  run("regex", "escape", true, [&](const Value& in) {
-    return Value(re_escape(rxs(getp(in, "val"))));
-  });
+  run("regex", "escape", true,
+      [&](const Value& in) { return Value(re_escape(rxs(getp(in, "val")))); });
 
   // Aggregate per-file scoreboard.
   std::map<std::string, std::pair<int, int>> by_file;
