@@ -32,7 +32,7 @@ reset: clean
 
 # Release: publish to Hex (mix hex.publish package — package only, so no ex_doc
 # dependency), then tag elixir/vX.Y.Z (version from VERSION, via mix.exs too).
-# Auth (from the aql vault at release time, none persisted on disk):
+# Auth (from the boru vault at release time, none persisted on disk):
 #   HEX_API_KEY    Hex key with package-publish perms (`mix hex.user key
 #                  generate` or hex.pm -> Account -> generate a key)
 #   GITHUB_TOKEN   pushes the git tag
@@ -40,14 +40,15 @@ reset: clean
 # a failed Hex upload aborts before any tag is created.
 VERSION := $(shell cat VERSION)
 TAG := elixir/v$(VERSION)
-AQL_DRY_RUN_FILLER := AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET
+# (The literal keeps the legacy AQL name: it must match the boru vault's dryRunFiller constant.)
+BORU_DRY_RUN_FILLER := AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET
 publish: test
 	@if git rev-parse -q --verify "refs/tags/$(TAG)" >/dev/null; then \
 	  echo "tag $(TAG) already exists — bump elixir/VERSION first"; exit 1; fi
 	@set -e; \
 	token="$${GITHUB_TOKEN:-$$GH_TOKEN}"; \
-	if [ "$$token" = "$(AQL_DRY_RUN_FILLER)" ]; then \
-	  echo "[dry-run] aql filler token detected: would publish to Hex and tag $(TAG); nothing pushed."; \
+	if [ "$$token" = "$(BORU_DRY_RUN_FILLER)" ]; then \
+	  echo "[dry-run] boru filler token detected: would publish to Hex and tag $(TAG); nothing pushed."; \
 	  exit 0; \
 	fi; \
 	mix local.hex --force >/dev/null 2>&1 || true; \

@@ -46,7 +46,7 @@ reset: clean
 # artifact is com.voxgig:struct-scala_3. `--publish-repository central` targets
 # the Portal's OSSRH-compat API (ossrh-staging-api.central.sonatype.com); only
 # src/ is packaged (never test/runner.scala).
-# Auth (from the aql vault at release time, none persisted on disk):
+# Auth (from the boru vault at release time, none persisted on disk):
 #   CENTRAL_USERNAME / CENTRAL_PASSWORD  Portal user token
 #   SIGNING_KEY_B64                      base64 of the armored GPG secret key,
 #       decoded to a temp file for scala-cli's Bouncy Castle signer (base64 so
@@ -57,14 +57,15 @@ reset: clean
 DESC := Voxgig Struct — utilities for transforming JSON-like data structures (Scala port).
 VERSION := $(shell cat VERSION)
 TAG := scala/v$(VERSION)
-AQL_DRY_RUN_FILLER := AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET
+# (The literal keeps the legacy AQL name: it must match the boru vault's dryRunFiller constant.)
+BORU_DRY_RUN_FILLER := AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET
 publish: test
 	@if git rev-parse -q --verify "refs/tags/$(TAG)" >/dev/null; then \
 	  echo "tag $(TAG) already exists — bump scala/VERSION first"; exit 1; fi
 	@set -e; \
 	token="$${GITHUB_TOKEN:-$$GH_TOKEN}"; \
-	if [ "$$token" = "$(AQL_DRY_RUN_FILLER)" ]; then \
-	  echo "[dry-run] aql filler token detected: would publish to Maven Central and tag $(TAG); nothing pushed."; \
+	if [ "$$token" = "$(BORU_DRY_RUN_FILLER)" ]; then \
+	  echo "[dry-run] boru filler token detected: would publish to Maven Central and tag $(TAG); nothing pushed."; \
 	  exit 0; \
 	fi; \
 	keyfile=$$(mktemp); trap 'rm -f "$$keyfile"' EXIT; \

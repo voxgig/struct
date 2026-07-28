@@ -38,28 +38,29 @@ audit:
 # Release: publish to RubyGems, then tag ruby/vX.Y.Z (version from the gemspec).
 #
 # RubyGems auth: `gem push` reads GEM_HOST_API_KEY, which a headless run
-# supplies with `aql vault exec --for=gem <alias> -- make publish-ruby`. The
+# supplies with `boru vault exec --for=gem <alias> -- make publish-ruby`. The
 # git tag push needs GitHub auth: with GH_TOKEN/GITHUB_TOKEN present we push
 # over HTTPS carrying the credential in an Authorization header (kept out of
 # the URL, .git/config, and argv); otherwise we fall back to the `origin`
 # remote (SSH for local dev).
 #
-# Dry-run cooperation: `aql vault exec --dry-run` injects a fixed filler in
+# Dry-run cooperation: `boru vault exec --dry-run` injects a fixed filler in
 # place of the real token, so the publish can be rehearsed without
 # credentials. When the gem or GitHub token is that filler we build the gem
 # (validating packaging), then stop — nothing pushed, no tag.
 VERSION := $(shell grep -E "\.version\s*=" voxgig_struct.gemspec | sed -E "s/.*[\"']([^\"']+)[\"'].*/\1/")
 TAG := ruby/v$(VERSION)
 GEM := voxgig_struct-$(VERSION).gem
-AQL_DRY_RUN_FILLER := AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET
+# (The literal keeps the legacy AQL name: it must match the boru vault's dryRunFiller constant.)
+BORU_DRY_RUN_FILLER := AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET
 publish: test
 	@if git rev-parse -q --verify "refs/tags/$(TAG)" >/dev/null; then \
 	  echo "tag $(TAG) already exists — bump gemspec version first"; exit 1; fi
 	gem build voxgig_struct.gemspec
 	@set -e; \
 	gemtok="$$GEM_HOST_API_KEY"; ghtok="$${GITHUB_TOKEN:-$$GH_TOKEN}"; \
-	if [ "$$gemtok" = "$(AQL_DRY_RUN_FILLER)" ] || [ "$$ghtok" = "$(AQL_DRY_RUN_FILLER)" ]; then \
-	  echo "[dry-run] aql filler token detected: built $(GEM); nothing pushed, no $(TAG) tag."; \
+	if [ "$$gemtok" = "$(BORU_DRY_RUN_FILLER)" ] || [ "$$ghtok" = "$(BORU_DRY_RUN_FILLER)" ]; then \
+	  echo "[dry-run] boru filler token detected: built $(GEM); nothing pushed, no $(TAG) tag."; \
 	  rm -f "$(GEM)"; \
 	  exit 0; \
 	fi; \

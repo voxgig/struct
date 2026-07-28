@@ -1,0 +1,6 @@
+# voxgig/struct boru port — corpus runner entry point.
+# Run from the boru/ port directory:  boru run -no-check -no-compile test/runner.boru
+# (The heavy lifting lives in runner-lib.boru; this top level stays minimal —
+# module-namespace calls are the engine's well-behaved path.)
+import "./test/runner-lib.boru" end
+(RunnerLib.main none) drop

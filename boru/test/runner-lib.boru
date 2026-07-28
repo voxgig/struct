@@ -1,19 +1,19 @@
 # ============================================================================
-# voxgig/struct AQL port — corpus runner module.
+# voxgig/struct boru port — corpus runner module.
 #
-# All runner logic lives in this module (imported by runner.aql) because
+# All runner logic lives in this module (imported by runner.boru) because
 # module-mediated code is the engine's well-behaved path; the top-level
 # runner script stays minimal. Mirrors the reference runner
 # (typescript/test/runner.ts) the way dart/test/runner.dart does.
 #
 # Function values travel wrapped in one-element lists ([f/r]) — see the
-# port notes in ../src/struct.aql.
+# port notes in ../src/struct.boru.
 # ============================================================================
 
 import "aql:io"
 import "aql:string-util"
 import "aql:minilang"
-import "../src/struct.aql"
+import "../src/struct.boru"
 
 def rl-nullmark "__NULL__"
 def rl-undefmark "__UNDEF__"

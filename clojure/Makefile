@@ -32,24 +32,25 @@ reset: clean
 
 # Release: build the jar + pom and deploy to Clojars (clojure -T:build deploy,
 # see build.clj), then cut + push the clojure/vX.Y.Z git tag.
-# Auth (from the aql vault at release time, none persisted on disk):
+# Auth (from the boru vault at release time, none persisted on disk):
 #   CLOJARS_USERNAME / CLOJARS_PASSWORD  Clojars deploy token (deps-deploy reads
 #                                        these from the env; password = token)
 #   GITHUB_TOKEN                         pushes the git tag over HTTPS
-# Headless: `aql vault exec ... -- make publish-clojure`. `--dry-run` injects a
+# Headless: `boru vault exec ... -- make publish-clojure`. `--dry-run` injects a
 # filler we detect to rehearse (no deploy, no tag). set -e + tag-last: a failed
 # Clojars upload aborts before any tag is created.
 # Prereq: the com.voxgig group verified on Clojars (clojars.org/verify).
 VERSION := $(shell cat VERSION)
 TAG := clojure/v$(VERSION)
-AQL_DRY_RUN_FILLER := AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET
+# (The literal keeps the legacy AQL name: it must match the boru vault's dryRunFiller constant.)
+BORU_DRY_RUN_FILLER := AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET
 publish: test
 	@if git rev-parse -q --verify "refs/tags/$(TAG)" >/dev/null; then \
 	  echo "tag $(TAG) already exists — bump clojure/VERSION first"; exit 1; fi
 	@set -e; \
 	token="$${GITHUB_TOKEN:-$$GH_TOKEN}"; \
-	if [ "$$token" = "$(AQL_DRY_RUN_FILLER)" ]; then \
-	  echo "[dry-run] aql filler token detected: would deploy to Clojars and tag $(TAG); nothing pushed."; \
+	if [ "$$token" = "$(BORU_DRY_RUN_FILLER)" ]; then \
+	  echo "[dry-run] boru filler token detected: would deploy to Clojars and tag $(TAG); nothing pushed."; \
 	  exit 0; \
 	fi; \
 	clojure -T:build deploy; \

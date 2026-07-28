@@ -44,14 +44,15 @@ reset: clean
 # write a temporary ~/.pause under a throwaway HOME and delete it after upload
 # (no persistent on-disk creds, no password on argv). With those env vars unset
 # it falls back to your existing ~/.pause. The github token for the tag push
-# comes via `aql vault exec --for=github`. See `man cpan-upload`.
+# comes via `boru vault exec --for=github`. See `man cpan-upload`.
 #
 # ExtUtils::MakeMaker's `perl Makefile.PL` generates a file called
 # `Makefile`, which would OVERWRITE this hand-written Makefile. So we
 # copy the dist sources into a throwaway .release/ dir and build there.
 VERSION := $(shell $(PERL) -Ilib -MVoxgig::Struct -e 'print $$Voxgig::Struct::VERSION')
 TAG := perl/v$(VERSION)
-AQL_DRY_RUN_FILLER := AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET
+# (The literal keeps the legacy AQL name: it must match the boru vault's dryRunFiller constant.)
+BORU_DRY_RUN_FILLER := AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET
 # cpan-upload POSTs to PAUSE over HTTPS via HTTP::Tiny, which needs a CA bundle
 # to verify the server cert — otherwise it dies with "Can't verify SSL peers
 # without knowing which Certificate Authorities to trust". The robust fix is to
@@ -67,8 +68,8 @@ publish: test
 	  echo "tag $(TAG) already exists — bump $$VERSION in lib/Voxgig/Struct.pm first"; exit 1; fi
 	@set -e; \
 	token="$${GITHUB_TOKEN:-$$GH_TOKEN}"; \
-	if [ "$$token" = "$(AQL_DRY_RUN_FILLER)" ]; then \
-	  echo "[dry-run] aql filler token detected: would publish dist and tag $(TAG); nothing pushed."; \
+	if [ "$$token" = "$(BORU_DRY_RUN_FILLER)" ]; then \
+	  echo "[dry-run] boru filler token detected: would publish dist and tag $(TAG); nothing pushed."; \
 	  exit 0; \
 	fi; \
 	rm -rf .release && mkdir -p .release; \

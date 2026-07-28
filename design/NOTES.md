@@ -75,11 +75,11 @@ If you're adding a new injector that takes a user callback, mirror the
 existing patterns and add a unit test in the port-specific test suite
 (not in the JSON corpus).
 
-## AQL port quirks
+## boru port quirks
 
-The AQL port is written in the AQL language itself (not Go) and does not
+The boru port is written in the boru language itself (not Go) and does not
 wrap the engine's native `aql:struct-util` module. Its quirks are
-engine-driven; the full list lives in `aql/AGENTS.md` ("Engine caveats").
+engine-driven; the full list lives in `boru/AGENTS.md` ("Engine caveats").
 The load-bearing ones:
 
 - **Function carriers.** A bare Function-valued name auto-dispatches when
@@ -95,11 +95,11 @@ The load-bearing ones:
   one list argument; canonical optional parameters are explicit `NOARG`
   sentinel arguments).
 - **Interpreter-pinned tests, checker-clean source.** The corpus runs
-  `aql run -no-check -no-compile` for deterministic runs, but the module
-  now also passes `aql check` with 0 errors and the full corpus passes
+  `boru run -no-check -no-compile` for deterministic runs, but the module
+  now also passes `boru check` with 0 errors and the full corpus passes
   under the default compiled mode. `make lint` runs the checker plus a
-  module-load smoke. Reaching this took engine fixes in aql (store-shaped
+  module-load smoke. Reaching this took engine fixes in boru (store-shaped
   flex-carrier checker nil-derefs, guard-fact/narrowing precision,
   forward-reference placeholders, multi-result `pop` poly, dynamic-pattern
-  `mini re` compilation); an older `aql` binary crashes or reports phantom
+  `mini re` compilation); an older `boru` binary crashes or reports phantom
   errors on it.

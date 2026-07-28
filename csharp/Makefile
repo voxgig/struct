@@ -42,14 +42,15 @@ audit:
 # Needs NuGet auth (NUGET_API_KEY env var).
 VERSION := $(shell grep -m1 "<Version>" VoxgigStruct.csproj | sed -E "s/.*<Version>([^<]+)<.*/\1/")
 TAG := csharp/v$(VERSION)
-AQL_DRY_RUN_FILLER := AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET
+# (The literal keeps the legacy AQL name: it must match the boru vault's dryRunFiller constant.)
+BORU_DRY_RUN_FILLER := AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET
 publish: test
 	@if git rev-parse -q --verify "refs/tags/$(TAG)" >/dev/null; then \
 	  echo "tag $(TAG) already exists — bump csproj first"; exit 1; fi
 	@set -e; \
 	token="$${GITHUB_TOKEN:-$$GH_TOKEN}"; \
-	if [ "$$token" = "$(AQL_DRY_RUN_FILLER)" ]; then \
-	  echo "[dry-run] aql filler token detected: would publish package and tag $(TAG); nothing pushed."; \
+	if [ "$$token" = "$(BORU_DRY_RUN_FILLER)" ]; then \
+	  echo "[dry-run] boru filler token detected: would publish package and tag $(TAG); nothing pushed."; \
 	  exit 0; \
 	fi; \
 	dotnet pack -c Release; \

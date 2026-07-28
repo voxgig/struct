@@ -37,7 +37,7 @@ reset: clean
 
 # Release: publish to the Sonatype Central Portal via the vanniktech plugin
 # (OSSRH was retired 2025-06-30), then tag kotlin/vX.Y.Z (version from
-# build.gradle.kts). Auth (from the aql vault at release time, none on disk),
+# build.gradle.kts). Auth (from the boru vault at release time, none on disk),
 # as ORG_GRADLE_PROJECT_* env vars the plugin reads as Gradle properties:
 #   ORG_GRADLE_PROJECT_mavenCentralUsername / ...Password   Portal user token
 #   ORG_GRADLE_PROJECT_signingInMemoryKeyPassword           GPG key passphrase
@@ -50,14 +50,15 @@ reset: clean
 # with `gpg --armor --export-secret-keys <KEYID> | base64`.
 VERSION := $(shell grep -E "^version" build.gradle.kts | sed -E "s/.*\"([^\"]+)\".*/\1/")
 TAG := kotlin/v$(VERSION)
-AQL_DRY_RUN_FILLER := AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET
+# (The literal keeps the legacy AQL name: it must match the boru vault's dryRunFiller constant.)
+BORU_DRY_RUN_FILLER := AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET
 publish: test
 	@if git rev-parse -q --verify "refs/tags/$(TAG)" >/dev/null; then \
 	  echo "tag $(TAG) already exists — bump build.gradle.kts first"; exit 1; fi
 	@set -e; \
 	token="$${GITHUB_TOKEN:-$$GH_TOKEN}"; \
-	if [ "$$token" = "$(AQL_DRY_RUN_FILLER)" ]; then \
-	  echo "[dry-run] aql filler token detected: would publish artifact and tag $(TAG); nothing pushed."; \
+	if [ "$$token" = "$(BORU_DRY_RUN_FILLER)" ]; then \
+	  echo "[dry-run] boru filler token detected: would publish artifact and tag $(TAG); nothing pushed."; \
 	  exit 0; \
 	fi; \
 	if [ -n "$$SIGNING_KEY_B64" ]; then \

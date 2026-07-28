@@ -1,30 +1,39 @@
-# AGENTS.md — AQL port of `voxgig/struct`
+# AGENTS.md — boru port of `voxgig/struct`
 
 Read the repo-root [`../AGENTS.md`](../AGENTS.md) first. This file covers
-only what is specific to the AQL port. **TypeScript is canonical; the
+only what is specific to the boru port. **TypeScript is canonical; the
 shared `build/test/*.jsonic` corpus is the contract.** This port follows
-the single-`null` model of the Python / Dart / Lua ports (AQL's `none`
+the single-`null` model of the Python / Dart / Lua ports (boru's `none`
 plays both `undefined` and JSON `null`), not the distinct-value model of
 the OCaml / Scala ports.
 
-The port is written in the AQL *language* (not Go), and deliberately does
+The port is written in the boru *language* (not Go), and deliberately does
 NOT use the engine's native `aql:struct-util` module — the whole point is
-a from-scratch implementation of the canonical algorithms in AQL itself.
+a from-scratch implementation of the canonical algorithms in boru itself.
 
 ## How to build / test / lint
 
 ```
-cd aql
-make test    # aql run -no-check -no-compile test/runner.aql
-make lint    # aql check src/struct.aql + a module load smoke
+cd boru
+make test    # boru run -no-check -no-compile test/runner.boru
+make lint    # boru check src/struct.boru + a module load smoke
 ```
 
-Requires only the `aql` CLI (`make test AQL=/path/to/aql` to point at a
+Requires only the `boru` CLI (`make test BORU=/path/to/boru` to point at a
 specific binary). **Zero third-party runtime dependencies** — the library
 imports only bundled `aql:` modules (`string-util`, `math-util`,
 `bin-util`, `minilang` for regex, `emitlang` for JSON output,
 `time-util`); the test runner additionally uses `aql:io` to read the
 corpus.
+
+**Rename transition note.** The language was renamed AQL → boru
+(github.com/boru-lang/boru), but on the engine's `main` the rename is
+still completing: the bundled-module namespace is still `aql:` (so the
+`import "aql:…"` strings above are load-bearing — do NOT rename them),
+the module search/cache dir is still `.aql/` (`make clean`), and the
+vault's dry-run filler literal is still `AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET`
+(referenced by every port's publish target). Sweep these to `boru` only
+when the upstream engine renames them.
 
 ## The value model
 
@@ -45,7 +54,7 @@ corpus.
   `JSON.stringify(null)` for injected nulls). Validation's `$NIL`/`$NULL`
   recover the absent-vs-stored-null distinction via literal slot
   presence (`vgi-haslit`).
-- Map literals keep **sorted key order** in AQL (a plain `{b:1,a:2}` is
+- Map literals keep **sorted key order** in boru (a plain `{b:1,a:2}` is
   key-sorted at parse, before any port code runs); `set` on a `flex` node
   appends in insertion order. `jsonify` uses the engine JSON emitter, so it
   preserves a flex node's stored (insertion) key order — and every node the
@@ -57,7 +66,7 @@ corpus.
 
 ## Function-value carriers (IMPORTANT)
 
-A bare Function-valued name **auto-dispatches when stepped** in AQL, so
+A bare Function-valued name **auto-dispatches when stepped** in boru, so
 function values never travel bare:
 
 - **fn box** — `` {"`$FN`": f/r} ``: the general "function as data" carrier.
@@ -101,21 +110,21 @@ Idioms in this codebase that look redundant are load-bearing:
    words that module fns must not redefine.
 6. **Interpreter-pinned tests, checker-clean source** — `make test` runs
    `-no-check -no-compile` for deterministic corpus runs, but the module
-   now also passes `aql check` with 0 errors (`make lint` runs it) and the
+   now also passes `boru check` with 0 errors (`make lint` runs it) and the
    full corpus passes under the default compiled mode too. Getting there
-   took a series of aql-engine fixes (checker nil-derefs on store-shaped
+   took a series of boru-engine fixes (checker nil-derefs on store-shaped
    flex carriers, guard-fact/narrowing precision, forward-reference
    placeholder handling, multi-result poly for `pop`, dynamic-pattern
-   `mini re` compilation) — an older `aql` binary will crash or report
-   phantom errors on this module; build from an aql checkout that includes
+   `mini re` compilation) — an older `boru` binary will crash or report
+   phantom errors on this module; build from a boru checkout that includes
    them.
 
 ## Canonical-name mapping
 
 Public functions are `vg-<canonicalname>` (e.g. `vg-getpath`); internal
 helpers are `vgi-*`; loop workers are `vgl-*`. The export map at the end
-of `src/struct.aql` binds every canonical name (the parity checker reads
-those keys). `jm`/`jt` take one list argument (AQL has no variadics);
+of `src/struct.boru` binds every canonical name (the parity checker reads
+those keys). `jm`/`jt` take one list argument (boru has no variadics);
 optional canonical parameters are explicit `NOARG` arguments.
 
 ## Making a change
@@ -129,28 +138,28 @@ optional canonical parameters are explicit `NOARG` arguments.
 ## CI wiring (proposed — needs `workflow` scope to land)
 
 CI has a `test-<lang>` job per port in `.github/workflows/build.yml`;
-the aql job could not be pushed from this session (the token lacks the
+the boru job could not be pushed from this session (the token lacks the
 `workflow` scope). Add it as:
 
 ```yaml
-  test-aql:
+  test-boru:
     runs-on: ubuntu-latest
     env:
-      # The port needs an aql build that includes the `del` word. Until
-      # the matching aql-lang/aql change merges, pin AQL_GIT_REF to its
-      # branch; then switch back to main.
-      AQL_GIT_REF: main
+      # main has every engine fix the port needs (verified: full corpus
+      # passes on a main build). Pin to a branch only if the port ever
+      # needs an unmerged engine change again.
+      BORU_GIT_REF: main
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23'
-      - name: Build the aql CLI from source
+      - name: Build the boru CLI from source
         run: |
-          git clone --depth 1 --branch "$AQL_GIT_REF" https://github.com/aql-lang/aql /tmp/aql-lang
-          (cd /tmp/aql-lang/cmd/go && go build -o "$RUNNER_TEMP/aql" .)
+          git clone --depth 1 --branch "$BORU_GIT_REF" https://github.com/boru-lang/boru /tmp/boru-lang
+          (cd /tmp/boru-lang/cmd/go && go build -o "$RUNNER_TEMP/boru" ./aql)
       - name: Run tests
-        working-directory: ./aql
+        working-directory: ./boru
         shell: bash
-        run: make test AQL="$RUNNER_TEMP/aql"
+        run: make test BORU="$RUNNER_TEMP/boru"
 ```

@@ -45,14 +45,15 @@ reset: clean
 # use it to confirm the package page renders, the sdist builds, and Haddock is
 # clean before committing to the permanent index. The .cabal version must match
 # VERSION (guarded below) since the sdist tarball name comes from the .cabal.
-# Auth (from the aql vault at release time, none persisted on disk):
+# Auth (from the boru vault at release time, none persisted on disk):
 #   HACKAGE_TOKEN  Hackage API token (hackage.haskell.org -> account -> tokens)
 #   GITHUB_TOKEN   pushes the git tag
 # set -e + tag-last: a failed upload never leaves a tag behind.
 VERSION := $(shell cat VERSION)
 TAG := haskell/v$(VERSION)
 SDIST := dist-newstyle/sdist/voxgig-struct-$(VERSION).tar.gz
-AQL_DRY_RUN_FILLER := AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET
+# (The literal keeps the legacy AQL name: it must match the boru vault's dryRunFiller constant.)
+BORU_DRY_RUN_FILLER := AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET
 
 # Upload a *candidate* (non-permanent, changeable, removable) so you can verify
 # the package page, dependency bounds, and Haddock rendering before the one-way
@@ -62,8 +63,8 @@ publish-candidate: test
 	@cabalver=$$(sed -nE 's/^version:[[:space:]]*([0-9.]+).*/\1/p' voxgig-struct.cabal); \
 	  [ "$$cabalver" = "$(VERSION)" ] || { echo "version mismatch: VERSION=$(VERSION) vs .cabal=$$cabalver — bump both"; exit 1; }
 	@set -e; \
-	if [ "$$HACKAGE_TOKEN" = "$(AQL_DRY_RUN_FILLER)" ] || [ "$${GITHUB_TOKEN:-$$GH_TOKEN}" = "$(AQL_DRY_RUN_FILLER)" ]; then \
-	  echo "[dry-run] aql filler token detected: would upload candidate voxgig-struct-$(VERSION); nothing uploaded."; \
+	if [ "$$HACKAGE_TOKEN" = "$(BORU_DRY_RUN_FILLER)" ] || [ "$${GITHUB_TOKEN:-$$GH_TOKEN}" = "$(BORU_DRY_RUN_FILLER)" ]; then \
+	  echo "[dry-run] boru filler token detected: would upload candidate voxgig-struct-$(VERSION); nothing uploaded."; \
 	  exit 0; \
 	fi; \
 	cabal sdist; \
@@ -77,8 +78,8 @@ publish: test
 	  [ "$$cabalver" = "$(VERSION)" ] || { echo "version mismatch: VERSION=$(VERSION) vs .cabal=$$cabalver — bump both"; exit 1; }
 	@set -e; \
 	token="$${GITHUB_TOKEN:-$$GH_TOKEN}"; \
-	if [ "$$token" = "$(AQL_DRY_RUN_FILLER)" ]; then \
-	  echo "[dry-run] aql filler token detected: would publish to Hackage and tag $(TAG); nothing pushed."; \
+	if [ "$$token" = "$(BORU_DRY_RUN_FILLER)" ]; then \
+	  echo "[dry-run] boru filler token detected: would publish to Hackage and tag $(TAG); nothing pushed."; \
 	  exit 0; \
 	fi; \
 	cabal sdist; \
