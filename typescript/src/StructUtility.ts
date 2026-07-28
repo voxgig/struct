@@ -3060,6 +3060,13 @@ class StructUtility {
   validate = validate
   walk = walk
 
+  re_compile = re_compile
+  re_find = re_find
+  re_find_all = re_find_all
+  re_replace = re_replace
+  re_test = re_test
+  re_escape = re_escape
+
   SKIP = SKIP
   DELETE = DELETE
 

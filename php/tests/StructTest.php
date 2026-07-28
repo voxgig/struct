@@ -386,6 +386,58 @@ class StructTest extends TestCase
     }
 
     // ——— sentinels: Group A null-unification and stringify(null) ———
+    // regex (parity floor: Go stdlib regexp — see design/REGEX_API.md)
+    public function testRegexTest(): void
+    {
+        $this->testSet(
+            $this->testSpec->regex->test,
+            function ($input) {
+                return Struct::re_test($input->pattern, $input->input);
+            }
+        );
+    }
+
+    public function testRegexFind(): void
+    {
+        $this->testSet(
+            $this->testSpec->regex->find,
+            function ($input) {
+                $m = Struct::re_find($input->pattern, $input->input);
+                return $m === null ? null : $m;
+            }
+        );
+    }
+
+    public function testRegexFindAll(): void
+    {
+        $this->testSet(
+            $this->testSpec->regex->find_all,
+            function ($input) {
+                return Struct::re_find_all($input->pattern, $input->input);
+            }
+        );
+    }
+
+    public function testRegexReplace(): void
+    {
+        $this->testSet(
+            $this->testSpec->regex->replace,
+            function ($input) {
+                return Struct::re_replace($input->pattern, $input->input, $input->replacement);
+            }
+        );
+    }
+
+    public function testRegexEscape(): void
+    {
+        $this->testSet(
+            $this->testSpec->regex->escape,
+            function ($input) {
+                return Struct::re_escape($input->val);
+            }
+        );
+    }
+
     // Mirrors perl/t/struct.t sentinels dispatch. These groups exercise the
     // canonical absent-vs-null rule: a stored JSON null counts as "no value"
     // for getprop/getelem/haskey/isempty/isnode, while stringify renders it.

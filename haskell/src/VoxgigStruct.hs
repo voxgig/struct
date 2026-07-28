@@ -693,17 +693,25 @@ re_find :: Value -> Value -> IO Value
 re_find p input = do
   ps <- reStr p
   is <- reStr input
-  case Vregex.findBounds (Vregex.compile ps) is of
-    Just (s, e) -> mkList [VStr (take (e - s) (drop s is))]
+  case Vregex.find (Vregex.compile ps) is of
+    Just groups -> mkList (map VStr groups)
     Nothing -> return VNull
 
--- | All matches of the regex in the subject.
+-- | All matches of the regex in the subject, each as [whole, capture1, ...].
 re_find_all :: Value -> Value -> IO Value
-re_find_all _ _ = emptyList
+re_find_all p input = do
+  ps <- reStr p
+  is <- reStr input
+  ms <- mapM (\m -> mkList (map VStr m)) (Vregex.findAll (Vregex.compile ps) is)
+  mkList ms
 
--- | Replace regex matches within the subject.
+-- | Replace every regex match within the subject ($1..$9 and $& supported).
 re_replace :: Value -> Value -> Value -> IO Value
-re_replace _ input _ = return input
+re_replace p input r = do
+  ps <- reStr p
+  is <- reStr input
+  rs <- reStr r
+  return (VStr (Vregex.replaceAll (Vregex.compile ps) is rs))
 
 -- | Escape a value for literal use in a regex.
 re_escape :: Value -> IO Value

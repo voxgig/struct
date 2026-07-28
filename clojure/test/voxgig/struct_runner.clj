@@ -268,7 +268,8 @@
         transformS (gp spec "transform")
         validateS (gp spec "validate")
         selectS (gp spec "select")
-        sentinels (gp spec "sentinels")]
+        sentinels (gp spec "sentinels")
+        regexs (gp spec "regex")]
 
     ;; minor
     (run-set "minor.isnode" (gp minor "isnode") s/isnode)
@@ -400,6 +401,18 @@
     ;; select sees a present-null field — the present-null unexpected-keys defect.
     (run-set "select.nullkey" (gp selectS "nullkey") {"null" false}
              (fn [vin] (s/select (vget vin "obj") (vget vin "query"))))
+
+    ;; regex (parity floor: Go stdlib regexp -- see design/REGEX_API.md)
+    (run-set "regex.test" (gp regexs "test") {}
+             (fn [vin] (s/re_test (vget vin "pattern") (vget vin "input"))))
+    (run-set "regex.find" (gp regexs "find") {}
+             (fn [vin] (s/re_find (vget vin "pattern") (vget vin "input"))))
+    (run-set "regex.find_all" (gp regexs "find_all") {}
+             (fn [vin] (s/re_find_all (vget vin "pattern") (vget vin "input"))))
+    (run-set "regex.replace" (gp regexs "replace") {}
+             (fn [vin] (s/re_replace (vget vin "pattern") (vget vin "input") (vget vin "replacement"))))
+    (run-set "regex.escape" (gp regexs "escape") {}
+             (fn [vin] (s/re_escape (vget vin "val"))))
 
     ;; sentinels
     (run-set "sentinels.getprop_unify" (gp sentinels "getprop_unify") {"null" false}

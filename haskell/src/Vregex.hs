@@ -1,9 +1,11 @@
 -- Minimal backtracking regex engine for the Haskell port of voxgig/struct.
 -- Supports the RE2 subset the corpus exercises: literals, '.', anchors ^ $,
--- \b, character classes [..] / [^..] with ranges and \d \w \s \D \W \S,
--- groups (..) and (?:..), alternation |, quantifiers * + ? and {n}/{n,}/{n,m}
--- with optional lazy '?'. No third-party dependency. The struct library uses
--- `test` for $LIKE; `find` backs the public re_* API (not corpus-tested).
+-- \b and \B, character classes [..] / [^..] with ranges and \d \w \s \D \W \S,
+-- groups (..), (?:..) and (?P<name>..), alternation |, quantifiers * + ? and
+-- {n}/{n,}/{n,m} with optional lazy '?'. Capturing groups are tracked, so the
+-- engine backs the full re_* API (find with captures, find_all, replace) at
+-- the Go-stdlib minimum bar; `test` also serves $LIKE. No third-party
+-- dependency.
 
 module Vregex
   ( Re
@@ -11,6 +13,9 @@ module Vregex
   , test
   , testStr
   , findBounds
+  , find
+  , findAll
+  , replaceAll
   ) where
 
 import Control.Applicative ((<|>))
@@ -24,8 +29,9 @@ data Node
   | Start
   | End
   | WordB
+  | NWordB
   | Cls Bool [Citem]              -- negated?, items
-  | Grp [[Node]]                  -- alternation of sequences
+  | Grp Int [[Node]]              -- capture index (0 = non-capturing), alternation
   | Star Bool Node               -- greedy?, atom
   | Plus Bool Node
   | Opt Bool Node
@@ -36,58 +42,69 @@ data Citem
   | CRange Char Char
   | CD | CW | CS | CND | CNW | CNS  -- \d \w \s \D \W \S
 
--- ----- parser (remaining-string style) -----
+-- Compiled = the alternation AST plus the number of capturing groups.
+data Re = Re { reAlts :: [[Node]], reNgroups :: Int }
 
-parse :: String -> [[Node]]
-parse pat = fst (parseAlt pat)
+-- ----- parser (remaining-string style, threading the group counter) -----
 
-parseAlt :: String -> ([[Node]], String)
-parseAlt s0 =
-  let (first, s1) = parseSeq s0
-  in go [first] s1
+parse :: String -> Re
+parse pat = let (alts, gc, _) = parseAlt 0 pat in Re alts gc
+
+parseAlt :: Int -> String -> ([[Node]], Int, String)
+parseAlt gc0 s0 =
+  let (first, gc1, s1) = parseSeq gc0 s0
+  in go [first] gc1 s1
   where
-    go acc ('|':rest) = let (sq, r) = parseSeq rest in go (sq : acc) r
-    go acc r = (reverse acc, r)
+    go acc gc ('|':rest) = let (sq, gc', r) = parseSeq gc rest in go (sq : acc) gc' r
+    go acc gc r = (reverse acc, gc, r)
 
-parseSeq :: String -> ([Node], String)
+parseSeq :: Int -> String -> ([Node], Int, String)
 parseSeq = goSeq []
   where
-    goSeq acc s = case s of
-      [] -> (reverse acc, s)
-      ('|':_) -> (reverse acc, s)
-      (')':_) -> (reverse acc, s)
-      _ -> case parseAtom s of
-             (Nothing, s') -> (reverse acc, s')
-             (Just a, s') ->
+    goSeq acc gc s = case s of
+      [] -> (reverse acc, gc, s)
+      ('|':_) -> (reverse acc, gc, s)
+      (')':_) -> (reverse acc, gc, s)
+      _ -> case parseAtom gc s of
+             (Nothing, gc', s') -> (reverse acc, gc', s')
+             (Just a, gc', s') ->
                let (a', s'') = parseQuantSuffix a s'
-               in goSeq (a' : acc) s''
+               in goSeq (a' : acc) gc' s''
 
-parseAtom :: String -> (Maybe Node, String)
-parseAtom s = case s of
-  [] -> (Nothing, s)
+parseAtom :: Int -> String -> (Maybe Node, Int, String)
+parseAtom gc s = case s of
+  [] -> (Nothing, gc, s)
   ('(':rest) ->
-    let rest1 = case rest of ('?':':':r) -> r; _ -> rest
-        (alts, r2) = parseAlt rest1
+    -- (?: is non-capturing; a plain ( and an RE2 named group (?P<name> are
+    -- both capturing (names are not tracked). Indices follow open parens.
+    let (gi, gc1, rest1) = case rest of
+          ('?':':':r) -> (0, gc, r)
+          ('?':'P':'<':r) ->
+            let r' = drop 1 (dropWhile (/= '>') r)
+            in (gc + 1, gc + 1, r')
+          _ -> (gc + 1, gc + 1, rest)
+        (alts, gc2, r2) = parseAlt gc1 rest1
         r3 = case r2 of (')':r) -> r; _ -> r2
-    in (Just (Grp alts), r3)
-  ('[':_) -> let (n, r) = parseClass s in (Just n, r)
-  ('.':rest) -> (Just Any, rest)
-  ('^':rest) -> (Just Start, rest)
-  ('$':rest) -> (Just End, rest)
+    in (Just (Grp gi alts), gc2, r3)
+  ('[':_) -> let (n, r) = parseClass s in (Just n, gc, r)
+  ('.':rest) -> (Just Any, gc, rest)
+  ('^':rest) -> (Just Start, gc, rest)
+  ('$':rest) -> (Just End, gc, rest)
   ('\\':rest) -> case rest of
-    ('d':r) -> (Just (Cls False [CD]), r)
-    ('w':r) -> (Just (Cls False [CW]), r)
-    ('s':r) -> (Just (Cls False [CS]), r)
-    ('D':r) -> (Just (Cls False [CND]), r)
-    ('W':r) -> (Just (Cls False [CNW]), r)
-    ('S':r) -> (Just (Cls False [CNS]), r)
-    ('b':r) -> (Just WordB, r)
-    ('n':r) -> (Just (Char '\n'), r)
-    ('t':r) -> (Just (Char '\t'), r)
-    ('r':r) -> (Just (Char '\r'), r)
-    (c:r) -> (Just (Char c), r)
-    [] -> (Just (Char '\\'), [])
-  (c:rest) -> (Just (Char c), rest)
+    ('d':r) -> (Just (Cls False [CD]), gc, r)
+    ('w':r) -> (Just (Cls False [CW]), gc, r)
+    ('s':r) -> (Just (Cls False [CS]), gc, r)
+    ('D':r) -> (Just (Cls False [CND]), gc, r)
+    ('W':r) -> (Just (Cls False [CNW]), gc, r)
+    ('S':r) -> (Just (Cls False [CNS]), gc, r)
+    ('b':r) -> (Just WordB, gc, r)
+    ('B':r) -> (Just NWordB, gc, r)
+    ('n':r) -> (Just (Char '\n'), gc, r)
+    ('t':r) -> (Just (Char '\t'), gc, r)
+    ('r':r) -> (Just (Char '\r'), gc, r)
+    (c:r) -> (Just (Char c), gc, r)
+    [] -> (Just (Char '\\'), gc, [])
+  (c:rest) -> (Just (Char c), gc, rest)
 
 parseClass :: String -> (Node, String)
 parseClass ('[':s0) =
@@ -134,7 +151,7 @@ parseQuantSuffix atom s = case s of
     lazyq r = (False, r)
     num = span (\c -> c >= '0' && c <= '9')
 
--- ----- matcher (backtracking, CPS over Maybe) -----
+-- ----- matcher (backtracking, CPS over Maybe, capture-tracking) -----
 
 isWord :: Char -> Bool
 isWord c = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
@@ -154,54 +171,65 @@ citemMatch it c = case it of
   CS -> c `elem` spaceChars
   CNS -> not (c `elem` spaceChars)
 
-mNode :: (Int -> Char) -> Int -> Node -> Int -> (Int -> Maybe r) -> Maybe r
-mNode inp len node pos k = case node of
-  Char c -> if pos < len && inp pos == c then k (pos + 1) else Nothing
-  Any -> if pos < len && inp pos /= '\n' then k (pos + 1) else Nothing
-  Start -> if pos == 0 then k pos else Nothing
-  End -> if pos == len then k pos else Nothing
+-- Capture spans as an association list; a group re-recorded on a later
+-- iteration is simply prepended, so `lookup` sees the most recent span.
+-- Spans are threaded functionally, so backtracking naturally discards
+-- abandoned group records.
+type Caps = [(Int, (Int, Int))]
+
+mNode :: (Int -> Char) -> Int -> Node -> Int -> Caps -> (Int -> Caps -> Maybe r) -> Maybe r
+mNode inp len node pos caps k = case node of
+  Char c -> if pos < len && inp pos == c then k (pos + 1) caps else Nothing
+  Any -> if pos < len && inp pos /= '\n' then k (pos + 1) caps else Nothing
+  Start -> if pos == 0 then k pos caps else Nothing
+  End -> if pos == len then k pos caps else Nothing
   WordB ->
     let before = pos > 0 && isWord (inp (pos - 1))
         after = pos < len && isWord (inp pos)
-    in if before /= after then k pos else Nothing
+    in if before /= after then k pos caps else Nothing
+  NWordB ->
+    let before = pos > 0 && isWord (inp (pos - 1))
+        after = pos < len && isWord (inp pos)
+    in if before == after then k pos caps else Nothing
   Cls neg items ->
     if pos < len
       then let c = inp pos
                hit = any (`citemMatch` c) items
-           in if (if neg then not hit else hit) then k (pos + 1) else Nothing
+           in if (if neg then not hit else hit) then k (pos + 1) caps else Nothing
       else Nothing
-  Grp alts -> asum [mSeq inp len sq pos k | sq <- alts]
+  Grp gi alts ->
+    let k' = if gi == 0 then k
+             else \p caps' -> k p ((gi, (pos, p)) : caps')
+    in asum [mSeq inp len sq pos caps k' | sq <- alts]
   Opt greedy a ->
-    if greedy then mNode inp len a pos k <|> k pos
-    else k pos <|> mNode inp len a pos k
-  Star greedy a -> mStar inp len greedy a pos k
-  Plus greedy a -> mNode inp len a pos (\p -> mStar inp len greedy a p k)
-  Rep greedy mn mx a -> mRep inp len greedy mn mx a pos k
+    if greedy then mNode inp len a pos caps k <|> k pos caps
+    else k pos caps <|> mNode inp len a pos caps k
+  Star greedy a -> mStar inp len greedy a pos caps k
+  Plus greedy a -> mNode inp len a pos caps (\p c -> mStar inp len greedy a p c k)
+  Rep greedy mn mx a -> mRep inp len greedy mn mx a pos caps k
 
-mStar :: (Int -> Char) -> Int -> Bool -> Node -> Int -> (Int -> Maybe r) -> Maybe r
-mStar inp len greedy a pos k =
-  if greedy
-    then mNode inp len a pos (\p -> if p > pos then mStar inp len greedy a p k else Nothing) <|> k pos
-    else k pos <|> mNode inp len a pos (\p -> if p > pos then mStar inp len greedy a p k else Nothing)
+mStar :: (Int -> Char) -> Int -> Bool -> Node -> Int -> Caps -> (Int -> Caps -> Maybe r) -> Maybe r
+mStar inp len greedy a pos caps k =
+  let more p c = if p > pos then mStar inp len greedy a p c k else Nothing
+  in if greedy
+    then mNode inp len a pos caps more <|> k pos caps
+    else k pos caps <|> mNode inp len a pos caps more
 
-mRep :: (Int -> Char) -> Int -> Bool -> Int -> Maybe Int -> Node -> Int -> (Int -> Maybe r) -> Maybe r
-mRep inp len greedy mn mx a pos k =
+mRep :: (Int -> Char) -> Int -> Bool -> Int -> Maybe Int -> Node -> Int -> Caps -> (Int -> Caps -> Maybe r) -> Maybe r
+mRep inp len greedy mn mx a pos caps k =
   if mn > 0
-    then mNode inp len a pos (\p -> mRep inp len greedy (mn - 1) (fmap (subtract 1) mx) a p k)
+    then mNode inp len a pos caps (\p c -> mRep inp len greedy (mn - 1) (fmap (subtract 1) mx) a p c k)
     else case mx of
-      Just 0 -> k pos
+      Just 0 -> k pos caps
       _ ->
-        let next p = if p > pos then mRep inp len greedy 0 (fmap (subtract 1) mx) a p k else Nothing
-        in if greedy then mNode inp len a pos next <|> k pos
-           else k pos <|> mNode inp len a pos next
+        let next p c = if p > pos then mRep inp len greedy 0 (fmap (subtract 1) mx) a p c k else Nothing
+        in if greedy then mNode inp len a pos caps next <|> k pos caps
+           else k pos caps <|> mNode inp len a pos caps next
 
-mSeq :: (Int -> Char) -> Int -> [Node] -> Int -> (Int -> Maybe r) -> Maybe r
-mSeq inp len sq pos k = case sq of
-  [] -> k pos
-  (x:rest) -> mNode inp len x pos (\p -> mSeq inp len rest p k)
-
--- Compiled = the alternation AST.
-type Re = [[Node]]
+mSeq :: (Int -> Char) -> Int -> [Node] -> Int -> Caps -> (Int -> Caps -> Maybe r) -> Maybe r
+mSeq inp len sq pos caps k = case sq of
+  [] -> k pos caps
+  (x:rest) -> mNode inp len x pos caps (\p c -> mSeq inp len rest p c k)
 
 compile :: String -> Re
 compile = parse
@@ -212,26 +240,84 @@ mkInp input =
       arr = listArray (0, len - 1) input :: Array Int Char
   in ((arr !), len)
 
+-- First match at or after `start`: (mstart, mend, caps).
+findAt :: Re -> (Int -> Char) -> Int -> Int -> Maybe (Int, Int, Caps)
+findAt re inp len = tryAt
+  where
+    tryAt i
+      | i > len = Nothing
+      | otherwise = case asum [mSeq inp len sq i [] (\p c -> Just (p, c)) | sq <- reAlts re] of
+          Just (e, caps) -> Just (i, e, caps)
+          Nothing -> tryAt (i + 1)
+
 -- Does the pattern match anywhere in input?
 test :: Re -> String -> Bool
-test re input = tryAt 0
-  where
-    (inp, len) = mkInp input
-    tryAt i
-      | any (\sq -> isJust (mSeq inp len sq i (\_ -> Just ()))) re = True
-      | i >= len = False
-      | otherwise = tryAt (i + 1)
+test re input = let (inp, len) = mkInp input in isJust (findAt re inp len 0)
 
 testStr :: String -> String -> Bool
 testStr pat input = test (compile pat) input
 
--- Leftmost match: returns (start, stop) or Nothing. Used by the public re_* API.
+-- Leftmost match: returns (start, stop) or Nothing.
 findBounds :: Re -> String -> Maybe (Int, Int)
-findBounds re input = tryAt 0
+findBounds re input =
+  let (inp, len) = mkInp input
+  in fmap (\(s, e, _) -> (s, e)) (findAt re inp len 0)
+
+subStr :: String -> Int -> Int -> String
+subStr input a b = take (b - a) (drop a input)
+
+matchGroups :: Re -> String -> Int -> Int -> Caps -> [String]
+matchGroups re input ms me caps =
+  subStr input ms me
+    : [ maybe "" (\(a, b) -> subStr input a b) (lookup gi caps)
+      | gi <- [1 .. reNgroups re] ]
+
+-- First match as [whole, capture1, ...]; unmatched groups are "".
+find :: Re -> String -> Maybe [String]
+find re input =
+  let (inp, len) = mkInp input
+  in fmap (\(ms, me, caps) -> matchGroups re input ms me caps) (findAt re inp len 0)
+
+-- Every non-overlapping match, left to right (Go FindAllStringSubmatch).
+findAll :: Re -> String -> [[String]]
+findAll re input = go 0
   where
     (inp, len) = mkInp input
-    tryAt i
-      | i > len = Nothing
-      | otherwise = case asum [mSeq inp len sq i Just | sq <- re] of
-          Just p -> Just (i, p)
-          Nothing -> tryAt (i + 1)
+    go pos
+      | pos > len = []
+      | otherwise = case findAt re inp len pos of
+          Nothing -> []
+          Just (ms, me, caps) ->
+            matchGroups re input ms me caps
+              : go (if me == ms then me + 1 else me)
+
+-- Replace every match; the template supports JS-style refs ($& for the whole
+-- match, $1..$9 for captures, $$ for a literal $). On a zero-width match the
+-- current character is emitted and the scan advances one position.
+replaceAll :: Re -> String -> String -> String
+replaceAll re input template = go 0
+  where
+    (inp, len) = mkInp input
+    go pos
+      | pos > len = ""
+      | otherwise = case findAt re inp len pos of
+          Nothing -> subStr input pos len
+          Just (ms, me, caps) ->
+            subStr input pos ms
+              ++ expand ms me caps template
+              ++ (if me == ms
+                    then (if ms < len then [inp ms] else "") ++ go (ms + 1)
+                    else go me)
+    expand _ _ _ [] = []
+    expand ms me caps ('$':'$':r) = '$' : expand ms me caps r
+    expand ms me caps ('$':'&':r) = subStr input ms me ++ expand ms me caps r
+    expand ms me caps ('$':d:r)
+      | d >= '0' && d <= '9' =
+          let gi = fromEnum d - fromEnum '0'
+              part
+                | gi == 0 = subStr input ms me
+                | gi <= reNgroups re =
+                    maybe "" (\(a, b) -> subStr input a b) (lookup gi caps)
+                | otherwise = ""
+          in part ++ expand ms me caps r
+    expand ms me caps (c:r) = c : expand ms me caps r

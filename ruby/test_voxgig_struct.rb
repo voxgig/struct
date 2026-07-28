@@ -52,6 +52,7 @@ class TestVoxgigStruct < Minitest::Test
     @getpath_spec   = @spec['getpath']
     @inject_spec    = @spec['inject']
     @sentinels_spec = @spec['sentinels']
+    @regex_spec = @spec['regex']
   end
 
   def test_exists
@@ -272,6 +273,38 @@ class TestVoxgigStruct < Minitest::Test
   # nested NULLMARK substitution is turned OFF ({ 'null' => false }) so the
   # corpus's real `null` reaches the function as a genuine nil — otherwise
   # the marker string would mask the very null-handling this group checks.
+
+  # regex (parity floor: Go stdlib regexp -- see design/REGEX_API.md)
+
+  def test_regex_test
+    @runset.call(@regex_spec['test'], lambda { |vin|
+      VoxgigStruct.re_test(vin['pattern'], vin['input'])
+    })
+  end
+
+  def test_regex_find
+    @runset.call(@regex_spec['find'], lambda { |vin|
+      VoxgigStruct.re_find(vin['pattern'], vin['input'])
+    })
+  end
+
+  def test_regex_find_all
+    @runset.call(@regex_spec['find_all'], lambda { |vin|
+      VoxgigStruct.re_find_all(vin['pattern'], vin['input'])
+    })
+  end
+
+  def test_regex_replace
+    @runset.call(@regex_spec['replace'], lambda { |vin|
+      VoxgigStruct.re_replace(vin['pattern'], vin['input'], vin['replacement'])
+    })
+  end
+
+  def test_regex_escape
+    @runset.call(@regex_spec['escape'], lambda { |vin|
+      VoxgigStruct.re_escape(vin['val'])
+    })
+  end
 
   def test_sentinels_getprop_unify
     @runsetflags.call(@sentinels_spec['getprop_unify'], { 'null' => false }, lambda { |vin|

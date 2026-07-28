@@ -259,6 +259,36 @@ final class CorpusTests: XCTestCase {
       })
   }
 
+  // MARK: - Regex (parity floor: Go stdlib regexp; design/REGEX_API.md)
+
+  func testRegex() {
+    let s = loadStructSpec()
+    guard case .map(let rx) = getprop(s, .string("regex")) else { return }
+    func rset(_ name: String) -> Value { getprop(.map(rx), .string(name)) |> setProp("set") }
+    func str(_ v: Value, _ key: String) -> String {
+      if case .string(let x) = getprop(v, .string(key)) { return x }
+      return ""
+    }
+    runset(
+      "regex.test", rset("test"),
+      { .bool(re_test(.string(str($0, "pattern")), str($0, "input"))) })
+    runset(
+      "regex.find", rset("find"),
+      { re_find(.string(str($0, "pattern")), str($0, "input")) })
+    runset(
+      "regex.find_all", rset("find_all"),
+      { re_find_all(.string(str($0, "pattern")), str($0, "input")) })
+    runset(
+      "regex.replace", rset("replace"),
+      {
+        .string(
+          re_replace(.string(str($0, "pattern")), str($0, "input"), str($0, "replacement")))
+      })
+    runset(
+      "regex.escape", rset("escape"),
+      { .string(re_escape(getprop($0, .string("val")))) })
+  }
+
   // MARK: - Sentinels (null / absent unification across the readers)
 
   func testSentinels() {

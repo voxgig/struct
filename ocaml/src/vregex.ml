@@ -1,9 +1,11 @@
 (* Minimal backtracking regex engine for the OCaml port of voxgig/struct.
  * Supports the RE2 subset the corpus exercises: literals, '.', anchors ^ $,
- * \b, character classes [..] / [^..] with ranges and \d \w \s \D \W \S,
- * groups (..) and (?:..), alternation |, quantifiers * + ? and {n}/{n,}/{n,m}
- * with optional lazy '?'. No third-party dependency. The struct library uses
- * `test` for $LIKE; `find` backs the public re_* API (not corpus-tested). *)
+ * word boundaries (b and B forms), character classes [..] / [^..] with ranges
+ * and \d \w \s \D \W \S, groups (..), (?:..) and (?P<name>..), alternation |,
+ * quantifiers * + ? and {n}/{n,}/{n,m} with optional lazy '?'. Capturing
+ * groups are tracked, so the engine backs the full re_* API (find with
+ * captures, find_all, replace) at the Go-stdlib minimum bar; `test` also
+ * serves $LIKE. No third-party dependency. *)
 
 type node =
   | Char of char
@@ -11,8 +13,9 @@ type node =
   | Start
   | End
   | WordB
+  | NWordB
   | Cls of bool * citem list           (* negated?, items *)
-  | Grp of node list list              (* alternation of sequences *)
+  | Grp of int * node list list        (* capture index (0 = non-capturing), alternation *)
   | Star of bool * node                (* greedy?, atom *)
   | Plus of bool * node
   | Opt of bool * node
@@ -21,13 +24,17 @@ type node =
 and citem =
   | CChar of char
   | CRange of char * char
-  | CD | CW | CS | CND | CNW | CNS     (* \d \w \s \D \W \S *)
+  | CD | CW | CS | CND | CNW | CNS     (* d w s D W S escapes *)
+
+(* Compiled = the alternation AST plus the number of capturing groups. *)
+type t = { alts : node list list; ngroups : int }
 
 (* ----- parser ----- *)
 
-let parse (pat : string) : node list list =
+let parse (pat : string) : t =
   let n = String.length pat in
   let pos = ref 0 in
+  let gc = ref 0 in
   let peek () = if !pos < n then Some pat.[!pos] else None in
   let adv () = incr pos in
   let parse_class () =
@@ -131,11 +138,22 @@ let parse (pat : string) : node list list =
     | None -> None
     | Some '(' ->
       adv ();
-      (* non-capturing? *)
-      (if peek () = Some '?' && !pos + 1 < n && pat.[!pos + 1] = ':' then (adv (); adv ()));
+      (* (?: is non-capturing; a plain ( and an RE2 named group (?P<name> are
+         both capturing (names are not tracked). Indices follow open parens. *)
+      let gi =
+        if peek () = Some '?' && !pos + 1 < n && pat.[!pos + 1] = ':' then (adv (); adv (); 0)
+        else if peek () = Some '?' && !pos + 2 < n && pat.[!pos + 1] = 'P'
+                && pat.[!pos + 2] = '<' then begin
+          adv (); adv (); adv ();
+          while peek () <> None && peek () <> Some '>' do adv () done;
+          (if peek () = Some '>' then adv ());
+          incr gc; !gc
+        end
+        else (incr gc; !gc)
+      in
       let alts = parse_alt () in
       (if peek () = Some ')' then adv ());
-      Some (Grp alts)
+      Some (Grp (gi, alts))
     | Some '[' -> Some (parse_class ())
     | Some '.' -> adv (); Some Any
     | Some '^' -> adv (); Some Start
@@ -150,6 +168,7 @@ let parse (pat : string) : node list list =
        | Some 'W' -> adv (); Some (Cls (false, [CNW]))
        | Some 'S' -> adv (); Some (Cls (false, [CNS]))
        | Some 'b' -> adv (); Some WordB
+       | Some 'B' -> adv (); Some NWordB
        | Some 'n' -> adv (); Some (Char '\n')
        | Some 't' -> adv (); Some (Char '\t')
        | Some 'r' -> adv (); Some (Char '\r')
@@ -157,9 +176,10 @@ let parse (pat : string) : node list list =
        | None -> Some (Char '\\'))
     | Some c -> adv (); Some (Char c)
   in
-  parse_alt ()
+  let alts = parse_alt () in
+  { alts; ngroups = !gc }
 
-(* ----- matcher (backtracking, CPS) ----- *)
+(* ----- matcher (backtracking, CPS, capture-tracking) ----- *)
 
 let is_word c =
   (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c = '_'
@@ -175,80 +195,187 @@ let citem_match it c =
   | CS -> c = ' ' || c = '\t' || c = '\n' || c = '\r' || c = '\012' || c = '\011'
   | CNS -> not (c = ' ' || c = '\t' || c = '\n' || c = '\r' || c = '\012' || c = '\011')
 
-let rec m_node input len node pos (k : int -> bool) : bool =
+(* Capture spans, one slot per capturing group (group i at index i-1). The
+   continuation receives the accepting end position and the spans so far; the
+   first accepting continuation under backtracking order wins. Spans are
+   threaded functionally (copy-on-write), so backtracking discards abandoned
+   group records naturally. *)
+type caps = (int * int) option array
+
+let rec m_node input len node pos (caps : caps)
+    (k : int -> caps -> (int * caps) option) : (int * caps) option =
   match node with
-  | Char c -> pos < len && input.[pos] = c && k (pos + 1)
-  | Any -> pos < len && input.[pos] <> '\n' && k (pos + 1)
-  | Start -> pos = 0 && k pos
-  | End -> pos = len && k pos
+  | Char c -> if pos < len && input.[pos] = c then k (pos + 1) caps else None
+  | Any -> if pos < len && input.[pos] <> '\n' then k (pos + 1) caps else None
+  | Start -> if pos = 0 then k pos caps else None
+  | End -> if pos = len then k pos caps else None
   | WordB ->
     let before = pos > 0 && is_word input.[pos - 1] in
     let after = pos < len && is_word input.[pos] in
-    (before <> after) && k pos
+    if before <> after then k pos caps else None
+  | NWordB ->
+    let before = pos > 0 && is_word input.[pos - 1] in
+    let after = pos < len && is_word input.[pos] in
+    if before = after then k pos caps else None
   | Cls (neg, items) ->
-    pos < len &&
-    (let c = input.[pos] in
-     let hit = List.exists (fun it -> citem_match it c) items in
-     (if neg then not hit else hit) && k (pos + 1))
-  | Grp alts -> List.exists (fun seq -> m_seq input len seq pos k) alts
+    if pos < len then begin
+      let c = input.[pos] in
+      let hit = List.exists (fun it -> citem_match it c) items in
+      if (if neg then not hit else hit) then k (pos + 1) caps else None
+    end else None
+  | Grp (gi, alts) ->
+    let k' =
+      if gi = 0 then k
+      else (fun p caps' ->
+          let c2 = Array.copy caps' in
+          c2.(gi - 1) <- Some (pos, p);
+          k p c2)
+    in
+    first_alt input len alts pos caps k'
   | Opt (greedy, a) ->
-    if greedy then m_node input len a pos k || k pos
-    else k pos || m_node input len a pos k
-  | Star (greedy, a) -> m_star input len greedy a pos k
+    if greedy then
+      (match m_node input len a pos caps k with Some r -> Some r | None -> k pos caps)
+    else
+      (match k pos caps with Some r -> Some r | None -> m_node input len a pos caps k)
+  | Star (greedy, a) -> m_star input len greedy a pos caps k
   | Plus (greedy, a) ->
-    m_node input len a pos (fun p -> m_star input len greedy a p k)
-  | Rep (greedy, mn, mx, a) -> m_rep input len greedy mn mx a pos k
+    m_node input len a pos caps (fun p c -> m_star input len greedy a p c k)
+  | Rep (greedy, mn, mx, a) -> m_rep input len greedy mn mx a pos caps k
 
-and m_star input len greedy a pos k =
+and first_alt input len alts pos caps k =
+  match alts with
+  | [] -> None
+  | seq :: rest ->
+    (match m_seq input len seq pos caps k with
+     | Some r -> Some r
+     | None -> first_alt input len rest pos caps k)
+
+and m_star input len greedy a pos caps k =
+  let more p c = if p > pos then m_star input len greedy a p c k else None in
   if greedy then
-    m_node input len a pos (fun p -> p > pos && m_star input len greedy a p k) || k pos
+    (match m_node input len a pos caps more with Some r -> Some r | None -> k pos caps)
   else
-    k pos || m_node input len a pos (fun p -> p > pos && m_star input len greedy a p k)
+    (match k pos caps with Some r -> Some r | None -> m_node input len a pos caps more)
 
-and m_rep input len greedy mn mx a pos k =
+and m_rep input len greedy mn mx a pos caps k =
   if mn > 0 then
-    m_node input len a pos (fun p ->
+    m_node input len a pos caps (fun p c ->
         m_rep input len greedy (mn - 1)
-          (match mx with Some m -> Some (m - 1) | None -> None) a p k)
+          (match mx with Some m -> Some (m - 1) | None -> None) a p c k)
   else
     match mx with
-    | Some 0 -> k pos
+    | Some 0 -> k pos caps
     | _ ->
-      let next p = p > pos && m_rep input len greedy 0
-                     (match mx with Some m -> Some (m - 1) | None -> None) a p k in
-      if greedy then m_node input len a pos next || k pos
-      else k pos || m_node input len a pos next
+      let next p c = if p > pos then m_rep input len greedy 0
+                       (match mx with Some m -> Some (m - 1) | None -> None) a p c k
+        else None in
+      if greedy then
+        (match m_node input len a pos caps next with Some r -> Some r | None -> k pos caps)
+      else
+        (match k pos caps with Some r -> Some r | None -> m_node input len a pos caps next)
 
-and m_seq input len seq pos k =
+and m_seq input len seq pos caps k =
   match seq with
-  | [] -> k pos
-  | x :: rest -> m_node input len x pos (fun p -> m_seq input len rest p k)
-
-(* Compiled = the alternation AST. *)
-type t = node list list
+  | [] -> k pos caps
+  | x :: rest -> m_node input len x pos caps (fun p c -> m_seq input len rest p c k)
 
 let compile (pat : string) : t = parse pat
 
-(* Does the pattern match anywhere in input? *)
-let test (re : t) (input : string) : bool =
-  let len = String.length input in
-  let rec try_at i =
-    if List.exists (fun seq -> m_seq input len seq i (fun _ -> true)) re then true
-    else if i >= len then false
-    else try_at (i + 1)
-  in
-  try_at 0
-
-let test_str (pat : string) (input : string) : bool = test (compile pat) input
-
-(* Leftmost match: returns (start, stop) or None. Used by the public re_* API. *)
-let find_bounds (re : t) (input : string) : (int * int) option =
+(* First match at or after `start`: (mstart, mend, caps). *)
+let find_at (re : t) (input : string) (start : int) : (int * int * caps) option =
   let len = String.length input in
   let rec try_at i =
     if i > len then None
-    else
-      let best = ref (-1) in
-      let ok = List.exists (fun seq -> m_seq input len seq i (fun p -> best := p; true)) re in
-      if ok then Some (i, !best) else try_at (i + 1)
+    else begin
+      let caps0 = Array.make (max 1 re.ngroups) None in
+      match first_alt input len re.alts i caps0 (fun p c -> Some (p, c)) with
+      | Some (e, caps) -> Some (i, e, caps)
+      | None -> try_at (i + 1)
+    end
+  in try_at start
+
+(* Does the pattern match anywhere in input? *)
+let test (re : t) (input : string) : bool =
+  match find_at re input 0 with Some _ -> true | None -> false
+
+let test_str (pat : string) (input : string) : bool = test (compile pat) input
+
+(* Leftmost match: returns (start, stop) or None. *)
+let find_bounds (re : t) (input : string) : (int * int) option =
+  match find_at re input 0 with
+  | Some (s, e, _) -> Some (s, e)
+  | None -> None
+
+let group_str input (caps : caps) gi =
+  match caps.(gi) with
+  | Some (a, b) -> String.sub input a (b - a)
+  | None -> ""
+
+let match_groups (re : t) input ms me caps =
+  String.sub input ms (me - ms)
+  :: List.init re.ngroups (fun i -> group_str input caps i)
+
+(* First match as [whole; capture1; ...]; unmatched groups are "". *)
+let find (re : t) (input : string) : string list option =
+  match find_at re input 0 with
+  | None -> None
+  | Some (ms, me, caps) -> Some (match_groups re input ms me caps)
+
+(* Every non-overlapping match, left to right (Go FindAllStringSubmatch). *)
+let find_all (re : t) (input : string) : string list list =
+  let len = String.length input in
+  let rec go pos acc =
+    if pos > len then List.rev acc
+    else match find_at re input pos with
+      | None -> List.rev acc
+      | Some (ms, me, caps) ->
+        let m = match_groups re input ms me caps in
+        let pos' = if me = ms then me + 1 else me in
+        go pos' (m :: acc)
   in
-  try_at 0
+  go 0 []
+
+(* Replace every match; the template supports the JS-style refs (and-sign for
+   the whole match), 1..9 group refs and a doubled dollar for a literal
+   dollar. On a zero-width match the current character is emitted and the
+   scan advances one position. *)
+let replace_all (re : t) (input : string) (template : string) : string =
+  let len = String.length input in
+  let b = Buffer.create (String.length input) in
+  let tn = String.length template in
+  let expand ms me (caps : caps) =
+    let i = ref 0 in
+    while !i < tn do
+      let c = template.[!i] in
+      if c = '$' && !i + 1 < tn then begin
+        let nc = template.[!i + 1] in
+        if nc = '$' then (Buffer.add_char b '$'; i := !i + 2)
+        else if nc = '&' || (nc >= '0' && nc <= '9') then begin
+          (if nc = '&' || nc = '0' then
+             Buffer.add_string b (String.sub input ms (me - ms))
+           else begin
+             let gi = Char.code nc - Char.code '0' in
+             if gi <= re.ngroups then
+               (match caps.(gi - 1) with
+                | Some (a, e) -> Buffer.add_string b (String.sub input a (e - a))
+                | None -> ())
+           end);
+          i := !i + 2
+        end else (Buffer.add_char b c; incr i)
+      end else (Buffer.add_char b c; incr i)
+    done
+  in
+  let rec go pos =
+    if pos > len then ()
+    else match find_at re input pos with
+      | None -> Buffer.add_string b (String.sub input pos (len - pos))
+      | Some (ms, me, caps) ->
+        Buffer.add_string b (String.sub input pos (ms - pos));
+        expand ms me caps;
+        if me = ms then begin
+          (if ms < len then Buffer.add_char b input.[ms]);
+          go (ms + 1)
+        end else go me
+  in
+  go 0;
+  Buffer.contents b

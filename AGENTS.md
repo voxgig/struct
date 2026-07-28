@@ -39,7 +39,7 @@ matrix in [`REPORT.md`](design/REPORT.md)):
 
 | Canonical | Complete | Partial |
 |---|---|---|
-| typescript | javascript, python, go, php, ruby, lua, rust, c, csharp, zig, cpp, perl, swift, clojure, ocaml, scala, java, kotlin, dart, elixir, haskell, aql | — |
+| typescript | javascript, python, go, php, ruby, lua, rust, c, csharp, zig, cpp, perl, swift, clojure, ocaml, scala, java, kotlin, dart, elixir, haskell, lean, aql | — |
 
 
 ## Prime directives (do not break these)
@@ -138,6 +138,7 @@ into the directory and use its `Makefile`. First run installs deps.
 | Dart | `dart/` | `dart run test/runner.dart` | `dart analyze` | native `Map`/`List` nodes; single `null` (like Python); core `RegExp` |
 | Elixir | `elixir/` | `elixir test/runner.exs` | compile check (`elixirc`) | ETS-backed heap nodes (`{:vmap,_}`/`{:vlist,_}`); single `nil` (like Python); core `Regex` |
 | Haskell | `haskell/` | `ghc … test/Runner.hs` | type-check (`ghc -fno-code`) | `IORef`-backed nodes (whole API in `IO`); distinct `VNoval`/`VNull` (like OCaml); in-tree Vregex |
+| Lean | `lean/` | `lake build` + runner | type-check (`lake build`) | heap-handle nodes (whole API in `SIO = ReaderT Ctx IO`); distinct `noval`/`null` (like OCaml); in-tree Vregex |
 | AQL | `aql/` | `aql run … test/runner.aql` | module load smoke | written in the AQL language itself; `flex` nodes; single `none` (like Python); `mini re` (Go RE2); fn-box carriers for function values |
 
 Repo-wide: `make test` / `make lint` / `make audit` (supply-chain) /
@@ -173,7 +174,7 @@ markdownlint, plus each language's linters).
 
 ## Conventions
 
-- **Casing.** `getpath` (TS/JS/Py/Ruby/PHP/Lua/Perl/Java/Kotlin/Swift/Clojure/OCaml/Scala/Dart/Elixir/Haskell/AQL),
+- **Casing.** `getpath` (TS/JS/Py/Ruby/PHP/Lua/Perl/Java/Kotlin/Swift/Clojure/OCaml/Scala/Dart/Elixir/Haskell/Lean/AQL),
   `GetPath` (Go/C#), `get_path` (Rust), `voxgig_getpath` (C — and C++ adds
   `_v`/`_str` variants). Parity is checked case/underscore-insensitively.
 - **Absent vs. null ("Group A/B").** See [`UNDEF_SPEC.md`](design/UNDEF_SPEC.md).
@@ -185,7 +186,10 @@ markdownlint, plus each language's linters).
 - **Ordered maps.** Map key order must match insertion order (TS object
   semantics). Languages without an ordered-map stdlib type hand-roll one
   in-tree (see `REPORT.md`); never swap in an unordered map.
-- **Regex.** Patterns must stay inside the **RE2 subset**
+- **Regex.** The Go stdlib `regexp` behaviour is the minimum `re_*`
+  functionality for every port (find with captures, find_all, replace with
+  `$1`..`$9` expansion) — enforced by the corpus `regex` group; see
+  [`REGEX_API.md`](design/REGEX_API.md). Patterns must stay inside the **RE2 subset**
   ([`REGEX.md`](design/REGEX.md)); the uniform six-function API is in
   [`REGEX_API.md`](design/REGEX_API.md). `python3 tools/check_corpus_regex.py`
   enforces the corpus stays in-subset. Backtracking-engine ports

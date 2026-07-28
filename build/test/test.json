@@ -19212,6 +19212,298 @@
       },
       "name": "sentinels",
       "set": []
+    },
+    "regex": {
+      "test": {
+        "set": [
+          {
+            "in": {
+              "pattern": "a+b",
+              "input": "xxaaabyy"
+            },
+            "out": true
+          },
+          {
+            "in": {
+              "pattern": "a+b",
+              "input": "xxbyy"
+            },
+            "out": false
+          },
+          {
+            "in": {
+              "pattern": "^ab$",
+              "input": "ab"
+            },
+            "out": true
+          },
+          {
+            "in": {
+              "pattern": "^ab$",
+              "input": "xab"
+            },
+            "out": false
+          },
+          {
+            "in": {
+              "pattern": "[0-9]{2,3}",
+              "input": "x42y"
+            },
+            "out": true
+          },
+          {
+            "in": {
+              "pattern": "[0-9]{2,3}",
+              "input": "x4y"
+            },
+            "out": false
+          },
+          {
+            "in": {
+              "pattern": "\\bcat\\b",
+              "input": "a cat sat"
+            },
+            "out": true
+          },
+          {
+            "in": {
+              "pattern": "\\bcat\\b",
+              "input": "scatter"
+            },
+            "out": false
+          },
+          {
+            "in": {
+              "pattern": "\\Bcat",
+              "input": "scat"
+            },
+            "out": true
+          },
+          {
+            "in": {
+              "pattern": "\\Bcat",
+              "input": "cat here"
+            },
+            "out": false
+          },
+          {
+            "in": {
+              "pattern": "colou?r|grey",
+              "input": "the color here"
+            },
+            "out": true
+          },
+          {
+            "in": {
+              "pattern": "\\d+\\s\\w+",
+              "input": "42 apples"
+            },
+            "out": true
+          },
+          {
+            "in": {
+              "pattern": "[^a-z]+",
+              "input": "abc"
+            },
+            "out": false
+          },
+          {
+            "in": {
+              "pattern": "(?:ab)+c",
+              "input": "zababcz"
+            },
+            "out": true
+          }
+        ]
+      },
+      "find": {
+        "set": [
+          {
+            "in": {
+              "pattern": "([a-z]+)-([0-9]+)",
+              "input": "id: abc-123!"
+            },
+            "out": [
+              "abc-123",
+              "abc",
+              "123"
+            ]
+          },
+          {
+            "in": {
+              "pattern": "[0-9]+",
+              "input": "a1b22c333"
+            },
+            "out": [
+              "1"
+            ]
+          },
+          {
+            "in": {
+              "pattern": "^(\\w+)\\s",
+              "input": "hello world"
+            },
+            "out": [
+              "hello ",
+              "hello"
+            ]
+          },
+          {
+            "in": {
+              "pattern": "(a|b)(c)",
+              "input": "xxbcyy"
+            },
+            "out": [
+              "bc",
+              "b",
+              "c"
+            ]
+          },
+          {
+            "in": {
+              "pattern": "q+",
+              "input": "abc"
+            },
+            "out": null
+          }
+        ]
+      },
+      "find_all": {
+        "set": [
+          {
+            "in": {
+              "pattern": "[0-9]+",
+              "input": "a1b22c333"
+            },
+            "out": [
+              [
+                "1"
+              ],
+              [
+                "22"
+              ],
+              [
+                "333"
+              ]
+            ]
+          },
+          {
+            "in": {
+              "pattern": "([a-z])([0-9])",
+              "input": "a1 b2 c3"
+            },
+            "out": [
+              [
+                "a1",
+                "a",
+                "1"
+              ],
+              [
+                "b2",
+                "b",
+                "2"
+              ],
+              [
+                "c3",
+                "c",
+                "3"
+              ]
+            ]
+          },
+          {
+            "in": {
+              "pattern": "\\b\\w+\\b",
+              "input": "to be or"
+            },
+            "out": [
+              [
+                "to"
+              ],
+              [
+                "be"
+              ],
+              [
+                "or"
+              ]
+            ]
+          },
+          {
+            "in": {
+              "pattern": "q",
+              "input": "abc"
+            },
+            "out": []
+          }
+        ]
+      },
+      "replace": {
+        "set": [
+          {
+            "in": {
+              "pattern": "[0-9]+",
+              "input": "a1b22",
+              "replacement": "#"
+            },
+            "out": "a#b#"
+          },
+          {
+            "in": {
+              "pattern": "(\\w+)@(\\w+)",
+              "input": "joe@corp, ann@dev",
+              "replacement": "$2.$1"
+            },
+            "out": "corp.joe, dev.ann"
+          },
+          {
+            "in": {
+              "pattern": "\\s+",
+              "input": "a  b   c",
+              "replacement": "-"
+            },
+            "out": "a-b-c"
+          },
+          {
+            "in": {
+              "pattern": "q",
+              "input": "abc",
+              "replacement": "X"
+            },
+            "out": "abc"
+          },
+          {
+            "in": {
+              "pattern": "(x+)",
+              "input": "axxb",
+              "replacement": "[$1]"
+            },
+            "out": "a[xx]b"
+          }
+        ]
+      },
+      "escape": {
+        "set": [
+          {
+            "in": {
+              "val": "a.b*c"
+            },
+            "out": "a\\.b\\*c"
+          },
+          {
+            "in": {
+              "val": "x[1]{2}"
+            },
+            "out": "x\\[1\\]\\{2\\}"
+          },
+          {
+            "in": {
+              "val": "plain"
+            },
+            "out": "plain"
+          }
+        ]
+      },
+      "name": "regex",
+      "set": []
     }
   },
   "primary": {

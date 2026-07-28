@@ -8,7 +8,7 @@
  * port mirrors the canonical TS logic directly. Nodes are mutable and
  * reference-stable: lists are `value list ref`, maps are an in-tree ordered
  * map (insertion order preserved). Zero third-party runtime dependencies; the
- * regex helper is the in-tree Vregex engine (RE2 subset). *)
+ * regex helper is the in-tree Vregex engine (RE2 subset, captures tracked). *)
 
 (* ---------------------------------------------------------------------------
  * Value model
@@ -432,11 +432,14 @@ and slice ?(start = Noval) ?(stop = Noval) ?(mutate = false) v =
 and re_compile ?flags:_ p = (match p with Str _ -> p | _ -> Str (js_string p))
 and re_str p = (match p with Str s -> s | _ -> js_string p)
 and re_find p input =
-  (match Vregex.find_bounds (Vregex.compile (re_str p)) (re_str input) with
-   | Some (s, e) -> lst [Str (String.sub (re_str input) s (e - s))]
+  (match Vregex.find (Vregex.compile (re_str p)) (re_str input) with
+   | Some groups -> lst (List.map (fun g -> Str g) groups)
    | None -> Null)
-and re_find_all _p _input = empty_list ()
-and re_replace _p input _r = input
+and re_find_all p input =
+  lst (List.map (fun m -> lst (List.map (fun g -> Str g) m))
+         (Vregex.find_all (Vregex.compile (re_str p)) (re_str input)))
+and re_replace p input r =
+  Str (Vregex.replace_all (Vregex.compile (re_str p)) (re_str input) (re_str r))
 and re_test p input = Bool (Vregex.test_str (re_str p) (re_str input))
 and re_escape s = escre s
 

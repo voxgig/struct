@@ -295,6 +295,7 @@ void runAll(dynamic spec) {
   var validates = g('validate');
   var selects = g('select');
   var sentinels = g('sentinels');
+  var regexs = g('regex');
   mg(n) => s.getprop(minor, n);
 
   runSet('minor.isnode', mg('isnode'), arg1((v) => s.isnode(v)));
@@ -492,6 +493,19 @@ void runAll(dynamic spec) {
   // select sees a present-null field — the present-null unexpected-keys defect.
   runSet('select.nullkey', s.getprop(selects, 'nullkey'),
       arg1((vin) => s.select(vget(vin, 'obj'), vget(vin, 'query'))), false);
+
+  // regex (parity floor: Go stdlib regexp — see design/REGEX_API.md)
+  runSet('regex.test', s.getprop(regexs, 'test'),
+      arg1((vin) => s.re_test(vget(vin, 'pattern'), vget(vin, 'input'))));
+  runSet('regex.find', s.getprop(regexs, 'find'),
+      arg1((vin) => s.re_find(vget(vin, 'pattern'), vget(vin, 'input'))));
+  runSet('regex.find_all', s.getprop(regexs, 'find_all'),
+      arg1((vin) => s.re_find_all(vget(vin, 'pattern'), vget(vin, 'input'))));
+  runSet('regex.replace', s.getprop(regexs, 'replace'),
+      arg1((vin) => s.re_replace(
+          vget(vin, 'pattern'), vget(vin, 'input'), vget(vin, 'replacement'))));
+  runSet('regex.escape', s.getprop(regexs, 'escape'),
+      arg1((vin) => s.re_escape(vget(vin, 'val'))));
 
   runSet(
       'sentinels.getprop_unify',

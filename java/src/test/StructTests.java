@@ -44,6 +44,7 @@ class StructTests {
   private static Map<String, Object> validateSpecialSpec;
   private static Map<String, Object> selectSpec;
   private static Map<String, Object> sentinelsSpec;
+  private static Map<String, Object> regexSpec;
 
   @BeforeAll
   static void init() throws IOException {
@@ -68,6 +69,7 @@ class StructTests {
     validateSpecialSpec = (Map<String, Object>) validateSpec.get("special");
     selectSpec = (Map<String, Object>) struct.get("select");
     sentinelsSpec = (Map<String, Object>) struct.get("sentinels");
+    regexSpec = (Map<String, Object>) struct.get("regex");
   }
 
   private static String slog(Object v) {
@@ -1057,6 +1059,64 @@ class StructTests {
   @Test
   void selectAlts() {
     runSelectSet("alts");
+  }
+
+  // regex (parity floor: Go stdlib regexp — see design/REGEX_API.md)
+
+  @Test
+  void regexTest() {
+    runSet(
+        (Map<String, Object>) regexSpec.get("test"),
+        v -> {
+          Map<String, Object> m = (Map<String, Object>) v;
+          return Struct.reTest((String) m.get("pattern"), (String) m.get("input"));
+        });
+  }
+
+  @Test
+  void regexFind() {
+    runSet(
+        (Map<String, Object>) regexSpec.get("find"),
+        v -> {
+          Map<String, Object> m = (Map<String, Object>) v;
+          String[] found = Struct.reFind((String) m.get("pattern"), (String) m.get("input"));
+          return found == null ? null : new ArrayList<Object>(java.util.Arrays.asList(found));
+        });
+  }
+
+  @Test
+  void regexFindAll() {
+    runSet(
+        (Map<String, Object>) regexSpec.get("find_all"),
+        v -> {
+          Map<String, Object> m = (Map<String, Object>) v;
+          List<Object> out = new ArrayList<>();
+          for (String[] row : Struct.reFindAll((String) m.get("pattern"), (String) m.get("input"))) {
+            out.add(new ArrayList<Object>(java.util.Arrays.asList(row)));
+          }
+          return out;
+        });
+  }
+
+  @Test
+  void regexReplace() {
+    runSet(
+        (Map<String, Object>) regexSpec.get("replace"),
+        v -> {
+          Map<String, Object> m = (Map<String, Object>) v;
+          return Struct.reReplace(
+              (String) m.get("pattern"), (String) m.get("input"), (String) m.get("replacement"));
+        });
+  }
+
+  @Test
+  void regexEscape() {
+    runSet(
+        (Map<String, Object>) regexSpec.get("escape"),
+        v -> {
+          Map<String, Object> m = (Map<String, Object>) v;
+          return Struct.reEscape((String) m.get("val"));
+        });
   }
 
   @Test

@@ -641,7 +641,32 @@ defmodule Voxgig.Struct do
     vlist_new(Enum.map(matches, fn groups -> vlist_new(Enum.map(groups, fn g -> g || "" end)) end))
   end
 
-  def re_replace(_p, input, _repl), do: input
+  def re_replace(p, input, repl) do
+    str = if(is_binary(input), do: input, else: js_string(input))
+
+    cond do
+      is_function(repl) ->
+        Regex.replace(rx(p), str, fn whole, caps ->
+          js_string(repl.(vlist_new([whole | List.wrap(caps)])))
+        end)
+
+      true ->
+        # JS-style refs: $& is the whole match (\\0), $1..$9 are captures
+        # (\\1..); $$ is a literal $.
+        repl_s = if(is_binary(repl), do: repl, else: js_string(repl))
+
+        translated =
+          Regex.replace(~r/\$(\$|&|[1-9])/, repl_s, fn _, ref ->
+            case ref do
+              "$" -> "$"
+              "&" -> "\\0"
+              d -> "\\" <> d
+            end
+          end)
+
+        Regex.replace(rx(p), str, translated)
+    end
+  end
   def re_escape(s), do: escre(s)
 
   def escre(s \\ nil) do

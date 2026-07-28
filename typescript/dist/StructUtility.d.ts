@@ -161,6 +161,12 @@ declare class StructUtility {
     typename: typeof typename;
     validate: typeof validate;
     walk: typeof walk;
+    re_compile: typeof re_compile;
+    re_find: typeof re_find;
+    re_find_all: typeof re_find_all;
+    re_replace: typeof re_replace;
+    re_test: typeof re_test;
+    re_escape: typeof re_escape;
     SKIP: {
         '`$SKIP`': boolean;
     };

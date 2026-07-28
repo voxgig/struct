@@ -784,7 +784,130 @@ static const char* category_to_file(const char* cat) {
     return "select.jsonic";
   if (strcmp(cat, "sentinels") == 0)
     return "sentinels.jsonic";
+  if (strcmp(cat, "regex") == 0)
+    return "regex.jsonic";
   return cat;
+}
+
+/* ---- regex subjects (parity floor: Go stdlib regexp; REGEX_API.md) ---- */
+
+static const char* rx_str(voxgig_value* v) {
+  return voxgig_is_string(v) ? voxgig_as_string(v) : "";
+}
+
+static voxgig_value* subj_re_test(voxgig_value* in, char** err, void* ud) {
+  (void)err;
+  (void)ud;
+  voxgig_value* pv = getp(in, "pattern");
+  voxgig_value* iv = getp(in, "input");
+  voxgig_regex* re = voxgig_regex_compile(rx_str(pv), NULL);
+  bool r = re != NULL && voxgig_regex_test(re, rx_str(iv), strlen(rx_str(iv)));
+  if (re != NULL)
+    voxgig_regex_free(re);
+  voxgig_release(pv);
+  voxgig_release(iv);
+  return voxgig_new_bool(r);
+}
+
+static voxgig_value* rx_groups_value(const char* input, const int* caps, int ngroups) {
+  voxgig_value* row = voxgig_new_list();
+  for (int g = 0; g < ngroups; g++) {
+    int cs = caps[2 * g];
+    int ce = caps[2 * g + 1];
+    if (cs < 0 || ce < cs) {
+      voxgig_list_push(voxgig_as_list(row), voxgig_new_string(""));
+    } else {
+      char* part = (char*)malloc((size_t)(ce - cs) + 1);
+      memcpy(part, input + cs, (size_t)(ce - cs));
+      part[ce - cs] = 0;
+      voxgig_list_push(voxgig_as_list(row), voxgig_new_string(part));
+      free(part);
+    }
+  }
+  return row;
+}
+
+static voxgig_value* subj_re_find(voxgig_value* in, char** err, void* ud) {
+  (void)err;
+  (void)ud;
+  voxgig_value* pv = getp(in, "pattern");
+  voxgig_value* iv = getp(in, "input");
+  const char* input = rx_str(iv);
+  voxgig_value* out = NULL;
+  voxgig_regex* re = voxgig_regex_compile(rx_str(pv), NULL);
+  if (re != NULL) {
+    int caps[2 * VOXGIG_REGEX_MAX_GROUPS];
+    int ngroups = voxgig_regex_ngroups(re);
+    if (voxgig_regex_find(re, input, strlen(input), caps, ngroups)) {
+      out = rx_groups_value(input, caps, ngroups);
+    }
+    voxgig_regex_free(re);
+  }
+  if (out == NULL)
+    out = voxgig_new_null();
+  voxgig_release(pv);
+  voxgig_release(iv);
+  return out;
+}
+
+static voxgig_value* subj_re_find_all(voxgig_value* in, char** err, void* ud) {
+  (void)err;
+  (void)ud;
+  voxgig_value* pv = getp(in, "pattern");
+  voxgig_value* iv = getp(in, "input");
+  const char* input = rx_str(iv);
+  voxgig_value* out = voxgig_new_list();
+  voxgig_regex* re = voxgig_regex_compile(rx_str(pv), NULL);
+  if (re != NULL) {
+    enum { MAXM = 64 };
+    static int caps[MAXM * 2 * VOXGIG_REGEX_MAX_GROUPS];
+    int ngroups = voxgig_regex_ngroups(re);
+    int nm = voxgig_regex_find_all(re, input, strlen(input), caps, MAXM);
+    for (int m = 0; m < nm; m++) {
+      voxgig_list_push(voxgig_as_list(out),
+                       rx_groups_value(input, caps + m * 2 * VOXGIG_REGEX_MAX_GROUPS, ngroups));
+    }
+    voxgig_regex_free(re);
+  }
+  voxgig_release(pv);
+  voxgig_release(iv);
+  return out;
+}
+
+static voxgig_value* subj_re_replace(voxgig_value* in, char** err, void* ud) {
+  (void)err;
+  (void)ud;
+  voxgig_value* pv = getp(in, "pattern");
+  voxgig_value* iv = getp(in, "input");
+  voxgig_value* rv = getp(in, "replacement");
+  const char* input = rx_str(iv);
+  voxgig_value* out = NULL;
+  voxgig_regex* re = voxgig_regex_compile(rx_str(pv), NULL);
+  if (re != NULL) {
+    char* rs = voxgig_regex_replace(re, input, strlen(input), rx_str(rv));
+    if (rs != NULL) {
+      out = voxgig_new_string(rs);
+      free(rs);
+    }
+    voxgig_regex_free(re);
+  }
+  if (out == NULL)
+    out = voxgig_new_string(input);
+  voxgig_release(pv);
+  voxgig_release(iv);
+  voxgig_release(rv);
+  return out;
+}
+
+static voxgig_value* subj_re_escape(voxgig_value* in, char** err, void* ud) {
+  (void)err;
+  (void)ud;
+  voxgig_value* v = getp(in, "val");
+  char* s = voxgig_escre(v);
+  voxgig_value* r = voxgig_new_string(s);
+  free(s);
+  voxgig_release(v);
+  return r;
 }
 
 int main(void) {
@@ -835,6 +958,13 @@ int main(void) {
   run("getpath", "relative", true, subj_getpath_relative, NULL);
   run("getpath", "special", true, subj_getpath_special, NULL);
   run("getpath", "handler", true, subj_getpath_handler, NULL);
+
+  /* regex (parity floor: Go stdlib regexp; REGEX_API.md) */
+  run("regex", "test", true, subj_re_test, NULL);
+  run("regex", "find", true, subj_re_find, NULL);
+  run("regex", "find_all", true, subj_re_find_all, NULL);
+  run("regex", "replace", true, subj_re_replace, NULL);
+  run("regex", "escape", true, subj_re_escape, NULL);
 
   /* sentinels */
   run("sentinels", "getprop_unify", true, subj_sent_getprop, NULL);

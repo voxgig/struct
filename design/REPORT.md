@@ -57,13 +57,14 @@ NFA engine in-tree (c/cpp/lua/rust/zig).
 | **zig** | 48 | 15 | 2 | 60/60 corpus sets \*1 | cycle-break + 7 latent-bug fixes |
 | **perl** | 48 | 15 | 2 | full corpus (700+ cases) | full canonical parity |
 | **swift** | 48 | 15 | 2 | full corpus (700+ cases) | full canonical parity |
-| **clojure** | 48 | 15 | 2 | 1329/1329 corpus | full TS-canonical parity |
-| **ocaml** | 48 | 15 | 2 | 1329/1329 corpus | full TS-canonical parity |
-| **scala** | 48 | 15 | 2 | 1329/1329 corpus | full TS-canonical parity |
-| **dart** | 48 | 15 | 2 | 1329/1329 corpus | full TS-canonical parity |
-| **elixir** | 48 | 15 | 2 | 1329/1329 corpus | full TS-canonical parity |
-| **haskell** | 48 | 15 | 2 | 1329/1329 corpus | full TS-canonical parity |
-| **aql** | 48 | 15 | 2 | 1329/1329 corpus | full TS-canonical parity |
+| **clojure** | 48 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
+| **ocaml** | 48 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
+| **scala** | 48 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
+| **dart** | 48 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
+| **elixir** | 48 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
+| **haskell** | 48 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
+| **lean** | 48 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
+| **aql** | 48 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
 
 \*1 Zig: previously reported "60/60 passing with a SIGSEGV" was
 misleading — the test process actually died at test 47/60

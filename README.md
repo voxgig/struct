@@ -48,6 +48,7 @@ syntax), and language-specific notes:
 | Dart       | Complete   | [`dart/README.md`](./dart/README.md)                  |
 | Elixir     | Complete   | [`elixir/README.md`](./elixir/README.md)              |
 | Haskell    | Complete   | [`haskell/README.md`](./haskell/README.md)            |
+| Lean       | Complete   | [`lean/README.md`](./lean/README.md)                  |
 | AQL        | Complete   | [`aql/README.md`](./aql/README.md)                    |
 
 Every listed port reports full canonical parity under
@@ -435,7 +436,7 @@ cross-engine edge cases:
 ├── build/test/       # shared JSON test corpus (.jsonic)
 ├── typescript/  javascript/  python/   # canonical + JS-family ports
 ├── go/  ruby/  php/                     # other complete ports
-├── lua/  csharp/  zig/  rust/  c/  perl/  kotlin/  cpp/  swift/  clojure/  ocaml/  scala/  dart/  elixir/  haskell/  aql/
+├── lua/  csharp/  zig/  rust/  c/  perl/  kotlin/  cpp/  swift/  clojure/  ocaml/  scala/  dart/  elixir/  haskell/  lean/  aql/
 ├── java/                                # JVM ports (also kotlin/ scala/ clojure/)
 └── LICENSE
 ```
@@ -472,6 +473,7 @@ Each language directory contains:
 | Dart       | `dart analyze`                    | `dart format`         |
 | Elixir     | compile check (`elixirc`)         | (`mix format` optional)|
 | Haskell    | type-check (`ghc -fno-code`)      | (`ormolu` optional)   |
+| Lean       | type-check (`lake build`)         | (warnings-clean build)|
 | AQL        | `aql check` + module load smoke   | (`aql fmt` optional)  |
 
 Run everything with `make lint` at the repo root, or one language with

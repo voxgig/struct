@@ -2520,6 +2520,12 @@ class StructUtility {
         this.typename = typename;
         this.validate = validate;
         this.walk = walk;
+        this.re_compile = re_compile;
+        this.re_find = re_find;
+        this.re_find_all = re_find_all;
+        this.re_replace = re_replace;
+        this.re_test = re_test;
+        this.re_escape = re_escape;
         this.SKIP = SKIP;
         this.DELETE = DELETE;
         this.jm = jm;

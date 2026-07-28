@@ -1109,6 +1109,97 @@ test "select-nullkey" {
     try r.runsetAllocFlags(try getSubSpec(r, "select", "nullkey"), .{ .null_flag = false }, wrap_select);
 }
 
+// ---- regex: parity floor Go stdlib regexp (design/REGEX_API.md) ----
+
+fn rxStr(val: JsonValue) []const u8 {
+    return if (val == .string) val.string else "";
+}
+
+fn rxGroupsValue(allocator: Allocator, groups: [][]const u8) JsonValue {
+    const row = allocator.create(voxgig_struct.ListRef) catch return .null;
+    row.* = .{ .data = voxgig_struct.ListData.init(allocator) };
+    for (groups) |g| row.append(.{ .string = g }) catch return .null;
+    return JsonValue{ .array = row };
+}
+
+fn wrap_re_test(allocator: Allocator, val: JsonValue) JsonValue {
+    _ = allocator;
+    if (val != .object) return .null;
+    const m = val.object;
+    const p = rxStr(m.get("pattern") orelse .null);
+    const i = rxStr(m.get("input") orelse .null);
+    return .{ .bool = voxgig_struct.re_test(p, i) };
+}
+
+fn wrap_re_find(allocator: Allocator, val: JsonValue) JsonValue {
+    if (val != .object) return .null;
+    const m = val.object;
+    const p = rxStr(m.get("pattern") orelse .null);
+    const i = rxStr(m.get("input") orelse .null);
+    const found = voxgig_struct.re_find(allocator, p, i) orelse return .null;
+    return rxGroupsValue(allocator, found);
+}
+
+fn wrap_re_find_all(allocator: Allocator, val: JsonValue) JsonValue {
+    if (val != .object) return .null;
+    const m = val.object;
+    const p = rxStr(m.get("pattern") orelse .null);
+    const i = rxStr(m.get("input") orelse .null);
+    const out = allocator.create(voxgig_struct.ListRef) catch return .null;
+    out.* = .{ .data = voxgig_struct.ListData.init(allocator) };
+    const all = voxgig_struct.re_find_all(allocator, p, i) orelse return JsonValue{ .array = out };
+    for (all) |mt| out.append(rxGroupsValue(allocator, mt)) catch return .null;
+    return JsonValue{ .array = out };
+}
+
+fn wrap_re_replace(allocator: Allocator, val: JsonValue) JsonValue {
+    if (val != .object) return .null;
+    const m = val.object;
+    const p = rxStr(m.get("pattern") orelse .null);
+    const i = rxStr(m.get("input") orelse .null);
+    const r = rxStr(m.get("replacement") orelse .null);
+    const s = voxgig_struct.re_replace(allocator, p, i, r) catch return .null;
+    return .{ .string = s };
+}
+
+fn wrap_re_escape(allocator: Allocator, val: JsonValue) JsonValue {
+    if (val != .object) return .null;
+    const m = val.object;
+    const v = rxStr(m.get("val") orelse .null);
+    const s = voxgig_struct.re_escape(allocator, v) catch return .null;
+    return .{ .string = s };
+}
+
+test "regex-test" {
+    var r = try runner.makeRunner(testing.allocator);
+    defer r.deinit();
+    try r.runsetAlloc(try getSubSpec(r, "regex", "test"), wrap_re_test);
+}
+
+test "regex-find" {
+    var r = try runner.makeRunner(testing.allocator);
+    defer r.deinit();
+    try r.runsetAlloc(try getSubSpec(r, "regex", "find"), wrap_re_find);
+}
+
+test "regex-find_all" {
+    var r = try runner.makeRunner(testing.allocator);
+    defer r.deinit();
+    try r.runsetAlloc(try getSubSpec(r, "regex", "find_all"), wrap_re_find_all);
+}
+
+test "regex-replace" {
+    var r = try runner.makeRunner(testing.allocator);
+    defer r.deinit();
+    try r.runsetAlloc(try getSubSpec(r, "regex", "replace"), wrap_re_replace);
+}
+
+test "regex-escape" {
+    var r = try runner.makeRunner(testing.allocator);
+    defer r.deinit();
+    try r.runsetAlloc(try getSubSpec(r, "regex", "escape"), wrap_re_escape);
+}
+
 // ---- sentinels: Group A null/undefined unification across the readers ----
 
 test "sentinels-getprop_unify" {

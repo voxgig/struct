@@ -777,6 +777,29 @@ def rs-transform-modify fn [[alist:Any] [Any] [
   Struct.transform (rl-eget vin "data") (rl-eget vin "spec") idf
 ]]
 
+# --- regex subjects: parity floor Go stdlib regexp (design/REGEX_API.md) ------
+
+def rs-re-test fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  Struct.re_test (rl-vgetn vin "pattern") (rl-vgetn vin "input")
+]]
+def rs-re-find fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  Struct.re_find (rl-vgetn vin "pattern") (rl-vgetn vin "input")
+]]
+def rs-re-find-all fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  Struct.re_find_all (rl-vgetn vin "pattern") (rl-vgetn vin "input")
+]]
+def rs-re-replace fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  Struct.re_replace (rl-vgetn vin "pattern") (rl-vgetn vin "input") (rl-vgetn vin "replacement")
+]]
+def rs-re-escape fn [[alist:Any] [Any] [
+  def vin (rl-arg0 alist)
+  Struct.re_escape (rl-vgetn vin "val")
+]]
+
 # --- tranche-5 subjects: validate / select / sentinels ------------------------
 def rs-validate fn [[alist:Any] [Any] [
   def vin (rl-arg0 alist)
@@ -901,6 +924,13 @@ def rl-main fn [[ig:Any] [Any] [
   (rl-run-set "select.operators" (sl get "operators") [rs-select/r] true) drop
   (rl-run-set "select.edge" (sl get "edge") [rs-select/r] true) drop
   (rl-run-set "select.alts" (sl get "alts") [rs-select/r] true) drop
+
+  def rxspec (spec get "regex")
+  (rl-run-set "regex.test" (rxspec get "test") [rs-re-test/r] true) drop
+  (rl-run-set "regex.find" (rxspec get "find") [rs-re-find/r] true) drop
+  (rl-run-set "regex.find_all" (rxspec get "find_all") [rs-re-find-all/r] true) drop
+  (rl-run-set "regex.replace" (rxspec get "replace") [rs-re-replace/r] true) drop
+  (rl-run-set "regex.escape" (rxspec get "escape") [rs-re-escape/r] true) drop
 
   def sn (spec get "sentinels")
   (rl-run-set "sentinels.getprop_unify" (sn get "getprop_unify") [rs-getprop-vka/r] false) drop

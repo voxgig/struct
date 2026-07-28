@@ -55,6 +55,11 @@ describe("struct", function()
   local getelem = struct_util.getelem
   local getpath = struct_util.getpath
   local getprop = struct_util.getprop
+  local re_test = struct_util.re_test
+  local re_find = struct_util.re_find
+  local re_find_all = struct_util.re_find_all
+  local re_replace = struct_util.re_replace
+  local re_escape = struct_util.re_escape
 
   local haskey = struct_util.haskey
   local inject = struct_util.inject
@@ -918,6 +923,38 @@ describe("struct", function()
   --     it can only see via the NULLMARK sentinel, so it runs with null = true.
 
   local sentinelsSpec = spec.sentinels
+  local regexSpec = spec.regex
+
+  -- regex (parity floor: Go stdlib regexp — see design/REGEX_API.md)
+  test("regex-test", function()
+    runset(regexSpec.test, function(vin)
+      return re_test(vin.pattern, vin.input)
+    end)
+  end)
+
+  test("regex-find", function()
+    runset(regexSpec.find, function(vin)
+      return re_find(vin.pattern, vin.input)
+    end)
+  end)
+
+  test("regex-find_all", function()
+    runset(regexSpec.find_all, function(vin)
+      return re_find_all(vin.pattern, vin.input)
+    end)
+  end)
+
+  test("regex-replace", function()
+    runset(regexSpec.replace, function(vin)
+      return re_replace(vin.pattern, vin.input, vin.replacement)
+    end)
+  end)
+
+  test("regex-escape", function()
+    runset(regexSpec.escape, function(vin)
+      return re_escape(vin.val)
+    end)
+  end)
 
   test("sentinels-getprop_unify", function()
     runsetflags(sentinelsSpec.getprop_unify, { null = false }, function(vin)

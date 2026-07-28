@@ -22,6 +22,11 @@ from voxgig_struct.voxgig_struct import (
     T_noval,
     T_null,
     T_scalar,
+    re_escape,
+    re_find,
+    re_find_all,
+    re_replace,
+    re_test,
 )
 
 sdk_client = SDK.test()
@@ -818,6 +823,38 @@ class TestStruct(unittest.TestCase):
     # -------------------------------------------------
     # Group A conformance — null and absent unified.
     # -------------------------------------------------
+
+    # regex (parity floor: Go stdlib regexp -- see design/REGEX_API.md)
+
+    def test_regex_test(self):
+        runset(
+            spec['regex']['test'],
+            lambda vin: re_test(vin.get('pattern'), vin.get('input')),
+        )
+
+    def test_regex_find(self):
+        runset(
+            spec['regex']['find'],
+            lambda vin: re_find(vin.get('pattern'), vin.get('input')),
+        )
+
+    def test_regex_find_all(self):
+        runset(
+            spec['regex']['find_all'],
+            lambda vin: re_find_all(vin.get('pattern'), vin.get('input')),
+        )
+
+    def test_regex_replace(self):
+        runset(
+            spec['regex']['replace'],
+            lambda vin: re_replace(vin.get('pattern'), vin.get('input'), vin.get('replacement')),
+        )
+
+    def test_regex_escape(self):
+        runset(
+            spec['regex']['escape'],
+            lambda vin: re_escape(vin.get('val')),
+        )
 
     def test_sentinels_getprop_unify(self):
         runsetflags(
