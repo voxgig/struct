@@ -58,7 +58,8 @@ VERSION := $(shell cat VERSION)
 TAG := ocaml/v$(VERSION)
 PKG := voxgig-struct-$(VERSION)
 ASSET_URL := https://github.com/voxgig/struct/releases/download/$(TAG)/$(PKG).tar.gz
-AQL_DRY_RUN_FILLER := AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET
+# (The literal keeps the legacy AQL name: it must match the boru vault's dryRunFiller constant.)
+BORU_DRY_RUN_FILLER := AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET
 publish: test
 	@if git rev-parse -q --verify "refs/tags/$(TAG)" >/dev/null; then \
 	  echo "tag $(TAG) already exists — bump ocaml/VERSION first"; exit 1; fi
@@ -66,8 +67,8 @@ publish: test
 	  [ "$$dpv" = "$(VERSION)" ] || { echo "version mismatch: VERSION=$(VERSION) vs dune-project=$$dpv — bump both"; exit 1; }
 	@set -e; \
 	token="$${GITHUB_TOKEN:-$$GH_TOKEN}"; \
-	if [ "$$token" = "$(AQL_DRY_RUN_FILLER)" ]; then \
-	  echo "[dry-run] aql filler token detected: would tag $(TAG), publish a release asset, and open an opam-repository PR; nothing pushed."; \
+	if [ "$$token" = "$(BORU_DRY_RUN_FILLER)" ]; then \
+	  echo "[dry-run] boru filler token detected: would tag $(TAG), publish a release asset, and open an opam-repository PR; nothing pushed."; \
 	  exit 0; \
 	fi; \
 	dune build; \

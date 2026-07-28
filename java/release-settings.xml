@@ -6,7 +6,7 @@
      maven-plugin reads. Credentials are a Central Portal USER TOKEN (generated
      at central.sonatype.com -> Account -> Generate User Token) — NOT your
      login. They are injected from the environment at release time (from the
-     aql vault), so no secrets live on disk:
+     boru vault), so no secrets live on disk:
        CENTRAL_USERNAME / CENTRAL_PASSWORD  -> the token's user/pass pair
      The GPG passphrase is read separately from MAVEN_GPG_PASSPHRASE by the
      maven-gpg-plugin. -->

@@ -1,6 +1,6 @@
 # Lint smoke: load the library module (parses the source, executes every
 # def, resolves the export map) and probe one word from each command family.
-import "./src/struct.aql" end
+import "./src/struct.boru" end
 def ok1 (Struct.getpath (flex {a: {b: 2}}) "a.b" Struct.NOARG)
 def ok2 (Struct.transform (flex {a: 1}) (flex {x: "`a`"}) Struct.NOARG)
 def ok3 (Struct.validate (flex {a: 1}) (flex {a: "`$INTEGER`"}) Struct.NOARG)

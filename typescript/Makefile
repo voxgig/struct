@@ -46,13 +46,13 @@ audit:
 #
 # npm auth: `npm publish` reads the per-registry token from the
 # npm_config_//registry.npmjs.org/:_authToken env var, which a headless run
-# supplies with `aql vault exec --for=npm <alias> -- make publish-ts` (the
+# supplies with `boru vault exec --for=npm <alias> -- make publish-ts` (the
 # recipe sets that exact var). The git tag push needs GitHub auth: when
 # GH_TOKEN/GITHUB_TOKEN is present we push over HTTPS carrying the credential
 # in an Authorization header (kept out of the URL, .git/config, and argv);
 # otherwise we fall back to the `origin` remote (SSH for local dev).
 #
-# Dry-run cooperation: `aql vault exec --dry-run` injects a fixed filler in
+# Dry-run cooperation: `boru vault exec --dry-run` injects a fixed filler in
 # place of the real token, so the whole publish can be rehearsed without
 # credentials. When the npm or GitHub token is that filler we run the package
 # dry-run, report what would happen, and exit 0 — nothing published, no tag.
@@ -62,15 +62,16 @@ audit:
 SHELL := /bin/bash
 VERSION := $(shell node -p "require('./package.json').version" 2>/dev/null)
 TAG := typescript/v$(VERSION)
-AQL_DRY_RUN_FILLER := AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET
+# (The literal keeps the legacy AQL name: it must match the boru vault's dryRunFiller constant.)
+BORU_DRY_RUN_FILLER := AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET
 publish: build test
 	@if git rev-parse -q --verify "refs/tags/$(TAG)" >/dev/null; then \
 	  echo "tag $(TAG) already exists — bump package.json version first"; exit 1; fi
 	@set -e; \
 	npmtok="$$(printenv 'npm_config_//registry.npmjs.org/:_authToken' 2>/dev/null || true)"; \
 	ghtok="$${GITHUB_TOKEN:-$$GH_TOKEN}"; \
-	if [ "$$npmtok" = "$(AQL_DRY_RUN_FILLER)" ] || [ "$$ghtok" = "$(AQL_DRY_RUN_FILLER)" ]; then \
-	  echo "[dry-run] aql filler token detected: rehearsing the package; nothing published, no $(TAG) tag."; \
+	if [ "$$npmtok" = "$(BORU_DRY_RUN_FILLER)" ] || [ "$$ghtok" = "$(BORU_DRY_RUN_FILLER)" ]; then \
+	  echo "[dry-run] boru filler token detected: rehearsing the package; nothing published, no $(TAG) tag."; \
 	  npm stage publish --dry-run --access public --registry https://registry.npmjs.org; \
 	  exit 0; \
 	fi; \

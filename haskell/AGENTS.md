@@ -33,7 +33,7 @@ make publish             # permanent upload + git tag haskell/vX.Y.Z
 ```
 
 Both need `HACKAGE_TOKEN` (account → tokens); `publish` also needs a token to
-push the tag. With the aql dry-run filler token in the env, both targets no-op
+push the tag. With the boru dry-run filler token in the env, both targets no-op
 loudly instead of touching the network.
 
 Dependency bounds follow PVP — **lower AND upper on every unique dependency**,

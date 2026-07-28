@@ -59,18 +59,19 @@ audit:
 # `uv run` so a local publish is fully uv-driven.
 #
 # PyPI auth: `uv publish` reads UV_PUBLISH_TOKEN, which a headless run
-# supplies with `aql vault exec --for=uv <alias> -- make publish-python`. The
+# supplies with `boru vault exec --for=uv <alias> -- make publish-python`. The
 # git tag push needs GitHub auth: with GH_TOKEN/GITHUB_TOKEN present we push
 # over HTTPS via an Authorization header (kept out of the URL, .git/config,
 # and argv); otherwise we fall back to the origin SSH remote.
 #
-# Dry-run cooperation: `aql vault exec --dry-run` injects a fixed filler in
+# Dry-run cooperation: `boru vault exec --dry-run` injects a fixed filler in
 # place of the real token; when the PyPI or GitHub token is that filler we
 # build + `uv publish --dry-run` (validating packaging), then stop — nothing
 # uploaded, no tag.
 VERSION := $(shell grep -E '^version[[:space:]]*=' pyproject.toml | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
 TAG := python/v$(VERSION)
-AQL_DRY_RUN_FILLER := AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET
+# (The literal keeps the legacy AQL name: it must match the boru vault's dryRunFiller constant.)
+BORU_DRY_RUN_FILLER := AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET
 publish:
 	@if git rev-parse -q --verify "refs/tags/$(TAG)" >/dev/null; then \
 	  echo "tag $(TAG) already exists — bump pyproject.toml version first"; exit 1; fi
@@ -78,8 +79,8 @@ publish:
 	uv build
 	@set -e; \
 	pypitok="$$UV_PUBLISH_TOKEN"; ghtok="$${GITHUB_TOKEN:-$$GH_TOKEN}"; \
-	if [ "$$pypitok" = "$(AQL_DRY_RUN_FILLER)" ] || [ "$$ghtok" = "$(AQL_DRY_RUN_FILLER)" ]; then \
-	  echo "[dry-run] aql filler token detected: uv publish --dry-run; nothing uploaded, no $(TAG) tag."; \
+	if [ "$$pypitok" = "$(BORU_DRY_RUN_FILLER)" ] || [ "$$ghtok" = "$(BORU_DRY_RUN_FILLER)" ]; then \
+	  echo "[dry-run] boru filler token detected: uv publish --dry-run; nothing uploaded, no $(TAG) tag."; \
 	  uv publish --dry-run; \
 	  exit 0; \
 	fi; \

@@ -1,13 +1,13 @@
 # ============================================================================
-# voxgig/struct — the AQL port.
+# voxgig/struct — the boru port.
 #
 # A faithful port of the canonical TypeScript implementation
-# (typescript/src/StructUtility.ts) to the AQL language itself.
+# (typescript/src/StructUtility.ts) to the boru language itself.
 # The shared corpus build/test/test.json is the behavioural contract;
-# the runner lives in ../test/runner.aql.
+# the runner lives in ../test/runner.boru.
 #
 # Port model (like the Python / Dart / Elixir ports):
-#   - single null: AQL `none` plays both JSON null and undefined.
+#   - single null: boru `none` plays both JSON null and undefined.
 #   - a distinct no-argument sentinel (vg-noarg) marks "argument absent",
 #     which is different from "argument is null" (see typify / stringify).
 #   - all nodes are flex (FlexMap / FlexList): reference semantics, in-place
@@ -24,14 +24,17 @@
 #     passed directly as arguments are safe (params shadow properly).
 #   - every internal call is fully parenthesised.
 #   - node truthiness is never used bare ({} and "" and 0 are falsy in
-#     AQL); predicates are explicit.
+#     boru); predicates are explicit.
 #
 # Internal words carry a `vg-` prefix (canonical names like `size`, `slice`,
-# `filter`, `flatten` are live core AQL words and cannot be rebound); the
+# `filter`, `flatten` are live core boru words and cannot be rebound); the
 # canonical public names are the keys of the `Struct` export map at the end
 # of this file.
 # ============================================================================
 
+# NOTE: the `aql:` module prefix is load-bearing — the engine's bundled-module
+# namespace has not been renamed to `boru:` yet (see AGENTS.md, "Rename
+# transition note"). Do not rename these imports until upstream does.
 import "aql:string-util"
 import "aql:math-util"
 import "aql:bin-util"
@@ -921,7 +924,7 @@ def vg-escurl fn [[s:Any] [String] [
 # ----------------------------------------------------------------------------
 # JSON-style serialization: one encoder drives both stringify (sorted,
 # compact, quotes stripped) and jsonify (indented, JSON.stringify format).
-# AQL map keys always iterate sorted.
+# boru map keys always iterate sorted.
 # ----------------------------------------------------------------------------
 def vgl-esc-json fn [[i:Integer s:String acc:Any] [Any] [
   if (i gte (size s)) [acc] [

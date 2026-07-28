@@ -68,21 +68,22 @@ reset: clean
 # subdirectory, so the tag MUST be the `zig/vX.Y.Z` form. Version is read from
 # the build.zig.zon manifest (Zig's package version field).
 #
-# Headless publish: `aql vault exec --for=github <alias> -- make publish-zig`
+# Headless publish: `boru vault exec --for=github <alias> -- make publish-zig`
 # injects GH_TOKEN/GITHUB_TOKEN; the tag is pushed over HTTPS via an
 # Authorization header (kept out of the URL, .git/config, and argv), else the
-# origin SSH remote. `aql vault exec --dry-run` injects a filler we detect to
+# origin SSH remote. `boru vault exec --dry-run` injects a filler we detect to
 # rehearse (no tag). set -e: a failed push never leaves a tag behind.
 VERSION := $(shell grep -E '\.version' build.zig.zon | sed -E 's/.*"([^"]+)".*/\1/')
 TAG := zig/v$(VERSION)
-AQL_DRY_RUN_FILLER := AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET
+# (The literal keeps the legacy AQL name: it must match the boru vault's dryRunFiller constant.)
+BORU_DRY_RUN_FILLER := AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET
 publish: test
 	@if git rev-parse -q --verify "refs/tags/$(TAG)" >/dev/null; then \
 	  echo "tag $(TAG) already exists — bump .version in build.zig.zon first"; exit 1; fi
 	@set -e; \
 	token="$${GITHUB_TOKEN:-$$GH_TOKEN}"; \
-	if [ "$$token" = "$(AQL_DRY_RUN_FILLER)" ]; then \
-	  echo "[dry-run] aql filler token detected: would tag $(TAG) and push it over"; \
+	if [ "$$token" = "$(BORU_DRY_RUN_FILLER)" ]; then \
+	  echo "[dry-run] boru filler token detected: would tag $(TAG) and push it over"; \
 	  echo "[dry-run] HTTPS to github.com/voxgig/struct — no tag created, nothing pushed."; \
 	  exit 0; \
 	fi; \

@@ -49,7 +49,7 @@ syntax), and language-specific notes:
 | Elixir     | Complete   | [`elixir/README.md`](./elixir/README.md)              |
 | Haskell    | Complete   | [`haskell/README.md`](./haskell/README.md)            |
 | Lean       | Complete   | [`lean/README.md`](./lean/README.md)                  |
-| AQL        | Complete   | [`aql/README.md`](./aql/README.md)                    |
+| boru       | Complete   | [`boru/README.md`](./boru/README.md)                  |
 
 Every listed port reports full canonical parity under
 `tools/check_parity.py` and passes the shared `build/test/` corpus. See each
@@ -436,7 +436,7 @@ cross-engine edge cases:
 ├── build/test/       # shared JSON test corpus (.jsonic)
 ├── typescript/  javascript/  python/   # canonical + JS-family ports
 ├── go/  ruby/  php/                     # other complete ports
-├── lua/  csharp/  zig/  rust/  c/  perl/  kotlin/  cpp/  swift/  clojure/  ocaml/  scala/  dart/  elixir/  haskell/  lean/  aql/
+├── lua/  csharp/  zig/  rust/  c/  perl/  kotlin/  cpp/  swift/  clojure/  ocaml/  scala/  dart/  elixir/  haskell/  lean/  boru/
 ├── java/                                # JVM ports (also kotlin/ scala/ clojure/)
 └── LICENSE
 ```
@@ -474,7 +474,7 @@ Each language directory contains:
 | Elixir     | compile check (`elixirc`)         | (`mix format` optional)|
 | Haskell    | type-check (`ghc -fno-code`)      | (`ormolu` optional)   |
 | Lean       | type-check (`lake build`)         | (warnings-clean build)|
-| AQL        | `aql check` + module load smoke   | (`aql fmt` optional)  |
+| boru       | `boru check` + module load smoke  | (`boru fmt` optional) |
 
 Run everything with `make lint` at the repo root, or one language with
 `make lint-<lang>` (e.g. `make lint-go`).

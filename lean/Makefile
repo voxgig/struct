@@ -36,14 +36,15 @@ reset: clean
 # Auth: GITHUB_TOKEN (or GH_TOKEN) for HTTPS tag push; ssh `origin` otherwise.
 VERSION := $(shell cat VERSION)
 TAG := lean/v$(VERSION)
-AQL_DRY_RUN_FILLER := AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET
+# (The literal keeps the legacy AQL name: it must match the boru vault's dryRunFiller constant.)
+BORU_DRY_RUN_FILLER := AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET
 publish: test
 	@if git rev-parse -q --verify "refs/tags/$(TAG)" >/dev/null; then \
 	  echo "tag $(TAG) already exists — bump lean/VERSION first"; exit 1; fi
 	@set -e; \
 	token="$${GITHUB_TOKEN:-$$GH_TOKEN}"; \
-	if [ "$$token" = "$(AQL_DRY_RUN_FILLER)" ]; then \
-	  echo "[dry-run] aql filler token detected: would tag $(TAG) and push it over"; \
+	if [ "$$token" = "$(BORU_DRY_RUN_FILLER)" ]; then \
+	  echo "[dry-run] boru filler token detected: would tag $(TAG) and push it over"; \
 	  echo "[dry-run] HTTPS to github.com/voxgig/struct — no tag created, nothing pushed."; \
 	  exit 0; \
 	fi; \
