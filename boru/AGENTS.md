@@ -2,7 +2,7 @@
 
 Read the repo-root [`../AGENTS.md`](../AGENTS.md) first. This file covers
 only what is specific to the boru port. **TypeScript is canonical; the
-shared `build/test/*.jsonic` corpus is the contract.** This port follows
+shared `build/test/*.aontu` corpus is the contract.** This port follows
 the single-`null` model of the Python / Dart / Lua ports (boru's `none`
 plays both `undefined` and JSON `null`), not the distinct-value model of
 the OCaml / Scala ports.

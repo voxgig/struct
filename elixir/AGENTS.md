@@ -2,7 +2,7 @@
 
 Read the repo-root [`../AGENTS.md`](../AGENTS.md) first. This file covers only
 what is specific to the Elixir port. **TypeScript is canonical; the shared
-`build/test/*.jsonic` corpus is the contract.** This port follows the
+`build/test/*.aontu` corpus is the contract.** This port follows the
 single-`nil` model of the Python / Clojure / Dart ports (Elixir has one `nil`),
 not the distinct-`undefined`/`null` model of the OCaml / Scala ports.
 

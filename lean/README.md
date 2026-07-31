@@ -4,7 +4,7 @@ Lean 4 port of [`voxgig/struct`](https://github.com/voxgig/struct) — one
 small, fixed API for manipulating JSON-shaped data: lookups, deep merge,
 by-example transform, by-example validate, tree walk, path get/set,
 selection. The behaviour is defined by the canonical TypeScript
-implementation and the shared `build/test/*.jsonic` corpus; this port passes
+implementation and the shared `build/test/*.aontu` corpus; this port passes
 the full corpus (1360/1360).
 
 ## Requirements

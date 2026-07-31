@@ -16,7 +16,7 @@ only what is specific to the Zig port.
 zig/
 ├── src/struct.zig    # the port: JsonValue, all public functions, constants
 ├── src/regex.zig     # in-tree RE2-subset Thompson NFA engine (no third-party dep)
-├── test/runner.zig   # loads ../build/test/*.jsonic and asserts equality
+├── test/runner.zig   # loads ../build/test/*.aontu and asserts equality
 ├── test/struct_test.zig        # the 60 corpus `test` blocks (the suite)
 ├── test/regex_pathological.zig # regex edge-case panel
 ├── test/walk_bench.zig         # optional walk benchmark (zig build bench, WALK_BENCH=1)

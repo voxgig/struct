@@ -95,7 +95,7 @@ corpus, ported faithfully to every language Voxgig SDKs support.  An
 SDK can rely on the same primitive operations everywhere.  A bug fix
 in the canonical TypeScript flows through to every other port.
 
-The shared test corpus (`build/test/*.jsonic`) is the contract.  Any
+The shared test corpus (`build/test/*.aontu`) is the contract.  Any
 implementation passes only if it matches the canonical answers
 case-for-case.
 
@@ -433,7 +433,7 @@ cross-engine edge cases:
 ├── DOCS.md           # comprehensive language-neutral guide
 ├── AGENTS.md         # guidance for AI coding agents (+ CLAUDE.md pointer)
 ├── design/           # reports & specs: REPORT, NOTES, REGEX*, UNDEF*
-├── build/test/       # shared JSON test corpus (.jsonic)
+├── build/test/       # shared JSON test corpus (.aontu)
 ├── typescript/  javascript/  python/   # canonical + JS-family ports
 ├── go/  ruby/  php/                     # other complete ports
 ├── lua/  csharp/  zig/  rust/  c/  perl/  kotlin/  cpp/  swift/  clojure/  ocaml/  scala/  dart/  elixir/  haskell/  lean/  boru/
@@ -444,7 +444,7 @@ cross-engine edge cases:
 Each language directory contains:
 
 - the implementation source,
-- a test runner that consumes `build/test/*.jsonic`,
+- a test runner that consumes `build/test/*.aontu`,
 - a `Makefile` with at minimum `make test` and `make lint` targets,
 - a `README.md` with the per-language quick-start. Cross-port quirks
   go in the top-level [`NOTES.md`](design/NOTES.md).

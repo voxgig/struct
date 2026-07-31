@@ -316,7 +316,7 @@ reference runner. This port passes 92/92 of the shared corpus suite (see
 **To change behaviour:** behaviour is canonical, so start in the TypeScript
 source and the corpus, not here — edit
 [`../typescript/src/StructUtility.ts`](../typescript/src/StructUtility.ts),
-adjust the corpus case in `../build/test/*.jsonic`, then port the same logic
+adjust the corpus case in `../build/test/*.aontu`, then port the same logic
 here, run `go test ./...` until green, and re-run
 [`../tools/check_parity.py`](../tools/check_parity.py) plus every other
 port's tests. The full checklist is in [`../AGENTS.md`](../AGENTS.md).

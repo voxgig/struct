@@ -1,4 +1,4 @@
-# testspec-schema.jsonic — REFERENCE DESIGN ARTIFACT (not wired into the build)
+# testspec-schema.aontu — REFERENCE DESIGN ARTIFACT (not wired into the build)
 #
 # Companion to design/TESTSPEC_MODEL.md. Expresses the proposed type-based,
 # *adaptive* structure for the build/test corpus in concrete aontu. It is a
@@ -10,7 +10,7 @@
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 1. BASE TYPES                                                  (schema.jsonic)
+# 1. BASE TYPES                                                  (schema.aontu)
 #    Schema marks (type()): constrain via unification, are not emitted as data.
 #    [VERIFY] that type()-marked top-level defs don't surface in test.json;
 #    if they do, wrap in hide() — they still unify, just never emit.
@@ -50,73 +50,73 @@ Group: type(close({
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 2. WIRING                                                        (test.jsonic)
+# 2. WIRING                                                        (test.aontu)
 #    Import the schema, then stamp Group onto every group of every function.
 # ═══════════════════════════════════════════════════════════════════════════
 
-@"schema.jsonic"             # brings Entry / Group into scope (emit nothing)
+@"schema.aontu"             # brings Entry / Group into scope (emit nothing)
 
 struct: &: {                 # '&:' applies to EVERY child of struct = each function
   name: key()                # function name = its own key      (existing behaviour)
   &: Group                   # each function's children = each GROUP, typed as Group
 }
 
-struct: minor:    @"minor.jsonic"
-struct: getpath:  @"getpath.jsonic"
-struct: inject:   @"inject.jsonic"
-struct: merge:    @"merge.jsonic"
-struct: transform:@"transform.jsonic"
-struct: walk:     @"walk.jsonic"
-struct: validate: @"validate.jsonic"
-struct: select:   @"select.jsonic"
-struct: sentinels:@"sentinels.jsonic"
+struct: minor:    @"minor.aontu"
+struct: getpath:  @"getpath.aontu"
+struct: inject:   @"inject.aontu"
+struct: merge:    @"merge.aontu"
+struct: transform:@"transform.aontu"
+struct: walk:     @"walk.aontu"
+struct: validate: @"validate.aontu"
+struct: select:   @"select.aontu"
+struct: sentinels:@"sentinels.aontu"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 3. PER-FUNCTION ADAPTATION                                  (top of <fn>.jsonic)
+# 3. PER-FUNCTION ADAPTATION                                  (top of <fn>.aontu)
 #    Each function REFINES the base Entry to its own input/output shape by
 #    unifying through the &: template. Refinement is additive — it layers onto
 #    Entry, never replaces it; metadata/expectation fields + defaults are
 #    inherited. The inner close() then guards the function's own field names.
 # ═══════════════════════════════════════════════════════════════════════════
 
-# getpath.jsonic — path lookup into a store
+# getpath.aontu — path lookup into a store
 struct: getpath: &: &: {                 # each group → each entry
   in?:  close({ path?: string | list,  store?: top })
   out?: *top
 }
 
-# validate.jsonic — by-example validation: data checked against spec
+# validate.aontu — by-example validation: data checked against spec
 struct: validate: &: &: {
   in?:  close({ data?: top,  spec?: top })
 }
 
-# transform.jsonic — by-example transform: data shaped by spec
+# transform.aontu — by-example transform: data shaped by spec
 struct: transform: &: &: {
   in?:  close({ data?: top,  spec?: top,  modify?: top })
 }
 
-# merge.jsonic — deep-merge a single list of objects
+# merge.aontu — deep-merge a single list of objects
 struct: merge: &: &: {
   in?:  list
 }
 
-# inject.jsonic — store-driven value injection
+# inject.aontu — store-driven value injection
 struct: inject: &: &: {
   in?:  close({ val?: top,  store?: top })
 }
 
-# select.jsonic — query a collection (uses fixtures, §5)
+# select.aontu — query a collection (uses fixtures, §5)
 struct: select: &: &: {
   in?:  close({ query?: top,  obj?: top })
 }
 
-# walk.jsonic — walk a single structure (callback-shaped; input stays open)
+# walk.aontu — walk a single structure (callback-shaped; input stays open)
 struct: walk: &: &: {
   in?:  top
 }
 
-# minor.jsonic — many small functions; refine per sibling, not per file:
+# minor.aontu — many small functions; refine per sibling, not per file:
 struct: minor: isnode: &: { in?: *top,  out?: boolean }
 struct: minor: ismap:  &: { in?: *top,  out?: boolean }
 struct: minor: clone:  &: { in?: *top,  out?: top }
@@ -150,7 +150,7 @@ struct: minor: clone:  &: { in?: *top,  out?: top }
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 5. FIXTURES AS A TYPED SLOT                            (select.jsonic, alts group)
+# 5. FIXTURES AS A TYPED SLOT                            (select.aontu, alts group)
 # ═══════════════════════════════════════════════════════════════════════════
 
 alts: {

@@ -265,7 +265,7 @@ Tests live in [`test/`](./test/); the runner
 mirrors.
 
 **To change canonical behaviour:** edit `src/StructUtility.ts`, add or
-adjust the corpus case in `../build/test/*.jsonic`, `npm run build && npm
+adjust the corpus case in `../build/test/*.aontu`, `npm run build && npm
 test` until green, then propagate to every port and re-run
 `python3 ../tools/check_parity.py` and the per-port tests. The full
 checklist is in [`../AGENTS.md`](../AGENTS.md). Tooling versions: Node 22+,

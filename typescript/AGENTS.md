@@ -64,7 +64,7 @@ wrap the same commands.
   declares `"types": ["node"]` so node globals (`process`, `__dirname`,
   `node:test`) resolve. Don't remove it.
 - **Editing here is a cross-port event.** After any behaviour change:
-  update `../build/test/*.jsonic`, rebuild+test here, then propagate to
+  update `../build/test/*.aontu`, rebuild+test here, then propagate to
   every port and run `python3 ../tools/check_parity.py` + `make test`.
 - **`test/direct.ts` is scratch**, not part of the suite (the runner globs
   `*.test.js`). It is still linted.

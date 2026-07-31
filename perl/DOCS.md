@@ -298,7 +298,7 @@ in-tree insertion-ordered `parse_json`. Tests live in [`t/`](./t/):
 
 **To change behaviour:** this is a port, so behaviour changes start in the
 canonical TypeScript, not here. Edit the canonical source, adjust the
-corpus case in `../build/test/*.jsonic`, then mirror the logic in
+corpus case in `../build/test/*.aontu`, then mirror the logic in
 [`lib/Voxgig/Struct.pm`](./lib/Voxgig/Struct.pm), run `make test` until
 green, and re-run [`../tools/check_parity.py`](../tools/check_parity.py).
 The full cross-port checklist is in [`../AGENTS.md`](../AGENTS.md).

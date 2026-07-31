@@ -24,7 +24,7 @@ csharp/
     ├── VoxgigStructTest.csproj # xUnit test project
     ├── Runner.cs               # shared-corpus runner (loads ../build/test/)
     ├── StructTest.cs           # green-bar regression panel
-    ├── CorpusScoreboard.cs     # per-.jsonic pass counts -> scoreboard json
+    ├── CorpusScoreboard.cs     # per-.aontu pass counts -> scoreboard json
     └── RegexPathologicalTest.cs
 ```
 

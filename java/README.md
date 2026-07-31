@@ -453,7 +453,7 @@ sentinel where it must disambiguate.
 
 ### Tests
 
-A Gson-based corpus runner drives the shared `.jsonic` fixtures
+A Gson-based corpus runner drives the shared `.aontu` fixtures
 (`src/test/`), with a committed `test-baseline.json`. Gson is a
 **test-scope** dependency only; the library proper has no third-party
 runtime dependency (it hand-rolls its JSON printer).
@@ -504,7 +504,7 @@ See `/design/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
 ```bash
 cd java
 mvn package
-make test           # mvn test — runs the shared .jsonic corpus
+make test           # mvn test — runs the shared .aontu corpus
 ```
 
 Tests live in [`src/test/`](./src/test/).

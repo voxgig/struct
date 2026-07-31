@@ -289,7 +289,7 @@ make lint                   # compile + checkstyle:check + spotbugs:check
 `mvn test` drives the shared corpus from
 [`../build/test/`](../build/test/) via the runner in
 [`src/test/`](./src/test/) (`Runner.java`, `StructCorpusTest.java`), loading
-the `.jsonic` cases with Gson and writing per-file pass counts to
+the `.aontu` cases with Gson and writing per-file pass counts to
 `target/corpus-scoreboard.json` (committed baseline:
 [`test-baseline.json`](./test-baseline.json)). The library is
 [`src/Struct.java`](./src/Struct.java); `sourceDirectory` is `src/` (flat —

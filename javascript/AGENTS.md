@@ -61,7 +61,7 @@ wraps `npm test`; `make lint` runs `npm run lint` *and* `npm run format:check`;
 ## Gotchas
 
 - **No build, but tests read a compiled corpus.** The runner reads
-  `../build/test/test.json` (the aggregated form of `../build/test/*.jsonic`).
+  `../build/test/test.json` (the aggregated form of `../build/test/*.aontu`).
   If a corpus case looks stale, regenerate it from the canonical side — do
   not edit it to make this port pass.
 - **`null` is not `undefined`.** JS distinguishes them and so does `struct`:

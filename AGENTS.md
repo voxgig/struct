@@ -9,7 +9,7 @@ and [`DOCS.md`](./DOCS.md) (the comprehensive guide).
 > 1. **TypeScript is canonical.** Behaviour is defined by
 >    [`typescript/src/StructUtility.ts`](./typescript/src/StructUtility.ts).
 >    Every other language is a *port* of it.
-> 2. **The shared JSON corpus is the contract.** The `.jsonic` files in
+> 2. **The shared JSON corpus is the contract.** The `.aontu` files in
 >    [`build/test/`](./build/test/) run against every port. If a port
 >    disagrees with the corpus, the port is wrong.
 > 3. **Change the canonical first, then propagate.** A behaviour change
@@ -76,21 +76,21 @@ matrix in [`REPORT.md`](design/REPORT.md)):
 │   ├── UNDEF.md / UNDEF_SPEC.md        # the absent-vs-null ("Group A/B") semantics
 │   └── REGEX.md / REGEX_API.md / REGEX_PATHOLOGICAL.md   # the regex dialect & API
 ├── Makefile             # top-level aggregate targets (test/lint/audit/scan)
-├── build/test/*.jsonic  # the shared test corpus — the behavioural contract
+├── build/test/*.aontu  # the shared test corpus — the behavioural contract
 ├── tools/               # check_parity.py, check_corpus_regex.py
 ├── typescript/          # the canonical implementation (+ its own AGENTS.md/DOCS.md)
 └── <lang>/              # one directory per port, each with the same layout
 ```
 
 Each `<lang>/` directory contains: the implementation source, a test
-runner that loads `build/test/*.jsonic`, a `Makefile` (at least `test`
+runner that loads `build/test/*.aontu`, a `Makefile` (at least `test`
 and `lint`), a `README.md` (overview), a `DOCS.md` (comprehensive), and an
 `AGENTS.md` (port-specific agent notes).
 
 
 ## The shared test corpus (the contract)
 
-The behavioural spec lives in [`build/test/`](./build/test/) as `.jsonic`
+The behavioural spec lives in [`build/test/`](./build/test/) as `.aontu`
 files (JSON with comments), one per area: `getpath`, `merge`, `walk`,
 `inject`, `transform`, `validate`, `select`, `minor`, `sentinels`, etc.
 `test.json` is the compiled/aggregated form the runners read.
@@ -158,7 +158,7 @@ markdownlint, plus each language's linters).
 
 ### Change canonical behaviour (rare; affects everyone)
 1. Edit [`typescript/src/StructUtility.ts`](./typescript/src/StructUtility.ts).
-2. Add/adjust the corpus case(s) in `build/test/*.jsonic`.
+2. Add/adjust the corpus case(s) in `build/test/*.aontu`.
 3. `cd typescript && npm run build && npm test` — canonical passes.
 4. Propagate the same logic to **every** port; run each port's tests.
 5. `python3 tools/check_parity.py` and `make test` stay green.

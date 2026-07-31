@@ -2,7 +2,7 @@
 
 Read the repo-root [`../AGENTS.md`](../AGENTS.md) first. This file covers only
 what is specific to the Haskell port. **TypeScript is canonical; the shared
-`build/test/*.jsonic` corpus is the contract.** This port follows the
+`build/test/*.aontu` corpus is the contract.** This port follows the
 distinct-`undefined`/`null` model of the OCaml / Scala ports (it has separate
 `VNoval` / `VNull` constructors), not the single-`null` model of the
 Python / Clojure / Dart / Elixir ports.

@@ -26,7 +26,7 @@ java/
 ├── src/Struct.java          # THE implementation: static API on voxgig.struct.Struct
 │                            #   + nested Injection and StructUtility classes
 ├── src/test/Runner.java          # corpus driver (mirrors typescript/test/runner.ts)
-├── src/test/StructCorpusTest.java # JUnit entry — runs build/test/*.jsonic, writes scoreboard
+├── src/test/StructCorpusTest.java # JUnit entry — runs build/test/*.aontu, writes scoreboard
 ├── src/test/{StructMinorTest,StructTests,RegexPathologicalTest}.java  # unit + regex panel
 ├── pom.xml                  # Maven; source/target 17; JUnit 6.1 + gson (test scope)
 ├── checkstyle.xml / spotbugs-exclude.xml   # lint config

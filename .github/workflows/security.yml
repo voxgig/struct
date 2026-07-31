@@ -136,14 +136,14 @@ jobs:
       - run: python3 tools/gen_doc_examples.py --check
 
   corpus-freshness:
-    name: corpus regenerates from *.jsonic
+    name: corpus regenerates from *.aontu
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Recompile build/test/test.json from the *.jsonic sources
+      - name: Recompile build/test/test.json from the *.aontu sources
         working-directory: ./build
         run: |
           npm install --no-audit --no-fund

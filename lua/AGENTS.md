@@ -86,7 +86,7 @@ installed** — if you can't run a target, say so; don't claim a change works.
   **documented, not bugs** ([`../REGEX_PATHOLOGICAL.md`](../design/REGEX_PATHOLOGICAL.md)) —
   don't diverge to "fix" them.
 - **Editing here is downstream.** After any canonical behaviour change:
-  update `../build/test/*.jsonic`, make the canonical TS pass, then mirror
+  update `../build/test/*.aontu`, make the canonical TS pass, then mirror
   here, `make test`, and run `python3 ../tools/check_parity.py` + `make test`.
 
 ## See also

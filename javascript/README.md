@@ -688,7 +688,7 @@ panel.
 
 ```bash
 cd javascript
-make test           # runs the shared .jsonic corpus
+make test           # runs the shared .aontu corpus
 ```
 
 Tests live in [`test/`](./test/) and read fixtures from

@@ -2,7 +2,7 @@
 
 Read the repo-root [`AGENTS.md`](../AGENTS.md) first. This file covers only
 what is specific to the Scala port. **TypeScript is canonical; the shared
-`build/test/*.jsonic` corpus is the contract.** This port mirrors the
+`build/test/*.aontu` corpus is the contract.** This port mirrors the
 canonical TypeScript logic directly (it was ported from the OCaml port), because
 Scala — like TypeScript, Rust and OCaml — keeps `undefined` and JSON `null`
 distinct.

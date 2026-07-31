@@ -7,7 +7,7 @@ Quick reminders (the full rationale is in `AGENTS.md`):
 
 - **TypeScript is canonical** (`typescript/src/StructUtility.ts`); every
   other language is a port of it.
-- **The `build/test/*.jsonic` corpus is the contract** — it runs against
+- **The `build/test/*.aontu` corpus is the contract** — it runs against
   every port. A port that disagrees with the corpus is the thing that's
   wrong, not the corpus.
 - **Change canonical first, then propagate** to every port and re-test.
