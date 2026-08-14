@@ -847,8 +847,7 @@ function delprop(parent, key) {
     // copy-on-write later without breaking any caller, where the reverse is not
     // true. expand() gives an ordinary mutable copy.
     if (iscondensed(parent)) {
-        throw new Error('struct: condensed structures are immutable - ' +
-            'expand() first, then modify the copy');
+        throw new Error('struct: condensed structures are immutable - ' + 'expand() first, then modify the copy');
     }
     if (!iskey(key)) {
         return parent;
@@ -887,8 +886,7 @@ function setprop(parent, key, val) {
     // copy-on-write later without breaking any caller, where the reverse is not
     // true. expand() gives an ordinary mutable copy.
     if (iscondensed(parent)) {
-        throw new Error('struct: condensed structures are immutable - ' +
-            'expand() first, then modify the copy');
+        throw new Error('struct: condensed structures are immutable - ' + 'expand() first, then modify the copy');
     }
     if (!iskey(key)) {
         return parent;
@@ -1065,8 +1063,7 @@ function merge(val, maxdepth) {
 function setpath(store, path, val, injdef) {
     // Same contract as setprop/delprop: a condensed store is immutable.
     if (iscondensed(store)) {
-        throw new Error('struct: condensed structures are immutable - ' +
-            'expand() first, then modify the copy');
+        throw new Error('struct: condensed structures are immutable - ' + 'expand() first, then modify the copy');
     }
     const pathType = typify(path);
     const parts = 0 < (T_list & pathType)
@@ -2657,11 +2654,11 @@ const S_condroot = 'root';
 // alone, so an ordinary map that happens to carry a `$condense` key is not
 // mistaken for one.
 function iscondensed(val) {
-    return ismap(val) &&
+    return (ismap(val) &&
         'number' === typeof val[S_condense] &&
         islist(val[S_condsym]) &&
         islist(val[S_condnode]) &&
-        'number' === typeof val[S_condroot];
+        'number' === typeof val[S_condroot]);
 }
 // Condense any JSON-shaped node. Pure: the same input always produces a
 // byte-identical result, on every port.
@@ -2783,7 +2780,7 @@ function condenseChild(cond, idx, key) {
         }
         // Pairs live at [1,2], [3,4], ... with keys ascending: bisect the pairs.
         let lo = 0;
-        let hi = ((enc.length - 1) / 2) - 1;
+        let hi = (enc.length - 1) / 2 - 1;
         while (lo <= hi) {
             const mid = (lo + hi) >> 1;
             const k = enc[1 + mid * 2];
@@ -2813,7 +2810,9 @@ function condenseResolve(cond, idx, path) {
     const parts = islist(path)
         ? path
         : 'string' === typeof path
-            ? ('' === path ? [] : path.split(S_DT))
+            ? '' === path
+                ? []
+                : path.split(S_DT)
             : null == path
                 ? []
                 : [S_MT + path];

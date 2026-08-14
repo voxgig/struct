@@ -914,10 +914,10 @@ function delprop<PARENT>(parent: PARENT, key: any): PARENT {
   // copy-on-write later without breaking any caller, where the reverse is not
   // true. expand() gives an ordinary mutable copy.
   if (iscondensed(parent as any)) {
-    throw new Error('struct: condensed structures are immutable - ' +
-      'expand() first, then modify the copy')
+    throw new Error(
+      'struct: condensed structures are immutable - ' + 'expand() first, then modify the copy',
+    )
   }
-
 
   if (!iskey(key)) {
     return parent
@@ -962,10 +962,10 @@ function setprop<PARENT>(parent: PARENT, key: any, val: any): PARENT {
   // copy-on-write later without breaking any caller, where the reverse is not
   // true. expand() gives an ordinary mutable copy.
   if (iscondensed(parent as any)) {
-    throw new Error('struct: condensed structures are immutable - ' +
-      'expand() first, then modify the copy')
+    throw new Error(
+      'struct: condensed structures are immutable - ' + 'expand() first, then modify the copy',
+    )
   }
-
 
   if (!iskey(key)) {
     return parent
@@ -1197,8 +1197,9 @@ function setpath(
 ) {
   // Same contract as setprop/delprop: a condensed store is immutable.
   if (iscondensed(store)) {
-    throw new Error('struct: condensed structures are immutable - ' +
-      'expand() first, then modify the copy')
+    throw new Error(
+      'struct: condensed structures are immutable - ' + 'expand() first, then modify the copy',
+    )
   }
 
   const pathType = typify(path)
@@ -3136,7 +3137,6 @@ class StructUtility {
   injectChild = injectChild
 }
 
-
 // ---------------------------------------------------------------------------
 // CONDENSED STRUCTURES
 //
@@ -3203,18 +3203,18 @@ const S_condsym = 'sym'
 const S_condnode = 'node'
 const S_condroot = 'root'
 
-
 // Is this a condensed structure? Checked structurally rather than by a marker
 // alone, so an ordinary map that happens to carry a `$condense` key is not
 // mistaken for one.
 function iscondensed(val: any): boolean {
-  return ismap(val) &&
+  return (
+    ismap(val) &&
     'number' === typeof (val as any)[S_condense] &&
     islist((val as any)[S_condsym]) &&
     islist((val as any)[S_condnode]) &&
     'number' === typeof (val as any)[S_condroot]
+  )
 }
-
 
 // Condense any JSON-shaped node. Pure: the same input always produces a
 // byte-identical result, on every port.
@@ -3229,13 +3229,11 @@ function condense(val: any): any {
         symset[keys[i]] = true
         collect((n as any)[keys[i]])
       }
-    }
-    else if (islist(n)) {
+    } else if (islist(n)) {
       for (let i = 0; i < n.length; i++) {
         collect(n[i])
       }
-    }
-    else if ('string' === typeof n) {
+    } else if ('string' === typeof n) {
       symset[n] = true
     }
   }
@@ -3310,7 +3308,6 @@ function condense(val: any): any {
   return out
 }
 
-
 // Resolve a symbol to its id by bisecting the sorted symbol table. -1 when
 // the string does not occur anywhere in the structure, which is itself a fast
 // negative answer for a key lookup.
@@ -3325,14 +3322,12 @@ function condenseSymId(cond: any, key: string): number {
     }
     if (sym[mid] < key) {
       lo = mid + 1
-    }
-    else {
+    } else {
       hi = mid - 1
     }
   }
   return -1
 }
-
 
 // The node index of `key` inside node `idx`, or -1. Touches only this node.
 function condenseChild(cond: any, idx: number, key: any): number {
@@ -3348,7 +3343,7 @@ function condenseChild(cond: any, idx: number, key: any): number {
     }
     // Pairs live at [1,2], [3,4], ... with keys ascending: bisect the pairs.
     let lo = 0
-    let hi = ((enc.length - 1) / 2) - 1
+    let hi = (enc.length - 1) / 2 - 1
     while (lo <= hi) {
       const mid = (lo + hi) >> 1
       const k = enc[1 + mid * 2]
@@ -3357,8 +3352,7 @@ function condenseChild(cond: any, idx: number, key: any): number {
       }
       if (k < symid) {
         lo = mid + 1
-      }
-      else {
+      } else {
         hi = mid - 1
       }
     }
@@ -3376,13 +3370,14 @@ function condenseChild(cond: any, idx: number, key: any): number {
   return -1
 }
 
-
 // Walk a path from a starting node, returning the node index or -1.
 function condenseResolve(cond: any, idx: number, path: any): number {
   const parts = islist(path)
     ? path
     : 'string' === typeof path
-      ? ('' === path ? [] : path.split(S_DT))
+      ? '' === path
+        ? []
+        : path.split(S_DT)
       : null == path
         ? []
         : [S_MT + path]
@@ -3399,7 +3394,6 @@ function condenseResolve(cond: any, idx: number, path: any): number {
   }
   return at
 }
-
 
 // Materialise node `idx` as an ordinary JSON-shaped value.
 //
@@ -3450,7 +3444,6 @@ function condenseMaterialise(cond: any, idx: number): any {
   return 0 > idx ? undefined : rebuild(idx)
 }
 
-
 // Fully materialise a condensed structure. The escape hatch: correct for any
 // caller, but it gives up every benefit of condensing, so prefer a view or a
 // path read.
@@ -3460,7 +3453,6 @@ function expand(cond: any): any {
   }
   return condenseMaterialise(cond, (cond as any)[S_condroot])
 }
-
 
 // The keys of node `idx`, WITHOUT materialising any of its values. This is
 // the point of the whole exercise for enumeration: listing the names in a
@@ -3487,7 +3479,6 @@ function condenseKeys(cond: any, idx: number): string[] {
   return []
 }
 
-
 // A cursor into a condensed structure. Reads resolve by integer index and
 // touch only the nodes on the path, so the cost of a lookup is proportional
 // to path depth and result size, never to total structure size.
@@ -3502,7 +3493,6 @@ type CondenseView = {
   ref: () => any
 }
 
-
 function condenseview(cond: any, idx?: number, memo?: any): CondenseView {
   const start = null == idx ? (iscondensed(cond) ? (cond as any)[S_condroot] : -1) : idx
 
@@ -3513,7 +3503,6 @@ function condenseview(cond: any, idx?: number, memo?: any): CondenseView {
   const refmemo: { [idx: string]: any } = null == memo ? {} : memo
 
   const view: CondenseView = {
-
     // The value at path, materialised. Scalars come back directly; a
     // container comes back as an independent copy.
     get: (path?: any) => condenseMaterialise(cond, condenseResolve(cond, start, path)),

@@ -137,7 +137,8 @@ describe('StructUtility', async () => {
     const c = s.condense(src)
     deepEqual(
       s.getpath(c, ['entity', 'p', 'op', 'list']),
-      s.getpath(src, ['entity', 'p', 'op', 'list']))
+      s.getpath(src, ['entity', 'p', 'op', 'list']),
+    )
     equal(s.getpath(c, ['entity', 'p', 'op', 'list', 'method']), 'GET')
     equal(undefined, s.getpath(c, ['entity', 'nope']))
   })
