@@ -399,7 +399,7 @@ Struct.validate(Struct.jm("name", "Ada", "age", 36),
     Struct.jm("name", "`$STRING`", "age", "`$INTEGER`"));   // {name=Ada, age=36}
 ```
 
-<!-- => {"name": "Ada", "age": 36} -->
+<!-- => {"age": 36, "name": "Ada"} -->
 
 `select` finds children matching a query, tagging each with its `$KEY`:
 
@@ -412,7 +412,7 @@ Struct.select(
 // [{name=Alice, age=30, $KEY=a}]
 ```
 
-<!-- => [{"name": "Alice", "age": 30, "$KEY": "a"}] -->
+<!-- => [{"$KEY": "a", "age": 30, "name": "Alice"}] -->
 
 
 ## Constants

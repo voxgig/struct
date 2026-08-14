@@ -497,7 +497,7 @@ voxgig_value* spec = voxgig_parse_json(
 voxgig_value* out = voxgig_transform(data, spec, NULL);
 /* { x: { y: [ { q: 13, r: 13, p: 1 }, { q: 23, r: 23, p: 1 } ] } } */
 ```
-<!-- => {"x": {"y": [{"q": 13, "r": 13, "p": 1}, {"q": 23, "r": 23, "p": 1}]}} -->
+<!-- => {"x": {"y": [{"p": 1, "q": 13, "r": 13}, {"p": 1, "q": 23, "r": 23}]}} -->
 
 Putting a command in **key** position (or, for `$APPLY`, directly under a
 map) is an error — commands must be list values:
@@ -520,7 +520,7 @@ voxgig_value* spec = voxgig_parse_json("{\"name\":\"`$STRING`\",\"age\":\"`$INTE
 voxgig_value* out  = voxgig_validate(data, spec, NULL);   /* {name:"Ada",age:36}  (throws on mismatch) */
 ```
 
-<!-- => {"name": "Ada", "age": 36} -->
+<!-- => {"age": 36, "name": "Ada"} -->
 
 `voxgig_select` finds the children matching a query — each match is tagged
 with its `$KEY`:
@@ -533,7 +533,7 @@ voxgig_value* query = voxgig_parse_json("{\"age\":30}", 0);
 voxgig_value* hits  = voxgig_select(children, query);   /* [{name:"Alice",age:30,$KEY:"a"}] */
 ```
 
-<!-- => [{"name": "Alice", "age": 30, "$KEY": "a"}] -->
+<!-- => [{"$KEY": "a", "age": 30, "name": "Alice"}] -->
 
 ### Builder helpers (2)
 

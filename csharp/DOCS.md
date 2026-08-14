@@ -154,7 +154,7 @@ StructUtils.Transform(
         StructUtils.Jt("`$EACH`", "a", StructUtils.Jm("q", "`$COPY`", "r", "`.q`", "p", "`...v`")))));
 // { x = { y = [ { q = 13, r = 13, p = 1 }, { q = 23, r = 23, p = 1 } ] } }
 ```
-<!-- => {"x": {"y": [{"q": 13, "r": 13, "p": 1}, {"q": 23, "r": 23, "p": 1}]}} -->
+<!-- => {"x": {"y": [{"p": 1, "q": 13, "r": 13}, {"p": 1, "q": 23, "r": 23}]}} -->
 
 Putting a command in **key** position (or, for `$APPLY`, directly under a
 map) is an error — commands must be list values:

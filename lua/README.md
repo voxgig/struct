@@ -482,7 +482,7 @@ struct.validate(
 -- { name = 'Ada', age = 36 }
 ```
 
-<!-- => {"name": "Ada", "age": 36} -->
+<!-- => {"age": 36, "name": "Ada"} -->
 
 <!-- example: select#query -->
 ```lua
@@ -494,7 +494,7 @@ struct.select(
 -- { { name = 'Alice', age = 30, ['$KEY'] = 'a' } }
 ```
 
-<!-- => [{"name": "Alice", "age": 30, "$KEY": "a"}] -->
+<!-- => [{"$KEY": "a", "age": 30, "name": "Alice"}] -->
 
 Transform commands drive structural ops. A command like `$EACH` appears in
 **value** position — as the first element of a list
@@ -510,7 +510,7 @@ struct.transform(
 )
 -- { x = { y = { { q = 13, r = 13, p = 1 }, { q = 23, r = 23, p = 1 } } } }
 ```
-<!-- => {"x": {"y": [{"q": 13, "r": 13, "p": 1}, {"q": 23, "r": 23, "p": 1}]}} -->
+<!-- => {"x": {"y": [{"p": 1, "q": 13, "r": 13}, {"p": 1, "q": 23, "r": 23}]}} -->
 
 Putting a command in **key** position (or, for `$APPLY`, directly under a map)
 is an error — commands must be list values:
