@@ -908,19 +908,23 @@ function jt(...v: any[]): any[] {
 // For arrays, the element at the index is removed and remaining elements are shifted down.
 // NOTE: parent list may be new list, thus update references.
 function delprop<PARENT>(parent: PARENT, key: any): PARENT {
+  if (!iskey(key)) {
+    return parent
+  }
+
   // A condensed structure is a DAG: one subtree can be reached by many
   // references, so an in-place write would be visible through all of them.
   // Raising is the decided contract (design Q1) - it can be relaxed to
   // copy-on-write later without breaking any caller, where the reverse is not
   // true. expand() gives an ordinary mutable copy.
+  //
+  // Checked AFTER the key validation: both helpers define an invalid key as
+  // ignored, so a call that cannot write must not start throwing merely
+  // because the store is condensed.
   if (iscondensed(parent as any)) {
     throw new Error(
       'struct: condensed structures are immutable - ' + 'expand() first, then modify the copy',
     )
-  }
-
-  if (!iskey(key)) {
-    return parent
   }
 
   if (ismap(parent)) {
@@ -956,19 +960,23 @@ function delprop<PARENT>(parent: PARENT, key: any): PARENT {
 // NOTE: If the key is above the list size, append the value; below, prepend.
 // NOTE: parent list may be new list, thus update references.
 function setprop<PARENT>(parent: PARENT, key: any, val: any): PARENT {
+  if (!iskey(key)) {
+    return parent
+  }
+
   // A condensed structure is a DAG: one subtree can be reached by many
   // references, so an in-place write would be visible through all of them.
   // Raising is the decided contract (design Q1) - it can be relaxed to
   // copy-on-write later without breaking any caller, where the reverse is not
   // true. expand() gives an ordinary mutable copy.
+  //
+  // Checked AFTER the key validation: both helpers define an invalid key as
+  // ignored, so a call that cannot write must not start throwing merely
+  // because the store is condensed.
   if (iscondensed(parent as any)) {
     throw new Error(
       'struct: condensed structures are immutable - ' + 'expand() first, then modify the copy',
     )
-  }
-
-  if (!iskey(key)) {
-    return parent
   }
 
   if (ismap(parent)) {
@@ -1259,8 +1267,19 @@ function getpath(store: any, path: number | string | string[], injdef?: Partial<
   // not need to know which it holds. Only the nodes ON the path are touched,
   // so this never materialises the whole structure.
   if (iscondensed(store)) {
-    const found = condenseResolve(store, (store as any)[S_condroot], parts)
-    return 0 > found ? undefined : condenseMaterialise(store, found)
+    // The fast path applies only when there are no injection options to
+    // honour. base/dparent/dpath/meta change what the walk below resolves
+    // against, and silently ignoring them would make a condensed store
+    // answer differently from the node it was built from - the opposite of
+    // the transparent-read contract. Rare enough to be worth materialising.
+    if (null == injdef || null == getprop(injdef, S_base)) {
+      const found = condenseResolve(store, (store as any)[S_condroot], parts)
+      const val = 0 > found ? undefined : condenseMaterialise(store, found)
+      // Group A null-as-absent: an ordinary getpath observes a stored null
+      // through getprop and reports it as absent, so this must too.
+      return null == val ? undefined : val
+    }
+    store = expand(store)
   }
 
   // let root = store
@@ -3206,10 +3225,55 @@ const S_condroot = 'root'
 // Is this a condensed structure? Checked structurally rather than by a marker
 // alone, so an ordinary map that happens to carry a `$condense` key is not
 // mistaken for one.
+// Compare by UNICODE CODE POINT, not by UTF-16 code unit.
+//
+// JavaScript's default string sort compares UTF-16 code units, which orders
+// an astral character BEFORE a high-BMP one; Python, Go and Rust all compare
+// by code point (equivalently, by UTF-8 bytes). A symbol table sorted the
+// JavaScript way would make two conforming ports emit different bytes for the
+// same input, which is exactly the byte-stability the format promises. Code
+// point order is the portable choice, so it is specified rather than
+// inherited.
+function condenseCmp(a: string, b: string): number {
+  let i = 0
+  let j = 0
+  while (i < a.length && j < b.length) {
+    const ca = a.codePointAt(i) as number
+    const cb = b.codePointAt(j) as number
+    if (ca !== cb) {
+      return ca < cb ? -1 : 1
+    }
+    i += 0xffff < ca ? 2 : 1
+    j += 0xffff < cb ? 2 : 1
+  }
+  return a.length - i - (b.length - j)
+}
+
+// Assign a key that may be `__proto__`.
+//
+// Plain assignment to `__proto__` invokes the inherited setter instead of
+// creating an own property, so a model carrying that key or string value
+// would be silently corrupted - it is valid JSON and Seneca-adjacent data
+// really does use `$`-ish and `__`-ish names.
+function condenseSet(obj: any, key: string, val: any) {
+  if ('__proto__' === key) {
+    Object.defineProperty(obj, key, {
+      value: val,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    })
+  } else {
+    obj[key] = val
+  }
+}
+
 function iscondensed(val: any): boolean {
+  // The version must MATCH, not merely be numeric: a future profile would
+  // otherwise be decoded under this one's schema.
   return (
     ismap(val) &&
-    'number' === typeof (val as any)[S_condense] &&
+    CONDENSE_VERSION === (val as any)[S_condense] &&
     islist((val as any)[S_condsym]) &&
     islist((val as any)[S_condnode]) &&
     'number' === typeof (val as any)[S_condroot]
@@ -3220,7 +3284,7 @@ function iscondensed(val: any): boolean {
 // byte-identical result, on every port.
 function condense(val: any): any {
   // Pass one: every distinct map key and string value, once, sorted.
-  const symset: { [sym: string]: boolean } = {}
+  const symset: { [sym: string]: boolean } = Object.create(null)
 
   const collect = (n: any) => {
     if (ismap(n)) {
@@ -3239,8 +3303,8 @@ function condense(val: any): any {
   }
   collect(val)
 
-  const sym = Object.keys(symset).sort()
-  const symid: { [sym: string]: number } = {}
+  const sym = Object.keys(symset).sort(condenseCmp)
+  const symid: { [sym: string]: number } = Object.create(null)
   for (let i = 0; i < sym.length; i++) {
     symid[sym[i]] = i
   }
@@ -3249,7 +3313,7 @@ function condense(val: any): any {
   // children are built first, identical subtrees have already been interned
   // by the time a parent references them, so sharing costs nothing extra.
   const node: any[][] = []
-  const seen: { [enc: string]: number } = {}
+  const seen: { [enc: string]: number } = Object.create(null)
 
   const intern = (enc: any[]): number => {
     // The kind tag leads every encoding, so a string node and a number node
@@ -3320,7 +3384,7 @@ function condenseSymId(cond: any, key: string): number {
     if (sym[mid] === key) {
       return mid
     }
-    if (sym[mid] < key) {
+    if (0 > condenseCmp(sym[mid], key)) {
       lo = mid + 1
     } else {
       hi = mid - 1
@@ -3360,8 +3424,15 @@ function condenseChild(cond: any, idx: number, key: any): number {
   }
 
   if (CONDENSE_LIST === enc[0]) {
-    const i = +key
-    if (isNaN(i) || 0 > i || i >= enc.length - 1) {
+    // Canonical integer keys ONLY. Unary + would accept "01", "1e0", " 1"
+    // and "+1", which an ordinary list lookup treats as plain (absent)
+    // properties - condensing must not change which value a path selects.
+    const k = S_MT + key
+    if (!/^(0|[1-9][0-9]*)$/.test(k)) {
+      return -1
+    }
+    const i = +k
+    if (i >= enc.length - 1) {
       return -1
     }
     return enc[1 + i]
@@ -3415,7 +3486,7 @@ function condenseMaterialise(cond: any, idx: number): any {
     if (CONDENSE_MAP === kind) {
       const out: any = {}
       for (let j = 1; j < enc.length; j += 2) {
-        out[sym[enc[j]]] = rebuild(enc[j + 1])
+        condenseSet(out, sym[enc[j]], rebuild(enc[j + 1]))
       }
       return out
     }

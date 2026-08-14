@@ -170,6 +170,66 @@ describe('StructUtility', async () => {
     equal(true, v.at('a').ref() === v.at('a').ref())
   })
 
+  test('condense-preserves-proto-named-keys-and-values', () => {
+    // Valid JSON, and plain assignment to `__proto__` hits the inherited
+    // setter instead of creating an own property - so both the symbol table
+    // and the materialised map need prototype-safe writes.
+    const s = struct
+    const asValue = JSON.parse('{"x":"__proto__"}')
+    deepEqual(s.expand(s.condense(asValue)), asValue)
+    const asKey = JSON.parse('{"__proto__":1}')
+    deepEqual(JSON.stringify(s.expand(s.condense(asKey))), '{"__proto__":1}')
+  })
+
+  test('condense-getpath-matches-plain-on-null-and-options', () => {
+    const s = struct
+    // Group A null-as-absent: a stored null reads as absent either way.
+    equal(s.getpath(s.condense({ a: null }), 'a'), s.getpath({ a: null }, 'a'))
+    equal(undefined, s.getpath(s.condense({ a: null }), 'a'))
+    // injdef.base must not be ignored by the condensed fast path.
+    const store = { base: { x: 1 } }
+    equal(
+      s.getpath(s.condense(store), 'x', { base: 'base' }),
+      s.getpath(store, 'x', { base: 'base' }),
+    )
+  })
+
+  test('condense-list-keys-are-canonical-integers', () => {
+    const s = struct
+    const plain = { l: [10, 20] }
+    const c = s.condense(plain)
+    // Unary + would accept these; an ordinary list lookup does not, so
+    // condensing must not change which value a path selects.
+    for (const k of ['01', '1e0', ' 1', '+1', '1.0', '-0']) {
+      equal(s.getpath(c, ['l', k]), s.getpath(plain, ['l', k]), `list key ${k}`)
+    }
+    equal(s.getpath(c, ['l', '1']), 20)
+  })
+
+  test('condense-symbols-sort-by-code-point', () => {
+    // JavaScript's default sort compares UTF-16 code units and would put the
+    // astral character FIRST; Python, Go and Rust compare by code point. The
+    // format specifies code point order so every port emits the same bytes.
+    const s = struct
+    const sym = s.condense({ a: '\u{10000}', b: '\uFFFF' }).sym
+    equal(
+      true,
+      sym.indexOf('\uFFFF') < sym.indexOf('\u{10000}'),
+      'symbol table is not in code-point order: ' + JSON.stringify(sym),
+    )
+  })
+
+  test('condense-invalid-key-mutations-stay-no-ops', () => {
+    // Both helpers define an invalid key as ignored, so a call that cannot
+    // write must not start throwing just because the store is condensed.
+    const s = struct
+    const c = s.condense({ a: 1 })
+    equal(c, s.delprop(c, undefined))
+    equal(c, s.setprop(c, undefined, 1))
+    // A call that COULD write still raises.
+    throws(() => s.delprop(c, 'sym'), /immutable/)
+  })
+
   test('condense-is-immutable', () => {
     const s = struct
     const c = s.condense({ a: 1 })

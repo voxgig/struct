@@ -701,6 +701,34 @@
               "sym": "x"
             },
             "out": false
+          },
+          {
+            "id": "iscondensed/future-version",
+            "in": {
+              "$condense": 2,
+              "node": [
+                [
+                  4
+                ]
+              ],
+              "root": 0,
+              "sym": []
+            },
+            "out": false
+          },
+          {
+            "id": "iscondensed/zero-version",
+            "in": {
+              "$condense": 0,
+              "node": [
+                [
+                  4
+                ]
+              ],
+              "root": 0,
+              "sym": []
+            },
+            "out": false
           }
         ]
       },

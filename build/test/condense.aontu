@@ -66,5 +66,9 @@ iscondensed: {
     { id:'iscondensed/marker-only', in: {'$condense':1}, out: false }
     { id:'iscondensed/missing-root', in: {'$condense':1, sym:[], node:[]}, out: false }
     { id:'iscondensed/bad-sym', in: {'$condense':1, sym:"x", node:[], root:0}, out: false }
+    # The version must MATCH. A future profile decoded under this one's schema
+    # would be silently wrong, which is worse than refusing it.
+    { id:'iscondensed/future-version', in: {'$condense':2, sym:[], node:[[4]], root:0}, out: false }
+    { id:'iscondensed/zero-version', in: {'$condense':0, sym:[], node:[[4]], root:0}, out: false }
   ]
 }
