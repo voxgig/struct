@@ -1,0 +1,74 @@
+# Condensed structures: the executable specification.
+#
+# `condense` output is pinned EXACTLY, not just round-tripped, because the
+# format is a contract between ports: a port whose symbol table sorts
+# differently, or whose map keys do not ascend, or whose node table is not
+# post-order, still round-trips locally while producing bytes no other port
+# can read. Pinning the encoding is what makes it one format.
+#
+# Node encodings: map [0,k,v,...] list [1,v,...] string [2,sym]
+#                 number [3,val]  true [4]  false [5]  null [6]
+
+condense: {
+  set: [
+    { id:'condense/scalar-string', in: "x", out: {'$condense':1,"sym":["x"],"node":[[2,0]],"root":0} }
+    { id:'condense/scalar-number', in: 1, out: {'$condense':1,"sym":[],"node":[[3,1]],"root":0} }
+    { id:'condense/scalar-true', in: true, out: {'$condense':1,"sym":[],"node":[[4]],"root":0} }
+    { id:'condense/scalar-false', in: false, out: {'$condense':1,"sym":[],"node":[[5]],"root":0} }
+    { id:'condense/scalar-null', in: null, out: {'$condense':1,"sym":[],"node":[[6]],"root":0} }
+    { id:'condense/empty-map', in: {}, out: {'$condense':1,"sym":[],"node":[[0]],"root":0} }
+    { id:'condense/empty-list', in: [], out: {'$condense':1,"sym":[],"node":[[1]],"root":0} }
+    { id:'condense/flat-map', in: {"a":1,"b":"z"}, out: {'$condense':1,"sym":["a","b","z"],"node":[[3,1],[2,2],[0,0,0,1,1]],"root":2} }
+    { id:'condense/key-order-is-sorted', in: {"b":1,"a":2}, out: {'$condense':1,"sym":["a","b"],"node":[[3,2],[3,1],[0,0,0,1,1]],"root":2} }
+    { id:'condense/nested', in: {"a":{"b":{"c":1}}}, out: {'$condense':1,"sym":["a","b","c"],"node":[[3,1],[0,2,0],[0,1,1],[0,0,2]],"root":3} }
+    { id:'condense/list-mixed', in: [1,"a",true,null,{"k":"v"}], out: {'$condense':1,"sym":["a","k","v"],"node":[[3,1],[2,0],[4],[6],[2,2],[0,1,4],[1,0,1,2,3,5]],"root":6} }
+    { id:'condense/shared-subtree', in: {"x":{"m":"GET","p":"/1"},"y":{"m":"GET","p":"/1"}}, out: {'$condense':1,"sym":["/1","GET","m","p","x","y"],"node":[[2,1],[2,0],[0,2,0,3,1],[0,4,2,5,2]],"root":3} }
+    { id:'condense/shared-scalar', in: {"a":"same","b":"same","c":"same"}, out: {'$condense':1,"sym":["a","b","c","same"],"node":[[2,3],[0,0,0,1,0,2,0]],"root":1} }
+    { id:'condense/deep-share', in: {"u":{"q":[1,2]},"v":{"q":[1,2]}}, out: {'$condense':1,"sym":["q","u","v"],"node":[[3,1],[3,2],[1,0,1],[0,0,2],[0,1,3,2,3]],"root":4} }
+  ]
+}
+
+
+# expand is condense's inverse. Note that key ORDER is normalised to sorted:
+# the format stores keys by ascending symbol id, so expanding does not restore
+# an arbitrary insertion order. Every port's keysof() already sorts, so this
+# matches what callers see anyway.
+expand: {
+  set: [
+    { id:'expand/scalar-string', in: {'$condense':1, sym:["x"], node:[[2,0]], root:0}, out: "x" }
+    { id:'expand/scalar-number', in: {'$condense':1, sym:[], node:[[3,1]], root:0}, out: 1 }
+    { id:'expand/scalar-true', in: {'$condense':1, sym:[], node:[[4]], root:0}, out: true }
+    { id:'expand/scalar-null', in: {'$condense':1, sym:[], node:[[6]], root:0}, out: null }
+    { id:'expand/empty-map', in: {'$condense':1, sym:[], node:[[0]], root:0}, out: {} }
+    { id:'expand/empty-list', in: {'$condense':1, sym:[], node:[[1]], root:0}, out: [] }
+    { id:'expand/flat-map', in: {'$condense':1, sym:["a","b","z"], node:[[3,1],[2,2],[0,0,0,1,1]], root:2}, out: {a:1, b:"z"} }
+    { id:'expand/shared-subtree', in: {'$condense':1, sym:["GET","/1","m","p","x","y"], node:[[2,0],[2,1],[0,2,0,3,1],[0,4,2,5,2]], root:3}, out: {x:{m:"GET",p:"/1"}, y:{m:"GET",p:"/1"}} }
+    # A non-condensed value passes through untouched, so a caller holding
+    # either shape can call expand unconditionally.
+    { id:'expand/passthrough-map', in: {a:1}, out: {a:1} }
+    { id:'expand/passthrough-scalar', in: 3, out: 3 }
+  ]
+}
+
+
+iscondensed: {
+  set: [
+    { id:'iscondensed/yes', in: {'$condense':1, sym:[], node:[[4]], root:0}, out: true }
+    { in: {a:1}, out: false }
+    { in: [1], out: false }
+    { in: "x", out: false }
+    { in: 1, out: false }
+    { in: true, out: false }
+    { in: null, out: false }
+    { out: false }
+    # Structural, not marker-only: a map that merely carries the key is not
+    # mistaken for a condensed structure.
+    { id:'iscondensed/marker-only', in: {'$condense':1}, out: false }
+    { id:'iscondensed/missing-root', in: {'$condense':1, sym:[], node:[]}, out: false }
+    { id:'iscondensed/bad-sym', in: {'$condense':1, sym:"x", node:[], root:0}, out: false }
+    # The version must MATCH. A future profile decoded under this one's schema
+    # would be silently wrong, which is worse than refusing it.
+    { id:'iscondensed/future-version', in: {'$condense':2, sym:[], node:[[4]], root:0}, out: false }
+    { id:'iscondensed/zero-version', in: {'$condense':0, sym:[], node:[[4]], root:0}, out: false }
+  ]
+}

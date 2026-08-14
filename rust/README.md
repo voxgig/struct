@@ -463,7 +463,7 @@ validate(
 // Value::Map({ name: "Ada", age: 36 })  (Err on mismatch)
 ```
 
-<!-- => {"name": "Ada", "age": 36} -->
+<!-- => {"age": 36, "name": "Ada"} -->
 
 <!-- example: select#query -->
 ```rust
@@ -481,7 +481,7 @@ select(
 // Value::List([{ name: "Alice", age: 30, $KEY: "a" }])
 ```
 
-<!-- => [{"name": "Alice", "age": 30, "$KEY": "a"}] -->
+<!-- => [{"$KEY": "a", "age": 30, "name": "Alice"}] -->
 
 
 ## Regex

@@ -445,7 +445,7 @@ StructUtils.Validate(
 // { name = "Ada", age = 36 }
 ```
 
-<!-- => {"name": "Ada", "age": 36} -->
+<!-- => {"age": 36, "name": "Ada"} -->
 
 <!-- example: select#query -->
 ```csharp
@@ -457,7 +457,7 @@ StructUtils.Select(
 // [{ name = "Alice", age = 30, $KEY = "a" }]
 ```
 
-<!-- => [{"name": "Alice", "age": 30, "$KEY": "a"}] -->
+<!-- => [{"$KEY": "a", "age": 30, "name": "Alice"}] -->
 
 ### Builders
 

@@ -509,7 +509,7 @@ over every entry at `path`:
 const out = try struct_lib.transform(allocator, data, spec);
 // jsonifyCompact(out) == "{\"x\":{\"y\":[{\"q\":13,\"r\":13,\"p\":1},{\"q\":23,\"r\":23,\"p\":1}]}}"
 ```
-<!-- => {"x": {"y": [{"q": 13, "r": 13, "p": 1}, {"q": 23, "r": 23, "p": 1}]}} -->
+<!-- => {"x": {"y": [{"p": 1, "q": 13, "r": 13}, {"p": 1, "q": 23, "r": 23}]}} -->
 
 Putting `$APPLY` directly under a map (key position) is an error — commands
 must be list values. The canonical TS throws; this port records the same
@@ -535,7 +535,7 @@ const res = try struct_lib.validate(allocator, data, spec);
 // res.out == { name: "Ada", age: 36 }, res.err == null
 ```
 
-<!-- => {"name": "Ada", "age": 36} -->
+<!-- => {"age": 36, "name": "Ada"} -->
 
 `select` finds children matching a query, tagging each match with its `$KEY`:
 
@@ -547,7 +547,7 @@ const hits = try struct_lib.select(allocator, children, query);
 // hits == [{ name: "Alice", age: 30, $KEY: "a" }]
 ```
 
-<!-- => [{"name": "Alice", "age": 30, "$KEY": "a"}] -->
+<!-- => [{"$KEY": "a", "age": 30, "name": "Alice"}] -->
 
 ### `std.json` interop
 

@@ -42,6 +42,27 @@ PARTIAL_PORTS: list[str] = []
 # the Go-stdlib regex floor landed — see design/REGEX_API.md.)
 KNOWN_GAPS: dict[str, set[str]] = {}
 
+# Canonical API that has landed in TypeScript but is NOT YET PORTED.
+#
+# Distinct from KNOWN_GAPS on purpose. A known gap is an accepted, permanent
+# divergence; this is a rollout in flight, and it must reach empty. It exists
+# because the condensed-structure work is deliberately sequenced as a tracer
+# bullet: define the format once in the canonical port, freeze it against the
+# shared corpus (build/test/condense.aontu), and only then port outward — so
+# that if the format has to change it changes while ONE implementation exists
+# rather than twenty-four.
+#
+# Every name here is specified by the corpus, which pins the exact encoding
+# rather than just round-tripping, so a port has an executable spec to build
+# against. Delete a name from this set as it lands everywhere; delete the set
+# when it is empty.
+PENDING_PORT: set[str] = {
+    "condense",
+    "condenseview",
+    "expand",
+    "iscondensed",
+}
+
 # Source files per port (implementation only — not tests).
 SOURCES = {
     "typescript": ["typescript/src/StructUtility.ts"],
@@ -230,7 +251,9 @@ def main() -> int:
     for port in COMPLETE_PORTS:
         have = defined_keys(port)
         gaps = KNOWN_GAPS.get(port, set())
-        miss = [orig for key, orig in canon_keys.items() if key not in have and key not in gaps]
+        pending = {norm(n) for n in PENDING_PORT}
+        miss = [orig for key, orig in canon_keys.items()
+                if key not in have and key not in gaps and key not in pending]
         accepted = sorted(orig for key, orig in canon_keys.items() if key not in have and key in gaps)
         suffix = f" (known gaps: {', '.join(accepted)})" if accepted else ""
         if miss:
@@ -246,6 +269,11 @@ def main() -> int:
             print(f"  note {port:5} (in progress) — missing {len(miss)}: " + ", ".join(sorted(miss)))
         else:
             print(f"  ok   {port:5} (in progress; full parity)")
+
+    if PENDING_PORT:
+        print(f"\npending port ({len(PENDING_PORT)}): " + ", ".join(sorted(PENDING_PORT)))
+        print("  canonical TypeScript only, by design — see PENDING_PORT above.")
+        print("  Specified by build/test/condense.aontu; port outward from there.")
 
     if not ok:
         print("\nA complete port is missing one or more canonical functions.")

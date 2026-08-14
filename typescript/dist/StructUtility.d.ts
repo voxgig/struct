@@ -125,9 +125,12 @@ declare function injectorArgs(argTypes: number[], args: any[]): any;
 declare function injectChild(child: any, store: any, inj: Injection): Injection;
 declare class StructUtility {
     clone: typeof clone;
+    condense: typeof condense;
+    condenseview: typeof condenseview;
     delprop: typeof delprop;
     escre: typeof escre;
     escurl: typeof escurl;
+    expand: typeof expand;
     filter: typeof filter;
     flatten: typeof flatten;
     getdef: typeof getdef;
@@ -137,6 +140,7 @@ declare class StructUtility {
     haskey: typeof haskey;
     inject: typeof inject;
     isempty: typeof isempty;
+    iscondensed: typeof iscondensed;
     isfunc: typeof isfunc;
     iskey: typeof iskey;
     islist: typeof islist;
@@ -195,5 +199,19 @@ declare class StructUtility {
     injectorArgs: typeof injectorArgs;
     injectChild: typeof injectChild;
 }
-export { StructUtility, clone, delprop, escre, escurl, filter, flatten, getdef, getelem, getpath, getprop, haskey, inject, isempty, isfunc, iskey, islist, ismap, isnode, items, join, jsonify, keysof, merge, pad, pathify, select, setpath, setprop, size, slice, strkey, stringify, transform, typify, typename, validate, walk, re_compile, re_find, re_find_all, re_replace, re_test, re_escape, SKIP, DELETE, jm, jt, T_any, T_noval, T_boolean, T_decimal, T_integer, T_number, T_string, T_function, T_symbol, T_null, T_list, T_map, T_instance, T_scalar, T_node, M_KEYPRE, M_KEYPOST, M_VAL, MODENAME, checkPlacement, injectorArgs, injectChild, };
+declare function iscondensed(val: any): boolean;
+declare function condense(val: any): any;
+declare function expand(cond: any): any;
+type CondenseView = {
+    get: (path?: any) => any;
+    keys: (path?: any) => string[];
+    has: (path?: any) => boolean;
+    at: (path?: any) => CondenseView;
+    value: () => any;
+    size: () => number;
+    exists: () => boolean;
+    ref: () => any;
+};
+declare function condenseview(cond: any, idx?: number, memo?: any): CondenseView;
+export { StructUtility, clone, condense, condenseview, expand, iscondensed, delprop, escre, escurl, filter, flatten, getdef, getelem, getpath, getprop, haskey, inject, isempty, isfunc, iskey, islist, ismap, isnode, items, join, jsonify, keysof, merge, pad, pathify, select, setpath, setprop, size, slice, strkey, stringify, transform, typify, typename, validate, walk, re_compile, re_find, re_find_all, re_replace, re_test, re_escape, SKIP, DELETE, jm, jt, T_any, T_noval, T_boolean, T_decimal, T_integer, T_number, T_string, T_function, T_symbol, T_null, T_list, T_map, T_instance, T_scalar, T_node, M_KEYPRE, M_KEYPOST, M_VAL, MODENAME, checkPlacement, injectorArgs, injectChild, };
 export type { Injection, Injector, WalkApply };
