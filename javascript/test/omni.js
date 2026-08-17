@@ -11,8 +11,11 @@ const Path = require('node:path')
 function omnihome() {
   const candidates = []
 
+  // Resolve OMNI_HOME against the process cwd: existsSync would do that
+  // anyway, but require() resolves relative paths against THIS file, so a
+  // relative OMNI_HOME could pass the probe and then fail the require.
   if (process.env.OMNI_HOME) {
-    candidates.push(process.env.OMNI_HOME)
+    candidates.push(Path.resolve(process.env.OMNI_HOME))
   }
 
   candidates.push(
