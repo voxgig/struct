@@ -1,0 +1,34 @@
+// The shared test runner comes from voxgig/omni, consumed as a local
+// checkout - omni is deliberately not published to a package registry
+// (yet). The checkout is resolved the same way voxgig/sekreto's ports
+// resolve it: $OMNI_HOME first, then sibling paths, taking the first
+// directory that carries spec/fib.json. Set OMNI_HOME if yours lives
+// elsewhere. Only the tests depend on omni; the library never does.
+
+const { existsSync } = require('node:fs')
+const Path = require('node:path')
+
+function omnihome() {
+  const candidates = []
+
+  if (process.env.OMNI_HOME) {
+    candidates.push(process.env.OMNI_HOME)
+  }
+
+  candidates.push(
+    Path.resolve(__dirname, '..', '..', '..', 'omni'),
+    Path.resolve(__dirname, '..', '..', '..', '..', 'omni'),
+    '/workspace/omni',
+    '/home/user/omni',
+  )
+
+  for (const candidate of candidates) {
+    if (existsSync(Path.join(candidate, 'spec', 'fib.json'))) {
+      return candidate
+    }
+  }
+
+  throw new Error('struct: voxgig/omni checkout not found - set OMNI_HOME')
+}
+
+module.exports = require(Path.join(omnihome(), 'javascript', 'compat', 'struct.js'))

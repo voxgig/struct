@@ -45,6 +45,14 @@ jobs:
         node-version: ['24', 'latest']
     steps:
       - uses: actions/checkout@v4
+      # The test runner is voxgig/omni, consumed as a local checkout (it is
+      # not published); the tests find it via OMNI_HOME. The library itself
+      # never depends on omni.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@v4
+        with:
+          repository: voxgig/omni
+          path: .omni
       - name: Setup Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
         with:
@@ -55,6 +63,8 @@ jobs:
       - name: Run tests
         working-directory: ./javascript
         run: npm test
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
 
   test-python:
     runs-on: ${{ matrix.os }}

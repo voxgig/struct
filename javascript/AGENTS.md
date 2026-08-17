@@ -15,7 +15,7 @@ only what is specific to the JavaScript port.
 ```
 javascript/
 ├── src/struct.js           # the implementation + public API (module.exports)
-├── test/runner.js          # corpus runner (loads ../build/test/test.json)
+├── test/omni.js            # resolves the voxgig/omni checkout (the runner)
 ├── test/struct.test.js     # corpus-driven tests
 ├── test/client.test.js     # SDK/client smoke test
 ├── test/regex_pathological.test.js  # regex edge-case panel
@@ -60,6 +60,11 @@ wraps `npm test`; `make lint` runs `npm run lint` *and* `npm run format:check`;
 
 ## Gotchas
 
+- **The runner is voxgig/omni, not in-tree.** `test/omni.js` resolves a
+  local omni checkout ($OMNI_HOME, then sibling paths) and re-exposes
+  omni's struct-compat shim behind the old `require('./runner')` API. The
+  library itself never touches omni - it is a test-only dependency, and
+  struct's zero-runtime-dependency rule is untouched.
 - **No build, but tests read a compiled corpus.** The runner reads
   `../build/test/test.json` (the aggregated form of `../build/test/*.aontu`).
   If a corpus case looks stale, regenerate it from the canonical side — do

@@ -3,7 +3,7 @@
 
 const { test, describe } = require('node:test')
 
-const { makeRunner } = require('./runner')
+const { makeRunner } = require('./omni')
 
 const { SDK } = require('./sdk.js')
 

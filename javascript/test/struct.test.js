@@ -4,7 +4,7 @@
 const { test, describe } = require('node:test')
 const assert = require('node:assert')
 
-const { makeRunner, nullModifier, NULLMARK } = require('./runner')
+const { makeRunner, nullModifier, NULLMARK } = require('./omni')
 
 const { SDK } = require('./sdk.js')
 
