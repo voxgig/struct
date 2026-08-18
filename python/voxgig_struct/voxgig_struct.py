@@ -345,8 +345,11 @@ def size(val: Any = UNDEF) -> int:
 
 def slice(val: Any, start: int = UNDEF, end: int = UNDEF, mutate: bool = False) -> Any:
     """Return a part of a list, string, or clamp a number"""
-    # Handle numbers - acts like clamp function
-    if isinstance(val, (int, float)):
+    # Handle numbers - acts like clamp function.
+    # bool is a subclass of int in python, but `typeof true` is not
+    # "number" in the canonical TypeScript, so a boolean must fall through
+    # to the container path and be returned unchanged.
+    if isinstance(val, (int, float)) and not isinstance(val, bool):
         if start is None:
             start = float('-inf')
         # TypeScript uses exclusive end, so subtract 1 when bounded.
