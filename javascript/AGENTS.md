@@ -15,7 +15,7 @@ only what is specific to the JavaScript port.
 ```
 javascript/
 ├── src/struct.js           # the implementation + public API (module.exports)
-├── test/runner.js          # corpus runner (loads ../build/test/test.json)
+├── test/omni.js            # resolves the voxgig/omni checkout (the runner)
 ├── test/struct.test.js     # corpus-driven tests
 ├── test/client.test.js     # SDK/client smoke test
 ├── test/regex_pathological.test.js  # regex edge-case panel
@@ -32,9 +32,15 @@ export list, so adding/removing a public name there affects parity.
 
 ## Commands
 
+Tests need a local [voxgig/omni](https://github.com/voxgig/omni) checkout
+(omni is the test runner and is not published): clone it as a sibling of
+this repo, or point `OMNI_HOME` at it. Without one, `npm test` aborts
+with `struct: voxgig/omni checkout not found - set OMNI_HOME`.
+
 ```bash
 npm install
 npm test              # node --test test/struct.test.js test/client.test.js
+OMNI_HOME=/path/to/omni npm test   # when omni is not a sibling checkout
 npm run lint          # eslint src test
 npm run format:check  # prettier --check
 npm run lint:fix      # eslint --fix
@@ -60,6 +66,11 @@ wraps `npm test`; `make lint` runs `npm run lint` *and* `npm run format:check`;
 
 ## Gotchas
 
+- **The runner is voxgig/omni, not in-tree.** `test/omni.js` resolves a
+  local omni checkout ($OMNI_HOME, then sibling paths) and re-exposes
+  omni's struct-compat shim behind the old `require('./runner')` API. The
+  library itself never touches omni - it is a test-only dependency, and
+  struct's zero-runtime-dependency rule is untouched.
 - **No build, but tests read a compiled corpus.** The runner reads
   `../build/test/test.json` (the aggregated form of `../build/test/*.aontu`).
   If a corpus case looks stale, regenerate it from the canonical side — do

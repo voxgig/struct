@@ -106,8 +106,13 @@ language cannot express directly:
 
 Every port ships a runner that walks these entries and asserts equality
 the same way (see [`typescript/test/runner.ts`](./typescript/test/runner.ts)
-for the reference). **A change is "done" only when the corpus passes in
-the canonical TS and in every port you touched.**
+for the reference). The in-situ runners are being replaced, port by port,
+by [voxgig/omni](https://github.com/voxgig/omni) — the same algorithm as a
+shared library, consumed as a local checkout (`$OMNI_HOME`, then sibling
+paths; see `javascript/test/omni.js`, the first migrated port). The plan
+and per-port status live in omni's `doc/plan/` register. **A change is
+"done" only when the corpus passes in the canonical TS and in every port
+you touched.**
 
 
 ## Per-language quick reference
