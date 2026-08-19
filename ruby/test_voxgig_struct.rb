@@ -431,7 +431,7 @@ class TestVoxgigStruct < Minitest::Test
       VoxgigStruct.setprop(cur[i - 1], key, v)
       val
     }
-    @runsetflags.call(@walk_spec['copy'], {}, lambda { |vin|
+    @runsetflags.call(@walk_spec['copy'], {}, lambda { |vin = VoxgigStruct::UNDEF|
       VoxgigStruct.walk(vin, walkcopy)
       cur[0]
     })
