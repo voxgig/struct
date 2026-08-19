@@ -3,7 +3,7 @@
 
 import unittest
 
-from runner import (
+from omni import (
     makeRunner,
 )
 from sdk import SDK
