@@ -17,12 +17,14 @@ def omnihome():
     if os.environ.get('OMNI_HOME'):
         candidates.append(os.path.abspath(os.environ['OMNI_HOME']))
 
-    candidates.extend([
-        os.path.join(_HERE, '..', '..', '..', 'omni'),
-        os.path.join(_HERE, '..', '..', '..', '..', 'omni'),
-        '/workspace/omni',
-        '/home/user/omni',
-    ])
+    candidates.extend(
+        [
+            os.path.join(_HERE, '..', '..', '..', 'omni'),
+            os.path.join(_HERE, '..', '..', '..', '..', 'omni'),
+            '/workspace/omni',
+            '/home/user/omni',
+        ]
+    )
 
     for candidate in candidates:
         if os.path.exists(os.path.join(candidate, 'spec', 'fib.json')):
