@@ -60,7 +60,7 @@ iscondensed: {
     { in: 1, out: false }
     { in: true, out: false }
     { in: null, out: false }
-    { args: [], out: false }
+    { out: false }
     # Structural, not marker-only: a map that merely carries the key is not
     # mistaken for a condensed structure.
     { id:'iscondensed/marker-only', in: {'$condense':1}, out: false }

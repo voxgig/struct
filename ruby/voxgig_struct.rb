@@ -126,7 +126,7 @@ module VoxgigStruct
     end
   end
 
-  def self.clone(val = UNDEF)
+  def self.clone(val)
     return nil if val.nil? || val.equal?(UNDEF)
 
     if isfunc(val)
@@ -247,7 +247,7 @@ module VoxgigStruct
     result.equal?(UNDEF) || result.nil? ? alt : result
   end
 
-  def self.isempty(val = UNDEF)
+  def self.isempty(val)
     return true if val.nil? || val.equal?(UNDEF) || val == ''
     return true if islist(val) && val.empty?
     return true if ismap(val) && val.empty?
@@ -255,23 +255,23 @@ module VoxgigStruct
     false
   end
 
-  def self.iskey(key = UNDEF)
+  def self.iskey(key)
     (key.is_a?(String) && !key.empty?) || key.is_a?(Numeric)
   end
 
-  def self.islist(val = UNDEF)
+  def self.islist(val)
     val.is_a?(Array)
   end
 
-  def self.ismap(val = UNDEF)
+  def self.ismap(val)
     val.is_a?(Hash)
   end
 
-  def self.isnode(val = UNDEF)
+  def self.isnode(val)
     ismap(val) || islist(val)
   end
 
-  def self.items(val = UNDEF, apply = nil)
+  def self.items(val, apply = nil)
     if ismap(val)
       pairs = val.keys.sort.map { |k| [k, val[k]] }
     elsif islist(val)
@@ -380,7 +380,7 @@ module VoxgigStruct
     ''
   end
 
-  def self.isfunc(val = UNDEF)
+  def self.isfunc(val)
     val.respond_to?(:call)
   end
 
@@ -388,7 +388,7 @@ module VoxgigStruct
     val.nil? ? alt : val
   end
 
-  def self.size(val = UNDEF)
+  def self.size(val)
     return 0 if val.nil? || val.equal?(UNDEF)
     return val.length if val.is_a?(String) || islist(val)
     return val.keys.length if ismap(val)
@@ -631,7 +631,7 @@ module VoxgigStruct
     end
   end
 
-  def self.keysof(val = UNDEF)
+  def self.keysof(val)
     return [] unless isnode(val)
 
     if ismap(val)
@@ -795,7 +795,7 @@ module VoxgigStruct
   # --- Merge function ---
   # Merge a list of values. Later values have precedence.
   # Nodes override scalars. Matching node kinds merge recursively.
-  def self.merge(val = UNDEF, maxdepth = nil)
+  def self.merge(val, maxdepth = nil)
     md = maxdepth.nil? ? MAXDEPTH : [maxdepth, 0].max
 
     return val unless islist(val)

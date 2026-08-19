@@ -8,7 +8,7 @@ isnode: {
     { in: 'a', out: false }
     { in: true, out: false }
     { in: null, out: false }
-    { args: [], out: false }
+    { out: false }
   ]
 }
 
@@ -22,7 +22,7 @@ ismap: {
     { in: 'a', out: false }
     { in: true, out: false }
     { in: null, out: false }
-    { args: [], out: false }
+    { out: false }
   ]
 }
 
@@ -36,7 +36,7 @@ islist: {
     { in: 'a', out: false }
     { in: true, out: false }
     { in: null, out: false }
-    { args: [], out: false }
+    { out: false }
   ]
 }
 
@@ -56,7 +56,7 @@ iskey: {
     { in: [1], out: false }
     { in: ['a'], out: false }
     { in: null, out: false }
-    { args: [], out: false }
+    { out: false }
   ]
 }
 
@@ -77,7 +77,7 @@ strkey: {
     { in: [1], out: '' }
     { in: ['a'], out: '' }
     { in: null, out: '' }
-    { args: [], out: '' }
+    { out: '' }
   ]
 }
 
@@ -100,14 +100,14 @@ isempty: {
     { in: [3], out: false }
 
     { in: null, out: true }
-    { args: [], out: true }
+    { out: true }
   ]
 }
 
 
 isfunc: {
   set: [
-    { args: [], out: false }
+    { out: false }
     { in: null, out: false }
     { in: true, out: false }
     { in: 1, out: false }
@@ -115,7 +115,7 @@ isfunc: {
     { in: {}, out: false }
     { in: [], out: false }
     { in: null, out: false }
-    { args: [], out: false }
+    { out: false }
   ]
 }
 
@@ -232,7 +232,7 @@ clone: {
     { in: '', out: '' }
     { in: {a:[1,{b:2},[3]]}, out: {a:[1,{b:2},[3]]} }
     { in: [[{x:1}],[{y:2}]], out: [[{x:1}],[{y:2}]] }
-    { args: [] }
+    {}
   ]
 }
 
@@ -261,7 +261,7 @@ items: {
     { in: 'a', out: [] }
     { in: true, out: [] }
     { in: null, out: [] }
-    { args: [], out: [] }
+    { out: [] }
   ]
 }
 
@@ -269,7 +269,7 @@ items: {
 keysof: {
   set: [
     { id:'minor/keysof#sorted', doc:true, in:{b:4,a:5}, out:[a,b] }
-    { args: [], out: [] }
+    { out: [] }
     { in: null, out: [] }
     { in: {}, out: [] }
     { in: [], out: [] }
@@ -582,7 +582,7 @@ typify: {
     { in: true, out: 536871040 }
     { in: false, out: 536871040 }
     { in: null, out: 4194432 }
-    { args: [], out: 1073741824 }
+    { out: 1073741824 }
   ]
 }
 
@@ -612,7 +612,7 @@ size: {
     { in: 2.5, out: 2 }
 
     { in: null, out: 0 }
-    { args: [], out: 0 }
+    { out: 0 }
 
     { in: true, out: 1 }
     { in: false, out: 0 }

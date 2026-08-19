@@ -47,7 +47,7 @@ basic: {
       out: { a: { b: { c: { d: { e: 'E~a.b.c.d.e' } } } } } }
 
     { in: {}, out: {} }
-    { args: [] }
+    { }
     { in: { a: 1 }, out: { a: 1 } }
     { in: { a: 1, b: 'B' }, out: { a: 1, b: 'B~b' } }
     
@@ -105,7 +105,7 @@ copy: {
     { in: {} out: {} }
     { in: [] out: [] }
     { in: null out: null }
-    { args: [] }
+    { }
     { in: {a1:{b1:1}} out: {a1:{b1:1}} }
 
     { in:  {a2:{b2:2},c2:{d2:{e2:22,f2:222}},g2:2222}
