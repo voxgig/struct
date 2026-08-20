@@ -30,10 +30,10 @@ bench:
 
 # Code quality: golangci-lint (errcheck/govet/ineffassign/staticcheck/unused),
 # plus a gofmt formatting check.
-lint: fmt-check vet
+lint: go.work fmt-check vet
 	golangci-lint run ./...
 
-vet:
+vet: go.work
 	go vet ./...
 
 fmt:
@@ -54,7 +54,9 @@ clean:
 all: fmt vet lint build test
 
 # Supply-chain + security: Go vuln DB (with reachability) + gosec SAST.
-audit:
+# go.work, because both tools load the test package too, and that package
+# imports voxgig/omni.
+audit: go.work
 	govulncheck ./...
 	gosec -quiet ./...
 
