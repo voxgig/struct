@@ -2012,9 +2012,9 @@ class Struct
         // Wrap the generated list the way `cloneWrap` wraps the spec: a plain
         // PHP array is a VALUE, so an injector writing back through
         // `$inj->nodes` would land on a copy and its result would be lost.
-        if (is_array($tval)) {
-            $tval = new ListRef($tval);
-        }
+        // `$tval` is initialised to `[]` above and only ever reassigned to an
+        // array, so no guard is needed - phpstan rejected one as dead.
+        $tval = new ListRef($tval);
 
         if (0 < self::size($tval)) {
             $tcur = (null == $src) ? self::undef() : ($src instanceof ListRef ? $src->list : array_values((array) $src));
