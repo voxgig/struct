@@ -192,6 +192,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # The test package imports voxgig/omni, consumed as a local checkout (it
+      # is not published); the Makefile's `go.work` target finds it via
+      # OMNI_HOME. The library itself never depends on omni.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: 'stable'
@@ -199,6 +207,8 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@latest
           go install github.com/securego/gosec/v2/cmd/gosec@latest
       - working-directory: ./go
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
         run: |
           gobin="$(go env GOPATH)/bin"
           PATH="$gobin:$PATH" make audit

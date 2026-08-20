@@ -1,10 +1,34 @@
 .PHONY: build test bench lint vet fmt fmt-check clean all audit publish
 
-build:
+# voxgig/omni is a sibling checkout, not a published module, and only the
+# tests use it. A go workspace points the test module's import at it,
+# which keeps go.mod free of a path that works on one machine - and free
+# of a dependency the library itself does not have. (The convention
+# voxgig/station and voxgig/sekreto already use.)
+#
+# The harness is a nested module, ./testutil, for the second half of that:
+# `go build ./...` here skips a nested module, so the library still compiles
+# with no omni checkout and no workspace, and `go mod tidy` cannot resolve
+# omni from the proxy and add it to the published dependency graph. The cost
+# is that ./... no longer reaches the harness, so each target names it.
+OMNI := $(shell \
+  for d in "$$OMNI_HOME" ../../omni ../../../omni /workspace/omni /home/user/omni; do \
+    if [ -n "$$d" ] && [ -f "$$d/spec/fib.json" ]; then \
+      (cd "$$d" && pwd); break; \
+    fi; \
+  done)
+
+go.work:
+	@test -n "$(OMNI)" || { echo "struct: voxgig/omni not found - set OMNI_HOME" >&2; exit 1; }
+	go work init . ./testutil $(OMNI)/go
+
+build: go.work
 	go build ./...
 
-test:
-	go test -v ./...
+# -count=1 disables the test cache: the corpus is read at run time, so Go
+# cannot see that build/test/test.json changed and would report a stale pass.
+test: go.work
+	go test -count=1 -v ./... ./testutil/...
 
 # Cross-port performance harness (JSON contract; see build/bench/README.md).
 bench:
@@ -12,11 +36,11 @@ bench:
 
 # Code quality: golangci-lint (errcheck/govet/ineffassign/staticcheck/unused),
 # plus a gofmt formatting check.
-lint: fmt-check vet
-	golangci-lint run ./...
+lint: go.work fmt-check vet
+	golangci-lint run ./... ./testutil/...
 
-vet:
-	go vet ./...
+vet: go.work
+	go vet ./... ./testutil/...
 
 fmt:
 	go fmt ./...
@@ -31,13 +55,16 @@ fmt-check:
 
 clean:
 	go clean ./...
+	rm -rf go.work go.work.sum
 
 all: fmt vet lint build test
 
 # Supply-chain + security: Go vuln DB (with reachability) + gosec SAST.
-audit:
-	govulncheck ./...
-	gosec -quiet ./...
+# go.work, because both tools load the test module too, and that module
+# imports voxgig/omni.
+audit: go.work
+	govulncheck ./... ./testutil/...
+	gosec -quiet ./... ./testutil/...
 
 # Release: Go modules have no registry — publishing IS the git tag. The module
 # lives in a subdirectory, so the tag MUST be the `go/vX.Y.Z` submodule form
