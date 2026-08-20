@@ -4,8 +4,14 @@
 // Go resolves it through a workspace rather than a `require`: `make test`
 // writes a gitignored go.work pointing at the sibling checkout ($OMNI_HOME
 // first, then sibling paths), so go.mod stays free of paths that only work
-// on one machine. Nothing the library ships imports omni - only this test
-// package does, and `go build ./...` of voxgigstruct itself is unaffected.
+// on one machine.
+//
+// That alone would not keep the library clean, which is why this package is
+// a nested module (see go.mod beside this file). A single module would put
+// this import in `go build ./...`, breaking a fresh checkout that has no
+// omni - and, worse, `go mod tidy` would resolve omni from the proxy (it is
+// a public repo) and write it into voxgigstruct's published dependency
+// graph. Nested, `./...` in the parent skips it, and neither can happen.
 //
 // This file is the Go counterpart of javascript/test/omni.js and
 // python/tests/omni.py. The runner API below is omni's struct compat shim

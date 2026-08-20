@@ -19,7 +19,12 @@ go/
 ├── regex_pathological_test.go   # regex edge-case panel
 ├── client_test.go               # example/usage test
 ├── walk_bench_test.go           # walk benchmark
-├── testutil/runner.go           # corpus loader + NULL/UNDEF/EXISTS markers
+├── testutil/                    # the test harness — its own module
+│   ├── omni.go                  #   voxgig/omni's struct shim, re-exported
+│   ├── sdkapi.go                #   the SDK shapes the harness builds
+│   ├── sdk.go, direct.go        #   the test client
+│   ├── helpers.go               #   NULL/UNDEF/EXISTS markers + Fdt
+│   └── go.mod                   #   module .../go/testutil; requires omni
 ├── go.mod                       # module github.com/voxgig/struct/go; go 1.23
 └── Makefile                     # build / test / lint / vet / fmt / audit
 ```
@@ -27,17 +32,37 @@ go/
 Package `voxgigstruct`; module path `github.com/voxgig/struct/go`; go
 directive 1.23; zero third-party runtime dependencies (stdlib only).
 
+### Two modules, deliberately
+
+The corpus runner is [voxgig/omni](https://github.com/voxgig/omni), consumed
+as a sibling checkout rather than a `require` — it is not published to a
+proxy, and the library is not to depend on it. `testutil` is a **nested
+module** so that stays true mechanically: `go build ./...` here skips a
+nested module, so the library compiles with no omni checkout at all, and
+`go mod tidy` cannot reach omni and write it into the published dependency
+graph.
+
+The trade is that `./...` no longer reaches the harness. Every Makefile
+target names it explicitly (`./... ./testutil/...`); do the same for any
+new one, or it will silently stop covering the tests.
+
+`make` writes a gitignored `go.work` spanning all three modules — this one,
+`./testutil`, and omni's — locating omni via `$OMNI_HOME` and then the usual
+sibling paths. Anything that loads the *test* files needs it.
+
 ## Commands
 
 ```bash
-go build ./...           # compile the library
-go test ./...            # run the corpus + unit tests
-golangci-lint run ./...  # static analysis
-go vet ./...             # vet pass
-make test                # go test -v ./...
-make lint                # fmt-check (gofmt -l) + go vet + golangci-lint run ./...
-make audit               # govulncheck + gosec
+go build ./...                     # compile the library — no omni needed
+make test                          # go test -count=1 -v ./... ./testutil/...
+make lint                          # fmt-check + go vet + golangci-lint
+make audit                         # govulncheck + gosec
 ```
+
+Prefer the `make` targets over bare `go` commands for anything touching
+tests: they generate `go.work` first, and they name `./testutil/...`. A bare
+`go test ./...` silently runs the corpus but skips the harness's own tests,
+and a bare `go vet ./...` fails outright with no workspace.
 
 `make` also exposes `build`, `fmt`, `fmt-check`, `clean`, and `all`.
 

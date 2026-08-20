@@ -117,13 +117,13 @@ jobs:
       # windows leg of the matrix.
       - name: Workspace
         working-directory: ./go
-        run: go work init . ${{ github.workspace }}/.omni/go
+        run: go work init . ./testutil ${{ github.workspace }}/.omni/go
       - name: Build
         working-directory: ./go
         run: go build ./...
       - name: Run tests
         working-directory: ./go
-        run: go test -count=1 -v ./...
+        run: go test -count=1 -v ./... ./testutil/...
 
   test-ruby:
     runs-on: ${{ matrix.os }}
