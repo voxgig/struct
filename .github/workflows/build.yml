@@ -520,11 +520,51 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: leanprover/lean-action@38fbc41a8c28c4cbaec22d7f7de508ec2e7c0dd9 # v1
-        with:
-          lake-package-directory: ./lean
-          test: false
-          lint: false
+      # elan directly rather than leanprover/lean-action: that action is a
+      # composite that references actions/cache/restore@v5 and
+      # actions/cache/save@v5 BY TAG internally, and the SHA-pin rule applies
+      # transitively - "The action actions/cache/restore@v5 is not allowed in
+      # voxgig/struct because all actions must be pinned to a full-length
+      # commit SHA." No version of it pins its own internals, `main` included,
+      # so there is nothing to upgrade to.
+      #
+      # The action was only installing the toolchain here anyway (test and
+      # lint are both false), and lean/Makefile already puts ~/.elan/bin on
+      # PATH. elan reads ./lean-toolchain and fetches the pinned Lean on first
+      # `lake` invocation, so behaviour is unchanged.
+      - name: Install Lean toolchain (elan)
+        shell: bash
+        env:
+          ELAN_VERSION: 'v4.2.3'
+          ELAN_SHA256_LINUX: 'df0b2b3a439961ffcbb3985214365ffe40f49bc871df04dff268c7d8e21ca8b2'
+          ELAN_SHA256_MACOS: '7cae4c03b2f0de4053fb04a91359d5804551e6e37a6ddd1b2e0097dc561ae4a9'
+          ELAN_SHA256_WINDOWS: 'be5e92a2dfdd8176099b2db0b810c27237c9054f1e5db1126f4f2a1134773b25'
+        run: |
+          set -euo pipefail
+          case "$RUNNER_OS" in
+            Linux)   asset=elan-x86_64-unknown-linux-gnu.tar.gz; sha="$ELAN_SHA256_LINUX" ;;
+            macOS)   asset=elan-aarch64-apple-darwin.tar.gz;     sha="$ELAN_SHA256_MACOS" ;;
+            Windows) asset=elan-x86_64-pc-windows-msvc.zip;      sha="$ELAN_SHA256_WINDOWS" ;;
+            *) echo "unsupported runner: $RUNNER_OS" >&2; exit 1 ;;
+          esac
+          archive="$RUNNER_TEMP/$asset"
+          curl -sSfL --retry 5 --retry-delay 5 --retry-all-errors \
+            -o "$archive" \
+            "https://github.com/leanprover/elan/releases/download/$ELAN_VERSION/$asset"
+          # macOS runners have shasum, not sha256sum.
+          if command -v sha256sum >/dev/null 2>&1; then
+            echo "$sha  $archive" | sha256sum -c -
+          else
+            echo "$sha  $archive" | shasum -a 256 -c -
+          fi
+          mkdir -p "$RUNNER_TEMP/elan"
+          if [ "${asset##*.}" = zip ]; then
+            7z x -o"$RUNNER_TEMP/elan" "$archive" >/dev/null
+          else
+            tar -xzf "$archive" -C "$RUNNER_TEMP/elan"
+          fi
+          "$RUNNER_TEMP/elan/elan-init" -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
       - name: Install make (Windows)
         if: runner.os == 'Windows'
         run: choco install make -y
