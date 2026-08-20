@@ -3021,19 +3021,6 @@ class Struct
 
         $ctype = self::typify($cval);
 
-        // PHP empty [] is ambiguous (list vs map). When the spec expects a
-        // map, treat an empty array/ListRef in the data as an empty map so
-        // that validation does not produce a spurious type-mismatch error.
-        // Go/Lua don't hit this because they have distinct map/list types.
-        if (
-            0 < (self::T_map & $ptype) &&
-            (is_array($cval) || $cval instanceof \Voxgig\Struct\ListRef) &&
-            0 === count($cval)
-        ) {
-            $cval = new \stdClass();
-            $ctype = self::typify($cval);
-        }
-
         // Type mismatch.
         if ($ptype !== $ctype && self::undef() !== $pval) {
             $inj->errs[] = self::_invalidTypeMsg($inj->path, self::typename($ptype), $ctype, $cval);
