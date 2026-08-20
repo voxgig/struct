@@ -194,6 +194,33 @@ local NONE = nil
 local SKIP = { ["`$SKIP`"] = true }
 local DELETE = { ["`$DELETE`"] = true }
 
+-- The no-value: absent, as distinct from a JSON null.
+--
+-- Lua has one `nil` and the corpus needs two states, so this port models the
+-- second explicitly - the same move struct/go makes with its `NOVAL`
+-- sentinel. `typify()` and `typify(null)` are different results the corpus
+-- pins as different (1073741824 against 4194432), and without a sentinel a
+-- Lua port simply cannot express the first.
+--
+-- It is recognised AHEAD of the normal dispatch in `typify`, which is the
+-- whole trick: a Lua sentinel is a table, so the ordinary path would class it
+-- as a map. Everywhere else it collapses to `nil` via `denoval`, because
+-- canonical distinguishes undefined from null in `typify` and nowhere else
+-- (`null == val` is true for both in JavaScript).
+local NOVAL = setmetatable({}, {
+  __tostring = function()
+    return "NOVAL"
+  end,
+})
+
+-- Collapse the no-value to nil for every function that must not see it.
+local function denoval(val)
+  if NOVAL == val then
+    return nil
+  end
+  return val
+end
+
 local MAXDEPTH = 32
 
 ----------------------------------------------------------
@@ -253,6 +280,7 @@ end
 -- @param val (any) The value to check
 -- @return (boolean) True if value is a node
 local function isnode(val)
+  val = denoval(val)
   if val == nil then
     return false
   end
@@ -264,6 +292,7 @@ end
 -- @param val (any) The value to check
 -- @return (boolean) True if value is a map
 ismap = function(val)
+  val = denoval(val)
   -- Check if the value is a table
   if type(val) ~= "table" or (getmetatable(val) and getmetatable(val).__jsontype == "array") then
     return false
@@ -288,6 +317,7 @@ end
 -- @param val (any) The value to check
 -- @return (boolean) True if value is a list
 islist = function(val)
+  val = denoval(val)
   -- First check metatable indicators (preferred approach)
   if
     getmetatable(val)
@@ -324,6 +354,7 @@ end
 -- @param key (any) The key to check
 -- @return (boolean) True if key is valid
 local function iskey(key)
+  key = denoval(key)
   local keytype = type(key)
   return (keytype == S_string and key ~= S_MT and key ~= NULLMARK) or keytype == S_number
 end
@@ -338,6 +369,7 @@ end
 
 -- The integer size of the value.
 local function size(val)
+  val = denoval(val)
   if islist(val) then
     return #val
   elseif ismap(val) then
@@ -365,6 +397,7 @@ end
 -- @param val (any) The value to check
 -- @return (boolean) True if value is empty
 local function isempty(val)
+  val = denoval(val)
   -- Check if the value is absent (nil) or JSON null (NULLMARK).
   if val == nil or val == NULLMARK then
     return true
@@ -388,6 +421,7 @@ end
 -- @param val (any) The value to check
 -- @return (boolean) True if value is a function
 local function isfunc(val)
+  val = denoval(val)
   return type(val) == "function"
 end
 
@@ -395,10 +429,15 @@ end
 -- @param value (any) The value to check
 -- @return (number) The type as a bit flag
 local function typify(value)
-  -- Lua's nil is the (only) representation of JSON null. Canonical TS
-  -- typify(null) === T_scalar | T_null. (TS typify(undefined) === T_noval,
-  -- but Lua cannot distinguish null from undefined at the value level, so
-  -- nil is treated as JSON null here.)
+  -- The no-value, checked BEFORE anything else: NOVAL is a table, so the
+  -- dispatch below would otherwise class it as a map.
+  if NOVAL == value then
+    return T_noval
+  end
+
+  -- Lua's nil is the representation of JSON null. Canonical TS
+  -- typify(null) === T_scalar | T_null; typify(undefined) === T_noval, which
+  -- this port spells NOVAL (above).
   if value == nil then
     return T_scalar | T_null
   end
@@ -522,6 +561,7 @@ end
 -- @param key (any) The key to convert
 -- @return (string) The string representation of the key
 local function strkey(key)
+  key = denoval(key)
   if key == NONE or key == NULLMARK then
     return S_MT
   end
@@ -545,6 +585,7 @@ end
 -- @param val (any) The object or array to get keys from
 -- @return (table) Array of keys as strings
 local function keysof(val)
+  val = denoval(val)
   if not isnode(val) then
     return {}
   end
@@ -580,6 +621,7 @@ end
 -- @param val (any) The object or array to convert to key-value pairs
 -- @return (table) Array of {key, value} pairs
 local function items(val)
+  val = denoval(val)
   if type(val) ~= "table" then
     return {}
   end
@@ -1298,6 +1340,7 @@ end
 -- @param flags (table) Optional flags to control cloning behavior
 -- @return (any) Deep copy of the value
 local function clone(val, flags)
+  val = denoval(val)
   -- Handle nil value
   if val == nil then
     return nil
@@ -1424,6 +1467,7 @@ end
 -- @param pool (table) Per-depth reusable path arrays (for recursive calls)
 -- @return (any) The transformed value
 local function walk(val, before, after, maxdepth, key, parent, path, pool)
+  val = denoval(val)
   if nil == pool then
     pool = {}
     local rootPath = {}
@@ -1487,6 +1531,7 @@ end
 -- @param maxdepth (number) Optional maximum depth for merge
 -- @return (any) The merged result
 local function merge(val, maxdepth)
+  val = denoval(val)
   local md = slice(getdef(maxdepth, MAXDEPTH), 0)
   local out
 
@@ -3440,6 +3485,7 @@ end
 
 -- Define the StructUtility "class"
 local StructUtility = {
+  NOVAL = NOVAL,
   clone = clone,
   delprop = delprop,
   escre = escre,
@@ -3529,6 +3575,7 @@ end
 
 return {
   StructUtility = StructUtility,
+  NOVAL = NOVAL,
   clone = clone,
   delprop = delprop,
   escre = escre,
