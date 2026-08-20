@@ -1404,11 +1404,43 @@ class Struct
         return $out;
     }
 
+    /**
+     * An injdef may arrive as a map rather than an object.
+     *
+     * Every injdef test in this port is spelled `is_object($injdef) &&
+     * property_exists(...)`, which is right for an injdef built in PHP but
+     * wrong for one that came from JSON: `json_decode($json, true)` yields an
+     * array, so a perfectly good `{ meta, extra, handler }` failed every test
+     * and fell through to the backward-compat branch, where it was treated as
+     * plain store data. The corpus supplies injdefs exactly that way, in
+     * `validate/special` and `getpath/special`.
+     *
+     * A map carrying any injdef key is therefore promoted to an object here.
+     * A map carrying none of them is left alone - that is the backward-compat
+     * "extra data passed directly" case, and it must keep working.
+     */
+    private static function _injdef(mixed $injdef): mixed
+    {
+        if (!is_array($injdef)) {
+            return $injdef;
+        }
+
+        foreach (['extra', 'modify', 'errs', 'meta', 'handler'] as $key) {
+            if (array_key_exists($key, $injdef)) {
+                return (object) $injdef;
+            }
+        }
+
+        return $injdef;
+    }
+
     public static function getpath(
         mixed $store,
         mixed $path,
         mixed $injdef = null
     ): mixed {
+        $injdef = self::_injdef($injdef);
+
         // Convert path to array of parts
         $parts = is_array($path) ? $path :
             (is_string($path) ? explode('.', $path) :
@@ -1523,6 +1555,8 @@ class Struct
         mixed $store,
         mixed $injdef = null
     ): mixed {
+        $injdef = self::_injdef($injdef);
+
         $valtype = gettype($val);
 
         /** @var Injection $inj */
@@ -2325,6 +2359,8 @@ class Struct
         mixed $spec,
         mixed $injdef = null
     ): mixed {
+        $injdef = self::_injdef($injdef);
+
         // Support injdef object pattern or backward compat (extra data passed directly)
         $extra = null;
         $modify = null;
@@ -2977,9 +3013,13 @@ class Struct
      */
     public static function validate(mixed $data, mixed $spec, mixed $injdef = null): mixed
     {
+        $injdef = self::_injdef($injdef);
+
         $extra = is_object($injdef) && property_exists($injdef, 'extra') ? $injdef->extra : null;
 
-        $collect = null != $injdef && property_exists($injdef, 'errs');
+        // `property_exists` raises a TypeError on an array, and every other
+        // test here guards with `is_object` first. This one did not.
+        $collect = is_object($injdef) && property_exists($injdef, 'errs');
 
         // PHP arrays are value-copied, so a plain array on $injdef->errs would be
         // detached from $inj->errs deep inside inject. Wrap in ArrayObject so the
