@@ -905,10 +905,13 @@ class Struct
             $valstr = $val;
         } else {
             $original = $val;
-            // Unwrap ListRefs before JSON encoding
-            if ($val instanceof ListRef) {
-                $val = self::cloneUnwrap($val);
-            }
+            // Unwrap ListRefs before JSON encoding - at ANY depth, not just at
+            // the top. A ListRef nested inside a map was encoded as the object
+            // it is, leaking its backing field:
+            //   {x:{list:[3]}}   instead of   {x:[3]}
+            // `cloneUnwrap` recurses and passes non-ListRef values through, so
+            // it is safe to call unconditionally.
+            $val = self::cloneUnwrap($val);
             try {
                 $sorted = self::sort_obj($val);
                 $str = json_encode($sorted);
