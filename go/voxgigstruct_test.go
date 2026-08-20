@@ -1084,14 +1084,14 @@ func TestStruct(t *testing.T) {
 		data := inVal["data"]
 		spec := inVal["spec"]
 		outVal := subtest["out"]
-		result := voxgigstruct.Transform(data, spec)
+		result, _ := voxgigstruct.Transform(data, spec)
 		if !reflect.DeepEqual(result, outVal) {
 			t.Errorf("Expected: %v, Got: %v", outVal, result)
 		}
 	})
 
 	t.Run("transform-paths", func(t *testing.T) {
-		runset(t, transformSpec["paths"], func(v any) any {
+		runset(t, transformSpec["paths"], func(v any) (any, error) {
 			m := v.(map[string]any)
 			data := m["data"]
 			spec := m["spec"]
@@ -1100,7 +1100,7 @@ func TestStruct(t *testing.T) {
 	})
 
 	t.Run("transform-cmds", func(t *testing.T) {
-		runset(t, transformSpec["cmds"], func(v any) any {
+		runset(t, transformSpec["cmds"], func(v any) (any, error) {
 			m := v.(map[string]any)
 			data := m["data"]
 			spec := m["spec"]
@@ -1109,7 +1109,7 @@ func TestStruct(t *testing.T) {
 	})
 
 	t.Run("transform-each", func(t *testing.T) {
-		runset(t, transformSpec["each"], func(v any) any {
+		runset(t, transformSpec["each"], func(v any) (any, error) {
 			m := v.(map[string]any)
 			data := m["data"]
 			spec := m["spec"]
@@ -1118,7 +1118,7 @@ func TestStruct(t *testing.T) {
 	})
 
 	t.Run("transform-pack", func(t *testing.T) {
-		runset(t, transformSpec["pack"], func(v any) any {
+		runset(t, transformSpec["pack"], func(v any) (any, error) {
 			m := v.(map[string]any)
 			data := m["data"]
 			spec := m["spec"]
@@ -1129,7 +1129,7 @@ func TestStruct(t *testing.T) {
 	// NOTE: transform-ref has some edge case failures in $REF handling
 	// (cyclic refs, nested self-refs). Kept as opt-in for now.
 	t.Run("transform-ref", func(t *testing.T) {
-		runset(t, transformSpec["ref"], func(v any) any {
+		runset(t, transformSpec["ref"], func(v any) (any, error) {
 			m := v.(map[string]any)
 			data := m["data"]
 			spec := m["spec"]
@@ -1138,7 +1138,7 @@ func TestStruct(t *testing.T) {
 	})
 
 	t.Run("transform-format", func(t *testing.T) {
-		runsetFlags(t, transformSpec["format"], map[string]bool{"null": false}, func(v any) any {
+		runsetFlags(t, transformSpec["format"], map[string]bool{"null": false}, func(v any) (any, error) {
 			m := v.(map[string]any)
 			data := m["data"]
 			spec := m["spec"]
@@ -1160,7 +1160,7 @@ func TestStruct(t *testing.T) {
 	})
 
 	t.Run("transform-edge-apply", func(t *testing.T) {
-		result := voxgigstruct.Transform(
+		result, _ := voxgigstruct.Transform(
 			map[string]any{},
 			[]any{"`$APPLY`", func(v any) any { return 1 + v.(int) }, 1},
 		)
@@ -1245,25 +1245,25 @@ func TestStruct(t *testing.T) {
 	t.Run("transform-funcval", func(t *testing.T) {
 		f0 := func() int { return 22 }
 
-		result1 := voxgigstruct.Transform(map[string]any{}, map[string]any{"x": 1})
+		result1, _ := voxgigstruct.Transform(map[string]any{}, map[string]any{"x": 1})
 		expected1 := map[string]any{"x": 1}
 		if !reflect.DeepEqual(expected1, result1) {
 			t.Errorf("Expected simple value transform result")
 		}
 
-		result2 := voxgigstruct.Transform(map[string]any{}, map[string]any{"x": f0})
+		result2, _ := voxgigstruct.Transform(map[string]any{}, map[string]any{"x": f0})
 		var fr0 = result2.(map[string]any)["x"].(func() int)
 		if f0() != fr0() {
 			t.Errorf("Expected x to be f0")
 		}
 
-		result3 := voxgigstruct.Transform(map[string]any{"a": 1}, map[string]any{"x": "`a`"})
+		result3, _ := voxgigstruct.Transform(map[string]any{"a": 1}, map[string]any{"x": "`a`"})
 		expected3 := map[string]any{"x": 1}
 		if !reflect.DeepEqual(expected3, result3) {
 			t.Errorf("Expected value lookup transform to work")
 		}
 
-		result4 := voxgigstruct.Transform(map[string]any{"f0": f0}, map[string]any{"x": "`f0`"})
+		result4, _ := voxgigstruct.Transform(map[string]any{"f0": f0}, map[string]any{"x": "`f0`"})
 		var fr4 = result4.(map[string]any)["x"].(func() int)
 		if 22 != fr4() {
 			t.Errorf("Expected function to be preserved")

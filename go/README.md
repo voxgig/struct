@@ -40,7 +40,7 @@ func main() {
     fmt.Println(voxgigstruct.GetPath(store, "db.host"))
     // localhost
 
-    out := voxgigstruct.Transform(store, map[string]any{
+    out, _ := voxgigstruct.Transform(store, map[string]any{
         "name":    "`user.first`",
         "surname": "`user.last`",
         "years":   "`age`",
@@ -464,7 +464,7 @@ voxgigstruct.Stringify("verylongstring", 5)   // "ve..."
 
 ```go
 func Inject(val any, store any, injdefs ...*Injection) any
-func Transform(data any, spec any, injdefs ...*Injection) any
+func Transform(data any, spec any, injdefs ...*Injection) (any, error)
 func TransformModify(data any, spec any, extra any, modify Modify) any
 func TransformModifyHandler(data any, spec any, extra any, modify Modify,
                             handler Injector, errs *ListRef[any],
@@ -492,7 +492,7 @@ voxgigstruct.Inject(
     map[string]any{"name": "Ada"},
 )
 
-out := voxgigstruct.Transform(
+out, _ := voxgigstruct.Transform(
     map[string]any{"hold": map[string]any{"x": 1}, "top": 99},
     map[string]any{"a": "`hold.x`", "b": "`top`"},
 )
@@ -591,7 +591,16 @@ ref := &voxgigstruct.ListRef[int]{List: []int{1, 2, 3}}
 ```go
 voxgigstruct.SKIP        // emit nothing for this key
 voxgigstruct.DELETE      // remove this key from the parent
+voxgigstruct.NOVAL       // no value at all — canonical's `undefined`
 ```
+
+`NOVAL` is this port's third state. Go has `nil` and it has real values and
+nothing between, so `Typify(nil)` is `T_scalar | T_null` and `T_noval` was
+otherwise unreachable — the port could not express `typify()` as distinct
+from `typify(null)`, two results the corpus pins as different. `Typify`
+recognises `NOVAL` ahead of its reflect dispatch; everywhere else the port
+follows canonical, which treats absent and null alike (`null == val` is true
+for both in JavaScript).
 
 ### Type bit-flags
 
@@ -665,14 +674,19 @@ takes options, the Go port either:
 starts a recursive descent from a non-root position, taking an explicit
 `key`, `parent`, and starting `path`.
 
-### `Validate` returns `(any, error)`
+### `Transform` and `Validate` return `(any, error)`
 
-Only `Validate` returns `(any, error)`, matching Go's idiom for fallible
-operations.  The error carries a human-readable message describing the
-first mismatch (or an aggregate, if the underlying call collected
-errors).  `Transform`, `TransformModify`, and `TransformModifyHandler`
-return a plain `any`; `TransformCollect` returns `(any, []string)` —
-the data plus any collected error strings.
+`Transform` and `Validate` return `(any, error)`, matching Go's idiom for
+fallible operations.  The error carries a human-readable message describing
+the first problem — an unknown `$FORMAT`, a type mismatch — or an aggregate,
+if the underlying call collected several.  Canonical throws at exactly that
+point; this is the Go form of the same behaviour.
+
+Supplying your own error collector (an `*Injection` with `Errs` set, or
+`TransformCollect`) means the errors are yours to inspect, and neither call
+generates one.  `TransformModify` and `TransformModifyHandler` return a
+plain `any`; `TransformCollect` returns `(any, []string)` — the data plus
+any collected error strings.
 
 ### `ListRef[T]`
 
