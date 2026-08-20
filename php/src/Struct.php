@@ -1565,12 +1565,14 @@ class Struct
                                 break;
                             }
                         } else {
-                            // Special case for single dot: use dparent if available
-                            if ($dparent !== null && $dparent !== self::undef()) {
-                                $val = $dparent;
-                            } else {
-                                $val = $src;
-                            }
+                            // Canonical assigns unconditionally here
+                            // (StructUtility.ts:1360: `else { val = dparent }`).
+                            // Falling back to $src returned the whole store when
+                            // there was no dparent - and an unresolved `$GET:`/
+                            // `$REF:`/`$META:` key stringifies to '', which lands
+                            // in exactly this branch. So a missing dynamic key
+                            // produced the entire store instead of the no-value.
+                            $val = $dparent;
                         }
                     } else {
                         $val = self::_getprop($val, $part);
