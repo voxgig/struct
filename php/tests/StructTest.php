@@ -1380,56 +1380,81 @@ class StructTest extends TestCase
         $this->assertTrue(true);
     }
 
-    // ——— Validate: empty array treated as map when spec expects map ———
+    // ——— Validate: an empty [] is a LIST, and a map spec rejects it ———
 
-    public function testValidateEmptyArrayAsMap(): void
+    public function testValidateEmptyArrayAgainstMapSpec(): void
     {
-        // PHP [] is ambiguous (list vs map). When the spec expects a map,
-        // an empty [] in the data should not cause a type-mismatch error.
+        // PHP's [] is ambiguous to the eye but not to this port: `ismap([])`
+        // is false and `islist([])` is true. Validation used to make an
+        // exception for it - an empty [] passed a map spec - which contradicted
+        // both `ismap` and the shared corpus (`validate/basic`, the entry
+        // expecting "Expected field c2 to be map, but found list: []").
+        //
+        // The corpus is the contract, so the exception is gone. A caller who
+        // means an empty MAP writes `new stdClass()`, which is what `ismap` has
+        // always required. Verified against canonical JavaScript: every case
+        // below produces the same errors, and case 5 the same value, there.
 
-        // Case 1: empty [] against a flat map spec — no validation errors
         $spec = (object) ['allow' => (object) ['method' => 'GET', 'op' => 'create']];
-        $data = (object) ['allow' => []];
-        $errs = [];
-        $injdef = (object) ['errs' => &$errs];
-        $result = Struct::validate($data, $spec, $injdef);
-        $this->assertEmpty($errs, 'empty [] should not cause type-mismatch against map spec');
-        // validate() delegates to transform(), which now returns associative
+        $validate = function ($data, $spec) {
+            $errs = [];
+            $injdef = (object) ['errs' => &$errs];
+            $result = Struct::validate($data, $spec, $injdef);
+            return [$errs, $result];
+        };
+
+        // Case 1: an empty [] against a map spec is a type mismatch.
+        [$errs, $result] = $validate((object) ['allow' => []], $spec);
+        $this->assertSame(
+            ['Expected field allow to be map, but found list: [].'],
+            $errs,
+            'an empty [] is a list, and a map spec must reject it'
+        );
+        // validate() delegates to transform(), which returns associative
         // arrays at the public boundary.
         $this->assertIsArray($result);
 
-        // Case 2: nested empty arrays against nested map spec
-        $spec2 = (object) [
-            'config' => (object) [
+        // Case 2: the same nested, reported per field.
+        [$errs2] = $validate(
+            (object) ['config' => (object) ['db' => [], 'cache' => []]],
+            (object) ['config' => (object) [
                 'db' => (object) ['host' => 'localhost'],
                 'cache' => (object) ['ttl' => 300],
+            ]]
+        );
+        $this->assertSame(
+            [
+                'Expected field config.cache to be map, but found list: [].',
+                'Expected field config.db to be map, but found list: [].',
             ],
-        ];
-        $data2 = (object) ['config' => (object) ['db' => [], 'cache' => []]];
-        $errs2 = [];
-        $injdef2 = (object) ['errs' => &$errs2];
-        $result2 = Struct::validate($data2, $spec2, $injdef2);
-        $this->assertEmpty($errs2, 'nested empty [] should not cause type-mismatch');
+            $errs2,
+            'nested empty [] is reported per field'
+        );
 
-        // Case 3: stdClass (correct convention) still works
-        $data3 = (object) ['allow' => (object) []];
-        $errs3 = [];
-        $injdef3 = (object) ['errs' => &$errs3];
-        $result3 = Struct::validate($data3, $spec, $injdef3);
-        $this->assertEmpty($errs3, 'stdClass empty map should validate fine');
+        // Case 3: stdClass is the way to spell an empty map, and it passes.
+        [$errs3] = $validate((object) ['allow' => (object) []], $spec);
+        $this->assertEmpty($errs3, 'an empty stdClass IS a map and must validate');
 
-        // Case 4: non-empty list against map spec — still produces type-mismatch
-        // (only EMPTY arrays get the ambiguity pass, non-empty lists remain errors)
-        $data4 = (object) ['allow' => [1, 2, 3]];
-        $errs4 = [];
-        $injdef4 = (object) ['errs' => &$errs4];
-        Struct::validate($data4, $spec, $injdef4);
-        // Non-empty list [1,2,3] has integer keys, so it IS a list with children;
-        // the validate engine will process its children against the spec, but the
-        // structural mismatch at the container level may or may not produce an error
-        // depending on injection navigation. The key assertion is that case 1-3 pass.
+        // Case 4: a non-empty list is rejected the same way, and prints its
+        // contents - the only difference from case 1 is the value in the text.
+        [$errs4] = $validate((object) ['allow' => [1, 2, 3]], $spec);
+        $this->assertSame(
+            ['Expected field allow to be map, but found list: [1,2,3].'],
+            $errs4,
+            'a non-empty list against a map spec is the same mismatch'
+        );
 
-        // Case 5: merge-then-validate SDK flow
+        // Case 5: merge-then-validate. `merge` itself yields a LIST here - the
+        // later empty [] replaces the earlier map, being a different type - so
+        // validation reports the mismatch. Canonical JavaScript produces this
+        // merged value, this error, and this result, identically.
+        $merged = Struct::merge([
+            (object) ['allow' => (object) ['method' => 'GET', 'op' => 'create'], 'timeout' => 30000],
+            (object) ['allow' => [], 'timeout' => 5000],
+            (object) [],
+        ]);
+        $this->assertTrue(Struct::islist(Struct::getprop($merged, 'allow')), 'merge yields a list');
+
         $optspec = (object) [
             'allow' => (object) [
                 'method' => 'GET,PUT,POST',
@@ -1437,31 +1462,22 @@ class StructTest extends TestCase
             ],
             'timeout' => 30000,
         ];
-        $merged = Struct::merge([
-            (object) ['allow' => (object) ['method' => 'GET', 'op' => 'create'], 'timeout' => 30000],
-            (object) ['allow' => [], 'timeout' => 5000],
-            (object) [],
-        ]);
-        $errs5 = [];
-        $injdef5 = (object) ['errs' => &$errs5];
-        $result5 = Struct::validate($merged, $optspec, $injdef5);
-        $this->assertEmpty($errs5, 'merge-then-validate SDK flow should produce no errors');
-        $this->assertIsArray($result5);
-        $this->assertTrue(
-            array_key_exists('allow', $result5) && is_array($result5['allow']),
-            'result.allow should be a map'
+        [$errs5, $result5] = $validate($merged, $optspec);
+        $this->assertSame(
+            ['Expected field allow to be map, but found list: [].'],
+            $errs5,
+            'merge-then-validate reports the mismatch merge created'
         );
-        $this->assertEquals(
-            'create,update,load',
-            $result5['allow']['op'] ?? null,
-            'result.allow.op should have spec default'
-        );
+        // The spec defaults are still filled in, mismatch notwithstanding.
+        $this->assertSame('create,update,load', $result5['allow']['op'] ?? null);
+        $this->assertSame(5000, $result5['timeout'] ?? null);
 
-        // Case 6: empty ListRef against map spec
-        $data6 = (object) ['allow' => new ListRef([])];
-        $errs6 = [];
-        $injdef6 = (object) ['errs' => &$errs6];
-        $result6 = Struct::validate($data6, $spec, $injdef6);
-        $this->assertEmpty($errs6, 'empty ListRef should not cause type-mismatch against map spec');
+        // Case 6: a ListRef is a list however empty it is.
+        [$errs6] = $validate((object) ['allow' => new ListRef([])], $spec);
+        $this->assertSame(
+            ['Expected field allow to be map, but found list: [].'],
+            $errs6,
+            'an empty ListRef is a list too'
+        );
     }
 }
