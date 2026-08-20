@@ -74,6 +74,7 @@ class Struct
     // Match TypeScript constants exactly
     private const S_BKEY = '`$KEY`';
     private const S_BANNO = '`$ANNO`';
+    private const S_BVAL = '`$VAL`';
     private const S_DTOP = '$TOP';
     private const S_DERRS = '$ERRS';
 
@@ -2098,7 +2099,11 @@ class Struct
         $keypath = self::_getprop($origchildspec, self::S_BKEY);
         $childspec = self::delprop($origchildspec, self::S_BKEY);
 
-        $child = $childspec;
+        // Canonical: `const child = getprop(childspec, S_BVAL, childspec)`
+        // (StructUtility.ts, transform_PACK). A child spec may name its value
+        // under `$VAL`; without this lookup the literal key survived into the
+        // output and the value was never transformed.
+        $child = self::_getprop($childspec, self::S_BVAL, $childspec);
 
         // Build parallel target object.
         $tval = new \stdClass();
