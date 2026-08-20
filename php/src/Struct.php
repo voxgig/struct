@@ -2757,9 +2757,14 @@ class Struct
             $childtm = self::_getprop($parent, 1);
 
             if (self::undef() === $inj->dparent) {
-                // Empty list as default.
-                while (count($parent) > 0) {
-                    array_pop($parent);
+                // Empty list as default. `$parent` may be a ListRef - see the
+                // note on the other array_pop below.
+                if ($parent instanceof ListRef) {
+                    $parent->list = [];
+                } else {
+                    while (count($parent) > 0) {
+                        array_pop($parent);
+                    }
                 }
                 return self::undef();
             }
@@ -2862,7 +2867,14 @@ class Struct
             // There was no match.
             $tvArr = ($tvals instanceof ListRef) ? $tvals->list : (is_array($tvals) ? $tvals : []);
             $valdesc = implode(', ', array_map(fn($v) => self::stringify($v), $tvArr));
-            $valdesc = preg_replace(self::R_TRANSFORM_NAME, '$1', strtolower($valdesc));
+            // Lowercase the NAME, not the whole string. R_TRANSFORM_NAME matches
+            // `$([A-Z]+)`, so lowercasing first made it stop matching and left
+            // the raw `$string` spelling in the message.
+            $valdesc = preg_replace_callback(
+                self::R_TRANSFORM_NAME,
+                fn(array $m): string => strtolower($m[1]),
+                $valdesc
+            );
 
             $inj->errs[] = self::_invalidTypeMsg(
                 $inj->path,
@@ -2928,7 +2940,14 @@ class Struct
 
             $tvArr = ($tvals instanceof ListRef) ? $tvals->list : (is_array($tvals) ? $tvals : []);
             $valdesc = implode(', ', array_map(fn($v) => self::stringify($v), $tvArr));
-            $valdesc = preg_replace(self::R_TRANSFORM_NAME, '$1', strtolower($valdesc));
+            // Lowercase the NAME, not the whole string. R_TRANSFORM_NAME matches
+            // `$([A-Z]+)`, so lowercasing first made it stop matching and left
+            // the raw `$string` spelling in the message.
+            $valdesc = preg_replace_callback(
+                self::R_TRANSFORM_NAME,
+                fn(array $m): string => strtolower($m[1]),
+                $valdesc
+            );
 
             $inj->errs[] = self::_invalidTypeMsg(
                 $inj->path,
