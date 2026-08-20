@@ -1427,8 +1427,28 @@ class Struct
 
         foreach (['extra', 'modify', 'errs', 'meta', 'handler'] as $key) {
             if (array_key_exists($key, $injdef)) {
-                return (object) $injdef;
+                return self::_injdefmeta((object) $injdef);
             }
+        }
+
+        return $injdef;
+    }
+
+    /**
+     * `Injection::$meta` is declared `object`, so a `meta` that came from JSON
+     * cannot be assigned to it:
+     *
+     *     TypeError: Cannot assign array to property
+     *     Voxgig\Struct\Injection::$meta of type object
+     *
+     * Only the meta container itself is promoted - its contents stay as they
+     * are, since they are caller data read through `getprop`, which handles
+     * both shapes.
+     */
+    private static function _injdefmeta(object $injdef): object
+    {
+        if (property_exists($injdef, 'meta') && is_array($injdef->meta)) {
+            $injdef->meta = (object) $injdef->meta;
         }
 
         return $injdef;
