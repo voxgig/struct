@@ -130,7 +130,11 @@ class Struct
     private const S_CM = ',';
 
     private const TYPENAME = [
-        'any', 'noval', 'boolean', 'decimal', 'integer', 'number', 'string',
+        // Index 1 is canonical's S_nil = 'nil' (StructUtility.ts:83,129).
+        // Spelled 'noval' here, `$NIL` resolved to no index at all, so its
+        // type mask was 0 and every $NIL check failed - including the one
+        // that should accept an absent field.
+        'any', 'nil', 'boolean', 'decimal', 'integer', 'number', 'string',
         'function', 'symbol', 'null',
         '', '', '', '', '', '', '',
         'list', 'map', 'instance',
@@ -912,7 +916,11 @@ class Struct
                 }
                 $valstr = str_replace('"', '', $str);
 
-                if (is_object($original) && $valstr === '[]') {
+                // An empty map must print `{}`, not `[]`. But `is_object` is
+                // too broad: a ListRef is an object standing for a LIST, so an
+                // empty one was printing `{}` too. `ismap` is the right test -
+                // it is true for stdClass and false for ListRef.
+                if (self::ismap($original) && $valstr === '[]') {
                     $valstr = '{}';
                 }
             } catch (\Exception $e) {
