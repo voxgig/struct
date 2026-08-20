@@ -261,10 +261,43 @@ jobs:
         zig-version: ['0.13.0']
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # Downloaded straight from ziglang.org rather than via a setup action.
+      # Every published zig setup action - mlugg, korandoru, goto-bus-stop -
+      # still targets Node 20, which is refused. A pinned tarball with a
+      # checked hash is what voxgig/omni's zig job already does, and it also
+      # drops setup-zig's community-mirror fallback, which was flaky.
       - name: Setup Zig ${{ matrix.zig-version }}
-        uses: mlugg/setup-zig@53fc45b17fe98b52f92ee5ea08ff48a85a3e7eb7 # v1
-        with:
-          version: ${{ matrix.zig-version }}
+        shell: bash
+        env:
+          ZIG_VERSION: ${{ matrix.zig-version }}
+          ZIG_SHA256_LINUX: 'd45312e61ebcc48032b77bc4cf7fd6915c11fa16e4aad116b66c9468211230ea'
+          ZIG_SHA256_MACOS: '46fae219656545dfaf4dce12fb4e8685cec5b51d721beee9389ab4194d43394c'
+          ZIG_SHA256_WINDOWS: 'd859994725ef9402381e557c60bb57497215682e355204d754ee3df75ee3c158'
+        run: |
+          set -euo pipefail
+          case "$RUNNER_OS" in
+            Linux)   name="zig-linux-x86_64-$ZIG_VERSION";   ext=tar.xz; sha="$ZIG_SHA256_LINUX" ;;
+            macOS)   name="zig-macos-aarch64-$ZIG_VERSION";  ext=tar.xz; sha="$ZIG_SHA256_MACOS" ;;
+            Windows) name="zig-windows-x86_64-$ZIG_VERSION"; ext=zip;    sha="$ZIG_SHA256_WINDOWS" ;;
+            *) echo "unsupported runner: $RUNNER_OS" >&2; exit 1 ;;
+          esac
+          archive="$RUNNER_TEMP/zig.$ext"
+          curl -sSfL --retry 5 --retry-delay 5 --retry-all-errors \
+            -o "$archive" "https://ziglang.org/download/$ZIG_VERSION/$name.$ext"
+          # macOS runners have shasum, not sha256sum.
+          if command -v sha256sum >/dev/null 2>&1; then
+            echo "$sha  $archive" | sha256sum -c -
+          else
+            echo "$sha  $archive" | shasum -a 256 -c -
+          fi
+          mkdir -p "$HOME/zig"
+          if [ "$ext" = zip ]; then
+            7z x -o"$RUNNER_TEMP/zigx" "$archive" >/dev/null
+            mv "$RUNNER_TEMP/zigx/$name"/* "$HOME/zig/"
+          else
+            tar -xJf "$archive" -C "$HOME/zig" --strip-components=1
+          fi
+          echo "$HOME/zig" >> "$GITHUB_PATH"
       # zig 0.13 cannot link against the newer Xcode SDK on macOS runners
       # (undefined libc symbols); the Command Line Tools SDK still works.
       - name: Use Command Line Tools SDK (macOS)
@@ -342,7 +375,7 @@ jobs:
       # not reliable for 6.0.2 specifically. Only install on Linux.
       - name: Setup Swift (Linux)
         if: runner.os == 'Linux'
-        uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2
+        uses: SwiftyLab/setup-swift@38f54a76b70d989321de9dc7c840618c08cf56e9 # v1.14.0
         with:
           swift-version: '6.0.2'
       - name: Swift version
