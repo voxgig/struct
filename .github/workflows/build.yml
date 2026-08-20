@@ -101,16 +101,29 @@ jobs:
         go-version: ['1.23', '1.24']
     steps:
       - uses: actions/checkout@v4
+      # The test runner is voxgig/omni, consumed as a local checkout (it is
+      # not published); Go reaches it through a workspace. The library
+      # itself never depends on omni.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@v4
+        with:
+          repository: voxgig/omni
+          path: .omni
       - name: Setup Go ${{ matrix.go-version }}
         uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go-version }}
+      # `go work init` rather than `make`, so this works unchanged on the
+      # windows leg of the matrix.
+      - name: Workspace
+        working-directory: ./go
+        run: go work init . ${{ github.workspace }}/.omni/go
       - name: Build
         working-directory: ./go
         run: go build ./...
       - name: Run tests
         working-directory: ./go
-        run: go test -v ./...
+        run: go test -count=1 -v ./...
 
   test-ruby:
     runs-on: ${{ matrix.os }}
