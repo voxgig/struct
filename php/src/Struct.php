@@ -2869,7 +2869,14 @@ class Struct
                 $vcurrent = self::validate($inj->dparent, $tval, $tinj);
                 $terrs = $tinj->errs;
 
-                $inj->setval($vcurrent, 2);
+                // -2, not 2. `setval` branches on `$ancestor < 2`, so a
+                // NEGATIVE ancestor selects the immediate-parent branch;
+                // 2 selects the ancestor branch and writes
+                // setprop(nodes[-2], path[-2], val) - and path[-2] here is
+                // `$TOP`, so the store key landed in the public result.
+                // Canonical passes -2 at this one site (StructUtility.ts:2230)
+                // and +2 at the other three; this port had 2 everywhere.
+                $inj->setval($vcurrent, -2);
 
                 // Accept current value if there was a match
                 if (0 === count($terrs)) {
