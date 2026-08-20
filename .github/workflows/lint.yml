@@ -18,8 +18,8 @@ jobs:
   lint-typescript:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '24'
       - working-directory: ./typescript
@@ -30,8 +30,8 @@ jobs:
   lint-javascript:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '24'
       - working-directory: ./javascript
@@ -42,8 +42,8 @@ jobs:
   lint-python:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: '3.12'
       - working-directory: ./python
@@ -54,8 +54,8 @@ jobs:
   lint-go:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: '1.24'
       - name: Install golangci-lint
@@ -68,9 +68,10 @@ jobs:
   lint-rust:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
+          toolchain: stable
           components: clippy, rustfmt
       - working-directory: ./rust
         run: make lint
@@ -78,8 +79,8 @@ jobs:
   lint-ruby:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: ruby/setup-ruby@v1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1
         with:
           ruby-version: '3.3'
           bundler-cache: true
@@ -90,8 +91,8 @@ jobs:
   lint-php:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: shivammathur/setup-php@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
         with:
           php-version: '8.3'
       - working-directory: ./php
@@ -107,8 +108,8 @@ jobs:
   lint-java:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-java@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
           # checkstyle 13.5.0 is compiled for Java 21 (class file v65); the
@@ -121,8 +122,8 @@ jobs:
   lint-kotlin:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-java@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
           java-version: '17'
@@ -132,11 +133,11 @@ jobs:
   lint-lua:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: leafo/gh-actions-lua@v13
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: leafo/gh-actions-lua@6919171ccf181b826f44b9bca76307b577217377 # v13
         with:
           luaVersion: "5.4"
-      - uses: leafo/gh-actions-luarocks@v6
+      - uses: leafo/gh-actions-luarocks@35d062def313a7699a0d513e996bcf4352f05389 # v6
       - run: luarocks install luacheck
       - working-directory: ./lua
         run: luacheck src test
@@ -144,17 +145,51 @@ jobs:
   lint-zig:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: mlugg/setup-zig@v1
-        with:
-          version: '0.13.0'
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # Downloaded straight from ziglang.org rather than via a setup action.
+      # Every published zig setup action - mlugg, korandoru, goto-bus-stop -
+      # still targets Node 20, which is refused. A pinned tarball with a
+      # checked hash is what voxgig/omni's zig job already does, and it also
+      # drops setup-zig's community-mirror fallback, which was flaky.
+      - name: Setup Zig 0.13.0
+        shell: bash
+        env:
+          ZIG_VERSION: '0.13.0'
+          ZIG_SHA256_LINUX: 'd45312e61ebcc48032b77bc4cf7fd6915c11fa16e4aad116b66c9468211230ea'
+          ZIG_SHA256_MACOS: '46fae219656545dfaf4dce12fb4e8685cec5b51d721beee9389ab4194d43394c'
+          ZIG_SHA256_WINDOWS: 'd859994725ef9402381e557c60bb57497215682e355204d754ee3df75ee3c158'
+        run: |
+          set -euo pipefail
+          case "$RUNNER_OS" in
+            Linux)   name="zig-linux-x86_64-$ZIG_VERSION";   ext=tar.xz; sha="$ZIG_SHA256_LINUX" ;;
+            macOS)   name="zig-macos-aarch64-$ZIG_VERSION";  ext=tar.xz; sha="$ZIG_SHA256_MACOS" ;;
+            Windows) name="zig-windows-x86_64-$ZIG_VERSION"; ext=zip;    sha="$ZIG_SHA256_WINDOWS" ;;
+            *) echo "unsupported runner: $RUNNER_OS" >&2; exit 1 ;;
+          esac
+          archive="$RUNNER_TEMP/zig.$ext"
+          curl -sSfL --retry 5 --retry-delay 5 --retry-all-errors \
+            -o "$archive" "https://ziglang.org/download/$ZIG_VERSION/$name.$ext"
+          # macOS runners have shasum, not sha256sum.
+          if command -v sha256sum >/dev/null 2>&1; then
+            echo "$sha  $archive" | sha256sum -c -
+          else
+            echo "$sha  $archive" | shasum -a 256 -c -
+          fi
+          mkdir -p "$HOME/zig"
+          if [ "$ext" = zip ]; then
+            7z x -o"$RUNNER_TEMP/zigx" "$archive" >/dev/null
+            mv "$RUNNER_TEMP/zigx/$name"/* "$HOME/zig/"
+          else
+            tar -xJf "$archive" -C "$HOME/zig" --strip-components=1
+          fi
+          echo "$HOME/zig" >> "$GITHUB_PATH"
       - working-directory: ./zig
         run: zig fmt --check src test build.zig
 
   lint-cpp:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - run: sudo apt-get update && sudo apt-get install -y nlohmann-json3-dev clang-tidy clang-format
       - working-directory: ./cpp
         run: make lint
@@ -162,8 +197,8 @@ jobs:
   lint-csharp:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
         with:
           dotnet-version: '8.0.x'
       - working-directory: ./csharp
@@ -172,7 +207,7 @@ jobs:
   lint-c:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - run: sudo apt-get update && sudo apt-get install -y clang-tidy clang-format
       - working-directory: ./c
         run: make lint
@@ -180,7 +215,7 @@ jobs:
   lint-perl:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - run: sudo apt-get update && sudo apt-get install -y libperl-critic-perl
       - working-directory: ./perl
         run: make lint
@@ -188,8 +223,8 @@ jobs:
   lint-swift:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: swift-actions/setup-swift@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: SwiftyLab/setup-swift@38f54a76b70d989321de9dc7c840618c08cf56e9 # v1.14.0
         with:
           swift-version: '6.0.2'
       - working-directory: ./swift
@@ -198,20 +233,20 @@ jobs:
   lint-scala:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: VirtusLab/scala-cli-setup@v1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: VirtusLab/scala-cli-setup@c2c917d5764319353961bc4e53885c62d3a95db1 # v1
       - working-directory: ./scala
         run: make lint
 
   lint-clojure:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-java@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
           java-version: '17'
-      - uses: DeLaGuardo/setup-clojure@13
+      - uses: DeLaGuardo/setup-clojure@4c7a6f613e5089821bb3bb2a33a3ee115578580d # 13
         with:
           cli: latest
       - working-directory: ./clojure
@@ -220,16 +255,16 @@ jobs:
   lint-dart:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: dart-lang/setup-dart@v1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1
       - working-directory: ./dart
         run: dart pub get && make lint
 
   lint-elixir:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: erlef/setup-beam@v1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
         with:
           otp-version: '27'
           elixir-version: '1.18'
@@ -239,8 +274,8 @@ jobs:
   lint-haskell:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: haskell-actions/setup@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: haskell-actions/setup@6037f33647c3f17758a2356c80fc4a53d7e0685d # v2
         with:
           ghc-version: '9.10'
       - working-directory: ./haskell
@@ -249,8 +284,8 @@ jobs:
   lint-ocaml:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: ocaml/setup-ocaml@v3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: ocaml/setup-ocaml@605a7e998e76e035b82c14d618a6e1010732c4ce # v3
         with:
           ocaml-compiler: '5'
       - working-directory: ./ocaml
@@ -260,11 +295,51 @@ jobs:
   lint-lean:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: leanprover/lean-action@v1
-        with:
-          lake-package-directory: ./lean
-          test: false
-          lint: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # elan directly rather than leanprover/lean-action: that action is a
+      # composite that references actions/cache/restore@v5 and
+      # actions/cache/save@v5 BY TAG internally, and the SHA-pin rule applies
+      # transitively - "The action actions/cache/restore@v5 is not allowed in
+      # voxgig/struct because all actions must be pinned to a full-length
+      # commit SHA." No version of it pins its own internals, `main` included,
+      # so there is nothing to upgrade to.
+      #
+      # The action was only installing the toolchain here anyway (test and
+      # lint are both false), and lean/Makefile already puts ~/.elan/bin on
+      # PATH. elan reads ./lean-toolchain and fetches the pinned Lean on first
+      # `lake` invocation, so behaviour is unchanged.
+      - name: Install Lean toolchain (elan)
+        shell: bash
+        env:
+          ELAN_VERSION: 'v4.2.3'
+          ELAN_SHA256_LINUX: 'df0b2b3a439961ffcbb3985214365ffe40f49bc871df04dff268c7d8e21ca8b2'
+          ELAN_SHA256_MACOS: '7cae4c03b2f0de4053fb04a91359d5804551e6e37a6ddd1b2e0097dc561ae4a9'
+          ELAN_SHA256_WINDOWS: 'be5e92a2dfdd8176099b2db0b810c27237c9054f1e5db1126f4f2a1134773b25'
+        run: |
+          set -euo pipefail
+          case "$RUNNER_OS" in
+            Linux)   asset=elan-x86_64-unknown-linux-gnu.tar.gz; sha="$ELAN_SHA256_LINUX" ;;
+            macOS)   asset=elan-aarch64-apple-darwin.tar.gz;     sha="$ELAN_SHA256_MACOS" ;;
+            Windows) asset=elan-x86_64-pc-windows-msvc.zip;      sha="$ELAN_SHA256_WINDOWS" ;;
+            *) echo "unsupported runner: $RUNNER_OS" >&2; exit 1 ;;
+          esac
+          archive="$RUNNER_TEMP/$asset"
+          curl -sSfL --retry 5 --retry-delay 5 --retry-all-errors \
+            -o "$archive" \
+            "https://github.com/leanprover/elan/releases/download/$ELAN_VERSION/$asset"
+          # macOS runners have shasum, not sha256sum.
+          if command -v sha256sum >/dev/null 2>&1; then
+            echo "$sha  $archive" | sha256sum -c -
+          else
+            echo "$sha  $archive" | shasum -a 256 -c -
+          fi
+          mkdir -p "$RUNNER_TEMP/elan"
+          if [ "${asset##*.}" = zip ]; then
+            7z x -o"$RUNNER_TEMP/elan" "$archive" >/dev/null
+          else
+            tar -xzf "$archive" -C "$RUNNER_TEMP/elan"
+          fi
+          "$RUNNER_TEMP/elan/elan-init" -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
       - working-directory: ./lean
         run: make lint
