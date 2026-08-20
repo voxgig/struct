@@ -5,7 +5,7 @@ namespace Voxgig\Struct;
 use PHPUnit\Framework\TestCase;
 
 require_once __DIR__ . '/SDK.php';
-require_once __DIR__ . '/Runner.php';
+require_once __DIR__ . '/omni.php';
 
 class ClientTest extends TestCase
 {

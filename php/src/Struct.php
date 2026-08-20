@@ -68,12 +68,13 @@ class Struct
      * String Constants
      * =======================
      */
-    private const S_DKEY = '`$KEY`';
+    private const S_DKEY = '$KEY';
     private const S_DMETA = '`$META`';
 
     // Match TypeScript constants exactly
     private const S_BKEY = '`$KEY`';
     private const S_BANNO = '`$ANNO`';
+    private const S_BVAL = '`$VAL`';
     private const S_DTOP = '$TOP';
     private const S_DERRS = '$ERRS';
 
@@ -130,7 +131,11 @@ class Struct
     private const S_CM = ',';
 
     private const TYPENAME = [
-        'any', 'noval', 'boolean', 'decimal', 'integer', 'number', 'string',
+        // Index 1 is canonical's S_nil = 'nil' (StructUtility.ts:83,129).
+        // Spelled 'noval' here, `$NIL` resolved to no index at all, so its
+        // type mask was 0 and every $NIL check failed - including the one
+        // that should accept an absent field.
+        'any', 'nil', 'boolean', 'decimal', 'integer', 'number', 'string',
         'function', 'symbol', 'null',
         '', '', '', '', '', '', '',
         'list', 'map', 'instance',
@@ -745,7 +750,9 @@ class Struct
         if (self::islist($val)) {
             return count($val);
         } elseif (self::ismap($val)) {
-            return count(get_object_vars($val));
+            // A map is a stdClass OR an associative array; `get_object_vars`
+            // takes only the former, and raises a TypeError on the latter.
+            return count(is_array($val) ? $val : get_object_vars($val));
         }
 
         if (is_string($val)) {
@@ -898,10 +905,13 @@ class Struct
             $valstr = $val;
         } else {
             $original = $val;
-            // Unwrap ListRefs before JSON encoding
-            if ($val instanceof ListRef) {
-                $val = self::cloneUnwrap($val);
-            }
+            // Unwrap ListRefs before JSON encoding - at ANY depth, not just at
+            // the top. A ListRef nested inside a map was encoded as the object
+            // it is, leaking its backing field:
+            //   {x:{list:[3]}}   instead of   {x:[3]}
+            // `cloneUnwrap` recurses and passes non-ListRef values through, so
+            // it is safe to call unconditionally.
+            $val = self::cloneUnwrap($val);
             try {
                 $sorted = self::sort_obj($val);
                 $str = json_encode($sorted);
@@ -910,7 +920,11 @@ class Struct
                 }
                 $valstr = str_replace('"', '', $str);
 
-                if (is_object($original) && $valstr === '[]') {
+                // An empty map must print `{}`, not `[]`. But `is_object` is
+                // too broad: a ListRef is an object standing for a LIST, so an
+                // empty one was printing `{}` too. `ismap` is the right test -
+                // it is true for stdClass and false for ListRef.
+                if (self::ismap($original) && $valstr === '[]') {
                     $valstr = '{}';
                 }
             } catch (\Exception $e) {
@@ -1126,6 +1140,15 @@ class Struct
     public static function cloneUnwrap(mixed $val, int $depth = 0): mixed
     {
         if ($depth > 32) {
+            return $val;
+        }
+        // The no-value is a singleton and must survive cloning as the SAME
+        // object - `undef() === $x` is how the whole port tests for it. The
+        // sentinel is an empty stdClass, so without this it was cloned into a
+        // fresh empty stdClass, every identity test downstream quietly became
+        // false, and `transform`/`validate` returned `[]` where canonical
+        // returns undefined. `clone` and `cloneWrap` both already guard it.
+        if (self::undef() === $val) {
             return $val;
         }
         if ($val instanceof ListRef) {
@@ -1404,11 +1427,63 @@ class Struct
         return $out;
     }
 
+    /**
+     * An injdef may arrive as a map rather than an object.
+     *
+     * Every injdef test in this port is spelled `is_object($injdef) &&
+     * property_exists(...)`, which is right for an injdef built in PHP but
+     * wrong for one that came from JSON: `json_decode($json, true)` yields an
+     * array, so a perfectly good `{ meta, extra, handler }` failed every test
+     * and fell through to the backward-compat branch, where it was treated as
+     * plain store data. The corpus supplies injdefs exactly that way, in
+     * `validate/special` and `getpath/special`.
+     *
+     * A map carrying any injdef key is therefore promoted to an object here.
+     * A map carrying none of them is left alone - that is the backward-compat
+     * "extra data passed directly" case, and it must keep working.
+     */
+    private static function _injdef(mixed $injdef): mixed
+    {
+        if (!is_array($injdef)) {
+            return $injdef;
+        }
+
+        foreach (['extra', 'modify', 'errs', 'meta', 'handler'] as $key) {
+            if (array_key_exists($key, $injdef)) {
+                return self::_injdefmeta((object) $injdef);
+            }
+        }
+
+        return $injdef;
+    }
+
+    /**
+     * `Injection::$meta` is declared `object`, so a `meta` that came from JSON
+     * cannot be assigned to it:
+     *
+     *     TypeError: Cannot assign array to property
+     *     Voxgig\Struct\Injection::$meta of type object
+     *
+     * Only the meta container itself is promoted - its contents stay as they
+     * are, since they are caller data read through `getprop`, which handles
+     * both shapes.
+     */
+    private static function _injdefmeta(object $injdef): object
+    {
+        if (property_exists($injdef, 'meta') && is_array($injdef->meta)) {
+            $injdef->meta = (object) $injdef->meta;
+        }
+
+        return $injdef;
+    }
+
     public static function getpath(
         mixed $store,
         mixed $path,
         mixed $injdef = null
     ): mixed {
+        $injdef = self::_injdef($injdef);
+
         // Convert path to array of parts
         $parts = is_array($path) ? $path :
             (is_string($path) ? explode('.', $path) :
@@ -1447,7 +1522,7 @@ class Struct
                 for ($pI = 0; $val !== self::undef() && $pI < count($parts); $pI++) {
                     $part = $parts[$pI];
 
-                    if ($injdef && $part === '$KEY') {
+                    if ($injdef && $part === self::S_DKEY) {
                         $part = self::_getprop($injdef, 'key');
                     } elseif ($injdef && str_starts_with($part, '$GET:')) {
                         // $GET:path$ -> get store value, use as path part (string)
@@ -1493,12 +1568,14 @@ class Struct
                                 break;
                             }
                         } else {
-                            // Special case for single dot: use dparent if available
-                            if ($dparent !== null && $dparent !== self::undef()) {
-                                $val = $dparent;
-                            } else {
-                                $val = $src;
-                            }
+                            // Canonical assigns unconditionally here
+                            // (StructUtility.ts:1360: `else { val = dparent }`).
+                            // Falling back to $src returned the whole store when
+                            // there was no dparent - and an unresolved `$GET:`/
+                            // `$REF:`/`$META:` key stringifies to '', which lands
+                            // in exactly this branch. So a missing dynamic key
+                            // produced the entire store instead of the no-value.
+                            $val = $dparent;
                         }
                     } else {
                         $val = self::_getprop($val, $part);
@@ -1523,6 +1600,8 @@ class Struct
         mixed $store,
         mixed $injdef = null
     ): mixed {
+        $injdef = self::_injdef($injdef);
+
         $valtype = gettype($val);
 
         /** @var Injection $inj */
@@ -1795,10 +1874,10 @@ class Struct
         }
 
         // if parent has a "$KEY" override, use that
-        $keyspec = self::_getprop($state->parent, self::S_DKEY);
+        $keyspec = self::_getprop($state->parent, self::S_BKEY);
         if ($keyspec !== self::undef()) {
             // remove the marker
-            self::setprop($state->parent, self::S_DKEY, self::undef());
+            self::setprop($state->parent, self::S_BKEY, self::undef());
             return self::_getprop($state->dparent, $keyspec);
         }
 
@@ -1930,6 +2009,13 @@ class Struct
 
         $rval = [];
 
+        // Wrap the generated list the way `cloneWrap` wraps the spec: a plain
+        // PHP array is a VALUE, so an injector writing back through
+        // `$inj->nodes` would land on a copy and its result would be lost.
+        // `$tval` is initialised to `[]` above and only ever reassigned to an
+        // array, so no guard is needed - phpstan rejected one as dead.
+        $tval = new ListRef($tval);
+
         if (0 < self::size($tval)) {
             $tcur = (null == $src) ? self::undef() : ($src instanceof ListRef ? $src->list : array_values((array) $src));
 
@@ -2034,7 +2120,11 @@ class Struct
         $keypath = self::_getprop($origchildspec, self::S_BKEY);
         $childspec = self::delprop($origchildspec, self::S_BKEY);
 
-        $child = $childspec;
+        // Canonical: `const child = getprop(childspec, S_BVAL, childspec)`
+        // (StructUtility.ts, transform_PACK). A child spec may name its value
+        // under `$VAL`; without this lookup the literal key survived into the
+        // output and the value was never transformed.
+        $child = self::_getprop($childspec, self::S_BVAL, $childspec);
 
         // Build parallel target object.
         $tval = new \stdClass();
@@ -2202,14 +2292,43 @@ class Struct
 
     private static array $FORMATTER = [];
 
+    /**
+     * Coerce a scalar to a string the way canonical does.
+     *
+     * The formatters are written `('' + v)` in canonical TypeScript, which is
+     * JavaScript coercion. PHP's `('' . $v)` agrees for strings and numbers
+     * and disagrees for exactly the values the corpus exercises:
+     *
+     *              JS         PHP
+     *     true     "true"     "1"
+     *     false    "false"    ""
+     *     null     "null"     ""
+     *
+     * so `$FORMAT upper` on `true` produced "1" here and "TRUE" everywhere
+     * else.
+     */
+    private static function _jsstr(mixed $val): string
+    {
+        if (true === $val) {
+            return 'true';
+        }
+        if (false === $val) {
+            return 'false';
+        }
+        if (null === $val) {
+            return 'null';
+        }
+        return '' . $val;
+    }
+
     private static function _getFormatters(): array
     {
         if (empty(self::$FORMATTER)) {
             self::$FORMATTER = [
                 'identity' => fn($_k, $v) => $v,
-                'upper' => fn($_k, $v) => self::isnode($v) ? $v : strtoupper('' . $v),
-                'lower' => fn($_k, $v) => self::isnode($v) ? $v : strtolower('' . $v),
-                'string' => fn($_k, $v) => self::isnode($v) ? $v : ('' . $v),
+                'upper' => fn($_k, $v) => self::isnode($v) ? $v : strtoupper(self::_jsstr($v)),
+                'lower' => fn($_k, $v) => self::isnode($v) ? $v : strtolower(self::_jsstr($v)),
+                'string' => fn($_k, $v) => self::isnode($v) ? $v : self::_jsstr($v),
                 'number' => function ($_k, $v) {
                     if (self::isnode($v)) {
                         return $v;
@@ -2226,7 +2345,7 @@ class Struct
                 },
                 'concat' => function ($k, $v) {
                     if (null === $k && self::islist($v)) {
-                        $parts = self::items($v, fn($n) => self::isnode($n[1]) ? '' : ('' . $n[1]));
+                        $parts = self::items($v, fn($n) => self::isnode($n[1]) ? '' : self::_jsstr($n[1]));
                         return self::join($parts, '');
                     }
                     return $v;
@@ -2325,6 +2444,8 @@ class Struct
         mixed $spec,
         mixed $injdef = null
     ): mixed {
+        $injdef = self::_injdef($injdef);
+
         // Support injdef object pattern or backward compat (extra data passed directly)
         $extra = null;
         $modify = null;
@@ -2345,6 +2466,18 @@ class Struct
         } else {
             // Backward compat: treat 3rd arg as extra data/store directly
             $extra = $injdef;
+        }
+
+        // A caller that supplied `errs` is collecting; anyone else expects the
+        // errors to be raised. Either way they have to be COLLECTED first, and
+        // by reference - a plain PHP array on the store would be copied before
+        // the injectors deep inside ever reached it.
+        $collect = null !== $errs;
+        if (is_array($errs) || null === $errs) {
+            $errs = new \ArrayObject(null === $errs ? [] : $errs);
+        }
+        if ($collect && is_object($injdef)) {
+            $injdef->errs = $errs;
         }
 
         // 1) clone spec, wrapping arrays in ListRef for reference stability (Go pattern)
@@ -2387,7 +2520,10 @@ class Struct
                 '$FORMAT' => [self::class, 'transform_FORMAT'],
                 '$APPLY' => [self::class, 'transform_APPLY'],
             ],
-            $extraTransforms
+            $extraTransforms,
+            // Last, so an `extra` carrying its own `$ERRS` cannot displace it -
+            // the same ordering `validate` relies on.
+            [self::S_DERRS => $errs]
         );
 
         // 4) run inject to do the transform
@@ -2405,6 +2541,15 @@ class Struct
             $injectOpts->errs = $injdef->errs;
         }
         $result = self::inject($specClone, $store, $injectOpts);
+
+        // Canonical: `const generr = 0 < size(errs) && !collect` - a transform
+        // that collected errors and was given no collector RAISES them
+        // (StructUtility.ts:2048). Without this the errors were recorded and
+        // then dropped: an unknown `$APPLY` argument produced no value and no
+        // error at all.
+        if (!$collect && 0 < count($errs)) {
+            throw new \Exception(implode(' | ', (array) $errs));
+        }
 
         // When a child transform (e.g. $REF) deletes the key, inject returns SKIP; return mutated spec
         if ($result === self::SKIP) {
@@ -2424,6 +2569,13 @@ class Struct
     private static function _stdClassToArray(mixed $val, int $depth = 0): mixed
     {
         if ($depth > 64) {
+            return $val;
+        }
+        // The no-value sentinel is itself an empty stdClass, so it would
+        // otherwise flatten to `[]` - turning `transform`'s and `validate`'s
+        // "no result" into an empty map at the public boundary. Canonical
+        // returns undefined there.
+        if (self::undef() === $val) {
             return $val;
         }
         if ($val instanceof \stdClass) {
@@ -2646,9 +2798,14 @@ class Struct
             $childtm = self::_getprop($parent, 1);
 
             if (self::undef() === $inj->dparent) {
-                // Empty list as default.
-                while (count($parent) > 0) {
-                    array_pop($parent);
+                // Empty list as default. `$parent` may be a ListRef - see the
+                // note on the other array_pop below.
+                if ($parent instanceof ListRef) {
+                    $parent->list = [];
+                } else {
+                    while (count($parent) > 0) {
+                        array_pop($parent);
+                    }
                 }
                 return self::undef();
             }
@@ -2669,9 +2826,16 @@ class Struct
             foreach ($inj->dparent as $i => $n) {
                 $parent[$i] = self::clone($childtm);
             }
-            // Adjust array length
+            // Adjust array length. `$parent` may be a ListRef, which is
+            // ArrayAccess and Countable but not an array - `array_pop` takes
+            // an array by reference, so it has to reach the backing list.
+            // (`delprop` already spells its ListRef branch this way.)
             while (count($parent) > count($inj->dparent)) {
-                array_pop($parent);
+                if ($parent instanceof ListRef) {
+                    array_pop($parent->list);
+                } else {
+                    array_pop($parent);
+                }
             }
             $inj->keyI = 0;
             $out = self::_getprop($inj->dparent, 0);
@@ -2723,17 +2887,24 @@ class Struct
             // See if we can find a match.
             foreach ($tvals as $tval) {
                 // If match, then errs.length = 0
-                $terrs = [];
-
                 $vstore = array_merge((array) $store, [self::S_DTOP => $inj->dparent]);
 
-                $vcurrent = self::validate($inj->dparent, $tval, (object) [
+                $tinj = (object) [
                     'extra' => $vstore,
-                    'errs' => $terrs,
+                    'errs' => [],
                     'meta' => $inj->meta,
-                ]);
+                ];
+                $vcurrent = self::validate($inj->dparent, $tval, $tinj);
+                $terrs = $tinj->errs;
 
-                $inj->setval($vcurrent, 2);
+                // -2, not 2. `setval` branches on `$ancestor < 2`, so a
+                // NEGATIVE ancestor selects the immediate-parent branch;
+                // 2 selects the ancestor branch and writes
+                // setprop(nodes[-2], path[-2], val) - and path[-2] here is
+                // `$TOP`, so the store key landed in the public result.
+                // Canonical passes -2 at this one site (StructUtility.ts:2230)
+                // and +2 at the other three; this port had 2 everywhere.
+                $inj->setval($vcurrent, -2);
 
                 // Accept current value if there was a match
                 if (0 === count($terrs)) {
@@ -2744,7 +2915,14 @@ class Struct
             // There was no match.
             $tvArr = ($tvals instanceof ListRef) ? $tvals->list : (is_array($tvals) ? $tvals : []);
             $valdesc = implode(', ', array_map(fn($v) => self::stringify($v), $tvArr));
-            $valdesc = preg_replace(self::R_TRANSFORM_NAME, '$1', strtolower($valdesc));
+            // Lowercase the NAME, not the whole string. R_TRANSFORM_NAME matches
+            // `$([A-Z]+)`, so lowercasing first made it stop matching and left
+            // the raw `$string` spelling in the message.
+            $valdesc = preg_replace_callback(
+                self::R_TRANSFORM_NAME,
+                fn(array $m): string => strtolower($m[1]),
+                $valdesc
+            );
 
             $inj->errs[] = self::_invalidTypeMsg(
                 $inj->path,
@@ -2810,7 +2988,14 @@ class Struct
 
             $tvArr = ($tvals instanceof ListRef) ? $tvals->list : (is_array($tvals) ? $tvals : []);
             $valdesc = implode(', ', array_map(fn($v) => self::stringify($v), $tvArr));
-            $valdesc = preg_replace(self::R_TRANSFORM_NAME, '$1', strtolower($valdesc));
+            // Lowercase the NAME, not the whole string. R_TRANSFORM_NAME matches
+            // `$([A-Z]+)`, so lowercasing first made it stop matching and left
+            // the raw `$string` spelling in the message.
+            $valdesc = preg_replace_callback(
+                self::R_TRANSFORM_NAME,
+                fn(array $m): string => strtolower($m[1]),
+                $valdesc
+            );
 
             $inj->errs[] = self::_invalidTypeMsg(
                 $inj->path,
@@ -2863,19 +3048,6 @@ class Struct
         }
 
         $ctype = self::typify($cval);
-
-        // PHP empty [] is ambiguous (list vs map). When the spec expects a
-        // map, treat an empty array/ListRef in the data as an empty map so
-        // that validation does not produce a spurious type-mismatch error.
-        // Go/Lua don't hit this because they have distinct map/list types.
-        if (
-            0 < (self::T_map & $ptype) &&
-            (is_array($cval) || $cval instanceof \Voxgig\Struct\ListRef) &&
-            0 === count($cval)
-        ) {
-            $cval = new \stdClass();
-            $ctype = self::typify($cval);
-        }
 
         // Type mismatch.
         if ($ptype !== $ctype && self::undef() !== $pval) {
@@ -2977,9 +3149,13 @@ class Struct
      */
     public static function validate(mixed $data, mixed $spec, mixed $injdef = null): mixed
     {
+        $injdef = self::_injdef($injdef);
+
         $extra = is_object($injdef) && property_exists($injdef, 'extra') ? $injdef->extra : null;
 
-        $collect = null != $injdef && property_exists($injdef, 'errs');
+        // `property_exists` raises a TypeError on an array, and every other
+        // test here guards with `is_object` first. This one did not.
+        $collect = is_object($injdef) && property_exists($injdef, 'errs');
 
         // PHP arrays are value-copied, so a plain array on $injdef->errs would be
         // detached from $inj->errs deep inside inject. Wrap in ArrayObject so the
@@ -2992,35 +3168,43 @@ class Struct
             $injdef->errs = $errs;
         }
 
-        $store = array_merge([
-            // Remove the transform commands.
-            '$DELETE' => null,
-            '$COPY' => null,
-            '$KEY' => null,
-            '$META' => null,
-            '$MERGE' => null,
-            '$EACH' => null,
-            '$PACK' => null,
+        $store = array_merge(
+            [
+                // Remove the transform commands.
+                '$DELETE' => null,
+                '$COPY' => null,
+                '$KEY' => null,
+                '$META' => null,
+                '$MERGE' => null,
+                '$EACH' => null,
+                '$PACK' => null,
 
-            '$STRING' => [self::class, 'validate_STRING'],
-            '$NUMBER' => [self::class, 'validate_TYPE'],
-            '$INTEGER' => [self::class, 'validate_TYPE'],
-            '$DECIMAL' => [self::class, 'validate_TYPE'],
-            '$BOOLEAN' => [self::class, 'validate_TYPE'],
-            '$NULL' => [self::class, 'validate_TYPE'],
-            '$NIL' => [self::class, 'validate_TYPE'],
-            '$MAP' => [self::class, 'validate_TYPE'],
-            '$LIST' => [self::class, 'validate_TYPE'],
-            '$FUNCTION' => [self::class, 'validate_TYPE'],
-            '$INSTANCE' => [self::class, 'validate_TYPE'],
-            '$ANY' => [self::class, 'validate_ANY'],
-            '$CHILD' => [self::class, 'validate_CHILD'],
-            '$ONE' => [self::class, 'validate_ONE'],
-            '$EXACT' => [self::class, 'validate_EXACT'],
-
-            // A special top level value to collect errors.
-            '$ERRS' => $errs,
-        ], (array) ($extra ?? []));
+                '$STRING' => [self::class, 'validate_STRING'],
+                '$NUMBER' => [self::class, 'validate_TYPE'],
+                '$INTEGER' => [self::class, 'validate_TYPE'],
+                '$DECIMAL' => [self::class, 'validate_TYPE'],
+                '$BOOLEAN' => [self::class, 'validate_TYPE'],
+                '$NULL' => [self::class, 'validate_TYPE'],
+                '$NIL' => [self::class, 'validate_TYPE'],
+                '$MAP' => [self::class, 'validate_TYPE'],
+                '$LIST' => [self::class, 'validate_TYPE'],
+                '$FUNCTION' => [self::class, 'validate_TYPE'],
+                '$INSTANCE' => [self::class, 'validate_TYPE'],
+                '$ANY' => [self::class, 'validate_ANY'],
+                '$CHILD' => [self::class, 'validate_CHILD'],
+                '$ONE' => [self::class, 'validate_ONE'],
+                '$EXACT' => [self::class, 'validate_EXACT'],
+            ],
+            (array) ($extra ?? []),
+            [
+                // A special top level value to collect errors.
+                // NOTE: the errs parameter always wins, so this merges LAST.
+                // An `extra` copied from an enclosing store carries that store's
+                // own `$ERRS`; merging it after would hand this validation the
+                // caller's error list and leak every trial failure into it.
+                '$ERRS' => $errs,
+            ]
+        );
 
         $meta = is_object($injdef) && property_exists($injdef, 'meta') ? $injdef->meta : null;
 
@@ -3151,14 +3335,14 @@ class Struct
             $vstore->{'$TOP'} = $point;
 
             foreach ($terms as $term) {
-                $terrs = [];
-                self::validate($point, $term, (object) [
+                $tinj = (object) [
                     'extra' => $vstore,
-                    'errs' => $terrs,
+                    'errs' => [],
                     'meta' => $state->meta,
-                ]);
+                ];
+                self::validate($point, $term, $tinj);
 
-                if (count($terrs) !== 0) {
+                if (count($tinj->errs) !== 0) {
                     $state->errs[] = 'AND:' . self::pathify($ppath) . ': ' . self::stringify($point) . ' fail:' . self::stringify($terms);
                 }
             }
@@ -3167,7 +3351,7 @@ class Struct
             $gp = self::getelem($state->nodes, -2);
             self::setprop($gp, $gkey, $point);
         }
-        return null;
+        return self::undef();
     }
 
     /**
@@ -3185,25 +3369,25 @@ class Struct
             $vstore->{'$TOP'} = $point;
 
             foreach ($terms as $term) {
-                $terrs = [];
-                self::validate($point, $term, (object) [
+                $tinj = (object) [
                     'extra' => $vstore,
-                    'errs' => $terrs,
+                    'errs' => [],
                     'meta' => $state->meta,
-                ]);
+                ];
+                self::validate($point, $term, $tinj);
 
-                if (count($terrs) === 0) {
+                if (count($tinj->errs) === 0) {
                     $gkey = self::getelem($state->path, -2);
                     $gp = self::getelem($state->nodes, -2);
                     self::setprop($gp, $gkey, $point);
 
-                    return null;
+                    return self::undef();
                 }
             }
 
             $state->errs[] = 'OR:' . self::pathify($ppath) . ': ' . self::stringify($point) . ' fail:' . self::stringify($terms);
         }
-        return null;
+        return self::undef();
     }
 
     /**
@@ -3220,14 +3404,14 @@ class Struct
             $vstore = self::merge([(object) [], $store], 1);
             $vstore->{'$TOP'} = $point;
 
-            $terrs = [];
-            self::validate($point, $term, (object) [
+            $tinj = (object) [
                 'extra' => $vstore,
-                'errs' => $terrs,
+                'errs' => [],
                 'meta' => $state->meta,
-            ]);
+            ];
+            self::validate($point, $term, $tinj);
 
-            if (count($terrs) === 0) {
+            if (count($tinj->errs) === 0) {
                 $state->errs[] = 'NOT:' . self::pathify($ppath) . ': ' . self::stringify($point) . ' fail:' . self::stringify($term);
             }
 
@@ -3235,7 +3419,7 @@ class Struct
             $gp = self::getelem($state->nodes, -2);
             self::setprop($gp, $gkey, $point);
         }
-        return null;
+        return self::undef();
     }
 
     /**
@@ -3273,7 +3457,7 @@ class Struct
                     ' fail:' . $ref . ' ' . self::stringify($term);
             }
         }
-        return null;
+        return self::undef();
     }
 
     /**
@@ -3350,7 +3534,15 @@ class Struct
 
         if (self::ismap($parent)) {
             $key = self::strkey($key);
-            unset($parent->$key);
+            // A map is a stdClass OR an associative array here - `ismap`
+            // accepts both - so the object spelling alone silently did
+            // nothing for the array case, and `delprop` returned its
+            // argument untouched.
+            if (is_array($parent)) {
+                unset($parent[$key]);
+            } else {
+                unset($parent->$key);
+            }
         } elseif (self::islist($parent)) {
             // Ensure key is an integer
             $keyI = (int)$key;
