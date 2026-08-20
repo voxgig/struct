@@ -68,7 +68,7 @@ class Struct
      * String Constants
      * =======================
      */
-    private const S_DKEY = '`$KEY`';
+    private const S_DKEY = '$KEY';
     private const S_DMETA = '`$META`';
 
     // Match TypeScript constants exactly
@@ -1447,7 +1447,7 @@ class Struct
                 for ($pI = 0; $val !== self::undef() && $pI < count($parts); $pI++) {
                     $part = $parts[$pI];
 
-                    if ($injdef && $part === '$KEY') {
+                    if ($injdef && $part === self::S_DKEY) {
                         $part = self::_getprop($injdef, 'key');
                     } elseif ($injdef && str_starts_with($part, '$GET:')) {
                         // $GET:path$ -> get store value, use as path part (string)
@@ -1795,10 +1795,10 @@ class Struct
         }
 
         // if parent has a "$KEY" override, use that
-        $keyspec = self::_getprop($state->parent, self::S_DKEY);
+        $keyspec = self::_getprop($state->parent, self::S_BKEY);
         if ($keyspec !== self::undef()) {
             // remove the marker
-            self::setprop($state->parent, self::S_DKEY, self::undef());
+            self::setprop($state->parent, self::S_BKEY, self::undef());
             return self::_getprop($state->dparent, $keyspec);
         }
 
