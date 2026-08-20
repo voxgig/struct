@@ -1139,6 +1139,15 @@ class Struct
         if ($depth > 32) {
             return $val;
         }
+        // The no-value is a singleton and must survive cloning as the SAME
+        // object - `undef() === $x` is how the whole port tests for it. The
+        // sentinel is an empty stdClass, so without this it was cloned into a
+        // fresh empty stdClass, every identity test downstream quietly became
+        // false, and `transform`/`validate` returned `[]` where canonical
+        // returns undefined. `clone` and `cloneWrap` both already guard it.
+        if (self::undef() === $val) {
+            return $val;
+        }
         if ($val instanceof ListRef) {
             $result = [];
             foreach ($val->list as $item) {
@@ -2548,6 +2557,13 @@ class Struct
     private static function _stdClassToArray(mixed $val, int $depth = 0): mixed
     {
         if ($depth > 64) {
+            return $val;
+        }
+        // The no-value sentinel is itself an empty stdClass, so it would
+        // otherwise flatten to `[]` - turning `transform`'s and `validate`'s
+        // "no result" into an empty map at the public boundary. Canonical
+        // returns undefined there.
+        if (self::undef() === $val) {
             return $val;
         }
         if ($val instanceof \stdClass) {
