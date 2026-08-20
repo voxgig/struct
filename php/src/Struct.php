@@ -3052,39 +3052,43 @@ class Struct
             $injdef->errs = $errs;
         }
 
-        $store = array_merge([
-            // Remove the transform commands.
-            '$DELETE' => null,
-            '$COPY' => null,
-            '$KEY' => null,
-            '$META' => null,
-            '$MERGE' => null,
-            '$EACH' => null,
-            '$PACK' => null,
+        $store = array_merge(
+            [
+                // Remove the transform commands.
+                '$DELETE' => null,
+                '$COPY' => null,
+                '$KEY' => null,
+                '$META' => null,
+                '$MERGE' => null,
+                '$EACH' => null,
+                '$PACK' => null,
 
-            '$STRING' => [self::class, 'validate_STRING'],
-            '$NUMBER' => [self::class, 'validate_TYPE'],
-            '$INTEGER' => [self::class, 'validate_TYPE'],
-            '$DECIMAL' => [self::class, 'validate_TYPE'],
-            '$BOOLEAN' => [self::class, 'validate_TYPE'],
-            '$NULL' => [self::class, 'validate_TYPE'],
-            '$NIL' => [self::class, 'validate_TYPE'],
-            '$MAP' => [self::class, 'validate_TYPE'],
-            '$LIST' => [self::class, 'validate_TYPE'],
-            '$FUNCTION' => [self::class, 'validate_TYPE'],
-            '$INSTANCE' => [self::class, 'validate_TYPE'],
-            '$ANY' => [self::class, 'validate_ANY'],
-            '$CHILD' => [self::class, 'validate_CHILD'],
-            '$ONE' => [self::class, 'validate_ONE'],
-            '$EXACT' => [self::class, 'validate_EXACT'],
-        ],
+                '$STRING' => [self::class, 'validate_STRING'],
+                '$NUMBER' => [self::class, 'validate_TYPE'],
+                '$INTEGER' => [self::class, 'validate_TYPE'],
+                '$DECIMAL' => [self::class, 'validate_TYPE'],
+                '$BOOLEAN' => [self::class, 'validate_TYPE'],
+                '$NULL' => [self::class, 'validate_TYPE'],
+                '$NIL' => [self::class, 'validate_TYPE'],
+                '$MAP' => [self::class, 'validate_TYPE'],
+                '$LIST' => [self::class, 'validate_TYPE'],
+                '$FUNCTION' => [self::class, 'validate_TYPE'],
+                '$INSTANCE' => [self::class, 'validate_TYPE'],
+                '$ANY' => [self::class, 'validate_ANY'],
+                '$CHILD' => [self::class, 'validate_CHILD'],
+                '$ONE' => [self::class, 'validate_ONE'],
+                '$EXACT' => [self::class, 'validate_EXACT'],
+            ],
             (array) ($extra ?? []),
-            // A special top level value to collect errors.
-            // NOTE: the errs parameter always wins, so this merges LAST.
-            // An `extra` copied from an enclosing store carries that store's
-            // own `$ERRS`; merging it after would hand this validation the
-            // caller's error list and leak every trial failure into it.
-            ['$ERRS' => $errs]);
+            [
+                // A special top level value to collect errors.
+                // NOTE: the errs parameter always wins, so this merges LAST.
+                // An `extra` copied from an enclosing store carries that store's
+                // own `$ERRS`; merging it after would hand this validation the
+                // caller's error list and leak every trial failure into it.
+                '$ERRS' => $errs,
+            ]
+        );
 
         $meta = is_object($injdef) && property_exists($injdef, 'meta') ? $injdef->meta : null;
 
