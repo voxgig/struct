@@ -745,7 +745,9 @@ class Struct
         if (self::islist($val)) {
             return count($val);
         } elseif (self::ismap($val)) {
-            return count(get_object_vars($val));
+            // A map is a stdClass OR an associative array; `get_object_vars`
+            // takes only the former, and raises a TypeError on the latter.
+            return count(is_array($val) ? $val : get_object_vars($val));
         }
 
         if (is_string($val)) {
