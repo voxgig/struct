@@ -1,112 +1,105 @@
 <?php
 
 require_once __DIR__ . '/../src/Struct.php';
-require_once __DIR__ . '/Runner.php';
+require_once __DIR__ . '/omni.php';
+require_once __DIR__ . '/SDK.php';
 
 use PHPUnit\Framework\TestCase;
 use Voxgig\Struct\Struct;
 use Voxgig\Struct\ListRef;
+use Voxgig\Struct\Runner;
+use Voxgig\Struct\SDK;
 
+/**
+ * The corpus is driven by voxgig/omni, via its struct compat shim - see
+ * tests/omni.php. Before this, these tests hand-rolled their own loop over
+ * `$tests->set`, which understood `in`, `args`, `err` and `out` and nothing
+ * else: no `ctx`, no `match`, no `client`, no NULL/UNDEF marks, no `null`
+ * flag. Groups needing any of those simply had no test method, so **350 of
+ * 1395 corpus entries never ran here**.
+ *
+ * The group list and per-group flags below mirror javascript/test/struct.test.js,
+ * which is the reference usage of this corpus.
+ */
 class StructTest extends TestCase
 {
-    private stdClass $testSpec;
+    private const CORPUS = '../../build/test/test.json';
+
+    /** @var array{spec:mixed,runset:callable,runsetflags:callable,subject:mixed,client:mixed} */
+    private array $pack;
+
+    /** The `struct` subtree, navigable as `$this->testSpec->minor->isnode`. */
+    private stdClass|array $testSpec;
 
     protected function setUp(): void
     {
-        $jsonPath = __DIR__ . '/../../build/test/test.json';
-        if (!file_exists($jsonPath)) {
-            throw new RuntimeException("Test JSON file not found: $jsonPath");
-        }
-        $jsonContent = file_get_contents($jsonPath);
-        if ($jsonContent === false) {
-            throw new RuntimeException("Failed to read test JSON: $jsonPath");
-        }
-        // decode objects as stdClass, arrays as PHP arrays
-        $data = json_decode($jsonContent, false);
-        if (json_last_error() !== JSON_ERROR_NONE) {
-            throw new RuntimeException("Invalid JSON: " . json_last_error_msg());
-        }
-        if (!isset($data->struct)) {
-            throw new RuntimeException("'struct' key not found in the test JSON file.");
-        }
-        $this->testSpec = $data->struct;
+        $runner = Runner::makeRunner(self::CORPUS, SDK::test());
+        $this->pack = $runner('struct');
+        $this->testSpec = self::specview($this->pack['spec']);
     }
 
     /**
-     * Helper that loops over each entry in $tests->set, calls $apply, then asserts:
-     *  - deep‐equals (assertEquals) if $forceEquals===true or expected is array/object,
-     *  - strict‐same (assertSame) otherwise.
-     *
-     * @param stdClass       $tests        The spec object (has ->set array)
-     * @param callable       $apply        Function to call on each entry's input
-     * @param bool           $forceEquals Whether to always use deep equality
+     * omni hands back the spec as nested arrays. The test methods below read
+     * it as `$this->testSpec->minor->isnode`, so intermediate levels become
+     * objects - but a GROUP node (the thing carrying `set`) is left as the
+     * array omni's runner expects to be handed back.
      */
-    private function testSet(stdClass $tests, callable $apply, bool $forceEquals = false): void
+    private static function specview(mixed $node): mixed
     {
-        foreach ($tests->set as $i => $entry) {
-            $hasErr = property_exists($entry, 'err');
-
-            // 1) Determine input
-            try {
-                if (property_exists($entry, 'args')) {
-                    $inForMsg = $entry->args;
-                    $result = $apply(...$entry->args);
-                } else {
-                    $in = property_exists($entry, 'in') ? $entry->in : Struct::undef();
-                    $inForMsg = $in;
-                    $result = $apply($in);
-                }
-            } catch (\Throwable $e) {
-                if ($hasErr) {
-                    $expectedErr = $entry->err;
-                    if ($expectedErr === true || str_contains($e->getMessage(), (string) $expectedErr)) {
-                        continue;
-                    }
-                    $this->fail(
-                        "Entry #{$i} error mismatch. Expected: {$expectedErr} | Got: " .
-                        $e->getMessage() . ' | Input: ' . json_encode($inForMsg ?? null)
-                    );
-                }
-                throw $e;
-            }
-
-            // Expected error but none thrown.
-            if ($hasErr) {
-                $this->fail(
-                    "Entry #{$i} expected error ({$entry->err}) but none was thrown. Input: " .
-                    json_encode($inForMsg)
-                );
-            }
-
-            // 2) If no expected 'out', skip
-            if (!property_exists($entry, 'out')) {
-                continue;
-            }
-            $expected = $entry->out;
-
-            // 3) Choose assertion
-            if ($forceEquals || is_array($expected) || is_object($expected)) {
-                // Normalise both sides: transform() now returns PHP associative
-                // arrays for map values, while test fixtures decode JSON into
-                // stdClass. Compare on a common representation so shape matches
-                // without caring about map carrier type.
-                $expectedNorm = self::normalizeMaps($expected);
-                $resultNorm = self::normalizeMaps($result);
-                $this->assertEquals(
-                    $expectedNorm,
-                    $resultNorm,
-                    "Entry #{$i} failed deep‐equal. Input: " . json_encode($inForMsg)
-                );
-            } else {
-                $this->assertSame(
-                    $expected,
-                    $result,
-                    "Entry #{$i} failed strict. Input: " . json_encode($inForMsg)
-                );
-            }
+        if (!is_array($node)) {
+            return $node;
         }
+        // A GROUP node is one carrying a NON-EMPTY `set`. The intermediate
+        // levels (`struct.minor`, `struct.validate`, ...) each carry an empty
+        // `set` of their own, so testing for the key alone stops the walk one
+        // level too high and the group nodes never become reachable.
+        if (isset($node['set']) && is_array($node['set']) && [] !== $node['set']) {
+            return $node;
+        }
+        // A LIST stays a list. Only maps become objects - turning `[a, b]` into
+        // an object with keys 0 and 1 stops it being a list, and anything the
+        // bespoke tests then hand to `merge`/`walk` is no longer what the
+        // corpus authored.
+        if (array_is_list($node)) {
+            return array_map([self::class, 'specview'], $node);
+        }
+        $out = new stdClass();
+        foreach ($node as $key => $val) {
+            $out->{$key} = self::specview($val);
+        }
+        return $out;
     }
 
+    /**
+     * Run one corpus group through omni.
+     *
+     * `$flags` was a `bool $forceEquals` before the swap - omni always deep
+     * equals, so a bool is accepted and ignored rather than editing every
+     * call site to drop it.
+     */
+    private function testSet(mixed $tests, callable $apply, array|bool $flags = []): void
+    {
+        $this->assertIsArray($tests, 'corpus group missing or not a group node');
+        $useflags = is_array($flags) ? $flags : [];
+
+        try {
+            ($this->pack['runsetflags'])($tests, $useflags, $apply);
+        } catch (\Throwable $err) {
+            // omni raises with the entry, the expectation and what it got.
+            $this->fail($err->getMessage());
+        }
+
+        // Reaching here means every entry in the group matched.
+        $this->assertTrue(true);
+    }
+
+
+    /**
+     * Compare on a common representation: map values may be a stdClass or an
+     * associative array depending on which side produced them. Used only by
+     * the bespoke tests below - corpus groups go through omni, which does its
+     * own deep equality.
+     */
     private static function normalizeMaps(mixed $val, int $depth = 0): mixed
     {
         if ($depth > 64) {
@@ -119,6 +112,9 @@ class StructTest extends TestCase
             }
             return $out;
         }
+        if ($val instanceof ListRef) {
+            $val = $val->list;
+        }
         if (is_array($val)) {
             $out = [];
             foreach ($val as $k => $v) {
@@ -129,7 +125,18 @@ class StructTest extends TestCase
         return $val;
     }
 
-    // ——— Exists test ———
+    /** Read a field from an entry's `in`, which may be a map or an object. */
+    private static function vin(mixed $v, string $key, mixed $alt = null): mixed
+    {
+        if (is_array($v)) {
+            return array_key_exists($key, $v) ? $v[$key] : $alt;
+        }
+        if (is_object($v)) {
+            return property_exists($v, $key) ? $v->{$key} : $alt;
+        }
+        return $alt;
+    }
+
     public function testExists(): void
     {
         $this->assertEquals('string', gettype([Struct::class, 'clone'][0]));
@@ -187,11 +194,15 @@ class StructTest extends TestCase
     }
     public function testIskey()
     {
-        $this->testSet($this->testSpec->minor->iskey, [Struct::class, 'iskey']);
+        $this->testSet($this->testSpec->minor->iskey, [Struct::class, 'iskey'],
+            ['null' => false]
+        );
     }
     public function testIsempty()
     {
-        $this->testSet($this->testSpec->minor->isempty, [Struct::class, 'isempty']);
+        $this->testSet($this->testSpec->minor->isempty, [Struct::class, 'isempty'],
+            ['null' => false]
+        );
     }
     public function testIsfunc()
     {
@@ -199,7 +210,9 @@ class StructTest extends TestCase
     }
     public function testTypify()
     {
-        $this->testSet($this->testSpec->minor->typify, [Struct::class, 'typify']);
+        $this->testSet($this->testSpec->minor->typify, [Struct::class, 'typify'],
+            ['null' => false]
+        );
     }
 
     // ——— getprop needs to extract stdClass props ———
@@ -208,11 +221,12 @@ class StructTest extends TestCase
         $this->testSet(
             $this->testSpec->minor->getprop,
             function ($input) {
-                $val = property_exists($input, 'val') ? $input->val : Struct::undef();
-                $key = property_exists($input, 'key') ? $input->key : Struct::undef();
-                $alt = property_exists($input, 'alt') ? $input->alt : Struct::undef();
+                $val = self::vin($input, 'val', Struct::undef());
+                $key = self::vin($input, 'key', Struct::undef());
+                $alt = self::vin($input, 'alt', Struct::undef());
                 return Struct::getprop($val, $key, $alt);
-            }
+            },
+            ['null' => false]
         );
     }
 
@@ -221,30 +235,34 @@ class StructTest extends TestCase
         $this->testSet(
             $this->testSpec->minor->getelem,
             function ($input) {
-                $val = property_exists($input, 'val') ? $input->val : Struct::undef();
-                $key = property_exists($input, 'key') ? $input->key : Struct::undef();
-                $alt = property_exists($input, 'alt') ? $input->alt : Struct::undef();
+                $val = self::vin($input, 'val', Struct::undef());
+                $key = self::vin($input, 'key', Struct::undef());
+                $alt = self::vin($input, 'alt', Struct::undef());
                 return $alt === Struct::undef() ?
                     Struct::getelem($val, $key) :
                     Struct::getelem($val, $key, $alt);
-            }
+            },
+            ['null' => false]
         );
     }
 
     // ——— Simple again ———
     public function testStrkey()
     {
-        $this->testSet($this->testSpec->minor->strkey, [Struct::class, 'strkey']);
+        $this->testSet($this->testSpec->minor->strkey, [Struct::class, 'strkey'],
+            ['null' => false]
+        );
     }
     public function testHaskey()
     {
         $this->testSet(
             $this->testSpec->minor->haskey,
             function ($input) {
-                $src = property_exists($input, 'src') ? $input->src : Struct::undef();
-                $key = property_exists($input, 'key') ? $input->key : Struct::undef();
+                $src = self::vin($input, 'src', Struct::undef());
+                $key = self::vin($input, 'key', Struct::undef());
                 return Struct::haskey($src, $key);
-            }
+            },
+            ['null' => false]
         );
     }
 
@@ -277,8 +295,8 @@ class StructTest extends TestCase
         $this->testSet(
             $this->testSpec->minor->delprop,
             function ($input) {
-                $parent = property_exists($input, 'parent') ? $input->parent : [];
-                $key = property_exists($input, 'key') ? $input->key : null;
+                $parent = self::vin($input, 'parent', Struct::undef());
+                $key = self::vin($input, 'key', null);
                 return Struct::delprop($parent, $key);
             },
             true
@@ -289,11 +307,12 @@ class StructTest extends TestCase
         $this->testSet(
             $this->testSpec->minor->join,
             function ($input) {
-                $val = property_exists($input, 'val') ? $input->val : [];
-                $sep = property_exists($input, 'sep') ? $input->sep : null;
-                $url = property_exists($input, 'url') ? $input->url : false;
+                $val = self::vin($input, 'val', Struct::undef());
+                $sep = self::vin($input, 'sep', null);
+                $url = (self::vin($input, 'url', Struct::undef()) !== Struct::undef()) ? self::vin($input, 'url') : false;
                 return Struct::join($val, $sep, $url);
-            }
+            },
+            ['null' => false]
         );
     }
 
@@ -302,16 +321,19 @@ class StructTest extends TestCase
         $this->testSet(
             $this->testSpec->minor->jsonify,
             function ($input) {
-                $val = property_exists($input, 'val') ? $input->val : Struct::undef();
-                $flags = property_exists($input, 'flags') ? $input->flags : null;
+                $val = self::vin($input, 'val', Struct::undef());
+                $flags = self::vin($input, 'flags', null);
                 return Struct::jsonify($val, $flags);
-            }
+            },
+            ['null' => false]
         );
     }
 
     public function testSize()
     {
-        $this->testSet($this->testSpec->minor->size, [Struct::class, 'size']);
+        $this->testSet($this->testSpec->minor->size, [Struct::class, 'size'],
+            ['null' => false]
+        );
     }
 
     public function testSlice()
@@ -319,11 +341,12 @@ class StructTest extends TestCase
         $this->testSet(
             $this->testSpec->minor->slice,
             function ($input) {
-                $val = property_exists($input, 'val') ? $input->val : Struct::undef();
-                $start = property_exists($input, 'start') ? $input->start : null;
-                $end = property_exists($input, 'end') ? $input->end : null;
+                $val = self::vin($input, 'val', Struct::undef());
+                $start = self::vin($input, 'start', null);
+                $end = self::vin($input, 'end', null);
                 return Struct::slice($val, $start, $end);
-            }
+            },
+            ['null' => false]
         );
     }
 
@@ -332,11 +355,12 @@ class StructTest extends TestCase
         $this->testSet(
             $this->testSpec->minor->pad,
             function ($input) {
-                $val = property_exists($input, 'val') ? $input->val : Struct::undef();
-                $pad = property_exists($input, 'pad') ? $input->pad : null;
-                $char = property_exists($input, 'char') ? $input->char : null;
+                $val = self::vin($input, 'val', Struct::undef());
+                $pad = self::vin($input, 'pad', null);
+                $char = self::vin($input, 'char', null);
                 return Struct::pad($val, $pad, $char);
-            }
+            },
+            ['null' => false]
         );
     }
 
@@ -345,16 +369,12 @@ class StructTest extends TestCase
     {
         $this->testSet(
             $this->testSpec->minor->stringify,
-            function ($input) {
-                $val = property_exists($input, 'val') ? $input->val : Struct::undef();
-                if ($val === null) {
-                    $val = 'null';
-                }
-                return property_exists($input, 'max')
-                    ? Struct::stringify($val, $input->max)
-                    : Struct::stringify($val);
-            },
-            true
+            fn($vin) => Struct::stringify(
+                Runner::NULLMARK === self::vin($vin, 'val', Struct::undef())
+                    ? 'null'
+                    : self::vin($vin, 'val', Struct::undef()),
+                self::vin($vin, 'max')
+            )
         );
     }
 
@@ -363,25 +383,16 @@ class StructTest extends TestCase
     {
         $this->testSet(
             $this->testSpec->minor->pathify,
-            function (stdClass $entry) {
-                // 1) An absent "path" key is canonical NONE/undefined, which the
-                //    PHP port models with the undef() sentinel. A present JSON
-                //    null stays a PHP null — pathify distinguishes the two
-                //    (<unknown-path> vs <unknown-path:null>).
-                $path = property_exists($entry, 'path')
-                    ? $entry->path
-                    : Struct::undef();
-
-                // 2) Optional slice offset
-                $from = property_exists($entry, 'from')
-                    ? $entry->from
-                    : null;
-
-                // 3) Run PHP port of pathify. The function is compared raw with
-                //    no normalization (no masking hack).
-                return Struct::pathify($path, $from);
+            function ($vin) {
+                $raw = self::vin($vin, 'path', Struct::undef());
+                $path = Runner::NULLMARK === $raw ? Struct::undef() : $raw;
+                $pathstr = str_replace('__NULL__.', '', Struct::pathify($path, self::vin($vin, 'from')));
+                if (Runner::NULLMARK === $raw) {
+                    $pathstr = str_replace('>', ':null>', $pathstr);
+                }
+                return $pathstr;
             },
-            /* deep‐equal = */ true
+            ['null' => true]
         );
     }
 
@@ -392,7 +403,7 @@ class StructTest extends TestCase
         $this->testSet(
             $this->testSpec->regex->test,
             function ($input) {
-                return Struct::re_test($input->pattern, $input->input);
+                return Struct::re_test(self::vin($input, 'pattern'), self::vin($input, 'input'));
             }
         );
     }
@@ -402,7 +413,7 @@ class StructTest extends TestCase
         $this->testSet(
             $this->testSpec->regex->find,
             function ($input) {
-                $m = Struct::re_find($input->pattern, $input->input);
+                $m = Struct::re_find(self::vin($input, 'pattern'), self::vin($input, 'input'));
                 return $m === null ? null : $m;
             }
         );
@@ -413,7 +424,7 @@ class StructTest extends TestCase
         $this->testSet(
             $this->testSpec->regex->find_all,
             function ($input) {
-                return Struct::re_find_all($input->pattern, $input->input);
+                return Struct::re_find_all(self::vin($input, 'pattern'), self::vin($input, 'input'));
             }
         );
     }
@@ -423,7 +434,7 @@ class StructTest extends TestCase
         $this->testSet(
             $this->testSpec->regex->replace,
             function ($input) {
-                return Struct::re_replace($input->pattern, $input->input, $input->replacement);
+                return Struct::re_replace(self::vin($input, 'pattern'), self::vin($input, 'input'), self::vin($input, 'replacement'));
             }
         );
     }
@@ -433,7 +444,7 @@ class StructTest extends TestCase
         $this->testSet(
             $this->testSpec->regex->escape,
             function ($input) {
-                return Struct::re_escape($input->val);
+                return Struct::re_escape(self::vin($input, 'val'));
             }
         );
     }
@@ -446,11 +457,12 @@ class StructTest extends TestCase
         $this->testSet(
             $this->testSpec->sentinels->getprop_unify,
             function ($input) {
-                $val = property_exists($input, 'val') ? $input->val : Struct::undef();
-                $key = property_exists($input, 'key') ? $input->key : Struct::undef();
-                $alt = property_exists($input, 'alt') ? $input->alt : Struct::undef();
+                $val = self::vin($input, 'val', Struct::undef());
+                $key = self::vin($input, 'key', Struct::undef());
+                $alt = self::vin($input, 'alt', Struct::undef());
                 return Struct::getprop($val, $key, $alt);
-            }
+            },
+            ['null' => false]
         );
     }
 
@@ -459,13 +471,14 @@ class StructTest extends TestCase
         $this->testSet(
             $this->testSpec->sentinels->getelem_absent,
             function ($input) {
-                $val = property_exists($input, 'val') ? $input->val : Struct::undef();
-                $key = property_exists($input, 'key') ? $input->key : Struct::undef();
-                $alt = property_exists($input, 'alt') ? $input->alt : Struct::undef();
+                $val = self::vin($input, 'val', Struct::undef());
+                $key = self::vin($input, 'key', Struct::undef());
+                $alt = self::vin($input, 'alt', Struct::undef());
                 return $alt === Struct::undef()
                     ? Struct::getelem($val, $key)
                     : Struct::getelem($val, $key, $alt);
-            }
+            },
+            ['null' => false]
         );
     }
 
@@ -474,10 +487,11 @@ class StructTest extends TestCase
         $this->testSet(
             $this->testSpec->sentinels->haskey_unify,
             function ($input) {
-                $val = property_exists($input, 'val') ? $input->val : Struct::undef();
-                $key = property_exists($input, 'key') ? $input->key : Struct::undef();
+                $val = self::vin($input, 'val', Struct::undef());
+                $key = self::vin($input, 'key', Struct::undef());
                 return Struct::haskey($val, $key);
-            }
+            },
+            ['null' => false]
         );
     }
 
@@ -485,7 +499,8 @@ class StructTest extends TestCase
     {
         $this->testSet(
             $this->testSpec->sentinels->isempty_unify,
-            fn($in) => Struct::isempty($in)
+            fn($in) => Struct::isempty($in),
+            ['null' => false]
         );
     }
 
@@ -493,7 +508,8 @@ class StructTest extends TestCase
     {
         $this->testSet(
             $this->testSpec->sentinels->isnode_unify,
-            fn($in) => Struct::isnode($in)
+            fn($in) => Struct::isnode($in),
+            ['null' => false]
         );
     }
 
@@ -501,7 +517,8 @@ class StructTest extends TestCase
     {
         $this->testSet(
             $this->testSpec->sentinels->stringify_null,
-            fn($in) => Struct::stringify($in)
+            fn($in) => Struct::stringify($in),
+            ['null' => false]
         );
     }
 
@@ -539,7 +556,7 @@ class StructTest extends TestCase
             $this->testSpec->getpath->handler,
             function ($input) {
                 $store = [
-                    '$TOP' => $input->store,
+                    '$TOP' => self::vin($input, 'store'),
                     '$FOO' => function () {
                         return 'foo';
                     }
@@ -550,7 +567,7 @@ class StructTest extends TestCase
                 };
                 return Struct::getpath(
                     $store,
-                    $input->path,
+                    self::vin($input, 'path'),
                     $state
                 );
             }
@@ -562,7 +579,7 @@ class StructTest extends TestCase
         $this->testSet(
             $this->testSpec->minor->clone,
             fn($in) => Struct::clone($in),
-            true
+            ['null' => false]
         );
     }
 
@@ -571,9 +588,9 @@ class StructTest extends TestCase
         $this->testSet(
             $this->testSpec->minor->setprop,
             function ($input) {
-                $parent = property_exists($input, 'parent') ? $input->parent : [];
-                $key = property_exists($input, 'key') ? $input->key : null;
-                $val = property_exists($input, 'val') ? $input->val : Struct::undef();
+                $parent = self::vin($input, 'parent', Struct::undef());
+                $key = self::vin($input, 'key', null);
+                $val = self::vin($input, 'val', Struct::undef());
                 return Struct::setprop($parent, $key, $val);
             },
             true
@@ -734,8 +751,8 @@ class StructTest extends TestCase
         $this->testSet(
             $this->testSpec->getpath->basic,
             function ($input) {
-                $path = property_exists($input, 'path') ? $input->path : Struct::undef();
-                $store = property_exists($input, 'store') ? $input->store : Struct::undef();
+                $path = self::vin($input, 'path', Struct::undef());
+                $store = self::vin($input, 'store', Struct::undef());
                 $result = Struct::getpath($store, $path);
                 return $result;
             },
@@ -748,14 +765,14 @@ class StructTest extends TestCase
         $this->testSet(
             $this->testSpec->getpath->relative,
             function ($input) {
-                $path = property_exists($input, 'path') ? $input->path : Struct::undef();
-                $store = property_exists($input, 'store') ? $input->store : Struct::undef();
+                $path = self::vin($input, 'path', Struct::undef());
+                $store = self::vin($input, 'store', Struct::undef());
                 $state = new \stdClass();
-                if (property_exists($input, 'dparent')) {
-                    $state->dparent = $input->dparent;
+                if ((self::vin($input, 'dparent', Struct::undef()) !== Struct::undef())) {
+                    $state->dparent = self::vin($input, 'dparent');
                 }
-                if (property_exists($input, 'dpath')) {
-                    $state->dpath = explode('.', $input->dpath);
+                if ((self::vin($input, 'dpath', Struct::undef()) !== Struct::undef())) {
+                    $state->dpath = explode('.', self::vin($input, 'dpath'));
                 }
                 $result = Struct::getpath($store, $path, $state);
                 return $result;
@@ -769,9 +786,9 @@ class StructTest extends TestCase
         $this->testSet(
             $this->testSpec->getpath->special,
             function ($input) {
-                $path = property_exists($input, 'path') ? $input->path : Struct::undef();
-                $store = property_exists($input, 'store') ? $input->store : Struct::undef();
-                $state = property_exists($input, 'inj') ? $input->inj : null;
+                $path = self::vin($input, 'path', Struct::undef());
+                $store = self::vin($input, 'store', Struct::undef());
+                $state = self::vin($input, 'inj', null);
                 $result = Struct::getpath($store, $path, $state);
                 return $result;
             },
@@ -798,20 +815,13 @@ class StructTest extends TestCase
 
     public function testInjectString(): void
     {
-        // a no-op modifier for string‐only tests
-        $nullModifier = function ($v, $k = null, $p = null, $state = null, $store = null) {
-            // do nothing
-            return $v;
-        };
-
         $this->testSet(
             $this->testSpec->inject->string,
-            function (stdClass $in) use ($nullModifier) {
-                $opts = new \stdClass();
-                $opts->modify = $nullModifier;
-                return Struct::inject($in->val, $in->store, $opts);
-            },
-            /* force deep‐equal */ true
+            fn($vin) => Struct::inject(
+                self::vin($vin, 'val'),
+                self::vin($vin, 'store'),
+                (object) ['modify' => [Runner::class, 'nullModifier']]
+            )
         );
     }
 
@@ -823,10 +833,10 @@ class StructTest extends TestCase
     {
         $this->testSet(
             $this->testSpec->inject->deep,
-            function (stdClass $in) {
+            function ($in) {
                 // deep tests never need a modifier or current
-                $val = property_exists($in, 'val') ? $in->val : null;
-                $store = property_exists($in, 'store') ? $in->store : null;
+                $val = self::vin($in, 'val', null);
+                $store = self::vin($in, 'store', null);
                 return Struct::inject($val, $store);
             },
             /* force deep‐equal */ true
@@ -839,7 +849,7 @@ class StructTest extends TestCase
         // single‐case test (no "set" array)
         $test = $this->testSpec->transform->basic;
         $in = $test->in;
-        $out = Struct::transform($in->data, $in->spec);
+        $out = Struct::transform(self::vin($in, 'data'), self::vin($in, 'spec'));
         $this->assertEquals(
             self::normalizeMaps($test->out),
             self::normalizeMaps($out),
@@ -852,10 +862,9 @@ class StructTest extends TestCase
     {
         $this->testSet(
             $this->testSpec->transform->paths,
-            fn(object $vin) => Struct::transform(
-                property_exists($vin, 'data') ? $vin->data : (object) [],
-                property_exists($vin, 'spec') ? $vin->spec : null,
-                property_exists($vin, 'store') ? $vin->store : (object) []
+            fn($vin) => Struct::transform(
+                self::vin($vin, 'data', Struct::undef()),
+                self::vin($vin, 'spec', null)
             )
         );
     }
@@ -865,10 +874,9 @@ class StructTest extends TestCase
     {
         $this->testSet(
             $this->testSpec->transform->cmds,
-            fn(object $vin) => Struct::transform(
-                property_exists($vin, 'data') ? $vin->data : (object) [],
-                property_exists($vin, 'spec') ? $vin->spec : null,
-                property_exists($vin, 'store') ? $vin->store : (object) []
+            fn($vin) => Struct::transform(
+                self::vin($vin, 'data', Struct::undef()),
+                self::vin($vin, 'spec', null)
             )
         );
     }
@@ -876,31 +884,35 @@ class StructTest extends TestCase
     // ——— transform-each ———
     public function testTransformEach(): void
     {
-        // TODO: Fix $EACH implementation in inject
-        $this->assertTrue(true);
+        $this->testSet(
+            $this->testSpec->transform->each,
+            fn($vin) => Struct::transform(self::vin($vin, 'data'), self::vin($vin, 'spec'))
+        );
     }
 
     public function testTransformPack(): void
     {
-        // TODO: Fix $PACK implementation in inject
-        $this->assertTrue(true);
+        $this->testSet(
+            $this->testSpec->transform->pack,
+            fn($vin) => Struct::transform(self::vin($vin, 'data'), self::vin($vin, 'spec'))
+        );
     }
 
     public function testTransformModify(): void
     {
         $this->testSet(
             $this->testSpec->transform->modify,
-            function (object $vin) {
+            function ($vin) {
                 $opts = new \stdClass();
-                $opts->extra = property_exists($vin, 'store') ? $vin->store : (object) [];
+                $opts->extra = self::vin($vin, 'store', Struct::undef());
                 $opts->modify = function ($val, $key, $parent) {
                     if ($key !== null && $parent !== null && is_string($val)) {
                         Struct::setprop($parent, $key, '@' . $val);
                     }
                 };
                 return Struct::transform(
-                    $vin->data,
-                    $vin->spec,
+                    self::vin($vin, 'data'),
+                    self::vin($vin, 'spec'),
                     $opts
                 );
             }
@@ -913,9 +925,9 @@ class StructTest extends TestCase
             $this->testSpec->transform->ref,
             function ($input) {
                 return Struct::transform(
-                    property_exists($input, 'data') ? $input->data : (object) [],
-                    property_exists($input, 'spec') ? $input->spec : (object) [],
-                    property_exists($input, 'store') ? $input->store : (object) []
+                    self::vin($input, 'data', Struct::undef()),
+                    self::vin($input, 'spec', Struct::undef()),
+                    self::vin($input, 'store', Struct::undef())
                 );
             }
         );
@@ -957,26 +969,35 @@ class StructTest extends TestCase
     // ——— validate tests ———
     public function testValidateBasic(): void
     {
-        // TODO: Deep inject bug - validate returns spec instead of data for scalars
-        $this->assertTrue(true);
+        $this->testSet(
+            $this->testSpec->validate->basic,
+            fn($vin) => Struct::validate(self::vin($vin, 'data'), self::vin($vin, 'spec')),
+            ['null' => false]
+        );
     }
 
     public function testValidateChild(): void
     {
-        // TODO: Deep inject bug - $CHILD validator not expanding children
-        $this->assertTrue(true);
+        $this->testSet(
+            $this->testSpec->validate->child,
+            fn($vin) => Struct::validate(self::vin($vin, 'data'), self::vin($vin, 'spec'))
+        );
     }
 
     public function testValidateOne(): void
     {
-        // TODO: Deep inject bug - $ONE validator not resolving
-        $this->assertTrue(true);
+        $this->testSet(
+            $this->testSpec->validate->one,
+            fn($vin) => Struct::validate(self::vin($vin, 'data'), self::vin($vin, 'spec'))
+        );
     }
 
     public function testValidateExact(): void
     {
-        // TODO: Deep inject bug - $EXACT validator not resolving
-        $this->assertTrue(true);
+        $this->testSet(
+            $this->testSpec->validate->exact,
+            fn($vin) => Struct::validate(self::vin($vin, 'data'), self::vin($vin, 'spec'))
+        );
     }
 
     public function testValidateInvalid(): void
@@ -987,24 +1008,29 @@ class StructTest extends TestCase
             function ($input) use (&$count) {
                 $count++;
                 return Struct::validate(
-                    property_exists($input, 'data') ? $input->data : (object) [],
-                    property_exists($input, 'spec') ? $input->spec : (object) []
+                    self::vin($input, 'data', Struct::undef()),
+                    self::vin($input, 'spec', Struct::undef())
                 );
-            }
+            },
+            ['null' => false]
         );
         $this->assertGreaterThan(0, $count, 'validate-invalid should have run at least one test entry');
     }
 
     public function testValidateSpecial(): void
     {
-        // TODO: Deep inject bug - validate path resolution against wrong source
-        $this->assertTrue(true);
+        $this->testSet(
+            $this->testSpec->validate->special,
+            fn($vin) => Struct::validate(self::vin($vin, 'data'), self::vin($vin, 'spec'), self::vin($vin, 'inj'))
+        );
     }
 
     public function testValidateCustom(): void
     {
-        // TODO: Deep inject bug - custom validator integration
-        $this->assertTrue(true);
+        // Was `$this->assertTrue(true)` with a TODO comment - a test that
+        // passed while asserting nothing. Marked incomplete instead, so it
+        // shows up as work rather than as coverage.
+        $this->markTestIncomplete('custom validator integration has no corpus group; needs a bespoke test');
     }
 
     // ——— transform-funcval ———
@@ -1038,20 +1064,26 @@ class StructTest extends TestCase
 
     public function testSelectBasic(): void
     {
-        // TODO: Fix select - $KEY property name and match logic
-        $this->assertTrue(true);
+        $this->testSet(
+            $this->testSpec->select->basic,
+            fn($vin) => Struct::select(self::vin($vin, 'obj'), self::vin($vin, 'query'))
+        );
     }
 
     public function testSelectOperators(): void
     {
-        // TODO: Fix select operators
-        $this->assertTrue(true);
+        $this->testSet(
+            $this->testSpec->select->operators,
+            fn($vin) => Struct::select(self::vin($vin, 'obj'), self::vin($vin, 'query'))
+        );
     }
 
     public function testSelectEdge(): void
     {
-        // TODO: Fix select edge
-        $this->assertTrue(true);
+        $this->testSet(
+            $this->testSpec->select->edge,
+            fn($vin) => Struct::select(self::vin($vin, 'obj'), self::vin($vin, 'query'))
+        );
     }
 
     // ——— Missing minor tests ———
@@ -1066,8 +1098,8 @@ class StructTest extends TestCase
         $this->testSet(
             $this->testSpec->minor->flatten,
             function ($input) {
-                $val = property_exists($input, 'val') ? $input->val : [];
-                $depth = property_exists($input, 'depth') ? $input->depth : null;
+                $val = self::vin($input, 'val', Struct::undef());
+                $depth = self::vin($input, 'depth', null);
                 return Struct::flatten($val, $depth);
             },
             true
@@ -1087,8 +1119,8 @@ class StructTest extends TestCase
         $this->testSet(
             $this->testSpec->minor->filter,
             function ($input) use ($checkmap) {
-                $val = property_exists($input, 'val') ? $input->val : [];
-                $check = $checkmap[$input->check];
+                $val = self::vin($input, 'val', Struct::undef());
+                $check = $checkmap[self::vin($input, 'check')];
                 return Struct::filter($val, $check);
             },
             true
@@ -1100,12 +1132,12 @@ class StructTest extends TestCase
         $this->testSet(
             $this->testSpec->minor->setpath,
             function ($input) {
-                $store = property_exists($input, 'store') ? $input->store : (object) [];
-                $path = property_exists($input, 'path') ? $input->path : '';
-                $val = property_exists($input, 'val') ? $input->val : Struct::undef();
+                $store = self::vin($input, 'store', Struct::undef());
+                $path = (self::vin($input, 'path', Struct::undef()) !== Struct::undef()) ? self::vin($input, 'path') : '';
+                $val = self::vin($input, 'val', Struct::undef());
                 return Struct::setpath($store, $path, $val);
             },
-            true
+            ['null' => false]
         );
     }
 
@@ -1265,8 +1297,8 @@ class StructTest extends TestCase
         $this->testSet(
             $this->testSpec->merge->depth,
             function ($input) {
-                $val = property_exists($input, 'val') ? $input->val : [];
-                $depth = property_exists($input, 'depth') ? $input->depth : null;
+                $val = self::vin($input, 'val', Struct::undef());
+                $depth = self::vin($input, 'depth', null);
                 return Struct::merge($val, $depth);
             },
             true
@@ -1324,7 +1356,8 @@ class StructTest extends TestCase
         $this->testSet(
             $this->testSpec->walk->depth,
             function ($vin) {
-                if (!is_object($vin) || !property_exists($vin, 'src')) {
+                // An entry's `in` is a map, which omni delivers as an array.
+                if (Struct::undef() === self::vin($vin, 'src', Struct::undef())) {
                     return null;
                 }
                 $top = null;
@@ -1344,11 +1377,11 @@ class StructTest extends TestCase
                     }
                     return $val;
                 };
-                $maxdepth = property_exists($vin, 'maxdepth') ? $vin->maxdepth : null;
-                Struct::walk($vin->src, $copy, null, $maxdepth);
+                $maxdepth = self::vin($vin, 'maxdepth', null);
+                Struct::walk(self::vin($vin, 'src'), $copy, null, $maxdepth);
                 return $top;
             },
-            true
+            ['null' => false]
         );
     }
 
@@ -1356,28 +1389,37 @@ class StructTest extends TestCase
 
     public function testValidateEdge(): void
     {
-        // TODO: Requires $INSTANCE validator implementation
-        $this->assertTrue(true);
+        // Was `$this->assertTrue(true)` with a TODO comment - a test that
+        // passed while asserting nothing. Marked incomplete instead, so it
+        // shows up as work rather than as coverage.
+        $this->markTestIncomplete('$INSTANCE validator is unimplemented in this port');
     }
 
     // ——— Transform apply and format ———
 
     public function testTransformApply(): void
     {
-        // TODO: Requires $APPLY transform implementation
-        $this->assertTrue(true);
+        $this->testSet(
+            $this->testSpec->transform->apply,
+            fn($vin) => Struct::transform(self::vin($vin, 'data'), self::vin($vin, 'spec'))
+        );
     }
 
     public function testTransformEdgeApply(): void
     {
-        // TODO: Requires $APPLY transform implementation
-        $this->assertTrue(true);
+        // Was `$this->assertTrue(true)` with a TODO comment - a test that
+        // passed while asserting nothing. Marked incomplete instead, so it
+        // shows up as work rather than as coverage.
+        $this->markTestIncomplete('no corpus group; transform/apply is covered by testTransformApply');
     }
 
     public function testTransformFormat(): void
     {
-        // TODO: Requires $FORMAT transform implementation
-        $this->assertTrue(true);
+        $this->testSet(
+            $this->testSpec->transform->format,
+            fn($vin) => Struct::transform(self::vin($vin, 'data'), self::vin($vin, 'spec')),
+            ['null' => false]
+        );
     }
 
     // ——— Validate: an empty [] is a LIST, and a map spec rejects it ———
@@ -1480,4 +1522,25 @@ class StructTest extends TestCase
             'an empty ListRef is a list too'
         );
     }
+
+    public function testSelectAlts(): void
+    {
+        $this->testSet(
+            $this->testSpec->select->alts,
+            fn($vin) => Struct::select(self::vin($vin, 'obj'), self::vin($vin, 'query'))
+        );
+    }
+
+    public function testSelectNullkey(): void
+    {
+        $this->testSet(
+            $this->testSpec->select->nullkey,
+            fn($vin) => Struct::select(self::vin($vin, 'obj'), self::vin($vin, 'query'))
+        );
+    }
+
+    // `condense`, `expand` and `iscondensed` have no methods on purpose: they
+    // are canonical-TypeScript-only by design (tools/check_parity.py lists
+    // them under PENDING_PORT), so their 37 corpus entries have no php
+    // subject to run against.
 }
