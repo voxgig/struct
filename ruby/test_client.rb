@@ -1,6 +1,6 @@
 require 'minitest/autorun'
 require_relative 'voxgig_struct'
-require_relative 'voxgig_runner'
+require_relative 'omni'
 
 # Path to the JSON test file (adjust as needed)
 TEST_JSON_FILE = File.join(File.dirname(__FILE__), '..', 'build', 'test', 'test.json')

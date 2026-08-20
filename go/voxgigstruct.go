@@ -441,6 +441,12 @@ func IsKey(val any) bool {
 // null in exactly one place - typify - and treats them alike everywhere
 // else (`null == val` in JavaScript is true for both). The functions below
 // follow canonical, so they take a value that has already been collapsed.
+//
+// The Group A readers - GetDef, GetProp, GetElem and (through GetProp)
+// HasKey - collapse it on the way in AND on the way out, so a NOVAL reached
+// as a container, a key, or a stored value reads as absent and yields the
+// alt. That is canonical: `getprop({a: undefined}, 'a', alt)` is alt, and
+// `haskey` is false, because `undefined == null` in JavaScript.
 func denoval(val any) any {
 	if NOVAL == val {
 		return nil
@@ -471,8 +477,9 @@ func IsFunc(val any) bool {
 	return reflect.ValueOf(val).Kind() == reflect.Func
 }
 
-// Get a defined value. Returns alt if val is nil.
+// Get a defined value. Returns alt if val is nil or NOVAL.
 func GetDef(val any, alt any) any {
+	val = denoval(val)
 	if nil == val {
 		return alt
 	}
@@ -738,6 +745,9 @@ func GetElem(val any, key any, alts ...any) any {
 		alt = alts[0]
 	}
 
+	val = denoval(val)
+	key = denoval(key)
+
 	if nil == val || nil == key {
 		return alt
 	}
@@ -763,7 +773,7 @@ func GetElem(val any, key any, alts ...any) any {
 		}
 	}
 
-	if nil == out {
+	if nil == denoval(out) {
 		if 0 < (T_function & Typify(alt)) {
 			fn := reflect.ValueOf(alt)
 			results := fn.Call(nil)
@@ -787,6 +797,9 @@ func GetProp(val any, key any, alts ...any) any {
 	if len(alts) > 0 {
 		alt = alts[0]
 	}
+
+	val = denoval(val)
+	key = denoval(key)
 
 	if nil == val || nil == key {
 		return alt
@@ -859,7 +872,7 @@ func GetProp(val any, key any, alts ...any) any {
 		}
 	}
 
-	if nil == out {
+	if nil == denoval(out) {
 		return alt
 	}
 

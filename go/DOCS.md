@@ -72,7 +72,8 @@ full language-neutral walkthrough; the Go-flavoured version:
 
 ```go
 // Reshape by example — the spec mirrors the output you want.
-out := voxgigstruct.Transform(
+// Returns (data, error); the error reports an unknown command or format.
+out, _ := voxgigstruct.Transform(
   map[string]any{"user": map[string]any{"first": "Ada", "last": "Lovelace"}, "age": 36},
   map[string]any{"name": "`user.first`", "surname": "`user.last`", "years": "`age`"},
 )
@@ -203,11 +204,13 @@ Go-specific points the signatures don't show:
   `func(key *string, val any, parent any, path []string) any`. The key is a
   `*string` — `nil` at the root, otherwise the map key or the string form of
   a list index.
-- **`(any, error)` for fallible calls.** Only `Validate` returns
-  `(any, error)` per Go idiom; the error carries the first mismatch message
-  (or an aggregate). `Transform`, `TransformModify`, and
-  `TransformModifyHandler` return a plain `any`; `TransformCollect` returns
-  `(any, []string)` (the data plus any collected error strings).
+- **`(any, error)` for fallible calls.** `Transform` and `Validate` return
+  `(any, error)` per Go idiom; the error carries the first problem (or an
+  aggregate) — for `Transform`, an unknown `$FORMAT` or a misplaced command;
+  for `Validate`, a type mismatch. Supplying your own collector suppresses
+  it, as canonical does. `TransformModify` and `TransformModifyHandler`
+  return a plain `any`; `TransformCollect` returns `(any, []string)` (the
+  data plus any collected error strings).
 - **Type flags** combine bitwise: `Typify("hi")` is `T_scalar | T_string`;
   test with `0 < (T_string & t)`. `Typify(nil)` is `T_scalar | T_null`.
 
@@ -224,10 +227,13 @@ reading the canonical TS, not by polling the ports; a change to canonical
 behaviour starts there, then flows to the corpus and out to every port (see
 [`../AGENTS.md`](../AGENTS.md#standard-workflows)).
 
-### `nil` covers absent *and* JSON null
+### `nil` covers absent *and* JSON null — except in `Typify`
 
 Go has only `nil`. Both "absent" and the JSON `null` scalar map to `nil` at
-the user-facing API. The port already follows the **Group A** rule (see
+the user-facing API. The one place the distinction is observable is
+`Typify`, where the `NOVAL` sentinel stands for canonical's `undefined`:
+`Typify(NOVAL)` is `T_noval`, `Typify(nil)` is `T_scalar | T_null`. That
+mirrors canonical, which separates the two in `typify` and nowhere else. The port already follows the **Group A** rule (see
 [`../UNDEF_SPEC.md`](../design/UNDEF_SPEC.md) and [`../REPORT.md`](../design/REPORT.md)):
 readers (`GetProp`, `GetElem`, `HasKey`, `IsEmpty`, `IsNode`) treat a stored
 `null` as "no value" and return the alt / `false`, while value-processors

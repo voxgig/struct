@@ -1,7 +1,7 @@
 require 'minitest/autorun'
 require 'json'
 require_relative 'voxgig_struct' # Loads VoxgigStruct module
-require_relative 'voxgig_runner' # Loads our runner module
+require_relative 'omni' # Loads the runner, from voxgig/omni
 
 # A helper for deep equality comparison using JSON round-trip.
 def deep_equal(a, b)
