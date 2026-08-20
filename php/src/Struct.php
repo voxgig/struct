@@ -3057,10 +3057,14 @@ class Struct
             '$CHILD' => [self::class, 'validate_CHILD'],
             '$ONE' => [self::class, 'validate_ONE'],
             '$EXACT' => [self::class, 'validate_EXACT'],
-
+        ],
+            (array) ($extra ?? []),
             // A special top level value to collect errors.
-            '$ERRS' => $errs,
-        ], (array) ($extra ?? []));
+            // NOTE: the errs parameter always wins, so this merges LAST.
+            // An `extra` copied from an enclosing store carries that store's
+            // own `$ERRS`; merging it after would hand this validation the
+            // caller's error list and leak every trial failure into it.
+            ['$ERRS' => $errs]);
 
         $meta = is_object($injdef) && property_exists($injdef, 'meta') ? $injdef->meta : null;
 
