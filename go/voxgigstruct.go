@@ -53,6 +53,7 @@ package voxgigstruct
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"math/bits"
@@ -165,6 +166,20 @@ type _sentinel struct{ name string }
 
 var SKIP = &_sentinel{"SKIP"}
 var DELETE = &_sentinel{"DELETE"}
+
+// NOVAL is Go's no-value: the third state canonical spells `undefined`.
+//
+// Go's value domain has nil and it has real values, and nothing between,
+// so `Typify(nil)` is T_scalar|T_null and T_noval was unreachable - this
+// port could not express `typify()` as distinct from `typify(null)`, which
+// the corpus pins as two different results (1073741824 vs 4194432). Every
+// other port models the distinction, natively or with a sentinel of its
+// own; NOVAL is Go's.
+//
+// It is recognised AHEAD of the reflect dispatch, in Typify, IsEmpty and
+// Clone. That ordering is the whole trick: a Go sentinel is a struct
+// pointer, so reflect would otherwise class it as a node.
+var NOVAL = &_sentinel{"NOVAL"}
 
 // Regex matching integer keys (including negative).
 var reIntegerKey = regexp.MustCompile(`^[-0-9]+$`)
@@ -421,7 +436,20 @@ func IsKey(val any) bool {
 }
 
 // Check for an "empty" value - nil, empty string, array, object.
+
+// denoval collapses NOVAL to nil. Canonical distinguishes undefined from
+// null in exactly one place - typify - and treats them alike everywhere
+// else (`null == val` in JavaScript is true for both). The functions below
+// follow canonical, so they take a value that has already been collapsed.
+func denoval(val any) any {
+	if NOVAL == val {
+		return nil
+	}
+	return val
+}
+
 func IsEmpty(val any) bool {
+	val = denoval(val)
 	if val == nil {
 		return true
 	}
@@ -457,6 +485,12 @@ func GetDef(val any, alt any) any {
 func Typify(value any) int {
 	if value == nil {
 		return T_scalar | T_null
+	}
+
+	// Before the reflect dispatch: NOVAL is a struct pointer, and reflect
+	// would class it as a node.
+	if NOVAL == value {
+		return T_noval
 	}
 
 	if _, ok := value.(*ListRef[any]); ok {
@@ -1364,6 +1398,7 @@ func Clone(val any) any {
 }
 
 func CloneFlags(val any, flags map[string]bool) any {
+	val = denoval(val)
 	if val == nil {
 		return nil
 	}
@@ -1631,6 +1666,7 @@ func Walk(
 	apply WalkApply,
 	opts ...any,
 ) any {
+	val = denoval(val)
 	var after WalkApply
 	maxdepth := 32
 
@@ -1809,6 +1845,7 @@ func _walkDescendAlloc(
 // modified.
 // Optional maxdepth parameter limits recursion depth.
 func Merge(val any, maxdepths ...int) any {
+	val = denoval(val)
 	md := 32
 	if len(maxdepths) > 0 {
 		if maxdepths[0] < 0 {
@@ -3282,24 +3319,68 @@ var Transform_FORMAT Injector = func(
 // ---------------------------------------------------------------------
 // Transform function: top-level
 
+// Transform returns an error when the transform collected any - an unknown
+// `$FORMAT`, say - and the caller did not supply their own error collector.
+// Canonical TypeScript throws at exactly that point (StructUtility.ts:
+// `const generr = 0 < size(errs) && !collect`), and Validate in this port
+// already surfaces it the same way. Transform did not, so every error a
+// transform collected was silently dropped: `Transform(nil, ["`$FORMAT`",
+// "not-a-format", "a"])` returned nil rather than reporting the unknown
+// format. The corpus pins that behaviour in transform/format, a group this
+// port's own test runner used to skip in full.
 func Transform(
 	data any, // source data
 	spec any, // transform specification
 	injdefs ...*Injection,
-) any {
+) (any, error) {
 	if len(injdefs) > 0 && injdefs[0] != nil {
 		injdef := injdefs[0]
-		return TransformModifyHandler(
+
+		// A caller-supplied collector means the errors are theirs to
+		// inspect, and canonical generates nothing.
+		collecterrs := injdef.Errs
+		errs := collecterrs
+		if nil == errs {
+			errs = ListRefCreate[any]()
+		}
+
+		out := TransformModifyHandler(
 			data,
 			spec,
 			injdef.Extra,
 			injdef.Modify,
 			injdef.Handler,
-			injdef.Errs,
+			errs,
 			injdef.Meta,
 		)
+
+		if nil != collecterrs {
+			return out, nil
+		}
+		return out, generatederr(errs)
 	}
-	return TransformModify(data, spec, nil, nil)
+
+	out, errs := transformModifyCore(data, spec, nil, nil)
+	return out, generatederr(errs)
+}
+
+// generatederr joins collected error strings into the single error canonical
+// throws. Nil when nothing was collected.
+func generatederr(errs *ListRef[any]) error {
+	if nil == errs || 0 == len(errs.List) {
+		return nil
+	}
+
+	errmsgs := make([]string, len(errs.List))
+	for i, e := range errs.List {
+		if s, ok := e.(string); ok {
+			errmsgs[i] = s
+		} else {
+			errmsgs[i] = fmt.Sprintf("%v", e)
+		}
+	}
+
+	return errors.New(strings.Join(errmsgs, " | "))
 }
 
 // TransformModifyHandler is like TransformModify but allows a custom handler and injection inj.

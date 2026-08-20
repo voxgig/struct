@@ -56,13 +56,14 @@ type StructUtility struct {
 	Size      func(val any) int
 	Slice     func(val any, args ...any) any
 	StrKey    func(key any) string
-	Transform func(data any, spec any, injdefs ...*voxgigstruct.Injection) any
+	Transform func(data any, spec any, injdefs ...*voxgigstruct.Injection) (any, error)
 	Typify    func(value any) int
 	Typename  func(t int) string
 	Validate  func(data any, spec any, injdefs ...*voxgigstruct.Injection) (any, error)
 
 	SKIP   any
 	DELETE any
+	NOVAL  any
 
 	Jm func(kv ...any) map[string]any
 	Jt func(v ...any) []any
