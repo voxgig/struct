@@ -4,13 +4,13 @@
 import unittest
 
 try:
-    from .runner import (
+    from .omni import (
         makeRunner,
         nullModifier,
     )
     from .sdk import SDK
 except ImportError:
-    from runner import (
+    from omni import (
         makeRunner,
         nullModifier,
     )
