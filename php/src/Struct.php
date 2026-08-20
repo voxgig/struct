@@ -2256,14 +2256,43 @@ class Struct
 
     private static array $FORMATTER = [];
 
+    /**
+     * Coerce a scalar to a string the way canonical does.
+     *
+     * The formatters are written `('' + v)` in canonical TypeScript, which is
+     * JavaScript coercion. PHP's `('' . $v)` agrees for strings and numbers
+     * and disagrees for exactly the values the corpus exercises:
+     *
+     *              JS         PHP
+     *     true     "true"     "1"
+     *     false    "false"    ""
+     *     null     "null"     ""
+     *
+     * so `$FORMAT upper` on `true` produced "1" here and "TRUE" everywhere
+     * else.
+     */
+    private static function _jsstr(mixed $val): string
+    {
+        if (true === $val) {
+            return 'true';
+        }
+        if (false === $val) {
+            return 'false';
+        }
+        if (null === $val) {
+            return 'null';
+        }
+        return '' . $val;
+    }
+
     private static function _getFormatters(): array
     {
         if (empty(self::$FORMATTER)) {
             self::$FORMATTER = [
                 'identity' => fn($_k, $v) => $v,
-                'upper' => fn($_k, $v) => self::isnode($v) ? $v : strtoupper('' . $v),
-                'lower' => fn($_k, $v) => self::isnode($v) ? $v : strtolower('' . $v),
-                'string' => fn($_k, $v) => self::isnode($v) ? $v : ('' . $v),
+                'upper' => fn($_k, $v) => self::isnode($v) ? $v : strtoupper(self::_jsstr($v)),
+                'lower' => fn($_k, $v) => self::isnode($v) ? $v : strtolower(self::_jsstr($v)),
+                'string' => fn($_k, $v) => self::isnode($v) ? $v : self::_jsstr($v),
                 'number' => function ($_k, $v) {
                     if (self::isnode($v)) {
                         return $v;
@@ -2280,7 +2309,7 @@ class Struct
                 },
                 'concat' => function ($k, $v) {
                     if (null === $k && self::islist($v)) {
-                        $parts = self::items($v, fn($n) => self::isnode($n[1]) ? '' : ('' . $n[1]));
+                        $parts = self::items($v, fn($n) => self::isnode($n[1]) ? '' : self::_jsstr($n[1]));
                         return self::join($parts, '');
                     }
                     return $v;
@@ -2403,6 +2432,18 @@ class Struct
             $extra = $injdef;
         }
 
+        // A caller that supplied `errs` is collecting; anyone else expects the
+        // errors to be raised. Either way they have to be COLLECTED first, and
+        // by reference - a plain PHP array on the store would be copied before
+        // the injectors deep inside ever reached it.
+        $collect = null !== $errs;
+        if (is_array($errs) || null === $errs) {
+            $errs = new \ArrayObject(null === $errs ? [] : $errs);
+        }
+        if ($collect && is_object($injdef)) {
+            $injdef->errs = $errs;
+        }
+
         // 1) clone spec, wrapping arrays in ListRef for reference stability (Go pattern)
         $specClone = self::cloneWrap($spec);
 
@@ -2443,7 +2484,10 @@ class Struct
                 '$FORMAT' => [self::class, 'transform_FORMAT'],
                 '$APPLY' => [self::class, 'transform_APPLY'],
             ],
-            $extraTransforms
+            $extraTransforms,
+            // Last, so an `extra` carrying its own `$ERRS` cannot displace it -
+            // the same ordering `validate` relies on.
+            [self::S_DERRS => $errs]
         );
 
         // 4) run inject to do the transform
@@ -2461,6 +2505,15 @@ class Struct
             $injectOpts->errs = $injdef->errs;
         }
         $result = self::inject($specClone, $store, $injectOpts);
+
+        // Canonical: `const generr = 0 < size(errs) && !collect` - a transform
+        // that collected errors and was given no collector RAISES them
+        // (StructUtility.ts:2048). Without this the errors were recorded and
+        // then dropped: an unknown `$APPLY` argument produced no value and no
+        // error at all.
+        if (!$collect && 0 < count($errs)) {
+            throw new \Exception(implode(' | ', (array) $errs));
+        }
 
         // When a child transform (e.g. $REF) deletes the key, inject returns SKIP; return mutated spec
         if ($result === self::SKIP) {
