@@ -18,8 +18,8 @@ jobs:
   lint-typescript:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
       - working-directory: ./typescript
@@ -30,8 +30,8 @@ jobs:
   lint-javascript:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
       - working-directory: ./javascript
@@ -42,8 +42,8 @@ jobs:
   lint-python:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - working-directory: ./python
@@ -54,8 +54,8 @@ jobs:
   lint-go:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.24'
       - name: Install golangci-lint
@@ -68,7 +68,7 @@ jobs:
   lint-rust:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
@@ -78,7 +78,7 @@ jobs:
   lint-ruby:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.3'
@@ -90,7 +90,7 @@ jobs:
   lint-php:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.3'
@@ -107,8 +107,8 @@ jobs:
   lint-java:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           # checkstyle 13.5.0 is compiled for Java 21 (class file v65); the
@@ -121,8 +121,8 @@ jobs:
   lint-kotlin:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -132,11 +132,11 @@ jobs:
   lint-lua:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: leafo/gh-actions-lua@v10
+      - uses: actions/checkout@v7
+      - uses: leafo/gh-actions-lua@v13
         with:
           luaVersion: "5.4"
-      - uses: leafo/gh-actions-luarocks@v4
+      - uses: leafo/gh-actions-luarocks@v6
       - run: luarocks install luacheck
       - working-directory: ./lua
         run: luacheck src test
@@ -144,7 +144,7 @@ jobs:
   lint-zig:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: mlugg/setup-zig@v1
         with:
           version: '0.13.0'
@@ -154,7 +154,7 @@ jobs:
   lint-cpp:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: sudo apt-get update && sudo apt-get install -y nlohmann-json3-dev clang-tidy clang-format
       - working-directory: ./cpp
         run: make lint
@@ -162,8 +162,8 @@ jobs:
   lint-csharp:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '8.0.x'
       - working-directory: ./csharp
@@ -172,7 +172,7 @@ jobs:
   lint-c:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: sudo apt-get update && sudo apt-get install -y clang-tidy clang-format
       - working-directory: ./c
         run: make lint
@@ -180,7 +180,7 @@ jobs:
   lint-perl:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: sudo apt-get update && sudo apt-get install -y libperl-critic-perl
       - working-directory: ./perl
         run: make lint
@@ -188,7 +188,7 @@ jobs:
   lint-swift:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: swift-actions/setup-swift@v2
         with:
           swift-version: '6.0.2'
@@ -198,7 +198,7 @@ jobs:
   lint-scala:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: VirtusLab/scala-cli-setup@v1
       - working-directory: ./scala
         run: make lint
@@ -206,8 +206,8 @@ jobs:
   lint-clojure:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -220,7 +220,7 @@ jobs:
   lint-dart:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dart-lang/setup-dart@v1
       - working-directory: ./dart
         run: dart pub get && make lint
@@ -228,7 +228,7 @@ jobs:
   lint-elixir:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: erlef/setup-beam@v1
         with:
           otp-version: '27'
@@ -239,7 +239,7 @@ jobs:
   lint-haskell:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: haskell-actions/setup@v2
         with:
           ghc-version: '9.10'
@@ -249,7 +249,7 @@ jobs:
   lint-ocaml:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ocaml/setup-ocaml@v3
         with:
           ocaml-compiler: '5'
@@ -260,7 +260,7 @@ jobs:
   lint-lean:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: leanprover/lean-action@v1
         with:
           lake-package-directory: ./lean
