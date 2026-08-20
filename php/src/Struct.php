@@ -2725,9 +2725,16 @@ class Struct
             foreach ($inj->dparent as $i => $n) {
                 $parent[$i] = self::clone($childtm);
             }
-            // Adjust array length
+            // Adjust array length. `$parent` may be a ListRef, which is
+            // ArrayAccess and Countable but not an array - `array_pop` takes
+            // an array by reference, so it has to reach the backing list.
+            // (`delprop` already spells its ListRef branch this way.)
             while (count($parent) > count($inj->dparent)) {
-                array_pop($parent);
+                if ($parent instanceof ListRef) {
+                    array_pop($parent->list);
+                } else {
+                    array_pop($parent);
+                }
             }
             $inj->keyI = 0;
             $out = self::_getprop($inj->dparent, 0);
@@ -3418,7 +3425,15 @@ class Struct
 
         if (self::ismap($parent)) {
             $key = self::strkey($key);
-            unset($parent->$key);
+            // A map is a stdClass OR an associative array here - `ismap`
+            // accepts both - so the object spelling alone silently did
+            // nothing for the array case, and `delprop` returned its
+            // argument untouched.
+            if (is_array($parent)) {
+                unset($parent[$key]);
+            } else {
+                unset($parent->$key);
+            }
         } elseif (self::islist($parent)) {
             // Ensure key is an integer
             $keyI = (int)$key;
