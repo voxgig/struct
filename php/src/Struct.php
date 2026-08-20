@@ -2723,15 +2723,15 @@ class Struct
             // See if we can find a match.
             foreach ($tvals as $tval) {
                 // If match, then errs.length = 0
-                $terrs = [];
-
                 $vstore = array_merge((array) $store, [self::S_DTOP => $inj->dparent]);
 
-                $vcurrent = self::validate($inj->dparent, $tval, (object) [
+                $tinj = (object) [
                     'extra' => $vstore,
-                    'errs' => $terrs,
+                    'errs' => [],
                     'meta' => $inj->meta,
-                ]);
+                ];
+                $vcurrent = self::validate($inj->dparent, $tval, $tinj);
+                $terrs = $tinj->errs;
 
                 $inj->setval($vcurrent, 2);
 
@@ -3151,14 +3151,14 @@ class Struct
             $vstore->{'$TOP'} = $point;
 
             foreach ($terms as $term) {
-                $terrs = [];
-                self::validate($point, $term, (object) [
+                $tinj = (object) [
                     'extra' => $vstore,
-                    'errs' => $terrs,
+                    'errs' => [],
                     'meta' => $state->meta,
-                ]);
+                ];
+                self::validate($point, $term, $tinj);
 
-                if (count($terrs) !== 0) {
+                if (count($tinj->errs) !== 0) {
                     $state->errs[] = 'AND:' . self::pathify($ppath) . ': ' . self::stringify($point) . ' fail:' . self::stringify($terms);
                 }
             }
@@ -3167,7 +3167,7 @@ class Struct
             $gp = self::getelem($state->nodes, -2);
             self::setprop($gp, $gkey, $point);
         }
-        return null;
+        return self::undef();
     }
 
     /**
@@ -3185,25 +3185,25 @@ class Struct
             $vstore->{'$TOP'} = $point;
 
             foreach ($terms as $term) {
-                $terrs = [];
-                self::validate($point, $term, (object) [
+                $tinj = (object) [
                     'extra' => $vstore,
-                    'errs' => $terrs,
+                    'errs' => [],
                     'meta' => $state->meta,
-                ]);
+                ];
+                self::validate($point, $term, $tinj);
 
-                if (count($terrs) === 0) {
+                if (count($tinj->errs) === 0) {
                     $gkey = self::getelem($state->path, -2);
                     $gp = self::getelem($state->nodes, -2);
                     self::setprop($gp, $gkey, $point);
 
-                    return null;
+                    return self::undef();
                 }
             }
 
             $state->errs[] = 'OR:' . self::pathify($ppath) . ': ' . self::stringify($point) . ' fail:' . self::stringify($terms);
         }
-        return null;
+        return self::undef();
     }
 
     /**
@@ -3220,14 +3220,14 @@ class Struct
             $vstore = self::merge([(object) [], $store], 1);
             $vstore->{'$TOP'} = $point;
 
-            $terrs = [];
-            self::validate($point, $term, (object) [
+            $tinj = (object) [
                 'extra' => $vstore,
-                'errs' => $terrs,
+                'errs' => [],
                 'meta' => $state->meta,
-            ]);
+            ];
+            self::validate($point, $term, $tinj);
 
-            if (count($terrs) === 0) {
+            if (count($tinj->errs) === 0) {
                 $state->errs[] = 'NOT:' . self::pathify($ppath) . ': ' . self::stringify($point) . ' fail:' . self::stringify($term);
             }
 
@@ -3235,7 +3235,7 @@ class Struct
             $gp = self::getelem($state->nodes, -2);
             self::setprop($gp, $gkey, $point);
         }
-        return null;
+        return self::undef();
     }
 
     /**
@@ -3273,7 +3273,7 @@ class Struct
                     ' fail:' . $ref . ' ' . self::stringify($term);
             }
         }
-        return null;
+        return self::undef();
     }
 
     /**
