@@ -393,6 +393,14 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # The test runner is voxgig/omni, header-only and consumed as a local
+      # checkout (it is not published); the Makefile finds it via OMNI_HOME.
+      # The library itself never depends on omni.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       - name: Install nlohmann/json (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y nlohmann-json3-dev
@@ -402,6 +410,8 @@ jobs:
       - name: Run tests
         working-directory: ./cpp
         run: make test
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
 
   test-perl:
     runs-on: ${{ matrix.os }}

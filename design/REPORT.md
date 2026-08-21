@@ -51,7 +51,7 @@ NFA engine in-tree (c/cpp/lua/rust/zig).
 | **rust** | 48+ | 15 | 2 | corpus pass | already Group A |
 | **c** | 48 | 15 | 2 | 1177/1177 corpus | Group A/B applied |
 | **java** | 48 | 15 | 2 | 1300/1300 corpus | full TS-canonical parity |
-| **cpp** | 48 | 15 | 2 | 1268/1268 corpus | full TS-canonical parity |
+| **cpp** | 48 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
 | **csharp** | 48 | 15 | 2 | 78/78 corpus | already Group A |
 | **kotlin** | 48 | 15 | 2 | 1315/1315 corpus | full TS-canonical parity |
 | **zig** | 48 | 15 | 2 | 60/60 corpus sets \*1 | cycle-break + 7 latent-bug fixes |

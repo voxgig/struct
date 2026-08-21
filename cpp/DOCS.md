@@ -337,21 +337,29 @@ backtracking, and zero-width `re_replace("a*", "abc", "X")` returns
 
 ```bash
 cd cpp
-make build        # smoke + corpus driver  (default target; == make test)
+make test         # smoke + corpus driver + client test
+make build        # the smoke test alone (default target)
 make smoke        # just the smoke test
 make corpus       # just the corpus driver
+make client       # just the client test
 make sanitize     # corpus built + run under ASan + UBSan
 make check_leak   # corpus under valgrind (full leak check)
 make lint         # clang-tidy + clang-format --dry-run --Werror
 make inspect      # print g++ version and the located nlohmann/json header
 ```
 
-Tests live in [`tests/`](./tests/); the corpus driver
-(`tests/struct_corpus_test.cpp`, via `tests/runner.hpp`) loads the shared
-corpus from [`../build/test/`](../build/test/) and mirrors the reference
-runner in [`../typescript/test/runner.ts`](../typescript/test/runner.ts).
-The header path for `nlohmann/json` defaults to `/usr/include`; override
-with `make JSON_INC=/path …`.
+Tests live in [`tests/`](./tests/). The corpus runs on
+[voxgig/omni](https://github.com/voxgig/omni), the shared test runner —
+header-only, consumed as a local checkout the Makefile finds via `$OMNI_HOME`
+or beside this repository, and on the include path of the test translation
+units only. [`tests/omni_bridge.hpp`](./tests/omni_bridge.hpp) converts
+between `omni::Json` and this port's `Value`.
+
+[`tests/struct_corpus_test.cpp`](./tests/struct_corpus_test.cpp) runs every
+group the corpus defines except the three `condense` ones, which no port
+implements yet: **1358 entries in 72 groups**, plus three single entries that
+are not sets. [`tests/client_test.cpp`](./tests/client_test.cpp) runs the two
+`check` entries — `DEF.client`, client-scoped options, and `contextify`.
 
 **To change behaviour:** behaviour is canonical. Edit
 [`../typescript/src/StructUtility.ts`](../typescript/src/StructUtility.ts)

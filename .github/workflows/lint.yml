@@ -200,9 +200,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # clang-tidy compiles the test sources, and those include omni's header.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       - run: sudo apt-get update && sudo apt-get install -y nlohmann-json3-dev clang-tidy clang-format
       - working-directory: ./cpp
         run: make lint
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
 
   lint-csharp:
     runs-on: ubuntu-latest

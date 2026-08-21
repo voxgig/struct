@@ -9,9 +9,10 @@
 > dispatch through the canonical injector machinery: 10 transform
 > commands, 6 validate checkers, 4 select operators.
 >
-> Passes the full shared corpus. Run locally with `make test` from
-> `cpp/`. Per-file pass counts are written to `corpus-scoreboard.json`
-> after each run; the committed baseline lives at `test-baseline.json`.
+> Passes the shared corpus (1360/1360), run on
+> [voxgig/omni](https://github.com/voxgig/omni) — the shared test runner,
+> header-only and consumed as a local checkout. Run it with `make test`
+> from `cpp/`.
 
 For motivation, language-neutral concepts, and the cross-language
 parity matrix, see the [top-level README](../README.md) and
@@ -24,13 +25,20 @@ explanation), see [`DOCS.md`](./DOCS.md).
 In the monorepo:
 
 ```bash
+git clone https://github.com/voxgig/omni ../../omni   # the test runner
+
 cd cpp
-make test        # smoke + corpus driver (the default build target)
+make build       # the smoke test alone (no omni)
+make test        # smoke + the shared corpus + the client test
 make smoke       # just the smoke test
 make corpus      # just the corpus driver
+make client      # just the client test
 make sanitize    # build + run with ASan + UBSan
 make check_leak  # build + run under valgrind
 ```
+
+Set `OMNI_HOME` if the checkout is somewhere else. Only the tests need it —
+nothing in `src/` names omni.
 
 The library is header-only across three files in `src/`:
 - [`value.hpp`](./src/value.hpp) — `Value` (a `std::variant`-based tagged

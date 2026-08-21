@@ -6,18 +6,41 @@ CXXFLAGS_COMMON := --std=c++17 -Wall -Wextra -Wno-unused-parameter
 
 CPP_SOURCES := $(wildcard src/*.hpp tests/*.hpp tests/*.cpp)
 
-.PHONY: build smoke test bench corpus check_leak sanitize lint tidy format-check clean reset inspect publish
+# The corpus runner is voxgig/omni, consumed as a local checkout - it is
+# header-only and not published. $OMNI_HOME first, then sibling paths, taking
+# the first directory that carries spec/fib.json.
+#
+# It is on the include path of the TEST translation units only. `make build`
+# compiles the smoke test, which does not include it, and nothing in src/
+# names omni (register 4.13).
+OMNI_CANDIDATES := $(OMNI_HOME) ../../omni ../../../omni /workspace/omni /home/user/omni
+OMNI_DIR := $(firstword $(foreach d,$(OMNI_CANDIDATES),$(if $(wildcard $(d)/spec/fib.json),$(d))))
+OMNI_INC := $(if $(OMNI_DIR),-I $(OMNI_DIR)/cpp/src)
 
-# Default: compile and run the smoke test plus the full corpus driver.
-build: smoke corpus
+.PHONY: build smoke test bench corpus client check_leak sanitize lint tidy format-check clean reset inspect publish omni-check
+
+# Fail with the reason rather than a page of "omni.hpp: No such file".
+omni-check:
+	@if [ -z "$(OMNI_DIR)" ]; then \
+	  echo "struct: voxgig/omni checkout not found - set OMNI_HOME."; \
+	  echo "  The tests run on the shared runner; the library itself does not."; \
+	  echo "  git clone https://github.com/voxgig/omni ../../omni"; \
+	  exit 1; \
+	fi
+
+# Default: the smoke test, which needs nothing but this port.
+build: smoke
 
 smoke:
 	g++ tests/smoke.cpp $(CXXFLAGS_COMMON) -I ./src -I ./tests $(EXTRA_INC) -o smoke.out && ./smoke.out
 
-corpus:
-	g++ tests/struct_corpus_test.cpp $(CXXFLAGS_COMMON) -I ./src -I ./tests $(EXTRA_INC) -o corpus.out && ./corpus.out
+corpus: omni-check
+	g++ tests/struct_corpus_test.cpp $(CXXFLAGS_COMMON) -I ./src -I ./tests $(OMNI_INC) $(EXTRA_INC) -o corpus.out && ./corpus.out
 
-test: build
+client: omni-check
+	g++ tests/client_test.cpp $(CXXFLAGS_COMMON) -I ./src -I ./tests $(OMNI_INC) $(EXTRA_INC) -o client.out && ./client.out
+
+test: smoke corpus client
 
 # Cross-port performance harness (JSON contract; see build/bench/README.md).
 # -O2 for representative timings; compile log to stderr.
@@ -31,21 +54,21 @@ compile_and_run_tests: corpus
 check_leak: corpus
 	valgrind --leak-check=full --show-leak-kinds=all ./corpus.out
 
-sanitize:
-	g++ tests/struct_corpus_test.cpp $(CXXFLAGS_COMMON) -fsanitize=address,undefined -g -I ./src -I ./tests $(EXTRA_INC) -o sanitize.out && ./sanitize.out
+sanitize: omni-check
+	g++ tests/struct_corpus_test.cpp $(CXXFLAGS_COMMON) -fsanitize=address,undefined -g -I ./src -I ./tests $(OMNI_INC) $(EXTRA_INC) -o sanitize.out && ./sanitize.out
 
 # Code quality: clang-tidy (static analysis) + clang-format check.
 lint: tidy format-check
 
-tidy:
-	clang-tidy tests/struct_corpus_test.cpp tests/smoke.cpp -- \
-	  $(CXXFLAGS_COMMON) -I ./src -I ./tests $(EXTRA_INC)
+tidy: omni-check
+	clang-tidy tests/struct_corpus_test.cpp tests/client_test.cpp tests/smoke.cpp -- \
+	  $(CXXFLAGS_COMMON) -I ./src -I ./tests $(OMNI_INC) $(EXTRA_INC)
 
 format-check:
 	clang-format --dry-run --Werror $(CPP_SOURCES)
 
 clean:
-	rm -f out.out corpus.out smoke.out sanitize.out corpus-scoreboard.json
+	rm -f out.out corpus.out client.out smoke.out sanitize.out corpus-scoreboard.json
 
 reset: clean
 
