@@ -609,15 +609,74 @@ private func cloneInner(_ v: Value, _ seen: inout [ObjectIdentifier: Value]) -> 
 extension JSON {
   internal static func quotedKey(_ s: String) -> String { quoted(s) }
 
+  // Canonical's numbers are JS numbers and their text is ECMA-262's
+  // Number::toString, which is NOT `Double.description`. Both pick the same
+  // SHORTEST round-tripping digits - "%.17g" printed 4.4 as 4.4000000000000004,
+  // and `validate/basic` asserts "Expected integer, but found decimal: 4.4."
+  // verbatim - but they place the decimal point differently. Swift goes
+  // exponential from 1e16 and pads the exponent to two digits, so 1e16 printed
+  // as "1e+16" where JS gives "10000000000000000", 1e-6 as "1e-06" where JS
+  // gives "0.000001", and 1e-7 as "1e-07" where JS gives "1e-7". So take the
+  // digits from `description` and re-place the point by ECMA's rules.
   public static func formatDouble(_ d: Double) -> String {
     if d.isNaN || d.isInfinite { return "null" }
     if d == d.rounded() && abs(d) < 1e16 {
       return String(Int64(d))
     }
-    // The SHORTEST representation that round-trips, which is what
-    // `Double.description` gives and what canonical's `String(n)` gives in JS.
-    // "%.17g" printed 4.4 as 4.4000000000000004, and `validate/basic` asserts
-    // the text of "Expected integer, but found decimal: 4.4." verbatim.
-    return String(d)
+
+    // `description` is "-?<digits>(.<digits>)?(e[+-]<digits>)?".
+    var rep = d.description
+    var sign = ""
+    if rep.hasPrefix("-") {
+      sign = "-"
+      rep.removeFirst()
+    }
+    var exp = 0
+    if let epos = rep.firstIndex(where: { "eE".contains($0) }) {
+      exp = Int(rep[rep.index(after: epos)...]) ?? 0
+      rep = String(rep[..<epos])
+    }
+    var digits: String
+    var point: Int
+    if let dot = rep.firstIndex(of: ".") {
+      point = rep.distance(from: rep.startIndex, to: dot)
+      digits = String(rep[..<dot]) + String(rep[rep.index(after: dot)...])
+    } else {
+      point = rep.count
+      digits = rep
+    }
+
+    // ECMA-262 Number::toString names `s`, `k` and `n`: `s` is the digits with
+    // no leading or trailing zero, `k` its length, and `s * 10^(n-k)` the value.
+    var n = point + exp
+    while digits.hasPrefix("0") {
+      digits.removeFirst()
+      n -= 1
+    }
+    while digits.hasSuffix("0") { digits.removeLast() }
+    let k = digits.count
+    if 0 == k { return "0" }
+
+    // Integral, point past the last digit: pad with zeros.
+    if k <= n && n <= 21 {
+      return sign + digits + String(repeating: "0", count: n - k)
+    }
+    // Point falls inside the digits.
+    if 0 < n && n <= 21 {
+      let cut = digits.index(digits.startIndex, offsetBy: n)
+      return sign + String(digits[..<cut]) + "." + String(digits[cut...])
+    }
+    // Point falls just left of them: "0." and up to five leading zeros.
+    if -6 < n && n <= 0 {
+      return sign + "0." + String(repeating: "0", count: -n) + digits
+    }
+    // Exponential, and the exponent carries no leading zero.
+    let esign = (n - 1) < 0 ? "-" : "+"
+    let emag = String(abs(n - 1))
+    if 1 == k {
+      return sign + digits + "e" + esign + emag
+    }
+    let head = digits.index(after: digits.startIndex)
+    return sign + String(digits[..<head]) + "." + String(digits[head...]) + "e" + esign + emag
   }
 }
