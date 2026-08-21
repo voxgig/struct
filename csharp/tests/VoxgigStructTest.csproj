@@ -6,6 +6,40 @@
     <IsPackable>false</IsPackable>
     <LangVersion>12</LangVersion>
   </PropertyGroup>
+
+  <!--
+    The test runner is voxgig/omni, consumed as a local checkout: $OMNI_HOME
+    first, then sibling paths, taking the first directory that carries
+    spec/fib.json. A C# project reference resolves at BUILD time, so unlike
+    the other ports the search lives here rather than in tests/Omni.cs.
+
+    This is on the TEST project only. VoxgigStruct.csproj references nothing
+    from omni, so the shipped package cannot acquire it - register 4.13.
+  -->
+  <PropertyGroup>
+    <!--
+      Every candidate is accepted only if it CARRIES spec/fib.json, $OMNI_HOME
+      included. Taking a set-but-wrong OMNI_HOME on trust made the build fail
+      later with "the namespace Omni does not exist", which names neither the
+      variable nor the path - so the check that matters is the file, not the
+      presence of the setting.
+    -->
+    <OmniHome Condition="'$(OmniHome)' == '' And '$(OMNI_HOME)' != '' And Exists('$(OMNI_HOME)/spec/fib.json')">$(OMNI_HOME)</OmniHome>
+    <OmniHome Condition="'$(OmniHome)' == '' And Exists('$(MSBuildThisFileDirectory)../../../omni/spec/fib.json')">$(MSBuildThisFileDirectory)../../../omni</OmniHome>
+    <OmniHome Condition="'$(OmniHome)' == '' And Exists('$(MSBuildThisFileDirectory)../../../../omni/spec/fib.json')">$(MSBuildThisFileDirectory)../../../../omni</OmniHome>
+    <OmniHome Condition="'$(OmniHome)' == '' And Exists('/workspace/omni/spec/fib.json')">/workspace/omni</OmniHome>
+    <OmniHome Condition="'$(OmniHome)' == '' And Exists('/home/user/omni/spec/fib.json')">/home/user/omni</OmniHome>
+  </PropertyGroup>
+
+  <Target Name="OmniCheckoutFound" BeforeTargets="PrepareForBuild">
+    <Error Condition="'$(OmniHome)' == '' And '$(OMNI_HOME)' != ''"
+           Text="struct: OMNI_HOME is set to '$(OMNI_HOME)' but there is no spec/fib.json there - that is not a voxgig/omni checkout." />
+    <Error Condition="'$(OmniHome)' == ''"
+           Text="struct: voxgig/omni checkout not found - set OMNI_HOME. The tests run on the shared runner; the library itself does not depend on it." />
+    <Error Condition="!Exists('$(OmniHome)/csharp/compat/VoxgigOmniCompat.csproj')"
+           Text="struct: found an omni checkout at '$(OmniHome)' but it has no csharp/compat project - it predates the C# compat shim." />
+  </Target>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk"    Version="17.8.0" />
     <PackageReference Include="xunit"                     Version="2.6.6" />
@@ -14,5 +48,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../VoxgigStruct.csproj" />
+    <ProjectReference Include="$(OmniHome)/csharp/compat/VoxgigOmniCompat.csproj" />
   </ItemGroup>
 </Project>

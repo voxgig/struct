@@ -217,9 +217,26 @@ jobs:
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
         with:
           dotnet-version: '8.0.x'
+      # Register 4.13: the omni reference is on the TEST project only, so the
+      # library must still build with no omni checkout present. Checked BEFORE
+      # omni is fetched - CI always has it afterwards, which is exactly why no
+      # port's CI caught this for go.
+      - name: Library builds without omni
+        working-directory: ./csharp
+        run: dotnet build VoxgigStruct.csproj
+      # The test runner is voxgig/omni, consumed as a local checkout (it is
+      # not published to NuGet); the tests find it via OMNI_HOME. The library
+      # itself never depends on omni.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       - name: Run tests
         working-directory: ./csharp/tests
         run: dotnet test
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
 
   test-kotlin:
     runs-on: ${{ matrix.os }}
