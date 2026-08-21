@@ -1,11 +1,32 @@
 # Makefile for the Clojure port of voxgig/struct.
 # Requires the Clojure CLI (`clojure` / `clj`) and a JDK on PATH.
 
-.PHONY: test bench lint build inspect clean reset publish
+.PHONY: test bench lint build inspect clean reset publish omni-check
 
-# Run the shared JSON corpus through the Clojure implementation.
-test:
-	clojure -M:test
+# The corpus runner is voxgig/omni, consumed as a local checkout - it is not
+# published to Clojars. $OMNI_HOME first, then sibling paths, taking the first
+# directory that carries spec/fib.json.
+#
+# It goes on the TEST classpath only, through an :omni alias minted here on the
+# command line as a :local/root dependency: `deps.edn` never names it, so
+# nothing the published jar carries depends on omni (register 4.13) - and
+# `make build` compiles src/ alone.
+OMNI_CANDIDATES := $(OMNI_HOME) ../../omni ../../../omni /workspace/omni /home/user/omni
+OMNI_DIR := $(firstword $(foreach d,$(OMNI_CANDIDATES),$(if $(wildcard $(d)/spec/fib.json),$(d))))
+OMNI_ALIAS = -Sdeps '{:aliases {:omni {:extra-deps {voxgig/omni {:local/root "$(OMNI_DIR)/clojure"}}}}}'
+
+# Fail with the reason rather than "Could not locate voxgig/omni/runner".
+omni-check:
+	@if [ -z "$(OMNI_DIR)" ]; then \
+	  echo "struct: voxgig/omni checkout not found - set OMNI_HOME."; \
+	  echo "  The tests run on the shared runner; the library itself does not."; \
+	  echo "  git clone https://github.com/voxgig/omni ../../omni"; \
+	  exit 1; \
+	fi
+
+# Run the shared JSON corpus through the Clojure implementation, on voxgig/omni.
+test: omni-check
+	clojure $(OMNI_ALIAS) -M:test:omni
 
 # Cross-port performance harness (JSON contract; see build/bench/README.md).
 # Runs clojure.main with src + bench on the classpath.
@@ -15,8 +36,9 @@ bench:
 # "Lint": compile the library + runner namespaces. A clean load means the
 # code is syntactically and structurally sound. (No third-party linter is
 # required; clj-kondo can be added to the :lint alias if available.)
-lint:
-	clojure -M:lint -e "(require 'voxgig.struct :reload) (require 'voxgig.struct-runner :reload) (println \"ok\")"
+# The runner requires omni, so this needs the checkout too.
+lint: omni-check
+	clojure $(OMNI_ALIAS) -M:lint:omni -e "(require 'voxgig.struct :reload) (require 'voxgig.struct-runner :reload) (println \"ok\")"
 
 build:
 	clojure -M -e "(compile 'voxgig.struct)" 2>/dev/null || clojure -M -e "(require 'voxgig.struct)"

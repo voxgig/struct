@@ -10,13 +10,38 @@ Python port, which shares Clojure's single-`nil` world).
 
 ```
 cd clojure
-make test     # clojure -M:test   — runs build/test/test.json through the port
+make test     # the shared corpus, on voxgig/omni
 make lint     # compiles the library + runner namespaces (a clean load = pass)
+make build    # compiles the LIBRARY alone (no omni)
 ```
 
 Requires the Clojure CLI (`clojure`/`clj`) and a JDK on `PATH`. The library
-itself has **zero third-party runtime dependencies**; the test runner reads
-the corpus with a small in-tree JSON reader (no JSON library).
+itself has **zero third-party runtime dependencies**.
+
+- **The corpus runner is voxgig/omni**, a local checkout the Makefile finds via
+  `$OMNI_HOME` or beside this repository and puts on the test classpath as an
+  `:omni` alias (`:local/root`) minted on the command line. `deps.edn` never
+  names it, so nothing the published jar carries depends on omni
+  (register 4.13).
+- **`test/voxgig/struct_runner.clj` is a bridge plus a list of subjects.**
+  `tostruct` / `toomni` convert between omni's persistent Clojure data and
+  this port's mutable `java.util.LinkedHashMap` / `ArrayList` nodes;
+  everything else — the entry loop, `fixjson`, deep equality, `err` and
+  `match` handling — is omni's.
+- **`match.args` needs the arguments back.** The conversion is a copy in both
+  directions, so a subject cannot write through omni's argument list.
+  `:runsetflags-args` takes a subject returning `[args result]`. Delete the
+  write-back and `minor.setpath` and `merge.integrity` fail — which is the
+  check that it is load-bearing.
+- **An integral number becomes a `Long`.** omni parses every JSON number with
+  `Double/parseDouble`; this port's `typify` reads T_integer / T_decimal off
+  the JVM type, so `tostruct` normalises an integral double back. struct/go's
+  shim needed the same (voxgig/omni#13).
+- **A zero-argument entry is CALLED with no argument.** omni supplies `ABSENT`
+  (voxgig/omni#30, register 4.12) and `run-set` turns that into `(subject)`,
+  falling back to `(subject nil)` for a function with no nullary arity. It is
+  the only way a port with one `nil` can separate `minor/typify`'s
+  `{in: null}` from its `{}`.
 
 ## The one thing to understand: nodes are mutable Java collections
 

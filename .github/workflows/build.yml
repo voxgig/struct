@@ -480,6 +480,14 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # The test runner is voxgig/omni, consumed as a local checkout (it is
+      # not published to Clojars); the Makefile mints an :omni alias for it
+      # from OMNI_HOME. The library itself never depends on omni.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
@@ -494,6 +502,8 @@ jobs:
         working-directory: ./clojure
         shell: bash
         run: make test
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
 
   test-dart:
     runs-on: ${{ matrix.os }}
