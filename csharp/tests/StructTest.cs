@@ -223,9 +223,17 @@ public class StructTests
                 if (m == null) return null;
                 object? val = m.TryGetValue("val", out object? v) ? v : null;
                 object? key = m.TryGetValue("key", out object? k) ? k : null;
-                if (m.TryGetValue("alt", out object? alt) && alt != null)
+                // Canonical's default alt is `undefined`, so the no-alt call
+                // has to ask for NONE explicitly: `GetProp(val, key)` defaults
+                // `alt` to null, which answers "null" where canonical answers
+                // "undefined", and under `null: false` the corpus tells them
+                // apart. It also omits `alt` only when the KEY is missing
+                // (`undefined === vin.alt`), so an explicit `alt: null` is
+                // passed through - unlike getelem below, which omits a null
+                // alt too (`null == vin.alt`).
+                if (m.TryGetValue("alt", out object? alt))
                     return StructUtils.GetProp(val, key, alt);
-                return StructUtils.GetProp(val, key);
+                return StructUtils.GetProp(val, key, StructUtils.NONE);
             }, flags: Omni.NoNulls);
     }
 
@@ -248,9 +256,10 @@ public class StructTests
                 if (m == null) return null;
                 object? val = m.TryGetValue("val", out object? v) ? v : null;
                 object? key = m.TryGetValue("key", out object? k) ? k : null;
+                // Canonical's default alt is `undefined`; see MinorGetProp.
                 if (m.TryGetValue("alt", out object? alt) && alt != null)
                     return StructUtils.GetElem(val, key, alt);
-                return StructUtils.GetElem(val, key);
+                return StructUtils.GetElem(val, key, StructUtils.NONE);
             }, flags: Omni.NoNulls);
     }
 
