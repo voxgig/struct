@@ -10,12 +10,17 @@ port. The behavioural contract is the shared JSON corpus in
 ## Status
 
 Complete. Every canonical public function is implemented and the entire
-shared corpus passes (`make test`). **Zero third-party dependencies** — only
-the OCaml compiler is required.
+shared corpus passes (`make test`), on
+[voxgig/omni](https://github.com/voxgig/omni) — the shared test runner.
+**Zero third-party dependencies** — only the OCaml compiler is required, and
+omni is a test-time source file, never part of the library.
 
 ## Requirements
 
 - The OCaml compiler (`ocamlc`), version 4.14 or later.
+- For the tests only: a [voxgig/omni](https://github.com/voxgig/omni)
+  checkout. The Makefile finds it via `$OMNI_HOME` or beside this
+  repository.
 
 ## Use
 
@@ -69,8 +74,8 @@ inject_child`.
 ## Develop
 
 ```
-make test     # run the shared corpus
-make lint     # type-check the library
+make test     # run the shared corpus on voxgig/omni (needs $OMNI_HOME)
+make lint     # type-check the library (no omni)
 make inspect  # compiler version
 ```
 

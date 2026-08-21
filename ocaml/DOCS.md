@@ -98,9 +98,20 @@ select (jt [jm [Str "a"; Num 1.0]; jm [Str "a"; Num 2.0]])
 
 ## Testing
 
-`make test` compiles `src/` + `test/runner.ml` with `ocamlc` and runs the
-entire shared corpus (`../build/test/test.json`) through the port, using an
-in-tree JSON reader and the same runner logic as every other port. Keep it
+`make test` compiles `src/`, omni's `omni.ml` and `test/runner.ml` with
+`ocamlc` and runs the entire shared corpus (`../build/test/test.json`) through
+the port on [voxgig/omni](https://github.com/voxgig/omni) — the shared test
+runner, so the entry loop, the comparison and the `err` and `match` handling
+are literally the same code every other port runs.
+
+omni is consumed as a local checkout the Makefile finds via `$OMNI_HOME` or
+beside this repository, and is compiled into the TEST binary only: `make lint`
+type-checks `src/` alone and nothing shipped names omni (register 4.13).
+
+`test/runner.ml` runs every group the corpus defines except the three
+`condense` ones, which no port implements yet — 1358 entries in 72 groups —
+plus the two `check` entries (`DEF.client`, client-scoped options,
+`contextify`) and four single entries that are not part of any set. Keep it
 green, keep `python3 ../tools/check_parity.py` green, and add no runtime
 dependencies.
 
