@@ -876,12 +876,27 @@ panel and per-port outcomes.
 
 ## Build and test
 
+Building and linting need nothing but this directory. **The tests also need a
+[voxgig/omni](https://github.com/voxgig/omni) checkout, built** — omni is the
+shared corpus runner every port now uses, and it is not published to a package
+registry, so it is consumed as a local checkout. `package.json` gains no
+dependency on it, and `npm run build` never touches it.
+
 ```bash
+# once, FROM THE REPOSITORY ROOT: the test runner, as this repo's sibling
+# (or anywhere, if you set $OMNI_HOME to it)
+git clone https://github.com/voxgig/omni ../omni
+(cd ../omni/typescript && npm install && npm run build)   # dist/ is not committed
+
 cd typescript
 npm install
-npm run build              # tsc -> dist/
-npm test                   # node --test on dist-test/
+npm run build              # tsc -> dist/            (no omni needed)
+npm test                   # node --test on dist-test/ (needs omni, built)
 ```
+
+[`test/omni.ts`](./test/omni.ts) is the only file that names omni. It resolves
+the checkout from `$OMNI_HOME` first, then sibling paths, and says which of the
+two things is wrong — no checkout found, or a checkout found but not built.
 
 Tests live in [`test/`](./test/) and read fixtures from
 [`../build/test/`](../build/test/).  The test runner consumes the
