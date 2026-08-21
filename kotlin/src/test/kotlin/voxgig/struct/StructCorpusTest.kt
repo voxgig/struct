@@ -1,94 +1,42 @@
 package voxgig.struct
 
-import com.google.gson.GsonBuilder
-import org.junit.jupiter.api.AfterAll
-import org.junit.jupiter.api.DynamicTest
-import org.junit.jupiter.api.TestFactory
-import java.nio.file.Files
-import java.nio.file.Paths
-import java.util.TreeMap
+import voxgig.omni.Flags
+import voxgig.omni.Json
 import java.util.function.Function
+import kotlin.test.BeforeTest
+import kotlin.test.Test
 
 /**
- * Mirror of java/src/test/StructCorpusTest.java. Drives every (category,name)
- * pair from build/test/test.json. Each pair becomes a DynamicTest that runs
- * the set, records pass/fail, and contributes to a per-file scoreboard.
+ * The shared corpus, run on the shared runner.
  *
- * Like the Java port: this test never fails the build for shortfalls. Its
- * purpose is to track parity progress; StructTests / StructMinorTest remain
- * the green-bar regression baseline.
+ * The in-situ runner (CorpusRunner.kt) is gone. Every group is driven through
+ * voxgig/omni, so this file only says WHICH subject answers each group and
+ * with which flags - the entry loop, the comparison, the `err` and `match`
+ * handling all live in the runner, identically for every port.
+ *
+ * Flags mirror canonical: typescript/test/utility/StructUtility.test.ts.
  */
-@Suppress("UNCHECKED_CAST")
+@Suppress("UNCHECKED_CAST", "LargeClass", "TooManyFunctions")
 class StructCorpusTest {
-    companion object {
-        private val SCOREBOARD: MutableMap<String, CorpusRunner.Result> = TreeMap()
-        private val CATEGORY_TO_FILE: Map<String, String> =
-            linkedMapOf(
-                "minor" to "minor.jsonic",
-                "walk" to "walk.jsonic",
-                "merge" to "merge.jsonic",
-                "getpath" to "getpath.jsonic",
-                "inject" to "inject.jsonic",
-                "transform" to "transform.jsonic",
-                "validate" to "validate.jsonic",
-                "select" to "select.jsonic",
-                "sentinels" to "sentinels.jsonic",
-                "regex" to "regex.jsonic",
-            )
+    private lateinit var run: Omni.Run
 
-        @JvmStatic
-        @AfterAll
-        fun printScoreboard() {
-            val byFile: MutableMap<String, IntArray> = TreeMap()
-            val failsByFile: MutableMap<String, MutableList<Array<String>>> = TreeMap()
-            var totalP = 0
-            var totalT = 0
-            for ((key, r) in SCOREBOARD) {
-                val cat = key.substringBefore('.')
-                val file = CATEGORY_TO_FILE[cat] ?: "$cat.jsonic"
-                val tot = byFile.getOrPut(file) { IntArray(2) }
-                tot[0] += r.passed
-                tot[1] += r.total
-                failsByFile.getOrPut(file) { mutableListOf() }
-                    .add(arrayOf(key, "${r.passed}/${r.total}"))
-                totalP += r.passed
-                totalT += r.total
-            }
-            val sb = StringBuilder()
-            sb.append("\n========= STRUCT CORPUS SCOREBOARD =========\n")
-            for ((file, tot) in byFile) {
-                sb.append(String.format("  %-18s %4d / %4d%n", file, tot[0], tot[1]))
-                for (sub in failsByFile[file]!!) {
-                    sb.append(String.format("      %-30s %s%n", sub[0], sub[1]))
-                }
-            }
-            sb.append(String.format("  %-18s %4d / %4d%n", "TOTAL", totalP, totalT))
-            sb.append("============================================\n")
-            // Print first 3 failures per non-100% case for debugging.
-            for ((key, r) in SCOREBOARD) {
-                if (r.passed < r.total) {
-                    sb.append("--- $key (${r.passed}/${r.total}) ---\n")
-                    for ((i, f) in r.failures.withIndex()) {
-                        if (i >= 3) break
-                        sb.append("  $f\n")
-                    }
-                }
-            }
-            println(sb)
-
-            try {
-                val out = linkedMapOf<String, Any?>()
-                val files = linkedMapOf<String, Map<String, Int>>()
-                for ((file, tot) in byFile) files[file] = linkedMapOf("passed" to tot[0], "total" to tot[1])
-                out["files"] = files
-                out["total"] = linkedMapOf("passed" to totalP, "total" to totalT)
-                val target = Paths.get("build", "corpus-scoreboard.json")
-                Files.createDirectories(target.parent)
-                Files.writeString(target, GsonBuilder().setPrettyPrinting().create().toJson(out) + "\n")
-            } catch (_: Exception) {
-            }
-        }
+    @BeforeTest
+    fun init() {
+        run = Omni.Run.of("struct")
     }
+
+    private fun group(vararg path: String): Json = run.group(*path)
+
+    private fun runset(
+        vararg path: String,
+        subject: Omni.StructSubject,
+    ) = run.runsetflags(group(*path), Flags(name = path.joinToString(".")), subject)
+
+    private fun runsetnull(
+        vararg path: String,
+        donull: Boolean,
+        subject: Omni.StructSubject,
+    ) = run.runsetflags(group(*path), Flags(nulls = donull, name = path.joinToString(".")), subject)
 
     private fun getp(
         input: Any?,
@@ -101,49 +49,93 @@ class StructCorpusTest {
         def: Any?,
     ): Any? = if (input is Map<*, *> && (input as Map<String, Any?>).containsKey(key)) input[key] else def
 
-    @TestFactory
-    fun corpus(): Iterable<DynamicTest> {
-        val tests = mutableListOf<DynamicTest>()
+    // ===== minor =====
 
-        // ===== minor =====
-        add(tests, "minor", "isnode", true) { Struct.isnode(it) }
-        add(tests, "minor", "ismap", true) { Struct.ismap(it) }
-        add(tests, "minor", "islist", true) { Struct.islist(it) }
-        add(tests, "minor", "iskey", false) { Struct.iskey(it) }
-        add(tests, "minor", "strkey", false) { Struct.strkey(it) }
-        add(tests, "minor", "isempty", false) { Struct.isempty(it) }
-        add(tests, "minor", "isfunc", true) { Struct.isfunc(it) }
-        add(tests, "minor", "getprop", false) {
+    @Test fun minorIsnode() = runset("minor", "isnode") { Struct.isnode(it) }
+
+    @Test fun minorIsmap() = runset("minor", "ismap") { Struct.ismap(it) }
+
+    @Test fun minorIslist() = runset("minor", "islist") { Struct.islist(it) }
+
+    @Test fun minorIskey() = runsetnull("minor", "iskey", donull = false) { Struct.iskey(it) }
+
+    @Test fun minorStrkey() = runsetnull("minor", "strkey", donull = false) { Struct.strkey(it) }
+
+    @Test fun minorIsempty() = runsetnull("minor", "isempty", donull = false) { Struct.isempty(it) }
+
+    @Test fun minorIsfunc() = runset("minor", "isfunc") { Struct.isfunc(it) }
+
+    @Test
+    fun minorGetprop() =
+        runsetnull("minor", "getprop", donull = false) {
+            val v = getp(it, "val")
+            val k = getp(it, "key")
+            // Canonical omits `alt` only when the KEY is missing
+            // (`undefined === vin.alt`), so an explicit `alt: null` is passed
+            // through - unlike getelem below, which omits a null alt too.
+            if (it is Map<*, *> && (it as Map<String, Any?>).containsKey("alt")) {
+                Struct.getprop(v, k, it["alt"])
+            } else {
+                Struct.getprop(v, k)
+            }
+        }
+
+    @Test
+    fun minorGetelem() =
+        runsetnull("minor", "getelem", donull = false) {
             val v = getp(it, "val")
             val k = getp(it, "key")
             val a = getpDef(it, "alt", Struct.UNDEF)
-            if (a === Struct.UNDEF) Struct.getprop(v, k) else Struct.getprop(v, k, a)
+            if (a === Struct.UNDEF || null == a) Struct.getelem(v, k) else Struct.getelem(v, k, a)
         }
-        add(tests, "minor", "getelem", false) {
-            val v = getp(it, "val")
-            val k = getp(it, "key")
-            val a = getpDef(it, "alt", Struct.UNDEF)
-            if (a === Struct.UNDEF) Struct.getelem(v, k) else Struct.getelem(v, k, a)
-        }
-        add(tests, "minor", "clone", false) { Struct.clone(it) }
-        add(tests, "minor", "items", true) { Struct.items(it) }
-        add(tests, "minor", "keysof", true) { Struct.keysof(it) }
-        add(tests, "minor", "haskey", false) { Struct.haskey(getp(it, "src"), getp(it, "key")) }
-        add(tests, "minor", "setprop", true) {
+
+    @Test fun minorClone() = runsetnull("minor", "clone", donull = false) { Struct.clone(it) }
+
+    @Test fun minorItems() = runset("minor", "items") { Struct.items(it) }
+
+    @Test fun minorKeysof() = runset("minor", "keysof") { Struct.keysof(it) }
+
+    @Test
+    fun minorHaskey() = runsetnull("minor", "haskey", donull = false) { Struct.haskey(getp(it, "src"), getp(it, "key")) }
+
+    @Test
+    fun minorSetprop() =
+        runset("minor", "setprop") {
             val parent = getpDef(it, "parent", Struct.UNDEF)
             Struct.setprop(if (parent === Struct.UNDEF) null else parent, getp(it, "key"), getp(it, "val"))
         }
-        add(tests, "minor", "delprop", true) {
+
+    @Test
+    fun minorDelprop() =
+        runset("minor", "delprop") {
             val parent = getpDef(it, "parent", Struct.UNDEF)
             Struct.delprop(if (parent === Struct.UNDEF) null else parent, getp(it, "key"))
         }
-        add(tests, "minor", "size", false) { Struct.size(it) }
-        add(tests, "minor", "typify", false) { Struct.typify(it) }
-        add(tests, "minor", "typename", false) { Struct.typename(it) }
-        add(tests, "minor", "slice", false) { Struct.slice(getp(it, "val"), getp(it, "start"), getp(it, "end")) }
-        add(tests, "minor", "pad", false) { Struct.pad(getp(it, "val"), getp(it, "pad"), getp(it, "char")) }
-        add(tests, "minor", "flatten", true) { Struct.flatten(getp(it, "val"), (getp(it, "depth") as? Number)?.toInt()) }
-        add(tests, "minor", "filter", true) {
+
+    @Test fun minorSize() = runsetnull("minor", "size", donull = false) { Struct.size(it) }
+
+    @Test fun minorTypify() = runsetnull("minor", "typify", donull = false) { Struct.typify(it) }
+
+    @Test fun minorTypename() = runset("minor", "typename") { Struct.typename(it) }
+
+    @Test
+    fun minorSlice() =
+        runsetnull("minor", "slice", donull = false) {
+            Struct.slice(getp(it, "val"), getp(it, "start"), getp(it, "end"))
+        }
+
+    @Test
+    fun minorPad() =
+        runsetnull("minor", "pad", donull = false) {
+            Struct.pad(getp(it, "val"), getp(it, "pad"), getp(it, "char"))
+        }
+
+    @Test
+    fun minorFlatten() = runset("minor", "flatten") { Struct.flatten(getp(it, "val"), (getp(it, "depth") as? Number)?.toInt()) }
+
+    @Test
+    fun minorFilter() =
+        runset("minor", "filter") {
             val v = getp(it, "val")
             when (getp(it, "check")) {
                 "gt3" -> Struct.filter(v) { item -> (item[1] as? Number)?.toDouble()?.let { d -> d > 3 } == true }
@@ -151,36 +143,70 @@ class StructCorpusTest {
                 else -> Struct.filter(v) { true }
             }
         }
-        add(tests, "minor", "escre", false) { Struct.escre(it) }
-        add(tests, "minor", "escurl", false) { Struct.escurl(it) }
-        add(tests, "minor", "join", false) { Struct.join(getp(it, "val"), getp(it, "sep"), getp(it, "url")) }
-        add(tests, "minor", "stringify", false) {
+
+    @Test fun minorEscre() = runset("minor", "escre") { Struct.escre(it) }
+
+    @Test fun minorEscurl() = runset("minor", "escurl") { Struct.escurl(it) }
+
+    @Test
+    fun minorJoin() =
+        runsetnull("minor", "join", donull = false) {
+            Struct.join(getp(it, "val"), getp(it, "sep"), getp(it, "url"))
+        }
+
+    @Test
+    fun minorStringify() =
+        runset("minor", "stringify") {
             val hasVal = it is Map<*, *> && (it as Map<String, Any?>).containsKey("val")
-            val v = if (hasVal) (it as Map<String, Any?>)["val"] else Struct.UNDEF
+            // This group runs with `null: true`, so a corpus null arrives as
+            // the NULLMARK string. Canonical hands `stringify` the word it
+            // would print.
+            val raw = if (hasVal) (it as Map<String, Any?>)["val"] else Struct.UNDEF
+            val v = if (Omni.NULLMARK == raw) "null" else raw
             val maxlen = (getp(it, "max") as? Number)?.toInt()
             if (maxlen == null) Struct.stringify(v) else Struct.stringify(v, maxlen)
         }
-        add(tests, "minor", "jsonify", false) {
+
+    @Test
+    fun minorJsonify() =
+        runsetnull("minor", "jsonify", donull = false) {
             val hasVal = it is Map<*, *> && (it as Map<String, Any?>).containsKey("val")
             val v = if (hasVal) (it as Map<String, Any?>)["val"] else Struct.UNDEF
             Struct.jsonify(v, getp(it, "flags"))
         }
-        add(tests, "minor", "pathify", false) {
-            val path = if (it is Map<*, *> && (it as Map<String, Any?>).containsKey("path")) it["path"] else Struct.UNDEF
+
+    @Test
+    fun minorPathify() =
+        runset("minor", "pathify") {
+            // `null: true`, so an absent path arrives as NULLMARK and the
+            // rendered path has to be put back the way canonical renders a
+            // real undefined.
+            val raw = if (it is Map<*, *> && (it as Map<String, Any?>).containsKey("path")) it["path"] else Struct.UNDEF
+            val marked = Omni.NULLMARK == raw
+            val path = if (marked) Struct.UNDEF else raw
             val from = (getp(it, "from") as? Number)?.toInt()
-            if (from == null) Struct.pathify(path) else Struct.pathify(path, from)
+            var text = if (from == null) Struct.pathify(path) else Struct.pathify(path, from)
+            text = text.replaceFirst(Omni.NULLMARK + ".", "")
+            if (marked) text.replace(">", ":null>") else text
         }
-        add(tests, "minor", "setpath", false) {
+
+    @Test
+    fun minorSetpath() =
+        runsetnull("minor", "setpath", donull = false) {
             Struct.setpath(getp(it, "store"), getp(it, "path"), getp(it, "val"))
         }
-        add(tests, "minor", "getdef", true) { Struct.getdef(getp(it, "val"), getp(it, "alt")) }
 
-        // ===== walk =====
-        add(tests, "walk", "basic", true) {
+    // ===== walk =====
+
+    @Test
+    fun walkBasic() =
+        runset("walk", "basic") {
             Struct.walk(it, Struct.WalkApply { _, v, _, p -> if (v is String) v + "~" + p.joinToString(".") else v })
         }
-        add(tests, "walk", "log", true) { Struct.clone(it) }
-        add(tests, "walk", "depth", false) {
+
+    @Test
+    fun walkDepth() =
+        runsetnull("walk", "depth", donull = false) {
             val src = getp(it, "src")
             val maxdepth = (getp(it, "maxdepth") as? Number)?.toInt()
             val top = arrayOfNulls<Any>(1)
@@ -205,19 +231,63 @@ class StructCorpusTest {
             top[0]
         }
 
-        // ===== merge =====
-        add(tests, "merge", "cases", true) { Struct.merge(it) }
-        add(tests, "merge", "array", true) { Struct.merge(it) }
-        add(tests, "merge", "integrity", true) { Struct.merge(it) }
-        add(tests, "merge", "depth", true) {
+    @Test
+    fun walkCopy() =
+        runset("walk", "copy") {
+            val cur = mutableListOf<Any?>()
+            val walkcopy =
+                Struct.WalkApply { key, value, _, path ->
+                    if (key == null) {
+                        cur.clear()
+                        cur.add(
+                            if (Struct.ismap(value)) {
+                                linkedMapOf<String, Any?>()
+                            } else if (Struct.islist(value)) {
+                                mutableListOf<Any?>()
+                            } else {
+                                value
+                            },
+                        )
+                    } else {
+                        val depth = path.size
+                        var child = value
+                        if (Struct.isnode(value)) {
+                            child = if (Struct.ismap(value)) linkedMapOf<String, Any?>() else mutableListOf<Any?>()
+                            while (cur.size <= depth) cur.add(null)
+                            cur[depth] = child
+                        }
+                        Struct.setprop(cur[depth - 1], key, child)
+                    }
+                    value
+                }
+            Struct.walk(it, walkcopy)
+            cur.firstOrNull()
+        }
+
+    // ===== merge =====
+
+    @Test fun mergeCases() = runset("merge", "cases") { Struct.merge(it) }
+
+    @Test fun mergeArray() = runset("merge", "array") { Struct.merge(it) }
+
+    @Test fun mergeIntegrity() = runset("merge", "integrity") { Struct.merge(it) }
+
+    @Test
+    fun mergeDepth() =
+        runset("merge", "depth") {
             val v = getp(it, "val")
             val d = (getp(it, "depth") as? Number)?.toInt() ?: 32
             Struct.merge(v, d)
         }
 
-        // ===== getpath =====
-        add(tests, "getpath", "basic", true) { Struct.getpath(getp(it, "store"), getp(it, "path")) }
-        add(tests, "getpath", "relative", true) {
+    // ===== getpath =====
+
+    @Test
+    fun getpathBasic() = runset("getpath", "basic") { Struct.getpath(getp(it, "store"), getp(it, "path")) }
+
+    @Test
+    fun getpathRelative() =
+        runset("getpath", "relative") {
             val inj: Struct.Injection? =
                 (it as? Map<String, Any?>)?.let { m ->
                     if (!m.containsKey("dparent") && !m.containsKey("dpath") && !m.containsKey("base")) {
@@ -237,7 +307,10 @@ class StructCorpusTest {
                 }
             Struct.getpath(getp(it, "store"), getp(it, "path"), inj)
         }
-        add(tests, "getpath", "special", true) {
+
+    @Test
+    fun getpathSpecial() =
+        runset("getpath", "special") {
             val injMap = getp(it, "inj") as? Map<String, Any?>
             val inj =
                 injMap?.let { im ->
@@ -259,37 +332,84 @@ class StructCorpusTest {
             Struct.getpath(getp(it, "store"), getp(it, "path"), inj)
         }
 
-        // ===== inject =====
-        // inject.string passes the nullModifier so a resolved JSON null (encoded
-        // by fixJSON as "__NULL__") renders as the literal text "null".
-        add(tests, "inject", "string", true) {
+    @Test
+    fun getpathHandler() =
+        runset("getpath", "handler") {
+            // The handler resolves a `$`-prefixed store entry that is a
+            // FUNCTION: the store holds `$FOO`, and the handler calls it.
+            // Nothing else in the corpus exercises `Injection.handler`.
+            val store =
+                linkedMapOf<String, Any?>(
+                    "\$TOP" to getp(it, "store"),
+                    "\$FOO" to Struct.Injector { _, _, _, _ -> "foo" },
+                )
+            val inj =
+                Struct.Injection(null, null).apply {
+                    handler =
+                        Struct.Injector { cinj, v, ref, cstore ->
+                            if (v is Struct.Injector) v.apply(cinj, v, ref, cstore) else v
+                        }
+                }
+            Struct.getpath(store, getp(it, "path"), inj)
+        }
+
+    // ===== inject =====
+
+    @Test
+    fun injectString() =
+        runset("inject", "string") {
+            // The runner encodes "value is JSON null" as NULLMARK so it
+            // survives a JSON round trip; this modifier puts a real null back
+            // as the structure is built.
             val inj = Struct.Injection(null, null)
-            inj.modify = CorpusRunner.NULL_MODIFIER
+            inj.modify =
+                Struct.Modify { v, k, parent, _, _ ->
+                    if (k != null && Struct.isnode(parent) && v is String) {
+                        if (Omni.NULLMARK == v) {
+                            Struct.setprop(parent, k, null)
+                        } else if (v.contains(Omni.NULLMARK)) {
+                            Struct.setprop(parent, k, v.replace(Omni.NULLMARK, "null"))
+                        }
+                    }
+                }
             Struct.inject(getp(it, "val"), getp(it, "store"), inj)
         }
-        add(tests, "inject", "deep", true) { Struct.inject(getp(it, "val"), getp(it, "store")) }
 
-        // ===== transform =====
-        add(tests, "transform", "paths", true) { Struct.transform(getp(it, "data"), getp(it, "spec")) }
-        add(tests, "transform", "cmds", true) { Struct.transform(getp(it, "data"), getp(it, "spec")) }
-        add(tests, "transform", "each", true) { Struct.transform(getp(it, "data"), getp(it, "spec")) }
-        add(tests, "transform", "pack", true) { Struct.transform(getp(it, "data"), getp(it, "spec")) }
-        add(tests, "transform", "ref", true) { Struct.transform(getp(it, "data"), getp(it, "spec")) }
-        add(tests, "transform", "format", false) { Struct.transform(getp(it, "data"), getp(it, "spec")) }
-        add(tests, "transform", "modify", true) {
+    @Test fun injectDeep() = runset("inject", "deep") { Struct.inject(getp(it, "val"), getp(it, "store")) }
+
+    // ===== transform =====
+
+    @Test fun transformPaths() = runset("transform", "paths") { Struct.transform(getp(it, "data"), getp(it, "spec")) }
+
+    @Test fun transformCmds() = runset("transform", "cmds") { Struct.transform(getp(it, "data"), getp(it, "spec")) }
+
+    @Test fun transformEach() = runset("transform", "each") { Struct.transform(getp(it, "data"), getp(it, "spec")) }
+
+    @Test fun transformPack() = runset("transform", "pack") { Struct.transform(getp(it, "data"), getp(it, "spec")) }
+
+    @Test fun transformRef() = runset("transform", "ref") { Struct.transform(getp(it, "data"), getp(it, "spec")) }
+
+    @Test
+    fun transformFormat() = runsetnull("transform", "format", donull = false) { Struct.transform(getp(it, "data"), getp(it, "spec")) }
+
+    @Test
+    fun transformModify() =
+        runset("transform", "modify") {
             val opts =
                 linkedMapOf<String, Any?>(
                     "modify" to
                         Struct.Modify { v, k, parent, _, _ ->
                             if (k != null && parent is MutableMap<*, *> && v is String) {
-                                @Suppress("UNCHECKED_CAST")
                                 (parent as MutableMap<String, Any?>)[k.toString()] = "@$v"
                             }
                         },
                 )
             Struct.transform(getp(it, "data"), getp(it, "spec"), opts)
         }
-        add(tests, "transform", "apply", true) {
+
+    @Test
+    fun transformApply() =
+        runset("transform", "apply") {
             val opts =
                 linkedMapOf<String, Any?>(
                     "extra" to
@@ -300,76 +420,92 @@ class StructCorpusTest {
             Struct.transform(getp(it, "data"), getp(it, "spec"), opts)
         }
 
-        // ===== validate =====
-        add(tests, "validate", "basic", false) { Struct.validate(getp(it, "data"), getp(it, "spec")) }
-        add(tests, "validate", "child", true) { Struct.validate(getp(it, "data"), getp(it, "spec")) }
-        add(tests, "validate", "one", true) { Struct.validate(getp(it, "data"), getp(it, "spec")) }
-        add(tests, "validate", "exact", true) { Struct.validate(getp(it, "data"), getp(it, "spec")) }
-        add(tests, "validate", "invalid", false) { Struct.validate(getp(it, "data"), getp(it, "spec")) }
-        add(tests, "validate", "special", true) {
+    // ===== validate =====
+
+    @Test
+    fun validateBasic() = runsetnull("validate", "basic", donull = false) { Struct.validate(getp(it, "data"), getp(it, "spec")) }
+
+    @Test fun validateChild() = runset("validate", "child") { Struct.validate(getp(it, "data"), getp(it, "spec")) }
+
+    @Test fun validateOne() = runset("validate", "one") { Struct.validate(getp(it, "data"), getp(it, "spec")) }
+
+    @Test fun validateExact() = runset("validate", "exact") { Struct.validate(getp(it, "data"), getp(it, "spec")) }
+
+    @Test
+    fun validateInvalid() = runsetnull("validate", "invalid", donull = false) { Struct.validate(getp(it, "data"), getp(it, "spec")) }
+
+    @Test
+    fun validateSpecial() =
+        runset("validate", "special") {
             val inj = (getp(it, "inj") as? Map<String, Any?>)
             Struct.validate(getp(it, "data"), getp(it, "spec"), inj)
         }
 
-        // ===== select =====
-        add(tests, "select", "basic", true) { Struct.select(getp(it, "obj"), getp(it, "query")) }
-        add(tests, "select", "operators", true) { Struct.select(getp(it, "obj"), getp(it, "query")) }
-        add(tests, "select", "edge", true) { Struct.select(getp(it, "obj"), getp(it, "query")) }
-        add(tests, "select", "alts", true) { Struct.select(getp(it, "obj"), getp(it, "query")) }
+    // ===== select =====
 
-        // ===== regex (parity floor: Go stdlib regexp; REGEX_API.md) =====
-        add(tests, "regex", "test", true) {
-            Struct.reTest(getp(it, "pattern") as String, getp(it, "input") as String)
-        }
-        add(tests, "regex", "find", true) {
-            Struct.reFind(getp(it, "pattern") as String, getp(it, "input") as String)
-        }
-        add(tests, "regex", "find_all", true) {
-            Struct.reFindAll(getp(it, "pattern") as String, getp(it, "input") as String)
-        }
-        add(tests, "regex", "replace", true) {
+    @Test fun selectBasic() = runset("select", "basic") { Struct.select(getp(it, "obj"), getp(it, "query")) }
+
+    @Test fun selectOperators() = runset("select", "operators") { Struct.select(getp(it, "obj"), getp(it, "query")) }
+
+    @Test fun selectEdge() = runset("select", "edge") { Struct.select(getp(it, "obj"), getp(it, "query")) }
+
+    @Test fun selectAlts() = runset("select", "alts") { Struct.select(getp(it, "obj"), getp(it, "query")) }
+
+    @Test
+    fun selectNullkey() =
+        // `null: false` keeps a JSON null an ACTUAL null rather than the
+        // NULLMARK string, so select sees a present-but-null field.
+        runsetnull("select", "nullkey", donull = false) { Struct.select(getp(it, "obj"), getp(it, "query")) }
+
+    // ===== regex (parity floor: Go stdlib regexp; REGEX_API.md) =====
+
+    @Test
+    fun regexTest() = runset("regex", "test") { Struct.reTest(getp(it, "pattern") as String, getp(it, "input") as String) }
+
+    @Test
+    fun regexFind() = runset("regex", "find") { Struct.reFind(getp(it, "pattern") as String, getp(it, "input") as String) }
+
+    @Test
+    fun regexFindAll() = runset("regex", "find_all") { Struct.reFindAll(getp(it, "pattern") as String, getp(it, "input") as String) }
+
+    @Test
+    fun regexReplace() =
+        runset("regex", "replace") {
             Struct.reReplace(
                 getp(it, "pattern") as String,
                 getp(it, "input") as String,
                 getp(it, "replacement") as String,
             )
         }
-        add(tests, "regex", "escape", true) {
-            Struct.reEscape(getp(it, "val") as String)
+
+    @Test fun regexEscape() = runset("regex", "escape") { Struct.reEscape(getp(it, "val") as String) }
+
+    // ===== sentinels: null and absent unified on observation =====
+
+    @Test
+    fun sentinelsGetpropUnify() =
+        runsetnull("sentinels", "getprop_unify", donull = false) {
+            Struct.getprop(getp(it, "val"), getp(it, "key"), getp(it, "alt"))
         }
 
-        // ===== sentinels =====
-        // Group A null-unification + null-aware scalar behaviour. All run with
-        // nullFlag=false (raw nulls preserved) so the Group A rule is exercised
-        // directly — mirrors canonical StructUtility.test.ts sentinels-* tests.
-        add(tests, "sentinels", "getprop_unify", false) { Struct.getprop(getp(it, "val"), getp(it, "key"), getp(it, "alt")) }
-        add(tests, "sentinels", "getelem_absent", false) { Struct.getelem(getp(it, "val"), getp(it, "key"), getp(it, "alt")) }
-        add(tests, "sentinels", "haskey_unify", false) { Struct.haskey(getp(it, "val"), getp(it, "key")) }
-        add(tests, "sentinels", "isempty_unify", false) { Struct.isempty(it) }
-        add(tests, "sentinels", "isnode_unify", false) { Struct.isnode(it) }
-        add(tests, "sentinels", "stringify_null", false) { Struct.stringify(it) }
+    @Test
+    fun sentinelsGetelemAbsent() =
+        runsetnull("sentinels", "getelem_absent", donull = false) {
+            Struct.getelem(getp(it, "val"), getp(it, "key"), getp(it, "alt"))
+        }
 
-        return tests
-    }
+    @Test
+    fun sentinelsHaskeyUnify() =
+        runsetnull("sentinels", "haskey_unify", donull = false) {
+            Struct.haskey(getp(it, "val"), getp(it, "key"))
+        }
 
-    private fun add(
-        tests: MutableList<DynamicTest>,
-        category: String,
-        name: String,
-        nullFlag: Boolean,
-        subject: CorpusRunner.Subject,
-    ) {
-        tests.add(
-            DynamicTest.dynamicTest("$category-$name") {
-                val spec =
-                    try {
-                        CorpusRunner.getSpec(category, name)
-                    } catch (_: Exception) {
-                        return@dynamicTest
-                    }
-                val r = CorpusRunner.runsetflags("$category.$name", spec, nullFlag, subject)
-                SCOREBOARD["$category.$name"] = r
-            },
-        )
-    }
+    @Test
+    fun sentinelsIsemptyUnify() = runsetnull("sentinels", "isempty_unify", donull = false) { Struct.isempty(it) }
+
+    @Test
+    fun sentinelsIsnodeUnify() = runsetnull("sentinels", "isnode_unify", donull = false) { Struct.isnode(it) }
+
+    @Test
+    fun sentinelsStringifyNull() = runsetnull("sentinels", "stringify_null", donull = false) { Struct.stringify(it) }
 }

@@ -219,7 +219,7 @@ language-neutral form:
   `validate`, `select`, …) preserve it literally.
 
 [`../REPORT.md`](../design/REPORT.md) records this port as **already Group A**;
-the shared corpus passes 1259/1259 assertions here. If your data source
+the shared corpus passes 1360/1360 assertions here. If your data source
 returns `null` for "not set", decide which
 you mean before handing it to `struct`. The corpus bridges the two with
 the `"__NULL__"` / `"__UNDEF__"` / `"__EXISTS__"` markers (see
@@ -267,10 +267,20 @@ The build cannot run in a network-isolated environment — Gradle resolves
 the Kotlin 2.2, detekt 1.23, and ktlint 12.1 plugins from Maven Central
 on first use. JVM target is 17.
 
-Tests live under [`src/test/kotlin/voxgig/struct/`](./src/test/kotlin/voxgig/struct/);
-the runner loads the shared corpus from [`../build/test/`](../build/test/),
-mirroring the reference runner in
-[`../typescript/test/runner.ts`](../typescript/test/runner.ts).
+Tests live under [`src/test/kotlin/voxgig/struct/`](./src/test/kotlin/voxgig/struct/)
+and run the shared corpus from [`../build/test/`](../build/test/) on
+[voxgig/omni](https://github.com/voxgig/omni), the shared test runner —
+consumed as a local checkout `build.gradle.kts` finds via `$OMNI_HOME` or
+beside this repository, in its own source set so it reaches the tests and
+nothing else.
+
+`StructCorpusTest` runs every group the corpus defines except the three
+`condense` ones, which no port implements yet: 1358 entries in 72 groups.
+`ClientTest` runs the two `check` entries — `DEF.client`, client-scoped
+options, and `contextify`. `StructTests` holds what the corpus shape cannot
+express: identity, presence, and the hand-built injectors and modifiers a JSON
+entry has no way to carry. `Omni.kt` is the bridge between omni's sealed
+`Json` and this port's plain `Any?`.
 
 **To change behaviour:** this is a *port*, so behaviour changes start in
 the canonical TypeScript, not here. Edit `../typescript/src/StructUtility.ts`,
