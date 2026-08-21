@@ -12,18 +12,57 @@ TEST_SOURCES := $(wildcard tests/*.c)
 TEST_HEADERS := $(wildcard tests/*.h)
 ALL_SOURCES := $(C_SOURCES) $(C_HEADERS) $(TEST_SOURCES) $(TEST_HEADERS)
 
-.PHONY: build smoke test bench corpus check_leak sanitize lint tidy format format-check clean reset inspect publish
+# The corpus runner is voxgig/omni, consumed as a local checkout - it is not
+# published, and C has no registry to publish it to. $OMNI_HOME first, then
+# sibling paths, taking the first directory that carries spec/fib.json.
+#
+# It is compiled into the TEST binaries only. `make build` builds src/ alone,
+# and nothing in the shipped library names omni (register 4.13).
+OMNI_CANDIDATES := $(OMNI_HOME) ../../omni ../../../omni /workspace/omni /home/user/omni
+OMNI_DIR := $(firstword $(foreach d,$(OMNI_CANDIDATES),$(if $(wildcard $(d)/spec/fib.json),$(d))))
+OMNI_SOURCES := $(wildcard $(OMNI_DIR)/c/src/*.c)
+OMNI_INC := $(if $(OMNI_DIR),-I $(OMNI_DIR)/c/src)
+OMNI_OBJ_DIR := .omni-obj
+OMNI_OBJS := $(addprefix $(OMNI_OBJ_DIR)/,$(notdir $(OMNI_SOURCES:.c=.o)))
 
-# Default: compile and run the corpus driver.
-build: corpus
+# omni is compiled on its OWN include path, never with `-I ./src`.
+#
+# `-I` directories are searched for angle-bracket includes too, and this port
+# ships `src/regex.h`. Compiling omni's `util.c` with `-I ./src` on the command
+# line made its `#include <regex.h>` resolve to that file instead of POSIX's,
+# and `regex_t` stopped existing. Same shape as the shadowing register 4.15
+# records for lua, in the other direction: there a shim put omni's `src/` on a
+# consumer's module path; here a consumer put its own `src/` on omni's.
+$(OMNI_OBJ_DIR)/%.o: $(OMNI_DIR)/c/src/%.c
+	@mkdir -p $(OMNI_OBJ_DIR)
+	$(CC) -c $< $(CFLAGS_COMMON) $(CFLAGS_DEBUG) -I $(OMNI_DIR)/c/src -o $@
+
+.PHONY: build smoke test bench corpus client check_leak sanitize lint tidy format format-check clean reset inspect publish omni-check
+
+# Fail with the reason rather than a page of "omni.h: No such file".
+omni-check:
+	@if [ -z "$(OMNI_DIR)" ]; then \
+	  echo "struct: voxgig/omni checkout not found - set OMNI_HOME."; \
+	  echo "  The tests run on the shared runner; the library itself does not."; \
+	  echo "  git clone https://github.com/voxgig/omni ../../omni"; \
+	  exit 1; \
+	fi
+
+# Default: compile the library. The tests need omni; this does not.
+build:
+	$(CC) -c $(C_SOURCES) $(CFLAGS_COMMON) $(CFLAGS_DEBUG) -I ./src $(EXTRA_INC)
+	@rm -f *.o
 
 smoke:
 	$(CC) tests/smoke.c $(C_SOURCES) $(CFLAGS_COMMON) $(CFLAGS_DEBUG) -I ./src $(EXTRA_INC) -o smoke.out $(LDLIBS) && ./smoke.out
 
-corpus:
-	$(CC) tests/struct_corpus_test.c $(C_SOURCES) $(CFLAGS_COMMON) $(CFLAGS_DEBUG) -I ./src $(EXTRA_INC) -o corpus.out $(LDLIBS) && ./corpus.out
+corpus: omni-check $(OMNI_OBJS)
+	$(CC) tests/struct_corpus_test.c $(C_SOURCES) $(OMNI_OBJS) $(CFLAGS_COMMON) $(CFLAGS_DEBUG) -I ./src $(OMNI_INC) $(EXTRA_INC) -o corpus.out $(LDLIBS) && ./corpus.out
 
-test: corpus
+client: omni-check $(OMNI_OBJS)
+	$(CC) tests/client_test.c $(C_SOURCES) $(OMNI_OBJS) $(CFLAGS_COMMON) $(CFLAGS_DEBUG) -I ./src $(OMNI_INC) $(EXTRA_INC) -o client.out $(LDLIBS) && ./client.out
+
+test: corpus client
 
 # Cross-port performance harness (JSON contract; see build/bench/README.md).
 # Release-optimised; build log to stderr so stdout is only the JSON line.
@@ -34,15 +73,15 @@ bench:
 check_leak: corpus
 	valgrind --leak-check=full --show-leak-kinds=all --error-exitcode=1 ./corpus.out
 
-sanitize:
-	$(CC) tests/struct_corpus_test.c $(C_SOURCES) $(CFLAGS_COMMON) -fsanitize=address,undefined -g -I ./src $(EXTRA_INC) -o sanitize.out $(LDLIBS) && ./sanitize.out
+sanitize: omni-check $(OMNI_OBJS)
+	$(CC) tests/struct_corpus_test.c $(C_SOURCES) $(OMNI_OBJS) $(CFLAGS_COMMON) -fsanitize=address,undefined -g -I ./src $(OMNI_INC) $(EXTRA_INC) -o sanitize.out $(LDLIBS) && ./sanitize.out
 
 # Code quality: clang-tidy (static analysis) + clang-format check.
 lint: format-check tidy
 
-tidy:
+tidy: omni-check
 	clang-tidy $(C_SOURCES) $(TEST_SOURCES) -- \
-	  $(CFLAGS_COMMON) -I ./src $(EXTRA_INC)
+	  $(CFLAGS_COMMON) -I ./src $(OMNI_INC) $(EXTRA_INC)
 
 format:
 	clang-format -i $(ALL_SOURCES)
@@ -51,7 +90,7 @@ format-check:
 	clang-format --dry-run --Werror $(ALL_SOURCES)
 
 clean:
-	rm -f smoke.out corpus.out sanitize.out corpus-scoreboard.json
+	rm -rf smoke.out corpus.out client.out sanitize.out corpus-scoreboard.json $(OMNI_OBJ_DIR)
 
 reset: clean
 
