@@ -264,3 +264,7 @@ cpp/bench/bench.out
 # sibling voxgig/omni checkout. Machine-specific, never committed.
 go/go.work
 go/go.work.sum
+
+# A link to the voxgig/omni checkout, and where CI checks omni out to.
+# Machine-specific, never committed.
+.omni
