@@ -3,7 +3,7 @@
 > Kotlin/JVM port of the canonical TypeScript implementation.
 >
 > **Status: complete.** Carries the **full** TS-canonical public API and
-> passes the shared corpus in full (1315/1315). All 48 functions, 15 type
+> passes the shared corpus in full (1360/1360). All 48 functions, 15 type
 > bit-flags, 3 mode constants (`M_KEYPRE`/`M_KEYPOST`/`M_VAL`),
 > `SKIP`/`DELETE` sentinels, and the `Injection` state machine.
 > `inject()`/`transform()`/`validate()`/`select()` all dispatch through
@@ -13,9 +13,9 @@
 > `$CHILD`/`$ONE`/`$EXACT`), and 4 select operators (`$AND`/`$OR`/
 > `$NOT`/`$CMP`). `python3 ../tools/check_parity.py` reports it `ok`.
 >
-> Passes the shared corpus suite (1259/1259 assertions across 8
-> files, run as 60 dynamic corpus subtests). Run locally with
-> `./gradlew test` from `kotlin/`.
+> Passes the shared corpus (1360/1360), run on
+> [voxgig/omni](https://github.com/voxgig/omni) — the shared test runner,
+> consumed as a local checkout. Run it with `./gradlew test` from `kotlin/`.
 
 For motivation, language-neutral concepts, and the cross-language
 parity matrix, see the [top-level README](../README.md),
@@ -28,9 +28,14 @@ Kotlin port guide is [`DOCS.md`](./DOCS.md).
 In the monorepo:
 
 ```bash
+git clone https://github.com/voxgig/omni ../../omni   # the test runner
+
 cd kotlin
 ./gradlew build        # or `make build` (compiles), `make test` (runs the suite)
 ```
+
+Set `OMNI_HOME` if the checkout is somewhere else. Only the tests need it —
+omni is not in the published jar.
 
 Gradle (Kotlin DSL) project; group `voxgig.struct`. The implementation
 is a single Kotlin `object` (singleton): `voxgig.struct.Struct`. The
@@ -567,7 +572,7 @@ Inside backticks in a `validate` spec (implemented as `validate_STRING`,
 
 The Kotlin port is **Complete**: it implements the entire canonical public
 surface, `check_parity.py` reports it `ok`, and it passes the shared corpus
-in full (1315/1315). Treat behavioural authority as resting with the
+in full (1360/1360). Treat behavioural authority as resting with the
 canonical TypeScript and the shared corpus.
 
 ### `null` conventions
@@ -578,7 +583,7 @@ distinct sentinel `Struct.UNDEF` (a private `Any()` identity) represents
 Group A readers (`getprop`, `getelem`, `haskey`, `isempty`, `isnode`)
 treat a stored `null` as no value; Group B processors (`clone`, `merge`,
 `walk`, `transform`, …) preserve it literally. REPORT.md lists Kotlin as
-"already Group A"; the shared corpus passes 1259/1259 assertions here.
+"already Group A"; the shared corpus passes 1360/1360 assertions here.
 
 ### Object model
 
@@ -648,7 +653,12 @@ make clean       # ./gradlew clean
 make reset       # clean + rm -rf .gradle build
 ```
 
-Lint is detekt (static analysis) + ktlint (style). Tests live in
-[`src/test/kotlin/voxgig/struct/`](./src/test/kotlin/voxgig/struct/) and
-load the shared corpus from [`../build/test/`](../build/test/). JVM
+Lint is detekt (static analysis) + ktlint (style); both see this port's
+sources only, since omni has its own source set. Tests live in
+[`src/test/kotlin/voxgig/struct/`](./src/test/kotlin/voxgig/struct/) and run
+the shared corpus from [`../build/test/`](../build/test/) on
+[voxgig/omni](https://github.com/voxgig/omni). `StructCorpusTest` runs every
+group the corpus defines except the three `condense` ones, which no port
+implements yet — 1358 entries in 72 groups; `ClientTest` runs the two `check`
+entries; `StructTests` holds what the corpus shape cannot express. JVM
 target 17.

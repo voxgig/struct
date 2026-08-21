@@ -280,20 +280,38 @@ jobs:
         java-version: ['17']
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # The test runner is voxgig/omni, consumed as a local checkout (it is
+      # not published to Maven Central); the build finds it via OMNI_HOME. The
+      # library itself never depends on omni - it is not in the published jar.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       - name: Setup Java ${{ matrix.java-version }}
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
           java-version: ${{ matrix.java-version }}
+      # The library build must not need omni. Checked BEFORE the tests, since
+      # afterwards the checkout is there and the check proves nothing.
+      - name: Library builds without omni
+        if: runner.os != 'Windows'
+        working-directory: ./kotlin
+        run: ./gradlew jar
       - name: Run tests (Unix)
         if: runner.os != 'Windows'
         working-directory: ./kotlin
         run: ./gradlew test
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
       - name: Run tests (Windows)
         if: runner.os == 'Windows'
         working-directory: ./kotlin
         shell: pwsh
         run: .\gradlew.bat test
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
 
   test-java:
     runs-on: ${{ matrix.os }}

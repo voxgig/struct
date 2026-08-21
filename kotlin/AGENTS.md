@@ -16,14 +16,19 @@ covers only what is specific to the Kotlin port.
 **Complete.** The full canonical surface is present (40 functions, 15 type
 flags, 3 mode constants, the sentinels, the `Injection` machine),
 `../tools/check_parity.py` reports it `ok`, and the shared corpus passes in
-full (1315/1315).
+full (1360/1360) on [voxgig/omni](https://github.com/voxgig/omni), the shared
+test runner.
 
 ## Layout
 
 ```
 kotlin/
 ├── src/main/kotlin/voxgig/struct/Struct.kt   # THE implementation (object Struct)
-├── src/test/kotlin/voxgig/struct/            # corpus-driven tests + regex panel
+├── src/test/kotlin/voxgig/struct/Omni.kt     # the bridge to voxgig/omni, both value models
+├── src/test/kotlin/voxgig/struct/StructCorpusTest.kt  # the shared corpus, on the shared runner
+├── src/test/kotlin/voxgig/struct/ClientTest.kt        # the client path (DEF.client, contextify)
+├── src/test/kotlin/voxgig/struct/StructTests.kt       # what the corpus shape cannot express
+├── src/test/kotlin/voxgig/struct/RegexPathologicalTest.kt
 ├── build.gradle.kts                          # Kotlin DSL build (plugins, deps)
 ├── settings.gradle.kts                       # rootProject.name = "struct-kt"
 ├── detekt.yml                                # detekt config
@@ -46,7 +51,22 @@ make reset                   # clean + rm -rf .gradle build
 ```
 
 `make build/test/lint/clean/reset` from this dir wrap the same Gradle
-calls. **The build needs network on first use** — Gradle resolves the
+calls.
+
+- **The corpus runner is voxgig/omni**, a local checkout `build.gradle.kts`
+  finds via `$OMNI_HOME` or beside this repository. It is not on Maven
+  Central. Its classes reach the TESTS and nowhere else - it has its own
+  source set, wired to `testImplementation` only, so `./gradlew jar` and
+  anything published are untouched (register 4.13). CI checks `jar` BEFORE
+  fetching omni, since afterwards the check proves nothing.
+- **`Omni.kt` converts both value models.** omni has a sealed `Json`; this
+  port has plain `Any?` with `Struct.UNDEF` for absent. Both draw the same
+  absent/null/value distinction, so nothing is guessed. omni's `Subject`
+  takes an immutable `List<Json>`, but its ELEMENTS are mutable, so the
+  bridge refills omni's own container after the call - that is what lets
+  `match.args` see an in-place `setpath`.
+
+**The build needs network on first use** — Gradle resolves the
 Kotlin 2.2, detekt 1.23, and ktlint 12.1 plugins from Maven Central. If
 you cannot build in this environment, say so; do not claim a change
 passes that you could not run.

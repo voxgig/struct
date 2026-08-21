@@ -1,74 +1,58 @@
 package voxgig.struct
 
-import com.google.gson.Gson
-import com.google.gson.reflect.TypeToken
-import java.nio.file.Files
-import java.nio.file.Path
 import java.util.function.Function
 import java.util.function.Supplier
-import java.util.regex.Pattern
 import kotlin.math.floor
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
+/**
+ * The properties the corpus shape cannot express: identity, the presence of a
+ * value rather than its shape, and the hand-built injectors and modifiers a
+ * JSON entry has no way to carry.
+ *
+ * Everything the corpus DOES express lives in StructCorpusTest, which runs it
+ * on voxgig/omni. This file used to carry its own entry loop as well - one
+ * that dropped every entry missing `in` or `out`, and every entry with `err`
+ * - and those loops are gone with it.
+ *
+ * The four `*Basic` cases read a single corpus entry that is not part of any
+ * set, so the runner cannot drive them; the spec comes off the runner rather
+ * than from a second loader.
+ */
 @Suppress("UNCHECKED_CAST")
 class StructTests {
-    private val gson = Gson()
     private lateinit var walkSpec: Map<String, Any?>
     private lateinit var mergeSpec: Map<String, Any?>
-    private lateinit var getpathSpec: Map<String, Any?>
     private lateinit var injectSpec: Map<String, Any?>
     private lateinit var transformSpec: Map<String, Any?>
-    private lateinit var eachSpec: Map<String, Any?>
-    private lateinit var packSpec: Map<String, Any?>
-    private lateinit var formatSpec: Map<String, Any?>
-    private lateinit var refSpec: Map<String, Any?>
-    private lateinit var validateSpec: Map<String, Any?>
-    private lateinit var validateOneSpec: Map<String, Any?>
-    private lateinit var validateExactSpec: Map<String, Any?>
-    private lateinit var validateInvalidSpec: Map<String, Any?>
-    private lateinit var validateSpecialSpec: Map<String, Any?>
-    private lateinit var selectSpec: Map<String, Any?>
-    private val cmdRef = Pattern.compile("`(\\$[A-Z]+[0-9]*)`")
 
     @BeforeTest
     fun init() {
-        val json = Files.readString(Path.of("..", "build", "test", "test.json"))
-        val mapType = object : TypeToken<Map<String, Any?>>() {}.type
-        val all = gson.fromJson<Map<String, Any?>>(json, mapType)
-        val struct = all["struct"] as Map<String, Any?>
+        val struct = Omni.tostruct(Omni.Run.of("struct").spec) as Map<String, Any?>
         walkSpec = struct["walk"] as Map<String, Any?>
         mergeSpec = struct["merge"] as Map<String, Any?>
-        getpathSpec = struct["getpath"] as Map<String, Any?>
         injectSpec = struct["inject"] as Map<String, Any?>
         transformSpec = struct["transform"] as Map<String, Any?>
-        eachSpec = transformSpec["each"] as Map<String, Any?>
-        packSpec = transformSpec["pack"] as Map<String, Any?>
-        formatSpec = transformSpec["format"] as Map<String, Any?>
-        refSpec = transformSpec["ref"] as Map<String, Any?>
-        validateSpec = struct["validate"] as Map<String, Any?>
-        validateOneSpec = validateSpec["one"] as Map<String, Any?>
-        validateExactSpec = validateSpec["exact"] as Map<String, Any?>
-        validateInvalidSpec = validateSpec["invalid"] as Map<String, Any?>
-        validateSpecialSpec = validateSpec["special"] as Map<String, Any?>
-        selectSpec = struct["select"] as Map<String, Any?>
+    }
+
+    // The `minor.isfunc` corpus group is nine entries and every one expects
+    // FALSE - no JSON value is callable, so the corpus alone cannot tell a
+    // working isfunc from `return false`. This is the positive case, and it
+    // matters beyond the predicate: isfunc is what gates injector command
+    // dispatch. It carried over from StructMinorTest.exists(), which the
+    // migration deleted along with the rest of that file.
+    @Test
+    fun isfuncPositive() {
+        assertTrue(Struct.isfunc { _: Any? -> null })
+        assertEquals("map", Struct.typename(Struct.T_MAP))
     }
 
     @Test
     fun walkExists() {
         assertTrue(Struct.walk(linkedMapOf<String, Any?>(), Struct.WalkApply { _, v, _, _ -> v }) is Map<*, *>)
-    }
-
-    @Test
-    fun walkBasic() {
-        val walkPath =
-            Struct.WalkApply { _, v, _, p ->
-                if (v is String) v + "~" + p.joinToString(".") else v
-            }
-        runSet(walkSpec["basic"] as Map<String, Any?>) { input -> Struct.walk(input, walkPath) }
     }
 
     @Test
@@ -111,71 +95,6 @@ class StructTests {
     }
 
     @Test
-    fun walkDepth() {
-        runSet(walkSpec["depth"] as Map<String, Any?>) { v ->
-            val m = v as Map<*, *>
-            val src = m["src"]
-            val maxdepth = m["maxdepth"]
-            val top = arrayOfNulls<Any>(1)
-            val cur = arrayOfNulls<Any>(1)
-            val copy =
-                Struct.WalkApply { key, value, _, _ ->
-                    if (Struct.isnode(value)) {
-                        val child: Any? = if (Struct.islist(value)) mutableListOf<Any?>() else linkedMapOf<String, Any?>()
-                        if (key == null) {
-                            top[0] = child
-                            cur[0] = child
-                        } else {
-                            cur[0] = Struct.setprop(cur[0], key, child)
-                            cur[0] = child
-                        }
-                    } else if (key != null) {
-                        cur[0] = Struct.setprop(cur[0], key, value)
-                    }
-                    value
-                }
-            if (maxdepth == null) Struct.walk(src, copy) else Struct.walk(src, copy, null, intish(maxdepth))
-            top[0]
-        }
-    }
-
-    @Test
-    fun walkCopy() {
-        runSet(walkSpec["copy"] as Map<String, Any?>) { v ->
-            val cur = arrayOfNulls<Any>(33)
-            val keys = arrayOfNulls<String>(33)
-            val walkcopy =
-                Struct.WalkApply { key, value, _, path ->
-                    if (key == null) {
-                        java.util.Arrays.fill(cur, null)
-                        java.util.Arrays.fill(keys, null)
-                        cur[0] =
-                            when {
-                                Struct.ismap(value) -> linkedMapOf<String, Any?>()
-                                Struct.islist(value) -> mutableListOf<Any?>()
-                                else -> value
-                            }
-                        return@WalkApply value
-                    }
-                    var node: Any? = value
-                    val i = path.size
-                    keys[i] = key
-                    if (Struct.isnode(node)) {
-                        cur[i] = if (Struct.ismap(node)) linkedMapOf<String, Any?>() else mutableListOf<Any?>()
-                        node = cur[i]
-                    }
-                    cur[i - 1] = Struct.setprop(cur[i - 1], key, node)
-                    for (j in i - 1 downTo 1) {
-                        cur[j - 1] = Struct.setprop(cur[j - 1], keys[j], cur[j])
-                    }
-                    value
-                }
-            Struct.walk(v, walkcopy)
-            cur[0]
-        }
-    }
-
-    @Test
     fun mergeExists() {
         assertEquals(null, Struct.merge(emptyList<Any?>()))
     }
@@ -188,31 +107,6 @@ class StructTests {
     }
 
     @Test
-    fun mergeCases() {
-        runSet(mergeSpec["cases"] as Map<String, Any?>) { Struct.merge(it) }
-    }
-
-    @Test
-    fun mergeArray() {
-        runSet(mergeSpec["array"] as Map<String, Any?>) { Struct.merge(it) }
-    }
-
-    @Test
-    fun mergeIntegrity() {
-        runSet(mergeSpec["integrity"] as Map<String, Any?>) { Struct.merge(it) }
-    }
-
-    @Test
-    fun mergeDepth() {
-        runSet(mergeSpec["depth"] as Map<String, Any?>) { v ->
-            val m = v as Map<*, *>
-            val value = m["val"]
-            val depth = m["depth"]
-            if (depth == null) Struct.merge(value) else Struct.merge(value, (depth as Number).toInt())
-        }
-    }
-
-    @Test
     fun mergeSpecial() {
         val f0 = Supplier { 11 }
         val result0 = Struct.merge(listOf(f0)) as Supplier<*>
@@ -222,72 +116,6 @@ class StructTests {
     @Test
     fun getpathExists() {
         assertEquals(1L, normalize(Struct.getpath(mapOf("a" to 1), "a")))
-    }
-
-    @Test
-    fun getpathBasic() {
-        runSet(getpathSpec["basic"] as Map<String, Any?>) { v ->
-            val m = v as Map<*, *>
-            Struct.getpath(m["store"], m["path"])
-        }
-    }
-
-    @Test
-    fun getpathRelative() {
-        runSet(getpathSpec["relative"] as Map<String, Any?>) { v ->
-            val m = v as Map<*, *>
-            val inj =
-                Struct.Injection(null, null).apply {
-                    dparent = m["dparent"]
-                    val dp = m["dpath"]
-                    if (dp is String && dp.isNotEmpty()) dpath = dp.split(".").toMutableList()
-                }
-            Struct.getpath(m["store"], m["path"], inj)
-        }
-    }
-
-    @Test
-    fun getpathSpecial() {
-        runSet(getpathSpec["special"] as Map<String, Any?>) { v ->
-            val m = v as Map<*, *>
-            val injObj = m["inj"]
-            if (injObj is Map<*, *>) {
-                val inj =
-                    Struct.Injection(null, null).apply {
-                        if (injObj.containsKey("key")) key = injObj["key"]?.toString() ?: ""
-                        if (injObj.containsKey("dparent")) dparent = injObj["dparent"]
-                        if (injObj.containsKey("dpath")) {
-                            val dp = injObj["dpath"]
-                            if (dp is List<*>) dpath = dp.map { it?.toString() ?: "" }.toMutableList()
-                        }
-                        if (injObj.containsKey("meta")) {
-                            val mm = injObj["meta"]
-                            if (mm is Map<*, *>) {
-                                meta = linkedMapOf<String, Any?>().also { for ((k, vv) in mm) it[k.toString()] = vv }
-                            }
-                        }
-                    }
-                Struct.getpath(m["store"], m["path"], inj)
-            } else {
-                Struct.getpath(m["store"], m["path"])
-            }
-        }
-    }
-
-    @Test
-    fun getpathHandler() {
-        runSet(getpathSpec["handler"] as Map<String, Any?>) { v ->
-            val m = v as Map<*, *>
-            val store = linkedMapOf<String, Any?>()
-            store[Struct.S_DTOP] = m["store"]
-            store["\$FOO"] = Supplier { "foo" }
-            val inj = Struct.Injection(null, null)
-            inj.handler =
-                Struct.Injector { _, value, _, _ ->
-                    if (value is Supplier<*>) value.get() else value
-                }
-            Struct.getpath(store, m["path"], inj)
-        }
     }
 
     @Test
@@ -304,24 +132,6 @@ class StructTests {
     }
 
     @Test
-    fun injectString() {
-        runSetNull(injectSpec["string"] as Map<String, Any?>) { v ->
-            val m = v as Map<*, *>
-            val inj = Struct.Injection(null, null)
-            inj.modify = nullModifier
-            Struct.inject(m["val"], m["store"], inj)
-        }
-    }
-
-    @Test
-    fun injectDeep() {
-        runSet(injectSpec["deep"] as Map<String, Any?>) { v ->
-            val m = v as Map<*, *>
-            Struct.inject(m["val"], m["store"])
-        }
-    }
-
-    @Test
     fun transformExists() {
         assertEquals("A", Struct.transform(emptyMap<String, Any?>(), "A"))
     }
@@ -332,100 +142,6 @@ class StructTests {
         val input = t["in"] as Map<String, Any?>
         val got = Struct.transform(input["data"], input["spec"])
         assertTrue(normalize(t["out"]) == normalize(got))
-    }
-
-    @Test
-    fun transformPathsSubset() {
-        runSet(transformSpec["paths"] as Map<String, Any?>) { v ->
-            val m = v as Map<*, *>
-            Struct.transform(m["data"], m["spec"])
-        }
-    }
-
-    @Test
-    fun transformCmds() {
-        runSet(transformSpec["cmds"] as Map<String, Any?>) { v ->
-            val m = v as Map<*, *>
-            Struct.transform(m["data"], m["spec"])
-        }
-    }
-
-    @Test
-    fun transformEach() {
-        runSet(eachSpec) { v ->
-            val m = v as Map<*, *>
-            Struct.transform(m["data"], m["spec"])
-        }
-    }
-
-    @Test
-    fun transformPack() {
-        runSet(packSpec) { v ->
-            val m = v as Map<*, *>
-            Struct.transform(m["data"], m["spec"])
-        }
-    }
-
-    @Test
-    fun transformFormat() {
-        runSet(formatSpec) { v ->
-            val m = v as Map<*, *>
-            Struct.transform(m["data"], m["spec"])
-        }
-    }
-
-    @Test
-    fun transformRef() {
-        runSet(refSpec) { v ->
-            val m = v as Map<*, *>
-            Struct.transform(m["data"], m["spec"])
-        }
-    }
-
-    @Test
-    fun validateBasic() {
-        runSet(validateSpec["basic"] as Map<String, Any?>) { v ->
-            val m = v as Map<*, *>
-            val opts = linkedMapOf<String, Any?>("errs" to mutableListOf<String>())
-            Struct.validate(m["data"], m["spec"], opts)
-        }
-    }
-
-    @Test
-    fun validateChild() {
-        runSet(validateSpec["child"] as Map<String, Any?>) { v ->
-            val m = v as Map<*, *>
-            val opts = linkedMapOf<String, Any?>("errs" to mutableListOf<String>())
-            Struct.validate(m["data"], m["spec"], opts)
-        }
-    }
-
-    @Test
-    fun validateOne() {
-        runSet(validateOneSpec) { v ->
-            val m = v as Map<*, *>
-            val opts = linkedMapOf<String, Any?>("errs" to mutableListOf<String>())
-            Struct.validate(m["data"], m["spec"], opts)
-        }
-    }
-
-    @Test
-    fun validateExact() {
-        runSet(validateExactSpec) { v ->
-            val m = v as Map<*, *>
-            val opts = linkedMapOf<String, Any?>("errs" to mutableListOf<String>())
-            Struct.validate(m["data"], m["spec"], opts)
-        }
-    }
-
-    @Test
-    fun validateInvalid() {
-        runValidateSet(validateInvalidSpec, false)
-    }
-
-    @Test
-    fun validateSpecial() {
-        runValidateSet(validateSpecialSpec, true)
     }
 
     @Test
@@ -476,38 +192,6 @@ class StructTests {
         out = Struct.validate(mapOf("a" to "A"), shape, opts)
         assertTrue(normalize(mapOf("a" to "A")) == normalize(out))
         assertEquals(listOf<Any?>("Not an integer at a: A"), errs)
-    }
-
-    @Test
-    fun selectBasic() {
-        runSetNull(selectSpec["basic"] as Map<String, Any?>) { v ->
-            val m = v as Map<*, *>
-            Struct.select(m["obj"], m["query"])
-        }
-    }
-
-    @Test
-    fun selectOperators() {
-        runSetNull(selectSpec["operators"] as Map<String, Any?>) { v ->
-            val m = v as Map<*, *>
-            Struct.select(m["obj"], m["query"])
-        }
-    }
-
-    @Test
-    fun selectEdge() {
-        runSetNull(selectSpec["edge"] as Map<String, Any?>) { v ->
-            val m = v as Map<*, *>
-            Struct.select(m["obj"], m["query"])
-        }
-    }
-
-    @Test
-    fun selectAlts() {
-        runSetNull(selectSpec["alts"] as Map<String, Any?>) { v ->
-            val m = v as Map<*, *>
-            Struct.select(m["obj"], m["query"])
-        }
     }
 
     @Test
@@ -571,136 +255,6 @@ class StructTests {
         assertEquals(99, ((got["x"] as Supplier<*>).get() as Number).toInt())
     }
 
-    private fun runSet(
-        testspec: Map<String, Any?>,
-        fn: (Any?) -> Any?,
-    ) {
-        runSet(testspec, fn, null)
-    }
-
-    private fun runSet(
-        testspec: Map<String, Any?>,
-        fn: (Any?) -> Any?,
-        filter: ((Map<*, *>) -> Boolean)?,
-    ) {
-        val set = testspec["set"] as List<*>
-        for (eo in set) {
-            if (eo !is Map<*, *>) continue
-            if (filter != null && !filter(eo)) continue
-            if (!eo.containsKey("in") || !eo.containsKey("out")) continue
-            // Cases with `err` are exercised by the StructCorpusTest corpus runner;
-            // skip here to avoid asserting the bespoke-pipeline `out` snapshot.
-            if (eo.containsKey("err")) continue
-            val input = Struct.clone(eo["in"])
-            val out = eo["out"]
-            val got = fn(input)
-            assertTrue(normalize(out) == normalize(got), "Mismatch in=${json(input)} expected=${json(out)} got=${json(got)}")
-        }
-    }
-
-    private fun runValidateSet(
-        testspec: Map<String, Any?>,
-        useInj: Boolean,
-    ) {
-        val set = testspec["set"] as List<*>
-        for (eo in set) {
-            if (eo !is Map<*, *>) continue
-            val entry = eo
-            val input = entry["in"] as? Map<*, *> ?: continue
-            val data = input["data"]
-            val spec = input["spec"]
-            val inj = if (useInj) input["inj"] as? Map<*, *> else null
-            val options = linkedMapOf<String, Any?>()
-            if (inj != null) inj.forEach { (k, v) -> options[k.toString()] = v }
-            if (entry.containsKey("err")) {
-                val expectedErr = entry["err"]?.toString() ?: ""
-                val ex = assertFailsWith<IllegalArgumentException> { Struct.validate(data, spec, options) }
-                assertEquals(canonicalErr(expectedErr), canonicalErr(ex.message ?: ""))
-            } else {
-                val got = Struct.validate(data, spec, options)
-                assertTrue(
-                    normalize(entry["out"]) == normalize(got),
-                    "Mismatch in=${json(input)} expected=${json(entry["out"])} got=${json(got)}",
-                )
-            }
-        }
-    }
-
-    private fun canonicalErr(err: String?): String {
-        if (err == null) return ""
-        return err.replace(Regex("\\.$"), "").replace(". |", " |").trim()
-    }
-
-    private fun slog(v: Any?): String = if (v == null) "" else Struct.stringify(v)
-
-    private fun intish(o: Any?): Int {
-        if (o is Number) return o.toInt()
-        throw IllegalArgumentException("expected number, got $o")
-    }
-
-    private fun isCopyEscapeOnlyCmdCase(entry: Map<*, *>): Boolean {
-        val inObj = entry["in"] as? Map<*, *> ?: return false
-        val spec = inObj["spec"]
-        val cmds = linkedSetOf<String>()
-        collectCommands(spec, cmds)
-        if (cmds.isEmpty()) return false
-        for (c in cmds) {
-            if (c != "\$BT" && c != "\$DS" && c != "\$COPY" && c != "\$DELETE" && !c.startsWith("\$MERGE")) {
-                return false
-            }
-        }
-        return true
-    }
-
-    private fun isEachCopyKeyOnlyCase(entry: Map<*, *>): Boolean {
-        val inObj = entry["in"] as? Map<*, *> ?: return false
-        val spec = inObj["spec"]
-        val cmds = linkedSetOf<String>()
-        collectCommands(spec, cmds)
-        if (cmds.isEmpty()) return false
-        for (c in cmds) {
-            if (c != "\$COPY" && c != "\$KEY" && c != "\$EACH") return false
-        }
-        return true
-    }
-
-    private fun isPackBasicCase(entry: Map<*, *>): Boolean {
-        val inObj = entry["in"] as? Map<*, *> ?: return false
-        val spec = inObj["spec"]
-        val cmds = linkedSetOf<String>()
-        collectCommands(spec, cmds)
-        if (!cmds.contains("\$PACK")) return false
-        for (c in cmds) {
-            if (c != "\$PACK" && c != "\$COPY" && c != "\$KEY" && c != "\$VAL") return false
-        }
-        return true
-    }
-
-    private fun collectCommands(
-        node: Any?,
-        out: MutableSet<String>,
-    ) {
-        when (node) {
-            is String -> {
-                val m = cmdRef.matcher(node)
-                while (m.find()) out.add(m.group(1))
-            }
-            is Map<*, *> ->
-                node.forEach { (k, v) ->
-                    collectCommands(k?.toString(), out)
-                    collectCommands(v, out)
-                }
-            is List<*> -> node.forEach { collectCommands(it, out) }
-        }
-    }
-
-    private fun json(v: Any?): String =
-        try {
-            gson.toJson(if (v === Struct.UNDEF) "__UNDEF__" else v)
-        } catch (_: Exception) {
-            v.toString()
-        }
-
     private fun normalize(v: Any?): Any? {
         // Treat the "no value" sentinel (UNDEF) and JSON null as equal, mirroring
         // canonical JS where `undefined == null`. The shared corpus uses null to
@@ -720,55 +274,10 @@ class StructTests {
         }
     }
 
-    // NULLMARK convention (mirrors java/src/test/StructTests.java + js runner).
-    // The shared corpus encodes "value is JSON null" by relying on the runner to
-    // replace every JSON null with the sentinel string "__NULL__" before running
-    // (flags.null=true), then a nullModifier callback swaps it back: a bare
-    // "__NULL__" becomes a real null, and "__NULL__" embedded in a larger string
-    // is rewritten to the literal text "null". This preserves null-vs-absent
-    // across the round-trip (inject of a null-valued ref into a partial string
-    // renders "null"; exact-mode select has a concrete value to compare).
-    private val nullmark = "__NULL__"
+    private fun slog(v: Any?): String = if (v == null) "" else Struct.stringify(v)
 
-    private fun fixJSON(v: Any?): Any? {
-        if (v == null || v === Struct.UNDEF) return nullmark
-        return when (v) {
-            is Map<*, *> -> v.entries.associateTo(linkedMapOf<String, Any?>()) { (it.key?.toString() ?: "") to fixJSON(it.value) }
-            is List<*> -> v.mapTo(mutableListOf<Any?>()) { fixJSON(it) }
-            else -> v
-        }
-    }
-
-    @Suppress("UNCHECKED_CAST")
-    private val nullModifier =
-        Struct.Modify { value, key, parent, _, _ ->
-            if (value !is String) return@Modify
-            val repl: Any? =
-                when {
-                    value == nullmark -> null
-                    value.contains(nullmark) -> value.replace(nullmark, "null")
-                    else -> return@Modify
-                }
-            when {
-                parent is MutableMap<*, *> && key != null -> (parent as MutableMap<String, Any?>)[key.toString()] = repl
-                parent is MutableList<*> && key is Number -> (parent as MutableList<Any?>)[key.toInt()] = repl
-            }
-        }
-
-    /** runSet variant that applies the NULLMARK fixup to inputs, result and expected. */
-    private fun runSetNull(
-        testspec: Map<String, Any?>,
-        fn: (Any?) -> Any?,
-    ) {
-        val set = testspec["set"] as List<*>
-        for (eo in set) {
-            if (eo !is Map<*, *>) continue
-            if (!eo.containsKey("in") || !eo.containsKey("out")) continue
-            if (eo.containsKey("err")) continue
-            val input = fixJSON(Struct.clone(eo["in"]))
-            val out = fixJSON(eo["out"])
-            val got = fixJSON(fn(input))
-            assertTrue(normalize(out) == normalize(got), "Mismatch in=${json(input)} expected=${json(out)} got=${json(got)}")
-        }
+    private fun intish(o: Any?): Int {
+        if (o is Number) return o.toInt()
+        throw IllegalArgumentException("expected number, got $o")
     }
 }
