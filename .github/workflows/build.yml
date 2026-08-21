@@ -561,6 +561,14 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # The test runner is voxgig/omni, consumed as a local checkout (it is
+      # not published to opam); the Makefile finds it via OMNI_HOME. The
+      # library itself never depends on omni.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       - uses: ocaml/setup-ocaml@605a7e998e76e035b82c14d618a6e1010732c4ce # v3
         with:
           ocaml-compiler: '5'
@@ -572,6 +580,8 @@ jobs:
         shell: bash
         # ocamlc lives in the opam switch; opam exec puts it on PATH.
         run: opam exec -- make test
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
 
   test-lean:
     runs-on: ${{ matrix.os }}
