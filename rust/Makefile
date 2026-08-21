@@ -26,10 +26,22 @@ test: setup-omni
 # Gitignored, machine-specific: the same deal as go's generated go.work.
 OMNI_HOME ?= $(shell for d in ../../omni ../../../omni /workspace/omni /home/user/omni; do \
 	  if [ -f "$$d/spec/fib.json" ]; then echo "$$d"; break; fi; done)
+# Validate what is already at ../.omni rather than trusting its existence.
+# `[ -e ]` FOLLOWS a symlink, so a dangling one tested as absent and then
+# `ln -s` failed with "File exists"; and a link pointing at something that is
+# not an omni checkout was accepted, with $OMNI_HOME ignored, leaving no way
+# to repair it short of deleting the link by hand.
 setup-omni:
-	@if [ -e ../.omni ]; then exit 0; fi; \
+	@if [ -f ../.omni/spec/fib.json ]; then exit 0; fi; \
+	if [ -e ../.omni ] && [ ! -L ../.omni ]; then \
+	  echo "struct: ../.omni exists but is not a voxgig/omni checkout, and is"; \
+	  echo "  not a symlink this target may replace. Remove it and re-run."; \
+	  exit 1; fi; \
 	if [ -z "$(OMNI_HOME)" ] || [ ! -f "$(OMNI_HOME)/spec/fib.json" ]; then \
-	  echo "struct: voxgig/omni checkout not found - set OMNI_HOME"; exit 1; fi; \
+	  echo "struct: voxgig/omni checkout not found - set OMNI_HOME"; \
+	  if [ -L ../.omni ]; then echo "  (../.omni is a stale link to $$(readlink ../.omni))"; fi; \
+	  exit 1; fi; \
+	rm -f ../.omni; \
 	ln -s "$$(cd $(OMNI_HOME) && pwd)" ../.omni; \
 	echo "linked ../.omni -> $$(cd $(OMNI_HOME) && pwd)"
 
