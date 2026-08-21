@@ -280,9 +280,19 @@ jobs:
         run: |
           chmod +x setup.sh
           ./setup.sh
+      # The test runner is voxgig/omni, consumed as a local checkout (it is
+      # not published to LuaRocks); the tests find it via OMNI_HOME. The
+      # library itself never depends on omni - struct.rockspec gains nothing.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       - name: Run tests
         working-directory: ./lua
         run: make test
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
 
   test-zig:
     runs-on: ${{ matrix.os }}

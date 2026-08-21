@@ -20,18 +20,21 @@ description = {
    license = "MIT"
 }
 -- Zero third-party runtime dependencies — src/struct.lua + src/regex.lua use
--- only the Lua standard library. busted/luassert (assertions) and dkjson/
--- luafilesystem (corpus loading + file ops) are needed ONLY by the test
--- harness, so they belong in test_dependencies, NOT here — otherwise every
--- `luarocks install voxgig-struct` would drag in the whole test stack.
+-- only the Lua standard library. busted/luassert (assertions) are needed ONLY
+-- by the test harness, so they belong in test_dependencies, NOT here —
+-- otherwise every `luarocks install voxgig-struct` would drag in the whole
+-- test stack.
+--
+-- dkjson and luafilesystem were here for the in-situ test runner, which is
+-- gone: the corpus now runs on voxgig/omni, which carries its own JSON and
+-- opens the spec path directly. omni is a local checkout found via OMNI_HOME
+-- (see test/omni.lua), not a rock, so it adds nothing here either.
 dependencies = {
    "lua >= 5.3"
 }
 test_dependencies = {
    "busted >= 2.0.0",
-   "luassert >= 1.8.0",
-   "dkjson >= 2.5",
-   "luafilesystem >= 1.8.0"
+   "luassert >= 1.8.0"
 }
 build = {
    type = "builtin",

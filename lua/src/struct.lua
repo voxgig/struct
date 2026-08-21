@@ -586,13 +586,16 @@ end
 -- @return (table) Array of keys as strings
 local function keysof(val)
   val = denoval(val)
+  -- Marked, not plain. An UNMARKED empty table is a map by this port's own
+  -- rules (ismap({}) is true, islist({}) is false), so an unmarked `{}` here
+  -- claims keysof returned an object where the corpus wants [].
   if not isnode(val) then
-    return {}
+    return setmetatable({}, { __jsontype = "array" })
   end
 
   if ismap(val) then
     -- For maps, collect all keys and sort them
-    local keys = {}
+    local keys = setmetatable({}, { __jsontype = "array" })
     for k, _ in pairs(val) do
       table.insert(keys, k)
     end
@@ -600,7 +603,7 @@ local function keysof(val)
     return keys
   else
     -- For lists, create array of stringified indices (0-based to match JS/Go)
-    local indexes = {}
+    local indexes = setmetatable({}, { __jsontype = "array" })
     for i = 1, #val do
       -- Subtract 1 to convert from Lua's 1-based to 0-based indexing
       table.insert(indexes, tostring(i - 1))
@@ -623,10 +626,10 @@ end
 local function items(val)
   val = denoval(val)
   if type(val) ~= "table" then
-    return {}
+    return setmetatable({}, { __jsontype = "array" })
   end
 
-  local result = {}
+  local result = setmetatable({}, { __jsontype = "array" })
 
   if islist(val) then
     -- Handle array-like tables (0-based string keys like JS Object.entries)
@@ -3295,7 +3298,7 @@ end
 -- Select children matching a query.
 local function select_fn(children, query)
   if not isnode(children) then
-    return {}
+    return setmetatable({}, { __jsontype = "array" })
   end
 
   if ismap(children) then
@@ -3311,7 +3314,7 @@ local function select_fn(children, query)
     end
   end
 
-  local results = {}
+  local results = setmetatable({}, { __jsontype = "array" })
   local injdef = {
     errs = {},
     meta = { [S_BEXACT] = true },
