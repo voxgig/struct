@@ -38,6 +38,18 @@ class StructTests {
         transformSpec = struct["transform"] as Map<String, Any?>
     }
 
+    // The `minor.isfunc` corpus group is nine entries and every one expects
+    // FALSE - no JSON value is callable, so the corpus alone cannot tell a
+    // working isfunc from `return false`. This is the positive case, and it
+    // matters beyond the predicate: isfunc is what gates injector command
+    // dispatch. It carried over from StructMinorTest.exists(), which the
+    // migration deleted along with the rest of that file.
+    @Test
+    fun isfuncPositive() {
+        assertTrue(Struct.isfunc { _: Any? -> null })
+        assertEquals("map", Struct.typename(Struct.T_MAP))
+    }
+
     @Test
     fun walkExists() {
         assertTrue(Struct.walk(linkedMapOf<String, Any?>(), Struct.WalkApply { _, v, _, _ -> v }) is Map<*, *>)
