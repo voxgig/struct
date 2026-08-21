@@ -97,10 +97,22 @@ s.select([{'a': 1}, {'a': 2}], {'a': {'`\$GT`': 1}}); // [{a: 2, $KEY: 1}]
 
 ## Testing
 
-`make test` runs the entire shared corpus (`../build/test/test.json`) through
-the port via `dart run test/runner.dart`, using the SDK's `dart:convert` to
-read the corpus into the same native types the library operates on, and the
-same runner logic as every other port. Keep it green, keep
+`make test` runs the shared corpus (`../build/test/test.json`) through the port
+on [voxgig/omni](https://github.com/voxgig/omni), the shared test runner — so
+the entry loop, the comparison and the `err` and `match` handling are literally
+the same code every other port runs. omni is a local checkout the Makefile
+finds via `$OMNI_HOME` or beside this repository and wires in through a
+generated `pubspec_overrides.yaml`; the published `pubspec.yaml` never names
+it, and `make build` compiles `lib/` alone.
+
+`test/runner.dart` is now only a list of subjects. The bridge is one line —
+omni's value model and this port's are the same plain Dart types, so the only
+conversion there is to make is omni's `ABSENT`, which this port spells `null`.
+
+Every group the corpus defines runs except the three `condense` ones, which no
+port implements yet — 1358 entries in 72 groups — plus the two `check` entries
+(`DEF.client`, client-scoped options, `contextify`) and three single entries
+that are not part of any set. Keep it green, keep
 `python3 ../tools/check_parity.py` green, and add no runtime dependencies.
 
 ## Implementation notes

@@ -266,7 +266,8 @@
     "derefs",
     "pval",
     "ckey",
-    "ckeys"
+    "ckeys",
+    "isabsent"
   ],
   "ignoreRegExpList": [
     "/`\\$[A-Z]+`/",

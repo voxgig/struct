@@ -1,10 +1,33 @@
 # Makefile for the Dart port of voxgig/struct.
 # Requires the Dart SDK (`dart`) on PATH. No third-party dependencies.
 
-.PHONY: test bench lint build inspect clean reset publish format
+.PHONY: test bench lint build inspect clean reset publish format omni-check
 
-# Run the shared JSON corpus through the Dart implementation.
-test:
+# The corpus runner is voxgig/omni, consumed as a local checkout - it is not
+# published to pub.dev. $OMNI_HOME first, then sibling paths, taking the first
+# directory that carries spec/fib.json.
+#
+# It reaches the analyzer through `pubspec_overrides.yaml`, which pub reads for
+# local development overrides and which this Makefile GENERATES (it is
+# gitignored, and the path differs per checkout). The published `pubspec.yaml`
+# never names omni, so nothing that depends on this package depends on it
+# (register 4.13) - `make build` proves that by compiling lib/ alone.
+OMNI_CANDIDATES := $(OMNI_HOME) ../../omni ../../../omni /workspace/omni /home/user/omni
+OMNI_DIR := $(firstword $(foreach d,$(OMNI_CANDIDATES),$(if $(wildcard $(d)/spec/fib.json),$(d))))
+
+# Fail with the reason rather than "Target of URI doesn't exist".
+omni-check:
+	@if [ -z "$(OMNI_DIR)" ]; then \
+	  echo "struct: voxgig/omni checkout not found - set OMNI_HOME."; \
+	  echo "  The tests run on the shared runner; the library itself does not."; \
+	  echo "  git clone https://github.com/voxgig/omni ../../omni"; \
+	  exit 1; \
+	fi
+	@printf 'dependency_overrides:\n  voxgig_omni:\n    path: %s/dart\n' "$(OMNI_DIR)" > pubspec_overrides.yaml
+	@dart pub get >/dev/null
+
+# Run the shared JSON corpus through the Dart implementation, on voxgig/omni.
+test: omni-check
 	dart run test/runner.dart
 
 # Cross-port performance harness (JSON contract; see build/bench/README.md).
@@ -12,21 +35,22 @@ bench:
 	@dart run bench/bench.dart
 
 # "Lint": static analysis (a clean `dart analyze` means the code is sound).
-lint:
+# The runner imports omni, so this needs the checkout too.
+lint: omni-check
 	dart analyze
 
 # Compile the library to a kernel snapshot as a build smoke-test.
 build:
 	dart compile kernel lib/voxgig_struct.dart -o /dev/null 2>/dev/null || dart analyze lib
 
-format:
+format: omni-check
 	dart format --output=none --set-exit-if-changed lib test
 
 inspect:
 	@dart --version
 
 clean:
-	rm -rf .dart_tool *.dill
+	rm -rf .dart_tool *.dill pubspec_overrides.yaml
 
 reset: clean
 
