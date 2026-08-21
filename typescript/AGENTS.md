@@ -15,7 +15,8 @@ only what is specific to the TypeScript port.
 typescript/
 ├── src/StructUtility.ts   # THE canonical implementation + public API
 ├── src/tsconfig.json      # build config for src
-├── test/runner.ts         # reference corpus runner (every port mirrors it)
+├── test/omni.ts           # resolves the voxgig/omni checkout; the ONLY file
+│                          #   that names the shared runner
 ├── test/utility/StructUtility.test.ts   # corpus-driven tests
 ├── test/regex_pathological.test.ts      # regex edge-case panel
 ├── test/direct.ts         # developer scratch (run via npm run test-direct)
@@ -33,7 +34,7 @@ required to define.
 ```bash
 npm install
 npm run build        # tsc --build src test  (REQUIRED before npm test)
-npm test             # node --test dist-test/**/*.test.js
+npm test             # node --test dist-test/**/*.test.js  (NEEDS omni, below)
 npm run lint         # eslint src test  +  prettier --check
 npm run typecheck    # tsc --build --force
 npm run reset        # clean + reinstall + build + test
@@ -41,6 +42,18 @@ npm run reset        # clean + reinstall + build + test
 
 `make test` / `make lint` from this dir (or `make test-ts` from the root)
 wrap the same commands.
+
+**`npm test` needs a voxgig/omni checkout, and needs it BUILT.** The corpus
+runner is omni's, consumed as a local checkout that is not published;
+`test/omni.ts` resolves it from `$OMNI_HOME` or a sibling path. Because the
+shim loads omni's COMPILED output, `npm run build` in the omni checkout is a
+prerequisite too - `dist/` is not committed there. There is no `omni-check`
+make target here, and deliberately: `test/omni.ts` already fails with the
+reason, and it distinguishes "no checkout" from "checkout present but not
+built", which a Makefile probe would not.
+
+Only the tests need it. `npm run build`, `npm run lint` and `npm run
+typecheck` do not, and `package.json` gains no dependency.
 
 ## Conventions specific to this port
 

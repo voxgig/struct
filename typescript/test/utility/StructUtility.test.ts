@@ -5,7 +5,7 @@
 import { test, describe, before } from 'node:test'
 import assert from 'node:assert'
 
-import { makeRunner, nullModifier, NULLMARK } from '../runner'
+import { makeRunner, nullModifier, NULLMARK } from '../omni'
 
 import { SDK, TEST_JSON_FILE } from './index'
 
