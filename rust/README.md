@@ -1,7 +1,7 @@
 # Struct for Rust
 
 > Rust port of the canonical TypeScript implementation.
-> Status: **complete** — the full shared corpus passes (`cargo test` → 1309
+> Status: **complete** — the full shared corpus passes (`make test` → 1309
 > checks; `cargo clippy` clean): minor utilities, `walk`, `merge`, `getpath`,
 > `setpath`, `inject`, `transform` (all 10 commands), `validate` (all 15
 > checkers), `select` (all operators), and the `primary.check` SDK test.
@@ -16,7 +16,7 @@ Inside the monorepo:
 ```bash
 cd rust
 cargo build
-cargo test          # runs the shared corpus (../build/test/test.json) against
+make test           # runs the shared corpus (../build/test/test.json) against
                     # the implemented subsets
 ```
 

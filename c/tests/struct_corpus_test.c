@@ -1,62 +1,77 @@
-/* Voxgig Struct corpus driver — C port. Mirrors cpp/tests/struct_corpus_test.cpp. */
+/* Copyright (c) 2025-2026 Voxgig Ltd. MIT LICENSE. */
 
-#include "runner.h"
+/*
+ * Voxgig Struct — the shared corpus, run on the shared runner.
+ *
+ * The in-situ runner (tests/runner.h) is gone. Every group is driven through
+ * voxgig/omni, so this file only says WHICH subject answers each group and
+ * with which flags — the entry loop, the comparison, the `err` and `match`
+ * handling all live in the runner, identically for every port.
+ *
+ * Flags mirror canonical: typescript/test/utility/StructUtility.test.ts.
+ */
+
+#include "omni_bridge.h"
 #include "voxgig_struct.h"
 
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-static voxgig_value* CORPUS = NULL;
+static omni_pool* POOL = NULL;
+static omni_runpack* PACK = NULL;
+static omni_json* SPEC = NULL;
 
-static voxgig_value* get_spec(const char* category, const char* name) {
-  if (!CORPUS) {
-    CORPUS = voxgig_parse_json_file("../build/test/test.json");
-  }
-  voxgig_value* sk = voxgig_new_string("struct");
-  voxgig_value* sv = voxgig_getprop(CORPUS, sk, NULL);
-  voxgig_release(sk);
-  voxgig_value* ck = voxgig_new_string(category);
-  voxgig_value* cat = voxgig_getprop(sv, ck, NULL);
-  voxgig_release(ck);
-  voxgig_release(sv);
-  voxgig_value* nk = voxgig_new_string(name);
-  voxgig_value* spec = voxgig_getprop(cat, nk, NULL);
-  voxgig_release(nk);
-  voxgig_release(cat);
-  return spec;
+static int GROUPS = 0;
+static int FAILED = 0;
+
+/* One named group of the resolved spec: `struct.<category>.<name>`. */
+static omni_json* group_spec(const char* category, const char* name) {
+  return omni_map_get(omni_map_get(SPEC, category), name);
 }
 
-/* Scoreboard. */
-typedef struct slot {
-  char* key;
-  runner_result r;
-} slot;
+/* Run one group. Each group is one assertion: omni stops at its first failing
+ * entry and reports the index, the entry and both values. */
+static void run(const char* category, const char* name, bool donull, bridge_subject_fn fn,
+                void* ud) {
+  bridge_subject wrap = bridge_wrap(POOL, fn, ud);
+  omni_flags flags = donull ? omni_flags_default() : omni_flags_nonull();
 
-static slot* SB = NULL;
-static size_t SB_LEN = 0;
-static size_t SB_CAP = 0;
+  char label[128];
+  snprintf(label, sizeof(label), "%s.%s", category, name);
+  /* Pool-owned: the label outlives this frame inside a failure message. */
+  flags.name = omni_pool_strdup(POOL, label);
 
-static void sb_add(const char* key, runner_result r) {
-  if (SB_LEN + 1 > SB_CAP) {
-    size_t nc = SB_CAP == 0 ? 64 : SB_CAP * 2;
-    SB = (slot*)realloc(SB, nc * sizeof(slot));
-    SB_CAP = nc;
+  char* err = NULL;
+  int rc = omni_runsetflags(PACK, group_spec(category, name), flags, &wrap.base, &err);
+
+  GROUPS++;
+  if (0 == rc) {
+    printf("  ok   %s\n", label);
+  } else {
+    FAILED++;
+    printf("  FAIL %s\n       %s\n", label, err ? err : "(no message)");
   }
-  SB[SB_LEN].key = strdup(key);
-  SB[SB_LEN].r = r;
-  SB_LEN++;
 }
 
-static void run(const char* cat, const char* name, bool null_flag, runner_subject_fn s, void* ud) {
-  char full[256];
-  snprintf(full, sizeof(full), "%s.%s", cat, name);
-  voxgig_value* spec = get_spec(cat, name);
-  runner_result r;
-  runner_result_init(&r, full);
-  run_subject(&r, spec, null_flag, s, ud);
-  voxgig_release(spec);
-  sb_add(full, r);
+/* `merge.basic`, `inject.basic` and `transform.basic` are single entries, not
+ * sets, so the runner cannot drive them. Compared here, through omni's own
+ * deepequal so the rule is the one every group uses. Takes one reference. */
+static void single(const char* label, omni_json* entry, voxgig_value* got) {
+  omni_json* want = omni_map_get(entry, "out");
+  omni_json* have = bridge_toomni(POOL, got);
+
+  GROUPS++;
+  if (omni_deepequal(have, want)) {
+    printf("  ok   %s\n", label);
+  } else {
+    FAILED++;
+    printf("  FAIL %s\n       expected: %s\n       actual:   %s\n", label,
+           omni_stringify(POOL, want), omni_stringify(POOL, have));
+  }
+
+  voxgig_release(got);
 }
 
 /* Helpers. */
@@ -70,6 +85,30 @@ static voxgig_value* getp(voxgig_value* in, const char* key) {
   voxgig_value* v = voxgig_map_get(voxgig_as_map(in), key);
   return v ? voxgig_retain(v) : voxgig_new_undef();
 }
+
+/* As getp, but answers NULL when the key is ABSENT rather than an undef
+ * value - the difference between "the entry omitted `alt`" and "the entry set
+ * `alt` to null", which the argument list has to preserve. */
+static voxgig_value* getp_literal(voxgig_value* in, const char* key) {
+  if (!voxgig_is_map(in))
+    return NULL;
+  voxgig_value* v = voxgig_map_get(voxgig_as_map(in), key);
+  return v ? voxgig_retain(v) : NULL;
+}
+
+/* Under `null: true` the runner replaces every corpus null with this marker,
+ * so it survives a JSON round trip in a language without one. */
+static bool is_nullmark(const voxgig_value* v) {
+  return voxgig_is_string(v) && 0 == strcmp(voxgig_as_string(v), OMNI_NULLMARK);
+}
+
+/* Canonical throws when an injector reports a problem; this port collects the
+ * messages instead, and the subject raises them. Defined below. */
+static char* join_errs(voxgig_value* errs);
+
+/* Marks the one inject group that wants the NULLMARK modifier. A function
+ * pointer is not convertible to void* in ISO C, so the flag is an object. */
+static const int USE_NULLMODIFIER = 1;
 
 /* Subject implementations. */
 static voxgig_value* subj_isnode(voxgig_value* in, char** err, void* ud) {
@@ -147,9 +186,12 @@ static voxgig_value* subj_getprop(voxgig_value* in, char** err, void* ud) {
   (void)ud;
   voxgig_value* val = getp(in, "val");
   voxgig_value* key = getp(in, "key");
-  voxgig_value* altk = voxgig_new_string("alt");
-  voxgig_value* alt = voxgig_haskey(in, altk) ? voxgig_getprop(in, altk, NULL) : NULL;
-  voxgig_release(altk);
+  /* Canonical omits `alt` only when the KEY is missing
+   * (`undefined === vin.alt`), so an explicit `alt: null` is passed through -
+   * unlike getelem below, which omits a null alt too (`null == vin.alt`).
+   * `voxgig_haskey` is the Group A rule and could not tell them apart.
+   * `minor/getprop#51` is the entry that separates them. */
+  voxgig_value* alt = getp_literal(in, "alt");
   voxgig_value* r = voxgig_getprop(val, key, alt);
   voxgig_release(val);
   voxgig_release(key);
@@ -203,6 +245,12 @@ static voxgig_value* subj_stringify(voxgig_value* in, char** err, void* ud) {
   (void)ud;
   voxgig_value* val = getp(in, "val");
   voxgig_value* max = getp(in, "max");
+  /* This group runs with `null: true`, so a corpus null arrives as the
+   * NULLMARK string. Canonical hands `stringify` the word it would print. */
+  if (is_nullmark(val)) {
+    voxgig_release(val);
+    val = voxgig_new_string("null");
+  }
   int m = -1;
   if (voxgig_is_int(max))
     m = (int)voxgig_as_int(max);
@@ -224,16 +272,59 @@ static voxgig_value* subj_jsonify(voxgig_value* in, char** err, void* ud) {
   voxgig_release(flags);
   return r;
 }
+/* Replace every occurrence of `find` in `text`. Caller owns the result. */
+static char* str_replace_all(const char* text, const char* find, const char* with) {
+  size_t flen = strlen(find);
+  size_t wlen = strlen(with);
+  size_t cap = strlen(text) + 1;
+  char* out = (char*)malloc(cap);
+  size_t len = 0;
+
+  for (const char* p = text; '\0' != *p;) {
+    if (0 == strncmp(p, find, flen)) {
+      cap += wlen;
+      char* grown = (char*)realloc(out, cap);
+      if (NULL == grown) {
+        free(out);
+        return NULL;
+      }
+      out = grown;
+      memcpy(out + len, with, wlen);
+      len += wlen;
+      p += flen;
+    } else {
+      out[len++] = *p++;
+    }
+  }
+  out[len] = '\0';
+  return out;
+}
+
+/* This group runs with `null: true`, so an ABSENT path arrives as the NULLMARK
+ * string and canonical puts the rendering back the way a real undefined would
+ * read: the marker segment disappears, and a `>` terminator gains `:null`. */
 static voxgig_value* subj_pathify(voxgig_value* in, char** err, void* ud) {
   (void)ud;
   voxgig_value* path = getp(in, "path");
   voxgig_value* from = getp(in, "from");
   voxgig_value* to = getp(in, "to");
+  bool marked = is_nullmark(path);
+  if (marked) {
+    voxgig_release(path);
+    path = voxgig_new_undef();
+  }
   int f = voxgig_is_int(from) ? (int)voxgig_as_int(from) : 0;
   int t = voxgig_is_int(to) ? (int)voxgig_as_int(to) : 0;
-  char* s = voxgig_pathify(path, f, t);
-  voxgig_value* r = voxgig_new_string(s);
-  free(s);
+
+  char* rendered = voxgig_pathify(path, f, t);
+  char* stripped = str_replace_all(rendered, OMNI_NULLMARK ".", "");
+  free(rendered);
+  char* final = marked ? str_replace_all(stripped, ">", ":null>") : stripped;
+  if (final != stripped)
+    free(stripped);
+
+  voxgig_value* r = voxgig_new_string(final);
+  free(final);
   voxgig_release(path);
   voxgig_release(from);
   voxgig_release(to);
@@ -599,11 +690,6 @@ static voxgig_value* subj_sent_stringify(voxgig_value* in, char** err, void* ud)
 }
 
 /* Inject basic. */
-static voxgig_value* subj_inject_basic(voxgig_value* in, char** err, void* ud) {
-  (void)err;
-  (void)ud;
-  return voxgig_inject(in, in, NULL);
-}
 
 /* Walk subjects. */
 static voxgig_value* walk_basic_cb(voxgig_value* key, voxgig_value* val, voxgig_value* parent,
@@ -681,22 +767,76 @@ static voxgig_value* subj_getpath_basic(voxgig_value* in, char** err, void* ud) 
 }
 
 /* inject subjects. */
-static voxgig_value* subj_inject(voxgig_value* in, char** err, void* ud) {
+/* The runner encodes "value is JSON null" as the NULLMARK string so it
+ * survives a JSON round trip; a modifier puts a real null back as the
+ * structure is built. `inject/string` needs it: entry 10 injects a stored null
+ * INTO a string, and the marker has to read as the word `null` there. */
+static void modify_nullmark(voxgig_value* val, voxgig_value* key, voxgig_value* parent,
+                            voxgig_injection* inj, voxgig_value* store, void* ud) {
+  (void)inj;
+  (void)store;
   (void)ud;
+  if (!voxgig_is_string(val) || NULL == key || !voxgig_is_node(parent))
+    return;
+
+  const char* text = voxgig_as_string(val);
+  if (0 == strcmp(text, OMNI_NULLMARK)) {
+    voxgig_setprop(parent, key, voxgig_new_null());
+    return;
+  }
+  if (NULL == strstr(text, OMNI_NULLMARK))
+    return;
+
+  char* replaced = str_replace_all(text, OMNI_NULLMARK, "null");
+  voxgig_setprop(parent, key, voxgig_new_string(replaced));
+  free(replaced);
+}
+
+static voxgig_value* subj_inject(voxgig_value* in, char** err, void* ud) {
+  (void)err;
   voxgig_value* val = getp(in, "val");
   voxgig_value* store = getp(in, "store");
-  voxgig_value* r = voxgig_inject(val, store, NULL);
+
+  voxgig_injection* inj = NULL;
+  if (NULL != ud) {
+    inj = voxgig_inj_new(NULL, NULL);
+    inj->mode = 0;
+    voxgig_release(inj->modify_val);
+    inj->modify_val = voxgig_new_modify(modify_nullmark, NULL);
+  }
+
+  voxgig_value* r = voxgig_inject(val, store, inj);
+
+  if (NULL != inj)
+    voxgig_inj_free(inj);
   voxgig_release(val);
   voxgig_release(store);
   return r;
 }
 
 /* transform subjects. */
+/* Canonical `transform` THROWS when an injector reports a problem and no
+ * `errs` list was supplied to collect into. C has no exceptions, so this port
+ * says it the only way it can: give transform an errs list, and raise here
+ * what canonical would have raised there. `subj_validate` below does the same,
+ * for the same reason. Without it `transform/apply#0` and
+ * `transform/format#11` - which assert exactly those messages - saw the
+ * unresolved spec come back as an ordinary value. */
 static voxgig_value* subj_transform(voxgig_value* in, char** err, void* ud) {
   (void)ud;
   voxgig_value* data = getp(in, "data");
   voxgig_value* spec = getp(in, "spec");
-  voxgig_value* r = voxgig_transform(data, spec, NULL);
+
+  voxgig_injection* inj = voxgig_inj_new(NULL, NULL);
+  inj->mode = 0;
+  voxgig_release(inj->errs);
+  inj->errs = voxgig_new_list();
+
+  voxgig_value* r = voxgig_transform(data, spec, inj);
+  if (0 < voxgig_list_len(voxgig_as_list(inj->errs)))
+    *err = join_errs(inj->errs);
+
+  voxgig_inj_free(inj);
   voxgig_release(data);
   voxgig_release(spec);
   return r;
@@ -762,31 +902,6 @@ static voxgig_value* subj_select(voxgig_value* in, char** err, void* ud) {
   voxgig_release(obj);
   voxgig_release(query);
   return r;
-}
-
-/* Category to file map (for scoreboard grouping). */
-static const char* category_to_file(const char* cat) {
-  if (strcmp(cat, "minor") == 0)
-    return "minor.jsonic";
-  if (strcmp(cat, "walk") == 0)
-    return "walk.jsonic";
-  if (strcmp(cat, "merge") == 0)
-    return "merge.jsonic";
-  if (strcmp(cat, "getpath") == 0)
-    return "getpath.jsonic";
-  if (strcmp(cat, "inject") == 0)
-    return "inject.jsonic";
-  if (strcmp(cat, "transform") == 0)
-    return "transform.jsonic";
-  if (strcmp(cat, "validate") == 0)
-    return "validate.jsonic";
-  if (strcmp(cat, "select") == 0)
-    return "select.jsonic";
-  if (strcmp(cat, "sentinels") == 0)
-    return "sentinels.jsonic";
-  if (strcmp(cat, "regex") == 0)
-    return "regex.jsonic";
-  return cat;
 }
 
 /* ---- regex subjects (parity floor: Go stdlib regexp; REGEX_API.md) ---- */
@@ -910,7 +1025,161 @@ static voxgig_value* subj_re_escape(voxgig_value* in, char** err, void* ud) {
   return r;
 }
 
+/* ---- new subjects: the six groups the in-situ runner never wired ---- */
+
+/* transform.modify: prefix every string the transform produces with '@'. */
+static void modify_prefix(voxgig_value* val, voxgig_value* key, voxgig_value* parent,
+                          voxgig_injection* inj, voxgig_value* store, void* ud) {
+  (void)inj;
+  (void)store;
+  (void)ud;
+  if (!voxgig_is_string(val) || NULL == key || NULL == parent)
+    return;
+  if (!voxgig_is_node(parent))
+    return;
+
+  const char* text = voxgig_as_string(val);
+  size_t len = strlen(text ? text : "");
+  char* prefixed = (char*)malloc(len + 2);
+  prefixed[0] = '@';
+  memcpy(prefixed + 1, text ? text : "", len);
+  prefixed[len + 1] = '\0';
+  voxgig_setprop(parent, key, voxgig_new_string_take(prefixed, len + 1));
+}
+
+static voxgig_value* subj_transform_modify(voxgig_value* in, char** err, void* ud) {
+  (void)err;
+  (void)ud;
+  voxgig_value* data = getp(in, "data");
+  voxgig_value* spec = getp(in, "spec");
+
+  voxgig_injection* inj = voxgig_inj_new(NULL, NULL);
+  inj->mode = 0;
+  voxgig_release(inj->modify_val);
+  inj->modify_val = voxgig_new_modify(modify_prefix, NULL);
+
+  voxgig_value* r = voxgig_transform(data, spec, inj);
+
+  voxgig_inj_free(inj);
+  voxgig_release(data);
+  voxgig_release(spec);
+  return r;
+}
+
+/* validate.special: the entry carries its own injection config in `inj`. */
+static voxgig_value* subj_validate_special(voxgig_value* in, char** err, void* ud) {
+  (void)ud;
+  voxgig_value* data = getp(in, "data");
+  voxgig_value* spec = getp(in, "spec");
+
+  voxgig_injection* inj = voxgig_inj_new(NULL, NULL);
+  inj->mode = 0;
+  voxgig_release(inj->errs);
+  inj->errs = voxgig_new_list();
+
+  /* `$=` and the other special checks read their operand out of `inj.meta`,
+   * which the entry supplies. Ignoring it made every one of them compare
+   * against nothing. */
+  voxgig_value* injv = getp(in, "inj");
+  voxgig_value* meta = getp(injv, "meta");
+  if (voxgig_is_map(meta)) {
+    voxgig_release(inj->meta);
+    inj->meta = voxgig_retain(meta);
+  }
+  voxgig_release(meta);
+  voxgig_release(injv);
+
+  voxgig_value* r = voxgig_validate(data, spec, inj);
+  if (0 < voxgig_list_len(voxgig_as_list(inj->errs)))
+    *err = join_errs(inj->errs);
+
+  voxgig_inj_free(inj);
+  voxgig_release(data);
+  voxgig_release(spec);
+  return r;
+}
+
+/* walk.copy: rebuild the tree through `setprop`, one level per path step.
+ * `cur[i]` is the node being built at depth i; canonical keeps the same
+ * one-element-per-depth array. */
+typedef struct walk_copy_state {
+  voxgig_value* cur; /* list of nodes by depth */
+} walk_copy_state;
+
+static voxgig_value* walk_copy_cb(voxgig_value* key, voxgig_value* val, voxgig_value* parent,
+                                  voxgig_value* path, void* ud) {
+  (void)parent;
+  walk_copy_state* st = (walk_copy_state*)ud;
+
+  /* A walk callback returns a RETAINED reference - `voxgig_walk` hands its
+   * result straight back to the caller, who releases it. */
+  if (NULL == key || voxgig_is_undef(key)) {
+    voxgig_release(st->cur);
+    st->cur = voxgig_new_list();
+    voxgig_list_push(voxgig_as_list(st->cur), voxgig_ismap(val)    ? voxgig_new_map()
+                                              : voxgig_islist(val) ? voxgig_new_list()
+                                                                   : voxgig_retain(val));
+    return val ? voxgig_retain(val) : voxgig_new_undef();
+  }
+
+  size_t depth = (size_t)voxgig_size(path);
+  voxgig_list* cur = voxgig_as_list(st->cur);
+
+  voxgig_value* child = voxgig_retain(val);
+  if (voxgig_isnode(val)) {
+    child = voxgig_ismap(val) ? voxgig_new_map() : voxgig_new_list();
+    while (voxgig_list_len(cur) <= depth)
+      voxgig_list_push(cur, voxgig_new_undef());
+    voxgig_list_set(cur, depth, voxgig_retain(child));
+  }
+
+  // setprop BORROWS and retains internally, unlike list_set above, which takes
+  // ownership - so the retain that is correct there leaks one reference per
+  // copied property here.
+  if (0 < depth)
+    voxgig_setprop(voxgig_list_get(cur, depth - 1), key, child);
+
+  voxgig_release(child);
+  return val ? voxgig_retain(val) : voxgig_new_undef();
+}
+
+static voxgig_value* subj_walk_copy(voxgig_value* in, char** err, void* ud) {
+  (void)err;
+  (void)ud;
+  walk_copy_state st = {NULL};
+  voxgig_value* walked = voxgig_walk(in, walk_copy_cb, NULL, VOXGIG_MAXDEPTH, &st);
+  voxgig_release(walked);
+
+  voxgig_value* out = NULL;
+  if (NULL != st.cur && 0 < voxgig_list_len(voxgig_as_list(st.cur)))
+    out = voxgig_retain(voxgig_list_get(voxgig_as_list(st.cur), 0));
+  else
+    out = voxgig_new_undef();
+
+  voxgig_release(st.cur);
+  return out;
+}
+
 int main(void) {
+  char* err = NULL;
+
+  POOL = omni_pool_new();
+
+  omni_runner* runner = omni_make_runner(POOL, "../build/test/test.json", NULL, NULL, &err);
+  if (NULL == runner) {
+    fprintf(stderr, "struct: %s\n", err ? err : "cannot load the corpus");
+    return 1;
+  }
+
+  PACK = omni_runner_run(runner, "struct", NULL, &err);
+  if (NULL == PACK) {
+    fprintf(stderr, "struct: %s\n", err ? err : "cannot resolve the struct spec");
+    return 1;
+  }
+  SPEC = omni_spec(PACK);
+
+  printf("\n===== struct corpus =====\n");
+
   /* minor */
   run("minor", "isnode", true, subj_isnode, NULL);
   run("minor", "ismap", true, subj_ismap, NULL);
@@ -919,35 +1188,41 @@ int main(void) {
   run("minor", "strkey", false, subj_strkey, NULL);
   run("minor", "isempty", false, subj_isempty, NULL);
   run("minor", "isfunc", true, subj_isfunc, NULL);
-  run("minor", "typify", true, subj_typify, NULL);
+  run("minor", "typify", false, subj_typify, NULL);
   run("minor", "typename", true, subj_typename, NULL);
   run("minor", "clone", false, subj_clone, NULL);
-  run("minor", "size", true, subj_size, NULL);
+  run("minor", "size", false, subj_size, NULL);
   run("minor", "keysof", true, subj_keysof, NULL);
   run("minor", "items", true, subj_items, NULL);
-  run("minor", "haskey", true, subj_haskey, NULL);
-  run("minor", "getprop", true, subj_getprop, NULL);
-  run("minor", "getelem", true, subj_getelem, NULL);
+  run("minor", "haskey", false, subj_haskey, NULL);
+  run("minor", "getprop", false, subj_getprop, NULL);
+  run("minor", "getelem", false, subj_getelem, NULL);
   run("minor", "setprop", true, subj_setprop, NULL);
   run("minor", "delprop", true, subj_delprop, NULL);
   run("minor", "stringify", true, subj_stringify, NULL);
-  run("minor", "jsonify", true, subj_jsonify, NULL);
+  run("minor", "jsonify", false, subj_jsonify, NULL);
   run("minor", "pathify", true, subj_pathify, NULL);
   run("minor", "escre", true, subj_escre, NULL);
   run("minor", "escurl", true, subj_escurl, NULL);
-  run("minor", "join", true, subj_join, NULL);
+  run("minor", "join", false, subj_join, NULL);
   run("minor", "flatten", true, subj_flatten, NULL);
   run("minor", "filter", true, subj_filter, NULL);
-  run("minor", "slice", true, subj_slice, NULL);
-  run("minor", "pad", true, subj_pad, NULL);
+  run("minor", "slice", false, subj_slice, NULL);
+  run("minor", "pad", false, subj_pad, NULL);
   run("minor", "setpath", false, subj_setpath, NULL);
 
   /* walk */
   run("walk", "basic", true, subj_walk_basic, NULL);
   run("walk", "depth", false, subj_walk_depth, NULL);
+  run("walk", "copy", true, subj_walk_copy, NULL);
 
   /* merge */
-  run("merge", "basic", true, subj_merge, NULL);
+  {
+    omni_json* entry = group_spec("merge", "basic");
+    voxgig_value* in = bridge_tostruct(omni_map_get(entry, "in"));
+    single("merge.basic", entry, voxgig_merge(in, VOXGIG_MAXDEPTH));
+    voxgig_release(in);
+  }
   run("merge", "cases", true, subj_merge, NULL);
   run("merge", "array", true, subj_merge, NULL);
   run("merge", "integrity", true, subj_merge, NULL);
@@ -959,111 +1234,78 @@ int main(void) {
   run("getpath", "special", true, subj_getpath_special, NULL);
   run("getpath", "handler", true, subj_getpath_handler, NULL);
 
-  /* regex (parity floor: Go stdlib regexp; REGEX_API.md) */
+  /* regex (parity floor: Go stdlib regexp - see design/REGEX_API.md) */
   run("regex", "test", true, subj_re_test, NULL);
   run("regex", "find", true, subj_re_find, NULL);
   run("regex", "find_all", true, subj_re_find_all, NULL);
   run("regex", "replace", true, subj_re_replace, NULL);
   run("regex", "escape", true, subj_re_escape, NULL);
 
-  /* sentinels */
-  run("sentinels", "getprop_unify", true, subj_sent_getprop, NULL);
-  run("sentinels", "getelem_absent", true, subj_sent_getelem, NULL);
-  run("sentinels", "haskey_unify", true, subj_sent_haskey, NULL);
-  run("sentinels", "isempty_unify", true, subj_sent_isempty, NULL);
-  run("sentinels", "isnode_unify", true, subj_sent_isnode, NULL);
-  run("sentinels", "stringify_null", true, subj_sent_stringify, NULL);
+  /* sentinels - null and absent unified on observation */
+  run("sentinels", "getprop_unify", false, subj_sent_getprop, NULL);
+  run("sentinels", "getelem_absent", false, subj_sent_getelem, NULL);
+  run("sentinels", "haskey_unify", false, subj_sent_haskey, NULL);
+  run("sentinels", "isempty_unify", false, subj_sent_isempty, NULL);
+  run("sentinels", "isnode_unify", false, subj_sent_isnode, NULL);
+  run("sentinels", "stringify_null", false, subj_sent_stringify, NULL);
 
   /* inject */
-  run("inject", "basic", true, subj_inject_basic, NULL);
-  run("inject", "string", true, subj_inject, NULL);
+  {
+    omni_json* entry = group_spec("inject", "basic");
+    voxgig_value* in = bridge_tostruct(omni_map_get(entry, "in"));
+    voxgig_value* val = getp(in, "val");
+    voxgig_value* store = getp(in, "store");
+    single("inject.basic", entry, voxgig_inject(val, store, NULL));
+    voxgig_release(val);
+    voxgig_release(store);
+    voxgig_release(in);
+  }
+  run("inject", "string", true, subj_inject, (void*)&USE_NULLMODIFIER);
   run("inject", "deep", true, subj_inject, NULL);
 
   /* transform */
+  {
+    omni_json* entry = group_spec("transform", "basic");
+    voxgig_value* in = bridge_tostruct(omni_map_get(entry, "in"));
+    voxgig_value* data = getp(in, "data");
+    voxgig_value* spec = getp(in, "spec");
+    single("transform.basic", entry, voxgig_transform(data, spec, NULL));
+    voxgig_release(data);
+    voxgig_release(spec);
+    voxgig_release(in);
+  }
   run("transform", "paths", true, subj_transform, NULL);
   run("transform", "cmds", true, subj_transform, NULL);
   run("transform", "each", true, subj_transform, NULL);
   run("transform", "pack", true, subj_transform, NULL);
   run("transform", "ref", true, subj_transform, NULL);
+  run("transform", "apply", true, subj_transform, NULL);
+  run("transform", "format", false, subj_transform, NULL);
+  run("transform", "modify", true, subj_transform_modify, NULL);
 
   /* validate */
-  run("validate", "basic", true, subj_validate, NULL);
-  run("validate", "invalid", true, subj_validate, NULL);
+  run("validate", "basic", false, subj_validate, NULL);
+  run("validate", "invalid", false, subj_validate, NULL);
   run("validate", "child", true, subj_validate, NULL);
   run("validate", "one", true, subj_validate, NULL);
   run("validate", "exact", true, subj_validate, NULL);
+  run("validate", "special", true, subj_validate_special, NULL);
 
   /* select */
   run("select", "basic", true, subj_select, NULL);
   run("select", "operators", true, subj_select, NULL);
   run("select", "edge", true, subj_select, NULL);
   run("select", "alts", true, subj_select, NULL);
+  run("select", "nullkey", false, subj_select, NULL);
 
-  /* Aggregate scoreboard. */
-  int totalP = 0, totalT = 0;
-  /* Group by file. */
-  printf("\n========= STRUCT CORPUS SCOREBOARD =========\n");
-  /* Per-test print, sorted-ish (insertion order is fine). */
-  for (size_t i = 0; i < SB_LEN; i++) {
-    printf("  %-30s %d / %d\n", SB[i].r.name, SB[i].r.passed, SB[i].r.total);
-    totalP += SB[i].r.passed;
-    totalT += SB[i].r.total;
-  }
-  printf("  %-30s %d / %d\n", "TOTAL", totalP, totalT);
-  printf("============================================\n");
+  /* condense / expand / iscondensed exist only in canonical TypeScript so far
+   * - no port implements them, and check_parity.py already lists them as
+   * pending. Named here so the gap is a visible TODO rather than three groups
+   * nobody notices are missing. */
+  printf("  skip condense.condense, condense.expand, condense.iscondensed (not ported)\n");
 
-  /* If CORPUS_VERBOSE, dump failures. */
-  const char* vrb = getenv("CORPUS_VERBOSE");
-  if (vrb && strcmp(vrb, "0") != 0) {
-    for (size_t i = 0; i < SB_LEN; i++) {
-      if (SB[i].r.fail_len == 0)
-        continue;
-      fprintf(stderr, "\n--- %s (%d/%d) ---\n", SB[i].r.name, SB[i].r.passed, SB[i].r.total);
-      int shown = 0;
-      for (size_t j = 0; j < SB[i].r.fail_len; j++) {
-        fprintf(stderr, "  %s\n", SB[i].r.failures[j]);
-        if (++shown >= 5) {
-          fprintf(stderr, "  ... %zu more\n", SB[i].r.fail_len - shown);
-          break;
-        }
-      }
-    }
-  }
+  printf("=========================\n%d groups, %d failed\n\n", GROUPS, FAILED);
 
-  /* Write target/corpus-scoreboard.json */
-  FILE* f = fopen("corpus-scoreboard.json", "w");
-  if (f) {
-    fprintf(f, "{\n  \"files\": {\n");
-    /* Group. */
-    /* For simplicity, just dump per-test. */
-    bool first = true;
-    for (size_t i = 0; i < SB_LEN; i++) {
-      const char* dot = strchr(SB[i].r.name, '.');
-      const char* cat = SB[i].r.name;
-      char catbuf[64];
-      if (dot) {
-        size_t cl = dot - cat;
-        if (cl >= sizeof(catbuf))
-          cl = sizeof(catbuf) - 1;
-        memcpy(catbuf, cat, cl);
-        catbuf[cl] = '\0';
-        cat = catbuf;
-      }
-      if (!first)
-        fprintf(f, ",\n");
-      first = false;
-      fprintf(f, "    \"%s\": {\"passed\": %d, \"total\": %d}", category_to_file(cat),
-              SB[i].r.passed, SB[i].r.total);
-    }
-    fprintf(f, "\n  },\n  \"total\": {\"passed\": %d, \"total\": %d}\n}\n", totalP, totalT);
-    fclose(f);
-  }
-
-  for (size_t i = 0; i < SB_LEN; i++) {
-    runner_result_free(&SB[i].r);
-    free(SB[i].key);
-  }
-  free(SB);
-  voxgig_release(CORPUS);
-  return 0;
+  omni_pool_free(POOL);
+  return 0 == FAILED ? 0 : 1;
 }

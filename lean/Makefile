@@ -5,18 +5,55 @@
 # elan installs to ~/.elan/bin; prepend it so a stock elan install just works.
 export PATH := $(HOME)/.elan/bin:$(PATH)
 
-.PHONY: test bench lint build inspect clean reset publish
+.PHONY: test bench lint build inspect clean reset publish omni-check
 
-# Build and run the shared JSON corpus through the Lean implementation.
-test: build
+# The corpus runner is voxgig/omni, consumed as a local checkout - it is not
+# published. $OMNI_HOME first, then sibling paths, taking the first directory
+# that carries spec/fib.json.
+#
+# COPIED in rather than built in place: lake writes its olean beside the
+# source, and the checkout is not ours to litter (nor necessarily writable).
+# lakefile.toml declares `.omni-build` as a lean_lib that only the RUNNER
+# imports, so `make build` compiles the library alone (register 4.13).
+#
+# $OMNI_HOME is resolved by the SHELL, not by make's `wildcard`/`foreach`.
+# Those are whitespace-delimited, so a path with a space ("C:/Users/Ann
+# Smith/omni") splits into two candidates that both miss - and the result is
+# not an error but a silent fallthrough to the next candidate, a DIFFERENT
+# checkout. `$$OMNI_HOME` reaches the shell as the raw environment value. The
+# sibling candidates are fixed literals with no spaces, so they stay here.
+OMNI_SIBLINGS := ../../omni ../../../omni /workspace/omni /home/user/omni
+OMNI_DIR := $(or \
+  $(shell [ -n "$$OMNI_HOME" ] && [ -f "$$OMNI_HOME/spec/fib.json" ] && printf '%s' "$$OMNI_HOME"),\
+  $(firstword $(foreach d,$(OMNI_SIBLINGS),$(if $(wildcard $(d)/spec/fib.json),$(d)))))
+
+omni-check:
+	@if [ -z "$(OMNI_DIR)" ]; then \
+	  echo "struct: voxgig/omni checkout not found - set OMNI_HOME."; \
+	  echo "  The tests run on the shared runner; the library itself does not."; \
+	  echo "  git clone https://github.com/voxgig/omni ../../omni"; \
+	  exit 1; \
+	fi
+	@mkdir -p .omni-build
+	@cp "$(OMNI_DIR)/lean/Omni.lean" .omni-build/Omni.lean
+
+# Build and run the shared JSON corpus through the Lean implementation, on
+# voxgig/omni.
+test: omni-check
+	lake build runner
 	./.lake/build/bin/runner ../build/test/test.json
 
+# The LIBRARY alone: nothing shipped names omni (register 4.13).
 build:
-	lake build
+	lake build VoxgigStruct
 
-# "Lint": type-check the library (a clean compile means it is sound; the
-# build is warnings-clean). No third-party linter exists for Lean.
-lint: build
+# "Lint": type-check the library (a clean compile means it is sound). No
+# third-party linter exists for Lean. The runner imports omni, so this needs
+# the checkout too - and omni's Omni.lean supports Lean 4.16 as well as the
+# 4.32 pinned here, so it carries deprecation warnings for names that do not
+# exist in 4.16 yet. Those are omni's; this port's own build is warnings-clean.
+lint: omni-check
+	lake build
 	@echo ok
 
 bench:

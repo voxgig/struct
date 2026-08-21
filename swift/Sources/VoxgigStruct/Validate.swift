@@ -9,11 +9,16 @@ import Foundation
 private func invalidTypeMsg(
   _ path: [String], _ needtype: String, _ vt: Int, _ v: Value, _ whence: String
 ) -> String {
-  let vs = v.isNoval ? "no value" : stringify(v)
+  // Canonical: `null == v ? 'no value' : stringify(v)`. In JS `null == v` is
+  // true for BOTH undefined and null, so a null value also reads "no value" -
+  // this port tested only for absent, and `validate/invalid#0` (`data: null`
+  // against `$STRING`) is the entry that notices.
+  let novalue = v.isNoval || v.isNull
+  let vs = novalue ? "no value" : stringify(v)
   let field =
     path.count > 1
     ? "field " + pathify(.list(VList(path.map { Value.string($0) })), 1) + " to be " : ""
-  let extra = v.isNoval ? "" : typename(vt) + S_VIZ
+  let extra = novalue ? "" : typename(vt) + S_VIZ
   return "Expected " + field + needtype + ", but found " + extra + vs + "."
 }
 
@@ -144,8 +149,13 @@ public func validate_ONE(_ inj: Injection, _ val: Value, _ ref: String, _ store:
     }
     inj.keyI = inj.keys.count
     inj.setval(inj.dparent, ancestor: 2)
-    if inj.path.count > 1 {
-      inj.path = Array(inj.path.suffix(inj.path.count - 1))
+    // Canonical: `inj.path = slice(inj.path, -1)`. A negative START in this
+    // API means "up to vlen + start", so it drops the LAST element - the
+    // `$ONE` list index - leaving the field the list sits at. This port
+    // dropped the FIRST element instead, so `validate/one#3` reported
+    // "field 0" where the corpus asks for "field x0".
+    if !inj.path.isEmpty {
+      inj.path = Array(inj.path.dropLast())
     }
     inj.key = inj.path.last ?? ""
     let tvals = slice(parent, 1)
@@ -167,7 +177,7 @@ public func validate_ONE(_ inj: Injection, _ val: Value, _ ref: String, _ store:
       subInj.extra = vstore
       subInj.errs = terrs
       subInj.meta = inj.meta
-      let vcurrent = validate(inj.dparent, tval, subInj)
+      let vcurrent = validateCollect(inj.dparent, tval, subInj, terrs)
       inj.setval(vcurrent, ancestor: -2)
       if terrs.items.isEmpty { return .noval }
     }
@@ -332,10 +342,30 @@ public func _validatehandler(_ inj: Injection, _ val: Value, _ ref: String, _ st
 
 // MARK: - validate top-level
 
-public func validate(_ data: Value, _ spec: Value, _ injdef: Injection? = nil) -> Value {
-  let extra = injdef?.extra ?? .noval
-  let collect = injdef?.errs != nil
+/// Validate `data` against the by-example `spec`.
+///
+/// Throws a `StructError` carrying the collected errors, joined with " | ",
+/// unless the caller supplied an error sink - canonical's
+/// `collect = null != injdef?.errs`, which here is `Injection.errssupplied`
+/// (assign `inj.errs` to collect). This port read `collect` off
+/// `injdef?.errs != nil`, and `errs` was a non-optional VList, so `collect` was
+/// true whenever ANY injdef was passed and every corpus entry with an `err:`
+/// expectation passed vacuously.
+public func validate(_ data: Value, _ spec: Value, _ injdef: Injection? = nil) throws -> Value {
+  let collect = injdef?.errssupplied ?? false
   let errs = injdef?.errs ?? VList()
+  let out = validateCollect(data, spec, injdef, errs)
+  if 0 < errs.items.count && !collect {
+    throw StructError(join(.list(errs), " | "))
+  }
+  return out
+}
+
+// The collecting core: never throws, and appends to the caller's `errs`.
+func validateCollect(
+  _ data: Value, _ spec: Value, _ injdef: Injection?, _ errs: VList
+) -> Value {
+  let extra = injdef?.extra ?? .noval
   let base = VMap()
   // Suppress transform commands.
   base.entries["$DELETE"] = .null
@@ -372,7 +402,7 @@ public func validate(_ data: Value, _ spec: Value, _ injdef: Injection? = nil) -
   runInj.modify = _validation
   runInj.handler = _validatehandler
   runInj.errs = errs
-  let out = transform(data, spec, runInj)
-  _ = collect
-  return out
+  // The core, not the throwing wrapper: this `validate` decides what to do
+  // with what transform collects.
+  return transformCollect(data, spec, runInj, errs)
 }

@@ -1,244 +1,145 @@
-;; Test runner for the shared JSON corpus (build/test/test.json).
-;; Self-contained: includes a small JSON reader that builds the same mutable
-;; Java collections the library uses (LinkedHashMap / ArrayList), so the
-;; library is exercised exactly as in production. No third-party deps.
+;; The shared corpus, run on the shared runner.
+;;
+;; The in-situ runner - a JSON reader, `fix-json`, `canon`/`eqv`, `matchval`,
+;; `do-match`, `resolve-args`, `check-result` and `handle-error`, all of it
+;; this port's own copy of omni's algorithm - is gone. Every group is driven
+;; through voxgig/omni, so this file only says WHICH subject answers each group
+;; and with which flags.
+;;
+;; omni is consumed as a local checkout: the Makefile puts its `src` on the
+;; test classpath via $OMNI_HOME. Only the tests use it - `deps.edn` never
+;; names it, so nothing published depends on omni (register 4.13).
+;;
+;; Flags mirror canonical: typescript/test/utility/StructUtility.test.ts.
 
 (ns voxgig.struct-runner
   (:require [voxgig.struct :as s]
+            [voxgig.omni.runner :as omni]
+            [voxgig.omni.util :as ou]
             [clojure.string :as str])
   (:import [java.util LinkedHashMap ArrayList List Map]))
 
-;; ---------------------------------------------------------------------------
-;; Minimal JSON reader -> LinkedHashMap / ArrayList / Long / Double / String /
-;; Boolean / nil
-;; ---------------------------------------------------------------------------
-
-(defn- json-read [^String s]
-  (let [n (count s) pos (int-array 1)]
-    (letfn [(peek-c [] (when (< (aget pos 0) n) (.charAt s (aget pos 0))))
-            (next-c [] (let [c (.charAt s (aget pos 0))] (aset pos 0 (inc (aget pos 0))) c))
-            (skip-ws [] (while (and (< (aget pos 0) n)
-                                    (Character/isWhitespace (.charAt s (aget pos 0))))
-                          (aset pos 0 (inc (aget pos 0)))))
-            (parse-val []
-              (skip-ws)
-              (let [c (peek-c)]
-                (cond
-                  (= c \{) (parse-obj)
-                  (= c \[) (parse-arr)
-                  (= c \") (parse-str)
-                  (or (= c \t) (= c \f)) (parse-bool)
-                  (= c \n) (parse-null)
-                  :else (parse-num))))
-            (parse-obj []
-              (next-c) ;; {
-              (let [m (LinkedHashMap.)]
-                (skip-ws)
-                (if (= (peek-c) \})
-                  (do (next-c) m)
-                  (loop []
-                    (skip-ws)
-                    (let [k (parse-str)]
-                      (skip-ws) (next-c) ;; :
-                      (let [v (parse-val)]
-                        (.put m k v))
-                      (skip-ws)
-                      (let [c (next-c)]
-                        (if (= c \,) (recur) m)))))))
-            (parse-arr []
-              (next-c) ;; [
-              (let [a (ArrayList.)]
-                (skip-ws)
-                (if (= (peek-c) \])
-                  (do (next-c) a)
-                  (loop []
-                    (let [v (parse-val)]
-                      (.add a v))
-                    (skip-ws)
-                    (let [c (next-c)]
-                      (if (= c \,) (recur) a))))))
-            (parse-str []
-              (next-c) ;; opening "
-              (let [sb (StringBuilder.)]
-                (loop []
-                  (let [c (next-c)]
-                    (cond
-                      (= c \") (.toString sb)
-                      (= c \\)
-                      (let [e (next-c)]
-                        (case e
-                          \" (.append sb \") \\ (.append sb \\) \/ (.append sb \/)
-                          \n (.append sb \newline) \t (.append sb \tab) \r (.append sb \return)
-                          \b (.append sb \backspace) \f (.append sb \formfeed)
-                          \u (let [hex (subs s (aget pos 0) (+ (aget pos 0) 4))]
-                               (aset pos 0 (+ (aget pos 0) 4))
-                               (.append sb (char (Integer/parseInt hex 16))))
-                          (.append sb e))
-                        (recur))
-                      :else (do (.append sb c) (recur)))))))
-            (parse-bool []
-              (if (= (peek-c) \t)
-                (do (aset pos 0 (+ (aget pos 0) 4)) true)
-                (do (aset pos 0 (+ (aget pos 0) 5)) false)))
-            (parse-null []
-              (aset pos 0 (+ (aget pos 0) 4)) nil)
-            (parse-num []
-              (let [start (aget pos 0)]
-                (while (and (< (aget pos 0) n)
-                            (let [c (.charAt s (aget pos 0))]
-                              (or (Character/isDigit c) (= c \-) (= c \+) (= c \.) (= c \e) (= c \E))))
-                  (aset pos 0 (inc (aget pos 0))))
-                (let [tok (subs s start (aget pos 0))]
-                  (if (or (.contains tok ".") (.contains tok "e") (.contains tok "E"))
-                    (Double/parseDouble tok)
-                    (Long/parseLong tok)))))]
-      (parse-val))))
-
-;; ---------------------------------------------------------------------------
-;; fixJSON / canonicalize / equality
-;; ---------------------------------------------------------------------------
-
 (def NULLMARK "__NULL__")
-(def UNDEFMARK "__UNDEF__")
-(def EXISTSMARK "__EXISTS__")
 
-(defn fix-json [v flag-null]
+;; ---------------------------------------------------------------------------
+;; The bridge
+;; ---------------------------------------------------------------------------
+
+;; omni's model -> this port's. omni holds persistent Clojure data; this port
+;; holds MUTABLE java.util collections, because the canonical algorithm rewrites
+;; nodes in place and needs them reference-stable. So this really does copy.
+;;
+;; ABSENT becomes nil, because that is all this port has - one nil for both
+;; canonical `undefined` and JSON null, like the Python, Dart and Lua ports.
+;; Where the corpus needs the two apart, `run-set` says it by calling the
+;; subject with NO argument rather than with nil; see `safe-call`.
+;;
+;; An integral number comes back as a Long, not a Double. omni's JSON reader
+;; parses every numeric token with Double/parseDouble - reasonable for a model
+;; whose only number is "JSON number" - but this port's `typify` answers
+;; T_integer or T_decimal from the JVM type, so 36 would classify as a decimal
+;; and `getelem(list, 0.0)` would miss its index. This port's own reader chose
+;; the JVM type from the token, and the corpus has no integral-with-point
+;; literal for the two to disagree on. struct/go's shim needed the same
+;; normalisation (voxgig/omni#13).
+(defn tostruct [val]
   (cond
-    (nil? v) (if flag-null NULLMARK nil)
-    (s/ismap v) (let [o (LinkedHashMap.)]
-                  (doseq [k (.keySet ^Map v)] (.put o (str k) (fix-json (.get ^Map v k) flag-null)))
-                  o)
-    (s/islist v) (let [a (ArrayList.)]
-                   (doseq [x v] (.add a (fix-json x flag-null)))
-                   a)
-    :else v))
+    (ou/isabsent val) nil
+    (ou/ismap val) (let [m (LinkedHashMap.)]
+                     (doseq [[k v] val] (.put m (str k) (tostruct v)))
+                     m)
+    (ou/islist val) (let [a (ArrayList.)]
+                      (doseq [v val] (.add a (tostruct v)))
+                      a)
+    (and (ou/isnum val) (not (integer? val))
+         (== (double val) (Math/rint (double val)))
+         (< (Math/abs (double val)) 9007199254740992.0))
+    (long val)
+    :else val))
 
-(defn canon [v]
+;; This port's model -> omni's. A function or the NOARG sentinel has no JSON
+;; form and omni only ever stringifies one, so it becomes its own rendering
+;; rather than silently collapsing to nil.
+(defn toomni [val]
   (cond
-    (s/ismap v) (into (sorted-map) (map (fn [k] [(str k) (canon (.get ^Map v k))]) (.keySet ^Map v)))
-    (s/islist v) (mapv canon (vec v))
-    :else v))
-
-(defn eqv [a b] (= (canon a) (canon b)))
-
-;; ---------------------------------------------------------------------------
-;; match support
-;; ---------------------------------------------------------------------------
-
-(defn matchval [check base]
-  (let [check (if (or (= check UNDEFMARK) (= check NULLMARK)) nil check)]
-    (cond
-      (eqv check base) true
-      (string? check)
-      (let [basestr (s/stringify base)
-            m (re-matches #"^/(.+)/$" check)]
-        (if m
-          (boolean (re-find (re-pattern (second m)) basestr))
-          (str/includes? (str/lower-case basestr) (str/lower-case (s/stringify check)))))
-      (s/isfunc check) true
-      :else false)))
-
-(defn do-match [check base]
-  (let [base (s/clone base)]
-    (s/walk check
-            (fn [_k val _p path]
-              (when-not (s/isnode val)
-                (let [baseval (s/getpath base path)]
-                  (cond
-                    (eqv baseval val) nil
-                    (and (= val UNDEFMARK) (nil? baseval)) nil
-                    (and (= val EXISTSMARK) (some? baseval)) nil
-                    (not (matchval val baseval))
-                    (throw (AssertionError.
-                            (str "MATCH: " (str/join "." (vec path)) ": ["
-                                 (s/stringify val) "] <=> [" (s/stringify baseval) "]"))))))
-              val))))
+    (identical? val s/NOARG) ou/ABSENT
+    (s/ismap val) (reduce (fn [out k] (assoc out (str k) (toomni (.get ^Map val k))))
+                          (array-map)
+                          (.keySet ^Map val))
+    (s/islist val) (mapv toomni (vec val))
+    (s/isfunc val) "[Function]"
+    :else val))
 
 ;; ---------------------------------------------------------------------------
-;; Per-entry runner
+;; Result tracking
 ;; ---------------------------------------------------------------------------
 
-(defn- omap [& kvs]
-  (let [m (LinkedHashMap.)]
-    (doseq [[k v] (partition 2 kvs)] (.put m k v))
-    m))
+(def ^:dynamic *results* nil)
 
-(defn- resolve-args [^Map entry subject]
-  (cond
-    (.containsKey entry "ctx") [(.get entry "ctx")]
-    (.containsKey entry "args") (vec (.get entry "args"))
-    (.containsKey entry "in") [(s/clone (.get entry "in"))]
-    :else []))
+(defn- record! [group ok? msg]
+  (swap! *results* update (if ok? :pass :fail) (fnil conj []) {:group group :msg msg}))
 
+(defn- errmsg [^Throwable err]
+  (or (.getMessage err) (str err)))
+
+;; ---------------------------------------------------------------------------
+;; Running a group
+;; ---------------------------------------------------------------------------
+
+;; Each group is one assertion: omni stops at its first failing entry and
+;; reports the index, the entry and both values.
+;;
+;; The subject is handed omni's arguments converted into this port's mutable
+;; nodes, and hands the converted arguments BACK - `match.args` asserts an
+;; in-place rewrite in eight of `minor/setpath`'s nine entries and all six of
+;; `merge/integrity`. Clojure's own data is immutable and the conversion is a
+;; copy either way, so returning them alongside the result (omni's
+;; `runsetflags-args`) is the only channel there is. rust, cpp, ocaml, elixir
+;; and haskell needed the same entry point for the same reason.
+;;
+;; The subject is VARIADIC - `(apply subject args)` - so a group can name a
+;; library function directly, the way this file always has.
+;;
+;; A ZERO-ARGUMENT entry (no `in`, no `args`, no `ctx`) reaches here as a
+;; single ABSENT cell, and this port answers it by calling the subject with no
+;; argument at all. That is the honest reading, and it is the only way a port
+;; with one nil for both can separate `{in: null, out: T_null}` from
+;; `{out: T_noval}` in `minor/typify`. A function with no nullary arity throws
+;; ArityException; nil is right for those (isempty, clone, ...), which is the
+;; fallback `safe-call` takes.
 (defn- safe-call [subject args]
   (if (empty? args)
     (try (subject) (catch clojure.lang.ArityException _ (subject nil)))
     (apply subject args)))
 
-(defn check-result [^Map entry args res]
-  (let [matched (atom false)]
-    (when (.containsKey entry "match")
-      (do-match (.get entry "match")
-                (omap "in" (.get entry "in") "args" (s/clone (ArrayList. ^java.util.Collection args))
-                      "out" (.get entry "res") "ctx" (.get entry "ctx")))
-      (reset! matched true))
-    (let [out (.get entry "out")]
-      (cond
-        (eqv out res) nil
-        (and @matched (or (= out NULLMARK) (nil? out))) nil
-        :else
-        (throw (AssertionError.
-                (str "Expected: " (s/stringify out) ", got: " (s/stringify res))))))))
-
-(defn handle-error [^Map entry err]
-  (let [entry-err (when (.containsKey entry "err") (.get entry "err"))
-        msg (or (.getMessage ^Throwable err) (str err))]
-    (if (.containsKey entry "err")
-      (if (or (= entry-err true) (matchval entry-err msg))
-        (when (.containsKey entry "match")
-          (do-match (.get entry "match")
-                    (omap "in" (.get entry "in") "out" (.get entry "res")
-                          "ctx" (.get entry "ctx") "err" msg)))
-        (throw (AssertionError. (str "ERROR MATCH: [" (s/stringify entry-err) "] <=> [" msg "]"))))
-      (throw (if (instance? AssertionError err) err (AssertionError. (str err)))))))
-
-(def ^:dynamic *results* nil)
-
-(defn- record! [group name ok? msg]
-  (swap! *results* update (if ok? :pass :fail) (fnil conj []) {:group group :name name :msg msg}))
+(defn- zeroarg? [cells]
+  (and (= 1 (count cells)) (ou/isabsent (first cells))))
 
 (defn run-set
-  ([group node subject] (run-set group node {} subject))
-  ([group node flags subject]
-   (let [flag-null (get flags "null" true)
-         fixed (fix-json node flag-null)
-         testset (.get ^Map fixed "set")]
-     (doseq [^Map entry testset]
-       (try
-         (when (and (not (.containsKey entry "out")) flag-null)
-           (.put entry "out" NULLMARK))
-         (let [args (resolve-args entry subject)
-               res (fix-json (safe-call subject args) flag-null)]
-           (.put entry "res" res)
-           (check-result entry args res))
-         (record! group (str (.get entry "name")) true nil)
-         (catch Throwable err
-           (try
-             (handle-error entry err)
-             (record! group (str (.get entry "name")) true nil)
-             (catch Throwable e2
-               (record! group (str (.get entry "name")) false (.getMessage e2))))))))))
+  ([runpack group node subject] (run-set runpack group node {} subject))
+  ([runpack group node flags subject]
+   (let [donull (get flags "null" true)
+         call (fn [cells]
+                (let [args (mapv tostruct cells)
+                      res (safe-call subject (if (zeroarg? cells) [] args))]
+                  [(mapv toomni args) (toomni res)]))]
+     (try
+       ((:runsetflags-args runpack) (toomni node) {:null donull :name group} call)
+       (record! group true nil)
+       (catch Throwable err (record! group false (errmsg err)))))))
 
-(defn run-single
-  "For the few specs that are a single {in,out} rather than a {set}."
-  [group node actual-fn]
+;; `merge.basic`, `inject.basic` and `transform.basic` are single entries, not
+;; sets, so the runner cannot drive them. Compared here, through omni's own
+;; deepequal so the rule is the one every group uses.
+(defn run-single [group node actual-fn]
   (try
     (let [expected (.get ^Map node "out")
           actual (actual-fn (.get ^Map node "in"))]
-      (if (eqv expected actual)
-        (record! group "single" true nil)
-        (record! group "single" false (str "Expected: " (s/stringify expected) ", got: " (s/stringify actual)))))
-    (catch Throwable e (record! group "single" false (.getMessage e)))))
+      (if (ou/deepequal (toomni expected) (toomni actual))
+        (record! group true nil)
+        (record! group false (str "Expected: " (s/stringify expected)
+                                  ", got: " (s/stringify actual)))))
+    (catch Throwable err (record! group false (errmsg err)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Spec access helpers + field getters
@@ -247,6 +148,11 @@
 (defn- gp [^Map m & ks] (reduce (fn [acc k] (when acc (.get ^Map acc k))) m ks))
 (defn- vget [vin k] (when (s/ismap vin) (.get ^Map vin k)))
 (defn- vhas [vin k] (and (s/ismap vin) (.containsKey ^Map vin k)))
+
+(defn- omap [& kvs]
+  (let [m (LinkedHashMap.)]
+    (doseq [[k v] (partition 2 kvs)] (.put m k v))
+    m))
 
 ;; ---------------------------------------------------------------------------
 ;; Test groups
@@ -259,7 +165,7 @@
     (= val NULLMARK) (s/setprop parent key nil)
     (string? val) (s/setprop parent key (str/replace val NULLMARK "null"))))
 
-(defn run-all [spec]
+(defn run-all [runpack spec]
   (let [minor (gp spec "minor")
         walk (gp spec "walk")
         mergeS (gp spec "merge")
@@ -269,162 +175,169 @@
         validateS (gp spec "validate")
         selectS (gp spec "select")
         sentinels (gp spec "sentinels")
-        regexs (gp spec "regex")]
+        regexs (gp spec "regex")
+        rs (fn rs
+             ([group node subject] (run-set runpack group node {} subject))
+             ([group node flags subject] (run-set runpack group node flags subject)))]
 
     ;; minor
-    (run-set "minor.isnode" (gp minor "isnode") s/isnode)
-    (run-set "minor.ismap" (gp minor "ismap") s/ismap)
-    (run-set "minor.islist" (gp minor "islist") s/islist)
-    (run-set "minor.iskey" (gp minor "iskey") {"null" false} s/iskey)
-    (run-set "minor.strkey" (gp minor "strkey") {"null" false} s/strkey)
-    (run-set "minor.isempty" (gp minor "isempty") {"null" false} s/isempty)
-    (run-set "minor.isfunc" (gp minor "isfunc") s/isfunc)
-    (run-set "minor.clone" (gp minor "clone") {"null" false} s/clone)
-    (run-set "minor.escre" (gp minor "escre") s/escre)
-    (run-set "minor.escurl" (gp minor "escurl") s/escurl)
-    (run-set "minor.stringify" (gp minor "stringify") {"null" false}
-             (fn [vin] (if (vhas vin "val") (s/stringify (vget vin "val") (vget vin "max")) (s/stringify))))
-    (run-set "minor.jsonify" (gp minor "jsonify") {"null" false}
-             (fn [vin] (s/jsonify (vget vin "val") (vget vin "flags"))))
-    (run-set "minor.getelem" (gp minor "getelem") {"null" false}
-             (fn [vin] (let [alt (vget vin "alt")]
-                         (if (nil? alt) (s/getelem (vget vin "val") (vget vin "key"))
-                             (s/getelem (vget vin "val") (vget vin "key") alt)))))
-    (run-set "minor.delprop" (gp minor "delprop")
-             (fn [vin] (s/delprop (vget vin "parent") (vget vin "key"))))
-    (run-set "minor.size" (gp minor "size") {"null" false} s/size)
-    (run-set "minor.slice" (gp minor "slice") {"null" false}
-             (fn [vin] (s/slice (vget vin "val") (vget vin "start") (vget vin "end"))))
-    (run-set "minor.pad" (gp minor "pad") {"null" false}
-             (fn [vin] (s/pad (vget vin "val") (vget vin "pad") (vget vin "char"))))
-    (run-set "minor.pathify" (gp minor "pathify") {"null" false}
-             (fn [vin] (if (vhas vin "path") (s/pathify (vget vin "path") (vget vin "from"))
-                           (s/pathify s/NOARG (vget vin "from")))))
-    (run-set "minor.items" (gp minor "items") s/items)
-    (run-set "minor.getprop" (gp minor "getprop") {"null" false}
-             (fn [vin] (let [alt (vget vin "alt")]
-                         (if (nil? alt) (s/getprop (vget vin "val") (vget vin "key"))
-                             (s/getprop (vget vin "val") (vget vin "key") alt)))))
-    (run-set "minor.setprop" (gp minor "setprop")
-             (fn [vin] (s/setprop (vget vin "parent") (vget vin "key") (vget vin "val"))))
-    (run-set "minor.haskey" (gp minor "haskey") {"null" false}
-             (fn [vin] (s/haskey (vget vin "src") (vget vin "key"))))
-    (run-set "minor.keysof" (gp minor "keysof") s/keysof)
-    (run-set "minor.join" (gp minor "join") {"null" false}
-             (fn [vin] (s/join (vget vin "val") (vget vin "sep") (vget vin "url"))))
-    (run-set "minor.typify" (gp minor "typify") {"null" false} s/typify)
-    (run-set "minor.setpath" (gp minor "setpath") {"null" false}
-             (fn [vin] (s/setpath (vget vin "store") (vget vin "path") (vget vin "val"))))
-    (run-set "minor.filter" (gp minor "filter")
-             (let [checkmap {"gt3" (fn [n] (> (nth n 1) 3)) "lt3" (fn [n] (< (nth n 1) 3))}]
-               (fn [vin] (s/filter (vget vin "val") (get checkmap (vget vin "check"))))))
-    (run-set "minor.typename" (gp minor "typename") s/typename)
-    (run-set "minor.flatten" (gp minor "flatten")
-             (fn [vin] (s/flatten (vget vin "val") (vget vin "depth"))))
+    (rs "minor.isnode" (gp minor "isnode") s/isnode)
+    (rs "minor.ismap" (gp minor "ismap") s/ismap)
+    (rs "minor.islist" (gp minor "islist") s/islist)
+    (rs "minor.iskey" (gp minor "iskey") {"null" false} s/iskey)
+    (rs "minor.strkey" (gp minor "strkey") {"null" false} s/strkey)
+    (rs "minor.isempty" (gp minor "isempty") {"null" false} s/isempty)
+    (rs "minor.isfunc" (gp minor "isfunc") s/isfunc)
+    (rs "minor.clone" (gp minor "clone") {"null" false} s/clone)
+    (rs "minor.escre" (gp minor "escre") s/escre)
+    (rs "minor.escurl" (gp minor "escurl") s/escurl)
+    (rs "minor.stringify" (gp minor "stringify") {"null" false}
+        (fn [vin] (if (vhas vin "val") (s/stringify (vget vin "val") (vget vin "max")) (s/stringify))))
+    (rs "minor.jsonify" (gp minor "jsonify") {"null" false}
+        (fn [vin] (s/jsonify (vget vin "val") (vget vin "flags"))))
+    (rs "minor.getelem" (gp minor "getelem") {"null" false}
+        (fn [vin] (let [alt (vget vin "alt")]
+                    (if (nil? alt) (s/getelem (vget vin "val") (vget vin "key"))
+                        (s/getelem (vget vin "val") (vget vin "key") alt)))))
+    (rs "minor.delprop" (gp minor "delprop")
+        (fn [vin] (s/delprop (vget vin "parent") (vget vin "key"))))
+    (rs "minor.size" (gp minor "size") {"null" false} s/size)
+    (rs "minor.slice" (gp minor "slice") {"null" false}
+        (fn [vin] (s/slice (vget vin "val") (vget vin "start") (vget vin "end"))))
+    (rs "minor.pad" (gp minor "pad") {"null" false}
+        (fn [vin] (s/pad (vget vin "val") (vget vin "pad") (vget vin "char"))))
+    (rs "minor.pathify" (gp minor "pathify") {"null" false}
+        (fn [vin] (if (vhas vin "path") (s/pathify (vget vin "path") (vget vin "from"))
+                      (s/pathify s/NOARG (vget vin "from")))))
+    (rs "minor.items" (gp minor "items") s/items)
+    (rs "minor.getprop" (gp minor "getprop") {"null" false}
+        (fn [vin] (let [alt (vget vin "alt")]
+                    (if (nil? alt) (s/getprop (vget vin "val") (vget vin "key"))
+                        (s/getprop (vget vin "val") (vget vin "key") alt)))))
+    (rs "minor.setprop" (gp minor "setprop")
+        (fn [vin] (s/setprop (vget vin "parent") (vget vin "key") (vget vin "val"))))
+    (rs "minor.haskey" (gp minor "haskey") {"null" false}
+        (fn [vin] (s/haskey (vget vin "src") (vget vin "key"))))
+    (rs "minor.keysof" (gp minor "keysof") s/keysof)
+    (rs "minor.join" (gp minor "join") {"null" false}
+        (fn [vin] (s/join (vget vin "val") (vget vin "sep") (vget vin "url"))))
+    ;; The one group that needs to tell "no argument" from "a null argument":
+    ;; the corpus has both `{in: null, out: T_null}` and `{out: T_noval}`.
+    ;; omni supplies ABSENT for the second (register 4.12), and `run-set`
+    ;; answers it by invoking `(s/typify)` with no argument at all.
+    (rs "minor.typify" (gp minor "typify") {"null" false} s/typify)
+    (rs "minor.setpath" (gp minor "setpath") {"null" false}
+        (fn [vin] (s/setpath (vget vin "store") (vget vin "path") (vget vin "val"))))
+    (rs "minor.filter" (gp minor "filter")
+        (let [checkmap {"gt3" (fn [n] (> (nth n 1) 3)) "lt3" (fn [n] (< (nth n 1) 3))}]
+          (fn [vin] (s/filter (vget vin "val") (get checkmap (vget vin "check"))))))
+    (rs "minor.typename" (gp minor "typename") s/typename)
+    (rs "minor.flatten" (gp minor "flatten")
+        (fn [vin] (s/flatten (vget vin "val") (vget vin "depth"))))
 
     ;; walk
     (run-walk-log "walk.log" (gp walk "log"))
-    (run-set "walk.basic" (gp walk "basic")
-             (fn [vin] (s/walk vin (fn [_k val _p path]
-                                     (if (string? val)
-                                       (str val "~" (str/join "." (map str (vec path))))
-                                       val)))))
-    (run-set "walk.copy" (gp walk "copy") walk-copy-subject)
-    (run-set "walk.depth" (gp walk "depth") {"null" false} walk-depth-subject)
+    (rs "walk.basic" (gp walk "basic")
+        (fn [vin] (s/walk vin (fn [_k val _p path]
+                                (if (string? val)
+                                  (str val "~" (str/join "." (map str (vec path))))
+                                  val)))))
+    (rs "walk.copy" (gp walk "copy") walk-copy-subject)
+    (rs "walk.depth" (gp walk "depth") {"null" false} walk-depth-subject)
 
     ;; merge
     (run-single "merge.basic" (gp mergeS "basic") (fn [in] (s/merge (s/clone in))))
-    (run-set "merge.cases" (gp mergeS "cases") s/merge)
-    (run-set "merge.array" (gp mergeS "array") s/merge)
-    (run-set "merge.integrity" (gp mergeS "integrity") s/merge)
-    (run-set "merge.depth" (gp mergeS "depth")
-             (fn [vin] (s/merge (vget vin "val") (vget vin "depth"))))
+    (rs "merge.cases" (gp mergeS "cases") s/merge)
+    (rs "merge.array" (gp mergeS "array") s/merge)
+    (rs "merge.integrity" (gp mergeS "integrity") s/merge)
+    (rs "merge.depth" (gp mergeS "depth")
+        (fn [vin] (s/merge (vget vin "val") (vget vin "depth"))))
 
     ;; getpath
-    (run-set "getpath.basic" (gp getpathS "basic")
-             (fn [vin] (s/getpath (vget vin "store") (vget vin "path"))))
-    (run-set "getpath.relative" (gp getpathS "relative")
-             (fn [vin] (let [dpath (vget vin "dpath")
-                             dpath (when (string? dpath) (let [a (ArrayList.)] (doseq [x (.split ^String dpath "\\." -1)] (.add a x)) a))
-                             injdef (omap "dparent" (vget vin "dparent") "dpath" dpath)]
-                         (s/getpath (vget vin "store") (vget vin "path") injdef))))
-    (run-set "getpath.special" (gp getpathS "special")
-             (fn [vin] (s/getpath (vget vin "store") (vget vin "path") (vget vin "inj"))))
-    (run-set "getpath.handler" (gp getpathS "handler")
-             (fn [vin] (let [handler (fn [inj val ref store] (if (s/isfunc val) (val) val))
-                             store (omap "$TOP" (vget vin "store") "$FOO" (fn [& _] "foo"))]
-                         (s/getpath store (vget vin "path") (omap "handler" handler)))))
+    (rs "getpath.basic" (gp getpathS "basic")
+        (fn [vin] (s/getpath (vget vin "store") (vget vin "path"))))
+    (rs "getpath.relative" (gp getpathS "relative")
+        (fn [vin] (let [dpath (vget vin "dpath")
+                        dpath (when (string? dpath) (let [a (ArrayList.)] (doseq [x (.split ^String dpath "\\." -1)] (.add a x)) a))
+                        injdef (omap "dparent" (vget vin "dparent") "dpath" dpath)]
+                    (s/getpath (vget vin "store") (vget vin "path") injdef))))
+    (rs "getpath.special" (gp getpathS "special")
+        (fn [vin] (s/getpath (vget vin "store") (vget vin "path") (vget vin "inj"))))
+    (rs "getpath.handler" (gp getpathS "handler")
+        (fn [vin] (let [handler (fn [inj val ref store] (if (s/isfunc val) (val) val))
+                        store (omap "$TOP" (vget vin "store") "$FOO" (fn [& _] "foo"))]
+                    (s/getpath store (vget vin "path") (omap "handler" handler)))))
 
     ;; inject
     (run-single "inject.basic" (gp injectS "basic")
                 (fn [in] (s/inject (s/clone (.get ^Map in "val")) (s/clone (.get ^Map in "store")))))
-    (run-set "inject.string" (gp injectS "string")
-             (fn [vin] (s/inject (vget vin "val") (vget vin "store")
-                                 (omap "modify" null-modifier "extra" (vget vin "current")))))
-    (run-set "inject.deep" (gp injectS "deep")
-             (fn [vin] (s/inject (vget vin "val") (vget vin "store"))))
+    (rs "inject.string" (gp injectS "string")
+        (fn [vin] (s/inject (vget vin "val") (vget vin "store")
+                            (omap "modify" null-modifier "extra" (vget vin "current")))))
+    (rs "inject.deep" (gp injectS "deep")
+        (fn [vin] (s/inject (vget vin "val") (vget vin "store"))))
 
     ;; transform
     (run-single "transform.basic" (gp transformS "basic")
                 (fn [in] (s/transform (.get ^Map in "data") (.get ^Map in "spec") (.get ^Map in "store"))))
     (doseq [g ["paths" "cmds" "each" "pack" "ref"]]
-      (run-set (str "transform." g) (gp transformS g)
-               (fn [vin] (s/transform (vget vin "data") (vget vin "spec") (vget vin "store")))))
-    (run-set "transform.modify" (gp transformS "modify")
-             (fn [vin] (s/transform (vget vin "data") (vget vin "spec")
-                                    (omap "modify" (fn [val key parent inj]
-                                                     (when (and (some? key) (some? parent) (string? val))
-                                                       (s/setprop parent key (str "@" val))))
-                                          "extra" (vget vin "store")))))
-    (run-set "transform.format" (gp transformS "format") {"null" false}
-             (fn [vin] (s/transform (vget vin "data") (vget vin "spec"))))
-    (run-set "transform.apply" (gp transformS "apply")
-             (fn [vin] (s/transform (vget vin "data") (vget vin "spec"))))
+      (rs (str "transform." g) (gp transformS g)
+          (fn [vin] (s/transform (vget vin "data") (vget vin "spec") (vget vin "store")))))
+    (rs "transform.modify" (gp transformS "modify")
+        (fn [vin] (s/transform (vget vin "data") (vget vin "spec")
+                               (omap "modify" (fn [val key parent inj]
+                                                (when (and (some? key) (some? parent) (string? val))
+                                                  (s/setprop parent key (str "@" val))))
+                                     "extra" (vget vin "store")))))
+    (rs "transform.format" (gp transformS "format") {"null" false}
+        (fn [vin] (s/transform (vget vin "data") (vget vin "spec"))))
+    (rs "transform.apply" (gp transformS "apply")
+        (fn [vin] (s/transform (vget vin "data") (vget vin "spec"))))
 
     ;; validate
-    (run-set "validate.basic" (gp validateS "basic") {"null" false}
-             (fn [vin] (s/validate (vget vin "data") (vget vin "spec"))))
+    (rs "validate.basic" (gp validateS "basic") {"null" false}
+        (fn [vin] (s/validate (vget vin "data") (vget vin "spec"))))
     (doseq [g ["child" "one" "exact"]]
-      (run-set (str "validate." g) (gp validateS g)
-               (fn [vin] (s/validate (vget vin "data") (vget vin "spec")))))
-    (run-set "validate.invalid" (gp validateS "invalid") {"null" false}
-             (fn [vin] (s/validate (vget vin "data") (vget vin "spec"))))
-    (run-set "validate.special" (gp validateS "special")
-             (fn [vin] (s/validate (vget vin "data") (vget vin "spec") (vget vin "inj"))))
+      (rs (str "validate." g) (gp validateS g)
+          (fn [vin] (s/validate (vget vin "data") (vget vin "spec")))))
+    (rs "validate.invalid" (gp validateS "invalid") {"null" false}
+        (fn [vin] (s/validate (vget vin "data") (vget vin "spec"))))
+    (rs "validate.special" (gp validateS "special")
+        (fn [vin] (s/validate (vget vin "data") (vget vin "spec") (vget vin "inj"))))
 
     ;; select
     (doseq [g ["basic" "operators" "edge" "alts"]]
-      (run-set (str "select." g) (gp selectS g)
-               (fn [vin] (s/select (vget vin "obj") (vget vin "query")))))
+      (rs (str "select." g) (gp selectS g)
+          (fn [vin] (s/select (vget vin "obj") (vget vin "query")))))
 
-    ;; null:false keeps JSON null as an actual nil (not the "__NULL__" marker) so
-    ;; select sees a present-null field — the present-null unexpected-keys defect.
-    (run-set "select.nullkey" (gp selectS "nullkey") {"null" false}
-             (fn [vin] (s/select (vget vin "obj") (vget vin "query"))))
+    ;; `null: false` keeps a JSON null an ACTUAL nil rather than the NULLMARK
+    ;; string, so select sees a present-but-null field.
+    (rs "select.nullkey" (gp selectS "nullkey") {"null" false}
+        (fn [vin] (s/select (vget vin "obj") (vget vin "query"))))
 
     ;; regex (parity floor: Go stdlib regexp -- see design/REGEX_API.md)
-    (run-set "regex.test" (gp regexs "test") {}
-             (fn [vin] (s/re_test (vget vin "pattern") (vget vin "input"))))
-    (run-set "regex.find" (gp regexs "find") {}
-             (fn [vin] (s/re_find (vget vin "pattern") (vget vin "input"))))
-    (run-set "regex.find_all" (gp regexs "find_all") {}
-             (fn [vin] (s/re_find_all (vget vin "pattern") (vget vin "input"))))
-    (run-set "regex.replace" (gp regexs "replace") {}
-             (fn [vin] (s/re_replace (vget vin "pattern") (vget vin "input") (vget vin "replacement"))))
-    (run-set "regex.escape" (gp regexs "escape") {}
-             (fn [vin] (s/re_escape (vget vin "val"))))
+    (rs "regex.test" (gp regexs "test")
+        (fn [vin] (s/re_test (vget vin "pattern") (vget vin "input"))))
+    (rs "regex.find" (gp regexs "find")
+        (fn [vin] (s/re_find (vget vin "pattern") (vget vin "input"))))
+    (rs "regex.find_all" (gp regexs "find_all")
+        (fn [vin] (s/re_find_all (vget vin "pattern") (vget vin "input"))))
+    (rs "regex.replace" (gp regexs "replace")
+        (fn [vin] (s/re_replace (vget vin "pattern") (vget vin "input") (vget vin "replacement"))))
+    (rs "regex.escape" (gp regexs "escape")
+        (fn [vin] (s/re_escape (vget vin "val"))))
 
     ;; sentinels
-    (run-set "sentinels.getprop_unify" (gp sentinels "getprop_unify") {"null" false}
-             (fn [vin] (s/getprop (vget vin "val") (vget vin "key") (vget vin "alt"))))
-    (run-set "sentinels.getelem_absent" (gp sentinels "getelem_absent") {"null" false}
-             (fn [vin] (s/getelem (vget vin "val") (vget vin "key") (vget vin "alt"))))
-    (run-set "sentinels.haskey_unify" (gp sentinels "haskey_unify") {"null" false}
-             (fn [vin] (s/haskey (vget vin "val") (vget vin "key"))))
-    (run-set "sentinels.isempty_unify" (gp sentinels "isempty_unify") {"null" false} s/isempty)
-    (run-set "sentinels.isnode_unify" (gp sentinels "isnode_unify") {"null" false} s/isnode)
-    (run-set "sentinels.stringify_null" (gp sentinels "stringify_null") {"null" false}
-             (fn [vin] (s/stringify vin)))))
+    (rs "sentinels.getprop_unify" (gp sentinels "getprop_unify") {"null" false}
+        (fn [vin] (s/getprop (vget vin "val") (vget vin "key") (vget vin "alt"))))
+    (rs "sentinels.getelem_absent" (gp sentinels "getelem_absent") {"null" false}
+        (fn [vin] (s/getelem (vget vin "val") (vget vin "key") (vget vin "alt"))))
+    (rs "sentinels.haskey_unify" (gp sentinels "haskey_unify") {"null" false}
+        (fn [vin] (s/haskey (vget vin "val") (vget vin "key"))))
+    (rs "sentinels.isempty_unify" (gp sentinels "isempty_unify") {"null" false} s/isempty)
+    (rs "sentinels.isnode_unify" (gp sentinels "isnode_unify") {"null" false} s/isnode)
+    (rs "sentinels.stringify_null" (gp sentinels "stringify_null") {"null" false}
+        (fn [vin] (s/stringify vin)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Special walk subjects
@@ -441,11 +354,12 @@
                                    ", t=" (s/pathify path)))
                     val)]
       (s/walk (.get ^Map test-data "in") walklog)
-      (if (eqv (s/getprop (.get ^Map test-data "out") "after") log)
-        (record! group "log" true nil)
-        (record! group "log" false (str "Expected: " (s/stringify (s/getprop (.get ^Map test-data "out") "after"))
-                                        ", got: " (s/stringify log)))))
-    (catch Throwable e (record! group "log" false (.getMessage e)))))
+      (let [expected (s/getprop (.get ^Map test-data "out") "after")]
+        (if (ou/deepequal (toomni expected) (toomni log))
+          (record! group true nil)
+          (record! group false (str "Expected: " (s/stringify expected)
+                                    ", got: " (s/stringify log))))))
+    (catch Throwable e (record! group false (errmsg e)))))
 
 (defn walk-copy-subject [vin]
   (let [cur (atom (doto (ArrayList.) (.add nil)))]
@@ -481,21 +395,60 @@
       (:top @state))))
 
 ;; ---------------------------------------------------------------------------
+;; The client path
+;; ---------------------------------------------------------------------------
+
+;; `DEF.client`, client-scoped options, and `contextify`. This port had no such
+;; test. It is the only thing that exercises subject resolution through a
+;; PROVIDER rather than through a callback this file hands over - so nothing
+;; here had ever checked that a corpus `client` key resolves, or that a
+;; `DEF.client` entry's options reach the subject.
+;;
+;; The subject talks to omni DIRECTLY, in omni's own value type: the runner
+;; resolves it by name off the provider, so there is no `in` to convert and no
+;; result for the bridge to convert back.
+(defn- check [options args]
+  (let [foo (get options "foo")
+        foos (if (ou/isnone foo) "" (ou/stringify foo))
+        ctx (first args)
+        bar (get-in ctx ["meta" "bar"])
+        bars (if (ou/isnone bar) "0" (ou/stringify bar))]
+    (array-map "zed" (str "ZED" foos "_" bars))))
+
+(defn- client-provider [options]
+  {:subject (fn [name] (when (= "check" name) (fn [args] (check options args))))
+   ;; A DEF.client entry becomes another provider, carrying its options.
+   :client client-provider
+   ;; This port adds nothing to a context; the hook must exist so omni
+   ;; installs `client` on it.
+   :contextify identity})
+
+(defn run-client [testfile]
+  (try
+    (let [runner (omni/make-runner testfile (client-provider (array-map)))
+          runpack (runner "check")]
+      ;; No subject: the runner resolves it by name off the provider, which is
+      ;; the whole point of the group.
+      ((:runsetflags runpack) ((:set runpack) "basic") {:null true :name "check.basic"} nil)
+      (record! "check.basic" true nil))
+    (catch Throwable err (record! "check.basic" false (errmsg err)))))
+
+;; ---------------------------------------------------------------------------
 ;; main
 ;; ---------------------------------------------------------------------------
 
 (defn -main [& args]
   (let [testfile (or (first args) "../build/test/test.json")
-        raw (slurp testfile)
-        alltests (json-read raw)
-        spec (.get ^Map alltests "struct")]
+        runner (omni/make-runner testfile)
+        runpack (runner "struct")]
     (binding [*results* (atom {:pass [] :fail []})]
-      (run-all spec)
+      (run-all runpack (tostruct (:spec runpack)))
+      (run-client testfile)
       (let [r @*results*
             np (count (:pass r))
             nf (count (:fail r))]
         (doseq [f (:fail r)]
-          (println "FAIL" (:group f) (:name f) "-" (:msg f)))
+          (println "FAIL" (:group f) "-" (:msg f)))
         (println)
-        (println (str "PASS " np "  FAIL " nf))
+        (println (str (+ np nf) " groups, " nf " failed"))
         (when (pos? nf) (System/exit 1))))))

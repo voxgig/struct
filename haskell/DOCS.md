@@ -91,12 +91,25 @@ demo = do
 
 ## Testing
 
-`make test` compiles `test/Runner.hs` and runs the entire shared corpus
-(`../build/test/test.json`). The runner ships a tiny hand-written JSON reader
-(no `aeson`) that builds the library's `IORef`-backed nodes directly — the same
-representation the library operates on — and uses the same runner logic as
-every other port. Keep it green, keep `python3 ../tools/check_parity.py` green,
-and add no runtime dependencies.
+`make test` runs the shared corpus (`../build/test/test.json`) through the port
+on [voxgig/omni](https://github.com/voxgig/omni), the shared test runner — so
+the entry loop, the comparison and the `err` and `match` handling are literally
+the same code every other port runs. omni is consumed as a local checkout the
+Makefile finds via `$OMNI_HOME` or beside this repository, and it goes on the
+**test** search path only: `make build` compiles `src/` alone and nothing
+shipped names omni.
+
+`test/Runner.hs` is now only a bridge and a list of subjects. It converts
+omni's `Json` into the library's `IORef`-backed nodes (`tostruct`) and back
+(`toomni`) — so what a subject receives is a real mutable node, and the
+arguments go back to omni after the call, which is what `match.args` asserts on
+in `minor/setpath` and `merge/integrity`.
+
+Every group the corpus defines runs except the three `condense` ones, which no
+port implements yet — 1358 entries in 72 groups — plus the two `check` entries
+(`DEF.client`, client-scoped options, `contextify`) and three single entries
+that are not part of any set. Keep it green, keep
+`python3 ../tools/check_parity.py` green, and add no runtime dependencies.
 
 ## Implementation notes
 

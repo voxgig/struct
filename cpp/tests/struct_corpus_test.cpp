@@ -1,48 +1,68 @@
-// Voxgig Struct corpus driver — C++ port.
-// Mirrors java/src/test/StructCorpusTest.java.
+// Copyright (c) 2025-2026 Voxgig Ltd. MIT LICENSE.
 //
-// Loads build/test/test.json, drives every (category, name) pair, and prints
-// a per-.jsonic-file scoreboard plus a totals line.
+// Voxgig Struct — the shared corpus, run on the shared runner.
+//
+// The in-situ runner (tests/runner.hpp) is gone. Every group is driven through
+// voxgig/omni, so this file only says WHICH subject answers each group and
+// with which flags — the entry loop, the comparison, the `err` and `match`
+// handling all live in the runner, identically for every port.
+//
+// Flags mirror canonical: typescript/test/utility/StructUtility.test.ts.
 
 #include <cstdio>
-#include <fstream>
 #include <iostream>
-#include <map>
 #include <string>
 #include <vector>
 
+#include "omni_bridge.hpp"
 #include "value.hpp"
-#include "value_io.hpp"
 #include "voxgig_struct.hpp"
-#include "runner.hpp"
 
 using namespace voxgig::structlib;
-using runner::get_spec;
-using runner::Result;
-using runner::runset;
-using runner::runsetflags;
-using runner::Subject;
+using bridge::Subject;
 
 namespace {
 
-std::map<std::string, Result> SCOREBOARD;
+const std::string NULLMARK = "__NULL__";
 
-const std::map<std::string, std::string>& category_to_file() {
-  static const std::map<std::string, std::string> M = {
-      {"minor", "minor.jsonic"},       {"walk", "walk.jsonic"},
-      {"merge", "merge.jsonic"},       {"getpath", "getpath.jsonic"},
-      {"inject", "inject.jsonic"},     {"transform", "transform.jsonic"},
-      {"validate", "validate.jsonic"}, {"select", "select.jsonic"},
-      {"regex", "regex.jsonic"},
-  };
-  return M;
+omni::Json SPEC;
+std::unique_ptr<omni::RunPack> PACK;
+
+int GROUPS = 0;
+int FAILED = 0;
+
+// Run one group. Each group is one assertion: omni stops at its first failing
+// entry and reports the index, the entry and both values.
+void run(const std::string& category, const std::string& name, bool donull, const Subject& s) {
+  const std::string label = category + "." + name;
+  omni::Flags flags = donull ? omni::Flags() : omni::Flags::nonull();
+  flags.name = label;
+
+  GROUPS++;
+  try {
+    PACK->runsetflags_args(SPEC.get(category).get(name), flags, bridge::wrap(s));
+    std::printf("  ok   %s\n", label.c_str());
+  } catch (const std::exception& err) {
+    FAILED++;
+    std::printf("  FAIL %s\n       %s\n", label.c_str(), err.what());
+  }
 }
 
-void run(const std::string& cat, const std::string& name, bool null_flag, const Subject& s) {
-  std::string full = cat + "." + name;
-  Value spec = get_spec(cat, name);
-  Result r = runsetflags(full, spec, null_flag, s);
-  SCOREBOARD[full] = r;
+// `merge.basic`, `inject.basic` and `transform.basic` are single entries, not
+// sets, so the runner cannot drive them. Compared here, through omni's own
+// deepequal so the rule is the one every group uses.
+void single(const std::string& label, const omni::Json& entry, const Value& got) {
+  const omni::Json want = entry.get("out");
+  const omni::Json have = bridge::toomni(got);
+
+  GROUPS++;
+  if (omni::deepequal(have, want)) {
+    std::printf("  ok   %s\n", label.c_str());
+  } else {
+    FAILED++;
+    std::printf("  FAIL %s\n       expected: %s\n       actual:   %s\n", label.c_str(),
+                omni::stringify(want).c_str(), omni::stringify(have).c_str());
+  }
 }
 
 // Extract a named field from a test-spec object. This mirrors the canonical
@@ -57,9 +77,45 @@ inline Value getpDef(const Value& in, const std::string& k, const Value& def) {
   return lookup_v(in, Value(k)).is_undef() ? def : lookup_v(in, Value(k));
 }
 
+// The runner encodes "value is JSON null" as this marker so it survives a JSON
+// round trip; a modifier puts a real null back as the structure is built.
+// Mirrors typescript/test/runner.ts:nullModifier — a slot whose injected value
+// is exactly the marker becomes JSON null; a string that merely *contains* it
+// has the marker rewritten to the literal text "null".
+inline void null_modifier(const Value& val, const Value& key, const Value& parent, Injection&,
+                          const Value&) {
+  if (!val.is_string())
+    return;
+  const std::string& s = val.as_string();
+  if (s == NULLMARK) {
+    setprop(parent, key, Value(nullptr));
+    return;
+  }
+  if (s.find(NULLMARK) != std::string::npos) {
+    std::string out = s;
+    std::string::size_type pos = 0;
+    while ((pos = out.find(NULLMARK, pos)) != std::string::npos) {
+      out.replace(pos, NULLMARK.size(), "null");
+      pos += 4;
+    }
+    setprop(parent, key, Value(out));
+  }
+}
+
 } // namespace
 
 int main() {
+  try {
+    omni::Runner runner = omni::makeRunner("../build/test/test.json");
+    PACK = std::make_unique<omni::RunPack>(runner.runner("struct"));
+    SPEC = PACK->spec;
+  } catch (const std::exception& err) {
+    std::cerr << "struct: " << err.what() << "\n";
+    return 1;
+  }
+
+  std::printf("\n===== struct corpus =====\n");
+
   // ===== minor =====
   run("minor", "isnode", true, [](const Value& in) { return Value(isnode(in)); });
   run("minor", "ismap", true, [](const Value& in) { return Value(ismap(in)); });
@@ -68,12 +124,12 @@ int main() {
   run("minor", "strkey", false, [](const Value& in) { return Value(strkey(in)); });
   run("minor", "isempty", false, [](const Value& in) { return Value(isempty(in)); });
   run("minor", "isfunc", true, [](const Value& in) { return Value(isfunc(in)); });
-  run("minor", "getprop", true, [](const Value& in) {
+  run("minor", "getprop", false, [](const Value& in) {
     Value alt = getpDef(in, "alt", Value::undef());
     return alt.is_undef() ? getprop(getp(in, "val"), getp(in, "key"))
                           : getprop(getp(in, "val"), getp(in, "key"), alt);
   });
-  run("minor", "getelem", true, [](const Value& in) {
+  run("minor", "getelem", false, [](const Value& in) {
     Value alt = getpDef(in, "alt", Value::undef());
     return alt.is_undef() ? getelem(getp(in, "val"), getp(in, "key"))
                           : getelem(getp(in, "val"), getp(in, "key"), alt);
@@ -86,7 +142,7 @@ int main() {
       out->push_back(Value(k));
     return Value(out);
   });
-  run("minor", "haskey", true,
+  run("minor", "haskey", false,
       [](const Value& in) { return Value(haskey(getp(in, "src"), getp(in, "key"))); });
   run("minor", "setprop", true, [](const Value& in) {
     Value parent = getpDef(in, "parent", Value::undef());
@@ -104,7 +160,7 @@ int main() {
     Value val = getpDef(in, "val", Value::undef());
     // Canonical subject: a stored-null (the NULLMARK in null mode) stringifies
     // as the literal text "null".
-    if (val.is_string() && val.as_string() == runner::NULLMARK())
+    if (val.is_string() && val.as_string() == NULLMARK)
       val = Value("null");
     Value max = getp(in, "max");
     int m = max.is_int() ? static_cast<int>(max.as_int()) : -1;
@@ -120,7 +176,7 @@ int main() {
     // path *element* (the marker) is stripped from the rendered string; and a
     // wholly-null path renders "<unknown-path:null>".
     Value path = getpDef(in, "path", Value::undef());
-    bool path_was_null = path.is_string() && path.as_string() == runner::NULLMARK();
+    bool path_was_null = path.is_string() && path.as_string() == NULLMARK;
     if (path_was_null)
       path = Value::undef();
     Value from = getp(in, "from");
@@ -176,7 +232,7 @@ int main() {
       [](const Value& in) { return Value(static_cast<int64_t>(typify(in))); });
   run("minor", "size", false,
       [](const Value& in) -> Value { return Value(voxgig::structlib::size(in)); });
-  run("minor", "slice", true, [](const Value& in) {
+  run("minor", "slice", false, [](const Value& in) {
     Value val = getp(in, "val");
     Value start = getp(in, "start");
     Value end = getp(in, "end");
@@ -196,6 +252,45 @@ int main() {
   });
 
   // ===== walk =====
+  // `walk.log` is a single entry, not a set, and carries THREE expected
+  // sequences - before, after and both - one per callback configuration.
+  // It was not run here at all, while DOCS.md claimed every non-condense
+  // group was covered; a callback-ordering regression could not have failed
+  // this suite. Canonical drives all three (javascript/test/struct.test.js
+  // `walk-log`), so this does too.
+  {
+    const omni::Json entry = SPEC.get("walk").get("log");
+    const Value win = bridge::tostruct(entry.get("in"));
+    std::vector<std::string> log;
+    auto walklog = [&log](const Value& key, const Value& val, const Value& parent,
+                          const std::vector<std::string>& path) -> Value {
+      auto pv = std::make_shared<List>();
+      for (const auto& seg : path)
+        pv->push_back(Value(seg));
+      log.push_back("k=" + stringify(key) + ", v=" + stringify(val) + ", p=" + stringify(parent) +
+                    ", t=" + pathify(Value(pv)));
+      return val;
+    };
+    auto logged = [&log]() {
+      auto out = std::make_shared<List>();
+      for (const auto& line : log)
+        out->push_back(Value(line));
+      return Value(out);
+    };
+
+    log.clear();
+    walk_v(win, nullptr, walklog, MAXDEPTH);
+    single("walk.log/after", omni::Json::map({{"out", entry.get("out").get("after")}}), logged());
+
+    log.clear();
+    walk_v(win, walklog);
+    single("walk.log/before", omni::Json::map({{"out", entry.get("out").get("before")}}), logged());
+
+    log.clear();
+    walk_v(win, walklog, walklog, MAXDEPTH);
+    single("walk.log/both", omni::Json::map({{"out", entry.get("out").get("both")}}), logged());
+  }
+
   run("walk", "basic", true, [](const Value& in) {
     return walk_v(in,
                   [](const Value& key, const Value& val, const Value&,
@@ -262,6 +357,10 @@ int main() {
   });
 
   // ===== merge =====
+  {
+    const omni::Json entry = SPEC.get("merge").get("basic");
+    single("merge.basic", entry, merge_v(bridge::tostruct(entry.get("in"))));
+  }
   run("merge", "cases", true, [](const Value& in) { return merge_v(in); });
   run("merge", "array", true, [](const Value& in) { return merge_v(in); });
   run("merge", "integrity", true, [](const Value& in) { return merge_v(in); });
@@ -332,18 +431,46 @@ int main() {
     return getpath_v(getp(in, "store"), getp(in, "path"), &inj);
   });
 
+  // The handler resolves a `$`-prefixed store entry that is a FUNCTION: the
+  // store holds `$FOO`, and the handler calls it. Nothing else in the corpus
+  // exercises `Injection::handler`.
+  run("getpath", "handler", true, [](const Value& in) {
+    auto store = std::shared_ptr<Map>(new Map());
+    store->set("$TOP", getp(in, "store"));
+    store->set("$FOO", Value(Injector([](Injection&, const Value&, const std::string&,
+                                         const Value&) { return Value(std::string("foo")); })));
+
+    Injection inj(Value::undef(), Value::undef());
+    inj.handler = [](Injection& cinj, const Value& val, const std::string& ref,
+                     const Value& cstore) -> Value {
+      return val.is_injector() ? val.as_injector()(cinj, val, ref, cstore) : val;
+    };
+
+    return getpath_v(Value(store), getp(in, "path"), &inj);
+  });
+
   // ===== inject =====
+  {
+    const omni::Json entry = SPEC.get("inject").get("basic");
+    const Value in = bridge::tostruct(entry.get("in"));
+    single("inject.basic", entry, inject(getp(in, "val"), getp(in, "store")));
+  }
   run("inject", "string", true, [](const Value& in) {
     // Canonical subject passes { modify: nullModifier }: an injected stored-null
     // (the marker, in null mode) renders as the literal text "null".
     Injection inj(Value::undef(), Value::undef());
-    inj.modify = runner::null_modifier;
+    inj.modify = null_modifier;
     return inject(getp(in, "val"), getp(in, "store"), &inj);
   });
   run("inject", "deep", true,
       [](const Value& in) { return inject(getp(in, "val"), getp(in, "store")); });
 
   // ===== transform =====
+  {
+    const omni::Json entry = SPEC.get("transform").get("basic");
+    const Value in = bridge::tostruct(entry.get("in"));
+    single("transform.basic", entry, transform(getp(in, "data"), getp(in, "spec")));
+  }
   run("transform", "paths", true,
       [](const Value& in) { return transform(getp(in, "data"), getp(in, "spec")); });
   run("transform", "cmds", true,
@@ -459,62 +586,33 @@ int main() {
   run("regex", "escape", true,
       [&](const Value& in) { return Value(re_escape(rxs(getp(in, "val")))); });
 
-  // Aggregate per-file scoreboard.
-  std::map<std::string, std::pair<int, int>> by_file;
-  std::map<std::string, std::vector<std::pair<std::string, std::string>>> details;
-  int totalP = 0, totalT = 0;
-  for (const auto& [key, r] : SCOREBOARD) {
-    std::string cat = key.substr(0, key.find('.'));
-    auto it = category_to_file().find(cat);
-    std::string file = it == category_to_file().end() ? cat + ".jsonic" : it->second;
-    by_file[file].first += r.passed;
-    by_file[file].second += r.total;
-    details[file].push_back({key, std::to_string(r.passed) + "/" + std::to_string(r.total)});
-    totalP += r.passed;
-    totalT += r.total;
-  }
+  // `null: false` keeps a JSON null an ACTUAL null rather than the marker, so
+  // select sees a present-but-null field.
+  run("select", "nullkey", false, [](const Value& in) {
+    auto out = std::make_shared<List>();
+    for (const auto& v : select(getp(in, "obj"), getp(in, "query")))
+      out->push_back(v);
+    return Value(out);
+  });
 
-  std::cout << "\n========= STRUCT CORPUS SCOREBOARD =========\n";
-  for (const auto& [file, pt] : by_file) {
-    std::printf("  %-18s %4d / %4d\n", file.c_str(), pt.first, pt.second);
-    for (const auto& [name, tally] : details[file]) {
-      std::printf("      %-30s %s\n", name.c_str(), tally.c_str());
-    }
-  }
-  std::printf("  %-18s %4d / %4d\n", "TOTAL", totalP, totalT);
-  std::cout << "============================================\n";
+  // ===== sentinels: null and absent unified on observation =====
+  run("sentinels", "getprop_unify", false,
+      [](const Value& in) { return getprop(getp(in, "val"), getp(in, "key"), getp(in, "alt")); });
+  run("sentinels", "getelem_absent", false,
+      [](const Value& in) { return getelem(getp(in, "val"), getp(in, "key"), getp(in, "alt")); });
+  run("sentinels", "haskey_unify", false,
+      [](const Value& in) { return Value(haskey(getp(in, "val"), getp(in, "key"))); });
+  run("sentinels", "isempty_unify", false, [](const Value& in) { return Value(isempty(in)); });
+  run("sentinels", "isnode_unify", false, [](const Value& in) { return Value(isnode(in)); });
+  run("sentinels", "stringify_null", false, [](const Value& in) { return Value(stringify(in)); });
 
-  // Optionally print failure details when CORPUS_VERBOSE is set.
-  if (const char* v = std::getenv("CORPUS_VERBOSE"); v && std::string(v) != "0") {
-    for (const auto& [name, r] : SCOREBOARD) {
-      if (r.failures.empty())
-        continue;
-      std::cerr << "\n--- " << name << " (" << r.passed << "/" << r.total << ") ---\n";
-      int shown = 0;
-      for (const auto& f : r.failures) {
-        std::cerr << "  " << f << "\n";
-        if (++shown >= 5) {
-          std::cerr << "  ... " << (r.failures.size() - shown) << " more\n";
-          break;
-        }
-      }
-    }
-  }
+  // condense / expand / iscondensed exist only in canonical TypeScript so far
+  // - no port implements them, and check_parity.py already lists them as
+  // pending. Named here so the gap is a visible TODO rather than three groups
+  // nobody notices are missing.
+  std::printf("  skip condense.condense, condense.expand, condense.iscondensed (not ported)\n");
 
-  // Write target/corpus-scoreboard.json
-  std::ofstream out("corpus-scoreboard.json");
-  if (out) {
-    out << "{\n  \"files\": {\n";
-    bool first = true;
-    for (const auto& [file, pt] : by_file) {
-      if (!first)
-        out << ",\n";
-      first = false;
-      out << "    \"" << file << "\": {\"passed\": " << pt.first << ", \"total\": " << pt.second
-          << "}";
-    }
-    out << "\n  },\n  \"total\": {\"passed\": " << totalP << ", \"total\": " << totalT << "}\n}\n";
-  }
+  std::printf("=========================\n%d groups, %d failed\n\n", GROUPS, FAILED);
 
-  return 0;
+  return 0 == FAILED ? 0 : 1;
 }

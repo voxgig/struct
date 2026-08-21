@@ -259,10 +259,11 @@ npm run lint         # ESLint 10 (flat config) + Prettier check
 npm run typecheck    # tsc --build --force
 ```
 
-Tests live in [`test/`](./test/); the runner
-([`test/runner.ts`](./test/runner.ts)) loads the shared corpus from
-[`../build/test/`](../build/test/) and is the reference every port's runner
-mirrors.
+Tests live in [`test/`](./test/). The runner is
+[voxgig/omni](https://github.com/voxgig/omni), a local checkout resolved by
+[`test/omni.ts`](./test/omni.ts) - the only file here that names it - loading
+the shared corpus from [`../build/test/`](../build/test/). It needs omni's
+typescript BUILT, since the shim loads its compiled output.
 
 **To change canonical behaviour:** edit `src/StructUtility.ts`, add or
 adjust the corpus case in `../build/test/*.aontu`, `npm run build && npm

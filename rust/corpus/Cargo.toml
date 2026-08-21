@@ -1,0 +1,27 @@
+# The corpus harness, as its own package.
+#
+# It is separate from the library for one reason: Cargo resolves EVERY
+# dependency in a manifest - dev-dependencies included - before it will build
+# anything at all. With `voxgig_omni` in the library's own `[dev-dependencies]`,
+# `cargo build` failed outright on a checkout with no omni beside it:
+#
+#     error: failed to get `voxgig_omni` as a dependency of package `voxgig-struct`
+#
+# That is register 4.13, and it is the same leak struct/go had. go's answer was
+# a nested module; this is Rust's. `cargo build` in `../` never sees omni, and
+# nothing published from `../src` can acquire it.
+[package]
+name = "voxgig-struct-corpus"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+voxgig-struct = { path = ".." }
+
+# A LITERAL path, because Cargo resolves these at build time and cannot read
+# $OMNI_HOME. `.omni` is a gitignored link created by `make setup-omni`; CI
+# checks omni out to exactly that path.
+voxgig_omni = { path = "../../.omni/rust" }
+
+[dev-dependencies]

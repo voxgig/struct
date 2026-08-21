@@ -1,2 +1,3 @@
 _build/
 .release/
+.omni-build/

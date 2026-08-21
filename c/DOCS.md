@@ -35,8 +35,8 @@ regex engine is an in-tree RE2-subset Thompson NFA in
 
 ```bash
 cd c
-make test        # compiles the corpus driver + runs it (no deps)
-make smoke       # the 13-check API smoke test
+make smoke       # the 13-check API smoke test (no test runner needed)
+make test        # the shared corpus + the client test (needs voxgig/omni)
 ```
 
 To use it from your own code, compile `src/*.c` alongside your program and
@@ -322,19 +322,30 @@ lookaround). Two consequences:
 
 ```bash
 cd c
-make test        # compile + run the corpus driver (alias of make corpus)
+make build       # compile the library alone
+make test        # the corpus driver + the client test
+make corpus      # just the corpus driver
+make client      # just the client test
 make smoke       # 13-check API smoke test
 make sanitize    # corpus driver under ASan + UBSan
 make check_leak  # corpus driver under valgrind
 make lint        # clang-format --dry-run + clang-tidy
 make format      # apply clang-format in place
-make clean       # remove built binaries / scoreboard
+make clean       # remove built binaries and omni's objects
 ```
 
-The corpus runner ([`tests/struct_corpus_test.c`](./tests/struct_corpus_test.c))
-loads the shared corpus from [`../build/test/`](../build/test/) — the same
-contract every port runs. This port passes the corpus (1232/1232); per-test
-counts are written to `corpus-scoreboard.json` after each run.
+The corpus runs on [voxgig/omni](https://github.com/voxgig/omni), the shared
+test runner, consumed as a local checkout the Makefile finds via `$OMNI_HOME`
+or beside this repository. It is compiled into the test binaries only —
+`make build` compiles `src/` alone, and nothing shipped names omni.
+[`tests/omni_bridge.h`](./tests/omni_bridge.h) converts between omni's
+`omni_json` and this port's `voxgig_value`.
+
+[`tests/struct_corpus_test.c`](./tests/struct_corpus_test.c) runs every group
+the corpus defines except the three `condense` ones, which no port implements
+yet: **1358 entries in 72 groups**, plus three single entries that are not
+sets. [`tests/client_test.c`](./tests/client_test.c) runs the two `check`
+entries — `DEF.client`, client-scoped options, and `contextify`.
 
 **To change behaviour:** this is a port, so behaviour changes start in the
 canonical TypeScript, flow to the corpus, then to every port. To fix a C

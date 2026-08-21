@@ -3,7 +3,7 @@
 
 import { test, describe } from 'node:test'
 
-import { makeRunner } from './runner'
+import { makeRunner } from './omni'
 
 import { SDK } from './sdk.js'
 

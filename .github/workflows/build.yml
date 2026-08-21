@@ -30,12 +30,30 @@ jobs:
       - name: Install dependencies
         working-directory: ./typescript
         run: npm install
+      # The test runner is voxgig/omni, consumed as a local checkout (it is
+      # not published); the tests find it via OMNI_HOME. The library itself
+      # never depends on omni - package.json gains nothing.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
+      # omni's TypeScript must be COMPILED before these tests run: `dist/` is
+      # not committed there, and this port loads the shim's built output
+      # (a .ts import from outside the project root would pull omni's whole
+      # source tree into struct's own tsc build). No other port needs this -
+      # the rest load omni's sources directly.
+      - name: Build voxgig/omni typescript
+        working-directory: ./.omni/typescript
+        run: npm install && npm run build
       - name: Build
         working-directory: ./typescript
         run: npm run build
       - name: Run tests
         working-directory: ./typescript
         run: npm test
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
 
   test-javascript:
     runs-on: ${{ matrix.os }}
@@ -199,11 +217,27 @@ jobs:
         uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           toolchain: stable
-      - name: Build
+      # Register 4.13: the corpus harness is a separate package (`rust/corpus`)
+      # so that omni stays out of the library's manifest. Cargo resolves
+      # dev-dependencies even for `cargo build`, so this must pass with NO omni
+      # checkout present - checked here, before omni is fetched.
+      - name: Library builds without omni
         working-directory: ./rust
         run: cargo build --all-targets
+      # The test runner is voxgig/omni, consumed as a local checkout (it is not
+      # published to crates.io). Cargo path dependencies are literal and cannot
+      # read $OMNI_HOME, so the checkout goes exactly where `corpus/Cargo.toml`
+      # names it.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       - name: Run tests
         working-directory: ./rust
+        run: cargo test
+      - name: Run corpus
+        working-directory: ./rust/corpus
         run: cargo test
 
   test-csharp:
@@ -246,20 +280,38 @@ jobs:
         java-version: ['17']
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # The test runner is voxgig/omni, consumed as a local checkout (it is
+      # not published to Maven Central); the build finds it via OMNI_HOME. The
+      # library itself never depends on omni - it is not in the published jar.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       - name: Setup Java ${{ matrix.java-version }}
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
           java-version: ${{ matrix.java-version }}
+      # The library build must not need omni. Checked BEFORE the tests, since
+      # afterwards the checkout is there and the check proves nothing.
+      - name: Library builds without omni
+        if: runner.os != 'Windows'
+        working-directory: ./kotlin
+        run: ./gradlew jar
       - name: Run tests (Unix)
         if: runner.os != 'Windows'
         working-directory: ./kotlin
         run: ./gradlew test
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
       - name: Run tests (Windows)
         if: runner.os == 'Windows'
         working-directory: ./kotlin
         shell: pwsh
         run: .\gradlew.bat test
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
 
   test-java:
     runs-on: ${{ matrix.os }}
@@ -274,9 +326,29 @@ jobs:
         with:
           distribution: temurin
           java-version: ${{ matrix.java-version }}
+      # Register 4.13: omni is a TEST-scoped dependency, so the library builds
+      # and packages without it. Checked before omni is fetched.
+      #
+      # `maven.test.skip` skips test COMPILATION as well as execution, which is
+      # the point here: the test sources import omni. QUOTED because Windows
+      # runners default to pwsh, which splits the bare token at the first `.`
+      # and hands maven `.test.skip=true` as a phase name of its own.
+      - name: Library builds without omni
+        working-directory: ./java
+        run: mvn -q "-Dmaven.test.skip=true" package
+      # The test runner is voxgig/omni, consumed as a local checkout (it is not
+      # published to Maven Central). `make test` builds its jar and installs it
+      # into the local repository, so the pom names an ordinary test dependency.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       - name: Run tests
         working-directory: ./java
-        run: mvn -q test
+        run: make test
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
 
   test-lua:
     runs-on: ${{ matrix.os }}
@@ -393,6 +465,14 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # The test runner is voxgig/omni, header-only and consumed as a local
+      # checkout (it is not published); the Makefile finds it via OMNI_HOME.
+      # The library itself never depends on omni.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       - name: Install nlohmann/json (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y nlohmann-json3-dev
@@ -402,6 +482,8 @@ jobs:
       - name: Run tests
         working-directory: ./cpp
         run: make test
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
 
   test-perl:
     runs-on: ${{ matrix.os }}
@@ -410,6 +492,14 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # The test runner is voxgig/omni, consumed as a local checkout (it is
+      # not published to CPAN); the tests find it via OMNI_HOME. The library
+      # itself never depends on omni - Makefile.PL gains nothing.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       - name: Setup Perl (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -424,6 +514,8 @@ jobs:
       - name: Run tests
         working-directory: ./perl
         run: prove -Ilib t/
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
 
   test-swift:
     runs-on: ${{ matrix.os }}
@@ -432,6 +524,14 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # The test runner is voxgig/omni, consumed as a local checkout (it is
+      # not published); `make test` points a gitignored symlink at it from
+      # OMNI_HOME. The library itself never depends on omni.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       # macOS runners ship a recent Swift toolchain (6.x) with Xcode by
       # default; `swift-actions/setup-swift@v2`'s macOS download path is
       # not reliable for 6.0.2 specifically. Only install on Linux.
@@ -444,7 +544,10 @@ jobs:
         run: swift --version
       - name: Run tests
         working-directory: ./swift
-        run: swift test --enable-test-discovery
+        shell: bash
+        run: make test
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
 
   test-c:
     runs-on: ${{ matrix.os }}
@@ -453,9 +556,19 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # The test runner is voxgig/omni, consumed as a local checkout (it is
+      # not published, and C has no registry to publish it to); the Makefile
+      # finds it via OMNI_HOME. The library itself never depends on omni.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       - name: Run tests
         working-directory: ./c
         run: make test
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
 
   test-scala:
     runs-on: ${{ matrix.os }}
@@ -480,6 +593,14 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # The test runner is voxgig/omni, consumed as a local checkout (it is
+      # not published to Clojars); the Makefile mints an :omni alias for it
+      # from OMNI_HOME. The library itself never depends on omni.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
@@ -494,6 +615,8 @@ jobs:
         working-directory: ./clojure
         shell: bash
         run: make test
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
 
   test-dart:
     runs-on: ${{ matrix.os }}
@@ -502,6 +625,15 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # The test runner is voxgig/omni, consumed as a local checkout (it is
+      # not published to pub.dev); the Makefile writes it into a generated
+      # pubspec_overrides.yaml from OMNI_HOME. The library itself never
+      # depends on omni.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1
       - name: Install make (Windows)
         if: runner.os == 'Windows'
@@ -509,7 +641,9 @@ jobs:
       - name: Run tests
         working-directory: ./dart
         shell: bash
-        run: dart pub get && make test
+        run: make test
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
 
   test-elixir:
     runs-on: ${{ matrix.os }}
@@ -518,6 +652,14 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # The test runner is voxgig/omni, consumed as a local checkout (it is
+      # not published to Hex); the test file finds it via OMNI_HOME. The
+      # library itself never depends on omni.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       # erlef/setup-beam supports Ubuntu + Windows only; use Homebrew on macOS.
       - name: Setup Elixir (setup-beam)
         if: runner.os != 'macOS'
@@ -535,6 +677,8 @@ jobs:
         working-directory: ./elixir
         shell: bash
         run: make test
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
 
   test-haskell:
     runs-on: ${{ matrix.os }}
@@ -543,6 +687,14 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # The test runner is voxgig/omni, consumed as a local checkout (it is
+      # not published to Hackage); the Makefile finds it via OMNI_HOME. The
+      # library itself never depends on omni.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       - uses: haskell-actions/setup@6037f33647c3f17758a2356c80fc4a53d7e0685d # v2
         with:
           ghc-version: '9.10'
@@ -553,6 +705,8 @@ jobs:
         working-directory: ./haskell
         shell: bash
         run: make test
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
 
   test-ocaml:
     runs-on: ${{ matrix.os }}
@@ -561,6 +715,14 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # The test runner is voxgig/omni, consumed as a local checkout (it is
+      # not published to opam); the Makefile finds it via OMNI_HOME. The
+      # library itself never depends on omni.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       - uses: ocaml/setup-ocaml@605a7e998e76e035b82c14d618a6e1010732c4ce # v3
         with:
           ocaml-compiler: '5'
@@ -572,6 +734,8 @@ jobs:
         shell: bash
         # ocamlc lives in the opam switch; opam exec puts it on PATH.
         run: opam exec -- make test
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
 
   test-lean:
     runs-on: ${{ matrix.os }}
@@ -580,6 +744,14 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # The test runner is voxgig/omni, consumed as a local checkout (it is
+      # not published); the Makefile copies its Omni.lean in from OMNI_HOME.
+      # The library itself never depends on omni.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       # elan directly rather than leanprover/lean-action: that action is a
       # composite that references actions/cache/restore@v5 and
       # actions/cache/save@v5 BY TAG internally, and the SHA-pin rule applies
@@ -632,3 +804,5 @@ jobs:
         working-directory: ./lean
         shell: bash
         run: make test
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni

@@ -1,55 +1,29 @@
-// Corpus test runner — drives the shared JSON test corpus
-// (../build/test/test.json) against the Rust port. Mirrors
-// ts/test/runner.ts + ts/test/utility/StructUtility.test.ts.
+// Corpus bindings - drives the shared JSON test corpus
+// (../build/test/test.json) against the Rust port.
 //
-// Only the implemented subsets are wired here: minor utilities, walk, merge,
-// getpath, setpath. inject / transform / validate / select (and the
-// top-level `primary` SDK tests) are staged; see rs/NOTES.md.
+// The RUNNER is voxgig/omni; the bridge to it is in `tests/omni.rs`. This
+// file is only the bindings: which group runs against which function, with
+// which `null` flag. Groups and flags mirror
+// `javascript/test/struct.test.js`, which is canonical.
+//
+// (The note that once stood here - "inject / transform / validate / select
+// are staged" - had been stale for some time: all four were wired, and 1356
+// entries over 71 groups were running.)
 
 use std::cell::RefCell;
-use std::fs;
-use std::path::PathBuf;
 use std::rc::Rc;
 
-use serde_json::Value as J;
 use voxgig_struct::ordered_map::OrderedMap;
 
 use voxgig_struct::value::Value;
 use voxgig_struct::*;
 
+mod omni;
+use omni::Run;
+
 const NULLMARK: &str = "__NULL__";
 const UNDEFMARK: &str = "__UNDEF__";
 const EXISTSMARK: &str = "__EXISTS__";
-
-// ---- JSON -> Value -----------------------------------------------------
-
-fn j_to_v(j: &J) -> Value {
-    match j {
-        J::Null => Value::Null,
-        J::Bool(b) => Value::Bool(*b),
-        J::Number(n) => Value::Num(n.as_f64().unwrap_or(f64::NAN)),
-        J::String(s) => Value::Str(s.clone()),
-        J::Array(a) => Value::list(a.iter().map(j_to_v).collect()),
-        J::Object(o) => {
-            let mut m = OrderedMap::new();
-            for (k, v) in o.iter() {
-                m.insert(k.clone(), j_to_v(v));
-            }
-            Value::map(m)
-        }
-    }
-}
-
-fn test_json() -> Value {
-    let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    p.push("..");
-    p.push("build");
-    p.push("test");
-    p.push("test.json");
-    let txt = fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {:?}: {e}", p));
-    let j: J = serde_json::from_str(&txt).expect("parse test.json");
-    j_to_v(&j)
-}
 
 // ---- value helpers -----------------------------------------------------
 
@@ -60,14 +34,6 @@ fn test_json() -> Value {
 // Mirrors the canonical TS runner reading entry fields by direct property access.
 fn vget(v: &Value, key: &str) -> Value {
     lookup(v, &Value::str(key))
-}
-
-fn vget_path(v: &Value, keys: &[&str]) -> Value {
-    let mut cur = v.clone();
-    for k in keys {
-        cur = vget(&cur, k);
-    }
-    cur
 }
 
 fn as_i64_opt(v: &Value) -> Option<i64> {
@@ -117,283 +83,7 @@ fn fix_json(v: &Value, null_flag: bool) -> Value {
     }
 }
 
-// match check for the `match` field of a test entry (substring / regex / etc).
-fn matchval(check: &Value, base: &Value) -> bool {
-    if check == base {
-        return true;
-    }
-    if let Value::Str(cs) = check {
-        let bstr = stringify(base, None, false);
-        if let Some(rem) = cs.strip_prefix('/').and_then(|s| s.strip_suffix('/')) {
-            if let Ok(re) = voxgig_struct::re::Regex::new(rem) {
-                return re.is_match(&bstr);
-            }
-        }
-        return bstr
-            .to_lowercase()
-            .contains(&stringify(check, None, false).to_lowercase());
-    }
-    false
-}
-
-// ---- the test loop -----------------------------------------------------
-
-struct Run {
-    failures: Vec<String>,
-    passed: usize,
-}
-
-impl Run {
-    fn new() -> Self {
-        Run {
-            failures: Vec::new(),
-            passed: 0,
-        }
-    }
-
-    /// Run a test set: `label` for messages, `null_flag` matches the TS
-    /// `flags.null` (`runset` => true, `runsetflags({null:false})` => false),
-    /// `subject` takes the (cloned) `vin` and returns the result Value.
-    fn run_set<F>(&mut self, set: &Value, null_flag: bool, label: &str, mut subject: F)
-    where
-        F: FnMut(Value) -> Value,
-    {
-        let fixed = fix_json(set, null_flag);
-        let testset = vget(&fixed, "set");
-        let entries = match testset.as_list() {
-            Some(l) => l.borrow().clone(),
-            None => {
-                self.failures.push(format!("{label}: no `set` array"));
-                return;
-            }
-        };
-        for (i, entry) in entries.iter().enumerate() {
-            // resolveEntry: missing `out` + null_flag => NULLMARK
-            let out0 = vget(entry, "out");
-            let expected = if out0.is_noval() && null_flag {
-                Value::str(NULLMARK)
-            } else {
-                out0
-            };
-            let err_expected = vget(entry, "err");
-            let match_spec = vget(entry, "match");
-
-            // `vin` = clone(entry.in) (deep). The subject gets a shallow
-            // Rc-clone of it, so any in-place mutation it makes (setpath,
-            // setprop, …) is visible through `vin` afterwards.
-            let vin = clone(&vget(entry, "in"));
-            let res = fix_json(&subject(vin.clone()), null_flag);
-
-            if !err_expected.is_noval() {
-                self.failures.push(format!(
-                    "{label}#{i}: expected error [{}] but got {}",
-                    stringify(&err_expected, Some(80), false),
-                    stringify(&res, Some(80), false),
-                ));
-                continue;
-            }
-
-            let mut matched = false;
-            if !match_spec.is_noval() {
-                // base = { in: entry.in (original), args: [vin (post-call)], out: res }
-                let mut base = OrderedMap::new();
-                base.insert("in".to_string(), vget(entry, "in"));
-                base.insert("args".to_string(), Value::list(vec![vin.clone()]));
-                base.insert("out".to_string(), res.clone());
-                let base = Value::map(base);
-                if let Some(why) = match_check(&match_spec, &base) {
-                    self.failures.push(format!(
-                        "{label}#{i}: match failed ({why}); got {}",
-                        stringify(&res, Some(160), false)
-                    ));
-                    continue;
-                }
-                matched = true;
-            }
-
-            if res == expected {
-                self.passed += 1;
-                continue;
-            }
-            if matched
-                && (expected == Value::str(NULLMARK) || expected.is_noval() || expected.is_null())
-            {
-                self.passed += 1;
-                continue;
-            }
-
-            self.failures.push(format!(
-                "{label}#{i}: in={} -> got {}, want {}",
-                stringify(&vget(entry, "in"), Some(120), false),
-                stringify(&res, Some(120), false),
-                stringify(&expected, Some(120), false),
-            ));
-        }
-    }
-}
-
-impl Run {
-    /// Like `run_set`, but the subject may return `Err(message)` — matched
-    /// (substring / regex, case-insensitive) against the entry's `err` field.
-    fn run_set_fallible<F>(&mut self, set: &Value, null_flag: bool, label: &str, mut subject: F)
-    where
-        F: FnMut(Value) -> Result<Value, String>,
-    {
-        let fixed = fix_json(set, null_flag);
-        let testset = vget(&fixed, "set");
-        let entries = match testset.as_list() {
-            Some(l) => l.borrow().clone(),
-            None => {
-                self.failures.push(format!("{label}: no `set` array"));
-                return;
-            }
-        };
-        for (i, entry) in entries.iter().enumerate() {
-            let out0 = vget(entry, "out");
-            let expected = if out0.is_noval() && null_flag {
-                Value::str(NULLMARK)
-            } else {
-                out0
-            };
-            let err_expected = vget(entry, "err");
-            let match_spec = vget(entry, "match");
-            let vin = clone(&vget(entry, "in"));
-            let result = subject(vin.clone());
-
-            match result {
-                Err(msg) => {
-                    if err_expected.is_noval() {
-                        self.failures
-                            .push(format!("{label}#{i}: unexpected error: {msg}"));
-                        continue;
-                    }
-                    let want = match &err_expected {
-                        Value::Bool(true) => {
-                            self.passed += 1;
-                            continue;
-                        }
-                        Value::Str(s) => s.clone(),
-                        other => stringify(other, None, false),
-                    };
-                    let ok = if let Some(rem) =
-                        want.strip_prefix('/').and_then(|s| s.strip_suffix('/'))
-                    {
-                        voxgig_struct::re::Regex::new(rem)
-                            .map(|re| re.is_match(&msg))
-                            .unwrap_or(false)
-                    } else {
-                        msg.to_lowercase().contains(&want.to_lowercase())
-                    };
-                    if ok {
-                        self.passed += 1;
-                    } else {
-                        self.failures.push(format!(
-                            "{label}#{i}: error mismatch: got [{}] want [{}]",
-                            msg, want
-                        ));
-                    }
-                }
-                Ok(v) => {
-                    if !err_expected.is_noval() {
-                        self.failures.push(format!(
-                            "{label}#{i}: expected error [{}] but got value {}",
-                            stringify(&err_expected, Some(80), false),
-                            stringify(&fix_json(&v, null_flag), Some(80), false)
-                        ));
-                        continue;
-                    }
-                    let res = fix_json(&v, null_flag);
-                    let mut matched = false;
-                    if !match_spec.is_noval() {
-                        let mut base = OrderedMap::new();
-                        base.insert("in".to_string(), vget(entry, "in"));
-                        base.insert("args".to_string(), Value::list(vec![vin.clone()]));
-                        base.insert("out".to_string(), res.clone());
-                        let base = Value::map(base);
-                        if let Some(why) = match_check(&match_spec, &base) {
-                            self.failures
-                                .push(format!("{label}#{i}: match failed ({why})"));
-                            continue;
-                        }
-                        matched = true;
-                    }
-                    if res == expected
-                        || (matched && (expected == Value::str(NULLMARK) || expected.is_nullish()))
-                    {
-                        self.passed += 1;
-                    } else {
-                        self.failures.push(format!(
-                            "{label}#{i}: in={} -> got {}, want {}",
-                            stringify(&vget(entry, "in"), Some(120), false),
-                            stringify(&res, Some(120), false),
-                            stringify(&expected, Some(120), false),
-                        ));
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// Walk `check`; every leaf must equal/match `getpath(base, path)`. Returns
-/// `Some(reason)` on the first mismatch, `None` if all leaves match.
-fn match_check(check: &Value, base: &Value) -> Option<String> {
-    fn rec(check: &Value, base: &Value, path: &mut Vec<String>) -> Option<String> {
-        match check {
-            Value::Map(cm) => {
-                for (k, cv) in cm.borrow().iter() {
-                    path.push(k.clone());
-                    let r = rec(cv, base, path);
-                    path.pop();
-                    if r.is_some() {
-                        return r;
-                    }
-                }
-                None
-            }
-            Value::List(cl) => {
-                for (i, cv) in cl.borrow().iter().enumerate() {
-                    path.push(i.to_string());
-                    let r = rec(cv, base, path);
-                    path.pop();
-                    if r.is_some() {
-                        return r;
-                    }
-                }
-                None
-            }
-            leaf => {
-                let bv = get_path(
-                    base,
-                    &Value::list(path.iter().cloned().map(Value::Str).collect()),
-                    None,
-                );
-                if leaf == &bv {
-                    return None;
-                }
-                if let Value::Str(s) = leaf {
-                    if s == UNDEFMARK && bv.is_noval() {
-                        return None;
-                    }
-                    if s == EXISTSMARK && !bv.is_nullish() {
-                        return None;
-                    }
-                }
-                if matchval(leaf, &bv) {
-                    return None;
-                }
-                Some(format!(
-                    "{}: {} <=> {}",
-                    path.join("."),
-                    stringify(leaf, Some(40), false),
-                    stringify(&bv, Some(40), false)
-                ))
-            }
-        }
-    }
-    let mut path = Vec::new();
-    rec(check, base, &mut path)
-}
+// The test loop now lives in `tests/omni.rs`, backed by voxgig/omni.
 
 // ---- adapters helpers --------------------------------------------------
 
@@ -439,13 +129,15 @@ fn inject_def_from_value(v: &Value) -> InjectDef {
 
 #[test]
 fn corpus() {
-    let spec = test_json();
-    let s = vget(&spec, "struct");
+    // The spec comes off the runner, not from a second loader, so the
+    // bindings and the runner cannot disagree about what the corpus says.
+    // `Run::run("struct")` has already resolved the `struct` section.
     let mut run = Run::new();
+    let s = run.spec.clone();
 
     macro_rules! set {
         ($cat:expr, $name:expr) => {
-            vget_path(&s, &[$cat, $name])
+            s.get($cat).get($name)
         };
     }
 
@@ -681,7 +373,7 @@ fn corpus() {
     });
     // walk.log — three runs (after-only / before-only / both) of a logging callback.
     {
-        let log_spec = vget_path(&s, &["walk", "log"]);
+        let log_spec = omni::tostruct(&s.get("walk").get("log"));
         let input = clone(&vget(&log_spec, "in"));
         let want = vget(&log_spec, "out");
         let mk_log = |inp: &Value, before: bool, after: bool| -> Value {
@@ -835,7 +527,7 @@ fn corpus() {
     });
     // merge.basic is a single { in, out } object (not a `set`); handle inline.
     {
-        let mb = vget(&s, "merge");
+        let mb = omni::tostruct(&s.get("merge"));
         let basic = vget(&mb, "basic");
         let bin = clone(&vget(&basic, "in"));
         let bout = fix_json(&vget(&basic, "out"), true);
@@ -913,7 +605,7 @@ fn corpus() {
     // -------- inject -------------------------------------------------
     {
         // inject.basic is a single { in: {val, store}, out } object.
-        let basic = vget_path(&s, &["inject", "basic"]);
+        let basic = omni::tostruct(&s.get("inject").get("basic"));
         let bin = vget(&basic, "in");
         let bout = fix_json(&vget(&basic, "out"), true);
         let got = fix_json(
@@ -962,7 +654,7 @@ fn corpus() {
 
     // -------- transform ---------------------------------------------
     {
-        let basic = vget_path(&s, &["transform", "basic"]);
+        let basic = omni::tostruct(&s.get("transform").get("basic"));
         let bin = vget(&basic, "in");
         let bout = fix_json(&vget(&basic, "out"), true);
         let got = match transform(
@@ -1078,40 +770,13 @@ fn corpus() {
         Value::map_of([("zed".to_string(), Value::str(format!("ZED{foo_s}_{bar_s}")))])
     }
     {
-        let check = vget_path(&spec, &["primary", "check"]);
-        // resolve clients from DEF.client (options are inject()'d against {} — a no-op here)
-        let def_clients = vget_path(&check, &["DEF", "client"]);
-        let mut clients: OrderedMap<Value> = OrderedMap::new();
-        if let Value::Map(m) = &def_clients {
-            for (cn, cdef) in m.borrow().iter() {
-                let opts = vget_path(cdef, &["test", "options"]);
-                let opts = inject(clone(&opts), &Value::empty_map(), None);
-                clients.insert(cn.clone(), opts);
-            }
-        }
-        let basic = vget(&check, "basic");
-        let testset = vget(&basic, "set");
-        if let Some(l) = testset.as_list() {
-            for (i, entry) in l.borrow().iter().enumerate() {
-                let ctx = vget(entry, "ctx");
-                let client = vget(entry, "client");
-                let opts = match &client {
-                    Value::Str(c) => clients.get(c).cloned().unwrap_or(Value::empty_map()),
-                    _ => Value::empty_map(),
-                };
-                let res = fix_json(&sdk_check(&opts, &ctx), true);
-                let want = fix_json(&vget(entry, "out"), true);
-                if res == want {
-                    run.passed += 1;
-                } else {
-                    run.failures.push(format!(
-                        "check-basic#{i}: got {}, want {}",
-                        stringify(&res, Some(120), false),
-                        stringify(&want, Some(120), false)
-                    ));
-                }
-            }
-        }
+        // The client group. omni resolves `DEF.client` and mints the
+        // sub-client; this port used to do both by hand, right here.
+        let mut checkrun = Run::check(Rc::new(sdk_check));
+        let basic = checkrun.spec.get("basic");
+        checkrun.run_set_named(&basic, true, "check-basic");
+        run.passed += checkrun.passed;
+        run.failures.extend(checkrun.failures);
     }
 
     // -------- report -------------------------------------------------

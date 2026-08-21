@@ -266,10 +266,15 @@
     "derefs",
     "pval",
     "ckey",
-    "ckeys"
+    "ckeys",
+    "collecterrs",
+    "isabsent",
+    "toomni",
+    "tostruct"
   ],
   "ignoreRegExpList": [
     "/`\\$[A-Z]+`/",
+    "/`-[A-Za-z][\\w.=-]*`/",
     "/\\bT_[a-z]+\\b/",
     "/\\bM_[A-Z]+\\b/",
     "/\\bS_[A-Za-z]+\\b/"

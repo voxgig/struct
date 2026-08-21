@@ -16,8 +16,9 @@ only what is specific to the Java port.
 functions, the `Injection` state machine, `SKIP`/`DELETE`, mode constants +
 `MODENAME`, all 11 transform commands, the validate checkers, and the 4
 select operators — `python3 ../tools/check_parity.py` reports it `ok`, and
-the shared corpus passes in full (1300/1300; the committed baseline
-[`test-baseline.json`](./test-baseline.json) records the per-file counts).
+the shared corpus passes in full - **1358 entries over 72 groups**, plus
+`transform.basic` and the two `primary.check` client entries, on the shared
+runner [voxgig/omni](https://github.com/voxgig/omni).
 
 ## Layout
 
@@ -25,12 +26,13 @@ the shared corpus passes in full (1300/1300; the committed baseline
 java/
 ├── src/Struct.java          # THE implementation: static API on voxgig.struct.Struct
 │                            #   + nested Injection and StructUtility classes
-├── src/test/Runner.java          # corpus driver (mirrors typescript/test/runner.ts)
-├── src/test/StructCorpusTest.java # JUnit entry — runs build/test/*.aontu, writes scoreboard
-├── src/test/{StructMinorTest,StructTests,RegexPathologicalTest}.java  # unit + regex panel
+├── src/test/Omni.java            # resolves the voxgig/omni checkout; the ONLY
+│                                 #   file that names the shared runner
+├── src/test/{StructTests,StructMinorTest}.java  # the corpus groups, one runSet per group
+├── src/test/ClientTest.java      # primary.check - subject resolution through a provider
+├── src/test/RegexPathologicalTest.java          # regex panel
 ├── pom.xml                  # Maven; source/target 17; JUnit 6.1 + gson (test scope)
-├── checkstyle.xml / spotbugs-exclude.xml   # lint config
-└── test-baseline.json       # committed per-file corpus pass counts
+└── checkstyle.xml / spotbugs-exclude.xml   # lint config
 ```
 
 `sourceDirectory` is `src/` (flat — no `src/main/java`); tests in
@@ -43,14 +45,23 @@ matches them case/underscore-insensitively against the canonical TS
 
 ```bash
 mvn -DskipTests compile      # build               (make build)
-mvn test                     # run the corpus suite (make test)
+make test                    # run the corpus suite on voxgig/omni
 make lint                    # compile + checkstyle:check + spotbugs:check
 ```
+
+**Use `make test`, not a bare `mvn test`.** The corpus runner is voxgig/omni,
+a local checkout that is not on Maven Central; `make test` builds its jar,
+installs it into the local repository and passes `-Pomni` to activate the
+profile that names it. Bare `mvn test` fails at test-compile with "package
+voxgig.omni does not exist". The profile is not unconditional because a
+coordinate in the POM proper breaks any static resolver that goes looking for
+it on Central — see the comment on the profile in `pom.xml`.
 
 `make test` / `make lint` (from this dir, or `make test-java` /
 `make lint-java` from the repo root) wrap these. Also: `make checkstyle` /
 `make spotbugs` (one check each), `make clean`, `make inspect` (tool
-versions). The corpus driver writes `target/corpus-scoreboard.json`.
+versions). The suite fails on the first mismatching entry and names the
+group, the index and both values; nothing is written to disk.
 
 ## Conventions specific to this port
 
@@ -87,9 +98,10 @@ versions). The corpus driver writes `target/corpus-scoreboard.json`.
 - **Function-value signatures** (`$APPLY`, `$FORMAT`, callable `alt`) use
   `java.util.function.Function`; covered by port-local unit tests, not the
   JSON corpus — see [`../NOTES.md`](../design/NOTES.md).
-- **The corpus test won't red-bar on a shortfall** — `StructCorpusTest`
-  records counts to the scoreboard. Diff `target/corpus-scoreboard.json`
-  against `test-baseline.json` to catch regressions.
+- **The corpus test fails loudly.** It used to not: the old suite was 59
+  JUnit `DynamicTest`s that asserted nothing, and a scoreboard file nothing
+  read. Both are gone. Every group is now a `runSet` call through omni, and
+  a shortfall is a red bar, not a diff against a baseline.
 - **Editing here must not diverge.** A behaviour change is a cross-port
   event: canonical TS + corpus first, port here, `mvn test`, then
   `python3 ../tools/check_parity.py`.

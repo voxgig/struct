@@ -3,16 +3,46 @@
 
 OCAMLC = ocamlc
 SRC = src/vregex.ml src/voxgig_struct.ml
-TESTSRC = $(SRC) test/runner.ml
 
-.PHONY: test bench lint build inspect clean reset publish
+# The corpus runner is voxgig/omni, consumed as a local checkout - it is not
+# published to opam. $OMNI_HOME first, then sibling paths, taking the first
+# directory that carries spec/fib.json.
+#
+# It is compiled into the TEST binary only: `make build` compiles src/ alone,
+# and nothing shipped names omni (register 4.13).
+OMNI_CANDIDATES := $(OMNI_HOME) ../../omni ../../../omni /workspace/omni /home/user/omni
+OMNI_DIR := $(firstword $(foreach d,$(OMNI_CANDIDATES),$(if $(wildcard $(d)/spec/fib.json),$(d))))
+OMNI_SRC := $(if $(OMNI_DIR),$(OMNI_DIR)/ocaml/src/omni.ml)
+
+# Copied in rather than compiled in place: ocamlc writes the .cmi and .cmo
+# beside the SOURCE, and the checkout is not ours to litter (nor necessarily
+# writable). NOT `build/` - that name is already a make TARGET here, and a
+# directory of the same name would make `make build` a no-op.
+OMNI_LOCAL = .omni-build/omni.ml
+
+TESTSRC = $(SRC) $(OMNI_LOCAL) test/runner.ml
+
+.PHONY: test bench lint build inspect clean reset publish omni-check
+
+# Fail with the reason rather than "Unbound module Omni".
+omni-check:
+	@if [ -z "$(OMNI_DIR)" ]; then \
+	  echo "struct: voxgig/omni checkout not found - set OMNI_HOME."; \
+	  echo "  The tests run on the shared runner; the library itself does not."; \
+	  echo "  git clone https://github.com/voxgig/omni ../../omni"; \
+	  exit 1; \
+	fi
 
 # Build and run the shared JSON corpus through the OCaml implementation.
 test: run_tests
 	./run_tests
 
+$(OMNI_LOCAL): omni-check $(OMNI_SRC)
+	@mkdir -p .omni-build
+	cp $(OMNI_SRC) $(OMNI_LOCAL)
+
 run_tests: $(TESTSRC)
-	$(OCAMLC) -I src $(TESTSRC) -o run_tests
+	$(OCAMLC) -I src -I .omni-build $(TESTSRC) -o run_tests
 
 # Cross-port performance harness (JSON contract; see build/bench/README.md).
 # Native (ocamlopt) for representative timings; build log to stderr.
@@ -35,7 +65,7 @@ inspect:
 
 clean:
 	rm -f src/*.cmi src/*.cmo test/*.cmi test/*.cmo run_tests
-	rm -rf _build
+	rm -rf _build .omni-build
 
 reset: clean
 

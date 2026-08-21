@@ -10,14 +10,25 @@ not the distinct-`undefined`/`null` model of the OCaml / Scala ports.
 
 ```
 cd elixir
-make test    # elixir test/runner.exs  — runs build/test/test.json
+make test    # elixir test/runner.exs  — the shared corpus, on voxgig/omni
 make lint    # elixirc lib/voxgig_struct.ex  (a clean compile = pass)
 ```
 
 Requires only Elixir / Erlang OTP. **Zero third-party runtime dependencies** —
 the library uses only the standard library (ETS for the heap, `Regex`/`:re` for
-the regex API). The test runner additionally ships a tiny hand-written JSON
-parser (no `Jason`/`Poison`) so it, too, has no third-party deps.
+the regex API).
+
+- **The corpus runner is voxgig/omni**, a local checkout `test/runner.exs`
+  finds via `$OMNI_HOME` or beside this repository. It is loaded at test time
+  only; `make lint` compiles `lib/` alone (register 4.13).
+- **A bare `nil` result reads as ABSENT.** This port has one `nil` for both
+  undefined and null, so the corpus decides which a top-level nil is: measured
+  entry by entry, reading it as null costs 42 entries and reading it as absent
+  costs 5. The 5 are named and guarded in `test/runner.exs`. The way out is the
+  one struct/lua took - give the port a real no-value sentinel.
+- **`match.args` needs the arguments back.** Nothing on the BEAM is mutable
+  from omni's side, so the subject returns `{args, result}` through omni's
+  `runsetflags_args`.
 
 ## The value model
 

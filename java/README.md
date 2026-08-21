@@ -10,9 +10,9 @@
 > the validate checkers, and the 4 select operators).
 >
 > Passes the full shared corpus. Run locally with `mvn test` from
-> `java/`. Per-file pass counts are written to
-> `target/corpus-scoreboard.json`; the committed baseline lives at
-> `test-baseline.json`.
+> `java/`. The suite runs on the shared runner
+> [voxgig/omni](https://github.com/voxgig/omni) and fails on the first
+> mismatching entry.
 
 For motivation, language-neutral concepts, and the cross-language
 parity matrix, see the [top-level README](../README.md) and
@@ -453,8 +453,8 @@ sentinel where it must disambiguate.
 
 ### Tests
 
-A Gson-based corpus runner drives the shared `.aontu` fixtures
-(`src/test/`), with a committed `test-baseline.json`. Gson is a
+The shared corpus runs on [voxgig/omni](https://github.com/voxgig/omni),
+a local checkout `make test` resolves (`src/test/Omni.java`). Gson is a
 **test-scope** dependency only; the library proper has no third-party
 runtime dependency (it hand-rolls its JSON printer).
 

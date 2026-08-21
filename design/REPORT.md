@@ -49,19 +49,19 @@ NFA engine in-tree (c/cpp/lua/rust/zig).
 | **ruby** | 48+ | 15 | 2 | 81/81 pass | Group A/B + UNDEF setval |
 | **lua** | 48+ | 15 | 2 | 74/74 pass | already Group A |
 | **rust** | 48+ | 15 | 2 | corpus pass | already Group A |
-| **c** | 48 | 15 | 2 | 1177/1177 corpus | Group A/B applied |
+| **c** | 48 | 15 | 2 | 1360/1360 corpus | Group A/B applied |
 | **java** | 48 | 15 | 2 | 1300/1300 corpus | full TS-canonical parity |
-| **cpp** | 48 | 15 | 2 | 1268/1268 corpus | full TS-canonical parity |
+| **cpp** | 48 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
 | **csharp** | 48 | 15 | 2 | 78/78 corpus | already Group A |
-| **kotlin** | 48 | 15 | 2 | 1315/1315 corpus | full TS-canonical parity |
+| **kotlin** | 48 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
 | **zig** | 48 | 15 | 2 | 60/60 corpus sets \*1 \*4 | cycle-break + 7 latent-bug fixes |
-| **perl** | 48 | 15 | 2 | full corpus (700+ cases) | full canonical parity |
-| **swift** | 48 | 15 | 2 | full corpus (700+ cases) | full canonical parity |
+| **perl** | 48 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
+| **swift** | 48 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
 | **clojure** | 48 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
 | **ocaml** | 48 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
 | **scala** | 48 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
 | **dart** | 48 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
-| **elixir** | 48 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
+| **elixir** | 48 | 15 | 2 | 1355/1360 corpus \*2 | full TS-canonical parity |
 | **haskell** | 48 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
 | **lean** | 48 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
 | **boru** | 48 | 15 | 2 | 1360/1360 corpus \*3 | full TS-canonical parity |
@@ -70,6 +70,11 @@ NFA engine in-tree (c/cpp/lua/rust/zig).
 no boru port to move onto — its 22 ports do not include one. Until it does,
 `test/runner.boru` stays this repository's own copy of the runner algorithm.
 That is a gap in omni, not in this port.
+
+\*2 Elixir: five entries are dropped, named and guarded in
+`elixir/test/runner.exs`. The port has one `nil` for undefined and null, so a
+bare nil result must be read one way; measured entry by entry, reading it as
+null costs 42 and as absent costs 5. Absent, therefore.
 
 \*1 Zig: previously reported "60/60 passing with a SIGSEGV" was
 misleading — the test process actually died at test 47/60
@@ -633,20 +638,20 @@ constants, both sentinels, boolean and null singletons.
 utilities, walk, merge, setpath, getpath, inject, transform,
 validate, and select are wired and pass the corpus tests.
 
-**Tests:** 11 corpus subtests + 3 smoke tests, ~700+ individual cases
-all passing (`swift test --enable-test-discovery` -- driver in
-`Tests/VoxgigStructTests/CorpusTests.swift`).
-- `minor.*` 191/191 across 13 subsets.
-- `walk.basic` 32/32, `getpath.basic` 58/58.
-- `inject.basic` + `inject.string` 19/19 + `inject.deep` 22/22.
-- `merge.cases` 55/55 + `merge.array` 35/35 + `merge.integrity` 6/6 +
-  `merge.depth` 45/45.
-- `transform.*` 188/188 (`paths` 44/44, `cmds` 35/35, `each` 43/43,
-  `pack` 19/19, `ref` 25/25, `format` 21/21, `modify` 1/1).
-- `validate.*` 86/86 (`basic` 39/39, `child` 18/18, `one` 6/6,
-  `exact` 11/11, `special` 12/12).
-- `select.*` 88/88 (`basic` 12/12, `operators` 58/58, `edge` 11/11,
-  `alts` 7/7).
+**Tests:** the shared corpus on [voxgig/omni](https://github.com/voxgig/omni)
+-- **1360 entries over 77 groups**, 0 failures (`make test`, driver in
+`Tests/VoxgigStructTests/CorpusTests.swift`), plus 3 smoke tests.
+
+The previous in-situ driver reported "~700+ cases" and was the weakest of
+the 24. Measured against the corpus it asserted **1244 of 1358** entries:
+it skipped every entry with an `err:` field (59 of them) behind a comment,
+never read a `match:` block (15), never read `args` or `ctx`, folded absent
+into null before comparing, and six groups -- `walk.copy`, `walk.depth`,
+`walk.log`, `getpath.relative`, `getpath.special`, `getpath.handler`,
+`select.nullkey` -- were absent entirely (55 entries). Running the corpus
+properly surfaced **ten** library defects, from `transform` / `validate`
+collecting errors and then dropping them, through `inject` discarding a
+caller's `handler`, to `setval` branching on `abs(ancestor)`.
 
 **Wired:** all 48 canonical functions including the `re_*` regex
 wrappers; `Injection` reference class with `child` / `descend` /

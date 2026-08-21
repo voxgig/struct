@@ -1,485 +1,515 @@
 #!perl
-# Corpus test runner: loads ../build/test/test.json and runs the test sets
-# the canonical TS test suite drives. Each subtest mirrors one runset name.
+# The shared corpus, run on the shared runner.
+#
+# Every group in `build/test/test.json` is driven through voxgig/omni (see
+# t/OmniBridge.pm), so this file only says WHICH subject answers each group
+# and with which flags - the entry loop, the comparison, the error and
+# `match` handling all live in the runner, identically for every port.
+#
+# Flags mirror canonical: typescript/test/utility/StructUtility.test.ts.
 
 use 5.018;
 use strict;
 use warnings;
+
 use Test::More;
 use FindBin;
 use lib "$FindBin::Bin/../lib";
+use lib "$FindBin::Bin";
+
 use Voxgig::Struct qw();
+use Scalar::Util ();
 
-my $corpus_path = "$FindBin::Bin/../../build/test/test.json";
+use OmniBridge;
 
-unless (-e $corpus_path) {
-    plan skip_all => "Corpus file not found: $corpus_path";
-}
+my $corpus = "$FindBin::Bin/../../build/test/test.json";
+plan skip_all => "Corpus file not found: $corpus" unless -e $corpus;
 
-# Use the in-tree insertion-ordered parser so map key order matches canonical.
-my $text = do {
-    open my $fh, '<:raw', $corpus_path or die "Cannot open $corpus_path: $!";
-    local $/;
-    <$fh>;
-};
+my $NULLMARK = $OmniBridge::NULLMARK;
 
-my $spec = Voxgig::Struct::parse_json($text);
-my $struct_spec = $spec->{struct};
+my $run  = OmniBridge::make_run('struct');
+my $spec = $run->{spec};
 
-sub canon {
-    my ($v) = @_;
-    # Map keys aren't significant for equality — sort them so the
-    # comparison ignores insertion order (matches node's deepStrictEqual).
-    return Voxgig::Struct::_stringify_inner($v, 1);
-}
-
-# Run a single set with a "subject" callback that takes `in` and returns the
-# computed result. The canonical out lives at entry->{out}.
+# One group, omni's default flags (`null` on).
 sub runset {
-    my ($label, $entries, $subject) = @_;
-    return unless $entries;
-    return unless Voxgig::Struct::islist($entries);
-    my $idx = 0;
-    my $pass = 0;
-    my $fail = 0;
-    for my $entry (@$entries) {
-        next unless Voxgig::Struct::ismap($entry);
-        my $in_val = $entry->{in};
-        my $expected = exists $entry->{out} ? $entry->{out} : undef;
-        my $err_field = $entry->{err};
-        my $got = eval { $subject->($in_val, $entry) };
-        my $err = $@;
-        if (defined $err_field) {
-            # An error is expected: the subject must throw, and (unless err is
-            # literally `true`) the thrown message must contain the expected
-            # substring or match the /regex/.
-            my $this = $idx;
-            $idx++;
-            if (!$err) {
-                $fail++;
-                diag("[$label#$this] expected error but none thrown (err=" . canon($err_field) . ")");
-                next;
-            }
-            my $msg = "$err";
-            my $ok;
-            if (Voxgig::Struct::is_jbool($err_field)) {
-                $ok = ${$err_field} ? 1 : 0;   # err: true → any error
-            }
-            elsif (!ref $err_field) {
-                if ($err_field =~ m{^/(.+)/$}s) {
-                    my $re = $1;
-                    $ok = ($msg =~ /$re/) ? 1 : 0;
-                }
+    my ( $label, $testspec, $subject ) = @_;
+    return group( $label, $testspec, {}, $subject );
+}
+
+# One group with explicit flags.
+sub runsetflags {
+    my ( $label, $testspec, $flags, $subject ) = @_;
+    return group( $label, $testspec, $flags, $subject );
+}
+
+# Each group is one Test::More assertion, so a failure names the group and
+# the entry (omni's message carries the index, the entry and both values).
+sub group {
+    my ( $label, $testspec, $flags, $subject ) = @_;
+    my $ok = eval { $run->{runsetflags}->( $testspec, $flags, $subject ); 1 };
+    if ($ok) {
+        pass($label);
+        return 1;
+    }
+    my $err = $@;
+    fail($label);
+    diag("$label: $err");
+    return 0;
+}
+
+my $jbool = \&Voxgig::Struct::jbool;
+
+# The three single-entry cases below are not sets, so they are compared here
+# rather than by the runner. Map key order is not significant - `_stringify_inner`
+# with the sort flag renders both sides the same way, as node's deepStrictEqual
+# does.
+sub canon { return Voxgig::Struct::_stringify_inner( $_[0], 1 ) }
+
+# ===========================================================================
+# minor
+# ===========================================================================
+
+my $minor = $spec->{minor};
+
+runset( 'minor-isnode', $minor->{isnode}, sub { $jbool->( Voxgig::Struct::isnode( $_[0] ) ) } );
+runset( 'minor-ismap',  $minor->{ismap},  sub { $jbool->( Voxgig::Struct::ismap( $_[0] ) ) } );
+runset( 'minor-islist', $minor->{islist}, sub { $jbool->( Voxgig::Struct::islist( $_[0] ) ) } );
+
+runsetflags( 'minor-iskey', $minor->{iskey}, { null => 0 },
+    sub { $jbool->( Voxgig::Struct::iskey( $_[0] ) ) } );
+
+runsetflags( 'minor-strkey', $minor->{strkey}, { null => 0 },
+    sub { Voxgig::Struct::strkey( $_[0] ) } );
+
+runsetflags( 'minor-isempty', $minor->{isempty}, { null => 0 },
+    sub { $jbool->( Voxgig::Struct::isempty( $_[0] ) ) } );
+
+runset( 'minor-isfunc', $minor->{isfunc}, sub { $jbool->( Voxgig::Struct::isfunc( $_[0] ) ) } );
+
+runsetflags( 'minor-clone', $minor->{clone}, { null => 0 },
+    sub { Voxgig::Struct::clone( $_[0] ) } );
+
+# The corpus names the predicate; the test file supplies it.
+my %checkmap = (
+    gt3 => sub { $_[0][1] > 3 },
+    lt3 => sub { $_[0][1] < 3 },
+);
+runset( 'minor-filter', $minor->{filter},
+    sub { Voxgig::Struct::filter( $_[0]{val}, $checkmap{ $_[0]{check} } ) } );
+
+runset( 'minor-flatten', $minor->{flatten},
+    sub { Voxgig::Struct::flatten( $_[0]{val}, $_[0]{depth} ) } );
+
+runset( 'minor-escre',  $minor->{escre},  sub { Voxgig::Struct::escre( $_[0] ) } );
+runset( 'minor-escurl', $minor->{escurl}, sub { Voxgig::Struct::escurl( $_[0] ) } );
+
+runset(
+    'minor-stringify',
+    $minor->{stringify},
+    sub {
+        my ($in)  = @_;
+        my $val   = $in->{val};
+        my $isnul = defined $val && !ref $val && $val eq $NULLMARK;
+        return Voxgig::Struct::stringify( $isnul ? 'null' : $val, $in->{max} );
+    }
+);
+
+runsetflags( 'minor-jsonify', $minor->{jsonify}, { null => 0 },
+    sub { Voxgig::Struct::jsonify( $_[0]{val}, $_[0]{flags} ) } );
+
+# `null: true`, so an absent path arrives as NULLMARK and the rendered path
+# has to be put back the way canonical renders a real undefined.
+runsetflags(
+    'minor-pathify',
+    $minor->{pathify},
+    { null => 1 },
+    sub {
+        my ($in)  = @_;
+        my $raw   = $in->{path};
+        my $isnul = defined $raw && !ref $raw && $raw eq $NULLMARK;
+        my $path  = $isnul ? undef : $raw;
+        my $str   = Voxgig::Struct::pathify( $path, $in->{from} );
+        $str =~ s/\Q$NULLMARK\E\.//;
+        $str =~ s/>/:null>/g if $isnul;
+        return $str;
+    }
+);
+
+runset( 'minor-items',  $minor->{items},  sub { Voxgig::Struct::items( $_[0] ) } );
+runset( 'minor-keysof', $minor->{keysof}, sub { Voxgig::Struct::keysof( $_[0] ) } );
+
+# `alt` is omitted where the corpus omits it: passing an explicit undef is a
+# different call, and getelem/getprop differ on whether a NULL alt counts.
+runsetflags(
+    'minor-getelem',
+    $minor->{getelem},
+    { null => 0 },
+    sub {
+        my ($in) = @_;
+        my $alt = $in->{alt};
+        return ( !defined $alt || Voxgig::Struct::is_jnull($alt) )
+          ? Voxgig::Struct::getelem( $in->{val}, $in->{key} )
+          : Voxgig::Struct::getelem( $in->{val}, $in->{key}, $alt );
+    }
+);
+
+runsetflags(
+    'minor-getprop',
+    $minor->{getprop},
+    { null => 0 },
+    sub {
+        my ($in) = @_;
+        return exists $in->{alt}
+          ? Voxgig::Struct::getprop( $in->{val}, $in->{key}, $in->{alt} )
+          : Voxgig::Struct::getprop( $in->{val}, $in->{key} );
+    }
+);
+
+runset( 'minor-setprop', $minor->{setprop},
+    sub { Voxgig::Struct::setprop( $_[0]{parent}, $_[0]{key}, $_[0]{val} ) } );
+
+runset( 'minor-delprop', $minor->{delprop},
+    sub { Voxgig::Struct::delprop( $_[0]{parent}, $_[0]{key} ) } );
+
+runsetflags( 'minor-haskey', $minor->{haskey}, { null => 0 },
+    sub { $jbool->( Voxgig::Struct::haskey( $_[0]{src}, $_[0]{key} ) ) } );
+
+runsetflags( 'minor-join', $minor->{join}, { null => 0 },
+    sub { Voxgig::Struct::join( $_[0]{val}, $_[0]{sep}, $_[0]{url} ) } );
+
+runset( 'minor-typename', $minor->{typename}, sub { Voxgig::Struct::typename( $_[0] ) } );
+
+runsetflags( 'minor-typify', $minor->{typify}, { null => 0 },
+    sub { Voxgig::Struct::typify( $_[0] ) } );
+
+runsetflags( 'minor-size', $minor->{size}, { null => 0 },
+    sub { Voxgig::Struct::size( $_[0] ) } );
+
+runsetflags( 'minor-slice', $minor->{slice}, { null => 0 },
+    sub { Voxgig::Struct::slice( $_[0]{val}, $_[0]{start}, $_[0]{end} ) } );
+
+runsetflags( 'minor-pad', $minor->{pad}, { null => 0 },
+    sub { Voxgig::Struct::pad( $_[0]{val}, $_[0]{pad}, $_[0]{char} ) } );
+
+# setpath rewrites `store` IN PLACE, and eight of these nine entries assert
+# that rewrite through `match.args`. The bridge hands the subject omni's own
+# hash, so the runner sees it (t/OmniBridge.pm).
+runsetflags( 'minor-setpath', $minor->{setpath}, { null => 0 },
+    sub { Voxgig::Struct::setpath( $_[0]{store}, $_[0]{path}, $_[0]{val} ) } );
+
+# ===========================================================================
+# walk
+# ===========================================================================
+
+runset(
+    'walk-basic',
+    $spec->{walk}{basic},
+    sub {
+        my $walkpath = sub {
+            my ( $_key, $val, $_parent, $path ) = @_;
+            return $val if ref $val || !defined $val;
+            return $val if !Voxgig::Struct::_is_string_sv($val);
+            return $val . '~' . CORE::join( '.', @$path );
+        };
+        return Voxgig::Struct::walk( $_[0], $walkpath );
+    }
+);
+
+runsetflags(
+    'walk-depth',
+    $spec->{walk}{depth},
+    { null => 0 },
+    sub {
+        my ($in) = @_;
+        my ( $top, $cur );
+        my $copy = sub {
+            my ( $key, $val, $_parent, $_path ) = @_;
+            if ( !defined $key || Voxgig::Struct::isnode($val) ) {
+                my $child = Voxgig::Struct::islist($val) ? [] : Voxgig::Struct::jm();
+                if ( !defined $key ) { $top = $cur = $child }
                 else {
-                    $ok = (index(lc $msg, lc $err_field) >= 0) ? 1 : 0;
+                    Voxgig::Struct::setprop( $cur, $key, $child );
+                    $cur = $child;
                 }
             }
             else {
-                $ok = 1;
+                Voxgig::Struct::setprop( $cur, $key, $val );
             }
-            if ($ok) { $pass++ }
-            else {
-                $fail++;
-                diag("[$label#$this] err mismatch: expected=" . canon($err_field) . " got=[$msg]");
+            return $val;
+        };
+        Voxgig::Struct::walk( $in->{src}, $copy, undef, $in->{maxdepth} );
+        return $top;
+    }
+);
+
+runset(
+    'walk-copy',
+    $spec->{walk}{copy},
+    sub {
+        my ($in) = @_;
+        my $cur;
+        my $walkcopy = sub {
+            my ( $key, $val, $_parent, $path ) = @_;
+            if ( !defined $key ) {
+                $cur = [];
+                $cur->[0] =
+                    Voxgig::Struct::ismap($val)  ? Voxgig::Struct::jm()
+                  : Voxgig::Struct::islist($val) ? []
+                  :                                $val;
+                return $val;
             }
-            next;
-        }
-        my $got_j = canon($got);
-        my $exp_j = canon($expected);
-        if ($got_j eq $exp_j) {
-            $pass++;
-        }
-        else {
-            $fail++;
-            diag("[$label#$idx] expected=$exp_j got=$got_j");
-        }
-        $idx++;
+
+            my $v = $val;
+            my $i = Voxgig::Struct::size($path);
+
+            if ( Voxgig::Struct::isnode($v) ) {
+                $v = $cur->[$i] =
+                  Voxgig::Struct::ismap($v) ? Voxgig::Struct::jm() : [];
+            }
+
+            Voxgig::Struct::setprop( $cur->[ $i - 1 ], $key, $v );
+
+            return $val;
+        };
+        Voxgig::Struct::walk( $in, $walkcopy );
+        return $cur->[0];
     }
-    ok($fail == 0, "$label: $pass/" . ($pass + $fail));
+);
+
+# ===========================================================================
+# merge
+# ===========================================================================
+
+# `merge.basic` is a single entry, not a set.
+{
+    my $basic = Voxgig::Struct::clone( $spec->{merge}{basic} );
+    is( canon( Voxgig::Struct::merge( $basic->{in} ) ),
+        canon( $basic->{out} ), 'merge-basic' );
 }
 
-# Minor subtests.
-my $minor = $struct_spec->{minor};
-if (Voxgig::Struct::ismap($minor)) {
-    runset('minor.isnode',    $minor->{isnode}{set},
-           sub { Voxgig::Struct::isnode($_[0]) ? Voxgig::Struct::JTRUE() : Voxgig::Struct::JFALSE() });
-    runset('minor.ismap',     $minor->{ismap}{set},
-           sub { Voxgig::Struct::ismap($_[0]) ? Voxgig::Struct::JTRUE() : Voxgig::Struct::JFALSE() });
-    runset('minor.islist',    $minor->{islist}{set},
-           sub { Voxgig::Struct::islist($_[0]) ? Voxgig::Struct::JTRUE() : Voxgig::Struct::JFALSE() });
-    runset('minor.iskey',     $minor->{iskey}{set},
-           sub { Voxgig::Struct::iskey($_[0]) ? Voxgig::Struct::JTRUE() : Voxgig::Struct::JFALSE() });
-    runset('minor.isempty',   $minor->{isempty}{set},
-           sub { Voxgig::Struct::isempty($_[0]) ? Voxgig::Struct::JTRUE() : Voxgig::Struct::JFALSE() });
-    runset('minor.size',      $minor->{size}{set},
-           sub { Voxgig::Struct::size($_[0]) });
-    runset('minor.keysof',    $minor->{keysof}{set},
-           sub { Voxgig::Struct::keysof($_[0]) });
-    runset('minor.haskey',    $minor->{haskey}{set},
-           sub {
-               my $in = $_[0];
-               Voxgig::Struct::haskey($in->{src}, $in->{key}) ? Voxgig::Struct::JTRUE() : Voxgig::Struct::JFALSE();
-           });
-    runset('minor.getprop',   $minor->{getprop}{set},
-           sub {
-               my $in = $_[0];
-               my $r = Voxgig::Struct::getprop($in->{val}, $in->{key}, $in->{alt});
-               Voxgig::Struct::is_none($r) ? undef : $r;
-           });
-    runset('minor.clone',     $minor->{clone}{set},
-           sub { Voxgig::Struct::clone($_[0]) });
-    runset('minor.escre',     $minor->{escre}{set},
-           sub { Voxgig::Struct::escre($_[0]) });
-    runset('minor.escurl',    $minor->{escurl}{set},
-           sub { Voxgig::Struct::escurl($_[0]) });
-    runset('minor.stringify', $minor->{stringify}{set},
-           sub {
-               my $in = $_[0];
-               if (Voxgig::Struct::ismap($in)) {
-                   return Voxgig::Struct::stringify($in->{val}, $in->{max});
-               }
-               return Voxgig::Struct::stringify($in);
-           });
-    runset('minor.slice',     $minor->{slice}{set},
-           sub {
-               my $in = $_[0];
-               return Voxgig::Struct::slice($in->{val}, $in->{start}, $in->{end});
-           });
-    # filter checks are named in the corpus; map them to predicates over [k,v].
-    my %filter_checks = (
-        gt3 => sub { $_[0][1] > 3 },
-        lt3 => sub { $_[0][1] < 3 },
-    );
-    runset('minor.filter',    $minor->{filter}{set},
-           sub {
-               my $in = $_[0];
-               return Voxgig::Struct::filter($in->{val}, $filter_checks{$in->{check}});
-           });
-    runset('minor.isfunc',    $minor->{isfunc}{set},
-           sub { Voxgig::Struct::isfunc($_[0]) ? Voxgig::Struct::JTRUE() : Voxgig::Struct::JFALSE() });
-    runset('minor.getelem',   $minor->{getelem}{set},
-           sub {
-               my $in = $_[0];
-               my $r = Voxgig::Struct::getelem($in->{val}, $in->{key}, $in->{alt});
-               Voxgig::Struct::is_none($r) ? undef : $r;
-           });
-    runset('minor.items',     $minor->{items}{set},
-           sub { Voxgig::Struct::items($_[0]) });
-    runset('minor.flatten',   $minor->{flatten}{set},
-           sub { my $in = $_[0]; Voxgig::Struct::flatten($in->{val}, $in->{depth}) });
-    runset('minor.typename',  $minor->{typename}{set},
-           sub { Voxgig::Struct::typename($_[0]) });
-    runset('minor.typify',    $minor->{typify}{set},
-           sub { Voxgig::Struct::typify($_[0]) });
-    runset('minor.join',      $minor->{join}{set},
-           sub { my $in = $_[0]; Voxgig::Struct::join($in->{val}, $in->{sep}, $in->{url}) });
-    runset('minor.jsonify',   $minor->{jsonify}{set},
-           sub { my $in = $_[0]; Voxgig::Struct::jsonify($in->{val}, $in->{flags}) });
-    runset('minor.pad',       $minor->{pad}{set},
-           sub { my $in = $_[0]; Voxgig::Struct::pad($in->{val}, $in->{pad}, $in->{char}) });
-    runset('minor.setprop',   $minor->{setprop}{set},
-           sub { my $in = $_[0]; Voxgig::Struct::setprop(Voxgig::Struct::clone($in->{parent}), $in->{key}, $in->{val}) });
-    runset('minor.delprop',   $minor->{delprop}{set},
-           sub { my $in = $_[0]; Voxgig::Struct::delprop(Voxgig::Struct::clone($in->{parent}), $in->{key}) });
-    # setpath returns the leaf key's PARENT node (canonical). The entry's
-    # `match.args.0.store` records the store AFTER in-place mutation; verify it
-    # here since runset only compares the return value to `out`.
-    runset('minor.setpath',   $minor->{setpath}{set},
-           sub {
-               my ($in, $entry) = @_;
-               my $store = $in->{store};
-               my $r = Voxgig::Struct::setpath($store, $in->{path}, $in->{val});
-               my $want_store = eval { $entry->{match}{args}{'0'}{store} };
-               if (defined $want_store) {
-                   my $got = canon($store);
-                   my $exp = canon($want_store);
-                   if ($got ne $exp) {
-                       diag("[minor.setpath store-mutation] expected=$exp got=$got");
-                       die "minor.setpath store mutation mismatch\n";
-                   }
-               }
-               Voxgig::Struct::is_none($r) ? undef : $r;
-           });
-    runset('minor.strkey',    $minor->{strkey}{set},
-           sub { Voxgig::Struct::strkey($_[0]) });
-    runset('minor.pathify',   $minor->{pathify}{set},
-           sub { my $in = $_[0]; Voxgig::Struct::pathify($in->{path}, $in->{from}) });
-}
+runset( 'merge-cases', $spec->{merge}{cases}, sub { Voxgig::Struct::merge( $_[0] ) } );
+runset( 'merge-array', $spec->{merge}{array}, sub { Voxgig::Struct::merge( $_[0] ) } );
 
-# Walk. Canonical test uses walkpath callback (appends `~path`).
-if (Voxgig::Struct::ismap($struct_spec->{walk})) {
-    my $walkpath = sub {
-        my ($key, $val, $parent, $path) = @_;
-        return $val if !defined $val || ref $val;
-        return $val if Voxgig::Struct::is_jbool($val) || Voxgig::Struct::is_jnull($val);
-        # Numbers don't participate; only strings annotated.
-        my $is_str = !Scalar::Util::looks_like_number($val) || "$val" =~ /[^0-9eE.+\-]/;
-        return $val unless $is_str;
-        return $val . '~' . CORE::join('.', @$path);
-    };
-    runset('walk.basic', $struct_spec->{walk}{basic}{set},
-           sub {
-               my $in = Voxgig::Struct::clone($_[0]);
-               return Voxgig::Struct::walk($in, $walkpath);
-           });
-}
+# All six entries assert the in-place result through `match.args`.
+runset( 'merge-integrity', $spec->{merge}{integrity}, sub { Voxgig::Struct::merge( $_[0] ) } );
 
-# Merge.
-if (Voxgig::Struct::ismap($struct_spec->{merge})) {
-    runset('merge.basic', $struct_spec->{merge}{basic}{set},
-           sub {
-               my $in = $_[0];
-               return Voxgig::Struct::merge($in);
-           });
-}
+runset( 'merge-depth', $spec->{merge}{depth},
+    sub { Voxgig::Struct::merge( $_[0]{val}, $_[0]{depth} ) } );
 
-# Getpath.
-if (Voxgig::Struct::ismap($struct_spec->{getpath})) {
-    my $gp = $struct_spec->{getpath};
-    runset('getpath.basic', $gp->{basic}{set},
-           sub {
-               my $in = $_[0];
-               return Voxgig::Struct::getpath($in->{store}, $in->{path});
-           });
-    runset('getpath.relative', $gp->{relative}{set},
-           sub {
-               my $in = $_[0];
-               my $dp = $in->{dpath};
-               return Voxgig::Struct::getpath($in->{store}, $in->{path}, {
-                   dparent => $in->{dparent},
-                   (defined $dp ? (dpath => [ split /\./, $dp ]) : ()),
-               });
-           });
-    runset('getpath.special', $gp->{special}{set},
-           sub {
-               my $in = $_[0];
-               return Voxgig::Struct::getpath($in->{store}, $in->{path}, $in->{inj});
-           });
-    runset('getpath.handler', $gp->{handler}{set},
-           sub {
-               my $in = $_[0];
-               return Voxgig::Struct::getpath(
-                   { '$TOP' => $in->{store}, '$FOO' => sub { 'foo' } },
-                   $in->{path},
-                   { handler => sub { my ($inj, $val, $cur, $ref) = @_; $val->() } },
-               );
-           });
-}
+# ===========================================================================
+# getpath
+# ===========================================================================
 
-# Sentinels — null / undefined unification across the readers.
-# regex (parity floor: Go stdlib regexp -- see design/REGEX_API.md)
-if (Voxgig::Struct::ismap($struct_spec->{regex})) {
-    my $rx = $struct_spec->{regex};
-    runset('regex.test', $rx->{test}{set},
-           sub {
-               my $in = $_[0];
-               Voxgig::Struct::re_test($in->{pattern}, $in->{input})
-                   ? Voxgig::Struct::JTRUE() : Voxgig::Struct::JFALSE();
-           });
-    runset('regex.find', $rx->{find}{set},
-           sub {
-               my $in = $_[0];
-               Voxgig::Struct::re_find($in->{pattern}, $in->{input});
-           });
-    runset('regex.find_all', $rx->{find_all}{set},
-           sub {
-               my $in = $_[0];
-               Voxgig::Struct::re_find_all($in->{pattern}, $in->{input});
-           });
-    runset('regex.replace', $rx->{replace}{set},
-           sub {
-               my $in = $_[0];
-               Voxgig::Struct::re_replace($in->{pattern}, $in->{input}, $in->{replacement});
-           });
-    runset('regex.escape', $rx->{escape}{set},
-           sub {
-               my $in = $_[0];
-               Voxgig::Struct::re_escape($in->{val});
-           });
-}
+my $getpath = $spec->{getpath};
 
-if (Voxgig::Struct::ismap($struct_spec->{sentinels})) {
-    my $sn = $struct_spec->{sentinels};
-    runset('sentinels.getprop_unify', $sn->{getprop_unify}{set},
-           sub {
-               my $in = $_[0];
-               my $r = Voxgig::Struct::getprop($in->{val}, $in->{key}, $in->{alt});
-               Voxgig::Struct::is_none($r) ? undef : $r;
-           });
-    runset('sentinels.getelem_absent', $sn->{getelem_absent}{set},
-           sub {
-               my $in = $_[0];
-               my $r = Voxgig::Struct::getelem($in->{val}, $in->{key}, $in->{alt});
-               Voxgig::Struct::is_none($r) ? undef : $r;
-           });
-    runset('sentinels.haskey_unify', $sn->{haskey_unify}{set},
-           sub {
-               my $in = $_[0];
-               Voxgig::Struct::haskey($in->{val}, $in->{key})
-                   ? Voxgig::Struct::JTRUE() : Voxgig::Struct::JFALSE();
-           });
-    runset('sentinels.isempty_unify', $sn->{isempty_unify}{set},
-           sub { Voxgig::Struct::isempty($_[0]) ? Voxgig::Struct::JTRUE() : Voxgig::Struct::JFALSE() });
-    runset('sentinels.isnode_unify', $sn->{isnode_unify}{set},
-           sub { Voxgig::Struct::isnode($_[0]) ? Voxgig::Struct::JTRUE() : Voxgig::Struct::JFALSE() });
-    runset('sentinels.stringify_null', $sn->{stringify_null}{set},
-           sub { Voxgig::Struct::stringify($_[0]) });
-}
+runset( 'getpath-basic', $getpath->{basic},
+    sub { Voxgig::Struct::getpath( $_[0]{store}, $_[0]{path} ) } );
 
-# NULLMARK fixup — the canonical test runner replaces JSON nulls with
-# "__NULL__" before running, and tests pass a `nullModifier` callback that
-# swaps any string containing "__NULL__" back to "null". This lets the
-# corpus encode "value is JSON null" without losing the distinction from
-# "value is absent" via the cross-port `fixJSON` round-trip.
-my $NULLMARK = '__NULL__';
-my $fix_null;
-$fix_null = sub {
-    my ($v) = @_;
-    if (Voxgig::Struct::is_jnull($v)) { return $NULLMARK }
-    if (Voxgig::Struct::ismap($v)) {
-        my $out = Voxgig::Struct::jm();
-        for my $k (Voxgig::Struct::_map_keys($v)) {
-            $out->{$k} = $fix_null->($v->{$k});
-        }
-        return $out;
-    }
-    if (Voxgig::Struct::islist($v)) {
-        return [ map { $fix_null->($_) } @$v ];
-    }
-    return $v;
-};
-my $null_modifier = sub {
-    my ($val, $key, $parent) = @_;
-    return unless defined $parent && ref $parent;
-    if (defined $val && !ref($val) && $val eq $NULLMARK) {
-        if (Voxgig::Struct::ismap($parent)) { $parent->{$key} = Voxgig::Struct::JNULL }
-        elsif (Voxgig::Struct::islist($parent)) { $parent->[$key] = Voxgig::Struct::JNULL }
-    }
-    elsif (defined $val && !ref($val) && index($val, $NULLMARK) >= 0) {
-        my $s = $val;
-        $s =~ s/\Q$NULLMARK\E/null/g;
-        if (Voxgig::Struct::ismap($parent)) { $parent->{$key} = $s }
-        elsif (Voxgig::Struct::islist($parent)) { $parent->[$key] = $s }
-    }
-};
-
-# Inject — inject.basic is a single entry, not a set.
-if (Voxgig::Struct::ismap($struct_spec->{inject})) {
-    my $basic = $struct_spec->{inject}{basic};
-    if (Voxgig::Struct::ismap($basic) && exists $basic->{in}) {
-        my $got_b = Voxgig::Struct::inject(
-            Voxgig::Struct::clone($basic->{in}{val}),
-            $basic->{in}{store},
+runset(
+    'getpath-relative',
+    $getpath->{relative},
+    sub {
+        my ($in) = @_;
+        my $dpath = $in->{dpath};
+        return Voxgig::Struct::getpath(
+            $in->{store},
+            $in->{path},
+            {
+                dparent => $in->{dparent},
+                ( defined $dpath && !ref $dpath ? ( dpath => [ split /\./, $dpath ] ) : () ),
+            }
         );
-        my $exp_b = $basic->{out};
-        is(canon($got_b), canon($exp_b), 'inject.basic');
     }
-    runset('inject.string', $struct_spec->{inject}{string}{set},
-           sub {
-               my $in = $_[0];
-               my $val   = $fix_null->(Voxgig::Struct::clone($in->{val}));
-               my $store = $fix_null->(Voxgig::Struct::clone($in->{store}));
-               my $r = Voxgig::Struct::inject($val, $store, { modify => $null_modifier });
-               return $r;
-           });
-    runset('inject.deep', $struct_spec->{inject}{deep}{set},
-           sub {
-               my $in = $_[0];
-               return Voxgig::Struct::inject(
-                   Voxgig::Struct::clone($in->{val}),
-                   $in->{store});
-           });
+);
+
+runset( 'getpath-special', $getpath->{special},
+    sub { Voxgig::Struct::getpath( $_[0]{store}, $_[0]{path}, $_[0]{inj} ) } );
+
+runset(
+    'getpath-handler',
+    $getpath->{handler},
+    sub {
+        my ($in) = @_;
+        return Voxgig::Struct::getpath(
+            Voxgig::Struct::jm( '$TOP', $in->{store}, '$FOO', sub { 'foo' } ),
+            $in->{path},
+            { handler => sub { my ( $_inj, $val, $_cur, $_ref ) = @_; return $val->() } },
+        );
+    }
+);
+
+# ===========================================================================
+# inject
+# ===========================================================================
+
+# The runner encodes "value is JSON null" as the NULLMARK string so it
+# survives a JSON round trip; a modifier puts a real null back as the
+# structure is built. omni's own nullmodifier writes omni's null (undef),
+# so this port supplies its own, writing JNULL.
+my $nullmodifier = sub {
+    my ( $val, $key, $parent ) = @_;
+    return if !defined $parent || !ref $parent;
+    return if ref $val || !defined $val;
+
+    if ( $val eq $NULLMARK ) {
+        Voxgig::Struct::setprop( $parent, $key, Voxgig::Struct::JNULL() );
+    }
+    elsif ( 0 <= index( $val, $NULLMARK ) ) {
+        my $text = $val;
+        $text =~ s/\Q$NULLMARK\E/null/g;
+        Voxgig::Struct::setprop( $parent, $key, $text );
+    }
+    return;
+};
+
+# `inject.basic` is a single entry, not a set.
+{
+    my $basic = Voxgig::Struct::clone( $spec->{inject}{basic} );
+    is( canon( Voxgig::Struct::inject( $basic->{in}{val}, $basic->{in}{store} ) ),
+        canon( $basic->{out} ), 'inject-basic' );
 }
 
-# Transform.
-if (Voxgig::Struct::ismap($struct_spec->{transform})) {
-    my $tx = $struct_spec->{transform};
-    if (Voxgig::Struct::ismap($tx->{basic}) && exists $tx->{basic}{in}) {
-        my $b = $tx->{basic};
-        my $got = eval { Voxgig::Struct::transform(
-            Voxgig::Struct::clone($b->{in}{data}),
-            Voxgig::Struct::clone($b->{in}{spec}),
-        ) };
-        is(canon($got), canon($b->{out}), 'transform.basic');
-    }
-    for my $sec (qw(paths cmds each pack ref apply)) {
-        runset("transform.$sec", $tx->{$sec}{set},
-               sub {
-                   my $in = $_[0];
-                   return Voxgig::Struct::transform(
-                       Voxgig::Struct::clone($in->{data}),
-                       Voxgig::Struct::clone($in->{spec}),
-                   );
-               });
-    }
-    # transform.format uses { null: false } — no NULLMARK fixup applied to
-    # input data, so genuine nulls flow through.
-    runset('transform.format', $tx->{format}{set},
-           sub {
-               my $in = $_[0];
-               return Voxgig::Struct::transform(
-                   Voxgig::Struct::clone($in->{data}),
-                   Voxgig::Struct::clone($in->{spec}),
-               );
-           });
-    # transform.modify uses a string-prefixer modifier.
-    runset('transform.modify', $tx->{modify}{set},
-           sub {
-               my $in = $_[0];
-               return Voxgig::Struct::transform(
-                   Voxgig::Struct::clone($in->{data}),
-                   Voxgig::Struct::clone($in->{spec}),
-                   { modify => sub {
-                       my ($val, $key, $parent) = @_;
-                       return unless defined $key && defined $parent && ref $parent;
-                       return if ref $val;
-                       return if !defined $val;
-                       return if Voxgig::Struct::is_jbool($val) || Voxgig::Struct::is_jnull($val);
-                       return unless Voxgig::Struct::_is_string_sv($val);
-                       my $new = '@' . $val;
-                       if (Voxgig::Struct::ismap($parent)) { $parent->{$key} = $new }
-                       elsif (Voxgig::Struct::islist($parent)) { $parent->[$key] = $new }
-                   }},
-               );
-           });
+runset( 'inject-string', $spec->{inject}{string},
+    sub { Voxgig::Struct::inject( $_[0]{val}, $_[0]{store}, { modify => $nullmodifier } ) } );
+
+runset( 'inject-deep', $spec->{inject}{deep},
+    sub { Voxgig::Struct::inject( $_[0]{val}, $_[0]{store} ) } );
+
+# ===========================================================================
+# transform
+# ===========================================================================
+
+my $transform = $spec->{transform};
+
+# `transform.basic` is a single entry, not a set.
+{
+    my $basic = Voxgig::Struct::clone( $transform->{basic} );
+    is( canon( Voxgig::Struct::transform( $basic->{in}{data}, $basic->{in}{spec} ) ),
+        canon( $basic->{out} ), 'transform-basic' );
 }
 
-# Validate.
-if (Voxgig::Struct::ismap($struct_spec->{validate})) {
-    my $vd = $struct_spec->{validate};
-    for my $sec (qw(basic child one exact invalid special)) {
-        runset("validate.$sec", $vd->{$sec}{set},
-               sub {
-                   my $in = $_[0];
-                   return Voxgig::Struct::validate(
-                       Voxgig::Struct::clone($in->{data}),
-                       Voxgig::Struct::clone($in->{spec}),
-                       $in->{inj},
-                   );
-               });
-    }
+for my $section (qw(paths cmds each pack ref apply)) {
+    runset( "transform-$section", $transform->{$section},
+        sub { Voxgig::Struct::transform( $_[0]{data}, $_[0]{spec} ) } );
 }
 
-# Select. Apply NULLMARK fixup (the canonical runner does this by default
-# with flags.null=true so a stored null encodes as "__NULL__" and exact-
-# match has a string to match against rather than a "key missing" state).
-# The runner ALSO fixJSONs the expected `out` for comparison.
-if (Voxgig::Struct::ismap($struct_spec->{select})) {
-    my $sl = $struct_spec->{select};
-    for my $sec (qw(basic operators edge alts)) {
-        my $entries = $sl->{$sec}{set};
-        next unless Voxgig::Struct::islist($entries);
-        for (my $i = 0; $i < @$entries; $i++) {
-            my $entry = $entries->[$i];
-            next unless Voxgig::Struct::ismap($entry);
-            my $in = $entry->{in};
-            my $obj   = $fix_null->(Voxgig::Struct::clone($in->{obj}));
-            my $query = $fix_null->(Voxgig::Struct::clone($in->{query}));
-            my $got = Voxgig::Struct::select($obj, $query);
-            my $exp = $fix_null->(Voxgig::Struct::clone($entry->{out}));
-            is(canon($got), canon($exp), "select.$sec#$i");
-        }
+runsetflags( 'transform-format', $transform->{format}, { null => 0 },
+    sub { Voxgig::Struct::transform( $_[0]{data}, $_[0]{spec} ) } );
+
+runset(
+    'transform-modify',
+    $transform->{modify},
+    sub {
+        my ($in) = @_;
+        return Voxgig::Struct::transform(
+            $in->{data},
+            $in->{spec},
+            {
+                modify => sub {
+                    my ( $val, $key, $parent ) = @_;
+                    return if !defined $key || !defined $parent || !ref $parent;
+                    return if ref $val || !defined $val;
+                    return if !Voxgig::Struct::_is_string_sv($val);
+                    Voxgig::Struct::setprop( $parent, $key, '@' . $val );
+                    return;
+                }
+            }
+        );
     }
+);
+
+# ===========================================================================
+# validate
+# ===========================================================================
+
+my $validate = $spec->{validate};
+
+runsetflags( 'validate-basic', $validate->{basic}, { null => 0 },
+    sub { Voxgig::Struct::validate( $_[0]{data}, $_[0]{spec} ) } );
+
+for my $section (qw(child one exact)) {
+    runset( "validate-$section", $validate->{$section},
+        sub { Voxgig::Struct::validate( $_[0]{data}, $_[0]{spec} ) } );
+}
+
+runsetflags( 'validate-invalid', $validate->{invalid}, { null => 0 },
+    sub { Voxgig::Struct::validate( $_[0]{data}, $_[0]{spec} ) } );
+
+runset( 'validate-special', $validate->{special},
+    sub { Voxgig::Struct::validate( $_[0]{data}, $_[0]{spec}, $_[0]{inj} ) } );
+
+# ===========================================================================
+# select
+# ===========================================================================
+
+my $select = $spec->{select};
+
+for my $section (qw(basic operators edge alts)) {
+    runset( "select-$section", $select->{$section},
+        sub { Voxgig::Struct::select( $_[0]{obj}, $_[0]{query} ) } );
+}
+
+# `null: false` keeps a JSON null an ACTUAL null rather than the NULLMARK
+# string, so select sees a present-but-null field.
+runsetflags( 'select-nullkey', $select->{nullkey}, { null => 0 },
+    sub { Voxgig::Struct::select( $_[0]{obj}, $_[0]{query} ) } );
+
+# ===========================================================================
+# regex (parity floor: Go stdlib regexp - see design/REGEX_API.md)
+# ===========================================================================
+
+my $regex = $spec->{regex};
+
+runset( 'regex-test', $regex->{test},
+    sub { $jbool->( Voxgig::Struct::re_test( $_[0]{pattern}, $_[0]{input} ) ) } );
+
+runset( 'regex-find', $regex->{find},
+    sub { Voxgig::Struct::re_find( $_[0]{pattern}, $_[0]{input} ) } );
+
+runset( 'regex-find_all', $regex->{find_all},
+    sub { Voxgig::Struct::re_find_all( $_[0]{pattern}, $_[0]{input} ) } );
+
+runset( 'regex-replace', $regex->{replace},
+    sub { Voxgig::Struct::re_replace( $_[0]{pattern}, $_[0]{input}, $_[0]{replacement} ) } );
+
+runset( 'regex-escape', $regex->{escape},
+    sub { Voxgig::Struct::re_escape( $_[0]{val} ) } );
+
+# ===========================================================================
+# sentinels - null and absent unified on observation
+# ===========================================================================
+
+my $sentinels = $spec->{sentinels};
+
+runsetflags( 'sentinels-getprop_unify', $sentinels->{getprop_unify}, { null => 0 },
+    sub { Voxgig::Struct::getprop( $_[0]{val}, $_[0]{key}, $_[0]{alt} ) } );
+
+runsetflags( 'sentinels-getelem_absent', $sentinels->{getelem_absent}, { null => 0 },
+    sub { Voxgig::Struct::getelem( $_[0]{val}, $_[0]{key}, $_[0]{alt} ) } );
+
+runsetflags( 'sentinels-haskey_unify', $sentinels->{haskey_unify}, { null => 0 },
+    sub { $jbool->( Voxgig::Struct::haskey( $_[0]{val}, $_[0]{key} ) ) } );
+
+runsetflags( 'sentinels-isempty_unify', $sentinels->{isempty_unify}, { null => 0 },
+    sub { $jbool->( Voxgig::Struct::isempty( $_[0] ) ) } );
+
+runsetflags( 'sentinels-isnode_unify', $sentinels->{isnode_unify}, { null => 0 },
+    sub { $jbool->( Voxgig::Struct::isnode( $_[0] ) ) } );
+
+runsetflags( 'sentinels-stringify_null', $sentinels->{stringify_null}, { null => 0 },
+    sub { Voxgig::Struct::stringify( $_[0] ) } );
+
+# ===========================================================================
+# condense
+# ===========================================================================
+#
+# `condense`, `expand` and `iscondensed` exist only in canonical TypeScript so
+# far - no other port implements them, and this one does not either. The three
+# groups (37 entries) are named here rather than left silent so the gap is a
+# visible TODO instead of a group nobody notices is missing.
+{
+    my @missing = grep { !Voxgig::Struct->can($_) } qw(condense expand iscondensed);
+    diag( 'condense not ported: skipping ' . scalar(@missing) . ' group(s)' ) if @missing;
 }
 
 done_testing();

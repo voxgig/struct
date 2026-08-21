@@ -105,12 +105,17 @@ public func inject(_ val: Value, _ store: Value, _ injdef: Injection? = nil) -> 
       root.errs = el
     }
     root.meta.entries["__d"] = .int(0)
-    // Carry over caller-supplied options from injdef.
+    // Carry over caller-supplied options from injdef. Canonical carries
+    // modify, extra, meta AND handler; this port dropped `handler`, so
+    // `validate`'s `_validatehandler` never ran and the meta-path exact form
+    // (`\`q0$=x1\``) silently fell through to ordinary literal validation.
+    // `validate/special#8` is the entry that notices.
     if let idef = injdef {
       if let m = idef.modify { root.modify = m }
       if !idef.extra.isNoval { root.extra = idef.extra }
       if !idef.meta.entries.isEmpty { root.meta = idef.meta }
       if !idef.errs.items.isEmpty { root.errs = idef.errs }
+      root.handler = idef.handler
       // Caller-provided meta/errs override above.
     }
     inj = root
@@ -185,20 +190,28 @@ public func checkPlacement(_ modes: Int, _ name: String, _ parentTypes: Int, _ i
   -> Bool
 {
   if (modes & inj.mode) == 0 {
-    let allowed = [M_KEYPRE, M_VAL, M_KEYPOST]
+    // Canonical's wording (StructUtility.ts checkPlacement): the PLACEMENT
+    // names, in [KEYPRE, KEYPOST, VAL] order, and a trailing period. The old
+    // message used MODENAME ("key:pre", "val"), listed the modes in a
+    // different order and dropped the period - `transform/apply` asserts the
+    // text verbatim.
+    let allowed = [M_KEYPRE, M_KEYPOST, M_VAL]
       .filter { (modes & $0) != 0 }
-      .compactMap { MODENAME[$0] }
+      .compactMap { PLACEMENT[$0] }
       .joined(separator: ",")
     inj.errs.items.append(
       .string(
-        "$\(name): invalid placement as " + (MODENAME[inj.mode] ?? "?") + ", expected: " + allowed))
+        "$\(name): invalid placement as " + (PLACEMENT[inj.mode] ?? "?") + ", expected: "
+          + allowed + "."))
     return false
   }
   if parentTypes != 0 {
     let ptype = typify(inj.parent)
     if (parentTypes & ptype) == 0 {
       inj.errs.items.append(
-        .string("$\(name): invalid placement in parent " + typename(ptype) + "."))
+        .string(
+          "$\(name): invalid placement in parent " + typename(ptype) + ", expected: "
+            + typename(parentTypes) + "."))
       return false
     }
   }
@@ -213,7 +226,17 @@ public func injectorArgs(_ types: [Int], _ args: Value) -> (Value, [Value]) {
     let arg = i < l.items.count ? l.items[i] : Value.noval
     let atype = typify(arg)
     if expected != T_any && (expected & atype) == 0 {
-      return (.string("argument \(i) not of type: " + typename(expected)), l.items)
+      // Canonical's exact wording (StructUtility.ts injectorArgs): the value,
+      // its type, its ONE-BASED position, and the type expected. The corpus
+      // asserts it verbatim in `transform/apply`; the old message named a
+      // zero-based index and dropped the value entirely.
+      return (
+        .string(
+          "invalid argument: " + stringify(arg, 22) + " (" + typename(atype)
+            + " at position " + String(1 + i) + ") is not of type: "
+            + typename(expected) + "."),
+        l.items
+      )
     }
     out.append(arg)
   }
