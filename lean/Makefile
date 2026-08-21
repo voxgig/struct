@@ -38,9 +38,11 @@ test: omni-check
 build:
 	lake build VoxgigStruct
 
-# "Lint": type-check the library (a clean compile means it is sound; the
-# build is warnings-clean). No third-party linter exists for Lean.
-# The runner imports omni, so this needs the checkout too.
+# "Lint": type-check the library (a clean compile means it is sound). No
+# third-party linter exists for Lean. The runner imports omni, so this needs
+# the checkout too - and omni's Omni.lean supports Lean 4.16 as well as the
+# 4.32 pinned here, so it carries deprecation warnings for names that do not
+# exist in 4.16 yet. Those are omni's; this port's own build is warnings-clean.
 lint: omni-check
 	lake build
 	@echo ok
