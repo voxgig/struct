@@ -1,6 +1,6 @@
 package.path = package.path .. ";./test/?.lua"
 
-local runnerModule = require("runner")
+local runnerModule = require("omni")
 local makeRunner = runnerModule.makeRunner
 
 local SDK = require("sdk").SDK

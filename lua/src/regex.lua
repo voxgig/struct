@@ -639,7 +639,9 @@ end
 
 function M.re_find_all(pattern, input)
   local re = M.compile(pattern)
-  local out = {}
+  -- Marked: an unmarked empty table reads as a MAP under this port's rules
+  -- (see keysof), and no-matches must be [].
+  local out = setmetatable({}, { __jsontype = "array" })
   for _, slots in ipairs(re:find_all(input)) do
     out[#out + 1] = caps_to_strs(slots, input or "", re.ngroups)
   end

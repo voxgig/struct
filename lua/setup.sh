@@ -79,10 +79,11 @@ install_lua() {
 # Install required Lua packages
 install_dependencies() {
   echo "Installing Lua dependencies..."
+  # busted/luassert only. The corpus runner is voxgig/omni, a local checkout
+  # found via OMNI_HOME (see test/omni.lua) rather than a rock; dkjson and
+  # luafilesystem went with the in-situ runner it replaced.
   luarocks install busted
   luarocks install luassert
-  luarocks install dkjson
-  luarocks install luafilesystem
 }
 
 # Main execution

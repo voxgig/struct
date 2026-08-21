@@ -22,7 +22,7 @@ lua/
 │   ├── struct.lua          # the library (the public module table)
 │   └── regex.lua           # in-tree RE2-subset Thompson-NFA engine (pure Lua)
 └── test/
-    ├── runner.lua          # JSONIC corpus driver
+    ├── omni.lua            # resolves the voxgig/omni checkout (the corpus runner)
     ├── struct_test.lua     # busted suite (corpus-driven)
     ├── regex_test.lua      # regex unit tests
     ├── regex_pathological.lua  # cross-port pathological-input panel
@@ -57,8 +57,20 @@ installed** — if you can't run a target, say so; don't claim a change works.
 - **Lua >= 5.3** is required for the native bitwise operators (`&`, `|`,
   `<<`) that `typify` and the type flags use. Don't backport to 5.1/5.2.
 - **Zero third-party runtime deps.** `src/struct.lua` + `src/regex.lua` use
-  only the Lua stdlib. The rockspec's `busted`/`luassert`/`dkjson`/
-  `luafilesystem` are **test-only** — never `require` them from `src/`.
+  only the Lua stdlib. The rockspec's `busted`/`luassert` are **test-only** —
+  never `require` them from `src/`.
+- **The corpus runner is voxgig/omni**, a local checkout found via
+  `$OMNI_HOME` (see `test/omni.lua`); it is not a rock, and the rockspec
+  gains nothing for it. `test/omni.lua` appends exactly one directory to
+  `package.path` and it must stay that way: omni ships `src/regex.lua` too,
+  so putting omni's `src/` on the path ahead of this port's shadows
+  `require("regex")` and every `re_*` matcher silently becomes nil.
+- **One `nil`, two meanings.** A function that returns nothing and one that
+  returns JSON null both return `nil`, so the runner reads a bare `nil` as
+  *absent*. That is the cheap side by a wide margin (43 entries against 6);
+  the six entries it costs are dropped by index, with guards, at the top of
+  `test/struct_test.lua`. `NOVAL` covers the argument side of the same
+  problem — see below.
 - **One table type, two roles.** Maps and lists are both tables; the
   `__jsontype` metatable field (`'object'` / `'array'`) distinguishes them.
   Build with `jm`/`jt` (or set the field) — don't leave an empty or literal
