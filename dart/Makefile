@@ -1,10 +1,42 @@
 # Makefile for the Dart port of voxgig/struct.
 # Requires the Dart SDK (`dart`) on PATH. No third-party dependencies.
 
-.PHONY: test bench lint build inspect clean reset publish format
+.PHONY: test bench lint build inspect clean reset publish format omni-check
 
-# Run the shared JSON corpus through the Dart implementation.
-test:
+# The corpus runner is voxgig/omni, consumed as a local checkout - it is not
+# published to pub.dev. $OMNI_HOME first, then sibling paths, taking the first
+# directory that carries spec/fib.json.
+#
+# It reaches the analyzer through `pubspec_overrides.yaml`, which pub reads for
+# local development overrides and which this Makefile GENERATES (it is
+# gitignored, and the path differs per checkout). The published `pubspec.yaml`
+# never names omni, so nothing that depends on this package depends on it
+# (register 4.13) - `make build` proves that by compiling lib/ alone.
+#
+# $OMNI_HOME is resolved by the SHELL, not by make's `wildcard`/`foreach`.
+# Those are whitespace-delimited and backslash-aware, so a path with a space
+# ("C:/Users/Ann Smith/omni") splits into two candidates that both miss, and a
+# Windows drive path is read for escapes. `$$OMNI_HOME` reaches the shell as
+# the raw environment value, so neither applies. The sibling candidates are
+# fixed literals with no spaces, so they stay in the make-level list.
+OMNI_SIBLINGS := ../../omni ../../../omni /workspace/omni /home/user/omni
+OMNI_DIR := $(or \
+  $(shell [ -n "$$OMNI_HOME" ] && [ -f "$$OMNI_HOME/spec/fib.json" ] && printf '%s' "$$OMNI_HOME"),\
+  $(firstword $(foreach d,$(OMNI_SIBLINGS),$(if $(wildcard $(d)/spec/fib.json),$(d)))))
+
+# Fail with the reason rather than "Target of URI doesn't exist".
+omni-check:
+	@if [ -z "$(OMNI_DIR)" ]; then \
+	  echo "struct: voxgig/omni checkout not found - set OMNI_HOME."; \
+	  echo "  The tests run on the shared runner; the library itself does not."; \
+	  echo "  git clone https://github.com/voxgig/omni ../../omni"; \
+	  exit 1; \
+	fi
+	@printf 'dependency_overrides:\n  voxgig_omni:\n    path: %s/dart\n' "$(OMNI_DIR)" > pubspec_overrides.yaml
+	@dart pub get >/dev/null
+
+# Run the shared JSON corpus through the Dart implementation, on voxgig/omni.
+test: omni-check
 	dart run test/runner.dart
 
 # Cross-port performance harness (JSON contract; see build/bench/README.md).
@@ -12,13 +44,16 @@ bench:
 	@dart run bench/bench.dart
 
 # "Lint": static analysis (a clean `dart analyze` means the code is sound).
-lint:
+# The runner imports omni, so this needs the checkout too.
+lint: omni-check
 	dart analyze
 
 # Compile the library to a kernel snapshot as a build smoke-test.
 build:
 	dart compile kernel lib/voxgig_struct.dart -o /dev/null 2>/dev/null || dart analyze lib
 
+# No omni prerequisite: formatting only parses the files, so it needs neither
+# package resolution nor the checkout - and the README says omni is for tests.
 format:
 	dart format --output=none --set-exit-if-changed lib test
 
@@ -26,7 +61,7 @@ inspect:
 	@dart --version
 
 clean:
-	rm -rf .dart_tool *.dill
+	rm -rf .dart_tool *.dill pubspec_overrides.yaml
 
 reset: clean
 

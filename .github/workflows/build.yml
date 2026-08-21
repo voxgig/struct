@@ -604,6 +604,15 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # The test runner is voxgig/omni, consumed as a local checkout (it is
+      # not published to pub.dev); the Makefile writes it into a generated
+      # pubspec_overrides.yaml from OMNI_HOME. The library itself never
+      # depends on omni.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1
       - name: Install make (Windows)
         if: runner.os == 'Windows'
@@ -611,7 +620,9 @@ jobs:
       - name: Run tests
         working-directory: ./dart
         shell: bash
-        run: dart pub get && make test
+        run: make test
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
 
   test-elixir:
     runs-on: ${{ matrix.os }}

@@ -10,13 +10,29 @@ not the distinct-`undefined`/`null` model of the OCaml / Scala ports.
 
 ```
 cd dart
-make test    # dart run test/runner.dart  — runs build/test/test.json
-make lint    # dart analyze  (a clean analysis = pass)
+make test    # the shared corpus, on voxgig/omni
+make lint    # dart analyze over lib + test (a clean analysis = pass)
+make build   # compile lib/ ALONE (no omni)
 ```
 
 Requires only the Dart SDK. **Zero third-party runtime dependencies** — the
-library uses only `dart:core`; the test runner additionally uses the SDK's
-`dart:convert` (to read the corpus) and `dart:io` (to read the file).
+library uses only `dart:core`.
+
+- **The corpus runner is voxgig/omni**, a local checkout the Makefile finds via
+  `$OMNI_HOME` or beside this repository. It reaches the analyzer through a
+  GENERATED, gitignored `pubspec_overrides.yaml` — pub's own local-development
+  override file — so the published `pubspec.yaml` never names omni
+  (register 4.13), and `make build` compiles `lib/` alone to prove it.
+- **`test/runner.dart` is a list of subjects and one line of bridge.** omni's
+  value model and this port's are the same plain Dart types, so `tostruct` is
+  just `isabsent(val) ? null : val`; there is nothing to copy. A node a subject
+  mutates IS omni's node, which is why `match.args` works here without omni's
+  `runsetflags_args` (the compiled ports need that second entry point).
+- **A zero-argument entry arrives as `ABSENT`**, not `null` — omni's
+  `_resolveargs` says so explicitly for the dynamic ports (voxgig/omni#29,
+  register 4.12). `minor.typify` is the group that needs it: the corpus has
+  both `{in: null, out: T_null}` and `{out: T_noval}`, and this port answers
+  the second only if it can see that no argument came.
 
 ## The value model
 
