@@ -12,8 +12,17 @@
 # gitignored, and the path differs per checkout). The published `pubspec.yaml`
 # never names omni, so nothing that depends on this package depends on it
 # (register 4.13) - `make build` proves that by compiling lib/ alone.
-OMNI_CANDIDATES := $(OMNI_HOME) ../../omni ../../../omni /workspace/omni /home/user/omni
-OMNI_DIR := $(firstword $(foreach d,$(OMNI_CANDIDATES),$(if $(wildcard $(d)/spec/fib.json),$(d))))
+#
+# $OMNI_HOME is resolved by the SHELL, not by make's `wildcard`/`foreach`.
+# Those are whitespace-delimited and backslash-aware, so a path with a space
+# ("C:/Users/Ann Smith/omni") splits into two candidates that both miss, and a
+# Windows drive path is read for escapes. `$$OMNI_HOME` reaches the shell as
+# the raw environment value, so neither applies. The sibling candidates are
+# fixed literals with no spaces, so they stay in the make-level list.
+OMNI_SIBLINGS := ../../omni ../../../omni /workspace/omni /home/user/omni
+OMNI_DIR := $(or \
+  $(shell [ -n "$$OMNI_HOME" ] && [ -f "$$OMNI_HOME/spec/fib.json" ] && printf '%s' "$$OMNI_HOME"),\
+  $(firstword $(foreach d,$(OMNI_SIBLINGS),$(if $(wildcard $(d)/spec/fib.json),$(d)))))
 
 # Fail with the reason rather than "Target of URI doesn't exist".
 omni-check:
@@ -43,7 +52,9 @@ lint: omni-check
 build:
 	dart compile kernel lib/voxgig_struct.dart -o /dev/null 2>/dev/null || dart analyze lib
 
-format: omni-check
+# No omni prerequisite: formatting only parses the files, so it needs neither
+# package resolution nor the checkout - and the README says omni is for tests.
+format:
 	dart format --output=none --set-exit-if-changed lib test
 
 inspect:
