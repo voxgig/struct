@@ -11,14 +11,29 @@ Python / Clojure / Dart / Elixir ports.
 
 ```
 cd haskell
-make test    # ghc … test/Runner.hs && runner  — runs build/test/test.json
-make lint    # ghc -fno-code  (a clean type-check = pass)
+make test    # the shared corpus, on voxgig/omni
+make lint    # ghc -fno-code over library + runner (a clean type-check = pass)
+make build   # ghc -fno-code over the library ALONE (no omni)
 ```
 
 Requires only GHC and its boot libraries (`base`, `array`). **Zero third-party
 runtime dependencies** — no Cabal/Stack packages, no `aeson`, no `regex-*`. The
-test runner ships a hand-written JSON reader; the library vendors a small
-RE2-subset regex engine (`src/Vregex.hs`).
+library vendors a small RE2-subset regex engine (`src/Vregex.hs`).
+
+- **The corpus runner is voxgig/omni**, a local checkout the Makefile finds via
+  `$OMNI_HOME` or beside this repository and puts on the TEST search path with
+  `-i`. `make build` compiles `src/` alone and the `.cabal` library stanza
+  never names it (register 4.13).
+- **`test/Runner.hs` is a bridge plus a list of subjects.** `tostruct` /
+  `toomni` convert between omni's immutable `Json` and this port's
+  `IORef`-backed nodes; everything else — the entry loop, `fixjson`, deep
+  equality, `err` and `match` handling — is omni's.
+- **`match.args` needs the arguments back.** omni's `Json` is immutable, so a
+  subject cannot write through the argument list even though this port's nodes
+  are mutable. `runsetFlagsArgs` takes a subject that returns
+  `(args, result)`; the wrapper in `runSet` converts the arguments back after
+  the call. Delete that and `minor.setpath` and `merge.integrity` fail — which
+  is the check that it is load-bearing.
 
 ## Releasing to Hackage
 
