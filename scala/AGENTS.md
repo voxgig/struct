@@ -11,13 +11,33 @@ distinct.
 
 ```
 cd scala
-make test    # scalac compiles src + test, scala runs build/test/test.json
-make lint    # type-checks the library (a clean compile = pass)
+make test    # the shared corpus, on voxgig/omni
+make lint    # type-checks the LIBRARY alone (a clean compile = pass; no omni)
+make build   # same, as a build smoke-test
 ```
 
-Requires the Scala 3 compiler (`scalac` / `scala`) and a JDK on `PATH`. **Zero
-third-party dependencies** — the test runner has an in-tree JSON reader, and
-the only regex used is the JVM standard `java.util.regex`.
+Requires the Scala 3 compiler (`scala-cli`) and a JDK on `PATH`. **Zero
+third-party dependencies** — the only regex used is the JVM standard
+`java.util.regex`.
+
+- **The corpus runner is voxgig/omni**, a local checkout the Makefile finds via
+  `$OMNI_HOME` or beside this repository and hands to `scala-cli` alongside the
+  tests. `make build` and `make lint` compile `src/` without it, and nothing
+  published names omni (register 4.13).
+- **`test/runner.scala` is a bridge plus a list of subjects.** `tostruct` /
+  `toomni` convert between omni's immutable `Json` and this port's mutable
+  `ArrayBuffer` / `LinkedHashMap` nodes; everything else — the entry loop,
+  `fixjson`, deep equality, `err` and `match` handling — is omni's.
+- **`match.args` needs the arguments back.** omni's `Json` is immutable, so a
+  subject cannot write through the argument list even though this port's nodes
+  are mutable. `runsetflagsargs` takes a subject returning `(args, result)`;
+  `runSet` hands the converted arguments back after the call. Delete that and
+  `minor.setpath` and `merge.integrity` fail — which is the check that it is
+  load-bearing.
+- **`getprop` omits `alt` only when the KEY is missing** (`undefined ===
+  vin.alt`), not when it is null; `getelem`'s rule is the looser
+  `null == vin.alt`. `minor/getprop#51` is the entry that separates them, and
+  it had never passed here.
 
 ## The value model
 

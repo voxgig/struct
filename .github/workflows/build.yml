@@ -464,6 +464,15 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # The test runner is voxgig/omni, consumed as a local checkout (it is
+      # not published to Maven Central); the Makefile finds it via OMNI_HOME
+      # and hands its sources to scala-cli alongside the tests. The library
+      # itself never depends on omni.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       - uses: VirtusLab/scala-cli-setup@c2c917d5764319353961bc4e53885c62d3a95db1 # v1
       - name: Install make (Windows)
         if: runner.os == 'Windows'
@@ -472,6 +481,8 @@ jobs:
         working-directory: ./scala
         shell: bash
         run: make test
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
 
   test-clojure:
     runs-on: ${{ matrix.os }}
