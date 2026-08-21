@@ -1,10 +1,12 @@
 # Struct for Swift
 
 > Swift port of the canonical TypeScript implementation.
-> Status: **complete** — the full shared corpus passes
-> (`swift test --enable-test-discovery`): all 29 minor utilities, `walk`,
-> `merge`, `setpath`, `getpath`, `inject`, `transform` (all 11 commands),
-> `validate` (all 15 checkers), `select` (all 4 operators), and the
+> Status: **complete** — the full shared corpus passes (`make test`) on
+> [voxgig/omni](https://github.com/voxgig/omni), the shared test runner:
+> 1358 entries in 72 groups, plus the two `check` entries and three single
+> entries that are not part of any set. That covers all 29 minor utilities,
+> `walk`, `merge`, `setpath`, `getpath`, `inject`, `transform` (all 11
+> commands), `validate` (all 15 checkers), `select` (all 5 groups), and the
 > `Injection` state machine.
 
 For motivation, the language-neutral concepts, and the cross-language
@@ -18,11 +20,12 @@ Inside the monorepo:
 
 ```bash
 cd swift
-make test
+make test     # needs a voxgig/omni checkout: $OMNI_HOME or beside this repo
 ```
 
 Tested with Swift 6.0.2. **Zero runtime third-party dependencies** —
-only Foundation. The insertion-ordered map type lives in-tree at
+only Foundation. omni is a test-target dependency that `swift build` never
+resolves. The insertion-ordered map type lives in-tree at
 [`Sources/VoxgigStruct/OrderedDictionary.swift`](./Sources/VoxgigStruct/OrderedDictionary.swift).
 
 
@@ -396,6 +399,12 @@ See `/design/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
 make test
 ```
 
-Loads `../build/test/test.json` (the cross-port corpus) and runs
-every wired subsystem. All 11 corpus subtests + smoke tests pass —
-roughly 700 individual canonical test cases.
+Runs `../build/test/test.json` (the cross-port corpus) through
+[voxgig/omni](https://github.com/voxgig/omni), the shared test runner — so
+the entry loop, the comparison and the `err` and `match` handling are
+literally the same code every other port runs. **1360** entries over 77
+groups, plus the smoke tests.
+
+`make test` needs an omni checkout, found via `$OMNI_HOME` or beside this
+repository; it points the gitignored `.omni-runner` symlink at it, which is
+what `Package.swift` looks for. `make build` compiles the library alone.

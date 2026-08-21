@@ -12,7 +12,12 @@ public func walk(
   _ after: WalkApply? = nil,
   _ maxdepth: Int = MAXDEPTH
 ) -> Value {
-  return walkInner(val, .noval, .noval, [], before, after, maxdepth, 0)
+  // Canonical: `maxdepth = null != maxdepth && 0 <= maxdepth ? maxdepth :
+  // MAXDEPTH`. A NEGATIVE maxdepth falls back to the default; it does not mean
+  // "stop immediately". `walk/depth` entry 1 passes -1 and expects the whole
+  // tree back. struct/perl carried the same defect.
+  let depthlimit = 0 <= maxdepth ? maxdepth : MAXDEPTH
+  return walkInner(val, .noval, .noval, [], before, after, depthlimit, 0)
 }
 
 private func walkInner(

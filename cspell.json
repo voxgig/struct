@@ -266,7 +266,10 @@
     "derefs",
     "pval",
     "ckey",
-    "ckeys"
+    "ckeys",
+    "toomni",
+    "tostruct",
+    "collecterrs"
   ],
   "ignoreRegExpList": [
     "/`\\$[A-Z]+`/",

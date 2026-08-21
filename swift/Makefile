@@ -1,6 +1,29 @@
-.PHONY: inspect build test bench lint clean reset publish
+.PHONY: inspect build test bench lint clean reset publish omni-check
 
 SWIFT ?= swift
+
+# The corpus runner is voxgig/omni, consumed as a local checkout - it is not
+# published. $OMNI_HOME first, then sibling paths, taking the first directory
+# that carries spec/fib.json.
+#
+# It reaches SwiftPM through `.omni-runner`, a gitignored symlink this target
+# points at omni's package directory: SwiftPM takes a path dependency's
+# identity from the last path component, and omni's package is at `omni/swift`
+# - the same basename as this one, which it reads as a self-dependency. The
+# symlink gives it a distinct identity. Package.swift declares the dependency
+# only when the symlink is there, so `make build` compiles the library alone
+# (register 4.13).
+OMNI_CANDIDATES := $(OMNI_HOME) ../../omni ../../../omni /workspace/omni /home/user/omni
+OMNI_DIR := $(firstword $(foreach d,$(OMNI_CANDIDATES),$(if $(wildcard $(d)/spec/fib.json),$(d))))
+
+omni-check:
+	@if [ -z "$(OMNI_DIR)" ]; then \
+	  echo "struct: voxgig/omni checkout not found - set OMNI_HOME."; \
+	  echo "  The tests run on the shared runner; the library itself does not."; \
+	  echo "  git clone https://github.com/voxgig/omni ../../omni"; \
+	  exit 1; \
+	fi
+	@ln -sfn "$$(cd $(OMNI_DIR)/swift && pwd)" .omni-runner
 
 inspect:
 	@echo "Swift version:"
@@ -12,7 +35,7 @@ inspect:
 build:
 	$(SWIFT) build
 
-test:
+test: omni-check
 	$(SWIFT) test
 
 # Cross-port performance harness (JSON contract; see build/bench/README.md).

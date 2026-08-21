@@ -614,6 +614,10 @@ extension JSON {
     if d == d.rounded() && abs(d) < 1e16 {
       return String(Int64(d))
     }
-    return String(format: "%.17g", d)
+    // The SHORTEST representation that round-trips, which is what
+    // `Double.description` gives and what canonical's `String(n)` gives in JS.
+    // "%.17g" printed 4.4 as 4.4000000000000004, and `validate/basic` asserts
+    // the text of "Expected integer, but found decimal: 4.4." verbatim.
+    return String(d)
   }
 }

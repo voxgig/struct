@@ -412,12 +412,29 @@ public func transform_APPLY(_ inj: Injection, _ val: Value, _ ref: String, _ sto
 
 // MARK: - Top-level transform
 
-public func transform(_ data: Value, _ spec: Value, _ injdef: Injection? = nil) -> Value {
+/// Transform `data` by the by-example `spec`.
+///
+/// Throws a `StructError` carrying the collected errors, joined with " | ",
+/// unless the caller asked for them (`injdef.collecterrs`). It did NOT throw
+/// before - the errors were collected and then dropped on the floor, which
+/// meant every corpus entry with an `err:` expectation passed vacuously. The
+/// same defect struct/go and struct/php carried.
+public func transform(_ data: Value, _ spec: Value, _ injdef: Injection? = nil) throws -> Value {
+  let errs = injdef?.errs ?? VList()
+  let out = transformCollect(data, spec, injdef, errs)
+  if 0 < errs.items.count && !(injdef?.collecterrs ?? false) {
+    throw StructError(join(.list(errs), " | "))
+  }
+  return out
+}
+
+// The collecting core: never throws, and appends to the caller's `errs`.
+func transformCollect(
+  _ data: Value, _ spec: Value, _ injdef: Injection?, _ errs: VList
+) -> Value {
   let origspec = spec
   let spec = clone(origspec)
   let extra = injdef?.extra ?? .noval
-  let collect = (injdef?.errs.items.count) != nil ? true : false
-  let errs = injdef?.errs ?? VList()
   let extraTransforms = VMap()
   let extraData = VMap()
   if !extra.isNoval, case .map(let em) = extra {
@@ -453,10 +470,5 @@ public func transform(_ data: Value, _ spec: Value, _ injdef: Injection? = nil) 
   let errsMap = VMap()
   errsMap.entries[S_DERRS] = .list(errs)
   let store = merge(.list([.map(base), .map(extraTransforms), .map(errsMap)]), 1)
-  let out = inject(spec, store, injdef)
-  if errs.items.count > 0 && !collect {
-    // Throw via fatalError isn't ideal — use a token to signal upstream.
-    // For now, leave errs accumulated in the injdef if collected.
-  }
-  return out
+  return inject(spec, store, injdef)
 }

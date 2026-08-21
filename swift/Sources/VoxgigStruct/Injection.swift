@@ -21,6 +21,12 @@ public final class Injection: @unchecked Sendable {
   public var nodes: [Value] = []
   public var handler: Injector = _injecthandler
   public var errs: VList = VList()
+  // Canonical's `collect` is `null != injdef?.errs` - "the caller supplied a
+  // sink, so hand the errors back instead of throwing". `errs` here is a
+  // non-optional VList that defaults to an empty one, so it cannot carry that
+  // distinction on its own; this flag does. Set it when you pass an `errs` you
+  // intend to read.
+  public var collecterrs: Bool = false
   public var meta: VMap = VMap()
   public var dparent: Value = .noval
   public var dpath: [String] = [S_DTOP]
@@ -52,6 +58,7 @@ public final class Injection: @unchecked Sendable {
     cinj.base = base
     cinj.meta = meta
     cinj.errs = errs
+    cinj.collecterrs = collecterrs
     cinj.prior = self
     cinj.dpath = dpath
     cinj.dparent = dparent
@@ -89,8 +96,13 @@ public final class Injection: @unchecked Sendable {
   // higher ancestor when |ancestor| >= 2). NONE deletes the slot.
   @discardableResult
   public func setval(_ v: Value, ancestor: Int = 0) -> Value {
+    // Canonical branches on the RAW ancestor (`null == ancestor || ancestor <
+    // 2`), not its magnitude: a NEGATIVE ancestor writes through `parent` /
+    // `key` like the default. This port took `abs()` first, so `setval(v, -2)`
+    // walked two nodes up instead - which `validate_ONE` is the only caller
+    // of, and no entry could notice while every `err:` entry was skipped.
     let absAnc = abs(ancestor)
-    if absAnc < 2 {
+    if ancestor < 2 {
       if v.isNoval {
         parent = delprop(parent, .string(key))
       } else {
