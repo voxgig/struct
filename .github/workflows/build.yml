@@ -744,6 +744,14 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # The test runner is voxgig/omni, consumed as a local checkout (it is
+      # not published); the Makefile copies its Omni.lean in from OMNI_HOME.
+      # The library itself never depends on omni.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       # elan directly rather than leanprover/lean-action: that action is a
       # composite that references actions/cache/restore@v5 and
       # actions/cache/save@v5 BY TAG internally, and the SHA-pin rule applies
@@ -796,3 +804,5 @@ jobs:
         working-directory: ./lean
         shell: bash
         run: make test
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
