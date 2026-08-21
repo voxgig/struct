@@ -54,7 +54,7 @@ NFA engine in-tree (c/cpp/lua/rust/zig).
 | **cpp** | 48 | 15 | 2 | 1268/1268 corpus | full TS-canonical parity |
 | **csharp** | 48 | 15 | 2 | 78/78 corpus | already Group A |
 | **kotlin** | 48 | 15 | 2 | 1315/1315 corpus | full TS-canonical parity |
-| **zig** | 48 | 15 | 2 | 60/60 corpus sets \*1 | cycle-break + 7 latent-bug fixes |
+| **zig** | 48 | 15 | 2 | 60/60 corpus sets \*1 \*4 | cycle-break + 7 latent-bug fixes |
 | **perl** | 48 | 15 | 2 | full corpus (700+ cases) | full canonical parity |
 | **swift** | 48 | 15 | 2 | full corpus (700+ cases) | full canonical parity |
 | **clojure** | 48 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
@@ -148,6 +148,8 @@ The fix unblocked the test process and exposed 7 separate test
 failures the SIGSEGV had been hiding — all now fixed (see \*1 above
 for the `transform.ref[20]` and `cmdEach` follow-up). `zig build test`
 is 60/60 passing.
+
+\*4 Zig: the 60/60 above counts test BLOCKS the in-situ runner chose to check, not corpus entries it verified. `test/runner.zig` skips the result check on every entry with an `err:` field (`if (err_field != null) continue;` - 59 of them), never looks at a `match:` block (15), never reads `args` or `ctx`, and runs most groups with `null_flag = false` where canonical uses true. So it cannot establish parity on error paths or in-place mutation, and the "100% parity" this report claimed for zig is an API claim, not a behavioural one. This is what moving onto voxgig/omni would settle, and why this port is the one that needs it most.
 
 **The corpus is NOT yet on voxgig/omni here, and this is the port that
 needs it most.** `test/runner.zig` is the weakest driver of the 24: it
@@ -822,7 +824,7 @@ reports every port ok against the 48-function canonical API).
 8. **swift** -- 100% parity. All 48 canonical functions, `Injection` reference class, all 11 transform commands, 15 validate checkers, 4 select operators. Full corpus passing.
 9. **java** -- 100% parity. All 48 canonical functions, `Injection` state machine, all 11 transform commands, 15 validate checkers, 4 select operators. 1300/1300 corpus checks passing (`make test-java`).
 10. **rust** -- 100% parity. Idiomatic `snake_case` API, all 11 transform commands, 15 validate checkers, 4 select operators. Full corpus passing.
-11. **zig** -- 100% parity. Allocator-first API, all transform commands, validate checkers and select operators. 60/60 corpus test blocks passing.
+11. **zig** -- API parity: allocator-first, all transform commands, validate checkers and select operators. Its 60/60 is NOT corpus conformance, though - the in-situ runner skips every entry carrying `err:` and never reads a `match:` block, so the error paths and the mutation assertions are untested here. See \*4.
 12. **csharp** -- 100% parity. All 48 canonical functions, full Injection state, all commands/checkers/operators. Corpus passing.
 13. **kotlin** -- 100% parity. All 48 canonical functions, `Injection` class, all 11 transform commands, 15 validate checkers, 4 select operators. Corpus passing.
 14. **perl** -- 100% parity. All 48 canonical functions, all 11 transform commands, 15 validate checkers, 4 select operators. Full corpus passing.
