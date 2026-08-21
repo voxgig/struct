@@ -23,7 +23,10 @@ OMNI_DIR := $(or \
   $(shell [ -n "$$OMNI_HOME" ] && [ -f "$$OMNI_HOME/spec/fib.json" ] && printf '%s' "$$OMNI_HOME"),\
   $(firstword $(foreach d,$(OMNI_SIBLINGS),$(if $(wildcard $(d)/spec/fib.json),$(d)))))
 
-TESTSRC = $(SRC) test/runner.scala $(OMNI_DIR)/scala/src
+# The omni sources are kept OUT of this list and quoted at the use site: a
+# make variable is a whitespace-delimited word list, so a spaced $(OMNI_DIR)
+# would reach scala-cli as two separate paths.
+TESTSRC = $(SRC) test/runner.scala
 
 .PHONY: test bench lint build inspect clean reset publish omni-check
 
@@ -40,7 +43,7 @@ omni-check:
 # (The classic `scala -cp out Runner` runner was removed in Scala 3.5+, where
 # `scala` is the scala-cli launcher and no longer runs a main from a classpath.)
 test: omni-check
-	scala-cli run $(TESTSRC) --main-class Runner
+	scala-cli run $(TESTSRC) "$(OMNI_DIR)/scala/src" --main-class Runner
 
 # Cross-port performance harness (JSON contract; see build/bench/README.md).
 # Uses the Scala 3 compiler (scalac) + java rather than scala-cli, so it runs
