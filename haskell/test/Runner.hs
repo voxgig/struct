@@ -1,323 +1,126 @@
--- Test runner for the shared JSON corpus (build/test/test.json).
--- Self-contained: an in-tree JSON reader builds the library's `Value` type
--- directly (via the IORef-backed nodes), so the Haskell port is exercised
--- exactly as in production. The runner logic mirrors every other port.
-
-{-# LANGUAGE LambdaCase #-}
+-- The shared corpus, run on the shared runner.
+--
+-- The in-situ runner - a JSON reader, `fixJson`, `eqv`, `doMatch`, `matchval`,
+-- `resolveArgs`, `checkResult` and `handleError`, all of it this port's own
+-- copy of omni's algorithm - is gone. Every group is driven through
+-- voxgig/omni, so this file only says WHICH subject answers each group and
+-- with which flags.
+--
+-- omni is consumed as a local checkout: the Makefile finds it via $OMNI_HOME
+-- or beside this repository and puts its `src` on the TEST search path only.
+-- `make build` compiles src/ alone and nothing shipped names omni
+-- (register 4.13).
+--
+-- Flags mirror canonical: typescript/test/utility/StructUtility.test.ts.
 
 module Main where
 
-import Control.Exception (SomeException, throwIO, try)
+import Control.Exception (SomeException, try)
 import Control.Monad (forM_, when)
-import Data.Char (chr, toLower)
 import Data.IORef
-import Data.List (intercalate, isPrefixOf)
+import Data.List (intercalate)
 import System.Environment (getArgs)
 import System.Exit (exitFailure)
-import Numeric (readHex)
 
 import VoxgigStruct
-import qualified Vregex
+import qualified Omni as O
 
-nullmark, undefmark, existsmark :: String
+nullmark :: String
 nullmark = "__NULL__"
-undefmark = "__UNDEF__"
-existsmark = "__EXISTS__"
 
--- ---------------- JSON reader -> Value ----------------
+-- ---------------- the bridge ----------------
 
-jsonRead :: String -> IO Value
-jsonRead s0 = do
-  posRef <- newIORef 0
-  let arr = s0
-      n = length arr
-      at i = arr !! i
-      peek = do p <- readIORef posRef; return (if p < n then Just (at p) else Nothing)
-      adv = modifyIORef' posRef (+ 1)
-      skipWs = do
-        p <- readIORef posRef
-        if p < n && (at p `elem` " \t\n\r") then adv >> skipWs else return ()
-      pval = do
-        skipWs
-        mc <- peek
-        case mc of
-          Just '{' -> pobj
-          Just '[' -> parr
-          Just '"' -> VStr <$> pstr
-          Just 't' -> modifyIORef' posRef (+ 4) >> return (VBool True)
-          Just 'f' -> modifyIORef' posRef (+ 5) >> return (VBool False)
-          Just 'n' -> modifyIORef' posRef (+ 4) >> return VNull
-          _ -> pnum
-      pobj = do
-        adv; skipWs
-        mc <- peek
-        if mc == Just '}' then adv >> emptyMap
-        else do
-          m <- emptyMap
-          let loop = do
-                skipWs
-                k <- pstr
-                skipWs; adv  -- ':'
-                v <- pval
-                _ <- setprop m (VStr k) v
-                skipWs
-                c <- peek >>= \case Just c -> adv >> return c; Nothing -> return '}'
-                if c == ',' then loop else return m
-          loop
-      parr = do
-        adv; skipWs
-        mc <- peek
-        if mc == Just ']' then adv >> emptyList
-        else do
-          accRef <- newIORef []
-          let loop = do
-                v <- pval
-                modifyIORef' accRef (v :)
-                skipWs
-                c <- peek >>= \case Just c -> adv >> return c; Nothing -> return ']'
-                if c == ',' then loop else do acc <- readIORef accRef; mkList (reverse acc)
-          loop
-      pstr = do
-        adv  -- opening quote
-        bRef <- newIORef []
-        let loop = do
-              p <- readIORef posRef
-              let c = at p
-              adv
-              if c == '"' then do b <- readIORef bRef; return (reverse b)
-              else if c == '\\' then do
-                p2 <- readIORef posRef
-                let e = at p2
-                adv
-                case e of
-                  '"' -> push '"' >> loop
-                  '\\' -> push '\\' >> loop
-                  '/' -> push '/' >> loop
-                  'n' -> push '\n' >> loop
-                  't' -> push '\t' >> loop
-                  'r' -> push '\r' >> loop
-                  'b' -> push '\b' >> loop
-                  'f' -> push '\f' >> loop
-                  'u' -> do
-                    pp <- readIORef posRef
-                    let hex = take 4 (drop pp arr)
-                    modifyIORef' posRef (+ 4)
-                    case readHex hex of [(code, _)] -> push (chr code) >> loop; _ -> loop
-                  _ -> push e >> loop
-              else push c >> loop
-            push c = modifyIORef' bRef (c :)
-        loop
-      pnum = do
-        start <- readIORef posRef
-        let go = do
-              p <- readIORef posRef
-              if p < n && (at p `elem` "0123456789-+.eE") then adv >> go else return ()
-        go
-        end <- readIORef posRef
-        let tok = take (end - start) (drop start arr)
-        return (VNum (read tok))
-  pval
+-- omni's model -> this port's. Both draw the same absent/null/value
+-- distinction (`VNoval` is canonical `undefined`), so nothing is guessed.
+-- Nodes are built through `mkList` / `mkMap`, so what a subject receives is a
+-- real IORef-backed node it may mutate.
+tostruct :: O.Json -> IO Value
+tostruct value = case value of
+  O.Absent -> return VNoval
+  O.Null -> return VNull
+  O.Bool b -> return (VBool b)
+  O.Num n -> return (VNum n)
+  O.Str s -> return (VStr s)
+  O.JList items -> mapM tostruct items >>= mkList
+  O.JMap entries -> mapM (\(key, item) -> (,) key <$> tostruct item) entries >>= mkMap
 
--- ---------------- fixJSON / equality ----------------
+-- This port's model -> omni's. A function or a sentinel has no JSON form and
+-- omni only ever stringifies one, so it becomes its own rendering rather than
+-- silently collapsing to null.
+toomni :: Value -> IO O.Json
+toomni value = case value of
+  VNoval -> return O.Absent
+  VNull -> return O.Null
+  VBool b -> return (O.Bool b)
+  VNum n -> return (O.Num n)
+  VStr s -> return (O.Str s)
+  VList r -> do items <- readIORef r; O.JList <$> mapM toomni items
+  VMap m -> do entries <- readIORef m; O.JMap <$> mapM (\(key, item) -> (,) key <$> toomni item) entries
+  VFunc _ -> return (O.Str "[Function]")
+  VSentinel tag -> return (O.Str ("`$" ++ tag ++ "`"))
 
-fixJson :: Value -> Bool -> IO Value
-fixJson v flagNull = case v of
-  VNoval -> return (if flagNull then VStr nullmark else v)
-  VNull -> return (if flagNull then VStr nullmark else v)
-  VMap m -> do
-    es <- readIORef m
-    o <- emptyMap
-    forM_ es $ \(k, x) -> do fx <- fixJson x flagNull; _ <- setprop o (VStr k) fx; return ()
-    return o
-  VList r -> do its <- readIORef r; xs <- mapM (\x -> fixJson x flagNull) its; mkList xs
-  _ -> return v
-
+-- Order-independent deep equality, through omni's own rule so the hand-written
+-- comparisons below match the way every group is checked.
 eqv :: Value -> Value -> IO Bool
-eqv a b = case (a, b) of
-  (VNoval, VNoval) -> return True
-  (VNoval, VNull) -> return True
-  (VNull, VNoval) -> return True
-  (VNull, VNull) -> return True
-  (VBool x, VBool y) -> return (x == y)
-  (VNum x, VNum y) -> return (x == y)
-  (VStr x, VStr y) -> return (x == y)
-  (VList x, VList y) -> do
-    xs <- readIORef x; ys <- readIORef y
-    if length xs /= length ys then return False else allM (zipWith eqv xs ys)
-  (VMap x, VMap y) -> do
-    xs <- readIORef x; ys <- readIORef y
-    if length xs /= length ys then return False
-    else allM [case lookup k ys of Just w -> eqv v w; Nothing -> return False | (k, v) <- xs]
-  _ -> return (sameRef a b)
-  where
-    allM = andM
-    sameRef (VList p) (VList q) = p == q
-    sameRef (VMap p) (VMap q) = p == q
-    sameRef VNoval VNoval = True
-    sameRef _ _ = False
-
--- ---------------- match support ----------------
-
-containsLower :: String -> String -> Bool
-containsLower hay needle =
-  let h = map toLower hay; nd = map toLower needle
-  in null nd || go h
-  where
-    go [] = False
-    go s@(_:rest) = (map toLower needle `isPrefixOf` map toLower s) || go rest
-
-matchval :: Value -> Value -> IO Bool
-matchval check0 base = do
-  let check = if vStrEq check0 undefmark || vStrEq check0 nullmark then VNoval else check0
-  e <- eqv check base
-  if e then return True
-  else case check of
-    VStr cs -> do
-      basestr <- stringify base
-      if length cs >= 2 && head cs == '/' && last cs == '/'
-        then return (Vregex.testStr (take (length cs - 2) (drop 1 cs)) basestr)
-        else do cstr <- stringify check; return (containsLower basestr cstr)
-    VFunc _ -> return True
-    _ -> return False
-
-doMatch :: Value -> Value -> IO ()
-doMatch check base0 = do
-  base <- clone base0
-  _ <- walk (Just (\_ v _ path -> do
-    when (not (isnode v)) $ do
-      baseval <- getpath INone base path
-      e <- eqv baseval v
-      if e then return ()
-      else if vStrEq v undefmark && isNullish baseval then return ()
-      else if vStrEq v existsmark && not (isNullish baseval) then return ()
-      else do
-        mv <- matchval v baseval
-        if not mv then do
-          pelems <- listItems path
-          pstrs <- mapM jsString pelems
-          sv <- stringify v
-          sb <- stringify baseval
-          ioError (userError ("MATCH: " ++ intercalate "." pstrs ++ ": [" ++ sv ++ "] <=> [" ++ sb ++ "]"))
-        else return ()
-    return v)) Nothing VNoval check
-  return ()
+eqv a b = do
+  ja <- toomni a
+  jb <- toomni b
+  return (O.deepequal ja jb)
 
 -- ---------------- result tracking ----------------
 
 data Counters = Counters { npass :: IORef Int, nfail :: IORef Int, failures :: IORef [String] }
 
-record :: Counters -> String -> String -> Bool -> String -> IO ()
-record c group name ok msg =
+record :: Counters -> String -> Bool -> String -> IO ()
+record c group ok msg =
   if ok then modifyIORef' (npass c) (+ 1)
-  else do modifyIORef' (nfail c) (+ 1); modifyIORef' (failures c) (++ ["FAIL " ++ group ++ " " ++ name ++ " - " ++ msg])
+  else do modifyIORef' (nfail c) (+ 1); modifyIORef' (failures c) (++ ["FAIL " ++ group ++ " - " ++ msg])
 
-errMsg :: SomeException -> String
-errMsg e = case lines (show e) of (l:_) -> stripUser l; [] -> show e
-  where stripUser s = case dropWhile (/= ':') s of _ -> s
+-- ---------------- running a group ----------------
 
--- ---------------- per-entry runner ----------------
+-- Each group is one assertion: omni stops at its first failing entry and
+-- reports the index, the entry and both values.
+--
+-- The subject is handed omni's arguments converted into this port's nodes, and
+-- the wrapper hands the converted arguments BACK - `match.args` asserts an
+-- in-place rewrite in eight of `minor/setpath`'s nine entries and all six of
+-- `merge/integrity`. This port's nodes are mutable IORef cells but omni's
+-- `Json` is not, so returning them alongside the result (omni's `SubjectArgs`)
+-- is the only channel there is. rust, cpp, ocaml and elixir needed the same
+-- entry point for the same reason.
+runSet :: Counters -> O.RunPack -> String -> Value -> ([Value] -> IO Value) -> Bool -> IO ()
+runSet c pack group node subject flagNull = do
+  spec <- toomni node
+  let call cells = do
+        args <- mapM tostruct cells
+        res <- subject args
+        (,) <$> mapM toomni args <*> toomni res
+      flags = O.Flags { O.flagNull = flagNull, O.flagName = Just group }
+  outcome <- try (O.runsetFlagsArgs pack spec flags call) :: IO (Either SomeException ())
+  case outcome of
+    Right () -> record c group True ""
+    Left err -> record c group False (O.errmessage err)
 
-omapV :: [(String, Value)] -> IO Value
-omapV = mkMap
-
-entryGet :: Value -> String -> IO Value
-entryGet e k = getpropRaw e k
-
-entryHas :: Value -> String -> IO Bool
-entryHas e k = case e of { VMap m -> do { es <- readIORef m; return (any ((== k) . fst) es) }; _ -> return False }
-
-resolveArgs :: Value -> IO [Value]
-resolveArgs entry = do
-  hc <- entryHas entry "ctx"
-  if hc then do c <- entryGet entry "ctx"; return [c]
-  else do
-    ha <- entryHas entry "args"
-    if ha then do a <- entryGet entry "args"; if islist a then listItems a else return []
-    else do
-      hi <- entryHas entry "in"
-      if hi then do v <- entryGet entry "in"; c <- clone v; return [c]
-      else return [VNoval]
-
-checkResult :: Value -> [Value] -> Value -> IO ()
-checkResult entry args res = do
-  hm <- entryHas entry "match"
-  matched <- if hm then do
-      mv <- entryGet entry "match"
-      ein <- entryGet entry "in"; eres <- entryGet entry "res"; ectx <- entryGet entry "ctx"
-      al <- mkList args
-      o <- omapV [("in", ein), ("args", al), ("out", eres), ("ctx", ectx)]
-      doMatch mv o
-      return True
-    else return False
-  out <- entryGet entry "out"
-  e <- eqv out res
-  if e then return ()
-  else if matched && (vStrEq out nullmark || isNullish out) then return ()
-  else do so <- stringify out; sr <- stringify res; ioError (userError ("Expected: " ++ so ++ ", got: " ++ sr))
-
-handleError :: Value -> SomeException -> IO ()
-handleError entry err = do
-  let msg = exMsg err
-  he <- entryHas entry "err"
-  if he then do
-    entryErr <- entryGet entry "err"
-    em <- matchval entryErr (VStr msg)
-    if vIsTrue entryErr || em then do
-      hm <- entryHas entry "match"
-      when hm $ do
-        mv <- entryGet entry "match"
-        ein <- entryGet entry "in"; eres <- entryGet entry "res"; ectx <- entryGet entry "ctx"
-        o <- omapV [("in", ein), ("out", eres), ("ctx", ectx), ("err", VStr msg)]
-        doMatch mv o
-    else do se <- stringify entryErr; ioError (userError ("ERROR MATCH: [" ++ se ++ "] <=> [" ++ msg ++ "]"))
-  else throwIO err
-
-exMsg :: SomeException -> String
-exMsg e =
-  let s = show e
-  in case stripPrefix "user error (" s of
-       Just rest -> reverse (drop 1 (reverse rest))  -- drop trailing ')'
-       Nothing -> s
-  where stripPrefix p str = if p `isPrefixOf` str then Just (drop (length p) str) else Nothing
-
-runSet :: Counters -> String -> Value -> ([Value] -> IO Value) -> Bool -> IO ()
-runSet c group node subject flagNull = do
-  fixed <- fixJson node flagNull
-  testset <- getprop fixed (VStr "set") >>= \ts -> if islist ts then listItems ts else return []
-  forM_ testset $ \entry -> do
-    nm <- entryGet entry "name" >>= jsString
-    result <- try (runOne entry) :: IO (Either SomeException ())
-    case result of
-      Right () -> record c group nm True ""
-      Left e -> do
-        r2 <- try (handleError entry e) :: IO (Either SomeException ())
-        case r2 of
-          Right () -> record c group nm True ""
-          Left e2 -> record c group nm False (exMsg e2)
-  where
-    runOne entry = do
-      ho <- entryHas entry "out"
-      when (not ho && flagNull) $ do _ <- setprop entry (VStr "out") (VStr nullmark); return ()
-      args <- resolveArgs entry
-      r <- subject args
-      res <- fixJson r flagNull
-      _ <- setprop entry (VStr "res") res
-      checkResult entry args res
-
+-- `merge.basic`, `inject.basic` and `transform.basic` are single entries, not
+-- sets, so the runner cannot drive them. Compared here, through omni's own
+-- deepequal so the rule is the one every group uses.
 runSingle :: Counters -> String -> Value -> (Value -> IO Value) -> IO ()
 runSingle c group node actualFn = do
-  result <- try go :: IO (Either SomeException ())
-  case result of
+  outcome <- try go :: IO (Either SomeException ())
+  case outcome of
     Right () -> return ()
-    Left e -> record c group "single" False (exMsg e)
+    Left err -> record c group False (O.errmessage err)
   where
     go = do
-      expected <- entryGet node "out"
-      inv <- entryGet node "in"
+      expected <- getpropRaw node "out"
+      inv <- getpropRaw node "in"
       actual <- actualFn inv
-      e <- eqv expected actual
-      if e then record c group "single" True ""
-      else do se <- stringify expected; sa <- stringify actual; record c group "single" False ("Expected: " ++ se ++ ", got: " ++ sa)
+      same <- eqv expected actual
+      if same then record c group True ""
+      else do
+        se <- stringify expected
+        sa <- stringify actual
+        record c group False ("Expected: " ++ se ++ ", got: " ++ sa)
 
 -- ---------------- arg helpers ----------------
 
@@ -334,19 +137,62 @@ vhas vin k = case vin of { VMap m -> do { es <- readIORef m; return (any ((== k)
 
 main :: IO ()
 main = do
-  args <- getArgs
-  let testfile = case args of (f:_) -> f; [] -> "../build/test/test.json"
-  raw <- readFile testfile
-  alltests <- jsonRead raw
-  spec <- entryGet alltests "struct"
+  argv <- getArgs
+  let testfile = case argv of (f:_) -> f; [] -> "../build/test/test.json"
+  pack <- O.makeRunner testfile O.emptyProvider "struct"
+  spec <- tostruct (O.packSpec pack)
   c <- Counters <$> newIORef 0 <*> newIORef 0 <*> newIORef []
-  runAll c spec
+  runAll c pack spec
+  runClient c testfile
   fs <- readIORef (failures c)
   forM_ fs putStrLn
   p <- readIORef (npass c)
   f <- readIORef (nfail c)
-  putStrLn ("\nPASS " ++ show p ++ "  FAIL " ++ show f)
+  putStrLn ("\n" ++ show (p + f) ++ " groups, " ++ show f ++ " failed")
   when (f > 0) exitFailure
+
+-- ---------------- the client path ----------------
+
+-- `DEF.client`, client-scoped options, and `contextify`. This port had no such
+-- test. It is the only thing that exercises subject resolution through a
+-- PROVIDER rather than through a callback this file hands over - so nothing
+-- here had ever checked that a corpus `client` key resolves, or that a
+-- `DEF.client` entry's options reach the subject.
+--
+-- The subject talks to omni DIRECTLY, in omni's own value type: the runner
+-- resolves it by name off the provider, so there is no `in` to convert and no
+-- result for the bridge to convert back.
+check :: O.Json -> O.Subject
+check options args = do
+  let foo = O.jget options "foo"
+      foos = if O.isabsent foo then "" else O.stringify foo
+      ctx = case args of (first:_) -> first; [] -> O.Absent
+      bar = O.jget (O.jget ctx "meta") "bar"
+      bars = if O.isnone bar then "0" else O.stringify bar
+  return (O.JMap [("zed", O.Str ("ZED" ++ foos ++ "_" ++ bars))])
+
+clientProvider :: O.Json -> O.Provider
+clientProvider options =
+  O.Provider
+    { O.providerSubject = Just (\name -> if name == "check" then Just (check options) else Nothing),
+      -- A DEF.client entry becomes another provider, carrying its options.
+      O.providerClient = Just clientProvider,
+      -- This port adds nothing to a context; the hook must exist so omni
+      -- installs `client` on it.
+      O.providerContextify = Just id,
+      O.providerInject = Nothing
+    }
+
+runClient :: Counters -> String -> IO ()
+runClient c testfile = do
+  pack <- O.makeRunner testfile (clientProvider (O.JMap [])) "check"
+  let flags = O.Flags { O.flagNull = True, O.flagName = Just "check.basic" }
+  -- No subject: the runner resolves it by name off the provider, which is the
+  -- whole point of the group.
+  outcome <- try (O.runsetFlags pack (O.packSet pack "basic") flags Nothing) :: IO (Either SomeException ())
+  case outcome of
+    Right () -> record c "check.basic" True ""
+    Left err -> record c "check.basic" False (O.errmessage err)
 
 -- ---------------- test groups ----------------
 
@@ -357,15 +203,15 @@ nullModifier v key parent _inj =
     VStr s -> do _ <- setprop parent key (VStr (replaceAll s nullmark "null")); return ()
     _ -> return ()
 
-runAll :: Counters -> Value -> IO ()
-runAll c spec = do
+runAll :: Counters -> O.RunPack -> Value -> IO ()
+runAll c pack spec = do
   let g k = getpropRaw spec k
   minor <- g "minor"; walks <- g "walk"; merges <- g "merge"
   getpaths <- g "getpath"; injects <- g "inject"; transforms <- g "transform"
   validates <- g "validate"; selects <- g "select"; sentinels <- g "sentinels"
   regexs <- g "regex"
   let mg k = getpropRaw minor k
-      rs group nd subj fl = do n <- nd; runSet c group n subj fl
+      rs group nd subj fl = do n <- nd; runSet c pack group n subj fl
       rsT group nd subj = rs group nd subj True
       rsF group nd subj = rs group nd subj False
 
@@ -396,9 +242,12 @@ runAll c spec = do
     if h then do pth <- vget vin "path"; VStr <$> pathifyFull pth frm VNoval False
     else VStr <$> pathifyFull VNoval frm VNoval True))
   rsT "minor.items" (mg "items") (arg1 items)
+  -- Canonical omits `alt` only when the KEY is missing (`undefined === vin.alt`),
+  -- so a present `alt: null` still goes through. getelem's rule is the looser
+  -- `null == vin.alt`; `minor/getprop#51` is the entry that separates them.
   rsF "minor.getprop" (mg "getprop") (arg1 (\vin -> do
-    alt <- vget vin "alt"; val <- vget vin "val"; key <- vget vin "key"
-    if isNullish alt then getprop val key else getpropAlt alt val key))
+    h <- vhas vin "alt"; val <- vget vin "val"; key <- vget vin "key"
+    if h then do alt <- vget vin "alt"; getpropAlt alt val key else getprop val key))
   rsT "minor.setprop" (mg "setprop") (arg1 (\vin -> do p <- vget vin "parent"; k <- vget vin "key"; val <- vget vin "val"; setprop p k val))
   rsF "minor.haskey" (mg "haskey") (arg1 (\vin -> do s <- vget vin "src"; k <- vget vin "key"; VBool <$> haskey s k))
   rsT "minor.keysof" (mg "keysof") (arg1 (\v -> do ks <- keysof v; mkList (map VStr ks)))
@@ -407,11 +256,11 @@ runAll c spec = do
   rsF "minor.setpath" (mg "setpath") (arg1 (\vin -> do st <- vget vin "store"; pth <- vget vin "path"; val <- vget vin "val"; setpath st pth val))
   rsT "minor.filter" (mg "filter") (arg1 (\vin -> do
     val <- vget vin "val"; ch <- vget vin "check"
-    let check = case ch of
+    let check2 = case ch of
           VStr "gt3" -> \(_, x) -> case x of VNum n -> n > 3; _ -> False
           VStr "lt3" -> \(_, x) -> case x of VNum n -> n < 3; _ -> False
           _ -> \_ -> False
-    VoxgigStruct.filter val check))
+    VoxgigStruct.filter val check2))
   rsT "minor.typename" (mg "typename") (arg1 (\v -> return (VStr (typename (case v of VNum n -> truncate n; _ -> 0)))))
   rsT "minor.flatten" (mg "flatten") (arg1 (\vin -> do
     val <- vget vin "val"; d <- vget vin "depth"
@@ -443,7 +292,7 @@ runAll c spec = do
     getpath (if isNullish injm then INone else IDef d) st pth))
   rsT "getpath.handler" (getpropRaw getpaths "handler") (arg1 (\vin -> do
     stv <- vget vin "store"; pth <- vget vin "path"
-    store <- omapV [("$TOP", stv), ("$FOO", VFunc (\_ _ _ _ -> return (VStr "foo")))]
+    store <- mkMap [("$TOP", stv), ("$FOO", VFunc (\_ _ _ _ -> return (VStr "foo")))]
     let d = (defaultInjDef VNoval) { dHandler = Just (\_inj v _ref _store -> case v of VFunc f -> f dummyInj VNoval "" VNoval; _ -> return v) }
     getpath (IDef d) store pth))
 
@@ -474,6 +323,10 @@ runAll c spec = do
 
   forM_ ["basic", "operators", "edge", "alts"] $ \gn ->
     rsT ("select." ++ gn) (getpropRaw selects gn) (arg1 (\vin -> do obj <- vget vin "obj"; qry <- vget vin "query"; select obj qry))
+  -- `null: false` keeps a JSON null an ACTUAL null rather than the NULLMARK
+  -- string, so select sees a present-but-null field.
+  rsF "select.nullkey" (getpropRaw selects "nullkey")
+    (arg1 (\vin -> do obj <- vget vin "obj"; qry <- vget vin "query"; select obj qry))
 
   -- regex (parity floor: Go stdlib regexp — see design/REGEX_API.md)
   rsT "regex.test" (getpropRaw regexs "test") (arg1 (\vin -> do p <- vget vin "pattern"; i <- vget vin "input"; re_test p i))
@@ -491,16 +344,15 @@ runAll c spec = do
 
 runWalkLog :: Counters -> String -> Value -> IO ()
 runWalkLog c group node = do
-  result <- try go :: IO (Either SomeException ())
-  case result of
+  outcome <- try go :: IO (Either SomeException ())
+  case outcome of
     Right () -> return ()
-    Left e -> record c group "log" False (exMsg e)
+    Left err -> record c group False (O.errmessage err)
   where
     go = do
       testData <- clone node
       logRef <- emptyList
-      let walklog _ v _ _ = return v
-          walklogA key v parent path = do
+      let walklogA key v parent path = do
             ks <- if isNullish key then stringify VNoval else stringify key
             vs <- stringify v
             ps <- if isNullish parent then stringify VNoval else stringify parent
@@ -512,9 +364,9 @@ runWalkLog c group node = do
       _ <- walk Nothing (Just walklogA) VNoval din
       dout <- getpropRaw testData "out"
       expected <- getprop dout (VStr "after")
-      e <- eqv expected logRef
-      if e then record c group "log" True ""
-      else do se <- stringify expected; sl <- stringify logRef; record c group "log" False ("Expected: " ++ se ++ ", got: " ++ sl)
+      same <- eqv expected logRef
+      if same then record c group True ""
+      else do se <- stringify expected; sl <- stringify logRef; record c group False ("Expected: " ++ se ++ ", got: " ++ sl)
 
 walkCopySubject :: Value -> IO Value
 walkCopySubject vin = do

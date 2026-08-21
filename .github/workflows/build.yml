@@ -543,6 +543,14 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # The test runner is voxgig/omni, consumed as a local checkout (it is
+      # not published to Hackage); the Makefile finds it via OMNI_HOME. The
+      # library itself never depends on omni.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       - uses: haskell-actions/setup@6037f33647c3f17758a2356c80fc4a53d7e0685d # v2
         with:
           ghc-version: '9.10'
@@ -553,6 +561,8 @@ jobs:
         working-directory: ./haskell
         shell: bash
         run: make test
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
 
   test-ocaml:
     runs-on: ${{ matrix.os }}
