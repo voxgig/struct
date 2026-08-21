@@ -191,6 +191,15 @@ defmodule Runner do
   # The way out is the one lua took - give the port a real no-value sentinel -
   # and that is a port change, not a runner change.
   #
+  # These five DID run under the in-situ runner, and passed. That pass was not
+  # evidence: its comparison read `out == @nullmark or out == nil` (old
+  # test/runner.exs:311), so a nil result satisfied an expected null and an
+  # expected absent alike - the two states this port cannot tell apart were
+  # accepted as the same answer. Dropping them costs five executed entries and
+  # removes five passes that could not have failed. It is a smaller loss than
+  # the 42 the other reading costs, but it IS a loss, and it stays visible here
+  # rather than being absorbed into a number.
+  #
   # Each drop is GUARDED: if the corpus moves under it, the guard fails loudly
   # rather than silently skipping some other entry.
   @drops %{
