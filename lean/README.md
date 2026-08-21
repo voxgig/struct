@@ -20,8 +20,9 @@ the full corpus (1360/1360).
 
 ```
 cd lean
-make test    # lake build + run the shared build/test/test.json corpus
-make lint    # type-check (a clean, warnings-free compile = pass)
+make test    # run the shared corpus on voxgig/omni (needs $OMNI_HOME)
+make build   # type-check the LIBRARY alone (no omni)
+make lint    # type-check library + runner (a warnings-free compile = pass)
 ```
 
 ## Usage sketch

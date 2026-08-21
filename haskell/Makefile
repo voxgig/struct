@@ -6,10 +6,39 @@
 
 BUILDDIR := .hsbuild
 
-# Run the shared JSON corpus through the Haskell implementation.
-test:
+# The corpus runner is voxgig/omni, consumed as a local checkout - it is not
+# published to Hackage. $OMNI_HOME first, then sibling paths, taking the first
+# directory that carries spec/fib.json.
+#
+# It goes on the TEST search path only: `make build` compiles src/ alone, and
+# nothing shipped (the .cabal library stanza) names omni (register 4.13).
+#
+# $OMNI_HOME is resolved by the SHELL, not by make's `wildcard`/`foreach`.
+# Those are whitespace-delimited, so a path with a space ("C:/Users/Ann
+# Smith/omni") splits into two candidates that both miss - and the result is
+# not an error but a silent fallthrough to the next candidate, a DIFFERENT
+# checkout. `$$OMNI_HOME` reaches the shell as the raw environment value. The
+# sibling candidates are fixed literals with no spaces, so they stay here.
+OMNI_SIBLINGS := ../../omni ../../../omni /workspace/omni /home/user/omni
+OMNI_DIR := $(or \
+  $(shell [ -n "$$OMNI_HOME" ] && [ -f "$$OMNI_HOME/spec/fib.json" ] && printf '%s' "$$OMNI_HOME"),\
+  $(firstword $(foreach d,$(OMNI_SIBLINGS),$(if $(wildcard $(d)/spec/fib.json),$(d)))))
+
+.PHONY: omni-check
+
+# Fail with the reason rather than "Could not find module `Omni'".
+omni-check:
+	@if [ -z "$(OMNI_DIR)" ]; then \
+	  echo "struct: voxgig/omni checkout not found - set OMNI_HOME."; \
+	  echo "  The tests run on the shared runner; the library itself does not."; \
+	  echo "  git clone https://github.com/voxgig/omni ../../omni"; \
+	  exit 1; \
+	fi
+
+# Run the shared JSON corpus through the Haskell implementation, on voxgig/omni.
+test: omni-check
 	@mkdir -p $(BUILDDIR)
-	ghc -O0 -isrc -itest -outputdir $(BUILDDIR) -o $(BUILDDIR)/runner test/Runner.hs
+	ghc -O0 -isrc -itest "-i$(OMNI_DIR)/haskell/src" -outputdir $(BUILDDIR) -o $(BUILDDIR)/runner test/Runner.hs
 	$(BUILDDIR)/runner ../build/test/test.json
 
 # Cross-port performance harness (JSON contract; see build/bench/README.md).
@@ -20,8 +49,9 @@ bench:
 	@$(BUILDDIR)/bench
 
 # "Lint": type-check the library and runner (a clean compile = pass).
-lint:
-	ghc -fno-code -isrc -itest test/Runner.hs
+# The runner names omni, so this needs the checkout too.
+lint: omni-check
+	ghc -fno-code -isrc -itest "-i$(OMNI_DIR)/haskell/src" test/Runner.hs
 
 # Compile the library as a build smoke-test.
 build:

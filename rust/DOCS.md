@@ -29,7 +29,7 @@ Then: [Build, test, extend](#build-test-and-extend).
 ```bash
 cd rust
 cargo build
-cargo test          # runs the shared corpus from ../build/test/test.json
+make test           # cargo test + the shared corpus (corpus/ package)
 ```
 
 Crate `voxgig-struct`; library `voxgig_struct`; edition 2021; stable Rust
@@ -420,7 +420,7 @@ and [`../REGEX_PATHOLOGICAL.md`](../design/REGEX_PATHOLOGICAL.md).
 ```bash
 cd rust
 cargo build
-cargo test          # runs the shared corpus suite (../build/test/test.json)
+make test           # cargo test + the shared corpus suite (corpus/ package)
 make lint           # cargo clippy --all-targets --all-features -- -D warnings
                     #   + cargo fmt --all -- --check
 make audit          # cargo audit (RustSec advisory DB)
@@ -436,6 +436,6 @@ does (the TypeScript runner is the reference).
 **To change canonical behaviour:** this does not start here. Edit the
 canonical TypeScript and the corpus first, then port the change into
 [`src/major.rs`](./src/major.rs) / [`src/mini.rs`](./src/mini.rs), run
-`cargo test` until green, re-run `make lint`, and re-run
+`make test` until green, re-run `make lint`, and re-run
 `python3 ../tools/check_parity.py` plus every other port's tests. The full
 checklist is in [`../AGENTS.md`](../AGENTS.md).

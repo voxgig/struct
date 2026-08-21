@@ -148,6 +148,41 @@
   </build>
 
   <profiles>
+    <!-- The shared test runner, voxgig/omni, consumed as a local checkout: it
+         is not published to Maven Central. `make test` builds its jar, installs
+         it into the local repository (see `setup-omni`) and activates this
+         profile, so it resolves like any other test-scoped dependency.
+
+         Two things it is deliberately NOT:
+
+         Not `system` scope, the obvious shortcut. A system-scoped dependency
+         sits on the COMPILE classpath, so omni would reach the library's own
+         build and its published POM - the leak register 4.13 is about.
+
+         Not an unconditional test-scoped dependency either, which is where
+         this started. Test scope keeps omni off consumers' classpaths, but
+         the coordinate still sits in the POM, and anything that resolves the
+         POM statically - osv-scanner's transitive dependency scan, for one -
+         goes looking for com.voxgig:omni:0.1.0 on Central and fails hard:
+
+             failed resolving {Maven:com.voxgig:struct-java[Concrete:0.1.0]}:
+             version Maven:com.voxgig:omni[Concrete:0.1.0]: not found
+
+         An inactive profile is invisible to that resolution. `mvn test` on its
+         own now fails to COMPILE the test sources ("package voxgig.omni does
+         not exist"); use `make test`, which passes -Pomni. -->
+    <profile>
+      <id>omni</id>
+      <dependencies>
+        <dependency>
+          <groupId>com.voxgig</groupId>
+          <artifactId>omni</artifactId>
+          <version>0.1.0</version>
+          <scope>test</scope>
+        </dependency>
+      </dependencies>
+    </profile>
+
     <!-- Release profile: attaches the sources + javadoc jars (required by
          Maven Central) and signs all artifacts with GPG. Signing is bound to
          the `verify` phase, so a plain `mvn -Prelease package` produces the

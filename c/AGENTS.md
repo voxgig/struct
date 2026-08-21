@@ -22,7 +22,9 @@ c/
 ├── src/transform.c       # transform / validate / select + all commands/checkers/ops
 ├── src/regex.h / regex.c # in-tree RE2-subset Thompson NFA (voxgig_regex_*)
 ├── src/re_util.c         # uniform voxgig_re_* wrappers over the engine
-├── tests/struct_corpus_test.c  # corpus driver (loads ../build/test/test.json)
+├── tests/omni_bridge.h   # the bridge to voxgig/omni: both value models, both ways
+├── tests/struct_corpus_test.c  # the shared corpus, run on the shared runner
+├── tests/client_test.c   # the client path (DEF.client, client options, contextify)
 ├── tests/smoke.c         # 13-check API smoke test
 ├── tests/regex_test.c    # regex unit checks
 ├── tests/regex_pathological.c  # pathological-input panel
@@ -38,15 +40,31 @@ and the `_v` / `_va` suffixes, then matching against the canonical
 ## Commands
 
 ```bash
-make test         # compile every src/*.c + the corpus driver, then run it
-make smoke        # the small API smoke test
-make corpus       # just the corpus driver (test is an alias of this)
+make test         # the corpus driver + the client test
+make smoke        # the small API smoke test (no omni needed)
+make corpus       # just the corpus driver
+make client       # just the client test
+make build        # compile src/ alone - the library build, which omni never enters
 make sanitize     # corpus driver under ASan + UBSan
 make check_leak   # corpus driver under valgrind
 make lint         # clang-format --dry-run --Werror  +  clang-tidy
 make format       # apply clang-format in place
-make clean        # remove *.out + corpus-scoreboard.json
+make clean        # remove *.out and omni's objects
 ```
+
+- **The corpus runner is voxgig/omni**, a local checkout the Makefile finds
+  via `$OMNI_HOME` or beside this repository. It is not published, and C has
+  no registry to publish it to. It is compiled into the TEST binaries only;
+  `make build` compiles `src/` alone (register 4.13).
+- **omni is compiled on its own include path**, never with `-I ./src`. `-I`
+  directories are searched for angle-bracket includes too, and this port ships
+  `src/regex.h`: with `-I ./src` on the command line, omni's
+  `#include <regex.h>` resolved to that file and `regex_t` stopped existing.
+- **`tests/omni_bridge.h` converts both value models.** `omni_json` is
+  pool-allocated and carries one `double`; `voxgig_value` is reference-counted
+  and separates integers from decimals. Both draw the same absent/null/value
+  distinction, so nothing is guessed. Read its header before touching either
+  direction.
 
 No package step and no third-party deps: the build is `$(CC) src/*.c
 tests/<driver>.c -lm`. `make test-c` from the repo root wraps `make test`.

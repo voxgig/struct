@@ -9,13 +9,19 @@ port. The behavioural contract is the shared JSON corpus in
 
 ## Status
 
-Complete. Every canonical public function is implemented and the entire
-shared corpus passes (`make test`). **Zero third-party dependencies** — only
-Elixir / Erlang OTP (ETS and `Regex`/`:re`) is required.
+Complete. Every canonical public function is implemented and the shared corpus
+passes (`make test`) on [voxgig/omni](https://github.com/voxgig/omni), the
+shared test runner — 1358 entries in 72 groups, less five this port cannot
+answer because it has one `nil` for both undefined and null (named, with their
+reasons, in `test/runner.exs`). **Zero third-party dependencies** — only
+Elixir / Erlang OTP (ETS and `Regex`/`:re`) is required, and omni is loaded at
+test time, never by the library.
 
 ## Requirements
 
 - Elixir 1.14 or later (Erlang/OTP 24+).
+- For the tests only: a [voxgig/omni](https://github.com/voxgig/omni)
+  checkout, found via `$OMNI_HOME` or beside this repository.
 
 ## Use
 
@@ -68,8 +74,8 @@ See [`DOCS.md`](./DOCS.md) for the full guide and
 ## Develop
 
 ```
-make test     # run the shared corpus
-make lint     # compile the library (a clean compile = pass)
+make test     # run the shared corpus on voxgig/omni (needs $OMNI_HOME)
+make lint     # compile the library (a clean compile = pass; no omni)
 ```
 
 ## License

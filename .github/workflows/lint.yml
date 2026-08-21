@@ -83,6 +83,13 @@ jobs:
         with:
           toolchain: stable
           components: clippy, rustfmt
+      # `make lint` clippies the corpus harness too, and that package depends
+      # on omni - so the checkout is needed here as well as in the test job.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       - working-directory: ./rust
         run: make lint
 
@@ -126,6 +133,9 @@ jobs:
           # JDK running the checkstyle plugin must be 21+ even though the
           # project itself targets release 17.
           java-version: '21'
+      # No omni checkout: `make lint` reaches only the `compile` phase, so it
+      # never compiles the test sources, and it does not activate the `omni`
+      # profile - so the coordinate is not in the model at all.
       - working-directory: ./java
         run: make lint
 
@@ -133,12 +143,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # detekt and ktlint compile the test source set, which needs omni.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
           java-version: '17'
       - working-directory: ./kotlin
         run: ./gradlew detekt ktlintCheck
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
 
   lint-lua:
     runs-on: ubuntu-latest
@@ -200,9 +218,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # clang-tidy compiles the test sources, and those include omni's header.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       - run: sudo apt-get update && sudo apt-get install -y nlohmann-json3-dev clang-tidy clang-format
       - working-directory: ./cpp
         run: make lint
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
 
   lint-csharp:
     runs-on: ubuntu-latest
@@ -218,9 +244,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # clang-tidy compiles the test sources, and those include omni's header.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       - run: sudo apt-get update && sudo apt-get install -y clang-tidy clang-format
       - working-directory: ./c
         run: make lint
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
 
   lint-perl:
     runs-on: ubuntu-latest
@@ -252,6 +286,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # `make lint` type-checks the corpus runner too, and that names
+      # voxgig/omni - a local checkout, not a published package. Same step
+      # lint-go already carries; the library itself never depends on omni.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
@@ -261,14 +303,26 @@ jobs:
           cli: latest
       - working-directory: ./clojure
         run: make lint
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
 
   lint-dart:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # `make lint` type-checks the corpus runner too, and that names
+      # voxgig/omni - a local checkout, not a published package. Same step
+      # lint-go already carries; the library itself never depends on omni.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1
       - working-directory: ./dart
         run: dart pub get && make lint
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
 
   lint-elixir:
     runs-on: ubuntu-latest
@@ -285,11 +339,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # `make lint` type-checks the corpus runner too, and that names
+      # voxgig/omni - a local checkout, not a published package. Same step
+      # lint-go already carries; the library itself never depends on omni.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       - uses: haskell-actions/setup@6037f33647c3f17758a2356c80fc4a53d7e0685d # v2
         with:
           ghc-version: '9.10'
       - working-directory: ./haskell
         run: make lint
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
 
   lint-ocaml:
     runs-on: ubuntu-latest
@@ -306,6 +370,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # `make lint` type-checks the corpus runner too, and that names
+      # voxgig/omni - a local checkout, not a published package. Same step
+      # lint-go already carries; the library itself never depends on omni.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       # elan directly rather than leanprover/lean-action: that action is a
       # composite that references actions/cache/restore@v5 and
       # actions/cache/save@v5 BY TAG internally, and the SHA-pin rule applies
@@ -353,3 +425,5 @@ jobs:
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
       - working-directory: ./lean
         run: make lint
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni

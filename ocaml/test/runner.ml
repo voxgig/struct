@@ -1,158 +1,71 @@
-(* Test runner for the shared JSON corpus (build/test/test.json).
- * Self-contained: an in-tree JSON reader builds the library's `value` type
- * directly, so the OCaml port is exercised exactly as in production. *)
+(* The shared corpus, run on the shared runner.
+ *
+ * The in-situ runner - a JSON reader, `fix_json`, `eqv`, `do_match`,
+ * `matchval`, `resolve_args`, `check_result` and `handle_error`, all of it
+ * this port's own copy of omni's algorithm - is gone. Every group is driven
+ * through voxgig/omni, so this file only says WHICH subject answers each group
+ * and with which flags.
+ *
+ * omni is consumed as a local checkout: the Makefile finds it via $OMNI_HOME
+ * or beside this repository and compiles `omni.ml` in with the tests. Only the
+ * tests use it - `make build` compiles src/ alone (register 4.13).
+ *
+ * Flags mirror canonical: typescript/test/utility/StructUtility.test.ts. *)
 
 open Voxgig_struct
+
+module O = Omni
 
 let nullmark = "__NULL__"
 let undefmark = "__UNDEF__"
 let existsmark = "__EXISTS__"
 
-(* ---------------- JSON reader -> value ---------------- *)
+let _ = undefmark
+let _ = existsmark
 
-let json_read (s : string) : value =
-  let n = String.length s in
-  let pos = ref 0 in
-  let peek () = if !pos < n then Some s.[!pos] else None in
-  let adv () = incr pos in
-  let skip_ws () =
-    while !pos < n && (match s.[!pos] with ' ' | '\t' | '\n' | '\r' -> true | _ -> false) do incr pos done
-  in
-  let rec pval () =
-    skip_ws ();
-    match peek () with
-    | Some '{' -> pobj ()
-    | Some '[' -> parr ()
-    | Some '"' -> Str (pstr ())
-    | Some 't' -> pos := !pos + 4; Bool true
-    | Some 'f' -> pos := !pos + 5; Bool false
-    | Some 'n' -> pos := !pos + 4; Null
-    | _ -> pnum ()
-  and pobj () =
-    adv (); skip_ws ();
-    if peek () = Some '}' then (adv (); empty_map ())
-    else begin
-      let m = empty_map () in
-      let rec loop () =
-        skip_ws ();
-        let k = pstr () in
-        skip_ws (); adv (); (* : *)
-        let v = pval () in
-        ignore (setprop m (Str k) v);
-        skip_ws ();
-        let c = (match peek () with Some c -> adv (); c | None -> '}') in
-        if c = ',' then loop () else m
-      in loop ()
-    end
-  and parr () =
-    adv (); skip_ws ();
-    if peek () = Some ']' then (adv (); empty_list ())
-    else begin
-      let acc = ref [] in
-      let rec loop () =
-        let v = pval () in
-        acc := v :: !acc;
-        skip_ws ();
-        let c = (match peek () with Some c -> adv (); c | None -> ']') in
-        if c = ',' then loop () else lst (List.rev !acc)
-      in loop ()
-    end
-  and pstr () =
-    adv ();
-    let b = Buffer.create 16 in
-    let rec loop () =
-      let c = s.[!pos] in adv ();
-      if c = '"' then Buffer.contents b
-      else if c = '\\' then begin
-        let e = s.[!pos] in adv ();
-        (match e with
-         | '"' -> Buffer.add_char b '"' | '\\' -> Buffer.add_char b '\\'
-         | '/' -> Buffer.add_char b '/' | 'n' -> Buffer.add_char b '\n'
-         | 't' -> Buffer.add_char b '\t' | 'r' -> Buffer.add_char b '\r'
-         | 'b' -> Buffer.add_char b '\b' | 'f' -> Buffer.add_char b '\012'
-         | 'u' ->
-           let hex = String.sub s !pos 4 in pos := !pos + 4;
-           let code = int_of_string ("0x" ^ hex) in
-           if code < 128 then Buffer.add_char b (Char.chr code)
-           else if code < 2048 then begin
-             Buffer.add_char b (Char.chr (0xC0 lor (code lsr 6)));
-             Buffer.add_char b (Char.chr (0x80 lor (code land 0x3F)))
-           end else begin
-             Buffer.add_char b (Char.chr (0xE0 lor (code lsr 12)));
-             Buffer.add_char b (Char.chr (0x80 lor ((code lsr 6) land 0x3F)));
-             Buffer.add_char b (Char.chr (0x80 lor (code land 0x3F)))
-           end
-         | c -> Buffer.add_char b c);
-        loop ()
-      end else (Buffer.add_char b c; loop ())
-    in loop ()
-  and pnum () =
-    let start = !pos in
-    while !pos < n && (match s.[!pos] with
-        | '0'..'9' | '-' | '+' | '.' | 'e' | 'E' -> true | _ -> false) do incr pos done;
-    let tok = String.sub s start (!pos - start) in
-    Num (float_of_string tok)
-  in
-  pval ()
+(* ---------------- the bridge ---------------- *)
 
-(* ---------------- fixJSON / equality ---------------- *)
+(* omni's model -> this port's. Both draw the same absent/null/value
+   distinction, so nothing is guessed. *)
+let rec tostruct (value : O.json) : value =
+  match value with
+  | O.Absent -> Noval
+  | O.Null -> Null
+  | O.Bool b -> Bool b
+  | O.Num n -> Num n
+  | O.Str s -> Str s
+  | O.JList items -> lst (List.map tostruct items)
+  | O.JMap entries ->
+    let m = empty_map () in
+    List.iter (fun (k, v) -> ignore (setprop m (Str k) (tostruct v))) entries;
+    m
 
-let rec fix_json v flag_null =
-  match v with
-  | Noval | Null -> if flag_null then Str nullmark else v
-  | Map m -> let o = empty_map () in
-    List.iter (fun (k, x) -> ignore (setprop o (Str k) (fix_json x flag_null))) m.entries; o
-  | List r -> lst (List.map (fun x -> fix_json x flag_null) !r)
-  | _ -> v
+(* This port's model -> omni's. A function or a sentinel has no JSON form and
+   omni only ever stringifies one, so it becomes its own rendering rather than
+   silently collapsing to null. *)
+let rec toomni (value : value) : O.json =
+  match value with
+  | Noval -> O.Absent
+  | Null -> O.Null
+  | Bool b -> O.Bool b
+  | Num n -> O.Num n
+  | Str s -> O.Str s
+  | List items -> O.JList (List.map toomni !items)
+  | Map m -> O.JMap (List.map (fun (k, v) -> (k, toomni v)) m.entries)
+  | Func _ -> O.Str "[Function]"
+  | Sentinel tag -> O.Str ("`$" ^ tag ^ "`")
 
-(* Order-independent deep equality for maps; sequence equality for lists. *)
-let rec eqv a b =
-  match a, b with
-  | (Noval | Null), (Noval | Null) -> true
-  | Bool x, Bool y -> x = y
-  | Num x, Num y -> x = y
-  | Str x, Str y -> x = y
-  | List x, List y -> List.length !x = List.length !y && List.for_all2 eqv !x !y
-  | Map x, Map y ->
-    omap_len x = omap_len y &&
-    List.for_all (fun (k, v) -> match omap_get y k with Some w -> eqv v w | None -> false) x.entries
-  | _ -> a == b
+(* Order-independent deep equality, through omni's own rule so the hand-written
+   cases below compare the way every group does. *)
+let eqv a b = O.deepequal (toomni a) (toomni b)
 
-(* ---------------- match support ---------------- *)
+let omap_v kvs =
+  let m = empty_map () in
+  List.iter (fun (k, v) -> ignore (setprop m (Str k) v)) kvs;
+  m
 
-let matchval check base =
-  let check = if check = Str undefmark || check = Str nullmark then Noval else check in
-  if eqv check base then true
-  else match check with
-    | Str cs ->
-      let basestr = stringify base in
-      if String.length cs >= 2 && cs.[0] = '/' && cs.[String.length cs - 1] = '/' then
-        Vregex.test_str (String.sub cs 1 (String.length cs - 2)) basestr
-      else
-        let low s = String.lowercase_ascii s in
-        let contains hay needle =
-          let hl = String.length hay and nl = String.length needle in
-          let rec go i = if i + nl > hl then false
-            else if String.sub hay i nl = needle then true else go (i + 1) in
-          nl = 0 || go 0 in
-        contains (low basestr) (low (stringify check))
-    | Func _ -> true
-    | _ -> false
-
-let do_match check base =
-  let base = clone base in
-  ignore (walk ~before:(fun _k v _p path ->
-      (if not (isnode v) then begin
-          let baseval = getpath base path in
-          if eqv baseval v then ()
-          else if v = Str undefmark && is_nullish baseval then ()
-          else if v = Str existsmark && not (is_nullish baseval) then ()
-          else if not (matchval v baseval) then
-            raise (Struct_error (Printf.sprintf "MATCH: %s: [%s] <=> [%s]"
-                                   (String.concat "." (List.map js_string (match path with List r -> !r | _ -> [])))
-                                   (stringify v) (stringify baseval)))
-        end);
-      v) check)
+let getprop_raw_pub e k =
+  match e with Map m -> (match omap_get m k with Some x -> x | None -> Noval) | _ -> Noval
 
 (* ---------------- result tracking ---------------- *)
 
@@ -160,88 +73,62 @@ let npass = ref 0
 let nfail = ref 0
 let failures = ref []
 
-let record group name ok msg =
+let record group ok msg =
   if ok then incr npass
-  else (incr nfail; failures := Printf.sprintf "FAIL %s %s - %s" group name msg :: !failures)
+  else (incr nfail; failures := Printf.sprintf "FAIL %s - %s" group msg :: !failures)
 
-(* ---------------- per-entry runner ---------------- *)
+let runpack : O.runpack option ref = ref None
 
-let omap_v kvs =
-  let m = empty_map () in
-  List.iter (fun (k, v) -> ignore (setprop m (Str k) v)) kvs; m
+let pack () = match !runpack with Some p -> p | None -> failwith "runner not started"
 
-let getprop_raw_pub e k = (match e with Map m -> (match omap_get m k with Some x -> x | None -> Noval) | _ -> Noval)
-let entry_get e k = getprop_raw_pub e k
-let entry_has e k = match e with Map m -> omap_has m k | _ -> false
-let default_injdef_pub () =
-  { d_meta = Noval; d_extra = Noval; d_errs = Noval; d_modify = None; d_handler = None;
-    d_base = Noval; d_dparent = Noval; d_dpath = Noval; d_key = Noval }
+(* ---------------- running a group ---------------- *)
 
-let resolve_args entry =
-  if entry_has entry "ctx" then [entry_get entry "ctx"]
-  else if entry_has entry "args" then (match entry_get entry "args" with List r -> !r | _ -> [])
-  else if entry_has entry "in" then [clone (entry_get entry "in")]
-  else [Noval]
+(* Each group is one assertion: omni stops at its first failing entry and
+   reports the index, the entry and both values.
 
-let check_result entry args res =
-  let matched = ref false in
-  (if entry_has entry "match" then begin
-      do_match (entry_get entry "match")
-        (omap_v ["in", entry_get entry "in"; "args", lst args;
-                 "out", entry_get entry "res"; "ctx", entry_get entry "ctx"]);
-      matched := true
-    end);
-  let out = entry_get entry "out" in
-  if eqv out res then ()
-  else if !matched && (out = Str nullmark || is_nullish out) then ()
-  else raise (Struct_error (Printf.sprintf "Expected: %s, got: %s" (stringify out) (stringify res)))
-
-let handle_error entry err =
-  let msg = (match err with Struct_error m -> m | e -> Printexc.to_string e) in
-  if entry_has entry "err" then begin
-    let entry_err = entry_get entry "err" in
-    if entry_err = Bool true || matchval entry_err (Str msg) then begin
-      if entry_has entry "match" then
-        do_match (entry_get entry "match")
-          (omap_v ["in", entry_get entry "in"; "out", entry_get entry "res";
-                   "ctx", entry_get entry "ctx"; "err", Str msg])
-    end else
-      raise (Struct_error (Printf.sprintf "ERROR MATCH: [%s] <=> [%s]" (stringify entry_err) msg))
-  end else raise err
-
+   The subject is handed omni's arguments as an ARRAY it may overwrite, and
+   the wrapper writes the converted argument back - `match.args` asserts an
+   in-place rewrite in eight of `minor/setpath`'s nine entries and all six of
+   `merge/integrity`, and this port's nodes are mutable while omni's json is
+   not. cpp and rust needed the same entry point for the same reason. *)
 let run_set ?(flags = []) group node subject =
-  let flag_null = (match List.assoc_opt "null" flags with Some b -> b | None -> true) in
-  let fixed = fix_json node flag_null in
-  let testset = (match getprop fixed (Str "set") with List r -> !r | _ -> []) in
-  List.iter (fun entry ->
-      let name = js_string (entry_get entry "name") in
-      try
-        (if not (entry_has entry "out") && flag_null then ignore (setprop entry (Str "out") (Str nullmark)));
-        let args = resolve_args entry in
-        let res = fix_json (subject args) flag_null in
-        ignore (setprop entry (Str "res") res);
-        check_result entry args res;
-        record group name true ""
-      with
-      | e ->
-        (try handle_error entry e; record group name true ""
-         with e2 -> record group name false
-                      (match e2 with Struct_error m -> m | _ -> Printexc.to_string e2)))
-    testset
+  let donull = match List.assoc_opt "null" flags with Some b -> b | None -> true in
+  let useflags = { O.null = donull; name = Some group } in
+  let call cells =
+    let args = Array.to_list cells |> List.map tostruct in
+    let res = subject args in
+    List.iteri (fun index arg -> cells.(index) <- toomni arg) args;
+    toomni res
+  in
+  match (pack ()).O.runsetflags_args (toomni node) useflags call with
+  | () -> record group true ""
+  | exception O.Omni_error message -> record group false message
+  | exception Struct_error message -> record group false message
+  | exception err -> record group false (Printexc.to_string err)
 
+(* `merge.basic`, `inject.basic` and `transform.basic` are single entries, not
+   sets, so the runner cannot drive them. Compared here, through omni's own
+   deepequal so the rule is the one every group uses. *)
 let run_single group node actual_fn =
-  try
-    let expected = getprop_raw_pub node "out" in
-    let actual = actual_fn (getprop_raw_pub node "in") in
-    if eqv expected actual then record group "single" true ""
-    else record group "single" false (Printf.sprintf "Expected: %s, got: %s" (stringify expected) (stringify actual))
-  with e -> record group "single" false (match e with Struct_error m -> m | _ -> Printexc.to_string e)
+  match actual_fn (getprop_raw_pub node "in") with
+  | actual ->
+    if O.deepequal (toomni (getprop_raw_pub node "out")) (toomni actual) then record group true ""
+    else
+      record group false
+        (Printf.sprintf "Expected: %s, got: %s" (stringify (getprop_raw_pub node "out"))
+           (stringify actual))
+  | exception Struct_error message -> record group false message
+  | exception err -> record group false (Printexc.to_string err)
 
 (* ---------------- arg helpers ---------------- *)
 
 let arg1 f = fun args -> f (match args with x :: _ -> x | [] -> Noval)
 let vget vin k = match vin with Map m -> (match omap_get m k with Some x -> x | None -> Noval) | _ -> Noval
 let vhas vin k = match vin with Map m -> omap_has m k | _ -> false
+
+let default_injdef_pub () =
+  { d_meta = Noval; d_extra = Noval; d_errs = Noval; d_modify = None; d_handler = None;
+    d_base = Noval; d_dparent = Noval; d_dpath = Noval; d_key = Noval }
 
 (* ---------------- test groups ---------------- *)
 
@@ -295,10 +182,14 @@ let rec run_all spec =
     (arg1 (fun vin -> if vhas vin "path" then Str (pathify ~startin:(vget vin "from") (vget vin "path"))
             else Str (pathify ~startin:(vget vin "from") ~absent:true Noval)));
   run_set "minor.items" (mg "items") (arg1 items);
+  (* Canonical omits `alt` only when the KEY is missing
+     (`undefined === vin.alt`), so an explicit `alt: null` is passed through -
+     unlike getelem, which omits a null alt too (`null == vin.alt`).
+     `minor/getprop#51` is the entry that separates them. *)
   run_set "minor.getprop" ~flags:["null", false] (mg "getprop")
-    (arg1 (fun vin -> let alt = vget vin "alt" in
-            if is_nullish alt then getprop (vget vin "val") (vget vin "key")
-            else getprop ~alt (vget vin "val") (vget vin "key")));
+    (arg1 (fun vin ->
+         if vhas vin "alt" then getprop ~alt:(vget vin "alt") (vget vin "val") (vget vin "key")
+         else getprop (vget vin "val") (vget vin "key")));
   run_set "minor.setprop" (mg "setprop")
     (arg1 (fun vin -> setprop (vget vin "parent") (vget vin "key") (vget vin "val")));
   run_set "minor.haskey" ~flags:["null", false] (mg "haskey")
@@ -406,6 +297,10 @@ let rec run_all spec =
       run_set ("select." ^ gn) (getprop_raw_pub selects gn)
         (arg1 (fun vin -> select (vget vin "obj") (vget vin "query"))))
     ["basic"; "operators"; "edge"; "alts"];
+  (* `null: false` keeps a JSON null an ACTUAL null rather than the NULLMARK
+     string, so select sees a present-but-null field. *)
+  run_set "select.nullkey" ~flags:["null", false] (getprop_raw_pub selects "nullkey")
+    (arg1 (fun vin -> select (vget vin "obj") (vget vin "query")));
 
   (* regex (parity floor: Go stdlib regexp — see design/REGEX_API.md) *)
   let regexs = g "regex" in
@@ -448,9 +343,9 @@ and run_walk_log group node =
       v in
     ignore (walk ~after:walklog (getprop_raw_pub test_data "in"));
     let expected = getprop (getprop_raw_pub test_data "out") (Str "after") in
-    if eqv expected log then record group "log" true ""
-    else record group "log" false (Printf.sprintf "Expected: %s, got: %s" (stringify expected) (stringify log))
-  with e -> record group "log" false (match e with Struct_error m -> m | _ -> Printexc.to_string e)
+    if eqv expected log then record (group ^ ".log") true ""
+    else record (group ^ ".log") false (Printf.sprintf "Expected: %s, got: %s" (stringify expected) (stringify log))
+  with e -> record (group ^ ".log") false (match e with Struct_error m -> m | _ -> Printexc.to_string e)
 
 and walk_copy_subject vin =
   let cur = ref (lst [Noval]) in
@@ -484,17 +379,55 @@ and walk_depth_subject vin =
   ignore (walk ~before:copy ~maxdepth:(vget vin "maxdepth") (vget vin "src"));
   !top
 
+
+(* ---------------- the client path ---------------- *)
+
+(* `DEF.client`, client-scoped options, and `contextify`. This port had no such
+   test. It is the only thing that exercises subject resolution through a
+   PROVIDER rather than through a callback this file hands over - so nothing
+   here had ever checked that a corpus `client` key resolves, or that a
+   `DEF.client` entry's options reach the subject.
+
+   The subject talks to omni DIRECTLY, in omni's own value type: the runner
+   resolves it by name off the provider, so there is no `in` to convert and no
+   result for the bridge to convert back. *)
+let check options args =
+  let foo = O.jget options "foo" in
+  let foos = if O.isabsent foo then "" else O.stringify foo in
+  let ctx = match args with first :: _ -> first | [] -> O.Absent in
+  let bar = O.jget (O.jget ctx "meta") "bar" in
+  let bars = if O.isnone bar then "0" else O.stringify bar in
+  O.JMap [ ("zed", O.Str ("ZED" ^ foos ^ "_" ^ bars)) ]
+
+let rec client_provider options =
+  {
+    O.subject = Some (fun name -> if name = "check" then Some (check options) else None);
+    (* A DEF.client entry becomes another provider, carrying its options. *)
+    O.client = Some client_provider;
+    (* This port adds nothing to a context; the hook must exist so omni
+       installs `client` on it. *)
+    O.contextify = Some (fun value -> value);
+    O.inject = None;
+  }
+
+let run_client testfile =
+  let resolved = O.make_runner testfile (client_provider (O.JMap [])) "check" None in
+  let useflags = { O.null = true; name = Some "check.basic" } in
+  (* No subject: the runner resolves it by name off the provider, which is the
+     whole point of the group. *)
+  match resolved.O.runsetflags (resolved.O.set "basic") useflags None with
+  | () -> record "check.basic" true ""
+  | exception O.Omni_error message -> record "check.basic" false message
+  | exception err -> record "check.basic" false (Printexc.to_string err)
+
 (* ---------------- main ---------------- *)
 
 let () =
   let testfile = if Array.length Sys.argv > 1 then Sys.argv.(1) else "../build/test/test.json" in
-  let ic = open_in_bin testfile in
-  let len = in_channel_length ic in
-  let raw = really_input_string ic len in
-  close_in ic;
-  let alltests = json_read raw in
-  let spec = getprop_raw_pub alltests "struct" in
-  run_all spec;
+  let resolved = O.make_runner testfile O.empty_provider "struct" None in
+  runpack := Some resolved;
+  run_all (tostruct resolved.O.spec);
+  run_client testfile;
   List.iter print_endline (List.rev !failures);
-  Printf.printf "\nPASS %d  FAIL %d\n" !npass !nfail;
+  Printf.printf "\n%d groups, %d failed\n" (!npass + !nfail) !nfail;
   if !nfail > 0 then exit 1

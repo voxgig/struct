@@ -34,12 +34,21 @@ matches case/underscore-insensitively, e.g. `get_path` ↔ `getpath`).
 
 ```bash
 cargo build
-cargo test          # runs the shared corpus (../build/test/test.json)
+make test           # cargo test + the shared corpus (see below)
+cargo test          # the LIBRARY's own tests only - NOT the corpus
 make lint           # cargo clippy --all-targets --all-features -- -D warnings
                     #   + cargo fmt --all -- --check
 make audit          # cargo audit (RustSec advisory DB)
 make inspect        # print toolchain + crate version
 ```
+
+**A bare `cargo test` in `rust/` does NOT run the corpus.** The harness is
+a separate package (`corpus/`), excluded from this workspace, because Cargo
+resolves dev-dependencies even for `cargo build` - so naming omni in the
+library manifest breaks a checkout that has no omni beside it (register
+4.13). `make test` runs both; `cargo test` alone runs the library's own
+tests, 14 of them. The corpus cannot be folded back into the default path
+without reintroducing that leak.
 
 `make build` / `make test` / `make lint` wrap the same commands; from the
 repo root, `make test-rust` / `make lint-rust` do too. Stable Rust 1.80+
@@ -88,7 +97,7 @@ repo root, `make test-rust` / `make lint-rust` do too. Stable Rust 1.80+
   convention), differing from Go's RE2 — that divergence is documented in
   [`../REGEX_PATHOLOGICAL.md`](../design/REGEX_PATHOLOGICAL.md); do not "fix" it.
 - **Editing here is downstream.** A behaviour change starts in canonical
-  TypeScript + the corpus, then ports here. After it: `cargo test` +
+  TypeScript + the corpus, then ports here. After it: `make test` +
   `make lint` green, then `python3 ../tools/check_parity.py` and the other
   ports' tests.
 

@@ -22,7 +22,7 @@ public func select_AND(_ inj: Injection, _ val: Value, _ ref: String, _ store: V
       subInj.extra = vstore
       subInj.errs = terrs
       subInj.meta = inj.meta
-      _ = validate(point, term, subInj)
+      _ = validateCollect(point, term, subInj, terrs)
       if !terrs.items.isEmpty {
         inj.errs.items.append(
           .string("AND:" + pathify(ppath) + S_VIZ + stringify(point) + " fail:" + stringify(terms)))
@@ -52,7 +52,7 @@ public func select_OR(_ inj: Injection, _ val: Value, _ ref: String, _ store: Va
       subInj.extra = vstore
       subInj.errs = terrs
       subInj.meta = inj.meta
-      _ = validate(point, term, subInj)
+      _ = validateCollect(point, term, subInj, terrs)
       if terrs.items.isEmpty {
         let gkey = getelem(.list(VList(inj.path.map { Value.string($0) })), .int(-2))
         let gp = inj.nodes.count >= 2 ? inj.nodes[inj.nodes.count - 2] : .noval
@@ -81,7 +81,7 @@ public func select_NOT(_ inj: Injection, _ val: Value, _ ref: String, _ store: V
   subInj.extra = vstore
   subInj.errs = terrs
   subInj.meta = inj.meta
-  _ = validate(point, term, subInj)
+  _ = validateCollect(point, term, subInj, terrs)
   if terrs.items.isEmpty {
     inj.errs.items.append(
       .string("NOT:" + pathify(ppath) + S_VIZ + stringify(point) + " fail:" + stringify(term)))
@@ -200,7 +200,7 @@ public func select(_ children: Value, _ query: Value) -> Value {
     inj.meta = meta
     inj.extra = .map(extra)
     inj.errs = errs
-    _ = validate(child, clone(q), inj)
+    _ = validateCollect(child, clone(q), inj, errs)
     if errs.items.isEmpty { results.append(child) }
   }
   return .list(results)

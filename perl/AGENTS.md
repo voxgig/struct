@@ -14,7 +14,9 @@ only what is specific to the Perl port.
 ```
 perl/
 ├── lib/Voxgig/Struct.pm   # the whole port: implementation + OrderedHash + JSON parser
-├── t/struct.t             # corpus runner (loads ../build/test/test.json)
+├── t/OmniBridge.pm        # resolves the voxgig/omni checkout, and converts both value models
+├── t/struct.t             # the shared corpus, run on the shared runner
+├── t/client.t             # the client path (DEF.client, client options, contextify)
 ├── t/regex_pathological.t # regex edge-case panel
 ├── t/00-load.t            # load + sanity check
 ├── Makefile               # test / lint / inspect / build (no-op) targets
@@ -47,6 +49,17 @@ same commands.
   is called fully qualified as `Voxgig::Struct::name(...)`. Don't add an
   `@EXPORT`/`@EXPORT_OK` list — call sites and tests rely on the qualified
   form.
+- **The corpus runner is voxgig/omni**, a local checkout found via
+  `$OMNI_HOME` (see `t/OmniBridge.pm`); it is not on CPAN, and
+  `Makefile.PL` gains nothing for it. `t/OmniBridge.pm` pushes omni's
+  `lib` onto `@INC` at run time, so nothing built or installed from `lib/`
+  can acquire it.
+- **The bridge converts, in both directions.** omni and this port model
+  JSON with different sentinels for absent (`Voxgig::Omni::Absent` vs
+  `$NONE`), null (`undef` vs `$JNULL`) and booleans (`JSON::PP::Boolean`
+  vs `Voxgig::Struct::Bool`). `tostruct` rewrites omni's containers IN
+  PLACE so `match.args` can see an in-place `setpath`/`merge`; `toomni`
+  copies. Read the header of `t/OmniBridge.pm` before touching either.
 - **Zero runtime deps.** Only core `Scalar::Util`, `List::Util`, `B`. Do
   not add a CPAN dependency — in particular, don't swap the in-tree
   `OrderedHash` for `Tie::IxHash`, or `parse_json` for `JSON::*` (they
@@ -58,8 +71,13 @@ same commands.
 
 - **Use ordered maps everywhere.** A bare `{ ... }` is an unordered hash;
   the library builds maps via `_mkmap` / `jm` / `parse_json` so they are
-  tied to `OrderedHash`. Key order is observable (`keysof`, `items`,
-  `jsonify`) — never introduce a plain hash where order matters.
+  tied to `OrderedHash`. Key order is observable (`jsonify` renders it) —
+  never introduce a plain hash where order matters. An untied hash is not
+  wrong, just orderless: `_map_keys` sorts it, so `jsonify` is at least
+  deterministic. (`keysof` and `items` sort unconditionally, as canonical
+  does.)
+- **`_map_keys` returns a LIST.** `scalar _map_keys($m)` is its last key,
+  not its length — use `_map_count`.
 - **`undef` vs `$JNULL` vs `$NONE`.** Three distinct "empty" values:
   `undef`/`$NONE` are *absent* (Group A reads return the `alt`), `$JNULL`
   is the JSON null scalar (Group B preserves it literally). Re-read the

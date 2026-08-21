@@ -98,10 +98,24 @@ Names are lower-smushed, identical to the canonical export list:
 
 ## Testing
 
-`make test` runs the entire shared corpus (`../build/test/test.json`) through
-the port via an in-tree JSON reader and the same runner logic as every other
-port. Keep it green, keep `python3 ../tools/check_parity.py` green, and add no
-runtime dependencies.
+`make test` runs the shared corpus (`../build/test/test.json`) through the port
+on [voxgig/omni](https://github.com/voxgig/omni), the shared test runner — so
+the entry loop, the comparison and the `err` and `match` handling are literally
+the same code every other port runs. omni is a local checkout the Makefile
+finds via `$OMNI_HOME` or beside this repository and adds as an `:omni` alias;
+`deps.edn` never names it, and `make build` compiles the library alone.
+
+`test/voxgig/struct_runner.clj` is now only a bridge and a list of subjects.
+It converts omni's persistent Clojure data into this port's mutable
+`java.util.LinkedHashMap` / `ArrayList` nodes and back — the copy is
+unavoidable, so the arguments go back to omni after the call, which is what
+`match.args` asserts on in `minor/setpath` and `merge/integrity`.
+
+Every group the corpus defines runs except the three `condense` ones, which no
+port implements yet — 1358 entries in 72 groups — plus the two `check` entries
+(`DEF.client`, client-scoped options, `contextify`) and three single entries
+that are not part of any set. Keep it green, keep
+`python3 ../tools/check_parity.py` green, and add no runtime dependencies.
 
 ## Implementation notes
 

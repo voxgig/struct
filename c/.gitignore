@@ -2,3 +2,7 @@
 *.o
 corpus-scoreboard.json
 *.dSYM/
+
+# omni's objects, compiled on their own include path (never with `-I ./src`,
+# which would shadow the system <regex.h> with this port's).
+.omni-obj/
