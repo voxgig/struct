@@ -22,3 +22,11 @@ path = "src/lib.rs"
 # Test-only: corpus loader uses serde_json to parse `test.json` into
 # `serde_json::Value`, then converts to our in-tree `Value`.
 serde_json = "1"
+
+
+# The corpus harness is its own package (`corpus/`), so that omni - which it
+# needs and this library does not - stays out of this manifest entirely.
+# Cargo resolves dev-dependencies even for `cargo build`, so a dev-dependency
+# here would have broken a checkout with no omni beside it. Register 4.13.
+[workspace]
+exclude = ["corpus"]

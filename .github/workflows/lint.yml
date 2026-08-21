@@ -83,6 +83,13 @@ jobs:
         with:
           toolchain: stable
           components: clippy, rustfmt
+      # `make lint` clippies the corpus harness too, and that package depends
+      # on omni - so the checkout is needed here as well as in the test job.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       - working-directory: ./rust
         run: make lint
 
