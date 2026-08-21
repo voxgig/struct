@@ -15,8 +15,17 @@ export PATH := $(HOME)/.elan/bin:$(PATH)
 # source, and the checkout is not ours to litter (nor necessarily writable).
 # lakefile.toml declares `.omni-build` as a lean_lib that only the RUNNER
 # imports, so `make build` compiles the library alone (register 4.13).
-OMNI_CANDIDATES := $(OMNI_HOME) ../../omni ../../../omni /workspace/omni /home/user/omni
-OMNI_DIR := $(firstword $(foreach d,$(OMNI_CANDIDATES),$(if $(wildcard $(d)/spec/fib.json),$(d))))
+#
+# $OMNI_HOME is resolved by the SHELL, not by make's `wildcard`/`foreach`.
+# Those are whitespace-delimited, so a path with a space ("C:/Users/Ann
+# Smith/omni") splits into two candidates that both miss - and the result is
+# not an error but a silent fallthrough to the next candidate, a DIFFERENT
+# checkout. `$$OMNI_HOME` reaches the shell as the raw environment value. The
+# sibling candidates are fixed literals with no spaces, so they stay here.
+OMNI_SIBLINGS := ../../omni ../../../omni /workspace/omni /home/user/omni
+OMNI_DIR := $(or \
+  $(shell [ -n "$$OMNI_HOME" ] && [ -f "$$OMNI_HOME/spec/fib.json" ] && printf '%s' "$$OMNI_HOME"),\
+  $(firstword $(foreach d,$(OMNI_SIBLINGS),$(if $(wildcard $(d)/spec/fib.json),$(d)))))
 
 omni-check:
 	@if [ -z "$(OMNI_DIR)" ]; then \
@@ -26,7 +35,7 @@ omni-check:
 	  exit 1; \
 	fi
 	@mkdir -p .omni-build
-	@cp $(OMNI_DIR)/lean/Omni.lean .omni-build/Omni.lean
+	@cp "$(OMNI_DIR)/lean/Omni.lean" .omni-build/Omni.lean
 
 # Build and run the shared JSON corpus through the Lean implementation, on
 # voxgig/omni.
