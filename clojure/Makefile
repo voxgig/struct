@@ -13,7 +13,17 @@
 # `make build` compiles src/ alone.
 OMNI_CANDIDATES := $(OMNI_HOME) ../../omni ../../../omni /workspace/omni /home/user/omni
 OMNI_DIR := $(firstword $(foreach d,$(OMNI_CANDIDATES),$(if $(wildcard $(d)/spec/fib.json),$(d))))
-OMNI_ALIAS = -Sdeps '{:aliases {:omni {:extra-deps {voxgig/omni {:local/root "$(OMNI_DIR)/clojure"}}}}}'
+#
+# The path is spliced into an EDN *string literal*, so it must carry forward
+# slashes. On Windows $OMNI_HOME arrives as `D:\a\struct\struct/.omni` and the
+# reader rejects the backslash escapes before it ever looks at the path:
+#
+#     Unsupported escape character: \a
+#
+# The JVM accepts forward slashes on Windows, so normalising is enough. This is
+# a no-op on a POSIX path, which has no backslashes to substitute.
+OMNI_EDN_DIR := $(subst \,/,$(OMNI_DIR))
+OMNI_ALIAS = -Sdeps '{:aliases {:omni {:extra-deps {voxgig/omni {:local/root "$(OMNI_EDN_DIR)/clojure"}}}}}'
 
 # Fail with the reason rather than "Could not locate voxgig/omni/runner".
 omni-check:
