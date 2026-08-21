@@ -3,15 +3,47 @@
 # No third-party libraries.
 
 SRC = src/voxgig_struct.scala
+
+# The corpus runner is voxgig/omni, consumed as a local checkout - it is not
+# published to Maven Central. $OMNI_HOME first, then sibling paths, taking the
+# first directory that carries spec/fib.json.
+#
+# Its sources are handed to scala-cli alongside the TESTS only: `make build`
+# and `make lint` compile src/ without it, and nothing published names omni
+# (register 4.13).
+#
+# $OMNI_HOME is resolved by the SHELL, not by make's `wildcard`/`foreach`.
+# Those are whitespace-delimited, so a path with a space ("C:/Users/Ann
+# Smith/omni") splits into two candidates that both miss - and the result is
+# not an error but a silent fallthrough to the next candidate, a DIFFERENT
+# checkout. `$$OMNI_HOME` reaches the shell as the raw environment value. The
+# sibling candidates are fixed literals with no spaces, so they stay here.
+OMNI_SIBLINGS := ../../omni ../../../omni /workspace/omni /home/user/omni
+OMNI_DIR := $(or \
+  $(shell [ -n "$$OMNI_HOME" ] && [ -f "$$OMNI_HOME/spec/fib.json" ] && printf '%s' "$$OMNI_HOME"),\
+  $(firstword $(foreach d,$(OMNI_SIBLINGS),$(if $(wildcard $(d)/spec/fib.json),$(d)))))
+
+# The omni sources are kept OUT of this list and quoted at the use site: a
+# make variable is a whitespace-delimited word list, so a spaced $(OMNI_DIR)
+# would reach scala-cli as two separate paths.
 TESTSRC = $(SRC) test/runner.scala
 
-.PHONY: test bench lint build inspect clean reset publish
+.PHONY: test bench lint build inspect clean reset publish omni-check
 
-# Run the shared JSON corpus through the Scala implementation via scala-cli.
+# Fail with the reason rather than "Not found: voxgig.omni".
+omni-check:
+	@if [ -z "$(OMNI_DIR)" ]; then \
+	  echo "struct: voxgig/omni checkout not found - set OMNI_HOME."; \
+	  echo "  The tests run on the shared runner; the library itself does not."; \
+	  echo "  git clone https://github.com/voxgig/omni ../../omni"; \
+	  exit 1; \
+	fi
+
+# Run the shared JSON corpus through the Scala implementation, on voxgig/omni.
 # (The classic `scala -cp out Runner` runner was removed in Scala 3.5+, where
 # `scala` is the scala-cli launcher and no longer runs a main from a classpath.)
-test:
-	scala-cli run $(TESTSRC) --main-class Runner
+test: omni-check
+	scala-cli run $(TESTSRC) "$(OMNI_DIR)/scala/src" --main-class Runner
 
 # Cross-port performance harness (JSON contract; see build/bench/README.md).
 # Uses the Scala 3 compiler (scalac) + java rather than scala-cli, so it runs
@@ -24,8 +56,9 @@ bench:
 	@$(SCALAC) -d bench/out $(SRC) bench/bench.scala 1>&2
 	@java -cp "bench/out:$(SCALA_RUNTIME)" bench
 
+# Compiles the LIBRARY alone: nothing shipped names omni (register 4.13).
 build:
-	scala-cli compile $(TESTSRC)
+	scala-cli compile $(SRC)
 
 # "Lint": compile the library (a clean compile means the code type-checks).
 # scalafmt/scalafix can be wired into this target if available.
