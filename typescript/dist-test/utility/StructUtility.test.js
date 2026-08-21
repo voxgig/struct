@@ -8,7 +8,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const node_test_1 = require("node:test");
 const node_assert_1 = __importDefault(require("node:assert"));
-const runner_1 = require("../runner");
+const omni_1 = require("../omni");
 const index_1 = require("./index");
 const { equal, deepEqual, throws } = node_assert_1.default;
 // NOTE: tests are (mostly) in order of increasing dependence.
@@ -19,7 +19,7 @@ const { equal, deepEqual, throws } = node_assert_1.default;
     let client;
     let struct;
     (0, node_test_1.before)(async () => {
-        const runner = await (0, runner_1.makeRunner)(index_1.TEST_JSON_FILE, await index_1.SDK.test());
+        const runner = await (0, omni_1.makeRunner)(index_1.TEST_JSON_FILE, await index_1.SDK.test());
         const runner_struct = await runner('struct');
         spec = runner_struct.spec;
         runset = runner_struct.runset;
@@ -266,7 +266,7 @@ const { equal, deepEqual, throws } = node_assert_1.default;
         await runset(spec.minor.escurl, struct.escurl);
     });
     (0, node_test_1.test)('minor-stringify', async () => {
-        await runset(spec.minor.stringify, (vin) => struct.stringify(runner_1.NULLMARK === vin.val ? 'null' : vin.val, vin.max));
+        await runset(spec.minor.stringify, (vin) => struct.stringify(omni_1.NULLMARK === vin.val ? 'null' : vin.val, vin.max));
     });
     (0, node_test_1.test)('minor-edge-stringify', async () => {
         const { stringify } = struct;
@@ -285,9 +285,9 @@ const { equal, deepEqual, throws } = node_assert_1.default;
     });
     (0, node_test_1.test)('minor-pathify', async () => {
         await runsetflags(spec.minor.pathify, { null: true }, (vin) => {
-            const path = runner_1.NULLMARK == vin.path ? undefined : vin.path;
+            const path = omni_1.NULLMARK == vin.path ? undefined : vin.path;
             let pathstr = struct.pathify(path, vin.from).replace('__NULL__.', '');
-            pathstr = runner_1.NULLMARK === vin.path ? pathstr.replace(/>/g, ':null>') : pathstr;
+            pathstr = omni_1.NULLMARK === vin.path ? pathstr.replace(/>/g, ':null>') : pathstr;
             return pathstr;
         });
     });
@@ -567,7 +567,7 @@ const { equal, deepEqual, throws } = node_assert_1.default;
         deepEqual(inject(test.in.val, test.in.store), test.out);
     });
     (0, node_test_1.test)('inject-string', async () => {
-        await runset(spec.inject.string, (vin) => struct.inject(vin.val, vin.store, { modify: runner_1.nullModifier }));
+        await runset(spec.inject.string, (vin) => struct.inject(vin.val, vin.store, { modify: omni_1.nullModifier }));
     });
     (0, node_test_1.test)('inject-deep', async () => {
         await runset(spec.inject.deep, (vin) => struct.inject(vin.val, vin.store));
