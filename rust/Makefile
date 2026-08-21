@@ -1,4 +1,4 @@
-.PHONY: inspect build test bench lint clippy fmt-check clean reset audit publish
+.PHONY: inspect build test bench lint clippy fmt-check clean reset audit publish setup-omni
 
 inspect:
 	@echo "Rust toolchain:"
@@ -11,8 +11,27 @@ inspect:
 build:
 	cargo build
 
-test:
+# The corpus harness is a separate package (`corpus/`) so that omni stays out
+# of the library's manifest entirely - Cargo resolves dev-dependencies even
+# for `cargo build`, so a dev-dependency here would break a checkout with no
+# omni beside it. Register 4.13; the same shape as struct/go's nested module.
+test: setup-omni
 	cargo test
+	cd corpus && cargo test
+
+# Link the voxgig/omni checkout where Cargo can find it. Cargo path
+# dependencies are LITERAL - they cannot read $OMNI_HOME - so the path is
+# fixed at `../.omni/rust` and this points `.omni` at wherever the checkout
+# actually is. CI checks omni out to that path directly and never runs this.
+# Gitignored, machine-specific: the same deal as go's generated go.work.
+OMNI_HOME ?= $(shell for d in ../../omni ../../../omni /workspace/omni /home/user/omni; do \
+	  if [ -f "$$d/spec/fib.json" ]; then echo "$$d"; break; fi; done)
+setup-omni:
+	@if [ -e ../.omni ]; then exit 0; fi; \
+	if [ -z "$(OMNI_HOME)" ] || [ ! -f "$(OMNI_HOME)/spec/fib.json" ]; then \
+	  echo "struct: voxgig/omni checkout not found - set OMNI_HOME"; exit 1; fi; \
+	ln -s "$$(cd $(OMNI_HOME) && pwd)" ../.omni; \
+	echo "linked ../.omni -> $$(cd $(OMNI_HOME) && pwd)"
 
 # Cross-port performance harness (JSON contract; see build/bench/README.md).
 # --release for realistic numbers; -q keeps cargo's build chatter off stdout.
@@ -22,11 +41,13 @@ bench:
 # Code quality: Clippy (treat warnings as errors) + rustfmt check.
 lint: clippy fmt-check
 
-clippy:
+clippy: setup-omni
 	cargo clippy --all-targets --all-features -- -D warnings
+	cd corpus && cargo clippy --all-targets --all-features -- -D warnings
 
 fmt-check:
 	cargo fmt --all -- --check
+	cd corpus && cargo fmt --all -- --check
 
 clean:
 	cargo clean

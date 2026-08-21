@@ -194,6 +194,8 @@ csharp/tests/corpus-scoreboard.json
 # third-party dependencies (the in-tree OrderedMap + LazyLock replaced
 # indexmap + once_cell, and serde_json is dev-only).
 rust/target/
+rust/corpus/target/
+rust/corpus/Cargo.lock
 
 # Lint / static-analysis caches
 .ruff_cache/
@@ -264,3 +266,8 @@ cpp/bench/bench.out
 # sibling voxgig/omni checkout. Machine-specific, never committed.
 go/go.work
 go/go.work.sum
+
+# Created by `make -C rust setup-omni`: a link to the voxgig/omni checkout,
+# because Cargo path dependencies are literal and cannot read $OMNI_HOME.
+# CI checks omni out to this path directly. Machine-specific, never committed.
+.omni
