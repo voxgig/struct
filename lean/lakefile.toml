@@ -10,6 +10,14 @@ srcDir = "src"
 name = "VoxgigStruct"
 srcDir = "src"
 
+# The corpus runner is voxgig/omni, copied into `.omni-build/` by the Makefile
+# from $OMNI_HOME. Declared as its own lean_lib and deliberately NOT in
+# defaultTargets: only `runner` imports it, so `lake build VoxgigStruct`
+# compiles the library without it (register 4.13).
+[[lean_lib]]
+name = "Omni"
+srcDir = ".omni-build"
+
 [[lean_exe]]
 name = "runner"
 srcDir = "test"

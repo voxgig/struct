@@ -119,10 +119,28 @@ prints as `"1.1"`, not `"1.100000"`.
 ## Testing
 
 ```
-make test    # lake build + run ../build/test/test.json (1360 cases)
+make test    # run the shared corpus on voxgig/omni (77 groups)
+make build   # type-check the library alone (no omni)
 make lint    # clean, warnings-free compile = pass
 ```
 
-The runner (`test/Runner.lean`) contains an in-tree, insertion-order
-preserving JSON reader — Lean core's `Lean.Data.Json` stores objects in a
-sorted tree, which would lose the key order the corpus depends on.
+`make test` runs the shared corpus (`../build/test/test.json`) through the
+port on [voxgig/omni](https://github.com/voxgig/omni), the shared test runner
+— so the entry loop, the comparison and the `err` and `match` handling are
+literally the same code every other port runs. **1360** entries over 77
+groups. omni is a local checkout the Makefile finds via `$OMNI_HOME` or
+beside this repository and copies into `.omni-build/`; `lakefile.toml`
+declares it as a lean_lib only the runner imports, so `make build` compiles
+the library alone.
+
+`test/Runner.lean` is now only a bridge and a list of subjects. It converts
+omni's `Val` into this port's heap-backed `Value` and back — so what a
+subject receives is a real mutable node, and the arguments go back to omni
+after the call, which is what `match.args` asserts on in `minor/setpath` and
+`merge/integrity`.
+
+One thing to know: omni's Lean port uses `Lean.Data.Json`, which stores
+objects in a **sorted** tree. Every map in the corpus is written key-sorted,
+so a sorted read and an insertion-ordered one agree today — but an entry
+authored out of key order would be silently reordered on the way in. The
+port's own reader used to preserve insertion order for exactly that reason.

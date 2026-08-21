@@ -11,15 +11,38 @@ JSON `null` as distinct values.
 
 ```
 cd lean
-make test    # lake build + runs build/test/test.json (expect 1360/1360)
-make lint    # type-checks the library (a clean, warnings-free compile = pass)
+make test    # the shared corpus, on voxgig/omni (expect 77 groups, 0 failed)
+make build   # lake build VoxgigStruct - the LIBRARY alone (no omni)
+make lint    # type-checks library + runner (a warnings-free compile = pass)
 ```
 
 Requires only the Lean 4 toolchain via elan (`lean-toolchain` pins the
 version; `lake` auto-fetches it). **Zero third-party dependencies** — no
-lake `require` lines, ever. The test runner has an in-tree JSON reader, and
-regex is the in-tree `src/Vregex.lean` engine (captures tracked; the corpus
-`regex` group holds it to the Go-stdlib floor of `design/REGEX_API.md`).
+lake `require` lines, ever. Regex is the in-tree `src/Vregex.lean` engine
+(captures tracked; the corpus `regex` group holds it to the Go-stdlib floor
+of `design/REGEX_API.md`).
+
+- **The corpus runner is voxgig/omni**, a local checkout the Makefile finds
+  via `$OMNI_HOME` or beside this repository and COPIES into `.omni-build/`
+  (lake writes its olean beside the source, and the checkout is not ours to
+  litter). `lakefile.toml` declares it as a lean_lib outside `defaultTargets`
+  that only the runner imports, so `make build` compiles the library alone
+  (register 4.13).
+- **`test/Runner.lean` is a bridge plus a list of subjects.** `tostruct` /
+  `toomni` convert between omni's `Val` and this port's `Value`; everything
+  else — the entry loop, `fixjson`, deep equality, `err` and `match` handling
+  — is omni's.
+- **omni's runner is pure; this port is `IO`.** The subject callback is the
+  one place the two meet, and it runs the action with `unsafeIO` behind an
+  `@[implemented_by]` shim (`runsio`). Test code only — nothing in `src/`
+  uses it.
+- **`match.args` needs the arguments back.** Lean is pure, so nothing this
+  port does to a node is visible through omni's argument list.
+  `runsetflagsargs` takes a subject returning `(args, result)`.
+- **`getprop` omits `alt` only when the KEY is missing** (`undefined ===
+  vin.alt`), not when it is null; `getelem`'s rule is the looser
+  `null == vin.alt`. `minor/getprop#51` separates them, and it had never
+  passed here.
 
 ## The value model
 
