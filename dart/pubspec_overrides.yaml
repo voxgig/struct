@@ -1,3 +1,0 @@
-dependency_overrides:
-  voxgig_omni:
-    path: ../../omni/dart
