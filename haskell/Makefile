@@ -38,7 +38,7 @@ omni-check:
 # Run the shared JSON corpus through the Haskell implementation, on voxgig/omni.
 test: omni-check
 	@mkdir -p $(BUILDDIR)
-	ghc -O0 -isrc -itest -i$(OMNI_DIR)/haskell/src -outputdir $(BUILDDIR) -o $(BUILDDIR)/runner test/Runner.hs
+	ghc -O0 -isrc -itest "-i$(OMNI_DIR)/haskell/src" -outputdir $(BUILDDIR) -o $(BUILDDIR)/runner test/Runner.hs
 	$(BUILDDIR)/runner ../build/test/test.json
 
 # Cross-port performance harness (JSON contract; see build/bench/README.md).
@@ -51,7 +51,7 @@ bench:
 # "Lint": type-check the library and runner (a clean compile = pass).
 # The runner names omni, so this needs the checkout too.
 lint: omni-check
-	ghc -fno-code -isrc -itest -i$(OMNI_DIR)/haskell/src test/Runner.hs
+	ghc -fno-code -isrc -itest "-i$(OMNI_DIR)/haskell/src" test/Runner.hs
 
 # Compile the library as a build smoke-test.
 build:
