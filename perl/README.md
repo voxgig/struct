@@ -523,5 +523,15 @@ See `/design/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
 make test
 ```
 
-The runner loads `../build/test/test.json` (the cross-port corpus)
-and exercises each set the wired functions are responsible for.
+The suite runs the cross-port corpus (`../build/test/test.json`) on
+[voxgig/omni](https://github.com/voxgig/omni), the shared test runner. omni
+is not on CPAN, so it is consumed as a local checkout: set `OMNI_HOME`, or
+put it beside this repository.
+
+```bash
+git clone https://github.com/voxgig/omni ../../omni
+OMNI_HOME=../../omni make test
+```
+
+Only the tests need it. `Makefile.PL` declares no such prerequisite and
+nothing installed from `lib/` can reach it.
