@@ -518,6 +518,14 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # The test runner is voxgig/omni, consumed as a local checkout (it is
+      # not published to Hex); the test file finds it via OMNI_HOME. The
+      # library itself never depends on omni.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       # erlef/setup-beam supports Ubuntu + Windows only; use Homebrew on macOS.
       - name: Setup Elixir (setup-beam)
         if: runner.os != 'macOS'
@@ -535,6 +543,8 @@ jobs:
         working-directory: ./elixir
         shell: bash
         run: make test
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
 
   test-haskell:
     runs-on: ${{ matrix.os }}
