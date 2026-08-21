@@ -519,12 +519,16 @@ final class CorpusTests: XCTestCase {
 
   // MARK: - Groups the runner cannot drive
 
+  // Three sequences, not one: `before`, `after` and `both` differ in ORDER, and
+  // asserting only `after` leaves the descending callback and the interleaving
+  // unchecked - a walk that ran `before` at the wrong time, or dropped it, would
+  // still pass. cpp needed the same third mode for the same reason.
   private func runWalkLog(_ group: String, _ node: Value) {
     let testData = clone(node)
-    let log = VList()
-    _ = walk(
-      getprop(testData, .string("in")), nil,
-      { key, val, parent, path in
+    let expect = getprop(testData, .string("out"))
+    for mode in ["before", "after", "both"] {
+      let log = VList()
+      let record: WalkApply = { key, val, parent, path in
         log.items.append(
           .string(
             "k=" + (key.isNoval || key.isNull ? stringify(.noval) : stringify(key))
@@ -533,11 +537,17 @@ final class CorpusTests: XCTestCase {
               + (parent.isNoval || parent.isNull ? stringify(.noval) : stringify(parent))
               + ", t=" + pathify(.list(path.map { Value.string($0) }))))
         return val
-      })
-    let expected = getprop(getprop(testData, .string("out")), .string("after"))
-    if !eqv(expected, .list(log)) {
-      XCTFail(
-        "\(group) - Expected: \(stringify(expected)), got: \(stringify(.list(log)))")
+      }
+      _ = walk(
+        getprop(testData, .string("in")),
+        "after" == mode ? nil : record,
+        "before" == mode ? nil : record)
+      let expected = getprop(expect, .string(mode))
+      if !eqv(expected, .list(log)) {
+        XCTFail(
+          "\(group)/\(mode) - Expected: \(stringify(expected)), "
+            + "got: \(stringify(.list(log)))")
+      }
     }
   }
 
