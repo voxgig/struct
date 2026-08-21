@@ -289,12 +289,16 @@ make inspect         # print the Perl + module version
 
 `perlcritic` is soft-skipped locally when it is not on `PATH`; CI hardens
 this (it is required when `CI=true`). There is no build step (`make build`
-just says so). `t/struct.t` (the corpus runner) emits 145 subtests, and the
-full suite is 151 tests across 3 files (700+ individual cases), loading the
-shared corpus from [`../build/test/`](../build/test/) (`test.json`) via the
-in-tree insertion-ordered `parse_json`. Tests live in [`t/`](./t/):
-`t/struct.t` (corpus runner), `t/regex_pathological.t` (regex panel), and
-`t/00-load.t` (load/sanity).
+just says so).
+
+The corpus runs on [voxgig/omni](https://github.com/voxgig/omni), the
+shared test runner, found via `$OMNI_HOME` or beside this repository (see
+`t/OmniBridge.pm`). `t/struct.t` runs every group the corpus defines except
+the three `condense` ones — 1358 entries in 75 assertions — and `t/client.t`
+runs the two client entries. The full suite is 82 tests across 4 files.
+Tests live in [`t/`](./t/): `t/struct.t` (the corpus), `t/client.t` (the
+client path), `t/regex_pathological.t` (regex panel) and `t/00-load.t`
+(load/sanity), with `t/OmniBridge.pm` holding the runner bridge.
 
 **To change behaviour:** this is a port, so behaviour changes start in the
 canonical TypeScript, not here. Edit the canonical source, adjust the

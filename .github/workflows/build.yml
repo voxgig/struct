@@ -410,6 +410,14 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # The test runner is voxgig/omni, consumed as a local checkout (it is
+      # not published to CPAN); the tests find it via OMNI_HOME. The library
+      # itself never depends on omni - Makefile.PL gains nothing.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       - name: Setup Perl (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -424,6 +432,8 @@ jobs:
       - name: Run tests
         working-directory: ./perl
         run: prove -Ilib t/
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
 
   test-swift:
     runs-on: ${{ matrix.os }}
