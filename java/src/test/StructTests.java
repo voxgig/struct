@@ -1,14 +1,10 @@
 package voxgig.struct;
 
 import com.google.gson.Gson;
-import com.google.gson.reflect.TypeToken;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
-import java.lang.reflect.Type;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -46,13 +42,13 @@ class StructTests {
   private static Map<String, Object> sentinelsSpec;
   private static Map<String, Object> regexSpec;
 
+  private static Omni.Run run;
+
   @BeforeAll
   static void init() throws IOException {
-    Path p = Path.of("..", "build", "test", "test.json");
-    String json = Files.readString(p);
-    Type t = new TypeToken<Map<String, Object>>() {}.getType();
-    Map<String, Object> all = GSON.fromJson(json, t);
-    Map<String, Object> struct = (Map<String, Object>) all.get("struct");
+    // The spec comes off the runner, not from a second loader.
+    run = Omni.Run.of("struct");
+    Map<String, Object> struct = (Map<String, Object>) run.spec;
     walkSpec = (Map<String, Object>) struct.get("walk");
     mergeSpec = (Map<String, Object>) struct.get("merge");
     getpathSpec = (Map<String, Object>) struct.get("getpath");
@@ -181,43 +177,26 @@ class StructTests {
   }
 
   private static void runSet(Map<String, Object> testspec, RunnerFn fn) {
-    runSet(testspec, fn, null);
+    runSet(testspec, fn, (EntryFilter) null);
+  }
+
+  /** Run a group with an explicit `null` flag, as canonical does. */
+  private static void runSet(Map<String, Object> testspec, RunnerFn fn, boolean nullFlag) {
+    run.runsetnull(testspec, nullFlag, fn::apply);
   }
 
   private static void runSet(Map<String, Object> testspec, RunnerFn fn, EntryFilter filter) {
-    Map<String, Object> testspecMap = testspec;
-    List<Object> set = (List<Object>) testspecMap.get("set");
-    for (Object eo : set) {
-      if (!(eo instanceof Map)) {
-        continue;
-      }
-      Map<String, Object> entry = (Map<String, Object>) eo;
-      if (filter != null && !filter.allow(entry)) {
-        continue;
-      }
-      if (!entry.containsKey("in") || !entry.containsKey("out")) {
-        continue;
-      }
-      // Skip entries that expect the call to throw — corpus runner handles those;
-      // these hand-rolled tests are happy-path only.
-      if (entry.containsKey("err")) {
-        continue;
-      }
-      Object in = entry.containsKey("in") ? Struct.clone(entry.get("in")) : Struct.UNDEF;
-      Object out = entry.get("out");
-      Object got;
-      try {
-        got = fn.apply(in);
-      } catch (Exception e) {
-        // Treat thrown errors as test mismatch (we only run happy-path entries).
-        org.junit.jupiter.api.Assertions.fail(
-            "Unexpected throw in=" + json(in) + " expected=" + json(out) + " threw=" + e.getMessage());
-        return;
-      }
-      assertTrue(
-          equalNorm(out, got),
-          () -> "Mismatch in=" + json(in) + " expected=" + json(out) + " got=" + json(got));
+    // Delegates to omni. The loop that stood here dropped an entry four ways:
+    // a per-call `filter`, a missing `in` OR `out`, and any `err` at all -
+    // "these hand-rolled tests are happy-path only", it said, pointing at the
+    // corpus scoreboard for the rest. That scoreboard had no assertion.
+    //
+    // 650 of 784 declared entries reached a subject through here.
+    if (null != filter) {
+      throw new IllegalArgumentException(
+          "struct: entry filters are gone - omni runs every entry in a group");
     }
+    run.runset(testspec, fn::apply);
   }
 
   private interface RunnerFn {
@@ -228,41 +207,23 @@ class StructTests {
     boolean allow(Map<String, Object> entry);
   }
 
+  /**
+   * The validate groups, on the runner. The loop that stood here compared
+   * entries itself, and its `err` branch string-matched messages through a
+   * `canonicalErr` normaliser that quietly stripped trailing periods and
+   * rewrote separators - so an error message could drift and still pass. omni
+   * matches the corpus's `err` text as authored.
+   */
   private static void runValidateSet(Map<String, Object> testspec, boolean useInj) {
-    List<Object> set = (List<Object>) testspec.get("set");
-    for (Object eo : set) {
-      if (!(eo instanceof Map<?, ?> em)) {
-        continue;
-      }
-      Map<String, Object> entry = toStringObjectMap(em);
-      Object inObj = entry.get("in");
-      if (!(inObj instanceof Map<?, ?> im)) {
-        continue;
-      }
-      Map<String, Object> in = toStringObjectMap(im);
-      Object data = in.get("data");
-      Object spec = in.get("spec");
-      Map<String, Object> inj = useInj && in.get("inj") instanceof Map<?, ?> injm ? toStringObjectMap(injm) : null;
-
-      if (entry.containsKey("err")) {
-        String expectedErr = Objects.toString(entry.get("err"), "");
-        String gotErr = "";
-        try {
-          Struct.validate(data, spec, inj);
-        } catch (Exception ex) {
-          gotErr = ex.getMessage();
-        }
-        assertEquals(
-            canonicalErr(expectedErr),
-            canonicalErr(gotErr),
-            "Expected err=" + expectedErr + " got err=" + gotErr);
-      } else {
-        Object got = Struct.validate(data, spec, inj);
-        assertTrue(
-            equalNorm(entry.get("out"), got),
-            () -> "Mismatch in=" + json(in) + " expected=" + json(entry.get("out")) + " got=" + json(got));
-      }
-    }
+    run.runsetnull(
+        testspec,
+        false,
+        v -> {
+          Map<String, Object> m = (Map<String, Object>) v;
+          Map<String, Object> inj =
+              useInj && m.get("inj") instanceof Map<?, ?> injm ? toStringObjectMap(injm) : null;
+          return Struct.validate(m.get("data"), m.get("spec"), inj);
+        });
   }
 
   private static Map<String, Object> toStringObjectMap(Map<?, ?> in) {
@@ -343,45 +304,7 @@ class StructTests {
     return true;
   }
 
-  private static boolean isEachCommandBasicCase(Map<String, Object> entry) {
-    Object inObj = entry.get("in");
-    if (!(inObj instanceof Map<?, ?> inMap)) {
-      return false;
-    }
-    Object spec = inMap.get("spec");
-    if (containsDotAscend(spec)) {
-      return false;
-    }
-    Set<String> cmds = new LinkedHashSet<>();
-    collectCommands(spec, cmds);
-    if (!cmds.contains("$EACH")) {
-      return false;
-    }
-    for (String c : cmds) {
-      if (!"$EACH".equals(c) && !"$COPY".equals(c) && !"$KEY".equals(c)) {
-        return false;
-      }
-    }
-    return true;
-  }
 
-  private static boolean isPackBasicCase(Map<String, Object> entry) {
-    Object inObj = entry.get("in");
-    if (!(inObj instanceof Map<?, ?> inMap)) {
-      return false;
-    }
-    Set<String> cmds = new LinkedHashSet<>();
-    collectCommands(inMap.get("spec"), cmds);
-    if (!cmds.contains("$PACK")) {
-      return false;
-    }
-    for (String c : cmds) {
-      if (!"$PACK".equals(c) && !"$COPY".equals(c) && !"$KEY".equals(c) && !"$VAL".equals(c) && !"$FORMAT".equals(c)) {
-        return false;
-      }
-    }
-    return true;
-  }
 
   private static boolean containsDotAscend(Object node) {
     if (node instanceof String s) {
@@ -529,7 +452,8 @@ class StructTests {
             Struct.walk(src, copy, null, intish(maxdepth));
           }
           return top[0];
-        });
+        },
+        false);
   }
 
   @Test
@@ -732,30 +656,17 @@ class StructTests {
 
   @Test
   void injectString() {
-    // NULLMARK round-trip: encode JSON nulls as "__NULL__" in the inputs, pass
-    // the nullModifier so a resolved null renders as the literal text "null",
-    // then compare against the fixJSON'd expected output. Mirrors js runner /
-    // perl t/struct.t inject.string dispatch.
-    List<Object> set = (List<Object>) ((Map<String, Object>) injectSpec.get("string")).get("set");
-    for (Object eo : set) {
-      if (!(eo instanceof Map<?, ?> em)) {
-        continue;
-      }
-      Map<String, Object> entry = (Map<String, Object>) em;
-      if (!entry.containsKey("in") || !entry.containsKey("out") || entry.containsKey("err")) {
-        continue;
-      }
-      Map<String, Object> in = (Map<String, Object>) Struct.clone(entry.get("in"));
-      Object val = fixJSON(in.get("val"));
-      Object store = fixJSON(in.get("store"));
-      Map<String, Object> opts = new LinkedHashMap<>();
-      opts.put("modify", NULL_MODIFIER);
-      Object got = fixJSON(Struct.inject(val, store, opts));
-      Object out = fixJSON(entry.get("out"));
-      assertTrue(
-          equalNorm(out, got),
-          () -> "Mismatch inject.string in=" + json(in) + " expected=" + json(out) + " got=" + json(got));
-    }
+    // On the runner, with the modifier canonical passes
+    // (`struct.inject(vin.val, vin.store, {modify: nullModifier})`). The loop
+    // that stood here did its own NULLMARK round-trip by hand.
+    runSet(
+        (Map<String, Object>) injectSpec.get("string"),
+        v -> {
+          Map<String, Object> m = (Map<String, Object>) v;
+          Map<String, Object> opts = new LinkedHashMap<>();
+          opts.put("modify", NULL_MODIFIER);
+          return Struct.inject(m.get("val"), m.get("store"), opts);
+        });
   }
 
   @Test
@@ -795,16 +706,6 @@ class StructTests {
         });
   }
 
-  @Test
-  void transformCmdsCopyEscapes() {
-    runSet(
-        (Map<String, Object>) transformSpec.get("cmds"),
-        v -> {
-          Map<String, Object> m = (Map<String, Object>) v;
-          return Struct.transform(m.get("data"), m.get("spec"));
-        },
-        StructTests::isCopyEscapeOnlyCmdCase);
-  }
 
   @Test
   void transformCmdsAll() {
@@ -816,38 +717,8 @@ class StructTests {
         });
   }
 
-  @Test
-  void transformEachCopyKeySubset() {
-    runSet(
-        eachSpec,
-        v -> {
-          Map<String, Object> m = (Map<String, Object>) v;
-          return Struct.transform(m.get("data"), m.get("spec"));
-        },
-        StructTests::isEachCopyKeyOnlyCase);
-  }
 
-  @Test
-  void transformEachCommandBasicSubset() {
-    runSet(
-        eachSpec,
-        v -> {
-          Map<String, Object> m = (Map<String, Object>) v;
-          return Struct.transform(m.get("data"), m.get("spec"));
-        },
-        StructTests::isEachCommandBasicCase);
-  }
 
-  @Test
-  void transformPackBasicSubset() {
-    runSet(
-        packSpec,
-        v -> {
-          Map<String, Object> m = (Map<String, Object>) v;
-          return Struct.transform(m.get("data"), m.get("spec"));
-        },
-        StructTests::isPackBasicCase);
-  }
 
   @Test
   void transformEachAll() {
@@ -876,7 +747,8 @@ class StructTests {
         v -> {
           Map<String, Object> m = (Map<String, Object>) v;
           return Struct.transform(m.get("data"), m.get("spec"));
-        });
+        },
+        false);
   }
 
   @Test
@@ -895,10 +767,14 @@ class StructTests {
         (Map<String, Object>) validateSpec.get("basic"),
         v -> {
           Map<String, Object> m = (Map<String, Object>) v;
-          Map<String, Object> opts = new LinkedHashMap<>();
-          opts.put("errs", new ArrayList<String>());
-          return Struct.validate(m.get("data"), m.get("spec"), opts);
-        });
+          // NO `errs` collector. Canonical calls `struct.validate(data, spec)`
+          // with two arguments, so a failure THROWS - which is what the
+          // corpus's `err` entries assert on. Passing a collector made
+          // validate accumulate instead, and every one of those entries was
+          // skipped by the old loop ("happy-path only"), so nothing noticed.
+          return Struct.validate(m.get("data"), m.get("spec"));
+        },
+        false);
   }
 
   @Test
@@ -907,9 +783,12 @@ class StructTests {
         (Map<String, Object>) validateSpec.get("child"),
         v -> {
           Map<String, Object> m = (Map<String, Object>) v;
-          Map<String, Object> opts = new LinkedHashMap<>();
-          opts.put("errs", new ArrayList<String>());
-          return Struct.validate(m.get("data"), m.get("spec"), opts);
+          // NO `errs` collector. Canonical calls `struct.validate(data, spec)`
+          // with two arguments, so a failure THROWS - which is what the
+          // corpus's `err` entries assert on. Passing a collector made
+          // validate accumulate instead, and every one of those entries was
+          // skipped by the old loop ("happy-path only"), so nothing noticed.
+          return Struct.validate(m.get("data"), m.get("spec"));
         });
   }
 
@@ -919,9 +798,12 @@ class StructTests {
         validateOneSpec,
         v -> {
           Map<String, Object> m = (Map<String, Object>) v;
-          Map<String, Object> opts = new LinkedHashMap<>();
-          opts.put("errs", new ArrayList<String>());
-          return Struct.validate(m.get("data"), m.get("spec"), opts);
+          // NO `errs` collector. Canonical calls `struct.validate(data, spec)`
+          // with two arguments, so a failure THROWS - which is what the
+          // corpus's `err` entries assert on. Passing a collector made
+          // validate accumulate instead, and every one of those entries was
+          // skipped by the old loop ("happy-path only"), so nothing noticed.
+          return Struct.validate(m.get("data"), m.get("spec"));
         });
   }
 
@@ -931,9 +813,12 @@ class StructTests {
         validateExactSpec,
         v -> {
           Map<String, Object> m = (Map<String, Object>) v;
-          Map<String, Object> opts = new LinkedHashMap<>();
-          opts.put("errs", new ArrayList<String>());
-          return Struct.validate(m.get("data"), m.get("spec"), opts);
+          // NO `errs` collector. Canonical calls `struct.validate(data, spec)`
+          // with two arguments, so a failure THROWS - which is what the
+          // corpus's `err` entries assert on. Passing a collector made
+          // validate accumulate instead, and every one of those entries was
+          // skipped by the old loop ("happy-path only"), so nothing noticed.
+          return Struct.validate(m.get("data"), m.get("spec"));
         });
   }
 
@@ -1018,27 +903,18 @@ class StructTests {
   // Select: apply the NULLMARK fixup to obj, query, and the expected out (the
   // canonical runner does this with flags.null=true so a stored null encodes as
   // "__NULL__" and exact-match has a value to compare). Mirrors perl t/struct.t.
+  /**
+   * The select groups, on the runner. The loop that stood here dropped any
+   * entry missing `in` or `out`, and every `err` entry outright, then did its
+   * own NULLMARK fixup.
+   */
   private static void runSelectSet(String section) {
-    Map<String, Object> testspec = (Map<String, Object>) selectSpec.get(section);
-    List<Object> set = (List<Object>) testspec.get("set");
-    for (Object eo : set) {
-      if (!(eo instanceof Map<?, ?> em)) {
-        continue;
-      }
-      Map<String, Object> entry = (Map<String, Object>) em;
-      if (!entry.containsKey("in") || !entry.containsKey("out") || entry.containsKey("err")) {
-        continue;
-      }
-      Map<String, Object> in = (Map<String, Object>) Struct.clone(entry.get("in"));
-      Object obj = fixJSON(in.get("obj"));
-      Object query = fixJSON(in.get("query"));
-      Object got = fixJSON(Struct.select(obj, query));
-      Object out = fixJSON(entry.get("out"));
-      assertTrue(
-          equalNorm(out, got),
-          () -> "Mismatch select." + section + " in=" + json(in)
-              + " expected=" + json(out) + " got=" + json(got));
-    }
+    runSet(
+        (Map<String, Object>) selectSpec.get(section),
+        v -> {
+          Map<String, Object> m = (Map<String, Object>) v;
+          return Struct.select(m.get("obj"), m.get("query"));
+        });
   }
 
   @Test
@@ -1186,5 +1062,73 @@ class StructTests {
     assertTrue(equalNorm(Map.of("x", 1), Struct.transform(Map.of("a", 1), Map.of("x", "`a`"))));
     Object got = Struct.transform(Map.of("f0", f0), Map.of("x", "`f0`"));
     assertEquals(99, ((java.util.function.Supplier<Integer>) ((Map<?, ?>) got).get("x")).get().intValue());
+  }
+
+  // ------------------------------------------------------------------
+  // Groups this port had never bound
+  // ------------------------------------------------------------------
+  //
+  // The six `sentinels` groups and `transform.apply` are in canonical's list
+  // (javascript/test/struct.test.js) and were simply absent here. sentinels is
+  // the set that pins how a NULL/UNDEF mark behaves as DATA rather than as a
+  // runner convention - exactly the distinction this port's old runner could
+  // not express, which is presumably why it was never wired.
+
+  @Test
+  void transformApply() {
+    runSet(
+        (Map<String, Object>) transformSpec.get("apply"),
+        v -> {
+          Map<String, Object> m = (Map<String, Object>) v;
+          return Struct.transform(m.get("data"), m.get("spec"));
+        });
+  }
+
+  @Test
+  void sentinelsGetpropUnify() {
+    runSet(
+        (Map<String, Object>) sentinelsSpec.get("getprop_unify"),
+        v -> {
+          Map<String, Object> m = (Map<String, Object>) v;
+          return Struct.getprop(m.get("val"), m.get("key"), m.get("alt"));
+        },
+        false);
+  }
+
+  @Test
+  void sentinelsGetelemAbsent() {
+    runSet(
+        (Map<String, Object>) sentinelsSpec.get("getelem_absent"),
+        v -> {
+          Map<String, Object> m = (Map<String, Object>) v;
+          return Struct.getelem(m.get("val"), m.get("key"), m.get("alt"));
+        },
+        false);
+  }
+
+  @Test
+  void sentinelsHaskeyUnify() {
+    runSet(
+        (Map<String, Object>) sentinelsSpec.get("haskey_unify"),
+        v -> {
+          Map<String, Object> m = (Map<String, Object>) v;
+          return Struct.haskey(m.get("val"), m.get("key"));
+        },
+        false);
+  }
+
+  @Test
+  void sentinelsIsemptyUnify() {
+    runSet((Map<String, Object>) sentinelsSpec.get("isempty_unify"), Struct::isempty, false);
+  }
+
+  @Test
+  void sentinelsIsnodeUnify() {
+    runSet((Map<String, Object>) sentinelsSpec.get("isnode_unify"), Struct::isnode, false);
+  }
+
+  @Test
+  void sentinelsStringifyNull() {
+    runSet((Map<String, Object>) sentinelsSpec.get("stringify_null"), Struct::stringify, false);
   }
 }

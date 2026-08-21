@@ -274,9 +274,24 @@ jobs:
         with:
           distribution: temurin
           java-version: ${{ matrix.java-version }}
+      # Register 4.13: omni is a TEST-scoped dependency, so the library builds
+      # and packages without it. Checked before omni is fetched.
+      - name: Library builds without omni
+        working-directory: ./java
+        run: mvn -q -DskipTests -Dmaven.test.skip=true package
+      # The test runner is voxgig/omni, consumed as a local checkout (it is not
+      # published to Maven Central). `make test` builds its jar and installs it
+      # into the local repository, so the pom names an ordinary test dependency.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       - name: Run tests
         working-directory: ./java
-        run: mvn -q test
+        run: make test
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
 
   test-lua:
     runs-on: ${{ matrix.os }}

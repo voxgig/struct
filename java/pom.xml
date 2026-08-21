@@ -68,6 +68,24 @@
       <version>${junit.jupiter.version}</version>
       <scope>test</scope>
     </dependency>
+
+    <!-- The shared test runner, voxgig/omni, consumed as a local checkout: it
+         is not published to Maven Central. `make test` builds the jar and
+         installs it into the local repository first (see `setup-omni`), so
+         this is an ORDINARY test-scoped dependency - exactly like gson and
+         junit above.
+
+         Not `system` scope, which was the obvious shortcut and is wrong:
+         a system-scoped dependency sits on the COMPILE classpath, so omni
+         would have reached the library's own build and its published POM.
+         That is the leak register 4.13 is about. Test scope keeps it out of
+         both. -->
+    <dependency>
+      <groupId>com.voxgig</groupId>
+      <artifactId>omni</artifactId>
+      <version>0.1.0</version>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 
   <build>
