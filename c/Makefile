@@ -37,6 +37,11 @@ $(OMNI_OBJ_DIR)/%.o: $(OMNI_DIR)/c/src/%.c
 	@mkdir -p $(OMNI_OBJ_DIR)
 	$(CC) -c $< $(CFLAGS_COMMON) $(CFLAGS_DEBUG) -I $(OMNI_DIR)/c/src -o $@
 
+# Placing omni-check above `build` made it the first ordinary target, and so
+# make's default goal: a bare `make` ran the omni probe instead of building,
+# and failed outright with no checkout. Say the default explicitly.
+.DEFAULT_GOAL := build
+
 .PHONY: build smoke test bench corpus client check_leak sanitize lint tidy format format-check clean reset inspect publish omni-check
 
 # Fail with the reason rather than a page of "omni.h: No such file".

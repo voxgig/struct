@@ -1133,8 +1133,11 @@ static voxgig_value* walk_copy_cb(voxgig_value* key, voxgig_value* val, voxgig_v
     voxgig_list_set(cur, depth, voxgig_retain(child));
   }
 
+  // setprop BORROWS and retains internally, unlike list_set above, which takes
+  // ownership - so the retain that is correct there leaks one reference per
+  // copied property here.
   if (0 < depth)
-    voxgig_setprop(voxgig_list_get(cur, depth - 1), key, voxgig_retain(child));
+    voxgig_setprop(voxgig_list_get(cur, depth - 1), key, child);
 
   voxgig_release(child);
   return val ? voxgig_retain(val) : voxgig_new_undef();
