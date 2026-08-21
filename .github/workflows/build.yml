@@ -276,9 +276,14 @@ jobs:
           java-version: ${{ matrix.java-version }}
       # Register 4.13: omni is a TEST-scoped dependency, so the library builds
       # and packages without it. Checked before omni is fetched.
+      #
+      # `maven.test.skip` skips test COMPILATION as well as execution, which is
+      # the point here: the test sources import omni. QUOTED because Windows
+      # runners default to pwsh, which splits the bare token at the first `.`
+      # and hands maven `.test.skip=true` as a phase name of its own.
       - name: Library builds without omni
         working-directory: ./java
-        run: mvn -q -DskipTests -Dmaven.test.skip=true package
+        run: mvn -q "-Dmaven.test.skip=true" package
       # The test runner is voxgig/omni, consumed as a local checkout (it is not
       # published to Maven Central). `make test` builds its jar and installs it
       # into the local repository, so the pom names an ordinary test dependency.

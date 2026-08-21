@@ -43,9 +43,17 @@ matches them case/underscore-insensitively against the canonical TS
 
 ```bash
 mvn -DskipTests compile      # build               (make build)
-mvn test                     # run the corpus suite (make test)
+make test                    # run the corpus suite on voxgig/omni
 make lint                    # compile + checkstyle:check + spotbugs:check
 ```
+
+**Use `make test`, not a bare `mvn test`.** The corpus runner is voxgig/omni,
+a local checkout that is not on Maven Central; `make test` builds its jar,
+installs it into the local repository and passes `-Pomni` to activate the
+profile that names it. Bare `mvn test` fails at test-compile with "package
+voxgig.omni does not exist". The profile is not unconditional because a
+coordinate in the POM proper breaks any static resolver that goes looking for
+it on Central — see the comment on the profile in `pom.xml`.
 
 `make test` / `make lint` (from this dir, or `make test-java` /
 `make lint-java` from the repo root) wrap these. Also: `make checkstyle` /

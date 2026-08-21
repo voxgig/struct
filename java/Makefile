@@ -10,8 +10,10 @@ inspect:
 build:
 	mvn -q -DskipTests compile
 
+# -Pomni activates the profile that names the omni test dependency; see the
+# comment on that profile in pom.xml for why it is not unconditional.
 test: setup-omni
-	mvn -q test
+	mvn -q -Pomni test
 
 # The shared test runner is voxgig/omni, a local checkout - it is not published
 # to Maven Central. Build its jar and install it into the local repository, so
@@ -72,7 +74,7 @@ publish: test
 	  echo "[dry-run] boru filler token detected: would publish artifact and tag $(TAG); nothing pushed."; \
 	  exit 0; \
 	fi; \
-	mvn -q -Prelease -s release-settings.xml deploy; \
+	mvn -q -Prelease,omni -s release-settings.xml deploy; \
 	git tag -a "$(TAG)" -m "java v$(VERSION)"; \
 	if [ -n "$$token" ]; then \
 	  hdr="AUTHORIZATION: basic $$(printf 'x-access-token:%s' "$$token" | base64 | tr -d '\n')"; \
