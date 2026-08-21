@@ -4,6 +4,7 @@
 // RUN-SOME: cd cs/tests && dotnet test --filter "DisplayName~minor-isnode"
 
 using Voxgig.Struct;
+using Voxgig.Omni;
 using Xunit;
 
 namespace Voxgig.Struct.Tests;
@@ -11,12 +12,17 @@ namespace Voxgig.Struct.Tests;
 
 public class StructTests
 {
+    private readonly Voxgig.Omni.Compat.Struct.StructRunPack _pack;
     private readonly Dictionary<string, object?> _spec;
     private readonly Dictionary<string, object?> _minor;
 
     public StructTests()
     {
-        _spec  = Runner.LoadSpec();
+        // One runner for the whole class. The spec comes back off it rather
+        // than from a second loader, so the tests and the runner can never
+        // disagree about what the corpus says.
+        _pack  = Omni.MakeRunner(SDK.Test())("struct", null);
+        _spec  = _pack.Spec as Dictionary<string, object?> ?? [];
         _minor = _spec["minor"] as Dictionary<string, object?> ?? [];
     }
 
@@ -65,53 +71,50 @@ public class StructTests
     [Fact]
     public void MinorIsNode()
     {
-        Runner.RunSet(_minor["isnode"], input =>
-            StructUtils.IsNode(input));
+        _pack.RunSet(_minor["isnode"], input =>
+            StructUtils.IsNode(input), flags: Omni.Nulls);
     }
 
     [Fact]
     public void MinorIsMap()
     {
-        Runner.RunSet(_minor["ismap"], input =>
-            StructUtils.IsMap(input));
+        _pack.RunSet(_minor["ismap"], input =>
+            StructUtils.IsMap(input), flags: Omni.Nulls);
     }
 
     [Fact]
     public void MinorIsList()
     {
-        Runner.RunSet(_minor["islist"], input =>
-            StructUtils.IsList(input));
+        _pack.RunSet(_minor["islist"], input =>
+            StructUtils.IsList(input), flags: Omni.Nulls);
     }
 
     [Fact]
     public void MinorIsKey()
     {
-        Runner.RunSet(_minor["iskey"],
-            input => StructUtils.IsKey(input),
-            flags: new() { ["null"] = false });
+        _pack.RunSet(_minor["iskey"],
+            input => StructUtils.IsKey(input), flags: Omni.NoNulls);
     }
 
     [Fact]
     public void MinorStrKey()
     {
-        Runner.RunSet(_minor["strkey"],
-            input => StructUtils.StrKey(input),
-            flags: new() { ["null"] = false });
+        _pack.RunSet(_minor["strkey"],
+            input => StructUtils.StrKey(input), flags: Omni.NoNulls);
     }
 
     [Fact]
     public void MinorIsEmpty()
     {
-        Runner.RunSet(_minor["isempty"],
-            input => StructUtils.IsEmpty(input),
-            flags: new() { ["null"] = false });
+        _pack.RunSet(_minor["isempty"],
+            input => StructUtils.IsEmpty(input), flags: Omni.NoNulls);
     }
 
     [Fact]
     public void MinorIsFunc()
     {
-        Runner.RunSet(_minor["isfunc"],
-            input => StructUtils.IsFunc(input));
+        _pack.RunSet(_minor["isfunc"],
+            input => StructUtils.IsFunc(input), flags: Omni.Nulls);
 
         // Edge: actual delegates should be recognised.
         Func<object?> f0 = () => null;
@@ -122,9 +125,8 @@ public class StructTests
     [Fact]
     public void MinorClone()
     {
-        Runner.RunSet(_minor["clone"],
-            input => StructUtils.Clone(input),
-            flags: new() { ["null"] = false });
+        _pack.RunSet(_minor["clone"],
+            input => StructUtils.Clone(input), flags: Omni.NoNulls);
 
         // Edge: functions should be shallow-copied, not cloned.
         Func<object?> f0 = () => null;
@@ -137,21 +139,21 @@ public class StructTests
     [Fact]
     public void MinorEscRe()
     {
-        Runner.RunSet(_minor["escre"],
-            input => StructUtils.EscRe(input as string));
+        _pack.RunSet(_minor["escre"],
+            input => StructUtils.EscRe(input as string), flags: Omni.Nulls);
     }
 
     [Fact]
     public void MinorEscUrl()
     {
-        Runner.RunSet(_minor["escurl"],
-            input => StructUtils.EscUrl(input as string));
+        _pack.RunSet(_minor["escurl"],
+            input => StructUtils.EscUrl(input as string), flags: Omni.Nulls);
     }
 
     [Fact]
     public void MinorStringify()
     {
-        Runner.RunSet(_minor["stringify"], input =>
+        _pack.RunSet(_minor["stringify"], input =>
         {
             var m = input as Dictionary<string, object?>;
             if (m == null) return StructUtils.Stringify(input);
@@ -159,50 +161,62 @@ public class StructTests
             // Absent "val" key -> NONE (TS undefined) so Stringify returns "".
             // Present-but-null -> JSON null (Stringify returns "null").
             object? val = m.ContainsKey("val") ? m["val"] : StructUtils.NONE;
-            if (val is string s && s == Runner.NULLMARK) val = null;
+            if (val is string s && s == Omni.NULLMARK) val = null;
 
             if (m.TryGetValue("max", out object? maxObj) && maxObj != null)
                 return StructUtils.Stringify(val, (int)Convert.ToInt64(maxObj));
 
             return StructUtils.Stringify(val);
-        });
+        }, flags: Omni.Nulls);
     }
 
     [Fact]
     public void MinorPathify()
     {
-        Runner.RunSet(_minor["pathify"],
+        _pack.RunSet(_minor["pathify"],
             input =>
             {
                 var m = input as Dictionary<string, object?>;
                 if (m == null) return StructUtils.Pathify(input);
 
-                // If the "path" key is absent entirely, pass NONE (not null) so
-                // Pathify can distinguish "not provided" from "explicitly null".
+                // Mirrors javascript/test/struct.test.js's minor-pathify, and
+                // the two compensations there are not incidental.
+                //
+                // This group runs with null MARKED, and the runner marks nulls
+                // inside `in` as well as inside `out` - so a real null authored
+                // in a path arrives as the string "__NULL__", which `iskey`
+                // accepts as an ordinary key (canonical's does too). Canonical
+                // strips the resulting segment back out of the answer; so does
+                // this. That is register 4.2's third channel defect showing
+                // through, not a defect in this port.
                 bool hasPath = m.ContainsKey("path");
                 object? path = hasPath ? m["path"] : StructUtils.NONE;
-                if (path is string ps && ps == Runner.NULLMARK) path = null;
+
+                // A whole path that IS the mark means "no path" - canonical
+                // passes undefined, which here is NONE.
+                bool markedpath = path is string ps && ps == Omni.NULLMARK;
+                if (markedpath) path = StructUtils.NONE;
 
                 int from = 0;
                 if (m.TryGetValue("from", out object? fv) && fv != null)
                     from = (int)Convert.ToInt64(fv);
 
-                return StructUtils.Pathify(path, from);
-            },
-            flags: new() { ["null"] = true });
+                string pathstr = StructUtils.Pathify(path, from).Replace("__NULL__.", "");
+                return markedpath ? pathstr.Replace(">", ":null>") : pathstr;
+            }, flags: Omni.Nulls);
     }
 
     [Fact]
     public void MinorItems()
     {
-        Runner.RunSet(_minor["items"],
-            input => StructUtils.Items(input));
+        _pack.RunSet(_minor["items"],
+            input => StructUtils.Items(input), flags: Omni.Nulls);
     }
 
     [Fact]
     public void MinorGetProp()
     {
-        Runner.RunSet(_minor["getprop"],
+        _pack.RunSet(_minor["getprop"],
             input =>
             {
                 var m = input as Dictionary<string, object?>;
@@ -212,8 +226,7 @@ public class StructTests
                 if (m.TryGetValue("alt", out object? alt) && alt != null)
                     return StructUtils.GetProp(val, key, alt);
                 return StructUtils.GetProp(val, key);
-            },
-            flags: new() { ["null"] = false });
+            }, flags: Omni.NoNulls);
     }
 
     [Fact]
@@ -228,7 +241,7 @@ public class StructTests
     [Fact]
     public void MinorGetElem()
     {
-        Runner.RunSet(_minor["getelem"],
+        _pack.RunSet(_minor["getelem"],
             input =>
             {
                 var m = input as Dictionary<string, object?>;
@@ -238,14 +251,13 @@ public class StructTests
                 if (m.TryGetValue("alt", out object? alt) && alt != null)
                     return StructUtils.GetElem(val, key, alt);
                 return StructUtils.GetElem(val, key);
-            },
-            flags: new() { ["null"] = false });
+            }, flags: Omni.NoNulls);
     }
 
     [Fact]
     public void MinorSetProp()
     {
-        Runner.RunSet(_minor["setprop"],
+        _pack.RunSet(_minor["setprop"],
             input =>
             {
                 var m = input as Dictionary<string, object?>;
@@ -254,8 +266,7 @@ public class StructTests
                 object? key    = m.TryGetValue("key",    out object? kv) ? kv : null;
                 object? val    = m.TryGetValue("val",    out object? vv) ? vv : null;
                 return StructUtils.SetProp(parent, key, val);
-            },
-            flags: new() { ["null"] = true });
+            }, flags: Omni.Nulls);
     }
 
     [Fact]
@@ -263,10 +274,10 @@ public class StructTests
     {
         var strarr0 = new List<object?> { "a", "b", "c", "d", "e" };
         var strarr1 = new List<object?> { "a", "b", "c", "d", "e" };
-        Assert.True(Runner.DeepEqual(
+        Assert.True(Omni.DeepEqual(
             new List<object?> { "a", "b", "C", "d", "e" },
             StructUtils.SetProp(strarr0, 2, "C")));
-        Assert.True(Runner.DeepEqual(
+        Assert.True(Omni.DeepEqual(
             new List<object?> { "a", "b", "CC", "d", "e" },
             StructUtils.SetProp(strarr1, "2", "CC")));
     }
@@ -274,7 +285,7 @@ public class StructTests
     [Fact]
     public void MinorDelProp()
     {
-        Runner.RunSet(_minor["delprop"],
+        _pack.RunSet(_minor["delprop"],
             input =>
             {
                 var m = input as Dictionary<string, object?>;
@@ -282,21 +293,20 @@ public class StructTests
                 object? parent = m.TryGetValue("parent", out object? pv) ? pv : null;
                 object? key    = m.TryGetValue("key",    out object? kv) ? kv : null;
                 return StructUtils.DelProp(parent, key);
-            },
-            flags: new() { ["null"] = true });
+            }, flags: Omni.Nulls);
     }
 
     [Fact]
     public void MinorKeysOf()
     {
-        Runner.RunSet(_minor["keysof"],
-            input => StructUtils.KeysOf(input));
+        _pack.RunSet(_minor["keysof"],
+            input => StructUtils.KeysOf(input), flags: Omni.Nulls);
     }
 
     [Fact]
     public void MinorHasKey()
     {
-        Runner.RunSet(_minor["haskey"],
+        _pack.RunSet(_minor["haskey"],
             input =>
             {
                 var m = input as Dictionary<string, object?>;
@@ -304,7 +314,7 @@ public class StructTests
                 object? val = m.TryGetValue("src", out object? v) ? v : null;
                 object? key = m.TryGetValue("key", out object? k) ? k : null;
                 return StructUtils.HasKey(val, key);
-            });
+            }, flags: Omni.NoNulls);
     }
 
 
@@ -323,25 +333,25 @@ public class StructTests
     [Fact]
     public void RegexTest()
     {
-        Runner.RunSet(RegexSpec["test"],
-            input => StructUtils.ReTest(RStr(input, "pattern"), RStr(input, "input")));
+        _pack.RunSet(RegexSpec["test"],
+            input => StructUtils.ReTest(RStr(input, "pattern"), RStr(input, "input")), flags: Omni.Nulls);
     }
 
     [Fact]
     public void RegexFind()
     {
-        Runner.RunSet(RegexSpec["find"],
+        _pack.RunSet(RegexSpec["find"],
             input =>
             {
                 var found = StructUtils.ReFind(RStr(input, "pattern"), RStr(input, "input"));
                 return found == null ? null : new List<object?>(found);
-            });
+            }, flags: Omni.Nulls);
     }
 
     [Fact]
     public void RegexFindAll()
     {
-        Runner.RunSet(RegexSpec["find_all"],
+        _pack.RunSet(RegexSpec["find_all"],
             input =>
             {
                 var outList = new List<object?>();
@@ -350,22 +360,22 @@ public class StructTests
                     outList.Add(new List<object?>(row));
                 }
                 return outList;
-            });
+            }, flags: Omni.Nulls);
     }
 
     [Fact]
     public void RegexReplace()
     {
-        Runner.RunSet(RegexSpec["replace"],
+        _pack.RunSet(RegexSpec["replace"],
             input => StructUtils.ReReplace(
-                RStr(input, "pattern"), RStr(input, "input"), RStr(input, "replacement")));
+                RStr(input, "pattern"), RStr(input, "input"), RStr(input, "replacement")), flags: Omni.Nulls);
     }
 
     [Fact]
     public void RegexEscape()
     {
-        Runner.RunSet(RegexSpec["escape"],
-            input => StructUtils.ReEscape(RStr(input, "val")));
+        _pack.RunSet(RegexSpec["escape"],
+            input => StructUtils.ReEscape(RStr(input, "val")), flags: Omni.Nulls);
     }
 
     // Sentinels — null / undefined unification across the readers.
@@ -378,7 +388,7 @@ public class StructTests
     [Fact]
     public void SentinelsGetPropUnify()
     {
-        Runner.RunSet(Sentinels["getprop_unify"],
+        _pack.RunSet(Sentinels["getprop_unify"],
             input =>
             {
                 var m = input as Dictionary<string, object?>;
@@ -387,14 +397,13 @@ public class StructTests
                 object? key = m.TryGetValue("key", out object? k) ? k : null;
                 object? alt = m.TryGetValue("alt", out object? a) ? a : null;
                 return StructUtils.GetProp(val, key, alt);
-            },
-            flags: new() { ["null"] = true });
+            }, flags: Omni.NoNulls);
     }
 
     [Fact]
     public void SentinelsGetElemAbsent()
     {
-        Runner.RunSet(Sentinels["getelem_absent"],
+        _pack.RunSet(Sentinels["getelem_absent"],
             input =>
             {
                 var m = input as Dictionary<string, object?>;
@@ -403,14 +412,13 @@ public class StructTests
                 object? key = m.TryGetValue("key", out object? k) ? k : null;
                 object? alt = m.TryGetValue("alt", out object? a) ? a : null;
                 return StructUtils.GetElem(val, key, alt);
-            },
-            flags: new() { ["null"] = true });
+            }, flags: Omni.NoNulls);
     }
 
     [Fact]
     public void SentinelsHasKeyUnify()
     {
-        Runner.RunSet(Sentinels["haskey_unify"],
+        _pack.RunSet(Sentinels["haskey_unify"],
             input =>
             {
                 var m = input as Dictionary<string, object?>;
@@ -418,32 +426,28 @@ public class StructTests
                 object? val = m.TryGetValue("val", out object? v) ? v : null;
                 object? key = m.TryGetValue("key", out object? k) ? k : null;
                 return StructUtils.HasKey(val, key);
-            },
-            flags: new() { ["null"] = true });
+            }, flags: Omni.NoNulls);
     }
 
     [Fact]
     public void SentinelsIsEmptyUnify()
     {
-        Runner.RunSet(Sentinels["isempty_unify"],
-            input => StructUtils.IsEmpty(input),
-            flags: new() { ["null"] = true });
+        _pack.RunSet(Sentinels["isempty_unify"],
+            input => StructUtils.IsEmpty(input), flags: Omni.NoNulls);
     }
 
     [Fact]
     public void SentinelsIsNodeUnify()
     {
-        Runner.RunSet(Sentinels["isnode_unify"],
-            input => StructUtils.IsNode(input),
-            flags: new() { ["null"] = true });
+        _pack.RunSet(Sentinels["isnode_unify"],
+            input => StructUtils.IsNode(input), flags: Omni.NoNulls);
     }
 
     [Fact]
     public void SentinelsStringifyNull()
     {
-        Runner.RunSet(Sentinels["stringify_null"],
-            input => StructUtils.Stringify(input),
-            flags: new() { ["null"] = true });
+        _pack.RunSet(Sentinels["stringify_null"],
+            input => StructUtils.Stringify(input), flags: Omni.NoNulls);
     }
 
     [Fact]
@@ -463,28 +467,28 @@ public class StructTests
     [Fact]
     public void MinorTypify()
     {
-        Runner.RunSet(_minor["typify"],
-            input => StructUtils.Typify(input));
+        _pack.RunSet(_minor["typify"],
+            input => StructUtils.Typify(input), flags: Omni.NoNulls);
     }
 
     [Fact]
     public void MinorTypeName()
     {
-        Runner.RunSet(_minor["typename"],
-            input => StructUtils.TypeName((int)Convert.ToInt64(input)));
+        _pack.RunSet(_minor["typename"],
+            input => StructUtils.TypeName((int)Convert.ToInt64(input)), flags: Omni.Nulls);
     }
 
     [Fact]
     public void MinorSize()
     {
-        Runner.RunSet(_minor["size"],
-            input => StructUtils.Size(input));
+        _pack.RunSet(_minor["size"],
+            input => StructUtils.Size(input), flags: Omni.NoNulls);
     }
 
     [Fact]
     public void MinorSlice()
     {
-        Runner.RunSet(_minor["slice"],
+        _pack.RunSet(_minor["slice"],
             input =>
             {
                 var m = input as Dictionary<string, object?>;
@@ -496,13 +500,13 @@ public class StructTests
                 int? end   = m.TryGetValue("end",   out object? ev) && ev != null
                     ? (int?)Convert.ToInt32(ev) : null;
                 return StructUtils.Slice(val, start, end);
-            });
+            }, flags: Omni.NoNulls);
     }
 
     [Fact]
     public void MinorFlatten()
     {
-        Runner.RunSet(_minor["flatten"],
+        _pack.RunSet(_minor["flatten"],
             input =>
             {
                 var m = input as Dictionary<string, object?>;
@@ -511,20 +515,20 @@ public class StructTests
                 int depth = m.TryGetValue("depth", out object? d) && d != null
                     ? (int)Convert.ToInt64(d) : 1;
                 return StructUtils.Flatten(val ?? [], depth);
-            });
+            }, flags: Omni.Nulls);
     }
 
     // Named filter predicates used in test.json.
     private static readonly Dictionary<string, Func<List<object?>, bool>> FilterChecks = new()
     {
-        ["gt3"] = n => Runner.IsNumericValue(n[1]) && Runner.ToDoubleVal(n[1]) > 3,
-        ["lt3"] = n => Runner.IsNumericValue(n[1]) && Runner.ToDoubleVal(n[1]) < 3,
+        ["gt3"] = n => Omni.IsNum(n[1]) && Omni.ToNum(n[1]) > 3,
+        ["lt3"] = n => Omni.IsNum(n[1]) && Omni.ToNum(n[1]) < 3,
     };
 
     [Fact]
     public void MinorFilter()
     {
-        Runner.RunSet(_minor["filter"],
+        _pack.RunSet(_minor["filter"],
             input =>
             {
                 var m = input as Dictionary<string, object?>;
@@ -534,13 +538,13 @@ public class StructTests
                 if (chk != null && FilterChecks.TryGetValue(chk, out var check))
                     return StructUtils.Filter(val, check);
                 return StructUtils.Filter(val, n => n[1] is string s && s.Length > 0);
-            });
+            }, flags: Omni.Nulls);
     }
 
     [Fact]
     public void MinorPad()
     {
-        Runner.RunSet(_minor["pad"],
+        _pack.RunSet(_minor["pad"],
             input =>
             {
                 var m = input as Dictionary<string, object?>;
@@ -554,13 +558,13 @@ public class StructTests
                 int pad = padding != null ? (int)Convert.ToInt64(padding) : 44;
                 string? pc = padchar as string;
                 return StructUtils.Pad(str, pad, pc);
-            });
+            }, flags: Omni.NoNulls);
     }
 
     [Fact]
     public void MinorJoin()
     {
-        Runner.RunSet(_minor["join"],
+        _pack.RunSet(_minor["join"],
             input =>
             {
                 var m = input as Dictionary<string, object?>;
@@ -569,7 +573,7 @@ public class StructTests
                 object? sep = m.TryGetValue("sep", out object? sv) ? sv : null;
                 bool url = m.TryGetValue("url", out object? uv) && uv is bool b && b;
                 return StructUtils.Join(arr as List<object?> ?? [], sep as string, url);
-            });
+            }, flags: Omni.NoNulls);
     }
 
     // ========================================================================
@@ -587,8 +591,8 @@ public class StructTests
             return val;
         };
 
-        Runner.RunSet(_spec["walk"] is Dictionary<string, object?> ws ? ws["basic"] : null,
-            input => StructUtils.Walk(input, walkpath));
+        _pack.RunSet(_spec["walk"] is Dictionary<string, object?> ws ? ws["basic"] : null,
+            input => StructUtils.Walk(input, walkpath), flags: Omni.Nulls);
     }
 
     [Fact]
@@ -625,20 +629,20 @@ public class StructTests
         // Test after (post-order).
         var logAfter = new List<object?>();
         StructUtils.Walk(testIn, null, makeWalkLog(logAfter));
-        Assert.True(Runner.DeepEqual(outSpec?["after"], logAfter),
+        Assert.True(Omni.DeepEqual(outSpec?["after"], logAfter),
             $"walk-log after:\n  got:  {StructUtils.Stringify(logAfter)}\n  want: {StructUtils.Stringify(outSpec?["after"])}");
 
         // Test before (pre-order).
         var logBefore = new List<object?>();
         StructUtils.Walk(testIn, makeWalkLog(logBefore));
-        Assert.True(Runner.DeepEqual(outSpec?["before"], logBefore),
+        Assert.True(Omni.DeepEqual(outSpec?["before"], logBefore),
             $"walk-log before:\n  got:  {StructUtils.Stringify(logBefore)}\n  want: {StructUtils.Stringify(outSpec?["before"])}");
 
         // Test both.
         var logBoth = new List<object?>();
         var bothCb = makeWalkLog(logBoth);
         StructUtils.Walk(testIn, bothCb, bothCb);
-        Assert.True(Runner.DeepEqual(outSpec?["both"], logBoth),
+        Assert.True(Omni.DeepEqual(outSpec?["both"], logBoth),
             $"walk-log both:\n  got:  {StructUtils.Stringify(logBoth)}\n  want: {StructUtils.Stringify(outSpec?["both"])}");
     }
 
@@ -646,7 +650,7 @@ public class StructTests
     public void WalkDepth()
     {
         var walkSpec = _spec["walk"] as Dictionary<string, object?>;
-        Runner.RunSet(walkSpec?["depth"],
+        _pack.RunSet(walkSpec?["depth"],
             input =>
             {
                 var m = input as Dictionary<string, object?>;
@@ -677,15 +681,14 @@ public class StructTests
 
                 StructUtils.Walk(src, copy, null, md);
                 return top;
-            },
-            flags: new() { ["null"] = false });
+            }, flags: Omni.NoNulls);
     }
 
     [Fact]
     public void WalkCopy()
     {
         var walkSpec = _spec["walk"] as Dictionary<string, object?>;
-        Runner.RunSet(walkSpec?["copy"],
+        _pack.RunSet(walkSpec?["copy"],
             input =>
             {
                 var cur = new object?[MAXDEPTH + 1];
@@ -719,7 +722,7 @@ public class StructTests
 
                 StructUtils.Walk(input, walkcopy);
                 return cur[0];
-            });
+            }, flags: Omni.Nulls);
     }
 
     private const int MAXDEPTH = StructUtils.MAXDEPTH;
@@ -737,7 +740,7 @@ public class StructTests
         if (basic == null) return;
 
         object? result = StructUtils.Merge(basic["in"]);
-        Assert.True(Runner.DeepEqual(basic["out"], result),
+        Assert.True(Omni.DeepEqual(basic["out"], result),
             $"merge-basic: expected {StructUtils.Stringify(basic["out"])} but got {StructUtils.Stringify(result)}");
     }
 
@@ -745,31 +748,31 @@ public class StructTests
     public void MergeCases()
     {
         var mergeSpec = _spec["merge"] as Dictionary<string, object?>;
-        Runner.RunSet(mergeSpec?["cases"],
-            input => StructUtils.Merge(input));
+        _pack.RunSet(mergeSpec?["cases"],
+            input => StructUtils.Merge(input), flags: Omni.Nulls);
     }
 
     [Fact]
     public void MergeArray()
     {
         var mergeSpec = _spec["merge"] as Dictionary<string, object?>;
-        Runner.RunSet(mergeSpec?["array"],
-            input => StructUtils.Merge(input));
+        _pack.RunSet(mergeSpec?["array"],
+            input => StructUtils.Merge(input), flags: Omni.Nulls);
     }
 
     [Fact]
     public void MergeIntegrity()
     {
         var mergeSpec = _spec["merge"] as Dictionary<string, object?>;
-        Runner.RunSet(mergeSpec?["integrity"],
-            input => StructUtils.Merge(input));
+        _pack.RunSet(mergeSpec?["integrity"],
+            input => StructUtils.Merge(input), flags: Omni.Nulls);
     }
 
     [Fact]
     public void MergeDepth()
     {
         var mergeSpec = _spec["merge"] as Dictionary<string, object?>;
-        Runner.RunSet(mergeSpec?["depth"],
+        _pack.RunSet(mergeSpec?["depth"],
             input =>
             {
                 var m = input as Dictionary<string, object?>;
@@ -779,7 +782,7 @@ public class StructTests
                 int? depth = m.TryGetValue("depth", out object? d) && d != null
                     ? (int?)Convert.ToInt32(d) : null;
                 return StructUtils.Merge(val, depth);
-            });
+            }, flags: Omni.Nulls);
     }
 
     [Fact]
@@ -808,7 +811,7 @@ public class StructTests
     [Fact]
     public void MinorSetPath()
     {
-        Runner.RunSet(_minor["setpath"],
+        _pack.RunSet(_minor["setpath"],
             input =>
             {
                 var m = input as Dictionary<string, object?>;
@@ -817,8 +820,7 @@ public class StructTests
                 object? path  = m.TryGetValue("path",  out object? pv) ? pv : null;
                 object? val   = m.TryGetValue("val",   out object? vv) ? vv : null;
                 return StructUtils.SetPath(store, path, val);
-            },
-            flags: new() { ["null"] = true });
+            }, flags: Omni.NoNulls);
     }
 
 
@@ -851,7 +853,7 @@ public class StructTests
         object? expected = basic["out"];
 
         object? result = StructUtils.Inject(val, store);
-        Assert.True(Runner.DeepEqual(expected, result),
+        Assert.True(Omni.DeepEqual(expected, result),
             $"inject-basic: expected {StructUtils.Stringify(expected)} but got {StructUtils.Stringify(result)}");
     }
 
@@ -859,23 +861,28 @@ public class StructTests
     public void InjectString()
     {
         var injectSpec = _spec["inject"] as Dictionary<string, object?>;
-        Runner.RunSet(injectSpec?["string"],
+        _pack.RunSet(injectSpec?["string"],
             input =>
             {
                 var m = input as Dictionary<string, object?>;
                 if (m == null) return null;
                 object? val   = m.TryGetValue("val",   out object? v) ? v : null;
                 object? store = m.TryGetValue("store", out object? s) ? s : null;
-                return StructUtils.Inject(val, store);
-            },
-            flags: new() { ["null"] = true });
+
+                // WITH the modifier. Canonical passes `nullModifier` here and
+                // this port passed nothing, so the modify hook had never once
+                // run - the same gap php's swap found, where a no-op modifier
+                // was passed instead of none at all.
+                return StructUtils.Inject(val, store,
+                    new InjectState { ModifyFn = Omni.NullModifier });
+            }, flags: Omni.Nulls);
     }
 
     [Fact]
     public void InjectDeep()
     {
         var injectSpec = _spec["inject"] as Dictionary<string, object?>;
-        Runner.RunSet(injectSpec?["deep"],
+        _pack.RunSet(injectSpec?["deep"],
             input =>
             {
                 var m = input as Dictionary<string, object?>;
@@ -883,7 +890,7 @@ public class StructTests
                 object? val   = m.TryGetValue("val",   out object? v) ? v : null;
                 object? store = m.TryGetValue("store", out object? s) ? s : null;
                 return StructUtils.Inject(val, store);
-            });
+            }, flags: Omni.Nulls);
     }
 
 
@@ -912,7 +919,7 @@ public class StructTests
         object? expected = basic["out"];
 
         object? result = StructUtils.Transform(data, spec);
-        Assert.True(Runner.DeepEqual(expected, result),
+        Assert.True(Omni.DeepEqual(expected, result),
             $"transform-basic: expected {StructUtils.Stringify(expected)} " +
             $"but got {StructUtils.Stringify(result)}");
     }
@@ -921,125 +928,112 @@ public class StructTests
     public void TransformPaths()
     {
         var tSpec = _spec["transform"] as Dictionary<string, object?>;
-        Runner.RunSet(tSpec?["paths"], input =>
+        _pack.RunSet(tSpec?["paths"], input =>
         {
             var m = input as Dictionary<string, object?>;
             if (m == null) return null;
             object? data = m.TryGetValue("data", out object? d) ? d : null;
             object? spec = m.TryGetValue("spec", out object? s) ? s : null;
             return StructUtils.Transform(data, spec);
-        });
+        }, flags: Omni.Nulls);
     }
 
     [Fact]
     public void TransformCmds()
     {
         var tSpec = _spec["transform"] as Dictionary<string, object?>;
-        Runner.RunSet(tSpec?["cmds"], input =>
+        _pack.RunSet(tSpec?["cmds"], input =>
         {
             var m = input as Dictionary<string, object?>;
             if (m == null) return null;
             object? data = m.TryGetValue("data", out object? d) ? d : null;
             object? spec = m.TryGetValue("spec", out object? s) ? s : null;
             return StructUtils.Transform(data, spec);
-        });
+        }, flags: Omni.Nulls);
     }
 
     [Fact]
     public void TransformEach()
     {
         var tSpec = _spec["transform"] as Dictionary<string, object?>;
-        Runner.RunSet(tSpec?["each"], input =>
+        _pack.RunSet(tSpec?["each"], input =>
         {
             var m = input as Dictionary<string, object?>;
             if (m == null) return null;
             object? data = m.TryGetValue("data", out object? d) ? d : null;
             object? spec = m.TryGetValue("spec", out object? s) ? s : null;
             return StructUtils.Transform(data, spec);
-        });
+        }, flags: Omni.Nulls);
     }
 
     [Fact]
     public void TransformPack()
     {
         var tSpec = _spec["transform"] as Dictionary<string, object?>;
-        Runner.RunSet(tSpec?["pack"], input =>
+        _pack.RunSet(tSpec?["pack"], input =>
         {
             var m = input as Dictionary<string, object?>;
             if (m == null) return null;
             object? data = m.TryGetValue("data", out object? d) ? d : null;
             object? spec = m.TryGetValue("spec", out object? s) ? s : null;
             return StructUtils.Transform(data, spec);
-        });
+        }, flags: Omni.Nulls);
     }
 
     [Fact]
     public void TransformRef()
     {
         var tSpec = _spec["transform"] as Dictionary<string, object?>;
-        Runner.RunSet(tSpec?["ref"], input =>
+        _pack.RunSet(tSpec?["ref"], input =>
         {
             var m = input as Dictionary<string, object?>;
             if (m == null) return null;
             object? data = m.TryGetValue("data", out object? d) ? d : null;
             object? spec = m.TryGetValue("spec", out object? s) ? s : null;
             return StructUtils.Transform(data, spec);
-        });
+        }, flags: Omni.Nulls);
     }
 
     [Fact]
     public void TransformFormat()
     {
         var tSpec = _spec["transform"] as Dictionary<string, object?>;
-        Runner.RunSet(tSpec?["format"], input =>
+        _pack.RunSet(tSpec?["format"], input =>
         {
             var m = input as Dictionary<string, object?>;
             if (m == null) return null;
             object? data = m.TryGetValue("data", out object? d) ? d : null;
             object? spec = m.TryGetValue("spec", out object? s) ? s : null;
             return StructUtils.Transform(data, spec);
-        }, flags: new() { ["null"] = true });
+        }, flags: Omni.NoNulls);
     }
 
     [Fact]
     public void TransformModify()
     {
-        var tSpec  = _spec["transform"] as Dictionary<string, object?>;
-        var modSet = tSpec?["modify"] as Dictionary<string, object?>;
-        if (modSet == null) return;
-
-        var set = modSet.TryGetValue("set", out object? sv) ? sv as List<object?> : null;
-        if (set == null || set.Count == 0) return;
-
-        var entry = set[0] as Dictionary<string, object?>;
-        if (entry == null || !entry.ContainsKey("out")) return;
-
-        var inVal = entry["in"] as Dictionary<string, object?>;
-        if (inVal == null) return;
-
-        object? data     = inVal.TryGetValue("data", out object? d) ? d : null;
-        object? spec     = inVal.TryGetValue("spec", out object? s) ? s : null;
-        object? expected = entry["out"];
-
-        // Modify callback that prefixes every injected string value with "@".
-        Modify myModify = (val, key, parent, inj, store) =>
+        // Was hand-rolled: it reached into `set[0]` and returned early - silently
+        // passing - on four separate conditions, so it tested one entry at best
+        // and nothing at all if the corpus shifted. Now it drives the group,
+        // with canonical's modifier (javascript/test/struct.test.js).
+        var tSpec = _spec["transform"] as Dictionary<string, object?>;
+        _pack.RunSet(tSpec?["modify"], input =>
         {
-            if (val is string sv2 && sv2.Length > 0)
-                StructUtils.SetProp(parent, key, "@" + sv2);
-            return val;
-        };
+            var m = input as Dictionary<string, object?>;
+            object? data = m?.GetValueOrDefault("data");
+            object? spec = m?.GetValueOrDefault("spec");
 
-        var injState = new InjectState { ModifyFn = myModify };
-        object? result = StructUtils.Transform(data, spec, injState);
+            Modify prefix = (val, key, parent, inj, store) =>
+            {
+                if (null != key && null != parent && val is string text)
+                {
+                    StructUtils.SetProp(parent, key, "@" + text);
+                }
+                return val;
+            };
 
-        Assert.True(Runner.DeepEqual(expected, result),
-            $"transform-modify: expected {StructUtils.Stringify(expected)} " +
-            $"but got {StructUtils.Stringify(result)}");
+            return StructUtils.Transform(data, spec, new InjectState { ModifyFn = prefix });
+        }, flags: Omni.Nulls);
     }
-
-    // ========================================================================
-    // GetPath tests
-    // ========================================================================
 
     [Fact]
     public void GetpathExists()
@@ -1052,7 +1046,7 @@ public class StructTests
     public void GetpathBasic()
     {
         var getpathSpec = _spec["getpath"] as Dictionary<string, object?>;
-        Runner.RunSet(getpathSpec?["basic"],
+        _pack.RunSet(getpathSpec?["basic"],
             input =>
             {
                 var m = input as Dictionary<string, object?>;
@@ -1060,14 +1054,14 @@ public class StructTests
                 object? path  = m.TryGetValue("path",  out object? pv) ? pv : null;
                 object? store = m.TryGetValue("store", out object? sv) ? sv : null;
                 return StructUtils.GetPath(store, path);
-            });
+            }, flags: Omni.Nulls);
     }
 
     [Fact]
     public void GetpathRelative()
     {
         var getpathSpec = _spec["getpath"] as Dictionary<string, object?>;
-        Runner.RunSet(getpathSpec?["relative"],
+        _pack.RunSet(getpathSpec?["relative"],
             input =>
             {
                 var m = input as Dictionary<string, object?>;
@@ -1082,14 +1076,14 @@ public class StructTests
                     state.DPath = dpathStr.Split('.').Cast<object?>().ToList();
 
                 return StructUtils.GetPath(store, path, null, state);
-            });
+            }, flags: Omni.Nulls);
     }
 
     [Fact]
     public void GetpathSpecial()
     {
         var getpathSpec = _spec["getpath"] as Dictionary<string, object?>;
-        Runner.RunSet(getpathSpec?["special"],
+        _pack.RunSet(getpathSpec?["special"],
             input =>
             {
                 var m = input as Dictionary<string, object?>;
@@ -1108,7 +1102,7 @@ public class StructTests
                 }
 
                 return StructUtils.GetPath(store, path, null, state);
-            });
+            }, flags: Omni.Nulls);
     }
 
     [Fact]
@@ -1127,7 +1121,7 @@ public class StructTests
                 refStr != null && refMap.TryGetValue(refStr, out object? mapped) ? mapped : val,
         };
 
-        Runner.RunSet(handlerSpec,
+        _pack.RunSet(handlerSpec,
             input =>
             {
                 var m = input as Dictionary<string, object?>;
@@ -1135,7 +1129,7 @@ public class StructTests
                 object? path  = m.TryGetValue("path",  out object? pv) ? pv : null;
                 object? store = m.TryGetValue("store", out object? sv) ? sv : null;
                 return StructUtils.GetPath(store, path, null, state);
-            });
+            }, flags: Omni.Nulls);
     }
 
     // ── minor.jsonify ────────────────────────────────────────────────────────
@@ -1144,7 +1138,7 @@ public class StructTests
     public void MinorJsonify()
     {
         var jsonifySpec = _minor["jsonify"] as Dictionary<string, object?>;
-        Runner.RunSet(jsonifySpec,
+        _pack.RunSet(jsonifySpec,
             input =>
             {
                 var m = input as Dictionary<string, object?>;
@@ -1157,7 +1151,7 @@ public class StructTests
                     return StructUtils.Jsonify(val, indent, offset);
                 }
                 return StructUtils.Jsonify(val);
-            }, new() { ["null"] = true });
+            }, flags: Omni.NoNulls);
     }
 
     // ── transform.apply ──────────────────────────────────────────────────────
@@ -1166,13 +1160,13 @@ public class StructTests
     public void TransformApply()
     {
         var applySpec = (_spec["transform"] as Dictionary<string,object?>)?["apply"] as Dictionary<string, object?>;
-        Runner.RunSetFull(applySpec,
+        _pack.RunSetMap(applySpec,
             input =>
             {
                 object? data = input?.GetValueOrDefault("data");
                 object? spec = input?.GetValueOrDefault("spec");
                 return StructUtils.Transform(data, spec);
-            }, new() { ["null"] = true });
+            }, flags: Omni.Nulls);
     }
 
     // ── validate ─────────────────────────────────────────────────────────────
@@ -1187,67 +1181,67 @@ public class StructTests
     public void ValidateBasic()
     {
         var validateSpec = (_spec["validate"] as Dictionary<string,object?>)?["basic"] as Dictionary<string, object?>;
-        Runner.RunSetFull(validateSpec, input =>
+        _pack.RunSetMap(validateSpec, input =>
         {
             object? data = input?.GetValueOrDefault("data");
             object? spec = input?.GetValueOrDefault("spec");
             return StructUtils.Validate(data, spec);
-        }, new() { ["null"] = true });
+        }, flags: Omni.NoNulls);
     }
 
     [Fact]
     public void ValidateChild()
     {
         var validateSpec = (_spec["validate"] as Dictionary<string,object?>)?["child"] as Dictionary<string, object?>;
-        Runner.RunSetFull(validateSpec, input =>
+        _pack.RunSetMap(validateSpec, input =>
         {
             object? data = input?.GetValueOrDefault("data");
             object? spec = input?.GetValueOrDefault("spec");
             return StructUtils.Validate(data, spec);
-        }, new() { ["null"] = true });
+        }, flags: Omni.Nulls);
     }
 
     [Fact]
     public void ValidateOne()
     {
         var validateSpec = (_spec["validate"] as Dictionary<string,object?>)?["one"] as Dictionary<string, object?>;
-        Runner.RunSetFull(validateSpec, input =>
+        _pack.RunSetMap(validateSpec, input =>
         {
             object? data = input?.GetValueOrDefault("data");
             object? spec = input?.GetValueOrDefault("spec");
             return StructUtils.Validate(data, spec);
-        }, new() { ["null"] = true });
+        }, flags: Omni.Nulls);
     }
 
     [Fact]
     public void ValidateExact()
     {
         var validateSpec = (_spec["validate"] as Dictionary<string,object?>)?["exact"] as Dictionary<string, object?>;
-        Runner.RunSetFull(validateSpec, input =>
+        _pack.RunSetMap(validateSpec, input =>
         {
             object? data = input?.GetValueOrDefault("data");
             object? spec = input?.GetValueOrDefault("spec");
             return StructUtils.Validate(data, spec);
-        }, new() { ["null"] = true });
+        }, flags: Omni.Nulls);
     }
 
     [Fact]
     public void ValidateInvalid()
     {
         var validateSpec = (_spec["validate"] as Dictionary<string,object?>)?["invalid"] as Dictionary<string, object?>;
-        Runner.RunSetFull(validateSpec, input =>
+        _pack.RunSetMap(validateSpec, input =>
         {
             object? data = input?.GetValueOrDefault("data");
             object? spec = input?.GetValueOrDefault("spec");
             return StructUtils.Validate(data, spec);
-        }, new() { ["null"] = true });
+        }, flags: Omni.NoNulls);
     }
 
     [Fact]
     public void ValidateSpecial()
     {
         var validateSpec = (_spec["validate"] as Dictionary<string,object?>)?["special"] as Dictionary<string, object?>;
-        Runner.RunSetFull(validateSpec, input =>
+        _pack.RunSetMap(validateSpec, input =>
         {
             object? data = input?.GetValueOrDefault("data");
             object? spec = input?.GetValueOrDefault("spec");
@@ -1259,7 +1253,7 @@ public class StructTests
                 if (meta != null) injdef.Meta = meta;
             }
             return StructUtils.Validate(data, spec, injdef);
-        }, new() { ["null"] = true });
+        }, flags: Omni.Nulls);
     }
 
     // ── select ───────────────────────────────────────────────────────────────
@@ -1274,55 +1268,55 @@ public class StructTests
     public void SelectBasic()
     {
         var selectSpec = (_spec["select"] as Dictionary<string,object?>)?["basic"] as Dictionary<string, object?>;
-        Runner.RunSet(selectSpec,
+        _pack.RunSet(selectSpec,
             input =>
             {
                 var m = input as Dictionary<string, object?>;
                 object? query = m?.GetValueOrDefault("query");
                 object? obj   = m?.GetValueOrDefault("obj");
                 return (object?)StructUtils.Select(obj, query);
-            }, new() { ["null"] = true });
+            }, flags: Omni.Nulls);
     }
 
     [Fact]
     public void SelectOperators()
     {
         var selectSpec = (_spec["select"] as Dictionary<string,object?>)?["operators"] as Dictionary<string, object?>;
-        Runner.RunSet(selectSpec,
+        _pack.RunSet(selectSpec,
             input =>
             {
                 var m = input as Dictionary<string, object?>;
                 object? query = m?.GetValueOrDefault("query");
                 object? obj   = m?.GetValueOrDefault("obj");
                 return (object?)StructUtils.Select(obj, query);
-            }, new() { ["null"] = true });
+            }, flags: Omni.Nulls);
     }
 
     [Fact]
     public void SelectEdge()
     {
         var selectSpec = (_spec["select"] as Dictionary<string,object?>)?["edge"] as Dictionary<string, object?>;
-        Runner.RunSet(selectSpec,
+        _pack.RunSet(selectSpec,
             input =>
             {
                 var m = input as Dictionary<string, object?>;
                 object? query = m?.GetValueOrDefault("query");
                 object? obj   = m?.GetValueOrDefault("obj");
                 return (object?)StructUtils.Select(obj, query);
-            }, new() { ["null"] = true });
+            }, flags: Omni.Nulls);
     }
 
     [Fact]
     public void SelectAlts()
     {
         var selectSpec = (_spec["select"] as Dictionary<string,object?>)?["alts"] as Dictionary<string, object?>;
-        Runner.RunSet(selectSpec,
+        _pack.RunSet(selectSpec,
             input =>
             {
                 var m = input as Dictionary<string, object?>;
                 object? query = m?.GetValueOrDefault("query");
                 object? obj   = m?.GetValueOrDefault("obj");
                 return (object?)StructUtils.Select(obj, query);
-            }, new() { ["null"] = true });
+            }, flags: Omni.Nulls);
     }
 }
