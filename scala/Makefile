@@ -11,8 +11,17 @@ SRC = src/voxgig_struct.scala
 # Its sources are handed to scala-cli alongside the TESTS only: `make build`
 # and `make lint` compile src/ without it, and nothing published names omni
 # (register 4.13).
-OMNI_CANDIDATES := $(OMNI_HOME) ../../omni ../../../omni /workspace/omni /home/user/omni
-OMNI_DIR := $(firstword $(foreach d,$(OMNI_CANDIDATES),$(if $(wildcard $(d)/spec/fib.json),$(d))))
+#
+# $OMNI_HOME is resolved by the SHELL, not by make's `wildcard`/`foreach`.
+# Those are whitespace-delimited, so a path with a space ("C:/Users/Ann
+# Smith/omni") splits into two candidates that both miss - and the result is
+# not an error but a silent fallthrough to the next candidate, a DIFFERENT
+# checkout. `$$OMNI_HOME` reaches the shell as the raw environment value. The
+# sibling candidates are fixed literals with no spaces, so they stay here.
+OMNI_SIBLINGS := ../../omni ../../../omni /workspace/omni /home/user/omni
+OMNI_DIR := $(or \
+  $(shell [ -n "$$OMNI_HOME" ] && [ -f "$$OMNI_HOME/spec/fib.json" ] && printf '%s' "$$OMNI_HOME"),\
+  $(firstword $(foreach d,$(OMNI_SIBLINGS),$(if $(wildcard $(d)/spec/fib.json),$(d)))))
 
 TESTSRC = $(SRC) test/runner.scala $(OMNI_DIR)/scala/src
 
