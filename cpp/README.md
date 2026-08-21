@@ -25,7 +25,7 @@ explanation), see [`DOCS.md`](./DOCS.md).
 In the monorepo:
 
 ```bash
-git clone https://github.com/voxgig/omni ../../omni   # the test runner
+git clone https://github.com/voxgig/omni ../omni      # the test runner
 
 cd cpp
 make build       # the smoke test alone (no omni)

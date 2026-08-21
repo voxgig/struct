@@ -357,8 +357,10 @@ between `omni::Json` and this port's `Value`.
 
 [`tests/struct_corpus_test.cpp`](./tests/struct_corpus_test.cpp) runs every
 group the corpus defines except the three `condense` ones, which no port
-implements yet: **1358 entries in 72 groups**, plus three single entries that
-are not sets. [`tests/client_test.cpp`](./tests/client_test.cpp) runs the two
+implements yet: **1358 entries in 72 groups**, plus four single entries that
+are not sets - `merge.basic`, `inject.basic`, `transform.basic` and
+`walk.log`. `walk.log` is driven in all three callback configurations
+(before, after, both), as canonical does. [`tests/client_test.cpp`](./tests/client_test.cpp) runs the two
 `check` entries — `DEF.client`, client-scoped options, and `contextify`.
 
 **To change behaviour:** behaviour is canonical. Edit

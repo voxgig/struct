@@ -252,6 +252,45 @@ int main() {
   });
 
   // ===== walk =====
+  // `walk.log` is a single entry, not a set, and carries THREE expected
+  // sequences - before, after and both - one per callback configuration.
+  // It was not run here at all, while DOCS.md claimed every non-condense
+  // group was covered; a callback-ordering regression could not have failed
+  // this suite. Canonical drives all three (javascript/test/struct.test.js
+  // `walk-log`), so this does too.
+  {
+    const omni::Json entry = SPEC.get("walk").get("log");
+    const Value win = bridge::tostruct(entry.get("in"));
+    std::vector<std::string> log;
+    auto walklog = [&log](const Value& key, const Value& val, const Value& parent,
+                          const std::vector<std::string>& path) -> Value {
+      auto pv = std::make_shared<List>();
+      for (const auto& seg : path)
+        pv->push_back(Value(seg));
+      log.push_back("k=" + stringify(key) + ", v=" + stringify(val) + ", p=" + stringify(parent) +
+                    ", t=" + pathify(Value(pv)));
+      return val;
+    };
+    auto logged = [&log]() {
+      auto out = std::make_shared<List>();
+      for (const auto& line : log)
+        out->push_back(Value(line));
+      return Value(out);
+    };
+
+    log.clear();
+    walk_v(win, nullptr, walklog, MAXDEPTH);
+    single("walk.log/after", omni::Json::map({{"out", entry.get("out").get("after")}}), logged());
+
+    log.clear();
+    walk_v(win, walklog);
+    single("walk.log/before", omni::Json::map({{"out", entry.get("out").get("before")}}), logged());
+
+    log.clear();
+    walk_v(win, walklog, walklog, MAXDEPTH);
+    single("walk.log/both", omni::Json::map({{"out", entry.get("out").get("both")}}), logged());
+  }
+
   run("walk", "basic", true, [](const Value& in) {
     return walk_v(in,
                   [](const Value& key, const Value& val, const Value&,

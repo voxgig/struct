@@ -17,6 +17,11 @@ OMNI_CANDIDATES := $(OMNI_HOME) ../../omni ../../../omni /workspace/omni /home/u
 OMNI_DIR := $(firstword $(foreach d,$(OMNI_CANDIDATES),$(if $(wildcard $(d)/spec/fib.json),$(d))))
 OMNI_INC := $(if $(OMNI_DIR),-I $(OMNI_DIR)/cpp/src)
 
+# Placing omni-check above `build` made it the first ordinary target, and so
+# make's default goal: a bare `make` ran the omni probe instead of building
+# the smoke test, and failed outright with no checkout. Say it explicitly.
+.DEFAULT_GOAL := build
+
 .PHONY: build smoke test bench corpus client check_leak sanitize lint tidy format-check clean reset inspect publish omni-check
 
 # Fail with the reason rather than a page of "omni.hpp: No such file".
