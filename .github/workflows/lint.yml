@@ -133,6 +133,9 @@ jobs:
           # JDK running the checkstyle plugin must be 21+ even though the
           # project itself targets release 17.
           java-version: '21'
+      # No omni checkout: `make lint` reaches only the `compile` phase, so it
+      # never compiles the test sources, and it does not activate the `omni`
+      # profile - so the coordinate is not in the model at all.
       - working-directory: ./java
         run: make lint
 

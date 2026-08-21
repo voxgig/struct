@@ -288,10 +288,10 @@ make lint                   # compile + checkstyle:check + spotbugs:check
 
 `mvn test` drives the shared corpus from
 [`../build/test/`](../build/test/) via the runner in
-[`src/test/`](./src/test/) (`Runner.java`, `StructCorpusTest.java`), loading
-the `.aontu` cases with Gson and writing per-file pass counts to
-`target/corpus-scoreboard.json` (committed baseline:
-[`test-baseline.json`](./test-baseline.json)). The library is
+[`src/test/`](./src/test/), driven by the shared runner
+[voxgig/omni](https://github.com/voxgig/omni) - a local checkout resolved by
+[`src/test/Omni.java`](./src/test/Omni.java), which is the only file that
+names it. The library is
 [`src/Struct.java`](./src/Struct.java); `sourceDirectory` is `src/` (flat —
 no `src/main/java`).
 
