@@ -981,10 +981,16 @@ static voxgig_value* tx_FORMAT(voxgig_injection* inj, voxgig_value* val, const c
   if (inj->mode != VOXGIG_M_VAL)
     return voxgig_new_undef();
 
+  /* Canonical reads these with `_lookup`, the LITERAL (Group B) read, not
+     `getprop`: a stored null is the value, not "no value". Reading them with
+     getprop turned `['`$FORMAT`', 'upper', null]` into a format of undefined,
+     which stringifies to "" where canonical answers "NULL". */
   voxgig_value* one = voxgig_new_int(1);
   voxgig_value* two = voxgig_new_int(2);
-  voxgig_value* name = voxgig_getprop(inj->parent, one, NULL);
-  voxgig_value* child = voxgig_getprop(inj->parent, two, NULL);
+  voxgig_value* namev = voxgig_lookup(inj->parent, one);
+  voxgig_value* childv = voxgig_lookup(inj->parent, two);
+  voxgig_value* name = namev ? voxgig_retain(namev) : voxgig_new_undef();
+  voxgig_value* child = childv ? voxgig_retain(childv) : voxgig_new_undef();
   voxgig_release(one);
   voxgig_release(two);
 

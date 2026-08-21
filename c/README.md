@@ -9,9 +9,9 @@
 > through the canonical injector machinery: 13 transform commands, 15
 > validate checkers, 8 select operators.
 >
-> Passes the shared corpus (1232/1232). Run locally with `make build`
-> from `c/`. Per-test pass counts are written to `corpus-scoreboard.json`
-> after each run.
+> Passes the shared corpus (1360/1360), run on
+> [voxgig/omni](https://github.com/voxgig/omni) — the shared test runner,
+> consumed as a local checkout. Run it with `make test` from `c/`.
 
 For motivation, language-neutral concepts, and the cross-language
 parity matrix, see the [top-level README](../README.md) and
@@ -23,13 +23,19 @@ parity matrix, see the [top-level README](../README.md) and
 In the monorepo:
 
 ```bash
+git clone https://github.com/voxgig/omni ../../omni   # the test runner
+
 cd c
-make build       # corpus driver
+make build       # compile the library (no omni)
+make test        # the shared corpus + the client test
 make smoke       # just the smoke test
 make corpus      # just the corpus driver
 make sanitize    # build + run with ASan + UBSan (memory-only; leaks reported)
 make check_leak  # build + run under valgrind
 ```
+
+Set `OMNI_HOME` if the checkout is somewhere else. Only the tests need it —
+nothing in `src/` names omni.
 
 The library is organised across `src/`:
 
@@ -599,25 +605,17 @@ voxgig_value
 
 ## Test status
 
-The corpus runner (`tests/struct_corpus_test.c`) loads
-`../build/test/test.json` and runs every category and named test it
-supports. Current score: **1232 / 1232**. Per-file:
+`tests/struct_corpus_test.c` runs `../build/test/test.json` on
+[voxgig/omni](https://github.com/voxgig/omni), the shared test runner. Every
+group the corpus defines runs except the three `condense` ones, which no port
+implements yet — **1358 entries in 72 groups**, plus `merge.basic`,
+`inject.basic` and `transform.basic` (single entries, not sets) and the two
+`check` entries in `tests/client_test.c`.
 
-```
-minor.*              553 / 553
-walk.*                40 / 40    (basic + depth)
-merge.*              141 / 141
-getpath.*             79 / 79    (basic + relative)
-inject.string         19 / 19
-inject.deep           22 / 22
-transform.*          166 / 166   (paths, cmds, each, pack, ref)
-validate.*           124 / 124
-select.*              88 / 88    (basic, operators, edge, alts)
-```
-
-All categories pass with no remaining failures; `$LIKE` matches via the
-in-tree Thompson NFA regex engine (`voxgig_re_test`), so the
-`select.operators` regex cases pass in full.
+Each group is one assertion: the runner stops at its first failing entry and
+names the index, the entry and both values. `$LIKE` matches via the in-tree
+Thompson NFA regex engine (`voxgig_re_test`), so the `select.operators` regex
+cases pass in full.
 
 
 ## Regex
@@ -681,13 +679,14 @@ See `/design/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
 
 ```bash
 cd c
-make build      # default: compile + run the corpus driver
+make build      # compile the library alone
+make test       # the shared corpus + the client test
 make smoke      # the 13-check API smoke test
 make sanitize   # corpus driver with ASan + UBSan
 make check_leak # corpus driver under valgrind
 make lint       # clang-format --dry-run + clang-tidy
 make format     # apply clang-format in place
-make clean      # remove built binaries / scoreboards
+make clean      # remove built binaries and omni's objects
 ```
 
 

@@ -49,7 +49,7 @@ NFA engine in-tree (c/cpp/lua/rust/zig).
 | **ruby** | 48+ | 15 | 2 | 81/81 pass | Group A/B + UNDEF setval |
 | **lua** | 48+ | 15 | 2 | 74/74 pass | already Group A |
 | **rust** | 48+ | 15 | 2 | corpus pass | already Group A |
-| **c** | 48 | 15 | 2 | 1177/1177 corpus | Group A/B applied |
+| **c** | 48 | 15 | 2 | 1360/1360 corpus | Group A/B applied |
 | **java** | 48 | 15 | 2 | 1300/1300 corpus | full TS-canonical parity |
 | **cpp** | 48 | 15 | 2 | 1268/1268 corpus | full TS-canonical parity |
 | **csharp** | 48 | 15 | 2 | 78/78 corpus | already Group A |
