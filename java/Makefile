@@ -38,7 +38,10 @@ bench:
 	@java -cp bench/build Bench
 
 # Code quality: Checkstyle (style) + SpotBugs (bug pattern detection).
-lint: setup-omni
+# No omni prerequisite: this reaches only the `compile` phase, so it never
+# compiles the test sources, and it does not activate the `omni` profile - so
+# the coordinate is not even in the model. Verified with no checkout present.
+lint:
 	mvn -q -DskipTests compile checkstyle:check spotbugs:check
 
 checkstyle:

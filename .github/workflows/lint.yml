@@ -126,16 +126,11 @@ jobs:
           # JDK running the checkstyle plugin must be 21+ even though the
           # project itself targets release 17.
           java-version: '21'
-      # `make lint` compiles the test sources, which need omni.
-      - name: Checkout voxgig/omni (test runner)
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          repository: voxgig/omni
-          path: .omni
+      # No omni checkout: `make lint` reaches only the `compile` phase, so it
+      # never compiles the test sources, and it does not activate the `omni`
+      # profile - so the coordinate is not in the model at all.
       - working-directory: ./java
         run: make lint
-        env:
-          OMNI_HOME: ${{ github.workspace }}/.omni
 
   lint-kotlin:
     runs-on: ubuntu-latest

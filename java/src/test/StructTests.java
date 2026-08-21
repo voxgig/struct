@@ -1004,23 +1004,26 @@ class StructTests {
     assertEquals(2L, normalize(Struct.transform(new LinkedHashMap<>(), spec)));
   }
 
+  // Drives the corpus group, as canonical does (javascript/test/struct.test.js
+  // `transform-modify`). It used to hard-code this group's single entry, so a
+  // change to it - or a second entry - would never have run here.
   @Test
   void transformModify() {
-    Map<String, Object> data = new LinkedHashMap<>();
-    data.put("x", "X");
-    Map<String, Object> spec = new LinkedHashMap<>();
-    spec.put("z", "`x`");
-    Map<String, Object> opts = new LinkedHashMap<>();
-    opts.put(
-        "modify",
-        (Struct.Modify)
-            (val, key, parent, inj, store) -> {
-              if (key != null && parent instanceof Map<?, ?> p && val instanceof String s) {
-                ((Map<String, Object>) p).put(Objects.toString(key), "@" + s);
-              }
-            });
-    Object got = Struct.transform(data, spec, opts);
-    assertTrue(equalNorm(Map.of("z", "@X"), got));
+    runSet(
+        (Map<String, Object>) transformSpec.get("modify"),
+        v -> {
+          Map<String, Object> m = (Map<String, Object>) v;
+          Map<String, Object> opts = new LinkedHashMap<>();
+          opts.put(
+              "modify",
+              (Struct.Modify)
+                  (val, key, parent, inj, store) -> {
+                    if (key != null && parent instanceof Map<?, ?> p && val instanceof String s) {
+                      ((Map<String, Object>) p).put(Objects.toString(key), "@" + s);
+                    }
+                  });
+          return Struct.transform(m.get("data"), m.get("spec"), opts);
+        });
   }
 
   @Test
