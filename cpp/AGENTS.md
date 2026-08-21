@@ -16,8 +16,9 @@ cpp/
 ├── src/value.hpp            # Value (std::variant), OrderedMap, Sentinel, flags, predicates
 ├── src/value_io.hpp         # hand-written JSON parser/serialiser (no third-party deps)
 ├── src/voxgig_struct.hpp    # main API: all 40 canonical fns + injectors
-├── tests/struct_corpus_test.cpp  # corpus driver (loads ../build/test/)
-├── tests/runner.hpp         # corpus runner helpers
+├── tests/omni_bridge.hpp    # the bridge to voxgig/omni: both value types, both ways
+├── tests/struct_corpus_test.cpp  # the shared corpus, run on the shared runner
+├── tests/client_test.cpp    # the client path (DEF.client, client options, contextify)
 ├── tests/smoke.cpp          # smoke test
 ├── tests/regex_pathological.cpp  # regex edge-case panel
 ├── overview/                # scratch examples (not part of the suite)
@@ -31,18 +32,27 @@ defined below.
 ## Commands
 
 ```bash
-make build        # smoke + corpus driver  (default; == make test)
+make test         # smoke + corpus driver + client test
+make build        # the smoke test alone (needs nothing but this port)
 make smoke        # smoke test only
 make corpus       # corpus driver only
+make client       # client test only
 make sanitize     # corpus under ASan + UBSan
 make check_leak   # corpus under valgrind
 make lint         # clang-tidy + clang-format --dry-run --Werror
 make inspect      # g++ version + located nlohmann/json header
 ```
 
-`make test` needs the header-only `nlohmann/json` on the include path
-(default `/usr/include`; override with `make JSON_INC=/path test`). It is a
-**test-harness-only** dependency — the library proper does not use it.
+- **The corpus runner is voxgig/omni**, header-only and consumed as a local
+  checkout the Makefile finds via `$OMNI_HOME` or beside this repository. It
+  is on the include path of the TEST translation units only; `make build`
+  compiles the smoke test, which does not include it (register 4.13).
+- **`tests/omni_bridge.hpp` converts both value types.** `omni::Json` carries
+  one `double`; `Value` separates integers from decimals. Both draw the same
+  absent/null/value distinction, so nothing is guessed. `omni::Json` is a
+  value type with nothing to share, so the wrapper writes the converted
+  argument back through omni's `runsetflags_args` - that is what lets
+  `match.args` see an in-place `setpath`.
 
 ## Conventions specific to this port
 
