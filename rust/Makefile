@@ -45,9 +45,12 @@ clippy: setup-omni
 	cargo clippy --all-targets --all-features -- -D warnings
 	cd corpus && cargo clippy --all-targets --all-features -- -D warnings
 
-fmt-check:
+# `-p`, not `--all`: corpus is its own workspace root and its path
+# dependencies (`..` and the omni link) are in the graph, so `--all` reformats
+# voxgig/omni's sources and fails on THEIR style. Scope it to this package.
+fmt-check: setup-omni
 	cargo fmt --all -- --check
-	cd corpus && cargo fmt --all -- --check
+	cd corpus && cargo fmt -p voxgig-struct-corpus -- --check
 
 clean:
 	cargo clean
