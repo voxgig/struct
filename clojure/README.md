@@ -9,14 +9,20 @@ port. The behavioural contract is the shared JSON corpus in
 
 ## Status
 
-Complete. Every canonical public function is implemented and the entire
-shared corpus passes (`make test`). Zero third-party runtime dependencies.
+Complete. Every canonical public function is implemented and the shared corpus
+passes in full (`make test`) on [voxgig/omni](https://github.com/voxgig/omni),
+the shared test runner — 1358 entries in 72 groups, plus the two `check`
+entries and three single entries that are not part of any set. Zero
+third-party runtime dependencies, and omni is a test-time classpath entry the
+published jar never names.
 
 ## Requirements
 
 - A JDK (Java 11+).
 - The [Clojure CLI](https://clojure.org/guides/install_clojure)
   (`clojure` / `clj`).
+- For the tests only: a [voxgig/omni](https://github.com/voxgig/omni)
+  checkout, found via `$OMNI_HOME` or beside this repository.
 
 ## Use
 
@@ -69,7 +75,7 @@ See [`DOCS.md`](./DOCS.md) for the full guide and
 ## Develop
 
 ```
-make test     # run the shared corpus
+make test     # run the shared corpus on voxgig/omni (needs $OMNI_HOME)
 make lint     # compile the namespaces
 make inspect  # toolchain versions
 ```

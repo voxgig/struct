@@ -286,6 +286,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # `make lint` type-checks the corpus runner too, and that names
+      # voxgig/omni - a local checkout, not a published package. Same step
+      # lint-go already carries; the library itself never depends on omni.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
@@ -295,6 +303,8 @@ jobs:
           cli: latest
       - working-directory: ./clojure
         run: make lint
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
 
   lint-dart:
     runs-on: ubuntu-latest
