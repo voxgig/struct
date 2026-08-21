@@ -15,6 +15,15 @@ public let MODENAME: [Int: String] = [
   M_VAL: "val",
 ]
 
+// What a placement is CALLED in an error message: both key phases read as
+// "key", and the value phase as "value" (canonical's PLACEMENT map). Distinct
+// from MODENAME, which names the phase itself.
+public let PLACEMENT: [Int: String] = [
+  M_KEYPRE: "key",
+  M_KEYPOST: "key",
+  M_VAL: "value",
+]
+
 // MARK: - Backtick-quoted command names
 
 public let S_BKEY = "`$KEY`"

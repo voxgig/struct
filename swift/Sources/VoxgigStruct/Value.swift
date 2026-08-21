@@ -41,6 +41,17 @@ public final class VMap: @unchecked Sendable {
   }
 }
 
+// MARK: - Errors
+
+/// The exception thrown on an unrecoverable structure error - today, the
+/// errors `transform` and `validate` collect when the caller did not ask for
+/// them to be collected. Canonical throws `new Error(join(errs, ' | '))`.
+public struct StructError: Error, CustomStringConvertible {
+  public let message: String
+  public init(_ message: String) { self.message = message }
+  public var description: String { return message }
+}
+
 // MARK: - Injector / Modify function types
 
 public typealias Injector = (Injection, Value, String, Value) -> Value

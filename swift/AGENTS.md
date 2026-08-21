@@ -33,13 +33,36 @@ files; `../tools/check_parity.py` checks the canonical 48 names are present.
 ## Commands
 
 ```bash
-make build          # swift build
-make test           # swift test --enable-test-discovery
+make build          # swift build - the LIBRARY alone (no omni)
+make test           # the shared corpus, on voxgig/omni
 make lint           # swift-format lint --strict --recursive Sources Tests
 make inspect        # swift --version + package describe
 make clean          # swift package clean + rm -rf .build
 make reset          # clean + rm -rf Package.resolved
 ```
+
+- **The corpus runner is voxgig/omni**, a local checkout `make test` finds via
+  `$OMNI_HOME` or beside this repository and points `.omni-runner` (a
+  gitignored symlink) at. `Package.swift` declares the dependency only when
+  that symlink is there, and only for the TEST target, so `swift build`
+  compiles the library alone (register 4.13). The symlink is not decoration:
+  SwiftPM takes a path dependency's identity from the last path component, and
+  omni's package lives at `omni/swift` - the same basename as this package,
+  which SwiftPM reads as a self-dependency.
+- **`Tests/VoxgigStructTests/CorpusTests.swift` is a bridge plus a list of
+  subjects.** `tostruct` / `toomni` convert between omni's `Json` and this
+  port's `Value`; everything else - the entry loop, `fixjson`, deep equality,
+  `err` and `match` handling - is omni's.
+- **`match.args` needs the arguments back.** omni's `Json` is a value type, so
+  a subject cannot write through the argument list even though `VMap` / `VList`
+  are classes. `runsetflagsargs` takes a subject returning `(args, result)`.
+- **An integral number becomes `.int`.** omni parses every JSON number as a
+  Double; this port's `typify` reads T_integer / T_decimal off the case, so
+  `tostruct` normalises. struct/go's shim and struct/clojure's bridge needed
+  the same (voxgig/omni#13).
+- **`in` fields are read RAW** (`lookup`, not `getprop`): the Group-A rule
+  would turn an authored `alt: null` or `val: null` into absent, and
+  `minor/getprop#51` and `minor/stringify#6` notice.
 
 `make test-swift` / `make lint-swift` from the repo root wrap the same
 commands. **The Swift toolchain is often absent** in CI/dev environments

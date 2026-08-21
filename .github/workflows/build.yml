@@ -524,6 +524,14 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # The test runner is voxgig/omni, consumed as a local checkout (it is
+      # not published); `make test` points a gitignored symlink at it from
+      # OMNI_HOME. The library itself never depends on omni.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       # macOS runners ship a recent Swift toolchain (6.x) with Xcode by
       # default; `swift-actions/setup-swift@v2`'s macOS download path is
       # not reliable for 6.0.2 specifically. Only install on Linux.
@@ -536,7 +544,10 @@ jobs:
         run: swift --version
       - name: Run tests
         working-directory: ./swift
-        run: swift test --enable-test-discovery
+        shell: bash
+        run: make test
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
 
   test-c:
     runs-on: ${{ matrix.os }}
