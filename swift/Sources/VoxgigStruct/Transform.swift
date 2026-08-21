@@ -415,14 +415,17 @@ public func transform_APPLY(_ inj: Injection, _ val: Value, _ ref: String, _ sto
 /// Transform `data` by the by-example `spec`.
 ///
 /// Throws a `StructError` carrying the collected errors, joined with " | ",
-/// unless the caller asked for them (`injdef.collecterrs`). It did NOT throw
-/// before - the errors were collected and then dropped on the floor, which
-/// meant every corpus entry with an `err:` expectation passed vacuously. The
-/// same defect struct/go and struct/php carried.
+/// unless the caller supplied an error sink - canonical's
+/// `collect = null != injdef?.errs`, which here is `Injection.errssupplied`
+/// (assign `inj.errs` to collect). Before, the errors were collected and then
+/// dropped on the floor, which meant every corpus entry with an `err:`
+/// expectation passed vacuously. The same defect struct/go and struct/php
+/// carried.
 public func transform(_ data: Value, _ spec: Value, _ injdef: Injection? = nil) throws -> Value {
+  let collect = injdef?.errssupplied ?? false
   let errs = injdef?.errs ?? VList()
   let out = transformCollect(data, spec, injdef, errs)
-  if 0 < errs.items.count && !(injdef?.collecterrs ?? false) {
+  if 0 < errs.items.count && !collect {
     throw StructError(join(.list(errs), " | "))
   }
   return out

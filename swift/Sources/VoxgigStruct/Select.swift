@@ -21,7 +21,6 @@ public func select_AND(_ inj: Injection, _ val: Value, _ ref: String, _ store: V
       let subInj = Injection(val: .noval, parent: .noval)
       subInj.extra = vstore
       subInj.errs = terrs
-      subInj.collecterrs = true
       subInj.meta = inj.meta
       _ = validateCollect(point, term, subInj, terrs)
       if !terrs.items.isEmpty {
@@ -52,7 +51,6 @@ public func select_OR(_ inj: Injection, _ val: Value, _ ref: String, _ store: Va
       let subInj = Injection(val: .noval, parent: .noval)
       subInj.extra = vstore
       subInj.errs = terrs
-      subInj.collecterrs = true
       subInj.meta = inj.meta
       _ = validateCollect(point, term, subInj, terrs)
       if terrs.items.isEmpty {
@@ -202,7 +200,6 @@ public func select(_ children: Value, _ query: Value) -> Value {
     inj.meta = meta
     inj.extra = .map(extra)
     inj.errs = errs
-    inj.collecterrs = true
     _ = validateCollect(child, clone(q), inj, errs)
     if errs.items.isEmpty { results.append(child) }
   }

@@ -20,13 +20,30 @@ public final class Injection: @unchecked Sendable {
   public var path: [String] = [S_DTOP]
   public var nodes: [Value] = []
   public var handler: Injector = _injecthandler
-  public var errs: VList = VList()
-  // Canonical's `collect` is `null != injdef?.errs` - "the caller supplied a
-  // sink, so hand the errors back instead of throwing". `errs` here is a
-  // non-optional VList that defaults to an empty one, so it cannot carry that
-  // distinction on its own; this flag does. Set it when you pass an `errs` you
-  // intend to read.
-  public var collecterrs: Bool = false
+  // Canonical gates throwing on `collect = null != injdef?.errs` - "the caller
+  // supplied a sink, so hand the errors back instead of throwing". A plain
+  // non-optional `VList` cannot carry that distinction, and reading it off
+  // `errs.items.isEmpty` is wrong too: `validate/special#7` passes an injdef
+  // carrying only `meta` and still expects a throw. So keep the sink optional
+  // behind a non-optional accessor - ASSIGNING `errs` supplies a sink, while
+  // merely reading it (which the collecting internals do constantly) does not.
+  private var _errs: VList? = nil
+  private var _errssupplied: Bool = false
+  public var errs: VList {
+    get {
+      if let e = _errs { return e }
+      let e = VList()
+      _errs = e
+      return e
+    }
+    set {
+      _errs = newValue
+      _errssupplied = true
+    }
+  }
+  /// Canonical's `null != injdef?.errs`: did the caller hand over a sink to
+  /// collect into, rather than expecting a throw?
+  public var errssupplied: Bool { _errssupplied }
   public var meta: VMap = VMap()
   public var dparent: Value = .noval
   public var dpath: [String] = [S_DTOP]
@@ -58,7 +75,6 @@ public final class Injection: @unchecked Sendable {
     cinj.base = base
     cinj.meta = meta
     cinj.errs = errs
-    cinj.collecterrs = collecterrs
     cinj.prior = self
     cinj.dpath = dpath
     cinj.dparent = dparent

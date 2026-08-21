@@ -176,7 +176,6 @@ public func validate_ONE(_ inj: Injection, _ val: Value, _ ref: String, _ store:
       let subInj = Injection(val: .noval, parent: .noval)
       subInj.extra = vstore
       subInj.errs = terrs
-      subInj.collecterrs = true
       subInj.meta = inj.meta
       let vcurrent = validateCollect(inj.dparent, tval, subInj, terrs)
       inj.setval(vcurrent, ancestor: -2)
@@ -346,15 +345,17 @@ public func _validatehandler(_ inj: Injection, _ val: Value, _ ref: String, _ st
 /// Validate `data` against the by-example `spec`.
 ///
 /// Throws a `StructError` carrying the collected errors, joined with " | ",
-/// unless the caller asked for them (`injdef.collecterrs`). It did NOT throw
-/// before - `collect` was `injdef?.errs != nil`, and `Injection.errs` is a
-/// non-optional VList, so `collect` was true whenever an injdef was passed and
-/// the result was discarded either way. Every corpus entry with an `err:`
+/// unless the caller supplied an error sink - canonical's
+/// `collect = null != injdef?.errs`, which here is `Injection.errssupplied`
+/// (assign `inj.errs` to collect). This port read `collect` off
+/// `injdef?.errs != nil`, and `errs` was a non-optional VList, so `collect` was
+/// true whenever ANY injdef was passed and every corpus entry with an `err:`
 /// expectation passed vacuously.
 public func validate(_ data: Value, _ spec: Value, _ injdef: Injection? = nil) throws -> Value {
+  let collect = injdef?.errssupplied ?? false
   let errs = injdef?.errs ?? VList()
   let out = validateCollect(data, spec, injdef, errs)
-  if 0 < errs.items.count && !(injdef?.collecterrs ?? false) {
+  if 0 < errs.items.count && !collect {
     throw StructError(join(.list(errs), " | "))
   }
   return out
@@ -403,6 +404,5 @@ func validateCollect(
   runInj.errs = errs
   // The core, not the throwing wrapper: this `validate` decides what to do
   // with what transform collects.
-  runInj.collecterrs = true
   return transformCollect(data, spec, runInj, errs)
 }

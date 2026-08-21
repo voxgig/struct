@@ -116,7 +116,6 @@ public func inject(_ val: Value, _ store: Value, _ injdef: Injection? = nil) -> 
       if !idef.meta.entries.isEmpty { root.meta = idef.meta }
       if !idef.errs.items.isEmpty { root.errs = idef.errs }
       root.handler = idef.handler
-      root.collecterrs = idef.collecterrs
       // Caller-provided meta/errs override above.
     }
     inj = root
