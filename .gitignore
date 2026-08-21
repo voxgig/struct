@@ -267,7 +267,8 @@ cpp/bench/bench.out
 go/go.work
 go/go.work.sum
 
-# Created by `make -C rust setup-omni`: a link to the voxgig/omni checkout,
-# because Cargo path dependencies are literal and cannot read $OMNI_HOME.
-# CI checks omni out to this path directly. Machine-specific, never committed.
+# A link to the voxgig/omni checkout: created by `make -C rust setup-omni`,
+# because Cargo path dependencies are literal and cannot read $OMNI_HOME, and
+# the path CI checks omni out to for every port that needs one.
+# Machine-specific, never committed.
 .omni
