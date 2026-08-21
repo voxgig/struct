@@ -285,11 +285,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # `make lint` type-checks the corpus runner too, and that names
+      # voxgig/omni - a local checkout, not a published package. Same step
+      # lint-go already carries; the library itself never depends on omni.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
       - uses: haskell-actions/setup@6037f33647c3f17758a2356c80fc4a53d7e0685d # v2
         with:
           ghc-version: '9.10'
       - working-directory: ./haskell
         run: make lint
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
 
   lint-ocaml:
     runs-on: ubuntu-latest
