@@ -64,7 +64,12 @@ NFA engine in-tree (c/cpp/lua/rust/zig).
 | **elixir** | 48 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
 | **haskell** | 48 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
 | **lean** | 48 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
-| **boru** | 48 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
+| **boru** | 48 | 15 | 2 | 1360/1360 corpus \*3 | full TS-canonical parity |
+
+\*3 Boru: the only port that CANNOT move onto voxgig/omni, because omni has
+no boru port to move onto — its 22 ports do not include one. Until it does,
+`test/runner.boru` stays this repository's own copy of the runner algorithm.
+That is a gap in omni, not in this port.
 
 \*1 Zig: previously reported "60/60 passing with a SIGSEGV" was
 misleading — the test process actually died at test 47/60
@@ -143,6 +148,38 @@ The fix unblocked the test process and exposed 7 separate test
 failures the SIGSEGV had been hiding — all now fixed (see \*1 above
 for the `transform.ref[20]` and `cmdEach` follow-up). `zig build test`
 is 60/60 passing.
+
+**The corpus is NOT yet on voxgig/omni here, and this is the port that
+needs it most.** `test/runner.zig` is the weakest driver of the 24: it
+skips the result check on every entry carrying an `err:` field
+(`if (err_field != null) continue;` — 59 of them), never looks at a
+`match:` block (15), never reads `args` or `ctx`, never applies `fixjson`
+to the spec, and runs most groups with `null_flag = false` where canonical
+uses true. `walk.copy`'s subject returns its input unchanged, so that group
+asserts nothing. Four single-entry groups — `walk.log`, `merge.basic`,
+`inject.basic`, `transform.basic` — have no test at all.
+
+The blocker is a **compiler-version gap, not a design one**. This port pins
+Zig **0.13**; omni's Zig port needs **0.16** (`std.Io`, the unmanaged
+`std.ArrayList`), and one source cannot satisfy both. `build.zig` and
+`build.zig.zon` port forward in a few lines, and `test/runner.zig` — the
+file the migration deletes — carries the only `std.fs.cwd()` call, but
+`src/struct.zig` itself does not: `std.StringArrayHashMap` no longer
+exists, and the managed `ArrayList` is gone. Measured, that is **89
+`.init(allocator)` sites and 146 `.append(` sites across 5,201 lines**,
+plus the knock-on type changes wherever a `MapData`/`ListData` is held.
+
+So the order is: migrate this port's std usage to Zig 0.16 first, as its own
+change, then swap the corpus onto omni. omni's side is already waiting —
+`runsetflagsargs` landed for it without a consumer (voxgig/omni#34), because
+the bridge into `JsonValue` is a copy and `match.args` needs the arguments
+handed back.
+
+Two library defects are already visible from reading, and will surface the
+moment the `err:` entries run: `transform` collects no errors at all (so the
+`transform.apply` / `transform.format` error entries cannot be produced), and
+`validate` prefixes its message with `"Invalid data: "`, which canonical does
+not.
 
 \*\* Rust: full TS-canonical parity. Idiomatic `snake_case` API (`get_path`,
 `is_node`, …; see `rust/README.md` for the name table), `Rc<RefCell>`
