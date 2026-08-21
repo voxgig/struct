@@ -61,10 +61,15 @@ NFA engine in-tree (c/cpp/lua/rust/zig).
 | **ocaml** | 48 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
 | **scala** | 48 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
 | **dart** | 48 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
-| **elixir** | 48 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
+| **elixir** | 48 | 15 | 2 | 1355/1360 corpus \*2 | full TS-canonical parity |
 | **haskell** | 48 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
 | **lean** | 48 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
 | **boru** | 48 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
+
+\*2 Elixir: five entries are dropped, named and guarded in
+`elixir/test/runner.exs`. The port has one `nil` for undefined and null, so a
+bare nil result must be read one way; measured entry by entry, reading it as
+null costs 42 and as absent costs 5. Absent, therefore.
 
 \*1 Zig: previously reported "60/60 passing with a SIGSEGV" was
 misleading — the test process actually died at test 47/60

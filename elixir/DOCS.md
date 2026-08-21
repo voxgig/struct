@@ -104,12 +104,24 @@ S.select(S.jt([S.jm(["a", 1]), S.jm(["a", 2])]), S.jm(["a", S.jm(["`$GT`", 1])])
 
 ## Testing
 
-`make test` runs the entire shared corpus (`../build/test/test.json`) through
-the port via `elixir test/runner.exs`. The runner ships a tiny JSON parser that
-reads the corpus straight into heap nodes (via the public `jm` / `jt`
-constructors) — the same native types the library operates on — and uses the
-same runner logic as every other port. Keep it green, keep
-`python3 ../tools/check_parity.py` green, and add no runtime dependencies.
+`make test` runs the shared corpus (`../build/test/test.json`) through the port
+on [voxgig/omni](https://github.com/voxgig/omni), the shared test runner — so
+the entry loop, the comparison and the `err` and `match` handling are literally
+the same code every other port runs. omni is consumed as a local checkout
+`test/runner.exs` finds via `$OMNI_HOME` or beside this repository, and is
+loaded only there: `make lint` compiles `lib/` alone (register 4.13).
+
+Every group the corpus defines runs except the three `condense` ones, which no
+port implements yet — 1358 entries in 72 groups — plus the two `check` entries
+(`DEF.client`, client-scoped options, `contextify`) and three single entries
+that are not part of any set.
+
+Five entries are dropped, each named with its reason and guarded so the corpus
+cannot move under it: this port has one `nil` for both undefined and null, so a
+bare nil coming back from a subject has to be read one way. Measured entry by
+entry, reading it as null costs 42 and reading it as absent costs those 5. Keep
+it green, keep `python3 ../tools/check_parity.py` green, and add no runtime
+dependencies.
 
 ## Implementation notes
 
