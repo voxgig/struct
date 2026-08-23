@@ -50,14 +50,26 @@ defmodule Voxgig.Struct do
     id
   end
 
+  # ensure_heap here too, not only in alloc. A named ETS table belongs to the
+  # process that created it and dies with it — and ExUnit runs each test in its
+  # own process, so a table created by an alloc in one test is gone by the
+  # next. hget then raised ArgumentError ("the table identifier does not refer
+  # to an existing ETS table") from whichever unrelated test happened to run
+  # second, which is why this surfaced as a pipeline/netsim failure rather than
+  # as anything to do with the heap.
   defp hget(id) do
+    ensure_heap()
+
     case :ets.lookup(@heap, id) do
       [{_, c}] -> c
       _ -> nil
     end
   end
 
-  defp hset(id, contents), do: :ets.insert(@heap, {id, contents})
+  defp hset(id, contents) do
+    ensure_heap()
+    :ets.insert(@heap, {id, contents})
+  end
 
   defp vmap_new(pairs), do: {:vmap, alloc(pairs)}
   defp vlist_new(items), do: {:vlist, alloc(items)}
