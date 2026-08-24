@@ -2402,19 +2402,21 @@ pub fn inject(allocator: Allocator, val: JsonValue, store: JsonValue, inj_opt: ?
         if (!inj.skip and (result != .null or val != .null)) {
             _ = try inj.setval(result, 0);
         }
-        inj.skip = false;
         current = result;
     }
 
     inj.val = current;
 
-    // Call modify callback if set (skip suppresses modify too).
+    // Call modify callback if set (skip suppresses modify too — the zig
+    // spelling of the canonical `SKIP !== val` guard around both setval
+    // and modify). Reset skip only after both checks have seen it.
     if (!inj.skip) {
         if (inj.modify) |modify_fn| {
             const mval = getprop(allocator, inj.parent, JsonValue{ .string = inj.key }, .null) catch .null;
             modify_fn(allocator, mval, inj.key, inj.parent, inj, store);
         }
     }
+    inj.skip = false;
 
     // Return value is the top-level result.
     return try getprop(allocator, inj.parent, JsonValue{ .string = S_DTOP }, .null);
@@ -2842,8 +2844,27 @@ fn cmdValidateChildCmd(allocator: Allocator, inj: *Injection, store: JsonValue) 
         while (li < dlen) : (li += 1) {
             try inj.parent.array.append(try clone(allocator, child));
         }
-        inj.key_i = 0;
-        return if (dlen > 0) dparent_val.array.data.items[0] else .null;
+
+        // NOTE: modifying inj! This extends the child value loop in inject
+        // to cover every cloned child.
+        var ckey_i: usize = inj.keys.len;
+        while (ckey_i < inj.parent.array.data.items.len) : (ckey_i += 1) {
+            const ckey = try strkey(allocator, JsonValue{ .integer = @intCast(ckey_i) });
+            inj.keys = appendSlice(allocator, []const u8, inj.keys, ckey) catch inj.keys;
+        }
+
+        // Restart the child value loop at the first element (the loop
+        // increments its signed nkI counter on resume) so that the first
+        // element is also validated against the child template. key_i is
+        // usize: max-usize bit-casts to -1 in inject's nkI — the same wrap
+        // idiom cmdRef already relies on.
+        inj.key_i = std.math.maxInt(usize);
+
+        // Suppress setval (and modify) so the cloned child template stays
+        // in place at the first element for the resumed loop to validate.
+        // This is the zig spelling of the canonical `return SKIP`.
+        inj.skip = true;
+        return .null;
     }
 
     return .null;

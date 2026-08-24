@@ -1991,8 +1991,21 @@ dynamic _validateChild(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
       while (pl.length > n) {
         pl.removeLast();
       }
-      inj.keyi = 0;
-      return getprop(inj.dparent, 0);
+
+      // NOTE: modifying inj! This extends the child value loop in inject
+      // to cover every cloned child.
+      for (var ckeyi = size(keys); ckeyi < size(parent); ckeyi++) {
+        setprop(keys, size(keys), strkey(ckeyi));
+      }
+
+      // Restart the child value loop at the first element (the loop
+      // increments keyi on resume) so that the first element is also
+      // validated against the child template.
+      inj.keyi = -1;
+
+      // SKIP leaves the cloned child template in place at the first
+      // element so the resumed loop can validate it.
+      return SKIP;
     }
   }
   return null;

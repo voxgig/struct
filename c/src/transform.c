@@ -1268,9 +1268,26 @@ static voxgig_value* va_CHILD(voxgig_injection* inj, voxgig_value* val, const ch
     for (size_t i = 0; i < dl->len; i++) {
       voxgig_list_push(voxgig_as_list(inj->parent), voxgig_clone(childtm));
     }
-    inj->keyI = 0;
     voxgig_release(childtm);
-    return dl->len > 0 ? voxgig_retain(dl->items[0]) : voxgig_new_undef();
+
+    /* NOTE: modifying inj! This extends the child value loop in inject
+       to cover every cloned child. */
+    size_t plen = voxgig_list_len(voxgig_as_list(inj->parent));
+    for (size_t ckeyI = inj->keys.len; ckeyI < plen; ckeyI++) {
+      char kbuf[32];
+      snprintf(kbuf, sizeof(kbuf), "%zu", ckeyI);
+      voxgig_strvec_push(&inj->keys, kbuf);
+    }
+
+    /* Restart the child value loop at the first element (the loop
+       increments keyI on resume) so that the first element is also
+       validated against the child template. */
+    inj->keyI = 0;
+    inj->keyI_neg = true;
+
+    /* SKIP leaves the cloned child template in place at the first
+       element so the resumed loop can validate it. */
+    return voxgig_new_skip();
   }
   return voxgig_new_undef();
 }

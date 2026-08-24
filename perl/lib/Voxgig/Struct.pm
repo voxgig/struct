@@ -2415,8 +2415,21 @@ sub validate_CHILD {
             setprop($parent, $n->[0], clone($childtm));
         });
         slice($parent, 0, scalar @{ $inj->{dparent} }, 1);
-        $inj->{keyI} = 0;
-        return getprop($inj->{dparent}, 0);
+
+        # NOTE: modifying inj! This extends the child value loop in inject
+        # to cover every cloned child.
+        for my $ckeyI (size($keys) .. size($parent) - 1) {
+            push @$keys, strkey($ckeyI);
+        }
+
+        # Restart the child value loop at the first element (the loop
+        # increments keyI on resume) so that the first element is also
+        # validated against the child template.
+        $inj->{keyI} = -1;
+
+        # SKIP leaves the cloned child template in place at the first
+        # element so the resumed loop can validate it.
+        return SKIP();
     }
     return NONE();
 }

@@ -1670,14 +1670,23 @@ const validate_CHILD = (inj) => {
       inj.keyI = size(parent)
       return inj.dparent
     }
-    // Clone children abd reset inj key index.
+    // Clone children and reset inj key index.
     // The inject child loop will now iterate over the cloned children,
-    // validating them againt the current list values.
+    // validating them against the current list values.
     items(inj.dparent, (n) => setprop(parent, n[0], clone(childtm)))
     slice(parent, 0, inj.dparent.length, true)
-    inj.keyI = 0
-    const out = getprop(inj.dparent, 0)
-    return out
+    // NOTE: modifying inj! This extends the child value loop in inject
+    // to cover every cloned child.
+    for (let ckeyI = size(keys); ckeyI < size(parent); ckeyI++) {
+      keys.push(strkey(ckeyI))
+    }
+    // Restart the child value loop at the first element (the loop
+    // increments keyI on resume) so that the first element is also
+    // validated against the child template.
+    inj.keyI = -1
+    // SKIP leaves the cloned child template in place at the first
+    // element so the resumed loop can validate it.
+    return SKIP
   }
   return NONE
 }

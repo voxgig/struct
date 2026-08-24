@@ -2006,8 +2006,26 @@ fn validate_child(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
             set_prop(parent.clone(), &Value::Num(n as f64), clone(&childtm));
         }
         slice(parent.clone(), Some(0), Some(dlen as i64), true);
-        inj.borrow_mut().key_i = 0;
-        return get_prop(&dparent, &Value::Num(0.0), Value::Noval);
+
+        // NOTE: modifying inj! This extends the child value loop in inject
+        // to cover every cloned child.
+        {
+            let keys = inj.borrow().keys.clone();
+            let plen = parent.as_list().map(|l| l.borrow().len()).unwrap_or(0);
+            let mut ks = keys.borrow_mut();
+            for ckey_i in ks.len()..plen {
+                ks.push(str_key(Value::Num(ckey_i as f64)));
+            }
+        }
+
+        // Restart the child value loop at the first element (the loop
+        // increments key_i on resume) so that the first element is also
+        // validated against the child template.
+        inj.borrow_mut().key_i = -1;
+
+        // SKIP leaves the cloned child template in place at the first
+        // element so the resumed loop can validate it.
+        return Value::skip();
     }
 
     Value::Noval

@@ -2802,14 +2802,27 @@ local function validate_CHILD(inj)
     end
 
     -- Clone children and reset inj key index.
+    -- The inject child loop will now iterate over the cloned children,
+    -- validating them against the current list values.
     for i = 1, #inj.dparent do
       parent[i] = clone(childtm)
     end
     slice(parent, 0, #inj.dparent, true)
-    inj.keyI = 0
 
-    local out = getprop(inj.dparent, 0)
-    return out
+    -- NOTE: modifying inj! This extends the child value loop in inject
+    -- to cover every cloned child.
+    for ckeyI = size(keys), size(parent) - 1 do
+      table.insert(keys, ckeyI)
+    end
+
+    -- Restart the child value loop at the first element (the loop
+    -- increments keyI on resume) so that the first element is also
+    -- validated against the child template.
+    inj.keyI = -1
+
+    -- SKIP leaves the cloned child template in place at the first
+    -- element so the resumed loop can validate it.
+    return SKIP
   end
 
   return NONE

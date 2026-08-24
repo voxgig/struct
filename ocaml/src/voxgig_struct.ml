@@ -1592,8 +1592,18 @@ and validate_child inj _v _ref _store =
     end else begin
       List.iter (fun (k, _) -> ignore (setprop parent (Str k) (clone childtm))) (items_pairs inj.dparent);
       (match parent with List r -> let n = size inj.dparent in r := (let a = Array.of_list !r in Array.to_list (Array.sub a 0 (min n (Array.length a)))) | _ -> ());
-      inj.keyi <- 0;
-      getprop inj.dparent (Num 0.0)
+      (* NOTE: modifying inj! This extends the child value loop in inject
+         to cover every cloned child. *)
+      for ckeyi = size keys to size parent - 1 do
+        ignore (setprop keys (Num (float_of_int (size keys))) (Str (strkey ~key:(Num (float_of_int ckeyi)) ())))
+      done;
+      (* Restart the child value loop at the first element (the loop
+         increments keyi on resume) so that the first element is also
+         validated against the child template. *)
+      inj.keyi <- -1;
+      (* skip leaves the cloned child template in place at the first
+         element so the resumed loop can validate it. *)
+      skip
     end
   end else Noval
 

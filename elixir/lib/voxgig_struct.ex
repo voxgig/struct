@@ -2249,8 +2249,21 @@ defmodule Voxgig.Struct do
             Enum.each(items_pairs(ig(inj, :dparent)), fn {k, _} -> setprop(parent, k, clone(childtm)) end)
             n = size(ig(inj, :dparent))
             list_set_items(parent, Enum.take(list_items(parent), n))
-            is_(inj, :keyi, 0)
-            getprop(ig(inj, :dparent), 0)
+
+            # NOTE: modifying inj! This extends the child value loop in inject
+            # to cover every cloned child.
+            Enum.each(size(keys)..(size(parent) - 1)//1, fn ckeyi ->
+              setprop(keys, size(keys), strkey(ckeyi))
+            end)
+
+            # Restart the child value loop at the first element (the loop
+            # increments keyi on resume) so that the first element is also
+            # validated against the child template.
+            is_(inj, :keyi, -1)
+
+            # @skip leaves the cloned child template in place at the first
+            # element so the resumed loop can validate it.
+            @skip
         end
 
       true ->
