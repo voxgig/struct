@@ -590,6 +590,14 @@ jobs:
       - name: Install make (Windows)
         if: runner.os == 'Windows'
         run: choco install make -y
+      # scala-cli-setup installs into COURSIER_BIN_DIR, which the Windows
+      # runner's Git-bash shell does not inherit - so `make test` died with
+      # `scala-cli: command not found` before a single test ran, and this
+      # lane has been reporting a toolchain gap as a port failure.
+      - name: Put scala-cli on PATH (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: cygpath -u "$COURSIER_BIN_DIR" >> "$GITHUB_PATH"
       - name: Run tests
         working-directory: ./scala
         shell: bash
