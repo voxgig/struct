@@ -43,17 +43,26 @@ npm run reset        # clean + reinstall + build + test
 `make test` / `make lint` from this dir (or `make test-ts` from the root)
 wrap the same commands.
 
-**`npm test` needs a voxgig/omni checkout, and needs it BUILT.** The corpus
-runner is omni's, consumed as a local checkout that is not published;
-`test/omni.ts` resolves it from `$OMNI_HOME` or a sibling path. Because the
-shim loads omni's COMPILED output, `npm run build` in the omni checkout is a
-prerequisite too - `dist/` is not committed there. There is no `omni-check`
-make target here, and deliberately: `test/omni.ts` already fails with the
-reason, and it distinguishes "no checkout" from "checkout present but not
-built", which a Makefile probe would not.
+**`npm test` needs nothing but `npm ci`.** The corpus runner is omni's,
+taken from npm as the `@voxgig/omni` devDependency; `test/omni.ts` imports
+`@voxgig/omni/compat/struct` directly. There is no checkout to resolve and no
+`OMNI_HOME`. It is pinned EXACTLY - `"0.1.0"`, not `"^0.1.0"`: this repo
+commits no lockfile (`.gitignore` line 150), so the manifest is the only
+thing pinning it, and a 0.x caret floats to anything under 0.2.0. `make
+omni-check` asserts the devDependencies-only isolation register 4.13
+requires.
 
-Only the tests need it. `npm run build`, `npm run lint` and `npm run
-typecheck` do not, and `package.json` gains no dependency.
+The other ports still resolve a checkout, and for them the old rules hold:
+`$OMNI_HOME` or a sibling path, and for a port loading compiled output, a
+built one. This port needs none of that any more.
+
+Only the TESTS need omni. `npm run build`, `npm run lint` and `npm run
+typecheck` do not. `package.json` names it, which it never did before, so
+`make omni-check` (`tools/omni-isolation.js`) asserts it stays a
+devDependency: absent from `dependencies`, absent from the production tree,
+`dev: true` in the lockfile, and named by no shipped file. That is register
+4.13's requirement, and it is checked in CI rather than trusted - which is
+the lesson struct/go paid for.
 
 ## Conventions specific to this port
 

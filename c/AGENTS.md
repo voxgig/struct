@@ -53,8 +53,8 @@ make clean        # remove *.out and omni's objects
 ```
 
 - **The corpus runner is voxgig/omni**, a local checkout the Makefile finds
-  via `$OMNI_HOME` or beside this repository. It is not published, and C has
-  no registry to publish it to. It is compiled into the TEST binaries only;
+  via `$OMNI_HOME` or beside this repository. C has no registry to publish it
+  to (omni's two Node ports are on npm; nothing else is). It is compiled into the TEST binaries only;
   `make build` compiles `src/` alone (register 4.13).
 - **omni is compiled on its own include path**, never with `-I ./src`. `-I`
   directories are searched for angle-bracket includes too, and this port ships

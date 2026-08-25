@@ -33,7 +33,8 @@ export list, so adding/removing a public name there affects parity.
 ## Commands
 
 Tests need a local [voxgig/omni](https://github.com/voxgig/omni) checkout
-(omni is the test runner and is not published): clone it as a sibling of
+(this port has not yet moved to the published `@voxgig/omni-js`): clone it
+as a sibling of
 this repo, or point `OMNI_HOME` at it. Without one, `npm test` aborts
 with `struct: voxgig/omni checkout not found - set OMNI_HOME`.
 

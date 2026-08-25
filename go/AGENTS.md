@@ -35,8 +35,9 @@ directive 1.23; zero third-party runtime dependencies (stdlib only).
 ### Two modules, deliberately
 
 The corpus runner is [voxgig/omni](https://github.com/voxgig/omni), consumed
-as a sibling checkout rather than a `require` — it is not published to a
-proxy, and the library is not to depend on it. `testutil` is a **nested
+as a sibling checkout rather than a `require`. The proxy would serve it —
+`go list -m github.com/voxgig/omni/go@latest` resolves — so what keeps it out
+of the library is mechanism, not absence. `testutil` is a **nested
 module** so that stays true mechanically: `go build ./...` here skips a
 nested module, so the library compiles with no omni checkout at all, and
 `go mod tidy` cannot reach omni and write it into the published dependency

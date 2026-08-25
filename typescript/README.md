@@ -876,11 +876,15 @@ panel and per-port outcomes.
 
 ## Build and test
 
-Building and linting need nothing but this directory. **The tests also need a
-[voxgig/omni](https://github.com/voxgig/omni) checkout, built** — omni is the
-shared corpus runner every port now uses, and it is not published to a package
-registry, so it is consumed as a local checkout. `package.json` gains no
-dependency on it, and `npm run build` never touches it.
+Building, linting and testing need nothing but this directory. The corpus
+runner is [voxgig/omni](https://github.com/voxgig/omni), taken from npm as
+`@voxgig/omni` — a **devDependency**, the way jest or vitest would be — so
+there is no checkout to find and no `OMNI_HOME` to set. `npm run build` never
+touches it, and `tools/omni-isolation.js` proves nothing shipped can reach it
+(register 4.13).
+
+This port is the first to take omni from a registry; the others still resolve
+a checkout.
 
 ```bash
 # once, FROM THE REPOSITORY ROOT: the test runner, as this repo's sibling

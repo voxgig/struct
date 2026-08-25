@@ -1,4 +1,4 @@
-.PHONY: inspect build test bench lint typecheck format-check clean reset audit publish
+.PHONY: inspect build test omni-check bench lint typecheck format-check clean reset audit publish
 
 inspect:
 	@echo "Node.js version:"
@@ -12,6 +12,12 @@ build:
 
 test:
 	npm test
+
+# REGISTER 4.13: omni is a TEST dependency and nothing shipped may reach
+# it. Run AFTER `make build` - one of the four checks reads what npm pack
+# would send, which comes off disk.
+omni-check: build
+	@node tools/omni-isolation.js
 
 # Performance bench: build the library (src project only; the test project
 # needs @types/node which isn't required here) quietly to stderr, then emit one

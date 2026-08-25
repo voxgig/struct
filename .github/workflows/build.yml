@@ -27,33 +27,33 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: ${{ matrix.node-version }}
+      # `npm install`, not `npm ci`: this repo gitignores package-lock.json
+      # (.gitignore:150) and commits no lockfile in any port, so there is
+      # nothing for `npm ci` to install from. What pins @voxgig/omni is the
+      # EXACT version in package.json - "0.1.0", not "^0.1.0", which for a
+      # 0.x would float to anything under 0.2.0.
       - name: Install dependencies
         working-directory: ./typescript
         run: npm install
-      # The test runner is voxgig/omni, consumed as a local checkout (it is
-      # not published); the tests find it via OMNI_HOME. The library itself
-      # never depends on omni - package.json gains nothing.
-      - name: Checkout voxgig/omni (test runner)
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          repository: voxgig/omni
-          path: .omni
-      # omni's TypeScript must be COMPILED before these tests run: `dist/` is
-      # not committed there, and this port loads the shim's built output
-      # (a .ts import from outside the project root would pull omni's whole
-      # source tree into struct's own tsc build). No other port needs this -
-      # the rest load omni's sources directly.
-      - name: Build voxgig/omni typescript
-        working-directory: ./.omni/typescript
-        run: npm install && npm run build
+      # The test runner is voxgig/omni, taken from npm as a devDependency.
+      # This job used to check omni out as a sibling, build it, and point
+      # OMNI_HOME at it; none of that is needed now, and nothing here
+      # reaches a checkout.
       - name: Build
         working-directory: ./typescript
         run: npm run build
+      # REGISTER 4.13: package.json now names omni, which it never did under
+      # the checkout route, so the isolation is asserted rather than assumed.
+      # After the build - one of its four checks reads what npm pack would
+      # send, which comes off disk.
+      - name: omni must not reach the shipped library
+        working-directory: ./typescript
+        run: node tools/omni-isolation.js
+      # Deliberately NO OMNI_HOME. If anything still resolved a checkout,
+      # this is where it would show.
       - name: Run tests
         working-directory: ./typescript
         run: npm test
-        env:
-          OMNI_HOME: ${{ github.workspace }}/.omni
 
   test-javascript:
     runs-on: ${{ matrix.os }}
