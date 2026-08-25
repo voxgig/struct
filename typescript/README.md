@@ -887,20 +887,21 @@ This port is the first to take omni from a registry; the others still resolve
 a checkout.
 
 ```bash
-# once, FROM THE REPOSITORY ROOT: the test runner, as this repo's sibling
-# (or anywhere, if you set $OMNI_HOME to it)
-git clone https://github.com/voxgig/omni ../omni
-(cd ../omni/typescript && npm install && npm run build)   # dist/ is not committed
-
 cd typescript
-npm install
-npm run build              # tsc -> dist/            (no omni needed)
-npm test                   # node --test on dist-test/ (needs omni, built)
+npm install                # @voxgig/omni comes with it, as a devDependency
+npm run build              # tsc -> dist/              (no omni needed)
+npm test                   # node --test on dist-test/ (omni from node_modules)
 ```
 
-[`test/omni.ts`](./test/omni.ts) is the only file that names omni. It resolves
-the checkout from `$OMNI_HOME` first, then sibling paths, and says which of the
-two things is wrong — no checkout found, or a checkout found but not built.
+No clone, and no `$OMNI_HOME`. `npm ci` is NOT an option here: this repo
+gitignores `package-lock.json` (`.gitignore` line 150) and commits none, so
+there is nothing for it to install from — which is also why `@voxgig/omni` is
+pinned to an exact `"0.1.0"` rather than a caret.
+
+[`test/omni.ts`](./test/omni.ts) is the only file that names omni. It imports
+`@voxgig/omni/compat/struct` and makes the corpus path absolute; that last part
+is still needed, because this port's tests compile to two different depths and
+omni's shim resolves a relative path against its caller.
 
 Tests live in [`test/`](./test/) and read fixtures from
 [`../build/test/`](../build/test/).  The test runner consumes the

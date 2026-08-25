@@ -15,8 +15,9 @@ only what is specific to the TypeScript port.
 typescript/
 ├── src/StructUtility.ts   # THE canonical implementation + public API
 ├── src/tsconfig.json      # build config for src
-├── test/omni.ts           # resolves the voxgig/omni checkout; the ONLY file
-│                          #   that names the shared runner
+├── test/omni.ts           # imports @voxgig/omni/compat/struct; the ONLY
+│                          #   file that names the shared runner
+├── tools/omni-isolation.js  # register 4.13 gate: omni stays dev-only
 ├── test/utility/StructUtility.test.ts   # corpus-driven tests
 ├── test/regex_pathological.test.ts      # regex edge-case panel
 ├── test/direct.ts         # developer scratch (run via npm run test-direct)
@@ -43,7 +44,7 @@ npm run reset        # clean + reinstall + build + test
 `make test` / `make lint` from this dir (or `make test-ts` from the root)
 wrap the same commands.
 
-**`npm test` needs nothing but `npm ci`.** The corpus runner is omni's,
+**`npm test` needs nothing but `npm install`.** The corpus runner is omni's,
 taken from npm as the `@voxgig/omni` devDependency; `test/omni.ts` imports
 `@voxgig/omni/compat/struct` directly. There is no checkout to resolve and no
 `OMNI_HOME`. It is pinned EXACTLY - `"0.1.0"`, not `"^0.1.0"`: this repo
