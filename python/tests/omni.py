@@ -1,6 +1,6 @@
 # The shared test runner comes from voxgig/omni, consumed as a local
-# checkout - omni is deliberately not published to a package registry
-# (yet). The checkout is resolved the same way voxgig/sekreto's ports
+# checkout - omni has no PyPI package (the two Node ports are on npm; this
+# one is not). The checkout is resolved the same way voxgig/sekreto's ports
 # resolve it: $OMNI_HOME first, then sibling paths, taking the first
 # directory that carries spec/fib.json. Set OMNI_HOME if yours lives
 # elsewhere. Only the tests depend on omni; the library never does.

@@ -1,5 +1,7 @@
 // The shared test runner comes from voxgig/omni, consumed as a local
-// checkout - omni is deliberately not published to a module proxy (yet).
+// checkout. Note the Go proxy DOES serve it - `go list -m
+// github.com/voxgig/omni/go@latest` resolves - so "not published" is not what
+// keeps it out of the library; the nested module below is.
 //
 // Go resolves it through a workspace rather than a `require`: `make test`
 // writes a gitignored go.work pointing at the sibling checkout ($OMNI_HOME
