@@ -2986,6 +2986,15 @@ def vgl-vchild-elems fn [[i:Integer n:Integer parent:Any childtm:Any] [Any] [
     r
   ]
 ]]
+# Append missing string indexes to the shared keys list (list-mode $CHILD):
+# extends the inject child value loop to cover every cloned child.
+def vgl-vchild-extkeys fn [[i:Integer n:Integer vkeys:Any] [Any] [
+  if (i gte n) [none] [
+    (append [(vg-strkey i)] vkeys) drop
+    def r (vgl-vchild-extkeys (i add 1) n vkeys)
+    r
+  ]
+]]
 
 def vg-v-child fn [[inj:Any val:Any iref:Any store:Any] [Any] [
   def mode (inj get "mode")
@@ -3028,9 +3037,17 @@ def vg-v-child fn [[inj:Any val:Any iref:Any store:Any] [Any] [
           ] [
             (vgl-vchild-elems 0 (vgz dparent) parent childtm) drop
             (vg-slice parent 0 (vgz dparent) true) drop
-            (inj set "keyi" 0) drop
-            def fout (vg-getprop dparent 0 vg-noarg)
-            fout
+            # NOTE: modifying inj! This extends the child value loop in
+            # inject to cover every cloned child.
+            def vkeys (inj get "keys")
+            (vgl-vchild-extkeys (vgz vkeys) (vgz parent) vkeys) drop
+            # Restart the child value loop at the first element (the loop
+            # increments keyi on resume) so that the first element is also
+            # validated against the child template.
+            (inj set "keyi" -1) drop
+            # SKIP leaves the cloned child template in place at the first
+            # element so the resumed loop can validate it.
+            vg-skip-marker
           ]
         ]
       ]

@@ -163,7 +163,30 @@ child: {
 
     { in: { data: {q:a25}, spec: {q:['`$CHILD`','`$MAP`']} },
       err: 'Expected field q to be list, but found string: a25' }
-      
+
+      # The first element of a list must be validated (issue #113)
+    { in: { data: {q:[26]}, spec: {q:['`$CHILD`','`$STRING`']} },
+      err: 'Expected field q.0 to be string, but found integer: 26' }
+
+    { in: { data: {q:[27,a27]}, spec: {q:['`$CHILD`','`$STRING`']} },
+      err: 'Expected field q.0 to be string, but found integer: 27' }
+
+    { in: { data: {q:[28,a28,b28]}, spec: {q:['`$CHILD`','`$STRING`']} },
+      err: 'Expected field q.0 to be string, but found integer: 28' }
+
+    { in: { data: [29,a29], spec: ['`$CHILD`','`$STRING`'] },
+      err: 'Expected field 0 to be string, but found integer: 29' }
+
+      # Elements after the second must also be validated (issue #113)
+    { in: { data: {q:[a30,b30,30]}, spec: {q:['`$CHILD`','`$STRING`']} },
+      err: 'Expected field q.2 to be string, but found integer: 30' }
+
+    { in: { data: {q:[a32,b32,c32]}, spec: {q:['`$CHILD`','`$STRING`']} },
+      out: {q:[a32,b32,c32]} }
+
+    { in: { data: {q:[33,34,35,36]}, spec: {q:['`$CHILD`','`$NUMBER`']} },
+      out: {q:[33,34,35,36]} }
+
       # Child template is a default value defining type
     { in: { data:{a40:{x0:2}}, spec: {a40:{'`$CHILD`':1}}}, out:{a40:{x0:2}} }
     { in: { data:{a41:{x0:3,x1:4}}, spec: {a41:{'`$CHILD`':1}}}, out:{a41:{x0:3,x1:4}} }

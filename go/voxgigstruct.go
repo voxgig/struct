@@ -3812,10 +3812,20 @@ var validate_CHILD Injector = func(
 			inj.Parent = newParent
 		}
 
-		inj.KeyI = 0
+		// NOTE: modifying inj! This extends the child value loop in inject
+		// to cover every cloned child.
+		for ckeyI := len(inj.Keys.List); ckeyI < length; ckeyI++ {
+			inj.Keys.Append(StrKey(ckeyI))
+		}
 
-		out := GetProp(dparent, 0)
-		return out
+		// Restart the child value loop at the first element (the loop
+		// increments KeyI on resume) so that the first element is also
+		// validated against the child template.
+		inj.KeyI = -1
+
+		// SKIP leaves the cloned child template in place at the first
+		// element so the resumed loop can validate it.
+		return SKIP
 	}
 
 	return nil

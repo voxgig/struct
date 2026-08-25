@@ -1559,10 +1559,25 @@ object struct {
         pushErr(inj, invalidTypeMsg(slice(path, VNum(0.0), VNum((size(path) - 1).toDouble)), S_list, typify(inj.dparent), inj.dparent, "V0230"))
         inj.keyi = size(parent); inj.dparent
       } else {
+        // Clone children and reset inj key index.
+        // The inject child loop will now iterate over the cloned children,
+        // validating them against the current list values.
         itemsPairs(inj.dparent).foreach { case (k, _) => setprop(parent, VStr(k), clone(childtm)) }
         parent match { case VList(b) => val n = size(inj.dparent); if (b.length > n) b.remove(n, b.length - n); case _ => }
-        inj.keyi = 0
-        getprop(inj.dparent, VNum(0.0))
+
+        // NOTE: modifying inj! This extends the child value loop in inject
+        // to cover every cloned child.
+        for (ckeyi <- size(keys) until size(parent))
+          setprop(keys, VNum(size(keys).toDouble), VStr(strkey(VNum(ckeyi.toDouble))))
+
+        // Restart the child value loop at the first element (the loop
+        // increments keyi on resume) so that the first element is also
+        // validated against the child template.
+        inj.keyi = -1
+
+        // SKIP leaves the cloned child template in place at the first
+        // element so the resumed loop can validate it.
+        SKIP
       }
     } else Noval
   }

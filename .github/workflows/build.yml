@@ -573,6 +573,10 @@ jobs:
   test-scala:
     runs-on: ${{ matrix.os }}
     strategy:
+      # One leg dying must not cancel its siblings: the windows failure below
+      # has been taking the ubuntu and macos legs down with it, so three jobs
+      # went red for one defect and neither surviving platform reported.
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:

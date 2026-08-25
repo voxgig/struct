@@ -125,8 +125,26 @@ public func validate_CHILD(_ inj: Injection, _ val: Value, _ ref: String, _ stor
         setprop(parent, .int(Int64(i)), clone(childtm))
       }
       slice(parent, 0, dl.items.count, mutate: true)
-      inj.keyI = 0
-      return getprop(inj.dparent, .int(0))
+
+      // NOTE: modifying inj! This extends the child value loop in inject
+      // to cover every cloned child (the loop re-reads `childinj.keys`
+      // after each phase). Canonical's counting `for` is a no-op when the
+      // data list is shorter than the template keys; a Swift `a..<b`
+      // range would trap there, so use `while`.
+      var ckeyI = inj.keys.count
+      while ckeyI < size(parent) {
+        inj.keys.append(strkey(.int(Int64(ckeyI))))
+        ckeyI += 1
+      }
+
+      // Restart the child value loop at the first element (the loop
+      // increments keyI on resume) so that the first element is also
+      // validated against the child template.
+      inj.keyI = -1
+
+      // SKIP leaves the cloned child template in place at the first
+      // element so the resumed loop can validate it.
+      return .sentinel(SKIP)
     }
   }
   return .noval

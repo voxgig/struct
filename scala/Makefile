@@ -4,6 +4,37 @@
 
 SRC = src/voxgig_struct.scala
 
+# KEEP THE `test:` RECIPE FREE OF SHELL METACHARACTERS.
+#
+# GNU make runs a recipe line ITSELF when the line holds no shell
+# metacharacter, and hands it to a shell when it does. On Windows the two
+# disagree about how to find scala-cli: make's own lookup probes the Windows
+# executable extensions and finds the `scala-cli.bat` coursier installs, but
+# the MSYS `sh` make spawns execs only the literal name - it appends `.exe`,
+# never `.bat`. So the SAME bare name works from make and is "command not
+# found" from sh.
+#
+# #109 added a quote here, to survive a spaced $(OMNI_DIR). The quote is a
+# metacharacter; it moved this line onto sh, and the Windows lane died at
+# exit 127 before a single test ran. Removing it restores exactly the
+# command shape that last ran green on Windows (PASS 1360 FAIL 0).
+#
+# The spaced-path case the quote was defending now fails LOUDLY in
+# `omni-check` instead, which is a better trade than a silent quote that
+# breaks the platform.
+#
+# Two things that look like fixes and are not, both measured, do not retry:
+#   - Adding COURSIER_BIN_DIR to PATH. It was already there; the step ran
+#     green and the next step failed identically (a867b03, reverted).
+#   - Probing for the launcher name with `command -v`. On MSYS `command -v`
+#     and `execvp` DISAGREE: the probe reports plain `scala-cli` found, and
+#     exec of that same name then fails.
+#
+# `lint:` (&&) and `inspect:` (|) still carry metacharacters and so remain
+# unusable on Windows. Neither runs in CI; fixing them needs a launcher that
+# sh can exec, not a Makefile change.
+SCALA_CLI ?= scala-cli
+
 # The corpus runner is voxgig/omni, consumed as a local checkout - it is not
 # published to Maven Central. $OMNI_HOME first, then sibling paths, taking the
 # first directory that carries spec/fib.json.
@@ -38,12 +69,20 @@ omni-check:
 	  echo "  git clone https://github.com/voxgig/omni ../../omni"; \
 	  exit 1; \
 	fi
+	@case "$(OMNI_DIR)" in *\ *) \
+	  echo "struct: OMNI_HOME must not contain spaces - the scala test"; \
+	  echo "  recipe passes it unquoted on purpose, because a quote is a"; \
+	  echo "  shell metacharacter and pushes the recipe onto a shell that"; \
+	  echo "  cannot resolve scala-cli on Windows (see the note above)."; \
+	  echo "  got: $(OMNI_DIR)"; \
+	  exit 1;; \
+	esac
 
 # Run the shared JSON corpus through the Scala implementation, on voxgig/omni.
 # (The classic `scala -cp out Runner` runner was removed in Scala 3.5+, where
 # `scala` is the scala-cli launcher and no longer runs a main from a classpath.)
 test: omni-check
-	scala-cli run $(TESTSRC) "$(OMNI_DIR)/scala/src" --main-class Runner
+	$(SCALA_CLI) run $(TESTSRC) $(OMNI_DIR)/scala/src --main-class Runner
 
 # Cross-port performance harness (JSON contract; see build/bench/README.md).
 # Uses the Scala 3 compiler (scalac) + java rather than scala-cli, so it runs
@@ -58,15 +97,15 @@ bench:
 
 # Compiles the LIBRARY alone: nothing shipped names omni (register 4.13).
 build:
-	scala-cli compile $(SRC)
+	$(SCALA_CLI) compile $(SRC)
 
 # "Lint": compile the library (a clean compile means the code type-checks).
 # scalafmt/scalafix can be wired into this target if available.
 lint:
-	scala-cli compile $(SRC) && echo ok
+	$(SCALA_CLI) compile $(SRC) && echo ok
 
 inspect:
-	@scala-cli version 2>&1 | head -2
+	@$(SCALA_CLI) version 2>&1 | head -2
 
 clean:
 	rm -rf out out-lint .scala-build .bsp src/.scala-build src/.bsp
@@ -103,7 +142,7 @@ publish: test
 	fi; \
 	keyfile=$$(mktemp); trap 'rm -f "$$keyfile"' EXIT; \
 	printf '%s' "$$SIGNING_KEY_B64" | base64 -d > "$$keyfile"; \
-	scala-cli --power publish src/voxgig_struct.scala \
+	$(SCALA_CLI) --power publish src/voxgig_struct.scala \
 	  --organization com.voxgig --name struct-scala --project-version "$(VERSION)" \
 	  --description "$(DESC)" --url "https://github.com/voxgig/struct" \
 	  --license "MIT:https://opensource.org/licenses/MIT" \

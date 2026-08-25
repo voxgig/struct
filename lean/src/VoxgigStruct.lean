@@ -2448,8 +2448,20 @@ partial def validateChild : InjectorFn := fun inj _v _ref _store => do
          let xs ← listItems r
          setListItems r (xs.extract 0 (min n.toNat xs.size))
        | _ => pure ())
-      modInj inj (fun dd => { dd with keyi := 0 })
-      getprop d.dparent (.num 0.0)
+      -- NOTE: modifying inj! This extends the child value loop in inject
+      -- to cover every cloned child.
+      let nkeys ← size keys
+      let nparent ← size parent
+      for ckeyI in [nkeys.toNat:nparent.toNat] do
+        let ck := vInt (ckeyI : Int)
+        let _ ← setprop keys ck (.str (strkey ck))
+      -- Restart the child value loop at the first element (the loop
+      -- increments keyi on resume) so that the first element is also
+      -- validated against the child template.
+      modInj inj (fun dd => { dd with keyi := -1 })
+      -- SKIP leaves the cloned child template in place at the first
+      -- element so the resumed loop can validate it.
+      pure SKIP
   else pure .noval
 
 /-- Deep structural equality (validate $EXACT). -/

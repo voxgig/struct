@@ -2012,8 +2012,18 @@ validateChild inj _ _ _ = do
         forM_ ps $ \(k, _) -> do cc <- clone childtm; _ <- setprop parent (VStr k) cc; return ()
         n <- size dp
         case parent of { VList r -> do { a <- readIORef r; writeIORef r (take (min n (length a)) a) }; _ -> return () }
-        writeIORef (iKeyi inj) 0
-        getprop dp (VNum 0)
+        -- NOTE: modifying inj! This extends the child value loop in inject
+        -- to cover every cloned child.
+        ksz0 <- size keys
+        psz3 <- size parent
+        forM_ [ksz0 .. psz3 - 1] $ \ckeyI -> do ksz <- size keys; _ <- setprop keys (VNum (fromIntegral ksz)) (VStr (strkey (VNum (fromIntegral ckeyI)))); return ()
+        -- Restart the child value loop at the first element (the loop
+        -- increments keyI on resume) so that the first element is also
+        -- validated against the child template.
+        writeIORef (iKeyi inj) (-1)
+        -- SKIP leaves the cloned child template in place at the first
+        -- element so the resumed loop can validate it.
+        return skip
   else return VNoval
 
 -- | @$ONE@ validation rule (value must match one of the alternatives).
