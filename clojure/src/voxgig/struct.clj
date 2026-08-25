@@ -1453,8 +1453,16 @@
           :else
           (do (doseq [n (items (ig inj :dparent))] (setprop parent (nth n 0) (clone childtm)))
               (while (> (.size ^List parent) (.size ^List (ig inj :dparent))) (.remove ^List parent (int (dec (.size ^List parent)))))
-              (is! inj :keyI 0)
-              (getprop (ig inj :dparent) 0))))
+              ;; NOTE: modifying inj! This extends the child value loop in inject
+              ;; to cover every cloned child.
+              (doseq [ckeyI (range (size keys) (size parent))] (.add ^List keys (strkey ckeyI)))
+              ;; Restart the child value loop at the first element (the loop
+              ;; increments keyI on resume) so that the first element is also
+              ;; validated against the child template.
+              (is! inj :keyI -1)
+              ;; SKIP leaves the cloned child template in place at the first
+              ;; element so the resumed loop can validate it.
+              SKIP)))
       :else nil)))
 
 (defn- validate_ONE [inj _val _ref store]

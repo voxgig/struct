@@ -2783,8 +2783,23 @@ inline Value CHILD_FN(Injection& inj, const Value& val, const std::string& ref,
     }
     while (pl->size() > dpl->size())
       pl->pop_back();
-    inj.keyI = 0;
-    return getprop(inj.dparent, Value(int64_t(0)));
+
+    // NOTE: modifying inj! This extends the child value loop in inject
+    // to cover every cloned child.
+    if (inj.keys) {
+      for (size_t ckeyI = inj.keys->size(); ckeyI < pl->size(); ckeyI++) {
+        inj.keys->push_back(strkey(Value(static_cast<int64_t>(ckeyI))));
+      }
+    }
+
+    // Restart the child value loop at the first element (the loop
+    // increments keyI on resume) so that the first element is also
+    // validated against the child template.
+    inj.keyI = -1;
+
+    // SKIP leaves the cloned child template in place at the first
+    // element so the resumed loop can validate it.
+    return SKIP();
   }
   return Value::undef();
 }

@@ -2459,10 +2459,20 @@ def validate_CHILD(inj, _val=UNDEF, _ref=UNDEF, _store=UNDEF):
         for n in items(inj.dparent):
             setprop(parent, n[0], clone(childtm))
         del parent[len(inj.dparent) :]
-        inj.keyI = 0
 
-        out = getprop(inj.dparent, 0)
-        return out
+        # NOTE: modifying inj! This extends the child value loop in inject
+        # to cover every cloned child.
+        for ckeyI in range(size(keys), size(parent)):
+            keys.append(strkey(ckeyI))
+
+        # Restart the child value loop at the first element (the loop
+        # increments keyI on resume) so that the first element is also
+        # validated against the child template.
+        inj.keyI = -1
+
+        # SKIP leaves the cloned child template in place at the first
+        # element so the resumed loop can validate it.
+        return SKIP
 
     return UNDEF
 

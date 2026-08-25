@@ -2887,6 +2887,9 @@ namespace Voxgig.Struct
                     return inj.DParent;
                 }
 
+                // Clone children and reset inj key index.
+                // The inject child loop will now iterate over the cloned children,
+                // validating them against the current list values.
                 var dpList = (List<object?>)inj.DParent;
                 foreach (var item in Items(inj.DParent))
                 {
@@ -2894,9 +2897,22 @@ namespace Voxgig.Struct
                 }
 
                 Slice(inj.Parent, 0, dpList.Count, true);
-                inj.KeyI = 0;
 
-                return GetProp(inj.DParent, 0);
+                // NOTE: modifying inj! This extends the child value loop in inject
+                // to cover every cloned child.
+                for (int ckeyI = Size(inj.Keys); ckeyI < Size(inj.Parent); ckeyI++)
+                {
+                    inj.Keys.Add(StrKey(ckeyI));
+                }
+
+                // Restart the child value loop at the first element (the loop
+                // increments keyI on resume) so that the first element is also
+                // validated against the child template.
+                inj.KeyI = -1;
+
+                // SKIP leaves the cloned child template in place at the first
+                // element so the resumed loop can validate it.
+                return SKIP;
             }
 
             return NONE;
