@@ -4,6 +4,30 @@
 
 SRC = src/voxgig_struct.scala
 
+# WHICH scala-cli NAME THE RECIPE SHELL CAN ACTUALLY RUN.
+#
+# GNU make runs a recipe line ITSELF when the line holds no shell
+# metacharacter, and hands it to a shell when it does. The two disagree on
+# Windows: make's own lookup probes the Windows executable extensions, so a
+# bare `scala-cli` finds the `scala-cli.bat` that coursier installs, but the
+# MSYS `sh` that make spawns resolves only the literal name (it appends
+# `.exe`, never `.bat`), so the same bare name is "command not found".
+#
+# That is why this lane went green -> red at #109 without any Windows change:
+# #109 added a quote to `test:` (to survive a spaced $(OMNI_DIR)), the quote
+# is a metacharacter, and the recipe moved onto sh. `lint:` (&&) and
+# `inspect:` (|) have the same problem for anyone running them on Windows.
+# Putting COURSIER_BIN_DIR on PATH does NOT help - the directory was already
+# there - which is why that attempt (a867b03) failed and was reverted.
+#
+# So resolve the name once, here, rather than dropping the quote and
+# reopening the spaced-path bug the quote was added to close.
+ifeq ($(origin SCALA_CLI),undefined)
+SCALA_CLI := $(shell if command -v scala-cli >/dev/null 2>&1; then echo scala-cli; \
+  elif command -v scala-cli.bat >/dev/null 2>&1; then echo scala-cli.bat; \
+  else echo scala-cli; fi)
+endif
+
 # The corpus runner is voxgig/omni, consumed as a local checkout - it is not
 # published to Maven Central. $OMNI_HOME first, then sibling paths, taking the
 # first directory that carries spec/fib.json.
@@ -43,7 +67,7 @@ omni-check:
 # (The classic `scala -cp out Runner` runner was removed in Scala 3.5+, where
 # `scala` is the scala-cli launcher and no longer runs a main from a classpath.)
 test: omni-check
-	scala-cli run $(TESTSRC) "$(OMNI_DIR)/scala/src" --main-class Runner
+	$(SCALA_CLI) run $(TESTSRC) "$(OMNI_DIR)/scala/src" --main-class Runner
 
 # Cross-port performance harness (JSON contract; see build/bench/README.md).
 # Uses the Scala 3 compiler (scalac) + java rather than scala-cli, so it runs
@@ -58,15 +82,15 @@ bench:
 
 # Compiles the LIBRARY alone: nothing shipped names omni (register 4.13).
 build:
-	scala-cli compile $(SRC)
+	$(SCALA_CLI) compile $(SRC)
 
 # "Lint": compile the library (a clean compile means the code type-checks).
 # scalafmt/scalafix can be wired into this target if available.
 lint:
-	scala-cli compile $(SRC) && echo ok
+	$(SCALA_CLI) compile $(SRC) && echo ok
 
 inspect:
-	@scala-cli version 2>&1 | head -2
+	@$(SCALA_CLI) version 2>&1 | head -2
 
 clean:
 	rm -rf out out-lint .scala-build .bsp src/.scala-build src/.bsp
@@ -103,7 +127,7 @@ publish: test
 	fi; \
 	keyfile=$$(mktemp); trap 'rm -f "$$keyfile"' EXIT; \
 	printf '%s' "$$SIGNING_KEY_B64" | base64 -d > "$$keyfile"; \
-	scala-cli --power publish src/voxgig_struct.scala \
+	$(SCALA_CLI) --power publish src/voxgig_struct.scala \
 	  --organization com.voxgig --name struct-scala --project-version "$(VERSION)" \
 	  --description "$(DESC)" --url "https://github.com/voxgig/struct" \
 	  --license "MIT:https://opensource.org/licenses/MIT" \
