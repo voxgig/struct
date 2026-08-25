@@ -88,7 +88,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - run: sudo apt-get update && sudo apt-get install -y shellcheck
+      # The runner image pre-configures third-party apt repos - Google Chrome
+      # among them - that nothing in this repository installs from. When one
+      # of those serves a briefly inconsistent index, `apt-get update` exits
+      # 100 and takes the job with it: struct#117 died on
+      # `dl.google.com/linux/chrome-stable ... Hash Sum mismatch`, in a
+      # shellcheck job, in a server-side testing library.
+      #
+      # `|| true` because apt STILL WRITES every index it did fetch ("they
+      # have been ignored, or old ones used instead"), so the install below
+      # proceeds on a good Ubuntu archive index. If the archive itself failed,
+      # the install fails loudly with the real reason rather than being
+      # masked.
+      #
+      # NOT `-o Dir::Etc::sourceparts=/dev/null`: on Ubuntu 24.04 the MAIN
+      # archive lives in sources.list.d/ubuntu.sources (deb822), so that flag
+      # skips everything and `apt-get install` cannot find the package at all.
+      # Verified: `E: Unable to locate package shellcheck`.
+      - run: |
+          sudo apt-get update || true
+          sudo apt-get install -y shellcheck
       - run: git ls-files -z '*.sh' | xargs -0 -r shellcheck
 
   spelling:
