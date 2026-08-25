@@ -4,29 +4,36 @@
 
 SRC = src/voxgig_struct.scala
 
-# WHICH scala-cli NAME THE RECIPE SHELL CAN ACTUALLY RUN.
+# KEEP THE `test:` RECIPE FREE OF SHELL METACHARACTERS.
 #
 # GNU make runs a recipe line ITSELF when the line holds no shell
-# metacharacter, and hands it to a shell when it does. The two disagree on
-# Windows: make's own lookup probes the Windows executable extensions, so a
-# bare `scala-cli` finds the `scala-cli.bat` that coursier installs, but the
-# MSYS `sh` that make spawns resolves only the literal name (it appends
-# `.exe`, never `.bat`), so the same bare name is "command not found".
+# metacharacter, and hands it to a shell when it does. On Windows the two
+# disagree about how to find scala-cli: make's own lookup probes the Windows
+# executable extensions and finds the `scala-cli.bat` coursier installs, but
+# the MSYS `sh` make spawns execs only the literal name - it appends `.exe`,
+# never `.bat`. So the SAME bare name works from make and is "command not
+# found" from sh.
 #
-# That is why this lane went green -> red at #109 without any Windows change:
-# #109 added a quote to `test:` (to survive a spaced $(OMNI_DIR)), the quote
-# is a metacharacter, and the recipe moved onto sh. `lint:` (&&) and
-# `inspect:` (|) have the same problem for anyone running them on Windows.
-# Putting COURSIER_BIN_DIR on PATH does NOT help - the directory was already
-# there - which is why that attempt (a867b03) failed and was reverted.
+# #109 added a quote here, to survive a spaced $(OMNI_DIR). The quote is a
+# metacharacter; it moved this line onto sh, and the Windows lane died at
+# exit 127 before a single test ran. Removing it restores exactly the
+# command shape that last ran green on Windows (PASS 1360 FAIL 0).
 #
-# So resolve the name once, here, rather than dropping the quote and
-# reopening the spaced-path bug the quote was added to close.
-ifeq ($(origin SCALA_CLI),undefined)
-SCALA_CLI := $(shell if command -v scala-cli >/dev/null 2>&1; then echo scala-cli; \
-  elif command -v scala-cli.bat >/dev/null 2>&1; then echo scala-cli.bat; \
-  else echo scala-cli; fi)
-endif
+# The spaced-path case the quote was defending now fails LOUDLY in
+# `omni-check` instead, which is a better trade than a silent quote that
+# breaks the platform.
+#
+# Two things that look like fixes and are not, both measured, do not retry:
+#   - Adding COURSIER_BIN_DIR to PATH. It was already there; the step ran
+#     green and the next step failed identically (a867b03, reverted).
+#   - Probing for the launcher name with `command -v`. On MSYS `command -v`
+#     and `execvp` DISAGREE: the probe reports plain `scala-cli` found, and
+#     exec of that same name then fails.
+#
+# `lint:` (&&) and `inspect:` (|) still carry metacharacters and so remain
+# unusable on Windows. Neither runs in CI; fixing them needs a launcher that
+# sh can exec, not a Makefile change.
+SCALA_CLI ?= scala-cli
 
 # The corpus runner is voxgig/omni, consumed as a local checkout - it is not
 # published to Maven Central. $OMNI_HOME first, then sibling paths, taking the
@@ -62,12 +69,20 @@ omni-check:
 	  echo "  git clone https://github.com/voxgig/omni ../../omni"; \
 	  exit 1; \
 	fi
+	@case "$(OMNI_DIR)" in *\ *) \
+	  echo "struct: OMNI_HOME must not contain spaces - the scala test"; \
+	  echo "  recipe passes it unquoted on purpose, because a quote is a"; \
+	  echo "  shell metacharacter and pushes the recipe onto a shell that"; \
+	  echo "  cannot resolve scala-cli on Windows (see the note above)."; \
+	  echo "  got: $(OMNI_DIR)"; \
+	  exit 1;; \
+	esac
 
 # Run the shared JSON corpus through the Scala implementation, on voxgig/omni.
 # (The classic `scala -cp out Runner` runner was removed in Scala 3.5+, where
 # `scala` is the scala-cli launcher and no longer runs a main from a classpath.)
 test: omni-check
-	$(SCALA_CLI) run $(TESTSRC) "$(OMNI_DIR)/scala/src" --main-class Runner
+	$(SCALA_CLI) run $(TESTSRC) $(OMNI_DIR)/scala/src --main-class Runner
 
 # Cross-port performance harness (JSON contract; see build/bench/README.md).
 # Uses the Scala 3 compiler (scalac) + java rather than scala-cli, so it runs
