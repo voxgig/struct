@@ -16,7 +16,7 @@
 // RUN IT AFTER `npm run build` - check (d) reads what npm pack would send,
 // which comes off disk.
 
-const { execFileSync } = require('node:child_process')
+const { execSync } = require('node:child_process')
 const { readFileSync } = require('node:fs')
 const Path = require('node:path')
 
@@ -24,15 +24,25 @@ const ROOT = Path.join(__dirname, '..')
 const OMNI = /^@voxgig\/omni(-js)?$/
 const fails = []
 
+// `execSync` with a literal command string, NOT execFile with an args array.
+// On Windows `npm` is a .cmd shim that execFile will neither resolve nor
+// execute - it fails with `spawnSync npm ENOENT`, which is how this was
+// found. Running it through a shell is what works there, and execSync does
+// that on both platforms; passing an ARRAY with `shell: true` would do it
+// too but is deprecated (DEP0190, args concatenated unescaped). Every
+// command here is a fixed literal with no interpolation, so the string form
+// carries no injection surface.
+const RUN = { cwd: ROOT, encoding: 'utf8' }
+
 function read(file) {
   return JSON.parse(readFileSync(Path.join(ROOT, file), 'utf8'))
 }
 
-function npm(args) {
+function npm(command) {
   // `npm ls --omit=dev` EXITS 1 when a named package is absent, so the exit
   // code cannot be the signal - parse the JSON and ignore the status.
   try {
-    return JSON.parse(execFileSync('npm', args, { cwd: ROOT, encoding: 'utf8' }))
+    return JSON.parse(execSync(command, RUN))
   }
   catch (err) {
     const out = err.stdout
@@ -66,7 +76,7 @@ function walk(node, path, seen) {
     }
   }
 }
-walk(npm(['ls', '--omit=dev', '--all', '--json']), [], new Set())
+walk(npm('npm ls --omit=dev --all --json'), [], new Set())
 
 // (c) the lockfile, when there is one, must agree that the entry is
 // dev-only. This repo gitignores package-lock.json (.gitignore:150) and
@@ -93,9 +103,7 @@ if (null != lock) {
 
 // (d) no SHIPPED file may name omni. package.json is exempt - (a) covers it,
 // and devDependencies legitimately names it there.
-const packed = JSON.parse(execFileSync('npm', ['pack', '--dry-run', '--json'], {
-  cwd: ROOT, encoding: 'utf8',
-}))
+const packed = JSON.parse(execSync('npm pack --dry-run --json', RUN))
 const shipped = (packed[0] && packed[0].files) || []
 for (const file of shipped) {
   if ('package.json' === file.path) { continue }
