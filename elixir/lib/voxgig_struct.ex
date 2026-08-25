@@ -26,17 +26,74 @@ defmodule Voxgig.Struct do
   # ---------------------------------------------------------------------------
 
   @heap :vox_struct_heap
+  @heap_owner :vox_struct_heap_owner
 
+  # A named ETS table is owned by the process that created it and dies with
+  # that process. The values here are HANDLES into it - {:vmap, id} - and they
+  # are passed across process boundaries freely: ExUnit runs every test in its
+  # own process, and a generated SDK caches its config in :persistent_term,
+  # which outlives all of them. So the table has to outlive its creator, or a
+  # handle that is still very much alive resolves into a fresh empty table.
+  #
+  # Adding ensure_heap to hget stopped that raising ArgumentError, but a silent
+  # nil turned out to be worse than the raise: the generated config's staleness
+  # check (`usable?`) was written to read the raise as "rebuild me", so once the
+  # raise stopped, a dead handle was cached as good and clone/1 crashed further
+  # down with "Enumerable not implemented for nil of type Atom" - nothing in the
+  # message pointing at the heap.
+  #
+  # The table is therefore owned by a dedicated process that never exits, and
+  # every id stays valid for the life of the VM.
   defp ensure_heap do
     case :ets.whereis(@heap) do
-      :undefined ->
+      :undefined -> start_heap()
+      _ -> :ok
+    end
+  end
+
+  defp start_heap do
+    caller = self()
+
+    spawn(fn ->
+      owner =
         try do
-          :ets.new(@heap, [:set, :public, :named_table])
+          Process.register(self(), @heap_owner)
+          true
         rescue
-          ArgumentError -> :ok
+          ArgumentError -> false
         end
 
-        :ok
+      if owner do
+        case :ets.whereis(@heap) do
+          :undefined -> :ets.new(@heap, [:set, :public, :named_table])
+          _ -> :ok
+        end
+      end
+
+      send(caller, :vox_heap_ready)
+
+      # Hold the table for the life of the VM. This process does nothing else.
+      if owner, do: Process.sleep(:infinity)
+    end)
+
+    receive do
+      :vox_heap_ready -> :ok
+    after
+      5_000 -> :ok
+    end
+
+    await_heap(1_000)
+  end
+
+  # The loser of a registration race reports ready before the winner has
+  # necessarily reached :ets.new, so wait on the table, not on the message.
+  defp await_heap(0), do: :ok
+
+  defp await_heap(n) do
+    case :ets.whereis(@heap) do
+      :undefined ->
+        Process.sleep(1)
+        await_heap(n - 1)
 
       _ ->
         :ok
@@ -50,14 +107,23 @@ defmodule Voxgig.Struct do
     id
   end
 
+  # ensure_heap here too, not only in alloc, so a read can never hit a missing
+  # table. With a permanent owner (above) that should not arise; before there
+  # was one, it raised ArgumentError from whichever unrelated test happened to
+  # run second.
   defp hget(id) do
+    ensure_heap()
+
     case :ets.lookup(@heap, id) do
       [{_, c}] -> c
       _ -> nil
     end
   end
 
-  defp hset(id, contents), do: :ets.insert(@heap, {id, contents})
+  defp hset(id, contents) do
+    ensure_heap()
+    :ets.insert(@heap, {id, contents})
+  end
 
   defp vmap_new(pairs), do: {:vmap, alloc(pairs)}
   defp vlist_new(items), do: {:vlist, alloc(items)}
