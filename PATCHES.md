@@ -164,9 +164,16 @@ path. `OMNI_REF` stays for them and for every other port still on a checkout.
 - `python3 tools/omni_isolation.py` → **all clean**;
   `python3 tools/check_parity.py` → clean.
 
-**lean is not verified**, and the patch cannot change that: there is no Lean
-toolchain in the authoring environment and elan's releases are not reachable
-from it. What is verified is the part that changed — `make omni-fetch` takes
-`lean/v0.1.0`, refuses a tag that no longer resolves to the pinned sha
-(measured with a deliberately wrong pin), is a no-op on a second run, and
-produces an `Omni.lean` byte-identical to omni's file at that tag.
+**lean's suite could not be run locally** — there is no Lean toolchain in the
+authoring environment and elan's releases are not reachable from it — but CI
+has now run it, and it is green on all three OSes at `c580d85`. That is the
+first evidence the `.omni-build`/`lean_lib` restructure builds and passes at
+all, and it is worth being precise about what it does *not* show: that run had
+`$OMNI_HOME` still honoured, so it exercised the copy path, not the fetch. The
+run on `e57b665` onward is the one that takes the tag, because the override
+moved to `$OMNI_LOCAL`.
+
+Verified locally either way — `make omni-fetch` takes `lean/v0.1.0`, refuses a
+tag that no longer resolves to the pinned sha (measured with a deliberately
+wrong pin), is a no-op on a second run, and produces an `Omni.lean`
+byte-identical to omni's file at that tag.
