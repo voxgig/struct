@@ -586,10 +586,18 @@ PORTS = {
     'c':          dict(lib=[], why='header/source tree, no manifest a consumer resolves'),
     'cpp':        dict(lib=[], why='header-only, no manifest a consumer resolves'),
     'scala':      dict(lib=[], why='no build file at all - scala-cli argument lists in the Makefile'),
-    'zig':        dict(lib=[], why='not migrated onto omni (register Phase 1: BLOCKED)'),
-    'boru':       dict(lib=[], why='no manifest a consumer resolves; not migrated '
-                                   'onto omni (register Phase 1: DECISION NEEDED - '
-                                   'omni has no boru port)'),
+    # Both run on omni now, and neither declares it anywhere a consumer
+    # could resolve: zig takes the checkout through a `-Domni` build option
+    # the Makefile sets, boru through a gitignored `.omni-runner` symlink the
+    # Makefile creates. build.zig.zon and the boru source tree name omni in
+    # no way at all, which is what leaves them UNCOVERED here - there is no
+    # declaration to check, only an absence, and this file exists because an
+    # absence is the weaker proof.
+    'zig':        dict(lib=[], why='omni arrives as a -Domni build option, not a '
+                                   'build.zig.zon dependency'),
+    'boru':       dict(lib=[], why='no manifest a consumer resolves; omni arrives '
+                                   'as a Makefile-made symlink the library never '
+                                   'imports'),
 }
 
 
