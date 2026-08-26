@@ -1,4 +1,49 @@
-# One patch to apply locally
+# Two patches to apply locally
+
+**Apply the zig one first — `main` is red without it.**
+
+`.github/workflows/build.yml` is refused to the authoring session's
+credentials:
+
+    ! [remote rejected] refusing to allow an OAuth App to create or update
+      workflow `.github/workflows/build.yml` without `workflow` scope
+
+so both changes live in [`patches/`](./patches) rather than in commits.
+
+**Delete this file and `patches/` once they are applied.** Until the boru one
+is, `boru/AGENTS.md`'s line about `test-boru` describes a job that is not
+there yet.
+
+## 1. `patches/zig-ci-macos-pip-REQUIRED.patch` — main is red without this
+
+    git am patches/zig-ci-macos-pip-REQUIRED.patch
+
+`test-zig (macos-14)` has failed on **every commit since #119 merged**, and
+main's `build.yml` has been red with it — green at `9386f9d`, failing from
+`bd7c63f` (the #119 merge) onward, unbroken.
+
+The Setup Zig step installs `ziglang` with the runner's `python3`, and on
+macos-14 that `python3` is Homebrew's, which marks it externally managed.
+pip does not warn there — it exits 1:
+
+    error: externally-managed-environment
+    × This environment is externally managed
+    ╰─> To install Python packages system-wide, try brew install xyz …
+
+The step dies before zig is ever fetched, so nothing after it runs. PEP 668
+names the venv as the answer, and a venv needs no extra action.
+
+Scoped to macOS on purpose: the ubuntu and windows legs install into the
+runner's tool-cache Python, which carries no such marker and passes today, so
+the patch leaves both byte-identical rather than moving three legs to fix
+one. `lint-zig` needs no change — it is ubuntu-only.
+
+Verified as far as it can be from outside a macOS runner: the mechanism
+itself — venv, then `pip install --require-hashes -r
+.github/zig-requirements.txt`, then the shim — ends in `zig version` printing
+**0.16.0**. The `RUNNER_OS = macOS` branch is the part no local run reaches.
+
+## 2. `patches/boru-ci-REQUIRED.patch`
 
 boru is the only port with **no CI job at all** — which is how it once spent
 two days broken on an engine rename without anyone noticing
@@ -6,23 +51,11 @@ two days broken on an engine rename without anyone noticing
 also needs `OMNI_REF` moved to the omni commit that carries omni's boru port:
 without it there is no runner for `boru/test/omni.boru` to import.
 
-Both changes are in `.github/workflows/build.yml`, which the authoring
-session's credentials are refused on:
-
-    ! [remote rejected] refusing to allow an OAuth App to create or update
-      workflow `.github/workflows/build.yml` without `workflow` scope
-
-So the fix is in [`patches/`](./patches) rather than committed.
-
-**Delete this file and `patches/` once it is applied.** Until it is,
-`boru/AGENTS.md`'s line about `test-boru` describes a job that is not there
-yet.
-
-## `patches/boru-ci-REQUIRED.patch`
-
     git am patches/boru-ci-REQUIRED.patch
 
-(or `git apply` it and commit yourself — the message is in the patch header.)
+(or `git apply` either one and commit yourself — the message is in the patch
+header.) Both apply clean to `main`, and clean in sequence with the zig one
+first; together the workflow parses to 24 jobs, one per port.
 
 Two changes:
 
