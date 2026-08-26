@@ -20,7 +20,7 @@ static-checker regression is then reported in seconds rather than after a
 corpus that takes minutes on an interpreter. One runner, not a matrix, and
 timeout-minutes to match.
 
-OMNI_REF moves to 1ae6606, which carries omni's boru port: without it there
+OMNI_REF moves to 4540a26, which carries omni's boru port: without it there
 is no runner for boru/test/omni.boru to import and the suite does not load.
 ---
  .github/workflows/build.yml | 58 ++++++++++++++++++++++++++++++++++++-
@@ -35,7 +35,7 @@ index a77c97d..04d60e0 100644
    # this repo's commit alone. Bump this one line to take a new omni; that
    # bump is the commit CI re-tests every port against.
 -  OMNI_REF: 064af05a693adfda4400cbdfd85d24d894172da5
-+  OMNI_REF: 1ae660628c4fd3e03a7f4e4ce54684e00b850f24
++  OMNI_REF: 4540a269d7c00d07136982d090348a9c616504d7
  
  jobs:
    test-typescript:
