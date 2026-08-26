@@ -1,26 +1,21 @@
 .PHONY: build test bench lint vet fmt fmt-check clean all audit publish
 
-# voxgig/omni is a sibling checkout, not a published module, and only the
-# tests use it. A go workspace points the test module's import at it,
-# which keeps go.mod free of a path that works on one machine - and free
-# of a dependency the library itself does not have. (The convention
-# voxgig/station and voxgig/sekreto already use.)
+# voxgig/omni comes from its release tag, `go/v0.1.0` - Go requires the
+# directory prefix for a module in a subdirectory - so there is no sibling
+# checkout to find and no $OMNI_HOME to set. testutil/go.mod names it,
+# testutil/go.sum pins it, and the checksum database backs both.
 #
-# The harness is a nested module, ./testutil, for the second half of that:
-# `go build ./...` here skips a nested module, so the library still compiles
-# with no omni checkout and no workspace, and `go mod tidy` cannot resolve
-# omni from the proxy and add it to the published dependency graph. The cost
-# is that ./... no longer reaches the harness, so each target names it.
-OMNI := $(shell \
-  for d in "$$OMNI_HOME" ../../omni ../../../omni /workspace/omni /home/user/omni; do \
-    if [ -n "$$d" ] && [ -f "$$d/spec/fib.json" ]; then \
-      (cd "$$d" && pwd); break; \
-    fi; \
-  done)
-
+# The harness is still a nested module, ./testutil, and that is what keeps
+# the dependency off the library: `go build ./...` here skips a nested
+# module, so voxgigstruct compiles with no omni whatever, and `go mod tidy`
+# in THIS module cannot add voxgig/omni to the published dependency graph.
+# The cost is that ./... no longer reaches the harness, so each target
+# names it.
+#
+# The workspace remains, minus omni: the library's own test files import
+# ./testutil, and a nested module is invisible to its parent without one.
 go.work:
-	@test -n "$(OMNI)" || { echo "struct: voxgig/omni not found - set OMNI_HOME" >&2; exit 1; }
-	go work init . ./testutil $(OMNI)/go
+	go work init . ./testutil
 
 build: go.work
 	go build ./...
