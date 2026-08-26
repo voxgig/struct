@@ -229,21 +229,13 @@ jobs:
           toolchain: stable
       # Register 4.13: the corpus harness is a separate package (`rust/corpus`)
       # so that omni stays out of the library's manifest. Cargo resolves
-      # dev-dependencies even for `cargo build`, so this must pass with NO omni
-      # checkout present - checked here, before omni is fetched.
+      # dev-dependencies even for `cargo build`, so this must pass with omni
+      # nowhere in the library's graph - which is now the only state there is,
+      # since `corpus/Cargo.toml` takes omni from its `rust/v0.1.0` tag and
+      # nothing checks omni out here at all.
       - name: Library builds without omni
         working-directory: ./rust
         run: cargo build --all-targets
-      # The test runner is voxgig/omni, consumed as a local checkout (it is not
-      # published to crates.io). Cargo path dependencies are literal and cannot
-      # read $OMNI_HOME, so the checkout goes exactly where `corpus/Cargo.toml`
-      # names it.
-      - name: Checkout voxgig/omni (test runner)
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          repository: voxgig/omni
-          path: .omni
-          ref: ${{ env.OMNI_REF }}
       - name: Run tests
         working-directory: ./rust
         run: cargo test
@@ -626,15 +618,8 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      # The test runner is voxgig/omni, consumed as a local checkout (it is
-      # not published to Clojars); the Makefile mints an :omni alias for it
-      # from OMNI_HOME. The library itself never depends on omni.
-      - name: Checkout voxgig/omni (test runner)
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          repository: voxgig/omni
-          path: .omni
-          ref: ${{ env.OMNI_REF }}
+      # No omni checkout: deps.edn declares it in the :omni alias at its
+      # clojure/v0.1.0 tag, and the Clojure CLI fetches it.
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
@@ -649,8 +634,6 @@ jobs:
         working-directory: ./clojure
         shell: bash
         run: make test
-        env:
-          OMNI_HOME: ${{ github.workspace }}/.omni
 
   test-dart:
     runs-on: ${{ matrix.os }}
@@ -659,16 +642,8 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      # The test runner is voxgig/omni, consumed as a local checkout (it is
-      # not published to pub.dev); the Makefile writes it into a generated
-      # pubspec_overrides.yaml from OMNI_HOME. The library itself never
-      # depends on omni.
-      - name: Checkout voxgig/omni (test runner)
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          repository: voxgig/omni
-          path: .omni
-          ref: ${{ env.OMNI_REF }}
+      # No omni checkout: pubspec.yaml declares it under dev_dependencies at
+      # its dart/v0.1.0 tag, and `dart pub get` fetches it.
       - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1
       - name: Install make (Windows)
         if: runner.os == 'Windows'
@@ -677,8 +652,6 @@ jobs:
         working-directory: ./dart
         shell: bash
         run: make test
-        env:
-          OMNI_HOME: ${{ github.workspace }}/.omni
 
   test-elixir:
     runs-on: ${{ matrix.os }}
@@ -782,15 +755,10 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      # The test runner is voxgig/omni, consumed as a local checkout (it is
-      # not published); the Makefile copies its Omni.lean in from OMNI_HOME.
-      # The library itself never depends on omni.
-      - name: Checkout voxgig/omni (test runner)
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          repository: voxgig/omni
-          path: .omni
-          ref: ${{ env.OMNI_REF }}
+      # No omni checkout: `make omni-fetch` takes Omni.lean from the
+      # lean/v0.1.0 tag and refuses a tag that no longer resolves to the
+      # pinned sha. Its override is $OMNI_LOCAL, which nothing else sets -
+      # deliberately not $OMNI_HOME, so an ambient one cannot defeat the pin.
       # elan directly rather than leanprover/lean-action: that action is a
       # composite that references actions/cache/restore@v5 and
       # actions/cache/save@v5 BY TAG internally, and the SHA-pin rule applies
@@ -843,8 +811,6 @@ jobs:
         working-directory: ./lean
         shell: bash
         run: make test
-        env:
-          OMNI_HOME: ${{ github.workspace }}/.omni
 
   # boru had no CI job at all, which is how the port spent two days broken on
   # an engine rename without anyone noticing (boru/AGENTS.md records it). This
