@@ -1,0 +1,16 @@
+# Zig toolchain for CI, pinned by wheel digest.
+#
+# The previous route downloaded the tarball from ziglang.org and checked a
+# per-platform SHA-256. `ziglang` on PyPI is the Zig Software Foundation's
+# own redistribution of those same tarballs, and pip gives the integrity
+# check a package manager rather than a hand-rolled `sha256sum -c`. One
+# `--hash` per platform wheel; pip picks the wheel for the runner and
+# refuses anything whose digest is not listed here.
+#
+# Bump: change the version and replace all three digests together. Get them
+# with `pip download ziglang==<v> --no-deps --only-binary=:all: --platform
+# <tag>` for manylinux_2_12_x86_64, macosx_12_0_arm64 and win_amd64.
+ziglang==0.16.0 \
+    --hash=sha256:9fcda73f62b851dd72a54b710ad40a209896db14cfb13649e62191243556342b \
+    --hash=sha256:b61e5413c49508d9d62e5dcea543e3af491594154d74a00ff52f84ed508260cc \
+    --hash=sha256:089a16a4eb5a2f45151993342f8fabad24ff1a0723dc146642895c29208a3939
