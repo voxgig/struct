@@ -25,8 +25,11 @@ of `design/REGEX_API.md`).
 - **The corpus runner is voxgig/omni, taken from its release tag** — fetched
   by `make omni-fetch` from `lean/v0.1.0`, checked against the sha this repo
   pins (a moved tag is an error, not a silent swap), and COPIED into
-  `.omni-build/`. `$OMNI_HOME` still overrides it, for working against an omni
-  that is not released yet.
+  `.omni-build/`. `$OMNI_LOCAL` overrides it, for working against an omni
+  that is not released yet — **not** `$OMNI_HOME`, which every other port here
+  reads and CI exports repo-wide: honouring that would mean the only automated
+  Lean runs silently took the checkout while this Makefile advertised a pinned
+  tag. An override has to be asked for.
 
   **Copied and not `[[require]]`d, deliberately.** Lake has no test-scoped
   dependency: a `[[require]]` is resolved by everyone who requires THIS

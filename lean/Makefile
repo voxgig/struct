@@ -24,15 +24,26 @@ OMNI_TAG := lean/v0.1.0
 # than silently testing against a different omni.
 OMNI_SHA := a710fcda81b0a72a5e98322cac0af56ab8c2d959
 
-# $OMNI_HOME overrides the fetch, for working against an omni that is not
-# released yet. Unset - the normal case - the tag is what is used, and
-# `.omni-build/.source` records which, so a second run needs no network.
+# $OMNI_LOCAL overrides the fetch, for working against an omni that is not
+# released yet: it names a checkout directly. Unset - the normal case - the
+# tag is what is used, and `.omni-build/.source` records which, so a second
+# run needs no network.
+#
+# NOT $OMNI_HOME, deliberately. Every other port in this repo reads that
+# variable, and CI exports it repo-wide, so honouring it here would mean the
+# only automated Lean runs silently took the checkout while this Makefile
+# advertised a pinned tag - an override nobody asked for, defeating the pin
+# in exactly the place it matters most. An override has to be asked for.
 omni-fetch:
-	@if [ -n "$$OMNI_HOME" ] && [ -f "$$OMNI_HOME/lean/Omni.lean" ]; then \
+	@if [ -n "$$OMNI_LOCAL" ]; then \
+	  if [ ! -f "$$OMNI_LOCAL/lean/Omni.lean" ]; then \
+	    echo "struct: OMNI_LOCAL=$$OMNI_LOCAL has no lean/Omni.lean"; \
+	    exit 1; \
+	  fi; \
 	  mkdir -p .omni-build; \
-	  cp "$$OMNI_HOME/lean/Omni.lean" .omni-build/Omni.lean; \
-	  printf 'OMNI_HOME %s\n' "$$OMNI_HOME" > .omni-build/.source; \
-	  echo "omni: $$OMNI_HOME (OMNI_HOME override)"; \
+	  cp "$$OMNI_LOCAL/lean/Omni.lean" .omni-build/Omni.lean; \
+	  printf 'OMNI_LOCAL %s\n' "$$OMNI_LOCAL" > .omni-build/.source; \
+	  echo "omni: $$OMNI_LOCAL (OMNI_LOCAL override)"; \
 	  exit 0; \
 	fi; \
 	if [ "$$(cat .omni-build/.source 2>/dev/null)" = "$(OMNI_TAG) $(OMNI_SHA)" ]; then exit 0; fi; \

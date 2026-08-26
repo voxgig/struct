@@ -13,8 +13,24 @@
 # `dev_dependencies` is also the isolation device: pub never installs one
 # transitively, so nothing that depends on voxgig_struct can reach omni
 # (register 4.13), and `make build` still proves it by compiling lib/ alone.
+#
+# pubspec.lock is NOT tracked - this package is a published library, and pub
+# says a library does not commit one - so the lock cannot be the pin here the
+# way corpus/Cargo.lock is for rust. The tag is resolved afresh on every
+# checkout, and a moved tag would silently swap the runner. So the resolved
+# ref is checked against a sha pinned here, which is the same guarantee
+# clojure gets from `:git/sha` and lean from its fetch check.
+OMNI_TAG := dart/v0.1.0
+OMNI_SHA := a710fcda81b0a72a5e98322cac0af56ab8c2d959
+
 deps:
 	@dart pub get >/dev/null
+	@got=$$(awk '/^  voxgig_omni:/{f=1} f && /resolved-ref:/{print $$2; exit}' pubspec.lock); \
+	if [ "$$got" != "$(OMNI_SHA)" ]; then \
+	  echo "struct: $(OMNI_TAG) resolved to $$got, not the pinned $(OMNI_SHA)."; \
+	  echo "  The tag moved. Refusing to test against an omni this repo has not pinned."; \
+	  exit 1; \
+	fi
 
 # Run the shared JSON corpus through the Dart implementation, on voxgig/omni.
 test: deps

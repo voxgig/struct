@@ -1,32 +1,35 @@
-From a6ec1a37103fe6e7a21c45a40f714c6790281fac Mon Sep 17 00:00:00 2001
+From 6ae50017226921184c13493c7ea80735533ba692 Mon Sep 17 00:00:00 2001
 From: Richard Rodger <richard@ricebridge.com>
-Date: Wed, 26 Aug 2026 22:27:40 +0000
+Date: Wed, 26 Aug 2026 22:41:59 +0000
 Subject: [PATCH] ci: clojure, dart, lean and rust take omni from its tag, not
  a checkout
 
-Each of the four now names a release in its own manifest, so the omni
-checkout these eight jobs carried is dead weight - and for lean it was worse
-than dead: `make omni-fetch` treats $OMNI_HOME as an OVERRIDE, so leaving it
-set would have quietly kept that job on a floating checkout while the
-Makefile advertised a pinned tag.
+Each of the four names a release in its own manifest now, so the omni
+checkout these eight jobs carry is redundant: all four ignore it.
 
 test-rust keeps its "Library builds without omni" step and gains meaning from
 the change: there is no longer any state in which omni is present for the
 library's build, since corpus/Cargo.toml resolves it from `rust/v0.1.0`.
 
 lint-dart drops its `dart pub get &&` prefix too - `make lint` depends on the
-`deps` target now, which is the same command.
+`deps` target now, which is the same command plus the sha check.
 
 test-haskell and lint-haskell keep their checkout: haskell is not part of this
 change and reaches omni by `-i$(OMNI_DIR)/haskell/src` on the test search path.
 OMNI_REF stays for them and for the other ports still on a checkout.
+
+Note this is tidying, not a correctness fix. It once was one: lean's Makefile
+took $OMNI_HOME as an override, so these jobs would have tested the checkout
+while advertising a pinned tag. That override is now $OMNI_LOCAL, which
+nothing else sets, so an ambient $OMNI_HOME cannot defeat the pin whether or
+not this patch is applied.
 ---
  .github/workflows/build.yml | 58 ++++++++-----------------------------
  .github/workflows/lint.yml  | 47 ++++++------------------------
  2 files changed, 21 insertions(+), 84 deletions(-)
 
 diff --git a/.github/workflows/build.yml b/.github/workflows/build.yml
-index c604c57..ec793f9 100644
+index c604c57..d4738d7 100644
 --- a/.github/workflows/build.yml
 +++ b/.github/workflows/build.yml
 @@ -229,21 +229,13 @@ jobs:
@@ -123,10 +126,10 @@ index c604c57..ec793f9 100644
 -          repository: voxgig/omni
 -          path: .omni
 -          ref: ${{ env.OMNI_REF }}
-+      # No omni checkout, and no OMNI_HOME: `make omni-fetch` takes Omni.lean
-+      # from the lean/v0.1.0 tag and refuses a tag that no longer resolves to
-+      # the pinned sha. OMNI_HOME would OVERRIDE that, so setting it here
-+      # would quietly put this job back on a floating checkout.
++      # No omni checkout: `make omni-fetch` takes Omni.lean from the
++      # lean/v0.1.0 tag and refuses a tag that no longer resolves to the
++      # pinned sha. Its override is $OMNI_LOCAL, which nothing else sets -
++      # deliberately not $OMNI_HOME, so an ambient one cannot defeat the pin.
        # elan directly rather than leanprover/lean-action: that action is a
        # composite that references actions/cache/restore@v5 and
        # actions/cache/save@v5 BY TAG internally, and the SHA-pin rule applies
@@ -140,7 +143,7 @@ index c604c57..ec793f9 100644
    # boru had no CI job at all, which is how the port spent two days broken on
    # an engine rename without anyone noticing (boru/AGENTS.md records it). This
 diff --git a/.github/workflows/lint.yml b/.github/workflows/lint.yml
-index 368040c..36971c5 100644
+index 368040c..bc7296b 100644
 --- a/.github/workflows/lint.yml
 +++ b/.github/workflows/lint.yml
 @@ -93,13 +93,8 @@ jobs:
@@ -219,8 +222,8 @@ index 368040c..36971c5 100644
 -          repository: voxgig/omni
 -          path: .omni
 -          ref: ${{ env.OMNI_REF }}
-+      # voxgig/omni - fetched from its lean/v0.1.0 tag by `make omni-fetch`.
-+      # No OMNI_HOME either: it would override the tag.
++      # voxgig/omni - fetched from its lean/v0.1.0 tag by `make omni-fetch`,
++      # whose override is $OMNI_LOCAL rather than $OMNI_HOME.
        # elan directly rather than leanprover/lean-action: that action is a
        # composite that references actions/cache/restore@v5 and
        # actions/cache/save@v5 BY TAG internally, and the SHA-pin rule applies

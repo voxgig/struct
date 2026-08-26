@@ -36,11 +36,12 @@ someone applies it:
   not have it, and `make test` fails on the import rather than on the corpus.
 
 - **CI still checks omni out for clojure, dart, lean and rust,** which is
-  now wrong rather than merely redundant. Those four take omni from its
-  release tags; the `test-lean` job in particular sets `$OMNI_HOME`, and
-  `make omni-fetch` treats that as an OVERRIDE — so until the third patch
-  lands, that job tests against the checkout while the Makefile advertises a
-  pinned tag. The other three ignore the checkout and pass either way.
+  redundant rather than wrong: all four take omni from its release tags and
+  ignore the checkout entirely. (An earlier draft of this note said `test-lean`
+  would silently take the checkout through `$OMNI_HOME`. That was true, and is
+  the reason `lean/Makefile` now takes its override from `$OMNI_LOCAL`
+  instead — a variable nothing else sets, so an ambient `$OMNI_HOME` can no
+  longer defeat the pin. The patch is tidying now, not a correctness fix.)
 
 `boru/AGENTS.md`'s line about `test-boru` describes the job the boru patch
 adds, so it reads ahead of the workflow until that patch lands.
@@ -138,9 +139,11 @@ verified is everything they run.
 
 clojure, dart, lean and rust now take omni from its `<port>/v0.1.0` release
 tags, so the omni checkout eight jobs carried is dead weight — and in
-`test-lean` and `lint-lean` it is worse than dead, because `$OMNI_HOME`
-overrides the tag. The patch drops the checkout step and the `OMNI_HOME`
-environment from all eight.
+`test-lean` and `lint-lean` it was once worse than dead — `$OMNI_HOME` used
+to override the tag — which is why `lean/Makefile` now takes its override from
+`$OMNI_LOCAL`, a variable nothing else sets. The patch drops the checkout step
+and the `OMNI_HOME` environment from all eight; with that override closed at
+the source it is tidying, not a fix.
 
 `test-haskell` and `lint-haskell` keep theirs: haskell is not part of that
 change and reaches omni through `-i$(OMNI_DIR)/haskell/src` on the test search
