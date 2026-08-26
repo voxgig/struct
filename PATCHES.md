@@ -1,109 +1,30 @@
-# Pending patches
+# Unfinished work carried as a patch
 
-Work from the omni-migration session of 2026-08-26 that could not be pushed
-from where it was written. Everything referenced here lives in
-[`patches/`](./patches).
+One incomplete change lives in [`patches/`](./patches) rather than on a
+branch: the zig-onto-omni migration. **Delete this file and `patches/` once
+that migration lands.**
 
-**Delete this file and `patches/` once the two REQUIRED patches have landed.**
+The two patches that used to sit beside it are done and gone —
+`ci: pin the omni checkout, and take Zig 0.16 from PyPI` here, and
+`ci: pin struct-compat's checkout` in voxgig/omni. They existed only because
+the session that wrote them could not push to `.github/workflows/`.
 
-## Why these are patches and not commits
+## `patches/zig-omni-swap-WIP.patch` + `patches/zig-test-omni.zig`
 
-The session's credentials could not write `.github/workflows/`:
-
-    ! [remote rejected] refusing to allow an OAuth App to create or update
-      workflow `.github/workflows/build.yml` without `workflow` scope
-
-The GitHub MCP server was the fallback route, and the only way to open a pull
-request from that environment; its token had expired and the session was
-non-interactive, so the OAuth flow could not be run. Everything that does
-*not* touch a workflow file was pushed normally.
-
-## 1. `patches/struct-workflows-REQUIRED.patch` — this repo
-
-**Apply this first: the branch is red without it.** The zig port now needs
-Zig 0.16 and CI still installs 0.13, because the step that installs 0.16 is
-in a workflow file. The observed failure is
-`zig/build.zig.zon:2:14: error: expected string literal` — 0.13 wants a
-string for `.name` and gets the enum literal 0.14 made mandatory. It fails
-there and never reaches `minimum_zig_version`.
-
-    git apply patches/struct-workflows-REQUIRED.patch
-    git commit -am "ci: pin the omni checkout, and take Zig 0.16 from PyPI"
-
-`git apply`, not `git am` — this one is `git diff` output, so it carries no
-commit message of its own.
-
-Four changes, all in `build.yml` and `lint.yml`:
-
-- **Pins the omni checkout.** 21 checkouts in `build.yml` and 9 in
-  `lint.yml` floated on omni's default branch with no `ref:` among them. Now
-  one workflow-level `OMNI_REF` per file. Unpinned, a run that started before
-  its paired omni PR merged tested against the *old* omni and stayed red
-  until someone re-ran it, and a green run here was never reproducible from
-  this repo's commit alone.
-- **Installs Zig 0.16 from PyPI**, reading digests from
-  `.github/zig-requirements.txt` (already on the branch). ziglang.org and
-  every community mirror were unreachable from the authoring environment, so
-  the official tarball digests could not be read; the PyPI wheels are the Zig
-  Software Foundation's own redistribution and were hashed directly. Verified
-  end to end on Linux — macOS and Windows are pinned by digest but were not
-  exercised.
-- **Drops the `zig-version` matrix axis.** A matrix of one, and the version
-  now lives in the pin file.
-- **Takes omni out of `test-go`'s workspace.** That job built its own
-  three-module workspace (`go work init . ./testutil $GITHUB_WORKSPACE/.omni/go`)
-  independently of the Makefile, and a `use` directive makes a module a root
-  module for the build — so the local checkout shadowed the `v0.1.0`
-  requirement and the job never verified that the tag resolves, that its
-  checksums match, or that the released API passes the corpus. Two modules
-  now, and the omni checkout step is gone from that job. Raised by Codex
-  review on #119; verified by running CI's exact sequence with
-  `OMNI_HOME=/nonexistent` and no checkout present.
-
-`macos-14` and the `DEVELOPER_DIR` export are deliberately untouched: both
-exist for 0.13's SDK problem, 0.16 is expected not to need them, and expected
-is not measured.
-
-## 2. `patches/omni-struct-compat-pin-REQUIRED.patch` — voxgig/omni
-
-Register item 0.5. Verified to apply cleanly to omni main at `1343c34`.
-
-    cd ../omni
-    git fetch origin
-    git checkout -B struct-compat-pin origin/main
-    git am ../struct/patches/omni-struct-compat-pin-REQUIRED.patch
-
-`git am` here, not `git apply` — this one is `format-patch` output and
-carries its own message and authorship.
-
-It is ten lines, so hand-editing `.github/workflows/ci.yml` is just as quick:
-an `env:` block with `STRUCT_REF: 9386f9de38eb6901f17994e7c0089443c3e656f3`
-between `permissions:` and `jobs:`, and `ref: ${{ env.STRUCT_REF }}` under
-`path: .struct` in the `struct-compat` job.
-
-omni's `struct-compat` job runs this repo's JavaScript suite against omni's
-runner and checked this repo out unpinned, so a red run there had three
-possible causes — omni regressed, struct's library regressed, or struct's
-tests moved — of which only the first is actionable in omni. Pinning leaves
-one.
-
-## 3. `patches/zig-omni-swap-WIP.patch` + `patches/zig-test-omni.zig` — INCOMPLETE
-
-The zig-onto-omni migration itself. **63 of 72 groups pass.** Apply only to
-continue the work:
+**63 of 72 groups pass.** Apply only to continue the work:
 
     git apply patches/zig-omni-swap-WIP.patch
     cp patches/zig-test-omni.zig zig/test/omni.zig
 
-To run it (no zig 0.16 package is available through apt or ziglang.org from a
-restricted network; PyPI carries the official build):
+To run it — the zig port needs 0.16, and PyPI carries the official build
+where a restricted network may not reach ziglang.org:
 
     pip install ziglang==0.16.0
     printf '#!/bin/sh\nexec python3 -m ziglang "$@"\n' > /usr/local/bin/zig
     chmod +x /usr/local/bin/zig
     cd zig && zig build test -Domni=/path/to/omni/zig/src/omni.zig
 
-What it contains:
+### What it contains
 
 - `zig/test/omni.zig` — the bridge and subject factory. Both sides already
   speak `std.json.Value`, so the conversion is this port's own
@@ -146,15 +67,14 @@ ignored every `match:` block (15), and discarded `validate`'s error message
 entirely. That is the pattern the omni register records for the other swaps —
 swift surfaced ten library defects, php seventeen.
 
-## Not done at all
+## Also not done
 
-- **The omni boru port.** The prerequisite landed on this branch: struct/boru
-  had drifted off a current boru engine completely — the bundled module
-  namespace moved `aql:` → `boru:` with no alias, and the word-reference
-  modifier `/r` became `/v`. Nothing caught it because boru is the one port
-  with no CI job. It is green again at 1367 entries. The omni port itself is
-  untouched.
+- **The omni boru port.** Its prerequisite is merged: struct/boru had drifted
+  off a current boru engine entirely — the bundled module namespace moved
+  `aql:` → `boru:` with no alias, and the word-reference modifier `/r` became
+  `/v`. Nothing caught it because boru is the one port with no CI job. It is
+  green again at 1367 entries. The omni port itself is untouched.
 - **clojure, dart, lean and rust onto their release tags.** The tags exist
-  (`<port>/v0.1.0`). go is done and on this branch.
+  (`<port>/v0.1.0`); go is done.
 - **A boru CI job.** `build.yml` has 23 and none for boru, though `boru` is
   in the root Makefile's `LANGS`.
