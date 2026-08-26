@@ -422,6 +422,17 @@ jobs:
         run: |
           set -euo pipefail
           py=python3; command -v python3 >/dev/null 2>&1 || py=python
+          # macos-14's python3 is Homebrew's, and Homebrew marks it externally
+          # managed: `pip install` there does not warn, it exits 1 (PEP 668,
+          # "externally-managed-environment") before zig is ever fetched. A
+          # venv is the documented answer and needs no extra action. Scoped to
+          # macOS on purpose - the ubuntu and windows legs install into the
+          # runner's tool-cache Python, which carries no such marker, and this
+          # leaves those two byte-identical.
+          if [ "$RUNNER_OS" = macOS ]; then
+            "$py" -m venv "$RUNNER_TEMP/zigvenv"
+            py="$RUNNER_TEMP/zigvenv/bin/python"
+          fi
           "$py" -m pip install --disable-pip-version-check --quiet \
             --require-hashes -r "$GITHUB_WORKSPACE/.github/zig-requirements.txt"
           bin="$RUNNER_TEMP/zigbin"; mkdir -p "$bin"
