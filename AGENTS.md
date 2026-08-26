@@ -112,8 +112,21 @@ shared library. Most ports consume it as a local checkout (`$OMNI_HOME`,
 then sibling paths; see `javascript/test/omni.js`, the first migrated
 port). **typescript takes it from npm instead**, as the `@voxgig/omni`
 devDependency — no checkout, no `OMNI_HOME` — and `typescript/tools/
-omni-isolation.js` proves nothing shipped can reach it (register 4.13). The plan
-and per-port status live in omni's `doc/plan/` register. **A change is
+omni-isolation.js` proves nothing shipped can reach it. The plan
+and per-port status live in omni's `doc/plan/` register.
+
+**Register 4.13 — omni is a test dependency of every port and a published
+dependency of none.** Nothing a consumer resolves may declare it.
+`python3 tools/omni_isolation.py` (`make scan-omni-isolation`) asserts that
+across every port's library manifest, and it is a *declaration* check, not a
+build-without-omni check. The difference matters: omni is a public repo, so
+`github.com/voxgig/omni/go` resolves from proxy.golang.org with no tags at
+all, and `go mod tidy` in a module with no checkout anywhere still writes the
+require line. A checkout-absent build can therefore pass while proving
+nothing. The CI job checks omni out *on purpose* and then asserts the
+manifests stay clean. Four ports are UNCOVERED and say so in the output
+rather than passing silently — `c`, `cpp` and `scala` have no manifest a
+consumer resolves, and `zig` is not migrated. **A change is
 "done" only when the corpus passes in the canonical TS and in every port
 you touched.**
 
