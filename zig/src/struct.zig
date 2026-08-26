@@ -226,7 +226,7 @@ pub const T_node: i32 = 1 << 6;
 // TYPENAME maps bit position (via leading zeros count) to type name string.
 pub const TYPENAME = [_][]const u8{
     S_any,
-    S_noval,
+    S_nil,
     S_boolean,
     S_decimal,
     S_integer,
@@ -2517,7 +2517,27 @@ fn resolvePathOrCmd(allocator: Allocator, pathref: []const u8, store: JsonValue,
         return try getpathInj(allocator, JsonValue{ .string = pathref }, store, inj);
     }
 
-    // Absolute path from store.
+    // Validation metadata references carry an operator: `$~` injects the
+    // resolved value, while `$=` rewrites the slot as an $EXACT validator
+    // and revisits it. Other absolute paths retain ordinary getpath
+    // semantics (notably the empty path resolves to $TOP, not the store).
+    if (inj.validate_mode and
+        (std.mem.indexOf(u8, pathref, "$~") != null or std.mem.indexOf(u8, pathref, "$=") != null))
+    {
+        const found = try getpathInj(allocator, JsonValue{ .string = pathref }, store, inj);
+        if (std.mem.indexOf(u8, pathref, "$=") != null) {
+            const exact = try allocator.create(ListRef);
+            exact.* = .{ .data = ListData.init(allocator) };
+            try exact.append(JsonValue{ .string = S_BEXACT });
+            try exact.append(found);
+            _ = try inj.setval(JsonValue{ .array = exact }, 0);
+            inj.key_i = std.math.maxInt(usize);
+            inj.skip = true;
+            return .null;
+        }
+        return found;
+    }
+
     return try getpath(allocator, JsonValue{ .string = pathref }, store);
 }
 
@@ -2573,6 +2593,7 @@ fn dispatchCmd(allocator: Allocator, cmd: []const u8, store: JsonValue, inj: *In
         if (std.mem.eql(u8, cmd, "$DECIMAL")) return try cmdValidateType(allocator, inj, S_decimal, T_decimal);
         if (std.mem.eql(u8, cmd, "$BOOLEAN")) return try cmdValidateType(allocator, inj, S_boolean, T_boolean);
         if (std.mem.eql(u8, cmd, "$NULL")) return try cmdValidateType(allocator, inj, S_null, T_null);
+        if (std.mem.eql(u8, cmd, "$NIL")) return try cmdValidateNil(allocator, inj);
         if (std.mem.eql(u8, cmd, "$OBJECT") or std.mem.eql(u8, cmd, "$MAP"))
             return try cmdValidateType(allocator, inj, S_map, T_map);
         if (std.mem.eql(u8, cmd, "$ARRAY") or std.mem.eql(u8, cmd, "$LIST"))
@@ -2726,12 +2747,23 @@ fn cmdValidateAny(inj: *Injection) JsonValue {
     return out;
 }
 
+fn cmdValidateNil(allocator: Allocator, inj: *Injection) anyerror!JsonValue {
+    if (inj.mode != M_VAL) return .null;
+    const out = getprop(allocator, inj.dparent, JsonValue{ .string = inj.key }, .null) catch .null;
+    if (out != .null) {
+        try inj.errs.append(try invalidTypeMsg(allocator, inj.path, S_nil, out));
+    }
+    _ = try inj.setval(out, 0);
+    return out;
+}
+
 fn cmdValidateOne(allocator: Allocator, inj: *Injection, _: JsonValue) anyerror!JsonValue {
     if (inj.mode != M_VAL) return .null;
     if (inj.parent != .array) return .null;
 
     // Skip remaining keys in the list.
     inj.key_i = inj.keys.len;
+    inj.skip = true;
 
     const parent_items = inj.parent.array.data.items;
     if (parent_items.len < 2) return .null;
@@ -2760,8 +2792,39 @@ fn cmdValidateOne(allocator: Allocator, inj: *Injection, _: JsonValue) anyerror!
         try desc.appendSlice(try stringify(allocator, alt, null));
     }
     const prefix = if (alts.len > 1) "one of " else "";
-    try inj.errs.append(try invalidTypeMsg(allocator, inj.path, try std.fmt.allocPrint(allocator, "{s}{s}", .{ prefix, desc.items }), data_val));
+    // Canonical does `inj.path = slice(inj.path, -1)`: $ONE wraps the value
+    // in its parent, so the error belongs to the parent's path, not to the
+    // list slot the command happens to occupy. Without this every message
+    // carried a trailing `.0`.
+    const reportpath = if (0 < inj.path.len) inj.path[0 .. inj.path.len - 1] else inj.path;
+    const named = try transformNames(allocator, desc.items);
+    try inj.errs.append(try invalidTypeMsg(allocator, reportpath, try std.fmt.allocPrint(allocator, "{s}{s}", .{ prefix, named }), data_val));
     return .null;
+}
+
+/// Canonical renders a validator description through R_TRANSFORM_NAME
+/// (/`\$([A-Z]+)`/g), lowercasing the captured name: the alternatives of
+/// `["`$ONE`","`$STRING`","`$NUMBER`"]` read back as "string, number", not
+/// as the spec literals. Applied to the joined description, so every
+/// command name inside it is rewritten.
+fn transformNames(allocator: Allocator, src: []const u8) ![]const u8 {
+    var out = std.array_list.Managed(u8).init(allocator);
+    var i: usize = 0;
+    while (i < src.len) {
+        // `$NAME` - backtick, dollar, one or more A-Z, backtick.
+        if (src[i] == '`' and i + 2 < src.len and src[i + 1] == '$') {
+            var j = i + 2;
+            while (j < src.len and src[j] >= 'A' and src[j] <= 'Z') : (j += 1) {}
+            if (j > i + 2 and j < src.len and src[j] == '`') {
+                for (src[i + 2 .. j]) |c| try out.append(c - 'A' + 'a');
+                i = j + 1;
+                continue;
+            }
+        }
+        try out.append(src[i]);
+        i += 1;
+    }
+    return out.items;
 }
 
 fn cmdValidateExactCmd(allocator: Allocator, inj: *Injection) anyerror!JsonValue {
@@ -2769,6 +2832,7 @@ fn cmdValidateExactCmd(allocator: Allocator, inj: *Injection) anyerror!JsonValue
     if (inj.parent != .array) return .null;
 
     inj.key_i = inj.keys.len;
+    inj.skip = true;
 
     const parent_items = inj.parent.array.data.items;
     if (parent_items.len < 2) return .null;
@@ -2795,7 +2859,10 @@ fn cmdValidateExactCmd(allocator: Allocator, inj: *Injection) anyerror!JsonValue
         try desc.appendSlice(try stringify(allocator, alt, null));
     }
     const prefix = if (alts.len > 1) "one of " else "";
-    try inj.errs.append(try invalidTypeMsg(allocator, inj.path, try std.fmt.allocPrint(allocator, "exactly equal to {s}{s}", .{ prefix, desc.items }), data_val));
+    // Same parent-path rule as $ONE above.
+    const reportpath = if (0 < inj.path.len) inj.path[0 .. inj.path.len - 1] else inj.path;
+    const root_prefix = if (1 < reportpath.len) "" else "value ";
+    try inj.errs.append(try invalidTypeMsg(allocator, reportpath, try std.fmt.allocPrint(allocator, "{s}exactly equal to {s}{s}", .{ root_prefix, prefix, desc.items }), data_val));
     return .null;
 }
 
@@ -3590,8 +3657,15 @@ fn injectChild(allocator: Allocator, child_raw: JsonValue, store: JsonValue, inj
 // Transform — public API. Builds store and calls Inject.
 // ============================================================================
 
-pub fn transform(allocator: Allocator, data: JsonValue, spec: JsonValue) !JsonValue {
-    if (spec == .null) return spec;
+/// Canonical `transform` collects injection errors and throws
+/// `join(errs, ' | ')` when any were collected. This port passed `null` for
+/// the injection, so no `errs` list existed, nothing was ever collected and
+/// nothing could be reported - `transform/apply` and `transform/format` had
+/// no way to produce the messages the corpus asserts. The error channel is
+/// the same one `validate` already uses: a message beside the value, since
+/// a Zig error carries no payload.
+pub fn transform(allocator: Allocator, data: JsonValue, spec: JsonValue) anyerror!struct { out: JsonValue, err: ?[]const u8 } {
+    if (spec == .null) return .{ .out = spec, .err = null };
 
     const spec_clone = try clone(allocator, spec);
     const data_clone = if (data == .null) JsonValue{ .null = {} } else try clone(allocator, data);
@@ -3603,9 +3677,35 @@ pub fn transform(allocator: Allocator, data: JsonValue, spec: JsonValue) !JsonVa
     store.* = .{ .data = .empty, .allocator = allocator };
     try store.put(S_DTOP, data_clone);
     try store.put(S_DSPEC, orig_spec);
+
+    const errs = try allocator.create(std.array_list.Managed([]const u8));
+    errs.* = std.array_list.Managed([]const u8).init(allocator);
+    try store.put(S_DERRS, JsonValue{ .null = {} });
+
     const store_val = JsonValue{ .object = store };
 
-    return try inject(allocator, spec_clone, store_val, null);
+    const inj_init = try allocator.create(Injection);
+    inj_init.* = Injection{
+        .allocator = allocator,
+        .mode = 0, // triggers root init
+        .keys = try allocator.alloc([]const u8, 0),
+        .path = try allocator.alloc([]const u8, 0),
+        .nodes = try allocator.alloc(JsonValue, 0),
+        .dpath = try allocator.alloc([]const u8, 0),
+        .errs = errs,
+    };
+
+    const result = try inject(allocator, spec_clone, store_val, inj_init);
+
+    if (0 < errs.items.len) {
+        var msg = std.array_list.Managed(u8).init(allocator);
+        for (errs.items, 0..) |e, i| {
+            if (0 < i) try msg.appendSlice(" | ");
+            try msg.appendSlice(e);
+        }
+        return .{ .out = result, .err = msg.items };
+    }
+    return .{ .out = result, .err = null };
 }
 
 // Transform with a modify callback applied after each injection step.
@@ -3684,6 +3784,10 @@ fn resolveSpecialEscapes(allocator: Allocator, pathref: []const u8) []const u8 {
 // ============================================================================
 
 pub fn validate(allocator: Allocator, data: JsonValue, spec: JsonValue) anyerror!struct { out: JsonValue, err: ?[]const u8 } {
+    return validateWith(allocator, data, spec, .null);
+}
+
+pub fn validateWith(allocator: Allocator, data: JsonValue, spec: JsonValue, injdef: JsonValue) anyerror!struct { out: JsonValue, err: ?[]const u8 } {
     const spec_clone = try clone(allocator, spec);
     const data_clone = if (data == .null) JsonValue{ .null = {} } else try clone(allocator, data);
     const orig_spec = try clone(allocator, spec);
@@ -3712,12 +3816,23 @@ pub fn validate(allocator: Allocator, data: JsonValue, spec: JsonValue) anyerror
         .dpath = try allocator.alloc([]const u8, 0),
         .errs = errs,
     };
+    if (injdef == .object) {
+        inj_init.meta = injdef.object.get("meta") orelse .null;
+        if (inj_init.meta == .object) {
+            if (inj_init.meta.object.get(S_BEXACT)) |exact| {
+                inj_init.exact_mode = exact == .bool and exact.bool;
+            }
+        }
+    }
 
     const result = try inject(allocator, spec_clone, store_val, inj_init);
 
     if (errs.items.len > 0) {
+        // Canonical is `throw new Error(join(errs, ' | '))` - the collected
+        // messages and nothing else. This port prefixed "Invalid data: ",
+        // which no other port emits and which the corpus's validate/invalid
+        // entries do not expect.
         var msg = std.array_list.Managed(u8).init(allocator);
-        try msg.appendSlice("Invalid data: ");
         for (errs.items, 0..) |e, i| {
             if (i > 0) try msg.appendSlice(" | ");
             try msg.appendSlice(e);
@@ -3787,7 +3902,7 @@ fn validationModify(allocator: Allocator, _: JsonValue, key: []const u8, parent:
                 if (bad.items.len > 0) {
                     var badmsg = std.array_list.Managed(u8).init(allocator);
                     badmsg.appendSlice("Unexpected keys at field ") catch {};
-                    badmsg.appendSlice(pathifySlice(allocator, if (inj.path.len > 1) inj.path[1..] else inj.path) catch "<root>") catch {};
+                    badmsg.appendSlice(pathifySlice(allocator, inj.path[1..]) catch "<root>") catch {};
                     badmsg.appendSlice(": ") catch {};
                     for (bad.items, 0..) |bk, bi| {
                         if (bi > 0) badmsg.appendSlice(", ") catch {};
@@ -3808,8 +3923,11 @@ fn validationModify(allocator: Allocator, _: JsonValue, key: []const u8, parent:
             const a = toStdJson(allocator, cval) catch return;
             const b = toStdJson(allocator, pval) catch return;
             if (!stdJsonEqual(a, b)) {
-                const p = pathifySlice(allocator, if (inj.path.len > 1) inj.path[1..] else inj.path) catch "<root>";
-                inj.errs.append(std.fmt.allocPrint(allocator, "Value at {s}: {s} should equal {s}.", .{ p, stringify(allocator, cval, null) catch "?", stringify(allocator, pval, null) catch "?" }) catch "exact match error") catch {};
+                const pathmsg = if (1 < inj.path.len)
+                    std.fmt.allocPrint(allocator, "at field {s}: ", .{pathifySlice(allocator, inj.path[1..]) catch "<root>"}) catch ""
+                else
+                    "";
+                inj.errs.append(std.fmt.allocPrint(allocator, "Value {s}{s} should equal {s}.", .{ pathmsg, stringify(allocator, cval, null) catch "?", stringify(allocator, pval, null) catch "?" }) catch "exact match error") catch {};
             }
         } else {
             // Non-exact: copy data value into spec result.
@@ -4072,17 +4190,38 @@ fn validateChildMap(
     return data_val;
 }
 
+/// Canonical `_invalidTypeMsg`:
+///
+///   'Expected ' +
+///   (1 < size(path) ? 'field ' + pathify(path, 1) + ' to be ' : '') +
+///   needtype + ', but found ' +
+///   (null != v ? typename(vt) + S_VIZ : '') + vs + '.'
+///
+/// Three things this port had wrong, all of them invisible while the driver
+/// discarded validate's message: the needtype was emitted TWICE (once before
+/// the field clause and once inside it); the path was rendered whole, so
+/// every message carried the `$TOP` root element canonical drops with
+/// `pathify(path, 1)`; and a null value was reported as `null: null` rather
+/// than `no value`, and only at the root.
 fn invalidTypeMsg(allocator: Allocator, path: []const []const u8, expected: []const u8, val: JsonValue) anyerror![]const u8 {
-    const p = try pathifySlice(allocator, path);
-    const actual = typename(typify(val));
-    const val_str = try stringify(allocator, val, 33);
-    if (path.len == 0) {
-        if (val == .null) {
-            return try std.fmt.allocPrint(allocator, "Expected {s}, but found no value.", .{expected});
-        }
-        return try std.fmt.allocPrint(allocator, "Expected {s}, but found {s}: {s}.", .{ expected, actual, val_str });
+    var buf = std.array_list.Managed(u8).init(allocator);
+    try buf.appendSlice("Expected ");
+    if (1 < path.len) {
+        try buf.appendSlice("field ");
+        try buf.appendSlice(try pathifySlice(allocator, path[1..]));
+        try buf.appendSlice(" to be ");
     }
-    return try std.fmt.allocPrint(allocator, "Expected {s}, field {s} to be {s}, but found {s}: {s}.", .{ expected, p, expected, actual, val_str });
+    try buf.appendSlice(expected);
+    try buf.appendSlice(", but found ");
+    if (val == .null) {
+        try buf.appendSlice("no value");
+    } else {
+        try buf.appendSlice(typename(typify(val)));
+        try buf.appendSlice(S_VIZ);
+        try buf.appendSlice(try stringify(allocator, val, 33));
+    }
+    try buf.append('.');
+    return buf.items;
 }
 
 fn pathifySlice(allocator: Allocator, path: []const []const u8) anyerror![]const u8 {

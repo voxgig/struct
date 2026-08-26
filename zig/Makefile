@@ -1,5 +1,9 @@
 .PHONY: inspect build test bench lint fmt-check clean reset publish
 
+OMNI_CANDIDATES := $(OMNI_HOME) ../../omni ../../../omni /workspace/omni /home/user/omni
+OMNI_DIR := $(firstword $(foreach d,$(OMNI_CANDIDATES),$(if $(wildcard $(d)/spec/fib.json),$(d))))
+OMNI_ZIG := $(abspath $(OMNI_DIR)/zig/src/omni.zig)
+
 # zig 0.13 could not link against very new Xcode SDKs on macOS (e.g. the Xcode
 # 26 SDK): every libc symbol (_malloc, _sigaction, __availability_version_check…)
 # came back undefined. The Command Line Tools SDK still works, so point zig at
@@ -41,7 +45,9 @@ fmt-check:
 # `--summary all` is required: without it, plain `zig build test` prints
 # `test success` with no count and the N/N grep below never matches.
 test:
-	@out=$$(zig build test --summary all 2>&1 || true); \
+	@if [ -z "$(OMNI_DIR)" ]; then \
+	  echo "struct: voxgig/omni checkout not found - set OMNI_HOME."; exit 1; fi
+	@out=$$(zig build test -Domni="$(OMNI_ZIG)" --summary all 2>&1 || true); \
 	echo "$$out"; \
 	passed=$$(echo "$$out" | grep -oE '[0-9]+/[0-9]+ tests passed' | head -1); \
 	if [ -n "$$passed" ]; then \

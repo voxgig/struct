@@ -2,13 +2,15 @@
 // RUN-SOME: zig build test 2>&1 | head
 
 // Test structure mirrors ts/test/utility/StructUtility.test.ts
-// Uses shared spec from build/test/test.json via runner.
+// Uses the shared corpus in build/test/test.json, driven by voxgig/omni
+// through test/omni.zig - which is a bridge and a subject factory, not a
+// runner: the algorithm is omni's.
 
 const std = @import("std");
 const testing = std.testing;
 
 const voxgig_struct = @import("voxgig-struct");
-const runner = @import("runner.zig");
+const omni = @import("omni.zig");
 
 const Allocator = std.mem.Allocator;
 const JsonValue = voxgig_struct.JsonValue;
@@ -16,7 +18,8 @@ const StdJsonValue = std.json.Value;
 
 // NOTE: tests are (mostly) in order of increasing dependence.
 
-// Wrap library functions as runner.Subject (fn(StdJsonValue) StdJsonValue).
+// Wrap library functions as omni subjects. A binding takes this port's own
+// JsonValue and returns one; test/omni.zig converts at the boundary.
 // All wrappers now use AllocSubject (takes Allocator + our JsonValue).
 // The runner converts std.json → JsonValue before calling, and back after.
 
@@ -44,51 +47,36 @@ fn wrap_isfunc(_: Allocator, val: JsonValue) JsonValue {
     return .{ .bool = voxgig_struct.isfunc(val) };
 }
 
-// Helper: get a nested spec section (operates on std.json for the test runner).
-fn getMinorSpec(r: runner.RunPack, name: []const u8) !StdJsonValue {
-    const minor = r.spec.get("minor") orelse return error.NoMinorSpec;
-    return switch (minor) {
-        .object => |obj| obj.get(name) orelse return error.NoSpec,
-        else => return error.MinorNotObject,
-    };
-}
-
 // ---- minor tests ----
 
 test "minor-isnode" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAlloc(try getMinorSpec(r, "isnode"), wrap_isnode);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "minor", "isnode", omni.sub(wrap_isnode), .{});
 }
 
 test "minor-ismap" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAlloc(try getMinorSpec(r, "ismap"), wrap_ismap);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "minor", "ismap", omni.sub(wrap_ismap), .{});
 }
 
 test "minor-islist" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAlloc(try getMinorSpec(r, "islist"), wrap_islist);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "minor", "islist", omni.sub(wrap_islist), .{});
 }
 
 test "minor-iskey" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getMinorSpec(r, "iskey"), .{ .null_flag = false }, wrap_iskey);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "minor", "iskey", omni.sub(wrap_iskey), omni.Flags.nonull());
 }
 
 test "minor-isempty" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getMinorSpec(r, "isempty"), .{ .null_flag = false }, wrap_isempty);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "minor", "isempty", omni.sub(wrap_isempty), omni.Flags.nonull());
 }
 
 test "minor-isfunc" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAlloc(try getMinorSpec(r, "isfunc"), wrap_isfunc);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "minor", "isfunc", omni.sub(wrap_isfunc), .{});
 }
 
 // ---- Allocator-aware wrappers for new functions ----
@@ -105,10 +93,14 @@ fn wrap_typename(allocator: Allocator, val: JsonValue) JsonValue {
 
 fn wrap_typify(allocator: Allocator, val: JsonValue) JsonValue {
     _ = allocator;
-    // Handle UNDEF marker (missing input → T_noval)
+    // With omni's default null handling, an authored null arrives as the
+    // NULL marker while a missing `in` arrives as a real null.
+    if (val == .null) {
+        return JsonValue{ .integer = @as(i64, voxgig_struct.T_noval) };
+    }
     if (val == .string) {
-        if (std.mem.eql(u8, val.string, runner.UNDEFMARK)) {
-            return JsonValue{ .integer = @as(i64, voxgig_struct.T_noval) };
+        if (std.mem.eql(u8, val.string, omni.NULLMARK)) {
+            return JsonValue{ .integer = voxgig_struct.typify(.null) };
         }
     }
     return JsonValue{ .integer = voxgig_struct.typify(val) };
@@ -181,13 +173,33 @@ fn wrap_stringify_raw(allocator: Allocator, val: JsonValue) JsonValue {
 }
 
 fn wrap_clone(allocator: Allocator, val: JsonValue) JsonValue {
-    // Handle UNDEF marker - return empty object
+    // Preserve an authored null while allowing omni to distinguish it from
+    // the absent final entry in the group.
     if (val == .string) {
-        if (std.mem.eql(u8, val.string, runner.UNDEFMARK)) {
+        if (std.mem.eql(u8, val.string, omni.NULLMARK)) {
             return .null;
         }
     }
     return voxgig_struct.clone(allocator, val) catch return .null;
+}
+
+fn restoreNullMarks(allocator: Allocator, val: JsonValue) JsonValue {
+    switch (val) {
+        .string => |text| {
+            if (std.mem.eql(u8, text, omni.NULLMARK)) return .null;
+        },
+        .array => |list| {
+            for (list.data.items) |*item| item.* = restoreNullMarks(allocator, item.*);
+        },
+        .object => |map| {
+            var it = map.iterator();
+            while (it.next()) |field| {
+                field.value_ptr.* = restoreNullMarks(allocator, field.value_ptr.*);
+            }
+        },
+        else => {},
+    }
+    return val;
 }
 
 fn wrap_flatten(allocator: Allocator, val: JsonValue) JsonValue {
@@ -332,7 +344,7 @@ fn wrap_stringify(allocator: Allocator, val: JsonValue) JsonValue {
 
     // Handle __NULL__ as "null"
     if (v == .string) {
-        if (std.mem.eql(u8, v.string, runner.NULLMARK)) {
+        if (std.mem.eql(u8, v.string, omni.NULLMARK)) {
             const result = voxgig_struct.stringify(allocator, JsonValue{ .string = "null" }, null) catch return JsonValue{ .string = voxgig_struct.S_MT };
             return JsonValue{ .string = result };
         }
@@ -354,12 +366,13 @@ fn wrap_pathify(allocator: Allocator, val: JsonValue) JsonValue {
     // in: { path?, from? }
     if (val != .object) return JsonValue{ .string = "<unknown-path>" };
     const m = val.object;
-    const path = m.get("path") orelse {
+    const path_raw = m.get("path") orelse {
         // No path field - return unknown-path
         var result = std.array_list.Managed(u8).init(allocator);
         result.appendSlice("<unknown-path>") catch return JsonValue{ .string = "<unknown-path>" };
         return JsonValue{ .string = result.items };
     };
+    const path = restoreNullMarks(allocator, path_raw);
 
     var from: usize = 0;
     if (m.get("from")) |f| {
@@ -411,7 +424,7 @@ fn wrap_pad(allocator: Allocator, val: JsonValue) JsonValue {
     // at test-case end, so we don't need an explicit free here.
     const s: []const u8 = switch (v) {
         .string => |str| blk: {
-            if (std.mem.eql(u8, str, runner.NULLMARK)) {
+            if (std.mem.eql(u8, str, omni.NULLMARK)) {
                 break :blk voxgig_struct.stringify(allocator, JsonValue{ .null = {} }, null) catch str;
             }
             break :blk str;
@@ -443,150 +456,116 @@ fn wrap_pad(allocator: Allocator, val: JsonValue) JsonValue {
 // ---- Allocator-aware minor tests ----
 
 test "minor-typename" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAlloc(try getMinorSpec(r, "typename"), wrap_typename);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "minor", "typename", omni.sub(wrap_typename), .{});
 }
 
 test "minor-typify" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getMinorSpec(r, "typify"), .{ .null_flag = false, .undef_as_null = false }, wrap_typify);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "minor", "typify", omni.sub(wrap_typify), .{});
 }
 
 test "minor-size" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getMinorSpec(r, "size"), .{ .null_flag = false }, wrap_size);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "minor", "size", omni.sub(wrap_size), omni.Flags.nonull());
 }
 
 test "minor-strkey" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getMinorSpec(r, "strkey"), .{ .null_flag = false }, wrap_strkey);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "minor", "strkey", omni.sub(wrap_strkey), omni.Flags.nonull());
 }
 
 test "minor-keysof" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getMinorSpec(r, "keysof"), .{ .null_flag = false }, wrap_keysof);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "minor", "keysof", omni.sub(wrap_keysof), .{});
 }
 
 test "minor-haskey" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getMinorSpec(r, "haskey"), .{ .null_flag = false }, wrap_haskey);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "minor", "haskey", omni.sub(wrap_haskey), omni.Flags.nonull());
 }
 
 test "minor-items" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getMinorSpec(r, "items"), .{ .null_flag = false }, wrap_items);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "minor", "items", omni.sub(wrap_items), .{});
 }
 
 test "minor-getelem" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getMinorSpec(r, "getelem"), .{ .null_flag = false }, wrap_getelem);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "minor", "getelem", omni.sub(wrap_getelem), .{});
 }
 
 test "minor-getprop" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getMinorSpec(r, "getprop"), .{ .null_flag = false }, wrap_getprop);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "minor", "getprop", omni.sub(wrap_getprop), .{});
 }
 
 test "minor-clone" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getMinorSpec(r, "clone"), .{ .null_flag = false, .undef_as_null = false }, wrap_clone);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "minor", "clone", omni.sub(wrap_clone), .{});
 }
 
 test "minor-flatten" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAlloc(try getMinorSpec(r, "flatten"), wrap_flatten);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "minor", "flatten", omni.sub(wrap_flatten), .{});
 }
 
 test "minor-filter" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAlloc(try getMinorSpec(r, "filter"), wrap_filter);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "minor", "filter", omni.sub(wrap_filter), .{});
 }
 
 test "minor-delprop" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getMinorSpec(r, "delprop"), .{ .null_flag = false }, wrap_delprop);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "minor", "delprop", omni.sub(wrap_delprop), .{});
 }
 
 test "minor-setprop" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getMinorSpec(r, "setprop"), .{ .null_flag = false }, wrap_setprop);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "minor", "setprop", omni.sub(wrap_setprop), .{});
 }
 
 test "minor-escre" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAlloc(try getMinorSpec(r, "escre"), wrap_escre);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "minor", "escre", omni.sub(wrap_escre), .{});
 }
 
 test "minor-escurl" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAlloc(try getMinorSpec(r, "escurl"), wrap_escurl);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "minor", "escurl", omni.sub(wrap_escurl), .{});
 }
 
 test "minor-join" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getMinorSpec(r, "join"), .{ .null_flag = false }, wrap_join);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "minor", "join", omni.sub(wrap_join), omni.Flags.nonull());
 }
 
 test "minor-jsonify" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAlloc(try getMinorSpec(r, "jsonify"), wrap_jsonify);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "minor", "jsonify", omni.sub(wrap_jsonify), omni.Flags.nonull());
 }
 
 test "minor-stringify" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getMinorSpec(r, "stringify"), .{ .null_flag = false }, wrap_stringify);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "minor", "stringify", omni.sub(wrap_stringify), .{});
 }
 
 test "minor-pathify" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getMinorSpec(r, "pathify"), .{ .null_flag = false }, wrap_pathify);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "minor", "pathify", omni.sub(wrap_pathify), .{});
 }
 
 test "minor-slice" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getMinorSpec(r, "slice"), .{ .null_flag = false }, wrap_slice);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "minor", "slice", omni.sub(wrap_slice), omni.Flags.nonull());
 }
 
 test "minor-pad" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getMinorSpec(r, "pad"), .{ .null_flag = false }, wrap_pad);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "minor", "pad", omni.sub(wrap_pad), omni.Flags.nonull());
 }
 
 // ---- Walk, Merge, and Transform helpers ----
-
-fn getSpec(r: runner.RunPack, name: []const u8) !JsonValue {
-    return r.spec.get(name) orelse return error.NoSpec;
-}
-
-fn getSubSpec(r: runner.RunPack, section: []const u8, sub: []const u8) !StdJsonValue {
-    const sec = r.spec.get(section) orelse return error.NoSpec;
-    return switch (sec) {
-        .object => |obj| obj.get(sub) orelse return error.NoSubSpec,
-        else => return error.SpecNotObject,
-    };
-}
 
 // ---- Walk wrappers ----
 
@@ -616,14 +595,14 @@ fn walkApplyCopy(_: Allocator, _: ?[]const u8, val: JsonValue, _: JsonValue, _: 
 }
 
 fn wrap_walk_basic(allocator: Allocator, val: JsonValue) JsonValue {
-    if (val == .string and std.mem.eql(u8, val.string, runner.NULLMARK)) {
+    if (val == .string and std.mem.eql(u8, val.string, omni.NULLMARK)) {
         return .null;
     }
     return voxgig_struct.walk(allocator, val, walkApplyBasic, null, voxgig_struct.MAXDEPTH) catch return .null;
 }
 
 fn wrap_walk_copy(allocator: Allocator, val: JsonValue) JsonValue {
-    if (val == .string and std.mem.eql(u8, val.string, runner.UNDEFMARK)) {
+    if (val == .string and std.mem.eql(u8, val.string, omni.UNDEFMARK)) {
         return .null;
     }
     return voxgig_struct.walk(allocator, val, walkApplyCopy, null, voxgig_struct.MAXDEPTH) catch return .null;
@@ -713,73 +692,67 @@ fn wrap_merge_integrity(allocator: Allocator, val: JsonValue) JsonValue {
 
 // ---- Transform wrappers ----
 
-fn wrap_transform(allocator: Allocator, val: JsonValue) JsonValue {
+fn wrap_transform(allocator: Allocator, val: JsonValue) omni.SubResult {
     // in: { data?, spec? }
-    if (val != .object) return .null;
+    if (val != .object) return omni.SubResult.val(.null);
     const m = val.object;
     const data = m.get("data") orelse .null;
-    const spec = m.get("spec") orelse return .null;
-    return voxgig_struct.transform(allocator, data, spec) catch return .null;
+    const spec = m.get("spec") orelse return omni.SubResult.val(.null);
+    const result = voxgig_struct.transform(allocator, data, spec) catch |e|
+        return omni.SubResult.fail(@errorName(e));
+    if (result.err) |msg| return omni.SubResult.fail(msg);
+    return omni.SubResult.val(result.out);
 }
 
 // ---- Walk tests ----
 
 test "walk-basic" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getSubSpec(r, "walk", "basic"), .{ .null_flag = false }, wrap_walk_basic);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "walk", "basic", omni.sub(wrap_walk_basic), .{});
 }
 
 test "walk-copy" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getSubSpec(r, "walk", "copy"), .{ .null_flag = false, .undef_as_null = false }, wrap_walk_copy);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "walk", "copy", omni.sub(wrap_walk_copy), .{});
 }
 
 test "walk-depth" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAlloc(try getSubSpec(r, "walk", "depth"), wrap_walk_depth);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "walk", "depth", omni.sub(wrap_walk_depth), omni.Flags.nonull());
 }
 
 // ---- Merge tests ----
 
 test "merge-cases" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getSubSpec(r, "merge", "cases"), .{ .null_flag = false }, wrap_merge_cases);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "merge", "cases", omni.sub(wrap_merge_cases), .{});
 }
 
 test "merge-array" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getSubSpec(r, "merge", "array"), .{ .null_flag = false }, wrap_merge_array);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "merge", "array", omni.sub(wrap_merge_array), .{});
 }
 
 test "merge-integrity" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getSubSpec(r, "merge", "integrity"), .{ .null_flag = false }, wrap_merge_integrity);
+    const r = try omni.makeRunner();
+    try omni.rungroupargs(&r, "merge", "integrity", omni.subargs(wrap_merge_integrity), .{});
 }
 
 test "merge-depth" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getSubSpec(r, "merge", "depth"), .{ .null_flag = false }, wrap_merge_depth);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "merge", "depth", omni.sub(wrap_merge_depth), .{});
 }
 
 // ---- Transform tests ----
 
 test "transform-paths" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getSubSpec(r, "transform", "paths"), .{ .null_flag = false }, wrap_transform);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "transform", "paths", omni.subres(wrap_transform), .{});
 }
 
 test "transform-cmds" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getSubSpec(r, "transform", "cmds"), .{ .null_flag = false }, wrap_transform);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "transform", "cmds", omni.subres(wrap_transform), .{});
 }
 
 // ---- SetPath tests ----
@@ -795,9 +768,8 @@ fn wrap_setpath(allocator: Allocator, val: JsonValue) JsonValue {
 }
 
 test "minor-setpath" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getMinorSpec(r, "setpath"), .{ .null_flag = false }, wrap_setpath);
+    const r = try omni.makeRunner();
+    try omni.rungroupargs(&r, "minor", "setpath", omni.subargs(wrap_setpath), omni.Flags.nonull());
 }
 
 // ---- GetPath tests ----
@@ -896,21 +868,18 @@ fn wrap_getpath_special(allocator: Allocator, val: JsonValue) JsonValue {
 }
 
 test "getpath-basic" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getSubSpec(r, "getpath", "basic"), .{ .null_flag = false }, wrap_getpath_basic);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "getpath", "basic", omni.sub(wrap_getpath_basic), .{});
 }
 
 test "getpath-relative" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getSubSpec(r, "getpath", "relative"), .{ .null_flag = false }, wrap_getpath_relative);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "getpath", "relative", omni.sub(wrap_getpath_relative), .{});
 }
 
 test "getpath-special" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getSubSpec(r, "getpath", "special"), .{ .null_flag = false }, wrap_getpath_special);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "getpath", "special", omni.sub(wrap_getpath_special), .{});
 }
 
 // ---- GetPath handler test ----
@@ -935,9 +904,8 @@ fn wrap_getpath_handler(allocator: Allocator, val: JsonValue) JsonValue {
 }
 
 test "getpath-handler" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getSubSpec(r, "getpath", "handler"), .{ .null_flag = false }, wrap_getpath_handler);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "getpath", "handler", omni.sub(wrap_getpath_handler), .{});
 }
 
 // ---- Inject tests ----
@@ -946,53 +914,46 @@ fn wrap_inject(allocator: Allocator, val: JsonValue) JsonValue {
     // in: { val, store }
     if (val != .object) return .null;
     const m = val.object;
-    const inject_val = m.get("val") orelse return .null;
-    const store = m.get("store") orelse JsonValue.makeMap(allocator) catch .null;
+    const inject_val = restoreNullMarks(allocator, m.get("val") orelse return .null);
+    const store = restoreNullMarks(allocator, m.get("store") orelse JsonValue.makeMap(allocator) catch .null);
     return voxgig_struct.inject(allocator, inject_val, store, null) catch return .null;
 }
 
 test "inject-string" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getSubSpec(r, "inject", "string"), .{ .null_flag = false }, wrap_inject);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "inject", "string", omni.sub(wrap_inject), .{});
 }
 
 test "inject-deep" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getSubSpec(r, "inject", "deep"), .{ .null_flag = false }, wrap_inject);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "inject", "deep", omni.sub(wrap_inject), .{});
 }
 
 // ---- Additional transform tests ----
 
 test "transform-each" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getSubSpec(r, "transform", "each"), .{ .null_flag = false }, wrap_transform);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "transform", "each", omni.subres(wrap_transform), .{});
 }
 
 test "transform-pack" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getSubSpec(r, "transform", "pack"), .{ .null_flag = false }, wrap_transform);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "transform", "pack", omni.subres(wrap_transform), .{});
 }
 
 test "transform-ref" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getSubSpec(r, "transform", "ref"), .{ .null_flag = false }, wrap_transform);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "transform", "ref", omni.subres(wrap_transform), .{});
 }
 
 test "transform-format" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getSubSpec(r, "transform", "format"), .{ .null_flag = false }, wrap_transform);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "transform", "format", omni.subres(wrap_transform), omni.Flags.nonull());
 }
 
 test "transform-apply" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getSubSpec(r, "transform", "apply"), .{ .null_flag = false }, wrap_transform);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "transform", "apply", omni.subres(wrap_transform), .{});
 }
 
 // ---- Transform modify test ----
@@ -1013,57 +974,57 @@ fn wrap_transform_modify(allocator: Allocator, val: JsonValue) JsonValue {
 }
 
 test "transform-modify" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getSubSpec(r, "transform", "modify"), .{ .null_flag = false }, wrap_transform_modify);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "transform", "modify", omni.sub(wrap_transform_modify), .{});
 }
 
 // ---- Validate tests ----
 
-fn wrap_validate(allocator: Allocator, val: JsonValue) JsonValue {
+fn wrap_validate(allocator: Allocator, val: JsonValue) omni.SubResult {
     // in: { data, spec }
-    if (val != .object) return .null;
+    //
+    // This discarded `result.err` and answered with `result.out` alone, so
+    // every one of validate's 60 `err:` entries had nothing to fail against -
+    // the library collected the messages and the driver dropped them.
+    if (val != .object) return omni.SubResult.val(.null);
     const m = val.object;
     const data = m.get("data") orelse .null;
-    const spec = m.get("spec") orelse return .null;
-    const result = voxgig_struct.validate(allocator, data, spec) catch return .null;
-    return result.out;
+    const spec = m.get("spec") orelse return omni.SubResult.val(.null);
+    const injdef = m.get("inj") orelse .null;
+    const result = voxgig_struct.validateWith(allocator, data, spec, injdef) catch |e|
+        return omni.SubResult.fail(@errorName(e));
+    if (result.err) |msg| return omni.SubResult.fail(msg);
+    return omni.SubResult.val(result.out);
 }
 
 test "validate-basic" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getSubSpec(r, "validate", "basic"), .{ .null_flag = false }, wrap_validate);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "validate", "basic", omni.subres(wrap_validate), omni.Flags.nonull());
 }
 
 test "validate-child" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getSubSpec(r, "validate", "child"), .{ .null_flag = false }, wrap_validate);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "validate", "child", omni.subres(wrap_validate), .{});
 }
 
 test "validate-one" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getSubSpec(r, "validate", "one"), .{ .null_flag = false }, wrap_validate);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "validate", "one", omni.subres(wrap_validate), .{});
 }
 
 test "validate-exact" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getSubSpec(r, "validate", "exact"), .{ .null_flag = false }, wrap_validate);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "validate", "exact", omni.subres(wrap_validate), .{});
 }
 
 test "validate-invalid" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getSubSpec(r, "validate", "invalid"), .{ .null_flag = false }, wrap_validate);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "validate", "invalid", omni.subres(wrap_validate), omni.Flags.nonull());
 }
 
 test "validate-special" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getSubSpec(r, "validate", "special"), .{ .null_flag = false }, wrap_validate);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "validate", "special", omni.subres(wrap_validate), .{});
 }
 
 // ---- Select tests ----
@@ -1078,35 +1039,30 @@ fn wrap_select(allocator: Allocator, val: JsonValue) JsonValue {
 }
 
 test "select-basic" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getSubSpec(r, "select", "basic"), .{ .null_flag = false }, wrap_select);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "select", "basic", omni.sub(wrap_select), .{});
 }
 
 test "select-operators" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getSubSpec(r, "select", "operators"), .{ .null_flag = false }, wrap_select);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "select", "operators", omni.sub(wrap_select), .{});
 }
 
 test "select-edge" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getSubSpec(r, "select", "edge"), .{ .null_flag = false }, wrap_select);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "select", "edge", omni.sub(wrap_select), .{});
 }
 
 test "select-alts" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getSubSpec(r, "select", "alts"), .{ .null_flag = false }, wrap_select);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "select", "alts", omni.sub(wrap_select), .{});
 }
 
 // null_flag = false keeps JSON null as an actual null (not the "__NULL__"
 // marker) so select sees a present-null field — the present-null defect.
 test "select-nullkey" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getSubSpec(r, "select", "nullkey"), .{ .null_flag = false }, wrap_select);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "select", "nullkey", omni.sub(wrap_select), .{});
 }
 
 // ---- regex: parity floor Go stdlib regexp (design/REGEX_API.md) ----
@@ -1171,69 +1127,58 @@ fn wrap_re_escape(allocator: Allocator, val: JsonValue) JsonValue {
 }
 
 test "regex-test" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAlloc(try getSubSpec(r, "regex", "test"), wrap_re_test);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "regex", "test", omni.sub(wrap_re_test), .{});
 }
 
 test "regex-find" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAlloc(try getSubSpec(r, "regex", "find"), wrap_re_find);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "regex", "find", omni.sub(wrap_re_find), .{});
 }
 
 test "regex-find_all" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAlloc(try getSubSpec(r, "regex", "find_all"), wrap_re_find_all);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "regex", "find_all", omni.sub(wrap_re_find_all), .{});
 }
 
 test "regex-replace" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAlloc(try getSubSpec(r, "regex", "replace"), wrap_re_replace);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "regex", "replace", omni.sub(wrap_re_replace), .{});
 }
 
 test "regex-escape" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAlloc(try getSubSpec(r, "regex", "escape"), wrap_re_escape);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "regex", "escape", omni.sub(wrap_re_escape), .{});
 }
 
 // ---- sentinels: Group A null/undefined unification across the readers ----
 
 test "sentinels-getprop_unify" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getSubSpec(r, "sentinels", "getprop_unify"), .{ .null_flag = false }, wrap_getprop);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "sentinels", "getprop_unify", omni.sub(wrap_getprop), omni.Flags.nonull());
 }
 
 test "sentinels-getelem_absent" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getSubSpec(r, "sentinels", "getelem_absent"), .{ .null_flag = false }, wrap_getelem);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "sentinels", "getelem_absent", omni.sub(wrap_getelem), omni.Flags.nonull());
 }
 
 test "sentinels-haskey_unify" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getSubSpec(r, "sentinels", "haskey_unify"), .{ .null_flag = false }, wrap_haskey_val);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "sentinels", "haskey_unify", omni.sub(wrap_haskey_val), omni.Flags.nonull());
 }
 
 test "sentinels-isempty_unify" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getSubSpec(r, "sentinels", "isempty_unify"), .{ .null_flag = false }, wrap_isempty);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "sentinels", "isempty_unify", omni.sub(wrap_isempty), omni.Flags.nonull());
 }
 
 test "sentinels-isnode_unify" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getSubSpec(r, "sentinels", "isnode_unify"), .{ .null_flag = false }, wrap_isnode);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "sentinels", "isnode_unify", omni.sub(wrap_isnode), omni.Flags.nonull());
 }
 
 test "sentinels-stringify_null" {
-    var r = try runner.makeRunner(testing.allocator);
-    defer r.deinit();
-    try r.runsetAllocFlags(try getSubSpec(r, "sentinels", "stringify_null"), .{ .null_flag = false }, wrap_stringify_raw);
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "sentinels", "stringify_null", omni.sub(wrap_stringify_raw), omni.Flags.nonull());
 }

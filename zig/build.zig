@@ -22,6 +22,17 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(lib);
 
+    // The corpus runner is voxgig/omni, a local checkout. Its path arrives as
+    // a build option because a Cargo-style literal path cannot read
+    // $OMNI_HOME; the Makefile resolves the checkout and passes it. Nothing
+    // here is declared in build.zig.zon and the library module never sees it,
+    // so no consumer of this package resolves omni (register 4.13).
+    const omni_path = b.option(
+        []const u8,
+        "omni",
+        "Path to voxgig/omni's zig source (test only; set by the Makefile)",
+    );
+
     // Each test/bench binary gets its own module: a Module carries the
     // target and optimize settings that used to sit on the compile step.
     const tests = b.addTest(.{
@@ -32,6 +43,14 @@ pub fn build(b: *std.Build) void {
         }),
     });
     tests.root_module.addImport("voxgig-struct", lib_mod);
+    if (omni_path) |op| {
+        const omni_mod = b.createModule(.{
+            .root_source_file = .{ .cwd_relative = op },
+            .target = target,
+            .optimize = optimize,
+        });
+        tests.root_module.addImport("omni", omni_mod);
+    }
 
     const run_tests = b.addRunArtifact(tests);
     run_tests.has_side_effects = true;
