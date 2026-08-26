@@ -15,16 +15,53 @@ a from-scratch implementation of the canonical algorithms in boru itself.
 
 ```
 cd boru
-make test    # boru run -no-check -no-compile test/runner.boru
-make lint    # boru check src/struct.boru + a module load smoke
+make test                     # the whole corpus, on voxgig/omni
+make test-some GROUP=minor    # one section, or one group (minor.iskey)
+make lint                     # boru check src/struct.boru + a load smoke
 ```
 
 Requires only the `boru` CLI (`make test BORU=/path/to/boru` to point at a
-specific binary). **Zero third-party runtime dependencies** — the library
-imports only bundled `boru:` modules (`string-util`, `math-util`,
+specific binary) and, for `make test`, a voxgig/omni checkout — `$OMNI_HOME`
+or a sibling directory. **Zero third-party runtime dependencies** — the
+library imports only bundled `boru:` modules (`string-util`, `math-util`,
 `bin-util`, `minilang` for regex, `emitlang` for JSON output,
-`time-util`); the test runner additionally uses `boru:io` to read the
-corpus.
+`time-util`).
+
+The corpus takes minutes end to end on the interpreter. `test-some` takes a
+prefix, so `GROUP=minor` runs a section and `GROUP=minor.iskey` runs one
+group; use it while iterating and the whole thing before you push.
+
+### The corpus runner is voxgig/omni
+
+`test/omni.boru` is a bridge and a subject factory, not a runner: the
+algorithm — `__NULL__` fixups, error matching, `match` walking, the set
+drivers — comes from omni's boru port, the same source every other port of
+this library runs. What used to be `test/runner-lib.boru`, a 951-line
+reimplementation of that algorithm, is gone.
+
+omni is not published (boru has no registry), so it is a local checkout.
+`make test` resolves it (`$OMNI_HOME`, then siblings, first directory
+carrying `spec/fib.json`) and points the gitignored `.omni-runner` symlink
+at its `boru/` port; `test/omni.boru` imports `../.omni-runner/src/omni.boru`.
+The symlink exists because a boru import path is a literal with no variable
+to interpolate. `make build` and `make lint` never touch it — the library
+depends on omni in no way at all (register 4.13).
+
+Two engine properties decide the shape of that file, and both are in
+"Engine caveats" below:
+
+- **A callback runs in the registry of whoever calls it.** omni calls the
+  subjects, so inside one neither `Struct.*` nor `test/omni.boru`'s own
+  module-level words exist. That is what `ob-build` is for: it captures
+  every library function as a *value*, and each subject is a lambda closing
+  over those captures. Walker callbacks are the mirror image — struct calls
+  them, so they keep using struct's internal `vg-*` words unchanged.
+- **A callback receives its arguments as one list.** `apply` does not
+  spread, so a subject reads `av get 0`.
+
+omni's ABSENT is its `undefined`, and it is what a subject gets for an
+entry with no `in`. `h-arg0`/`h-arg0n` translate it: NOARG where a missing
+argument is meaningful to struct, null where it is not.
 
 **The AQL → boru rename is complete upstream, and this port has followed
 it.** The bundled-module namespace is `boru:`, the module cache dir is
@@ -35,9 +72,12 @@ load failure and `/r` is not in its modifier table at all, so a port left
 on the old syntax does not run rather than running with a warning.
 
 That is how this port spent two days broken without anyone noticing: it
-is the only one with no CI job, so nothing exercised it against a moving
-engine. A job is owed. Until there is one, run `make test` locally after
-any engine bump.
+was the only one with no CI job, so nothing exercised it against a moving
+engine. Its job is `test-boru` in `.github/workflows/build.yml`, which
+builds the CLI from a pinned boru commit — the engine has no release
+channel, so a commit is the only reproducible version there is. Bump that
+one line to take a newer engine, and expect to run `make test` locally
+first: the engine moves under this port more than under any other.
 
 ## The value model
 

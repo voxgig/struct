@@ -1,0 +1,1021 @@
+# RUN: boru run -no-check -no-compile test/runner.boru
+# RUN-SOME: boru run -no-check -no-compile test/runner.boru minor.iskey
+#
+# The corpus runner is voxgig/omni. This file is the boru bridge and subject
+# factory: the algorithm is omni's, the subjects are struct's. What it
+# replaces - a 951-line reimplementation of that algorithm - is gone; what it
+# asserts is unchanged, group for group and flag for flag.
+#
+# Two engine properties shape everything below. Both are measured; the port's
+# full list is in ../AGENTS.md ("Engine caveats"), and omni's boru/README.md
+# records the same two from the runner's side.
+#
+#   A callback runs in the registry of WHOEVER CALLS IT. A subject is called
+#   by omni, so inside one neither `Struct.*` nor this file's own module-level
+#   words exist - only core words and values captured from the frame that
+#   built it. That is what `ob-build` is for: it captures every library
+#   function as a value, and every subject is a lambda closing over those
+#   captures. A walker callback is the mirror image - struct calls it, so it
+#   runs in struct's registry and uses struct's internal `vg-*` words, exactly
+#   as it did before this file existed.
+#
+#   A callback receives its arguments as ONE LIST. `apply` does not spread on
+#   this engine, so a subject reads `av get 0` rather than declaring an arity.
+#   omni-zig and omni-go take arguments the same way.
+
+import "boru:string-util"
+import "../src/struct.boru"
+import "../.omni-runner/src/omni.boru"
+
+# --- tallies -----------------------------------------------------------------
+# omni raises on the first failing entry in a set, so the unit of report here
+# is the group, not the entry: 75 checks, one per corpus group.
+
+def ob-tally (flex {npass: 0 nfail: 0})
+def ob-failures (flex [])
+
+def ob-record fn [[label:Any ok:Any msg:Any] [Any] [
+  if (ok eq true) [
+    def np ((ob-tally get "npass") add 1)
+    (ob-tally set "npass" np) drop
+    none
+  ] [
+    def nf ((ob-tally get "nfail") add 1)
+    (ob-tally set "nfail" nf) drop
+    def line `FAIL ${label} - ${msg}`
+    (append [line] ob-failures) drop
+    none
+  ]
+]]
+
+def ob-print-failures fn [[i:Integer] [Any] [
+  def r (
+    if (i gte (size ob-failures)) [none] [
+      print (ob-failures get i)
+      def i1 (i add 1)
+      def rr (ob-print-failures i1)
+      rr
+    ]
+  )
+  r
+]]
+
+# --- group selection -----------------------------------------------------------
+# `make test-some GROUP=minor` runs one section, or one group, out of a corpus
+# that takes minutes end to end. A bare prefix selects: "minor" takes all of
+# minor, "minor.iskey" takes one group.
+
+def ob-only (flex {name: none})
+
+def ob-wanted fn [[label:Any] [Boolean] [
+  def o (ob-only get "name")
+  def r (
+    if (o is None) [true] [
+      def n (size o)
+      def pre (if ((size label) gte n) [label slice 0 n] [""])
+      pre eq o
+    ]
+  )
+  r
+]]
+
+# --- this file's own entry helpers ---------------------------------------------
+# For the checks below, which run in THIS registry. The subjects get their own
+# copies inside ob-build, for the reason in the header.
+
+def ob-eget fn [[e:Any k:String] [Any] [
+  def r (if (e is Map) [e get (k)] [none])
+  r
+]]
+
+# --- callbacks struct invokes --------------------------------------------------
+# These are handed to struct - as a getpath handler, an inject modifier, a
+# transform modifier - so struct calls them and they run in struct's registry,
+# where `vg-*` and (because struct imports it too) `StringUtil` are bound.
+# The move to omni does not touch them.
+
+def rs-foo fn [[ig:Any] [Any] ["foo"]]
+def rl-foo-box {"`$FN`": rs-foo/v}
+
+def rs-gp-handler fn [[inj:Any val:Any iref:Any st:Any] [Any] [
+  if (vg-isfunc val) [
+    def f (val get "`$FN`")
+    none f/v apply
+  ] [val]
+]]
+def rl-gph-box {"`$FN`": rs-gp-handler/v}
+
+def rs-nullmod fn [[mval:Any mkey:Any mparent:Any inj:Any st:Any] [Any] [
+  if (mval eq "__NULL__") [
+    (mparent set (mkey) none) drop none
+  ] [
+    if (mval is String) [
+      def nv (vg-re-replace "__NULL__" mval "null")
+      (mparent set (mkey) nv) drop none
+    ] [none]
+  ] drop
+  none
+]]
+def rl-nullmod-box {"`$FN`": rs-nullmod/v}
+
+def rs-atmod fn [[mval:Any mkey:Any mparent:Any inj:Any st:Any] [Any] [
+  if (((mkey is None) not) and ((mparent is None) not)) [
+    if (mval is String) [
+      def nv (StringUtil.concat ["@" mval])
+      (mparent set (mkey) nv) drop none
+    ] [none]
+  ] [none] drop
+  none
+]]
+def rl-atmod-box {"`$FN`": rs-atmod/v}
+
+# --- the subject factory --------------------------------------------------------
+# One frame, captured by every subject: the library functions as values, the
+# entry helpers as lambdas, and the boxed callbacks above. A subject that
+# named any of them directly would die with `undefined word` the moment omni
+# called it.
+
+def ob-build fn [[] [Any] [
+  # The library under test, captured as values.
+  def f-clone (Struct.clone/v)
+  def f-delprop (Struct.delprop/v)
+  def f-escre (Struct.escre/v)
+  def f-escurl (Struct.escurl/v)
+  def f-filter (Struct.filter/v)
+  def f-flatten (Struct.flatten/v)
+  def f-getelem (Struct.getelem/v)
+  def f-getpath (Struct.getpath/v)
+  def f-getprop (Struct.getprop/v)
+  def f-haskey (Struct.haskey/v)
+  def f-inject (Struct.inject/v)
+  def f-isempty (Struct.isempty/v)
+  def f-isfunc (Struct.isfunc/v)
+  def f-iskey (Struct.iskey/v)
+  def f-islist (Struct.islist/v)
+  def f-ismap (Struct.ismap/v)
+  def f-isnode (Struct.isnode/v)
+  def f-items (Struct.items/v)
+  def f-join (Struct.join/v)
+  def f-jsonify (Struct.jsonify/v)
+  def f-keysof (Struct.keysof/v)
+  def f-merge (Struct.merge/v)
+  def f-pad (Struct.pad/v)
+  def f-pathify (Struct.pathify/v)
+  def f-re_escape (Struct.re_escape/v)
+  def f-re_find (Struct.re_find/v)
+  def f-re_find_all (Struct.re_find_all/v)
+  def f-re_replace (Struct.re_replace/v)
+  def f-re_test (Struct.re_test/v)
+  def f-select (Struct.select/v)
+  def f-setpath (Struct.setpath/v)
+  def f-setprop (Struct.setprop/v)
+  def f-size (Struct.size/v)
+  def f-slice (Struct.slice/v)
+  def f-stringify (Struct.stringify/v)
+  def f-strkey (Struct.strkey/v)
+  def f-transform (Struct.transform/v)
+  def f-typename (Struct.typename/v)
+  def f-typify (Struct.typify/v)
+  def f-validate (Struct.validate/v)
+  def f-walk (Struct.walk/v)
+
+  # `NOARG` is a value, not a function: no /v.
+  def f-noarg (Struct.NOARG)
+  def h-su-concat (StringUtil.concat/v)
+  def h-su-split (StringUtil.split/v)
+  def h-nullmark (Omni.NULLMARK)
+
+  # The boxed callbacks, as values.
+  def h-foo-box (rl-foo-box)
+  def h-gph-box (rl-gph-box)
+  def h-nullmod-box (rl-nullmod-box)
+  def h-atmod-box (rl-atmod-box)
+
+  # Entry helpers. Struct's subjects read their argument out of the entry's
+  # `in` map; a missing slot is NOARG ("argument not given"), which is not
+  # the same as a slot holding null.
+  # omni hands a subject one argument per entry, and ABSENT where the entry
+  # gave none. ABSENT is omni's `undefined`, so struct reads it as NOARG
+  # where a missing argument is meaningful and as null where it is not - the
+  # split the in-situ runner made by returning an empty argument list.
+  def h-isabsent (Omni.isabsent/v)
+  def h-arg0 ([av:Any] => [
+    def v (if ((size av) gt 0) [av get 0] [none])
+    def r (if (h-isabsent v) [none] [v])
+    r
+  ])
+  def h-arg0n ([av:Any] => [
+    def v (if ((size av) gt 0) [av get 0] [f-noarg])
+    def r (if (h-isabsent v) [f-noarg] [v])
+    r
+  ])
+  def h-eget ([e:Any k:Any] => [
+    def r (if (e is Map) [e get (k)] [none])
+    r
+  ])
+  def h-ehas ([e:Any k:Any] => [
+    def r (if (e is Map) [e has (k)] [false])
+    r
+  ])
+  def h-vgetn ([vin:Any k:Any] => [
+    def r (
+      if (vin is Map) [
+        if (vin has (k)) [vin get (k)] [f-noarg]
+      ] [f-noarg]
+    )
+    r
+  ])
+
+  # filter predicates: struct calls these, so core words are all they need.
+  def h-filter-gt3 ([pair:Any] => [
+    def pv (pair get 1)
+    def r (if (pv is Number) [pv gt 3] [false])
+    r
+  ])
+  def h-filter-lt3 ([pair:Any] => [
+    def pv (pair get 1)
+    def r (if (pv is Number) [pv lt 3] [false])
+    r
+  ])
+  def h-filter-none ([pair:Any] => [
+    def r false
+    r
+  ])
+
+  # --- the subjects -------------------------------------------------------------
+
+  def s-isnode ([av:Any] => [
+    def r (f-isnode (h-arg0 av))
+    r
+  ])
+
+  def s-ismap ([av:Any] => [
+    def r (f-ismap (h-arg0 av))
+    r
+  ])
+
+  def s-islist ([av:Any] => [
+    def r (f-islist (h-arg0 av))
+    r
+  ])
+
+  def s-iskey ([av:Any] => [
+    def r (f-iskey (h-arg0n av))
+    r
+  ])
+
+  def s-strkey ([av:Any] => [
+    def r (f-strkey (h-arg0n av))
+    r
+  ])
+
+  def s-isempty ([av:Any] => [
+    def r (f-isempty (h-arg0n av))
+    r
+  ])
+
+  def s-isfunc ([av:Any] => [
+    def r (f-isfunc (h-arg0 av))
+    r
+  ])
+
+  def s-clone ([av:Any] => [
+    def r (f-clone (h-arg0n av))
+    r
+  ])
+
+  def s-items ([av:Any] => [
+    def r (f-items (h-arg0 av))
+    r
+  ])
+
+  def s-keysof ([av:Any] => [
+    def r (f-keysof (h-arg0 av))
+    r
+  ])
+
+  def s-typify ([av:Any] => [
+    def r (f-typify (h-arg0n av))
+    r
+  ])
+
+  def s-size ([av:Any] => [
+    def r (f-size (h-arg0n av))
+    r
+  ])
+
+  def s-getprop ([av:Any] => [
+    def vin (h-arg0 av)
+    def v (h-eget vin "val")
+    def k (h-eget vin "key")
+    def alt (h-vgetn vin "alt")
+    def r (f-getprop v k alt)
+    r
+  ])
+
+  def s-getelem ([av:Any] => [
+    def vin (h-arg0 av)
+    def v (h-eget vin "val")
+    def k (h-eget vin "key")
+    def alt (h-vgetn vin "alt")
+    def r (f-getelem v k alt)
+    r
+  ])
+
+  def s-haskey ([av:Any] => [
+    def vin (h-arg0 av)
+    def src (h-eget vin "src")
+    def k (h-eget vin "key")
+    def r (f-haskey src k)
+    r
+  ])
+
+  def s-setprop ([av:Any] => [
+    def vin (h-arg0 av)
+    def p (h-eget vin "parent")
+    def k (h-eget vin "key")
+    def v (h-eget vin "val")
+    def r (f-setprop p k v)
+    r
+  ])
+
+  def s-delprop ([av:Any] => [
+    def vin (h-arg0 av)
+    def p (h-eget vin "parent")
+    def k (h-eget vin "key")
+    def r (f-delprop p k)
+    r
+  ])
+
+  def s-flatten ([av:Any] => [
+    def vin (h-arg0 av)
+    def v (h-eget vin "val")
+    def d (h-eget vin "depth")
+    def r (f-flatten v d)
+    r
+  ])
+
+  def s-typename ([av:Any] => [
+    def v (h-arg0 av)
+    def t (if (v is Number) [v] [0])
+    def r (f-typename t)
+    r
+  ])
+
+  def s-stringify ([av:Any] => [
+    def vin (h-arg0 av)
+    def r (
+    if (h-ehas vin "val") [
+      # Reference subject: stringify(NULLMARK === vin.val ? 'null' : vin.val, vin.max)
+      def v0 (vin get "val")
+      def v (if (v0 eq h-nullmark) ["null"] [v0])
+      def mx (h-vgetn vin "max")
+      f-stringify v mx f-noarg
+    ] [
+      f-stringify f-noarg f-noarg f-noarg
+    ]
+    )
+    r
+  ])
+
+  def s-stringify-null ([av:Any] => [
+    def v (h-arg0 av)
+    def r (f-stringify v f-noarg f-noarg)
+    r
+  ])
+
+  def s-jsonify ([av:Any] => [
+    def vin (h-arg0 av)
+    def v (h-vgetn vin "val")
+    def fl (h-eget vin "flags")
+    def r (f-jsonify v fl)
+    r
+  ])
+
+  def s-pathify ([av:Any] => [
+    def vin (h-arg0 av)
+    def p (if (h-ehas vin "path") [vin get "path"] [f-noarg])
+    def fr (h-eget vin "from")
+    def r (f-pathify p fr f-noarg)
+    r
+  ])
+
+  def s-slice ([av:Any] => [
+    def vin (h-arg0 av)
+    def v (h-eget vin "val")
+    def st (h-eget vin "start")
+    def en (h-eget vin "end")
+    def r (f-slice v st en f-noarg)
+    r
+  ])
+
+  def s-pad ([av:Any] => [
+    def vin (h-arg0 av)
+    def v (h-eget vin "val")
+    def pd (h-eget vin "pad")
+    def ch (h-eget vin "char")
+    def r (f-pad v pd ch)
+    r
+  ])
+
+  def s-escre ([av:Any] => [
+    def r (f-escre (h-arg0 av))
+    r
+  ])
+
+  def s-escurl ([av:Any] => [
+    def r (f-escurl (h-arg0 av))
+    r
+  ])
+
+  def s-join ([av:Any] => [
+    def vin (h-arg0 av)
+    def v (h-eget vin "val")
+    def sp (h-vgetn vin "sep")
+    def u (h-eget vin "url")
+    def r (f-join v sp u)
+    r
+  ])
+
+  def s-getpath ([av:Any] => [
+    def vin (h-arg0 av)
+    def st (h-eget vin "store")
+    def p (h-eget vin "path")
+    def r (f-getpath st p f-noarg)
+    r
+  ])
+
+  def s-setpath ([av:Any] => [
+    def vin (h-arg0 av)
+    def st (h-eget vin "store")
+    def p (h-vgetn vin "path")
+    def v (h-eget vin "val")
+    def r (f-setpath st p v f-noarg)
+    r
+  ])
+
+  def s-filter ([av:Any] => [
+    def vin (h-arg0 av)
+    def v (h-eget vin "val")
+    def c (h-eget vin "check")
+    def chk (
+      if (c eq "gt3") [[h-filter-gt3/v]] [
+        if (c eq "lt3") [[h-filter-lt3/v]] [[h-filter-none/v]]
+      ]
+    )
+    def r (f-filter v chk)
+    r
+  ])
+
+  def s-getpath-relative ([av:Any] => [
+    def vin (h-arg0 av)
+    def st (h-eget vin "store")
+    def p (h-eget vin "path")
+    def dp0 (h-eget vin "dpath")
+    def dpath (
+      if (dp0 is String) [make FlexList (h-su-split "." dp0 {keepEmpty: true})] [none]
+    )
+    def dparent (h-eget vin "dparent")
+    def idf (flex {})
+    (idf set "dparent" dparent) drop
+    (idf set "dpath" dpath) drop
+    def r (f-getpath st p idf)
+    r
+  ])
+
+  def s-getpath-special ([av:Any] => [
+    def vin (h-arg0 av)
+    def st (h-eget vin "store")
+    def p (h-eget vin "path")
+    def idf (h-eget vin "inj")
+    def r (f-getpath st p idf)
+    r
+  ])
+
+  def s-getpath-handler ([av:Any] => [
+    def vin (h-arg0 av)
+    def sv (h-eget vin "store")
+    def st (do {"$TOP": (sv) "$FOO": (h-foo-box)})
+    def p (h-eget vin "path")
+    def idf (do {"handler": (h-gph-box)})
+    def r (f-getpath st p idf)
+    r
+  ])
+
+  def s-merge ([av:Any] => [
+    def r (f-merge (h-arg0 av) f-noarg)
+    r
+  ])
+
+  def s-merge-depth ([av:Any] => [
+    def vin (h-arg0 av)
+    def v (h-eget vin "val")
+    def d (h-vgetn vin "depth")
+    def r (f-merge v d)
+    r
+  ])
+
+  def s-walk-basic ([av:Any] => [
+    def vin (h-arg0 av)
+    def cb ([k:Any v:Any parent:Any pth:Any] => [
+      if (v is String) [
+        def ps (vgi-join-list pth ".")
+        h-su-concat [v "~" ps]
+      ] [v]
+    ])
+    def r (f-walk vin [cb/v] f-noarg f-noarg)
+    r
+  ])
+
+  def s-walk-copy ([av:Any] => [
+    def vin (h-arg0 av)
+    def c (flex [])
+    def cb ([k:Any v:Any parent:Any pth:Any] => [
+      if (k is None) [
+        def top (
+          if (vg-ismap v) [flex {}] [
+            if (vg-islist v) [flex []] [v]
+          ]
+        )
+        if ((size c) gt 0) [(c set 0 top) drop none] [(append [top] c) drop none] drop
+        v
+      ] [
+        def i (size pth)
+        def nv (
+          if (vg-isnode v) [
+            if ((size c) lte i) [(append [none] c) drop none] [none] drop
+            def child (if (vg-ismap v) [flex {}] [flex []])
+            (c set i child) drop
+            child
+          ] [v]
+        )
+        def tgt (vg-getelem c (i sub 1) vg-noarg)
+        (vg-setprop tgt k nv) drop
+        v
+      ]
+    ])
+    (f-walk vin [cb/v] f-noarg f-noarg) drop
+    def r (f-getelem c 0 f-noarg)
+    r
+  ])
+
+  def s-walk-depth ([av:Any] => [
+    def vin (h-arg0 av)
+    def src (h-eget vin "src")
+    def md (h-vgetn vin "maxdepth")
+    def st (flex {})
+    (st set "top" none) drop
+    (st set "cur" none) drop
+    def cb ([k:Any v:Any parent:Any pth:Any] => [
+      if ((k is None) or (vg-isnode v)) [
+        def child (if (vg-islist v) [flex []] [flex {}])
+        if (k is None) [
+          (st set "top" child) drop
+          (st set "cur" child) drop
+          none
+        ] [
+          def cur (st get "cur")
+          (vg-setprop cur k child) drop
+          (st set "cur" child) drop
+          none
+        ] drop
+        none
+      ] [
+        def cur (st get "cur")
+        (vg-setprop cur k v) drop
+        none
+      ] drop
+      v
+    ])
+    (f-walk src [cb/v] f-noarg md) drop
+    def r (st get "top")
+    r
+  ])
+
+  def s-inject ([av:Any] => [
+    def vin (h-arg0 av)
+    def r (f-inject (h-eget vin "val") (h-eget vin "store") f-noarg)
+    r
+  ])
+
+  def s-inject-modify ([av:Any] => [
+    def vin (h-arg0 av)
+    def idf (do {"modify": (h-nullmod-box)})
+    def r (f-inject (h-eget vin "val") (h-eget vin "store") idf)
+    r
+  ])
+
+  def s-transform ([av:Any] => [
+    def vin (h-arg0 av)
+    def r (f-transform (h-eget vin "data") (h-eget vin "spec") f-noarg)
+    r
+  ])
+
+  def s-transform-modify ([av:Any] => [
+    def vin (h-arg0 av)
+    def idf (do {"modify": (h-atmod-box)})
+    def r (f-transform (h-eget vin "data") (h-eget vin "spec") idf)
+    r
+  ])
+
+  def s-re-test ([av:Any] => [
+    def vin (h-arg0 av)
+    def r (f-re_test (h-vgetn vin "pattern") (h-vgetn vin "input"))
+    r
+  ])
+
+  def s-re-find ([av:Any] => [
+    def vin (h-arg0 av)
+    def r (f-re_find (h-vgetn vin "pattern") (h-vgetn vin "input"))
+    r
+  ])
+
+  def s-re-find-all ([av:Any] => [
+    def vin (h-arg0 av)
+    def r (f-re_find_all (h-vgetn vin "pattern") (h-vgetn vin "input"))
+    r
+  ])
+
+  def s-re-replace ([av:Any] => [
+    def vin (h-arg0 av)
+    def r (f-re_replace (h-vgetn vin "pattern") (h-vgetn vin "input") (h-vgetn vin "replacement"))
+    r
+  ])
+
+  def s-re-escape ([av:Any] => [
+    def vin (h-arg0 av)
+    def r (f-re_escape (h-vgetn vin "val"))
+    r
+  ])
+
+  def s-validate ([av:Any] => [
+    def vin (h-arg0 av)
+    def r (f-validate (h-eget vin "data") (h-eget vin "spec") f-noarg)
+    r
+  ])
+
+  def s-validate-inj ([av:Any] => [
+    def vin (h-arg0 av)
+    def idf (h-vgetn vin "inj")
+    def r (f-validate (h-eget vin "data") (h-eget vin "spec") idf)
+    r
+  ])
+
+  def s-select ([av:Any] => [
+    def vin (h-arg0 av)
+    def r (f-select (h-eget vin "obj") (h-eget vin "query"))
+    r
+  ])
+
+  def s-getprop-vka ([av:Any] => [
+    def vin (h-arg0 av)
+    def r (f-getprop (h-vgetn vin "val") (h-vgetn vin "key") (h-vgetn vin "alt"))
+    r
+  ])
+
+  def s-getelem-vka ([av:Any] => [
+    def vin (h-arg0 av)
+    def r (f-getelem (h-vgetn vin "val") (h-vgetn vin "key") (h-vgetn vin "alt"))
+    r
+  ])
+
+  def s-haskey-vk ([av:Any] => [
+    def vin (h-arg0 av)
+    def r (f-haskey (h-vgetn vin "val") (h-vgetn vin "key"))
+    r
+  ])
+
+  def r (flex {
+    "isnode": [s-isnode/v]
+    "ismap": [s-ismap/v]
+    "islist": [s-islist/v]
+    "iskey": [s-iskey/v]
+    "strkey": [s-strkey/v]
+    "isempty": [s-isempty/v]
+    "isfunc": [s-isfunc/v]
+    "clone": [s-clone/v]
+    "items": [s-items/v]
+    "keysof": [s-keysof/v]
+    "typify": [s-typify/v]
+    "size": [s-size/v]
+    "getprop": [s-getprop/v]
+    "getelem": [s-getelem/v]
+    "haskey": [s-haskey/v]
+    "setprop": [s-setprop/v]
+    "delprop": [s-delprop/v]
+    "flatten": [s-flatten/v]
+    "typename": [s-typename/v]
+    "stringify": [s-stringify/v]
+    "stringify-null": [s-stringify-null/v]
+    "jsonify": [s-jsonify/v]
+    "pathify": [s-pathify/v]
+    "slice": [s-slice/v]
+    "pad": [s-pad/v]
+    "escre": [s-escre/v]
+    "escurl": [s-escurl/v]
+    "join": [s-join/v]
+    "getpath": [s-getpath/v]
+    "setpath": [s-setpath/v]
+    "filter": [s-filter/v]
+    "getpath-relative": [s-getpath-relative/v]
+    "getpath-special": [s-getpath-special/v]
+    "getpath-handler": [s-getpath-handler/v]
+    "merge": [s-merge/v]
+    "merge-depth": [s-merge-depth/v]
+    "walk-basic": [s-walk-basic/v]
+    "walk-copy": [s-walk-copy/v]
+    "walk-depth": [s-walk-depth/v]
+    "inject": [s-inject/v]
+    "inject-modify": [s-inject-modify/v]
+    "transform": [s-transform/v]
+    "transform-modify": [s-transform-modify/v]
+    "re-test": [s-re-test/v]
+    "re-find": [s-re-find/v]
+    "re-find-all": [s-re-find-all/v]
+    "re-replace": [s-re-replace/v]
+    "re-escape": [s-re-escape/v]
+    "validate": [s-validate/v]
+    "validate-inj": [s-validate-inj/v]
+    "select": [s-select/v]
+    "getprop-vka": [s-getprop-vka/v]
+    "getelem-vka": [s-getelem-vka/v]
+    "haskey-vk": [s-haskey-vk/v]
+  })
+  r
+]]
+
+# --- driving the corpus ----------------------------------------------------------
+
+# Run one corpus group through omni. A failure is a raise, so each group is
+# caught here: the run reports all 75, not just the first that breaks.
+def ob-group fn [[pack:Any section:Any name:Any subject:Any flagnull:Boolean] [Any] [
+  def sec (Omni.get (pack get "spec") section)
+  def nd (Omni.get sec name)
+  def label `${section}.${name}`
+  def r (
+    if ((ob-wanted label) not) [none] [
+    if (Omni.isabsent nd) [
+      def rr (ob-record label false "no such corpus group")
+      rr
+    ] [
+      def flags (flex {})
+      (flags set "name" label) drop
+      if (flagnull eq false) [(flags set "null" false) drop none] [none] drop
+      def outcome (do [
+        (Omni.runsetflags pack nd flags subject) drop
+        {ok: true}
+      ] error [var [[e]
+        def o (flex {})
+        (o set "ok" false) drop
+        (o set "msg" (Omni.errmessage e)) drop
+        o
+      ]])
+      if ((outcome get "ok") eq true) [
+        def rr (ob-record label true "")
+        rr
+      ] [
+        def rr (ob-record label false (outcome get "msg"))
+        rr
+      ]
+    ]
+    ]
+  )
+  r
+]]
+
+# Four corpus nodes are single in/out pairs rather than `set` groups, so no
+# runner drives them - every port hand-writes these, canonical TypeScript
+# included (see typescript/test/utility/StructUtility.test.ts). They call
+# struct straight from this registry.
+
+def ob-single fn [[pack:Any section:Any name:Any subject:Any] [Any] [
+  def sec (Omni.get (pack get "spec") section)
+  def nd (Omni.get sec name)
+  def label `${section}.${name}`
+  def r (
+    if ((ob-wanted label) not) [none] [
+    if ((nd is Map) not) [
+      def rr (ob-record label false "no such corpus group")
+      rr
+    ] [
+      def fixed (Omni.fixjson nd false)
+      def outcome (do [
+        def iv (fixed get "in")
+        def f (Omni.unbox subject)
+        def actual (iv f/v apply)
+        def expected (fixed get "out")
+        if (expected deq actual) [{ok: true}] [
+          def es (Struct.stringify expected Struct.NOARG Struct.NOARG)
+          def as2 (Struct.stringify actual Struct.NOARG Struct.NOARG)
+          raise {code: check_fail/q message: `Expected: ${es}, got: ${as2}`}
+        ]
+      ] error [var [[e]
+        def o (flex {})
+        (o set "ok" false) drop
+        (o set "msg" (e get "message")) drop
+        o
+      ]])
+      if ((outcome get "ok") eq true) [
+        def rr (ob-record label true "")
+        rr
+      ] [
+        def rr (ob-record label false (outcome get "msg"))
+        rr
+      ]
+    ]
+    ]
+  )
+  r
+]]
+
+def rs-merge-basic fn [[iv:Any] [Any] [
+  def cl (Struct.clone iv)
+  Struct.merge cl Struct.NOARG
+]]
+
+def rs-inject-basic fn [[iv:Any] [Any] [
+  Struct.inject (ob-eget iv "val") (ob-eget iv "store") Struct.NOARG
+]]
+
+def rs-transform-basic fn [[iv:Any] [Any] [
+  Struct.transform (ob-eget iv "data") (ob-eget iv "spec") Struct.NOARG
+]]
+
+# walk.log records k/v/p/t at each visit and pins all three phase orders
+# (after, before, both) against the corpus - three assertions in one node,
+# which is why it is not a `set`.
+def ob-walk-log fn [[pack:Any] [Any] [
+  def wk (Omni.get (pack get "spec") "walk")
+  def nd (Omni.get wk "log")
+  def r (
+    if ((ob-wanted "walk.log") not) [none] [
+    if ((nd is Map) not) [
+      def rr (ob-record "walk.log" false "no such corpus group")
+      rr
+    ] [
+      def fixed (Omni.fixjson nd false)
+      def outcome (do [
+        def logacc (flex [])
+        def cb ([k:Any v:Any parent:Any pth:Any] => [
+          def ks (if (k is None) [vg-stringify vg-noarg vg-noarg vg-noarg] [vg-stringify k vg-noarg vg-noarg])
+          def vs (vg-stringify v vg-noarg vg-noarg)
+          def ps (if (parent is None) [vg-stringify vg-noarg vg-noarg vg-noarg] [vg-stringify parent vg-noarg vg-noarg])
+          def ts (vg-pathify pth vg-noarg vg-noarg)
+          def line `k=${ks}, v=${vs}, p=${ps}, t=${ts}`
+          (append [line] logacc) drop
+          v
+        ])
+        def iv (fixed get "in")
+        def td (Struct.clone iv)
+        (Struct.walk td Struct.NOARG [cb/v] Struct.NOARG) drop
+        def expa ((fixed get "out") get "after")
+        if (expa deq logacc) [none] [
+          def es (Struct.stringify expa Struct.NOARG Struct.NOARG)
+          def gs (Struct.stringify logacc Struct.NOARG Struct.NOARG)
+          raise {code: check_fail/q message: `after: Expected: ${es}, got: ${gs}`}
+        ] drop
+        (Struct.slice logacc 0 0 true) drop
+        (Struct.walk td [cb/v] Struct.NOARG Struct.NOARG) drop
+        def expb ((fixed get "out") get "before")
+        if (expb deq logacc) [none] [
+          def es (Struct.stringify expb Struct.NOARG Struct.NOARG)
+          def gs (Struct.stringify logacc Struct.NOARG Struct.NOARG)
+          raise {code: check_fail/q message: `before: Expected: ${es}, got: ${gs}`}
+        ] drop
+        (Struct.slice logacc 0 0 true) drop
+        (Struct.walk td [cb/v] [cb/v] Struct.NOARG) drop
+        def expc ((fixed get "out") get "both")
+        if (expc deq logacc) [{ok: true}] [
+          def es (Struct.stringify expc Struct.NOARG Struct.NOARG)
+          def gs (Struct.stringify logacc Struct.NOARG Struct.NOARG)
+          raise {code: check_fail/q message: `both: Expected: ${es}, got: ${gs}`}
+        ]
+      ] error [var [[e]
+        def o (flex {})
+        (o set "ok" false) drop
+        (o set "msg" (e get "message")) drop
+        o
+      ]])
+      if ((outcome get "ok") eq true) [
+        def rr (ob-record "walk.log" true "")
+        rr
+      ] [
+        def rr (ob-record "walk.log" false (outcome get "msg"))
+        rr
+      ]
+    ]
+    ]
+  )
+  r
+]]
+
+# --- main --------------------------------------------------------------------
+# The null flags are the in-situ runner's, group for group: this change swaps
+# the runner, not what is asserted.
+
+def ob-main fn [[av:Any] [Any] [
+  if (av is List) [
+    if ((size av) gt 0) [(ob-only set "name" (av get 0)) drop none] [none] drop
+    none
+  ] [none] drop
+
+  def subs (ob-build)
+  def rn (Omni.makeRunner "../build/test/test.json" (flex {}))
+  def pack (Omni.runner rn "struct" none)
+
+  (ob-group pack "minor" "isnode" (subs get "isnode") true) drop
+  (ob-group pack "minor" "ismap" (subs get "ismap") true) drop
+  (ob-group pack "minor" "islist" (subs get "islist") true) drop
+  (ob-group pack "minor" "iskey" (subs get "iskey") false) drop
+  (ob-group pack "minor" "strkey" (subs get "strkey") false) drop
+  (ob-group pack "minor" "isempty" (subs get "isempty") false) drop
+  (ob-group pack "minor" "isfunc" (subs get "isfunc") true) drop
+  (ob-group pack "minor" "clone" (subs get "clone") false) drop
+  (ob-group pack "minor" "items" (subs get "items") true) drop
+  (ob-group pack "minor" "keysof" (subs get "keysof") true) drop
+  (ob-group pack "minor" "typify" (subs get "typify") false) drop
+  (ob-group pack "minor" "size" (subs get "size") false) drop
+  (ob-group pack "minor" "getprop" (subs get "getprop") false) drop
+  (ob-group pack "minor" "getelem" (subs get "getelem") false) drop
+  (ob-group pack "minor" "haskey" (subs get "haskey") false) drop
+  (ob-group pack "minor" "setprop" (subs get "setprop") true) drop
+  (ob-group pack "minor" "delprop" (subs get "delprop") true) drop
+  (ob-group pack "minor" "flatten" (subs get "flatten") true) drop
+  (ob-group pack "minor" "typename" (subs get "typename") true) drop
+  (ob-group pack "minor" "filter" (subs get "filter") true) drop
+  (ob-group pack "minor" "stringify" (subs get "stringify") true) drop
+  (ob-group pack "minor" "jsonify" (subs get "jsonify") false) drop
+  (ob-group pack "minor" "pathify" (subs get "pathify") false) drop
+  (ob-group pack "minor" "slice" (subs get "slice") false) drop
+  (ob-group pack "minor" "pad" (subs get "pad") false) drop
+  (ob-group pack "minor" "escre" (subs get "escre") true) drop
+  (ob-group pack "minor" "escurl" (subs get "escurl") true) drop
+  (ob-group pack "minor" "join" (subs get "join") false) drop
+  (ob-group pack "minor" "setpath" (subs get "setpath") false) drop
+
+  (ob-group pack "getpath" "basic" (subs get "getpath") true) drop
+  (ob-group pack "getpath" "relative" (subs get "getpath-relative") true) drop
+  (ob-group pack "getpath" "special" (subs get "getpath-special") true) drop
+  (ob-group pack "getpath" "handler" (subs get "getpath-handler") true) drop
+
+  (ob-group pack "merge" "cases" (subs get "merge") true) drop
+  (ob-group pack "merge" "array" (subs get "merge") true) drop
+  (ob-group pack "merge" "integrity" (subs get "merge") true) drop
+  (ob-group pack "merge" "depth" (subs get "merge-depth") true) drop
+
+  (ob-group pack "walk" "basic" (subs get "walk-basic") true) drop
+  (ob-group pack "walk" "copy" (subs get "walk-copy") true) drop
+  (ob-group pack "walk" "depth" (subs get "walk-depth") false) drop
+
+  (ob-group pack "inject" "string" (subs get "inject-modify") true) drop
+  (ob-group pack "inject" "deep" (subs get "inject") true) drop
+
+  (ob-group pack "transform" "paths" (subs get "transform") true) drop
+  (ob-group pack "transform" "cmds" (subs get "transform") true) drop
+  (ob-group pack "transform" "each" (subs get "transform") true) drop
+  (ob-group pack "transform" "pack" (subs get "transform") true) drop
+  (ob-group pack "transform" "modify" (subs get "transform-modify") true) drop
+  (ob-group pack "transform" "ref" (subs get "transform") true) drop
+  (ob-group pack "transform" "format" (subs get "transform") false) drop
+  (ob-group pack "transform" "apply" (subs get "transform") true) drop
+
+  (ob-group pack "validate" "basic" (subs get "validate") false) drop
+  (ob-group pack "validate" "child" (subs get "validate") true) drop
+  (ob-group pack "validate" "one" (subs get "validate") true) drop
+  (ob-group pack "validate" "exact" (subs get "validate") true) drop
+  (ob-group pack "validate" "invalid" (subs get "validate") false) drop
+  (ob-group pack "validate" "special" (subs get "validate-inj") true) drop
+
+  (ob-group pack "select" "basic" (subs get "select") true) drop
+  (ob-group pack "select" "operators" (subs get "select") true) drop
+  (ob-group pack "select" "edge" (subs get "select") true) drop
+  (ob-group pack "select" "alts" (subs get "select") true) drop
+
+  (ob-group pack "regex" "test" (subs get "re-test") true) drop
+  (ob-group pack "regex" "find" (subs get "re-find") true) drop
+  (ob-group pack "regex" "find_all" (subs get "re-find-all") true) drop
+  (ob-group pack "regex" "replace" (subs get "re-replace") true) drop
+  (ob-group pack "regex" "escape" (subs get "re-escape") true) drop
+
+  (ob-group pack "sentinels" "getprop_unify" (subs get "getprop-vka") false) drop
+  (ob-group pack "sentinels" "getelem_absent" (subs get "getelem-vka") false) drop
+  (ob-group pack "sentinels" "haskey_unify" (subs get "haskey-vk") false) drop
+  (ob-group pack "sentinels" "isempty_unify" (subs get "isempty") false) drop
+  (ob-group pack "sentinels" "isnode_unify" (subs get "isnode") false) drop
+  (ob-group pack "sentinels" "stringify_null" (subs get "stringify-null") false) drop
+
+  (ob-single pack "merge" "basic" [rs-merge-basic/v]) drop
+  (ob-single pack "inject" "basic" [rs-inject-basic/v]) drop
+  (ob-single pack "transform" "basic" [rs-transform-basic/v]) drop
+  (ob-walk-log pack) drop
+
+  (ob-print-failures 0) drop
+  def np (ob-tally get "npass")
+  def nf (ob-tally get "nfail")
+  print `PASS ${np}  FAIL ${nf}`
+  if (nf gt 0) [raise {code: corpus_fail/q message: `${nf} corpus failures`}] [none] drop
+  def r none
+  r
+]]
+
+export "OmniRun" {main: ob-main/v}

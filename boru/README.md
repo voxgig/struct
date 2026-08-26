@@ -16,11 +16,13 @@ application language.
 ## Status
 
 Complete. Every canonical public function is implemented and the entire
-shared corpus passes (`make test`). **Zero third-party dependencies** —
-only the `boru` CLI is required (the library imports only the engine's
-bundled `boru:` modules: `string-util`, `math-util`, `bin-util`,
-`minilang`, `emitlang`, `time-util`; the test runner additionally
-uses `boru:io` to read the corpus).
+shared corpus passes (`make test`), on the shared runner every other port
+uses — [voxgig/omni](https://github.com/voxgig/omni). **Zero third-party
+dependencies** — only the `boru` CLI is required. The library imports only
+the engine's bundled `boru:` modules (`string-util`, `math-util`,
+`bin-util`, `minilang`, `emitlang`, `time-util`) and nothing else at all;
+omni is a *test* dependency, reached through a symlink `make test` creates
+and `make build` never touches.
 
 ## Requirements
 
@@ -75,17 +77,38 @@ accepted as inputs; node-creating code always builds flex nodes.
 
 - [`src/struct.boru`](./src/struct.boru) — the whole library (one module).
 - [`test/runner.boru`](./test/runner.boru) — corpus runner entry point.
-- [`test/runner-lib.boru`](./test/runner-lib.boru) — the runner module
-  (mirrors `typescript/test/runner.ts`).
+- [`test/omni.boru`](./test/omni.boru) — the voxgig/omni bridge and subject
+  factory: the algorithm is omni's, the subjects are struct's.
 - [`test/lint.boru`](./test/lint.boru) — the `make lint` load smoke.
 
 ## Test / lint
 
 ```
 cd boru
-make test    # boru run -no-check -no-compile test/runner.boru
-make lint    # boru check src/struct.boru + a module load smoke
+make test                     # the whole corpus, on voxgig/omni
+make test-some GROUP=minor    # one section, or one group (minor.iskey)
+make lint                     # boru check src/struct.boru + a load smoke
 ```
+
+The corpus takes minutes end to end on the interpreter, which is what
+`test-some` is for.
+
+### The test runner
+
+The corpus is driven by [voxgig/omni](https://github.com/voxgig/omni), the
+shared multi-language runner — the same algorithm, from the same source,
+as every other port of this library. It is not published (boru has no
+registry), so it is consumed as a local checkout: `make test` looks at
+`$OMNI_HOME` and then at sibling paths, takes the first directory carrying
+`spec/fib.json`, and points the gitignored `.omni-runner` symlink at its
+`boru/` port. A boru import path is a literal with no variable to
+interpolate — the symlink is what makes a per-checkout location fixed.
+
+    git clone https://github.com/voxgig/omni ../../omni    # or set OMNI_HOME
+
+Only `make test` depends on it. `make build` and `make lint` never touch
+the link, so a clone with no omni beside it still builds and checks the
+library.
 
 See [`DOCS.md`](./DOCS.md) for the comprehensive guide and
 [`AGENTS.md`](./AGENTS.md) for contributor/agent notes.

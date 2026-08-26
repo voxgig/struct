@@ -128,11 +128,17 @@ Struct.select (flex [{x: 1} {x: 2}]) (flex {x: {"`$GT`": 1}})
 
 ## Testing
 
-`make test` runs the shared corpus (1300+ invocations) through
-[`test/runner-lib.boru`](./test/runner-lib.boru), a faithful port of the
-reference runner (`typescript/test/runner.ts`): the same `__NULL__`
-fixups, error-substring matching, `match` walking and set drivers. The
-run must end `PASS <n>  FAIL 0`.
+`make test` runs the shared corpus (1300+ invocations) on
+[voxgig/omni](https://github.com/voxgig/omni), the runner every port of
+this library shares — the same `__NULL__` fixups, error matching, `match`
+walking and set drivers, from one source rather than a per-port copy.
+[`test/omni.boru`](./test/omni.boru) is the bridge: it builds struct's
+subjects and names the corpus groups. The run must end
+`PASS <n>  FAIL 0`.
+
+omni is a test-only local checkout, found via `$OMNI_HOME` or a sibling
+directory; `make test` links it as `.omni-runner`. `make test-some
+GROUP=minor` runs one section out of a corpus that takes minutes.
 
 `make lint` additionally runs the boru static checker over the library
 (the module checks clean — 0 errors) and a load smoke.
