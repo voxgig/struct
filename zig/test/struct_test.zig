@@ -356,7 +356,7 @@ fn wrap_pathify(allocator: Allocator, val: JsonValue) JsonValue {
     const m = val.object;
     const path = m.get("path") orelse {
         // No path field - return unknown-path
-        var result = std.ArrayList(u8).init(allocator);
+        var result = std.array_list.Managed(u8).init(allocator);
         result.appendSlice("<unknown-path>") catch return JsonValue{ .string = "<unknown-path>" };
         return JsonValue{ .string = result.items };
     };
@@ -599,7 +599,7 @@ fn walkApplyBasic(_: Allocator, key: ?[]const u8, val: JsonValue, _: JsonValue, 
         for (path) |p| total_len += p.len;
         if (path.len > 1) total_len += path.len - 1; // dots between parts
 
-        var buf = std.ArrayList(u8).init(std.heap.page_allocator);
+        var buf = std.array_list.Managed(u8).init(std.heap.page_allocator);
         buf.appendSlice(val.string) catch return val;
         buf.append('~') catch return val;
         for (path, 0..) |p, i| {
@@ -656,7 +656,7 @@ fn cloneWithDepth(allocator: Allocator, val: JsonValue, maxdepth: i32, depth: i3
     }
     if (voxgig_struct.ismap(val)) {
         const new_obj_ref = allocator.create(voxgig_struct.MapRef) catch return .null;
-        new_obj_ref.* = .{ .data = voxgig_struct.MapData.init(allocator) };
+        new_obj_ref.* = .{ .data = .empty, .allocator = allocator };
         var it = val.object.iterator();
         while (it.next()) |kv| {
             try new_obj_ref.put(kv.key_ptr.*, try cloneWithDepth(allocator, kv.value_ptr.*, maxdepth, depth + 1));
@@ -834,7 +834,7 @@ fn wrap_getpath_relative(allocator: Allocator, val: JsonValue) JsonValue {
         }
     }
 
-    var errs = std.ArrayList([]const u8).init(allocator);
+    var errs = std.array_list.Managed([]const u8).init(allocator);
     const init_keys = allocator.alloc([]const u8, 0) catch return .null;
     const init_path = allocator.alloc([]const u8, 0) catch return .null;
     const init_nodes = allocator.alloc(JsonValue, 0) catch return .null;
@@ -862,7 +862,7 @@ fn wrap_getpath_special(allocator: Allocator, val: JsonValue) JsonValue {
     const inj_spec = m.get("inj");
 
     if (inj_spec) |ij| {
-        var errs = std.ArrayList([]const u8).init(allocator);
+        var errs = std.array_list.Managed([]const u8).init(allocator);
         var init_keys = allocator.alloc([]const u8, 0) catch return .null;
         var init_path = allocator.alloc([]const u8, 0) catch return .null;
         var init_nodes = allocator.alloc(JsonValue, 0) catch return .null;
@@ -927,7 +927,7 @@ fn wrap_getpath_handler(allocator: Allocator, val: JsonValue) JsonValue {
 
     // Build a store that has $FOO as a function returning "foo".
     const handler_store = allocator.create(voxgig_struct.MapRef) catch return .null;
-    handler_store.* = .{ .data = voxgig_struct.MapData.init(allocator) };
+    handler_store.* = .{ .data = .empty, .allocator = allocator };
     handler_store.put("$TOP", .null) catch {};
     handler_store.put("$FOO", JsonValue{ .function = fooHandler }) catch {};
 

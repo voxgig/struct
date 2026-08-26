@@ -139,7 +139,15 @@ pub const Flags = struct {
 /// Load test.json and return the "struct" spec.
 pub fn makeRunner(allocator: Allocator) !RunPack {
     const path = TEST_JSON_FILE;
-    const data = try std.fs.cwd().readFileAlloc(allocator, path, 10 * 1024 * 1024);
+    // 0.16 moved the filesystem into std.Io.Dir and made I/O take an
+    // explicit Io. In a test build std.testing.io is that instance; the
+    // 10MB cap the old call carried is now spelled as an Io.Limit.
+    const data = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        path,
+        allocator,
+        .limited(10 * 1024 * 1024),
+    );
     const parsed = try std.json.parseFromSlice(StdJsonValue, allocator, data, .{});
     const root = parsed.value;
 
@@ -177,9 +185,9 @@ fn checkResult(expected: StdJsonValue, result: StdJsonValue) !void {
 fn fmtJson(val: StdJsonValue) []const u8 {
     // Best-effort one-line representation for diagnostic output. Uses the
     // process-wide page allocator so the lifetime is OK for a print-and-die.
-    var buf = std.ArrayList(u8).init(std.heap.page_allocator);
-    std.json.stringify(val, .{}, buf.writer()) catch return "?";
-    return buf.items;
+    // 0.16 replaced std.json.stringify with std.json.Stringify; valueAlloc
+    // is the allocate-and-return form this diagnostic wants.
+    return std.json.Stringify.valueAlloc(std.heap.page_allocator, val, .{}) catch "?";
 }
 
 /// Deep equality for std.json.Value.

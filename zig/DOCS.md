@@ -40,7 +40,7 @@ cd zig
 zig build test      # build + run the corpus suite
 ```
 
-Tested with Zig 0.13.0. Import the module by its package name:
+Tested with Zig 0.16.0. Import the module by its package name:
 
 ```zig
 const struct_lib = @import("voxgig-struct");

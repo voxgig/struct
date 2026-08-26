@@ -10,9 +10,11 @@ const JsonValue = voxgig_struct.JsonValue;
 
 var bench_sink: u64 = 0;
 
-fn envi(k: []const u8, d: usize) usize {
-    const v = std.process.getEnvVarOwned(std.heap.page_allocator, k) catch return d;
-    defer std.heap.page_allocator.free(v);
+// 0.16 moved environment access off std.process and behind an explicit map:
+// std.process.getEnvVarOwned is gone, and `main` receives the map on its
+// std.process.Init argument. The map owns its strings, so nothing to free.
+fn envi(env: *const std.process.Environ.Map, k: []const u8, d: usize) usize {
+    const v = env.get(k) orelse return d;
     return std.fmt.parseInt(usize, v, 10) catch d;
 }
 
@@ -79,7 +81,7 @@ fn doOp(a: Allocator, op: Op, tree: JsonValue, mlist: JsonValue, path: JsonValue
     }
 }
 
-fn runOp(base: Allocator, op: Op, w: usize, d: usize, warm: usize, runs: usize, gp: usize, times: []u64) !Stats {
+fn runOp(base: Allocator, io: std.Io, op: Op, w: usize, d: usize, warm: usize, runs: usize, gp: usize, times: []u64) !Stats {
     var arena = std.heap.ArenaAllocator.init(base);
     defer arena.deinit();
     const a = arena.allocator();
@@ -93,7 +95,7 @@ fn runOp(base: Allocator, op: Op, w: usize, d: usize, warm: usize, runs: usize, 
         try mlist.array.append(try buildTree(a, w, d, 2));
     }
     if (op == .getpath) {
-        var buf = std.ArrayList(u8).init(a);
+        var buf = std.array_list.Managed(u8).init(a);
         var i: usize = 0;
         while (i < d) : (i += 1) {
             if (i > 0) try buf.append('.');
@@ -106,20 +108,25 @@ fn runOp(base: Allocator, op: Op, w: usize, d: usize, warm: usize, runs: usize, 
     while (i < warm) : (i += 1) try doOp(a, op, tree, mlist, path, gp);
     i = 0;
     while (i < runs) : (i += 1) {
-        var timer = try std.time.Timer.start();
+        // std.time.Timer is gone in 0.16; timing reads a clock through the
+        // Io. `awake` is CLOCK_MONOTONIC on Linux, which is what the old
+        // Timer used.
+        const t0 = std.Io.Timestamp.now(io, .awake);
         try doOp(a, op, tree, mlist, path, gp);
-        times[i] = timer.read();
+        const t1 = std.Io.Timestamp.now(io, .awake);
+        times[i] = @intCast(t1.nanoseconds - t0.nanoseconds);
     }
     return finish(times);
 }
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     const base = std.heap.page_allocator;
-    const w = envi("BENCH_WIDTH", 5);
-    const d = envi("BENCH_DEPTH", 6);
-    const warm = envi("BENCH_WARMUP", 3);
-    const runs = envi("BENCH_RUNS", 21);
-    const gp = envi("BENCH_GETPATH_ITERS", 2000);
+    const env = init.environ_map;
+    const w = envi(env, "BENCH_WIDTH", 5);
+    const d = envi(env, "BENCH_DEPTH", 6);
+    const warm = envi(env, "BENCH_WARMUP", 3);
+    const runs = envi(env, "BENCH_RUNS", 21);
+    const gp = envi(env, "BENCH_GETPATH_ITERS", 2000);
     const nodes = nodecount(w, d);
     const times = try base.alloc(u64, runs);
     defer base.free(times);
@@ -132,16 +139,20 @@ pub fn main() !void {
         .{ .name = "getpath", .op = .getpath, .uc = @as(u64, gp) },
     };
 
-    var out = std.ArrayList(u8).init(base);
+    // ArrayList lost .writer() in 0.16; std.Io.Writer.Allocating is the
+    // allocate-as-you-go writer that replaced it.
+    var out: std.Io.Writer.Allocating = .init(base);
     defer out.deinit();
-    const wr = out.writer();
+    const wr = &out.writer;
     try wr.print("{{\"lang\":\"zig\",\"runtime\":\"zig {s}\",\"nodes\":{d},\"params\":{{\"width\":{d},\"depth\":{d},\"warmup\":{d},\"runs\":{d},\"getpath_iters\":{d}}},\"ops\":[", .{ builtin.zig_version_string, nodes, w, d, warm, runs, gp });
     for (specs, 0..) |spec, idx| {
-        const s = try runOp(base, spec.op, w, d, warm, runs, gp, times);
+        const s = try runOp(base, init.io, spec.op, w, d, warm, runs, gp, times);
         if (idx > 0) try wr.writeByte(',');
         try wr.print("{{\"op\":\"{s}\",\"runs\":{d},\"unit_count\":{d},\"min_ms\":{d:.6},\"median_ms\":{d:.6},\"mean_ms\":{d:.6}}}", .{ spec.name, runs, spec.uc, s.min_ms, s.median_ms, s.mean_ms });
     }
     try wr.writeAll("]}\n");
-    try std.io.getStdOut().writeAll(out.items);
+    // std.io.getStdOut() is gone; the file handle now comes from std.Io.File
+    // and every write takes the Io explicitly.
+    try std.Io.File.stdout().writeStreamingAll(init.io, out.written());
     std.debug.print("zig: sink={d}\n", .{bench_sink});
 }

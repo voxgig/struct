@@ -6,13 +6,13 @@
 # runner script stays minimal. Mirrors the reference runner
 # (typescript/test/runner.ts) the way dart/test/runner.dart does.
 #
-# Function values travel wrapped in one-element lists ([f/r]) — see the
+# Function values travel wrapped in one-element lists ([f/v]) — see the
 # port notes in ../src/struct.boru.
 # ============================================================================
 
-import "aql:io"
-import "aql:string-util"
-import "aql:minilang"
+import "boru:io"
+import "boru:string-util"
+import "boru:minilang"
 import "../src/struct.boru"
 
 def rl-nullmark "__NULL__"
@@ -191,7 +191,7 @@ def rl-do-match fn [[chk:Any base0:Any] [Any] [
     ] [none] drop
     v
   ])
-  (Struct.walk chk [walker/r] Struct.NOARG Struct.NOARG) drop
+  (Struct.walk chk [walker/v] Struct.NOARG Struct.NOARG) drop
   none
 ]]
 
@@ -278,7 +278,7 @@ def rl-run-entry fn [[group:Any entry:Any subj:Any flagnull:Boolean] [Any] [
   def outcome (do [
     def alist (rl-resolve-args entry)
     def f (vgi-fnarg-rl subj)
-    def res0 (alist f/r apply)
+    def res0 (alist f/v apply)
     def res (rl-fix res0 flagnull)
     (entry set "res" res) drop
     (rl-check-result entry alist res) drop
@@ -326,7 +326,7 @@ def rl-run-set-loop fn [[i:Integer group:Any testset:Any subj:Any flagnull:Boole
   ]
 ]]
 
-# Unwrap a wrapped function argument ([f/r] list) to the Function.
+# Unwrap a wrapped function argument ([f/v] list) to the Function.
 def vgi-fnarg-rl fn [[fw:Any] [Any] [
   if (fw is List) [
     if ((size fw) eq 1) [fw get 0] [fw]
@@ -351,7 +351,7 @@ def rl-run-single fn [[group:Any nd:Any subj:Any] [Any] [
     def outcome (do [
       def iv (fixed get "in")
       def f (vgi-fnarg-rl subj)
-      def actual (iv f/r apply)
+      def actual (iv f/v apply)
       def expected (fixed get "out")
       if (expected deq actual) [{ok: true}] [
         def es (Struct.stringify expected Struct.NOARG Struct.NOARG)
@@ -516,8 +516,8 @@ def rs-filter fn [[alist:Any] [Any] [
   def v (rl-eget vin "val")
   def c (rl-eget vin "check")
   def chk (
-    if (c eq "gt3") [[rs-filter-gt3/r]] [
-      if (c eq "lt3") [[rs-filter-lt3/r]] [[rs-filter-none/r]]
+    if (c eq "gt3") [[rs-filter-gt3/v]] [
+      if (c eq "lt3") [[rs-filter-lt3/v]] [[rs-filter-none/v]]
     ]
   )
   Struct.filter v chk
@@ -553,14 +553,14 @@ def rs-getpath-special fn [[alist:Any] [Any] [
   Struct.getpath st p idf
 ]]
 def rs-foo fn [[ig:Any] [Any] ["foo"]]
-def rl-foo-box {"`$FN`": rs-foo/r}
+def rl-foo-box {"`$FN`": rs-foo/v}
 def rs-gp-handler fn [[inj:Any val:Any iref:Any st:Any] [Any] [
   if (vg-isfunc val) [
     def f (val get "`$FN`")
-    none f/r apply
+    none f/v apply
   ] [val]
 ]]
-def rl-gph-box {"`$FN`": rs-gp-handler/r}
+def rl-gph-box {"`$FN`": rs-gp-handler/v}
 def rs-getpath-handler fn [[alist:Any] [Any] [
   def vin (rl-arg0 alist)
   def sv (rl-eget vin "store")
@@ -599,7 +599,7 @@ def rs-walk-basic fn [[alist:Any] [Any] [
       StringUtil.concat [v "~" ps]
     ] [v]
   ])
-  Struct.walk vin [cb/r] Struct.NOARG Struct.NOARG
+  Struct.walk vin [cb/v] Struct.NOARG Struct.NOARG
 ]]
 
 # walk.log: record k/v/p/t at each after-visit.
@@ -619,7 +619,7 @@ def rl-run-walk-log fn [[group:Any nd:Any] [Any] [
       ])
       def iv (fixed get "in")
       def td (Struct.clone iv)
-      (Struct.walk td Struct.NOARG [cb/r] Struct.NOARG) drop
+      (Struct.walk td Struct.NOARG [cb/v] Struct.NOARG) drop
       def expa ((fixed get "out") get "after")
       if (expa deq logacc) [none] [
         def es (Struct.stringify expa Struct.NOARG Struct.NOARG)
@@ -627,7 +627,7 @@ def rl-run-walk-log fn [[group:Any nd:Any] [Any] [
         raise {code: check_fail/q message: `after: Expected: ${es}, got: ${gs}`}
       ] drop
       (Struct.slice logacc 0 0 true) drop
-      (Struct.walk td [cb/r] Struct.NOARG Struct.NOARG) drop
+      (Struct.walk td [cb/v] Struct.NOARG Struct.NOARG) drop
       def expb ((fixed get "out") get "before")
       if (expb deq logacc) [none] [
         def es (Struct.stringify expb Struct.NOARG Struct.NOARG)
@@ -635,7 +635,7 @@ def rl-run-walk-log fn [[group:Any nd:Any] [Any] [
         raise {code: check_fail/q message: `before: Expected: ${es}, got: ${gs}`}
       ] drop
       (Struct.slice logacc 0 0 true) drop
-      (Struct.walk td [cb/r] [cb/r] Struct.NOARG) drop
+      (Struct.walk td [cb/v] [cb/v] Struct.NOARG) drop
       def expc ((fixed get "out") get "both")
       if (expc deq logacc) [{ok: true}] [
         def es (Struct.stringify expc Struct.NOARG Struct.NOARG)
@@ -685,7 +685,7 @@ def rs-walk-copy fn [[alist:Any] [Any] [
       v
     ]
   ])
-  (Struct.walk vin [cb/r] Struct.NOARG Struct.NOARG) drop
+  (Struct.walk vin [cb/v] Struct.NOARG Struct.NOARG) drop
   Struct.getelem c 0 Struct.NOARG
 ]]
 
@@ -718,7 +718,7 @@ def rs-walk-depth fn [[alist:Any] [Any] [
     ] drop
     v
   ])
-  (Struct.walk src [cb/r] Struct.NOARG md) drop
+  (Struct.walk src [cb/v] Struct.NOARG md) drop
   st get "top"
 ]]
 
@@ -745,7 +745,7 @@ def rs-nullmod fn [[mval:Any mkey:Any mparent:Any inj:Any st:Any] [Any] [
   ] drop
   none
 ]]
-def rl-nullmod-box {"`$FN`": rs-nullmod/r}
+def rl-nullmod-box {"`$FN`": rs-nullmod/v}
 def rs-inject-modify fn [[alist:Any] [Any] [
   def vin (rl-arg0 alist)
   def idf (do {"modify": (rl-nullmod-box)})
@@ -770,7 +770,7 @@ def rs-atmod fn [[mval:Any mkey:Any mparent:Any inj:Any st:Any] [Any] [
   ] [none] drop
   none
 ]]
-def rl-atmod-box {"`$FN`": rs-atmod/r}
+def rl-atmod-box {"`$FN`": rs-atmod/v}
 def rs-transform-modify fn [[alist:Any] [Any] [
   def vin (rl-arg0 alist)
   def idf (do {"modify": (rl-atmod-box)})
@@ -846,99 +846,99 @@ def rl-main fn [[ig:Any] [Any] [
   def alltests (IO.read (make Pathon "../build/test/test.json"))
   def spec (alltests get "struct")
 
-  (rl-run-set "minor.isnode" (rl-minor spec "isnode") [rs-isnode/r] true) drop
-  (rl-run-set "minor.ismap" (rl-minor spec "ismap") [rs-ismap/r] true) drop
-  (rl-run-set "minor.islist" (rl-minor spec "islist") [rs-islist/r] true) drop
-  (rl-run-set "minor.iskey" (rl-minor spec "iskey") [rs-iskey/r] false) drop
-  (rl-run-set "minor.strkey" (rl-minor spec "strkey") [rs-strkey/r] false) drop
-  (rl-run-set "minor.isempty" (rl-minor spec "isempty") [rs-isempty/r] false) drop
-  (rl-run-set "minor.isfunc" (rl-minor spec "isfunc") [rs-isfunc/r] true) drop
-  (rl-run-set "minor.clone" (rl-minor spec "clone") [rs-clone/r] false) drop
-  (rl-run-set "minor.items" (rl-minor spec "items") [rs-items/r] true) drop
-  (rl-run-set "minor.keysof" (rl-minor spec "keysof") [rs-keysof/r] true) drop
-  (rl-run-set "minor.typify" (rl-minor spec "typify") [rs-typify/r] false) drop
-  (rl-run-set "minor.size" (rl-minor spec "size") [rs-size/r] false) drop
-  (rl-run-set "minor.getprop" (rl-minor spec "getprop") [rs-getprop/r] false) drop
-  (rl-run-set "minor.getelem" (rl-minor spec "getelem") [rs-getelem/r] false) drop
-  (rl-run-set "minor.haskey" (rl-minor spec "haskey") [rs-haskey/r] false) drop
-  (rl-run-set "minor.setprop" (rl-minor spec "setprop") [rs-setprop/r] true) drop
-  (rl-run-set "minor.delprop" (rl-minor spec "delprop") [rs-delprop/r] true) drop
-  (rl-run-set "minor.flatten" (rl-minor spec "flatten") [rs-flatten/r] true) drop
-  (rl-run-set "minor.typename" (rl-minor spec "typename") [rs-typename/r] true) drop
-  (rl-run-set "minor.filter" (rl-minor spec "filter") [rs-filter/r] true) drop
-  (rl-run-set "minor.stringify" (rl-minor spec "stringify") [rs-stringify/r] true) drop
-  (rl-run-set "minor.jsonify" (rl-minor spec "jsonify") [rs-jsonify/r] false) drop
-  (rl-run-set "minor.pathify" (rl-minor spec "pathify") [rs-pathify/r] false) drop
-  (rl-run-set "minor.slice" (rl-minor spec "slice") [rs-slice/r] false) drop
-  (rl-run-set "minor.pad" (rl-minor spec "pad") [rs-pad/r] false) drop
-  (rl-run-set "minor.escre" (rl-minor spec "escre") [rs-escre/r] true) drop
-  (rl-run-set "minor.escurl" (rl-minor spec "escurl") [rs-escurl/r] true) drop
-  (rl-run-set "minor.join" (rl-minor spec "join") [rs-join/r] false) drop
-  (rl-run-set "minor.setpath" (rl-minor spec "setpath") [rs-setpath/r] false) drop
+  (rl-run-set "minor.isnode" (rl-minor spec "isnode") [rs-isnode/v] true) drop
+  (rl-run-set "minor.ismap" (rl-minor spec "ismap") [rs-ismap/v] true) drop
+  (rl-run-set "minor.islist" (rl-minor spec "islist") [rs-islist/v] true) drop
+  (rl-run-set "minor.iskey" (rl-minor spec "iskey") [rs-iskey/v] false) drop
+  (rl-run-set "minor.strkey" (rl-minor spec "strkey") [rs-strkey/v] false) drop
+  (rl-run-set "minor.isempty" (rl-minor spec "isempty") [rs-isempty/v] false) drop
+  (rl-run-set "minor.isfunc" (rl-minor spec "isfunc") [rs-isfunc/v] true) drop
+  (rl-run-set "minor.clone" (rl-minor spec "clone") [rs-clone/v] false) drop
+  (rl-run-set "minor.items" (rl-minor spec "items") [rs-items/v] true) drop
+  (rl-run-set "minor.keysof" (rl-minor spec "keysof") [rs-keysof/v] true) drop
+  (rl-run-set "minor.typify" (rl-minor spec "typify") [rs-typify/v] false) drop
+  (rl-run-set "minor.size" (rl-minor spec "size") [rs-size/v] false) drop
+  (rl-run-set "minor.getprop" (rl-minor spec "getprop") [rs-getprop/v] false) drop
+  (rl-run-set "minor.getelem" (rl-minor spec "getelem") [rs-getelem/v] false) drop
+  (rl-run-set "minor.haskey" (rl-minor spec "haskey") [rs-haskey/v] false) drop
+  (rl-run-set "minor.setprop" (rl-minor spec "setprop") [rs-setprop/v] true) drop
+  (rl-run-set "minor.delprop" (rl-minor spec "delprop") [rs-delprop/v] true) drop
+  (rl-run-set "minor.flatten" (rl-minor spec "flatten") [rs-flatten/v] true) drop
+  (rl-run-set "minor.typename" (rl-minor spec "typename") [rs-typename/v] true) drop
+  (rl-run-set "minor.filter" (rl-minor spec "filter") [rs-filter/v] true) drop
+  (rl-run-set "minor.stringify" (rl-minor spec "stringify") [rs-stringify/v] true) drop
+  (rl-run-set "minor.jsonify" (rl-minor spec "jsonify") [rs-jsonify/v] false) drop
+  (rl-run-set "minor.pathify" (rl-minor spec "pathify") [rs-pathify/v] false) drop
+  (rl-run-set "minor.slice" (rl-minor spec "slice") [rs-slice/v] false) drop
+  (rl-run-set "minor.pad" (rl-minor spec "pad") [rs-pad/v] false) drop
+  (rl-run-set "minor.escre" (rl-minor spec "escre") [rs-escre/v] true) drop
+  (rl-run-set "minor.escurl" (rl-minor spec "escurl") [rs-escurl/v] true) drop
+  (rl-run-set "minor.join" (rl-minor spec "join") [rs-join/v] false) drop
+  (rl-run-set "minor.setpath" (rl-minor spec "setpath") [rs-setpath/v] false) drop
 
   def gp (spec get "getpath")
-  (rl-run-set "getpath.basic" (gp get "basic") [rs-getpath/r] true) drop
-  (rl-run-set "getpath.relative" (gp get "relative") [rs-getpath-relative/r] true) drop
-  (rl-run-set "getpath.special" (gp get "special") [rs-getpath-special/r] true) drop
-  (rl-run-set "getpath.handler" (gp get "handler") [rs-getpath-handler/r] true) drop
+  (rl-run-set "getpath.basic" (gp get "basic") [rs-getpath/v] true) drop
+  (rl-run-set "getpath.relative" (gp get "relative") [rs-getpath-relative/v] true) drop
+  (rl-run-set "getpath.special" (gp get "special") [rs-getpath-special/v] true) drop
+  (rl-run-set "getpath.handler" (gp get "handler") [rs-getpath-handler/v] true) drop
 
   def mg2 (spec get "merge")
-  (rl-run-single "merge.basic" (mg2 get "basic") [rs-merge-basic/r]) drop
-  (rl-run-set "merge.cases" (mg2 get "cases") [rs-merge/r] true) drop
-  (rl-run-set "merge.array" (mg2 get "array") [rs-merge/r] true) drop
-  (rl-run-set "merge.integrity" (mg2 get "integrity") [rs-merge/r] true) drop
-  (rl-run-set "merge.depth" (mg2 get "depth") [rs-merge-depth/r] true) drop
+  (rl-run-single "merge.basic" (mg2 get "basic") [rs-merge-basic/v]) drop
+  (rl-run-set "merge.cases" (mg2 get "cases") [rs-merge/v] true) drop
+  (rl-run-set "merge.array" (mg2 get "array") [rs-merge/v] true) drop
+  (rl-run-set "merge.integrity" (mg2 get "integrity") [rs-merge/v] true) drop
+  (rl-run-set "merge.depth" (mg2 get "depth") [rs-merge-depth/v] true) drop
 
   def wk (spec get "walk")
   (rl-run-walk-log "walk.log" (wk get "log")) drop
-  (rl-run-set "walk.basic" (wk get "basic") [rs-walk-basic/r] true) drop
-  (rl-run-set "walk.copy" (wk get "copy") [rs-walk-copy/r] true) drop
-  (rl-run-set "walk.depth" (wk get "depth") [rs-walk-depth/r] false) drop
+  (rl-run-set "walk.basic" (wk get "basic") [rs-walk-basic/v] true) drop
+  (rl-run-set "walk.copy" (wk get "copy") [rs-walk-copy/v] true) drop
+  (rl-run-set "walk.depth" (wk get "depth") [rs-walk-depth/v] false) drop
 
   def ij (spec get "inject")
-  (rl-run-single "inject.basic" (ij get "basic") [rs-inject-basic/r]) drop
-  (rl-run-set "inject.string" (ij get "string") [rs-inject-modify/r] true) drop
-  (rl-run-set "inject.deep" (ij get "deep") [rs-inject/r] true) drop
+  (rl-run-single "inject.basic" (ij get "basic") [rs-inject-basic/v]) drop
+  (rl-run-set "inject.string" (ij get "string") [rs-inject-modify/v] true) drop
+  (rl-run-set "inject.deep" (ij get "deep") [rs-inject/v] true) drop
 
   def tf (spec get "transform")
-  (rl-run-single "transform.basic" (tf get "basic") [rs-transform-basic/r]) drop
-  (rl-run-set "transform.paths" (tf get "paths") [rs-transform/r] true) drop
-  (rl-run-set "transform.cmds" (tf get "cmds") [rs-transform/r] true) drop
-  (rl-run-set "transform.each" (tf get "each") [rs-transform/r] true) drop
-  (rl-run-set "transform.pack" (tf get "pack") [rs-transform/r] true) drop
-  (rl-run-set "transform.modify" (tf get "modify") [rs-transform-modify/r] true) drop
-  (rl-run-set "transform.ref" (tf get "ref") [rs-transform/r] true) drop
-  (rl-run-set "transform.format" (tf get "format") [rs-transform/r] false) drop
-  (rl-run-set "transform.apply" (tf get "apply") [rs-transform/r] true) drop
+  (rl-run-single "transform.basic" (tf get "basic") [rs-transform-basic/v]) drop
+  (rl-run-set "transform.paths" (tf get "paths") [rs-transform/v] true) drop
+  (rl-run-set "transform.cmds" (tf get "cmds") [rs-transform/v] true) drop
+  (rl-run-set "transform.each" (tf get "each") [rs-transform/v] true) drop
+  (rl-run-set "transform.pack" (tf get "pack") [rs-transform/v] true) drop
+  (rl-run-set "transform.modify" (tf get "modify") [rs-transform-modify/v] true) drop
+  (rl-run-set "transform.ref" (tf get "ref") [rs-transform/v] true) drop
+  (rl-run-set "transform.format" (tf get "format") [rs-transform/v] false) drop
+  (rl-run-set "transform.apply" (tf get "apply") [rs-transform/v] true) drop
 
   def vd (spec get "validate")
-  (rl-run-set "validate.basic" (vd get "basic") [rs-validate/r] false) drop
-  (rl-run-set "validate.child" (vd get "child") [rs-validate/r] true) drop
-  (rl-run-set "validate.one" (vd get "one") [rs-validate/r] true) drop
-  (rl-run-set "validate.exact" (vd get "exact") [rs-validate/r] true) drop
-  (rl-run-set "validate.invalid" (vd get "invalid") [rs-validate/r] false) drop
-  (rl-run-set "validate.special" (vd get "special") [rs-validate-inj/r] true) drop
+  (rl-run-set "validate.basic" (vd get "basic") [rs-validate/v] false) drop
+  (rl-run-set "validate.child" (vd get "child") [rs-validate/v] true) drop
+  (rl-run-set "validate.one" (vd get "one") [rs-validate/v] true) drop
+  (rl-run-set "validate.exact" (vd get "exact") [rs-validate/v] true) drop
+  (rl-run-set "validate.invalid" (vd get "invalid") [rs-validate/v] false) drop
+  (rl-run-set "validate.special" (vd get "special") [rs-validate-inj/v] true) drop
 
   def sl (spec get "select")
-  (rl-run-set "select.basic" (sl get "basic") [rs-select/r] true) drop
-  (rl-run-set "select.operators" (sl get "operators") [rs-select/r] true) drop
-  (rl-run-set "select.edge" (sl get "edge") [rs-select/r] true) drop
-  (rl-run-set "select.alts" (sl get "alts") [rs-select/r] true) drop
+  (rl-run-set "select.basic" (sl get "basic") [rs-select/v] true) drop
+  (rl-run-set "select.operators" (sl get "operators") [rs-select/v] true) drop
+  (rl-run-set "select.edge" (sl get "edge") [rs-select/v] true) drop
+  (rl-run-set "select.alts" (sl get "alts") [rs-select/v] true) drop
 
   def rxspec (spec get "regex")
-  (rl-run-set "regex.test" (rxspec get "test") [rs-re-test/r] true) drop
-  (rl-run-set "regex.find" (rxspec get "find") [rs-re-find/r] true) drop
-  (rl-run-set "regex.find_all" (rxspec get "find_all") [rs-re-find-all/r] true) drop
-  (rl-run-set "regex.replace" (rxspec get "replace") [rs-re-replace/r] true) drop
-  (rl-run-set "regex.escape" (rxspec get "escape") [rs-re-escape/r] true) drop
+  (rl-run-set "regex.test" (rxspec get "test") [rs-re-test/v] true) drop
+  (rl-run-set "regex.find" (rxspec get "find") [rs-re-find/v] true) drop
+  (rl-run-set "regex.find_all" (rxspec get "find_all") [rs-re-find-all/v] true) drop
+  (rl-run-set "regex.replace" (rxspec get "replace") [rs-re-replace/v] true) drop
+  (rl-run-set "regex.escape" (rxspec get "escape") [rs-re-escape/v] true) drop
 
   def sn (spec get "sentinels")
-  (rl-run-set "sentinels.getprop_unify" (sn get "getprop_unify") [rs-getprop-vka/r] false) drop
-  (rl-run-set "sentinels.getelem_absent" (sn get "getelem_absent") [rs-getelem-vka/r] false) drop
-  (rl-run-set "sentinels.haskey_unify" (sn get "haskey_unify") [rs-haskey-vk/r] false) drop
-  (rl-run-set "sentinels.isempty_unify" (sn get "isempty_unify") [rs-isempty/r] false) drop
-  (rl-run-set "sentinels.isnode_unify" (sn get "isnode_unify") [rs-isnode/r] false) drop
-  (rl-run-set "sentinels.stringify_null" (sn get "stringify_null") [rs-stringify-null/r] false) drop
+  (rl-run-set "sentinels.getprop_unify" (sn get "getprop_unify") [rs-getprop-vka/v] false) drop
+  (rl-run-set "sentinels.getelem_absent" (sn get "getelem_absent") [rs-getelem-vka/v] false) drop
+  (rl-run-set "sentinels.haskey_unify" (sn get "haskey_unify") [rs-haskey-vk/v] false) drop
+  (rl-run-set "sentinels.isempty_unify" (sn get "isempty_unify") [rs-isempty/v] false) drop
+  (rl-run-set "sentinels.isnode_unify" (sn get "isnode_unify") [rs-isnode/v] false) drop
+  (rl-run-set "sentinels.stringify_null" (sn get "stringify_null") [rs-stringify-null/v] false) drop
 
   (rl-print-failures 0) drop
   def np (rl-tally get "npass")
@@ -948,4 +948,4 @@ def rl-main fn [[ig:Any] [Any] [
   none
 ]]
 
-export "RunnerLib" {main: rl-main/r}
+export "RunnerLib" {main: rl-main/v}

@@ -225,7 +225,7 @@ const Thread = struct {
 
 const ThreadList = struct {
     allocator: std.mem.Allocator,
-    threads: std.ArrayList(Thread),
+    threads: std.array_list.Managed(Thread),
     visited: []u32,
     gen: u32 = 0,
 
@@ -234,7 +234,7 @@ const ThreadList = struct {
         @memset(v, 0);
         return .{
             .allocator = allocator,
-            .threads = std.ArrayList(Thread).init(allocator),
+            .threads = std.array_list.Managed(Thread).init(allocator),
             .visited = v,
             .gen = 0,
         };
@@ -313,14 +313,14 @@ const Parser = struct {
     src: []const u8,
     pos: usize = 0,
     next_group: usize = 1,
-    code: std.ArrayList(Insn),
+    code: std.array_list.Managed(Insn),
     err: ?[]const u8 = null,
 
     fn init(allocator: std.mem.Allocator, src: []const u8) Parser {
         return .{
             .allocator = allocator,
             .src = src,
-            .code = std.ArrayList(Insn).init(allocator),
+            .code = std.array_list.Managed(Insn).init(allocator),
         };
     }
 

@@ -29,6 +29,6 @@ lint:
 	$(BORU) run -no-check -no-compile test/lint.boru
 
 clean:
-	rm -rf .aql
+	rm -rf .boru
 
 reset: clean

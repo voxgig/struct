@@ -57,7 +57,7 @@ fn measure(allocator: Allocator, label: []const u8, tree: JsonValue, runs: usize
         _ = try voxgig_struct.walk(allocator, tree, benchCb, null, voxgig_struct.MAXDEPTH);
     }
 
-    var times = try std.ArrayList(u64).initCapacity(allocator, runs);
+    var times = try std.array_list.Managed(u64).initCapacity(allocator, runs);
     defer times.deinit();
 
     var r: usize = 0;

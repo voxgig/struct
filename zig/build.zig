@@ -12,20 +12,24 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // Static library artifact
-    const lib = b.addStaticLibrary(.{
+    // Static library artifact. Since 0.14 every compile step takes a
+    // *Module rather than a root source file, so the module above is the
+    // artifact's root instead of being declared twice.
+    const lib = b.addLibrary(.{
         .name = "voxgig-struct",
-        .root_source_file = b.path("src/struct.zig"),
-        .target = target,
-        .optimize = optimize,
+        .linkage = .static,
+        .root_module = lib_mod,
     });
     b.installArtifact(lib);
 
-    // Tests
+    // Each test/bench binary gets its own module: a Module carries the
+    // target and optimize settings that used to sit on the compile step.
     const tests = b.addTest(.{
-        .root_source_file = b.path("test/struct_test.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("test/struct_test.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
     tests.root_module.addImport("voxgig-struct", lib_mod);
 
@@ -37,9 +41,11 @@ pub fn build(b: *std.Build) void {
 
     // Walk benchmarks — gated on the WALK_BENCH=1 env var at runtime.
     const bench = b.addTest(.{
-        .root_source_file = b.path("test/walk_bench.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("test/walk_bench.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
     bench.root_module.addImport("voxgig-struct", lib_mod);
 
@@ -53,9 +59,11 @@ pub fn build(b: *std.Build) void {
     // Invoke with: zig build perfbench -Doptimize=ReleaseFast
     const perfbench = b.addExecutable(.{
         .name = "perfbench",
-        .root_source_file = b.path("bench/bench.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("bench/bench.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
     perfbench.root_module.addImport("voxgig-struct", lib_mod);
     const run_perfbench = b.addRunArtifact(perfbench);

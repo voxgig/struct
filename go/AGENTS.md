@@ -34,22 +34,31 @@ directive 1.23; zero third-party runtime dependencies (stdlib only).
 
 ### Two modules, deliberately
 
-The corpus runner is [voxgig/omni](https://github.com/voxgig/omni), consumed
-as a sibling checkout rather than a `require`. The proxy would serve it —
-`go list -m github.com/voxgig/omni/go@latest` resolves — so what keeps it out
-of the library is mechanism, not absence. `testutil` is a **nested
-module** so that stays true mechanically: `go build ./...` here skips a
-nested module, so the library compiles with no omni checkout at all, and
-`go mod tidy` cannot reach omni and write it into the published dependency
-graph.
+The corpus runner is [voxgig/omni](https://github.com/voxgig/omni), taken
+from its release tag: `testutil/go.mod` requires
+`github.com/voxgig/omni/go v0.1.0` and `testutil/go.sum` pins it with
+checksum-database-backed hashes. Go needs the directory prefix for a module
+in a subdirectory, so the tag is `go/v0.1.0` and the version Go records is
+`v0.1.0`. There is no sibling checkout to find and no `$OMNI_HOME` to set.
+
+What keeps omni out of the *library* is mechanism, not absence — the proxy
+serves it, which is exactly why absence was never a guard here. `testutil`
+is a **nested module**: `go build ./...` in this module skips it, so the
+library compiles with no omni whatever, and `go mod tidy` here cannot write
+omni into the published dependency graph. That is unchanged by the move to a
+tag, and `tools/omni_isolation.py` asserts it as a declaration check.
 
 The trade is that `./...` no longer reaches the harness. Every Makefile
 target names it explicitly (`./... ./testutil/...`); do the same for any
 new one, or it will silently stop covering the tests.
 
-`make` writes a gitignored `go.work` spanning all three modules — this one,
-`./testutil`, and omni's — locating omni via `$OMNI_HOME` and then the usual
-sibling paths. Anything that loads the *test* files needs it.
+`make` still writes a gitignored `go.work`, but over **two** modules — this
+one and `./testutil` — and it no longer names omni. It exists only because
+the library's own test files import `./testutil`, and a nested module is
+invisible to its parent without a workspace. Do not add omni back to it: a
+`use` directive makes that module a root module for the build, which shadows
+the `v0.1.0` requirement and silently returns the tests to a floating
+checkout.
 
 ## Commands
 

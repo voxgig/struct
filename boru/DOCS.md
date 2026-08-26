@@ -61,15 +61,15 @@ A bare Function-valued name auto-dispatches when stepped, so function
 values ride in carriers:
 
 - pure callbacks (walk apply, filter predicates): a one-element list
-  `[myfn/r]`;
+  `[myfn/v]`;
 - `isfunc`-tested values (store commands, `handler`, `modify`,
-  `$FORMAT` formatters): an fn box `` {"`$FN`": myfn/r} ``.
+  `$FORMAT` formatters): an fn box `` {"`$FN`": myfn/v} ``.
 
 ```boru
 def upcase fn [[k:Any v:Any p:Any pth:Any] [Any] [
   if (v is String) [StringUtil.upper v] [v]
 ]]
-Struct.walk data Struct.NOARG [upcase/r] Struct.NOARG
+Struct.walk data Struct.NOARG [upcase/v] Struct.NOARG
 ```
 
 Command/callback signatures match the canonical ones: transform commands

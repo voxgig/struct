@@ -270,7 +270,8 @@
     "collecterrs",
     "isabsent",
     "toomni",
-    "tostruct"
+    "tostruct",
+    "Domni"
   ],
   "ignoreRegExpList": [
     "/`\\$[A-Z]+`/",

@@ -10,7 +10,7 @@ The behavioural contract is the shared JSON corpus in
 
 The port is written **in the boru language itself** (a concatenative,
 strongly-typed query language on Go) — it deliberately does not wrap the
-engine's native `aql:struct-util` module, so it exercises boru as an
+engine's native `boru:struct-util` module, so it exercises boru as an
 application language.
 
 ## Status
@@ -18,11 +18,9 @@ application language.
 Complete. Every canonical public function is implemented and the entire
 shared corpus passes (`make test`). **Zero third-party dependencies** —
 only the `boru` CLI is required (the library imports only the engine's
-bundled `aql:` modules: `string-util`, `math-util`, `bin-util`,
+bundled `boru:` modules: `string-util`, `math-util`, `bin-util`,
 `minilang`, `emitlang`, `time-util`; the test runner additionally
-uses `aql:io` to read the corpus). The module prefix is still `aql:`
-because the engine's AQL → boru rename has not yet reached the bundled
-module namespace (see the transition note in [`AGENTS.md`](./AGENTS.md)).
+uses `boru:io` to read the corpus).
 
 ## Requirements
 
@@ -56,8 +54,8 @@ boru has no optional parameters, no variadics, and no `undefined`:
 - **`jm` / `jt`** take one list argument instead of variadic arguments:
   `Struct.jm ["a" 1 "b" 2]` / `Struct.jt [1 2 3]`.
 - **Function values** (walk callbacks, transform commands, `modify`
-  hooks) travel in carriers: a one-element list `[f/r]` for pure
-  callbacks, or an fn box `` {"`$FN`": f/r} `` where the canonical API
+  hooks) travel in carriers: a one-element list `[f/v]` for pure
+  callbacks, or an fn box `` {"`$FN`": f/v} `` where the canonical API
   `isfunc`-tests the value (store commands, handlers). See
   [`AGENTS.md`](./AGENTS.md) for the full convention.
 - **`none` plays both `undefined` and JSON `null`** (the single-null
