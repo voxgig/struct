@@ -90,6 +90,13 @@ EXEMPT = [
     ('php', 'php/composer.json', '"require-dev": {',
      '"require-dev": { "voxgig/omni": "^0.1",',
      "Composer never installs a dependency's require-dev"),
+    # java's ACTUAL mechanism, and the reason read_pom scopes rather than
+    # greps: pom.xml names omni ten times today, all inside <profiles>.
+    ('java', 'java/pom.xml', '<profiles>',
+     '<profiles><profile><id>leak</id><dependencies><dependency>'
+     '<groupId>com.voxgig</groupId><artifactId>omni</artifactId>'
+     '</dependency></dependencies></profile>',
+     'a -Pomni profile is invisible to a resolver and to static scanners'),
 ]
 
 

@@ -50,7 +50,6 @@ import json
 import re
 import sys
 import tomllib
-import xml.etree.ElementTree as ET
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -147,37 +146,44 @@ def read_pyproject(path):
     return deps
 
 
+# NO XML PARSER, DELIBERATELY.  `xml.etree.ElementTree` is what this wanted,
+# and semgrep blocks it repo-wide
+# (python.lang.security.use-defused-xml.use-defused-xml): the stdlib parser is
+# vulnerable to entity expansion, and `defusedxml` is the recommended fix.
+# Taking that fix would mean a new dependency, which AGENTS.md forbids, for a
+# threat that does not exist here - these two files are committed repo content,
+# not input.  Rather than argue the exemption in a suppression comment, both
+# readers below scope textually, the same technique already used for the
+# formats with no stdlib parser at all.  It costs nothing: neither reader
+# needed the tree, only the region.
+
 def read_pom(path):
-    """pom.xml: dependencies OUTSIDE any <profile>.
+    """pom.xml: dependency coordinates OUTSIDE any <profiles> block.
 
     struct/java keeps omni behind a `-Pomni` profile precisely so it is
-    invisible to a consumer's resolver and to static scanners; a dependency
-    in the default model is the failure this looks for.
+    invisible to a consumer's resolver and to static scanners, so the profile
+    block is exempt and the default model is not.  That exemption is live, not
+    theoretical: java/pom.xml names omni ten times today, every one of them
+    inside <profiles>.  A whole-file grep would fail on the correct tree.
     """
-    ns = {'m': 'http://maven.apache.org/POM/4.0.0'}
-    root = ET.parse(path).getroot()
-    profiles = {id(e) for p in root.findall('.//m:profiles', ns)
-                for e in p.iter()}
+    text = re.sub(r'<profiles>.*?</profiles>', '', path.read_text(encoding='utf-8'),
+                  flags=re.S | re.I)
     deps = []
-    for dep in root.findall('.//m:dependency', ns):
-        if id(dep) in profiles:
-            continue
-        gid = dep.findtext('m:groupId', '', ns)
-        aid = dep.findtext('m:artifactId', '', ns)
-        deps.append(f'{gid}:{aid}')
+    for dep in re.finditer(r'<dependency>(.*?)</dependency>', text, re.S | re.I):
+        body = dep.group(1)
+        gid = re.search(r'<groupId>(.*?)</groupId>', body, re.S | re.I)
+        aid = re.search(r'<artifactId>(.*?)</artifactId>', body, re.S | re.I)
+        deps.append('{}:{}'.format(gid.group(1).strip() if gid else '',
+                                   aid.group(1).strip() if aid else ''))
     return deps
 
 
 def read_csproj(path):
-    """A .csproj: PackageReference and ProjectReference."""
-    root = ET.parse(path).getroot()
-    deps = []
-    for tag in ('PackageReference', 'ProjectReference'):
-        for el in root.iter():
-            if el.tag.split('}')[-1] != tag:
-                continue
-            deps.append(el.get('Include') or el.get('Update') or '')
-    return deps
+    """A .csproj: the Include/Update of every Package/ProjectReference."""
+    text = path.read_text(encoding='utf-8')
+    return [m.group(2) for m in re.finditer(
+        r'<(?:Package|Project)Reference\b[^>]*?\b(Include|Update)\s*=\s*"([^"]*)"',
+        text, re.I)]
 
 
 def read_lakefile(path):
