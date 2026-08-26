@@ -8,7 +8,7 @@ plays both `undefined` and JSON `null`), not the distinct-value model of
 the OCaml / Scala ports.
 
 The port is written in the boru *language* (not Go), and deliberately does
-NOT use the engine's native `aql:struct-util` module — the whole point is
+NOT use the engine's native `boru:struct-util` module — the whole point is
 a from-scratch implementation of the canonical algorithms in boru itself.
 
 ## How to build / test / lint
@@ -21,19 +21,23 @@ make lint    # boru check src/struct.boru + a module load smoke
 
 Requires only the `boru` CLI (`make test BORU=/path/to/boru` to point at a
 specific binary). **Zero third-party runtime dependencies** — the library
-imports only bundled `aql:` modules (`string-util`, `math-util`,
+imports only bundled `boru:` modules (`string-util`, `math-util`,
 `bin-util`, `minilang` for regex, `emitlang` for JSON output,
-`time-util`); the test runner additionally uses `aql:io` to read the
+`time-util`); the test runner additionally uses `boru:io` to read the
 corpus.
 
-**Rename transition note.** The language was renamed AQL → boru
-(github.com/boru-lang/boru), but on the engine's `main` the rename is
-still completing: the bundled-module namespace is still `aql:` (so the
-`import "aql:…"` strings above are load-bearing — do NOT rename them),
-the module search/cache dir is still `.aql/` (`make clean`), and the
-vault's dry-run filler literal is still `AQL-DRY-RUN-FILLER-NOT-A-REAL-SECRET`
-(referenced by every port's publish target). Sweep these to `boru` only
-when the upstream engine renames them.
+**The AQL → boru rename is complete upstream, and this port has followed
+it.** The bundled-module namespace is `boru:`, the module cache dir is
+`.boru/` (`make clean`), and the word-reference modifier is `/v`, not `/r`
+— `foo/v` is the binding's value rather than a call. The engine carries
+**no alias** for any of the old spellings: `import "aql:io"` is a hard
+load failure and `/r` is not in its modifier table at all, so a port left
+on the old syntax does not run rather than running with a warning.
+
+That is how this port spent two days broken without anyone noticing: it
+is the only one with no CI job, so nothing exercised it against a moving
+engine. A job is owed. Until there is one, run `make test` locally after
+any engine bump.
 
 ## The value model
 
@@ -69,11 +73,11 @@ when the upstream engine renames them.
 A bare Function-valued name **auto-dispatches when stepped** in boru, so
 function values never travel bare:
 
-- **fn box** — `` {"`$FN`": f/r} ``: the general "function as data" carrier.
+- **fn box** — `` {"`$FN`": f/v} ``: the general "function as data" carrier.
   Store commands (`$COPY`, `$EACH`, …), `handler`, `modify` and
   formatter-table entries are boxes; `vg-isfunc` recognises the shape
   (mirroring canonical `isfunc`).
-- **one-element list** — `[f/r]`: pure callback slots that canonical
+- **one-element list** — `[f/v]`: pure callback slots that canonical
   code never `isfunc`-tests (walk before/after, `filter` predicates).
 
 Unwrap with `vgi-fnarg`; call through `vgi-call1/2/4/5` (`apply` binds
@@ -157,7 +161,7 @@ the boru job could not be pushed from this session (the token lacks the
       - name: Build the boru CLI from source
         run: |
           git clone --depth 1 --branch "$BORU_GIT_REF" https://github.com/boru-lang/boru /tmp/boru-lang
-          (cd /tmp/boru-lang/cmd/go && go build -o "$RUNNER_TEMP/boru" ./aql)
+          (cd /tmp/boru-lang/cmd/go && go build -o "$RUNNER_TEMP/boru" ./boru)
       - name: Run tests
         working-directory: ./boru
         shell: bash

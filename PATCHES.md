@@ -21,9 +21,11 @@ non-interactive, so the OAuth flow could not be run. Everything that does
 ## 1. `patches/struct-workflows-REQUIRED.patch` — this repo
 
 **Apply this first: the branch is red without it.** The zig port now needs
-Zig 0.16 (`build.zig.zon` uses an enum-literal name and a
-`minimum_zig_version`, neither of which 0.13 can parse) and CI still installs
-0.13, because the step that installs 0.16 is in a workflow file.
+Zig 0.16 and CI still installs 0.13, because the step that installs 0.16 is
+in a workflow file. The observed failure is
+`zig/build.zig.zon:2:14: error: expected string literal` — 0.13 wants a
+string for `.name` and gets the enum literal 0.14 made mandatory. It fails
+there and never reaches `minimum_zig_version`.
 
     git apply patches/struct-workflows-REQUIRED.patch
     git commit -am "ci: pin the omni checkout, and take Zig 0.16 from PyPI"
@@ -31,7 +33,7 @@ Zig 0.16 (`build.zig.zon` uses an enum-literal name and a
 `git apply`, not `git am` — this one is `git diff` output, so it carries no
 commit message of its own.
 
-Three changes, all in `build.yml` and `lint.yml`:
+Four changes, all in `build.yml` and `lint.yml`:
 
 - **Pins the omni checkout.** 21 checkouts in `build.yml` and 9 in
   `lint.yml` floated on omni's default branch with no `ref:` among them. Now
@@ -48,6 +50,15 @@ Three changes, all in `build.yml` and `lint.yml`:
   exercised.
 - **Drops the `zig-version` matrix axis.** A matrix of one, and the version
   now lives in the pin file.
+- **Takes omni out of `test-go`'s workspace.** That job built its own
+  three-module workspace (`go work init . ./testutil $GITHUB_WORKSPACE/.omni/go`)
+  independently of the Makefile, and a `use` directive makes a module a root
+  module for the build — so the local checkout shadowed the `v0.1.0`
+  requirement and the job never verified that the tag resolves, that its
+  checksums match, or that the released API passes the corpus. Two modules
+  now, and the omni checkout step is gone from that job. Raised by Codex
+  review on #119; verified by running CI's exact sequence with
+  `OMNI_HOME=/nonexistent` and no checkout present.
 
 `macos-14` and the `DEVELOPER_DIR` export are deliberately untouched: both
 exist for 0.13's SDK problem, 0.16 is expected not to need them, and expected

@@ -1,12 +1,8 @@
-// The shared test runner comes from voxgig/omni, consumed as a local
-// checkout. Note the Go proxy DOES serve it - `go list -m
-// github.com/voxgig/omni/go@latest` resolves - so "not published" is not what
-// keeps it out of the library; the nested module below is.
-//
-// Go resolves it through a workspace rather than a `require`: `make test`
-// writes a gitignored go.work pointing at the sibling checkout ($OMNI_HOME
-// first, then sibling paths), so go.mod stays free of paths that only work
-// on one machine.
+// The shared test runner comes from voxgig/omni, taken from its release tag:
+// go.mod beside this file requires github.com/voxgig/omni/go v0.1.0 and
+// go.sum pins it with checksum-database-backed hashes. Go needs the directory
+// prefix for a module in a subdirectory, so the tag is `go/v0.1.0`. No
+// $OMNI_HOME, no sibling checkout, no path that works on one machine only.
 //
 // That alone would not keep the library clean, which is why this package is
 // a nested module (see go.mod beside this file). A single module would put
