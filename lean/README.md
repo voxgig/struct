@@ -20,7 +20,7 @@ the full corpus (1360/1360).
 
 ```
 cd lean
-make test    # run the shared corpus on voxgig/omni (needs $OMNI_HOME)
+make test    # run the shared corpus on voxgig/omni (fetched from its tag)
 make build   # type-check the LIBRARY alone (no omni)
 make lint    # type-check library + runner (a warnings-free compile = pass)
 ```

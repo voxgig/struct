@@ -22,8 +22,18 @@ lake `require` lines, ever. Regex is the in-tree `src/Vregex.lean` engine
 (captures tracked; the corpus `regex` group holds it to the Go-stdlib floor
 of `design/REGEX_API.md`).
 
-- **The corpus runner is voxgig/omni**, a local checkout the Makefile finds
-  via `$OMNI_HOME` or beside this repository and COPIES into `.omni-build/`
+- **The corpus runner is voxgig/omni, taken from its release tag** — fetched
+  by `make omni-fetch` from `lean/v0.1.0`, checked against the sha this repo
+  pins (a moved tag is an error, not a silent swap), and COPIED into
+  `.omni-build/`. `$OMNI_HOME` still overrides it, for working against an omni
+  that is not released yet.
+
+  **Copied and not `[[require]]`d, deliberately.** Lake has no test-scoped
+  dependency: a `[[require]]` is resolved by everyone who requires THIS
+  package, so declaring omni that way would put the test runner in every
+  consumer's dependency graph — register 4.13. Fetching the tag in the
+  Makefile keeps the pin and the isolation at once, which a `[[require]]`
+  cannot. It was copied, before the tag, from a checkout into `.omni-build/`
   (lake writes its olean beside the source, and the checkout is not ours to
   litter). `lakefile.toml` declares it as a lean_lib outside `defaultTargets`
   that only the runner imports, so `make build` compiles the library alone

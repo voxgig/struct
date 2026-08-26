@@ -19,9 +19,11 @@ publish = false
 [dependencies]
 voxgig-struct = { path = ".." }
 
-# A LITERAL path, because Cargo resolves these at build time and cannot read
-# $OMNI_HOME. `.omni` is a gitignored link created by `make setup-omni`; CI
-# checks omni out to exactly that path.
-voxgig_omni = { path = "../../.omni/rust" }
+# The release tag, not a path. Cargo traverses the repository to find a crate
+# by name, so `omni/rust` is reachable with no root manifest, and `Cargo.lock`
+# beside this file records the resolved commit - which is what makes a run
+# here reproducible from this repo's commit alone. A path could not: it named
+# whatever checkout happened to be at `../../.omni`.
+voxgig_omni = { git = "https://github.com/voxgig/omni", tag = "rust/v0.1.0" }
 
 [dev-dependencies]

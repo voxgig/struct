@@ -1,2 +1,5 @@
 .lake/
 .omni-build/
+# Transient: the shallow clone of omni's release tag that `make omni-fetch`
+# copies Omni.lean out of, and removes again.
+.omni-src/

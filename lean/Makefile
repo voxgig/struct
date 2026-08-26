@@ -5,41 +5,56 @@
 # elan installs to ~/.elan/bin; prepend it so a stock elan install just works.
 export PATH := $(HOME)/.elan/bin:$(PATH)
 
-.PHONY: test bench lint build inspect clean reset publish omni-check
+.PHONY: test bench lint build inspect clean reset publish omni-fetch
 
-# The corpus runner is voxgig/omni, consumed as a local checkout - it is not
-# published. $OMNI_HOME first, then sibling paths, taking the first directory
-# that carries spec/fib.json.
+# The corpus runner is voxgig/omni, taken from its release tag: this fetches
+# `lean/Omni.lean` at `lean/v0.1.0` and copies it into `.omni-build`, which
+# lakefile.toml declares as a lean_lib that only the RUNNER imports.
 #
-# COPIED in rather than built in place: lake writes its olean beside the
-# source, and the checkout is not ours to litter (nor necessarily writable).
-# lakefile.toml declares `.omni-build` as a lean_lib that only the RUNNER
-# imports, so `make build` compiles the library alone (register 4.13).
-#
-# $OMNI_HOME is resolved by the SHELL, not by make's `wildcard`/`foreach`.
-# Those are whitespace-delimited, so a path with a space ("C:/Users/Ann
-# Smith/omni") splits into two candidates that both miss - and the result is
-# not an error but a silent fallthrough to the next candidate, a DIFFERENT
-# checkout. `$$OMNI_HOME` reaches the shell as the raw environment value. The
-# sibling candidates are fixed literals with no spaces, so they stay here.
-OMNI_SIBLINGS := ../../omni ../../../omni /workspace/omni /home/user/omni
-OMNI_DIR := $(or \
-  $(shell [ -n "$$OMNI_HOME" ] && [ -f "$$OMNI_HOME/spec/fib.json" ] && printf '%s' "$$OMNI_HOME"),\
-  $(firstword $(foreach d,$(OMNI_SIBLINGS),$(if $(wildcard $(d)/spec/fib.json),$(d)))))
+# COPIED, not required, and that is deliberate. Lake has no test-scoped
+# dependency: a `[[require]]` is resolved by everyone who requires THIS
+# package, so declaring omni there would put the test runner into every
+# consumer's dependency graph - register 4.13, and the one thing this port
+# must not do. Fetching the tag here instead keeps the pin and the isolation
+# at once, which a `[[require]]` cannot.
+OMNI_URL := https://github.com/voxgig/omni
+OMNI_TAG := lean/v0.1.0
+# The commit that tag must resolve to. A tag can be moved, and this repo has
+# pinned a release, not a name: if the two disagree the build stops rather
+# than silently testing against a different omni.
+OMNI_SHA := a710fcda81b0a72a5e98322cac0af56ab8c2d959
 
-omni-check:
-	@if [ -z "$(OMNI_DIR)" ]; then \
-	  echo "struct: voxgig/omni checkout not found - set OMNI_HOME."; \
-	  echo "  The tests run on the shared runner; the library itself does not."; \
-	  echo "  git clone https://github.com/voxgig/omni ../../omni"; \
-	  exit 1; \
-	fi
-	@mkdir -p .omni-build
-	@cp "$(OMNI_DIR)/lean/Omni.lean" .omni-build/Omni.lean
+# $OMNI_HOME overrides the fetch, for working against an omni that is not
+# released yet. Unset - the normal case - the tag is what is used, and
+# `.omni-build/.source` records which, so a second run needs no network.
+omni-fetch:
+	@if [ -n "$$OMNI_HOME" ] && [ -f "$$OMNI_HOME/lean/Omni.lean" ]; then \
+	  mkdir -p .omni-build; \
+	  cp "$$OMNI_HOME/lean/Omni.lean" .omni-build/Omni.lean; \
+	  printf 'OMNI_HOME %s\n' "$$OMNI_HOME" > .omni-build/.source; \
+	  echo "omni: $$OMNI_HOME (OMNI_HOME override)"; \
+	  exit 0; \
+	fi; \
+	if [ "$$(cat .omni-build/.source 2>/dev/null)" = "$(OMNI_TAG) $(OMNI_SHA)" ]; then exit 0; fi; \
+	rm -rf .omni-src; \
+	mkdir -p .omni-build; \
+	git -c advice.detachedHead=false clone --quiet --depth 1 \
+	  --branch "$(OMNI_TAG)" "$(OMNI_URL)" .omni-src || \
+	  { echo "struct: could not fetch $(OMNI_TAG) from $(OMNI_URL)"; exit 1; }; \
+	got=$$(git -C .omni-src rev-parse HEAD); \
+	if [ "$$got" != "$(OMNI_SHA)" ]; then \
+	  echo "struct: $(OMNI_TAG) resolves to $$got, not the pinned $(OMNI_SHA)."; \
+	  echo "  The tag moved. Refusing to build against an omni this repo has not pinned."; \
+	  rm -rf .omni-src; exit 1; \
+	fi; \
+	cp .omni-src/lean/Omni.lean .omni-build/Omni.lean; \
+	rm -rf .omni-src; \
+	printf '%s %s\n' "$(OMNI_TAG)" "$(OMNI_SHA)" > .omni-build/.source; \
+	echo "omni: $(OMNI_TAG) ($(OMNI_SHA))"
 
 # Build and run the shared JSON corpus through the Lean implementation, on
 # voxgig/omni.
-test: omni-check
+test: omni-fetch
 	lake build runner
 	./.lake/build/bin/runner ../build/test/test.json
 
@@ -49,10 +64,10 @@ build:
 
 # "Lint": type-check the library (a clean compile means it is sound). No
 # third-party linter exists for Lean. The runner imports omni, so this needs
-# the checkout too - and omni's Omni.lean supports Lean 4.16 as well as the
+# it fetched too - and omni's Omni.lean supports Lean 4.16 as well as the
 # 4.32 pinned here, so it carries deprecation warnings for names that do not
 # exist in 4.16 yet. Those are omni's; this port's own build is warnings-clean.
-lint: omni-check
+lint: omni-fetch
 	lake build
 	@echo ok
 

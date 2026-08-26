@@ -18,11 +18,23 @@ make build   # compile lib/ ALONE (no omni)
 Requires only the Dart SDK. **Zero third-party runtime dependencies** — the
 library uses only `dart:core`.
 
-- **The corpus runner is voxgig/omni**, a local checkout the Makefile finds via
-  `$OMNI_HOME` or beside this repository. It reaches the analyzer through a
-  GENERATED, gitignored `pubspec_overrides.yaml` — pub's own local-development
-  override file — so the published `pubspec.yaml` never names omni
-  (register 4.13), and `make build` compiles `lib/` alone to prove it.
+- **The corpus runner is voxgig/omni, taken from its release tag.**
+  `pubspec.yaml` declares `voxgig_omni` under `dev_dependencies` as a git
+  dependency on `dart/v0.1.0`, and `dart pub get` fetches it — no checkout, no
+  `$OMNI_HOME`, no generated override file. `dev_dependencies` is the isolation
+  device: pub never installs one transitively. `pubspec.lock` records the
+  commit the tag resolved to but is NOT tracked, because this package is a
+  published library and pub's guidance is that a library does not commit one —
+  the pin here is the tag itself, which is the one way this port differs from
+  go and rust.
+
+  Note what moved with it: `pubspec.yaml` now DOES name omni, where the old
+  generated `pubspec_overrides.yaml` meant it never did, so `make build` no
+  longer proves isolation by building without omni — pub resolves the whole
+  pubspec, dev dependencies included, before it compiles anything. The proof
+  is the scope instead, which is what register 4.13 asks for and what
+  `tools/omni_isolation.py` asserts: omni is under `dev_dependencies`, and pub
+  never installs one transitively. Same device as npm's `devDependencies`.
 - **`test/runner.dart` is a list of subjects and one line of bridge.** omni's
   value model and this port's are the same plain Dart types, so `tostruct` is
   just `isabsent(val) ? null : val`; there is nothing to copy. A node a subject

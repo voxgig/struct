@@ -1,4 +1,4 @@
-.PHONY: inspect build test bench lint clippy fmt-check clean reset audit publish setup-omni
+.PHONY: inspect build test bench lint clippy fmt-check clean reset audit publish
 
 inspect:
 	@echo "Rust toolchain:"
@@ -15,35 +15,14 @@ build:
 # of the library's manifest entirely - Cargo resolves dev-dependencies even
 # for `cargo build`, so a dev-dependency here would break a checkout with no
 # omni beside it. Register 4.13; the same shape as struct/go's nested module.
-test: setup-omni
+#
+# No omni prerequisite any more: corpus/Cargo.toml takes omni from its release
+# tag, `rust/v0.1.0`, and corpus/Cargo.lock pins the commit that tag resolved
+# to. Nothing here needs a checkout beside it, and nothing here can silently
+# test against a different omni than the lockfile records.
+test:
 	cargo test
 	cd corpus && cargo test
-
-# Link the voxgig/omni checkout where Cargo can find it. Cargo path
-# dependencies are LITERAL - they cannot read $OMNI_HOME - so the path is
-# fixed at `../.omni/rust` and this points `.omni` at wherever the checkout
-# actually is. CI checks omni out to that path directly and never runs this.
-# Gitignored, machine-specific: the same deal as go's generated go.work.
-OMNI_HOME ?= $(shell for d in ../../omni ../../../omni /workspace/omni /home/user/omni; do \
-	  if [ -f "$$d/spec/fib.json" ]; then echo "$$d"; break; fi; done)
-# Validate what is already at ../.omni rather than trusting its existence.
-# `[ -e ]` FOLLOWS a symlink, so a dangling one tested as absent and then
-# `ln -s` failed with "File exists"; and a link pointing at something that is
-# not an omni checkout was accepted, with $OMNI_HOME ignored, leaving no way
-# to repair it short of deleting the link by hand.
-setup-omni:
-	@if [ -f ../.omni/spec/fib.json ]; then exit 0; fi; \
-	if [ -e ../.omni ] && [ ! -L ../.omni ]; then \
-	  echo "struct: ../.omni exists but is not a voxgig/omni checkout, and is"; \
-	  echo "  not a symlink this target may replace. Remove it and re-run."; \
-	  exit 1; fi; \
-	if [ -z "$(OMNI_HOME)" ] || [ ! -f "$(OMNI_HOME)/spec/fib.json" ]; then \
-	  echo "struct: voxgig/omni checkout not found - set OMNI_HOME"; \
-	  if [ -L ../.omni ]; then echo "  (../.omni is a stale link to $$(readlink ../.omni))"; fi; \
-	  exit 1; fi; \
-	rm -f ../.omni; \
-	ln -s "$$(cd $(OMNI_HOME) && pwd)" ../.omni; \
-	echo "linked ../.omni -> $$(cd $(OMNI_HOME) && pwd)"
 
 # Cross-port performance harness (JSON contract; see build/bench/README.md).
 # --release for realistic numbers; -q keeps cargo's build chatter off stdout.
@@ -53,14 +32,14 @@ bench:
 # Code quality: Clippy (treat warnings as errors) + rustfmt check.
 lint: clippy fmt-check
 
-clippy: setup-omni
+clippy:
 	cargo clippy --all-targets --all-features -- -D warnings
 	cd corpus && cargo clippy --all-targets --all-features -- -D warnings
 
-# `-p`, not `--all`: corpus is its own workspace root and its path
-# dependencies (`..` and the omni link) are in the graph, so `--all` reformats
-# voxgig/omni's sources and fails on THEIR style. Scope it to this package.
-fmt-check: setup-omni
+# `-p`, not `--all`: corpus is its own workspace root and its dependencies
+# (`..` and omni) are in the graph, so `--all` reformats voxgig/omni's sources
+# and fails on THEIR style. Scope it to this package.
+fmt-check:
 	cargo fmt --all -- --check
 	cd corpus && cargo fmt -p voxgig-struct-corpus -- --check
 

@@ -19,8 +19,8 @@ test-time override that the published package never names.
 ## Requirements
 
 - The [Dart SDK](https://dart.dev/get-dart) 3.0 or later.
-- For the tests only: a [voxgig/omni](https://github.com/voxgig/omni)
-  checkout, found via `$OMNI_HOME` or beside this repository.
+- For the tests only: [voxgig/omni](https://github.com/voxgig/omni), fetched
+  by `dart pub get` from its `dart/v0.1.0` release tag. No checkout needed.
 
 ## Use
 
@@ -70,9 +70,9 @@ See [`DOCS.md`](./DOCS.md) for the full guide and
 ## Develop
 
 ```
-make test     # run the shared corpus on voxgig/omni (needs $OMNI_HOME)
+make test     # run the shared corpus on voxgig/omni (fetched from its tag)
 make lint     # dart analyze over lib + test
-make build    # compile lib/ alone (no omni)
+make build    # compile lib/ alone
 make format   # dart format check
 ```
 

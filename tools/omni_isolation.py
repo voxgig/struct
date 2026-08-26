@@ -422,7 +422,7 @@ def read_swift(path):
     return fails
 
 
-def read_scoped(path, start, stop=None, exempt=None):
+def read_scoped(path, start, stop=None, exempt=None, comment=None):
     """Read the dependency-declaring REGION of a manifest with no stdlib
     parser (cabal, opam, gemspec, rockspec, gradle.kts, mix.exs, deps.edn,
     Makefile.PL, build.zig.zon, pubspec.yaml).
@@ -432,6 +432,15 @@ def read_scoped(path, start, stop=None, exempt=None):
     the only use is Gradle's test configurations, which Gradle never publishes
     to a consumer.
 
+    `comment` strips comment text before anything else, and it is not a
+    nicety: a comment can also open a scope by accident.  clojure's start
+    pattern is `:deps\b`, and a comment ABOVE the map explaining
+    `:deps/root "clojure"` matched it - so the scan began inside prose and
+    read the word omni out of an explanation of why omni is NOT declared
+    there.  Measured, not hypothetical.  It strips by line, so a `;` inside a
+    string would be cut too; no manifest here has one, and a parse is the
+    real answer if one ever does.
+
     This is a scoped textual scan, and saying so plainly matters: it is
     weaker than a parse and it is what is available without adding a runtime
     dependency, which AGENTS.md forbids.  It is scoped rather than a whole
@@ -439,6 +448,8 @@ def read_scoped(path, start, stop=None, exempt=None):
     one of these manifests is entitled to do - cannot false-positive.
     """
     text = path.read_text(encoding='utf-8')
+    if comment:
+        text = re.sub(comment, '', text, flags=re.M)
     lines = []
     # EVERY region, not the first. Gradle allows several `dependencies { }`
     # blocks and kotlin/build.gradle.kts already has two, so `re.search` read
@@ -575,8 +586,11 @@ PORTS = {
                              lambda p: read_scoped(
                                  p, r'^\s*dependencies\s*\{', r'^\}',
                                  exempt=r'^\s*test(Implementation|RuntimeOnly|CompileOnly)\b'))]),
+    # `comment=';.*$'`: EDN comments are stripped first, because one of them
+    # opened the scope - see read_scoped.
     'clojure':    dict(lib=[('clojure/deps.edn',
-                             lambda p: read_scoped(p, r':deps\b', r':aliases\b'))]),
+                             lambda p: read_scoped(p, r':deps\b', r':aliases\b',
+                                                   comment=r';.*$'))]),
     'dart':       dict(lib=[('dart/pubspec.yaml',
                              lambda p: read_scoped(p, r'^dependencies:', r'^dev_dependencies:'))]),
     'perl':       dict(lib=[('perl/Makefile.PL',
