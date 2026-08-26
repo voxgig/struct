@@ -93,7 +93,7 @@ fn runOp(base: Allocator, op: Op, w: usize, d: usize, warm: usize, runs: usize, 
         try mlist.array.append(try buildTree(a, w, d, 2));
     }
     if (op == .getpath) {
-        var buf = std.ArrayList(u8).init(a);
+        var buf = std.array_list.Managed(u8).init(a);
         var i: usize = 0;
         while (i < d) : (i += 1) {
             if (i > 0) try buf.append('.');
@@ -132,7 +132,7 @@ pub fn main() !void {
         .{ .name = "getpath", .op = .getpath, .uc = @as(u64, gp) },
     };
 
-    var out = std.ArrayList(u8).init(base);
+    var out = std.array_list.Managed(u8).init(base);
     defer out.deinit();
     const wr = out.writer();
     try wr.print("{{\"lang\":\"zig\",\"runtime\":\"zig {s}\",\"nodes\":{d},\"params\":{{\"width\":{d},\"depth\":{d},\"warmup\":{d},\"runs\":{d},\"getpath_iters\":{d}}},\"ops\":[", .{ builtin.zig_version_string, nodes, w, d, warm, runs, gp });

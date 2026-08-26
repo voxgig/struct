@@ -84,7 +84,7 @@ lint` runs only the format check.
   `.null` as absent; Group B preserve it). Re-read
   [`../UNDEF_SPEC.md`](../design/UNDEF_SPEC.md) before touching any read/merge/clone
   path.
-- **Tested on Zig 0.13.0.** The build assumes that toolchain; newer Zig has
+- **Tested on Zig 0.16.0.** The build assumes that toolchain; older Zig has
   moved `std.ArrayList`/build APIs, so confirm the version (`make inspect`)
   before assuming a failure is a port bug.
 

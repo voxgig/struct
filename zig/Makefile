@@ -1,10 +1,12 @@
 .PHONY: inspect build test bench lint fmt-check clean reset publish
 
-# zig 0.13 cannot link against very new Xcode SDKs on macOS (e.g. the Xcode 26
-# SDK): every libc symbol (_malloc, _sigaction, __availability_version_check…)
-# comes back undefined. The Command Line Tools SDK still works, so point zig at
+# zig 0.13 could not link against very new Xcode SDKs on macOS (e.g. the Xcode
+# 26 SDK): every libc symbol (_malloc, _sigaction, __availability_version_check…)
+# came back undefined. The Command Line Tools SDK still works, so point zig at
 # it when CLT is installed and the caller hasn't set their own DEVELOPER_DIR.
 # macOS-only and a no-op where CLT is absent (Linux CI, minimal runners).
+# Kept across the 0.16 move: harmless where it is not needed, and whether 0.16
+# has stopped needing it has not been measured on a macOS runner.
 ifeq ($(shell uname),Darwin)
 ifndef DEVELOPER_DIR
 ifneq ($(wildcard /Library/Developer/CommandLineTools/.),)

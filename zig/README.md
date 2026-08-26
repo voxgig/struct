@@ -16,7 +16,7 @@ cd zig
 zig build test
 ```
 
-Tested with Zig 0.13.0.  Module: [`src/struct.zig`](./src/struct.zig).
+Tested with Zig 0.16.0.  Module: [`src/struct.zig`](./src/struct.zig).
 Package name: `voxgig-struct`.
 
 ```zig
