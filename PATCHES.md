@@ -10,9 +10,23 @@ credentials:
 
 so both changes live in [`patches/`](./patches) rather than in commits.
 
-**Delete this file and `patches/` once they are applied.** Until the boru one
-is, `boru/AGENTS.md`'s line about `test-boru` describes a job that is not
-there yet.
+**Delete this file and `patches/` once they are applied.** Until then, two
+things are true and worth saying plainly, because a patch file is inert until
+someone applies it:
+
+- **CI does not exercise the boru suite at all.** There is no `test-boru`
+  job in the checked-in workflow, and `OMNI_REF` still points at `064af05`,
+  which predates omni's boru port — so even a job added by hand would find no
+  runner to import.
+- **A local `make test` needs omni#49 too.** The Makefile resolves an omni
+  *checkout* (`$OMNI_HOME`, then siblings), not `OMNI_REF`, so it works as
+  soon as the omni beside you carries `boru/src/omni.boru` — after
+  [voxgig/omni#49](https://github.com/voxgig/omni/pull/49) merges, or with
+  its branch checked out. A fresh clone of omni `main` before that merge does
+  not have it, and `make test` fails on the import rather than on the corpus.
+
+`boru/AGENTS.md`'s line about `test-boru` describes the job the boru patch
+adds, so it reads ahead of the workflow until that patch lands.
 
 ## 1. `patches/zig-ci-macos-pip-REQUIRED.patch` — main is red without this
 
