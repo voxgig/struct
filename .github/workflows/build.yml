@@ -20,7 +20,7 @@ env:
   # stays red until re-run, and a green run here is not reproducible from
   # this repo's commit alone. Bump this one line to take a new omni; that
   # bump is the commit CI re-tests every port against.
-  OMNI_REF: 95c59eb1a0e6270a82aed6a056ea93e28f67f909
+  OMNI_REF: 064af05a693adfda4400cbdfd85d24d894172da5
 
 jobs:
   test-typescript:
