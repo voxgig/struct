@@ -1,0 +1,416 @@
+diff --git a/.github/workflows/build.yml b/.github/workflows/build.yml
+index 8c2a51a..30c4e18 100644
+--- a/.github/workflows/build.yml
++++ b/.github/workflows/build.yml
+@@ -14,6 +14,14 @@ env:
+   # Node 20 runtime; opt them into Node 24 now (default from 2026-06-02).
+   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+ 
++  # The corpus runner is voxgig/omni, checked out by every port's job. Pinned
++  # to a SHA rather than floating on omni's default branch: unpinned, a run
++  # that starts before a paired omni PR merges tests against the OLD omni and
++  # stays red until re-run, and a green run here is not reproducible from
++  # this repo's commit alone. Bump this one line to take a new omni; that
++  # bump is the commit CI re-tests every port against.
++  OMNI_REF: 95c59eb1a0e6270a82aed6a056ea93e28f67f909
++
+ jobs:
+   test-typescript:
+     runs-on: ${{ matrix.os }}
+@@ -71,6 +79,7 @@ jobs:
+         with:
+           repository: voxgig/omni
+           path: .omni
++          ref: ${{ env.OMNI_REF }}
+       - name: Setup Node.js ${{ matrix.node-version }}
+         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+         with:
+@@ -100,6 +109,7 @@ jobs:
+         with:
+           repository: voxgig/omni
+           path: .omni
++          ref: ${{ env.OMNI_REF }}
+       - name: Setup Python ${{ matrix.python-version }}
+         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+         with:
+@@ -127,6 +137,7 @@ jobs:
+         with:
+           repository: voxgig/omni
+           path: .omni
++          ref: ${{ env.OMNI_REF }}
+       - name: Setup Go ${{ matrix.go-version }}
+         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+         with:
+@@ -158,6 +169,7 @@ jobs:
+         with:
+           repository: voxgig/omni
+           path: .omni
++          ref: ${{ env.OMNI_REF }}
+       - name: Setup Ruby
+         uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1
+         with:
+@@ -200,6 +212,7 @@ jobs:
+         with:
+           repository: voxgig/omni
+           path: .omni
++          ref: ${{ env.OMNI_REF }}
+       - name: Run tests
+         working-directory: ./php
+         run: vendor/bin/phpunit
+@@ -233,6 +246,7 @@ jobs:
+         with:
+           repository: voxgig/omni
+           path: .omni
++          ref: ${{ env.OMNI_REF }}
+       - name: Run tests
+         working-directory: ./rust
+         run: cargo test
+@@ -266,6 +280,7 @@ jobs:
+         with:
+           repository: voxgig/omni
+           path: .omni
++          ref: ${{ env.OMNI_REF }}
+       - name: Run tests
+         working-directory: ./csharp/tests
+         run: dotnet test
+@@ -288,6 +303,7 @@ jobs:
+         with:
+           repository: voxgig/omni
+           path: .omni
++          ref: ${{ env.OMNI_REF }}
+       - name: Setup Java ${{ matrix.java-version }}
+         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+         with:
+@@ -344,6 +360,7 @@ jobs:
+         with:
+           repository: voxgig/omni
+           path: .omni
++          ref: ${{ env.OMNI_REF }}
+       - name: Run tests
+         working-directory: ./java
+         run: make test
+@@ -377,6 +394,7 @@ jobs:
+         with:
+           repository: voxgig/omni
+           path: .omni
++          ref: ${{ env.OMNI_REF }}
+       - name: Run tests
+         working-directory: ./lua
+         run: make test
+@@ -387,53 +405,36 @@ jobs:
+     runs-on: ${{ matrix.os }}
+     strategy:
+       matrix:
+-        # Pin macOS to macos-14: zig 0.13 cannot link against the macOS 26
+-        # SDK now shipped by macos-latest (undefined libc symbols such as
+-        # _getcwd/_malloc), and even the Command Line Tools SDK on that image
+-        # is too new. macos-14 (arm64, SDK 14) is the last image zig 0.13 links.
++        # macos-14 is held over from the 0.13 pin, where the macOS 26 SDK on
++        # macos-latest left every libc symbol undefined and macos-14 (arm64,
++        # SDK 14) was the last image that linked. 0.16 is expected to handle
++        # the newer SDK, but that has not been measured on a runner, so the
++        # image moves in its own change rather than inside the version bump.
+         os: [ubuntu-latest, macos-14, windows-latest]
+-        zig-version: ['0.13.0']
+     steps:
+       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+-      # Downloaded straight from ziglang.org rather than via a setup action.
+-      # Every published zig setup action - mlugg, korandoru, goto-bus-stop -
+-      # still targets Node 20, which is refused. A pinned tarball with a
+-      # checked hash is what voxgig/omni's zig job already does, and it also
+-      # drops setup-zig's community-mirror fallback, which was flaky.
+-      - name: Setup Zig ${{ matrix.zig-version }}
++      # ziglang on PyPI rather than a ziglang.org tarball. It is the Zig
++      # Software Foundation's own redistribution of the same builds, and it
++      # puts the integrity check in pip instead of a hand-rolled
++      # `sha256sum -c`: .github/zig-requirements.txt carries one --hash per
++      # platform wheel and both workflows read that one file. It still avoids
++      # every published zig setup action (all of them target the refused
++      # Node 20) and setup-zig's flaky community-mirror fallback.
++      - name: Setup Zig
+         shell: bash
+-        env:
+-          ZIG_VERSION: ${{ matrix.zig-version }}
+-          ZIG_SHA256_LINUX: 'd45312e61ebcc48032b77bc4cf7fd6915c11fa16e4aad116b66c9468211230ea'
+-          ZIG_SHA256_MACOS: '46fae219656545dfaf4dce12fb4e8685cec5b51d721beee9389ab4194d43394c'
+-          ZIG_SHA256_WINDOWS: 'd859994725ef9402381e557c60bb57497215682e355204d754ee3df75ee3c158'
+         run: |
+           set -euo pipefail
+-          case "$RUNNER_OS" in
+-            Linux)   name="zig-linux-x86_64-$ZIG_VERSION";   ext=tar.xz; sha="$ZIG_SHA256_LINUX" ;;
+-            macOS)   name="zig-macos-aarch64-$ZIG_VERSION";  ext=tar.xz; sha="$ZIG_SHA256_MACOS" ;;
+-            Windows) name="zig-windows-x86_64-$ZIG_VERSION"; ext=zip;    sha="$ZIG_SHA256_WINDOWS" ;;
+-            *) echo "unsupported runner: $RUNNER_OS" >&2; exit 1 ;;
+-          esac
+-          archive="$RUNNER_TEMP/zig.$ext"
+-          curl -sSfL --retry 5 --retry-delay 5 --retry-all-errors \
+-            -o "$archive" "https://ziglang.org/download/$ZIG_VERSION/$name.$ext"
+-          # macOS runners have shasum, not sha256sum.
+-          if command -v sha256sum >/dev/null 2>&1; then
+-            echo "$sha  $archive" | sha256sum -c -
+-          else
+-            echo "$sha  $archive" | shasum -a 256 -c -
+-          fi
+-          mkdir -p "$HOME/zig"
+-          if [ "$ext" = zip ]; then
+-            7z x -o"$RUNNER_TEMP/zigx" "$archive" >/dev/null
+-            mv "$RUNNER_TEMP/zigx/$name"/* "$HOME/zig/"
+-          else
+-            tar -xJf "$archive" -C "$HOME/zig" --strip-components=1
+-          fi
+-          echo "$HOME/zig" >> "$GITHUB_PATH"
+-      # zig 0.13 cannot link against the newer Xcode SDK on macOS runners
+-      # (undefined libc symbols); the Command Line Tools SDK still works.
++          py=python3; command -v python3 >/dev/null 2>&1 || py=python
++          "$py" -m pip install --disable-pip-version-check --quiet \
++            --require-hashes -r "$GITHUB_WORKSPACE/.github/zig-requirements.txt"
++          bin="$RUNNER_TEMP/zigbin"; mkdir -p "$bin"
++          printf '#!/bin/sh\nexec %s -m ziglang "$@"\n' "$py" > "$bin/zig"
++          chmod +x "$bin/zig"
++          echo "$bin" >> "$GITHUB_PATH"
++          "$bin/zig" version
++      # Held over with the macos-14 pin above: 0.13 could not link against the
++      # newer Xcode SDK (undefined libc symbols) and the Command Line Tools SDK
++      # still works. Harmless if 0.16 no longer needs it; unmeasured either way.
+       - name: Use Command Line Tools SDK (macOS)
+         if: runner.os == 'macOS'
+         run: echo "DEVELOPER_DIR=/Library/Developer/CommandLineTools" >> "$GITHUB_ENV"
+@@ -473,6 +474,7 @@ jobs:
+         with:
+           repository: voxgig/omni
+           path: .omni
++          ref: ${{ env.OMNI_REF }}
+       - name: Install nlohmann/json (Linux)
+         if: runner.os == 'Linux'
+         # apt-get update tolerated: see the note in security.yml.
+@@ -503,6 +505,7 @@ jobs:
+         with:
+           repository: voxgig/omni
+           path: .omni
++          ref: ${{ env.OMNI_REF }}
+       - name: Setup Perl (Linux)
+         if: runner.os == 'Linux'
+         run: |
+@@ -536,6 +539,7 @@ jobs:
+         with:
+           repository: voxgig/omni
+           path: .omni
++          ref: ${{ env.OMNI_REF }}
+       # macOS runners ship a recent Swift toolchain (6.x) with Xcode by
+       # default; `swift-actions/setup-swift@v2`'s macOS download path is
+       # not reliable for 6.0.2 specifically. Only install on Linux.
+@@ -568,6 +572,7 @@ jobs:
+         with:
+           repository: voxgig/omni
+           path: .omni
++          ref: ${{ env.OMNI_REF }}
+       - name: Run tests
+         working-directory: ./c
+         run: make test
+@@ -594,6 +599,7 @@ jobs:
+         with:
+           repository: voxgig/omni
+           path: .omni
++          ref: ${{ env.OMNI_REF }}
+       - uses: VirtusLab/scala-cli-setup@c2c917d5764319353961bc4e53885c62d3a95db1 # v1
+       - name: Install make (Windows)
+         if: runner.os == 'Windows'
+@@ -620,6 +626,7 @@ jobs:
+         with:
+           repository: voxgig/omni
+           path: .omni
++          ref: ${{ env.OMNI_REF }}
+       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+         with:
+           distribution: temurin
+@@ -653,6 +660,7 @@ jobs:
+         with:
+           repository: voxgig/omni
+           path: .omni
++          ref: ${{ env.OMNI_REF }}
+       - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1
+       - name: Install make (Windows)
+         if: runner.os == 'Windows'
+@@ -679,6 +687,7 @@ jobs:
+         with:
+           repository: voxgig/omni
+           path: .omni
++          ref: ${{ env.OMNI_REF }}
+       # erlef/setup-beam supports Ubuntu + Windows only; use Homebrew on macOS.
+       - name: Setup Elixir (setup-beam)
+         if: runner.os != 'macOS'
+@@ -714,6 +723,7 @@ jobs:
+         with:
+           repository: voxgig/omni
+           path: .omni
++          ref: ${{ env.OMNI_REF }}
+       - uses: haskell-actions/setup@6037f33647c3f17758a2356c80fc4a53d7e0685d # v2
+         with:
+           ghc-version: '9.10'
+@@ -742,6 +752,7 @@ jobs:
+         with:
+           repository: voxgig/omni
+           path: .omni
++          ref: ${{ env.OMNI_REF }}
+       - uses: ocaml/setup-ocaml@605a7e998e76e035b82c14d618a6e1010732c4ce # v3
+         with:
+           ocaml-compiler: '5'
+@@ -771,6 +782,7 @@ jobs:
+         with:
+           repository: voxgig/omni
+           path: .omni
++          ref: ${{ env.OMNI_REF }}
+       # elan directly rather than leanprover/lean-action: that action is a
+       # composite that references actions/cache/restore@v5 and
+       # actions/cache/save@v5 BY TAG internally, and the SHA-pin rule applies
+diff --git a/.github/workflows/lint.yml b/.github/workflows/lint.yml
+index 5a8483c..95b4a29 100644
+--- a/.github/workflows/lint.yml
++++ b/.github/workflows/lint.yml
+@@ -14,6 +14,14 @@ env:
+   # Node 20 runtime; opt them into Node 24 now (default from 2026-06-02).
+   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+ 
++  # The corpus runner is voxgig/omni, checked out by every port's job. Pinned
++  # to a SHA rather than floating on omni's default branch: unpinned, a run
++  # that starts before a paired omni PR merges tests against the OLD omni and
++  # stays red until re-run, and a green run here is not reproducible from
++  # this repo's commit alone. Bump this one line to take a new omni; that
++  # bump is the commit CI re-tests every port against.
++  OMNI_REF: 95c59eb1a0e6270a82aed6a056ea93e28f67f909
++
+ jobs:
+   lint-typescript:
+     runs-on: ubuntu-latest
+@@ -63,6 +71,7 @@ jobs:
+         with:
+           repository: voxgig/omni
+           path: .omni
++          ref: ${{ env.OMNI_REF }}
+       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+         with:
+           go-version: '1.24'
+@@ -90,6 +99,7 @@ jobs:
+         with:
+           repository: voxgig/omni
+           path: .omni
++          ref: ${{ env.OMNI_REF }}
+       - working-directory: ./rust
+         run: make lint
+ 
+@@ -149,6 +159,7 @@ jobs:
+         with:
+           repository: voxgig/omni
+           path: .omni
++          ref: ${{ env.OMNI_REF }}
+       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+         with:
+           distribution: temurin
+@@ -174,43 +185,25 @@ jobs:
+     runs-on: ubuntu-latest
+     steps:
+       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+-      # Downloaded straight from ziglang.org rather than via a setup action.
+-      # Every published zig setup action - mlugg, korandoru, goto-bus-stop -
+-      # still targets Node 20, which is refused. A pinned tarball with a
+-      # checked hash is what voxgig/omni's zig job already does, and it also
+-      # drops setup-zig's community-mirror fallback, which was flaky.
+-      - name: Setup Zig 0.13.0
++      # ziglang on PyPI rather than a ziglang.org tarball. It is the Zig
++      # Software Foundation's own redistribution of the same builds, and it
++      # puts the integrity check in pip instead of a hand-rolled
++      # `sha256sum -c`: .github/zig-requirements.txt carries one --hash per
++      # platform wheel and both workflows read that one file. It still avoids
++      # every published zig setup action (all of them target the refused
++      # Node 20) and setup-zig's flaky community-mirror fallback.
++      - name: Setup Zig
+         shell: bash
+-        env:
+-          ZIG_VERSION: '0.13.0'
+-          ZIG_SHA256_LINUX: 'd45312e61ebcc48032b77bc4cf7fd6915c11fa16e4aad116b66c9468211230ea'
+-          ZIG_SHA256_MACOS: '46fae219656545dfaf4dce12fb4e8685cec5b51d721beee9389ab4194d43394c'
+-          ZIG_SHA256_WINDOWS: 'd859994725ef9402381e557c60bb57497215682e355204d754ee3df75ee3c158'
+         run: |
+           set -euo pipefail
+-          case "$RUNNER_OS" in
+-            Linux)   name="zig-linux-x86_64-$ZIG_VERSION";   ext=tar.xz; sha="$ZIG_SHA256_LINUX" ;;
+-            macOS)   name="zig-macos-aarch64-$ZIG_VERSION";  ext=tar.xz; sha="$ZIG_SHA256_MACOS" ;;
+-            Windows) name="zig-windows-x86_64-$ZIG_VERSION"; ext=zip;    sha="$ZIG_SHA256_WINDOWS" ;;
+-            *) echo "unsupported runner: $RUNNER_OS" >&2; exit 1 ;;
+-          esac
+-          archive="$RUNNER_TEMP/zig.$ext"
+-          curl -sSfL --retry 5 --retry-delay 5 --retry-all-errors \
+-            -o "$archive" "https://ziglang.org/download/$ZIG_VERSION/$name.$ext"
+-          # macOS runners have shasum, not sha256sum.
+-          if command -v sha256sum >/dev/null 2>&1; then
+-            echo "$sha  $archive" | sha256sum -c -
+-          else
+-            echo "$sha  $archive" | shasum -a 256 -c -
+-          fi
+-          mkdir -p "$HOME/zig"
+-          if [ "$ext" = zip ]; then
+-            7z x -o"$RUNNER_TEMP/zigx" "$archive" >/dev/null
+-            mv "$RUNNER_TEMP/zigx/$name"/* "$HOME/zig/"
+-          else
+-            tar -xJf "$archive" -C "$HOME/zig" --strip-components=1
+-          fi
+-          echo "$HOME/zig" >> "$GITHUB_PATH"
++          py=python3; command -v python3 >/dev/null 2>&1 || py=python
++          "$py" -m pip install --disable-pip-version-check --quiet \
++            --require-hashes -r "$GITHUB_WORKSPACE/.github/zig-requirements.txt"
++          bin="$RUNNER_TEMP/zigbin"; mkdir -p "$bin"
++          printf '#!/bin/sh\nexec %s -m ziglang "$@"\n' "$py" > "$bin/zig"
++          chmod +x "$bin/zig"
++          echo "$bin" >> "$GITHUB_PATH"
++          "$bin/zig" version
+       - working-directory: ./zig
+         run: zig fmt --check src test build.zig
+ 
+@@ -224,6 +217,7 @@ jobs:
+         with:
+           repository: voxgig/omni
+           path: .omni
++          ref: ${{ env.OMNI_REF }}
+       # apt-get update tolerated: see the note in security.yml.
+       - run: |
+           sudo apt-get update || true
+@@ -253,6 +247,7 @@ jobs:
+         with:
+           repository: voxgig/omni
+           path: .omni
++          ref: ${{ env.OMNI_REF }}
+       # apt-get update tolerated: see the note in security.yml.
+       - run: |
+           sudo apt-get update || true
+@@ -303,6 +298,7 @@ jobs:
+         with:
+           repository: voxgig/omni
+           path: .omni
++          ref: ${{ env.OMNI_REF }}
+       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+         with:
+           distribution: temurin
+@@ -327,6 +323,7 @@ jobs:
+         with:
+           repository: voxgig/omni
+           path: .omni
++          ref: ${{ env.OMNI_REF }}
+       - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1
+       - working-directory: ./dart
+         run: dart pub get && make lint
+@@ -356,6 +353,7 @@ jobs:
+         with:
+           repository: voxgig/omni
+           path: .omni
++          ref: ${{ env.OMNI_REF }}
+       - uses: haskell-actions/setup@6037f33647c3f17758a2356c80fc4a53d7e0685d # v2
+         with:
+           ghc-version: '9.10'
+@@ -387,6 +385,7 @@ jobs:
+         with:
+           repository: voxgig/omni
+           path: .omni
++          ref: ${{ env.OMNI_REF }}
+       # elan directly rather than leanprover/lean-action: that action is a
+       # composite that references actions/cache/restore@v5 and
+       # actions/cache/save@v5 BY TAG internally, and the SHA-pin rule applies
