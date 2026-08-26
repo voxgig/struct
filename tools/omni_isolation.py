@@ -94,8 +94,22 @@ SOURCE = OMNI
 # comment marker, so a real reference with a trailing comment is still read.
 COMMENT = re.compile(r'^\s*(//|#|--|\*|/\*|"""|\'\'\')')
 
+# `#` OPENS A COMMENT IN SOME LANGUAGES AND A PREPROCESSOR DIRECTIVE IN OTHERS.
+# Treating every `#` line as prose made `#include "voxgig/omni.h"` invisible -
+# in c and cpp, which have NO manifest, so the source scan is the only check
+# they get. A regression introduced by the comment skip itself.
+#
+# Listed rather than keyed on file type, and erring towards CODE: a prose line
+# that happens to start `# if you want to...` is scanned, which is the safe
+# direction. Missing a directive is not.
+DIRECTIVE = re.compile(
+    r'^\s*#\s*(include|import|define|pragma|if|ifdef|ifndef|elif|else|endif|'
+    r'undef|error|warning|line)\b', re.I)
+
 
 def is_comment(line):
+    if DIRECTIVE.match(line):
+        return False
     return bool(COMMENT.match(line))
 
 
@@ -349,44 +363,62 @@ def read_lakefile(path):
     return deps
 
 
+def _balanced(text, open_at):
+    """The substring from `open_at` (an index of `(`) to its matching `)`.
+
+    A regex cannot do this. `.target(...)` legitimately contains nested calls -
+    `.product(name: "Omni", package: "VoxgigOmni")` is the normal way a target
+    declares a dependency - and an earlier `[^(]` guard, added to stop one
+    `.target(` running on into the next, made exactly that nesting
+    unmatchable. Count instead.
+    """
+    depth = 0
+    for i in range(open_at, len(text)):
+        if '(' == text[i]:
+            depth += 1
+        elif ')' == text[i]:
+            depth -= 1
+            if 0 == depth:
+                return text[open_at + 1:i]
+    return text[open_at + 1:]
+
+
 def read_swift(path):
-    """Package.swift, structurally.
+    """Package.swift, structurally - it is a PROGRAM, not a data file.
 
-    This manifest legitimately names omni ten times: it is a Swift PROGRAM
-    that declares the dependency only when the gitignored `.omni-runner`
-    symlink exists, and only for the TEST target.  A grep would fail on the
-    correct tree, so scope the check to what a consumer resolves - the
-    `dependencies:` of the Package and of every non-test target.
+    This manifest legitimately names omni many times: it declares the
+    dependency only when a gitignored symlink exists, and only for the TEST
+    target.  A grep would fail on the correct tree.
 
-    The `dependencies: nil == omniPath ? [] : [...]` form is what makes the
-    package-level list conditional; that is accepted, and what is rejected is
-    an unconditional package dependency or any omni reference inside a
-    .target/.executableTarget dependency list.
+    PACKAGE-LEVEL: strip the gated ternary, then assert nothing is left. Not
+    "a gate exists somewhere in the region" - that passed an unconditional
+    declaration CONCATENATED with the gated array, which still contains the
+    gate. What must be true is that every `.package(` is inside the gate, and
+    removing the gate and finding none left is how to say so.
+
+    TARGETS: every non-test target, read to its matching paren so nested
+    calls are visible.
     """
     text = path.read_text(encoding='utf-8')
     fails = []
 
-    # Package-level dependencies must be EMPTY unless actually gated. Not
-    # "mentions omniPath" - that passes if someone deletes the ternary and
-    # leaves `[.package(name: "VoxgigOmni", path: omniPath!)]`, which is
-    # unconditional and unevaluatable for a consumer with no symlink. Require
-    # the conditional itself, with an empty-list branch.
-    GATE = re.compile(r'(nil\s*==\s*omniPath|omniPath\s*==\s*nil)\s*\?\s*\[\s*\]\s*:')
     m = re.search(r'\n\s*dependencies:\s*(.*?)(?=\n\s*targets:)', text, re.S)
-    if m and '.package(' in m.group(1) and not GATE.search(m.group(1)):
-        # Structural, not name-based: ANY package-level dependency that is not
-        # gated is a failure, whatever it is called. This package publishes a
-        # library with no dependencies at all, so an ungated `.package(` is
-        # wrong regardless of whether the matcher recognises its name.
-        fails.append('package dependencies declare `.package(` without the '
-                     '`nil == omniPath ? [] :` gate: '
-                     + ' '.join(m.group(1).split())[:70])
+    if m:
+        region = m.group(1)
+        # Remove `<nil-check> ? [] : [ ... ]` in full, however spelled.
+        stripped = re.sub(
+            r'(nil\s*==\s*\w*[Oo]mni\w*|\w*[Oo]mni\w*\s*==\s*nil)'
+            r'\s*\?\s*\[\s*\]\s*:\s*\[.*?\]',
+            '', region, flags=re.S)
+        if '.package(' in stripped:
+            fails.append('package dependencies declare `.package(` outside the '
+                         'nil-check gate: ' + ' '.join(stripped.split())[:70])
 
-    # Any non-test target naming omni in its dependency list.
-    for tm in re.finditer(r'\.(target|executableTarget)\((.*?)\n\s*\)', text, re.S):
-        if names_omni(tm.group(2)):
+    for tm in re.finditer(r'\.(target|executableTarget)\(', text):
+        body = _balanced(text, tm.end() - 1)
+        if names_omni(body):
             fails.append(f'.{tm.group(1)} declares omni: '
-                         + ' '.join(tm.group(2).split())[:70])
+                         + ' '.join(body.split())[:70])
     return fails
 
 
@@ -531,7 +563,8 @@ PORTS = {
     'lua':        dict(lib=[('lua/struct.rockspec',
                              lambda p: read_scoped(p, r'^dependencies\s*=', r'^\w+\s*='))]),
     'elixir':     dict(lib=[('elixir/mix.exs',
-                             lambda p: read_scoped(p, r'defp?\s+deps\b', r'^\s*end\b'))]),
+                             lambda p: read_scoped(p, r'(\bdeps:\s*|defp\s+deps\b)',
+                                                   r'^\s*end\b'))]),
     # `testImplementation`/`testRuntimeOnly`/`testCompileOnly` are Gradle's
     # test configurations and are never published to a consumer - kotlin's
     # equivalent of npm devDependencies, and how this port declares omni
@@ -603,6 +636,27 @@ def main():
         fails.append(f'{port}: has an entry here but is not a port directory - '
                      'stale, and its checks read nothing')
 
+    # An UNCOVERED port must still BE uncovered. `lib=[]` prints a reason
+    # forever, so a port that later gains a real manifest - a pom.xml, a
+    # gemspec - would keep printing it while an omni declaration in that new
+    # manifest sailed through. Discovery already counts the port as known, so
+    # nothing else would notice.
+    MANIFEST_NAMES = ('go.mod', 'Cargo.toml', 'pom.xml', 'build.gradle',
+                      'build.gradle.kts', 'deps.edn', 'pubspec.yaml', 'mix.exs',
+                      'composer.json', 'pyproject.toml', 'setup.py',
+                      'Package.swift', 'lakefile.toml', 'Makefile.PL',
+                      'package.json')
+    for port in sorted(PORTS):
+        if PORTS[port]['lib']:
+            continue
+        found = [n for n in MANIFEST_NAMES if (ROOT / port / n).exists()]
+        found += [q.name for q in (ROOT / port).glob('*.csproj')]
+        found += [q.name for q in (ROOT / port).glob('*.gemspec')]
+        if found:
+            fails.append(f'{port}: is declared UNCOVERED ("{PORTS[port].get("why")}") '
+                         f'but now has {", ".join(sorted(set(found)))} - give it a '
+                         'real PORTS entry')
+
     for port in sorted(PORTS):
         spec = PORTS[port]
         if not spec['lib']:
@@ -648,6 +702,39 @@ def main():
                          'nothing; fix the glob')
         for hit in hits:
             fails.append(f'{port}: shipped source imports omni: {hit}')
+
+    # A SKIP MUST BE JUSTIFIED BY SOMETHING THIS FILE CHECKS, and derived
+    # rather than hard-coded, so it stays true per repo.
+    #
+    # A port keeps its OMNI_HOME resolver out of the package with a `files`
+    # negation, and SOURCES skips that path on that basis. Drop the negation
+    # and the resolver ships again while the scan still looks away - the skip
+    # would assert a fact nothing verified. python had exactly this shape and
+    # no exclusion at all, which is how omnihome.py reached PyPI.
+    #
+    # A skip matching NO file is reported too: it is the same
+    # silence-looks-like-success failure as a dead glob, and a skip copied
+    # between repos is how one arrives.
+    for port in sorted(SOURCES):
+        for prefix in SOURCES[port]['skip']:
+            matched = sorted(ROOT.glob(prefix + '*'))
+            if not matched:
+                fails.append(f'{port}: SOURCES skips {prefix!r} and nothing '
+                             'matches it - a dead skip; remove it')
+                continue
+            manifest = ROOT / port / 'package.json'
+            if not manifest.exists():
+                continue
+            files = json.loads(manifest.read_text(encoding='utf-8')).get('files')
+            if not files:
+                continue
+            rel = prefix.split('/', 1)[1] if '/' in prefix else prefix
+            if not any(f.startswith('!') and f.lstrip('!').startswith(rel.split('/')[0] + '/')
+                       and rel.rsplit('/', 1)[-1] in f
+                       for f in files):
+                fails.append(f'{port}: package.json `files` no longer excludes '
+                             f'{rel!r}, but SOURCES still skips it - the file '
+                             'would ship unscanned')
 
     print(f'register 4.13 - library manifests checked: {len(checked)}, '
           f'shipped source files scanned: {scanned}')

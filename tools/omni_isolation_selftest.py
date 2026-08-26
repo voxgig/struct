@@ -45,6 +45,11 @@ LEAK = 'LEAK voxgig_omni VoxgigOmni Omni voxgig.omni voxgig/omni omni\n'
 # `omni`, so every source mutation passed while this spelling went unchecked.
 SOURCE_SPELLINGS = 'import voxgig_omni\nuse voxgig_omni::Runner;\n'
 
+# `#include "voxgig/omni.h"` is CODE. The comment skip classified every `#`
+# line as prose, which made it invisible in c and cpp - ports with no manifest,
+# so the source scan is the only check they get.
+PREPROCESSOR = '#include "voxgig/omni.h"\n'
+
 # (port, manifest, anchor, replacement) - the anchor must exist, and a
 # missing one is a FAILURE, not a skip: it means the manifest moved and the
 # mutation silently stopped testing anything.
@@ -131,6 +136,15 @@ MANIFEST = [
     # consumer with no symlink.
     ('swift', 'swift/Package.swift', 'dependencies: nil == omniPath ? [] : [',
      'dependencies: [', ),
+    # An ungated `.package(` CONCATENATED with the gated array: the gate is
+    # still present, so "a gate exists somewhere" passed it.
+    ('swift', 'swift/Package.swift', 'dependencies: nil == omniPath',
+     'dependencies: [.package(name: "Evil", path: "../omni/swift")] + (nil == omniPath'),
+    # A nested `.product(...)` in a library target - unmatchable after a
+    # `[^(]` guard was added to stop one `.target(` running into the next.
+    ('swift', 'swift/Package.swift',
+     '.target(name: "VoxgigStruct", path: "Sources/VoxgigStruct")',
+     '.target(name: "VoxgigStruct", dependencies: [.product(name: "Omni", package: "VoxgigOmni")], path: "Sources/VoxgigStruct")'),
 ]
 
 # Blocks that may name omni. The checker must NOT fire on these.
@@ -213,6 +227,10 @@ def main():
         results.append(mutate(rel, '', SOURCE_SPELLINGS,
                               f'{port}: shipped source imports omni',
                               True, f'{port}:source-spelling'))
+        if port in ('c', 'cpp'):
+            results.append(mutate(rel, '', PREPROCESSOR,
+                                  f'{port}: shipped source imports omni',
+                                  True, f'{port}:source-include'))
 
     for status, tag, note in results:
         print(f'{status}  {tag:52} {note}')
