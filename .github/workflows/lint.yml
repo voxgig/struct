@@ -14,6 +14,14 @@ env:
   # Node 20 runtime; opt them into Node 24 now (default from 2026-06-02).
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+  # The corpus runner is voxgig/omni, checked out by every port's job. Pinned
+  # to a SHA rather than floating on omni's default branch: unpinned, a run
+  # that starts before a paired omni PR merges tests against the OLD omni and
+  # stays red until re-run, and a green run here is not reproducible from
+  # this repo's commit alone. Bump this one line to take a new omni; that
+  # bump is the commit CI re-tests every port against.
+  OMNI_REF: 95c59eb1a0e6270a82aed6a056ea93e28f67f909
+
 jobs:
   lint-typescript:
     runs-on: ubuntu-latest
@@ -63,6 +71,7 @@ jobs:
         with:
           repository: voxgig/omni
           path: .omni
+          ref: ${{ env.OMNI_REF }}
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: '1.24'
@@ -90,6 +99,7 @@ jobs:
         with:
           repository: voxgig/omni
           path: .omni
+          ref: ${{ env.OMNI_REF }}
       - working-directory: ./rust
         run: make lint
 
@@ -149,6 +159,7 @@ jobs:
         with:
           repository: voxgig/omni
           path: .omni
+          ref: ${{ env.OMNI_REF }}
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
@@ -174,43 +185,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      # Downloaded straight from ziglang.org rather than via a setup action.
-      # Every published zig setup action - mlugg, korandoru, goto-bus-stop -
-      # still targets Node 20, which is refused. A pinned tarball with a
-      # checked hash is what voxgig/omni's zig job already does, and it also
-      # drops setup-zig's community-mirror fallback, which was flaky.
-      - name: Setup Zig 0.13.0
+      # ziglang on PyPI rather than a ziglang.org tarball. It is the Zig
+      # Software Foundation's own redistribution of the same builds, and it
+      # puts the integrity check in pip instead of a hand-rolled
+      # `sha256sum -c`: .github/zig-requirements.txt carries one --hash per
+      # platform wheel and both workflows read that one file. It still avoids
+      # every published zig setup action (all of them target the refused
+      # Node 20) and setup-zig's flaky community-mirror fallback.
+      - name: Setup Zig
         shell: bash
-        env:
-          ZIG_VERSION: '0.13.0'
-          ZIG_SHA256_LINUX: 'd45312e61ebcc48032b77bc4cf7fd6915c11fa16e4aad116b66c9468211230ea'
-          ZIG_SHA256_MACOS: '46fae219656545dfaf4dce12fb4e8685cec5b51d721beee9389ab4194d43394c'
-          ZIG_SHA256_WINDOWS: 'd859994725ef9402381e557c60bb57497215682e355204d754ee3df75ee3c158'
         run: |
           set -euo pipefail
-          case "$RUNNER_OS" in
-            Linux)   name="zig-linux-x86_64-$ZIG_VERSION";   ext=tar.xz; sha="$ZIG_SHA256_LINUX" ;;
-            macOS)   name="zig-macos-aarch64-$ZIG_VERSION";  ext=tar.xz; sha="$ZIG_SHA256_MACOS" ;;
-            Windows) name="zig-windows-x86_64-$ZIG_VERSION"; ext=zip;    sha="$ZIG_SHA256_WINDOWS" ;;
-            *) echo "unsupported runner: $RUNNER_OS" >&2; exit 1 ;;
-          esac
-          archive="$RUNNER_TEMP/zig.$ext"
-          curl -sSfL --retry 5 --retry-delay 5 --retry-all-errors \
-            -o "$archive" "https://ziglang.org/download/$ZIG_VERSION/$name.$ext"
-          # macOS runners have shasum, not sha256sum.
-          if command -v sha256sum >/dev/null 2>&1; then
-            echo "$sha  $archive" | sha256sum -c -
-          else
-            echo "$sha  $archive" | shasum -a 256 -c -
-          fi
-          mkdir -p "$HOME/zig"
-          if [ "$ext" = zip ]; then
-            7z x -o"$RUNNER_TEMP/zigx" "$archive" >/dev/null
-            mv "$RUNNER_TEMP/zigx/$name"/* "$HOME/zig/"
-          else
-            tar -xJf "$archive" -C "$HOME/zig" --strip-components=1
-          fi
-          echo "$HOME/zig" >> "$GITHUB_PATH"
+          py=python3; command -v python3 >/dev/null 2>&1 || py=python
+          "$py" -m pip install --disable-pip-version-check --quiet \
+            --require-hashes -r "$GITHUB_WORKSPACE/.github/zig-requirements.txt"
+          bin="$RUNNER_TEMP/zigbin"; mkdir -p "$bin"
+          printf '#!/bin/sh\nexec %s -m ziglang "$@"\n' "$py" > "$bin/zig"
+          chmod +x "$bin/zig"
+          echo "$bin" >> "$GITHUB_PATH"
+          "$bin/zig" version
       - working-directory: ./zig
         run: zig fmt --check src test build.zig
 
@@ -224,6 +217,7 @@ jobs:
         with:
           repository: voxgig/omni
           path: .omni
+          ref: ${{ env.OMNI_REF }}
       # apt-get update tolerated: see the note in security.yml.
       - run: |
           sudo apt-get update || true
@@ -253,6 +247,7 @@ jobs:
         with:
           repository: voxgig/omni
           path: .omni
+          ref: ${{ env.OMNI_REF }}
       # apt-get update tolerated: see the note in security.yml.
       - run: |
           sudo apt-get update || true
@@ -303,6 +298,7 @@ jobs:
         with:
           repository: voxgig/omni
           path: .omni
+          ref: ${{ env.OMNI_REF }}
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
@@ -327,6 +323,7 @@ jobs:
         with:
           repository: voxgig/omni
           path: .omni
+          ref: ${{ env.OMNI_REF }}
       - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1
       - working-directory: ./dart
         run: dart pub get && make lint
@@ -356,6 +353,7 @@ jobs:
         with:
           repository: voxgig/omni
           path: .omni
+          ref: ${{ env.OMNI_REF }}
       - uses: haskell-actions/setup@6037f33647c3f17758a2356c80fc4a53d7e0685d # v2
         with:
           ghc-version: '9.10'
@@ -387,6 +385,7 @@ jobs:
         with:
           repository: voxgig/omni
           path: .omni
+          ref: ${{ env.OMNI_REF }}
       # elan directly rather than leanprover/lean-action: that action is a
       # composite that references actions/cache/restore@v5 and
       # actions/cache/save@v5 BY TAG internally, and the SHA-pin rule applies
