@@ -1,17 +1,45 @@
-# Unfinished work carried as a patch
+# Patches to apply locally
 
-One incomplete change lives in [`patches/`](./patches) rather than on a
-branch: the zig-onto-omni migration. **Delete this file and `patches/` once
-that migration lands.**
+Changes that could not be pushed from the session that wrote them, plus one
+that is genuinely unfinished. Everything referenced here lives in
+[`patches/`](./patches).
 
-The two patches that used to sit beside it are done and gone —
-`ci: pin the omni checkout, and take Zig 0.16 from PyPI` here, and
-`ci: pin struct-compat's checkout` in voxgig/omni. They existed only because
-the session that wrote them could not push to `.github/workflows/`.
+Both entries exist for the same reason: the authoring session's credentials
+are refused on `.github/workflows/`, so anything touching a workflow file has
+to be applied by someone whose git has `workflow` scope.
 
-## `patches/zig-omni-swap-WIP.patch` + `patches/zig-test-omni.zig`
+    ! [remote rejected] refusing to allow an OAuth App to create or update
+      workflow `.github/workflows/build.yml` without `workflow` scope
 
-**63 of 72 groups pass.** Apply only to continue the work:
+**Delete this file and `patches/` once both are done.**
+
+## 1. `patches/omni-ref-bump-REQUIRED.patch` — ready to apply
+
+    git apply patches/omni-ref-bump-REQUIRED.patch
+    git commit -am "ci: take omni 064af05, five commits on from the pin"
+
+Two lines, one in `build.yml` and one in `lint.yml`:
+
+    -  OMNI_REF: 95c59eb1a0e6270a82aed6a056ea93e28f67f909
+    +  OMNI_REF: 064af05a693adfda4400cbdfd85d24d894172da5
+
+The pin was set when omni's tip was `95c59eb`. omni has since merged #45, #46
+and #47 — `deepequal(NaN, NaN)` fixed in six ports and then pinned
+across all 23, where the shared corpus cannot reach it — plus its own
+`struct-compat` checkout pin. Every port still on the checkout route is
+therefore testing against a stale omni.
+
+Bumping this one line is the mechanism working as intended: the bump is the
+commit CI re-tests every port against, deliberately rather than by drift.
+
+Verified before proposing: `064af05a693adfda4400cbdfd85d24d894172da5` is a
+real commit and is omni's `origin/main` tip, and seven ports on the checkout
+route — javascript, python, c, cpp, perl, ruby, rust — all pass against it.
+
+## 2. `patches/zig-omni-swap-WIP.patch` + `patches/zig-test-omni.zig` — unfinished
+
+The zig-onto-omni migration. **63 of 72 groups pass.** Apply only to continue
+the work, not to land it:
 
     git apply patches/zig-omni-swap-WIP.patch
     cp patches/zig-test-omni.zig zig/test/omni.zig
@@ -67,14 +95,21 @@ ignored every `match:` block (15), and discarded `validate`'s error message
 entirely. That is the pattern the omni register records for the other swaps —
 swift surfaced ten library defects, php seventeen.
 
-## Also not done
+## Not started
+
+Nothing below has a patch; these are the remaining items of the omni
+migration.
 
 - **The omni boru port.** Its prerequisite is merged: struct/boru had drifted
   off a current boru engine entirely — the bundled module namespace moved
   `aql:` → `boru:` with no alias, and the word-reference modifier `/r` became
   `/v`. Nothing caught it because boru is the one port with no CI job. It is
-  green again at 1367 entries. The omni port itself is untouched.
+  green again at 1367 entries. The omni port itself is untouched, and it is
+  what blocks struct/boru from migrating at all.
 - **clojure, dart, lean and rust onto their release tags.** The tags exist
-  (`<port>/v0.1.0`); go is done.
-- **A boru CI job.** `build.yml` has 23 and none for boru, though `boru` is
-  in the root Makefile's `LANGS`.
+  (`<port>/v0.1.0`); go is done and is the worked example — `testutil/go.mod`
+  requires `github.com/voxgig/omni/go v0.1.0` with a checksum-pinned
+  `go.sum`, and no checkout is involved.
+- **A boru CI job.** `build.yml` has 23 and none for boru, though `boru` is in
+  the root Makefile's `LANGS`. That gap is why the engine drift above went
+  unnoticed for two days.
