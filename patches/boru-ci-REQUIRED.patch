@@ -1,0 +1,104 @@
+From e29fa4818ad21ce72134bf64fef782644ec50a4c Mon Sep 17 00:00:00 2001
+From: Richard Rodger <richard@ricebridge.com>
+Date: Wed, 26 Aug 2026 18:49:03 +0000
+Subject: [PATCH] ci(boru): the job this port never had, and the omni bump it
+ needs
+
+boru was the only port with no CI job at all, which is how it spent two days
+broken on an engine rename without anyone noticing (boru/AGENTS.md records
+it). `test-boru` closes that.
+
+The engine has no release channel of any kind - no tags, no published
+binaries, and no `go install` (cmd/go is a module of its own whose go.mod
+carries `replace` directives into sibling modules, which go install refuses).
+So the job builds the CLI from a pinned commit, for the same reason OMNI_REF
+is pinned: unpinned, a green run here is not reproducible from this repo's
+commit alone.
+
+Lint runs before test because it needs neither omni nor the corpus - a
+static-checker regression is then reported in seconds rather than after a
+corpus that takes minutes on an interpreter. One runner, not a matrix, and
+timeout-minutes to match.
+
+OMNI_REF moves to 1ae6606, which carries omni's boru port: without it there
+is no runner for boru/test/omni.boru to import and the suite does not load.
+---
+ .github/workflows/build.yml | 58 ++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 57 insertions(+), 1 deletion(-)
+
+diff --git a/.github/workflows/build.yml b/.github/workflows/build.yml
+index a77c97d..04d60e0 100644
+--- a/.github/workflows/build.yml
++++ b/.github/workflows/build.yml
+@@ -20,7 +20,7 @@ env:
+   # stays red until re-run, and a green run here is not reproducible from
+   # this repo's commit alone. Bump this one line to take a new omni; that
+   # bump is the commit CI re-tests every port against.
+-  OMNI_REF: 064af05a693adfda4400cbdfd85d24d894172da5
++  OMNI_REF: 1ae660628c4fd3e03a7f4e4ce54684e00b850f24
+ 
+ jobs:
+   test-typescript:
+@@ -834,3 +834,59 @@ jobs:
+         run: make test
+         env:
+           OMNI_HOME: ${{ github.workspace }}/.omni
++
++  # boru had no CI job at all, which is how the port spent two days broken on
++  # an engine rename without anyone noticing (boru/AGENTS.md records it). This
++  # is that job.
++  test-boru:
++    runs-on: ubuntu-latest
++    # The corpus is interpreted, one entry at a time, by a language with no
++    # JIT: the whole run is minutes, not seconds. That is the cost of covering
++    # the port at all, and it is paid on one runner rather than a matrix.
++    timeout-minutes: 45
++    steps:
++      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
++      # The boru CLI has no release channel of any kind: no tags, no published
++      # binaries, and no `go install` (cmd/go is a module of its own whose
++      # go.mod carries `replace` directives into sibling modules, which go
++      # install refuses outright). Building from a pinned commit is the only
++      # reproducible version there is - and the pin is what makes a green run
++      # here mean something, exactly as OMNI_REF does above. Bump this one line
++      # to take a newer engine, and run `cd boru && make test` locally first:
++      # the engine moves under this port more than under any other.
++      - name: Checkout boru-lang/boru (the engine)
++        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
++        with:
++          repository: boru-lang/boru
++          path: .boru-lang
++          ref: 8181f78fae7cd335ae3a3513507c7474b5f03663
++      - name: Setup Go
++        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
++        with:
++          go-version: '1.24'
++      - name: Build the boru CLI
++        shell: bash
++        run: |
++          set -euo pipefail
++          cd "$GITHUB_WORKSPACE/.boru-lang/cmd/go"
++          go build -o "$RUNNER_TEMP/boru" ./boru
++          "$RUNNER_TEMP/boru" help | head -1
++      # The corpus runner is voxgig/omni, consumed as a local checkout - boru
++      # has no registry to publish it to. The Makefile resolves OMNI_HOME into
++      # the `.omni-runner` symlink the suite imports through.
++      - name: Checkout voxgig/omni (test runner)
++        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
++        with:
++          repository: voxgig/omni
++          path: .omni
++          ref: ${{ env.OMNI_REF }}
++      # Lint first: it needs no omni and no corpus, so a static-checker
++      # regression is reported in seconds instead of after the whole run.
++      - name: Lint
++        working-directory: ./boru
++        run: make lint BORU=$RUNNER_TEMP/boru
++      - name: Test
++        working-directory: ./boru
++        env:
++          OMNI_HOME: ${{ github.workspace }}/.omni
++        run: make test BORU=$RUNNER_TEMP/boru
+-- 
+2.43.0
+
