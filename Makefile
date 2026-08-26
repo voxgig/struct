@@ -38,7 +38,7 @@ PUBLISH_LANGS = typescript javascript python go ruby php lua zig java rust c cpp
 
 .PHONY: all inspect build test bench lint audit scan analyze clean reset publish status verify corpus gen-docs \
         scan-secrets scan-deps scan-sast scan-workflows scan-shell scan-spelling scan-docs \
-        scan-parity scan-regex scan-docs-examples
+        scan-parity scan-omni-isolation scan-regex scan-docs-examples
 
 all: test
 
@@ -144,7 +144,7 @@ gen-docs:
 # These need their tools on PATH:
 #   gitleaks, osv-scanner, semgrep, actionlint, shellcheck, cspell, markdownlint
 
-scan: scan-secrets scan-deps scan-sast scan-workflows scan-shell scan-parity scan-regex scan-docs-examples scan-spelling scan-docs
+scan: scan-secrets scan-deps scan-sast scan-workflows scan-shell scan-parity scan-omni-isolation scan-regex scan-docs-examples scan-spelling scan-docs
 
 scan-secrets:
 	@echo "======== scan: secrets (gitleaks) ========"
@@ -178,6 +178,12 @@ scan-docs:
 scan-parity:
 	@echo "======== scan: cross-port API parity ========"
 	python3 tools/check_parity.py
+
+scan-omni-isolation:
+	@echo "======== scan: omni is declared by no shipped library (register 4.13) ========"
+	python3 tools/omni_isolation.py
+	@echo "-------- and the guard itself, mutation-tested --------"
+	python3 tools/omni_isolation_selftest.py
 
 scan-regex:
 	@echo "======== scan: corpus regex stays inside RE2 subset ========"
