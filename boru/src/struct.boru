@@ -13,7 +13,7 @@
 #   - all nodes are flex (FlexMap / FlexList): reference semantics, in-place
 #     mutation — the same aliasing model the canonical TS relies on.
 #   - regex: the uniform re_* API is built over the engine's RE2 matcher
-#     (aql:minilang `mini re`), the same dialect the corpus is limited to.
+#     (boru:minilang `mini re`), the same dialect the corpus is limited to.
 #
 # House rules of this module:
 #   - iteration is by tail-recursive MODULE-LEVEL loop functions (vgl-*)
@@ -32,15 +32,15 @@
 # of this file.
 # ============================================================================
 
-# NOTE: the `aql:` module prefix is load-bearing — the engine's bundled-module
-# namespace has not been renamed to `boru:` yet (see AGENTS.md, "Rename
-# transition note"). Do not rename these imports until upstream does.
-import "aql:string-util"
-import "aql:math-util"
-import "aql:bin-util"
-import "aql:minilang"
-import "aql:emitlang"
-import "aql:time-util"
+# The bundled-module prefix is `boru:`. It was `aql:` until the engine
+# completed the AQL -> boru rename; the engine now carries NO alias for the
+# old spelling, so `aql:` is a hard load failure rather than a deprecation.
+import "boru:string-util"
+import "boru:math-util"
+import "boru:bin-util"
+import "boru:minilang"
+import "boru:emitlang"
+import "boru:time-util"
 
 # ----------------------------------------------------------------------------
 # Mode values for the inject step (bitfield), and type bit codes.
@@ -212,7 +212,7 @@ def vgi-starts-with fn [[s:String prefix:String] [Boolean] [
 # Call a function value (the check-clean apply idiom). apply binds the
 # stack TOP to the function's FIRST parameter, so arguments push in
 # reverse. The Function parameter is deliberately LAST: a trailing
-# `(f/r)` argument reaches it through the stack, which is the one
+# `(f/v)` argument reaches it through the stack, which is the one
 # placement a function reference can occupy in a call (references
 # never feed forward collection). Zero-argument apply refuses to
 # compile, so nullary callables in this port take one ignored argument
@@ -221,19 +221,19 @@ def vgi-starts-with fn [[s:String prefix:String] [Boolean] [
 # body that ENDS in a bare call loses a none result at the return
 # boundary (engine quirk); `def r (...) r` keeps the value alive.
 def vgi-call1 fn [[a:Any f:Function] [Any] [
-  def r (a f/r apply)
+  def r (a f/v apply)
   r
 ]]
 def vgi-call2 fn [[a:Any b:Any f:Function] [Any] [
-  def r (b a f/r apply)
+  def r (b a f/v apply)
   r
 ]]
 def vgi-call4 fn [[a:Any b:Any c:Any d:Any f:Function] [Any] [
-  def r (d c b a f/r apply)
+  def r (d c b a f/v apply)
   r
 ]]
 def vgi-call5 fn [[a:Any b:Any c:Any d:Any e:Any f:Function] [Any] [
-  def r (e d c b a f/r apply)
+  def r (e d c b a f/v apply)
   r
 ]]
 
@@ -243,11 +243,11 @@ def vgi-call5 fn [[a:Any b:Any c:Any d:Any e:Any f:Function] [Any] [
 #   - the FN BOX, a map {"`$FN`": f} — the general "function as data"
 #     representation (store commands, handlers, callable alternatives);
 #     vg-isfunc recognises it, mirroring the canonical isfunc.
-#   - the one-element list [f/r] — used for pure callback slots (walk
+#   - the one-element list [f/v] — used for pure callback slots (walk
 #     before/after, filter checks, modify) where canonical code never
 #     isfunc-tests the value.
 # vgi-fnarg unwraps either carrier to the raw Function (safe to bind
-# with def; only bare stepping is unsafe — call via `arg f/r apply`).
+# with def; only bare stepping is unsafe — call via `arg f/v apply`).
 def vg-fn-key "`$FN`"
 def vgi-fnarg fn [[fw:Any] [Any] [
   if (fw is Map) [
@@ -478,7 +478,7 @@ def vg-getelem fn [[v:Any k:Any alt:Any] [Any] [
     if (found is None) [
       if (vg-isfunc alt2) [
         def f (vgi-fnarg alt2)
-        none f/r apply
+        none f/v apply
       ] [alt2]
     ] [found]
   ]
@@ -523,7 +523,7 @@ def vgl-items-apply fn [[i:Integer prs:Any fw:Any acc:Any] [Any] [
   if (i gte (size prs)) [acc] [
     def pr (prs get i)
     def f (vgi-fnarg fw)
-    def fv (pr f/r apply)
+    def fv (pr f/v apply)
     (append [fv] acc) drop
     def i1 (i add 1)
     def r (vgl-items-apply i1 prs fw acc)
@@ -542,7 +542,7 @@ def vgl-filter fn [[i:Integer prs:Any fw:Any acc:Any] [Any] [
   if (i gte (size prs)) [acc] [
     def pair (prs get i)
     def f (vgi-fnarg fw)
-    def keepv (pair f/r apply)
+    def keepv (pair f/v apply)
     if (keepv eq true) [
       def pv (pair get 1)
       (append [pv] acc) drop
@@ -835,7 +835,7 @@ def vgl-re-replace fn [[i:Integer ms:Any s:String repl:Any acc:Any posbox:Any] [
     def rep (
       if (vg-isfunc repl) [
         def f (vgi-fnarg repl)
-        def rr (ml f/r apply)
+        def rr (ml f/v apply)
         def btr4 (vg-js-string rr)
         btr4
       ] [
@@ -1393,7 +1393,7 @@ def vg-pathify fn [[val:Any startin:Any endin:Any] [String] [
 
 # ----------------------------------------------------------------------------
 # walk — depth-first traversal applying before/after callbacks.
-# Callbacks travel wrapped ([f/r]); vg-noarg / none means "no callback".
+# Callbacks travel wrapped ([f/v]); vg-noarg / none means "no callback".
 # Paths are fresh lists per visit (the canonical TS shares one mutable
 # array per depth purely as an allocation optimisation).
 # ----------------------------------------------------------------------------
@@ -1402,7 +1402,7 @@ def vgi-has-cb fn [[fw:Any] [Boolean] [
 ]]
 def vgi-cb4 fn [[fw:Any a:Any b:Any c:Any d:Any] [Any] [
   def f (vgi-fnarg fw)
-  def r (vgi-call4 a b c d (f/r))
+  def r (vgi-call4 a b c d (f/v))
   r
 ]]
 def vgl-walk-children fn [[ci:Integer ckeys:Any out:Any fwb:Any fwa:Any md:Integer pth:Any] [Any] [
@@ -1527,7 +1527,7 @@ def vgl-merge-list fn [[oi:Integer lst:Any md:Integer obox:Any] [Any] [
       (st set "dst" dst) drop
       (st set "md" md) drop
       (append [st] vgi-merge-stack) drop
-      def walked (vg-walk obj [vg-merge-before/r] [vg-merge-after/r] md)
+      def walked (vg-walk obj [vg-merge-before/v] [vg-merge-after/v] md)
       (pop vgi-merge-stack) drop drop
       (obox set 0 walked) drop
       none
@@ -2148,7 +2148,7 @@ def vg-inject fn [[val:Any store:Any injdef:Any] [Any] [
     def mparent (inj get "parent")
     def mval (vg-getprop mparent mkey vg-noarg)
     def mf (vgi-fnarg imod)
-    (vgi-call5 mval mkey mparent inj store (mf/r)) drop
+    (vgi-call5 mval mkey mparent inj store (mf/v)) drop
     none
   ] [none] drop
   (inj set "val" rv) drop
@@ -2359,7 +2359,7 @@ def vg-t-each fn [[inj:Any val:Any iref:Any store:Any] [Any] [
           def acc (flex [])
           def prs (vg-items src)
           def mkcopy ([pr:Any] => [vg-clone child])
-          def ter1 (vgl-items-apply 0 prs [mkcopy/r] acc)
+          def ter1 (vgl-items-apply 0 prs [mkcopy/v] acc)
           ter1
         ] [
           if (vg-bit vg-t-map srctype) [
@@ -2377,7 +2377,7 @@ def vg-t-each fn [[inj:Any val:Any iref:Any store:Any] [Any] [
               def r2 (vg-merge ml 1)
               r2
             ])
-            def ter2 (vgl-items-apply 0 prs [mkcopy2/r] acc)
+            def ter2 (vgl-items-apply 0 prs [mkcopy2/v] acc)
             ter2
           ] [flex []]
         ]
@@ -2390,7 +2390,7 @@ def vg-t-each fn [[inj:Any val:Any iref:Any store:Any] [Any] [
             def acc2 (flex [])
             def prs2 (vg-items src)
             def getv ([pr:Any] => [pr get 1])
-            def ter3 (vgl-items-apply 0 prs2 [getv/r] acc2)
+            def ter3 (vgl-items-apply 0 prs2 [getv/v] acc2)
             ter3
           ]
         )
@@ -2473,7 +2473,7 @@ def vg-t-pack fn [[inj:Any val:Any iref:Any store:Any] [Any] [
               (vg-setprop nd "`$ANNO`" kv) drop
               nd
             ])
-            def r (vgl-items-apply 0 prs [tag/r] acc)
+            def r (vgl-items-apply 0 prs [tag/v] acc)
             r
           ] [none]
         ]
@@ -2516,7 +2516,7 @@ def vg-t-pack fn [[inj:Any val:Any iref:Any store:Any] [Any] [
           ] drop
           none
         ])
-        (vgl-items-apply 0 (vg-items src) [mkentry/r] (flex [])) drop
+        (vgl-items-apply 0 (vg-items src) [mkentry/v] (flex [])) drop
         def rvalbox (flex [none])
         (rvalbox set 0 (flex {})) drop
         if ((vg-isempty tval) not) [
@@ -2547,7 +2547,7 @@ def vg-t-pack fn [[inj:Any val:Any iref:Any store:Any] [Any] [
             (ibox set 0 (i2 add 1)) drop
             none
           ])
-          (vgl-items-apply 0 (vg-items src) [addsrc/r] (flex [])) drop
+          (vgl-items-apply 0 (vg-items src) [addsrc/v] (flex [])) drop
           def tpath (vg-slice ipath -1 vg-noarg vg-noarg)
           def ckey (vg-getelem ipath -2 vg-noarg)
           def dpath (flex [])
@@ -2595,7 +2595,7 @@ def vg-t-ref fn [[inj:Any val:Any iref:Any store:Any] [Any] [
     (inj set "keyi" (vgz (inj get "keys"))) drop
     def specbox (vg-getprop store "$SPEC" vg-noarg)
     def sf (vgi-fnarg specbox)
-    def spec (none sf/r apply)
+    def spec (none sf/v apply)
     def dpath (vg-slice ipath 1 vg-noarg vg-noarg)
     def rinj (flex {})
     (rinj set "dpath" dpath) drop
@@ -2607,7 +2607,7 @@ def vg-t-ref fn [[inj:Any val:Any iref:Any store:Any] [Any] [
         if (v2 eq "`$REF`") [(subrefbox set 0 true) drop none] [none] drop
         v2
       ])
-      (vg-walk refv [cb/r] vg-noarg vg-noarg) drop
+      (vg-walk refv [cb/v] vg-noarg vg-noarg) drop
       none
     ] [none] drop
     def hassubref (subrefbox get 0)
@@ -2692,19 +2692,19 @@ def vg-fmt-concat fn [[k:Any v:Any p:Any pth:Any] [Any] [
       def e (pr get 1)
       if (vg-isnode e) [""] [vg-js-string e]
     ])
-    def strs (vgl-items-apply 0 prs [pickfmt/r] acc)
+    def strs (vgl-items-apply 0 prs [pickfmt/v] acc)
     def btr27 (vg-join strs "" vg-noarg)
     btr27
   ] [v]
 ]]
 def vg-formatter-table {
-  identity: {"`$FN`": vg-fmt-identity/r}
-  upper: {"`$FN`": vg-fmt-upper/r}
-  lower: {"`$FN`": vg-fmt-lower/r}
-  string: {"`$FN`": vg-fmt-string/r}
-  number: {"`$FN`": vg-fmt-number/r}
-  integer: {"`$FN`": vg-fmt-integer/r}
-  concat: {"`$FN`": vg-fmt-concat/r}
+  identity: {"`$FN`": vg-fmt-identity/v}
+  upper: {"`$FN`": vg-fmt-upper/v}
+  lower: {"`$FN`": vg-fmt-lower/v}
+  string: {"`$FN`": vg-fmt-string/v}
+  number: {"`$FN`": vg-fmt-number/v}
+  integer: {"`$FN`": vg-fmt-integer/v}
+  concat: {"`$FN`": vg-fmt-concat/v}
 }
 
 def vg-t-format fn [[inj:Any val:Any iref:Any store:Any] [Any] [
@@ -2759,7 +2759,7 @@ def vg-t-apply fn [[inj:Any val:Any iref:Any store:Any] [Any] [
       def cinj (vg-injectchild child store inj)
       def resolved (cinj get "val")
       def f (vgi-fnarg af)
-      def out (vgi-call2 resolved store (f/r))
+      def out (vgi-call2 resolved store (f/v))
       (vg-setprop target tkey out) drop
       out
     ]
@@ -2787,7 +2787,7 @@ def vg-injecthandler fn [[inj:Any val:Any iref:Any store:Any] [Any] [
   )
   if (iscmd eq true) [
     def f (vgi-fnarg val)
-    def out (vgi-call4 inj val iref store (f/r))
+    def out (vgi-call4 inj val iref store (f/v))
     out
   ] [
     if (((inj get "mode") eq 4) and ((inj get "full") eq true)) [
@@ -2796,7 +2796,7 @@ def vg-injecthandler fn [[inj:Any val:Any iref:Any store:Any] [Any] [
     ] [val]
   ]
 ]]
-def vg-injecthandler-box {"`$FN`": vg-injecthandler/r}
+def vg-injecthandler-box {"`$FN`": vg-injecthandler/v}
 
 # ----------------------------------------------------------------------------
 # transform — by-example transformation of data via a spec.
@@ -2825,7 +2825,7 @@ def vg-transform fn [[data:Any spec:Any injdef:Any] [Any] [
       ] drop
       none
     ])
-    (vgl-items-apply 0 prs [split1/r] (flex [])) drop
+    (vgl-items-apply 0 prs [split1/v] (flex [])) drop
     none
   ] [none] drop
   def ml (flex [])
@@ -2838,7 +2838,7 @@ def vg-transform fn [[data:Any spec:Any injdef:Any] [Any] [
   def specfn ([ig:Any] => [origspec])
   def basestore (do {
     "$TOP": (dataclone)
-    "$SPEC": ({} set "`$FN`" (specfn/r))
+    "$SPEC": ({} set "`$FN`" (specfn/v))
     "$BT": (vg-t-bt-box)
     "$DS": (vg-t-ds-box)
     "$WHEN": (vg-t-when-box)
@@ -2867,19 +2867,19 @@ def vg-transform fn [[data:Any spec:Any injdef:Any] [Any] [
   ] [none] drop
   out
 ]]
-def vg-t-delete-box {"`$FN`": vg-t-delete/r}
-def vg-t-copy-box {"`$FN`": vg-t-copy/r}
-def vg-t-key-box {"`$FN`": vg-t-key/r}
-def vg-t-anno-box {"`$FN`": vg-t-anno/r}
-def vg-t-merge-box {"`$FN`": vg-t-merge/r}
-def vg-t-each-box {"`$FN`": vg-t-each/r}
-def vg-t-pack-box {"`$FN`": vg-t-pack/r}
-def vg-t-ref-box {"`$FN`": vg-t-ref/r}
-def vg-t-format-box {"`$FN`": vg-t-format/r}
-def vg-t-apply-box {"`$FN`": vg-t-apply/r}
-def vg-t-bt-box {"`$FN`": vg-t-bt/r}
-def vg-t-ds-box {"`$FN`": vg-t-ds/r}
-def vg-t-when-box {"`$FN`": vg-t-when/r}
+def vg-t-delete-box {"`$FN`": vg-t-delete/v}
+def vg-t-copy-box {"`$FN`": vg-t-copy/v}
+def vg-t-key-box {"`$FN`": vg-t-key/v}
+def vg-t-anno-box {"`$FN`": vg-t-anno/v}
+def vg-t-merge-box {"`$FN`": vg-t-merge/v}
+def vg-t-each-box {"`$FN`": vg-t-each/v}
+def vg-t-pack-box {"`$FN`": vg-t-pack/v}
+def vg-t-ref-box {"`$FN`": vg-t-ref/v}
+def vg-t-format-box {"`$FN`": vg-t-format/v}
+def vg-t-apply-box {"`$FN`": vg-t-apply/v}
+def vg-t-bt-box {"`$FN`": vg-t-bt/v}
+def vg-t-ds-box {"`$FN`": vg-t-ds/v}
+def vg-t-when-box {"`$FN`": vg-t-when/v}
 
 # ----------------------------------------------------------------------------
 # validate — shape validation via the transform machinery.
@@ -2907,12 +2907,12 @@ def vg-lower-tname-cb fn [[ml:Any] [Any] [
   def low (StringUtil.lower (ml get 1))
   low
 ]]
-def vg-lower-tname-box {"`$FN`": vg-lower-tname-cb/r}
+def vg-lower-tname-box {"`$FN`": vg-lower-tname-cb/v}
 def vgi-valdesc fn [[tvals:Any] [String] [
   def prs (vg-items tvals)
   def acc (flex [])
   def pickv ([pr:Any] => [vg-stringify (pr get 1) vg-noarg vg-noarg])
-  (vgl-items-apply 0 prs [pickv/r] acc) drop
+  (vgl-items-apply 0 prs [pickv/v] acc) drop
   def joined (vgi-join-list acc ", ")
   def low (vg-re-replace "`\\$([A-Z]+)`" joined vg-lower-tname-box)
   low
@@ -3235,7 +3235,7 @@ def vg-validation fn [[pval:Any key:Any parent:Any inj:Any store:Any] [Any] [
     ]
   ]
 ]]
-def vg-validation-box {"`$FN`": vg-validation/r}
+def vg-validation-box {"`$FN`": vg-validation/v}
 
 # The validate inject handler: meta paths get special treatment, everything
 # else defers to the standard inject handler.
@@ -3262,14 +3262,14 @@ def vg-validatehandler fn [[inj:Any val:Any iref:Any store:Any] [Any] [
     fout
   ]
 ]]
-def vg-validatehandler-box {"`$FN`": vg-validatehandler/r}
+def vg-validatehandler-box {"`$FN`": vg-validatehandler/v}
 
-def vg-v-string-box {"`$FN`": vg-v-string/r}
-def vg-v-type-box {"`$FN`": vg-v-type/r}
-def vg-v-any-box {"`$FN`": vg-v-any/r}
-def vg-v-child-box {"`$FN`": vg-v-child/r}
-def vg-v-one-box {"`$FN`": vg-v-one/r}
-def vg-v-exact-box {"`$FN`": vg-v-exact/r}
+def vg-v-string-box {"`$FN`": vg-v-string/v}
+def vg-v-type-box {"`$FN`": vg-v-type/v}
+def vg-v-any-box {"`$FN`": vg-v-any/v}
+def vg-v-child-box {"`$FN`": vg-v-child/v}
+def vg-v-one-box {"`$FN`": vg-v-one/v}
+def vg-v-exact-box {"`$FN`": vg-v-exact/v}
 
 def vg-validate fn [[data:Any spec:Any injdef:Any] [Any] [
   def idf (if (vg-is-noarg injdef) [none] [injdef])
@@ -3355,7 +3355,7 @@ def vg-s-and fn [[inj:Any val:Any iref:Any store:Any] [Any] [
     def point (vg-getpath store ppath vg-noarg)
     def fails (flex [])
     (vgl-sel-terms 0 terms inj store point ppath fails) drop
-    def failed (vg-filter fails [vgi-istrue/r])
+    def failed (vg-filter fails [vgi-istrue/v])
     if ((vgz failed) gt 0) [
       (append [(StringUtil.concat ["AND:" (vg-pathify ppath vg-noarg vg-noarg) ": " (vg-stringify point vg-noarg vg-noarg) " fail:" (vg-stringify terms vg-noarg vg-noarg)])] (inj get "errs")) drop
       none
@@ -3374,7 +3374,7 @@ def vg-s-or fn [[inj:Any val:Any iref:Any store:Any] [Any] [
     def point (vg-getpath store ppath vg-noarg)
     def fails (flex [])
     (vgl-sel-terms 0 terms inj store point ppath fails) drop
-    def passed (vg-filter fails [vgi-isfalse/r])
+    def passed (vg-filter fails [vgi-isfalse/v])
     if ((vgz passed) gt 0) [
       def gkey (vg-getelem (inj get "path") -2 vg-noarg)
       def gp (vg-getelem (inj get "nodes") -2 vg-noarg)
@@ -3438,10 +3438,10 @@ def vg-s-cmp fn [[inj:Any val:Any iref:Any store:Any] [Any] [
 def vgi-istrue fn [[pr:Any] [Boolean] [(pr get 1) eq true]]
 def vgi-isfalse fn [[pr:Any] [Boolean] [(pr get 1) eq false]]
 
-def vg-s-and-box {"`$FN`": vg-s-and/r}
-def vg-s-or-box {"`$FN`": vg-s-or/r}
-def vg-s-not-box {"`$FN`": vg-s-not/r}
-def vg-s-cmp-box {"`$FN`": vg-s-cmp/r}
+def vg-s-and-box {"`$FN`": vg-s-and/v}
+def vg-s-or-box {"`$FN`": vg-s-or/v}
+def vg-s-not-box {"`$FN`": vg-s-not/v}
+def vg-s-cmp-box {"`$FN`": vg-s-cmp/v}
 
 def vgl-select-kids fn [[i:Integer prs:Any intkeys:Boolean acc:Any] [Any] [
   if (i gte (size prs)) [acc] [
@@ -3495,7 +3495,7 @@ def vg-select fn [[children:Any query:Any] [Any] [
     def prs (vg-items children)
     def kids (vgl-select-kids 0 prs (vg-islist children) (flex []))
     def q (vg-clone query)
-    (vg-walk q vg-noarg [vg-open-cb/r] vg-noarg) drop
+    (vg-walk q vg-noarg [vg-open-cb/v] vg-noarg) drop
     def results (vgl-select-match 0 kids q (flex []))
     results
   ]
@@ -3536,54 +3536,54 @@ def vg-jt fn [[v:Any] [Any] [
 # Export (canonical names are the map keys; grows as the port fills out).
 # ----------------------------------------------------------------------------
 export "Struct" {
-  isnode: vg-isnode/r
-  ismap: vg-ismap/r
-  islist: vg-islist/r
-  iskey: vg-iskey/r
-  isempty: vg-isempty/r
-  isfunc: vg-isfunc/r
-  size: vg-size/r
-  typify: vg-typify/r
-  typename: vg-typename/r
-  getdef: vg-getdef/r
-  strkey: vg-strkey/r
-  keysof: vg-keysof/r
-  getprop: vg-getprop/r
-  haskey: vg-haskey/r
-  getelem: vg-getelem/r
-  items: vg-items/r
-  filter: vg-filter/r
-  flatten: vg-flatten/r
-  clone: vg-clone/r
-  setprop: vg-setprop/r
-  delprop: vg-delprop/r
-  stringify: vg-stringify/r
-  jsonify: vg-jsonify/r
-  pathify: vg-pathify/r
-  slice: vg-slice/r
-  pad: vg-pad/r
-  join: vg-join/r
-  escre: vg-escre/r
-  escurl: vg-escurl/r
-  re_compile: vg-re-compile/r
-  re_find: vg-re-find/r
-  re_find_all: vg-re-find-all/r
-  re_replace: vg-re-replace/r
-  re_test: vg-re-test/r
-  re_escape: vg-re-escape/r
-  walk: vg-walk/r
-  merge: vg-merge/r
-  getpath: vg-getpath/r
-  setpath: vg-setpath/r
-  inject: vg-inject/r
-  transform: vg-transform/r
-  validate: vg-validate/r
-  select: vg-select/r
-  jm: vg-jm/r
-  jt: vg-jt/r
-  checkPlacement: vg-checkplacement/r
-  injectorArgs: vg-injectorargs/r
-  injectChild: vg-injectchild/r
+  isnode: vg-isnode/v
+  ismap: vg-ismap/v
+  islist: vg-islist/v
+  iskey: vg-iskey/v
+  isempty: vg-isempty/v
+  isfunc: vg-isfunc/v
+  size: vg-size/v
+  typify: vg-typify/v
+  typename: vg-typename/v
+  getdef: vg-getdef/v
+  strkey: vg-strkey/v
+  keysof: vg-keysof/v
+  getprop: vg-getprop/v
+  haskey: vg-haskey/v
+  getelem: vg-getelem/v
+  items: vg-items/v
+  filter: vg-filter/v
+  flatten: vg-flatten/v
+  clone: vg-clone/v
+  setprop: vg-setprop/v
+  delprop: vg-delprop/v
+  stringify: vg-stringify/v
+  jsonify: vg-jsonify/v
+  pathify: vg-pathify/v
+  slice: vg-slice/v
+  pad: vg-pad/v
+  join: vg-join/v
+  escre: vg-escre/v
+  escurl: vg-escurl/v
+  re_compile: vg-re-compile/v
+  re_find: vg-re-find/v
+  re_find_all: vg-re-find-all/v
+  re_replace: vg-re-replace/v
+  re_test: vg-re-test/v
+  re_escape: vg-re-escape/v
+  walk: vg-walk/v
+  merge: vg-merge/v
+  getpath: vg-getpath/v
+  setpath: vg-setpath/v
+  inject: vg-inject/v
+  transform: vg-transform/v
+  validate: vg-validate/v
+  select: vg-select/v
+  jm: vg-jm/v
+  jt: vg-jt/v
+  checkPlacement: vg-checkplacement/v
+  injectorArgs: vg-injectorargs/v
+  injectChild: vg-injectchild/v
   NOARG: vg-noarg
   SKIP: vg-skip-marker
   DELETE: vg-delete-marker
