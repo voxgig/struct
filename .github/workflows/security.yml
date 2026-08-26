@@ -153,7 +153,12 @@ jobs:
       # public repo, so `github.com/voxgig/omni/go` resolves from
       # proxy.golang.org with no tags at all: `go mod tidy` in a module with
       # no checkout anywhere still writes the require line. A checkout-absent
-      # build can now go green while proving nothing.
+      # build can now go green while proving nothing. That hole is Go's
+      # specifically - rust, swift, dart, haskell and lean name omni by a
+      # literal path, which cannot fall back - but the declaration check
+      # earns its place in every port for a separate reason: it catches an
+      # omni import at the commit that introduces it, not at the tidy that
+      # publishes it.
       #
       # So this job does the opposite of the old one. It makes omni as
       # resolvable as it can be and then asserts the manifests still declare

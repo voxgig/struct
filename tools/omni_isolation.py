@@ -15,8 +15,25 @@ tags, because omni is a public repo.  `go mod tidy` in a module with no omni
 checkout anywhere resolves a pseudo-version and writes the require line - the
 voxgig/struct#89 bug that opened 4.13 in the first place.
 
-So a checkout-absent build can now go green while proving nothing.  Every
-check below instead reads a COMMITTED manifest and asks what it DECLARES.
+So for Go a checkout-absent build can now go green while proving nothing.
+
+That hole is GO'S SPECIFICALLY, and the difference is what a mechanism names
+omni BY.  rust (`../../.omni/rust`), swift (the `.omni-runner` symlink), dart
+(a generated `pubspec_overrides.yaml`), haskell (`-i$(OMNI_DIR)/haskell/src`)
+and lean (`.omni-build`) all name a literal PATH, and a path has no fallback:
+a Cargo path dependency whose target is absent fails with `failed to load
+source for dependency` and never reaches for a registry or a git ref, however
+much of omni is published.  Go needs a pair no other port has - a module path
+a public proxy already serves, AND a routine command that writes that
+resolution into the published manifest.
+
+A declaration check is still worth having in EVERY port, for a reason that has
+nothing to do with that hole: it catches an omni import at the commit that
+introduces it, rather than at the `go mod tidy` that publishes it.  No
+absence-based check does that at all.
+
+Every check below reads a COMMITTED manifest or a shipped source file and asks
+what it DECLARES.
 None of them cares whether omni is resolvable, which is why this runs in CI
 WITH the omni checkout present: if it passed only because omni was missing,
 it would be the very check it replaces.

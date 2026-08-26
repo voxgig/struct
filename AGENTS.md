@@ -122,9 +122,13 @@ across every port's library manifest, and it is a *declaration* check, not a
 build-without-omni check. The difference matters: omni is a public repo, so
 `github.com/voxgig/omni/go` resolves from proxy.golang.org with no tags at
 all, and `go mod tidy` in a module with no checkout anywhere still writes the
-require line. A checkout-absent build can therefore pass while proving
-nothing. The CI job checks omni out *on purpose* and then asserts the
-manifests stay clean. Four ports are UNCOVERED and say so in the output
+require line, so for Go a checkout-absent build can pass while proving
+nothing. That hole is Go's specifically — rust, swift, dart, haskell and
+lean name omni by a literal *path*, which has no fallback — but a
+declaration check is worth having everywhere for a separate reason: it
+catches an omni import at the commit that introduces it, rather than at
+the `go mod tidy` that publishes it. The CI job checks omni out *on
+purpose* and then asserts the manifests stay clean. Four ports are UNCOVERED and say so in the output
 rather than passing silently — `c`, `cpp` and `scala` have no manifest a
 consumer resolves, and `zig` is not migrated. **A change is
 "done" only when the corpus passes in the canonical TS and in every port
