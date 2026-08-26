@@ -34,7 +34,16 @@ ISO = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(ISO)
 
 # A line that spells omni every way any port's pattern looks for.
-LEAK = '// Omni voxgig_omni Voxgig.Omni voxgig.omni voxgig/omni omni\n'
+# NOT a comment. Whole-line comments are skipped by the scanner now that it
+# shares the manifest matcher, so a `//`-prefixed marker would be silently
+# ignored and every source mutation would pass while testing nothing.
+LEAK = 'LEAK voxgig_omni VoxgigOmni Omni voxgig.omni voxgig/omni omni\n'
+
+# The module spelling that actually appears in code. `\bomni\b` could not match
+# `voxgig_omni` - `_` is a word character, so there is no boundary - and that is
+# exactly what Python and Rust import. The old marker carried a standalone
+# `omni`, so every source mutation passed while this spelling went unchecked.
+SOURCE_SPELLINGS = 'import voxgig_omni\nuse voxgig_omni::Runner;\n'
 
 # (port, manifest, anchor, replacement) - the anchor must exist, and a
 # missing one is a FAILURE, not a skip: it means the manifest moved and the
@@ -80,6 +89,19 @@ MANIFEST = [
      'dependencies:\n  voxgig_omni:\n    path: ../../omni/dart\n\nenvironment:'),
     ('perl', 'perl/Makefile.PL', 'WriteMakefile(',
      'WriteMakefile(\n  PREREQ_PM => { "Voxgig::Omni" => 0 },'),
+
+    # THE FIVE EVASIONS Codex found on the sekreto copy of this tool.
+    # A block-form `replace` redirecting an innocuous module to omni; the old
+    # parser recorded the literal `replace (` and ignored everything inside.
+    ('go', 'go/go.mod', 'go 1.23',
+     'go 1.23\n\nrequire innocent/pkg v1.0.0\n\nreplace (\n\tinnocent/pkg => github.com/voxgig/omni/go v0.0.0\n)'),
+    # Single-quoted XML, valid, and read as no dependency at all.
+    ('csharp', 'csharp/VoxgigStruct.csproj', '</Project>',
+     "<ItemGroup><PackageReference Include='Voxgig.Omni' Version='0.1.0' /></ItemGroup></Project>"),
+    # Cargo workspace inheritance: the real crate is named in
+    # [workspace.dependencies], which a package-level read never sees.
+    ('rust', 'rust/Cargo.toml', '[lib]',
+     '[dependencies]\nrunner = { workspace = true }\n\n[workspace.dependencies]\nrunner = { package = "voxgig_omni", version = "0.1" }\n\n[lib]'),
 
     # EVASIONS. Each of these declares omni in a way that reads clean to a
     # naive check, and every one was a live hole in the first version.
@@ -186,6 +208,11 @@ def main():
         results.append(mutate(rel, '', LEAK,
                               f'{port}: shipped source imports omni',
                               True, f'{port}:source'))
+        # And again with ONLY the ecosystem module spelling, no standalone
+        # `omni` anywhere in the marker.
+        results.append(mutate(rel, '', SOURCE_SPELLINGS,
+                              f'{port}: shipped source imports omni',
+                              True, f'{port}:source-spelling'))
 
     for status, tag, note in results:
         print(f'{status}  {tag:52} {note}')

@@ -71,6 +71,35 @@ def names_omni(text):
     return bool(OMNI.search(text or ''))
 
 
+# THE SPELLING THAT ACTUALLY APPEARS IN CODE.
+#
+# Every port's source pattern used to be hand-written, and most were
+# `\bomni\b` - which cannot match `voxgig_omni`, because `_` is a word
+# character so there is no boundary before `omni`. That is the exact module
+# name Python and Rust import, so the guard would have read
+# `import voxgig_omni` in a shipped file and called it clean.
+#
+# The mutation suite did not catch it either: the injected marker happened to
+# contain a standalone `omni`. Mutation testing proves what you thought to
+# mutate, and this was not thought of.
+#
+# One matcher now, shared with the manifest side, so the two cannot drift.
+SOURCE = OMNI
+
+
+# A WHOLE-LINE comment is skipped; a trailing one is not. Sharing the matcher
+# above means prose about omni now matches too, and these repos discuss it
+# constantly - scanning comments is how a guard trains people to ignore it.
+# Deliberately narrow: only a line whose FIRST non-space characters are a
+# comment marker, so a real reference with a trailing comment is still read.
+COMMENT = re.compile(r'^\s*(//|#|--|\*|/\*|"""|\'\'\')')
+
+
+def is_comment(line):
+    return bool(COMMENT.match(line))
+
+
+
 # A dynamic dependency list this cannot resolve must FAIL, not pass quietly -
 # it is precisely the case where omni could be declared and unseen. The string
 # names omni so it trips the same matcher every other finding does.
@@ -91,47 +120,79 @@ def _aslist(value):
 # ---------------------------------------------------------------------------
 
 def read_go_mod(path):
-    """go.mod: every module path in a require, single or block form."""
-    deps, inblock = [], False
+    """go.mod: every module path in a require, replace or exclude.
+
+    ALL THREE HAVE A BLOCK FORM. Handling `require (` alone recorded the
+    literal `replace (` and ignored every entry inside it, so an innocuously
+    named module redirected to omni - `innocent/pkg => github.com/voxgig/omni/go`
+    - read clean.
+    """
+    deps, block = [], None
     for line in path.read_text(encoding='utf-8').splitlines():
         line = line.split('//')[0].strip()
-        if line.startswith('require ('):
-            inblock = True
+        if not line:
             continue
-        if inblock:
+        if block is not None:
             if line == ')':
-                inblock = False
-            elif line:
-                deps.append(line.split()[0])
-        elif line.startswith('require '):
-            deps.append(line[len('require '):].split()[0])
-        elif line.startswith(('replace ', 'exclude ')):
-            deps.append(line)
+                block = None
+            else:
+                # A replace line is `old => new`; both sides matter.
+                deps.append(line)
+            continue
+        for kw in ('require', 'replace', 'exclude'):
+            if line == f'{kw} (' or line.startswith(f'{kw} ('):
+                block = kw
+                break
+        else:
+            for kw in ('require ', 'replace ', 'exclude '):
+                if line.startswith(kw):
+                    deps.append(line[len(kw):])
+                    break
     return deps
 
 
 def read_cargo(path):
-    """Cargo.toml: dependencies AND dev-dependencies.
+    """Cargo.toml: dependencies AND dev-dependencies, keys, `package`, and
+    anything inherited from `[workspace.dependencies]`.
 
-    dev-dependencies are NOT exempt here the way npm devDependencies are.
-    Cargo resolves dev-dependencies even for a plain `cargo build`, which is
-    exactly why struct/rust puts the harness in a separate corpus/ package
-    rather than a dev-dependency (register 4.13).
+    dev-dependencies are not exempt the way npm devDependencies are: Cargo
+    resolves them even for a plain `cargo build`, which is why the conformance
+    harness is a separate package.
+
+    Three spellings hide the real crate. `runner = { package = "voxgig_omni" }`
+    renames it, so the key says `runner` and code imports `runner`.
+    `runner = { workspace = true }` moves the real declaration into
+    `[workspace.dependencies]`, which a package-level read never sees. And a
+    `[target.*]` block repeats both.
     """
+    data = tomllib.loads(path.read_text(encoding='utf-8'))
+    wsdeps = ((data.get('workspace') or {}).get('dependencies') or {})
+
     def entries(block):
-        # BOTH the key AND the `package` value. `runner = { package =
-        # "voxgig_omni" }` renames the crate, so the key alone says `runner`
-        # and code imports `runner` too - the source scan would not
-        # compensate. Cargo still resolves and publishes omni.
         for name, spec in (block or {}).items():
             yield name
-            if isinstance(spec, dict) and spec.get('package'):
+            if not isinstance(spec, dict):
+                continue
+            if spec.get('package'):
                 yield spec['package']
+            if spec.get('workspace'):
+                inherited = wsdeps.get(name)
+                if isinstance(inherited, dict):
+                    yield inherited.get('package') or name
+                    if inherited.get('git'):
+                        yield str(inherited['git'])
+                    if inherited.get('path'):
+                        yield str(inherited['path'])
+                elif isinstance(inherited, str):
+                    yield inherited
+            for key in ('path', 'git'):
+                if spec.get(key):
+                    yield str(spec[key])
 
-    data = tomllib.loads(path.read_text(encoding='utf-8'))
     deps = []
     for block in ('dependencies', 'dev-dependencies', 'build-dependencies'):
         deps.extend(entries(data.get(block)))
+    deps.extend(entries(wsdeps))
     for tgt in (data.get('target') or {}).values():
         for block in ('dependencies', 'dev-dependencies', 'build-dependencies'):
             deps.extend(entries(tgt.get(block)))
@@ -260,10 +321,16 @@ def read_pom(path):
 
 
 def read_csproj(path):
-    """A .csproj: the Include/Update of every Package/ProjectReference."""
+    """A .csproj: the Include/Update of every Package/ProjectReference.
+
+    BOTH XML QUOTE STYLES. A double-quote-only pattern returned nothing at all
+    for `Include='Voxgig.Omni'`, which is valid XML, and a package reference
+    resolves whether or not any source file imports its namespace - so the
+    source scan does not close that hole."""
     text = path.read_text(encoding='utf-8')
-    return [m.group(2) for m in re.finditer(
-        r'<(?:Package|Project)Reference\b[^>]*?\b(Include|Update)\s*=\s*"([^"]*)"',
+    return [m.group(1) or m.group(2) for m in re.finditer(
+        r'<(?:Package|Project)Reference\b[^>]*?\b(?:Include|Update)\s*='
+        r'\s*(?:"([^"]*)"|\'([^\']*)\')',
         text, re.I)]
 
 
@@ -373,34 +440,38 @@ def read_scoped(path, start, stop=None, exempt=None):
 SOURCES = {
     'go':     dict(globs=['go/**/*.go'],
                    skip=['go/testutil/'],
-                   pattern=r'voxgig/omni'),
-    'rust':   dict(globs=['rust/src/**/*.rs'], skip=[], pattern=r'voxgig_omni'),
+                   pattern=SOURCE),
+    'rust':   dict(globs=['rust/src/**/*.rs'], skip=[], pattern=SOURCE),
     'java':   dict(globs=['java/src/**/*.java'], skip=['java/src/test/'],
-                   pattern=r'\bomni\b'),
-    'kotlin': dict(globs=['kotlin/src/main/**/*.kt'], skip=[], pattern=r'voxgig\.omni'),
-    'csharp': dict(globs=['csharp/*.cs'], skip=[], pattern=r'\bomni\b'),
-    'swift':  dict(globs=['swift/Sources/**/*.swift'], skip=[], pattern=r'\bomni\b'),
-    'haskell': dict(globs=['haskell/src/**/*.hs'], skip=[], pattern=r'\bOmni\b'),
-    'python': dict(globs=['python/voxgig_struct/**/*.py'], skip=[], pattern=r'\bomni\b'),
-    'ruby':   dict(globs=['ruby/voxgig_struct.rb'], skip=[], pattern=r'\bomni\b'),
-    'php':    dict(globs=['php/src/**/*.php'], skip=[], pattern=r'voxgig.{0,2}omni'),
-    'dart':   dict(globs=['dart/lib/**/*.dart'], skip=[], pattern=r'voxgig_omni'),
-    'elixir': dict(globs=['elixir/lib/**/*.ex'], skip=[], pattern=r'\bOmni\b'),
-    'lua':    dict(globs=['lua/src/**/*.lua'], skip=[], pattern=r'\bomni\b'),
-    'clojure': dict(globs=['clojure/src/**/*.clj*'], skip=[], pattern=r'\bomni\b'),
-    'scala':  dict(globs=['scala/src/**/*.scala'], skip=[], pattern=r'\bomni\b'),
-    'c':      dict(globs=['c/src/**/*.[ch]'], skip=[], pattern=r'\bomni\b'),
+                   pattern=SOURCE),
+    'kotlin': dict(globs=['kotlin/src/main/**/*.kt'], skip=[], pattern=SOURCE),
+    'csharp': dict(globs=['csharp/*.cs'], skip=[], pattern=SOURCE),
+    'swift':  dict(globs=['swift/Sources/**/*.swift'], skip=[], pattern=SOURCE),
+    'haskell': dict(globs=['haskell/src/**/*.hs'], skip=[], pattern=SOURCE),
+    'python': dict(globs=['python/voxgig_struct/**/*.py'], skip=[], pattern=SOURCE),
+    'ruby':   dict(globs=['ruby/voxgig_struct.rb'], skip=[], pattern=SOURCE),
+    'php':    dict(globs=['php/src/**/*.php'], skip=[], pattern=SOURCE),
+    'dart':   dict(globs=['dart/lib/**/*.dart'], skip=[], pattern=SOURCE),
+    'elixir': dict(globs=['elixir/lib/**/*.ex'], skip=[], pattern=SOURCE),
+    'lua':    dict(globs=['lua/src/**/*.lua'], skip=[], pattern=SOURCE),
+    'clojure': dict(globs=['clojure/src/**/*.clj*'], skip=[], pattern=SOURCE),
+    'scala':  dict(globs=['scala/src/**/*.scala'], skip=[], pattern=SOURCE),
+    'c':      dict(globs=['c/src/**/*.[ch]'], skip=[], pattern=SOURCE),
     'cpp':    dict(globs=['cpp/src/**/*.[ch]pp', 'cpp/src/**/*.h'], skip=[],
-                   pattern=r'\bomni\b'),
-    'ocaml':  dict(globs=['ocaml/src/**/*.ml*'], skip=[], pattern=r'\bomni\b'),
-    'perl':   dict(globs=['perl/lib/**/*.pm'], skip=[], pattern=r'\bomni\b'),
-    'lean':   dict(globs=['lean/src/**/*.lean'], skip=[], pattern=r'\bOmni\b'),
-    'typescript': dict(globs=['typescript/src/**/*.ts'], skip=[], pattern=r'voxgig/omni'),
+                   pattern=SOURCE),
+    'ocaml':  dict(globs=['ocaml/src/**/*.ml*'], skip=[], pattern=SOURCE),
+    'perl':   dict(globs=['perl/lib/**/*.pm'], skip=[], pattern=SOURCE),
+    'lean':   dict(globs=['lean/src/**/*.lean'], skip=[], pattern=SOURCE),
+    'typescript': dict(globs=['typescript/src/**/*.ts'], skip=[], pattern=SOURCE),
     # Not migrated, and with no manifest - but its SOURCE still ships, so it
     # is scanned like any other. A port absent from this table is a port
     # nothing checks, which is how boru was missed the first time.
-    'boru':       dict(globs=['boru/src/**/*.boru'], skip=[], pattern=r'\bomni\b'),
-    'javascript': dict(globs=['javascript/src/**/*.js'], skip=[], pattern=r'voxgig/omni'),
+    'boru':       dict(globs=['boru/src/**/*.boru'], skip=[], pattern=SOURCE),
+    # zig had a PORTS entry and no SOURCES entry, so its shipped source was
+    # never read - found the moment the union check became a both-tables
+    # check. Not migrated onto omni, but its source ships regardless.
+    'zig':        dict(globs=['zig/src/**/*.zig'], skip=[], pattern=SOURCE),
+    'javascript': dict(globs=['javascript/src/**/*.js'], skip=[], pattern=SOURCE),
 }
 
 
@@ -408,7 +479,7 @@ def scan_sources(port):
     spec = SOURCES.get(port)
     if not spec:
         return [], 0
-    rx = re.compile(spec['pattern'], re.I)
+    rx = spec['pattern']
     hits, seen = [], 0
     for glob in spec['globs']:
         for path in ROOT.glob(glob):
@@ -421,6 +492,8 @@ def scan_sources(port):
             except OSError:
                 continue
             for n, line in enumerate(text.splitlines(), 1):
+                if is_comment(line):
+                    continue
                 if rx.search(line):
                     hits.append(f'{rel}:{n}: {line.strip()[:70]}')
     return hits, seen
@@ -513,11 +586,20 @@ def main():
     fails, uncovered, checked = [], [], []
 
     # Coverage first: no port may be absent from both tables.
-    known = set(PORTS) | set(SOURCES)
-    for port in sorted(discover_ports() - known):
-        fails.append(f'{port}: is a port directory but appears in neither PORTS '
-                     'nor SOURCES - nothing checks it; add an entry')
-    for port in sorted(known - discover_ports()):
+    # BOTH tables, not their union. A port listed in only one is still
+    # "known", so neither check fires while half its scanning is silently
+    # skipped - and the error for a wholly new port said only to add "an
+    # entry", which invites exactly that. A port with no manifest declares
+    # `lib=[]` explicitly; there is no opting out of SOURCES.
+    ports = discover_ports()
+    for port in sorted(ports - set(PORTS)):
+        fails.append(f'{port}: is a port directory with no PORTS entry - its '
+                     'manifests are unchecked; add one (lib=[] with a `why` if '
+                     'it has no manifest a consumer resolves)')
+    for port in sorted(ports - set(SOURCES)):
+        fails.append(f'{port}: is a port directory with no SOURCES entry - its '
+                     'shipped source is unscanned; add one')
+    for port in sorted((set(PORTS) | set(SOURCES)) - ports):
         fails.append(f'{port}: has an entry here but is not a port directory - '
                      'stale, and its checks read nothing')
 
