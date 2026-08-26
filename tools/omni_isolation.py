@@ -56,13 +56,32 @@ ROOT = Path(__file__).resolve().parent.parent
 
 # Matches the ways omni is spelled across ecosystems: the npm scope
 # (@voxgig/omni, @voxgig/omni-js), the Go module path, the Maven coordinate,
-# the crate/gem/pub name (voxgig_omni, voxgig-omni) and a bare "omni" used as
-# a component name.
-OMNI = re.compile(r'(^|[^a-z0-9])(@?voxgig[/_.-]omni|omni)([^a-z0-9]|$)', re.I)
+# the crate/gem/pub name (voxgig_omni, voxgig-omni), CONCATENATED CamelCase
+# (VoxgigOmni, which is how SwiftPM names the package) and a bare "omni" used
+# as a component name.
+#
+# The separator is optional on purpose. It was mandatory at first, and that
+# missed `.package(name: "VoxgigOmni", path: omniPath!)` entirely - the exact
+# line a swift leak consists of. `omniPath` is still NOT matched, and should
+# not be: it is a local variable, not a dependency.
+OMNI = re.compile(r'(^|[^a-z0-9])(@?voxgig[/_.-]?omni|omni)([^a-z0-9]|$)', re.I)
 
 
 def names_omni(text):
     return bool(OMNI.search(text or ''))
+
+
+# A dynamic dependency list this cannot resolve must FAIL, not pass quietly -
+# it is precisely the case where omni could be declared and unseen. The string
+# names omni so it trips the same matcher every other finding does.
+DYNAMIC_UNRESOLVED = ('<dynamic dependencies with no resolvable source: '
+                      'omni cannot be ruled out here>')
+
+
+def _aslist(value):
+    if value is None:
+        return []
+    return [value] if isinstance(value, str) else list(value)
 
 
 # ---------------------------------------------------------------------------
@@ -99,13 +118,23 @@ def read_cargo(path):
     exactly why struct/rust puts the harness in a separate corpus/ package
     rather than a dev-dependency (register 4.13).
     """
+    def entries(block):
+        # BOTH the key AND the `package` value. `runner = { package =
+        # "voxgig_omni" }` renames the crate, so the key alone says `runner`
+        # and code imports `runner` too - the source scan would not
+        # compensate. Cargo still resolves and publishes omni.
+        for name, spec in (block or {}).items():
+            yield name
+            if isinstance(spec, dict) and spec.get('package'):
+                yield spec['package']
+
     data = tomllib.loads(path.read_text(encoding='utf-8'))
     deps = []
     for block in ('dependencies', 'dev-dependencies', 'build-dependencies'):
-        deps.extend((data.get(block) or {}).keys())
+        deps.extend(entries(data.get(block)))
     for tgt in (data.get('target') or {}).values():
-        for block in ('dependencies', 'dev-dependencies'):
-            deps.extend((tgt.get(block) or {}).keys())
+        for block in ('dependencies', 'dev-dependencies', 'build-dependencies'):
+            deps.extend(entries(tgt.get(block)))
     return deps
 
 
@@ -120,7 +149,13 @@ def read_package_json(path):
     data = json.loads(path.read_text(encoding='utf-8'))
     deps = []
     for block in ('dependencies', 'peerDependencies', 'optionalDependencies'):
-        deps.extend((data.get(block) or {}).keys())
+        for name, spec in (data.get(block) or {}).items():
+            # The key AND the value. `"runner": "npm:@voxgig/omni@1.0.0"` is
+            # an npm alias: the key says `runner`, shipped code imports
+            # `runner`, and the consumer still resolves omni.
+            deps.append(name)
+            if isinstance(spec, str):
+                deps.append(spec)
     return deps
 
 
@@ -137,12 +172,42 @@ def read_composer(path):
 
 
 def read_pyproject(path):
+    """pyproject.toml, including DYNAMIC dependency declarations.
+
+    `dynamic = ["dependencies"]` moves the real list out of this file - with
+    setuptools, into whatever `[tool.setuptools.dynamic]` points at.  Reading
+    only the static keys would see nothing while an omni requirement became
+    published `Requires-Dist` metadata that consumers install.  So the
+    referenced files are read too, and a dynamic declaration this cannot
+    resolve is REPORTED rather than passed over.
+    """
     data = tomllib.loads(path.read_text(encoding='utf-8'))
     proj = data.get('project') or {}
     deps = list(proj.get('dependencies') or [])
     for group in (proj.get('optional-dependencies') or {}).values():
         deps.extend(group)
     deps.extend((data.get('build-system') or {}).get('requires') or [])
+
+    dynamic = set(proj.get('dynamic') or [])
+    if dynamic & {'dependencies', 'optional-dependencies'}:
+        cfg = ((data.get('tool') or {}).get('setuptools') or {}).get('dynamic') or {}
+        targets = []
+        for key in ('dependencies', 'optional-dependencies'):
+            spec = cfg.get(key)
+            if not isinstance(spec, dict):
+                continue
+            if 'file' in spec:                       # dependencies = {file = [...]}
+                targets.extend(_aslist(spec['file']))
+            else:                                    # optional-dependencies = {grp = {file=..}}
+                for group in spec.values():
+                    if isinstance(group, dict):
+                        targets.extend(_aslist(group.get('file')))
+        if not targets:
+            deps.append(DYNAMIC_UNRESOLVED)
+        for rel in targets:
+            ref = path.parent / rel
+            deps.extend(ref.read_text(encoding='utf-8').splitlines()
+                        if ref.exists() else [DYNAMIC_UNRESOLVED])
     return deps
 
 
@@ -161,13 +226,29 @@ def read_pom(path):
     """pom.xml: dependency coordinates OUTSIDE any <profiles> block.
 
     struct/java keeps omni behind a `-Pomni` profile precisely so it is
-    invisible to a consumer's resolver and to static scanners, so the profile
-    block is exempt and the default model is not.  That exemption is live, not
+    invisible to a consumer's resolver and to static scanners, so that profile
+    is exempt and the default model is not.  The exemption is live, not
     theoretical: java/pom.xml names omni ten times today, every one of them
     inside <profiles>.  A whole-file grep would fail on the correct tree.
+
+    But the exemption is narrow.  Only a profile with NO <activation> is
+    dropped, because that is the kind Maven applies solely when named on the
+    command line.  A profile carrying activeByDefault, or a jdk/os/property
+    condition, can turn itself on in a consumer's build, so it is checked like
+    any other dependency.  Both of this pom's profiles (omni, release) are
+    activation-free today; the distinction is here so that stays true.
     """
-    text = re.sub(r'<profiles>.*?</profiles>', '', path.read_text(encoding='utf-8'),
-                  flags=re.S | re.I)
+    text = path.read_text(encoding='utf-8')
+
+    # Drop only the profiles that CANNOT participate in the effective model a
+    # consumer resolves - i.e. those with no <activation> block, which Maven
+    # applies only when named explicitly (`-Pomni`). A profile carrying
+    # activeByDefault, or a jdk/os/property condition, CAN activate on its
+    # own, so its dependencies stay in scope and are checked like any other.
+    def droppable(match):
+        return '' if not re.search(r'<activation>', match.group(0), re.I) else match.group(0)
+
+    text = re.sub(r'<profile>.*?</profile>', droppable, text, flags=re.S | re.I)
     deps = []
     for dep in re.finditer(r'<dependency>(.*?)</dependency>', text, re.S | re.I):
         body = dep.group(1)
@@ -218,10 +299,21 @@ def read_swift(path):
     text = path.read_text(encoding='utf-8')
     fails = []
 
-    # Package-level dependencies must be empty unless gated on omniPath.
+    # Package-level dependencies must be EMPTY unless actually gated. Not
+    # "mentions omniPath" - that passes if someone deletes the ternary and
+    # leaves `[.package(name: "VoxgigOmni", path: omniPath!)]`, which is
+    # unconditional and unevaluatable for a consumer with no symlink. Require
+    # the conditional itself, with an empty-list branch.
+    GATE = re.compile(r'(nil\s*==\s*omniPath|omniPath\s*==\s*nil)\s*\?\s*\[\s*\]\s*:')
     m = re.search(r'\n\s*dependencies:\s*(.*?)(?=\n\s*targets:)', text, re.S)
-    if m and names_omni(m.group(1)) and 'omniPath' not in m.group(1):
-        fails.append('package dependencies name omni unconditionally')
+    if m and '.package(' in m.group(1) and not GATE.search(m.group(1)):
+        # Structural, not name-based: ANY package-level dependency that is not
+        # gated is a failure, whatever it is called. This package publishes a
+        # library with no dependencies at all, so an ungated `.package(` is
+        # wrong regardless of whether the matcher recognises its name.
+        fails.append('package dependencies declare `.package(` without the '
+                     '`nil == omniPath ? [] :` gate: '
+                     + ' '.join(m.group(1).split())[:70])
 
     # Any non-test target naming omni in its dependency list.
     for tm in re.finditer(r'\.(target|executableTarget)\((.*?)\n\s*\)', text, re.S):
@@ -231,10 +323,15 @@ def read_swift(path):
     return fails
 
 
-def read_scoped(path, start, stop=None):
+def read_scoped(path, start, stop=None, exempt=None):
     """Read the dependency-declaring REGION of a manifest with no stdlib
     parser (cabal, opam, gemspec, rockspec, gradle.kts, mix.exs, deps.edn,
     Makefile.PL, build.zig.zon, pubspec.yaml).
+
+    `exempt` drops lines matching a pattern, for the declarations a format
+    scopes to tests the way npm scopes devDependencies.  It must stay NARROW:
+    the only use is Gradle's test configurations, which Gradle never publishes
+    to a consumer.
 
     This is a scoped textual scan, and saying so plainly matters: it is
     weaker than a parse and it is what is available without adding a runtime
@@ -243,15 +340,21 @@ def read_scoped(path, start, stop=None):
     one of these manifests is entitled to do - cannot false-positive.
     """
     text = path.read_text(encoding='utf-8')
-    m = re.search(start, text, re.I | re.M)
-    if not m:
-        return []
-    tail = text[m.end():]
-    if stop:
-        e = re.search(stop, tail, re.I | re.M)
-        if e:
-            tail = tail[:e.start()]
-    return [line for line in tail.splitlines() if line.strip()]
+    lines = []
+    # EVERY region, not the first. Gradle allows several `dependencies { }`
+    # blocks and kotlin/build.gradle.kts already has two, so `re.search` read
+    # one and declared the file clean on the strength of it.
+    for m in re.finditer(start, text, re.I | re.M):
+        tail = text[m.end():]
+        if stop:
+            e = re.search(stop, tail, re.I | re.M)
+            if e:
+                tail = tail[:e.start()]
+        lines.extend(line for line in tail.splitlines() if line.strip())
+    if exempt:
+        rx = re.compile(exempt, re.I)
+        lines = [line for line in lines if not rx.search(line)]
+    return lines
 
 
 # ---------------------------------------------------------------------------
@@ -293,6 +396,10 @@ SOURCES = {
     'perl':   dict(globs=['perl/lib/**/*.pm'], skip=[], pattern=r'\bomni\b'),
     'lean':   dict(globs=['lean/src/**/*.lean'], skip=[], pattern=r'\bOmni\b'),
     'typescript': dict(globs=['typescript/src/**/*.ts'], skip=[], pattern=r'voxgig/omni'),
+    # Not migrated, and with no manifest - but its SOURCE still ships, so it
+    # is scanned like any other. A port absent from this table is a port
+    # nothing checks, which is how boru was missed the first time.
+    'boru':       dict(globs=['boru/src/**/*.boru'], skip=[], pattern=r'\bomni\b'),
     'javascript': dict(globs=['javascript/src/**/*.js'], skip=[], pattern=r'voxgig/omni'),
 }
 
@@ -352,8 +459,16 @@ PORTS = {
                              lambda p: read_scoped(p, r'^dependencies\s*=', r'^\w+\s*='))]),
     'elixir':     dict(lib=[('elixir/mix.exs',
                              lambda p: read_scoped(p, r'defp?\s+deps\b', r'^\s*end\b'))]),
+    # `testImplementation`/`testRuntimeOnly`/`testCompileOnly` are Gradle's
+    # test configurations and are never published to a consumer - kotlin's
+    # equivalent of npm devDependencies, and how this port declares omni
+    # (`testImplementation(omni.output)`, from its own source set). Every
+    # other configuration - implementation, api, compileOnly, runtimeOnly - is
+    # in scope.
     'kotlin':     dict(lib=[('kotlin/build.gradle.kts',
-                             lambda p: read_scoped(p, r'^\s*dependencies\s*\{', r'^\}'))]),
+                             lambda p: read_scoped(
+                                 p, r'^\s*dependencies\s*\{', r'^\}',
+                                 exempt=r'^\s*test(Implementation|RuntimeOnly|CompileOnly)\b'))]),
     'clojure':    dict(lib=[('clojure/deps.edn',
                              lambda p: read_scoped(p, r':deps\b', r':aliases\b'))]),
     'dart':       dict(lib=[('dart/pubspec.yaml',
@@ -366,11 +481,45 @@ PORTS = {
     'cpp':        dict(lib=[], why='header-only, no manifest a consumer resolves'),
     'scala':      dict(lib=[], why='no build file at all - scala-cli argument lists in the Makefile'),
     'zig':        dict(lib=[], why='not migrated onto omni (register Phase 1: BLOCKED)'),
+    'boru':       dict(lib=[], why='no manifest a consumer resolves; not migrated '
+                                   'onto omni (register Phase 1: DECISION NEEDED - '
+                                   'omni has no boru port)'),
 }
+
+
+def discover_ports():
+    """Every port directory in the repo, found rather than listed.
+
+    A port carries an AGENTS.md and a Makefile; that pair is what
+    distinguishes one from `tools/`, `build/` and the rest. Discovering them
+    is the point: `boru` was absent from both tables in the first version of
+    this file, so its source was never read and the output still said
+    everything was clean. A port this file does not know about is a port
+    nothing checks, and that must be loud.
+    """
+    found = set()
+    for entry in ROOT.iterdir():
+        if not entry.is_dir() or entry.name.startswith('.'):
+            continue
+        if not (entry / 'AGENTS.md').exists():
+            continue
+        if not any((entry / n).exists() for n in ('Makefile', 'makefile')):
+            continue
+        found.add(entry.name)
+    return found
 
 
 def main():
     fails, uncovered, checked = [], [], []
+
+    # Coverage first: no port may be absent from both tables.
+    known = set(PORTS) | set(SOURCES)
+    for port in sorted(discover_ports() - known):
+        fails.append(f'{port}: is a port directory but appears in neither PORTS '
+                     'nor SOURCES - nothing checks it; add an entry')
+    for port in sorted(known - discover_ports()):
+        fails.append(f'{port}: has an entry here but is not a port directory - '
+                     'stale, and its checks read nothing')
 
     for port in sorted(PORTS):
         spec = PORTS[port]

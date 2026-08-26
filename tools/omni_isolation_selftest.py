@@ -80,12 +80,45 @@ MANIFEST = [
      'dependencies:\n  voxgig_omni:\n    path: ../../omni/dart\n\nenvironment:'),
     ('perl', 'perl/Makefile.PL', 'WriteMakefile(',
      'WriteMakefile(\n  PREREQ_PM => { "Voxgig::Omni" => 0 },'),
+
+    # EVASIONS. Each of these declares omni in a way that reads clean to a
+    # naive check, and every one was a live hole in the first version.
+    # A rename: the key says `runner`, and shipped code can import `runner`
+    # too, so the source scan does not compensate.
+    ('rust', 'rust/Cargo.toml', '[lib]',
+     '[dependencies]\nrunner = { package = "voxgig_omni", version = "0.1" }\n\n[lib]'),
+    # An npm alias: same shape, same blind spot.
+    ('typescript', 'typescript/package.json', '"devDependencies": {',
+     '"dependencies": { "runner": "npm:@voxgig/omni@1.0.0" },\n  "devDependencies": {'),
+    # A Maven profile that turns ITSELF on, so it reaches the effective model
+    # a consumer resolves. Only activation-free profiles are exempt.
+    ('java', 'java/pom.xml', '<profiles>',
+     '<profiles><profile><id>auto</id><activation><activeByDefault>true'
+     '</activeByDefault></activation><dependencies><dependency>'
+     '<groupId>com.voxgig</groupId><artifactId>omni</artifactId>'
+     '</dependency></dependencies></profile>'),
+    # Gradle's SECOND dependencies block, on a published configuration.
+    # `re.search` read only the first and called the file clean.
+    ('kotlin', 'kotlin/build.gradle.kts', 'dependencies {\n    testImplementation(omni.output)',
+     'dependencies {\n    implementation("com.voxgig:omni:0.1.0")\n    testImplementation(omni.output)'),
+    # Dependencies declared dynamic and sourced from a file this cannot read:
+    # must fail, not pass over.
+    ('python', 'python/pyproject.toml', '[project]',
+     '[project]\ndynamic = ["dependencies"]'),
+    # Swift with the gate deleted: unconditional, and unevaluatable for a
+    # consumer with no symlink.
+    ('swift', 'swift/Package.swift', 'dependencies: nil == omniPath ? [] : [',
+     'dependencies: [', ),
 ]
 
 # Blocks that may name omni. The checker must NOT fire on these.
 EXEMPT = [
-    ('typescript', 'typescript/package.json', '"main": "dist/StructUtility.js",',
-     '"devDependencies": { "@voxgig/omni": "^0.1.1" },\n  "main": "dist/StructUtility.js",',
+    # Into the EXISTING object, not a second top-level key. A duplicate
+    # `devDependencies` is silently discarded by json.loads (last wins), so
+    # the first version of this mutation reported "clean" while the injected
+    # entry was never parsed - an exemption test that tested nothing.
+    ('typescript', 'typescript/package.json', '"devDependencies": {',
+     '"devDependencies": {\n    "@voxgig/omni": "^0.1.1",',
      'npm devDependencies are never installed transitively'),
     ('php', 'php/composer.json', '"require-dev": {',
      '"require-dev": { "voxgig/omni": "^0.1",',
