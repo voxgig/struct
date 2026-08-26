@@ -80,7 +80,7 @@ Two changes:
   corpus that takes minutes on an interpreter. One runner, no matrix, and
   `timeout-minutes: 45` to match.
 
-- **Moves `OMNI_REF` to `4540a26`**, the tip of voxgig/omni's
+- **Moves `OMNI_REF` to `fbf1da6`**, the tip of voxgig/omni's
   `claude/struct-omni-tests-ylr39r` — omni's boru port plus the two runner
   fixes struct's corpus found. **Merge [voxgig/omni#49](https://github.com/voxgig/omni/pull/49)
   first**; the commit is reachable either way, but pinning to an unmerged
