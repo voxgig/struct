@@ -847,7 +847,16 @@ jobs:
           set -euo pipefail
           cd "$GITHUB_WORKSPACE/.boru-lang/cmd/go"
           go build -o "$RUNNER_TEMP/boru" ./boru
-          "$RUNNER_TEMP/boru" help | head -1
+          # `sed -n 1p`, NOT `head -1`: head exits after the first line and
+          # closes the pipe, so `boru help` dies of SIGPIPE writing the rest -
+          # exit 141, which the `set -o pipefail` above then promotes to a
+          # step failure even though the build and the CLI are both fine.
+          # Measured: that is exactly how this job first failed on main. sed
+          # drains its input, so there is nothing to signal, and pipefail
+          # still catches a real failure of the CLI. Do not add `;q` to it.
+          # (The `perl -V | head -1` step above is safe because its block
+          # does NOT set pipefail - bash -e alone reports head's status.)
+          "$RUNNER_TEMP/boru" help | sed -n '1p'
       # The corpus runner is voxgig/omni, consumed as a local checkout - boru
       # has no registry to publish it to. The Makefile resolves OMNI_HOME into
       # the `.omni-runner` symlink the suite imports through.
@@ -861,9 +870,9 @@ jobs:
       # regression is reported in seconds instead of after the whole run.
       - name: Lint
         working-directory: ./boru
-        run: make lint BORU=$RUNNER_TEMP/boru
+        run: make lint BORU="$RUNNER_TEMP/boru"
       - name: Test
         working-directory: ./boru
         env:
           OMNI_HOME: ${{ github.workspace }}/.omni
-        run: make test BORU=$RUNNER_TEMP/boru
+        run: make test BORU="$RUNNER_TEMP/boru"
