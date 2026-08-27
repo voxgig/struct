@@ -1,0 +1,87 @@
+From c4303eb66b428a4e29a17969aeefe3495835b16f Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 27 Aug 2026 13:09:54 +0000
+Subject: [PATCH] =?UTF-8?q?ci(publish):=20npm=20install,=20not=20npm=20ci?=
+ =?UTF-8?q?=20=E2=80=94=20this=20repo=20commits=20no=20lockfile?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The first ever run of publish.yml failed 17 seconds in, at "Install
+dependencies", because `npm ci` cannot run without a lockfile and this repo
+gitignores package-lock.json (.gitignore:150) in every port. build.yml already
+carries that reasoning at its own install step; publish.yml was adapted from
+voxgig/sdkgen, which does commit lockfiles, and the difference was not carried
+across.
+
+Nothing about the published artifact loosens: `dependencies` in
+typescript/package.json is EMPTY - the package ships no runtime deps at all -
+so everything installed here is build, lint and test tooling that never
+reaches the tarball, and @voxgig/omni among it is pinned exactly rather than
+by range.
+
+Verified by running the workflow's own sequence locally:
+
+    npm install   -> exit 0 (was: exit 1, "npm ci" usage error)
+    npm run build -> OK
+    npm test      -> fail 0
+
+and actionlint over the repo is clean.
+---
+ .github/workflows/publish.yml | 24 +++++++++++++++++++-----
+ 1 file changed, 19 insertions(+), 5 deletions(-)
+
+diff --git a/.github/workflows/publish.yml b/.github/workflows/publish.yml
+index c932c67..fbe9a74 100644
+--- a/.github/workflows/publish.yml
++++ b/.github/workflows/publish.yml
+@@ -20,12 +20,12 @@
+ #
+ # TWO JOBS, BECAUSE THEY NEED DIFFERENT PRIVILEGES.
+ #
+-#   publish  id-token: write, contents: READ. Runs npm ci, the build and the
+-#            tests — i.e. dependency lifecycle scripts and project code.
++#   publish  id-token: write, contents: READ. Runs the install, the build and
++#            the tests — i.e. dependency lifecycle scripts and project code.
+ #   tag      contents: write. Runs git and nothing else.
+ #
+ # Keeping them in one job would hand a repository-write credential to every
+-# dependency postinstall script that runs during `npm ci`, because checkout
++# dependency postinstall script that runs during the install, because checkout
+ # persists its token into the git config for the whole job.
+ #
+ # A ref pushed with GITHUB_TOKEN does NOT start another workflow run (GitHub
+@@ -160,14 +160,28 @@ jobs:
+           fi
+           if [ -n "$AT" ]; then echo "$TAG already points here; nothing to create"; fi
+ 
+-      # `npm ci` FIRST. The pre-flight below runs `node build/check-model.js`,
++      # INSTALL FIRST. The pre-flight below runs `node build/check-model.js`,
+       # which requires aontu — so with the install after it, the pre-flight
+       # died on "Cannot find module 'aontu'" and no release using this
+       # workflow could ever reach the publish step. Fail-fast ordering is only
+       # worth having when the fast step can actually run.
++      #
++      # `npm install`, NOT `npm ci`, for the reason build.yml already gives at
++      # its own install step: this repo gitignores package-lock.json
++      # (.gitignore:150) and commits no lockfile in any port, so `npm ci` has
++      # nothing to install from and exits 1 before doing anything. That is not
++      # hypothetical - it is how the first ever run of this workflow failed,
++      # 17 seconds in. The workflow was adapted from voxgig/sdkgen, which does
++      # commit lockfiles; struct does not.
++      #
++      # Nothing about the PUBLISHED artifact loosens by this: `dependencies` in
++      # typescript/package.json is EMPTY - the package ships with no runtime
++      # deps at all - so everything installed here is build, lint and test
++      # tooling that never reaches the tarball, and @voxgig/omni among it is
++      # pinned to an exact version rather than a range.
+       - name: Install dependencies
+         working-directory: typescript
+-        run: npm ci
++        run: npm install
+ 
+ 
+       - name: Build and test
+-- 
+2.43.0
+
