@@ -1,0 +1,292 @@
+# Releases @voxgig/struct: publishes to npm AND writes the git tag.
+#
+# Adapted from voxgig/sdkgen's publish.yml, which carries the reasoning for
+# every guard below. The npm-side trusted publisher must be registered against
+# THIS filename (publish.yml) or the OIDC exchange is rejected as a 404.
+#
+# ONE FILE, BECAUSE NPM ALLOWS EXACTLY ONE. A trusted publisher is registered
+# on npmjs.com against a single workflow FILENAME, and every @voxgig package
+# is registered against `publish.yml`. The name itself is arbitrary — other
+# orgs register `release.yml` — but only the ONE registered file can publish,
+# so anything that must accompany a publish has to live inside it. Here that
+# is the tag.
+#
+# A second workflow cannot publish whatever permissions it holds; npm rejects
+# the exchange and reports it as
+#
+#   npm error 404 Not Found - PUT https://registry.npmjs.org/...
+#
+# — a 404, not a 403, so as not to leak whether the package exists.
+#
+# TWO JOBS, BECAUSE THEY NEED DIFFERENT PRIVILEGES.
+#
+#   publish  id-token: write, contents: READ. Runs npm ci, the build and the
+#            tests — i.e. dependency lifecycle scripts and project code.
+#   tag      contents: write. Runs git and nothing else.
+#
+# Keeping them in one job would hand a repository-write credential to every
+# dependency postinstall script that runs during `npm ci`, because checkout
+# persists its token into the git config for the whole job.
+#
+# A ref pushed with GITHUB_TOKEN does NOT start another workflow run (GitHub
+# suppresses that so workflows cannot trigger themselves), so the tag job
+# cannot be replaced by "tag and let the publisher fire on it".
+#
+# TWO WAYS IN:
+#
+#   workflow_dispatch  the normal path. Publishes if missing, then tags.
+#   push: tags v*      the manual path, for a tag pushed by hand. Publishes
+#                      only; the tag job does not run.
+#
+# VERSION BUMPS ARE NOT AUTOMATED, deliberately. Nothing here commits. It
+# reads the version already on the branch and releases exactly that, so the
+# bump stays a reviewable diff and the release stays a button.
+#
+#   typescript/package.json "version" -> tag v<version>
+#
+# Renaming this file breaks publishing until the npm-side trusted publisher is
+# updated to match. Do NOT publish locally over a token: that bypasses OIDC.
+
+name: publish
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      expect_sha:
+        description: 'Optional: refuse unless main is still at this commit (set by `make publish`)'
+        type: string
+        default: ''
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  publish:
+    name: npm publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # Deliberately NOT contents: write — see the header. This job runs
+    # dependency lifecycle scripts.
+    permissions:
+      id-token: write
+      contents: read
+
+    outputs:
+      version: ${{ steps.versions.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24.x
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Resolve the version being released
+        id: versions
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./typescript/package.json').version")"
+          test -n "$VERSION" || { echo "::error::could not read typescript/package.json version"; exit 1; }
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "$VERSION -> tag v$VERSION"
+
+      # RELEASES COME FROM main, INCLUDING FROM THE BUTTON. `gh workflow run
+      # --ref` accepts any branch or tag, and the Makefile's `main` guard only
+      # binds callers who went through `make publish` — so without this the
+      # Actions UI or a stray API call could publish and tag a feature branch,
+      # irreversibly.
+      - name: Dispatches must come from main
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF_NAME" != "main" ]; then
+            echo "::error::dispatch ref is $GITHUB_REF_NAME; releases must come from main"
+            exit 1
+          fi
+
+      # `--ref main` names a MUTABLE branch, so between `make publish` pushing
+      # the release commit and this run resolving, another commit can land and
+      # be published under the version just bumped. `make publish` passes the
+      # SHA it pushed; if main has moved since, stop rather than release
+      # something nobody asked for.
+      - name: main must still be the commit we intended to release
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.expect_sha != '' }}
+        env:
+          EXPECT_SHA: ${{ inputs.expect_sha }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_SHA" != "$EXPECT_SHA" ]; then
+            echo "::error::main has moved: expected $EXPECT_SHA, got $GITHUB_SHA"
+            exit 1
+          fi
+
+      # A tag pushed by hand must agree with the version it claims to release.
+      # Without this, pushing v1.2.3 while typescript/package.json still says 1.2.2
+      # resolves 1.2.2, finds it already published, skips the publish, and the
+      # run goes GREEN — leaving a tag with no release behind it.
+      - name: The pushed tag must match the package version
+        if: ${{ github.event_name == 'push' }}
+        env:
+          PKG_VERSION: ${{ steps.versions.outputs.version }}
+        run: |
+          set -euo pipefail
+          WANT="v$PKG_VERSION"
+          if [ "$GITHUB_REF_NAME" != "$WANT" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match typescript/package.json ($WANT)"
+            exit 1
+          fi
+
+      # AN EXISTING TAG IS ONLY A PROBLEM IF IT POINTS SOMEWHERE ELSE. A tag
+      # already on this commit is the idempotent case — nothing to create, not
+      # an error — which is what lets a partly-failed release be re-dispatched.
+      - name: Refuse a tag that points at a different commit
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          PKG_VERSION: ${{ steps.versions.outputs.version }}
+        run: |
+          set -euo pipefail
+          TAG="v$PKG_VERSION"
+          HEAD_SHA="$(git rev-parse HEAD)"
+          AT="$(git rev-parse -q --verify "refs/tags/$TAG^{commit}" 2>/dev/null || true)"
+          if [ -n "$AT" ] && [ "$AT" != "$HEAD_SHA" ]; then
+            echo "::error::tag $TAG already exists on $AT, not this commit — bump typescript/package.json"
+            exit 1
+          fi
+          if [ -n "$AT" ]; then echo "$TAG already points here; nothing to create"; fi
+
+      # `npm ci` FIRST. The pre-flight below runs `node build/check-model.js`,
+      # which requires aontu — so with the install after it, the pre-flight
+      # died on "Cannot find module 'aontu'" and no release using this
+      # workflow could ever reach the publish step. Fail-fast ordering is only
+      # worth having when the fast step can actually run.
+      - name: Install dependencies
+        working-directory: typescript
+        run: npm ci
+
+
+      - name: Build and test
+        working-directory: typescript
+        run: |
+          npm run build
+          npm test
+
+      # Trusted publishing requires npm >= 11.5.1.
+      - name: Use a trusted-publishing capable npm
+        run: npm install -g npm@latest
+
+      # THE REGISTRY IS THE SOURCE OF TRUTH FOR "IS THIS RELEASED", not the
+      # tag. A run can publish and then fail before tagging, leaving a version
+      # on npm with nothing pointing at it. Without this check that state is
+      # unrecoverable: the publish step dies on "cannot publish over the
+      # previously published versions" before the tag job ever runs.
+      - name: Is this version already on npm?
+        id: registry
+        env:
+          PKG_VERSION: ${{ steps.versions.outputs.version }}
+        run: |
+          set -euo pipefail
+          V="$PKG_VERSION"
+          if npm view "@voxgig/struct@$V" version >/dev/null 2>&1; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "$V is already on npm — skipping publish"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            echo "$V is not on npm — will publish"
+          fi
+
+      # SKIPPING THE PUBLISH ASSUMES "SAME VERSION MEANS SAME CODE". That holds
+      # only if main has not moved. Publish succeeds at commit A, the tag job
+      # fails, main advances to B, someone re-dispatches: the version is still
+      # on npm, so the publish is skipped and B gets tagged — while the
+      # registry artifact was built from A. The tag would then point at code
+      # the published package does not contain.
+      #
+      # npm records the source commit as `gitHead`, so this is checkable.
+      # Absent gitHead (an old or non-git publish) cannot be verified, so warn
+      # rather than block — refusing would make legitimate recovery impossible.
+      - name: A published version must come from this commit
+        if: ${{ steps.registry.outputs.published == 'true' }}
+        env:
+          PKG_VERSION: ${{ steps.versions.outputs.version }}
+        run: |
+          set -euo pipefail
+          V="$PKG_VERSION"
+          GH="$(npm view "@voxgig/struct@$V" gitHead 2>/dev/null || true)"
+          if [ -z "$GH" ]; then
+            echo "::warning::npm records no gitHead for $V; cannot verify it was built from this commit"
+          elif [ "$GH" != "$GITHUB_SHA" ]; then
+            echo "::error::npm has $V built from $GH, but this run is $GITHUB_SHA — tagging would point at code the registry does not contain"
+            exit 1
+          else
+            echo "$V on npm was built from this commit"
+          fi
+
+      # Publish BEFORE tagging (the tag job `needs` this one), so a tag only
+      # ever exists for a release that reached the registry.
+      - name: Publish to npm
+        if: ${{ steps.registry.outputs.published == 'false' }}
+        working-directory: typescript
+        env:
+          PKG_VERSION: ${{ steps.versions.outputs.version }}
+        run: |
+          set -euo pipefail
+          V="$PKG_VERSION"
+          # A PRERELEASE MUST NOT BECOME `latest`. `npm publish` defaults to
+          # the latest dist-tag, so publishing 1.2.3-beta.1 that way hands it
+          # to every unpinned install.
+          case "$V" in
+            *-*) DIST=next ;;
+            *)   DIST=latest ;;
+          esac
+          echo "publishing $V under dist-tag $DIST"
+          npm publish --access public --tag "$DIST"
+
+  # Runs git and nothing else. No npm install, no project code — so the
+  # repository-write credential is never in scope while third-party code runs.
+  tag:
+    name: tag
+    needs: publish
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Tag the release
+        env:
+          PKG_VERSION: ${{ needs.publish.outputs.version }}
+        run: |
+          set -euo pipefail
+          TAG="v$PKG_VERSION"
+          HEAD_SHA="$(git rev-parse HEAD)"
+
+          # EXISTENCE IS NOT ENOUGH. `git rev-parse --verify` only asks whether
+          # the name resolves; a tag created between the publish job's guard
+          # and this checkout could point anywhere. Treating that as the
+          # idempotent case would leave a green run with an npm artifact from
+          # THIS commit and a release tag on a different one. Dereference and
+          # compare.
+          AT="$(git rev-parse -q --verify "refs/tags/$TAG^{commit}" 2>/dev/null || true)"
+          if [ -n "$AT" ]; then
+            if [ "$AT" != "$HEAD_SHA" ]; then
+              echo "::error::$TAG exists on $AT, not this commit ($HEAD_SHA)"
+              exit 1
+            fi
+            echo "$TAG already points here — nothing to do" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git tag "$TAG"
+          git push origin "refs/tags/$TAG"
+          echo "pushed $TAG" >> "$GITHUB_STEP_SUMMARY"
