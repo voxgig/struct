@@ -232,10 +232,13 @@ dart/.dart_tool/
 dart/.packages
 dart/*.dill
 # pubspec.lock stays ignored: this package is a published LIBRARY, and pub's
-# own guidance is that a library does not commit one. The omni pin is the tag
-# itself - `ref: dart/v0.1.0` in pubspec.yaml - not a recorded commit, which
-# is the one way this port differs from rust and go, where the harness is a
-# non-published package and its lockfile IS tracked.
+# own guidance is that a library does not commit one. So the LOCK cannot be
+# the pin here, the way rust's corpus/Cargo.lock and go's go.sum are - but
+# there IS still a recorded commit, it just lives elsewhere: OMNI_SHA in
+# dart/Makefile, which `make deps` checks against the resolved-ref pub writes
+# into the (ignored) lock, refusing to test if `dart/v0.1.0` ever resolves to
+# anything else. What differs from rust and go is WHERE the commit is
+# recorded, not whether one is.
 dart/pubspec.lock
 
 # Elixir
