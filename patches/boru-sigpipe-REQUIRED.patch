@@ -1,0 +1,20 @@
+diff --git a/.github/workflows/build.yml b/.github/workflows/build.yml
+index d4738d7..5e0ecc5 100644
+--- a/.github/workflows/build.yml
++++ b/.github/workflows/build.yml
+@@ -847,7 +847,14 @@ jobs:
+           set -euo pipefail
+           cd "$GITHUB_WORKSPACE/.boru-lang/cmd/go"
+           go build -o "$RUNNER_TEMP/boru" ./boru
+-          "$RUNNER_TEMP/boru" help | head -1
++          # `sed -n 1p`, NOT `head -1`: head exits after the first line and
++          # closes the pipe, so `boru help` dies of SIGPIPE writing the rest -
++          # exit 141, which `set -o pipefail` then promotes to a step failure
++          # even though the build and the CLI are both fine. Measured: that is
++          # exactly how this job first failed on main. sed drains its input,
++          # so there is nothing to signal, and pipefail still catches a real
++          # failure of the CLI itself. Do not add `;q` to the sed script.
++          "$RUNNER_TEMP/boru" help | sed -n '1p'
+       # The corpus runner is voxgig/omni, consumed as a local checkout - boru
+       # has no registry to publish it to. The Makefile resolves OMNI_HOME into
+       # the `.omni-runner` symlink the suite imports through.
