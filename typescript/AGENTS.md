@@ -47,7 +47,7 @@ wrap the same commands.
 **`npm test` needs nothing but `npm install`.** The corpus runner is omni's,
 taken from npm as the `@voxgig/omni` devDependency; `test/omni.ts` imports
 `@voxgig/omni/compat/struct` directly. There is no checkout to resolve and no
-`OMNI_HOME`. It is pinned EXACTLY - `"0.1.0"`, not `"^0.1.0"`: this repo
+`OMNI_HOME`. It is pinned EXACTLY - `"0.1.2"`, not `"^0.1.2"`: this repo
 commits no lockfile (`.gitignore` line 150), so the manifest is the only
 thing pinning it, and a 0.x caret floats to anything under 0.2.0. `make
 omni-check` asserts the devDependencies-only isolation register 4.13
