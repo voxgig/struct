@@ -1590,7 +1590,14 @@ local function merge(val, maxdepth)
         -- Descend into override node.
         else
           -- Descend into destination node using same key.
-          dst[pI + 1] = 0 < pI and getprop(dst[pI], key) or dst[pI + 1]
+          -- NOT `a and b or c`: that idiom silently yields `c` whenever `b`
+          -- is falsy, and `getprop` returns exactly that for a key the
+          -- destination does not have. `dst[pI + 1]` then kept the PREVIOUS
+          -- sibling's destination node, so the next key descended into it and
+          -- the two ended up sharing ONE table holding the union of both.
+          if 0 < pI then
+            dst[pI + 1] = getprop(dst[pI], key)
+          end
           local tval = dst[pI + 1]
 
           -- Destination empty, so create node (unless override is class instance).
