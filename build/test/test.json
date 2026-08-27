@@ -4212,6 +4212,37 @@
         "set": [
           {
             "in": [
+              {},
+              {
+                "auth": {
+                  "prefix": ""
+                }
+              },
+              {
+                "auth": {
+                  "basic": false
+                },
+                "feature": {
+                  "test": {
+                    "active": true
+                  }
+                }
+              }
+            ],
+            "out": {
+              "auth": {
+                "basic": false,
+                "prefix": ""
+              },
+              "feature": {
+                "test": {
+                  "active": true
+                }
+              }
+            }
+          },
+          {
+            "in": [
               {
                 "e": 5
               },

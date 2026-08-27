@@ -174,6 +174,17 @@ array: {
 
 integrity: {
   set: [
+    # Sibling maps must stay SEPARATE tables. Where the destination has the
+    # first key but not the second, a port that carries a stale destination
+    # node from one key to the next merges the second INTO the first, and both
+    # end up as one node holding the union. Lua did exactly that: `dst[pI+1] =
+    # 0 < pI and getprop(dst[pI], key) or dst[pI+1]` yields the previous
+    # sibling's node whenever getprop returns a falsy value, which is what a
+    # missing key gives. Every other port passed this shape already.
+    { in: [{}, {auth:{prefix:''}}, {auth:{basic:false}, feature:{test:{active:true}}}],
+      out: {auth:{prefix:'',basic:false}, feature:{test:{active:true}}}
+    }
+
     { in: [{e:5},{a:1,d:4},{a:2,b:3}],
       out: {a:2,b:3,d:4,e:5},
       match:args:0:[{e:5},{a:1,d:4},{a:2,b:3}]
