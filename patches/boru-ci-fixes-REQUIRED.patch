@@ -1,3 +1,28 @@
+From 4c6211b14447eac214a61b4e530f91cef36d988b Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 27 Aug 2026 12:06:29 +0000
+Subject: [PATCH] ci(boru): fix the two defects in the test-boru job
+
+1. `"$RUNNER_TEMP/boru" help | head -1` exits 141. head closes the pipe after
+   one line, boru takes SIGPIPE writing the rest, and `set -o pipefail`
+   promotes that to a step failure - though the build and the CLI are fine.
+   `sed -n '1p'` drains its input instead, and pipefail still catches a real
+   failure of the CLI.
+
+2. `BORU=$RUNNER_TEMP/boru` is unquoted on two lines, which actionlint
+   reports as shellcheck SC2086.
+
+Verified with CI's own checker: actionlint (installed as security.yml does,
+with shellcheck present) reports exit 1 with both SC2086 findings before, and
+exit 0 after. build.yml still parses to 24 jobs.
+
+The `perl -V | head -1` step elsewhere is deliberately untouched: its block
+does not set pipefail, so bash -e reports head's exit 0 and perl's SIGPIPE
+never surfaces.
+---
+ .github/workflows/build.yml | 15 ++++++++++++---
+ 1 file changed, 12 insertions(+), 3 deletions(-)
+
 diff --git a/.github/workflows/build.yml b/.github/workflows/build.yml
 index d4738d7..e5489d1 100644
 --- a/.github/workflows/build.yml
@@ -32,3 +57,6 @@ index d4738d7..e5489d1 100644
            OMNI_HOME: ${{ github.workspace }}/.omni
 -        run: make test BORU=$RUNNER_TEMP/boru
 +        run: make test BORU="$RUNNER_TEMP/boru"
+-- 
+2.43.0
+
