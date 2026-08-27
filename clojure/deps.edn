@@ -1,7 +1,19 @@
 {:paths ["src"]
  :deps {org.clojure/clojure {:mvn/version "1.12.5"}}
  :aliases
- {:test
+ {;; The corpus runner is voxgig/omni, taken from its release tag. It lives
+  ;; in an ALIAS, not in :deps, and that is the isolation device: an alias is
+  ;; never transitive, so nothing that depends on this library resolves omni
+  ;; (register 4.13). :deps/root selects the port's subdirectory, and the pair
+  ;; of :git/tag and :git/sha is what tools.deps requires - the tag names the
+  ;; release, the sha is what it must resolve to, and a moved tag is an error
+  ;; rather than a silent change of dependency.
+  :omni
+  {:extra-deps {io.github.voxgig/omni
+                {:git/tag "clojure/v0.1.0"
+                 :git/sha "a710fcda81b0a72a5e98322cac0af56ab8c2d959"
+                 :deps/root "clojure"}}}
+  :test
   {:extra-paths ["test"]
    :main-opts ["-m" "voxgig.struct-runner"]}
   :lint

@@ -1,42 +1,39 @@
 # Makefile for the Dart port of voxgig/struct.
 # Requires the Dart SDK (`dart`) on PATH. No third-party dependencies.
 
-.PHONY: test bench lint build inspect clean reset publish format omni-check
+.PHONY: test bench lint build inspect clean reset publish format deps
 
-# The corpus runner is voxgig/omni, consumed as a local checkout - it is not
-# published to pub.dev. $OMNI_HOME first, then sibling paths, taking the first
-# directory that carries spec/fib.json.
+# The corpus runner is voxgig/omni, taken from its release tag: pubspec.yaml
+# declares `voxgig_omni` under `dev_dependencies` as a git dependency on
+# `dart/v0.1.0`, and pubspec.lock records the commit that resolved to. No
+# checkout beside this one, no $OMNI_HOME, and no generated override file -
+# `dart pub get` fetches it, and a run here is reproducible from this repo's
+# commit alone.
 #
-# It reaches the analyzer through `pubspec_overrides.yaml`, which pub reads for
-# local development overrides and which this Makefile GENERATES (it is
-# gitignored, and the path differs per checkout). The published `pubspec.yaml`
-# never names omni, so nothing that depends on this package depends on it
-# (register 4.13) - `make build` proves that by compiling lib/ alone.
+# `dev_dependencies` is also the isolation device: pub never installs one
+# transitively, so nothing that depends on voxgig_struct can reach omni
+# (register 4.13), and `make build` still proves it by compiling lib/ alone.
 #
-# $OMNI_HOME is resolved by the SHELL, not by make's `wildcard`/`foreach`.
-# Those are whitespace-delimited and backslash-aware, so a path with a space
-# ("C:/Users/Ann Smith/omni") splits into two candidates that both miss, and a
-# Windows drive path is read for escapes. `$$OMNI_HOME` reaches the shell as
-# the raw environment value, so neither applies. The sibling candidates are
-# fixed literals with no spaces, so they stay in the make-level list.
-OMNI_SIBLINGS := ../../omni ../../../omni /workspace/omni /home/user/omni
-OMNI_DIR := $(or \
-  $(shell [ -n "$$OMNI_HOME" ] && [ -f "$$OMNI_HOME/spec/fib.json" ] && printf '%s' "$$OMNI_HOME"),\
-  $(firstword $(foreach d,$(OMNI_SIBLINGS),$(if $(wildcard $(d)/spec/fib.json),$(d)))))
+# pubspec.lock is NOT tracked - this package is a published library, and pub
+# says a library does not commit one - so the lock cannot be the pin here the
+# way corpus/Cargo.lock is for rust. The tag is resolved afresh on every
+# checkout, and a moved tag would silently swap the runner. So the resolved
+# ref is checked against a sha pinned here, which is the same guarantee
+# clojure gets from `:git/sha` and lean from its fetch check.
+OMNI_TAG := dart/v0.1.0
+OMNI_SHA := a710fcda81b0a72a5e98322cac0af56ab8c2d959
 
-# Fail with the reason rather than "Target of URI doesn't exist".
-omni-check:
-	@if [ -z "$(OMNI_DIR)" ]; then \
-	  echo "struct: voxgig/omni checkout not found - set OMNI_HOME."; \
-	  echo "  The tests run on the shared runner; the library itself does not."; \
-	  echo "  git clone https://github.com/voxgig/omni ../../omni"; \
+deps:
+	@dart pub get >/dev/null
+	@got=$$(awk '/^  voxgig_omni:/{f=1} f && /resolved-ref:/{print $$2; exit}' pubspec.lock); \
+	if [ "$$got" != "$(OMNI_SHA)" ]; then \
+	  echo "struct: $(OMNI_TAG) resolved to $$got, not the pinned $(OMNI_SHA)."; \
+	  echo "  The tag moved. Refusing to test against an omni this repo has not pinned."; \
 	  exit 1; \
 	fi
-	@printf 'dependency_overrides:\n  voxgig_omni:\n    path: %s/dart\n' "$(OMNI_DIR)" > pubspec_overrides.yaml
-	@dart pub get >/dev/null
 
 # Run the shared JSON corpus through the Dart implementation, on voxgig/omni.
-test: omni-check
+test: deps
 	dart run test/runner.dart
 
 # Cross-port performance harness (JSON contract; see build/bench/README.md).
@@ -44,16 +41,16 @@ bench:
 	@dart run bench/bench.dart
 
 # "Lint": static analysis (a clean `dart analyze` means the code is sound).
-# The runner imports omni, so this needs the checkout too.
-lint: omni-check
+# The runner imports omni, so this needs the dependency resolved too.
+lint: deps
 	dart analyze
 
 # Compile the library to a kernel snapshot as a build smoke-test.
 build:
 	dart compile kernel lib/voxgig_struct.dart -o /dev/null 2>/dev/null || dart analyze lib
 
-# No omni prerequisite: formatting only parses the files, so it needs neither
-# package resolution nor the checkout - and the README says omni is for tests.
+# No `deps` prerequisite: formatting only parses the files, so it needs no
+# package resolution at all - and the README says omni is for tests.
 format:
 	dart format --output=none --set-exit-if-changed lib test
 

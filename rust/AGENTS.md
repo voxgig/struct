@@ -45,10 +45,18 @@ make inspect        # print toolchain + crate version
 **A bare `cargo test` in `rust/` does NOT run the corpus.** The harness is
 a separate package (`corpus/`), excluded from this workspace, because Cargo
 resolves dev-dependencies even for `cargo build` - so naming omni in the
-library manifest breaks a checkout that has no omni beside it (register
-4.13). `make test` runs both; `cargo test` alone runs the library's own
-tests, 14 of them. The corpus cannot be folded back into the default path
-without reintroducing that leak.
+library manifest would put it in the way of every `cargo build` here, and in
+the published manifest besides (register 4.13). `make test` runs both;
+`cargo test` alone runs the library's own tests, 14 of them. The corpus
+cannot be folded back into the default path without reintroducing that leak.
+
+**omni comes from its release tag, not from a checkout.**
+`corpus/Cargo.toml` declares `voxgig_omni = { git = ".../omni", tag =
+"rust/v0.1.0" }`, and `corpus/Cargo.lock` - tracked, unlike most lockfiles
+here - records the commit that resolved to. There is no `.omni` link and no
+`setup-omni` target any more: Cargo traverses the repository to find the
+crate by name, so `omni/rust` is reachable with no root manifest on omni's
+side.
 
 `make build` / `make test` / `make lint` wrap the same commands; from the
 repo root, `make test-rust` / `make lint-rust` do too. Stable Rust 1.80+

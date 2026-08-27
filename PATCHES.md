@@ -1,17 +1,27 @@
-# Two patches to apply locally
+# Three patches to apply locally, in this order
 
-**Apply the zig one first — `main` is red without it.**
+    git am patches/zig-ci-macos-pip-REQUIRED.patch    # first — main is red without it
+    git am patches/boru-ci-REQUIRED.patch
+    git am patches/tags-ci-REQUIRED.patch
 
-`.github/workflows/build.yml` is refused to the authoring session's
-credentials:
+**Order matters.** All three edit `.github/workflows/build.yml`, and the third
+was generated on top of the first two — applied out of order, it does not
+apply at all (measured: the boru patch appends `test-boru` at the end of the
+file, which moves the context the tags patch needs). Applied in order, all
+three apply clean to `main` and the result parses to 24 build jobs and 23 lint
+jobs.
+
+`.github/workflows/` is refused to the authoring session's credentials:
 
     ! [remote rejected] refusing to allow an OAuth App to create or update
       workflow `.github/workflows/build.yml` without `workflow` scope
 
-so both changes live in [`patches/`](./patches) rather than in commits.
+so the changes live in [`patches/`](./patches) rather than in commits. That
+refusal was measured, not assumed: the changes were committed and pushed as
+ordinary commits, and GitHub rejected the whole push.
 
-**Delete this file and `patches/` once they are applied.** Until then, two
-things are true and worth saying plainly, because a patch file is inert until
+**Delete this file and `patches/` once they are applied.** Until then, these
+are true and worth saying plainly, because a patch file is inert until
 someone applies it:
 
 - **CI does not exercise the boru suite at all.** There is no `test-boru`
@@ -24,6 +34,14 @@ someone applies it:
   [voxgig/omni#49](https://github.com/voxgig/omni/pull/49) merges, or with
   its branch checked out. A fresh clone of omni `main` before that merge does
   not have it, and `make test` fails on the import rather than on the corpus.
+
+- **CI still checks omni out for clojure, dart, lean and rust,** which is
+  redundant rather than wrong: all four take omni from its release tags and
+  ignore the checkout entirely. (An earlier draft of this note said `test-lean`
+  would silently take the checkout through `$OMNI_HOME`. That was true, and is
+  the reason `lean/Makefile` now takes its override from `$OMNI_LOCAL`
+  instead — a variable nothing else sets, so an ambient `$OMNI_HOME` can no
+  longer defeat the pin. The patch is tidying now, not a correctness fix.)
 
 `boru/AGENTS.md`'s line about `test-boru` describes the job the boru patch
 adds, so it reads ahead of the workflow until that patch lands.
@@ -114,3 +132,48 @@ the commit (`.info`, `Origin.Hash`), not from expanding a short one.
 
 The job's own steps are not verified — they cannot be, from here. What is
 verified is everything they run.
+
+## 3. `patches/tags-ci-REQUIRED.patch`
+
+    git am patches/tags-ci-REQUIRED.patch
+
+clojure, dart, lean and rust now take omni from its `<port>/v0.1.0` release
+tags, so the omni checkout eight jobs carried is dead weight — and in
+`test-lean` and `lint-lean` it was once worse than dead — `$OMNI_HOME` used
+to override the tag — which is why `lean/Makefile` now takes its override from
+`$OMNI_LOCAL`, a variable nothing else sets. The patch drops the checkout step
+and the `OMNI_HOME` environment from all eight; with that override closed at
+the source it is tidying, not a fix.
+
+`test-haskell` and `lint-haskell` keep theirs: haskell is not part of that
+change and reaches omni through `-i$(OMNI_DIR)/haskell/src` on the test search
+path. `OMNI_REF` stays for them and for every other port still on a checkout.
+
+### Verified locally, against the tags rather than a checkout
+
+- **rust** — `make test`: the library's 14 tests plus **1371 corpus checks**,
+  with `../.omni` deleted outright. `corpus/Cargo.lock` (now tracked) records
+  the commit `rust/v0.1.0` resolved to.
+- **dart** — `make test`: **77 groups, 0 failed**, with no
+  `pubspec_overrides.yaml` and no checkout.
+- **clojure** — **77 groups, 0 failed**, resolved through `tools.deps` from
+  the `:omni` alias. This and dart close the "cut but not consumer-verified"
+  note omni's register carried for both.
+- All four tags resolve to `a710fcda81b0a72a5e98322cac0af56ab8c2d959`, agreed
+  independently by Cargo, pub and tools.deps.
+- `python3 tools/omni_isolation.py` → **all clean**;
+  `python3 tools/check_parity.py` → clean.
+
+**lean's suite could not be run locally** — there is no Lean toolchain in the
+authoring environment and elan's releases are not reachable from it — but CI
+has now run it, and it is green on all three OSes at `c580d85`. That is the
+first evidence the `.omni-build`/`lean_lib` restructure builds and passes at
+all, and it is worth being precise about what it does *not* show: that run had
+`$OMNI_HOME` still honoured, so it exercised the copy path, not the fetch. The
+run on `e57b665` onward is the one that takes the tag, because the override
+moved to `$OMNI_LOCAL`.
+
+Verified locally either way — `make omni-fetch` takes `lean/v0.1.0`, refuses a
+tag that no longer resolves to the pinned sha (measured with a deliberately
+wrong pin), is a no-op on a second run, and produces an `Omni.lean`
+byte-identical to omni's file at that tag.

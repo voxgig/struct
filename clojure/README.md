@@ -21,8 +21,9 @@ published jar never names.
 - A JDK (Java 11+).
 - The [Clojure CLI](https://clojure.org/guides/install_clojure)
   (`clojure` / `clj`).
-- For the tests only: a [voxgig/omni](https://github.com/voxgig/omni)
-  checkout, found via `$OMNI_HOME` or beside this repository.
+- For the tests only: [voxgig/omni](https://github.com/voxgig/omni), declared
+  in the `:omni` alias at its `clojure/v0.1.0` release tag and fetched by the
+  Clojure CLI. No checkout needed.
 
 ## Use
 
@@ -75,7 +76,7 @@ See [`DOCS.md`](./DOCS.md) for the full guide and
 ## Develop
 
 ```
-make test     # run the shared corpus on voxgig/omni (needs $OMNI_HOME)
+make test     # run the shared corpus on voxgig/omni (fetched from its tag)
 make lint     # compile the namespaces
 make inspect  # toolchain versions
 ```

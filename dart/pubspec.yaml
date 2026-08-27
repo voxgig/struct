@@ -7,3 +7,16 @@ repository: https://github.com/voxgig/struct
 environment:
   sdk: '>=3.0.0 <4.0.0'
 # Zero third-party runtime dependencies (by project policy).
+
+# The corpus runner, taken from its release tag rather than from whatever
+# checkout happens to sit beside this one. `dev_dependencies` is the isolation
+# device: pub never installs a dev dependency transitively, so nothing that
+# depends on voxgig_struct can reach omni (register 4.13), and `pubspec.lock`
+# records the commit `dart/v0.1.0` resolved to - which is what makes a run
+# here reproducible from this repo's commit alone.
+dev_dependencies:
+  voxgig_omni:
+    git:
+      url: https://github.com/voxgig/omni
+      ref: dart/v0.1.0
+      path: dart

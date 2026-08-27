@@ -18,10 +18,12 @@ make build    # compiles the LIBRARY alone (no omni)
 Requires the Clojure CLI (`clojure`/`clj`) and a JDK on `PATH`. The library
 itself has **zero third-party runtime dependencies**.
 
-- **The corpus runner is voxgig/omni**, a local checkout the Makefile finds via
-  `$OMNI_HOME` or beside this repository and puts on the test classpath as an
-  `:omni` alias (`:local/root`) minted on the command line. `deps.edn` never
-  names it, so nothing the published jar carries depends on omni
+- **The corpus runner is voxgig/omni, taken from its release tag.** `deps.edn`
+  declares `io.github.voxgig/omni` at `clojure/v0.1.0` — with the sha that tag
+  must resolve to, and `:deps/root "clojure"` for the subdirectory — inside an
+  `:omni` ALIAS. There is no checkout to find and no `$OMNI_HOME`. The alias is
+  the isolation device: an alias is never transitive, so nothing the published
+  jar carries depends on omni
   (register 4.13).
 - **`test/voxgig/struct_runner.clj` is a bridge plus a list of subjects.**
   `tostruct` / `toomni` convert between omni's persistent Clojure data and
