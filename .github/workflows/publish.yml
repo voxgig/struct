@@ -20,12 +20,12 @@
 #
 # TWO JOBS, BECAUSE THEY NEED DIFFERENT PRIVILEGES.
 #
-#   publish  id-token: write, contents: READ. Runs npm ci, the build and the
-#            tests — i.e. dependency lifecycle scripts and project code.
+#   publish  id-token: write, contents: READ. Runs the install, the build and
+#            the tests — i.e. dependency lifecycle scripts and project code.
 #   tag      contents: write. Runs git and nothing else.
 #
 # Keeping them in one job would hand a repository-write credential to every
-# dependency postinstall script that runs during `npm ci`, because checkout
+# dependency postinstall script that runs during the install, because checkout
 # persists its token into the git config for the whole job.
 #
 # A ref pushed with GITHUB_TOKEN does NOT start another workflow run (GitHub
@@ -160,14 +160,28 @@ jobs:
           fi
           if [ -n "$AT" ]; then echo "$TAG already points here; nothing to create"; fi
 
-      # `npm ci` FIRST. The pre-flight below runs `node build/check-model.js`,
+      # INSTALL FIRST. The pre-flight below runs `node build/check-model.js`,
       # which requires aontu — so with the install after it, the pre-flight
       # died on "Cannot find module 'aontu'" and no release using this
       # workflow could ever reach the publish step. Fail-fast ordering is only
       # worth having when the fast step can actually run.
+      #
+      # `npm install`, NOT `npm ci`, for the reason build.yml already gives at
+      # its own install step: this repo gitignores package-lock.json
+      # (.gitignore:150) and commits no lockfile in any port, so `npm ci` has
+      # nothing to install from and exits 1 before doing anything. That is not
+      # hypothetical - it is how the first ever run of this workflow failed,
+      # 17 seconds in. The workflow was adapted from voxgig/sdkgen, which does
+      # commit lockfiles; struct does not.
+      #
+      # Nothing about the PUBLISHED artifact loosens by this: `dependencies` in
+      # typescript/package.json is EMPTY - the package ships with no runtime
+      # deps at all - so everything installed here is build, lint and test
+      # tooling that never reaches the tarball, and @voxgig/omni among it is
+      # pinned to an exact version rather than a range.
       - name: Install dependencies
         working-directory: typescript
-        run: npm ci
+        run: npm install
 
 
       - name: Build and test
