@@ -244,6 +244,74 @@ markdownlint, plus each language's linters).
   that a change works.
 
 
+## Release and publish
+
+Two tag namespaces, because there are two kinds of thing to release.
+
+| what | version lives in | released by | tag |
+| --- | --- | --- | --- |
+| npm `@voxgig/struct` | `typescript/package.json` | `publish.yml` (CI, OIDC) | `v<version>` |
+| each of the 23 other ports | that port's manifest | `make publish-<lang>` | `<lang>/v<version>` |
+
+`PUBLISH_LANGS` in the root `Makefile` lists every port with a publish flow
+(all but boru). Each `make publish-<lang>` publishes to that ecosystem's
+registry **where one exists** (npm, PyPI, crates.io, NuGet, RubyGems,
+LuaRocks, Maven Central, CPAN) and **always** pushes `<lang>/vX.Y.Z`.
+Registry-less ports — Go, PHP/Packagist, Swift, Zig, C, C++ — release *purely*
+by that tag.
+
+**There is no `publish-all`, deliberately.** Each publish is irreversible and
+cuts a version tag, so they are one command each.
+
+`make status` (`tools/release_status.py`) is the dashboard: for every port it
+compares the manifest version, the latest `<lang>/v*` tag and the registry,
+and reports released / publish-pending / unpublished / mismatch. Start there.
+
+### The npm package goes through CI, not the Makefile
+
+**Actions → publish → Run workflow** on `main`, or push a `v<version>` tag.
+`make publish` from `typescript/` also exists — **prefer the workflow**:
+
+- The Makefile path publishes over an **npm token**, bypassing OIDC trusted
+  publishing and its provenance attestation entirely.
+- It cuts `typescript/v<version>`, a *different tag* from the `v<version>`
+  that `publish.yml` writes and that the 16 bare `v*` tags actually use.
+  There is exactly one `typescript/v*` tag in this repo (`typescript/v0.2.1`)
+  against 16 bare ones — the namespace is effectively abandoned, and cutting
+  another would put the release marker where nothing looks for it.
+
+The workflow reads the version from `typescript/package.json`, so **bump it
+first in a reviewed PR**, then dispatch. It refuses a pushed tag that
+disagrees with the package version, and refuses a tag that already points at
+a different commit.
+
+### Why publish and tag are two jobs in one file
+
+`publish.yml` holds `publish` (`id-token: write`, `contents: read`) and `tag`
+(`contents: write`) separately. That split is load-bearing, not tidiness:
+
+- OIDC **cannot** write a tag — its audience is the registry, not GitHub.
+- `checkout` persists its token into the git config for a whole job, so one
+  combined job would run every dependency `postinstall` alongside a
+  repository-write credential.
+- They cannot be split across two **files**: npm registers a trusted publisher
+  against a single workflow **filename**, and a ref pushed with `GITHUB_TOKEN`
+  starts no further workflow run — so "tag in A, publish on the tag" publishes
+  nothing, silently. An unregistered workflow's OIDC token is refused as
+  **404, not 403**, which reads as "package does not exist".
+
+### Irreversible
+
+- **npm never allows republishing a version.** Bump and release again.
+- **A Go tag is permanent**: `proxy.golang.org` and `sum.golang.org` cache a
+  version immutably, and moving or deleting the tag reaches users as a
+  security error. Withdraw only via `retract` in a new version. The same
+  caution applies to every registry-less port here.
+
+`voxgig/apidef`'s `docs/how-to/release-and-tag.md` carries the fullest
+write-up of this design.
+
+
 ## Where to look next
 
 - Conceptual + how-to + full reference: [`DOCS.md`](./DOCS.md)
