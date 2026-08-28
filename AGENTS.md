@@ -263,9 +263,20 @@ by that tag.
 **There is no `publish-all`, deliberately.** Each publish is irreversible and
 cuts a version tag, so they are one command each.
 
-`make status` (`tools/release_status.py`) is the dashboard: for every port it
-compares the manifest version, the latest `<lang>/v*` tag and the registry,
-and reports released / publish-pending / unpublished / mismatch. Start there.
+`make status` (`tools/release_status.py`) is the dashboard. Start there — but
+know what it does and does not do:
+
+- **It covers 22 of the 24 ports.** Its `PORTS` table omits `lean` and `boru`.
+  `boru` has no publish flow so that is right; **`lean` does** — it is in
+  `PUBLISH_LANGS` — so a pending or mismatched Lean release shows up nowhere.
+- **STATUS compares LOCAL against TAG only.** The registry column is a
+  cross-check, not an input: `status()` reports `released` whenever local and
+  tag agree and the registry is anything other than `absent`/`?`. It never
+  compares the registry version to the other two, so it can call a release
+  complete while the registry still serves an older version.
+- **It reads only `<lang>/v*` tags.** `_add_tag` matches `^([a-z+]+)/v(.+)$`
+  and silently drops anything else — including the bare `v*` tags that are the
+  npm package's real release markers. See below.
 
 ### The npm package goes through CI, not the Makefile
 
@@ -277,13 +288,34 @@ and reports released / publish-pending / unpublished / mismatch. Start there.
 - It cuts `typescript/v<version>`, a *different tag* from the `v<version>`
   that `publish.yml` writes and that the 16 bare `v*` tags actually use.
   There is exactly one `typescript/v*` tag in this repo (`typescript/v0.2.1`)
-  against 16 bare ones — the namespace is effectively abandoned, and cutting
-  another would put the release marker where nothing looks for it.
+  against 16 bare ones.
+
+**The two namespaces are already out of step, and `make status` is the one
+thing that cannot see it.** The dashboard reads only `<lang>/v*`, so for
+typescript it tracks the abandoned `typescript/v0.2.1` and ignores every bare
+`v*` tag — including the current `v0.3.2`. It therefore reports:
+
+```
+typescript  0.3.2  typescript/v0.2.1  0.3.2  publish-pending
+```
+
+publish-pending for a version that is on npm. That is not a stale row waiting
+on a release; it is what the dashboard will keep saying after every successful
+CI release, until it learns about bare tags. Treat typescript's row as
+unreliable, and read `git ls-remote --tags origin 'v*'` for the truth.
 
 The workflow reads the version from `typescript/package.json`, so **bump it
 first in a reviewed PR**, then dispatch. It refuses a pushed tag that
 disagrees with the package version, and refuses a tag that already points at
 a different commit.
+
+**A pushed tag is not checked against `main`.** The "Dispatches must come from
+main" guard is gated on `github.event_name == 'workflow_dispatch'`; the push
+path only checks the tag against the package version. Tag a feature commit and
+the workflow publishes *that commit* — code that never landed in the reviewed
+release, irreversibly, since npm will not take the version again. If you push
+a tag by hand, point it at a commit on `main`. The dispatch path has no such
+hole, which is the strongest reason to prefer it.
 
 ### Why publish and tag are two jobs in one file
 
