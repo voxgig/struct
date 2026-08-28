@@ -504,7 +504,7 @@ See `/design/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
 ```bash
 cd java
 mvn package
-make test           # mvn test — runs the shared .aontu corpus
+make test           # mvn test — runs the shared .aon corpus
 ```
 
 Tests live in [`src/test/`](./src/test/).

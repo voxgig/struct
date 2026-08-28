@@ -269,7 +269,7 @@ Zig has no `undefined` JSON value, so the port models "absent" with the
   `.null` literally.
 
 This split is the single most common source of port bugs; the
-`sentinels.aontu` corpus category exercises it directly. Full spec:
+`sentinels.aon` corpus category exercises it directly. Full spec:
 [`../UNDEF_SPEC.md`](../design/UNDEF_SPEC.md).
 
 ### Regex: in-tree engine, and a documented parity gap
@@ -330,7 +330,7 @@ gated on `WALK_BENCH=1`).
 
 **To change behaviour:** behaviour is canonical, so start in
 [`../typescript/`](../typescript/), adjust the corpus case in
-`../build/test/*.aontu`, then port the change here, run `zig build test`
+`../build/test/*.aon`, then port the change here, run `zig build test`
 until green, and re-run `python3 ../tools/check_parity.py`. The full
 checklist is in [`../AGENTS.md`](../AGENTS.md) and the port-specific notes
 are in [`AGENTS.md`](./AGENTS.md).

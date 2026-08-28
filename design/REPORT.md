@@ -118,7 +118,7 @@ this exposed one more latent bug — `cmdEach` was calling `getpath`
 without the injection, so a `"."` source path resolved against root
 data instead of `inj.dparent`; switched to `getpathInj`.
 
-The `sentinels.aontu` conformance category (UNDEF_SPEC.md point 7)
+The `sentinels.aon` conformance category (UNDEF_SPEC.md point 7)
 exercises Group A's "null = absent" rule with three side-by-side
 input states (VALUE, NULL, ABSENT) for getprop / getelem / haskey /
 isempty / isnode, plus a stringify_null check. TS, JS, and Python

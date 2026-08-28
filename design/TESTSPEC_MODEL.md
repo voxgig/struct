@@ -1,7 +1,7 @@
 # Test Spec Model — Structure Analysis & a Type-Based Proposal
 
 **Status:** analysis / proposal (2026-06). Nothing here is implemented yet.
-This document analyses the current `build/test/*.aontu` model and proposes a
+This document analyses the current `build/test/*.aon` model and proposes a
 more coherent, *type-based* structure that uses aontu's unification features
 instead of leaving the entry schema implicit in the TypeScript runner.
 
@@ -17,8 +17,8 @@ instead of leaving the entry schema implicit in the TypeScript runner.
 The corpus is an aontu/`@voxgig/model` program, not hand-written JSON:
 
 ```
-build/test/*.aontu          # aontu source (the model)
-        │  voxgig-model test/test.aontu         (build/package.json: "test-model")
+build/test/*.aon          # aontu source (the model)
+        │  voxgig-model test/test.aon         (build/package.json: "test-model")
         ▼
 build/test/test.json         # 390 KB compiled output — the actual contract
         │  read by typescript/test/runner.ts → resolveSpec()
@@ -26,7 +26,7 @@ build/test/test.json         # 390 KB compiled output — the actual contract
 every port's test runner      # ts, py, go, rust, c, … all read test.json
 ```
 
-`test.aontu` is the entry point. It wires the per-function files together and
+`test.aon` is the entry point. It wires the per-function files together and
 seeds one template:
 
 ```jsonic
@@ -35,9 +35,9 @@ struct: &: {            # '&' = a template unified into EVERY child of `struct`
   set: []               # …and a default empty `set`
 }
 
-struct: minor:    @"minor.aontu"     # '@' = import/include
-struct: getpath:  @"getpath.aontu"
-struct: validate: @"validate.aontu"
+struct: minor:    @"minor.aon"     # '@' = import/include
+struct: getpath:  @"getpath.aon"
+struct: validate: @"validate.aon"
 …
 primary: check: { DEF: { … }, basic: { set: [ … ] } }
 ```
@@ -52,13 +52,13 @@ used exactly once.
 
 ```
 struct
-└── <function>      e.g. getpath, merge, validate, minor.isnode …   (one per .aontu, or one per minor fn)
+└── <function>      e.g. getpath, merge, validate, minor.isnode …   (one per .aon, or one per minor fn)
     └── <group>     e.g. basic, edge, operators, child …            ({ set:[…], + ad-hoc fixtures })
         └── set[]   list of test ENTRIES                            (the leaf units)
 ```
 
-* **Function** — one file per public function (`getpath.aontu`, `merge.aontu`,
-  …), except `minor.aontu` which packs ~30 small functions (`isnode`, `ismap`,
+* **Function** — one file per public function (`getpath.aon`, `merge.aon`,
+  …), except `minor.aon` which packs ~30 small functions (`isnode`, `ismap`,
   `clone`, `slice`, …) as siblings.
 * **Group** — a named bucket of entries (`basic`, `relative`, `handler`,
   `operators`, `child`, `exact`, …). A group is `{ set: [...] }`, sometimes with
@@ -134,8 +134,8 @@ accident rather than a designed slot.
 
 Of aontu's features, the corpus uses only `@` (import), one `&:` map template,
 `$` absolute refs, and `key()`. Everything else is literal JSON. (Note: the
-`` `$STRING` ``/`` `$COPY` `` backtick tokens scattered through `validate.aontu`
-and `transform.aontu` are **struct's own** by-example sentinels — string
+`` `$STRING` ``/`` `$COPY` `` backtick tokens scattered through `validate.aon`
+and `transform.aon` are **struct's own** by-example sentinels — string
 *payloads* under test — not aontu syntax. Easy to conflate; they are data.)
 
 
@@ -147,7 +147,7 @@ build time, (b) defaults are centralised, and (c) the structure documents
 itself.
 
 > The complete structure as runnable-shaped code is in
-> [`testspec-schema.aontu`](./testspec-schema.aontu) — base types, wiring,
+> [`testspec-schema.aon`](./testspec-schema.aon) — base types, wiring,
 > per-function refinements, a worked entry, and the fixtures slot. The sections
 > below explain it piece by piece.
 
@@ -176,13 +176,13 @@ and `close()` is what catches a typoed *field name* — without forbidding any
 
 ### 4.1 A shared, hidden, adaptive base type
 
-Add one `build/test/schema.aontu`, imported by `test.aontu`, defining the base
+Add one `build/test/schema.aon`, imported by `test.aon`, defining the base
 `Entry` under a `hide()`-marked block so it contributes constraints but emits
 nothing. Every field is **optional with a default** — the type *adapts* to
 whichever fields an entry supplies rather than demanding a fixed shape:
 
 ```jsonic
-# schema.aontu — hidden definitions; contribute constraints, emit no JSON.
+# schema.aon — hidden definitions; contribute constraints, emit no JSON.
 
 # Adaptive base: all fields optional, all defaulted. An entry is whatever
 # subset of these it sets; the type adds constraints/defaults, never excludes.
@@ -248,7 +248,7 @@ by unifying a refinement through the `&:` template (§4.3) — see §4.3.1.
 
 ### 4.3 Centralise defaults via the existing `&:` mechanism
 
-Extend the template that already exists in `test.aontu` from "per function" to
+Extend the template that already exists in `test.aon` from "per function" to
 "per group", so group shape/defaults are stated once:
 
 ```jsonic
@@ -272,18 +272,18 @@ or a `validate` input *looks like*. The adaptive lever is to let each function
 adapts to the function under test:
 
 ```jsonic
-# in getpath.aontu — refine every entry of every getpath group
+# in getpath.aon — refine every entry of every getpath group
 struct: getpath: &: &: {           # each group → each entry
   in?:  { path?: string | list,  store?: top }
   out?: top
 }
 
-# in validate.aontu
+# in validate.aon
 struct: validate: &: &: {
   in?:  { data?: top,  spec?: top }
 }
 
-# in merge.aontu — merge takes a single list argument
+# in merge.aon — merge takes a single list argument
 struct: merge: &: &: {
   in?:  list
 }
@@ -297,7 +297,7 @@ catching the field-level typo the base type alone can't see. This is "adaptive
 structure" in the aontu idiom: a base type generalises, per-function templates
 specialise, and unification composes the two — no disjunction, no exclusion.
 
-`minor.aontu` (many functions per file) refines per sibling rather than per
+`minor.aon` (many functions per file) refines per sibling rather than per
 file: `struct: minor: isnode: &: { in?: top, out?: boolean }`, etc., or leaves
 the base as-is where inputs are genuinely heterogeneous.
 
@@ -343,7 +343,7 @@ unification (`Entry'`), never a disjunction that forbids field combinations.
 The hard constraint: `git diff` on the regenerated `build/test/test.json` must
 be empty after each step. Recommended order, smallest-blast-radius first:
 
-1. **Add `schema.aontu` with `hide()`-marked types; don't reference them yet.**
+1. **Add `schema.aon` with `hide()`-marked types; don't reference them yet.**
    Regenerate `test.json`; confirm zero diff. This validates locally that
    `hide()` excludes definitions from output on the pinned `@voxgig/model`
    build before anything depends on it. (If the pinned version's `hide()`
@@ -353,7 +353,7 @@ be empty after each step. Recommended order, smallest-blast-radius first:
 2. **Apply defaults (§4.3)** — `&: Group` group template + `*value` field
    defaults. Regenerate; confirm zero diff. Pure cleanup.
 3. **Type one file's `set` with `[ &:Entry ]` + `close()`** — start with
-   `minor.aontu` (simplest, most uniform entries). Regenerate; confirm zero
+   `minor.aon` (simplest, most uniform entries). Regenerate; confirm zero
    diff; then roll across files one at a time. Each file's first build is where
    a latent typo would surface as a `close()` error — fix the data, not the
    schema.
@@ -376,7 +376,7 @@ the model, keep the contract" is mechanically enforced rather than trusted.
 
 ## 6. What this buys
 
-* **One source of truth for the entry shape** — declared in `schema.aontu`,
+* **One source of truth for the entry shape** — declared in `schema.aon`,
   not reverse-engineered from `runner.ts`. New ports/tools read the type.
 * **Build-time rejection** of typoed field names (the `otu:`/`pth:` class of
   silent no-op test) via `close()` — at both the entry and per-function level.
@@ -406,7 +406,7 @@ version- and integration-specific, all checkable in minutes during step 1:
    `close()` as final (no later additions), the fix is to close *after*
    refinement: keep the base and refinements open, and `close()` the composed
    `Entry'` at the leaf where the `&:Entry` list template is applied.
-3. **`voxgig-model` import resolution for a non-spec file** — `schema.aontu` is
+3. **`voxgig-model` import resolution for a non-spec file** — `schema.aon` is
    imported for types only, not as a `struct.<fn>`. Confirm the builder doesn't
    try to treat it as a function spec.
 

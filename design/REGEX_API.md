@@ -18,7 +18,7 @@ regexp functionality every port must provide** for the six `re_*` functions:
   references in string replacements (Go `ReplaceAllString`);
 - `re_test` and `re_escape` behave as Go `MatchString` / the shared `escre`.
 
-The corpus group `build/test/regex.aontu` enforces this floor in every
+The corpus group `build/test/regex.aon` enforces this floor in every
 port's test runner; its expected values were generated with Go and
 cross-checked against the canonical TS. Ports may exceed the floor (native
 engines usually do), but may not fall below it.

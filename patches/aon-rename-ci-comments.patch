@@ -1,0 +1,47 @@
+From 25f5b30c58090cdca2af14812ebf8d0f7433254c Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 28 Aug 2026 13:17:32 +0000
+Subject: [PATCH] ci: name the .aon sources by their extension
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Follow-up to the .aon rename: build/test/*.aontu became build/test/*.aon,
+but this workflow still calls them .aontu in the corpus-freshness job's
+display name and in the name of the step that recompiles test.json.
+
+Cosmetic only. No CI logic keys off the extension — the step runs
+`npm run test-model`, whose script the rename already repointed at
+test/test.aon — so the job has been passing on the renamed sources
+throughout; it just reports them under the old name.
+
+Carried as a patch because pushing .github/workflows/ needs a `workflow`
+scoped token, which the session that did the rename did not have.
+---
+ .github/workflows/security.yml | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/.github/workflows/security.yml b/.github/workflows/security.yml
+index e6d2b84..6af6a51 100644
+--- a/.github/workflows/security.yml
++++ b/.github/workflows/security.yml
+@@ -197,14 +197,14 @@ jobs:
+       - run: python3 tools/gen_doc_examples.py --check
+ 
+   corpus-freshness:
+-    name: corpus regenerates from *.aontu
++    name: corpus regenerates from *.aon
+     runs-on: ubuntu-latest
+     steps:
+       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+         with:
+           node-version: '24'
+-      - name: Recompile build/test/test.json from the *.aontu sources
++      - name: Recompile build/test/test.json from the *.aon sources
+         working-directory: ./build
+         run: |
+           npm install --no-audit --no-fund
+-- 
+2.43.0
+

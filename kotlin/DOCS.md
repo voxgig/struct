@@ -284,7 +284,7 @@ entry has no way to carry. `Omni.kt` is the bridge between omni's sealed
 
 **To change behaviour:** this is a *port*, so behaviour changes start in
 the canonical TypeScript, not here. Edit `../typescript/src/StructUtility.ts`,
-adjust the corpus case in `../build/test/*.aontu`, make the canonical
+adjust the corpus case in `../build/test/*.aon`, make the canonical
 pass, then bring the same logic to `Struct.kt`, run `./gradlew test`, and
 re-run `python3 ../tools/check_parity.py`. The full cross-port checklist
 is in [`../AGENTS.md`](../AGENTS.md) and this port's

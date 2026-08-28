@@ -31,7 +31,7 @@ The library uses regular expressions in two places:
    | `/+$` / `^/+` / `([^/])/+([^/])` | URL joiner internals | yes |
 
 2. **User-facing**: the `$LIKE` select operator. The shared corpus has
-   **one** `$LIKE` case in `build/test/select.aontu`:
+   **one** `$LIKE` case in `build/test/select.aon`:
 
    ```
    { query: {s0: '`$LIKE`':'[aA][bB][cC]'}, obj: [{s0:'DEf'},{s0:'ABc'}] }
@@ -152,11 +152,11 @@ following the same approach as the C and Zig engines.
 To keep the corpus inside the portable subset:
 
 1. **Document the subset** at the top of
-   `build/test/select.aontu` (and any future file that adds `$LIKE`
+   `build/test/select.aon` (and any future file that adds `$LIKE`
    patterns).
 2. **Add a parity-scan check** in `tools/check_parity.py` (or a sibling
    `tools/check_corpus_regex.py`) that:
-   - Walks every `.aontu` test file.
+   - Walks every `.aon` test file.
    - Extracts strings under `$LIKE` (and any other regex slot we add
      later).
    - Runs each pattern through Go's `regexp.Compile` (via a shell-out)
