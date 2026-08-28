@@ -2,7 +2,7 @@
 
 Read the repo-root [`AGENTS.md`](../AGENTS.md) first. This file covers only
 what is specific to the Clojure port. **TypeScript is canonical; the shared
-`build/test/*.aontu` corpus is the contract.** This port is a faithful
+`build/test/*.aon` corpus is the contract.** This port is a faithful
 translation of the canonical implementation (modelled most closely on the
 Python port, which shares Clojure's single-`nil` world).
 

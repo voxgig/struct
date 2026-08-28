@@ -4,14 +4,14 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test-model": "voxgig-model test/test.aontu",
-    "test-model-watch": "voxgig-model -w test/test.aontu",
+    "test-model": "voxgig-model test/test.aon",
+    "test-model-watch": "voxgig-model -w test/test.aon",
     "clean": "rm -rf node_modules yarn.lock package-lock.json",
     "reset": "npm run clean && npm i && npm run test-model"
   },
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@voxgig/model": "^9.2.4"
+    "@voxgig/model": "^10.0.1"
   }
 }

@@ -460,7 +460,7 @@ syntax, and they live *inside* the by-example structure.
 ### The test corpus is the contract
 
 Behaviour is not pinned by prose; it is pinned by data. The
-[`build/test/*.aontu`](./build/test/) files are a language-independent
+[`build/test/*.aon`](./build/test/) files are a language-independent
 list of `{ in, out }` cases that every port runs through an identical
 runner. "Correct" means "matches the corpus." This is what lets fifteen
 independent implementations stay genuinely identical: there is an

@@ -12,7 +12,7 @@
 > Passes the full shared corpus (1178/1178). The xUnit suite
 > (`StructTest.cs`, 74 tests) is the green-bar regression baseline;
 > the `CorpusScoreboard` test mirrors the Java/C++ runners and writes
-> `corpus-scoreboard.json` after each run with per-`.aontu`-file pass
+> `corpus-scoreboard.json` after each run with per-`.aon`-file pass
 > counts. The committed baseline lives at `test-baseline.json`.
 
 For motivation, language-neutral concepts, and the cross-language

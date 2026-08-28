@@ -48,7 +48,7 @@ KNOWN_GAPS: dict[str, set[str]] = {}
 # divergence; this is a rollout in flight, and it must reach empty. It exists
 # because the condensed-structure work is deliberately sequenced as a tracer
 # bullet: define the format once in the canonical port, freeze it against the
-# shared corpus (build/test/condense.aontu), and only then port outward — so
+# shared corpus (build/test/condense.aon), and only then port outward — so
 # that if the format has to change it changes while ONE implementation exists
 # rather than twenty-four.
 #
@@ -273,7 +273,7 @@ def main() -> int:
     if PENDING_PORT:
         print(f"\npending port ({len(PENDING_PORT)}): " + ", ".join(sorted(PENDING_PORT)))
         print("  canonical TypeScript only, by design — see PENDING_PORT above.")
-        print("  Specified by build/test/condense.aontu; port outward from there.")
+        print("  Specified by build/test/condense.aon; port outward from there.")
 
     if not ok:
         print("\nA complete port is missing one or more canonical functions.")

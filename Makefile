@@ -123,12 +123,12 @@ verify:
 	@$(MAKE) -C build/verify verify
 
 # ---- Shared test corpus ----
-# build/test/test.json is a COMMITTED artifact compiled from build/test/*.aontu
+# build/test/test.json is a COMMITTED artifact compiled from build/test/*.aon
 # by @voxgig/model. Every port's test runner reads it directly. After editing any
-# *.aontu source (e.g. adding a doc-example entry), run `make corpus` and commit
+# *.aon source (e.g. adding a doc-example entry), run `make corpus` and commit
 # the regenerated test.json — CI's corpus-freshness check fails on a stale JSON.
 corpus:
-	@echo "======== corpus: regenerate build/test/test.json from *.aontu ========"
+	@echo "======== corpus: regenerate build/test/test.json from *.aon ========"
 	cd build && npm install --no-audit --no-fund --silent && npm run --silent test-model
 	@echo "Regenerated build/test/test.json"
 

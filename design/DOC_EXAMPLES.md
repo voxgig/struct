@@ -27,7 +27,7 @@ all 16 ports, plus **one shared checker** in the `tools/`-script house style.
 
 ## 1. Principle: a doc example *is* a corpus entry
 
-The repo already has the exact substrate we need. `build/test/*.aontu` compiles (via
+The repo already has the exact substrate we need. `build/test/*.aon` compiles (via
 `@voxgig/model`) to the committed `build/test/test.json`, and **every** port's runner executes it
 as `subject(...args)` deep-equalled to `out` (or matched to `err`/`match`). A documentation
 example — "call `F` with these inputs, get this output" — is structurally identical to a corpus
@@ -53,7 +53,7 @@ An 18-agent probe inspected every port's test harness and the corpus toolchain. 
 | Append entry to existing subject-set | **auto-runs in all 16 ports** | Doc examples added to e.g. `getpath.basic.set` execute everywhere with zero code change. |
 | Extra `id`/`doc` field on an entry | **tolerated by all 16** (entries parsed as generic JSON maps, incl. typed go/rust/java/kotlin/csharp/swift/zig/cpp; empirically confirmed for JS) | Examples can carry linkage metadata safely. Avoid only jsonic-reserved tokens (`&`, `key()`, `DEF`, `@"…"`). |
 | Unknown fields through `voxgig-model` compile | **preserved** (`match`/`ctx`/`client` already round-trip into `test.json`) | `id`/`doc` survive compile unchanged. |
-| `test.json` regeneration | **manual; NOT in CI or any Makefile** | **Gap to fix** — see §4. Editing `.aontu` today requires a hand-run `cd build && npm i && npm run test-model` + commit, or the stale JSON keeps being tested. |
+| `test.json` regeneration | **manual; NOT in CI or any Makefile** | **Gap to fix** — see §4. Editing `.aon` today requires a hand-run `cd build && npm i && npm run test-model` + commit, or the stale JSON keeps being tested. |
 | Doc output convention | **every port uses inline native-comment output** (`//`, `#`, `--`, `/* */`), never a JSON fence; outputs in native notation (`.string("x")`, `Value::Str(...)`, `.{…}`); **no HTML-comment markers exist anywhere today** | A shared checker cannot textually compare native output → §3 layers separate the *machine-checked* canonical output from the *human-visible* native comment. The clean slate means we can introduce one uniform anchor convention. |
 
 **Net:** the maximal-sharing path is to **append tagged example entries to existing corpus
@@ -66,10 +66,10 @@ subject-sets** (zero per-port code), not to create a new `examples` group (16× 
 ### Layer 0 — Example data in the shared corpus *(shared, mandatory)*
 Each documented example is authored as one corpus entry, in the shape its function's existing
 subject-closure already consumes, appended to that subject's `set` in the relevant
-`build/test/*.aontu` file, and tagged:
+`build/test/*.aon` file, and tagged:
 
 ```jsonic
-// in build/test/getpath.aontu, under basic.set:
+// in build/test/getpath.aon, under basic.set:
 { id:'getpath/basic#db-host', doc:true, in:{ store:{ db:{ host:'localhost' }}, path:'db.host' }, out:'localhost' }
 ```
 
@@ -140,8 +140,8 @@ every anchor is guaranteed to carry an up-to-date, corpus-correct output.
 
 1. **Make corpus regeneration first-class and CI-guarded.** Add a `make corpus` target that runs
    the `@voxgig/model` compile (`cd build && npm ci && npm run test-model`) and a CI job that
-   recompiles `.aontu` and `git diff --exit-code build/test/test.json`. Without this, example
-   entries added to `.aontu` but not recompiled would silently never run — the same staleness that
+   recompiles `.aon` and `git diff --exit-code build/test/test.json`. Without this, example
+   entries added to `.aon` but not recompiled would silently never run — the same staleness that
    caused the original problem. (This also fixes a latent gap: `test.json` is regenerated entirely
    by hand today.)
 2. **Naming:** the Makefile `scan-docs` target is already markdownlint — use **`scan-docs-examples`**.
@@ -171,7 +171,7 @@ The example *behaviour* needs no new CI: it rides the existing per-port `test-*`
 ## 6. Authoring workflow (what a contributor does)
 
 1. Write the example as a corpus entry (`id`, `doc:true`, `in|args`, `out|err`) in the relevant
-   `build/test/<fn>.aontu` subject-set.
+   `build/test/<fn>.aon` subject-set.
 2. `make corpus` to regenerate + commit `build/test/test.json`.
 3. In the doc, add the `<!-- example: <id> -->` anchor, the native snippet, and the
    `<!-- => <json> -->` (or `<!-- throws: … -->`) line. (Or, on a Layer-3 port, just the anchor +

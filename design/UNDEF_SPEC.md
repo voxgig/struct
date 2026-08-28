@@ -171,7 +171,7 @@ don't restrict what the library can do — they restrict how tests
 
 ## Conformance test category
 
-`build/test/sentinels.aontu` exercises Group A's rules with the
+`build/test/sentinels.aon` exercises Group A's rules with the
 three states side-by-side:
 
 ```jsonic
@@ -298,7 +298,7 @@ The rollout from this draft:
    flag. Remove NULLMARK conversion. Apply the single preprocess
    pass above. Use strict structural deep-equal.
 
-7. **Add `sentinels.aontu`** as a conformance category. A port
+7. **Add `sentinels.aon`** as a conformance category. A port
    passing it demonstrates the unification.
 
 ## What this design preserves
@@ -351,6 +351,6 @@ The rollout from this draft:
 - Tests are written to **assert observable behaviour** (via Group A
   functions) rather than raw structural shape, so Lua's "set-nil
   deletes" can't break them.
-- Conformance test category `sentinels.aontu` provides three
+- Conformance test category `sentinels.aon` provides three
   side-by-side cases per Group A function and verifies any port
   unifies null and absent on observation.

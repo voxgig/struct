@@ -2,7 +2,7 @@
 
 Read the repo-root [`AGENTS.md`](../AGENTS.md) first. This file covers only
 what is specific to the Lean port. **TypeScript is canonical; the shared
-`build/test/*.aontu` corpus is the contract.** This port mirrors the
+`build/test/*.aon` corpus is the contract.** This port mirrors the
 canonical TypeScript logic directly (via the OCaml port's structure),
 because Lean — like TypeScript, OCaml and Haskell — keeps `undefined` and
 JSON `null` as distinct values.

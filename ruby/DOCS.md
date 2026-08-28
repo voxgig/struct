@@ -263,6 +263,6 @@ case, compare the Ruby logic to the canonical TS for that function, fix the
 Ruby to match, then `make test` and `make lint` green.
 
 **To change canonical behaviour:** do it in the TypeScript first, adjust
-`../build/test/*.aontu`, then propagate here and re-run
+`../build/test/*.aon`, then propagate here and re-run
 [`../tools/check_parity.py`](../tools/check_parity.py) plus this port's
 tests. The full checklist is in [`../AGENTS.md`](../AGENTS.md).
