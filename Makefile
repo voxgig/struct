@@ -13,7 +13,7 @@
 #   make clean         — clean all build artifacts
 #   make publish-rust  — publish ONE language to its registry + tag <lang>/vX.Y.Z
 #   make publish       — show the per-language publish targets
-#   make publish-all   — bump + release every git-tag-driven port (CONFIRM=yes)
+#   make publish-all   — bump + release EVERY port (CONFIRM=yes)
 
 # Every port directory. Target names are the dir names, used verbatim as
 # `make -C <dir>`. Each port ships at least `test` and `lint`; `build`,
@@ -105,25 +105,23 @@ bench:
 bench-%:
 	python3 tools/bench.py $*
 
-# A registry upload cannot be taken back, so publishing stays one language at a
-# time by default. `make publish-all` is the one exception and it covers only
-# the ports where that objection does not apply -- see below.
+# One language at a time, or all of them: `make publish-<lang>` releases one,
+# `make publish-all` releases every port in PUBLISH_LANGS.
 publish:
-	@echo "Publishing is per-language — pick one (each port versions independently):"
+	@echo "Publishing one port at a time:"
 	@echo "  make publish-<lang>   e.g.  make publish-rust"
 	@echo "Languages: $(PUBLISH_LANGS)"
 	@echo "Each runs the port's registry publish (where one exists) and pushes tag <lang>/vX.Y.Z."
 	@echo ""
-	@echo "  make publish-all CONFIRM=yes   bump + release the $(words $(PUBLISH_ALL)) git-tag-driven ports"
-	@echo "  Covered:  $(PUBLISH_ALL)"
-	@echo "  Excluded: $(filter-out $(PUBLISH_ALL),$(PUBLISH_LANGS))  (registry uploads — one at a time)"
+	@echo "  make publish-all CONFIRM=yes   bump + release all $(words $(PUBLISH_ALL)) ports"
+	@echo "    tag-only ($(words $(PUBLISH_ALL_TAGONLY))): $(PUBLISH_ALL_TAGONLY)"
+	@echo "    OIDC     ($(words $(PUBLISH_ALL_OIDC))): $(PUBLISH_ALL_OIDC)"
+	@echo "    registry ($(words $(PUBLISH_ALL_REGISTRY))): $(PUBLISH_ALL_REGISTRY)"
+	@echo "  A port that fails does not stop the rest; the run ends with a summary."
 
 # ---- publish-all ----
 #
-# THE TWO GROUPS IT COVERS BOTH RELEASE BY PUSHING A GIT TAG, which is why
-# batching them is not the thing the per-language rule above guards against.
-# Nothing here uploads to a registry from this machine, and a git tag is
-# deletable in a way a published version is not.
+# EVERY PORT IN PUBLISH_LANGS, in three groups that release differently:
 #
 #   PUBLISH_ALL_TAGONLY  no registry exists; the tag IS the release. Each goes
 #                        through `make publish-<lang>`, so the port's own tests
@@ -135,18 +133,35 @@ publish:
 #                        bypassing OIDC and its provenance attestation, and for
 #                        typescript it cuts `typescript/v*` rather than the bare
 #                        `v*` the package actually releases under.
+#   PUBLISH_ALL_REGISTRY an irreversible upload under that ecosystem's own
+#                        credentials (PyPI, RubyGems, NuGet, CPAN, Maven,
+#                        LuaRocks, Clojars, pub.dev, Hex, Hackage, opam), then
+#                        its tag. These need their credentials present; a port
+#                        whose credentials are missing fails and the run
+#                        carries on without it.
 #
-# The 13 registry ports (python, ruby, csharp, ... ) are deliberately absent.
-# Each uploads an irreversible artifact under its own credentials, so each
-# stays one command.
+# ONE PORT'S FAILURE DOES NOT STOP THE REST, and that is not a preference: the
+# first real run of this target died on zig -- a local toolchain older than the
+# 0.16 the port requires -- and took lean and all three OIDC ports down with
+# it, none of which had anything wrong. Each port is now attempted
+# independently and the run ends with a summary and a non-zero exit if any
+# failed.
 #
 # IT IS RESUMABLE, because tools/bump.py refuses to bump past a version whose
-# tag does not exist. Stop it half way -- a failed test, a rejected push -- and
-# re-running releases the ports still outstanding at the versions already
-# committed, instead of skipping them and bumping the rest a second time.
+# tag does not exist. Stop it half way -- a failed test, a rejected push, a
+# missing credential -- and re-running releases the ports still outstanding at
+# the versions already committed, instead of skipping them and bumping the rest
+# a second time.
 #
-# ORDER: tag-only first. They are local, cheap and fail fast, so a broken tree
-# is caught before anything reaches a registry.
+# ORDER: tag-only, then OIDC, then registry. The tag-only ports are local and
+# cheap, so a broken tree shows up before anything is uploaded; the OIDC tags
+# go next so their CI runs while the registry uploads proceed.
+#
+# THE OIDC LOOP READS A TEMP FILE, NOT A PIPE, deliberately: a piped `while`
+# runs in a subshell, so every `failed=` it recorded would be discarded at the
+# `done` and a failed tag push would vanish from the summary. mktemp rather
+# than a file in the tree, so a run that dies mid-way leaves nothing behind for
+# the next run's clean-tree guard to trip over.
 #
 # THE BUMP COMMIT GOES STRAIGHT TO `main`, because both halves need it there
 # before anything is tagged: a tag records a commit, not a working tree, so an
@@ -155,9 +170,10 @@ publish:
 # does not match it. If `main` is protected against direct pushes this stops
 # here, before any release -- land the bump through a PR and re-run, and the
 # "nothing to bump" path picks it up.
-PUBLISH_ALL_TAGONLY = go php c cpp swift zig lean
-PUBLISH_ALL_OIDC    = typescript javascript rust
-PUBLISH_ALL         = $(PUBLISH_ALL_TAGONLY) $(PUBLISH_ALL_OIDC)
+PUBLISH_ALL_TAGONLY  = go php c cpp swift zig lean
+PUBLISH_ALL_OIDC     = typescript javascript rust
+PUBLISH_ALL_REGISTRY = python ruby csharp perl java kotlin scala lua clojure dart elixir haskell ocaml
+PUBLISH_ALL          = $(PUBLISH_ALL_TAGONLY) $(PUBLISH_ALL_OIDC) $(PUBLISH_ALL_REGISTRY)
 
 # `$(MAKE_BIN)`, NOT `$(MAKE)`, IN THE RECIPE BELOW. GNU make treats any recipe
 # line whose text contains `$(MAKE)` as recursive and runs it even under `-n`,
@@ -189,20 +205,43 @@ publish-all:
 	else \
 	  echo "nothing to bump — releasing the versions already committed"; \
 	fi; \
-	for lang in $(PUBLISH_ALL_TAGONLY); do $(MAKE_BIN) publish-$$lang; done; \
+	failed=""; \
+	for lang in $(PUBLISH_ALL_TAGONLY); do \
+	  $(MAKE_BIN) publish-$$lang || { failed="$$failed $$lang"; \
+	    echo "!! publish-$$lang FAILED — carrying on with the rest"; }; \
+	done; \
 	echo "======== publish: $(PUBLISH_ALL_OIDC) (tag push -> publish.yml) ========"; \
-	python3 tools/bump.py --ports "$$(echo $(PUBLISH_ALL_OIDC) | tr ' ' ',')" --plan \
-	| while IFS="$$(printf '\t')" read -r lang tag version; do \
-	    if git rev-parse -q --verify "refs/tags/$$tag" >/dev/null; then \
-	      echo "  $$tag already exists; nothing to do"; continue; fi; \
-	    git tag -a "$$tag" -m "$$lang v$$version"; \
-	    git push --quiet origin "$$tag"; \
+	tsv="$$(mktemp)"; \
+	python3 tools/bump.py --ports "$$(echo $(PUBLISH_ALL_OIDC) | tr ' ' ',')" --plan > "$$tsv"; \
+	while IFS="$$(printf '\t')" read -r lang tag version; do \
+	  if git rev-parse -q --verify "refs/tags/$$tag" >/dev/null; then \
+	    echo "  $$tag already exists; nothing to do"; continue; fi; \
+	  if git tag -a "$$tag" -m "$$lang v$$version" && git push --quiet origin "$$tag"; then \
 	    echo "  pushed $$tag — publish.yml is now releasing $$lang $$version"; \
-	  done; \
+	  else \
+	    failed="$$failed $$lang"; git tag -d "$$tag" >/dev/null 2>&1 || true; \
+	    echo "!! $$tag push FAILED — carrying on with the rest"; \
+	  fi; \
+	done < "$$tsv"; \
+	rm -f "$$tsv"; \
+	for lang in $(PUBLISH_ALL_REGISTRY); do \
+	  $(MAKE_BIN) publish-$$lang || { failed="$$failed $$lang"; \
+	    echo "!! publish-$$lang FAILED — carrying on with the rest"; }; \
+	done; \
 	echo ""; \
-	echo "Tag-driven ports are released. The OIDC three publish asynchronously:"; \
+	echo "======== publish-all summary ========"; \
+	if [ -n "$$failed" ]; then \
+	  echo "FAILED:$$failed"; \
+	  echo "Nothing else was skipped on their account — every other port was attempted."; \
+	  echo "Fix them and re-run: the bump will not move a version whose tag is missing,"; \
+	  echo "so a re-run releases exactly what is still outstanding."; \
+	else \
+	  echo "every port released"; \
+	fi; \
+	echo "The OIDC ports publish asynchronously:"; \
 	echo "  watch   https://github.com/voxgig/struct/actions/workflows/publish.yml"; \
-	echo "  verify  make status"
+	echo "  verify  make status"; \
+	test -z "$$failed"
 
 # Release dashboard: per-port local version vs latest published tag vs registry.
 status:

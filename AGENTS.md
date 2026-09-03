@@ -347,22 +347,24 @@ LuaRocks, Maven Central, CPAN) and **always** pushes `<lang>/vX.Y.Z`.
 Registry-less ports — Go, PHP/Packagist, Swift, Zig, C, C++ — release *purely*
 by that tag.
 
-**`make publish-all CONFIRM=yes` covers the ten git-tag-driven ports**, and
-only those. It bumps the patch, commits that and pushes it to `main`, releases
-the seven registry-less ports through their own `make publish-<lang>`, then
-pushes the release tag for typescript, javascript and rust so `publish.yml`
-releases those over OIDC.
+**`make publish-all CONFIRM=yes` releases every port in `PUBLISH_LANGS`.** It
+bumps the patch, commits that and pushes it to `main`, then works three groups
+that release differently: the seven registry-less ports through their own
+`make publish-<lang>`; typescript, javascript and rust by pushing the release
+tag `publish.yml` triggers on, so those go over OIDC rather than a local token;
+and the thirteen registry ports through `make publish-<lang>`, which uploads
+under that ecosystem's own credentials.
 
-**The thirteen registry ports are excluded on purpose**, and every other
-publish stays one command. Each of those uploads an irreversible artifact
-under its own credentials; `publish-all` is less an exception to that than the
-set the objection never applied to, since nothing it does uploads from your
-machine and a git tag can be deleted where a published version cannot.
+**A port that fails does not stop the rest.** The first real run died on zig —
+a local toolchain older than the 0.16 the port requires — and took `lean` and
+all three OIDC ports with it, none of which had anything wrong. Every port is
+now attempted independently; the run ends with a summary naming what failed,
+and exits non-zero.
 
 It is resumable: `tools/bump.py` will not bump past a version whose tag is
-missing, so a run that stops half way — a failing test, a refused push — picks
-up the ports it has not released yet rather than skipping them and bumping the
-rest twice.
+missing, so a run that stops half way — a failing test, a refused push, a
+missing credential — picks up the ports it has not released yet rather than
+skipping them and bumping the rest twice.
 
 `make status` (`tools/release_status.py`) is the dashboard. Start there — but
 know what it does and does not do:
