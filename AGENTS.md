@@ -298,14 +298,20 @@ Two tag namespaces, because there are two kinds of thing to release.
 | what | version lives in | released by | tag |
 | --- | --- | --- | --- |
 | npm `@voxgig/struct` | `typescript/package.json` | `publish.yml` (CI, OIDC) | `v<version>` |
+| npm `@voxgig/structjs` | `javascript/package.json` | `publish.yml` (CI, OIDC) | `javascript/v<version>` |
 | crates.io `voxgig-struct` | `rust/Cargo.toml` | `publish.yml` (CI, OIDC) | `rust/v<version>` |
-| each of the 22 other ports | that port's manifest | `make publish-<lang>` | `<lang>/v<version>` |
+| each of the 21 other ports | that port's manifest | `make publish-<lang>` | `<lang>/v<version>` |
 
-**rust is the second port on the CI path** — crates.io now has a trusted
-publisher registered against `publish.yml`, so the crate is released by
-dispatching that workflow with `target: rust`, not by `make publish-rust`.
-It keeps the `<lang>/v<version>` tag shape every other port uses; only the
-credential and the operator changed.
+**Three ports are on the CI path**: typescript and javascript on npm, rust
+on crates.io. Each has a trusted publisher registered against
+`publish.yml`, so each is released by dispatching that workflow rather than
+by `make publish-<lang>`. Both of the newer two keep the
+`<lang>/v<version>` tag shape every other port uses; only the credential
+and the operator changed.
+
+**Targets are named by port, not by registry** — `typescript`,
+`javascript`, `rust`. The dispatch input used to offer `npm`, which stopped
+identifying anything the moment a second npm package joined it.
 
 `PUBLISH_LANGS` in the root `Makefile` lists every port with a publish flow
 (all but boru); `typescript` and `rust` are in it but should go through CI,
@@ -333,16 +339,16 @@ know what it does and does not do:
   and silently drops anything else — including the bare `v*` tags that are the
   npm package's real release markers. See below.
 
-### The npm package and the crate go through CI, not the Makefile
+### The three OIDC ports go through CI, not the Makefile
 
-**Actions → publish → Run workflow** on `main`, picking `target: npm` or
-`target: rust`; or push the matching tag by hand (`v<version>` for npm,
-`rust/v<version>` for the crate). One target per run: the two packages
-version independently and every publish is irreversible, which is the same
-reason there is no `publish-all`.
+**Actions → publish → Run workflow** on `main`, picking `target:
+typescript`, `javascript` or `rust`; or push the matching tag by hand
+(`v<version>`, `javascript/v<version>`, `rust/v<version>`). One target per
+run: the three packages version independently and every publish is
+irreversible, which is the same reason there is no `publish-all`.
 
-`make publish` from `typescript/` and `make publish-rust` also exist —
-**prefer the workflow**:
+`make publish` from `typescript/` and `javascript/`, and `make
+publish-rust`, also exist — **prefer the workflow**:
 
 - The Makefile path publishes over a long-lived registry token (an **npm
   token**, a **`CARGO_REGISTRY_TOKEN`**), bypassing OIDC trusted publishing
@@ -394,9 +400,10 @@ hole, which is the strongest reason to prefer it.
 
 ### Why publish and tag are two jobs, and why both registries share one file
 
-`publish.yml` holds four jobs: `publish` / `tag` for npm and `publish-rust` /
-`tag-rust` for crates.io. Each pair splits `id-token: write, contents: read`
-from `contents: write`. That split is load-bearing, not tidiness:
+`publish.yml` holds six jobs, a publish/tag pair per port: `publish` / `tag`
+for typescript, `publish-javascript` / `tag-javascript`, and `publish-rust` /
+`tag-rust`. Each pair splits `id-token: write, contents: read` from
+`contents: write`. That split is load-bearing, not tidiness:
 
 - OIDC **cannot** write a tag — its audience is the registry, not GitHub.
 - `checkout` persists its token into the git config for a whole job, so one

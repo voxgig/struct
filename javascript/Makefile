@@ -66,10 +66,10 @@ publish: test
 	ghtok="$${GITHUB_TOKEN:-$$GH_TOKEN}"; \
 	if [ "$$npmtok" = "$(BORU_DRY_RUN_FILLER)" ] || [ "$$ghtok" = "$(BORU_DRY_RUN_FILLER)" ]; then \
 	  echo "[dry-run] boru filler token detected: rehearsing the package; nothing published, no $(TAG) tag."; \
-	  npm stage publish --dry-run --access public --registry https://registry.npmjs.org; \
+	  npm publish --dry-run --access public --registry https://registry.npmjs.org; \
 	  exit 0; \
 	fi; \
-	npm stage publish --access public --registry https://registry.npmjs.org; \
+	npm publish --access public --registry https://registry.npmjs.org; \
 	echo "tag: $(TAG)"; \
 	git tag -a "$(TAG)" -m "javascript v$(VERSION)"; \
 	if [ -n "$$ghtok" ]; then \

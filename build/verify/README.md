@@ -89,10 +89,10 @@ The tag-only ports read their version from `php/VERSION`, `c/VERSION`,
 
 ## Publication status
 
-`@voxgig/structjs` (JavaScript) and `voxgig-struct` (Rust / crates.io) are
-**not published yet**, so `verify-javascript` and `verify-rust` are expected
-to fail at the install step until they are. The scaffolding is in place so
-they work the moment those packages ship.
+Both packages that were pending are now live: `@voxgig/structjs` on npm and
+`voxgig-struct` on crates.io, the latter released over OIDC trusted
+publishing. `verify-javascript` and `verify-rust` install from the registry
+like every other port here.
 
 ## Toolchains required
 
