@@ -112,6 +112,32 @@ PORTS = {
                                     ("rust/corpus", ["cargo", "metadata", "--format-version", "1"])]),
     "javascript": ("javascript/v", [Loc("javascript/package.json", r'"version": "(\d+\.\d+\.\d+)"')],
                                    [("javascript", ["npm", "run", "inject-version"])]),
+    # --- registry ports ---
+    "python":     ("python/v",     [Loc("python/pyproject.toml", r'(?m)^version = "(\d+\.\d+\.\d+)"')], []),
+    "ruby":       ("ruby/v",       [Loc("ruby/voxgig_struct.gemspec", r"spec\.version\s*=\s*'(\d+\.\d+\.\d+)'")], []),
+    "csharp":     ("csharp/v",     [Loc("csharp/VoxgigStruct.csproj", r"<Version>(\d+\.\d+\.\d+)</Version>")], []),
+    "perl":       ("perl/v",       [Loc("perl/lib/Voxgig/Struct.pm", r"our \$VERSION = '(\d+\.\d+\.\d+)';")], []),
+    # Anchored on the project's own coordinates: the bare `<version>` line is
+    # also a substring of the omni test dependency further down the file.
+    "java":       ("java/v",       [Loc("java/pom.xml",
+                                        r"<artifactId>struct-java</artifactId>\s*\n\s*<version>(\d+\.\d+\.\d+)</version>")], []),
+    "kotlin":     ("kotlin/v",     [Loc("kotlin/build.gradle.kts", r'(?m)^version = "(\d+\.\d+\.\d+)"')], []),
+    "scala":      ("scala/v",      [plain("scala/VERSION")], []),
+    "clojure":    ("clojure/v",    [plain("clojure/VERSION")], []),
+    "elixir":     ("elixir/v",     [plain("elixir/VERSION")], []),
+    "dart":       ("dart/v",       [Loc("dart/pubspec.yaml", r"(?m)^version: (\d+\.\d+\.\d+)")], []),
+    # The rockspec carries the version twice: its own `X.Y.Z-<rev>` (the
+    # trailing rockspec revision is not part of the port's version) and the
+    # source `tag`, which points at this repo's release tag.
+    "lua":        ("lua/v",        [Loc("lua/struct.rockspec", r'(?m)^version = "(\d+\.\d+\.\d+)-\d+"'),
+                                    Loc("lua/struct.rockspec", r'tag = "lua/v(\d+\.\d+\.\d+)"')], []),
+    "haskell":    ("haskell/v",    [plain("haskell/VERSION"),
+                                    Loc("haskell/voxgig-struct.cabal", r"(?m)^version:\s+(\d+\.\d+\.\d+)")], []),
+    # `^version:` must be anchored: unanchored it also matches the
+    # `opam-version: "2.0"` line above it.
+    "ocaml":      ("ocaml/v",      [plain("ocaml/VERSION"),
+                                    Loc("ocaml/voxgig-struct.opam", r'(?m)^version: "(\d+\.\d+\.\d+)"'),
+                                    Loc("ocaml/dune-project", r"(?m)^\(version (\d+\.\d+\.\d+)\)")], []),
     "typescript": ("v",            [Loc("typescript/package.json", r'"version": "(\d+\.\d+\.\d+)"')],
                                    # inject-version rewrites the src and test
                                    # comments; the build carries them into the
