@@ -12,7 +12,8 @@
 #   make inspect       — show version info for all languages
 #   make clean         — clean all build artifacts
 #   make publish-rust  — publish ONE language to its registry + tag <lang>/vX.Y.Z
-#   make publish       — show the per-language publish targets (no publish-all)
+#   make publish       — show the per-language publish targets
+#   make publish-all   — bump + release every git-tag-driven port (CONFIRM=yes)
 
 # Every port directory. Target names are the dir names, used verbatim as
 # `make -C <dir>`. Each port ships at least `test` and `lint`; `build`,
@@ -36,7 +37,7 @@ AUDIT_LANGS = typescript javascript python go ruby php rust csharp
 # no tag flow yet, so it is not in PUBLISH_LANGS.
 PUBLISH_LANGS = typescript javascript python go ruby php lua zig java rust c cpp csharp kotlin perl swift clojure ocaml scala dart elixir haskell lean
 
-.PHONY: all inspect build test bench lint audit scan analyze clean reset publish status verify corpus gen-docs \
+.PHONY: all inspect build test bench lint audit scan analyze clean reset publish publish-all status verify corpus gen-docs \
         scan-secrets scan-deps scan-sast scan-workflows scan-shell scan-spelling scan-docs \
         scan-parity scan-omni-isolation scan-regex scan-docs-examples scan-prose
 
@@ -104,13 +105,104 @@ bench:
 bench-%:
 	python3 tools/bench.py $*
 
-# Publishing is deliberately one-language-at-a-time (each upload is
-# irreversible and each cuts a version tag), so there is no publish-all.
+# A registry upload cannot be taken back, so publishing stays one language at a
+# time by default. `make publish-all` is the one exception and it covers only
+# the ports where that objection does not apply -- see below.
 publish:
 	@echo "Publishing is per-language — pick one (each port versions independently):"
 	@echo "  make publish-<lang>   e.g.  make publish-rust"
 	@echo "Languages: $(PUBLISH_LANGS)"
 	@echo "Each runs the port's registry publish (where one exists) and pushes tag <lang>/vX.Y.Z."
+	@echo ""
+	@echo "  make publish-all CONFIRM=yes   bump + release the $(words $(PUBLISH_ALL)) git-tag-driven ports"
+	@echo "  Covered:  $(PUBLISH_ALL)"
+	@echo "  Excluded: $(filter-out $(PUBLISH_ALL),$(PUBLISH_LANGS))  (registry uploads — one at a time)"
+
+# ---- publish-all ----
+#
+# THE TWO GROUPS IT COVERS BOTH RELEASE BY PUSHING A GIT TAG, which is why
+# batching them is not the thing the per-language rule above guards against.
+# Nothing here uploads to a registry from this machine, and a git tag is
+# deletable in a way a published version is not.
+#
+#   PUBLISH_ALL_TAGONLY  no registry exists; the tag IS the release. Each goes
+#                        through `make publish-<lang>`, so the port's own tests
+#                        and its existing-tag guard still run.
+#   PUBLISH_ALL_OIDC     the tag push triggers .github/workflows/publish.yml,
+#                        which runs the tests again and publishes over OIDC
+#                        trusted publishing. NOT `make publish-<lang>`: that
+#                        path uploads over a long-lived registry token,
+#                        bypassing OIDC and its provenance attestation, and for
+#                        typescript it cuts `typescript/v*` rather than the bare
+#                        `v*` the package actually releases under.
+#
+# The 13 registry ports (python, ruby, csharp, ... ) are deliberately absent.
+# Each uploads an irreversible artifact under its own credentials, so each
+# stays one command.
+#
+# IT IS RESUMABLE, because tools/bump.py refuses to bump past a version whose
+# tag does not exist. Stop it half way -- a failed test, a rejected push -- and
+# re-running releases the ports still outstanding at the versions already
+# committed, instead of skipping them and bumping the rest a second time.
+#
+# ORDER: tag-only first. They are local, cheap and fail fast, so a broken tree
+# is caught before anything reaches a registry.
+#
+# THE BUMP COMMIT GOES STRAIGHT TO `main`, because both halves need it there
+# before anything is tagged: a tag records a commit, not a working tree, so an
+# uncommitted bump tags code that still carries the old version, and
+# publish.yml reads the version off the pushed branch and refuses a tag that
+# does not match it. If `main` is protected against direct pushes this stops
+# here, before any release -- land the bump through a PR and re-run, and the
+# "nothing to bump" path picks it up.
+PUBLISH_ALL_TAGONLY = go php c cpp swift zig lean
+PUBLISH_ALL_OIDC    = typescript javascript rust
+PUBLISH_ALL         = $(PUBLISH_ALL_TAGONLY) $(PUBLISH_ALL_OIDC)
+
+# `$(MAKE_BIN)`, NOT `$(MAKE)`, IN THE RECIPE BELOW. GNU make treats any recipe
+# line whose text contains `$(MAKE)` as recursive and runs it even under `-n`,
+# `-t` and `-q`. The recipe is one backslash-continued line, so a single
+# `$(MAKE)` anywhere in it makes `make -n publish-all CONFIRM=yes` cut and push
+# real release tags instead of printing what it would do -- the opposite of
+# what -n is for, on the one target where that is least recoverable. Measured
+# here before this indirection existed. The check is textual and pre-expansion,
+# so aliasing the variable is enough to opt out of it.
+MAKE_BIN := $(MAKE)
+
+publish-all:
+	@test "$(CONFIRM)" = "yes" || { \
+	  echo "publish-all releases $(words $(PUBLISH_ALL)) ports and pushes their tags."; \
+	  echo "Re-run as: make publish-all CONFIRM=yes"; exit 1; }
+	@set -e; \
+	test -z "$$(git status --porcelain)" || { echo "working tree is dirty — commit or stash first"; exit 1; }; \
+	branch="$$(git rev-parse --abbrev-ref HEAD)"; \
+	test "$$branch" = "main" || { echo "on $$branch — releases are cut from main"; exit 1; }; \
+	git fetch --tags --quiet origin main; \
+	test "$$(git rev-parse HEAD)" = "$$(git rev-parse origin/main)" || { \
+	  echo "main and origin/main differ — pull or push first"; exit 1; }; \
+	echo "======== bump ========"; \
+	python3 tools/bump.py --ports "$$(echo $(PUBLISH_ALL) | tr ' ' ',')"; \
+	if [ -n "$$(git status --porcelain)" ]; then \
+	  git commit -aqm "all ports: patch bump for a release train"; \
+	  git push --quiet origin main; \
+	  echo "bump committed and pushed: $$(git rev-parse --short HEAD)"; \
+	else \
+	  echo "nothing to bump — releasing the versions already committed"; \
+	fi; \
+	for lang in $(PUBLISH_ALL_TAGONLY); do $(MAKE_BIN) publish-$$lang; done; \
+	echo "======== publish: $(PUBLISH_ALL_OIDC) (tag push -> publish.yml) ========"; \
+	python3 tools/bump.py --ports "$$(echo $(PUBLISH_ALL_OIDC) | tr ' ' ',')" --plan \
+	| while IFS="$$(printf '\t')" read -r lang tag version; do \
+	    if git rev-parse -q --verify "refs/tags/$$tag" >/dev/null; then \
+	      echo "  $$tag already exists; nothing to do"; continue; fi; \
+	    git tag -a "$$tag" -m "$$lang v$$version"; \
+	    git push --quiet origin "$$tag"; \
+	    echo "  pushed $$tag — publish.yml is now releasing $$lang $$version"; \
+	  done; \
+	echo ""; \
+	echo "Tag-driven ports are released. The OIDC three publish asynchronously:"; \
+	echo "  watch   https://github.com/voxgig/struct/actions/workflows/publish.yml"; \
+	echo "  verify  make status"
 
 # Release dashboard: per-port local version vs latest published tag vs registry.
 status:
