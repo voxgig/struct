@@ -56,14 +56,36 @@
 # THREE WAYS IN:
 #
 #   workflow_dispatch        the normal path. Publishes if missing, then tags.
-#   push: tags v*            the manual path, for a tag pushed by hand.
+#   push: tags typescript/v* the manual path, for a tag pushed by hand.
 #                            Publishes @voxgig/struct only.
 #   push: tags javascript/v* the same, for @voxgig/struct-js.
 #   push: tags rust/v*       the same, for the crate.
 #
-# A `*` in a ref filter does not cross `/`, so `v*` cannot also match
-# `javascript/v0.1.1` or `rust/v0.1.2`, and the push paths never overlap.
-# The tag jobs do not run on a push.
+# A `*` in a ref filter does not cross `/`, so the three push paths never
+# overlap. The tag jobs do not run on a push.
+#
+# EVERY PORT TAGS AS `<lang>/v<version>`, TYPESCRIPT INCLUDED. It released
+# under a BARE `v<version>` up to 0.3.4, and the 16 bare tags in this repo are
+# that history. One port with its own scheme cost more than it saved: the tag
+# is the repository's release marker, `tools/release_status.py` reads one by
+# matching `^([a-z+]+)/v`, and a bare tag does not match -- so the dashboard
+# silently dropped every typescript release and reported the port at
+# `typescript/v0.2.1`, a stale tag from a Makefile publish, while 0.3.4 was
+# live on npm. `tools/bump.py` carried a special case for the same reason.
+# Both are gone now; the port name is in the tag, as it is in the sibling
+# repositories.
+#
+# THE BARE TAGS STAY. They are what `v0.3.4` and its fifteen predecessors were
+# released under, and rewriting a published release marker to tidy a scheme
+# would be worse than the inconsistency. The new scheme therefore starts at
+# the first release cut after this change, and the two namespaces sit side by
+# side: everything up to `v0.3.4` bare, everything after it under
+# `typescript/v`. `tools/bump.py` reads the new prefix and falls back to the
+# bare one for a version the new namespace does not carry, so 0.3.4 still
+# reads as released and the next bump is 0.3.5. Without that bridge it would
+# read 0.3.4 as unreleased and cut `typescript/v0.3.4` at whatever commit
+# main was on -- a tag the gitHead guard below then refuses, left behind for
+# the dashboard to read as a release.
 #
 # DRY RUN. `dry_run: true` on a dispatch rehearses a release without making
 # one: every guard and every test runs, the artifact is packed with
@@ -83,38 +105,30 @@
 # reads the version already on the branch and releases exactly that, so the
 # bump stays a reviewable diff and the release stays a button.
 #
-#   typescript/package.json "version" -> tag v<version>
+#   typescript/package.json "version" -> tag typescript/v<version>
 #   javascript/package.json "version" -> tag javascript/v<version>
 #   rust/Cargo.toml         version   -> tag rust/v<version>
 #
 # Renaming this file breaks publishing until BOTH registries' trusted
 # publishers are updated to match. Do NOT publish locally over a token: that
-# bypasses OIDC and its provenance attestation entirely. The one exception is
-# a package name npm has never seen, which is exactly where @voxgig/struct-js
-# is now -- see the next paragraph.
+# bypasses OIDC and its provenance attestation entirely.
 #
-# @voxgig/struct-js HAS NO TRUSTED PUBLISHER YET. The javascript port was
-# renamed from @voxgig/structjs, which ends at 0.1.1, and npm registers a
-# trusted publisher only on a package that already exists. So the FIRST
-# release under the new name is a token publish, after which the publisher
-# is registered against this file and every later release comes back here.
-# Dispatching `target: javascript` before that registration fails the OIDC
-# exchange, and npm reports it as the same 404 described above.
-#
-# THAT BOOTSTRAP IS ONE PLAIN `npm publish`, NOT `make -C javascript
-# publish`. The Makefile stages -- `npm stage publish` posts to
-# /-/stage/package/<name>, an endpoint addressed at a package that already
-# exists -- so staging a name npm has never seen 404s the same way. Publish
-# it by hand from javascript/ with
-# `npm publish --access public --registry https://registry.npmjs.org`, then
-# `make -C javascript tag`, which reads the registry and refuses until that
-# publish has landed. The port's Makefile carries the same note.
+# @voxgig/struct-js HAS NEVER PUBLISHED OVER OIDC. The port was renamed from
+# @voxgig/structjs, and npm registers a trusted publisher only against a
+# package that already exists, so 0.1.2 went out as one plain token publish:
+# it sits on npm under a person's name with no provenance attestation, while
+# @voxgig/struct@0.3.4 carries one. A `target: javascript` dispatch on
+# 2026-09-03 failed the OIDC exchange all the same, reported as exactly the
+# 404 above -- tests passed, the tarball packed, the PUT was rejected. Until
+# a publisher for @voxgig/struct-js is registered against THIS repository and
+# THIS filename on the package's npm settings page, that dispatch cannot
+# succeed. The registration is what to check, not the workflow.
 
 name: publish
 
 on:
   push:
-    tags: ['v*', 'javascript/v*', 'rust/v*']
+    tags: ['typescript/v*', 'javascript/v*', 'rust/v*']
   workflow_dispatch:
     inputs:
       target:
@@ -149,7 +163,7 @@ jobs:
     # release of whatever typescript/package.json happens to say.
     if: >-
       ${{ (github.event_name == 'workflow_dispatch' && inputs.target == 'typescript')
-       || (github.event_name == 'push' && startsWith(github.ref_name, 'v')) }}
+       || (github.event_name == 'push' && startsWith(github.ref_name, 'typescript/v')) }}
 
     # Deliberately NOT contents: write — see the header. This job runs
     # dependency lifecycle scripts.
@@ -177,7 +191,7 @@ jobs:
           VERSION="$(node -p "require('./typescript/package.json').version")"
           test -n "$VERSION" || { echo "::error::could not read typescript/package.json version"; exit 1; }
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "$VERSION -> tag v$VERSION"
+          echo "$VERSION -> tag typescript/v$VERSION"
 
       # RELEASES COME FROM main, INCLUDING FROM THE BUTTON. `gh workflow run
       # --ref` accepts any branch or tag, and the Makefile's `main` guard only
@@ -214,16 +228,17 @@ jobs:
           fi
 
       # A tag pushed by hand must agree with the version it claims to release.
-      # Without this, pushing v1.2.3 while typescript/package.json still says 1.2.2
-      # resolves 1.2.2, finds it already published, skips the publish, and the
-      # run goes GREEN — leaving a tag with no release behind it.
+      # Without this, pushing typescript/v1.2.3 while typescript/package.json
+      # still says 1.2.2 resolves 1.2.2, finds it already published, skips the
+      # publish, and the run goes GREEN — leaving a tag with no release behind
+      # it.
       - name: The pushed tag must match the package version
         if: ${{ github.event_name == 'push' }}
         env:
           PKG_VERSION: ${{ steps.versions.outputs.version }}
         run: |
           set -euo pipefail
-          WANT="v$PKG_VERSION"
+          WANT="typescript/v$PKG_VERSION"
           if [ "$GITHUB_REF_NAME" != "$WANT" ]; then
             echo "::error::tag $GITHUB_REF_NAME does not match typescript/package.json ($WANT)"
             exit 1
@@ -246,7 +261,7 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
           set -euo pipefail
-          TAG="v$PKG_VERSION"
+          TAG="typescript/v$PKG_VERSION"
           HEAD_SHA="$(git rev-parse HEAD)"
           AT="$(git rev-parse -q --verify "refs/tags/$TAG^{commit}" 2>/dev/null || true)"
           if [ -n "$AT" ] && [ "$AT" != "$HEAD_SHA" ]; then
@@ -397,7 +412,7 @@ jobs:
           PKG_VERSION: ${{ needs.publish.outputs.version }}
         run: |
           set -euo pipefail
-          TAG="v$PKG_VERSION"
+          TAG="typescript/v$PKG_VERSION"
           HEAD_SHA="$(git rev-parse HEAD)"
 
           # EXISTENCE IS NOT ENOUGH. `git rev-parse --verify` only asks whether

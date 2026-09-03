@@ -338,28 +338,38 @@ Two tag namespaces, because there are two kinds of thing to release.
 
 | what | version lives in | released by | tag |
 | --- | --- | --- | --- |
-| npm `@voxgig/struct` | `typescript/package.json` | `publish.yml` (CI, OIDC) | `v<version>` |
+| npm `@voxgig/struct` | `typescript/package.json` | `publish.yml` (CI, OIDC) | `typescript/v<version>` |
 | npm `@voxgig/struct-js` | `javascript/package.json` | `publish.yml` (CI, OIDC) | `javascript/v<version>` |
 | crates.io `voxgig-struct` | `rust/Cargo.toml` | `publish.yml` (CI, OIDC) | `rust/v<version>` |
 | each of the 21 other ports | that port's manifest | `make publish-<lang>` | `<lang>/v<version>` |
 
 **Three ports are on the CI path**: typescript and javascript on npm, rust
-on crates.io. Each has a trusted publisher registered against
-`publish.yml`, so each is released by dispatching that workflow rather than
-by `make publish-<lang>`. Both of the newer two keep the
-`<lang>/v<version>` tag shape every other port uses; only the credential
-and the operator changed.
+on crates.io — released by dispatching `publish.yml` rather than by
+`make publish-<lang>`. All three use the `<lang>/v<version>` tag shape every
+other port uses; only the credential and the operator changed. Typescript
+and rust have a trusted publisher registered against `publish.yml`;
+javascript does not yet, which is the paragraph after next.
 
-**The javascript package is renamed to `@voxgig/struct-js`, and that name
-has no trusted publisher yet.** npm registers a trusted publisher only on a
-package that already exists, so the first release under the new name cannot
-go over OIDC. Register the publisher against `publish.yml` on the new
-package's settings page once it has one, and every release after that goes
-back through CI; dispatching `publish.yml` with target `javascript` before
-that registration fails the OIDC exchange, which npm reports as a 404.
+Typescript joined that shape late. It released under a bare `v<version>`
+up to `v0.3.4`, and those 16 tags stay — they are what those releases went
+out under. Everything from the next release on is `typescript/v<version>`,
+which is the only shape `tools/release_status.py` can read.
 
-**A first release is one plain `npm publish`, not `make publish`.** The two
-paths this repository normally uses both need the package to exist already:
+**`@voxgig/struct-js` has no working trusted publisher.** npm registers one
+only on a package that already exists, so 0.1.2 went out as one plain token
+publish — it sits on npm under a person's name with no provenance
+attestation, where `@voxgig/struct@0.3.4` carries one. A `target:
+javascript` dispatch on 2026-09-03 failed the OIDC exchange all the same,
+which npm reports as a 404 on `PUT /@voxgig%2fstruct-js`: the tests passed
+and the tarball packed, the upload was refused. Register a publisher for
+the package against this repository and the filename `publish.yml` on its
+npm settings page. Until that is done javascript cannot be released from
+CI, and `javascript/package.json` sits at 0.1.4 unreleased.
+
+**A first release under a NEW package name is one plain `npm publish`, not
+`make publish`** — the case `@voxgig/struct-js` was in at 0.1.2, and the
+only one. The two paths this repository normally uses both need the package
+to exist already:
 OIDC for the reason above, and `make -C <lang> publish` because
 `npm stage publish` posts to `/-/stage/package/<name>`, an endpoint
 addressed at an existing package. Staging a name npm has never seen answers
@@ -419,15 +429,19 @@ know what it does and does not do:
   compares the registry version to the other two, so it can call a release
   complete while the registry still serves an older version.
 - **It reads only `<lang>/v*` tags.** `_add_tag` matches `^([a-z+]+)/v(.+)$`
-  and silently drops anything else — including the bare `v*` tags that are the
-  npm package's real release markers. See below.
+  and silently drops anything else — including the 16 bare `v*` tags the npm
+  package released under up to `v0.3.4`. That was typescript's whole problem:
+  the dashboard reported it at `typescript/v0.2.1`, a stale Makefile tag, while
+  0.3.4 was live. `publish.yml` writes `typescript/v<version>` now, so every
+  release from the next one on reads correctly; the bare tags stay as history
+  and remain invisible to this tool.
 
 ### The three OIDC ports go through CI, not the Makefile
 
 **Actions → publish → Run workflow** on `main`, picking `target:
 typescript`, `javascript` or `rust`; or push the matching tag by hand
-(`v<version>`, `javascript/v<version>`, `rust/v<version>`). One target per
-run: the three packages version independently and every publish is
+(`typescript/v<version>`, `javascript/v<version>`, `rust/v<version>`). One
+target per run: the three packages version independently and every publish is
 irreversible. `make publish-all` drives exactly this tag-push path for all
 three, which is why it never needs a registry credential of its own.
 
@@ -437,10 +451,11 @@ publish-rust`, also exist — **prefer the workflow**:
 - The Makefile path publishes over a long-lived registry token (an **npm
   token**, a **`CARGO_REGISTRY_TOKEN`**), bypassing OIDC trusted publishing
   and its provenance attestation entirely.
-- For typescript it cuts `typescript/v<version>`, a *different tag* from the `v<version>`
-  that `publish.yml` writes and that the 16 bare `v*` tags actually use.
-  There is exactly one `typescript/v*` tag in this repo (`typescript/v0.2.1`)
-  against 16 bare ones.
+- It cuts the same tag as the workflow now. It always cut
+  `typescript/v<version>`; `publish.yml` used to write a bare `v<version>`
+  instead, so the two paths disagreed and only one of them produced a tag the
+  rest of the tooling could read. Both write `typescript/v<version>` today —
+  the 16 bare tags up to `v0.3.4` are what that history left behind.
 - **Both npm ports need two commands, not one.** `make publish` runs
   `npm stage publish`, which uploads the tarball and defers the 2FA
   proof-of-presence: the version is *staged*, not released. `npm stage

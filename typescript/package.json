@@ -34,9 +34,9 @@
     "inject-version": "node -e \"t=['./src/StructUtility.ts','./test/utility/StructUtility.test.ts'],r=require,fs=r('fs'),v=r('./package.json').version,t.map(f=>fs.writeFileSync(f,fs.readFileSync(f,'utf8').replace(/\\/\\/ VERSION: @voxgig\\/struct [^\\n]+/, '// VERSION: @voxgig/struct '+v)))\"",
     "clean": "rm -rf dist dist-test node_modules yarn.lock package-lock.json",
     "reset": "npm run clean && npm i && npm run build && npm test",
-    "repo-tag": "REPO_VERSION=`node -e \"console.log(require('./package').version)\"` && echo TAG: v$REPO_VERSION && git commit -a -m v$REPO_VERSION && git push && git tag v$REPO_VERSION && git push --tags;",
+    "repo-tag": "REPO_VERSION=`node -e \"console.log(require('./package').version)\"` && npm view @voxgig/struct@$REPO_VERSION version > /dev/null 2>&1 || { echo \"@voxgig/struct@$REPO_VERSION is not on the registry - approve the staged release first (npm stage approve)\"; exit 1; } && echo TAG: typescript/v$REPO_VERSION && git commit -a -m typescript/v$REPO_VERSION && git push && git tag typescript/v$REPO_VERSION && git push --tags;",
     "repo-publish": "npm run clean && npm i && npm run repo-publish-quick",
-    "repo-publish-quick": "npm run inject-version && npm run build && npm run test && npm run doc && npm run repo-tag && npm stage publish --access public --registry https://registry.npmjs.org",
+    "repo-publish-quick": "npm run inject-version && npm run build && npm run test && npm run doc && npm stage publish --access public --registry https://registry.npmjs.org && echo 'Staged. NOT published and NOT tagged: run `npm stage approve`, then `npm run repo-tag`.'",
     "repo-publish-dry": "npm run clean && npm i && npm run repo-publish-dry-quick",
     "repo-publish-dry-quick": "npm run inject-version && npm run build && npm run test && npm run doc && npm stage publish --dry-run --access public --registry https://registry.npmjs.org"
   },

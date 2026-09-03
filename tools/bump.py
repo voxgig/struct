@@ -89,12 +89,20 @@ def plain(path: str) -> Loc:
     return Loc(path, r"\A\s*(\d+\.\d+\.\d+)\s*\Z")
 
 
+# New tag prefix -> the prefix that port used to release under. Consulted
+# only by `released()`, and only when the new prefix finds nothing.
+LEGACY = {"typescript/v": "v"}
+
+
 # port -> (tag prefix, version locations, post-bump commands)
 #
-# TAG PREFIX IS NOT ALWAYS `<lang>/v`. The typescript package releases under the
-# BARE `v<version>` namespace -- that is what publish.yml writes and what the 16
-# bare tags in this repo use. Reading `typescript/v*` instead finds one stale
-# tag from a Makefile publish and reports the port as years behind.
+# EVERY PREFIX IS `<lang>/v`, typescript included. It used to be the exception
+# -- the package released under the bare `v<version>` namespace, so this table
+# carried `"v"` for it and reading `typescript/v*` found one stale Makefile tag
+# and reported the port as years behind. publish.yml writes
+# `typescript/v<version>` now; the 16 bare tags up to `v0.3.4` stay as the
+# history that scheme left behind, and the new namespace starts at the first
+# release cut after the change.
 PORTS = {
     "go":         ("go/v",         [plain("go/VERSION")], []),
     "php":        ("php/v",        [plain("php/VERSION")], []),
@@ -138,7 +146,7 @@ PORTS = {
     "ocaml":      ("ocaml/v",      [plain("ocaml/VERSION"),
                                     Loc("ocaml/voxgig-struct.opam", r'(?m)^version: "(\d+\.\d+\.\d+)"'),
                                     Loc("ocaml/dune-project", r"(?m)^\(version (\d+\.\d+\.\d+)\)")], []),
-    "typescript": ("v",            [Loc("typescript/package.json", r'"version": "(\d+\.\d+\.\d+)"')],
+    "typescript": ("typescript/v", [Loc("typescript/package.json", r'"version": "(\d+\.\d+\.\d+)"')],
                                    # inject-version rewrites the src and test
                                    # comments; the build carries them into the
                                    # committed dist/ and dist-test/.
@@ -165,9 +173,24 @@ def released(prefix: str, version: str) -> bool:
     manifest is committed leaves any port that way.
 
     Local tags only, so callers must `git fetch --tags` first.
+
+    A PORT THAT CHANGED TAG NAMESPACE NEEDS ITS LAST OLD TAG TO COUNT.
+    typescript released under a bare `v<version>` up to 0.3.4 and under
+    `typescript/v<version>` from the next release on. Reading only the new
+    prefix makes 0.3.4 look unreleased, and that is not a cosmetic
+    misreport: `make publish-all` refuses to bump a port whose current
+    version is untagged, so the OIDC loop would cut `typescript/v0.3.4` at
+    whatever commit main happens to be on. The workflow then rejects it --
+    npm built 0.3.4 from an earlier commit -- and the repository is left
+    carrying a tag for a release that did not come from it, which
+    release_status.py reads as released. LEGACY answers that: the bare tag
+    counts as the release it was, once, and the fallback stops mattering
+    the moment a version is cut under the new prefix.
     """
-    out = run(["git", "tag", "-l", f"{prefix}{version}"], ROOT).strip()
-    return bool(out)
+    if run(["git", "tag", "-l", f"{prefix}{version}"], ROOT).strip():
+        return True
+    old = LEGACY.get(prefix)
+    return bool(old and run(["git", "tag", "-l", f"{old}{version}"], ROOT).strip())
 
 
 def bump_patch(version: str) -> str:
@@ -203,7 +226,7 @@ def main(argv: list) -> int:
         if args.plan:
             # The release tag this port's CURRENT version wants. Callers cut
             # tags from this rather than composing `<lang>/v<version>`
-            # themselves, because typescript's namespace is the bare `v`.
+            # themselves: the prefix is the table's to decide, not theirs.
             print(f"{name}\t{prefix}{current}\t{current}")
             continue
 
