@@ -59,7 +59,8 @@ boru has no optional parameters, no variadics, and no `undefined`:
   hooks) travel in carriers: a one-element list `[f/v]` for pure
   callbacks, or an fn box `` {"`$FN`": f/v} `` where the canonical API
   `isfunc`-tests the value (store commands, handlers). See
-  [`AGENTS.md`](./AGENTS.md) for the full convention.
+  [`DOCS.md`](./DOCS.md#function-values-carriers) for the full
+  convention.
 - **`none` plays both `undefined` and JSON `null`** (the single-null
   model of the Python / Dart / Lua ports). The Group A/B rules
   ([`../design/UNDEF_SPEC.md`](../design/UNDEF_SPEC.md)) recover the
@@ -110,5 +111,4 @@ Only `make test` depends on it. `make build` and `make lint` never touch
 the link, so a clone with no omni beside it still builds and checks the
 library.
 
-See [`DOCS.md`](./DOCS.md) for the comprehensive guide and
-[`AGENTS.md`](./AGENTS.md) for contributor/agent notes.
+See [`DOCS.md`](./DOCS.md) for the full guide.

@@ -1,4 +1,4 @@
-# Struct for C# — Comprehensive Guide
+# Struct for C# — the full guide
 
 > A **port**. The canonical behaviour is defined in TypeScript
 > ([`../typescript/`](../typescript/)); this C# port is held to the same
@@ -258,8 +258,7 @@ corpus in [`../build/test/`](../build/test/). Practically:
   [`../typescript/src/StructUtility.ts`](../typescript/src/StructUtility.ts)
   and the corpus, not by reading this port in isolation.
 - A change to canonical behaviour starts in TypeScript, then flows to the
-  corpus and out to every port including this one (see
-  [`../AGENTS.md`](../AGENTS.md#standard-workflows)).
+  corpus and out to every port including this one.
 
 ### `null` and `object?`
 
@@ -322,9 +321,9 @@ Lint is **Roslyn analyzers**, not a separate tool: the csproj turns on
 on purpose (see the csproj comment) so a newer SDK can't introduce a new
 default-on rule and break CI.
 
-Tests live in [`tests/`](./tests/); the runner
-([`tests/Runner.cs`](./tests/Runner.cs)) loads the shared corpus from
-[`../build/test/`](../build/test/) the same way every port's runner does.
+Tests live in [`tests/`](./tests/); the corpus loader
+([`tests/Omni.cs`](./tests/Omni.cs)) resolves the shared runner from
+[`../build/test/`](../build/test/) the same way every port's does.
 The xUnit panel ([`tests/StructTest.cs`](./tests/StructTest.cs)) is the
 green-bar regression baseline, and `tests/RegexPathologicalTest.cs` holds
 the regex edge-case panel.
@@ -333,6 +332,5 @@ the regex edge-case panel.
 disagreement by matching `Struct.cs` to the canonical and the corpus — do
 not edit the corpus. A genuine canonical change starts in TypeScript, then
 propagates here; re-run `make test` and
-`python3 ../tools/check_parity.py`. The full checklist is in
-[`../AGENTS.md`](../AGENTS.md). Toolchain: .NET SDK 8.0.100 (pinned in
+`python3 ../tools/check_parity.py`. Toolchain: .NET SDK 8.0.100 (pinned in
 [`global.json`](./global.json)), LangVersion 12.

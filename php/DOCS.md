@@ -1,4 +1,4 @@
-# Struct for PHP — Comprehensive Guide
+# Struct for PHP — the full guide
 
 > A faithful PHP port of the **canonical** TypeScript implementation. Behaviour
 > is defined by TypeScript and pinned by the shared corpus; this port matches it
@@ -209,7 +209,7 @@ TypeScript is the source of truth; the shared corpus in
 [`../build/test/`](../build/test/) is generated from it and this port is held to
 that corpus. A behaviour question is answered by reading the canonical TS, not by
 reading `Struct.php`. A canonical change starts in TypeScript, flows to the
-corpus, then to this port (see [`../AGENTS.md`](../AGENTS.md)).
+corpus, then to this port.
 
 ### Arrays are value types — `ListRef` and `&$parent`
 
@@ -255,7 +255,7 @@ This port already follows **Group A** null semantics (see
 `Struct::validate` returns the data on success. By default it throws a plain
 `\Exception` whose message lists the accumulated errors (`'Invalid data: …'`).
 Supply an `errs` collector on the `$injdef` object to accumulate instead of
-throwing (see the how-to above). Separately, `re_compile` throws
+throwing (see the preceding how-to). Separately, `re_compile` throws
 `\InvalidArgumentException` on an invalid pattern.
 
 ### Regex
@@ -300,5 +300,4 @@ suite (85/85, 1022 assertions — see [`../REPORT.md`](../design/REPORT.md)).
 
 **To change behaviour:** do it in canonical TypeScript first, adjust the corpus,
 then port the change here, run `make test` and `make lint`, and re-run
-[`../tools/check_parity.py`](../tools/check_parity.py). The full checklist is in
-[`../AGENTS.md`](../AGENTS.md).
+[`../tools/check_parity.py`](../tools/check_parity.py).

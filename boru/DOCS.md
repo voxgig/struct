@@ -1,4 +1,4 @@
-# boru port — comprehensive guide
+# boru port — the full guide
 
 This document covers the boru-specific details of `voxgig/struct`. For the
 language-neutral concepts, tutorial and full reference, read the top-level
@@ -143,6 +143,6 @@ GROUP=minor` runs one section out of a corpus that takes minutes.
 `make lint` additionally runs the boru static checker over the library
 (the module checks clean — 0 errors) and a load smoke.
 
-For engine-level idioms (bind-then-return, module-level loops,
-no-short-circuit `and`, carrier rules) read
-[`AGENTS.md`](./AGENTS.md) before changing the source.
+The engine-level idioms the source relies on are bind-then-return,
+module-level loops, `and` without short-circuiting, and the carrier
+rules in [`Function values: carriers`](#function-values-carriers).

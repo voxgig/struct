@@ -1,4 +1,4 @@
-# Struct for C++ — Comprehensive Guide
+# Struct for C++ — the full guide
 
 > A **port** of the canonical TypeScript implementation. Behaviour is
 > defined by TypeScript and pinned by the shared corpus; this port follows
@@ -277,8 +277,8 @@ Everything else keeps its canonical spelling (`getprop`, `setprop`,
 Behaviour is defined by the canonical TypeScript and pinned by the shared
 corpus in [`../build/test/`](../build/test/). When this port disagrees with
 the corpus, the port is wrong — fix it here, never edit the corpus. A
-genuine behaviour change starts in TypeScript and flows out to every port
-(see [`../AGENTS.md`](../AGENTS.md#standard-workflows)).
+genuine behaviour change starts in TypeScript and flows out to every
+port.
 
 ### null versus absent
 
@@ -367,5 +367,4 @@ are not sets - `merge.basic`, `inject.basic`, `transform.basic` and
 [`../typescript/src/StructUtility.ts`](../typescript/src/StructUtility.ts)
 and the corpus first, then port the change into the three headers here,
 `make test` until green, run `make lint`, and re-run
-`python3 ../tools/check_parity.py`. The full cross-port checklist is in
-[`../AGENTS.md`](../AGENTS.md).
+`python3 ../tools/check_parity.py`.

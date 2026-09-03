@@ -1,7 +1,7 @@
 # Struct for TypeScript
 
-> The canonical implementation.  Every other language port matches
-> the behaviour defined here.  When the shared test corpus
+> The canonical implementation. Every other language port matches
+> the behaviour defined here. When the shared test corpus
 > ([`../build/test/`](../build/test/)) and another port disagree, the
 > corpus -- generated from this code -- is right.
 
@@ -91,7 +91,7 @@ import {
 ## Function reference
 
 Every function is documented with its TypeScript signature, a one-line
-description, and a usage example.  Source:
+description, and a usage example. Source:
 [`src/StructUtility.ts`](./src/StructUtility.ts).
 
 ### Predicates
@@ -775,7 +775,7 @@ Quote inside a `validate` spec, e.g. `` '`$STRING`' ``.
 
 ## `StructUtility` class
 
-Wraps every function and constant as instance properties.  Useful
+Wraps every function and constant as instance properties. Useful
 when you want to inject the API surface (e.g. for stubbing in tests):
 
 ```ts
@@ -807,7 +807,7 @@ adopt the `'__NULL__'` placeholder used by the shared test corpus.
 
 `walk`, `merge`, `inject`, and `setpath` all rely on lists being
 reference-stable: a mutation through one reference is visible to
-every holder.  This is JavaScript's natural behaviour; no wrapper
+every holder. This is JavaScript's natural behaviour; no wrapper
 needed.
 
 ### Path syntax
@@ -859,7 +859,7 @@ portable.
 - **Catastrophic backtracking.** ECMAScript `RegExp` uses backtracking;
   nested quantifiers (e.g. `(a+)+`) against a non-matching suffix can be
   exponential in the input length. The discovery panel measures ~180 ms
-  on Node 22 for `^(a+)+$` against 22 a's plus `!`. RE2-style engines
+  on Node 22 for `^(a+)+$` against 22 repetitions of `a` plus `!`. RE2-style engines
   finish the same case in under 0.1 ms. Write linear-friendly patterns
   (`a+` instead of `(a+)+`) and keep injected user input in
   character classes, not in alternations.

@@ -519,7 +519,7 @@ VoxgigStruct.jt(1, 2, 3)          # [1, 2, 3]
 ### `Injection` class
 
 Full implementation with `descend`, `child`, `setval` instance
-methods.  Used internally by `inject`/`transform`/`validate`; you
+methods. Used internally by `inject`/`transform`/`validate`; you
 need it when writing custom injectors.
 
 ### Injection helpers
@@ -603,7 +603,7 @@ Ruby has `nil`.  The port distinguishes:
 ### Method naming
 
 Ruby method names match canonical lowercase (`getpath`, `setpath`,
-`getprop`), not Ruby's idiomatic snake_case.  Parity beats style.
+`getprop`), not Ruby's idiomatic snake_case. Parity beats style.
 
 ### Walk-based merge
 
@@ -640,7 +640,7 @@ portable to the Go / Rust / C / Lua / Zig ports.
 ### Sharp edges
 
 - **Catastrophic backtracking.** Onigmo has internal mitigations for
-  some classic ReDoS shapes — `^(a+)+$` against 22 a's plus `!` runs
+  some classic ReDoS shapes — `^(a+)+$` against 22 repetitions of `a` plus `!` runs
   in microseconds here. Larger inputs or different shapes can still
   blow up; the safe rule is to stay inside the RE2 subset and avoid
   nested quantifiers.

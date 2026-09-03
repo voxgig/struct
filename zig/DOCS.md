@@ -1,4 +1,4 @@
-# Struct for Zig — Comprehensive Guide
+# Struct for Zig — the full guide
 
 > A **port** of the canonical TypeScript implementation. Behaviour is
 > defined by TypeScript and pinned by the shared corpus; this port matches
@@ -280,7 +280,7 @@ exposes `re_compile`, `re_test`, and `re_escape`; `re_compile`/`re_test`
 use `std.heap.page_allocator` internally so callers need not thread one
 through.
 
-**Honest parity gap:** the canonical six-function regex API also defines
+**Parity gap:** the canonical six-function regex API also defines
 `re_find` / `re_find_all` / `re_replace`. The NFA has the primitives, and
 wrapper functions exist in [`src/struct.zig`](./src/struct.zig), but those
 three are still recorded as a **known parity gap** for Zig in
@@ -297,8 +297,8 @@ not-yet-guaranteed until that entry shrinks. Engine-family edges (zero-width
 A behaviour question is answered by reading the canonical TypeScript and
 [`../build/test/`](../build/test/), never by reading this port. If this
 port disagrees with the corpus, the port is wrong — fix the port, not the
-corpus. Canonical changes start in TypeScript and flow out to every port;
-see [`../AGENTS.md`](../AGENTS.md#standard-workflows).
+corpus. Canonical changes start in TypeScript and flow out to every
+port.
 
 ---
 
@@ -331,6 +331,4 @@ gated on `WALK_BENCH=1`).
 **To change behaviour:** behaviour is canonical, so start in
 [`../typescript/`](../typescript/), adjust the corpus case in
 `../build/test/*.aon`, then port the change here, run `zig build test`
-until green, and re-run `python3 ../tools/check_parity.py`. The full
-checklist is in [`../AGENTS.md`](../AGENTS.md) and the port-specific notes
-are in [`AGENTS.md`](./AGENTS.md).
+until green, and re-run `python3 ../tools/check_parity.py`.

@@ -1,4 +1,4 @@
-# Struct for Lua — Comprehensive Guide
+# Struct for Lua — the full guide
 
 > A **port** of the canonical TypeScript implementation. Behaviour is
 > defined by TypeScript and pinned by the shared corpus; this port follows
@@ -190,7 +190,7 @@ returned module table are the definition this port presents.
 Lua-specific points the signatures don't show:
 
 - **One container type.** A map and a list are both Lua tables. The port
-  tells them apart via the `__jsontype` metatable field (`'object'` vs
+  distinguishes them by the `__jsontype` metatable field (`'object'` vs
   `'array'`); `ismap`/`islist`, `jsonify`, and `stringify` consult it. Build
   tagged tables with `struct.jm(...)` / `struct.jt(...)`, or
   `setmetatable(t, { __jsontype = 'array' })`.
@@ -229,8 +229,7 @@ canonical code. Practically:
 - A behaviour question is answered by reading the canonical TS and the
   corpus, not by trusting this port in isolation.
 - A change to canonical behaviour starts in TypeScript, flows to the corpus,
-  and only then reaches Lua (see
-  [`../AGENTS.md`](../AGENTS.md#standard-workflows)).
+  and only then reaches Lua.
 
 ### `nil` is "absent" (Group A)
 
@@ -240,7 +239,7 @@ distinct null value. So the language-neutral
 is **Group A throughout** (a stored `nil` is simply "no value"). Where the
 corpus must distinguish a real null from absent, the test runner uses the
 string sentinels `"__NULL__"` / `"__UNDEF__"` / `"__EXISTS__"`; the library
-itself never sees a separate null. See [`../REPORT.md`](../design/REPORT.md) and
+itself has no separate null. See [`../REPORT.md`](../design/REPORT.md) and
 [`../UNDEF_SPEC.md`](../design/UNDEF_SPEC.md).
 
 ### Lists are reference-stable
@@ -290,8 +289,8 @@ make clean           # rm luacov.* .busted
 The corpus suite reports **74/74 cases passing** (per
 [`../REPORT.md`](../design/REPORT.md)). Tests live in
 [`test/`](./test/); [`test/struct_test.lua`](./test/struct_test.lua) is the
-busted suite and [`test/runner.lua`](./test/runner.lua) is the JSONIC driver
-that loads the shared corpus from [`../build/test/`](../build/test/).
+busted suite and [`test/omni.lua`](./test/omni.lua) is the loader that
+reads the shared corpus from [`../build/test/`](../build/test/).
 
 To run busted directly without make:
 
@@ -303,6 +302,5 @@ busted test/struct_test.lua
 **This is a port, not the canonical.** To change behaviour, edit the
 canonical TypeScript and the corpus first; then mirror the logic here,
 `make test` until green, and re-run [`../tools/check_parity.py`](../tools/check_parity.py)
-plus the per-port tests. The full cross-port checklist is in
-[`../AGENTS.md`](../AGENTS.md). Tooling: Lua 5.3+, LuaRocks, `busted`,
+plus the per-port tests. Tooling: Lua 5.3+, LuaRocks, `busted`,
 `luacheck`, StyLua (built with the `lua54` feature for 5.3+ bitwise ops).

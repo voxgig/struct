@@ -53,7 +53,8 @@ subsystem (`Value.swift`, `Constants.swift`, `JSON.swift`, `Minor.swift`,
 
 Functions live as top-level `public func`s in module `VoxgigStruct`. The
 port keeps the canonical TS names (`isnode`, `getpath`, `keysof`, …)
-rather than `camelCase`ing them — this means the function-name table is
+rather than converting them to `camelCase` — this means the function-name
+table is
 the same across every Voxgig port.
 
 ### Core types
@@ -87,7 +88,7 @@ or removes the slot.
 
 ### JSON parser
 
-`JSON.parse(text)` returns a `Value` that uses the type rules above
+`JSON.parse(text)` returns a `Value` that uses the preceding type rules
 (in particular, the in-tree `OrderedDictionary`-backed
 maps and `.int` vs `.double` for integers vs decimals). The Foundation
 `JSONSerialization` is not used because it doesn't preserve insertion

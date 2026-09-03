@@ -1,4 +1,4 @@
-# Struct for Ruby — Comprehensive Guide
+# Struct for Ruby — the full guide
 
 > A faithful **port** of the canonical TypeScript implementation. Behaviour
 > is defined there and mirrored here, case for case. This guide is the
@@ -200,8 +200,8 @@ Behaviour is defined by the canonical TypeScript
 and pinned by the shared corpus in [`../build/test/`](../build/test/). When
 the Ruby output and the corpus disagree, the Ruby port is wrong — fix it
 here to match; never edit the corpus to make Ruby pass. A genuine
-behaviour change starts in the canonical TS and flows out to every port
-(see [`../AGENTS.md`](../AGENTS.md#standard-workflows)).
+behaviour change starts in the canonical TS and flows out to every
+port.
 
 ### `nil` versus `UNDEF`
 
@@ -265,4 +265,4 @@ Ruby to match, then `make test` and `make lint` green.
 **To change canonical behaviour:** do it in the TypeScript first, adjust
 `../build/test/*.aon`, then propagate here and re-run
 [`../tools/check_parity.py`](../tools/check_parity.py) plus this port's
-tests. The full checklist is in [`../AGENTS.md`](../AGENTS.md).
+tests.

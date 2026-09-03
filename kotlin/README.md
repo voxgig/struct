@@ -626,7 +626,7 @@ and lookaround; using them will not be portable.
 ### Sharp edges
 
 - **Catastrophic backtracking.** `java.util.regex` is a backtracking
-  engine; the discovery panel times P1 (`^(a+)+$` over 22 a's plus `!`)
+  engine; the discovery panel times P1 (`^(a+)+$` over 22 repetitions of `a` plus `!`)
   at ~24 ms here. Other shapes can be worse. Prefer flat patterns.
 - **Zero-width `replace`.** `reReplace("a*", "abc", "X")` returns
   `"XXbXcX"` — the ECMA/backtracking convention shared by all

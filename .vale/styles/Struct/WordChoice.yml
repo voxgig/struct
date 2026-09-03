@@ -1,0 +1,35 @@
+# The parts of Google.WordListCase that are right for this project,
+# carried as our own rule so they can sit at error level.
+#
+# Google.WordListCase itself is a WARNING here (see .vale.ini): it maps
+# `touch` to `tap`, which is a mobile-UI rule, and it produced 143 alerts
+# over the reader-facing pages, nearly all of them about casing this
+# project states on purpose. The substitutions kept below have no such
+# collision.
+#
+# CARRIED FROM voxgig/jostraca MINUS ITS REGEX ENTRIES. Upstream swaps
+# `regex` for `regular expression` and `regexes` for `regular
+# expressions`. Measured here first: 163 hits, and the word is not filler
+# in this project -- it names a thing. Struct ships its own RE2-subset
+# engine, a six-function `re_*` API, a `Regex API` reference section and
+# three specification pages under design/ whose filenames are REGEX*.md.
+# A gate that fires on the subject matter is a gate people learn to switch
+# off, which is the standard STYLE-GUIDE.md sets for the banned list and
+# the same standard applies here.
+#
+# `below` is not swapped, because it is not on Google's word list and this
+# rule carries Google's list rather than extending it. 27 uses, unruled.
+extends: substitution
+message: "Use '%s' instead of '%s'."
+link: 'https://developers.google.com/style/word-list'
+level: error
+ignorecase: true
+action:
+  name: replace
+swap:
+  # "above" and "below" assume the reader sees a visual layout; a screen
+  # reader does not. Google's accessibility guidance, and it is right.
+  # 4 hits here, all of them genuine, all rewritten.
+  (?:the )?above: preceding
+  file name: filename
+  file names: filenames

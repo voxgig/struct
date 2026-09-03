@@ -1,4 +1,4 @@
-# Struct for Rust — Comprehensive Guide
+# Struct for Rust — the full guide
 
 > A **port** of the canonical TypeScript implementation. Behaviour is
 > defined by the canonical source and pinned by the shared corpus; this
@@ -350,9 +350,7 @@ generated from it and this port is held to that corpus. Practically:
 - A behaviour question is answered by reading the canonical TS (and the
   corpus), not by reading this port.
 - A change to canonical behaviour starts in TypeScript, then flows to the
-  corpus and out to every port — see
-  [`../AGENTS.md`](../AGENTS.md#standard-workflows). Do **not** "fix"
-  behaviour here alone.
+  corpus and out to every port. Do **not** "fix" behaviour here alone.
 
 ### The `Value` enum
 
@@ -437,5 +435,4 @@ does (the TypeScript runner is the reference).
 canonical TypeScript and the corpus first, then port the change into
 [`src/major.rs`](./src/major.rs) / [`src/mini.rs`](./src/mini.rs), run
 `make test` until green, re-run `make lint`, and re-run
-`python3 ../tools/check_parity.py` plus every other port's tests. The full
-checklist is in [`../AGENTS.md`](../AGENTS.md).
+`python3 ../tools/check_parity.py` plus every other port's tests.

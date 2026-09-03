@@ -389,7 +389,7 @@ and lookaround; using them will not be portable.
 
 - **libstdc++ `<regex>` has the worst-in-class catastrophic
   backtracking.** The discovery panel measures **~1.2 s** for
-  `^(a+)+$` over 22 a's plus `!`. This is well-known and is the
+  `^(a+)+$` over 22 repetitions of `a` plus `!`. This is well-known and is the
   reason many production C++ projects avoid `<regex>` in favour of
   RE2 or PCRE2. Stay inside the RE2 subset and avoid nested
   quantifiers; even then, performance won't match the dedicated

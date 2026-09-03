@@ -1,4 +1,4 @@
-# Struct for Swift — Comprehensive Guide
+# Struct for Swift — the full guide
 
 > A **port**, not the canonical. Behaviour is defined by the canonical
 > TypeScript and pinned by the shared corpus; this port must match it.
@@ -283,8 +283,7 @@ This Swift code is a *port*. The shared corpus in
 [`../build/test/`](../build/test/) is generated from the canonical
 TypeScript, and this port is held to it. A behaviour question is answered by
 reading the canonical TS, not by reading this code; a change to canonical
-behaviour starts in TS, flows to the corpus, then to every port (see
-[`../AGENTS.md`](../AGENTS.md#standard-workflows)).
+behaviour starts in TS, flows to the corpus, then to every port.
 
 ### `noval` versus `null`
 
@@ -355,6 +354,5 @@ The Swift port passes the full shared corpus suite at full canonical parity
 
 **To change behaviour:** behaviour is canonical-first — edit the TypeScript,
 adjust the corpus, then port the same logic here and re-run `make test` plus
-`python3 ../tools/check_parity.py`. The full checklist is in
-[`../AGENTS.md`](../AGENTS.md). The Swift toolchain may be absent in some
+`python3 ../tools/check_parity.py`. The Swift toolchain may be absent in some
 environments; if you can't build, say so rather than guessing.

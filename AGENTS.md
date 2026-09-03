@@ -3,7 +3,8 @@
 Guidance for AI coding agents (and the humans reviewing them) working in
 this repository. If you read one file before touching anything, read this
 one. For the user-facing documentation see [`README.md`](./README.md) (overview)
-and [`DOCS.md`](./DOCS.md) (the comprehensive guide).
+and [`DOCS.md`](./DOCS.md) (the full guide); before writing a sentence that
+ships, read [`STYLE-GUIDE.md`](./STYLE-GUIDE.md).
 
 > **TL;DR**
 > 1. **TypeScript is canonical.** Behaviour is defined by
@@ -68,8 +69,9 @@ matrix in [`REPORT.md`](design/REPORT.md)):
 ```
 .
 ├── README.md            # user-facing overview + language-neutral reference
-├── DOCS.md              # comprehensive language-neutral guide (tutorial→reference)
+├── DOCS.md              # the language-neutral guide in full (tutorial→reference)
 ├── AGENTS.md            # this file
+├── STYLE-GUIDE.md       # normative for the reader-facing pages; two CI gates
 ├── design/              # reports & specs:
 │   ├── REPORT.md        #   cross-port parity matrix (per-port function/test counts)
 │   ├── NOTES.md         #   cross-cutting quirks & edge cases that fit nowhere else
@@ -244,6 +246,51 @@ markdownlint, plus each language's linters).
   that a change works.
 
 
+## Prose follows STYLE-GUIDE.md
+
+[`STYLE-GUIDE.md`](./STYLE-GUIDE.md) is normative for the root
+`README.md` and `DOCS.md` and for every port's `README.md` and `DOCS.md` —
+50 pages. It carries the voice, the four-part section rules, the
+banned-phrase list, the spaced em dash and its ration, and the rule that
+documentation never cites a working document. Read it before writing a
+sentence that ships; every rule in it was added after something went
+wrong, and the counts behind each one are recorded.
+
+Two gates enforce it and both run in CI, in `.github/workflows/docs.yml`:
+
+| Gate | Runs | Covers |
+| --- | --- | --- |
+| `vale --minAlertLevel=error $(python3 tools/check_prose.py --files)` | `make scan-prose`, docs.yml | Google's rules plus the banned list, at the levels in `.vale.ini` |
+| `python3 tools/check_prose.py` | `make scan-prose`, docs.yml | the banned list, em-dash spacing and ration, first person, no emoji, no working-document citations, resolving relative links, a complete page set |
+
+The banned list is one file,
+`.vale/styles/config/vocabularies/Struct/reject.txt`, read by both. The
+page set is one function, `pages()` in `tools/check_prose.py`, printed by
+`--files` and handed to Vale. Add a phrase or a page in one place and both
+gates pick it up; there is no second copy to keep in step.
+
+**Every port carries both a `README.md` and a `DOCS.md`, and the gate
+fails if one goes missing.** Existence is not membership: a page that is
+simply absent would otherwise drop out of the set and both gates would
+report green on the 49 that remain, with nothing saying the fiftieth had
+stopped being read.
+
+**This file is not documentation, and the docs may not cite it.** Nor may
+they cite `CLAUDE.md`, `design/DOC_EXAMPLES.md`, the assessments, or any
+future `*_PLAN.md`. They are working documents: written for the people
+changing this repository and revised as the code moves. State the fact in
+the page that owns it instead. `design/`'s *specifications* — `REGEX*.md`,
+`UNDEF*.md`, `TESTSPEC_MODEL.md`, `REPORT.md`, `NOTES.md` — are normative
+and stay freely citable; the guide's "What stays linkable, and why"
+explains the split.
+
+**Three Google rules are switched off** in `.vale.ini` in favour of house
+rules that live in `tools/check_prose.py`: `Google.EmDash` (this project
+spaces the em dash — 589 of them, none unspaced), `Google.We` and
+`Google.FirstPerson`. A Google rule switched off in favour of a house rule
+that is not real is worse than no rule at all, so if you switch one off,
+write the replacement first.
+
 ## Release and publish
 
 Two tag namespaces, because there are two kinds of thing to release.
@@ -384,6 +431,7 @@ write-up of this design.
 ## Where to look next
 
 - Conceptual + how-to + full reference: [`DOCS.md`](./DOCS.md)
+- Writing any of it: [`STYLE-GUIDE.md`](./STYLE-GUIDE.md)
 - Per-port specifics: `<lang>/DOCS.md`, `<lang>/README.md`, `<lang>/AGENTS.md`
 - Parity matrix: [`REPORT.md`](design/REPORT.md)
 - Edge cases & quirks: [`NOTES.md`](design/NOTES.md), [`UNDEF.md`](design/UNDEF.md)

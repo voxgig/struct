@@ -1,0 +1,176 @@
+# Terms Vale's dictionary does not know. Entries are REGEXES, so
+# [Vv]oxgig accepts both casings without Vale.Terms then enforcing one of
+# them over the other -- listing both plain forms is what turns this file
+# into a capitalisation rule by accident.
+#
+# EVERY ENTRY BELOW WAS MEASURED, not guessed. `Vale.Spelling` at error
+# level over the 50 reader-facing pages produced 620 alerts across 142
+# distinct words on a clean run; this file is those 142, sorted into the
+# groups below, and nothing else. A word that stops appearing in the docs
+# should come out of here, and a new one is added when the gate asks for
+# it.
+
+[Vv]oxgig
+voxgig_struct
+
+# British spellings. Google style is US English; the house voice is not,
+# and the precedence in .vale.ini puts the house voice first.
+#
+# LISTED, not matched by suffix. `\w+ise` and friends accept any word
+# ending in those letters -- `madeupise` included -- and so punch a hole
+# straight through the error-level spelling gate this file exists to make
+# usable. Add the stem when a new one is needed; the cost of doing that is
+# the point.
+organised?
+recognise[ds]?
+serialiser
+
+# The data model and the public API surface.
+accessors?
+[Bb]oolean
+[Bb]ooleans
+[Cc]allables
+[Cc]anonical
+[Ll]ookups
+maxdepth
+modename
+mutator
+[Nn]amespace
+[Nn]ullable
+params
+[Rr]ecurse
+[Ss]truct
+stringification
+[Tt]oolchain
+trie
+[Tt]ruthy
+[Uu]ntyped
+
+# Regex engine vocabulary: the in-tree RE2 subset and the engines the
+# cross-port notes compare it against.
+[Bb]ackref
+[Bb]ackrefs
+backreferences
+lookaround
+lookbehind
+metacharacters?
+Onigmo
+regexes
+
+# General programming vocabulary the reference pages use across ports.
+arg
+args
+arrayref
+bitcode
+bitfield
+bitwise
+bool
+callee
+camelCase
+camelCased
+charset
+classpath
+concatenative
+[Cc]onfig
+[Cc]onfigs
+coderef
+dedupe
+deps
+dereferencing
+destructure
+[Dd]ev
+devDependency
+disambiguates
+enum
+erroring
+extensionless
+fixups
+formatters
+fn
+globals
+growable
+hashref
+inlined
+initializers
+interop
+lockfiles
+malloc
+metatable
+mojibake
+monorepo
+nullable
+optionals
+refcount
+[Rr][Ee][Pp][Ll]
+snake_case
+snake_cased
+stdlib
+stdout
+subtree
+superset
+teardown
+templated
+untrusted
+uppercased
+variadic
+variadics
+vendored
+walkthrough
+
+# Language, toolchain and tool names the per-port pages name directly.
+actionlint
+[Cc]heckstyle
+Clippy
+Clojars
+Clojure
+cspell
+csharp
+csproj
+detekt
+ESLint
+gcc
+gitignored
+gitleaks
+Gradle
+Gson
+JUnit
+ktlint
+lean_lib
+Lua
+luacheck
+markdownlint
+minitest
+mypy
+npm
+ocamlformat
+OCaml
+PHPStan
+PHPUnit
+[Pp][Hh][Pp]
+scalafmt
+Semgrep
+shellcheck
+SDKs
+valgrind
+vitest
+XCTest
+xUnit
+Zig
+
+# Project-internal names.
+[Bb]oru
+[Oo]mni
+[Mm]akefile
+[Rr]epo
+reimplement
+mitigations
+APIs
+TS
+
+# NOT LISTED, DELIBERATELY: `a`, `ing` and `OR`. Vale extracted those
+# three from a pluralised letter ("22 a's"), a code span carrying an
+# English suffix (`snake_case`ing) and an apostrophe-d verb ("OR'd"). All
+# three are tokenizer artefacts of sentences that read badly anyway, and
+# adding a one-letter word to a spelling vocabulary would switch off the
+# gate for every stray `a` after it. The three sentences were rewritten
+# instead.

@@ -338,7 +338,7 @@ func Filter(val any, check func([2]any) bool) []any
 type WalkApply func(key *string, val any, parent any, path []string) any
 ```
 
-`key` is a `*string` — `nil` at the root, otherwise the map key or the
+`key` is a `*string` — `nil` at the root, otherwise the map key, or the
 string form of a list index. `Walk`'s `opts` carry the optional `after`
 callback and `maxdepth`; `WalkDescend` starts a descent from a non-root
 position with an explicit `key`, `parent`, and starting `path`.
@@ -575,7 +575,7 @@ func InjectChild(child any, store any, inj *Injection) *Injection
 
 ### `ListRef[T]`
 
-Generic wrapper providing pointer-stable list semantics.  Used
+Generic wrapper providing pointer-stable list semantics. Used
 internally by `merge` and `inject`; you only need it when writing
 custom modify callbacks that mutate lists.
 
@@ -661,7 +661,7 @@ the test runner uses string sentinels `__NULL__` and `__UNDEF__`.
 
 ### Multiple variants instead of optional parameters
 
-Go has no optional or named parameters.  Where canonical TypeScript
+Go has no optional or named parameters. Where canonical TypeScript
 takes options, the Go port either:
 
 - collects them in a variadic (e.g. `Pad(str, args ...any)`,
@@ -677,9 +677,9 @@ starts a recursive descent from a non-root position, taking an explicit
 ### `Transform` and `Validate` return `(any, error)`
 
 `Transform` and `Validate` return `(any, error)`, matching Go's idiom for
-fallible operations.  The error carries a human-readable message describing
+fallible operations. The error carries a human-readable message describing
 the first problem — an unknown `$FORMAT`, a type mismatch — or an aggregate,
-if the underlying call collected several.  Canonical throws at exactly that
+if the underlying call collected several. Canonical throws at exactly that
 point; this is the Go form of the same behaviour.
 
 Supplying your own error collector (an `*Injection` with `Errs` set, or

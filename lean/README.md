@@ -63,6 +63,5 @@ lean/
     └── Runner.lean        # shared-corpus test runner (in-tree JSON reader)
 ```
 
-Documentation: [`DOCS.md`](./DOCS.md) (comprehensive guide),
-[`AGENTS.md`](./AGENTS.md) (notes for AI coding agents), and the
+Documentation: [`DOCS.md`](./DOCS.md) (the full guide) and the
 language-neutral [`../README.md`](../README.md) / [`../DOCS.md`](../DOCS.md).

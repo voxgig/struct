@@ -1,7 +1,7 @@
 # Struct for Zig
 
 > Zig port of the canonical TypeScript implementation.
-> Status: complete.  See [`../REPORT.md`](../design/REPORT.md) for parity.
+> Status: complete. See [`../REPORT.md`](../design/REPORT.md) for parity.
 
 For motivation, language-neutral concepts, and the cross-language
 parity matrix, see the [top-level README](../README.md).
@@ -51,7 +51,7 @@ pub fn main() !void {
 ## Argument-order note
 
 The Zig port follows the language convention of placing `allocator`
-as the **first** argument.  Argument order *after* the allocator is
+as the **first** argument. Argument order *after* the allocator is
 also a Zig-side choice, so signatures look like:
 
 ```zig
@@ -84,7 +84,7 @@ pub const JsonValue = union(enum) {
 ```
 
 `MapRef` and `ListRef` are heap-allocated wrappers so mutations are
-visible to every holder.  This preserves the canonical
+visible to every holder. This preserves the canonical
 "reference-stable" semantics.
 
 ### Predicates
@@ -593,21 +593,21 @@ $NULL  $NIL    $FUNCTION $INSTANCE $ANY       $CHILD    $ONE     $EXACT
 ### Why a custom `JsonValue`
 
 Zig's stdlib `std.json.Value` is a value type: assignment copies and
-nested mutation is awkward.  The canonical algorithm assumes
+nested mutation is awkward. The canonical algorithm assumes
 reference-stable lists and maps, so the port wraps containers in
-heap-allocated `MapRef` / `ListRef` structs.  Conversion functions
+heap-allocated `MapRef` / `ListRef` structs. Conversion functions
 bridge to and from `std.json.Value` at the boundary.
 
 ### Allocator threaded through every call
 
 Idiomatic Zig: every function that may allocate takes an
-`Allocator` as its first argument.  Callers control lifetime
+`Allocator` as its first argument. Callers control lifetime
 explicitly; errors propagate through `!` returns.
 
 ### Status
 
 Complete: all major subsystems are present and the port passes its share
-of the shared corpus. One honest caveat — the top-level `re_find` /
+of the shared corpus. One caveat — the top-level `re_find` /
 `re_find_all` / `re_replace` wrappers are not yet wired (the in-tree NFA
 engine has the primitives), a documented known gap in
 [`../tools/check_parity.py`](../tools/check_parity.py). See
@@ -662,7 +662,7 @@ lookaround, possessive quantifiers, atomic groups.
 - **Zero-width `re_replace`** matches the in-tree-Thompson and
   PCRE/ECMA convention: `re_replace(alloc, "a*", "abc", "X")` returns
   `"XXbXcX"`. Go (RE2) returns `"XbXcX"` instead; this is RE2's
-  chosen rule and we don't paper over it.
+  chosen rule, and this port does not paper over it.
 
 See `/design/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
 
