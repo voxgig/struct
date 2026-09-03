@@ -357,6 +357,20 @@ publish-rust`, also exist — **prefer the workflow**:
   that `publish.yml` writes and that the 16 bare `v*` tags actually use.
   There is exactly one `typescript/v*` tag in this repo (`typescript/v0.2.1`)
   against 16 bare ones.
+- **Both npm ports need two commands, not one.** `make publish` runs
+  `npm stage publish`, which uploads the tarball and defers the 2FA
+  proof-of-presence: the version is *staged*, not released. `npm stage
+  approve` is what puts it on the registry, and only then does `make tag`
+  cut `<lang>/v<version>`. The tag is deliberately a second command,
+  gated on the registry actually serving the version — the same order
+  `publish.yml` keeps by having its tag job `needs` a successful publish,
+  so that a tag only ever exists for a version a consumer can install.
+  The single-command version of this used to tag and report "Published"
+  the moment staging returned, which left a release tag with no release
+  behind it whenever an approval was rejected, expired or forgotten.
+- **`npm stage publish` needs npm >= 11.19** (it landed between 11.9.0 and
+  11.19.1). Older npm answers `Unknown command: "stage"`, which reads like
+  a typo and is not one.
 
 **The two namespaces are already out of step, and `make status` is the one
 thing that cannot see it.** The dashboard reads only `<lang>/v*`, so for

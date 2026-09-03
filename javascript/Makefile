@@ -1,4 +1,4 @@
-.PHONY: inspect build test bench lint format-check clean reset audit publish
+.PHONY: inspect build test tag bench lint format-check clean reset audit publish
 
 inspect:
 	@echo "Node.js version:"
@@ -82,7 +82,32 @@ publish: test
 	  exit 0; \
 	fi; \
 	npm stage publish --access public --registry https://registry.npmjs.org; \
-	echo "tag: $(TAG)"; \
+	echo "Staged @voxgig/structjs@$(VERSION). NOT published yet, and NOT tagged."; \
+	echo "  1. approve it:  npm stage approve   (npm stage list shows the id)"; \
+	echo "  2. then tag it: make -C javascript tag"
+
+# THE TAG IS A SECOND COMMAND, BECAUSE STAGING IS NOT PUBLISHING.
+# `npm stage publish` defers the 2FA proof-of-presence: it uploads the
+# tarball and stops, and `npm stage approve` is what puts the version on
+# the registry. This recipe used to tag and print "Published" the moment
+# staging returned, so a rejected, expired or simply forgotten approval
+# left a release tag with no release behind it -- and the existing-tag
+# guard above then refused the retry.
+#
+# So the tag waits for the registry to actually serve the version. That
+# is the same order .github/workflows/publish.yml keeps for the OIDC
+# path, where the tag job `needs` a successful publish: a tag only ever
+# exists for a version a consumer can install.
+tag:
+	@set -e; \
+	if ! npm view "@voxgig/structjs@$(VERSION)" version >/dev/null 2>&1; then \
+	  echo "@voxgig/structjs@$(VERSION) is not on the registry."; \
+	  echo "If you staged it, approve it first: npm stage approve"; \
+	  exit 1; \
+	fi; \
+	if git rev-parse -q --verify "refs/tags/$(TAG)" >/dev/null; then \
+	  echo "$(TAG) already exists; nothing to do"; exit 0; fi; \
+	ghtok="$${GITHUB_TOKEN:-$$GH_TOKEN}"; \
 	git tag -a "$(TAG)" -m "javascript v$(VERSION)"; \
 	if [ -n "$$ghtok" ]; then \
 	  echo "push: $(TAG) -> github.com/voxgig/struct (HTTPS, token auth)"; \
