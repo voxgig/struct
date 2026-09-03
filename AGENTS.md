@@ -360,10 +360,10 @@ only on a package that already exists, so 0.1.2 went out as one plain token
 publish — it sits on npm under a person's name with no provenance
 attestation, where `@voxgig/struct@0.3.4` carries one. A `target:
 javascript` dispatch on 2026-09-03 failed the OIDC exchange all the same,
-which npm reports as a 404 on `PUT /@voxgig%2fstruct-js`: the tests passed
-and the tarball packed, the upload was refused. Register a publisher for
-the package against this repository and the filename `publish.yml` on its
-npm settings page. Until that is done javascript cannot be released from
+which npm reports as a 404 on the `PUT` of `@voxgig/struct-js`: the tests
+passed and the tarball packed, the upload was refused. Register a publisher
+for the package against this repository and the filename `publish.yml` on
+its npm settings page. Until that is done javascript cannot be released from
 CI, and `javascript/package.json` sits at 0.1.4 unreleased.
 
 **A first release under a NEW package name is one plain `npm publish`, not
