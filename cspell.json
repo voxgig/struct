@@ -273,7 +273,16 @@
     "collecterrs",
     "isabsent",
     "toomni",
-    "tostruct"
+    "tostruct",
+    "OIDC",
+    "PyPI",
+    "pypa",
+    "RubyGems",
+    "Hackage",
+    "Sonatype",
+    "NuGet",
+    "Sigstore",
+    "ziglang"
   ],
   "ignoreRegExpList": [
     "/`\\$[A-Z]+`/",
