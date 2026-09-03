@@ -1,5 +1,5 @@
 "use strict";
-// VERSION: @voxgig/struct 0.3.3
+// VERSION: @voxgig/struct 0.3.4
 // RUN: npm test
 // RUN-SOME: npm run test-some --pattern=getpath
 var __importDefault = (this && this.__importDefault) || function (mod) {

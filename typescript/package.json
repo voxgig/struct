@@ -1,6 +1,6 @@
 {
   "name": "@voxgig/struct",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "JSON data structure manipulations",
   "main": "dist/StructUtility.js",
   "type": "commonjs",
