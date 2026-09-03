@@ -32,9 +32,9 @@
     "reset": "npm run clean && npm i && npm test",
     "repo-tag": "REPO_VERSION=`node -e \"console.log(require('./package').version)\"` && echo TAG: javascript/v$REPO_VERSION && git commit -a -m javascript/v$REPO_VERSION && git push && git tag javascript/v$REPO_VERSION && git push --tags;",
     "repo-publish": "npm run clean && npm i && npm run repo-publish-quick",
-    "repo-publish-quick": "npm run inject-version && npm run test && npm run doc && npm publish --access public --registry https://registry.npmjs.org && npm run repo-tag",
+    "repo-publish-quick": "npm run inject-version && npm run test && npm run doc && npm stage publish --access public --registry https://registry.npmjs.org && npm run repo-tag",
     "repo-publish-dry": "npm run clean && npm i && npm run repo-publish-dry-quick",
-    "repo-publish-dry-quick": "npm run inject-version && npm run test && npm run doc && npm publish --dry-run --access public --registry https://registry.npmjs.org"
+    "repo-publish-dry-quick": "npm run inject-version && npm run test && npm run doc && npm stage publish --dry-run --access public --registry https://registry.npmjs.org"
   },
   "license": "MIT",
   "files": [

@@ -51,6 +51,18 @@ audit:
 # the package dry-run, report what would happen, and exit 0 — nothing
 # published, no tag.
 #
+# NEEDS npm >= 11.19. `npm stage publish` stages the tarball and defers the
+# 2FA proof-of-presence to an approval step, which is what the trusted
+# publisher on npmjs.com grants alongside plain `npm publish`. It arrived
+# between 11.9.0 and 11.19.1: on anything older npm answers
+#
+#   Unknown command: "stage"
+#
+# which reads exactly like a typo and invites the "fix" of deleting the
+# word. It is not a typo. Upgrade npm instead. (CI does not use this path
+# at all -- .github/workflows/publish.yml publishes over OIDC with plain
+# `npm publish`, where there is no human to prove presence.)
+#
 # Reading the slash/colon-named npm auth var needs a shell that preserves
 # non-identifier env names across exec (bash does; dash/busybox sh drop them).
 SHELL := /bin/bash
@@ -66,10 +78,10 @@ publish: test
 	ghtok="$${GITHUB_TOKEN:-$$GH_TOKEN}"; \
 	if [ "$$npmtok" = "$(BORU_DRY_RUN_FILLER)" ] || [ "$$ghtok" = "$(BORU_DRY_RUN_FILLER)" ]; then \
 	  echo "[dry-run] boru filler token detected: rehearsing the package; nothing published, no $(TAG) tag."; \
-	  npm publish --dry-run --access public --registry https://registry.npmjs.org; \
+	  npm stage publish --dry-run --access public --registry https://registry.npmjs.org; \
 	  exit 0; \
 	fi; \
-	npm publish --access public --registry https://registry.npmjs.org; \
+	npm stage publish --access public --registry https://registry.npmjs.org; \
 	echo "tag: $(TAG)"; \
 	git tag -a "$(TAG)" -m "javascript v$(VERSION)"; \
 	if [ -n "$$ghtok" ]; then \
