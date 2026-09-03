@@ -20,8 +20,19 @@ Gives typescript the same tag scheme as every other port and every sibling
 repository: `typescript/v<version>` in place of the bare `v<version>`.
 
 ```sh
+# From this branch, streamed so it survives the checkout: shell redirection
+# is resolved BEFORE `git am` runs, so `git am < patch/...` from `main`
+# looks for a file that only exists here and fails.
+git fetch origin claude/struct-tag-scheme-patch
 git checkout main && git pull
-git am < patch/0001-publish-one-tag-scheme-for-every-port.patch
+git show origin/claude/struct-tag-scheme-patch:patch/0001-publish-one-tag-scheme-for-every-port.patch | git am
+```
+
+Or copy it out first, then apply it from anywhere:
+
+```sh
+git show origin/claude/struct-tag-scheme-patch:patch/0001-publish-one-tag-scheme-for-every-port.patch > /tmp/tagscheme.patch
+git checkout main && git pull && git am < /tmp/tagscheme.patch
 ```
 
 Six files:
@@ -31,7 +42,8 @@ Six files:
 | `.github/workflows/publish.yml` | push trigger `v*` → `typescript/v*`, the job selector, and the four places that compose the tag |
 | `tools/bump.py` | drops the typescript special case (`"v"` → `"typescript/v"`) |
 | `typescript/package.json` | the `repo-tag` npm script, which cut the bare tag too |
-| `AGENTS.md`, `Makefile`, `design/PUBLISH_AUTOMATION.md` | the paragraphs that existed to explain the inconsistency |
+| `AGENTS.md` | the release table's typescript row, the obsolete `@voxgig/struct-js` bootstrap section, and the paragraphs that existed to explain the inconsistency |
+| `Makefile`, `design/PUBLISH_AUTOMATION.md` | the same, where they repeat it |
 
 **Apply it whole.** `tools/bump.py` composes the tag that `publish.yml`'s
 trigger listens for, so landing the tooling half alone would cut

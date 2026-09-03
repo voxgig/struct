@@ -1,4 +1,4 @@
-From 911e722bee1628c3542bdba86e13f5d856481fab Mon Sep 17 00:00:00 2001
+From 9d774aeee16ba2cab0c3f14968304406736f9c22 Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Thu, 3 Sep 2026 19:21:12 +0000
 Subject: [PATCH] publish: one tag scheme for every port, typescript included
@@ -46,12 +46,12 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01S5zKiMP1i1FRDZ6pzgzrUp
 ---
  .github/workflows/publish.yml | 76 ++++++++++++++++++++---------------
- AGENTS.md                     | 21 ++++++----
+ AGENTS.md                     | 55 +++++++++++++++----------
  Makefile                      |  7 ++--
  design/PUBLISH_AUTOMATION.md  | 31 +++++++++-----
- tools/bump.py                 | 15 ++++---
- typescript/package.json       |  2 +-
- 6 files changed, 91 insertions(+), 61 deletions(-)
+ tools/bump.py                 | 39 ++++++++++++++----
+ typescript/package.json       |  4 +-
+ 6 files changed, 134 insertions(+), 78 deletions(-)
 
 diff --git a/.github/workflows/publish.yml b/.github/workflows/publish.yml
 index a6073b2..7cd3c85 100644
@@ -204,10 +204,58 @@ index a6073b2..7cd3c85 100644
  
            # EXISTENCE IS NOT ENOUGH. `git rev-parse --verify` only asks whether
 diff --git a/AGENTS.md b/AGENTS.md
-index 103f9c9..6a82a89 100644
+index 103f9c9..6501629 100644
 --- a/AGENTS.md
 +++ b/AGENTS.md
-@@ -378,15 +378,19 @@ know what it does and does not do:
+@@ -297,7 +297,7 @@ Two tag namespaces, because there are two kinds of thing to release.
+ 
+ | what | version lives in | released by | tag |
+ | --- | --- | --- | --- |
+-| npm `@voxgig/struct` | `typescript/package.json` | `publish.yml` (CI, OIDC) | `v<version>` |
++| npm `@voxgig/struct` | `typescript/package.json` | `publish.yml` (CI, OIDC) | `typescript/v<version>` |
+ | npm `@voxgig/struct-js` | `javascript/package.json` | `publish.yml` (CI, OIDC) | `javascript/v<version>` |
+ | crates.io `voxgig-struct` | `rust/Cargo.toml` | `publish.yml` (CI, OIDC) | `rust/v<version>` |
+ | each of the 21 other ports | that port's manifest | `make publish-<lang>` | `<lang>/v<version>` |
+@@ -305,19 +305,25 @@ Two tag namespaces, because there are two kinds of thing to release.
+ **Three ports are on the CI path**: typescript and javascript on npm, rust
+ on crates.io. Each has a trusted publisher registered against
+ `publish.yml`, so each is released by dispatching that workflow rather than
+-by `make publish-<lang>`. Both of the newer two keep the
+-`<lang>/v<version>` tag shape every other port uses; only the credential
+-and the operator changed.
+-
+-**The javascript package is renamed to `@voxgig/struct-js`, and that name
+-has no trusted publisher yet.** npm registers a trusted publisher only on a
+-package that already exists, so the first release under the new name cannot
+-go over OIDC. Register the publisher against `publish.yml` on the new
+-package's settings page once it has one, and every release after that goes
+-back through CI; dispatching `publish.yml` with target `javascript` before
+-that registration fails the OIDC exchange, which npm reports as a 404.
+-
+-**A first release is one plain `npm publish`, not `make publish`.** The two
++by `make publish-<lang>`. All three use the `<lang>/v<version>` tag shape
++every other port uses; only the credential and the operator changed.
++
++Typescript joined that shape late. It released under a bare `v<version>`
++up to `v0.3.4`, and those 16 tags stay — they are what those releases went
++out under. Everything from the next release on is `typescript/v<version>`,
++which is the only shape `tools/release_status.py` can read.
++
++**`@voxgig/struct-js` has its trusted publisher now**, so all three CI
++ports release the same way and none of them needs a token. The bootstrap
++below is kept as history, not as instructions: npm registers a trusted
++publisher only on a package that already exists, so the first release under
++the renamed package (0.1.2) had to be one plain token publish, and the
++publisher was registered against `publish.yml` afterwards. If a `target:
++javascript` dispatch ever fails the OIDC exchange — npm reports it as a
++404 — the registration is what to check, not the workflow.
++
++**A first release under a NEW package name is one plain `npm publish`, not
++`make publish`** — the case above, and the only one. The two
+ paths this repository normally uses both need the package to exist already:
+ OIDC for the reason above, and `make -C <lang> publish` because
+ `npm stage publish` posts to `/-/stage/package/<name>`, an endpoint
+@@ -378,15 +384,19 @@ know what it does and does not do:
    compares the registry version to the other two, so it can call a release
    complete while the registry still serves an older version.
  - **It reads only `<lang>/v*` tags.** `_add_tag` matches `^([a-z+]+)/v(.+)$`
@@ -231,7 +279,7 @@ index 103f9c9..6a82a89 100644
  irreversible. `make publish-all` drives exactly this tag-push path for all
  three, which is why it never needs a registry credential of its own.
  
-@@ -396,10 +400,11 @@ publish-rust`, also exist — **prefer the workflow**:
+@@ -396,10 +406,11 @@ publish-rust`, also exist — **prefer the workflow**:
  - The Makefile path publishes over a long-lived registry token (an **npm
    token**, a **`CARGO_REGISTRY_TOKEN`**), bypassing OIDC trusted publishing
    and its provenance attestation entirely.
@@ -326,11 +374,18 @@ index a35b7ff..f0e7be0 100644
    `boru`. `boru` has no publish flow so that is correct; lean does, which is
    why lean sat unreleased at 0.1.0 without ever appearing as pending.
 diff --git a/tools/bump.py b/tools/bump.py
-index fa3f7d7..5535122 100755
+index fa3f7d7..712c72a 100755
 --- a/tools/bump.py
 +++ b/tools/bump.py
-@@ -91,10 +91,13 @@ def plain(path: str) -> Loc:
+@@ -89,12 +89,20 @@ def plain(path: str) -> Loc:
+     return Loc(path, r"\A\s*(\d+\.\d+\.\d+)\s*\Z")
  
+ 
++# New tag prefix -> the prefix that port used to release under. Consulted
++# only by `released()`, and only when the new prefix finds nothing.
++LEGACY = {"typescript/v": "v"}
++
++
  # port -> (tag prefix, version locations, post-bump commands)
  #
 -# TAG PREFIX IS NOT ALWAYS `<lang>/v`. The typescript package releases under the
@@ -347,7 +402,7 @@ index fa3f7d7..5535122 100755
  PORTS = {
      "go":         ("go/v",         [plain("go/VERSION")], []),
      "php":        ("php/v",        [plain("php/VERSION")], []),
-@@ -138,7 +141,7 @@ PORTS = {
+@@ -138,7 +146,7 @@ PORTS = {
      "ocaml":      ("ocaml/v",      [plain("ocaml/VERSION"),
                                      Loc("ocaml/voxgig-struct.opam", r'(?m)^version: "(\d+\.\d+\.\d+)"'),
                                      Loc("ocaml/dune-project", r"(?m)^\(version (\d+\.\d+\.\d+)\)")], []),
@@ -356,7 +411,34 @@ index fa3f7d7..5535122 100755
                                     # inject-version rewrites the src and test
                                     # comments; the build carries them into the
                                     # committed dist/ and dist-test/.
-@@ -203,7 +206,7 @@ def main(argv: list) -> int:
+@@ -165,9 +173,24 @@ def released(prefix: str, version: str) -> bool:
+     manifest is committed leaves any port that way.
+ 
+     Local tags only, so callers must `git fetch --tags` first.
++
++    A PORT THAT CHANGED TAG NAMESPACE NEEDS ITS LAST OLD TAG TO COUNT.
++    typescript released under a bare `v<version>` up to 0.3.4 and under
++    `typescript/v<version>` from the next release on. Reading only the new
++    prefix makes 0.3.4 look unreleased, and that is not a cosmetic
++    misreport: `make publish-all` refuses to bump a port whose current
++    version is untagged, so the OIDC loop would cut `typescript/v0.3.4` at
++    whatever commit main happens to be on. The workflow then rejects it --
++    npm built 0.3.4 from an earlier commit -- and the repository is left
++    carrying a tag for a release that did not come from it, which
++    release_status.py reads as released. LEGACY answers that: the bare tag
++    counts as the release it was, once, and the fallback stops mattering
++    the moment a version is cut under the new prefix.
+     """
+-    out = run(["git", "tag", "-l", f"{prefix}{version}"], ROOT).strip()
+-    return bool(out)
++    if run(["git", "tag", "-l", f"{prefix}{version}"], ROOT).strip():
++        return True
++    old = LEGACY.get(prefix)
++    return bool(old and run(["git", "tag", "-l", f"{old}{version}"], ROOT).strip())
+ 
+ 
+ def bump_patch(version: str) -> str:
+@@ -203,7 +226,7 @@ def main(argv: list) -> int:
          if args.plan:
              # The release tag this port's CURRENT version wants. Callers cut
              # tags from this rather than composing `<lang>/v<version>`
@@ -366,18 +448,21 @@ index fa3f7d7..5535122 100755
              continue
  
 diff --git a/typescript/package.json b/typescript/package.json
-index 12dca48..33da078 100644
+index 12dca48..14e858f 100644
 --- a/typescript/package.json
 +++ b/typescript/package.json
-@@ -34,7 +34,7 @@
+@@ -34,9 +34,9 @@
      "inject-version": "node -e \"t=['./src/StructUtility.ts','./test/utility/StructUtility.test.ts'],r=require,fs=r('fs'),v=r('./package.json').version,t.map(f=>fs.writeFileSync(f,fs.readFileSync(f,'utf8').replace(/\\/\\/ VERSION: @voxgig\\/struct [^\\n]+/, '// VERSION: @voxgig/struct '+v)))\"",
      "clean": "rm -rf dist dist-test node_modules yarn.lock package-lock.json",
      "reset": "npm run clean && npm i && npm run build && npm test",
 -    "repo-tag": "REPO_VERSION=`node -e \"console.log(require('./package').version)\"` && echo TAG: v$REPO_VERSION && git commit -a -m v$REPO_VERSION && git push && git tag v$REPO_VERSION && git push --tags;",
-+    "repo-tag": "REPO_VERSION=`node -e \"console.log(require('./package').version)\"` && echo TAG: typescript/v$REPO_VERSION && git commit -a -m typescript/v$REPO_VERSION && git push && git tag typescript/v$REPO_VERSION && git push --tags;",
++    "repo-tag": "REPO_VERSION=`node -e \"console.log(require('./package').version)\"` && npm view @voxgig/struct@$REPO_VERSION version > /dev/null 2>&1 || { echo \"@voxgig/struct@$REPO_VERSION is not on the registry - approve the staged release first (npm stage approve)\"; exit 1; } && echo TAG: typescript/v$REPO_VERSION && git commit -a -m typescript/v$REPO_VERSION && git push && git tag typescript/v$REPO_VERSION && git push --tags;",
      "repo-publish": "npm run clean && npm i && npm run repo-publish-quick",
-     "repo-publish-quick": "npm run inject-version && npm run build && npm run test && npm run doc && npm run repo-tag && npm stage publish --access public --registry https://registry.npmjs.org",
+-    "repo-publish-quick": "npm run inject-version && npm run build && npm run test && npm run doc && npm run repo-tag && npm stage publish --access public --registry https://registry.npmjs.org",
++    "repo-publish-quick": "npm run inject-version && npm run build && npm run test && npm run doc && npm stage publish --access public --registry https://registry.npmjs.org && echo 'Staged. NOT published and NOT tagged: run `npm stage approve`, then `npm run repo-tag`.'",
      "repo-publish-dry": "npm run clean && npm i && npm run repo-publish-dry-quick",
+     "repo-publish-dry-quick": "npm run inject-version && npm run build && npm run test && npm run doc && npm stage publish --dry-run --access public --registry https://registry.npmjs.org"
+   },
 -- 
 2.43.0
 
