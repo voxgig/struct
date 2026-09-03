@@ -80,9 +80,10 @@ load-bearing and should survive the extension:
   for a version a consumer can install. Keep it. Making a tag push the
   universal trigger would invert that for every registry port: a tag pushed
   first stays behind whether or not the tests, the token exchange and the
-  upload then succeed. That is not hypothetical — `javascript/v0.1.3` exists
-  today while npm still serves 0.1.2, which is the same defect listed under
-  phase 2 below.
+  upload then succeed. That is not hypothetical — `javascript/v0.1.3` sat on
+  the repository for hours while npm still served 0.1.2, which is the same
+  defect listed under phase 2 below. That instance has since been released;
+  the defect it exposed has not been fixed.
 
 **pub.dev is the exception, and stays isolated.** It publishes *only* from a
 tag-triggered workflow, so dart alone tags before it publishes and needs its
@@ -107,9 +108,14 @@ tag-python:
 
 Ordered by dependency rather than by size.
 
-1. **Finish what is outstanding.** Register the npm trusted publisher for
-   `@voxgig/struct-js` and release the ports left mid-train. Nothing is built
-   here; it clears the board so later phases start from a known state.
+1. **Finish what is outstanding.** ✅ for javascript: the npm trusted
+   publisher for `@voxgig/struct-js` is registered and 0.1.3 is released, so
+   all three OIDC ports now publish the same way. Typescript's tag scheme was
+   unified with the rest at the same time — it released under a bare
+   `v<version>` up to 0.3.4, which is why `tools/release_status.py` could not
+   see any of its releases. The ports left mid-train are still outstanding.
+   Nothing is built here; it clears the board so later phases start from a
+   known state.
 2. **Fix the release-state model.** Automation multiplies whatever the current
    logic gets wrong, so this comes before adding ports. The six defects are
    listed below.
@@ -149,14 +155,17 @@ they matter here because a dashboard that calls an incomplete release
   re-run `opam publish` in that case.
 - **A pushed tag is not a release.** The OIDC path reports success the moment
   the tag lands, while the workflow can still fail at the build, the tests,
-  the token exchange or the upload. Observed: `javascript/v0.1.3` exists while
-  npm still serves 0.1.2. Report those ports as pending, or wait on the
-  workflow conclusion.
+  the token exchange or the upload. Observed: `javascript/v0.1.3` existed
+  while npm still served 0.1.2, and stayed that way until someone compared the
+  registry by hand. Report those ports as pending, or wait on the workflow
+  conclusion.
 - **The dashboard never compares the registry.** `status()` in
   `tools/release_status.py` reports `released` whenever the manifest and the
   tag agree, treating the registry column as a cross-check rather than an
   input. That is precisely the javascript case above: local 0.1.3, tag
-  `javascript/v0.1.3`, npm 0.1.2 — reported as released.
+  `javascript/v0.1.3`, npm 0.1.2 — reported as released. Typescript was the
+  mirror image until its tags were unified: released on npm, but reported
+  years behind because `_add_tag` cannot read a bare `v*` tag.
 - **The dashboard has no lean row.** Its `PORTS` table omits `lean` and
   `boru`. `boru` has no publish flow so that is correct; lean does, which is
   why lean sat unreleased at 0.1.0 without ever appearing as pending.

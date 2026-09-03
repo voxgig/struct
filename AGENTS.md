@@ -378,15 +378,19 @@ know what it does and does not do:
   compares the registry version to the other two, so it can call a release
   complete while the registry still serves an older version.
 - **It reads only `<lang>/v*` tags.** `_add_tag` matches `^([a-z+]+)/v(.+)$`
-  and silently drops anything else — including the bare `v*` tags that are the
-  npm package's real release markers. See below.
+  and silently drops anything else — including the 16 bare `v*` tags the npm
+  package released under up to `v0.3.4`. That was typescript's whole problem:
+  the dashboard reported it at `typescript/v0.2.1`, a stale Makefile tag, while
+  0.3.4 was live. `publish.yml` writes `typescript/v<version>` now, so every
+  release from the next one on reads correctly; the bare tags stay as history
+  and remain invisible to this tool.
 
 ### The three OIDC ports go through CI, not the Makefile
 
 **Actions → publish → Run workflow** on `main`, picking `target:
 typescript`, `javascript` or `rust`; or push the matching tag by hand
-(`v<version>`, `javascript/v<version>`, `rust/v<version>`). One target per
-run: the three packages version independently and every publish is
+(`typescript/v<version>`, `javascript/v<version>`, `rust/v<version>`). One
+target per run: the three packages version independently and every publish is
 irreversible. `make publish-all` drives exactly this tag-push path for all
 three, which is why it never needs a registry credential of its own.
 
@@ -396,10 +400,11 @@ publish-rust`, also exist — **prefer the workflow**:
 - The Makefile path publishes over a long-lived registry token (an **npm
   token**, a **`CARGO_REGISTRY_TOKEN`**), bypassing OIDC trusted publishing
   and its provenance attestation entirely.
-- For typescript it cuts `typescript/v<version>`, a *different tag* from the `v<version>`
-  that `publish.yml` writes and that the 16 bare `v*` tags actually use.
-  There is exactly one `typescript/v*` tag in this repo (`typescript/v0.2.1`)
-  against 16 bare ones.
+- It cuts the same tag as the workflow now. It always cut
+  `typescript/v<version>`; `publish.yml` used to write a bare `v<version>`
+  instead, so the two paths disagreed and only one of them produced a tag the
+  rest of the tooling could read. Both write `typescript/v<version>` today —
+  the 16 bare tags up to `v0.3.4` are what that history left behind.
 - **Both npm ports need two commands, not one.** `make publish` runs
   `npm stage publish`, which uploads the tarball and defers the 2FA
   proof-of-presence: the version is *staged*, not released. `npm stage
