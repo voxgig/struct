@@ -8,7 +8,7 @@ use strict;
 use warnings;
 use utf8;
 
-our $VERSION = '0.1.0';
+our $VERSION = '0.1.1';
 
 use Scalar::Util qw(blessed reftype looks_like_number refaddr);
 use List::Util qw();

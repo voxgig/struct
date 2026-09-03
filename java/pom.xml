@@ -5,7 +5,7 @@
 
   <groupId>com.voxgig</groupId>
   <artifactId>struct-java</artifactId>
-  <version>0.1.0</version>
+  <version>0.1.1</version>
   <name>voxgig-struct-java</name>
   <description>Voxgig Struct — utilities for transforming JSON-like data structures (Java port).</description>
   <url>https://github.com/voxgig/struct</url>

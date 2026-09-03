@@ -1,13 +1,13 @@
 rockspec_format = "3.0"  -- required for test_dependencies (luarocks >= 3.0)
 package = "voxgig-struct"
-version = "0.1.0-1"
+version = "0.1.1-1"
 -- git+https (GitHub dropped the unauthenticated git:// protocol in 2022).
 -- `tag` pins the install to the released revision — bump it in lockstep with
 -- `version` above. `dir`: luarocks clones the monorepo into `struct/`, and the
 -- Lua port lives in its `lua/` subdir, so the build root is `struct/lua`.
 source = {
    url = "git+https://github.com/voxgig/struct.git",
-   tag = "lua/v0.1.0",
+   tag = "lua/v0.1.1",
    dir = "struct/lua"
 }
 description = {

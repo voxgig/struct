@@ -1,6 +1,6 @@
 cabal-version:      2.4
 name:               voxgig-struct
-version:            0.1.0
+version:            0.1.1
 synopsis:           Haskell port of voxgig/struct: JSON-like data structure utilities.
 description:
   A faithful Haskell port of the canonical voxgig/struct library: utilities for
