@@ -1,63 +1,105 @@
-# Releases @voxgig/struct: publishes to npm AND writes the git tag.
+# Releases the two voxgig/struct packages that publish over OIDC, and writes
+# their git tags: `@voxgig/struct` on npm (from `typescript/`) and
+# `voxgig-struct` on crates.io (from `rust/`).
 #
 # Adapted from voxgig/sdkgen's publish.yml, which carries the reasoning for
-# every guard below. The npm-side trusted publisher must be registered against
-# THIS filename (publish.yml) or the OIDC exchange is rejected as a 404.
+# every guard below. BOTH registries' trusted publishers are registered
+# against THIS filename (publish.yml) or the OIDC exchange is rejected.
 #
-# ONE FILE, BECAUSE NPM ALLOWS EXACTLY ONE. A trusted publisher is registered
-# on npmjs.com against a single workflow FILENAME, and every @voxgig package
-# is registered against `publish.yml`. The name itself is arbitrary — other
-# orgs register `release.yml` — but only the ONE registered file can publish,
-# so anything that must accompany a publish has to live inside it. Here that
-# is the tag.
+# ONE FILE, BECAUSE EACH REGISTRY ALLOWS EXACTLY ONE. A trusted publisher is
+# registered against a single workflow FILENAME — on npmjs.com for every
+# @voxgig package, on crates.io for `voxgig-struct` — and both are registered
+# against `publish.yml`. The name itself is arbitrary — other orgs register
+# `release.yml` — but only the ONE registered file can publish, so anything
+# that must accompany a publish has to live inside it. Here that is the tag,
+# and now a second registry.
 #
-# A second workflow cannot publish whatever permissions it holds; npm rejects
+# A second workflow cannot publish whatever permissions it holds. npm rejects
 # the exchange and reports it as
 #
 #   npm error 404 Not Found - PUT https://registry.npmjs.org/...
 #
-# — a 404, not a 403, so as not to leak whether the package exists.
+# — a 404, not a 403, so as not to leak whether the package exists. crates.io
+# fails earlier and more plainly: the token exchange in
+# `rust-lang/crates-io-auth-action` fails and `cargo publish` never runs.
 #
-# TWO JOBS, BECAUSE THEY NEED DIFFERENT PRIVILEGES.
+# ONE TARGET PER RUN. The two packages version independently (typescript is
+# 0.3.x, rust is 0.1.x) and every publish is irreversible, so a dispatch
+# releases exactly ONE of them — `target: npm` or `target: rust`. That is the
+# same one-at-a-time rule the root Makefile keeps by refusing to offer a
+# `publish-all`, and it is why there is no `both`.
 #
-#   publish  id-token: write, contents: READ. Runs the install, the build and
-#            the tests — i.e. dependency lifecycle scripts and project code.
-#   tag      contents: write. Runs git and nothing else.
+# TWO JOBS PER TARGET, BECAUSE THEY NEED DIFFERENT PRIVILEGES.
+#
+#   publish, publish-rust  id-token: write, contents: READ. Run the install,
+#                          the build and the tests — i.e. dependency lifecycle
+#                          scripts and project code.
+#   tag, tag-rust          contents: write. Run git and nothing else.
 #
 # Keeping them in one job would hand a repository-write credential to every
 # dependency postinstall script that runs during the install, because checkout
-# persists its token into the git config for the whole job.
+# persists its token into the git config for the whole job. `cargo publish`
+# has the same exposure: it compiles the dependency graph, build scripts and
+# proc macros included.
 #
 # A ref pushed with GITHUB_TOKEN does NOT start another workflow run (GitHub
-# suppresses that so workflows cannot trigger themselves), so the tag job
+# suppresses that so workflows cannot trigger themselves), so the tag jobs
 # cannot be replaced by "tag and let the publisher fire on it".
 #
-# TWO WAYS IN:
+# THREE WAYS IN:
 #
-#   workflow_dispatch  the normal path. Publishes if missing, then tags.
-#   push: tags v*      the manual path, for a tag pushed by hand. Publishes
-#                      only; the tag job does not run.
+#   workflow_dispatch   the normal path. Publishes if missing, then tags.
+#   push: tags v*       the manual path, for a tag pushed by hand. Publishes
+#                       @voxgig/struct only; the tag jobs do not run.
+#   push: tags rust/v*  the same, for the crate. A `*` in a ref filter does
+#                       not cross `/`, so `v*` cannot also match `rust/v0.1.1`
+#                       and the two push paths never both fire.
+#
+# DRY RUN. `dry_run: true` on a dispatch rehearses a release without making
+# one: every guard and every test runs, the artifact is packed with
+# `--dry-run`, nothing is published and nothing is tagged. For rust it also
+# mints and immediately revokes a real crates.io token, which is the ONLY way
+# to prove the registry-side trusted publisher is configured correctly —
+# short of burning a version number to find out.
+#
+# It is therefore the one path allowed off `main`. That is deliberate, and the
+# cost is bounded: dispatching at all requires repository write, the minted
+# token can only publish this one crate, the action masks it in the log and
+# revokes it in its post step, and no publish or tag step can run in the same
+# breath. Weigh that against the alternative, which is that the trusted
+# publisher can only ever be tested by an irreversible release.
 #
 # VERSION BUMPS ARE NOT AUTOMATED, deliberately. Nothing here commits. It
 # reads the version already on the branch and releases exactly that, so the
 # bump stays a reviewable diff and the release stays a button.
 #
 #   typescript/package.json "version" -> tag v<version>
+#   rust/Cargo.toml         version   -> tag rust/v<version>
 #
-# Renaming this file breaks publishing until the npm-side trusted publisher is
-# updated to match. Do NOT publish locally over a token: that bypasses OIDC.
+# Renaming this file breaks publishing until BOTH registries' trusted
+# publishers are updated to match. Do NOT publish locally over a token: that
+# bypasses OIDC and its provenance attestation entirely.
 
 name: publish
 
 on:
   push:
-    tags: ['v*']
+    tags: ['v*', 'rust/v*']
   workflow_dispatch:
     inputs:
+      target:
+        description: 'Which package to release'
+        type: choice
+        options: [npm, rust]
+        default: npm
       expect_sha:
         description: 'Optional: refuse unless main is still at this commit (set by `make publish`)'
         type: string
         default: ''
+      dry_run:
+        description: 'Rehearse only: run every guard and test, publish nothing, tag nothing'
+        type: boolean
+        default: false
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -67,6 +109,13 @@ jobs:
     name: npm publish
     runs-on: ubuntu-latest
     timeout-minutes: 20
+
+    # `target` picks the package on a dispatch; the tag prefix picks it on a
+    # push. Without this the crate's `rust/v*` tag would also start an npm
+    # release of whatever typescript/package.json happens to say.
+    if: >-
+      ${{ (github.event_name == 'workflow_dispatch' && inputs.target == 'npm')
+       || (github.event_name == 'push' && startsWith(github.ref_name, 'v')) }}
 
     # Deliberately NOT contents: write — see the header. This job runs
     # dependency lifecycle scripts.
@@ -101,8 +150,12 @@ jobs:
       # binds callers who went through `make publish` — so without this the
       # Actions UI or a stray API call could publish and tag a feature branch,
       # irreversibly.
+      #
+      # Exempting `dry_run` is safe for the reason the header gives: it reaches
+      # no publish step and no tag job, so a feature branch can rehearse but
+      # cannot release.
       - name: Dispatches must come from main
-        if: ${{ github.event_name == 'workflow_dispatch' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && !inputs.dry_run }}
         run: |
           set -euo pipefail
           if [ "$GITHUB_REF_NAME" != "main" ]; then
@@ -145,18 +198,31 @@ jobs:
       # AN EXISTING TAG IS ONLY A PROBLEM IF IT POINTS SOMEWHERE ELSE. A tag
       # already on this commit is the idempotent case — nothing to create, not
       # an error — which is what lets a partly-failed release be re-dispatched.
+      #
+      # A REHEARSAL WARNS WHERE A RELEASE STOPS. This guard and the registry
+      # one below ask "does the world already contain this version", and at
+      # the moment you most want to rehearse — publish.yml just changed, the
+      # manifest still says the version last released — the honest answer is
+      # yes. Failing there would mean no rehearsal without a bump first, which
+      # is exactly the friction that stops people rehearsing at all.
       - name: Refuse a tag that points at a different commit
         if: ${{ github.event_name == 'workflow_dispatch' }}
         env:
           PKG_VERSION: ${{ steps.versions.outputs.version }}
+          DRY_RUN: ${{ inputs.dry_run }}
         run: |
           set -euo pipefail
           TAG="v$PKG_VERSION"
           HEAD_SHA="$(git rev-parse HEAD)"
           AT="$(git rev-parse -q --verify "refs/tags/$TAG^{commit}" 2>/dev/null || true)"
           if [ -n "$AT" ] && [ "$AT" != "$HEAD_SHA" ]; then
-            echo "::error::tag $TAG already exists on $AT, not this commit — bump typescript/package.json"
-            exit 1
+            MSG="tag $TAG already exists on $AT, not this commit — bump typescript/package.json"
+            if [ "${DRY_RUN:-false}" = "true" ]; then
+              echo "::warning::$MSG (rehearsal: a real release stops here)"
+            else
+              echo "::error::$MSG"
+              exit 1
+            fi
           fi
           if [ -n "$AT" ]; then echo "$TAG already points here; nothing to create"; fi
 
@@ -228,6 +294,7 @@ jobs:
         if: ${{ steps.registry.outputs.published == 'true' }}
         env:
           PKG_VERSION: ${{ steps.versions.outputs.version }}
+          DRY_RUN: ${{ inputs.dry_run }}
         run: |
           set -euo pipefail
           V="$PKG_VERSION"
@@ -235,8 +302,13 @@ jobs:
           if [ -z "$GH" ]; then
             echo "::warning::npm records no gitHead for $V; cannot verify it was built from this commit"
           elif [ "$GH" != "$GITHUB_SHA" ]; then
-            echo "::error::npm has $V built from $GH, but this run is $GITHUB_SHA — tagging would point at code the registry does not contain"
-            exit 1
+            MSG="npm has $V built from $GH, but this run is $GITHUB_SHA — tagging would point at code the registry does not contain"
+            if [ "${DRY_RUN:-false}" = "true" ]; then
+              echo "::warning::$MSG (rehearsal: a real release stops here)"
+            else
+              echo "::error::$MSG"
+              exit 1
+            fi
           else
             echo "$V on npm was built from this commit"
           fi
@@ -244,7 +316,7 @@ jobs:
       # Publish BEFORE tagging (the tag job `needs` this one), so a tag only
       # ever exists for a release that reached the registry.
       - name: Publish to npm
-        if: ${{ steps.registry.outputs.published == 'false' }}
+        if: ${{ steps.registry.outputs.published == 'false' && !inputs.dry_run }}
         working-directory: typescript
         env:
           PKG_VERSION: ${{ steps.versions.outputs.version }}
@@ -261,12 +333,20 @@ jobs:
           echo "publishing $V under dist-tag $DIST"
           npm publish --access public --tag "$DIST"
 
+      # The npm side of a rehearsal packs the tarball and stops. It cannot
+      # prove npm's trusted publisher works — that exchange happens inside a
+      # real `npm publish` — so this checks the artifact, not the credential.
+      - name: Rehearse the npm package
+        if: ${{ inputs.dry_run }}
+        working-directory: typescript
+        run: npm publish --access public --dry-run
+
   # Runs git and nothing else. No npm install, no project code — so the
   # repository-write credential is never in scope while third-party code runs.
   tag:
     name: tag
     needs: publish
-    if: ${{ github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.target == 'npm' && !inputs.dry_run }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -292,6 +372,266 @@ jobs:
           # idempotent case would leave a green run with an npm artifact from
           # THIS commit and a release tag on a different one. Dereference and
           # compare.
+          AT="$(git rev-parse -q --verify "refs/tags/$TAG^{commit}" 2>/dev/null || true)"
+          if [ -n "$AT" ]; then
+            if [ "$AT" != "$HEAD_SHA" ]; then
+              echo "::error::$TAG exists on $AT, not this commit ($HEAD_SHA)"
+              exit 1
+            fi
+            echo "$TAG already points here — nothing to do" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git tag "$TAG"
+          git push origin "refs/tags/$TAG"
+          echo "pushed $TAG" >> "$GITHUB_STEP_SUMMARY"
+
+  # THE CRATE. Same shape as the npm job above, and the differences are all
+  # registry differences, called out where they occur.
+  publish-rust:
+    name: crates.io publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    if: >-
+      ${{ (github.event_name == 'workflow_dispatch' && inputs.target == 'rust')
+       || (github.event_name == 'push' && startsWith(github.ref_name, 'rust/v')) }}
+
+    # Deliberately NOT contents: write — see the header. `cargo publish`
+    # compiles the whole dependency graph, build scripts and proc macros
+    # included, which is third-party code executing on this runner.
+    permissions:
+      id-token: write
+      contents: read
+
+    outputs:
+      version: ${{ steps.versions.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: stable
+
+      # THE SAME EXPRESSION `rust/Makefile` USES, so the two cannot disagree
+      # about which version a release is. `-m1` stops at `[package]`'s own
+      # `version`, before any dependency's.
+      - name: Resolve the version being released
+        id: versions
+        working-directory: rust
+        run: |
+          set -euo pipefail
+          VERSION="$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
+          test -n "$VERSION" || { echo "::error::could not read rust/Cargo.toml version"; exit 1; }
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "$VERSION -> tag rust/v$VERSION"
+
+      - name: Dispatches must come from main
+        if: ${{ github.event_name == 'workflow_dispatch' && !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF_NAME" != "main" ]; then
+            echo "::error::dispatch ref is $GITHUB_REF_NAME; releases must come from main"
+            exit 1
+          fi
+
+      - name: main must still be the commit we intended to release
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.expect_sha != '' }}
+        env:
+          EXPECT_SHA: ${{ inputs.expect_sha }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_SHA" != "$EXPECT_SHA" ]; then
+            echo "::error::main has moved: expected $EXPECT_SHA, got $GITHUB_SHA"
+            exit 1
+          fi
+
+      - name: The pushed tag must match the crate version
+        if: ${{ github.event_name == 'push' }}
+        env:
+          CRATE_VERSION: ${{ steps.versions.outputs.version }}
+        run: |
+          set -euo pipefail
+          WANT="rust/v$CRATE_VERSION"
+          if [ "$GITHUB_REF_NAME" != "$WANT" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match rust/Cargo.toml ($WANT)"
+            exit 1
+          fi
+
+      # Warns rather than stops on a rehearsal — see the npm job's copy of
+      # this step for why.
+      - name: Refuse a tag that points at a different commit
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          CRATE_VERSION: ${{ steps.versions.outputs.version }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          TAG="rust/v$CRATE_VERSION"
+          HEAD_SHA="$(git rev-parse HEAD)"
+          AT="$(git rev-parse -q --verify "refs/tags/$TAG^{commit}" 2>/dev/null || true)"
+          if [ -n "$AT" ] && [ "$AT" != "$HEAD_SHA" ]; then
+            MSG="tag $TAG already exists on $AT, not this commit — bump rust/Cargo.toml"
+            if [ "${DRY_RUN:-false}" = "true" ]; then
+              echo "::warning::$MSG (rehearsal: a real release stops here)"
+            else
+              echo "::error::$MSG"
+              exit 1
+            fi
+          fi
+          if [ -n "$AT" ]; then echo "$TAG already points here; nothing to create"; fi
+
+      # No install step, because there is nothing to install: the library has
+      # ZERO runtime dependencies and one dev-dependency (serde_json, for the
+      # corpus loader). `cargo test` resolves what it needs.
+      - name: Build and test
+        working-directory: rust
+        run: |
+          cargo build --all-targets
+          cargo test
+
+      # THE CORPUS IS THE CONTRACT, and `cargo test` in `rust/` does not run
+      # it. The harness is a separate package precisely so that omni stays out
+      # of the PUBLISHED manifest (register 4.13) — which also means the
+      # library's own test run says nothing about port parity. Publishing
+      # without this would ship a port nobody checked against the canonical.
+      - name: Run the corpus
+        working-directory: rust/corpus
+        run: cargo test
+
+      # THE REGISTRY IS THE SOURCE OF TRUTH FOR "IS THIS RELEASED", not the
+      # tag — same reasoning as the npm job's equivalent step: a run can
+      # publish and then fail before tagging, and without this that state is
+      # unrecoverable.
+      #
+      # crates.io answers 404 for a version it does not have and 403 to a
+      # request with no descriptive User-Agent, so both are spelled out. Any
+      # other status is a registry the workflow does not understand; stopping
+      # beats guessing "not published" and trying to publish over it.
+      - name: Is this version already on crates.io?
+        id: registry
+        env:
+          CRATE_VERSION: ${{ steps.versions.outputs.version }}
+        run: |
+          set -euo pipefail
+          V="$CRATE_VERSION"
+          CODE="$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H 'User-Agent: voxgig-struct release workflow (https://github.com/voxgig/struct)' \
+            "https://crates.io/api/v1/crates/voxgig-struct/$V")"
+          case "$CODE" in
+            200)
+              echo "published=true" >> "$GITHUB_OUTPUT"
+              echo "$V is already on crates.io — skipping publish"
+              ;;
+            404)
+              echo "published=false" >> "$GITHUB_OUTPUT"
+              echo "$V is not on crates.io — will publish"
+              ;;
+            *)
+              echo "::error::crates.io answered $CODE for voxgig-struct/$V; refusing to guess"
+              exit 1
+              ;;
+          esac
+
+      # SKIPPING THE PUBLISH ASSUMES "SAME VERSION MEANS SAME CODE" — the npm
+      # job's step of this name explains why that can be false and how it ends
+      # with a tag pointing at code the registry does not contain.
+      #
+      # crates.io records no `gitHead`, but a version published over trusted
+      # publishing carries `trustpub_data.sha`, which is the commit that
+      # published it. That is the same check by another name. A version
+      # published over a token has `trustpub_data: null` and cannot be
+      # verified — 0.1.0 is exactly that — so warn rather than block, or
+      # legitimate recovery becomes impossible.
+      - name: A published version must come from this commit
+        if: ${{ steps.registry.outputs.published == 'true' }}
+        env:
+          CRATE_VERSION: ${{ steps.versions.outputs.version }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          V="$CRATE_VERSION"
+          SHA="$(curl -sS \
+            -H 'User-Agent: voxgig-struct release workflow (https://github.com/voxgig/struct)' \
+            "https://crates.io/api/v1/crates/voxgig-struct/$V" \
+            | python3 -c 'import json,sys; v=json.load(sys.stdin).get("version") or {}; t=v.get("trustpub_data") or {}; print(t.get("sha",""))')"
+          if [ -z "$SHA" ]; then
+            echo "::warning::crates.io records no trusted-publishing commit for $V; cannot verify it was built from this commit"
+          elif [ "$SHA" != "$GITHUB_SHA" ]; then
+            MSG="crates.io has $V published from $SHA, but this run is $GITHUB_SHA — tagging would point at code the registry does not contain"
+            if [ "${DRY_RUN:-false}" = "true" ]; then
+              echo "::warning::$MSG (rehearsal: a real release stops here)"
+            else
+              echo "::error::$MSG"
+              exit 1
+            fi
+          else
+            echo "$V on crates.io was published from this commit"
+          fi
+
+      # OIDC -> a crates.io token that lives ~30 minutes. AFTER the build and
+      # the tests deliberately: minting it first would spend most of its life
+      # compiling. The action masks the token in the log and revokes it in its
+      # post step, so it does not outlive the job even on failure.
+      #
+      # This step runs on a rehearsal too — it is the whole point of one. The
+      # registry-side trusted publisher (owner, repo, and THIS filename) is not
+      # observable any other way, and a misconfiguration surfaces here rather
+      # than after a version number has been spent.
+      - name: Mint a crates.io token over OIDC
+        id: auth
+        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
+
+      # Publish BEFORE tagging (the tag job `needs` this one), so a tag only
+      # ever exists for a release that reached the registry.
+      #
+      # No dist-tag to choose, unlike npm: crates.io has none. Cargo's semver
+      # ranges already exclude prereleases unless a caller opts in, so
+      # 0.1.1-beta.1 cannot reach an unpinned dependent by accident.
+      - name: Publish to crates.io
+        if: ${{ steps.registry.outputs.published == 'false' && !inputs.dry_run }}
+        working-directory: rust
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: cargo publish
+
+      # Packs and verifies exactly what `cargo publish` would upload, and
+      # uploads nothing. Reaching this step at all means the token exchange
+      # above succeeded, which is the half a rehearsal exists to prove.
+      - name: Rehearse the crate
+        if: ${{ inputs.dry_run }}
+        working-directory: rust
+        run: cargo publish --dry-run
+
+  # Runs git and nothing else — see the `tag` job above, which this mirrors.
+  tag-rust:
+    name: tag (rust)
+    needs: publish-rust
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.target == 'rust' && !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Tag the release
+        env:
+          CRATE_VERSION: ${{ needs.publish-rust.outputs.version }}
+        run: |
+          set -euo pipefail
+          TAG="rust/v$CRATE_VERSION"
+          HEAD_SHA="$(git rev-parse HEAD)"
+
+          # EXISTENCE IS NOT ENOUGH — dereference and compare, for the reason
+          # spelled out in the npm tag job.
           AT="$(git rev-parse -q --verify "refs/tags/$TAG^{commit}" 2>/dev/null || true)"
           if [ -n "$AT" ]; then
             if [ "$AT" != "$HEAD_SHA" ]; then

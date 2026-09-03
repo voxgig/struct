@@ -109,6 +109,24 @@ repo root, `make test-rust` / `make lint-rust` do too. Stable Rust 1.80+
   `make lint` green, then `python3 ../tools/check_parity.py` and the other
   ports' tests.
 
+## Release
+
+The crate is released **by CI over OIDC**, not from this directory:
+**Actions -> publish -> Run workflow** on `main` with `target: rust`. That
+publishes `voxgig-struct` to crates.io and pushes `rust/v<version>` — the
+same tag `make publish` here would cut, over a short-lived trusted-publishing
+token instead of a long-lived `CARGO_REGISTRY_TOKEN`.
+
+- **Bump `Cargo.toml` first, in a reviewed PR.** Nothing in the workflow
+  commits; it releases the version already on `main`. `cargo test` in both
+  packages updates `Cargo.lock` and `corpus/Cargo.lock` — both are tracked,
+  so commit them with the bump.
+- **`dry_run: true` rehearses** — every guard, both test runs, `cargo publish
+  --dry-run`, and a crates.io token minted and revoked without being used. It
+  is the only way to check the trusted publisher without spending a version.
+- `make publish` here still works and is the fallback if CI cannot run. See
+  [`../AGENTS.md`](../AGENTS.md#release-and-publish) for the full picture.
+
 ## See also
 
 - Port guide: [`DOCS.md`](./DOCS.md) · Reference + quick start:

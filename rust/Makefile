@@ -54,7 +54,17 @@ audit:
 	cargo audit
 
 # Release: publish to crates.io, then tag rust/vX.Y.Z (version from Cargo.toml).
-# Needs crates.io auth (CARGO_REGISTRY_TOKEN / `cargo login`). Dry-run with:
+#
+# PREFER THE WORKFLOW. crates.io has a trusted publisher registered against
+# .github/workflows/publish.yml, so the supported path is
+#
+#   Actions -> publish -> Run workflow, on main, with target: rust
+#
+# which publishes over a short-lived OIDC token and cuts the SAME
+# rust/vX.Y.Z tag this target does. `dry_run: true` rehearses it without
+# releasing. This target remains for the case where CI cannot run, and it
+# publishes over a long-lived CARGO_REGISTRY_TOKEN / `cargo login`
+# credential instead - no OIDC, no provenance. Rehearse it locally with:
 #   cargo publish --dry-run
 VERSION := $(shell grep -m1 '^version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')
 TAG := rust/v$(VERSION)
