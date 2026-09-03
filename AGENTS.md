@@ -250,7 +250,7 @@ markdownlint, plus each language's linters).
 
 [`STYLE-GUIDE.md`](./STYLE-GUIDE.md) is normative for the root
 `README.md` and `DOCS.md` and for every port's `README.md` and `DOCS.md` —
-50 pages. It carries the voice, the Diátaxis section rules, the
+50 pages. It carries the voice, the four-part section rules, the
 banned-phrase list, the spaced em dash and its ration, and the rule that
 documentation never cites a working document. Read it before writing a
 sentence that ships; every rule in it was added after something went

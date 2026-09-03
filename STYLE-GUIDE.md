@@ -10,9 +10,9 @@ that a reviewer can point at a rule instead of arguing taste.
 It is a port of [voxgig/jostraca](https://github.com/jostraca/jostraca)'s
 guide, which shares an author and a house voice with this project. The
 structure and most of the rules are that project's. Where this one differs
-— the em dash, the internal-document set, the shape of the four Diátaxis
-kinds — the difference is recorded with the measurement behind it, because
-a divergence nobody wrote down reads later as drift.
+— the em dash, the internal-document set, the shape of the four parts —
+the difference is recorded with the measurement behind it, because a
+divergence nobody wrote down reads later as drift.
 
 Three sources feed the guide, in a fixed priority order. The same order is
 encoded in [`.vale.ini`](./.vale.ini), and every rule switched off there
@@ -48,24 +48,26 @@ A Google rule sitting at `warning` rather than `error` was tried at error
 level first and found wrong for these pages; `.vale.ini` records what it
 produced and why it was demoted.
 
-## The structure: Diátaxis, as sections rather than files
+## The structure: four parts, as sections rather than files
 
-Upstream gives each Diátaxis kind its own file. This project has 24 ports
-and could not, so the kind is a **numbered section** inside each
-`DOCS.md`, and the rules attach to the section:
+Every `DOCS.md` is a four-part guide: a tutorial, how-to recipes, a
+reference, and an explanation, in that order. Upstream gives each part its
+own file. This project has 24 ports and could not, so the part is a
+**numbered section** inside each `DOCS.md`, and the rules attach to the
+section:
 
-| Kind | Where | May | May not |
+| Part | Where | May | May not |
 |---|---|---|---|
 | Tutorial | `DOCS.md` §1 | teach step by step, show output for every step, defer detail with a link | argue design, list every function, assume the reader's goal |
 | How-to | `DOCS.md` §2 | solve one named task, assume competence, link the reference | teach basics, explain design, drift into a second task |
 | Reference | `DOCS.md` §3 | state facts exhaustively and dryly, pin claims to corpus entries | narrate, persuade, teach |
 | Explanation | `DOCS.md` §4 | argue, compare, admit trade-offs, tell the design's story | be the only place a fact lives |
 
-`README.md` is the doorway and belongs to no kind: it routes, gives the
+`README.md` is the doorway and belongs to no part: it routes, gives the
 quick start, and states no fact of its own that a `DOCS.md` below it does
 not also state.
 
-One fact appears in all four kinds at different altitudes — met in the
+One fact appears in all four parts at different altitudes — met in the
 tutorial, used in a how-to, specified in the reference, argued in the
 explanation — but the normative statement lives in the reference and
 everything else links to it.
@@ -144,9 +146,8 @@ does not, because Vale cannot tell the two halves of `design/` apart.
 
 ## The voice
 
-The house voice is Richard Rodger's blog register, adapted per section
-kind. The portable part of that voice is its *rhythm*, not its stock
-phrases. Ten habits, with the register they apply in:
+The house voice is Richard Rodger's blog register, adapted per section.
+The portable part of that voice is its *rhythm*, not its stock phrases. Ten habits, with the register they apply in:
 
 1. **Open with a concrete fact or a plainly stated problem, then a short
    dry beat.** Tutorial and how-to sections. Reference sections open by
@@ -398,7 +399,7 @@ Two rules of taste:
 - An example is written in the language of the page it is on. The root
   pages use the canonical TypeScript; a port page uses that port.
 
-## Per-kind templates
+## Templates, part by part
 
 **Tutorial section** (`DOCS.md` §1): goal sentence → snippet → output →
 the one observation → forward link. Every step's output shown.
