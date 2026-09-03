@@ -37,7 +37,7 @@ Two gates check it, and both run in CI:
 | Gate | Runs | Checks |
 |---|---|---|
 | `vale $(python3 tools/check_prose.py --files)` | `.github/workflows/docs.yml` | Google's rules plus the banned list, at the levels set in `.vale.ini` |
-| `python3 tools/check_prose.py` | `make scan-prose`, and the same workflow | the banned list, the em-dash spacing and ration, the first-person rules, no emoji, no citations of a working document, and that every relative link resolves |
+| `python3 tools/check_prose.py` | `make scan-prose`, and the same workflow | the banned list, the em-dash spacing and ration, the first-person rules, no emoji, no citations of a working document, that every relative link resolves, and that the page set is complete |
 
 The banned list is read from one file by both, so they cannot drift. The
 page set comes from one function, `tools/check_prose.py --files`, for the
@@ -327,11 +327,14 @@ The rest:
   - [Rust](rust/README.md). The port, with its own RE2-subset engine.
   ```
 
-- **Every relative link must resolve.** `tools/check_prose.py` checks the
-  path, not the anchor, since a heading slug depends on the renderer. The
-  check found four dead links the day it was written: four ports named a
-  `runner` file that has never existed here, and all four had been
-  shipping as 404s on GitHub, npm and PyPI.
+- **Every relative link must resolve, and stay inside the repository.**
+  `tools/check_prose.py` checks the path, not the anchor, since a heading
+  slug depends on the renderer; it reads both `[text](target)` and
+  `[text][label]` with its definition. A target that resolves on a Linux
+  runner but climbs out of the checkout resolves nowhere on GitHub or in a
+  published package, so it fails too. The check found four dead links the
+  day it was written: four ports named a `runner` file that has never
+  existed here, all shipping as 404s on GitHub, npm and PyPI.
 - No emoji in documentation.
 - Sentence-style capitalisation in headings (Google style), except where
   the heading names a proper noun: `Regex API`, `Struct for Rust`.

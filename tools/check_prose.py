@@ -13,7 +13,8 @@ paragraph ends.
     first-person-singular   stricter than Google's rule
     no-emoji
     internal-documents      documentation never cites a working document
-    relative-links-resolve  a link's target exists
+    relative-links-resolve  a link's target exists, inside the repository
+    page-set-is-complete    every port carries both required pages
 
 Run it directly, or `make scan-prose`. `--files` prints the page set both
 gates read, so the Vale invocation and this one cannot drift apart.
@@ -62,18 +63,53 @@ STYLE_GUIDE = ROOT / "STYLE-GUIDE.md"
 # order to ban citations of them.
 # ---------------------------------------------------------------------
 
-def pages() -> list[Path]:
-    found = [ROOT / "README.md", ROOT / "DOCS.md"]
+NOT_PORTS = ("build", "test", "design", "tools", "node_modules")
+
+REQUIRED = ("README.md", "DOCS.md")
+
+
+def port_dirs() -> list[Path]:
+    """Directories that carry at least one of the two required pages."""
+    out = []
     for child in sorted(ROOT.iterdir()):
         if not child.is_dir() or child.name.startswith("."):
             continue
-        if child.name in ("build", "test", "design", "tools", "node_modules"):
+        if child.name in NOT_PORTS:
             continue
-        for name in ("README.md", "DOCS.md"):
-            page = child / name
-            if page.is_file():
-                found.append(page)
+        if any((child / name).is_file() for name in REQUIRED):
+            out.append(child)
+    return out
+
+
+def pages() -> list[Path]:
+    found = [ROOT / name for name in REQUIRED]
+    for child in port_dirs():
+        found += [child / name for name in REQUIRED]
     return [p for p in found if p.is_file()]
+
+
+def check_page_set() -> list[str]:
+    """EXISTENCE IS NOT MEMBERSHIP. `pages()` can only return files that
+    are there, so deleting one used to shrink the set silently -- both
+    gates would report on 49 pages and pass, and nothing said the fiftieth
+    had stopped being read. Every port carries BOTH pages, so ask for both
+    and fail on the gap rather than absorbing it.
+
+    A directory carrying neither is not a port and is not missed; that is
+    why the rule is written as both-or-neither rather than a hardcoded
+    list, which would itself go stale when a port is added.
+    """
+    hits = []
+    for name in REQUIRED:
+        if not (ROOT / name).is_file():
+            hits.append(f"missing required page: {name}")
+    for child in port_dirs():
+        for name in REQUIRED:
+            if not (child / name).is_file():
+                hits.append(
+                    f"missing required page: {child.name}/{name} "
+                    f"(the directory carries the other one)")
+    return hits
 
 
 def label(path: Path) -> str:
@@ -123,12 +159,39 @@ def fenceless(md: str) -> str:
     return "\n".join(out)
 
 
-# A code span may be broken by a line wrap. `ocamlc -I src` wrapped mid-span
-# in ocaml/DOCS.md and the first-person rule then read the compiler's -I
-# flag as the pronoun, which is the shape of false positive that gets a
-# gate switched off. Bounded to 200 characters so an unmatched backtick
-# swallows a sentence rather than the rest of the file.
-CODE_SPAN = re.compile(r"`[^`]{0,200}`", re.S)
+# A code span may be broken by a line wrap. `ocamlc -I src` wrapped
+# mid-span in ocaml/DOCS.md and the first-person rule then read the
+# compiler's -I flag as the pronoun, which is the shape of false positive
+# that gets a gate switched off.
+#
+# BALANCED RUNS, not single backticks. Markdown closes a span with a run of
+# exactly as many backticks as opened it, which is how code containing a
+# backtick is written -- ``{"`$FN`": f/v}`` in boru's pages, for one. A
+# pattern matching one pair at a time strips the delimiters of such a span
+# and leaves its CONTENTS in the prose stream, so ``my`` or ``quietly``
+# would fail a gate for a word only ever shown as code. The lookarounds
+# pin the run length; the bound keeps an unmatched backtick to a sentence
+# rather than the rest of the file.
+CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.{0,400}?)(?<!`)\1(?!`)", re.S)
+
+
+# A link's DESTINATION is not prose: the reader never sees it. Left in, a
+# perfectly ordinary URL with a path segment like /our/ or /mine trips the
+# first-person rule, and one with /quietly trips the banned list -- a false
+# positive on compliant copy, in the checks that .vale.ini switches
+# Google.We and Google.FirstPerson off in favour of.
+#
+# The destination is blanked to spaces rather than removed, and the link
+# TEXT is kept, so both the visible words and every character position
+# survive. `check_links` reads fenceless() instead, which keeps the
+# destinations it exists to resolve.
+INLINE_LINK = re.compile(r"(\[[^\]]*\])(\([^)\n]*\)|\[[^\]]*\])")
+
+LINK_DEF = re.compile(r"(?m)^(\s{0,3}\[[^\]]+\]:)(.*)$")
+
+
+def _blank(match: re.Match, keep: int, blank: int) -> str:
+    return match.group(keep) + " " * len(match.group(blank))
 
 
 def prose(md: str) -> str:
@@ -140,7 +203,9 @@ def prose(md: str) -> str:
     """
     text = fenceless(md)
     text = re.sub(r"\A---\n.*?\n---\n", "", text, flags=re.S)
-    return CODE_SPAN.sub(lambda m: "\n" * m.group(0).count("\n"), text)
+    text = CODE_SPAN.sub(lambda m: "\n" * m.group(0).count("\n"), text)
+    text = INLINE_LINK.sub(lambda m: _blank(m, 1, 2), text)
+    return LINK_DEF.sub(lambda m: _blank(m, 1, 2), text)
 
 
 class Para:
@@ -372,9 +437,33 @@ def check(paths: list[Path]) -> list[str]:
 # renderer, and a gate that guesses one would fail on correct links.
 # ---------------------------------------------------------------------
 
+# BOTH MARKDOWN LINK FORMS. The inline `[text](target)` is the common one
+# here, but `[text][label]` with a `[label]: target` definition is equally
+# standard and the root README already uses it (for external links today,
+# and nothing stops a relative one). A gate that reads only the first form
+# would report success on a broken reference link while promising to check
+# every link, which is worse than not having the check.
 LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
 
-EXTERNAL = ("http://", "https://", "mailto:", "#")
+LINK_TARGET = re.compile(r"(?m)^\s{0,3}\[[^\]]+\]:\s*<?([^>\s]+)>?")
+
+EXTERNAL = ("http://", "https://", "mailto:", "#", "//")
+
+
+def broken(page: Path, target: str) -> bool:
+    """A target is good only if it exists AND stays inside the repository.
+
+    Existing is not enough: `../../etc/passwd` from a root page resolves on
+    a Linux runner and would pass, while resolving nowhere on GitHub or
+    inside a published package. Both halves have to hold.
+    """
+    relative = target.split("#", 1)[0]
+    if not relative:
+        return False
+    resolved = (page.parent / relative).resolve()
+    if not resolved.exists():
+        return True
+    return not resolved.is_relative_to(ROOT)
 
 
 def check_links(paths: list[Path]) -> list[str]:
@@ -383,14 +472,12 @@ def check_links(paths: list[Path]) -> list[str]:
         name = label(path)
         text = fenceless(path.read_text(encoding="utf-8"))
         for i, line in enumerate(text.split("\n"), 1):
-            for match in LINK.finditer(line):
-                target = match.group(1)
+            targets = [m.group(1) for m in LINK.finditer(line)]
+            targets += [m.group(1) for m in LINK_TARGET.finditer(line)]
+            for target in targets:
                 if target.startswith(EXTERNAL):
                     continue
-                relative = target.split("#", 1)[0]
-                if not relative:
-                    continue
-                if not (path.parent / relative).exists():
+                if broken(path, target):
                     hits.append(f"{name}:{i}  broken link: {target}")
     return hits
 
@@ -411,6 +498,11 @@ def check_guide_names_this_gate() -> list[str]:
 
 def main(argv: list[str]) -> int:
     if "--files" in argv:
+        problems = check_page_set()
+        if problems:
+            for problem in problems:
+                print(problem, file=sys.stderr)
+            return 1
         try:
             for path in pages():
                 print(label(path))
@@ -425,7 +517,7 @@ def main(argv: list[str]) -> int:
 
     hits = check(paths) + check_links(paths)
     if not named:
-        hits += check_guide_names_this_gate()
+        hits += check_page_set() + check_guide_names_this_gate()
 
     print(f"prose gate: {len(paths)} pages")
     if hits:

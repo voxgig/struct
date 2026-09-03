@@ -261,13 +261,19 @@ Two gates enforce it and both run in CI, in `.github/workflows/docs.yml`:
 | Gate | Runs | Covers |
 | --- | --- | --- |
 | `vale --minAlertLevel=error $(python3 tools/check_prose.py --files)` | `make scan-prose`, docs.yml | Google's rules plus the banned list, at the levels in `.vale.ini` |
-| `python3 tools/check_prose.py` | `make scan-prose`, docs.yml | the banned list, em-dash spacing and ration, first person, no emoji, no working-document citations, resolving relative links |
+| `python3 tools/check_prose.py` | `make scan-prose`, docs.yml | the banned list, em-dash spacing and ration, first person, no emoji, no working-document citations, resolving relative links, a complete page set |
 
 The banned list is one file,
 `.vale/styles/config/vocabularies/Struct/reject.txt`, read by both. The
 page set is one function, `pages()` in `tools/check_prose.py`, printed by
 `--files` and handed to Vale. Add a phrase or a page in one place and both
 gates pick it up; there is no second copy to keep in step.
+
+**Every port carries both a `README.md` and a `DOCS.md`, and the gate
+fails if one goes missing.** Existence is not membership: a page that is
+simply absent would otherwise drop out of the set and both gates would
+report green on the 49 that remain, with nothing saying the fiftieth had
+stopped being read.
 
 **This file is not documentation, and the docs may not cite it.** Nor may
 they cite `CLAUDE.md`, `design/DOC_EXAMPLES.md`, the assessments, or any
