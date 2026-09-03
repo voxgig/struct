@@ -21,7 +21,7 @@
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
 
     <!-- NuGet package metadata. -->
-    <Version>0.1.0</Version>
+    <Version>0.1.1</Version>
     <PackageId>Voxgig.Struct</PackageId>
     <Authors>Voxgig</Authors>
     <Description>Uniform JSON-shaped data structure manipulations — C# port of @voxgig/struct</Description>
