@@ -61,9 +61,18 @@ STYLE_GUIDE = ROOT / "STYLE-GUIDE.md"
 # STYLE-GUIDE.md is exempt for the reason upstream gives: it quotes the
 # banned phrases in order to ban them, and names the internal documents in
 # order to ban citations of them.
+#
+# patch/ is not in it either. It is a TRANSIENT delivery folder -- a change
+# an agent session could not push, because `.github/workflows/` is refused
+# to it, handed over as a `git format-patch` file (AGENTS.md, "Repository
+# map"). Its README is an apply note for whoever lands the patch, not an
+# authored page: it names the working documents the patch edits, which the
+# citation rule forbids a page from doing, and it has no DOCS.md companion
+# because there is nothing to write one about. Without this the gate reads
+# the folder as a port and demands both pages of it.
 # ---------------------------------------------------------------------
 
-NOT_PORTS = ("build", "test", "design", "tools", "node_modules")
+NOT_PORTS = ("build", "test", "design", "tools", "patch", "node_modules")
 
 REQUIRED = ("README.md", "DOCS.md")
 
