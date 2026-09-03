@@ -347,8 +347,22 @@ LuaRocks, Maven Central, CPAN) and **always** pushes `<lang>/vX.Y.Z`.
 Registry-less ports — Go, PHP/Packagist, Swift, Zig, C, C++ — release *purely*
 by that tag.
 
-**There is no `publish-all`, deliberately.** Each publish is irreversible and
-cuts a version tag, so they are one command each.
+**`make publish-all CONFIRM=yes` covers the ten git-tag-driven ports**, and
+only those. It bumps the patch, commits that and pushes it to `main`, releases
+the seven registry-less ports through their own `make publish-<lang>`, then
+pushes the release tag for typescript, javascript and rust so `publish.yml`
+releases those over OIDC.
+
+**The thirteen registry ports are excluded on purpose**, and every other
+publish stays one command. Each of those uploads an irreversible artifact
+under its own credentials; `publish-all` is less an exception to that than the
+set the objection never applied to, since nothing it does uploads from your
+machine and a git tag can be deleted where a published version cannot.
+
+It is resumable: `tools/bump.py` will not bump past a version whose tag is
+missing, so a run that stops half way — a failing test, a refused push — picks
+up the ports it has not released yet rather than skipping them and bumping the
+rest twice.
 
 `make status` (`tools/release_status.py`) is the dashboard. Start there — but
 know what it does and does not do:
@@ -371,7 +385,8 @@ know what it does and does not do:
 typescript`, `javascript` or `rust`; or push the matching tag by hand
 (`v<version>`, `javascript/v<version>`, `rust/v<version>`). One target per
 run: the three packages version independently and every publish is
-irreversible, which is the same reason there is no `publish-all`.
+irreversible. `make publish-all` drives exactly this tag-push path for all
+three, which is why it never needs a registry credential of its own.
 
 `make publish` from `typescript/` and `javascript/`, and `make
 publish-rust`, also exist — **prefer the workflow**:
