@@ -1,6 +1,6 @@
 {
-  "name": "@voxgig/structjs",
-  "version": "0.1.1",
+  "name": "@voxgig/struct-js",
+  "version": "0.1.2",
   "description": "JSON data structure manipulations — JavaScript port",
   "main": "src/struct.js",
   "type": "commonjs",
@@ -27,7 +27,7 @@
     "format": "prettier --write \"src/**/*.js\" \"test/**/*.js\"",
     "format:check": "prettier --check \"src/**/*.js\" \"test/**/*.js\"",
     "doc": "echo doc",
-    "inject-version": "node -e \"t=['./src/struct.js'],r=require,fs=r('fs'),v=r('./package.json').version,t.map(f=>fs.writeFileSync(f,fs.readFileSync(f,'utf8').replace(/\\/\\/ VERSION: @voxgig\\/structjs [^\\n]+/, '// VERSION: @voxgig/structjs '+v)))\"",
+    "inject-version": "node -e \"t=['./src/struct.js'],r=require,fs=r('fs'),v=r('./package.json').version,t.map(f=>fs.writeFileSync(f,fs.readFileSync(f,'utf8').replace(/\\/\\/ VERSION: @voxgig\\/struct-js [^\\n]+/, '// VERSION: @voxgig/struct-js '+v)))\"",
     "clean": "rm -rf coverage node_modules yarn.lock package-lock.json",
     "reset": "npm run clean && npm i && npm test",
     "repo-tag": "REPO_VERSION=`node -e \"console.log(require('./package').version)\"` && echo TAG: javascript/v$REPO_VERSION && git commit -a -m javascript/v$REPO_VERSION && git push && git tag javascript/v$REPO_VERSION && git push --tags;",

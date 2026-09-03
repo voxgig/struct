@@ -1,6 +1,6 @@
 # Releases the three voxgig/struct packages that publish over OIDC, and
 # writes their git tags: `@voxgig/struct` on npm (from `typescript/`),
-# `@voxgig/structjs` on npm (from `javascript/`), and `voxgig-struct` on
+# `@voxgig/struct-js` on npm (from `javascript/`), and `voxgig-struct` on
 # crates.io (from `rust/`).
 #
 # Adapted from voxgig/sdkgen's publish.yml, which carries the reasoning for
@@ -58,7 +58,7 @@
 #   workflow_dispatch        the normal path. Publishes if missing, then tags.
 #   push: tags v*            the manual path, for a tag pushed by hand.
 #                            Publishes @voxgig/struct only.
-#   push: tags javascript/v* the same, for @voxgig/structjs.
+#   push: tags javascript/v* the same, for @voxgig/struct-js.
 #   push: tags rust/v*       the same, for the crate.
 #
 # A `*` in a ref filter does not cross `/`, so `v*` cannot also match
@@ -89,7 +89,18 @@
 #
 # Renaming this file breaks publishing until BOTH registries' trusted
 # publishers are updated to match. Do NOT publish locally over a token: that
-# bypasses OIDC and its provenance attestation entirely.
+# bypasses OIDC and its provenance attestation entirely. The one exception is
+# a package name npm has never seen, which is exactly where @voxgig/struct-js
+# is now -- see the next paragraph.
+#
+# @voxgig/struct-js HAS NO TRUSTED PUBLISHER YET. The javascript port was
+# renamed from @voxgig/structjs, which ends at 0.1.1, and npm registers a
+# trusted publisher only on a package that already exists. So the FIRST
+# release under the new name is a token publish -- `make -C javascript
+# publish`, then `npm stage approve` -- after which the publisher is
+# registered against this file and every later release comes back here.
+# Dispatching `target: javascript` before that registration fails the OIDC
+# exchange, and npm reports it as the same 404 described above.
 
 name: publish
 
@@ -535,7 +546,7 @@ jobs:
         run: |
           set -euo pipefail
           V="$PKG_VERSION"
-          if npm view "@voxgig/structjs@$V" version >/dev/null 2>&1; then
+          if npm view "@voxgig/struct-js@$V" version >/dev/null 2>&1; then
             echo "published=true" >> "$GITHUB_OUTPUT"
             echo "$V is already on npm — skipping publish"
           else
@@ -551,7 +562,7 @@ jobs:
         run: |
           set -euo pipefail
           V="$PKG_VERSION"
-          GH="$(npm view "@voxgig/structjs@$V" gitHead 2>/dev/null || true)"
+          GH="$(npm view "@voxgig/struct-js@$V" gitHead 2>/dev/null || true)"
           if [ -z "$GH" ]; then
             echo "::warning::npm records no gitHead for $V; cannot verify it was built from this commit"
           elif [ "$GH" != "$GITHUB_SHA" ]; then

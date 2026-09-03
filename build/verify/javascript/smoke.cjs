@@ -1,4 +1,4 @@
-const s = require('@voxgig/structjs')
+const s = require('@voxgig/struct-js')
 
 const store = { db: { host: 'localhost' } }
 const got = s.getpath(store, 'db.host')
