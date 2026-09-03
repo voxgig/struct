@@ -74,7 +74,7 @@ make -C build/verify verify-ruby \
 |---------------|-----------------------------------------|----------------------------------------------|
 | `go/`         | `github.com/voxgig/struct/go`           | `voxgigstruct.GetPath(store, "db.host")`     |
 | `typescript/` | `@voxgig/struct` (npm, CommonJS)        | `require('@voxgig/struct').getpath(...)`     |
-| `javascript/` | `@voxgig/structjs` (npm)                | `require('@voxgig/structjs').getpath(...)`   |
+| `javascript/` | `@voxgig/struct-js` (npm)               | `require('@voxgig/struct-js').getpath(...)`  |
 | `ruby/`       | `voxgig_struct` (RubyGems)              | `VoxgigStruct.getpath(store, "db.host")`     |
 | `python/`     | `voxgig-struct` (PyPI)                  | `from voxgig_struct import getpath`          |
 | `rust/`       | `voxgig-struct` (crates.io)             | `voxgig_struct::get_path(&store, ...)`       |
@@ -89,10 +89,13 @@ The tag-only ports read their version from `php/VERSION`, `c/VERSION`,
 
 ## Publication status
 
-Both packages that were pending are now live: `@voxgig/structjs` on npm and
-`voxgig-struct` on crates.io, the latter released over OIDC trusted
-publishing. `verify-javascript` and `verify-rust` install from the registry
-like every other port here.
+`voxgig-struct` on crates.io is live, released over OIDC trusted publishing,
+and `verify-rust` installs from the registry like every other port here.
+
+The javascript port has been renamed and publishes as `@voxgig/struct-js`.
+Nothing carries that name on npm yet: the old `@voxgig/structjs` ends at
+0.1.1 and is not republished, so `verify-javascript` fails with a 404 until
+the first `@voxgig/struct-js` release reaches the registry.
 
 ## Toolchains required
 

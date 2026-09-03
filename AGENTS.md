@@ -298,7 +298,7 @@ Two tag namespaces, because there are two kinds of thing to release.
 | what | version lives in | released by | tag |
 | --- | --- | --- | --- |
 | npm `@voxgig/struct` | `typescript/package.json` | `publish.yml` (CI, OIDC) | `v<version>` |
-| npm `@voxgig/structjs` | `javascript/package.json` | `publish.yml` (CI, OIDC) | `javascript/v<version>` |
+| npm `@voxgig/struct-js` | `javascript/package.json` | `publish.yml` (CI, OIDC) | `javascript/v<version>` |
 | crates.io `voxgig-struct` | `rust/Cargo.toml` | `publish.yml` (CI, OIDC) | `rust/v<version>` |
 | each of the 21 other ports | that port's manifest | `make publish-<lang>` | `<lang>/v<version>` |
 
@@ -308,6 +308,21 @@ on crates.io. Each has a trusted publisher registered against
 by `make publish-<lang>`. Both of the newer two keep the
 `<lang>/v<version>` tag shape every other port uses; only the credential
 and the operator changed.
+
+**The javascript package is renamed to `@voxgig/struct-js`, and that name
+has no trusted publisher yet.** npm registers a trusted publisher only on a
+package that already exists, so the first release under the new name cannot
+go over OIDC: publish it with a token (`make -C javascript publish`, then
+`npm stage approve`), register the publisher against `publish.yml` on the
+new package's settings page, and every release after that goes back through
+CI. Dispatching `publish.yml` with target `javascript` before that
+registration fails the OIDC exchange, which npm reports as a 404.
+
+The old `@voxgig/structjs` ends at 0.1.1 and is not published again;
+deprecate it at the new name. The new package starts at **0.1.2**, because
+`javascript/v0.1.1` is already tagged for the old one and every guard on
+the release path compares `javascript/package.json` against that one tag
+namespace, whatever the npm name under it.
 
 **Targets are named by port, not by registry** — `typescript`,
 `javascript`, `rust`. The dispatch input used to offer `npm`, which stopped

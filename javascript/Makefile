@@ -82,7 +82,7 @@ publish: test
 	  exit 0; \
 	fi; \
 	npm stage publish --access public --registry https://registry.npmjs.org; \
-	echo "Staged @voxgig/structjs@$(VERSION). NOT published yet, and NOT tagged."; \
+	echo "Staged @voxgig/struct-js@$(VERSION). NOT published yet, and NOT tagged."; \
 	echo "  1. approve it:  npm stage approve   (npm stage list shows the id)"; \
 	echo "  2. then tag it: make -C javascript tag"
 
@@ -100,8 +100,8 @@ publish: test
 # exists for a version a consumer can install.
 tag:
 	@set -e; \
-	if ! npm view "@voxgig/structjs@$(VERSION)" version >/dev/null 2>&1; then \
-	  echo "@voxgig/structjs@$(VERSION) is not on the registry."; \
+	if ! npm view "@voxgig/struct-js@$(VERSION)" version >/dev/null 2>&1; then \
+	  echo "@voxgig/struct-js@$(VERSION) is not on the registry."; \
 	  echo "If you staged it, approve it first: npm stage approve"; \
 	  exit 1; \
 	fi; \
@@ -117,4 +117,4 @@ tag:
 	  echo "push: $(TAG) -> origin (ssh)"; \
 	  git push origin "$(TAG)"; \
 	fi; \
-	echo "Published @voxgig/structjs@$(VERSION) + tag $(TAG)."
+	echo "Published @voxgig/struct-js@$(VERSION) + tag $(TAG)."
