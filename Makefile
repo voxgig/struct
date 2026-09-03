@@ -130,9 +130,10 @@ publish:
 #                        which runs the tests again and publishes over OIDC
 #                        trusted publishing. NOT `make publish-<lang>`: that
 #                        path uploads over a long-lived registry token,
-#                        bypassing OIDC and its provenance attestation, and for
-#                        typescript it cuts `typescript/v*` rather than the bare
-#                        `v*` the package actually releases under.
+#                        bypassing OIDC and its provenance attestation. The two
+#                        paths cut the same tag now -- typescript released
+#                        under a bare `v*` until 0.3.4 and the Makefile always
+#                        cut `typescript/v*`; publish.yml writes that too.
 #   PUBLISH_ALL_REGISTRY an irreversible upload under that ecosystem's own
 #                        credentials (PyPI, RubyGems, NuGet, CPAN, Maven,
 #                        LuaRocks, Clojars, pub.dev, Hex, Hackage, opam), then

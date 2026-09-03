@@ -91,10 +91,13 @@ def plain(path: str) -> Loc:
 
 # port -> (tag prefix, version locations, post-bump commands)
 #
-# TAG PREFIX IS NOT ALWAYS `<lang>/v`. The typescript package releases under the
-# BARE `v<version>` namespace -- that is what publish.yml writes and what the 16
-# bare tags in this repo use. Reading `typescript/v*` instead finds one stale
-# tag from a Makefile publish and reports the port as years behind.
+# EVERY PREFIX IS `<lang>/v`, typescript included. It used to be the exception
+# -- the package released under the bare `v<version>` namespace, so this table
+# carried `"v"` for it and reading `typescript/v*` found one stale Makefile tag
+# and reported the port as years behind. publish.yml writes
+# `typescript/v<version>` now, and the 16 bare tags up to `v0.3.4` are the
+# history that scheme left behind. `typescript/v0.3.4` was added alongside the
+# bare one, so this table finds the current release rather than that stale tag.
 PORTS = {
     "go":         ("go/v",         [plain("go/VERSION")], []),
     "php":        ("php/v",        [plain("php/VERSION")], []),
@@ -138,7 +141,7 @@ PORTS = {
     "ocaml":      ("ocaml/v",      [plain("ocaml/VERSION"),
                                     Loc("ocaml/voxgig-struct.opam", r'(?m)^version: "(\d+\.\d+\.\d+)"'),
                                     Loc("ocaml/dune-project", r"(?m)^\(version (\d+\.\d+\.\d+)\)")], []),
-    "typescript": ("v",            [Loc("typescript/package.json", r'"version": "(\d+\.\d+\.\d+)"')],
+    "typescript": ("typescript/v", [Loc("typescript/package.json", r'"version": "(\d+\.\d+\.\d+)"')],
                                    # inject-version rewrites the src and test
                                    # comments; the build carries them into the
                                    # committed dist/ and dist-test/.
@@ -203,7 +206,7 @@ def main(argv: list) -> int:
         if args.plan:
             # The release tag this port's CURRENT version wants. Callers cut
             # tags from this rather than composing `<lang>/v<version>`
-            # themselves, because typescript's namespace is the bare `v`.
+            # themselves: the prefix is the table's to decide, not theirs.
             print(f"{name}\t{prefix}{current}\t{current}")
             continue
 
