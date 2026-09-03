@@ -75,22 +75,31 @@ load-bearing and should survive the extension:
   `id-token: write` and `contents: read`; the tag job takes `contents: write`
   and runs git and nothing else. Together they would hand a repository-write
   credential to every dependency install script that runs during the build.
-- **A tag push is the trigger.** It already works for three ports, needs no
-  dispatch plumbing, and pub.dev *only* permits publishing from a
-  tag-triggered workflow — so the constraint is load-bearing rather than
-  incidental.
+- **Publish, then tag — not the reverse.** The dispatch path exists so the tag
+  job can declare `needs:` the publish job, which means a tag only ever exists
+  for a version a consumer can install. Keep it. Making a tag push the
+  universal trigger would invert that for every registry port: a tag pushed
+  first stays behind whether or not the tests, the token exchange and the
+  upload then succeed. That is not hypothetical — `javascript/v0.1.3` exists
+  today while npm still serves 0.1.2, which is the same defect listed under
+  phase 2 below.
 
-That gives a per-port job keyed on its tag pattern:
+**pub.dev is the exception, and stays isolated.** It publishes *only* from a
+tag-triggered workflow, so dart alone tags before it publishes and needs its
+own recovery path for a tag whose publish then failed. Do not generalise its
+constraint to the other twelve registries. The seven registry-less ports tag
+first by definition, because there the tag *is* the release.
+
+So the dispatch path keeps its shape, and gains one job pair per port:
 
 ```yaml
-on:
-  push:
-    tags: ['v*', 'javascript/v*', 'rust/v*', 'python/v*', 'ruby/v*', ...]
-
-publish-python:
-  if: startsWith(github.ref_name, 'python/v')
+publish-python:                 # dispatch: target = python
   permissions: { id-token: write, contents: read }
   environment: release          # secrets and required reviewers live here
+
+tag-python:
+  needs: publish-python         # the tag cannot exist without the publish
+  permissions: { contents: write }
 ```
 
 
@@ -102,7 +111,7 @@ Ordered by dependency rather than by size.
    `@voxgig/struct-js` and release the ports left mid-train. Nothing is built
    here; it clears the board so later phases start from a known state.
 2. **Fix the release-state model.** Automation multiplies whatever the current
-   logic gets wrong, so this comes before adding ports. The four defects are
+   logic gets wrong, so this comes before adding ports. The six defects are
    listed below.
 3. **The trusted-publishing ports.** python, ruby, csharp and dart join
    typescript, javascript and rust. Each needs one publisher registered
@@ -118,8 +127,11 @@ Ordered by dependency rather than by size.
 
 ## What phase 2 has to fix
 
-Four defects in the current release-state model, all of which get worse
-unattended when a workflow is driving rather than a person.
+Six defects in the current release-state model, all of which get worse
+unattended when a workflow is driving rather than a person. The first four are
+in the release path; the last two are in the dashboard that reports on it, and
+they matter here because a dashboard that calls an incomplete release
+"released" is how an irreversible one goes unnoticed.
 
 - **Released-ness is read from local tags.** `tools/bump.py` asks
   `git tag -l`, so a successful `git tag` followed by a failed `git push`
@@ -140,6 +152,14 @@ unattended when a workflow is driving rather than a person.
   the token exchange or the upload. Observed: `javascript/v0.1.3` exists while
   npm still serves 0.1.2. Report those ports as pending, or wait on the
   workflow conclusion.
+- **The dashboard never compares the registry.** `status()` in
+  `tools/release_status.py` reports `released` whenever the manifest and the
+  tag agree, treating the registry column as a cross-check rather than an
+  input. That is precisely the javascript case above: local 0.1.3, tag
+  `javascript/v0.1.3`, npm 0.1.2 — reported as released.
+- **The dashboard has no lean row.** Its `PORTS` table omits `lean` and
+  `boru`. `boru` has no publish flow so that is correct; lean does, which is
+  why lean sat unreleased at 0.1.0 without ever appearing as pending.
 
 
 ## What stays manual
@@ -147,9 +167,17 @@ unattended when a workflow is driving rather than a person.
 - **The version bump.** It should remain a reviewable diff on a pull request.
   Automating the release is not the same as automating the decision to
   release.
-- **Registry-side trust.** Every trusted publisher and every secret is added
-  by a person, once, on the registry's own site. That is the point of the
-  design.
-- **The first publish of any new package name.** A trusted publisher can only
-  be configured on a package that already exists, so a rename or a new port
-  needs one token publish by hand — as `@voxgig/struct-js` did.
+- **Registry-side trust.** Every trusted publisher is added by a person, once,
+  on the registry's own site. That is the point of the design.
+- **Moving each secret into GitHub.** For the nine secret-bearing ports the
+  registry only *issues* the credential; the workflow cannot read it until it
+  is also stored as a repository or environment secret — along with the Maven
+  signing key and its passphrase. Generating and storing are two steps, and
+  phase 4 stalls at authentication if only the first is done.
+- **The first publish of a new package name, on most registries.** npm and the
+  others configure a trusted publisher on a package's own settings page, which
+  exists only once the package does, so a rename or a new port needs one token
+  publish by hand — as `@voxgig/struct-js` did. **PyPI is the exception**: a
+  *pending* publisher is registered against a future project name from the
+  account sidebar, and the first OIDC publish creates the project. A new
+  Python package therefore needs no token at all.
