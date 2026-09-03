@@ -400,14 +400,19 @@ let check options args =
   O.JMap [ ("zed", O.Str ("ZED" ^ foos ^ "_" ^ bars)) ]
 
 let rec client_provider options =
+  (* Built FROM `empty_provider`, not as a bare literal: omni's provider
+     record is a shared type that gains optional hooks over time, and every
+     bare literal here breaks the moment it does -- `errify` was the one that
+     did it. `with` names only the hooks this port implements and takes the
+     None default for the rest. Line 427 below already reads it this way. *)
   {
+    O.empty_provider with
     O.subject = Some (fun name -> if name = "check" then Some (check options) else None);
     (* A DEF.client entry becomes another provider, carrying its options. *)
     O.client = Some client_provider;
     (* This port adds nothing to a context; the hook must exist so omni
        installs `client` on it. *)
     O.contextify = Some (fun value -> value);
-    O.inject = None;
   }
 
 let run_client testfile =
