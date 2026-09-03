@@ -1,4 +1,4 @@
-# Struct for Java — Comprehensive Guide
+# Struct for Java — the full guide
 
 > A **port** of the canonical TypeScript implementation. Behaviour is
 > defined by [`../typescript/src/StructUtility.ts`](../typescript/src/StructUtility.ts)
@@ -225,7 +225,8 @@ compound ones (`getprop`, `setprop`, `getpath`, `setpath`, `getelem`,
 and the three injection helpers (`checkPlacement` / `injectorArgs` /
 `injectChild`) use camelCase. Parity is checked case/underscore-insensitively.
 (`getElem` / `getProp` / `joinUrl` / `escapeRegex` / `escapeUrl` do **not**
-exist as methods — read by their real lowercase names above.)
+exist as methods — read by their real lowercase names, listed
+preceding this note.)
 
 ---
 
@@ -234,8 +235,7 @@ exist as methods — read by their real lowercase names above.)
 This is a port: the canonical TS is the source of truth and the shared
 corpus in [`../build/test/`](../build/test/) is the contract. Answer
 behaviour questions by reading the canonical TS, not by polling ports; a
-behaviour change starts there and flows to every port (see
-[`../AGENTS.md`](../AGENTS.md#standard-workflows)).
+behaviour change starts there and flows to every port.
 
 ### `null` versus absent
 
@@ -301,5 +301,4 @@ no `src/main/java`).
 **To change behaviour:** this is a port — never diverge from the canonical
 alone. Edit the canonical TS + corpus first, port the change into
 `src/Struct.java`, `mvn test` until the scoreboard is green, then re-run
-`python3 ../tools/check_parity.py`. Full checklist in
-[`../AGENTS.md`](../AGENTS.md).
+`python3 ../tools/check_parity.py`.

@@ -1,4 +1,4 @@
-# Struct for Kotlin — Comprehensive Guide
+# Struct for Kotlin — the full guide
 
 > Kotlin/JVM port of the canonical TypeScript implementation. This is the
 > in-depth companion to [`README.md`](./README.md) (the quick-start +
@@ -196,8 +196,8 @@ Kotlin-specific points the signatures don't show:
 
 ### Status: partial, but full-surface
 
-The root [`README.md`](../README.md) and [`../AGENTS.md`](../AGENTS.md)
-classify Kotlin as a **Partial** port (the same bracket as Java), yet it
+The root [`README.md`](../README.md) classifies Kotlin as a **Partial**
+port (the same bracket as Java), yet it
 already carries the entire canonical public surface — all 48 functions,
 15 type flags, the three mode constants, the sentinels, and the full
 `Injection` machine — and `check_parity.py` reports it `ok`. "Partial"
@@ -245,7 +245,7 @@ an RE2 superset) behind the uniform six-function API (`reCompile` /
 inside the **RE2 subset** — `Regex` *allows* backreferences and
 lookaround, but those don't port. Being a backtracking engine, this port
 aligns with the ECMA/backtracking family on the two documented sharp
-edges: catastrophic backtracking (`^(a+)+$` over 22 a's plus `!` ≈ 24 ms
+edges: catastrophic backtracking (`^(a+)+$` over 22 repetitions of `a` plus `!` ≈ 24 ms
 here) and zero-width `reReplace` returning `"XXbXcX"` (Go's RE2 returns
 `"XbXcX"`). See [`README.md` → Regex](./README.md#regex) and
 [`../REGEX_PATHOLOGICAL.md`](../design/REGEX_PATHOLOGICAL.md);
@@ -286,6 +286,4 @@ entry has no way to carry. `Omni.kt` is the bridge between omni's sealed
 the canonical TypeScript, not here. Edit `../typescript/src/StructUtility.ts`,
 adjust the corpus case in `../build/test/*.aon`, make the canonical
 pass, then bring the same logic to `Struct.kt`, run `./gradlew test`, and
-re-run `python3 ../tools/check_parity.py`. The full cross-port checklist
-is in [`../AGENTS.md`](../AGENTS.md) and this port's
-[`AGENTS.md`](./AGENTS.md).
+re-run `python3 ../tools/check_parity.py`.

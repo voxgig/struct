@@ -1,4 +1,4 @@
-# Struct for C — Comprehensive Guide
+# Struct for C — the full guide
 
 > A C11 port of the canonical TypeScript implementation. Behaviour is
 > defined by TypeScript and pinned by the shared corpus; this port follows
@@ -351,6 +351,4 @@ entries — `DEF.client`, client-scoped options, and `contextify`.
 canonical TypeScript, flow to the corpus, then to every port. To fix a C
 bug, reproduce against the failing corpus case, compare `src/*.c` to the
 canonical TS for that function, fix the **port** (never the corpus), then
-`make test` green and `make lint`. The full cross-port checklist is in
-[`../AGENTS.md`](../AGENTS.md); see also [`./AGENTS.md`](./AGENTS.md) for
-port-specific agent notes.
+`make test` green and `make lint`.

@@ -1,4 +1,4 @@
-# Elixir port — comprehensive guide
+# Elixir port — the full guide
 
 This document covers the Elixir-specific details of `voxgig/struct`. For the
 language-neutral concepts, tutorial and full reference, read the top-level
@@ -116,7 +116,7 @@ port implements yet — 1358 entries in 72 groups — plus the two `check` entri
 (`DEF.client`, client-scoped options, `contextify`) and three single entries
 that are not part of any set.
 
-Five entries are dropped, each named with its reason and guarded so the corpus
+Five entries are dropped, each named with its reason, and guarded so the corpus
 cannot move under it: this port has one `nil` for both undefined and null, so a
 bare nil coming back from a subject has to be read one way. Measured entry by
 entry, reading it as null costs 42 and reading it as absent costs those 5. Keep

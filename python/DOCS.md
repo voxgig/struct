@@ -1,4 +1,4 @@
-# Struct for Python — Comprehensive Guide
+# Struct for Python — the full guide
 
 > A faithful **port** of the canonical TypeScript implementation. Behaviour
 > is defined by TypeScript and pinned by the shared corpus; this port
@@ -199,8 +199,7 @@ Behaviour is defined by the canonical TypeScript
 ([`../typescript/src/StructUtility.ts`](../typescript/src/StructUtility.ts))
 and pinned by the shared corpus in [`../build/test/`](../build/test/). A
 behaviour question is answered by reading the canonical, not this module; a
-change to behaviour starts there and flows out to every port (see
-[`../AGENTS.md`](../AGENTS.md)).
+change to behaviour starts there and flows out to every port.
 
 ### `None`, `null`, and `UNDEF`
 
@@ -257,10 +256,10 @@ make test           # python3 -m unittest discover -s tests
 make lint           # ruff check + ruff format --check + mypy
 ```
 
-Tests live in [`tests/`](./tests/); the runner
-([`tests/runner.py`](./tests/runner.py)) loads the shared corpus from
-[`../build/test/`](../build/test/) and asserts the same way every port's
-runner does. The library has zero third-party runtime dependencies; dev
+Tests live in [`tests/`](./tests/); the corpus loader
+([`tests/omni.py`](./tests/omni.py)) resolves the shared runner and reads
+[`../build/test/`](../build/test/), asserting the same way every port
+does. The library has zero third-party runtime dependencies; dev
 tooling needs `ruff>=0.9` and `mypy>=1.14`.
 
 **To fix a port bug** (this port disagrees with the corpus): reproduce with
@@ -270,5 +269,4 @@ Re-run `make test` and `make lint`.
 
 **Changing canonical behaviour starts in TypeScript, not here.** Edit the
 canonical source and corpus first, then propagate to this port and re-run
-`python3 ../tools/check_parity.py` plus the shared corpus suite. The full
-checklist is in [`../AGENTS.md`](../AGENTS.md).
+`python3 ../tools/check_parity.py` plus the shared corpus suite.

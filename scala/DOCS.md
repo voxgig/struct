@@ -1,4 +1,4 @@
-# Scala port — comprehensive guide
+# Scala port — the full guide
 
 This document covers the Scala-specific details of `voxgig/struct`. For the
 language-neutral concepts, tutorial and full reference, read the top-level

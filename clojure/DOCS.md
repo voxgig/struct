@@ -1,4 +1,4 @@
-# Clojure port — comprehensive guide
+# Clojure port — the full guide
 
 This document covers the Clojure-specific details of `voxgig/struct`. For the
 language-neutral concepts, tutorial and full reference, read the top-level

@@ -1,4 +1,4 @@
-# Struct for Perl — Comprehensive Guide
+# Struct for Perl — the full guide
 
 > A **port** of the canonical TypeScript implementation. Behaviour is
 > defined by TypeScript and pinned by the shared corpus; this port mirrors
@@ -226,8 +226,7 @@ TypeScript is the source of truth. The shared corpus in
 [`../build/test/`](../build/test/) is generated from the canonical code,
 and this port is held to it. A behaviour question is answered by reading
 the canonical TypeScript and the corpus, not by reading this port; a change
-to canonical behaviour starts in TypeScript and flows out here (see
-[`../AGENTS.md`](../AGENTS.md)).
+to canonical behaviour starts in TypeScript and flows out here.
 
 ### Insertion-ordered maps — the key quirk
 
@@ -305,4 +304,3 @@ canonical TypeScript, not here. Edit the canonical source, adjust the
 corpus case in `../build/test/*.aon`, then mirror the logic in
 [`lib/Voxgig/Struct.pm`](./lib/Voxgig/Struct.pm), run `make test` until
 green, and re-run [`../tools/check_parity.py`](../tools/check_parity.py).
-The full cross-port checklist is in [`../AGENTS.md`](../AGENTS.md).

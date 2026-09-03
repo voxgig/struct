@@ -1,4 +1,4 @@
-# Struct for Go — Comprehensive Guide
+# Struct for Go — the full guide
 
 > A faithful **port** of the canonical TypeScript implementation. Behaviour
 > is defined there and pinned by the shared corpus; this port reproduces it
@@ -224,8 +224,7 @@ TypeScript is the source of truth. The shared corpus in
 [`../build/test/`](../build/test/) is generated to match the canonical code,
 and this port is held to that corpus. A behaviour question is answered by
 reading the canonical TS, not by polling the ports; a change to canonical
-behaviour starts there, then flows to the corpus and out to every port (see
-[`../AGENTS.md`](../AGENTS.md#standard-workflows)).
+behaviour starts there, then flows to the corpus and out to every port.
 
 ### `nil` covers absent *and* JSON null — except in `Typify`
 
@@ -325,4 +324,4 @@ source and the corpus, not here — edit
 adjust the corpus case in `../build/test/*.aon`, then port the same logic
 here, run `go test ./...` until green, and re-run
 [`../tools/check_parity.py`](../tools/check_parity.py) plus every other
-port's tests. The full checklist is in [`../AGENTS.md`](../AGENTS.md).
+port's tests.

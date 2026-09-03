@@ -674,7 +674,7 @@ do not, so using those will not be portable.
 
 - **Catastrophic backtracking.** `RegExp` is a backtracking engine;
   nested quantifiers like `(a+)+` against a non-matching suffix can be
-  exponential in input length (the discovery panel sees ~180 ms on
+  exponential in input length (the discovery panel reports ~180 ms on
   Node 22 vs <0.1 ms on RE2-style engines). Prefer flat patterns and
   character classes over alternations.
 - **Zero-width `replace`.** `re_replace("a*", "abc", "X")` returns

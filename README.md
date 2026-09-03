@@ -3,18 +3,18 @@
 > Uniform JSON-shaped data structure manipulations, in many languages.
 
 `struct` is the data manipulation primitive used inside the Voxgig
-SDKs.  Every Voxgig SDK -- whatever its host language -- needs to look
+SDKs. Every Voxgig SDK -- whatever its host language -- needs to look
 up values inside nested JSON, merge configurations, transform data
 between shapes, and validate that incoming data matches an expected
-shape.  Rewriting that work for each language drifts: behaviours
+shape. Rewriting that work for each language drifts: behaviours
 diverge, edge cases get patched in one place but not another, and the
 semantics of "the same" call become subtly different.
 
 `struct` solves that by defining one canonical API, in one canonical
 implementation (TypeScript), and porting it to every language a
-Voxgig SDK runs in.  The same names, the same arguments, the same
+Voxgig SDK runs in. The same names, the same arguments, the same
 return values, and the same JSON-driven test corpus run against every
-port.  When you call `getpath(store, 'a.b.c')` in Python, Go, PHP, or
+port. When you call `getpath(store, 'a.b.c')` in Python, Go, PHP, or
 Lua, you get the same answer.
 
 
@@ -55,22 +55,20 @@ Every listed port reports full canonical parity under
 `tools/check_parity.py` and passes the shared `build/test/` corpus. See each
 port's `README.md` for details.
 
-Each port directory also carries a `DOCS.md` (the comprehensive,
-four-part guide) and an `AGENTS.md` (notes for AI coding agents).
+Each port directory also carries a `DOCS.md`: the same four-part
+guide, written in that language.
 
 The cross-language parity matrix lives in [`REPORT.md`](design/REPORT.md).
 
 For the in-depth, language-neutral guide — tutorial, how-to recipes, full
-reference, and design explanation — see [`DOCS.md`](./DOCS.md). If you (or
-an AI coding agent) are going to *modify* this repository, start with
-[`AGENTS.md`](./AGENTS.md).
+reference, and design explanation — see [`DOCS.md`](./DOCS.md).
 
 
 ## Motivation
 
 Voxgig SDKs work with structured data: configuration trees, API
 request and response payloads, validation specs, transform recipes.
-These are JSON-shaped: nested maps and lists of scalars.  The same
+These are JSON-shaped: nested maps and lists of scalars. The same
 operations come up over and over:
 
 - "Give me the value at path `service.db.host`."
@@ -81,7 +79,7 @@ operations come up over and over:
 
 The naive answer is "use the host language's stdlib".  But:
 
-- The host language may not have a deep merge.  Or its deep merge
+- The host language may not have a deep merge. Or its deep merge
   may have different rules than the next language's deep merge.
 - "Get a value at a path" is one line in JavaScript and ten in C++.
 - The semantics of `null` versus "absent" versus "empty" differ
@@ -91,11 +89,11 @@ The naive answer is "use the host language's stdlib".  But:
   reimplement them per language.
 
 `struct` is the answer: one API, one set of semantics, one JSON test
-corpus, ported faithfully to every language Voxgig SDKs support.  An
-SDK can rely on the same primitive operations everywhere.  A bug fix
+corpus, ported faithfully to every language Voxgig SDKs support. An
+SDK can rely on the same primitive operations everywhere. A bug fix
 in the canonical TypeScript flows through to every other port.
 
-The shared test corpus (`build/test/*.aon`) is the contract.  Any
+The shared test corpus (`build/test/*.aon`) is the contract. Any
 implementation passes only if it matches the canonical answers
 case-for-case.
 
@@ -121,7 +119,7 @@ A few terms recur throughout the API.
   means "remove this key".
 
 By-example design: the shape of the output is described by data that
-*looks like* the output.  A transform spec for `{name, age}` is itself
+*looks like* the output. A transform spec for `{name, age}` is itself
 a map with keys `name` and `age`.  A validate spec is the same shape
 as the data it accepts, with type tokens (e.g. ``` `$STRING` ```) at
 the leaves.
@@ -129,7 +127,7 @@ the leaves.
 
 ## Quick start
 
-Pick your language's `DOCS.md` for installation instructions.  Once
+Pick your language's `DOCS.md` for installation instructions. Once
 installed, the calls below all mean the same thing.
 
 ### Look up a value at a path
@@ -234,7 +232,7 @@ names that match your language's casing convention.
 
 This is the canonical API surface, defined in TypeScript at
 [`typescript/src/StructUtility.ts`](./typescript/src/StructUtility.ts).  Every port
-exposes equivalents.  The casing varies by language convention
+exposes equivalents. The casing varies by language convention
 (`getpath` in TS/JS/Py/Ruby/PHP/Lua/Perl/Java/Kotlin/Swift; `GetPath`
 in Go/C#; `get_path` in Rust; `voxgig_getpath` in C).
 
@@ -242,7 +240,7 @@ in Go/C#; `get_path` in Rust; `voxgig_getpath` in C).
 
 | Function                            | Returns         | Description                                                                 |
 |-------------------------------------|-----------------|-----------------------------------------------------------------------------|
-| `typename(t)`                       | string          | Human name (`"string"`, `"map"`, ...) for a type bit-flag from `typify`.    |
+| `typename(t)`                       | string          | Human name (`"string"`, `"map"`, and so on) for a type bit-flag from `typify`.    |
 | `getdef(val, alt)`                  | any             | Returns `val` unless it is undefined, in which case returns `alt`.          |
 | `isnode(val)`                       | bool            | True if `val` is a node -- either a map or a list.                          |
 | `ismap(val)`                        | bool            | True if `val` is a map (object with string keys).                           |
@@ -404,15 +402,15 @@ cross-engine edge cases:
 ## Design notes
 
 - **By-example over DSL.**  A transform/validate spec looks like the
-  output it describes.  No second language to learn.
+  output it describes. No second language to learn.
 - **Tolerant of "absent".**  Functions return a defined alternative
-  (`alt`) rather than throwing on missing keys.  Each language port
+  (`alt`) rather than throwing on missing keys. Each language port
   handles its own undefined/null distinction; see per-language docs.
 - **Lists are mutable and reference-stable.**  In languages where
   this is not native (Go, PHP), the port introduces a wrapper
   (`ListRef`).
 - **JSON null is not undefined.**  Most JSON parsers conflate them;
-  `struct` distinguishes them.  The shared test corpus uses the
+  `struct` distinguishes them. The shared test corpus uses the
   string `"__NULL__"` to stand in for JSON null where the test
   language can't represent it directly.
 - **The TypeScript implementation is canonical.**  Disagreement
@@ -430,8 +428,9 @@ cross-engine edge cases:
 ```
 .
 ├── README.md         # this file
-├── DOCS.md           # comprehensive language-neutral guide
+├── DOCS.md           # the language-neutral guide, in full
 ├── AGENTS.md         # guidance for AI coding agents (+ CLAUDE.md pointer)
+├── STYLE-GUIDE.md    # how the documentation is written; enforced in CI
 ├── design/           # reports & specs: REPORT, NOTES, REGEX*, UNDEF*
 ├── build/test/       # shared JSON test corpus (.aon)
 ├── typescript/  javascript/  python/   # canonical + JS-family ports

@@ -633,7 +633,7 @@ and `__UNDEF__`.
 ### Walk uses keyword arguments
 
 Where canonical TypeScript has positional optional parameters, the
-Python port uses keyword arguments.  For example:
+Python port uses keyword arguments. For example:
 
 ```python
 walk(tree, before=None, after=visit, maxdepth=10)
@@ -642,7 +642,7 @@ walk(tree, before=None, after=visit, maxdepth=10)
 ### Lowercase function names
 
 Function names match canonical TypeScript exactly: `getpath`,
-`setpath`, `getprop`, etc.  PEP 8 would suggest `get_path`, but
+`setpath`, `getprop`, etc. PEP 8 would suggest `get_path`, but
 parity with other ports beats style here.
 
 ### Test status
@@ -675,7 +675,7 @@ not be portable to the Go / Rust / C / Lua / Zig ports.
 ### Sharp edges
 
 - **Catastrophic backtracking.** Python's `re` (the default C engine)
-  is backtracking. `^(a+)+$` against 22 a's plus `!` runs ~190 ms here;
+  is backtracking. `^(a+)+$` against 22 repetitions of `a` plus `!` runs ~190 ms here;
   RE2-style ports finish the same case in <0.1 ms. Use flat patterns.
 - **Zero-width `replace`.** `re_replace("a*", "abc", "X")` returns
   `"XXbXcX"` — the ECMA convention shared by all PCRE/ECMA/.NET/Java/Onigmo engines plus the in-tree Thompson ports. Go (RE2) returns `"XbXcX"` instead; see `/design/REGEX_PATHOLOGICAL.md`.

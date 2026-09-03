@@ -1,4 +1,4 @@
-# Struct for TypeScript — Comprehensive Guide
+# Struct for TypeScript — the full guide
 
 > The **canonical** port. Behaviour defined here is the behaviour every
 > other language must match. This guide is the in-depth companion to
@@ -212,8 +212,8 @@ every other language is held to that corpus. Practically:
 - A behaviour question is answered by reading
   [`src/StructUtility.ts`](./src/StructUtility.ts), not by polling the
   ports.
-- A change to canonical behaviour starts here, then flows to the corpus and
-  out to every port (see [`../AGENTS.md`](../AGENTS.md#standard-workflows)).
+- A change to canonical behaviour starts here, then flows to the corpus
+  and out to every port.
 
 ### `null` versus `undefined`
 
@@ -268,7 +268,7 @@ typescript BUILT, since the shim loads its compiled output.
 **To change canonical behaviour:** edit `src/StructUtility.ts`, add or
 adjust the corpus case in `../build/test/*.aon`, `npm run build && npm
 test` until green, then propagate to every port and re-run
-`python3 ../tools/check_parity.py` and the per-port tests. The full
-checklist is in [`../AGENTS.md`](../AGENTS.md). Tooling versions: Node 22+,
+`python3 ../tools/check_parity.py` and the per-port tests. Tooling
+versions: Node 22+,
 TypeScript 6, ESLint 10.
 </content>

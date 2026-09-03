@@ -517,7 +517,7 @@ $NULL  $NIL    $FUNCTION $INSTANCE $ANY       $CHILD    $ONE     $EXACT
 
 Nullable reference types are enabled
 (`<Nullable>enable</Nullable>`).  The API exposes nullable
-references throughout.  As in Go and Java, `null` covers both JSON
+references throughout. As in Go and Java, `null` covers both JSON
 null and "absent".
 
 ### Identifier collisions
@@ -561,7 +561,8 @@ be portable.
 ### Sharp edges
 
 - **Catastrophic backtracking.** .NET's regex is backtracking; the
-  discovery panel sees P1 (`^(a+)+$` over 22 a's plus `!`) in
+  discovery panel reports P1 (`^(a+)+$` over 22 repetitions of `a`,
+  then `!`) in
   ~390 ms here. .NET 7+ ships a non-backtracking engine you can opt
   into via `RegexOptions.NonBacktracking` — consider it for
   untrusted patterns. Stay inside the RE2 subset and prefer flat

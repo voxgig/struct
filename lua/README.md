@@ -589,7 +589,7 @@ $NULL  $NIL    $FUNCTION $INSTANCE $ANY       $CHILD    $ONE     $EXACT
 
 ### One container type, two roles
 
-Lua tables are unified: a "list" and a "map" are both tables.  The
+Lua tables are unified: a "list" and a "map" are both tables. The
 port distinguishes them via the `__jsontype` metatable field
 (`'array'` vs `'object'`).  `ismap` and `islist` consult this field;
 `stringify` and `jsonify` use it when serialising.
@@ -604,7 +604,7 @@ Or use the `jt(...)` / `jm(...)` builders.
 
 ### 1-based vs 0-based indexing
 
-Lua arrays are 1-based natively.  The external API still presents
+Lua arrays are 1-based natively. The external API still presents
 0-based indexing for consistency with the canonical API:
 `getpath(list, '0')` returns the first element, even though
 internally the list is stored at index 1.  The translation happens
@@ -646,7 +646,7 @@ reference-stable" assumption holds without a wrapper.
 Uniform six-function regex API (see `/design/REGEX_API.md`). The Lua port
 **ships its own RE2-subset engine** in `src/regex.lua` (~500 LOC of
 pure Lua — Lua's built-in pattern language is intentionally not
-regex, so we vendor one). No LuaRocks dependency, no FFI.
+regex, so the port vendors one). No LuaRocks dependency, no FFI.
 
 ### API
 

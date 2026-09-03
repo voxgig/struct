@@ -73,7 +73,7 @@ this signature, so the calling conventions differ slightly from TS:
 | Transform commands / validate checkers / select operators / the `handler` | `f(inj, val, ref, store)` | all four | `(inj, val, ref, store)` — same |
 | `$WHEN` / `$BT` / `$DS` / `$SPEC` thunks | `f(inj, val, ref, store)` (args ignored) | — | `()` — args ignored either way |
 | `$APPLY` (`['`$APPLY`', applyFn, child]`) | `f(inj, val, "", store)` | `val` = the resolved `child`; `store`; `inj` = the child injection | `apply(resolved, store, cinj)` — same data, different order |
-| `$FORMAT` user formatter (`['`$FORMAT`', fn, child]`) | applied to **each node** of the resolved `child`; `f(inj, val, "", store)` | `val` = the current node | `walk(resolved, formatter)` — TS's `formatter` also gets `(key, parent, path)`; the Rust form only sees `val` |
+| `$FORMAT` user formatter (`['`$FORMAT`', fn, child]`) | applied to **each node** of the resolved `child`; `f(inj, val, "", store)` | `val` = the current node | `walk(resolved, formatter)` — TS's `formatter` also gets `(key, parent, path)`; the Rust form receives only `val` |
 | `get_elem(list, key, alt)` when `alt` is callable and the element is absent | `f(inj, val, "", store)` (a fresh throwaway injection, `Noval` val/store, empty ref) | — | `alt()` — args ignored either way |
 
 In short: a `Value::func` closure that reads its `val` argument (and `store` /
@@ -210,7 +210,7 @@ pad(Value::str("a"), Some(3), None); // "a  "
 ```
 <!-- => "a  " -->
 
-`typify` returns an `i64` bit-field (a "kind" flag OR'd with a specific type
+`typify` returns an `i64` bit-field (a "kind" flag combined with a specific type
 flag); `type_name` maps a flag back to a human name:
 
 <!-- example: minor/typify#int -->

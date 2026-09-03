@@ -1,4 +1,4 @@
-# Dart port — comprehensive guide
+# Dart port — the full guide
 
 This document covers the Dart-specific details of `voxgig/struct`. For the
 language-neutral concepts, tutorial and full reference, read the top-level

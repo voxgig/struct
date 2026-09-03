@@ -1,4 +1,4 @@
-# Voxgig Struct — Comprehensive Guide
+# Voxgig Struct — the full guide
 
 > Uniform JSON-shaped data structure manipulation, defined once and ported
 > to every language.
@@ -441,7 +441,7 @@ read the same everywhere: `re_compile`, `re_test`, `re_find`,
 
 A Voxgig SDK exists in many languages, and each needs the same data
 operations. Re-implementing them per language drifts — edge cases get
-fixed in one place and not another until "the same call" quietly means
+fixed in one place and not another until "the same call" means
 different things. `struct` removes that drift by construction: there is
 **one** definition (the canonical TypeScript), and every other language is
 a *port* held to it. The payoff is that `getpath(store, 'a.b.c')` is the
@@ -529,10 +529,9 @@ documented, not "fixed", in [`REGEX_PATHOLOGICAL.md`](design/REGEX_PATHOLOGICAL.
 |---|---|
 | Overview + at-a-glance reference | [`README.md`](./README.md) |
 | This guide | `DOCS.md` |
-| Working in the repo (for agents) | [`AGENTS.md`](./AGENTS.md) |
 | Per-port parity matrix | [`REPORT.md`](design/REPORT.md) |
 | Cross-cutting quirks | [`NOTES.md`](design/NOTES.md) |
 | Absent-vs-null spec | [`UNDEF.md`](design/UNDEF.md), [`UNDEF_SPEC.md`](design/UNDEF_SPEC.md) |
 | Regex dialect + API | [`REGEX.md`](design/REGEX.md), [`REGEX_API.md`](design/REGEX_API.md), [`REGEX_PATHOLOGICAL.md`](design/REGEX_PATHOLOGICAL.md) |
-| Per-port specifics | `<lang>/DOCS.md`, `<lang>/README.md`, `<lang>/AGENTS.md` |
+| Per-port specifics | `<lang>/README.md`, `<lang>/DOCS.md` |
 </content>

@@ -1,0 +1,123 @@
+# The prose gate. Both halves of it, over the reader-facing pages, at the
+# levels set in .vale.ini. See STYLE-GUIDE.md for what they enforce and
+# why each rule sits where it does.
+#
+# Separate from build.yml and lint.yml because it is neither a platform
+# check nor a per-language check: one runner, one job, no matrix. It runs
+# on documentation and configuration changes only, so a code-only pull
+# request does not wait on it.
+#
+# Adapted from voxgig/jostraca's docs.yml, which carries the reasoning for
+# the pinning below.
+name: docs
+
+# The path list is written out twice rather than shared through a YAML
+# anchor: GitHub's workflow parser does not support anchors, and a local
+# linter that resolves them will pass a file the runner then reads as an
+# empty filter.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**/README.md'
+      - '**/DOCS.md'
+      - 'STYLE-GUIDE.md'
+      - '.vale.ini'
+      - '.vale/**'
+      - 'tools/check_prose.py'
+      - '.github/workflows/docs.yml'
+  pull_request:
+    paths:
+      - '**/README.md'
+      - '**/DOCS.md'
+      - 'STYLE-GUIDE.md'
+      - '.vale.ini'
+      - '.vale/**'
+      - 'tools/check_prose.py'
+      - '.github/workflows/docs.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  prose:
+    name: prose gate (vale + check_prose)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.12'
+
+      # PINNED, and .vale.ini pins the Google package by release URL for
+      # the same reason. Vale ships new rules in the binary AND in the
+      # package, and an unpinned gate turns someone else's release into a
+      # red build on a pull request that touched one word.
+      - name: Install Vale
+        env:
+          VALE_VERSION: '3.14.0'
+        run: |
+          set -euo pipefail
+          curl -sSfL -o vale.tar.gz \
+            "https://github.com/errata-ai/vale/releases/download/v${VALE_VERSION}/vale_${VALE_VERSION}_Linux_64-bit.tar.gz"
+          tar xzf vale.tar.gz vale
+          sudo mv vale /usr/local/bin/
+          vale --version
+
+      # Downloads the Google package into .vale/styles/Google/, which is
+      # gitignored -- the vocabularies under .vale/styles/config/ and the
+      # house rules under .vale/styles/Struct/ are ours and are committed.
+      - name: Sync Vale packages
+        run: vale sync
+
+      # ONE FILE SET, PRINTED BY ONE FUNCTION. `--files` is
+      # tools/check_prose.py's own page list, so the two gates cannot read
+      # different sets: a page added to the repository and not to `pages()`
+      # is a page NEITHER gate has read, which is a visible failure to fix
+      # rather than a silent hole in one of them.
+      - name: Resolve the page set
+        id: pages
+        run: |
+          set -euo pipefail
+          PAGES="$(python3 tools/check_prose.py --files | tr '\n' ' ')"
+          test -n "$PAGES" || { echo "::error::no reader-facing pages resolved"; exit 1; }
+          echo "pages=$PAGES" >> "$GITHUB_OUTPUT"
+          echo "$PAGES" | tr ' ' '\n' | sed '/^$/d' | wc -l | xargs echo "pages:"
+
+      # Fails on any error-level finding. Warnings and suggestions are
+      # reported for the author to read and do not block; see the demotion
+      # notes in .vale.ini for what sits at which level and why.
+      - name: Vale
+        env:
+          PAGES: ${{ steps.pages.outputs.pages }}
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2086
+          vale --minAlertLevel=error $PAGES
+
+      # The house rules Vale cannot express: the banned list matched across
+      # a line wrap, the em-dash spacing and ration, first person, emoji,
+      # and citations of a working document. Three Google rules are
+      # switched off in .vale.ini in favour of rules in here, so this
+      # step failing to run at all would silently widen what is allowed.
+      - name: check_prose
+        run: python3 tools/check_prose.py
+
+      - name: Full prose report (advisory)
+        if: always()
+        env:
+          PAGES: ${{ steps.pages.outputs.pages }}
+        run: |
+          {
+            echo '## Prose report'
+            echo
+            echo 'Errors block the build. Warnings and suggestions do not.'
+            echo
+            echo '```'
+            # shellcheck disable=SC2086
+            vale --minAlertLevel=suggestion $PAGES 2>&1 | tail -40 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -53,7 +53,8 @@ Source: [`lib/Voxgig/Struct.pm`](./lib/Voxgig/Struct.pm).
 
 Functions live in the `Voxgig::Struct::` namespace. The port keeps the
 canonical TS names (`isnode`, `getpath`, `keysof`, …) rather than
-`snake_case`ing them — this means the function-name table is the same
+converting them to `snake_case` — this means the function-name table is
+the same
 across every Voxgig port.
 
 ### Core types
@@ -79,7 +80,7 @@ preserves or removes the slot.
 ### JSON parser
 
 `Voxgig::Struct::parse_json($text)` returns a structure that uses the
-type rules above (in particular, `Voxgig::Struct::OrderedHash`-tied maps and
+preceding type rules (in particular, `Voxgig::Struct::OrderedHash`-tied maps and
 flag-marked numbers). `Cpanel::JSON::XS` / `JSON::PP` are not used
 because they don't preserve insertion order.
 

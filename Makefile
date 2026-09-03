@@ -38,7 +38,7 @@ PUBLISH_LANGS = typescript javascript python go ruby php lua zig java rust c cpp
 
 .PHONY: all inspect build test bench lint audit scan analyze clean reset publish status verify corpus gen-docs \
         scan-secrets scan-deps scan-sast scan-workflows scan-shell scan-spelling scan-docs \
-        scan-parity scan-omni-isolation scan-regex scan-docs-examples
+        scan-parity scan-omni-isolation scan-regex scan-docs-examples scan-prose
 
 all: test
 
@@ -142,9 +142,10 @@ gen-docs:
 
 # ---- Repo-wide static analysis (not per-language) ----
 # These need their tools on PATH:
-#   gitleaks, osv-scanner, semgrep, actionlint, shellcheck, cspell, markdownlint
+#   gitleaks, osv-scanner, semgrep, actionlint, shellcheck, cspell,
+#   markdownlint, vale
 
-scan: scan-secrets scan-deps scan-sast scan-workflows scan-shell scan-parity scan-omni-isolation scan-regex scan-docs-examples scan-spelling scan-docs
+scan: scan-secrets scan-deps scan-sast scan-workflows scan-shell scan-parity scan-omni-isolation scan-regex scan-docs-examples scan-spelling scan-docs scan-prose
 
 scan-secrets:
 	@echo "======== scan: secrets (gitleaks) ========"
@@ -174,6 +175,27 @@ scan-spelling:
 scan-docs:
 	@echo "======== scan: markdown (markdownlint) ========"
 	markdownlint '**/*.md'
+
+# The prose gate, both halves, over the reader-facing pages. STYLE-GUIDE.md
+# is what they enforce; .vale.ini records why each rule sits at its level.
+#
+# ONE FILE SET FOR BOTH. `check_prose.py --files` prints it, and vale is
+# handed the same list rather than a directory, so a page can never be read
+# by one gate and not the other.
+#
+# check_prose runs even when vale is not installed, because it is the half
+# that carries the house rules .vale.ini switches Google rules OFF in
+# favour of -- skipping it silently would widen what is allowed.
+scan-prose:
+	@echo "======== scan: prose (vale + check_prose) ========"
+	@if command -v vale >/dev/null 2>&1; then \
+	  vale sync >/dev/null && \
+	  vale --minAlertLevel=error $$(python3 tools/check_prose.py --files); \
+	else \
+	  echo "(vale not installed - skipping the Google/banned-list half;"; \
+	  echo " see .github/workflows/docs.yml for the pinned version)"; \
+	fi
+	@python3 tools/check_prose.py
 
 scan-parity:
 	@echo "======== scan: cross-port API parity ========"

@@ -286,3 +286,12 @@ go/go.work.sum
 # the path CI checks omni out to for every port that needs one.
 # Machine-specific, never committed.
 .omni
+
+# Vale's synced style packages. `.vale.ini` pins the Google package by
+# release URL and `vale sync` downloads it into .vale/styles/Google/,
+# which is a build artefact of that pin -- committing it would be
+# committing the same bytes twice, and letting it drift from the URL is
+# the nondeterminism the pin exists to stop. The vocabularies under
+# .vale/styles/config/ and the house rules under .vale/styles/Struct/ are
+# ours and ARE committed.
+.vale/styles/Google/

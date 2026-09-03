@@ -613,7 +613,7 @@ implements yet — **1358 entries in 72 groups**, plus `merge.basic`,
 `check` entries in `tests/client_test.c`.
 
 Each group is one assertion: the runner stops at its first failing entry and
-names the index, the entry and both values. `$LIKE` matches via the in-tree
+names the index, the entry, and both values. `$LIKE` matches via the in-tree
 Thompson NFA regex engine (`voxgig_re_test`), so the `select.operators` regex
 cases pass in full.
 

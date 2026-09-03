@@ -1,4 +1,4 @@
-# Struct for JavaScript — Comprehensive Guide
+# Struct for JavaScript — the full guide
 
 > A faithful **port** of the canonical TypeScript implementation. Behaviour
 > is defined by [`../typescript/`](../typescript/) and pinned by the shared
@@ -211,8 +211,7 @@ Practically:
   ([`../typescript/src/StructUtility.ts`](../typescript/src/StructUtility.ts)),
   not by reading this port in isolation.
 - A change to canonical behaviour starts in TypeScript, then flows to the
-  corpus and out to every port including this one (see
-  [`../AGENTS.md`](../AGENTS.md#standard-workflows)).
+  corpus and out to every port including this one.
 
 Because both ports run on V8, runtime semantics are effectively identical;
 the difference is types, not behaviour.
@@ -275,12 +274,11 @@ runs both ESLint and the Prettier check); `make audit` runs `npm audit`.
 There is **no build step** — `make build` is a no-op, and `npm test` runs
 the source directly under `node --test`.
 
-Tests live in [`test/`](./test/); the runner
-([`test/runner.js`](./test/runner.js)) loads the shared corpus from
-[`../build/test/`](../build/test/), mirroring the canonical TS runner.
+Tests live in [`test/`](./test/); the corpus loader
+([`test/omni.js`](./test/omni.js)) resolves the shared runner and reads
+[`../build/test/`](../build/test/), mirroring the canonical TS suite.
 
 **This port follows; it does not lead.** To change canonical behaviour,
-edit the canonical TS and corpus first (the checklist is in
-[`../AGENTS.md`](../AGENTS.md)), then update this port to match,
+edit the canonical TS and corpus first, then update this port to match,
 `npm test` until green, and re-run `python3 ../tools/check_parity.py`.
 Tooling: Node.js, ESLint 10, Prettier 3.

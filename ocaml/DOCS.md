@@ -1,4 +1,4 @@
-# OCaml port — comprehensive guide
+# OCaml port — the full guide
 
 This document covers the OCaml-specific details of `voxgig/struct`. For the
 language-neutral concepts, tutorial and full reference, read the top-level

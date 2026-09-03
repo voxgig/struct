@@ -551,7 +551,7 @@ Struct::injectChild($child, $store, $inj)
 ### `ListRef`
 
 Wrapper class giving a list reference semantics across calls that
-would otherwise copy it.  Used internally; you only need it when
+would otherwise copy it. Used internally; you only need it when
 writing custom `Modify` callbacks that mutate lists.
 
 ```php
@@ -607,14 +607,14 @@ $NULL  $NIL    $FUNCTION $INSTANCE $ANY       $CHILD    $ONE     $EXACT
 
 ### `UNDEF` is a string sentinel
 
-PHP has no separate "undefined" keyword.  Internally the port uses
+PHP has no separate "undefined" keyword. Internally the port uses
 the string `'__UNDEFINED__'` (`Struct::UNDEF`) as a sentinel for
-absent values.  User-facing APIs accept `null` and return `null`,
+absent values. User-facing APIs accept `null` and return `null`,
 so you usually do not see it directly.
 
 ### Arrays are value types
 
-PHP arrays copy on assignment.  Two adaptations preserve canonical
+PHP arrays copy on assignment. Two adaptations preserve canonical
 "reference-stable list" semantics:
 
 1. `setprop` takes its parent **by reference** (`&$parent`) and mutates
