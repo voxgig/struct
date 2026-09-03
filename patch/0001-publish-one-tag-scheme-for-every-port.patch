@@ -1,4 +1,4 @@
-From 9d774aeee16ba2cab0c3f14968304406736f9c22 Mon Sep 17 00:00:00 2001
+From 07485a8848b02f35e0d6a121270647cb6a667ccc Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Thu, 3 Sep 2026 19:21:12 +0000
 Subject: [PATCH] publish: one tag scheme for every port, typescript included
@@ -31,33 +31,39 @@ replaces.
 The 16 bare tags stay. They are what those releases went out under, and
 rewriting a published release marker to tidy a scheme would be worse than
 the inconsistency itself. The namespaces sit side by side: everything up to
-`v0.3.4` bare, everything after it under `typescript/v`. Until the first
-release is cut under the new scheme, bump.py reports 0.3.4 as untagged --
-accurate, since no `typescript/v0.3.4` exists, and self-correcting the
-moment one is cut. typescript is deliberately left at 0.3.4 here: the
+`v0.3.4` bare, everything after it under `typescript/v`. bump.py bridges the
+seam: it reads the new prefix and falls back to the bare one for a version
+the new namespace does not carry, so 0.3.4 still reads as released and the
+next bump is 0.3.5. Without that bridge it would read 0.3.4 as unreleased
+and cut `typescript/v0.3.4` at whatever commit main was on -- a tag the
+workflow's gitHead guard then refuses, left behind for release_status.py to
+read as a release. typescript is deliberately left at 0.3.4 here: the
 release that cuts that first tag belongs with a real change, not with this.
 
-Also corrects the workflow header's @voxgig/struct-js bootstrap
-instructions, which said a `target: javascript` dispatch would fail the OIDC
-exchange. Its trusted publisher is registered now, and leaving that text
-would send the next release down a token path for no reason.
+Also corrects what the workflow header, AGENTS.md and PUBLISH_AUTOMATION.md
+say about @voxgig/struct-js. It has never published over OIDC: 0.1.2 went
+out as a plain token publish and carries no provenance attestation, and a
+`target: javascript` dispatch on 2026-09-03 failed the exchange all the
+same, reported as a 404 on the PUT. The text now says a publisher still has
+to be registered against this repository and this filename, rather than
+implying the path is live.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01S5zKiMP1i1FRDZ6pzgzrUp
 ---
- .github/workflows/publish.yml | 76 ++++++++++++++++++++---------------
- AGENTS.md                     | 55 +++++++++++++++----------
- Makefile                      |  7 ++--
- design/PUBLISH_AUTOMATION.md  | 31 +++++++++-----
- tools/bump.py                 | 39 ++++++++++++++----
+ .github/workflows/publish.yml | 81 +++++++++++++++++++++--------------
+ AGENTS.md                     | 65 +++++++++++++++++-----------
+ Makefile                      |  7 +--
+ design/PUBLISH_AUTOMATION.md  | 31 ++++++++++----
+ tools/bump.py                 | 39 +++++++++++++----
  typescript/package.json       |  4 +-
- 6 files changed, 134 insertions(+), 78 deletions(-)
+ 6 files changed, 147 insertions(+), 80 deletions(-)
 
 diff --git a/.github/workflows/publish.yml b/.github/workflows/publish.yml
-index a6073b2..7cd3c85 100644
+index a6073b2..6a3b55a 100644
 --- a/.github/workflows/publish.yml
 +++ b/.github/workflows/publish.yml
-@@ -56,14 +56,33 @@
+@@ -56,14 +56,36 @@
  # THREE WAYS IN:
  #
  #   workflow_dispatch        the normal path. Publishes if missing, then tags.
@@ -89,13 +95,16 @@ index a6073b2..7cd3c85 100644
 +# would be worse than the inconsistency. The new scheme therefore starts at
 +# the first release cut after this change, and the two namespaces sit side by
 +# side: everything up to `v0.3.4` bare, everything after it under
-+# `typescript/v`. `tools/bump.py` reads the new prefix, so until that first
-+# release it reports 0.3.4 as untagged -- which is accurate, since no
-+# `typescript/v0.3.4` exists, and self-corrects the moment one is cut.
++# `typescript/v`. `tools/bump.py` reads the new prefix and falls back to the
++# bare one for a version the new namespace does not carry, so 0.3.4 still
++# reads as released and the next bump is 0.3.5. Without that bridge it would
++# read 0.3.4 as unreleased and cut `typescript/v0.3.4` at whatever commit
++# main was on -- a tag the gitHead guard below then refuses, left behind for
++# the dashboard to read as a release.
  #
  # DRY RUN. `dry_run: true` on a dispatch rehearses a release without making
  # one: every guard and every test runs, the artifact is packed with
-@@ -83,38 +102,28 @@
+@@ -83,38 +105,30 @@
  # reads the version already on the branch and releases exactly that, so the
  # bump stays a reviewable diff and the release stays a button.
  #
@@ -127,14 +136,16 @@ index a6073b2..7cd3c85 100644
 -# `npm publish --access public --registry https://registry.npmjs.org`, then
 -# `make -C javascript tag`, which reads the registry and refuses until that
 -# publish has landed. The port's Makefile carries the same note.
-+# @voxgig/struct-js IS REGISTERED NOW, and all three targets release the same
-+# way. Its bootstrap is history worth keeping: the port was renamed from
-+# @voxgig/structjs, npm registers a trusted publisher only against a package
-+# that already exists, so the first release under the new name (0.1.2) had to
-+# be one plain token publish. The publisher was registered against this file
-+# afterwards. Nothing here needs a token again -- if a `target: javascript`
-+# dispatch ever reports the 404 above, the registration is what to check,
-+# not the workflow.
++# @voxgig/struct-js HAS NEVER PUBLISHED OVER OIDC. The port was renamed from
++# @voxgig/structjs, and npm registers a trusted publisher only against a
++# package that already exists, so 0.1.2 went out as one plain token publish:
++# it sits on npm under a person's name with no provenance attestation, while
++# @voxgig/struct@0.3.4 carries one. A `target: javascript` dispatch on
++# 2026-09-03 failed the OIDC exchange all the same, reported as exactly the
++# 404 above -- tests passed, the tarball packed, the PUT was rejected. Until
++# a publisher for @voxgig/struct-js is registered against THIS repository and
++# THIS filename on the package's npm settings page, that dispatch cannot
++# succeed. The registration is what to check, not the workflow.
  
  name: publish
  
@@ -145,7 +156,7 @@ index a6073b2..7cd3c85 100644
    workflow_dispatch:
      inputs:
        target:
-@@ -149,7 +158,7 @@ jobs:
+@@ -149,7 +163,7 @@ jobs:
      # release of whatever typescript/package.json happens to say.
      if: >-
        ${{ (github.event_name == 'workflow_dispatch' && inputs.target == 'typescript')
@@ -154,7 +165,7 @@ index a6073b2..7cd3c85 100644
  
      # Deliberately NOT contents: write — see the header. This job runs
      # dependency lifecycle scripts.
-@@ -177,7 +186,7 @@ jobs:
+@@ -177,7 +191,7 @@ jobs:
            VERSION="$(node -p "require('./typescript/package.json').version")"
            test -n "$VERSION" || { echo "::error::could not read typescript/package.json version"; exit 1; }
            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
@@ -163,7 +174,7 @@ index a6073b2..7cd3c85 100644
  
        # RELEASES COME FROM main, INCLUDING FROM THE BUTTON. `gh workflow run
        # --ref` accepts any branch or tag, and the Makefile's `main` guard only
-@@ -214,16 +223,17 @@ jobs:
+@@ -214,16 +228,17 @@ jobs:
            fi
  
        # A tag pushed by hand must agree with the version it claims to release.
@@ -185,7 +196,7 @@ index a6073b2..7cd3c85 100644
            if [ "$GITHUB_REF_NAME" != "$WANT" ]; then
              echo "::error::tag $GITHUB_REF_NAME does not match typescript/package.json ($WANT)"
              exit 1
-@@ -246,7 +256,7 @@ jobs:
+@@ -246,7 +261,7 @@ jobs:
            DRY_RUN: ${{ inputs.dry_run }}
          run: |
            set -euo pipefail
@@ -194,7 +205,7 @@ index a6073b2..7cd3c85 100644
            HEAD_SHA="$(git rev-parse HEAD)"
            AT="$(git rev-parse -q --verify "refs/tags/$TAG^{commit}" 2>/dev/null || true)"
            if [ -n "$AT" ] && [ "$AT" != "$HEAD_SHA" ]; then
-@@ -397,7 +407,7 @@ jobs:
+@@ -397,7 +412,7 @@ jobs:
            PKG_VERSION: ${{ needs.publish.outputs.version }}
          run: |
            set -euo pipefail
@@ -204,10 +215,10 @@ index a6073b2..7cd3c85 100644
  
            # EXISTENCE IS NOT ENOUGH. `git rev-parse --verify` only asks whether
 diff --git a/AGENTS.md b/AGENTS.md
-index 103f9c9..6501629 100644
+index 103f9c9..ef07054 100644
 --- a/AGENTS.md
 +++ b/AGENTS.md
-@@ -297,7 +297,7 @@ Two tag namespaces, because there are two kinds of thing to release.
+@@ -297,28 +297,38 @@ Two tag namespaces, because there are two kinds of thing to release.
  
  | what | version lives in | released by | tag |
  | --- | --- | --- | --- |
@@ -216,10 +227,10 @@ index 103f9c9..6501629 100644
  | npm `@voxgig/struct-js` | `javascript/package.json` | `publish.yml` (CI, OIDC) | `javascript/v<version>` |
  | crates.io `voxgig-struct` | `rust/Cargo.toml` | `publish.yml` (CI, OIDC) | `rust/v<version>` |
  | each of the 21 other ports | that port's manifest | `make publish-<lang>` | `<lang>/v<version>` |
-@@ -305,19 +305,25 @@ Two tag namespaces, because there are two kinds of thing to release.
+ 
  **Three ports are on the CI path**: typescript and javascript on npm, rust
- on crates.io. Each has a trusted publisher registered against
- `publish.yml`, so each is released by dispatching that workflow rather than
+-on crates.io. Each has a trusted publisher registered against
+-`publish.yml`, so each is released by dispatching that workflow rather than
 -by `make publish-<lang>`. Both of the newer two keep the
 -`<lang>/v<version>` tag shape every other port uses; only the credential
 -and the operator changed.
@@ -233,29 +244,37 @@ index 103f9c9..6501629 100644
 -that registration fails the OIDC exchange, which npm reports as a 404.
 -
 -**A first release is one plain `npm publish`, not `make publish`.** The two
-+by `make publish-<lang>`. All three use the `<lang>/v<version>` tag shape
-+every other port uses; only the credential and the operator changed.
+-paths this repository normally uses both need the package to exist already:
++on crates.io — released by dispatching `publish.yml` rather than by
++`make publish-<lang>`. All three use the `<lang>/v<version>` tag shape every
++other port uses; only the credential and the operator changed. Typescript
++and rust have a trusted publisher registered against `publish.yml`;
++javascript does not yet, which is the paragraph after next.
 +
 +Typescript joined that shape late. It released under a bare `v<version>`
 +up to `v0.3.4`, and those 16 tags stay — they are what those releases went
 +out under. Everything from the next release on is `typescript/v<version>`,
 +which is the only shape `tools/release_status.py` can read.
 +
-+**`@voxgig/struct-js` has its trusted publisher now**, so all three CI
-+ports release the same way and none of them needs a token. The bootstrap
-+below is kept as history, not as instructions: npm registers a trusted
-+publisher only on a package that already exists, so the first release under
-+the renamed package (0.1.2) had to be one plain token publish, and the
-+publisher was registered against `publish.yml` afterwards. If a `target:
-+javascript` dispatch ever fails the OIDC exchange — npm reports it as a
-+404 — the registration is what to check, not the workflow.
++**`@voxgig/struct-js` has no working trusted publisher.** npm registers one
++only on a package that already exists, so 0.1.2 went out as one plain token
++publish — it sits on npm under a person's name with no provenance
++attestation, where `@voxgig/struct@0.3.4` carries one. A `target:
++javascript` dispatch on 2026-09-03 failed the OIDC exchange all the same,
++which npm reports as a 404 on `PUT /@voxgig%2fstruct-js`: the tests passed
++and the tarball packed, the upload was refused. Register a publisher for
++the package against this repository and the filename `publish.yml` on its
++npm settings page. Until that is done javascript cannot be released from
++CI, and `javascript/package.json` sits at 0.1.4 unreleased.
 +
 +**A first release under a NEW package name is one plain `npm publish`, not
-+`make publish`** — the case above, and the only one. The two
- paths this repository normally uses both need the package to exist already:
++`make publish`** — the case `@voxgig/struct-js` was in at 0.1.2, and the
++only one. The two paths this repository normally uses both need the package
++to exist already:
  OIDC for the reason above, and `make -C <lang> publish` because
  `npm stage publish` posts to `/-/stage/package/<name>`, an endpoint
-@@ -378,15 +384,19 @@ know what it does and does not do:
+ addressed at an existing package. Staging a name npm has never seen answers
+@@ -378,15 +388,19 @@ know what it does and does not do:
    compares the registry version to the other two, so it can call a release
    complete while the registry still serves an older version.
  - **It reads only `<lang>/v*` tags.** `_add_tag` matches `^([a-z+]+)/v(.+)$`
@@ -279,7 +298,7 @@ index 103f9c9..6501629 100644
  irreversible. `make publish-all` drives exactly this tag-push path for all
  three, which is why it never needs a registry credential of its own.
  
-@@ -396,10 +406,11 @@ publish-rust`, also exist — **prefer the workflow**:
+@@ -396,10 +410,11 @@ publish-rust`, also exist — **prefer the workflow**:
  - The Makefile path publishes over a long-lived registry token (an **npm
    token**, a **`CARGO_REGISTRY_TOKEN`**), bypassing OIDC trusted publishing
    and its provenance attestation entirely.
@@ -314,7 +333,7 @@ index a2b642b..5f1bd32 100644
  #                        credentials (PyPI, RubyGems, NuGet, CPAN, Maven,
  #                        LuaRocks, Clojars, pub.dev, Hex, Hackage, opam), then
 diff --git a/design/PUBLISH_AUTOMATION.md b/design/PUBLISH_AUTOMATION.md
-index a35b7ff..f0e7be0 100644
+index a35b7ff..9916729 100644
 --- a/design/PUBLISH_AUTOMATION.md
 +++ b/design/PUBLISH_AUTOMATION.md
 @@ -80,9 +80,10 @@ load-bearing and should survive the extension:
@@ -324,34 +343,34 @@ index a35b7ff..f0e7be0 100644
 -  upload then succeed. That is not hypothetical — `javascript/v0.1.3` exists
 -  today while npm still serves 0.1.2, which is the same defect listed under
 -  phase 2 below.
-+  upload then succeed. That is not hypothetical — `javascript/v0.1.3` sat on
-+  the repository for hours while npm still served 0.1.2, which is the same
-+  defect listed under phase 2 below. That instance has since been released;
-+  the defect it exposed has not been fixed.
++  upload then succeed. That is not hypothetical — `javascript/v0.1.3` is on
++  the repository today while npm still serves 0.1.2, which is the same defect
++  listed under phase 2 below. Neither that instance nor the defect it exposed
++  has been fixed.
  
  **pub.dev is the exception, and stays isolated.** It publishes *only* from a
  tag-triggered workflow, so dart alone tags before it publishes and needs its
-@@ -107,9 +108,16 @@ tag-python:
+@@ -107,8 +108,17 @@ tag-python:
  
  Ordered by dependency rather than by size.
  
 -1. **Finish what is outstanding.** Register the npm trusted publisher for
 -   `@voxgig/struct-js` and release the ports left mid-train. Nothing is built
--   here; it clears the board so later phases start from a known state.
 +1. **Finish what is outstanding.** The npm trusted publisher for
-+   `@voxgig/struct-js` is registered, and the release it was missing went out
-+   as 0.1.4 — 0.1.3 was tagged but never published, and the guard against
-+   tagging a commit the registry does not carry is what sent it forward
-+   rather than back. All three OIDC ports publish the same way now.
-+   Typescript's tag scheme is unified with the rest here too: it released
-+   under a bare `v<version>` up to 0.3.4, which is why
-+   `tools/release_status.py` could not see any of its releases. The ports
-+   left mid-train are still outstanding. Nothing is built here; it clears the
-+   board so later phases start from a known state.
++   `@voxgig/struct-js` is still not registered: a `target: javascript`
++   dispatch on 2026-09-03 failed the OIDC exchange, and npm still serves
++   0.1.2 — the token publish that created the package, carrying no
++   provenance. `javascript/package.json` is at 0.1.4, so the port is one
++   registration away from a release. (0.1.3 was tagged but never published;
++   the guard against tagging a commit the registry does not carry is what
++   sent it forward to 0.1.4 rather than back.) Typescript's tag scheme is
++   unified with the rest here too: it released under a bare `v<version>` up
++   to 0.3.4, which is why `tools/release_status.py` could not see any of its
++   releases. The ports left mid-train are still outstanding. Nothing is built
+    here; it clears the board so later phases start from a known state.
  2. **Fix the release-state model.** Automation multiplies whatever the current
     logic gets wrong, so this comes before adding ports. The six defects are
-    listed below.
-@@ -149,14 +157,17 @@ they matter here because a dashboard that calls an incomplete release
+@@ -149,14 +159,17 @@ they matter here because a dashboard that calls an incomplete release
    re-run `opam publish` in that case.
  - **A pushed tag is not a release.** The OIDC path reports success the moment
    the tag lands, while the workflow can still fail at the build, the tests,
