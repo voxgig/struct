@@ -1,6 +1,6 @@
 [package]
 name = "voxgig-struct"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Uniform JSON-shaped data structure manipulations — Rust port of @voxgig/struct"
 license = "MIT"
