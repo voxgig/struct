@@ -312,11 +312,22 @@ and the operator changed.
 **The javascript package is renamed to `@voxgig/struct-js`, and that name
 has no trusted publisher yet.** npm registers a trusted publisher only on a
 package that already exists, so the first release under the new name cannot
-go over OIDC: publish it with a token (`make -C javascript publish`, then
-`npm stage approve`), register the publisher against `publish.yml` on the
-new package's settings page, and every release after that goes back through
-CI. Dispatching `publish.yml` with target `javascript` before that
-registration fails the OIDC exchange, which npm reports as a 404.
+go over OIDC. Register the publisher against `publish.yml` on the new
+package's settings page once it has one, and every release after that goes
+back through CI; dispatching `publish.yml` with target `javascript` before
+that registration fails the OIDC exchange, which npm reports as a 404.
+
+**A first release is one plain `npm publish`, not `make publish`.** The two
+paths this repository normally uses both need the package to exist already:
+OIDC for the reason above, and `make -C <lang> publish` because
+`npm stage publish` posts to `/-/stage/package/<name>`, an endpoint
+addressed at an existing package. Staging a name npm has never seen answers
+`404 Package "<name>" not found`, and does it after running the tests and
+packing the tarball, so it reads as a late failure rather than an
+unsupported one. So bootstrap by hand from the port directory —
+`npm publish --access public --registry https://registry.npmjs.org`, adding
+`--otp=<code>` if the account prompts — and then `make -C <lang> tag`, which
+reads the registry and refuses until that publish has landed.
 
 The old `@voxgig/structjs` ends at 0.1.1 and is not published again;
 deprecate it at the new name. The new package starts at **0.1.2**, because

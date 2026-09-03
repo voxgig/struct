@@ -63,6 +63,25 @@ audit:
 # at all -- .github/workflows/publish.yml publishes over OIDC with plain
 # `npm publish`, where there is no human to prove presence.)
 #
+# STAGING CANNOT CREATE A PACKAGE, so this target cannot make the FIRST
+# release of a name npm has never seen. `npm stage publish` posts to
+#
+#   POST /-/stage/package/@voxgig%2fstruct-js
+#
+# which is addressed at a package that already exists; for a new name npm
+# answers 404 Package "@voxgig/struct-js" not found -- after running the
+# tests and packing the tarball, so it looks like a late failure rather
+# than an unsupported one. Measured against the real registry when this
+# port was renamed. A first release is therefore one plain publish by
+# hand, from this directory:
+#
+#   npm publish --access public --registry https://registry.npmjs.org
+#
+# (`--access public` because the scope defaults to restricted, and
+# `--otp=<code>` if the account prompts). Then `make tag` as usual: it
+# reads the registry, so it refuses until that publish has landed. Every
+# release after the first goes through this target, or through CI.
+#
 # Reading the slash/colon-named npm auth var needs a shell that preserves
 # non-identifier env names across exec (bash does; dash/busybox sh drop them).
 SHELL := /bin/bash

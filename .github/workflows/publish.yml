@@ -96,11 +96,19 @@
 # @voxgig/struct-js HAS NO TRUSTED PUBLISHER YET. The javascript port was
 # renamed from @voxgig/structjs, which ends at 0.1.1, and npm registers a
 # trusted publisher only on a package that already exists. So the FIRST
-# release under the new name is a token publish -- `make -C javascript
-# publish`, then `npm stage approve` -- after which the publisher is
-# registered against this file and every later release comes back here.
+# release under the new name is a token publish, after which the publisher
+# is registered against this file and every later release comes back here.
 # Dispatching `target: javascript` before that registration fails the OIDC
 # exchange, and npm reports it as the same 404 described above.
+#
+# THAT BOOTSTRAP IS ONE PLAIN `npm publish`, NOT `make -C javascript
+# publish`. The Makefile stages -- `npm stage publish` posts to
+# /-/stage/package/<name>, an endpoint addressed at a package that already
+# exists -- so staging a name npm has never seen 404s the same way. Publish
+# it by hand from javascript/ with
+# `npm publish --access public --registry https://registry.npmjs.org`, then
+# `make -C javascript tag`, which reads the registry and refuses until that
+# publish has landed. The port's Makefile carries the same note.
 
 name: publish
 
