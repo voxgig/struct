@@ -74,7 +74,7 @@ make -C build/verify verify-ruby \
 |---------------|-----------------------------------------|----------------------------------------------|
 | `go/`         | `github.com/voxgig/struct/go`           | `voxgigstruct.GetPath(store, "db.host")`     |
 | `typescript/` | `@voxgig/struct` (npm, CommonJS)        | `require('@voxgig/struct').getpath(...)`     |
-| `javascript/` | `@voxgig/structjs` (npm)                | `require('@voxgig/structjs').getpath(...)`   |
+| `javascript/` | `@voxgig/struct-js` (npm)               | `require('@voxgig/struct-js').getpath(...)`  |
 | `ruby/`       | `voxgig_struct` (RubyGems)              | `VoxgigStruct.getpath(store, "db.host")`     |
 | `python/`     | `voxgig-struct` (PyPI)                  | `from voxgig_struct import getpath`          |
 | `rust/`       | `voxgig-struct` (crates.io)             | `voxgig_struct::get_path(&store, ...)`       |
@@ -89,7 +89,7 @@ The tag-only ports read their version from `php/VERSION`, `c/VERSION`,
 
 ## Publication status
 
-`@voxgig/structjs` (JavaScript) and `voxgig-struct` (Rust / crates.io) are
+`@voxgig/struct-js` (JavaScript) and `voxgig-struct` (Rust / crates.io) are
 **not published yet**, so `verify-javascript` and `verify-rust` are expected
 to fail at the install step until they are. The scaffolding is in place so
 they work the moment those packages ship.

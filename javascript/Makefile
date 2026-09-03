@@ -80,4 +80,4 @@ publish: test
 	  echo "push: $(TAG) -> origin (ssh)"; \
 	  git push origin "$(TAG)"; \
 	fi; \
-	echo "Published @voxgig/structjs@$(VERSION) + tag $(TAG)."
+	echo "Published @voxgig/struct-js@$(VERSION) + tag $(TAG)."
