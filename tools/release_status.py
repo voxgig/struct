@@ -38,7 +38,7 @@ UA = {"User-Agent": "voxgig-struct-release-status"}
 #   version-source: ("file", path) whole file | ("re", path, pat) | ("glob", pat, re)
 PORTS = [
     ("typescript", ("re", "typescript/package.json", r'"version"\s*:\s*"([^"]+)"'), "npm", "@voxgig/struct"),
-    ("javascript", ("re", "javascript/package.json", r'"version"\s*:\s*"([^"]+)"'), "npm", "@voxgig/struct-js"),
+    ("javascript", ("re", "javascript/package.json", r'"version"\s*:\s*"([^"]+)"'), "npm", "@voxgig/structjs"),
     ("python", ("re", "python/pyproject.toml", r'(?m)^version\s*=\s*"([^"]+)"'), "pypi", "voxgig-struct"),
     ("go", ("file", "go/VERSION"), "go", "github.com/voxgig/struct/go"),
     ("ruby", ("re", "ruby/voxgig_struct.gemspec", r"version\s*=\s*['\"]([^'\"]+)"), "rubygems", "voxgig_struct"),

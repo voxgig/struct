@@ -1,6 +1,6 @@
 {
-  "name": "@voxgig/struct-js",
-  "version": "0.1.0",
+  "name": "@voxgig/structjs",
+  "version": "0.1.1",
   "description": "JSON data structure manipulations — JavaScript port",
   "main": "src/struct.js",
   "type": "commonjs",
@@ -20,21 +20,21 @@
   "scripts": {
     "test": "node --enable-source-maps --test test/struct.test.js test/client.test.js",
     "test-cov": "rm -rf ./coverage && mkdir -p ./coverage && node --experimental-test-coverage --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/lcov.info --enable-source-maps --test test/struct.test.js",
-    "test-some": "node --enable-source-maps --test-name-pattern=\"$TEST_PATTERN\" --test test/struct.test.js",
+    "test-some": "node --enable-source-maps --test-name-pattern=\"$npm_config_pattern\" --test test/struct.test.js",
     "walk-bench": "node --enable-source-maps --test test/walk-bench.test.js",
     "lint": "eslint src test",
     "lint:fix": "eslint src test --fix",
     "format": "prettier --write \"src/**/*.js\" \"test/**/*.js\"",
     "format:check": "prettier --check \"src/**/*.js\" \"test/**/*.js\"",
     "doc": "echo doc",
-    "inject-version": "node -e \"t=['./src/struct.js'],r=require,fs=r('fs'),v=r('./package.json').version,t.map(f=>fs.writeFileSync(f,fs.readFileSync(f,'utf8').replace(/\\/\\/ VERSION: @voxgig\\/struct-js [^\\n]+/, '// VERSION: @voxgig/struct-js '+v)))\"",
+    "inject-version": "node -e \"t=['./src/struct.js'],r=require,fs=r('fs'),v=r('./package.json').version,t.map(f=>fs.writeFileSync(f,fs.readFileSync(f,'utf8').replace(/\\/\\/ VERSION: @voxgig\\/structjs [^\\n]+/, '// VERSION: @voxgig/structjs '+v)))\"",
     "clean": "rm -rf coverage node_modules yarn.lock package-lock.json",
     "reset": "npm run clean && npm i && npm test",
     "repo-tag": "REPO_VERSION=`node -e \"console.log(require('./package').version)\"` && echo TAG: javascript/v$REPO_VERSION && git commit -a -m javascript/v$REPO_VERSION && git push && git tag javascript/v$REPO_VERSION && git push --tags;",
     "repo-publish": "npm run clean && npm i && npm run repo-publish-quick",
-    "repo-publish-quick": "npm run inject-version && npm run test && npm run doc && npm run repo-tag && npm stage publish --access public --registry https://registry.npmjs.org",
+    "repo-publish-quick": "npm run inject-version && npm run test && npm run doc && npm publish --access public --registry https://registry.npmjs.org && npm run repo-tag",
     "repo-publish-dry": "npm run clean && npm i && npm run repo-publish-dry-quick",
-    "repo-publish-dry-quick": "npm run inject-version && npm run test && npm run doc && npm stage publish --dry-run --access public --registry https://registry.npmjs.org"
+    "repo-publish-dry-quick": "npm run inject-version && npm run test && npm run doc && npm publish --dry-run --access public --registry https://registry.npmjs.org"
   },
   "license": "MIT",
   "files": [

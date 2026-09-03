@@ -1,6 +1,7 @@
-# Releases the two voxgig/struct packages that publish over OIDC, and writes
-# their git tags: `@voxgig/struct` on npm (from `typescript/`) and
-# `voxgig-struct` on crates.io (from `rust/`).
+# Releases the three voxgig/struct packages that publish over OIDC, and
+# writes their git tags: `@voxgig/struct` on npm (from `typescript/`),
+# `@voxgig/structjs` on npm (from `javascript/`), and `voxgig-struct` on
+# crates.io (from `rust/`).
 #
 # Adapted from voxgig/sdkgen's publish.yml, which carries the reasoning for
 # every guard below. BOTH registries' trusted publishers are registered
@@ -8,8 +9,8 @@
 #
 # ONE FILE, BECAUSE EACH REGISTRY ALLOWS EXACTLY ONE. A trusted publisher is
 # registered against a single workflow FILENAME — on npmjs.com for every
-# @voxgig package, on crates.io for `voxgig-struct` — and both are registered
-# against `publish.yml`. The name itself is arbitrary — other orgs register
+# @voxgig package, on crates.io for `voxgig-struct` — and all three are
+# registered against `publish.yml`. The name itself is arbitrary — other orgs register
 # `release.yml` — but only the ONE registered file can publish, so anything
 # that must accompany a publish has to live inside it. Here that is the tag,
 # and now a second registry.
@@ -23,18 +24,24 @@
 # fails earlier and more plainly: the token exchange in
 # `rust-lang/crates-io-auth-action` fails and `cargo publish` never runs.
 #
-# ONE TARGET PER RUN. The two packages version independently (typescript is
-# 0.3.x, rust is 0.1.x) and every publish is irreversible, so a dispatch
-# releases exactly ONE of them — `target: npm` or `target: rust`. That is the
-# same one-at-a-time rule the root Makefile keeps by refusing to offer a
-# `publish-all`, and it is why there is no `both`.
+# ONE TARGET PER RUN. The three packages version independently (typescript
+# is 0.3.x, javascript and rust are 0.1.x) and every publish is
+# irreversible, so a dispatch releases exactly ONE of them.
+#
+# TARGETS ARE NAMED BY PORT, not by registry: `typescript`, `javascript`,
+# `rust`. Two of the three publish to npm, so the old `npm` name stopped
+# identifying anything the moment the second one arrived. That is also how
+# the rest of the repository names them -- PUBLISH_LANGS, `make
+# publish-<lang>`, and the `<lang>/v*` tags.
 #
 # TWO JOBS PER TARGET, BECAUSE THEY NEED DIFFERENT PRIVILEGES.
 #
-#   publish, publish-rust  id-token: write, contents: READ. Run the install,
+#   publish, publish-javascript, publish-rust
+#                          id-token: write, contents: READ. Run the install,
 #                          the build and the tests — i.e. dependency lifecycle
 #                          scripts and project code.
-#   tag, tag-rust          contents: write. Run git and nothing else.
+#   tag, tag-javascript, tag-rust
+#                          contents: write. Run git and nothing else.
 #
 # Keeping them in one job would hand a repository-write credential to every
 # dependency postinstall script that runs during the install, because checkout
@@ -48,12 +55,15 @@
 #
 # THREE WAYS IN:
 #
-#   workflow_dispatch   the normal path. Publishes if missing, then tags.
-#   push: tags v*       the manual path, for a tag pushed by hand. Publishes
-#                       @voxgig/struct only; the tag jobs do not run.
-#   push: tags rust/v*  the same, for the crate. A `*` in a ref filter does
-#                       not cross `/`, so `v*` cannot also match `rust/v0.1.1`
-#                       and the two push paths never both fire.
+#   workflow_dispatch        the normal path. Publishes if missing, then tags.
+#   push: tags v*            the manual path, for a tag pushed by hand.
+#                            Publishes @voxgig/struct only.
+#   push: tags javascript/v* the same, for @voxgig/structjs.
+#   push: tags rust/v*       the same, for the crate.
+#
+# A `*` in a ref filter does not cross `/`, so `v*` cannot also match
+# `javascript/v0.1.1` or `rust/v0.1.2`, and the push paths never overlap.
+# The tag jobs do not run on a push.
 #
 # DRY RUN. `dry_run: true` on a dispatch rehearses a release without making
 # one: every guard and every test runs, the artifact is packed with
@@ -74,6 +84,7 @@
 # bump stays a reviewable diff and the release stays a button.
 #
 #   typescript/package.json "version" -> tag v<version>
+#   javascript/package.json "version" -> tag javascript/v<version>
 #   rust/Cargo.toml         version   -> tag rust/v<version>
 #
 # Renaming this file breaks publishing until BOTH registries' trusted
@@ -84,14 +95,14 @@ name: publish
 
 on:
   push:
-    tags: ['v*', 'rust/v*']
+    tags: ['v*', 'javascript/v*', 'rust/v*']
   workflow_dispatch:
     inputs:
       target:
-        description: 'Which package to release'
+        description: 'Which port to release'
         type: choice
-        options: [npm, rust]
-        default: npm
+        options: [typescript, javascript, rust]
+        default: typescript
       expect_sha:
         description: 'Optional: refuse unless main is still at this commit (set by `make publish`)'
         type: string
@@ -103,10 +114,14 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # The corpus runner for the javascript port, pinned to the same commit
+  # build.yml checks out. The library never depends on omni; only the tests
+  # this job runs before publishing do.
+  OMNI_REF: fbf1da64e3c90fc54e3c6b237b0b5835890df8c4
 
 jobs:
   publish:
-    name: npm publish
+    name: npm publish (typescript)
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -114,7 +129,7 @@ jobs:
     # push. Without this the crate's `rust/v*` tag would also start an npm
     # release of whatever typescript/package.json happens to say.
     if: >-
-      ${{ (github.event_name == 'workflow_dispatch' && inputs.target == 'npm')
+      ${{ (github.event_name == 'workflow_dispatch' && inputs.target == 'typescript')
        || (github.event_name == 'push' && startsWith(github.ref_name, 'v')) }}
 
     # Deliberately NOT contents: write — see the header. This job runs
@@ -344,9 +359,9 @@ jobs:
   # Runs git and nothing else. No npm install, no project code — so the
   # repository-write credential is never in scope while third-party code runs.
   tag:
-    name: tag
+    name: tag (typescript)
     needs: publish
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.target == 'npm' && !inputs.dry_run }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.target == 'typescript' && !inputs.dry_run }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -384,6 +399,235 @@ jobs:
           git tag "$TAG"
           git push origin "refs/tags/$TAG"
           echo "pushed $TAG" >> "$GITHUB_STEP_SUMMARY"
+
+  # THE SECOND NPM PACKAGE. Same shape as the typescript job above; the
+  # differences are that this port has no build step and that its tests need
+  # the omni corpus runner as a checkout rather than a devDependency.
+  publish-javascript:
+    name: npm publish (javascript)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    if: >-
+      ${{ (github.event_name == 'workflow_dispatch' && inputs.target == 'javascript')
+       || (github.event_name == 'push' && startsWith(github.ref_name, 'javascript/v')) }}
+
+    # Deliberately NOT contents: write — see the header. This job runs
+    # dependency lifecycle scripts.
+    permissions:
+      id-token: write
+      contents: read
+
+    outputs:
+      version: ${{ steps.versions.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24.x
+          registry-url: 'https://registry.npmjs.org'
+
+      # The corpus runner is voxgig/omni, consumed as a local checkout: unlike
+      # the typescript port, this one does not take it from npm. The library
+      # never depends on it -- only the tests below do, and they find it
+      # through OMNI_HOME.
+      - name: Checkout voxgig/omni (test runner)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
+          ref: ${{ env.OMNI_REF }}
+
+      - name: Resolve the version being released
+        id: versions
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./javascript/package.json').version")"
+          test -n "$VERSION" || { echo "::error::could not read javascript/package.json version"; exit 1; }
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "$VERSION -> tag javascript/v$VERSION"
+
+      - name: Dispatches must come from main
+        if: ${{ github.event_name == 'workflow_dispatch' && !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF_NAME" != "main" ]; then
+            echo "::error::dispatch ref is $GITHUB_REF_NAME; releases must come from main"
+            exit 1
+          fi
+
+      - name: main must still be the commit we intended to release
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.expect_sha != '' }}
+        env:
+          EXPECT_SHA: ${{ inputs.expect_sha }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_SHA" != "$EXPECT_SHA" ]; then
+            echo "::error::main has moved: expected $EXPECT_SHA, got $GITHUB_SHA"
+            exit 1
+          fi
+
+      - name: The pushed tag must match the package version
+        if: ${{ github.event_name == 'push' }}
+        env:
+          PKG_VERSION: ${{ steps.versions.outputs.version }}
+        run: |
+          set -euo pipefail
+          WANT="javascript/v$PKG_VERSION"
+          if [ "$GITHUB_REF_NAME" != "$WANT" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match javascript/package.json ($WANT)"
+            exit 1
+          fi
+
+      # Warns rather than stops on a rehearsal — see the typescript job's copy
+      # of this step for why.
+      - name: Refuse a tag that points at a different commit
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          PKG_VERSION: ${{ steps.versions.outputs.version }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          TAG="javascript/v$PKG_VERSION"
+          HEAD_SHA="$(git rev-parse HEAD)"
+          AT="$(git rev-parse -q --verify "refs/tags/$TAG^{commit}" 2>/dev/null || true)"
+          if [ -n "$AT" ] && [ "$AT" != "$HEAD_SHA" ]; then
+            MSG="tag $TAG already exists on $AT, not this commit — bump javascript/package.json"
+            if [ "${DRY_RUN:-false}" = "true" ]; then
+              echo "::warning::$MSG (rehearsal: a real release stops here)"
+            else
+              echo "::error::$MSG"
+              exit 1
+            fi
+          fi
+          if [ -n "$AT" ]; then echo "$TAG already points here; nothing to create"; fi
+
+      # `npm install`, NOT `npm ci`: this repo commits no lockfile in any port
+      # (.gitignore), so `npm ci` has nothing to install from. Nothing about
+      # the PUBLISHED artifact loosens by that -- `dependencies` here is
+      # EMPTY, so everything installed is lint and test tooling that never
+      # reaches the tarball.
+      #
+      # NO BUILD STEP. This port ships `src/struct.js` as written; its
+      # Makefile says so, and the package `files` list is LICENSE and src.
+      - name: Install dependencies
+        working-directory: javascript
+        run: npm install
+
+      - name: Test
+        working-directory: javascript
+        run: npm test
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
+
+      # Trusted publishing requires npm >= 11.5.1.
+      - name: Use a trusted-publishing capable npm
+        run: npm install -g npm@latest
+
+      - name: Is this version already on npm?
+        id: registry
+        env:
+          PKG_VERSION: ${{ steps.versions.outputs.version }}
+        run: |
+          set -euo pipefail
+          V="$PKG_VERSION"
+          if npm view "@voxgig/structjs@$V" version >/dev/null 2>&1; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "$V is already on npm — skipping publish"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            echo "$V is not on npm — will publish"
+          fi
+
+      - name: A published version must come from this commit
+        if: ${{ steps.registry.outputs.published == 'true' }}
+        env:
+          PKG_VERSION: ${{ steps.versions.outputs.version }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          V="$PKG_VERSION"
+          GH="$(npm view "@voxgig/structjs@$V" gitHead 2>/dev/null || true)"
+          if [ -z "$GH" ]; then
+            echo "::warning::npm records no gitHead for $V; cannot verify it was built from this commit"
+          elif [ "$GH" != "$GITHUB_SHA" ]; then
+            MSG="npm has $V built from $GH, but this run is $GITHUB_SHA — tagging would point at code the registry does not contain"
+            if [ "${DRY_RUN:-false}" = "true" ]; then
+              echo "::warning::$MSG (rehearsal: a real release stops here)"
+            else
+              echo "::error::$MSG"
+              exit 1
+            fi
+          else
+            echo "$V on npm was built from this commit"
+          fi
+
+      # Publish BEFORE tagging (the tag job `needs` this one), so a tag only
+      # ever exists for a release that reached the registry.
+      - name: Publish to npm
+        if: ${{ steps.registry.outputs.published == 'false' && !inputs.dry_run }}
+        working-directory: javascript
+        env:
+          PKG_VERSION: ${{ steps.versions.outputs.version }}
+        run: |
+          set -euo pipefail
+          V="$PKG_VERSION"
+          # A PRERELEASE MUST NOT BECOME `latest` — see the typescript job.
+          case "$V" in
+            *-*) DIST=next ;;
+            *)   DIST=latest ;;
+          esac
+          echo "publishing $V under dist-tag $DIST"
+          npm publish --access public --tag "$DIST"
+
+      - name: Rehearse the npm package
+        if: ${{ inputs.dry_run }}
+        working-directory: javascript
+        run: npm publish --access public --dry-run
+
+  # Runs git and nothing else — see the `tag` job above, which this mirrors.
+  tag-javascript:
+    name: tag (javascript)
+    needs: publish-javascript
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.target == 'javascript' && !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Tag the release
+        env:
+          PKG_VERSION: ${{ needs.publish-javascript.outputs.version }}
+        run: |
+          set -euo pipefail
+          TAG="javascript/v$PKG_VERSION"
+          HEAD_SHA="$(git rev-parse HEAD)"
+
+          # EXISTENCE IS NOT ENOUGH — dereference and compare, for the reason
+          # spelled out in the typescript tag job.
+          AT="$(git rev-parse -q --verify "refs/tags/$TAG^{commit}" 2>/dev/null || true)"
+          if [ -n "$AT" ]; then
+            if [ "$AT" != "$HEAD_SHA" ]; then
+              echo "::error::$TAG exists on $AT, not this commit ($HEAD_SHA)"
+              exit 1
+            fi
+            echo "$TAG already points here — nothing to do" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git tag "$TAG"
+          git push origin "refs/tags/$TAG"
+          echo "pushed $TAG" >> "$GITHUB_STEP_SUMMARY"
+
 
   # THE CRATE. Same shape as the npm job above, and the differences are all
   # registry differences, called out where they occur.

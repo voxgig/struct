@@ -17,7 +17,7 @@ The JS source is a single CommonJS module:
 const struct = require('./javascript/src/struct.js')
 ```
 
-When packaged the public name is `@voxgig/struct-js` (see
+When packaged the public name is `@voxgig/structjs` (see
 [`package.json`](./package.json)).
 
 
