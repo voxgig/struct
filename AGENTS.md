@@ -80,6 +80,7 @@ matrix in [`REPORT.md`](design/REPORT.md)):
 ├── Makefile             # top-level aggregate targets (test/lint/audit/scan)
 ├── build/test/*.aon  # the shared test corpus — the behavioural contract
 ├── tools/               # check_parity.py, check_corpus_regex.py
+├── patch/               # TRANSIENT: changes an agent could not push (see below)
 ├── typescript/          # the canonical implementation (+ its own AGENTS.md/DOCS.md)
 └── <lang>/              # one directory per port, each with the same layout
 ```
@@ -88,6 +89,46 @@ Each `<lang>/` directory contains: the implementation source, a test
 runner that loads `build/test/*.aon`, a `Makefile` (at least `test`
 and `lint`), a `README.md` (overview), a `DOCS.md` (comprehensive), and an
 `AGENTS.md` (port-specific agent notes).
+
+
+### `patch/` — a legitimate folder, and a temporary one
+
+**An agent session cannot write `.github/workflows/`.** Both write paths
+refuse it: `git push` rejects the ref (*"refusing to allow an OAuth App to
+create or update workflow ... without workflow scope"*) and the GitHub App's
+file API fails on that path while writing every other file in the repository
+fine. Tag pushes and ref deletions are refused the same way.
+
+That is a hard boundary, not a bug to route around, and it means a change
+that touches the release workflow cannot arrive as a branch. `patch/` is how
+one arrives instead: a `git format-patch` file plus a `README.md` naming the
+apply command, what the patch touches, and why. Apply it with
+
+```sh
+git am < patch/0001-<name>.patch
+```
+
+**Then delete the folder.** It is a delivery vehicle, never repository
+content:
+
+- Once applied, the file only duplicates the history it just created.
+- Left behind untracked it blocks releases — `make publish-all` and the port
+  `publish` targets refuse to run against `git status --porcelain` output.
+- A patch that has drifted from `main` is worse than no patch, and nothing
+  here revalidates one.
+
+So a `patch/` on `main` is a bug; a `patch/` on a short-lived branch, with an
+open PR explaining it, is the mechanism working. If you find one, check
+whether its change already landed before applying it — `git apply --check`
+answers that quickly.
+
+**Do not use it as a general escape hatch.** Anything an agent *can* push
+belongs on a branch, and a patch that touches no workflow file has no reason
+to exist. Splitting a change so the pushable half lands alone is usually
+worse than waiting: the tag-scheme patch is the standing example, where
+`tools/bump.py` composes the tag `publish.yml`'s trigger listens for, so the
+tooling half alone would cut a tag the workflow ignores — a release that
+silently publishes nothing.
 
 
 ## The shared test corpus (the contract)
