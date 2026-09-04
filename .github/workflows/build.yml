@@ -20,6 +20,11 @@ env:
   # stays red until re-run, and a green run here is not reproducible from
   # this repo's commit alone. Bump this one line to take a new omni; that
   # bump is the commit CI re-tests every port against.
+  #
+  # AND BUMP THE OTHER TWO WITH IT: lint.yml and publish.yml define OMNI_REF
+  # too, because github gives workflow files no way to share an `env`. It is
+  # one pin written three times. `workflows` in security.yml fails if the
+  # three ever disagree.
   OMNI_REF: fbf1da64e3c90fc54e3c6b237b0b5835890df8c4
 
 jobs:

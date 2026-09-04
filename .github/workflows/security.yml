@@ -82,6 +82,65 @@ jobs:
       - run: |
           go install github.com/rhysd/actionlint/cmd/actionlint@latest
           "$(go env GOPATH)/bin/actionlint"
+      # ONE PIN, WRITTEN THREE TIMES. build.yml, lint.yml and publish.yml each
+      # define OMNI_REF, because github gives workflow files no way to share an
+      # `env`. publish.yml's comment already states the invariant in writing --
+      # "pinned to the same commit build.yml checks out" -- and lint.yml still
+      # drifted eight omni commits behind the other two, which is what an
+      # invariant stated only in prose is worth. A green lint run against one
+      # omni and a green build run against another do not compose into a claim
+      # about either.
+      #
+      # This is deliberately a grep and not a python tool: it reads the same
+      # three lines a person reads, and it lives beside actionlint because a
+      # disagreement between workflow files is exactly what this job is for.
+      #
+      # AGREEING IS NOT ENOUGH: EACH FILE MUST STILL HAVE ITS OWN. Comparing
+      # only the distinct values passes when a definition goes MISSING -- the
+      # survivors still agree with each other -- and a workflow that lost its
+      # `env.OMNI_REF` while keeping `ref: ${{ env.OMNI_REF }}` does not fail.
+      # It resolves the ref to the empty string, and actions/checkout reads
+      # that as "the default branch", which is the exact floating checkout the
+      # pin exists to prevent, arrived at silently. So the loop asserts the
+      # definition is present exactly once wherever the value is used, and the
+      # comparison runs after it.
+      #
+      # A USE IS AN ANCHORED `key: ${{ ... }}`, NOT THE BARE NAME, because
+      # THIS FILE would otherwise match itself: the comment above and the
+      # message below both spell the name, and counting those makes the check
+      # report security.yml as a workflow using a pin it does not define. Every
+      # real use is a `ref:` value, and a comment or an `echo` cannot look like
+      # one.
+      - name: OMNI_REF agrees across workflows
+        run: |
+          fail=0
+          for f in .github/workflows/*.yml; do
+            uses="$(grep -cE '^ *[A-Za-z_-]+: *\$\{\{ *env\.OMNI_REF *\}\}' "$f" || true)"
+            defs="$(grep -c '^ *OMNI_REF:' "$f" || true)"
+            if [ "$uses" -gt 0 ] && [ "$defs" -ne 1 ]; then
+              echo "$f uses env.OMNI_REF $uses time(s) but defines it $defs time(s)"
+              fail=1
+            fi
+            if [ "$uses" -eq 0 ] && [ "$defs" -gt 0 ]; then
+              echo "$f defines OMNI_REF and never uses it"
+              fail=1
+            fi
+          done
+          refs="$(grep -h '^ *OMNI_REF:' .github/workflows/*.yml | awk '{print $2}' | sort -u)"
+          if [ -z "$refs" ]; then
+            echo "no OMNI_REF defined anywhere -- this check has gone blind"
+            fail=1
+          elif [ "$(printf '%s\n' "$refs" | wc -l)" -ne 1 ]; then
+            echo "OMNI_REF disagrees across workflows:"
+            grep -n '^ *OMNI_REF:' .github/workflows/*.yml
+            fail=1
+          fi
+          if [ "$fail" -ne 0 ]; then
+            echo
+            echo "OMNI_REF is one pin, written once in every workflow that uses it."
+            exit 1
+          fi
+          echo "OMNI_REF: $refs (defined once in every workflow that uses it)"
 
   shell:
     name: shell lint (shellcheck)
