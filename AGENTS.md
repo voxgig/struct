@@ -202,7 +202,7 @@ into the directory and use its `Makefile`. First run installs deps.
 | Swift | `swift/` | `swift test` | swift-format | `allocator`-free; in-tree ordered dict |
 | Clojure | `clojure/` | `clojure -M:test` | namespace compile check | mutable `LinkedHashMap`/`ArrayList` nodes; lower-smushed names |
 | OCaml | `ocaml/` | `make test` (`ocamlc`) | type-check (`ocamlc -c`) | `value` variant; distinct Noval/Null (like TS); in-tree regex engine |
-| Scala | `scala/` | `make test` (`scalac`/`scala`) | type-check (`scalac`) | `Value` ADT; distinct Noval/VNull (like TS); `java.util.regex` |
+| Scala | `scala/` | `make test` (`scala-cli`) | compile check (`scala-cli compile`) | **Scala 3** — `scala-cli` for build/test/lint, Scala 3 `scalac` + `java` for `make bench`; apt's Scala 2 cannot build it; `Value` ADT; distinct Noval/VNull (like TS); `java.util.regex` |
 | Dart | `dart/` | `dart run test/runner.dart` | `dart analyze` | native `Map`/`List` nodes; single `null` (like Python); core `RegExp` |
 | Elixir | `elixir/` | `elixir test/runner.exs` | compile check (`elixirc`) | ETS-backed heap nodes (`{:vmap,_}`/`{:vlist,_}`); single `nil` (like Python); core `Regex` |
 | Haskell | `haskell/` | `ghc … test/Runner.hs` | type-check (`ghc -fno-code`) | `IORef`-backed nodes (whole API in `IO`); distinct `VNoval`/`VNull` (like OCaml); in-tree Vregex |

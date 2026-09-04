@@ -468,7 +468,7 @@ Each language directory contains:
 | Kotlin     | detekt                            | ktlint                |
 | Clojure    | namespace compile check           | (clj-kondo optional)  |
 | OCaml      | type-check (`ocamlc -c`)          | (ocamlformat optional)|
-| Scala      | type-check (`scalac`)             | (scalafmt optional)   |
+| Scala      | compile check (`scala-cli`)       | (scalafmt optional)   |
 | Dart       | `dart analyze`                    | `dart format`         |
 | Elixir     | compile check (`elixirc`)         | (`mix format` optional)|
 | Haskell    | type-check (`ghc -fno-code`)      | (`ormolu` optional)   |
