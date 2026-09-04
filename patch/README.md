@@ -13,24 +13,37 @@ This folder is transient: delete it once the patch is applied.
 
 ## Apply it
 
-`AGENTS.md` §"An agent session cannot write `.github/workflows/`" already gives
-the form, and this folder follows it — from any checkout that carries the
-folder, this branch or `main` once the delivery commit is merged:
+`AGENTS.md` §"An agent session cannot write `.github/workflows/`" gives the
+form, and this folder follows it. **Apply it from this branch, while the
+branch still exists:**
 
 ```sh
+git fetch origin claude/struct-omni-pin-patch
+git checkout claude/struct-omni-pin-patch
 git am < patch/0001-ci-OMNI_REF-is-one-pin-written-three-times-so-make-t.patch
 ```
 
-**Read it from the worktree, not from a branch ref.** An earlier draft of this
-file used `git show origin/claude/struct-omni-pin-patch:… | git am` and claimed
-that works from any checkout after merging. It does not: merging is usually
-followed by deleting the source branch, and a fresh clone never had it, so the
-one documented command would fail exactly when it is most likely to be run —
-by a maintainer on `main`, after the merge. The file is tracked; the worktree
-copy is the durable one, which is why `AGENTS.md` spells it that way.
+**Do not merge this pull request to get the patch onto `main`.** The same
+section is explicit that *"a `patch/` on `main` is a bug; a `patch/` on a
+short-lived branch, with an open PR explaining it, is the mechanism
+working"* — applied, the file only duplicates the history it just created,
+and left behind it blocks releases, because `make publish-all` and the port
+`publish` targets refuse to run against `git status --porcelain` output. So
+this PR is a **carrier**: take the patch out of it and close it.
 
-**Then delete the folder**, per the same section: applied, the file only
-duplicates the history it just created, and left behind it blocks releases.
+Two earlier drafts of this section were wrong, and both are corrected rather
+than quietly replaced, because the wrong forms are the ones quoted in the
+pull request description:
+
+1. It read the patch from `origin/claude/struct-omni-pin-patch:…` through
+   `git show`. That fails once the branch is deleted, and a fresh clone never
+   had it.
+2. It then said the command works from `main` "once the delivery commit is
+   merged" — which contradicts the rule above. The carrier is not supposed to
+   reach `main` at all.
+
+`git apply --check` answers quickly whether the change already landed, which
+is worth running first if this branch has been sitting.
 
 ## What it fixes
 
@@ -64,12 +77,35 @@ disagree. It is deliberately a `grep` rather than a Python tool: it reads the
 same three lines a person reads, and a disagreement between workflow files is
 what that job already exists for.
 
+**Agreeing is not enough, and the first draft of the check only checked that.**
+Comparing distinct values passes when a definition goes *missing*, because the
+survivors still agree with each other — and a workflow that lost its
+`env.OMNI_REF` while keeping its `ref:` uses resolves the ref to the empty
+string, which `actions/checkout` reads as the default branch. That is the exact
+floating checkout the pin exists to prevent, reached silently and with the
+consistency gate green. The check now asserts the definition is present exactly
+once in every workflow that uses the value, and compares the values afterwards.
+
+It counts a use as an anchored `key: ${{ ... }}` rather than the bare name,
+because `security.yml` would otherwise match itself — its comment and its
+failure message both spell the name. That is not hypothetical: it is what the
+first run of the hardened loop did.
+
 ## Checks
 
-- the guard was run against the drift it is meant to catch: **before**, two
-  values, exit 1, all three lines named; **after**, one value, pass
+Four cases, with the step's script extracted verbatim from the YAML:
+
+| case | result |
+|---|---|
+| patched tree | pass |
+| `lint.yml` loses its definition, keeps its five uses | fail, naming the file |
+| `lint.yml` back to `064af05` | fail, naming all three |
+| restored | pass |
+
+The second is the case the first draft of the check passed.
+
 - `actionlint` with `shellcheck`: clean across every workflow in the repo
-- `git am` onto `main`: clean, and all three touched files parse as YAML
+- `git am` of this patch: clean, and all three touched files parse as YAML
 
 ## A separate observation, not fixed here
 

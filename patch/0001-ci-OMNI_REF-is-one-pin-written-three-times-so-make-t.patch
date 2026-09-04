@@ -1,4 +1,4 @@
-From 296c98afc8ff6bab3fb9eb9eb39c709b1d7bf017 Mon Sep 17 00:00:00 2001
+From 8c4e026835c621783b71592ea519f28ca3862098 Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Fri, 4 Sep 2026 13:37:26 +0000
 Subject: [PATCH] ci: OMNI_REF is one pin written three times, so make them
@@ -25,14 +25,37 @@ one verdict.
 publish.yml already states the invariant in writing -- "pinned to the same
 commit build.yml checks out" -- and lint.yml drifted anyway, which is what an
 invariant stated only in prose is worth. So security.yml's `workflows` job
-now fails when the three disagree. It is deliberately a grep rather than a
-python tool: it reads the same three lines a person reads, and a disagreement
-between workflow files is what that job is already for.
+now fails when the three disagree.
 
-The check was run against the drift it is meant to catch. Before this change
-it reports two values and exits 1, naming all three lines; after, it reports
-one and passes. `actionlint` with shellcheck is clean across the repository's
-workflows.
+AGREEING IS NOT ENOUGH, AND THE FIRST DRAFT OF THIS CHECK ONLY CHECKED THAT.
+Comparing distinct values passes when a definition goes MISSING, because the
+survivors still agree with each other. A workflow that lost its `env.OMNI_REF`
+while keeping its `ref:` uses resolves the ref to the empty string, and
+actions/checkout reads that as "the default branch" -- the exact floating
+checkout the pin exists to prevent, arrived at silently and with the
+consistency gate green. So the check now asserts the definition is present
+exactly once in every workflow that uses the value, and compares the values
+afterwards.
+
+A use is an anchored `key: ${{ ... }}` rather than the bare name, because
+this file would otherwise match itself: the comment and the failure message
+both spell the name, and counting those makes the check report security.yml
+as a workflow using a pin it does not define. That is not hypothetical -- it
+is what the first run of the hardened loop did.
+
+It is a grep and not a python tool on purpose: it reads the same lines a
+person reads, and a disagreement between workflow files is what that job is
+already for.
+
+FOUR CASES RUN, with the step's script extracted verbatim from the yaml:
+
+    patched tree                                    pass
+    lint.yml loses its definition, keeps five uses  fail, naming the file
+    lint.yml back to 064af05                        fail, naming all three
+    restored                                        pass
+
+The second is the case the first draft passed. actionlint with shellcheck is
+clean across every workflow in the repository.
 
 Both comments now say the pin is one line in three files and that the other
 two move with it.
@@ -40,10 +63,10 @@ two move with it.
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01S5zKiMP1i1FRDZ6pzgzrUp
 ---
- .github/workflows/build.yml    |  5 +++++
- .github/workflows/lint.yml     |  8 +++++++-
- .github/workflows/security.yml | 27 +++++++++++++++++++++++++++
- 3 files changed, 39 insertions(+), 1 deletion(-)
+ .github/workflows/build.yml    |  5 +++
+ .github/workflows/lint.yml     |  8 ++++-
+ .github/workflows/security.yml | 59 ++++++++++++++++++++++++++++++++++
+ 3 files changed, 71 insertions(+), 1 deletion(-)
 
 diff --git a/.github/workflows/build.yml b/.github/workflows/build.yml
 index e5489d1..110fd6e 100644
@@ -81,10 +104,10 @@ index bc7296b..d1cb806 100644
  jobs:
    lint-typescript:
 diff --git a/.github/workflows/security.yml b/.github/workflows/security.yml
-index 6af6a51..016ed18 100644
+index 6af6a51..cd52849 100644
 --- a/.github/workflows/security.yml
 +++ b/.github/workflows/security.yml
-@@ -82,6 +82,33 @@ jobs:
+@@ -82,6 +82,65 @@ jobs:
        - run: |
            go install github.com/rhysd/actionlint/cmd/actionlint@latest
            "$(go env GOPATH)/bin/actionlint"
@@ -100,21 +123,53 @@ index 6af6a51..016ed18 100644
 +      # This is deliberately a grep and not a python tool: it reads the same
 +      # three lines a person reads, and it lives beside actionlint because a
 +      # disagreement between workflow files is exactly what this job is for.
++      #
++      # AGREEING IS NOT ENOUGH: EACH FILE MUST STILL HAVE ITS OWN. Comparing
++      # only the distinct values passes when a definition goes MISSING -- the
++      # survivors still agree with each other -- and a workflow that lost its
++      # `env.OMNI_REF` while keeping `ref: ${{ env.OMNI_REF }}` does not fail.
++      # It resolves the ref to the empty string, and actions/checkout reads
++      # that as "the default branch", which is the exact floating checkout the
++      # pin exists to prevent, arrived at silently. So the loop asserts the
++      # definition is present exactly once wherever the value is used, and the
++      # comparison runs after it.
++      #
++      # A USE IS AN ANCHORED `key: ${{ ... }}`, NOT THE BARE NAME, because
++      # THIS FILE would otherwise match itself: the comment above and the
++      # message below both spell the name, and counting those makes the check
++      # report security.yml as a workflow using a pin it does not define. Every
++      # real use is a `ref:` value, and a comment or an `echo` cannot look like
++      # one.
 +      - name: OMNI_REF agrees across workflows
 +        run: |
++          fail=0
++          for f in .github/workflows/*.yml; do
++            uses="$(grep -cE '^ *[A-Za-z_-]+: *\$\{\{ *env\.OMNI_REF *\}\}' "$f" || true)"
++            defs="$(grep -c '^ *OMNI_REF:' "$f" || true)"
++            if [ "$uses" -gt 0 ] && [ "$defs" -ne 1 ]; then
++              echo "$f uses env.OMNI_REF $uses time(s) but defines it $defs time(s)"
++              fail=1
++            fi
++            if [ "$uses" -eq 0 ] && [ "$defs" -gt 0 ]; then
++              echo "$f defines OMNI_REF and never uses it"
++              fail=1
++            fi
++          done
 +          refs="$(grep -h '^ *OMNI_REF:' .github/workflows/*.yml | awk '{print $2}' | sort -u)"
 +          if [ -z "$refs" ]; then
-+            echo "no OMNI_REF found in .github/workflows/ -- this check has gone blind"
-+            exit 1
-+          fi
-+          if [ "$(printf '%s\n' "$refs" | wc -l)" -ne 1 ]; then
++            echo "no OMNI_REF defined anywhere -- this check has gone blind"
++            fail=1
++          elif [ "$(printf '%s\n' "$refs" | wc -l)" -ne 1 ]; then
 +            echo "OMNI_REF disagrees across workflows:"
 +            grep -n '^ *OMNI_REF:' .github/workflows/*.yml
++            fail=1
++          fi
++          if [ "$fail" -ne 0 ]; then
 +            echo
-+            echo "They are one pin written three times. Make them equal."
++            echo "OMNI_REF is one pin, written once in every workflow that uses it."
 +            exit 1
 +          fi
-+          echo "OMNI_REF: $refs (all workflows agree)"
++          echo "OMNI_REF: $refs (defined once in every workflow that uses it)"
  
    shell:
      name: shell lint (shellcheck)
