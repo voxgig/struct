@@ -820,7 +820,16 @@ jobs:
   # boru had no CI job at all, which is how the port spent two days broken on
   # an engine rename without anyone noticing (boru/AGENTS.md records it). This
   # is that job.
+  #
+  # HELD INACTIVE 2026-09-04, alongside the root Makefile's HOLD. The body
+  # below is intact and unchanged: delete the `if: false` to bring it back.
+  # Be clear about what the hold costs, because this job used to be held
+  # DELIBERATELY OPEN for exactly one reason -- with it skipped, nothing
+  # exercises the port against a moving engine, and the two-day silent
+  # breakage described above can recur. Accepted for the moment: boru is
+  # inactive everywhere until boru-lang/boru ships a release.
   test-boru:
+    if: false
     runs-on: ubuntu-latest
     # The corpus is interpreted, one entry at a time, by a language with no
     # JIT: the whole run is minutes, not seconds. That is the cost of covering

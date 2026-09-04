@@ -211,8 +211,9 @@ into the directory and use its `Makefile`. First run installs deps.
 
 **boru is on hold**, so `make test` and `make lint` skip it — see `HOLD` in
 the root `Makefile` for why and how to restore it. `make test-boru` still
-runs the port, and CI's `test-boru` job still gates it against the engine
-commit `.github/workflows/build.yml` pins.
+runs the port. **CI is held too**, since 2026-09-04: the `test-boru` job in
+`.github/workflows/build.yml` carries `if: false`, so nothing gates the port
+against the engine commit that workflow pins while the hold stands.
 
 Repo-wide: `make test` / `make lint` / `make audit` (supply-chain) /
 `make scan` (secrets, SAST, parity, regex, spelling, markdown) /

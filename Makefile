@@ -35,10 +35,15 @@ ALL_LANGS = typescript javascript python go ruby php lua zig java rust c cpp csh
 #         on the first `/v` reference, which reads as broken source rather
 #         than a stale toolchain. Held until boru-lang/boru ships a release.
 #
-#         CI IS DELIBERATELY NOT HELD. `test-boru` in build.yml builds the
-#         pinned engine itself, so it stays green and keeps the port from
-#         rotting -- which is the failure boru/AGENTS.md records, two days
-#         broken on an engine rename because nothing exercised it.
+#         CI IS HELD TOO, since 2026-09-04: the `test-boru` job in
+#         build.yml carries `if: false`. That reverses a deliberate choice
+#         rather than fixing an oversight -- the job existed precisely to
+#         keep the port from rotting, and while it is skipped nothing
+#         exercises boru against a moving engine, so the failure
+#         boru/AGENTS.md records (two days broken on an engine rename
+#         because nothing ran it) can happen again. Accepted for the
+#         moment. Emptying this list and deleting that `if: false` are the
+#         two halves of restoring the port.
 HOLD = boru
 
 LANGS = $(filter-out $(HOLD),$(ALL_LANGS))
