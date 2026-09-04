@@ -1,6 +1,6 @@
 # Top-level Makefile for all language implementations.
 # Usage:
-#   make test          — run tests for all languages
+#   make test          — run tests for all languages EXCEPT any in HOLD
 #   make test-zig      — run tests for one language
 #   make bench         — run the performance harness (build/bench/REPORT.md)
 #   make bench-go      — run the performance harness for one language
@@ -109,7 +109,15 @@ publish-%:
 
 inspect: $(LANGS:%=inspect-%)
 build: $(LANGS:%=build-%)
+# A HELD PORT IS NAMED AT THE END, NOT SILENTLY DROPPED. A sweep that skips
+# one and says nothing is how a partial local run gets read as full
+# conformance. With HOLD empty this prints nothing and the target is exactly
+# what it was.
 test: $(LANGS:%=test-%)
+	@if [ -n "$(HOLD)" ]; then \
+	  echo "HELD, NOT RUN: $(HOLD)   (see HOLD in the Makefile)"; \
+	  echo "$(words $(LANGS)) of $(words $(ALL_LANGS)) ports run"; \
+	fi
 lint: $(LINT_LANGS:%=lint-%)
 audit: $(AUDIT_LANGS:%=audit-%)
 clean: $(ALL_LANGS:%=clean-%)
