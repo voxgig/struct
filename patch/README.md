@@ -13,13 +13,24 @@ This folder is transient: delete it once the patch is applied.
 
 ## Apply it
 
+`AGENTS.md` §"An agent session cannot write `.github/workflows/`" already gives
+the form, and this folder follows it — from any checkout that carries the
+folder, this branch or `main` once the delivery commit is merged:
+
 ```sh
-git show origin/claude/struct-omni-pin-patch:patch/0001-ci-OMNI_REF-is-one-pin-written-three-times-so-make-t.patch | git am
+git am < patch/0001-ci-OMNI_REF-is-one-pin-written-three-times-so-make-t.patch
 ```
 
-The command streams the patch out of the delivery commit rather than reading
-it from the worktree, so it works from any checkout — including `main` after
-this merges.
+**Read it from the worktree, not from a branch ref.** An earlier draft of this
+file used `git show origin/claude/struct-omni-pin-patch:… | git am` and claimed
+that works from any checkout after merging. It does not: merging is usually
+followed by deleting the source branch, and a fresh clone never had it, so the
+one documented command would fail exactly when it is most likely to be run —
+by a maintainer on `main`, after the merge. The file is tracked; the worktree
+copy is the durable one, which is why `AGENTS.md` spells it that way.
+
+**Then delete the folder**, per the same section: applied, the file only
+duplicates the history it just created, and left behind it blocks releases.
 
 ## What it fixes
 
