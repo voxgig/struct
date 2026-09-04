@@ -19,7 +19,29 @@
 # `make -C <dir>`. Each port ships at least `test` and `lint`; `build`,
 # `inspect`, `clean` and `reset` are invoked tolerantly (a port without one
 # just reports "(no <t> target)").
-LANGS = typescript javascript python go ruby php lua zig java rust c cpp csharp kotlin perl swift clojure ocaml scala dart elixir haskell lean boru
+ALL_LANGS = typescript javascript python go ruby php lua zig java rust c cpp csharp kotlin perl swift clojure ocaml scala dart elixir haskell lean boru
+
+# PORTS ON HOLD. Dropped from the aggregate targets that run a toolchain --
+# inspect, build, test, lint -- and from nothing else. Each stays a port: its
+# sources, its `make -C <dir> test`, `make test-<lang>` here, and its row in
+# tools/check_parity.py are all untouched, and `clean`/`reset` still reach it
+# because those only remove files. Emptying this list restores the port.
+#
+#   boru  The engine has no release channel of ANY kind -- no tags, no
+#         published binaries, and `go install` refuses it outright -- so the
+#         only reproducible version is the commit .github/workflows/build.yml
+#         pins, built from source by every developer who wants to run the
+#         port. A binary that does not match fails as a bare `undefined word`
+#         on the first `/v` reference, which reads as broken source rather
+#         than a stale toolchain. Held until boru-lang/boru ships a release.
+#
+#         CI IS DELIBERATELY NOT HELD. `test-boru` in build.yml builds the
+#         pinned engine itself, so it stays green and keeps the port from
+#         rotting -- which is the failure boru/AGENTS.md records, two days
+#         broken on an engine rename because nothing exercised it.
+HOLD = boru
+
+LANGS = $(filter-out $(HOLD),$(ALL_LANGS))
 
 # Every port ships a `make lint` target, so lint covers the full set.
 LINT_LANGS = $(LANGS)
@@ -90,8 +112,8 @@ build: $(LANGS:%=build-%)
 test: $(LANGS:%=test-%)
 lint: $(LINT_LANGS:%=lint-%)
 audit: $(AUDIT_LANGS:%=audit-%)
-clean: $(LANGS:%=clean-%)
-reset: $(LANGS:%=reset-%)
+clean: $(ALL_LANGS:%=clean-%)
+reset: $(ALL_LANGS:%=reset-%)
 
 # ---- Performance harness ----
 # Build a fixed in-memory workload in each port and time the core ops

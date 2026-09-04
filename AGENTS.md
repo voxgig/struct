@@ -209,6 +209,11 @@ into the directory and use its `Makefile`. First run installs deps.
 | Lean | `lean/` | `lake build` + runner | type-check (`lake build`) | heap-handle nodes (whole API in `SIO = ReaderT Ctx IO`); distinct `noval`/`null` (like OCaml); in-tree Vregex |
 | boru | `boru/` | `boru run … test/runner.boru` | module load smoke | written in the boru language itself; `flex` nodes; single `none` (like Python); `mini re` (Go RE2); fn-box carriers for function values |
 
+**boru is on hold**, so `make test` and `make lint` skip it — see `HOLD` in
+the root `Makefile` for why and how to restore it. `make test-boru` still
+runs the port, and CI's `test-boru` job still gates it against the engine
+commit `.github/workflows/build.yml` pins.
+
 Repo-wide: `make test` / `make lint` / `make audit` (supply-chain) /
 `make scan` (secrets, SAST, parity, regex, spelling, markdown) /
 `make analyze` (all three). Some `scan`/`lint` tools must be on PATH
