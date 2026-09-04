@@ -36,7 +36,9 @@ ALL_LANGS = typescript javascript python go ruby php lua zig java rust c cpp csh
 #         than a stale toolchain. Held until boru-lang/boru ships a release.
 #
 #         CI IS HELD TOO, since 2026-09-04: the `test-boru` job in
-#         build.yml carries `if: false`. That reverses a deliberate choice
+#         build.yml now runs only on a manual dispatch, never on a push or
+#         a pull request -- the same shape as this list, held from the
+#         sweep but still reachable on purpose. That reverses a deliberate choice
 #         rather than fixing an oversight -- the job existed precisely to
 #         keep the port from rotting, and while it is skipped nothing
 #         exercises boru against a moving engine, so the failure
