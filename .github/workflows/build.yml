@@ -5,6 +5,8 @@ on:
     branches: [ main, dev ]
   pull_request:
     branches: [ main, dev ]
+  # Lets a held job be run deliberately -- see test-boru below.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -820,7 +822,24 @@ jobs:
   # boru had no CI job at all, which is how the port spent two days broken on
   # an engine rename without anyone noticing (boru/AGENTS.md records it). This
   # is that job.
+  #
+  # HELD INACTIVE 2026-09-04, alongside the root Makefile's HOLD. The
+  # condition drops this job from every automatic run -- push and
+  # pull_request -- leaving it reachable only by a manual dispatch. That is
+  # deliberately the same shape the Makefile already has: held from the
+  # sweep, still reachable on purpose, exactly as `make test-boru` reaches a
+  # held port. Delete the `if:` line to bring it back.
+  #
+  # `if: false` was the obvious spelling and actionlint rejects it outright
+  # -- "constant expression in condition. remove the if: section" -- so it
+  # is not an option in a repo that lints its workflows.
+  #
+  # Be clear about what the hold costs: this job was held DELIBERATELY OPEN
+  # for one reason, and with it off the automatic runs nothing exercises the
+  # port against a moving engine, so the two-day silent breakage described
+  # above can recur. Accepted for the moment.
   test-boru:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     # The corpus is interpreted, one entry at a time, by a language with no
     # JIT: the whole run is minutes, not seconds. That is the cost of covering

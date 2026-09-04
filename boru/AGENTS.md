@@ -79,6 +79,12 @@ channel, so a commit is the only reproducible version there is. Bump that
 one line to take a newer engine, and expect to run `make test` locally
 first: the engine moves under this port more than under any other.
 
+**That job is held inactive as of 2026-09-04** — it runs only on a manual
+dispatch, and the port is out of the root Makefile's aggregate targets as
+well. So the protection this section describes is not in force on a push or
+a pull request, and the silent breakage above can recur. Deleting the `if:`
+line restores it.
+
 ## The value model
 
 - Nodes are **flex** collections: `flex {}` / `flex []` are mutable and
