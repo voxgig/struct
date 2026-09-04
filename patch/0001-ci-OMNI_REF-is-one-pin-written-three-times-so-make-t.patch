@@ -1,0 +1,123 @@
+From 296c98afc8ff6bab3fb9eb9eb39c709b1d7bf017 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 4 Sep 2026 13:37:26 +0000
+Subject: [PATCH] ci: OMNI_REF is one pin written three times, so make them
+ agree
+
+build.yml, lint.yml and publish.yml each define OMNI_REF, because github
+gives workflow files no way to share an `env`. They had two values:
+
+    build.yml    fbf1da64e3c90fc54e3c6b237b0b5835890df8c4
+    publish.yml  fbf1da64e3c90fc54e3c6b237b0b5835890df8c4
+    lint.yml     064af05a693adfda4400cbdfd85d24d894172da5   <- eight behind
+
+`064af05` is an ancestor of `fbf1da6`, eight omni commits back, so lint was
+the stale one and this bumps it to what the other two already use. No other
+pin moves: which omni this repository tests against is a deliberate act, and
+the comment in build.yml says so.
+
+WHY IT MATTERS. Every port's lint job checks out omni at OMNI_REF and hands
+its sources to the linter alongside the tests. A green lint run against one
+omni and a green build run against another do not compose into a claim about
+either -- the two gates were reading different corpus runners and reporting
+one verdict.
+
+publish.yml already states the invariant in writing -- "pinned to the same
+commit build.yml checks out" -- and lint.yml drifted anyway, which is what an
+invariant stated only in prose is worth. So security.yml's `workflows` job
+now fails when the three disagree. It is deliberately a grep rather than a
+python tool: it reads the same three lines a person reads, and a disagreement
+between workflow files is what that job is already for.
+
+The check was run against the drift it is meant to catch. Before this change
+it reports two values and exits 1, naming all three lines; after, it reports
+one and passes. `actionlint` with shellcheck is clean across the repository's
+workflows.
+
+Both comments now say the pin is one line in three files and that the other
+two move with it.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01S5zKiMP1i1FRDZ6pzgzrUp
+---
+ .github/workflows/build.yml    |  5 +++++
+ .github/workflows/lint.yml     |  8 +++++++-
+ .github/workflows/security.yml | 27 +++++++++++++++++++++++++++
+ 3 files changed, 39 insertions(+), 1 deletion(-)
+
+diff --git a/.github/workflows/build.yml b/.github/workflows/build.yml
+index e5489d1..110fd6e 100644
+--- a/.github/workflows/build.yml
++++ b/.github/workflows/build.yml
+@@ -20,6 +20,11 @@ env:
+   # stays red until re-run, and a green run here is not reproducible from
+   # this repo's commit alone. Bump this one line to take a new omni; that
+   # bump is the commit CI re-tests every port against.
++  #
++  # AND BUMP THE OTHER TWO WITH IT: lint.yml and publish.yml define OMNI_REF
++  # too, because github gives workflow files no way to share an `env`. It is
++  # one pin written three times. `workflows` in security.yml fails if the
++  # three ever disagree.
+   OMNI_REF: fbf1da64e3c90fc54e3c6b237b0b5835890df8c4
+ 
+ jobs:
+diff --git a/.github/workflows/lint.yml b/.github/workflows/lint.yml
+index bc7296b..d1cb806 100644
+--- a/.github/workflows/lint.yml
++++ b/.github/workflows/lint.yml
+@@ -20,7 +20,13 @@ env:
+   # stays red until re-run, and a green run here is not reproducible from
+   # this repo's commit alone. Bump this one line to take a new omni; that
+   # bump is the commit CI re-tests every port against.
+-  OMNI_REF: 064af05a693adfda4400cbdfd85d24d894172da5
++  #
++  # AND BUMP THE OTHER TWO WITH IT. build.yml, lint.yml and publish.yml each
++  # define OMNI_REF -- github gives workflow files no way to share an `env` --
++  # and they are one pin written three times, not three pins. This copy sat
++  # eight omni commits behind the other two and nothing said so, because
++  # nothing looked; security.yml's `workflows` job looks now.
++  OMNI_REF: fbf1da64e3c90fc54e3c6b237b0b5835890df8c4
+ 
+ jobs:
+   lint-typescript:
+diff --git a/.github/workflows/security.yml b/.github/workflows/security.yml
+index 6af6a51..016ed18 100644
+--- a/.github/workflows/security.yml
++++ b/.github/workflows/security.yml
+@@ -82,6 +82,33 @@ jobs:
+       - run: |
+           go install github.com/rhysd/actionlint/cmd/actionlint@latest
+           "$(go env GOPATH)/bin/actionlint"
++      # ONE PIN, WRITTEN THREE TIMES. build.yml, lint.yml and publish.yml each
++      # define OMNI_REF, because github gives workflow files no way to share an
++      # `env`. publish.yml's comment already states the invariant in writing --
++      # "pinned to the same commit build.yml checks out" -- and lint.yml still
++      # drifted eight omni commits behind the other two, which is what an
++      # invariant stated only in prose is worth. A green lint run against one
++      # omni and a green build run against another do not compose into a claim
++      # about either.
++      #
++      # This is deliberately a grep and not a python tool: it reads the same
++      # three lines a person reads, and it lives beside actionlint because a
++      # disagreement between workflow files is exactly what this job is for.
++      - name: OMNI_REF agrees across workflows
++        run: |
++          refs="$(grep -h '^ *OMNI_REF:' .github/workflows/*.yml | awk '{print $2}' | sort -u)"
++          if [ -z "$refs" ]; then
++            echo "no OMNI_REF found in .github/workflows/ -- this check has gone blind"
++            exit 1
++          fi
++          if [ "$(printf '%s\n' "$refs" | wc -l)" -ne 1 ]; then
++            echo "OMNI_REF disagrees across workflows:"
++            grep -n '^ *OMNI_REF:' .github/workflows/*.yml
++            echo
++            echo "They are one pin written three times. Make them equal."
++            exit 1
++          fi
++          echo "OMNI_REF: $refs (all workflows agree)"
+ 
+   shell:
+     name: shell lint (shellcheck)
+-- 
+2.43.0
+
