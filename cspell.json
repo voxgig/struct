@@ -26,6 +26,7 @@
     "**/NOTES.md",
     "**/REVIEW.md",
     "**/PLAN.md",
+    "patch/**",
     "cpp/REFACTOR_PLAN.md",
     "cpp/overview/**"
   ],
