@@ -113,16 +113,23 @@
 # publishers are updated to match. Do NOT publish locally over a token: that
 # bypasses OIDC and its provenance attestation entirely.
 #
-# @voxgig/struct-js HAS NEVER PUBLISHED OVER OIDC. The port was renamed from
-# @voxgig/structjs, and npm registers a trusted publisher only against a
-# package that already exists, so 0.1.2 went out as one plain token publish:
-# it sits on npm under a person's name with no provenance attestation, while
-# @voxgig/struct@0.3.4 carries one. A `target: javascript` dispatch on
-# 2026-09-03 failed the OIDC exchange all the same, reported as exactly the
-# 404 above -- tests passed, the tarball packed, the PUT was rejected. Until
-# a publisher for @voxgig/struct-js is registered against THIS repository and
-# THIS filename on the package's npm settings page, that dispatch cannot
-# succeed. The registration is what to check, not the workflow.
+# BOTH NPM PACKAGES PUBLISH OVER OIDC, and @voxgig/struct-js was the last to
+# get there. The port was renamed from @voxgig/structjs, and npm registers a
+# trusted publisher only against a package that already EXISTS, so 0.1.2 went
+# out as one plain token publish to bootstrap the name: it sits on npm under a
+# person's account with no provenance attestation, and it stays that way,
+# because a release cannot add provenance to a version already published. A
+# `target: javascript` dispatch on 2026-09-03 then failed the exchange as
+# exactly the 404 above -- tests passed, the tarball packed, the PUT was
+# rejected -- because the publisher was still unregistered. Registering it
+# fixed precisely that: 0.1.4 published over OIDC on 2026-09-04 and 0.1.5 on
+# 2026-09-05. @voxgig/struct has carried an attestation since 0.3.0.
+#
+# SO A 404 ON THE PUT MEANS THE REGISTRATION, not this file. Check it on the
+# package's npm settings page, against THIS repository and THIS filename, and
+# check the RIGHT package: the two npm names are registered separately and
+# carry different OIDC config ids, so one of them publishing proves nothing
+# about the other. A `dry_run` cannot test either -- see DRY RUN above.
 
 name: publish
 
