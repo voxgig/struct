@@ -45,8 +45,8 @@ What the registry records instead:
 
 | package | first OIDC release | publisher |
 | --- | --- | --- |
-| `@voxgig/struct` | 0.3.0 | `trustedPublisher: github`, SLSA provenance |
-| `@voxgig/struct-js` | 0.1.4, 2026-09-04 (gitHead `224ce10`) | `trustedPublisher: github`, SLSA provenance |
+| `@voxgig/struct` | 0.3.0 | `trustedPublisher: github`, provenance attestation |
+| `@voxgig/struct-js` | 0.1.4, 2026-09-04 (gitHead `224ce10`) | `trustedPublisher: github`, provenance attestation |
 
 `@voxgig/struct-js@0.1.5` followed on 2026-09-05 from gitHead `f856ceb`.
 0.1.2 remains the lone token publish, under a personal account with no
