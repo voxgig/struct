@@ -152,7 +152,7 @@ itself.
 > below explain it piece by piece.
 
 The aontu features used below are confirmed from
-[`rjrodger/aontu`](https://github.com/rjrodger/aontu) `docs/reference-language.md`:
+[`aontu-lang/aontu`](https://github.com/aontu-lang/aontu) `docs/reference-language.md`:
 
 | Feature | Syntax | Use here |
 |---|---|---|
