@@ -53,8 +53,6 @@ impl std::fmt::Display for StructError {
 
 impl std::error::Error for StructError {}
 
-/// Bundle of all functions, mirroring the TS `StructUtility` class. Useful
-/// for the test harness (which looks subjects up by name).
 pub struct StructUtility;
 
 impl StructUtility {

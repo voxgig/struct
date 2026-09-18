@@ -31,11 +31,9 @@ func benchmarkWalk(b *testing.B, width, depth int) {
 	}
 }
 
-// BenchmarkWalkWideDeep: wide+deep w=8 d=6 (~8^6 = 262144 leaves).
 func BenchmarkWalkWideDeep(b *testing.B) { benchmarkWalk(b, 8, 6) }
 
 // BenchmarkWalkVeryWide: very-wide w=1000 d=2 (~1e6 leaves, shallow).
 func BenchmarkWalkVeryWide(b *testing.B) { benchmarkWalk(b, 1000, 2) }
 
-// BenchmarkWalkVeryDeep: very-deep w=2 d=20 (~2^20 = 1048576 leaves).
 func BenchmarkWalkVeryDeep(b *testing.B) { benchmarkWalk(b, 2, 20) }

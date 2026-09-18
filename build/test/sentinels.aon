@@ -1,17 +1,6 @@
 
-# Conformance category for Group A semantics (UNDEF_SPEC.md).
-#
-# Each Group A function — getprop, getelem, haskey, isempty, isnode —
-# treats a stored JSON null as "no value", indistinguishable from absent.
-# Group B functions (setprop, stringify, jsonify, pad, typify) preserve
-# null as a real value. These tests exercise the three states side-by-side:
-#
-#   VALUE  — a regular JSON value
-#   NULL   — literal `null` in the JSON
-#   ABSENT — key omitted from the map / __UNDEF__ marker elsewhere
 
 
-# getprop: null and absent both yield alt.
 getprop_unify: {
   set: [
     { in: { val:{a:1},    key:'a', alt:'D' }, out: 1   }
@@ -31,7 +20,6 @@ getelem_absent: {
 }
 
 
-# haskey: null counts as "no value".
 haskey_unify: {
   set: [
     { in: { val:{a:1},    key:'a' }, out: true  }
@@ -41,8 +29,6 @@ haskey_unify: {
 }
 
 
-# isempty: null, absent, empty string, empty list, empty map all empty;
-# any non-empty scalar / container is not empty.
 isempty_unify: {
   set: [
     { in: null, out: true  }
@@ -56,7 +42,6 @@ isempty_unify: {
 }
 
 
-# isnode: null is not a node, neither is absent.
 isnode_unify: {
   set: [
     { in: {a:1}, out: true  }

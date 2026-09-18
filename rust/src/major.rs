@@ -630,7 +630,6 @@ pub fn get_path_inj(store: &Value, path: &Value, injdef: Option<&Inj>) -> Value 
                         if ascends == 0 {
                             val = dparent.clone();
                         } else {
-                            // fullpath = slice(dpath, -ascends) ++ parts[p_i+1..]
                             let head = slice(
                                 Value::list(dpath.iter().cloned().map(Value::Str).collect()),
                                 Some(-ascends),
@@ -741,10 +740,6 @@ pub fn set_path(store: &Value, path: &Value, val: Value, injdef: Option<&InjectD
 
     parent
 }
-
-// ---------------------------------------------------------------------
-// inject / transform / validate / select — staged (see rs/PLAN.md, NOTES.md)
-// ---------------------------------------------------------------------
 
 /// Default inject handler (`_injecthandler`): if the value is a `$NAME`
 /// command function, call it; otherwise, in `val` mode for a full-string
@@ -1334,7 +1329,6 @@ fn transform_ref(inj: &Inj, val: &Value, _r: &str, store: &Value) -> Value {
         let keylen = inj.borrow().keys.borrow().len() as i64;
         inj.borrow_mut().key_i = keylen;
     }
-    // spec = ($SPEC)()
     let spec = {
         let sf = get_prop(store, &Value::str(S_DSPEC), Value::Noval);
         match &sf {
@@ -1820,7 +1814,6 @@ fn iso_now() -> String {
         .unwrap_or_default();
     let secs = dur.as_secs() as i64;
     let millis = dur.subsec_millis();
-    // days since 1970-01-01
     let days = secs.div_euclid(86_400);
     let tod = secs.rem_euclid(86_400);
     let (h, m, s) = (tod / 3600, (tod % 3600) / 60, tod % 60);

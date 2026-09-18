@@ -26,11 +26,8 @@ func NullModifier(
 		if NULLMARK == v {
 			_ = voxgigstruct.SetProp(parent, key, nil)
 		} else if UNDEFMARK == v {
-			// Handle undefined values - in Go, we just set to nil
 			_ = voxgigstruct.SetProp(parent, key, nil)
 		} else if EXISTSMARK == v {
-			// For EXISTSMARK, we don't need to do anything special in the modifier
-			// since this is a marker used during matching, not a value to be transformed
 		} else {
 			_ = voxgigstruct.SetProp(parent, key,
 				strings.ReplaceAll(v, NULLMARK, "null"))

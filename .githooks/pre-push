@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+cd "$(git rev-parse --show-toplevel)"
+command -v node >/dev/null 2>&1 || { echo "pre-push: Node.js is required for the comment gate" >&2; exit 1; }
+exec node tools/comment-gate.cjs

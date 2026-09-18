@@ -1,10 +1,3 @@
-// Test Provider (prototype) — CANONICAL implementation.
-//
-// Reads the shared corpus (build/test/test.json) and hands test code clean,
-// normalized cases. It is NOT a test runner: it never calls the subject and
-// never asserts. See ../PROVIDER.md for the model and ../AGENTS.md for usage.
-//
-// Zero runtime dependencies (Node built-ins only), matching repo policy.
 
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'

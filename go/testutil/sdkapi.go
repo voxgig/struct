@@ -1,9 +1,3 @@
-// The SDK shapes the test harness builds and the runner consumes. These
-// stay in struct's tree rather than moving to omni's compat shim: they name
-// struct's own types (*voxgigstruct.Injection, WalkApply), which the shim
-// deliberately never imports - it reaches the SDK by reflection so that omni
-// cannot end up depending on the library it is meant to check.
-
 package runner
 
 import (

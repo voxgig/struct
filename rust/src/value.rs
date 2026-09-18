@@ -173,9 +173,6 @@ impl Value {
     }
 }
 
-// Deep, order-independent (for maps) equality — matches `deepStrictEqual`
-// semantics used by the corpus runner and the JSON-string fallback used by
-// `validate_EXACT`. Functions are never equal (pointer-eq would also do).
 impl PartialEq for Value {
     fn eq(&self, other: &Value) -> bool {
         match (self, other) {

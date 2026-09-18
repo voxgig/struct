@@ -54,57 +54,6 @@ exports.jt = jt;
 exports.checkPlacement = checkPlacement;
 exports.injectorArgs = injectorArgs;
 exports.injectChild = injectChild;
-// VERSION: @voxgig/struct 0.3.6
-/* Voxgig Struct
- * =============
- *
- * Utility functions to manipulate in-memory JSON-like data
- * structures. These structures assumed to be composed of nested
- * "nodes", where a node is a list or map, and has named or indexed
- * fields.  The general design principle is "by-example". Transform
- * specifications mirror the desired output.  This implementation is
- * designed for porting to multiple language, and to be tolerant of
- * undefined values.
- *
- * Main utilities
- * - getpath: get the value at a key path deep inside an object.
- * - merge: merge multiple nodes, overriding values in earlier nodes.
- * - walk: walk a node tree, applying a function at each node and leaf.
- * - inject: inject values from a data store into a new data structure.
- * - transform: transform a data structure to an example structure.
- * - validate: valiate a data structure against a shape specification.
- *
- * Minor utilities
- * - isnode, islist, ismap, iskey, isfunc: identify value kinds.
- * - isempty: undefined values, or empty nodes.
- * - keysof: sorted list of node keys (ascending).
- * - haskey: true if key value is defined.
- * - clone: create a copy of a JSON-like data structure.
- * - items: list entries of a map or list as [key, value] pairs.
- * - getprop: safely get a property value by key.
- * - setprop: safely set a property value by key.
- * - stringify: human-friendly string version of a value.
- * - escre: escape a regular expresion string.
- * - escurl: escape a url.
- * - join: join parts of a url, merging forward slashes.
- *
- * This set of functions and supporting utilities is designed to work
- * uniformly across many languages, meaning that some code that may be
- * functionally redundant in specific languages is still retained to
- * keep the code human comparable.
- *
- * NOTE: Lists are assumed to be mutable and reference stable.
- *
- * NOTE: In this code JSON nulls are in general *not* considered the
- * same as the undefined value in the given language. However most
- * JSON parsers do use the undefined value to represent JSON
- * null. This is ambiguous as JSON null is a separate value, not an
- * undefined value. You should convert such values to a special value
- * to represent JSON null, if this ambiguity creates issues
- * (thankfully in most APIs, JSON nulls are not used). For example,
- * the unit tests use the string "__NULL__" where necessary.
- *
- */
 // String constants are explicitly defined.
 // Mode value for inject step (bitfield).
 const M_KEYPRE = 1;
@@ -113,7 +62,6 @@ const M_KEYPOST = 2;
 exports.M_KEYPOST = M_KEYPOST;
 const M_VAL = 4;
 exports.M_VAL = M_VAL;
-// Special strings.
 const S_BKEY = '`$KEY`';
 const S_BANNO = '`$ANNO`';
 const S_BEXACT = '`$EXACT`';
@@ -122,7 +70,6 @@ const S_DKEY = '$KEY';
 const S_DTOP = '$TOP';
 const S_DERRS = '$ERRS';
 const S_DSPEC = '$SPEC';
-// General strings.
 const S_list = 'list';
 const S_base = 'base';
 const S_boolean = 'boolean';
@@ -141,7 +88,6 @@ const S_integer = 'integer';
 const S_map = 'map';
 const S_scalar = 'scalar';
 const S_node = 'node';
-// Character strings.
 const S_BT = '`';
 const S_CN = ':';
 const S_CS = ']';
@@ -154,7 +100,6 @@ const S_OS = '[';
 const S_SP = ' ';
 const S_CM = ',';
 const S_VIZ = ': ';
-// Types
 let t = 31;
 const T_any = (1 << t--) - 1;
 exports.T_any = T_any;
@@ -174,7 +119,7 @@ const T_function = 1 << t--;
 exports.T_function = T_function;
 const T_symbol = 1 << t--;
 exports.T_symbol = T_symbol;
-const T_null = 1 << t--; // The actual JSON null value.
+const T_null = 1 << t--;
 exports.T_null = T_null;
 t -= 7;
 const T_list = 1 << t--;
@@ -218,25 +163,22 @@ const TYPENAME = [
 ];
 // The standard undefined value for this language.
 const NONE = undefined;
-// Private markers
 const SKIP = { '`$SKIP`': true };
 exports.SKIP = SKIP;
 const DELETE = { '`$DELETE`': true };
 exports.DELETE = DELETE;
-// Regular expression constants
-const R_INTEGER_KEY = /^[-0-9]+$/; // Match integer keys (including <0).
+const R_INTEGER_KEY = /^[-0-9]+$/;
 const R_ESCAPE_REGEXP = /[.*+?^${}()|[\]\\]/g; // Chars that need escaping in regexp.
-const R_QUOTES = /"/g; // Double quotes for removal.
-const R_DOT = /\./g; // Dots in path strings.
-const R_CLONE_REF = /^`\$REF:([0-9]+)`$/; // Copy reference in cloning.
-const R_META_PATH = /^([^$]+)\$([=~])(.+)$/; // Meta path syntax.
-const R_DOUBLE_DOLLAR = /\$\$/g; // Double dollar escape sequence.
-const R_TRANSFORM_NAME = /`\$([A-Z]+)`/g; // Transform command names.
-const R_INJECTION_FULL = /^`(\$[A-Z]+|[^`]*)[0-9]*`$/; // Full string injection pattern.
-const R_BT_ESCAPE = /\$BT/g; // Backtick escape sequence.
-const R_DS_ESCAPE = /\$DS/g; // Dollar sign escape sequence.
-const R_INJECTION_PARTIAL = /`([^`]+)`/g; // Partial string injection pattern.
-// Default max depth (for walk etc).
+const R_QUOTES = /"/g;
+const R_DOT = /\./g;
+const R_CLONE_REF = /^`\$REF:([0-9]+)`$/;
+const R_META_PATH = /^([^$]+)\$([=~])(.+)$/;
+const R_DOUBLE_DOLLAR = /\$\$/g;
+const R_TRANSFORM_NAME = /`\$([A-Z]+)`/g;
+const R_INJECTION_FULL = /^`(\$[A-Z]+|[^`]*)[0-9]*`$/;
+const R_BT_ESCAPE = /\$BT/g;
+const R_DS_ESCAPE = /\$DS/g;
+const R_INJECTION_PARTIAL = /`([^`]+)`/g;
 const MAXDEPTH = 32;
 // Return type string for narrowest type.
 function typename(t) {
@@ -275,7 +217,6 @@ function isempty(val) {
         (Array.isArray(val) && 0 === val.length) ||
         (S_object === typeof val && 0 === Object.keys(val).length));
 }
-// Value is a function.
 function isfunc(val) {
     return S_function === typeof val;
 }
@@ -302,13 +243,6 @@ function size(val) {
         return 0;
     }
 }
-// Extract part of an array or string into a new value, from the start
-// point to the end point.  If no end is specified, extract to the
-// full length of the value. Negative arguments count from the end of
-// the value. For numbers, perform min and max bounding, where start
-// is inclusive, and end is *exclusive*.
-// NOTE: input lists are not mutated by default. Use the mutate
-// argument to mutate lists in place.
 function slice(val, start, end, mutate) {
     if (S_number === typeof val) {
         start = null == start || S_number !== typeof start ? Number.MIN_SAFE_INTEGER : start;
@@ -371,7 +305,6 @@ function slice(val, start, end, mutate) {
     }
     return val;
 }
-// String padding.
 function pad(str, padding, padchar) {
     str = S_string === typeof str ? str : stringify(str);
     padding = null == padding ? 44 : padding;
@@ -522,11 +455,6 @@ function items(val, apply) {
     }
     return out;
 }
-// To replicate the array spread operator:
-// a=1, b=[2,3], c=[4,5]
-// [a,...b,c] -> [1,2,3,[4,5]]
-// flatten([a,b,[c]]) -> [1,2,3,[4,5]]
-// NOTE: [c] ensures c is not expanded
 function flatten(list, depth) {
     if (!islist(list)) {
         return list;
@@ -545,7 +473,6 @@ function filter(val, check) {
     }
     return out;
 }
-// Escape regular expression.
 function escre(s) {
     return re_replace(R_ESCAPE_REGEXP, s, '\\$&');
 }
@@ -553,7 +480,6 @@ function escre(s) {
 function re_escape(s) {
     return escre(s);
 }
-// Escape URLs.
 function escurl(s) {
     s = null == s ? S_MT : s;
     return encodeURIComponent(s);
@@ -563,8 +489,6 @@ function escurl(s) {
 // dialect is the RE2 subset documented in /REGEX.md. Internal library code
 // uses these helpers instead of host-language regex methods directly.
 // ===========================================================================
-// Compile a regex (or return as-is if already compiled). Cached behaviour is
-// up to the port; in TS we just construct a RegExp.
 function re_compile(pattern, flags) {
     if (pattern instanceof RegExp) {
         return pattern;
@@ -615,7 +539,6 @@ function re_replace(pattern, input, replacement) {
     }
     return input.replace(re, replacement);
 }
-// Boolean test for any match.
 function re_test(pattern, input) {
     const re = pattern instanceof RegExp ? pattern : new RegExp(pattern);
     return re.test(input);
@@ -662,9 +585,6 @@ function join(arr, sep, url) {
     }), (n) => S_MT !== n[1]).join(sepdef);
     return out;
 }
-// Output JSON in a "standard" format, with 2 space indents, each property on a new line,
-// and spaces after {[: and before ]}. Any "wierd" values (NaN, etc) are output as null.
-// In general, the behaivor of of JavaScript's JSON.stringify(val,null,2) is followed.
 function jsonify(val, flags) {
     let str = S_null;
     if (null != val) {
@@ -834,25 +754,10 @@ function jt(...v) {
     }
     return a;
 }
-// Safely delete a property from an object or array element.
-// Undefined arguments and invalid keys are ignored.
-// Returns the (possibly modified) parent.
-// For objects, the property is deleted using the delete operator.
-// For arrays, the element at the index is removed and remaining elements are shifted down.
-// NOTE: parent list may be new list, thus update references.
 function delprop(parent, key) {
     if (!iskey(key)) {
         return parent;
     }
-    // A condensed structure is a DAG: one subtree can be reached by many
-    // references, so an in-place write would be visible through all of them.
-    // Raising is the decided contract (design Q1) - it can be relaxed to
-    // copy-on-write later without breaking any caller, where the reverse is not
-    // true. expand() gives an ordinary mutable copy.
-    //
-    // Checked AFTER the key validation: both helpers define an invalid key as
-    // ignored, so a call that cannot write must not start throwing merely
-    // because the store is condensed.
     if (iscondensed(parent)) {
         throw new Error('struct: condensed structures are immutable - ' + 'expand() first, then modify the copy');
     }
@@ -861,7 +766,6 @@ function delprop(parent, key) {
         delete parent[key];
     }
     else if (islist(parent)) {
-        // Ensure key is an integer.
         let keyI = +key;
         if (isNaN(keyI)) {
             return parent;
@@ -887,15 +791,6 @@ function setprop(parent, key, val) {
     if (!iskey(key)) {
         return parent;
     }
-    // A condensed structure is a DAG: one subtree can be reached by many
-    // references, so an in-place write would be visible through all of them.
-    // Raising is the decided contract (design Q1) - it can be relaxed to
-    // copy-on-write later without breaking any caller, where the reverse is not
-    // true. expand() gives an ordinary mutable copy.
-    //
-    // Checked AFTER the key validation: both helpers define an invalid key as
-    // ignored, so a call that cannot write must not start throwing merely
-    // because the store is condensed.
     if (iscondensed(parent)) {
         throw new Error('struct: condensed structures are immutable - ' + 'expand() first, then modify the copy');
     }
@@ -905,41 +800,22 @@ function setprop(parent, key, val) {
         pany[key] = val;
     }
     else if (islist(parent)) {
-        // Ensure key is an integer.
         let keyI = +key;
         if (isNaN(keyI)) {
             return parent;
         }
         keyI = Math.floor(keyI);
-        // TODO: DELETE list element
         // Set or append value at position keyI, or append if keyI out of bounds.
         if (0 <= keyI) {
             parent[slice(keyI, 0, size(parent) + 1)] = val;
         }
-        // Prepend value if keyI is negative
         else {
             parent.unshift(val);
         }
     }
     return parent;
 }
-// Walk a data structure depth first, applying a function to each value.
-// The `path` argument passed to the before/after callbacks is a single
-// mutable array per depth, shared across all callback invocations for the
-// lifetime of this top-level walk call. Callbacks that need to store the
-// path MUST clone it (e.g. `path.slice()`); the contents will otherwise
-// be overwritten by subsequent visits.
-function walk(
-// These arguments are the public interface.
-val, 
-// Before descending into a node.
-before, 
-// After descending into a node.
-after, 
-// Maximum recursive depth, default: 32. Use null for infinite depth.
-maxdepth, 
-// These areguments are used for recursive state.
-key, parent, path, pool) {
+function walk(val, before, after, maxdepth, key, parent, path, pool) {
     if (NONE === pool) {
         pool = [[]];
     }
@@ -983,10 +859,8 @@ key, parent, path, pool) {
 // override each other, and do *not* merge.  The first element is
 // modified.
 function merge(val, maxdepth) {
-    // const md: number = null == maxdepth ? MAXDEPTH : maxdepth < 0 ? 0 : maxdepth
     const md = slice(maxdepth ?? MAXDEPTH, 0);
     let out = NONE;
-    // Handle edge cases.
     if (!islist(val)) {
         return val;
     }
@@ -998,12 +872,10 @@ function merge(val, maxdepth) {
     else if (1 === lenlist) {
         return list[0];
     }
-    // Merge a list of values.
     out = getprop(list, 0, {});
     for (let oI = 1; oI < lenlist; oI++) {
         const obj = list[oI];
         if (!isnode(obj)) {
-            // Nodes win.
             out = obj;
         }
         else {
@@ -1016,7 +888,6 @@ function merge(val, maxdepth) {
                 if (md <= pI) {
                     setprop(cur[pI - 1], key, val);
                 }
-                // Scalars just override directly.
                 else if (!isnode(val)) {
                     cur[pI] = val;
                 }
@@ -1034,7 +905,6 @@ function merge(val, maxdepth) {
                     else if (vtype === typify(tval)) {
                         cur[pI] = tval;
                     }
-                    // Override wins.
                     else {
                         cur[pI] = val;
                         // No need to descend when override wins (destination is discarded).
@@ -1057,7 +927,6 @@ function merge(val, maxdepth) {
             }
             // Walk overriding node, creating paths in output as needed.
             out = walk(obj, before, after, maxdepth);
-            // console.log('WALK-DONE', out, obj)
         }
     }
     if (0 === md) {
@@ -1105,7 +974,6 @@ function setpath(store, path, val, injdef) {
     return parent;
 }
 function getpath(store, path, injdef) {
-    // Operate on a string array.
     const parts = islist(path)
         ? path
         : 'string' === typeof path
@@ -1135,7 +1003,6 @@ function getpath(store, path, injdef) {
         }
         store = expand(store);
     }
-    // let root = store
     let val = store;
     const base = getprop(injdef, S_base);
     const src = getprop(store, base, store);
@@ -1146,7 +1013,6 @@ function getpath(store, path, injdef) {
         val = src;
     }
     else if (0 < numparts) {
-        // Check for $ACTIONs
         if (1 === numparts) {
             val = getprop(store, parts[0]);
         }
@@ -1193,7 +1059,6 @@ function getpath(store, path, injdef) {
                             val = dparent;
                         }
                         else {
-                            // const fullpath = slice(dpath, 0 - ascends).concat(parts.slice(pI + 1))
                             const fullpath = flatten([slice(dpath, 0 - ascends), parts.slice(pI + 1)]);
                             if (ascends <= size(dpath)) {
                                 val = getpath(store, fullpath);
@@ -1220,20 +1085,14 @@ function getpath(store, path, injdef) {
         const ref = pathify(path);
         val = handler(injdef, val, ref, store);
     }
-    // console.log('GETPATH', path, val)
     return val;
 }
-// Inject values from a data store into a node recursively, resolving
-// paths against the store, or current if they are local. The modify
-// argument allows custom modification of the result.  The inj
-// (Injection) argument is used to maintain recursive state.
 function inject(val, store, injdef) {
     const valtype = typeof val;
     let inj = injdef;
     // Create state if at root of injection.  The input value is placed
     // inside a virtual parent holder to simplify edge cases.
     if (NONE === injdef || null == injdef.mode) {
-        // Set up state assuming we are starting in the virtual parent.
         inj = new Injection(val, { [S_DTOP]: val });
         inj.dparent = store;
         inj.errs = getprop(store, S_DERRS, []);
@@ -1248,12 +1107,7 @@ function inject(val, store, injdef) {
     inj.descend();
     // console.log('INJ-START', val, inj.mode, inj.key, inj.val,
     //  't=', inj.path, 'P=', inj.parent, 'dp=', inj.dparent, 'ST=', store.$TOP)
-    // Descend into node.
     if (isnode(val)) {
-        // Keys are sorted alphanumerically to ensure determinism.
-        // Injection transforms ($FOO) are processed *after* other keys.
-        // NOTE: the optional digits suffix of the transform can thus be
-        // used to order the transforms.
         let nodekeys;
         nodekeys = keysof(val);
         if (ismap(val)) {
@@ -1265,10 +1119,6 @@ function inject(val, store, injdef) {
         else {
             nodekeys = keysof(val);
         }
-        // Each child key-value pair is processed in three injection phases:
-        // 1. inj.mode=M_KEYPRE - Key string is injected, returning a possibly altered key.
-        // 2. inj.mode=M_VAL - The child value is injected.
-        // 3. inj.mode=M_KEYPOST - Key string is injected again, allowing child mutation.
         for (let nkI = 0; nkI < nodekeys.length; nkI++) {
             const childinj = inj.child(nkI, nodekeys);
             const nodekey = childinj.key;
@@ -1297,7 +1147,6 @@ function inject(val, store, injdef) {
             }
         }
     }
-    // Inject paths into string scalars.
     else if (S_string === valtype) {
         inj.mode = M_VAL;
         val = _injectstr(val, store, inj);
@@ -1305,26 +1154,20 @@ function inject(val, store, injdef) {
             inj.setval(val);
         }
     }
-    // Custom modification.
     if (inj.modify && SKIP !== val) {
         const mkey = inj.key;
         const mparent = inj.parent;
         const mval = getprop(mparent, mkey);
         inj.modify(mval, mkey, mparent, inj, store);
     }
-    // console.log('INJ-VAL', val)
     inj.val = val;
-    // Original val reference may no longer be correct.
-    // This return value is only used as the top level result.
     return _lookup(inj.parent, S_DTOP);
 }
 // The transform_* functions are special command inject handlers (see Injector).
-// Delete a key from a map or list.
 const transform_DELETE = (inj) => {
     inj.setval(NONE);
     return NONE;
 };
-// Copy value from source data.
 const transform_COPY = (inj, _val) => {
     const ijname = 'COPY';
     if (!checkPlacement(M_VAL, ijname, T_any, inj)) {
@@ -1348,8 +1191,6 @@ const transform_KEY = (inj) => {
         delprop(parent, S_BKEY);
         return getprop(inj.dparent, keyspec);
     }
-    // Key is defined within general purpose $META object.
-    // return getprop(getprop(parent, S_BANNO), S_KEY, getprop(path, path.length - 2))
     return _lookup(_lookup(parent, S_BANNO), S_KEY) ?? getelem(path, -2);
 };
 // Annotate node.  Does nothing itself, just used by
@@ -1378,8 +1219,6 @@ const transform_MERGE = (inj) => {
         args = Array.isArray(args) ? args : [args];
         // Remove the $MERGE command from a parent map.
         inj.setval(NONE);
-        // Literals in the parent have precedence, but we still merge onto
-        // the parent object, so that node tree references are not changed.
         const mergelist = flatten([[parent], args, [clone(parent)]]);
         merge(mergelist);
     }
@@ -1394,13 +1233,11 @@ const transform_EACH = (inj, _val, _ref, store) => {
     }
     // Remove remaining keys to avoid spurious processing.
     slice(inj.keys, 0, 1, true);
-    // const [err, srcpath, child] = injectorArgs([T_string, T_any], inj)
     const [err, srcpath, child] = injectorArgs([T_string, T_any], slice(inj.parent, 1));
     if (NONE !== err) {
         inj.errs.push('$' + ijname + ': ' + err);
         return NONE;
     }
-    // Source data.
     const srcstore = getprop(store, inj.base, store);
     const src = getpath(srcstore, srcpath, inj);
     const srctype = typify(src);
@@ -1427,7 +1264,6 @@ const transform_EACH = (inj, _val, _ref, store) => {
         const ckey = getelem(inj.path, -2);
         const tpath = slice(inj.path, -1);
         const dpath = flatten([S_DTOP, srcpath.split(S_DT), '$:' + ckey]);
-        // Parent structure.
         tcur = { [ckey]: tcur };
         if (1 < size(tpath)) {
             const pkey = getelem(inj.path, -3, S_DTOP);
@@ -1445,9 +1281,7 @@ const transform_EACH = (inj, _val, _ref, store) => {
         inject(tval, store, tinj);
         rval = tinj.val;
     }
-    // _updateAncestors(inj, target, tkey, rval)
     setprop(target, tkey, rval);
-    // Prevent callee from damaging first list entry (since we are in `val` mode).
     return rval[0];
 };
 // Convert a node to a map.
@@ -1458,21 +1292,17 @@ const transform_PACK = (inj, _val, _ref, store) => {
     if (!checkPlacement(M_KEYPRE, ijname, T_map, inj)) {
         return NONE;
     }
-    // Get arguments.
     const args = getprop(parent, key);
     const [err, srcpath, origchildspec] = injectorArgs([T_string, T_any], args);
     if (NONE !== err) {
         inj.errs.push('$' + ijname + ': ' + err);
         return NONE;
     }
-    // Find key and target node.
     const tkey = getelem(path, -2);
     const pathsize = size(path);
     const target = getelem(nodes, pathsize - 2, () => getelem(nodes, pathsize - 1));
-    // Source data
     const srcstore = getprop(store, inj.base, store);
     let src = getpath(srcstore, srcpath, inj);
-    // Prepare source as a list.
     if (!islist(src)) {
         if (ismap(src)) {
             src = items(src, (item) => {
@@ -1487,11 +1317,9 @@ const transform_PACK = (inj, _val, _ref, store) => {
     if (null == src) {
         return NONE;
     }
-    // Get keypath.
     const keypath = getprop(origchildspec, S_BKEY);
     const childspec = delprop(origchildspec, S_BKEY);
     const child = getprop(childspec, S_BVAL, childspec);
-    // Build parallel target object.
     const tval = {};
     items(src, (item) => {
         const srckey = item[0];
@@ -1517,7 +1345,6 @@ const transform_PACK = (inj, _val, _ref, store) => {
     });
     let rval = {};
     if (!isempty(tval)) {
-        // Build parallel source object.
         const tsrc = {};
         src.reduce((a, n, i) => {
             const kn = null == keypath
@@ -1547,14 +1374,9 @@ const transform_PACK = (inj, _val, _ref, store) => {
         inject(tval, store, tinj);
         rval = tinj.val;
     }
-    // _updateAncestors(inj, target, tkey, rval)
     setprop(target, tkey, rval);
-    // Drop transform key.
     return NONE;
 };
-// TODO: not found ref should removed key (setprop NONE)
-// Reference original spec (enables recursice transformations)
-// Format: ['`$REF`', '`spec-path`']
 const transform_REF = (inj, val, _ref, store) => {
     const { nodes } = inj;
     if (M_VAL !== inj.mode) {
@@ -1563,12 +1385,9 @@ const transform_REF = (inj, val, _ref, store) => {
     // Get arguments: ['`$REF`', 'ref-path'].
     const refpath = _lookup(inj.parent, 1);
     inj.keyI = size(inj.keys);
-    // Spec reference.
     const spec = getprop(store, S_DSPEC)();
     const dpath = slice(inj.path, 1);
     const ref = getpath(spec, refpath, {
-        // TODO: test relative refs
-        // dpath: inj.path.slice(1),
         dpath,
         // dparent: getpath(spec, inj.path.slice(1))
         dparent: getpath(spec, dpath),
@@ -1609,17 +1428,13 @@ const transform_REF = (inj, val, _ref, store) => {
     return val;
 };
 const transform_FORMAT = (inj, _val, _ref, store) => {
-    // console.log('FORMAT-START', inj, _val)
     // Remove remaining keys to avoid spurious processing.
     slice(inj.keys, 0, 1, true);
     if (M_VAL !== inj.mode) {
         return NONE;
     }
-    // Get arguments: ['`$FORMAT`', 'name', child].
-    // TODO: EACH and PACK should accept customm functions too
     const name = _lookup(inj.parent, 1);
     const child = _lookup(inj.parent, 2);
-    // Source data.
     const tkey = getelem(inj.path, -2);
     const target = getelem(inj.nodes, -2, () => getelem(inj.nodes, -1));
     const cinj = injectChild(child, store, inj);
@@ -1631,7 +1446,6 @@ const transform_FORMAT = (inj, _val, _ref, store) => {
     }
     const out = walk(resolved, formatter);
     setprop(target, tkey, out);
-    // _updateAncestors(inj, target, tkey, out)
     return out;
 };
 const FORMATTER = {
@@ -1672,7 +1486,6 @@ const transform_APPLY = (inj, _val, _ref, store) => {
     if (!checkPlacement(M_VAL, ijname, T_list, inj)) {
         return NONE;
     }
-    // const [err, apply, child] = injectorArgs([T_function, T_any], inj)
     const [err, apply, child] = injectorArgs([T_function, T_any], slice(inj.parent, 1));
     if (NONE !== err) {
         inj.errs.push('$' + ijname + ': ' + err);
@@ -1729,7 +1542,6 @@ injdef) {
             $FORMAT: transform_FORMAT,
             $APPLY: transform_APPLY,
         },
-        // Custom extra transforms, if any.
         extraTransforms,
         {
             $ERRS: errs,
@@ -1770,7 +1582,6 @@ const validate_TYPE = (inj, _val, ref) => {
     }
     return out;
 };
-// Allow any value.
 const validate_ANY = (inj) => {
     const out = _lookup(inj.dparent, inj.key);
     return out;
@@ -1781,10 +1592,8 @@ const validate_ANY = (inj) => {
 const validate_CHILD = (inj) => {
     const { mode, key, parent, keys, path } = inj;
     // Setup data structures for validation by cloning child template.
-    // Map syntax.
     if (M_KEYPRE === mode) {
         const childtm = getprop(parent, key);
-        // Get corresponding current object.
         const pkey = getelem(path, -2);
         let tval = getprop(inj.dparent, pkey);
         if (NONE == tval) {
@@ -1800,21 +1609,16 @@ const validate_CHILD = (inj) => {
             // NOTE: modifying inj! This extends the child value loop in inject.
             keys.push(ckey);
         }
-        // Remove $CHILD to cleanup ouput.
         inj.setval(NONE);
         return NONE;
     }
-    // List syntax.
     if (M_VAL === mode) {
         if (!islist(parent)) {
-            // $CHILD was not inside a list.
             inj.errs.push('Invalid $CHILD as value');
             return NONE;
         }
         const childtm = _lookup(parent, 1);
         if (NONE === inj.dparent) {
-            // Empty list as default.
-            // parent.length = 0
             slice(parent, 0, 0, true);
             return NONE;
         }
@@ -1844,11 +1648,6 @@ const validate_CHILD = (inj) => {
     }
     return NONE;
 };
-// TODO: implement SOME, ALL
-// FIX: ONE should mean exactly one, not at least one (=SOME)
-// TODO: implement a generate validate_ALT to do all of these
-// Match at least one of the specified shapes.
-// Syntax: ['`$ONE`', alt0, alt1, ...]
 const validate_ONE = (inj, _val, _ref, store) => {
     const { mode, parent, keyI } = inj;
     // Only operate in val mode, since parent is a list.
@@ -1871,9 +1670,7 @@ const validate_ONE = (inj, _val, _ref, store) => {
                 ' must have at least one argument.');
             return;
         }
-        // See if we can find a match.
         for (const tval of tvals) {
-            // If match, then errs.length = 0
             const terrs = [];
             const vstore = merge([{}, store], 1);
             vstore.$TOP = inj.dparent;
@@ -1888,7 +1685,6 @@ const validate_ONE = (inj, _val, _ref, store) => {
                 return;
             }
         }
-        // There was no match.
         const valdesc = replace(join(items(tvals, (n) => stringify(n[1])), ', '), R_TRANSFORM_NAME, (_m, p1) => p1.toLowerCase());
         inj.errs.push(_invalidTypeMsg(inj.path, (1 < size(tvals) ? 'one of ' : '') + valdesc, typify(inj.dparent), inj.dparent, 'V0210'));
     }
@@ -1906,7 +1702,6 @@ const validate_EXACT = (inj) => {
         inj.keyI = size(inj.keys);
         // Clean up structure, replacing [$EXACT, ...] with current data parent
         inj.setval(inj.dparent, 2);
-        // inj.path = slice(inj.path, 0, size(inj.path) - 1)
         inj.path = slice(inj.path, 0, -1);
         inj.key = getelem(inj.path, -1);
         const tvals = slice(parent, 1);
@@ -1916,7 +1711,6 @@ const validate_EXACT = (inj) => {
                 ' must have at least one argument.');
             return;
         }
-        // See if we can find an exact value match.
         let currentstr = undefined;
         for (const tval of tvals) {
             let exactmatch = tval === inj.dparent;
@@ -1929,7 +1723,6 @@ const validate_EXACT = (inj) => {
                 return;
             }
         }
-        // There was no match.
         const valdesc = replace(join(items(tvals, (n) => stringify(n[1])), ', '), R_TRANSFORM_NAME, (_m, p1) => p1.toLowerCase());
         inj.errs.push(_invalidTypeMsg(inj.path, (1 < size(inj.path) ? '' : 'value ') +
             'exactly equal to ' +
@@ -1949,9 +1742,7 @@ const _validation = (pval, key, parent, inj) => {
     if (SKIP === pval) {
         return;
     }
-    // select needs exact matches
     const exact = getprop(inj.meta, S_BEXACT, false);
-    // Current val to verify.
     const cval = getprop(inj.dparent, key);
     if (NONE === inj || (!exact && NONE === cval)) {
         return;
@@ -1962,7 +1753,6 @@ const _validation = (pval, key, parent, inj) => {
         return;
     }
     const ctype = typify(cval);
-    // Type mismatch.
     if (ptype !== ctype && NONE !== pval) {
         inj.errs.push(_invalidTypeMsg(inj.path, typename(ptype), ctype, cval, 'V0010'));
         return;
@@ -2016,16 +1806,6 @@ const _validation = (pval, key, parent, inj) => {
     }
     return;
 };
-// Validate a data structure against a shape specification.  The shape
-// specification follows the "by example" principle.  Plain data in
-// teh shape is treated as default values that also specify the
-// required type.  Thus shape {a:1} validates {a:2}, since the types
-// (number) match, but not {a:'A'}.  Shape {a;1} against data {}
-// returns {a:1} as a=1 is the default value of the a key.  Special
-// validation commands (in the same syntax as transform ) are also
-// provided to specify required values.  Thus shape {a:'`$STRING`'}
-// validates {a:'A'} but not {a:1}. Empty map or list means the node
-// is open, and if missing an empty default is inserted.
 function validate(data, // Source data to transform into new data (original not mutated)
 spec, // Transform specification; output follows this shape
 injdef) {
@@ -2034,7 +1814,6 @@ injdef) {
     const errs = injdef?.errs || [];
     const store = merge([
         {
-            // Remove the transform commands.
             $DELETE: null,
             $COPY: null,
             $KEY: null,
@@ -2151,9 +1930,7 @@ const select_NOT = (inj, _val, _ref, store) => {
 const select_CMP = (inj, _val, ref, store) => {
     if (M_KEYPRE === inj.mode) {
         const term = _lookup(inj.parent, inj.key);
-        // const src = getprop(store, inj.base, store)
         const gkey = getelem(inj.path, -2);
-        // const tval = getprop(src, gkey)
         const ppath = slice(inj.path, -1);
         const point = getpath(store, ppath);
         let pass = false;
@@ -2190,10 +1967,6 @@ const select_CMP = (inj, _val, ref, store) => {
     }
     return NONE;
 };
-// Select children from a top-level object that match a MongoDB-style query.
-// Supports $and, $or, and equality comparisons.
-// For arrays, children are elements; for objects, children are values.
-// TODO: swap arg order for consistency
 function select(children, query) {
     if (!isnode(children)) {
         return [];
@@ -2308,7 +2081,6 @@ class Injection {
                 }
             }
         }
-        // TODO: is this needed?
         return this.dparent;
     }
     child(keyI, keys) {
@@ -2344,17 +2116,11 @@ class Injection {
             const akey = getelem(this.path, 0 - ancestor);
             parent = NONE === val ? delprop(aval, akey) : setprop(aval, akey, val);
         }
-        // console.log('SETVAL', val, this.key, this.parent)
         return parent;
     }
 }
 // Internal utilities
 // ==================
-// // Update all references to target in inj.nodes.
-// function _updateAncestors(_inj: Injection, target: any, tkey: any, tval: any) {
-//   // SetProp is sufficient in TypeScript as target reference remains consistent even for lists.
-//   setprop(target, tkey, tval)
-// }
 // Build a type validation error message.
 function _invalidTypeMsg(path, needtype, vt, v, _whence) {
     const vs = null == v ? 'no value' : stringify(v);
@@ -2373,8 +2139,6 @@ function _invalidTypeMsg(path, needtype, vt, v, _whence) {
 const _injecthandler = (inj, val, ref, store) => {
     let out = val;
     const iscmd = isfunc(val) && (NONE === ref || ref.startsWith(S_DS));
-    // Only call val function if it is a special command ($NAME format).
-    // TODO: OR if meta.'$CALL'
     if (iscmd) {
         out = val(inj, val, ref, store);
     }
@@ -2403,22 +2167,11 @@ const _validatehandler = (inj, val, ref, store) => {
     }
     return out;
 };
-// Inject values from a data store into a string. Not a public utility - used by
-// `inject`.  Inject are marked with `path` where path is resolved
-// with getpath against the store or current (if defined)
-// arguments. See `getpath`.  Custom injection handling can be
-// provided by inj.handler (this is used for transform functions).
-// The path can also have the special syntax $NAME999 where NAME is
-// upper case letters only, and 999 is any digits, which are
-// discarded. This syntax specifies the name of a transform, and
-// optionally allows transforms to be ordered by alphanumeric sorting.
 function _injectstr(val, store, inj) {
-    // Can't inject into non-strings
     if (S_string !== typeof val || S_MT === val) {
         return S_MT;
     }
     let out = val;
-    // Pattern examples: "`a.b.c`", "`$NAME`", "`$NAME1`"
     const m = re_find(R_INJECTION_FULL, val);
     // Full string of the val is an injection.
     if (m) {
@@ -2426,17 +2179,14 @@ function _injectstr(val, store, inj) {
             inj.full = true;
         }
         let pathref = m[1];
-        // Special escapes inside injection.
         if (3 < size(pathref)) {
             pathref = re_replace(R_DS_ESCAPE, re_replace(R_BT_ESCAPE, pathref, S_BT), S_DS);
         }
-        // Get the extracted path reference.
         out = getpath(store, pathref, inj);
     }
     else {
         // Check for injections within the string.
         const partial = (_m, ref) => {
-            // Special escapes inside injection.
             if (3 < size(ref)) {
                 ref = re_replace(R_DS_ESCAPE, re_replace(R_BT_ESCAPE, ref, S_BT), S_DS);
             }
@@ -2444,7 +2194,6 @@ function _injectstr(val, store, inj) {
                 inj.full = false;
             }
             const found = getpath(store, ref, inj);
-            // Ensure inject value is a string.
             return NONE === found ? S_MT : S_string === typeof found ? found : JSON.stringify(found);
         };
         out = re_replace(R_INJECTION_PARTIAL, val, (m) => partial('', m[1]));
@@ -2496,13 +2245,11 @@ function checkPlacement(modes, ijname, parentTypes, inj) {
     }
     return true;
 }
-// function injectorArgs(argTypes: number[], inj: Injection): any {
 function injectorArgs(argTypes, args) {
     const numargs = size(argTypes);
     const found = new Array(1 + numargs);
     found[0] = NONE;
     for (let argI = 0; argI < numargs; argI++) {
-        // const arg = inj.parent[1 + argI]
         const arg = args[argI];
         const argType = typify(arg);
         if (0 === (argTypes[argI] & argType)) {
@@ -2537,7 +2284,6 @@ function injectChild(child, store, inj) {
             setprop(cinj.parent, inj.key, child);
         }
     }
-    // console.log('FORMAT-INJECT-CHILD', child)
     inject(child, store, cinj);
     return cinj;
 }
@@ -2616,56 +2362,6 @@ class StructUtility {
     }
 }
 exports.StructUtility = StructUtility;
-// ---------------------------------------------------------------------------
-// CONDENSED STRUCTURES
-//
-// A condensed structure holds the same information as a JSON-shaped node in a
-// fraction of the space, and can be read WITHOUT materialising it. Three
-// mechanisms, all in one format:
-//
-//   intern  a symbol table holds each distinct map key and string value once
-//   share   identical subtrees become ONE node with many references (a DAG)
-//   lazy    a reader resolves a path by walking integer indexes, touching
-//           only the nodes on that path
-//
-// The shape:
-//
-//   { "$condense": 1,      format version
-//     "sym":  [ ... ],     distinct strings, sorted (so lookup can bisect)
-//     "node": [ ... ],     integer-encoded nodes, children before parents
-//     "root": 12 }         index into node[]
-//
-// Each node is one of:
-//
-//   map     [0, k0, v0, k1, v1, ...]   k ascending symbol ids, v node refs
-//   list    [1, v0, v1, ...]           node refs
-//   string  [2, symId]
-//   number  [3, value]
-//   true    [4]        false [5]        null [6]
-//
-// Two properties are load-bearing rather than incidental:
-//
-//   Map keys ascend, because keysof() sorts. That makes output byte-stable
-//   (generators depend on it) and lets a key lookup bisect rather than scan.
-//
-//   References are integer indexes into a post-order table, so every ref
-//   points BACKWARDS. Sharing is therefore free — two identical subtrees
-//   intern to one node and two refs, with no dedup pass at read time — and a
-//   reader can never loop.
-//
-// The transport is JSON arrays of integers on purpose. The FORMAT is defined
-// here, but TOKENIZING is left to each language's own JSON parser: mature,
-// fast, memory-safe, already present, and nothing to keep in parity across
-// ports. A binary profile ($condense: 2) is a future option, deliberately
-// deferred - it is worth perhaps 2-3x and costs a hand-written decoder per
-// language.
-//
-// IMMUTABILITY. Sharing makes a condensed structure a DAG, so a mutation
-// through one reference would be visible through every other. Rather than
-// make that hazard the caller's problem, it is designed out: mutating
-// helpers RAISE on a condensed node, and expand()/value() always return an
-// independent copy. ref() is the one opt-in escape hatch and is named to be
-// alarming.
 const CONDENSE_VERSION = 1;
 const CONDENSE_MAP = 0;
 const CONDENSE_LIST = 1;
@@ -2678,18 +2374,6 @@ const S_condense = '$condense';
 const S_condsym = 'sym';
 const S_condnode = 'node';
 const S_condroot = 'root';
-// Is this a condensed structure? Checked structurally rather than by a marker
-// alone, so an ordinary map that happens to carry a `$condense` key is not
-// mistaken for one.
-// Compare by UNICODE CODE POINT, not by UTF-16 code unit.
-//
-// JavaScript's default string sort compares UTF-16 code units, which orders
-// an astral character BEFORE a high-BMP one; Python, Go and Rust all compare
-// by code point (equivalently, by UTF-8 bytes). A symbol table sorted the
-// JavaScript way would make two conforming ports emit different bytes for the
-// same input, which is exactly the byte-stability the format promises. Code
-// point order is the portable choice, so it is specified rather than
-// inherited.
 function condenseCmp(a, b) {
     let i = 0;
     let j = 0;
@@ -2704,12 +2388,6 @@ function condenseCmp(a, b) {
     }
     return a.length - i - (b.length - j);
 }
-// Assign a key that may be `__proto__`.
-//
-// Plain assignment to `__proto__` invokes the inherited setter instead of
-// creating an own property, so a model carrying that key or string value
-// would be silently corrupted - it is valid JSON and Seneca-adjacent data
-// really does use `$`-ish and `__`-ish names.
 function condenseSet(obj, key, val) {
     if ('__proto__' === key) {
         Object.defineProperty(obj, key, {
@@ -2907,13 +2585,6 @@ function condenseResolve(cond, idx, path) {
     }
     return at;
 }
-// Materialise node `idx` as an ordinary JSON-shaped value.
-//
-// Containers are rebuilt on every call and never memoised: sharing is an
-// implementation detail, and handing the same object out twice would let a
-// caller mutating one reference corrupt every other. The cost is that
-// expansion reproduces the original tree - which is exactly the size it was
-// before condensing, so it is bounded by the input.
 function condenseMaterialise(cond, idx) {
     const sym = cond[S_condsym];
     const node = cond[S_condnode];

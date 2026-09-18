@@ -98,8 +98,6 @@ const { equal, deepEqual, throws } = node_assert_1.default;
         // subtree interns to the same node and the root simply gains a ref, so
         // the node count is unchanged.
         equal(two.node.length, one.node.length);
-        // Three distinct values would cost three nodes, so this is real sharing
-        // rather than an artefact of the example being small.
         const three = s.condense({ x: { m: 'GET' }, y: { m: 'PUT' }, z: { m: 'POST' } });
         equal(true, three.node.length > two.node.length);
     });
@@ -172,9 +170,6 @@ const { equal, deepEqual, throws } = node_assert_1.default;
         equal(s.getpath(c, ['l', '1']), 20);
     });
     (0, node_test_1.test)('condense-symbols-sort-by-code-point', () => {
-        // JavaScript's default sort compares UTF-16 code units and would put the
-        // astral character FIRST; Python, Go and Rust compare by code point. The
-        // format specifies code point order so every port emits the same bytes.
         const s = struct;
         const sym = s.condense({ a: '\u{10000}', b: '\uFFFF' }).sym;
         equal(true, sym.indexOf('\uFFFF') < sym.indexOf('\u{10000}'), 'symbol table is not in code-point order: ' + JSON.stringify(sym));
@@ -680,7 +675,6 @@ const { equal, deepEqual, throws } = node_assert_1.default;
         const extra = {
             $INTEGER: (inj) => {
                 const { key } = inj;
-                // let out = getprop(current, key)
                 const out = struct.getprop(inj.dparent, key);
                 const t = typeof out;
                 if ('number' !== t && !Number.isInteger(out)) {

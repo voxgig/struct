@@ -1,54 +1,5 @@
 /* Copyright (c) 2025 Voxgig Ltd. MIT LICENSE. */
 
-/* Voxgig Struct
- * =============
- *
- * Utility functions to manipulate in-memory JSON-like data
- * structures. These structures assumed to be composed of nested
- * "nodes", where a node is a list or map, and has named or indexed
- * fields.  The general design principle is "by-example". Transform
- * specifications mirror the desired output.  This implementation is
- * designed for porting to multiple language, and to be tolerant of
- * undefined values.
- *
- * Main utilities
- * - getpath: get the value at a key path deep inside an object.
- * - merge: merge multiple nodes, overriding values in earlier nodes.
- * - walk: walk a node tree, applying a function at each node and leaf.
- * - inject: inject values from a data store into a new data structure.
- * - transform: transform a data structure to an example structure.
- * - validate: valiate a data structure against a shape specification.
- *
- * Minor utilities
- * - isnode, islist, ismap, iskey, isfunc: identify value kinds.
- * - isempty: undefined values, or empty nodes.
- * - keysof: sorted list of node keys (ascending).
- * - haskey: true if key value is defined.
- * - clone: create a copy of a JSON-like data structure.
- * - items: list entries of a map or list as [key, value] pairs.
- * - getprop: safely get a property value by key.
- * - setprop: safely set a property value by key.
- * - stringify: human-friendly string version of a value.
- * - escre: escape a regular expresion string.
- * - escurl: escape a url.
- * - joinurl: join parts of a url, merging forward slashes.
- *
- * This set of functions and supporting utilities is designed to work
- * uniformly across many languages, meaning that some code that may be
- * functionally redundant in specific languages is still retained to
- * keep the code human comparable.
- *
- * NOTE: In this code JSON nulls are in general *not* considered the
- * same as the undefined value in the given language. However most
- * JSON parsers do use the undefined value to represent JSON
- * null. This is ambiguous as JSON null is a separate value, not an
- * undefined value. You should convert such values to a special value
- * to represent JSON null, if this ambiguity creates issues
- * (thankfully in most APIs, JSON nulls are not used). For example,
- * the unit tests use the string "__NULL__" where necessary.
- *
- */
-
 package voxgigstruct
 
 import (
@@ -130,13 +81,11 @@ const (
 	T_function = 1 << 24
 	T_symbol   = 1 << 23
 	T_null     = 1 << 22
-	// 7 bits reserved
 	T_list     = 1 << 14
 	T_map      = 1 << 13
 	T_instance = 1 << 12
-	// 4 bits reserved
-	T_scalar = 1 << 7
-	T_node   = 1 << 6
+	T_scalar   = 1 << 7
+	T_node     = 1 << 6
 )
 
 // TYPENAME maps bit position (via leading zeros count) to type name string.
@@ -167,18 +116,6 @@ type _sentinel struct{ name string }
 var SKIP = &_sentinel{"SKIP"}
 var DELETE = &_sentinel{"DELETE"}
 
-// NOVAL is Go's no-value: the third state canonical spells `undefined`.
-//
-// Go's value domain has nil and it has real values, and nothing between,
-// so `Typify(nil)` is T_scalar|T_null and T_noval was unreachable - this
-// port could not express `typify()` as distinct from `typify(null)`, which
-// the corpus pins as two different results (1073741824 vs 4194432). Every
-// other port models the distinction, natively or with a sentinel of its
-// own; NOVAL is Go's.
-//
-// It is recognised AHEAD of the reflect dispatch, in Typify, IsEmpty and
-// Clone. That ordering is the whole trick: a Go sentinel is a struct
-// pointer, so reflect would otherwise class it as a node.
 var NOVAL = &_sentinel{"NOVAL"}
 
 // Regex matching integer keys (including negative).
@@ -437,16 +374,6 @@ func IsKey(val any) bool {
 
 // Check for an "empty" value - nil, empty string, array, object.
 
-// denoval collapses NOVAL to nil. Canonical distinguishes undefined from
-// null in exactly one place - typify - and treats them alike everywhere
-// else (`null == val` in JavaScript is true for both). The functions below
-// follow canonical, so they take a value that has already been collapsed.
-//
-// The Group A readers - GetDef, GetProp, GetElem and (through GetProp)
-// HasKey - collapse it on the way in AND on the way out, so a NOVAL reached
-// as a container, a key, or a stored value reads as absent and yields the
-// alt. That is canonical: `getprop({a: undefined}, 'a', alt)` is alt, and
-// `haskey` is false, because `undefined == null` in JavaScript.
 func denoval(val any) any {
 	if NOVAL == val {
 		return nil
@@ -920,11 +847,6 @@ func Items(val any) [][2]any {
 		out := make([][2]any, 0, len(m))
 
 		keys := KeysOf(val)
-		// keys := make([]string, 0, len(m))
-		// for k := range m {
-		// 	keys = append(keys, k)
-		// }
-		// sort.Strings(keys)
 
 		for _, k := range keys {
 			out = append(out, [2]any{k, m[k]})
@@ -1037,15 +959,6 @@ func ReFindAll(pattern, input string) [][]string {
 	return regexp.MustCompile(pattern).FindAllStringSubmatch(input, -1)
 }
 
-// ReReplace replaces every match. The replacement supports Go's $0..$N
-// reference syntax (functionally equivalent to JS $&..$N).
-//
-// Note: Go's `regexp` (RE2) suppresses an empty match immediately
-// following a non-empty match at the same offset. This is RE2's
-// chosen convention and differs from ECMAScript / Python / Java etc:
-// `re_replace("a*", "abc", "X")` returns "XbXcX" here, "XXbXcX" on
-// PCRE/ECMA engines. The variance is inherent to the host regex
-// package; see REGEX_PATHOLOGICAL.md.
 func ReReplace(pattern, input, replacement string) string {
 	return regexp.MustCompile(pattern).ReplaceAllString(input, replacement)
 }
@@ -1203,9 +1116,6 @@ func Join(arr []any, args ...any) string {
 	return strings.Join(parts, sep)
 }
 
-// Output JSON in a "standard" format, with 2 space indents, each property on a new line,
-// and spaces after {[: and before ]}. Any "weird" values (NaN, etc) are output as null.
-// In general, the behavior of JavaScript's JSON.stringify(val,null,2) is followed.
 func Jsonify(val any, flags ...map[string]any) string {
 	str := S_null
 
@@ -1539,13 +1449,6 @@ func DelProp(parent any, key any) any {
 	return parent
 }
 
-// Safely set a property. Undefined arguments and invalid keys are ignored.
-// Returns the (possibly modified) parent.
-// If the value is undefined the key will be deleted from the parent.
-// If the parent is a list, and the key is negative, prepend the value.
-// NOTE: If the key is above the list size, append the value; below, prepend.
-// If the value is undefined, remove the list element at index key, and shift the
-// remaining elements down.  These rules avoid "holes" in the list.
 func SetProp(parent any, key any, newval any) any {
 	if !IsKey(key) {
 		return parent
@@ -1664,16 +1567,6 @@ func SetProp(parent any, key any, newval any) any {
 	return parent
 }
 
-// Walk a data structure depth first, applying functions to each value.
-// Walk(val, before) - before callback only (pre-order).
-// Walk(val, before, after) - both before and after callbacks.
-// Walk(val, before, after, maxdepth) - with maximum recursion depth.
-// Pass nil for before or after to skip that callback.
-// For backward compatibility, Walk(val, apply) applies the callback after children (post-order).
-//
-// The `path` passed to callbacks is a single mutable slice per depth, reused
-// across recursive calls. Callbacks must clone it (see WalkApply) if they want
-// to retain it beyond the invocation.
 func Walk(
 	val any,
 	apply WalkApply,
@@ -1984,13 +1877,6 @@ func Merge(val any, maxdepths ...int) any {
 	return out
 }
 
-// Get a value deep inside a node using a key path.  For example the
-// path `a.b` gets the value 1 from {a:{b:1}}.  The path can specified
-// as a dotted string, or a string array.  If the path starts with a
-// dot (or the first element is "), the path is considered local, and
-// resolved against the `current` argument, if defined.  Integer path
-// parts are used as array indexes.  The inj argument allows for
-// custom handling when called from `inject` or `transform`.
 func GetPath(store any, path any, injdefs ...*Injection) any {
 	var inj *Injection
 	if len(injdefs) > 0 {
@@ -2204,15 +2090,6 @@ func SetPath(store any, path any, val any, injdefs ...map[string]any) any {
 	}
 }
 
-// Inject store values into a string. Not a public utility - used by
-// `inject`.  Inject are marked with `path` where path is resolved
-// with getpath against the store or current (if defined)
-// arguments. See `getpath`.  Custom injection handling can be
-// provided by inj.handler (this is used for transform functions).
-// The path can also have the special syntax $NAME999 where NAME is
-// upper case letters only, and 999 is any digits, which are
-// discarded. This syntax specifies the name of a transform, and
-// optionally allows transforms to be ordered by alphanumeric sorting.
 func _injectStr(
 	val string,
 	store any,
@@ -2222,8 +2099,6 @@ func _injectStr(
 		return S_MT
 	}
 
-	// Pattern examples: "`a.b.c`", "`$NAME`", "`$NAME1`"
-	// fullRe := regexp.MustCompile("^`([^`]+)[0-9]*`$")
 	fullRe := regexp.MustCompile("^`(\\$[A-Z]+|[^`]*)[0-9]*`$")
 	matches := fullRe.FindStringSubmatch(val)
 
@@ -2291,10 +2166,6 @@ func _injectStr(
 	return out
 }
 
-// Inject values from a data store into a node recursively, resolving
-// paths against the store, or current if they are local. The modify
-// argument allows custom modification of the result. The inj
-// (Injection) argument is used to maintain recursive inj.
 func Inject(
 	val any,
 	store any,
@@ -2448,8 +2319,6 @@ func Inject(
 
 	inj.Val = val
 
-	// Original val reference may no longer be correct.
-	// This return value is only used as the top level result.
 	rval := GetProp(inj.Parent, S_DTOP)
 
 	return rval
@@ -2607,8 +2476,6 @@ var Transform_MERGE Injector = func(
 			return inj.Key
 		}
 
-		// Literals in the parent have precedence, but we still merge onto
-		// the parent object, so that node tree references are not changed.
 		mergeList := []any{inj.Parent}
 		mergeList = append(mergeList, list...)
 		mergeList = append(mergeList, Clone(inj.Parent))
@@ -2758,14 +2625,12 @@ var Transform_EACH Injector = func(
 
 	SetProp(target, tkey, rval)
 
-	// Prevent callee from damaging first list entry (since we are in val mode).
 	if len(rval) > 0 {
 		return rval[0]
 	}
 	return nil
 }
 
-// transform_PACK => `$PACK`
 var Transform_PACK Injector = func(
 	inj *Injection,
 	val any,
@@ -2947,9 +2812,6 @@ var Transform_PACK Injector = func(
 	return nil
 }
 
-// transform_APPLY => `$APPLY`
-// Reference original spec (enables recursive transformations).
-// Format: ['`$REF`', '`spec-path`']
 var Transform_REF Injector = func(
 	inj *Injection,
 	val any,
@@ -3135,9 +2997,6 @@ var Transform_APPLY Injector = func(
 	return out
 }
 
-// transform_FORMAT => `$FORMAT`
-// injectChild resolves a child value via injection, going up the injection chain
-// to get the correct data context.
 func InjectChild(child any, store any, inj *Injection) *Injection {
 	cinj := inj
 
@@ -3332,15 +3191,6 @@ var Transform_FORMAT Injector = func(
 // ---------------------------------------------------------------------
 // Transform function: top-level
 
-// Transform returns an error when the transform collected any - an unknown
-// `$FORMAT`, say - and the caller did not supply their own error collector.
-// Canonical TypeScript throws at exactly that point (StructUtility.ts:
-// `const generr = 0 < size(errs) && !collect`), and Validate in this port
-// already surfaces it the same way. Transform did not, so every error a
-// transform collected was silently dropped: `Transform(nil, ["`$FORMAT`",
-// "not-a-format", "a"])` returned nil rather than reporting the unknown
-// format. The corpus pins that behaviour in transform/format, a group this
-// port's own test runner used to skip in full.
 func Transform(
 	data any, // source data
 	spec any, // transform specification
@@ -3762,7 +3612,6 @@ var validate_CHILD Injector = func(
 	// List syntax
 	if inj.Mode == M_VAL {
 
-		// We expect 'parent' to be a slice of any, like ["`$CHILD`", childTemplate].
 		if !IsList(inj.Parent) {
 			inj.Errs.Append("Invalid $CHILD as value")
 			return nil
@@ -3805,7 +3654,6 @@ var validate_CHILD Injector = func(
 			newParent[i] = Clone(child)
 		}
 
-		// Replace parent with the new slice
 		if lr, ok := inj.Parent.(*ListRef[any]); ok {
 			lr.List = newParent
 		} else {
@@ -3847,7 +3695,6 @@ func init_validate_ONE() {
 	) any {
 		// Only operate in "val mode" (list mode).
 		if inj.Mode == M_VAL {
-			// Validate that parent is a list and we're at the first element
 			if !IsList(inj.Parent) || inj.KeyI != 0 {
 				inj.Errs.Append("The $ONE validator at field " +
 					Pathify(inj.Path.List, 1, 1) +
@@ -3855,7 +3702,6 @@ func init_validate_ONE() {
 				return nil
 			}
 
-			// Once we handle `$ONE`, we skip further iteration by setting KeyI to keys.length
 			inj.KeyI = len(inj.Keys.List)
 
 			// The parent is assumed to be a slice: ["`$ONE`", alt0, alt1, ...].
@@ -3879,7 +3725,6 @@ func init_validate_ONE() {
 			// The shape alternatives are everything after the first element.
 			tvals := parentSlice[1:] // alt0, alt1, ...
 
-			// Ensure we have at least one alternative
 			if len(tvals) == 0 {
 				inj.Errs.Append("The $ONE validator at field " +
 					Pathify(inj.Path.List, 1, 1) +
@@ -3902,13 +3747,11 @@ func init_validate_ONE() {
 				// Update the value in the grandparent
 				SetProp(grandparent, grandkey, vcurrent)
 
-				// If no errors, we found a match
 				if err == nil && len(terrs.List) == 0 {
 					return nil
 				}
 			}
 
-			// If we get here, there was no match
 			mapped := make([]string, len(tvals))
 			for i, v := range tvals {
 				mapped[i] = Stringify(v)
@@ -3953,7 +3796,6 @@ func init_validate_EXACT() {
 	) any {
 		// Only operate in "val mode" (list mode).
 		if inj.Mode == M_VAL {
-			// Validate that parent is a list and we're at the first element
 			if !IsList(inj.Parent) || inj.KeyI != 0 {
 				inj.Errs.Append("The $EXACT validator at field " +
 					Pathify(inj.Path.List, 1, 1) +
@@ -3961,7 +3803,6 @@ func init_validate_EXACT() {
 				return nil
 			}
 
-			// Once we handle `$EXACT`, we skip further iteration by setting KeyI to keys.length
 			inj.KeyI = len(inj.Keys.List)
 
 			// The parent is assumed to be a slice: ["`$EXACT`", alt0, alt1, ...].
@@ -3985,7 +3826,6 @@ func init_validate_EXACT() {
 			// The exact values to match are everything after the first element.
 			tvals := parentSlice[1:] // alt0, alt1, ...
 
-			// Ensure we have at least one alternative
 			if len(tvals) == 0 {
 				inj.Errs.Append("The $EXACT validator at field " +
 					Pathify(inj.Path.List, 1, 1) +
@@ -3993,7 +3833,6 @@ func init_validate_EXACT() {
 				return nil
 			}
 
-			// See if we can find an exact value match
 			var currentStr *string
 			for _, tval := range tvals {
 				exactMatch := false
@@ -4021,7 +3860,6 @@ func init_validate_EXACT() {
 				}
 			}
 
-			// If we get here, there was no match
 			mapped := make([]string, len(tvals))
 			for i, v := range tvals {
 				mapped[i] = Stringify(v)
@@ -4315,8 +4153,6 @@ func Validate(
 	// Run the transformation with validation and _validatehandler
 	out := TransformModifyHandler(data, spec, store, validationFn, _validatehandler, errs, meta)
 
-	// Generate an error if we collected any errors and the caller didn't provide
-	// their own error collection
 	var err error
 	generr := 0 < len(errs.List) && collecterrs == nil
 	if generr {
@@ -4738,11 +4574,6 @@ func _invalidTypeMsg(path []string, needtype string, vt string, v any, whence ..
 	// Build the main error message
 	message := "Expected " + fieldPart + needtype + ", but found " + typePart + vs
 
-	// Uncomment to help debug validation errors
-	// if len(whence) > 0 {
-	//    message += " [" + whence[0] + "]"
-	// }
-
 	return message + "."
 }
 
@@ -4752,7 +4583,6 @@ func _invalidTypeMsg(path []string, needtype string, vt string, v any, whence ..
 // Floats are truncated to integers.
 // Booleans, objects, arrays, null, undefined all return empty string.
 
-// TODO: rename to _strKey
 func StrKey(key any) string {
 	if nil == key {
 		return S_MT
@@ -4903,7 +4733,6 @@ func _toFloat64(val any) (float64, error) {
 
 // _parseInt is a helper to convert a string to int safely.
 func _parseInt(s string) (int, error) {
-	// We'll do a very simple parse:
 	var x int
 	sign := 1
 	for i, c := range s {

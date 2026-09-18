@@ -1,22 +1,3 @@
-// Minimal in-tree insertion-ordered map.
-//
-// Rust's `std::collections::HashMap` doesn't preserve insertion order, and
-// the canonical contract requires that JSON object key order survive every
-// operation. Other ports either get this for free (Python 3.7+ dict,
-// Ruby Hash, PHP array, JS object), or hand-roll an OrderedMap
-// (C / C++ / Zig). This is the Rust equivalent — keeps the port
-// dependency-free.
-//
-// Only the operations the rest of voxgig-struct uses are implemented:
-// `new`, `insert`, `get`, `contains_key`, `shift_remove`, `iter`,
-// `iter_mut`, `keys`, `values`, `len`, `is_empty`, indexing by `&str`,
-// `Clone`, `IntoIterator` and `FromIterator`.
-//
-// Parallel keys + values vectors preserve insertion order; a separate
-// `HashMap<String, usize>` indexes key -> position for O(1) lookup.
-// `shift_remove` is O(n) on a vec-shift plus an O(n) index rebuild; the
-// corpus's map sizes are modest so this is the right complexity trade.
-
 use std::collections::HashMap;
 use std::ops::Index;
 

@@ -29,15 +29,9 @@ type Indexable = {
     [key: number]: any;
 };
 type InjectMode = number;
-type Injector = (inj: Injection, // Injection state.
-val: any, // Injection value specification.
-ref: string, // Original injection reference string.
+type Injector = (inj: Injection, val: any, ref: string, // Original injection reference string.
 store: any) => any;
-type Modify = (val: any, // Value.
-key?: PropKey, // Value key, if any,
-parent?: any, // Parent node, if any.
-inj?: Injection, // Injection state, if any.
-store?: any) => void;
+type Modify = (val: any, key?: PropKey, parent?: any, inj?: Injection, store?: any) => void;
 type WalkApply = (key: string | number | undefined, val: any, parent: any, path: string[]) => any;
 declare function typename(t: number): any;
 declare function getdef(val: any, alt: any): any;
