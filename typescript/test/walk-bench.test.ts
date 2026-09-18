@@ -1,4 +1,3 @@
-
 import { test, describe } from 'node:test'
 
 import { walk } from '../dist/StructUtility'

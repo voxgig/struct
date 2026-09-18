@@ -1,7 +1,5 @@
 /* Copyright (c) 2025-2026 Voxgig Ltd. MIT LICENSE. */
 
-
-
 // String constants are explicitly defined.
 
 // Mode value for inject step (bitfield).
@@ -139,13 +137,7 @@ type Injector = (
 ) => any
 
 // Apply a custom modification to injections.
-type Modify = (
-  val: any,
-  key?: PropKey,
-  parent?: any,
-  inj?: Injection,
-  store?: any,
-) => void
+type Modify = (val: any, key?: PropKey, parent?: any, inj?: Injection, store?: any) => void
 
 type WalkApply = (
   // Map keys are strings, list keys are numbers, top key is NONE
@@ -878,13 +870,10 @@ function setprop<PARENT>(parent: PARENT, key: any, val: any): PARENT {
 
     keyI = Math.floor(keyI)
 
-
     // Set or append value at position keyI, or append if keyI out of bounds.
     if (0 <= keyI) {
       parent[slice(keyI, 0, size(parent) + 1)] = val
-    }
-
-    else {
+    } else {
       parent.unshift(val)
     }
   }
@@ -996,9 +985,7 @@ function merge(val: any, maxdepth?: number): any {
 
         if (md <= pI) {
           setprop(cur[pI - 1], key, val)
-        }
-
-        else if (!isnode(val)) {
+        } else if (!isnode(val)) {
           cur[pI] = val
         }
 
@@ -1018,9 +1005,7 @@ function merge(val: any, maxdepth?: number): any {
           // Matching override and destination so continue with their values.
           else if (vtype === typify(tval)) {
             cur[pI] = tval
-          }
-
-          else {
+          } else {
             cur[pI] = val
 
             // No need to descend when override wins (destination is discarded).
@@ -1234,7 +1219,6 @@ function getpath(store: any, path: number | string | string[], injdef?: Partial<
     val = handler(injdef, val, ref, store)
   }
 
-
   return val
 }
 
@@ -1264,7 +1248,6 @@ function inject(val: any, store: any, injdef?: Partial<Injection>) {
   //  't=', inj.path, 'P=', inj.parent, 'dp=', inj.dparent, 'ST=', store.$TOP)
 
   if (isnode(val)) {
-
     let nodekeys: any[]
     nodekeys = keysof(val)
 
@@ -1311,9 +1294,7 @@ function inject(val: any, store: any, injdef?: Partial<Injection>) {
         nodekeys = childinj.keys
       }
     }
-  }
-
-  else if (S_string === valtype) {
+  } else if (S_string === valtype) {
     inj.mode = M_VAL
     val = _injectstr(val, store, inj)
     if (SKIP !== val) {
@@ -1328,7 +1309,6 @@ function inject(val: any, store: any, injdef?: Partial<Injection>) {
 
     inj.modify(mval, mkey, mparent, inj, store)
   }
-
 
   inj.val = val
 
@@ -1686,7 +1666,6 @@ const transform_REF: Injector = (inj: Injection, val: any, _ref: string, store: 
 }
 
 const transform_FORMAT: Injector = (inj: Injection, _val: any, _ref: string, store: any) => {
-
   // Remove remaining keys to avoid spurious processing.
   slice(inj.keys, 0, 1, true)
 
@@ -2381,7 +2360,6 @@ const select_CMP: Injector = (inj: Injection, _val: any, ref: string, store: any
     const term = _lookup(inj.parent, inj.key)
     const gkey = getelem(inj.path, -2)
 
-
     const ppath = slice(inj.path, -1)
     const point = getpath(store, ppath)
 
@@ -2617,7 +2595,6 @@ class Injection {
 // Internal utilities
 // ==================
 
-
 // Build a type validation error message.
 function _invalidTypeMsg(path: any, needtype: string, vt: number, v: any, _whence?: string) {
   const vs = null == v ? 'no value' : stringify(v)
@@ -2641,7 +2618,6 @@ function _invalidTypeMsg(path: any, needtype: string, vt: number, v: any, _whenc
 const _injecthandler: Injector = (inj: Injection, val: any, ref: string, store: any): any => {
   let out = val
   const iscmd = isfunc(val) && (NONE === ref || ref.startsWith(S_DS))
-
 
   if (iscmd) {
     out = (val as Injector)(inj, val, ref, store)
@@ -2701,7 +2677,6 @@ function _injectstr(val: string, store: any, inj?: Injection): any {
   } else {
     // Check for injections within the string.
     const partial = (_m: string, ref: string) => {
-
       if (3 < size(ref)) {
         ref = re_replace(R_DS_ESCAPE, re_replace(R_BT_ESCAPE, ref, S_BT), S_DS)
       }
@@ -2908,7 +2883,6 @@ class StructUtility {
   injectorArgs = injectorArgs
   injectChild = injectChild
 }
-
 
 const CONDENSE_VERSION = 1
 

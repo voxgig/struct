@@ -2,19 +2,6 @@ import { transform, M_KEYPRE } from '..'
 
 const errs: any = []
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 const extra = {
   $CAPTURE: (inj: any) => {
     if (M_KEYPRE === inj.mode) {
