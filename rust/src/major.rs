@@ -741,7 +741,6 @@ pub fn set_path(store: &Value, path: &Value, val: Value, injdef: Option<&InjectD
     parent
 }
 
-
 /// Default inject handler (`_injecthandler`): if the value is a `$NAME`
 /// command function, call it; otherwise, in `val` mode for a full-string
 /// injection, write the value back into the parent.

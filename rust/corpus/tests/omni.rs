@@ -1,4 +1,3 @@
-
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -6,7 +5,6 @@ use voxgig_omni::json::Json;
 use voxgig_omni::runner::{make_runner, Flags, Provider, RunPack, SpecRef, Subject, SubjectArgs};
 use voxgig_struct::ordered_map::OrderedMap;
 use voxgig_struct::value::Value;
-
 
 pub fn tostruct(j: &Json) -> Value {
     match j {

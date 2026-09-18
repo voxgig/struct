@@ -10,12 +10,10 @@
 use crate::re::Regex;
 use std::sync::LazyLock as Lazy;
 
-// ---- mode flags (bitfield) for inject steps ---------------------------
 pub const M_KEYPRE: i64 = 1;
 pub const M_KEYPOST: i64 = 2;
 pub const M_VAL: i64 = 4;
 
-// ---- special strings --------------------------------------------------
 pub const S_BKEY: &str = "`$KEY`";
 pub const S_BANNO: &str = "`$ANNO`";
 pub const S_BEXACT: &str = "`$EXACT`";
@@ -65,28 +63,16 @@ pub const T_SCALAR: u32 = 1 << 7;
 pub const T_NODE: u32 = 1 << 6;
 
 pub const TYPENAME: [&str; 26] = [
-    "any",
-    "nil",      // 1   clz32(T_noval=1<<30)
-    "boolean",
-    "decimal",
-    "integer",
-    "number",
-    "string",
-    "function",
-    "symbol",
-    "null",
-    "", "", "", "", "", "", "",
-    "list",     // 17  clz32(1<<14)
+    "any", "nil", // 1   clz32(T_noval=1<<30)
+    "boolean", "decimal", "integer", "number", "string", "function", "symbol", "null", "", "", "",
+    "", "", "", "", "list",     // 17  clz32(1<<14)
     "map",      // 18  clz32(1<<13)
     "instance", // 19  clz32(1<<12)
-    "", "", "", "",
-    "scalar",
-    "node",
+    "", "", "", "", "scalar", "node",
 ];
 
 pub const MAXDEPTH: i64 = 32;
 
-// ---- regexes ----------------------------------------------------------
 pub static R_INTEGER_KEY: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[-0-9]+$").unwrap());
 pub static R_ESCAPE_REGEXP: Lazy<Regex> = Lazy::new(|| Regex::new(r"[.*+?^${}()|\[\]\\]").unwrap());
 pub static R_QUOTES: Lazy<Regex> = Lazy::new(|| Regex::new(r#"""#).unwrap());
