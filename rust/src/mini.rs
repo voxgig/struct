@@ -92,8 +92,6 @@ pub fn is_func(val: &Value) -> bool {
     matches!(val, Value::Func(_))
 }
 
-/// `size(val)` — length for lists/strings, key count for maps, integer
-/// part for numbers, 1/0 for booleans, 0 otherwise.
 pub fn size(val: &Value) -> i64 {
     match val {
         Value::List(l) => l.borrow().len() as i64,
@@ -170,7 +168,6 @@ pub fn slice(val: Value, start: Option<i64>, end: Option<i64>, mutate: bool) -> 
                     }
                 }
                 Value::Str(st) => {
-                    // substring by UTF-16 units to match JS .substring
                     let units: Vec<u16> = st.encode_utf16().collect();
                     let sub: Vec<u16> = units[s as usize..e as usize].to_vec();
                     return Value::Str(String::from_utf16_lossy(&sub));
@@ -320,12 +317,6 @@ pub fn get_prop(val: &Value, key: &Value, alt: Value) -> Value {
     }
 }
 
-/// Internal raw lookup that PRESERVES a stored JSON null (Group B). Mirrors the
-/// canonical TS `_lookup` (StructUtility.ts:477): Group B callers — validate /
-/// transform commands / builders / inject internals — use this when they need
-/// the raw stored value at a slot regardless of whether it is null. The public
-/// `get_prop` / `get_elem` / `has_key` APIs treat null as absent (Group A) per
-/// UNDEF_SPEC.md. Returns `Noval` only when the key is genuinely absent.
 pub fn lookup(val: &Value, key: &Value) -> Value {
     if val.is_noval() || key.is_noval() {
         return Value::Noval;
@@ -523,7 +514,6 @@ pub fn re_find_all(pattern: &str, input: &str) -> Vec<Vec<String>> {
         .collect()
 }
 
-/// Replace every match. Supports `$&` (whole match) and `$1`..`$9` (captures).
 pub fn re_replace(pattern: &str, input: &str, replacement: &str) -> String {
     let re = match Regex::new(pattern) {
         Ok(r) => r,
@@ -826,10 +816,6 @@ pub fn stringify(val: &Value, maxlen: Option<i64>, pretty: bool) -> String {
     valstr
 }
 
-/// Compact JSON with object keys sorted (used by `stringify`). Functions and
-/// `undefined` map values are dropped. Cycles are not detected -> caller maps
-/// the failure to `__STRINGIFY_FAILED__` only if recursion overflows (which
-/// would actually panic); we approximate with a depth guard.
 fn human_json(val: &Value) -> Option<String> {
     human_json_depth(val, 0)
 }

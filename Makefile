@@ -387,3 +387,15 @@ scan-docs-examples:
 
 # Everything: linters/formatters + dependency audits + repo-wide scans.
 analyze: lint audit scan
+
+.PHONY: comments comments-test hooks
+comments:
+	node tools/comment-gate.cjs
+
+comments-test:
+	node --test tools/comment-gate.test.cjs
+
+hooks:
+	git config core.hooksPath .githooks
+
+test: comments

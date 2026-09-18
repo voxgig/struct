@@ -1,16 +1,3 @@
-// Test Provider (prototype) — Rust port of the CANONICAL implementation
-// (../ts/provider.ts).
-//
-// Reads the shared corpus (build/test/test.json) and hands test code clean,
-// normalized cases. It is NOT a test runner: it never calls the subject and
-// never asserts. See ../PROVIDER.md for the model and ../AGENTS.md for usage.
-//
-// DEPENDENCY-FREE: this crate has NO third-party dependencies. JSON is handled
-// by the hand-written `json` module below (a `Json` value enum + recursive
-// descent parser). The object variant is a `Vec<(String, Json)>` that preserves
-// key insertion order, so `functions()`/`groups()` return the corpus order
-// (minor first) rather than sorted keys. Regex matching is provided by the tiny
-// dependency-free `mini_regex` module.
 
 use std::fs;
 use std::path::PathBuf;
@@ -79,8 +66,6 @@ pub struct MatchResult {
     pub actual: Option<Json>,
 }
 
-// Default corpus path: build/test/test.json relative to the repo root.
-// From test/proto/rust, the repo root is three levels up.
 fn default_test_file() -> PathBuf {
     let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     p.push("..");
@@ -461,7 +446,6 @@ fn is_absent(v: &Option<Json>) -> bool {
     }
 }
 
-// "present" means a non-null value was found.
 fn is_present(v: &Option<Json>) -> bool {
     matches!(v, Some(val) if !val.is_null())
 }
@@ -526,12 +510,6 @@ fn object_get<'a>(obj: &'a [(String, Json)], key: &str) -> Option<&'a Json> {
     obj.iter().find(|(k, _)| k == key).map(|(_, v)| v)
 }
 
-// ─── minimal dependency-free JSON value + parser ───────────────────────────
-//
-// A small JSON value type and recursive-descent parser, sufficient for the
-// shared corpus. The object variant is a `Vec<(String, Json)>` so key insertion
-// order is preserved (matching serde_json's `preserve_order`), which is what
-// makes `functions()`/`groups()` return corpus order.
 mod json {
     use std::fmt;
     use std::fmt::Write as _;
@@ -930,15 +908,6 @@ mod json {
     }
 }
 
-// ─── tiny dependency-free regex matcher ────────────────────────────────────
-//
-// PROTOTYPE: regex simplified. The workspace `rust/` crate ships its own regex
-// engine; to keep this prototype self-contained with no extra dependency, this
-// is a small backtracking matcher supporting a practical subset: literals, `.`,
-// `*`, `+`, `?`, `^`, `$`, character classes `[...]` (with ranges and `^`
-// negation) and the escapes `\d \w \s \D \W \S` plus escaped metacharacters.
-// `is_match` is unanchored (searches for the pattern anywhere) unless `^`/`$`
-// anchor it. This is sufficient for the corpus's err/match regexes.
 mod mini_regex {
     #[derive(Clone)]
     enum Atom {
@@ -1126,7 +1095,6 @@ mod mini_regex {
             count += 1;
             positions.push(p);
         }
-        // positions[k] = end position after matching k repetitions.
         let mut k = count;
         loop {
             if k >= tok.min {

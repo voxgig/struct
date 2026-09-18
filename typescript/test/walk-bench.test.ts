@@ -1,8 +1,3 @@
-// Benchmark for walk() on a wide and deep tree.
-// Not run by default. To enable:
-//   WALK_BENCH=1 npm run build && WALK_BENCH=1 npm test
-// Or with pattern:
-//   WALK_BENCH=1 TEST_PATTERN=walk-bench npm run test-some
 
 import { test, describe } from 'node:test'
 
@@ -35,8 +30,6 @@ function countNodes(val: any): number {
 }
 
 function measure(label: string, tree: any, runs: number) {
-  // Touch path to simulate a minimal consumer. Using path.length keeps the
-  // work O(1) so we measure walk overhead rather than callback overhead.
   let sink = 0
   const cb = (_k: any, v: any, _p: any, path: string[]) => {
     sink += path.length
@@ -89,8 +82,6 @@ describe('walk-bench', () => {
   })
 
   test('walk-bench-very-deep', { skip: !BENCH }, () => {
-    // MAXDEPTH in walk is 32, so cap depth at 24. Width 2 keeps node count sane.
-    // width=2, depth=20 -> (2^21 - 1) = 2,097,151 nodes.
     const deep = buildTree(2, 20)
     measure('deep (w=2,d=20)', deep, 5)
   })

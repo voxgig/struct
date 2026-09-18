@@ -294,7 +294,6 @@ impl<'a> Parser<'a> {
                 && self.src[self.pos + 1] == b'P'
                 && self.src[self.pos + 2] == b'<'
             {
-                // Named group — consume name; we don't expose names but still capture.
                 self.pos += 3;
                 while self.pos < self.src.len() && self.src[self.pos] != b'>' {
                     self.pos += 1;
@@ -431,7 +430,6 @@ impl<'a> Parser<'a> {
                 // L0: SPLIT L1 L2; atom; JMP L0; L2:
                 self.code.insert(start, Insn::new(Op::Split(0, 0)));
                 self.shift_targets_after(start, 1);
-                // We've inserted one before start; compute after the atom (now end+1).
                 let after_atom = self.code.len(); // before JMP emit
                 self.emit(Op::Jmp(start as i32));
                 let exit = self.code.len();
@@ -452,7 +450,6 @@ impl<'a> Parser<'a> {
                 );
             }
             b'{' => {
-                // Emit n_lo mandatory copies (we already have one — the original atom).
                 for _ in 1..n_lo {
                     self.code_clone(start, end);
                 }
@@ -852,14 +849,6 @@ impl ThreadList {
     }
 
     fn add(&mut self, re: &Regex, input: &[u8], pc: usize, slots: &[i32], sp: usize) {
-        // Iterative epsilon-closure: we walk Jmp/Split/Save/Bol/Eol/Wb/Nwb
-        // until we hit a char-consuming op or Match. A recursive version
-        // overflows the stack on long Thompson chains (e.g. `a{0,10000}`
-        // unrolls into 10000 chained Splits — `cargo test` aborted with
-        // SIGABRT on the pathological-regex panel before this loop landed).
-        //
-        // The stack mirrors the recursive order: Split pushes y first then
-        // x, so x is processed first (priority preserved).
         let mut stack: Vec<(usize, Vec<i32>)> = vec![(pc, slots.to_vec())];
         while let Some((cur_pc, cur_slots)) = stack.pop() {
             if cur_pc >= re.code.len() {

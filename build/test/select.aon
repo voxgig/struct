@@ -1,97 +1,76 @@
 
 basic: {
   set: [
-    # Basic equality matching
     { id:'select#query', doc:true, in: { query: {age:30}, obj: {a:{name:'Alice',age:30}, b:{name:'Bob',age:25}} },
       out: [{name:'Alice',age:30,'$KEY':'a'}] }
 
-      { in: { query: {name:'Bob'}, obj: {a:{name:'Alice',age:30}, b:{name:'Bob',age:25}} }, 
+      { in: { query: {name:'Bob'}, obj: {a:{name:'Alice',age:30}, b:{name:'Bob',age:25}} },
       out: [{name:'Bob',age:25,'$KEY':'b'}] }
-    
-    # Multiple field equality
-    { in: { query: {age:30,city:'NYC'}, obj: {a:{age:30,city:'NYC'}, b:{age:30,city:'LA'}} }, 
+
+    { in: { query: {age:30,city:'NYC'}, obj: {a:{age:30,city:'NYC'}, b:{age:30,city:'LA'}} },
       out: [{age:30,city:'NYC','$KEY':'a'}] }
-    
-    # Array children
+
     { in: { query: {type:'user'},
-            obj: [{id:1,type:'user'}, {id:2,type:'admin'}, {id:3,type:'user'}] }, 
+            obj: [{id:1,type:'user'}, {id:2,type:'admin'}, {id:3,type:'user'}] },
       out: [{id:1,type:'user','$KEY':0}, {id:3,type:'user','$KEY':2}] }
-    
-    # No matches
-    { in: { query: {age:40}, obj: {a:{age:30}, b:{age:25}} }, 
+
+    { in: { query: {age:40}, obj: {a:{age:30}, b:{age:25}} },
       out: [] }
-    
-    # Empty query matches all
+
     { in: { query: {}, obj: {a:{x:1}, b:{x:2}} },
       out: [{x:1,'$KEY':'a'}, {x:2,'$KEY':'b'}] }
 
-    # Non-object input
     { in: { query: {x:1}, obj: 'hello' }, out: [] }
     { in: { query: {x:1}, obj: 42 }, out: [] }
     { in: { query: {x:1}, obj: null }, out: [] }
     { in: { query: {x:1}, obj: undefined }, out: [] }
-    
-    # Deep equality for objects
-    { in: { query: {data:{x:1,y:2}}, obj: {a:{data:{x:1,y:2}}, b:{data:{x:1,y:3}}} }, 
+
+    { in: { query: {data:{x:1,y:2}}, obj: {a:{data:{x:1,y:2}}, b:{data:{x:1,y:3}}} },
       out: [{data:{x:1,y:2},'$KEY':'a'}] }
-    
-    # Deep equality for arrays
-    { in: { query: {tags:['a','b']}, obj: {a:{tags:['a','b']}, b:{tags:['a','c']}} }, 
+
+    { in: { query: {tags:['a','b']}, obj: {a:{tags:['a','b']}, b:{tags:['a','c']}} },
       out: [{tags:['a','b'],'$KEY':'a'}] }
   ]
 }
 
 operators: {
   set: [
-    # `$AND` operator
-    { in: { query: {'`$AND`':[{age:30}, {city:'NYC'}]}, 
-            obj: {a:{age:30,city:'NYC'}, b:{age:30,city:'LA'}, c:{age:25,city:'NYC'}} }, 
+    { in: { query: {'`$AND`':[{age:30}, {city:'NYC'}]},
+            obj: {a:{age:30,city:'NYC'}, b:{age:30,city:'LA'}, c:{age:25,city:'NYC'}} },
       out: [{age:30,city:'NYC','$KEY':'a'}] }
-    
-    # `$AND` with no matches
-    { in: { query: {'`$AND`':[{age:30}, {city:'Boston'}]}, 
-            obj: {a:{age:30,city:'NYC'}, b:{age:30,city:'LA'}} }, 
+
+    { in: { query: {'`$AND`':[{age:30}, {city:'Boston'}]},
+            obj: {a:{age:30,city:'NYC'}, b:{age:30,city:'LA'}} },
       out: [] }
-    
-    # `$OR` operator
-    { in: { query: {'`$OR`':['x', 'y']}, 
-            obj: {a:'x', b:'z', c:'y'} }, 
+
+    { in: { query: {'`$OR`':['x', 'y']},
+            obj: {a:'x', b:'z', c:'y'} },
       out: ['x', 'y'] }
 
 
-    # TODO: review
-   
-    # { in: { query: {'$KEY':{'`$OR`':['b', 'c']}}, 
-    #         obj: {a:'x', b:'z', c:'y'} }, 
-    #   out: ['z', 'y'] }
 
-    # { in: { query: {'`$OR`':[{'$KEY':'b'}, {'$KEY':'c'}]}, 
-    #         obj: {a:'x', b:'z', c:'y'} }, 
-    #   out: ['z', 'y'] }
 
-      
-    { in: { query: {'`$OR`':[{age:25}, {age:35}]}, 
-            obj: {a:{age:30}, b:{age:25}, c:{age:35}} }, 
+
+
+    { in: { query: {'`$OR`':[{age:25}, {age:35}]},
+            obj: {a:{age:30}, b:{age:25}, c:{age:35}} },
       out: [{age:25,'$KEY':'b'}, {age:35,'$KEY':'c'}] }
-    
-    # `$OR` with all matches
-    { in: { query: {'`$OR`':[{type:'user'}, {type:'admin'}]}, 
-            obj: [{type:'user'}, {type:'admin'}, {type:'guest'}] }, 
+
+    { in: { query: {'`$OR`':[{type:'user'}, {type:'admin'}]},
+            obj: [{type:'user'}, {type:'admin'}, {type:'guest'}] },
       out: [{type:'user','$KEY':0}, {type:'admin','$KEY':1}] }
-    
-    # Nested `$AND` within `$OR`
-    { in: { query: {'`$OR`':[{'`$AND`':[{role:'user'}, {active:true}]}, {'`$AND`':[{role:'admin'}, {age:30}]}]}, 
-            obj: {a:{role:'admin',age:30,active:true}, b:{role:'user',age:25,active:true}, 
-                  c:{role:'user',age:30,active:false}, d:{role:'admin',age:30,active:false}} }, 
-      out: [{role:'admin',age:30,active:true,'$KEY':'a'}, {role:'user',age:25,active:true,'$KEY':'b'}, 
+
+    { in: { query: {'`$OR`':[{'`$AND`':[{role:'user'}, {active:true}]}, {'`$AND`':[{role:'admin'}, {age:30}]}]},
+            obj: {a:{role:'admin',age:30,active:true}, b:{role:'user',age:25,active:true},
+                  c:{role:'user',age:30,active:false}, d:{role:'admin',age:30,active:false}} },
+      out: [{role:'admin',age:30,active:true,'$KEY':'a'}, {role:'user',age:25,active:true,'$KEY':'b'},
             {role:'admin',age:30,active:false,'$KEY':'d'}] }
-    
-    # Complex nested operators
-    { in: { query: {'`$AND`':[{'`$OR`':[{status:'active'}, {status:'pending'}]}, {priority:'high'}]}, 
-            obj: {a:{status:'active',priority:'high'}, b:{status:'active',priority:'low'}, 
-                  c:{status:'pending',priority:'high'}, d:{status:'done',priority:'high'}} }, 
+
+    { in: { query: {'`$AND`':[{'`$OR`':[{status:'active'}, {status:'pending'}]}, {priority:'high'}]},
+            obj: {a:{status:'active',priority:'high'}, b:{status:'active',priority:'low'},
+                  c:{status:'pending',priority:'high'}, d:{status:'done',priority:'high'}} },
       out: [{status:'active',priority:'high','$KEY':'a'}, {status:'pending',priority:'high','$KEY':'c'}] }
-    
+
     # Empty `$AND` array (should match all)
     { in: { query: {'`$AND`':[]}, obj: {a:{x:1}, b:{x:2}} },
       out: [{x:1,'$KEY':'a'}, {x:2,'$KEY':'b'}] }
@@ -189,25 +168,25 @@ operators: {
       out: [{x:1,'$KEY':0},{x:2,'$KEY':1}] }
 
 
-    { in: { query: {a:{'`$GT`':10}}, obj: [{a:9},{a:10},{a:11},{a:12}] }, 
+    { in: { query: {a:{'`$GT`':10}}, obj: [{a:9},{a:10},{a:11},{a:12}] },
       out: [{a:11,'$KEY':2},{a:12,'$KEY':3}] }
 
-    { in: { query: {a:{'`$GTE`':10}}, obj: [{a:9},{a:10},{a:11},{a:12}] }, 
+    { in: { query: {a:{'`$GTE`':10}}, obj: [{a:9},{a:10},{a:11},{a:12}] },
       out: [{a:10,'$KEY':1},{a:11,'$KEY':2},{a:12,'$KEY':3}] }
 
-      
-    { in: { query: {b:{'`$LT`':10}}, obj: [{b:9},{b:10},{b:11},{b:12}] }, 
+
+    { in: { query: {b:{'`$LT`':10}}, obj: [{b:9},{b:10},{b:11},{b:12}] },
       out: [{b:9,'$KEY':0}] }
 
-    { in: { query: {b:{'`$LTE`':10}}, obj: [{b:9},{b:10},{b:11},{b:12}] }, 
+    { in: { query: {b:{'`$LTE`':10}}, obj: [{b:9},{b:10},{b:11},{b:12}] },
       out: [{b:9,'$KEY':0},{b:10,'$KEY':1}] }
 
-      
-    { in: { query: {a:b:'`$LT`':10}, obj: [{a:b:9},{a:b:10},{a:b:11},{a:b:12}] }, 
+
+    { in: { query: {a:b:'`$LT`':10}, obj: [{a:b:9},{a:b:10},{a:b:11},{a:b:12}] },
       out: [{a:b:9,'$KEY':0}] }
 
-           
-    { in: { query: {x:{y:20}}, obj: [{x:{y:20,z:220}},{x:{y:21,z:221}}] }, 
+
+    { in: { query: {x:{y:20}}, obj: [{x:{y:20,z:220}},{x:{y:21,z:221}}] },
       out: [{x:{y:20,z:220},'$KEY':0}] }
 
     { in: { query: {s0:'`$LIKE`':'[aA][bB][cC]'}, obj: [{s0:'DEf'},{s0:'ABc'}] },
@@ -221,67 +200,51 @@ operators: {
     { in: { query: {s:'`$LIKE`':'hello'}, obj: [{s:'say hello world'},{s:'goodbye'}] },
       out: [{s:'say hello world','$KEY':0}] }
 
-    # Anchored at start.
     { in: { query: {s:'`$LIKE`':'^cat'}, obj: [{s:'cat sat'},{s:'a cat'}] },
       out: [{s:'cat sat','$KEY':0}] }
 
-    # Anchored at end.
     { in: { query: {s:'`$LIKE`':'end$'}, obj: [{s:'the end'},{s:'ended here'}] },
       out: [{s:'the end','$KEY':0}] }
 
-    # Both anchors — exact match.
     { in: { query: {s:'`$LIKE`':'^abc$'}, obj: [{s:'abc'},{s:'abcd'},{s:'xabc'}] },
       out: [{s:'abc','$KEY':0}] }
 
-    # `.` matches any single char.
     { in: { query: {s:'`$LIKE`':'^a.c$'}, obj: [{s:'abc'},{s:'aXc'},{s:'ac'}] },
       out: [{s:'abc','$KEY':0},{s:'aXc','$KEY':1}] }
 
-    # `*` zero-or-more (greedy).
     { in: { query: {s:'`$LIKE`':'^ab*c$'}, obj: [{s:'ac'},{s:'abc'},{s:'abbbc'},{s:'abdc'}] },
       out: [{s:'ac','$KEY':0},{s:'abc','$KEY':1},{s:'abbbc','$KEY':2}] }
 
-    # `+` one-or-more.
     { in: { query: {s:'`$LIKE`':'^ab+c$'}, obj: [{s:'ac'},{s:'abc'},{s:'abbbc'}] },
       out: [{s:'abc','$KEY':1},{s:'abbbc','$KEY':2}] }
 
-    # `?` zero-or-one.
     { in: { query: {s:'`$LIKE`':'^colou?r$'}, obj: [{s:'color'},{s:'colour'},{s:'colouur'}] },
       out: [{s:'color','$KEY':0},{s:'colour','$KEY':1}] }
 
-    # Bounded quantifier {n}.
     { in: { query: {s:'`$LIKE`':'^a{3}$'}, obj: [{s:'aa'},{s:'aaa'},{s:'aaaa'}] },
       out: [{s:'aaa','$KEY':1}] }
 
-    # Bounded range {n,m}.
     { in: { query: {s:'`$LIKE`':'^a{2,4}$'}, obj: [{s:'a'},{s:'aa'},{s:'aaa'},{s:'aaaa'},{s:'aaaaa'}] },
       out: [{s:'aa','$KEY':1},{s:'aaa','$KEY':2},{s:'aaaa','$KEY':3}] }
 
-    # Open-ended {n,}.
     { in: { query: {s:'`$LIKE`':'^a{2,}$'}, obj: [{s:'a'},{s:'aa'},{s:'aaa'}] },
       out: [{s:'aa','$KEY':1},{s:'aaa','$KEY':2}] }
 
-    # Character class — positive.
     { in: { query: {s:'`$LIKE`':'^[abc]$'}, obj: [{s:'a'},{s:'b'},{s:'c'},{s:'d'}] },
       out: [{s:'a','$KEY':0},{s:'b','$KEY':1},{s:'c','$KEY':2}] }
 
-    # Character class — negative.
     { in: { query: {s:'`$LIKE`':'^[^xyz]$'}, obj: [{s:'a'},{s:'x'},{s:'y'}] },
       out: [{s:'a','$KEY':0}] }
 
-    # Character range.
     { in: { query: {s:'`$LIKE`':'^[0-9]+$'}, obj: [{s:'123'},{s:'12a'},{s:''}] },
       out: [{s:'123','$KEY':0}] }
 
-    # Predefined class \d.
     { in: { query: {s:'`$LIKE`':'^\\d{3}$'}, obj: [{s:'123'},{s:'12'},{s:'abc'}] },
       out: [{s:'123','$KEY':0}] }
 
-    # Predefined class \w.
     { in: { query: {s:'`$LIKE`':'^\\w+$'}, obj: [{s:'abc_123'},{s:'hi there'}] },
       out: [{s:'abc_123','$KEY':0}] }
 
-    # Predefined class \s.
     { in: { query: {s:'`$LIKE`':'^a\\sb$'}, obj: [{s:'a b'},{s:'a\tb'},{s:'ab'}] },
       out: [{s:'a b','$KEY':0},{s:'a\tb','$KEY':1}] }
 
@@ -289,7 +252,6 @@ operators: {
     { in: { query: {s:'`$LIKE`':'^\\D+$'}, obj: [{s:'abc'},{s:'a1'}] },
       out: [{s:'abc','$KEY':0}] }
 
-    # Alternation.
     { in: { query: {s:'`$LIKE`':'^(cat|dog)$'}, obj: [{s:'cat'},{s:'dog'},{s:'fish'}] },
       out: [{s:'cat','$KEY':0},{s:'dog','$KEY':1}] }
 
@@ -297,11 +259,9 @@ operators: {
     { in: { query: {s:'`$LIKE`':'^(?:ab|cd)+$'}, obj: [{s:'ab'},{s:'abcd'},{s:'abcdab'},{s:'abc'}] },
       out: [{s:'ab','$KEY':0},{s:'abcd','$KEY':1},{s:'abcdab','$KEY':2}] }
 
-    # Capturing group used implicitly (engine still matches; we don't expose captures via $LIKE).
     { in: { query: {s:'`$LIKE`':'^a(bc)+d$'}, obj: [{s:'abcd'},{s:'abcbcd'},{s:'ad'}] },
       out: [{s:'abcd','$KEY':0},{s:'abcbcd','$KEY':1}] }
 
-    # Word boundary.
     { in: { query: {s:'`$LIKE`':'\\bword\\b'}, obj: [{s:'a word here'},{s:'sword'},{s:'word!'}] },
       out: [{s:'a word here','$KEY':0},{s:'word!','$KEY':2}] }
 
@@ -318,71 +278,64 @@ operators: {
     { in: { query: {'`$NOT`':10}, obj: [9,10,11] },
       out: [9,11] }
 
-    { in: { query: {'`$NOT`':{n0:'x'}}, obj: [{n0:x},{n0:y},{n0:z}] }, 
+    { in: { query: {'`$NOT`':{n0:'x'}}, obj: [{n0:x},{n0:y},{n0:z}] },
       out: [{n0:y,'$KEY':1},{n0:z,'$KEY':2}] }
 
     { in: { query: {'`$NOT`':{'`$OR`':[{x:1},{y:2}]}},
-            obj: [{x:1,y:3},{x:2,y:2},{x:3,y:1}] }, 
+            obj: [{x:1,y:3},{x:2,y:2},{x:3,y:1}] },
       out: [{x:3,y:1,'$KEY':2}] }
-      
+
   ]
 }
 
 edge: {
   set: [
     # Mixed equality and operators
-    { in: { query: {type:'user', '`$OR`':[{status:'active'}, {admin:true}]}, 
-            obj: [{type:'user',status:'active'}, {type:'user',status:'inactive',admin:true}, 
-                  {type:'guest',status:'active'}] }, 
+    { in: { query: {type:'user', '`$OR`':[{status:'active'}, {admin:true}]},
+            obj: [{type:'user',status:'active'}, {type:'user',status:'inactive',admin:true},
+                  {type:'guest',status:'active'}] },
       out: [{type:'user',status:'active','$KEY':0}, {type:'user',status:'inactive',admin:true,'$KEY':1}] }
-    
-    
-    { in: { query: {value:q}, obj: {a:{value:q}, b:{value:p},c:{}} }, 
+
+
+    { in: { query: {value:q}, obj: {a:{value:q}, b:{value:p},c:{}} },
       out: [{value:q,'$KEY':'a'}] }
 
-    { in: { query: {value:null}, obj: {a:{value:null}, b:{value:0}, c:{}} }, 
+    { in: { query: {value:null}, obj: {a:{value:null}, b:{value:0}, c:{}} },
       out: [{value:null,'$KEY':'a'}] }
-    
-    { in: { query: {active:true}, obj: {a:{active:true}, b:{active:false}, c:{active:1}} }, 
+
+    { in: { query: {active:true}, obj: {a:{active:true}, b:{active:false}, c:{active:1}} },
       out: [{active:true,'$KEY':'a'}] }
-    
+
     # Number comparison (exact match)
-    { in: { query: {count:0}, obj: {a:{count:0}, b:{count:false}, c:{count:'0'}} }, 
+    { in: { query: {count:0}, obj: {a:{count:0}, b:{count:false}, c:{count:'0'}} },
       out: [{count:0,'$KEY':'a'}] }
 
-      
-    { in: { query: {'`$OR`':[{a:1},{a:2}]}, obj: [{a:0}, {a:1}, {a:2}, {a:3}] }, 
+
+    { in: { query: {'`$OR`':[{a:1},{a:2}]}, obj: [{a:0}, {a:1}, {a:2}, {a:3}] },
       out: [{a:1,'$KEY':1}, {a:2,'$KEY':2}] }
 
-    { in: { query: {a:{'`$OR`':[10,20]}}, obj: [{a:0}, {a:10}, {a:20}, {a:30}] }, 
+    { in: { query: {a:{'`$OR`':[10,20]}}, obj: [{a:0}, {a:10}, {a:20}, {a:30}] },
       out: [{a:10,'$KEY':1}, {a:20,'$KEY':2}] }
 
     { in: { query: {a2:{'`$OR`':[{b2:1},{b2:2}]}},
-            obj: [{a2:{b2:0}}, {a2:{b2:1}}, {a2:{b2:2}}, {a2:{b2:3}}] }, 
+            obj: [{a2:{b2:0}}, {a2:{b2:1}}, {a2:{b2:2}}, {a2:{b2:3}}] },
       out: [{a2:{b2:1},'$KEY':1}, {a2:{b2:2},'$KEY':2}] }
 
-    { in: { query: {'`$OR`':[{a3:{'`$OR`':[1]}}]}, obj: [{a3:0}, {a3:1}, {a3:2}] }, 
+    { in: { query: {'`$OR`':[{a3:{'`$OR`':[1]}}]}, obj: [{a3:0}, {a3:1}, {a3:2}] },
       out: [{a3:1,'$KEY':1}] }
 
 
     { in: { query: {c0:{'`$AND`':[{x:1},{y:2}]}},
-            obj: [{c0:{x:1,y:3,z:0}}, {c0:{x:1,y:2,z:1}}] }, 
+            obj: [{c0:{x:1,y:3,z:0}}, {c0:{x:1,y:2,z:1}}] },
       out: [{c0:{x:1,y:2,z:1},'$KEY':1}] }
 
     { in: { query: {c0:{'`$AND`':[{x:1},{y:{'`$OR`':[2,3]}}]}},
-            obj: [{c0:{x:1,y:3,z:0}}, {c0:{x:1,y:2,z:1}}, {c0:{x:1,y:1,z:2}}] }, 
-      out: [{c0:{x:1,y:3,z:0},'$KEY':0}, {c0:{x:1,y:2,z:1},'$KEY':1}] }     
+            obj: [{c0:{x:1,y:3,z:0}}, {c0:{x:1,y:2,z:1}}, {c0:{x:1,y:1,z:2}}] },
+      out: [{c0:{x:1,y:3,z:0},'$KEY':0}, {c0:{x:1,y:2,z:1},'$KEY':1}] }
   ]
 }
 
 
-# path alternates selection
-# NOTES FOR SDK:
-#  build query by union of all select keys, getting values from operation spec, match
-#  need a deterministic sort of alts so multiple selects (should not happen) have at least
-#    a stable list of returned alts order. also $path as get out of jail
-#      normalize: /a/{x}/b/ -> path$:'/a/{}/b'
-#  if no alt found, use select to indicate missing select options
 alts: {
   data: obj0: [
     { select:foo_id:true, x:1 }
@@ -400,7 +353,7 @@ alts: {
     { select:{'$action':foo,zed_id:true}, x:31 }
     { select:{'$action':bar,zed_id:true}, x:32 }
   ]
-  
+
   set: [
     { in: { query: select: {
               foo_id:true  # boolean true means value exists (incl. JSON null)
@@ -425,17 +378,15 @@ alts: {
              obj: $.struct.select.alts.data.obj2 }
        out: [{ '$KEY': 0, select: { query:q0:v0 }, x: 21} ]
      }
-     
+
      { in: { query: select: { '$action':bar, zed_id:true }
              obj: $.struct.select.alts.data.obj3 }
        out: [{ '$KEY': 1, select: {'$action':bar,zed_id:true}, x: 32} ]
      }
 
-     # empty query matches all
      { in: { query: {}, obj: {a:{x:1},b:{x:2}} },
        out: [{x:1,'$KEY':a},{x:2,'$KEY':b}] }
 
-     # query with no matches
      { in: { query: {z:99}, obj: {a:{x:1},b:{x:2}} },
        out: [] }
 
@@ -443,19 +394,12 @@ alts: {
 }
 
 
-# select over records with a PRESENT-BUT-NULL field. Run by each port with the
-# runner's `null: false` flag, so the JSON `null` reaches select as an ACTUAL
-# null (not the "__NULL__" marker) — that is what exercises the present-null
-# defect. A value-based `haskey` / `_lookup == null` port drops `b` under the
-# open match; canonical keeps it (literal presence, `NONE === _lookup`).
-# See design/SELECT_NULL_KEY_BACKPORT.md.
 nullkey: {
   set: [
     # empty `$AND` open match — the null slot must not make `b`'s key unexpected
     { in: { query: {'`$AND`':[]}, obj: {a:{opt:'x'}, b:{opt:null}} },
       out: [{opt:'x','$KEY':'a'}, {opt:null,'$KEY':'b'}] }
 
-    # empty query open match
     { in: { query: {}, obj: {a:{opt:'x'}, b:{opt:null}} },
       out: [{opt:'x','$KEY':'a'}, {opt:null,'$KEY':'b'}] }
   ]

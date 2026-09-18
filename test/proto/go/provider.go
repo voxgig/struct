@@ -1,12 +1,3 @@
-// Test Provider (prototype) — Go port of the canonical TypeScript
-// implementation (../ts/provider.ts).
-//
-// Reads the shared corpus (build/test/test.json) and hands test code clean,
-// normalized cases. It is NOT a test runner: it never calls the subject and
-// never asserts. See ../PROVIDER.md for the model and ../AGENTS.md for usage.
-//
-// Zero runtime dependencies (Go standard library only), matching repo policy.
-
 package provider
 
 import (

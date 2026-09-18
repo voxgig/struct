@@ -199,8 +199,6 @@ func TestStruct(t *testing.T) {
 				path := m["path"]
 				from, hasFrom := m["from"]
 
-				// NOTE: JSON null is not really nil, so special handling needed since
-				// the JSON parser does give us nil for null!
 				if "__NULL__" == path {
 					path = nil
 				}
@@ -635,15 +633,6 @@ func TestStruct(t *testing.T) {
 		})
 	})
 
-	// sentinels tests
-	// ===============
-	//
-	// Group A null-unification readers (getprop, getelem, haskey, isempty,
-	// isnode) treat a stored JSON null as "no value"; stringify (Group B)
-	// preserves null as a real value. Dispatched with null:false so the
-	// bare/nested JSON nulls survive fixJSON as Go nil rather than being
-	// rewritten to the "__NULL__" sentinel. Mirrors perl/t/struct.t.
-
 	t.Run("sentinels-getprop_unify", func(t *testing.T) {
 		runsetFlags(t, sentinelsSpec["getprop_unify"], map[string]bool{"null": false}, func(v any) any {
 			m := v.(map[string]any)
@@ -713,10 +702,6 @@ func TestStruct(t *testing.T) {
 			} else {
 				ks = *k
 			}
-			// At the root the parent is the canonical undefined (no parent).
-			// Go conflates undefined with JSON null, so render the absent
-			// root parent as "" to mirror the canonical stringify(undefined),
-			// while Stringify(nil) itself yields "null" per the corpus.
 			ps := ""
 			if nil != p {
 				ps = voxgigstruct.Stringify(p)
@@ -1349,7 +1334,7 @@ func TestStruct(t *testing.T) {
 	})
 
 	t.Run("validate-custom", func(t *testing.T) {
-		errs := voxgigstruct.ListRefCreate[any]() // make([]any,0)
+		errs := voxgigstruct.ListRefCreate[any]()
 
 		integerCheck := voxgigstruct.Injector(func(
 			inj *voxgigstruct.Injection,

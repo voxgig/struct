@@ -1,14 +1,3 @@
-// Corpus bindings - drives the shared JSON test corpus
-// (../build/test/test.json) against the Rust port.
-//
-// The RUNNER is voxgig/omni; the bridge to it is in `tests/omni.rs`. This
-// file is only the bindings: which group runs against which function, with
-// which `null` flag. Groups and flags mirror
-// `javascript/test/struct.test.js`, which is canonical.
-//
-// (The note that once stood here - "inject / transform / validate / select
-// are staged" - had been stale for some time: all four were wired, and 1356
-// entries over 71 groups were running.)
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -50,9 +39,6 @@ fn as_str_opt(v: &Value) -> Option<String> {
     }
 }
 
-// fixJSON: deep-replace JSON null (and undefined) with NULLMARK (when
-// null_flag). Matches `JSON.parse(JSON.stringify(val, replacer))` with the
-// null->NULLMARK replacer used by ts/test/runner.ts.
 fn fix_json(v: &Value, null_flag: bool) -> Value {
     match v {
         Value::Null | Value::Noval => {
@@ -371,7 +357,6 @@ fn corpus() {
         };
         walk(vin, Some(&mut walkpath), None, None)
     });
-    // walk.log — three runs (after-only / before-only / both) of a logging callback.
     {
         let log_spec = omni::tostruct(&s.get("walk").get("log"));
         let input = clone(&vget(&log_spec, "in"));
@@ -751,9 +736,6 @@ fn corpus() {
         );
     }
 
-    // -------- primary / SDK ------------------------------------------
-    // A tiny mock SDK (mirrors ts/test/sdk.ts): check(ctx) ->
-    //   { zed: 'ZED' + (opts.foo ?? '') + '_' + (ctx.meta?.bar ?? '0') }
     fn sdk_check(opts: &Value, ctx: &Value) -> Value {
         let foo = get_prop(opts, &Value::str("foo"), Value::Noval);
         let foo_s = if foo.is_nullish() {
@@ -770,8 +752,6 @@ fn corpus() {
         Value::map_of([("zed".to_string(), Value::str(format!("ZED{foo_s}_{bar_s}")))])
     }
     {
-        // The client group. omni resolves `DEF.client` and mints the
-        // sub-client; this port used to do both by hand, right here.
         let mut checkrun = Run::check(Rc::new(sdk_check));
         let basic = checkrun.spec.get("basic");
         checkrun.run_set_named(&basic, true, "check-basic");
@@ -796,8 +776,6 @@ fn corpus() {
     eprintln!("corpus: {} checks passed", run.passed);
 }
 
-// Function values embedded in data: `get_elem` with a callable `alt`, and
-// `$APPLY` / a user `$FORMAT` formatter — see rs/README.md "Function values".
 #[test]
 fn function_values() {
     // get_elem: absent element + callable alt -> alt is invoked

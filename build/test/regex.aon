@@ -1,18 +1,3 @@
-# Regex parity validation for the uniform re_* API (see design/REGEX_API.md).
-#
-# DECISION: the Go stdlib `regexp` (RE2) behaviour is the minimum regexp
-# functionality every port must provide for re_test / re_find / re_find_all /
-# re_replace / re_escape. Expected values below were generated with Go and
-# cross-checked against the canonical TS (JS RegExp).
-#
-# Portability constraints (the cases stay inside the intersection of Go RE2,
-# ECMAScript, PCRE, java.util.regex, .NET, ICU and the in-tree engines):
-# - patterns use only the RE2 subset of design/REGEX.md, without named groups
-#   (C++ std::regex has no (?P<name>...)) and without empty-width matches;
-# - every capturing group in a case participates in the match (engines differ
-#   on unmatched-group representation);
-# - replacement strings use only literals and $1..$9 references ($& is not
-#   portable: Go writes the whole match as $0, JS as $&).
 
 test: {
   set: [
