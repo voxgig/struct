@@ -252,6 +252,14 @@ one: {
     { in: { data: {a:{a:1}}, spec: {a:['`$ONE`','`$MAP`']} }, out: {a:{a:1}} }
     { in: { data: {a:{a:'s'}}, spec: {a:['`$ONE`','`$MAP`','`$LIST`']} },
       out: {a:{a:'s'}} }
+
+    # A $ONE nested inside a $ONE alternative, matching containers: the walker
+    # must not re-read a slot the inner $ONE has consumed.
+    { in: { data: {s:{active:true, providers:[{kind:'env'}]}},
+            spec: {'`$OPEN`':true, s:['`$ONE`',
+              {'`$OPEN`':true, active:['`$ONE`','`$BOOLEAN`','`$NIL`'],
+                providers:['`$ONE`','`$LIST`','`$NIL`']}, '`$NIL`']} },
+      out: {s:{active:true, providers:[{kind:'env'}]}} }
   ]
 }
 

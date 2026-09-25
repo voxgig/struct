@@ -2466,7 +2466,9 @@ sub validate_ONE {
                 meta  => $inj->{meta},
             });
             _inj_setval($inj, $vcurrent, -2);
-            return if size($terrs) == 0;
+            # SKIP: the alternative validated this subtree, so the walker must
+            # not run its generic pass over a slot $ONE has consumed.
+            return SKIP() if size($terrs) == 0;
         }
         my $valdesc = CORE::join(', ', map { stringify($_) } @$tvals);
         $valdesc =~ s/`\$([A-Z]+)`/lc($1)/ge;
@@ -2571,6 +2573,10 @@ sub _validation {
     }
     if (ismap($cval)) {
         if (!ismap($pval)) {
+            warn "[V0020] key=" . (defined $key ? $key : 'undef')
+              . " parent=" . stringify($parent)
+              . " pval=" . (defined $pval ? stringify($pval) : 'undef')
+              . " path=@{$inj->{path}}\n" if $ENV{STRUCT_TRACE};
             push @{ $inj->{errs} },
                 _invalid_type_msg($inj->{path}, typename($ptype), $ctype, $cval, 'V0020');
             return;

@@ -19399,6 +19399,50 @@
                 "a": "s"
               }
             }
+          },
+          {
+            "in": {
+              "data": {
+                "s": {
+                  "active": true,
+                  "providers": [
+                    {
+                      "kind": "env"
+                    }
+                  ]
+                }
+              },
+              "spec": {
+                "`$OPEN`": true,
+                "s": [
+                  "`$ONE`",
+                  {
+                    "`$OPEN`": true,
+                    "active": [
+                      "`$ONE`",
+                      "`$BOOLEAN`",
+                      "`$NIL`"
+                    ],
+                    "providers": [
+                      "`$ONE`",
+                      "`$LIST`",
+                      "`$NIL`"
+                    ]
+                  },
+                  "`$NIL`"
+                ]
+              }
+            },
+            "out": {
+              "s": {
+                "active": true,
+                "providers": [
+                  {
+                    "kind": "env"
+                  }
+                ]
+              }
+            }
           }
         ]
       },
