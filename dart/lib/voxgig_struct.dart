@@ -2026,7 +2026,6 @@ dynamic _validateOne(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
   inj.keyi = size(inj.keys);
   _injSetval(inj, inj.dparent, 2);
   inj.path = slice(inj.path, 0, size(inj.path) - 1);
-  inj.key = getelem(inj.path, -1);
   var tvals = slice(parent, 1);
   if (size(tvals) == 0) {
     _pushErr(

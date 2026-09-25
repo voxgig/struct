@@ -3089,7 +3089,6 @@ def vg-v-one fn [[inj:Any val:Any iref:Any store:Any] [Any] [
       (inj set "keyi" (vgz (inj get "keys"))) drop
       (vgi-inj-setval inj (inj get "dparent") 2) drop
       (inj set "path" (vg-slice (inj get "path") -1 vg-noarg vg-noarg)) drop
-      (inj set "key" (vg-getelem (inj get "path") -1 vg-noarg)) drop
       def tvals (vg-slice parent 1 vg-noarg vg-noarg)
       if ((vgz tvals) eq 0) [
         (append [(StringUtil.concat ["The $ONE validator at field " (vg-pathify (inj get "path") 1 1) " must have at least one argument."])] (inj get "errs")) drop

@@ -3710,20 +3710,18 @@ func init_validate_ONE() {
 				return nil
 			}
 
-			// Get grandparent and grandkey to replace the structure
-			grandparent := inj.Nodes.List[len(inj.Nodes.List)-2]
-			grandkey := inj.Path.List[len(inj.Path.List)-2]
+			// setval, not a hand-held grandparent: setval DELETES on a nil
+			// value where SetProp keeps one, so an optional entry the caller
+			// omitted came back materialised.
+			inj.setval(inj.Dparent, 2)
 
-			// Clean up structure by replacing [$ONE, ...] with current value
-			SetProp(grandparent, grandkey, inj.Dparent)
-			inj.Parent = inj.Dparent
-
-			// Adjust the path
+			// Path shortens for the message only: `modify` reads
+			// getprop(inj.Parent, inj.Key), and inj.Parent is still this list.
 			inj.Path.List = inj.Path.List[:len(inj.Path.List)-1]
-			inj.Key = inj.Path.List[len(inj.Path.List)-1]
 
-			// The shape alternatives are everything after the first element.
-			tvals := parentSlice[1:] // alt0, alt1, ...
+			// COPY, not a view: setval below rewrites the node this slice
+			// aliases, which rewrote the alternatives the error message reports.
+			tvals := append([]any(nil), parentSlice[1:]...) // alt0, alt1, ...
 
 			if len(tvals) == 0 {
 				inj.Errs.Append("The $ONE validator at field " +
@@ -3744,8 +3742,7 @@ func init_validate_ONE() {
 				// Attempt validation of data with shape `tval`
 				vcurrent, err := Validate(inj.Dparent, tval, &Injection{Extra: vstore, Errs: terrs})
 
-				// Update the value in the grandparent
-				SetProp(grandparent, grandkey, vcurrent)
+				inj.setval(vcurrent, -2)
 
 				if err == nil && len(terrs.List) == 0 {
 					return nil

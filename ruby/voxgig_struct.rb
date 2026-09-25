@@ -1825,9 +1825,17 @@ module VoxgigStruct
     end
 
     inj.keyI = size(inj.keys)
-    inj.setval(inj.dparent, 2)
+
+    # DELETE the node when the data has no value there, as ts does: setval's
+    # nil-with-ancestor case preserves the key, so an optional entry the
+    # caller omitted came back as a nil-valued key rather than staying absent.
+    if inj.dparent.nil?
+      delprop(getelem(inj.nodes, -2), getelem(inj.path, -2))
+    else
+      inj.setval(inj.dparent, 2)
+    end
+
     inj.path = inj.path[0...-1]
-    inj.key = getelem(inj.path, -1)
 
     tvals = parent[1..]
     if size(tvals).zero?

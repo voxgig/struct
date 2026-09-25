@@ -1590,7 +1590,6 @@ object struct {
         inj.keyi = size(inj.keys)
         injSetval(inj, inj.dparent, 2)
         inj.path = slice(inj.path, VNum(0.0), VNum((size(inj.path) - 1).toDouble))
-        inj.key = getelem(inj.path, VNum(-1.0))
         val tvals = slice(parent, VNum(1.0))
         if (size(tvals) == 0) { pushErr(inj, "The $ONE validator at field " + pathify(inj.path, VNum(1.0), VNum(1.0)) + " must have at least one argument."); Noval }
         else {

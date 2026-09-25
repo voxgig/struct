@@ -1324,9 +1324,6 @@ static voxgig_value* va_ONE(voxgig_injection* inj, voxgig_value* val, const char
     free(inj->path.data[inj->path.len - 1]);
     inj->path.len--;
   }
-  free(inj->key);
-  inj->key = inj->path.len > 0 ? xstrdup_t(inj->path.data[inj->path.len - 1]) : xstrdup_t("");
-
   voxgig_list* pl = voxgig_as_list(inj->parent);
   voxgig_value* tvals = voxgig_new_list();
   for (size_t i = 1; i < pl->len; i++)

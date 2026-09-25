@@ -2040,7 +2040,6 @@ validateOne inj _ _ store = do
       keys <- readIORef (iKeys inj); ksz <- size keys; writeIORef (iKeyi inj) ksz
       dp <- readIORef (iDparent inj); _ <- injSetval 2 inj dp
       path <- readIORef (iPath inj); psz <- size path; sl <- sliceM path (VNum 0) (VNum (fromIntegral (psz - 1))) False; writeIORef (iPath inj) sl
-      np <- readIORef (iPath inj); nk <- getelem np (VNum (-1)); writeIORef (iKey inj) nk
       tvals <- sliceM parent (VNum 1) VNoval False
       tsz <- size tvals
       if tsz == 0 then do path2 <- readIORef (iPath inj); p <- pathifyFull path2 (VNum 1) (VNum 1) False; pushErr inj ("The $ONE validator at field " ++ p ++ " must have at least one argument."); return VNoval

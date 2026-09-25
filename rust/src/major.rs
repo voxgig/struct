@@ -2052,7 +2052,6 @@ fn validate_one(inj: &Inj, _v: &Value, _r: &str, store: &Value) -> Value {
         let mut b = inj.borrow_mut();
         let n = b.path.len();
         b.path.truncate(n.saturating_sub(1));
-        b.key = b.path.last().cloned().unwrap_or_default();
     }
     let path_after = inj.borrow().path.clone();
     let meta = inj.borrow().meta.clone();

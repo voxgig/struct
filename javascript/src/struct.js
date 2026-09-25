@@ -1711,7 +1711,6 @@ const validate_ONE = (inj, _val, _ref, store) => {
     // Clean up structure, replacing [$ONE, ...] with current
     inj.setval(inj.dparent, 2)
     inj.path = slice(inj.path, -1)
-    inj.key = getelem(inj.path, -1)
     let tvals = slice(parent, 1)
     if (0 === size(tvals)) {
       inj.errs.push(

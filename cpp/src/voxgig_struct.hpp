@@ -2819,7 +2819,6 @@ inline Value ONE_FN(Injection& inj, const Value& val, const std::string& ref, co
   inj.setval(inj.dparent, 2);
   if (!inj.path.empty())
     inj.path.pop_back();
-  inj.key = inj.path.empty() ? "" : inj.path.back();
 
   std::vector<Value> tvals;
   if (inj.parent.is_list()) {

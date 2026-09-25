@@ -1474,7 +1474,6 @@
           (is! inj :keyI (size (ig inj :keys)))
           (inj-setval inj (ig inj :dparent) 2)
           (is! inj :path (slice (ig inj :path) 0 (dec (size (ig inj :path)))))
-          (is! inj :key (getelem (ig inj :path) -1))
           (let [tvals (alist-of (subvec (vec parent) 1))]
             (if (= (size tvals) 0)
               (do (.add ^List (ig inj :errs) (str "The $ONE validator at field " (pathify (ig inj :path) 1 1) " must have at least one argument.")) nil)

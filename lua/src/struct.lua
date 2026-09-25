@@ -2863,7 +2863,6 @@ local function validate_ONE(inj, _val, _ref, store)
     inj:setval(inj.dparent, 2)
 
     inj.path = slice(inj.path, 0, -1)
-    inj.key = getelem(inj.path, -1)
 
     local tvals = slice(parent, 1)
     if 0 == size(tvals) then

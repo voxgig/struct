@@ -244,6 +244,14 @@ one: {
 
     { in: { data: {}, spec: {a:['`$ONE`','`$MAP`','`$LIST`']} },
       err: 'Expected field a to be one of map, list, but found no value.' }
+
+    # A data key repeating its own shape key must not resolve back to the
+    # consumed $ONE slot.
+    { in: { data: {a:{a:{x:1}}}, spec: {a:['`$ONE`','`$MAP`','`$NIL`']} },
+      out: {a:{a:{x:1}}} }
+    { in: { data: {a:{a:1}}, spec: {a:['`$ONE`','`$MAP`']} }, out: {a:{a:1}} }
+    { in: { data: {a:{a:'s'}}, spec: {a:['`$ONE`','`$MAP`','`$LIST`']} },
+      out: {a:{a:'s'}} }
   ]
 }
 

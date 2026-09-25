@@ -2679,7 +2679,6 @@ public class Struct {
             slicedPath instanceof List<?> spl
                 ? new ArrayList<>((List<String>) spl)
                 : new ArrayList<>();
-        inj.key = strkey(getelem(inj.path, -1));
 
         Object tvalsRaw = slice(inj.parent, 1, null);
         List<Object> tvals =

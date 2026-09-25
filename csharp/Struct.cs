@@ -2938,7 +2938,6 @@ namespace Voxgig.Struct
 
             inj.SetVal(inj.DParent, 2);
             inj.Path = (List<object?>)Slice(inj.Path, -1)!;
-            inj.Key = StrKey(GetElem(inj.Path, -1)) ?? S_MT;
 
             var tvals = (List<object?>)Slice(inj.Parent, 1)!;
             if (0 == Size(tvals))
@@ -2949,14 +2948,19 @@ namespace Voxgig.Struct
                 return null;
             }
 
+            // GetProp answers null for a missing key where ts hands the nested
+            // call `undefined`, so `$NIL` rejected every optional entry the
+            // caller omitted and no default client could be constructed.
+            object? dval = inj.DParent ?? NONE;
+
             foreach (object? tval in tvals)
             {
                 var terrs = new List<object?>();
                 var vstore = (Dictionary<string, object?>)Merge(
                     new List<object?> { new Dictionary<string, object?>(), store }, 1)!;
-                vstore[S_DTOP] = inj.DParent;
+                vstore[S_DTOP] = dval;
 
-                object? vcurrent = Validate(inj.DParent, tval, new InjectState
+                object? vcurrent = Validate(dval, tval, new InjectState
                 {
                     Extra = vstore,
                     Errs = terrs,

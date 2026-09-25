@@ -2449,7 +2449,6 @@ sub validate_ONE {
         $inj->{keyI} = size($inj->{keys});
         _inj_setval($inj, $inj->{dparent}, 2);
         $inj->{path} = slice($inj->{path}, -1);
-        $inj->{key} = getelem($inj->{path}, -1);
         my $tvals = slice($parent, 1);
         if (size($tvals) == 0) {
             push @{ $inj->{errs} },

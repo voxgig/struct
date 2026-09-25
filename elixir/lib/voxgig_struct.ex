@@ -2350,7 +2350,6 @@ defmodule Voxgig.Struct do
         is_(inj, :keyi, size(ig(inj, :keys)))
         inj_setval(inj, ig(inj, :dparent), 2)
         is_(inj, :path, slice(ig(inj, :path), 0, size(ig(inj, :path)) - 1))
-        is_(inj, :key, getelem(ig(inj, :path), -1))
         tvals = slice(parent, 1)
 
         if size(tvals) == 0 do

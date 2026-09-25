@@ -175,7 +175,6 @@ public func validate_ONE(_ inj: Injection, _ val: Value, _ ref: String, _ store:
     if !inj.path.isEmpty {
       inj.path = Array(inj.path.dropLast())
     }
-    inj.key = inj.path.last ?? ""
     let tvals = slice(parent, 1)
     guard case .list(let tl) = tvals else { return .noval }
     if tl.items.isEmpty {

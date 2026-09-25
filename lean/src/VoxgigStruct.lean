@@ -2614,8 +2614,7 @@ partial def validateOne : InjectorFn := fun inj _v _ref store => do
       injSetval inj d.dparent (ancestor := 2)
       let psize ← size d.path
       let npath ← slice d.path (start := .num 0.0) (stop := vInt (psize - 1))
-      let nkey ← getelem npath (.num (-1.0))
-      modInj inj (fun dd => { dd with path := npath, key := nkey })
+      modInj inj (fun dd => { dd with path := npath })
       let tvals ← slice parent (start := .num 1.0)
       if (← size tvals) == 0 then do
         let d2 ← getInj inj

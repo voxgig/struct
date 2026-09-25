@@ -1616,7 +1616,6 @@ and validate_one inj _v _ref store =
       inj.keyi <- size inj.keys;
       ignore (inj_setval ~ancestor:2 inj inj.dparent);
       inj.path <- slice ~start:(Num 0.0) ~stop:(Num (float_of_int (size inj.path - 1))) inj.path;
-      inj.key <- getelem inj.path (Num (-1.0));
       let tvals = slice ~start:(Num 1.0) parent in
       if size tvals = 0 then
         (push_err inj ("The $ONE validator at field " ^ pathify ~startin:(Num 1.0) ~endin:(Num 1.0) inj.path ^ " must have at least one argument."); Noval)

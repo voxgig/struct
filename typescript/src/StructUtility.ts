@@ -1985,8 +1985,9 @@ const validate_ONE: Injector = (inj: Injection, _val: any, _ref: string, store: 
     // Clean up structure, replacing [$ONE, ...] with current
     inj.setval(inj.dparent, 2)
 
+    // Path shortens for the message only: `modify` reads
+    // getprop(inj.parent, inj.key), and inj.parent is still this list.
     inj.path = slice(inj.path, -1)
-    inj.key = getelem(inj.path, -1)
 
     const tvals = slice(parent, 1)
     if (0 === size(tvals)) {

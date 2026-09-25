@@ -2496,7 +2496,6 @@ def validate_ONE(inj, _val=UNDEF, _ref=UNDEF, store=UNDEF):
         inj.setval(inj.dparent, 2)
 
         inj.path = inj.path[:-1]
-        inj.key = getelem(inj.path, -1)
 
         tvals = parent[1:]
         if size(tvals) == 0:
