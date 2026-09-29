@@ -1,10 +1,12 @@
 [package]
 name = "voxgig-struct"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 description = "Uniform JSON-shaped data structure manipulations — Rust port of @voxgig/struct"
 license = "MIT"
 repository = "https://github.com/voxgig/struct"
+homepage = "https://voxgig.com"
+documentation = "https://docs.rs/voxgig-struct"
 readme = "README.md"
 keywords = ["voxgig", "data", "struct", "structure", "json"]
 
