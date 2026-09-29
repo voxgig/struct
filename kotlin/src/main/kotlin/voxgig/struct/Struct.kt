@@ -2251,7 +2251,6 @@ object Struct {
             val sp = slice(inj.path, -1, null)
             @Suppress("UNCHECKED_CAST")
             inj.path = if (sp is List<*>) (sp as List<String>).toMutableList() else mutableListOf()
-            inj.key = strkey(getelem(inj.path, -1))
 
             val tvalsRaw = slice(inj.parent, 1, null)
 
