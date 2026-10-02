@@ -17425,6 +17425,76 @@
       "basic": {
         "set": [
           {
+            "in": {
+              "data": {
+                "apikey": null
+              },
+              "spec": {
+                "apikey": ""
+              }
+            },
+            "out": {
+              "apikey": ""
+            }
+          },
+          {
+            "in": {
+              "data": {
+                "count": null,
+                "enabled": null,
+                "name": null
+              },
+              "spec": {
+                "count": 7,
+                "enabled": true,
+                "name": "default"
+              }
+            },
+            "out": {
+              "count": 7,
+              "enabled": true,
+              "name": "default"
+            }
+          },
+          {
+            "in": {
+              "data": {
+                "options": {
+                  "apikey": null
+                }
+              },
+              "spec": {
+                "options": {
+                  "apikey": ""
+                }
+              }
+            },
+            "out": {
+              "options": {
+                "apikey": ""
+              }
+            }
+          },
+          {
+            "in": {
+              "data": [
+                null,
+                null,
+                null
+              ],
+              "spec": [
+                "default",
+                7,
+                true
+              ]
+            },
+            "out": [
+              "default",
+              7,
+              true
+            ]
+          },
+          {
             "doc": true,
             "id": "validate#shape",
             "in": {
