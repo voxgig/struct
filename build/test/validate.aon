@@ -2,6 +2,11 @@
 
 basic: {
   set: [
+    { in: { data: {apikey:null}, spec: {apikey:''} }, out: {apikey:''} }
+    { in: { data: {name:null,count:null,enabled:null}, spec: {name:'default',count:7,enabled:true} }, out: {name:'default',count:7,enabled:true} }
+    { in: { data: {options:{apikey:null}}, spec: {options:{apikey:''}} }, out: {options:{apikey:''}} }
+    { in: { data: [null,null,null], spec: ['default',7,true] }, out: ['default',7,true] }
+
     { id:'validate#shape', doc:true, in: { data:{name:'Ada',age:36}, spec:{name:'`$STRING`',age:'`$INTEGER`'} }, out:{name:'Ada',age:36} }
     { in: { data: 1000, spec: 1000 }, out: 1000 }
     { in: { data: 1002, spec: 1001 }, out: 1002 }
