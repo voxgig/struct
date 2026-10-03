@@ -708,10 +708,10 @@ def re_escape(s):
 
 
 def escurl(s: Any):
-    "Escape URLs."
+    "Escape URLs, keeping what encodeURIComponent keeps."
     if s == UNDEF:
         s = S_MT
-    return urllib.parse.quote(s, safe='')
+    return urllib.parse.quote(s, safe="!~*'()")
 
 
 def replace(s, from_pat, to_str):

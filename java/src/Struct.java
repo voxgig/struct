@@ -718,12 +718,18 @@ public class Struct {
 
   public static String reEscape(String s) { return escre(s); }
 
+  // Keeps what encodeURIComponent keeps: URLEncoder encodes `~!'()` and spaces as `+`.
   public static String escurl(Object s) {
     if (s == null || s == UNDEF) {
       return "";
     }
     return URLEncoder.encode(Objects.toString(s), StandardCharsets.UTF_8)
-        .replace("+", "%20");
+        .replace("+", "%20")
+        .replace("%7E", "~")
+        .replace("%21", "!")
+        .replace("%27", "'")
+        .replace("%28", "(")
+        .replace("%29", ")");
   }
 
   public static String join(Object arr, Object sep, Object url) {
