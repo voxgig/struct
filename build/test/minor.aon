@@ -505,6 +505,10 @@ escurl: {
     { id:'minor/escurl#space', doc:true, in:'hello world?', out:'hello%20world%3F' }
     { in: 'a-B_0.', out: 'a-B_0.' }
     { in: ' ?:', out: '%20%3F%3A' }
+    { in: "!~*'()", out: "!~*'()" }
+    { in: 'a+b c', out: 'a%2Bb%20c' }
+    { in: "it's (ok)!", out: "it's%20(ok)!" }
+    { in: '&=/#@', out: '%26%3D%2F%23%40' }
   ]
 }
 

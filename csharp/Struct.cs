@@ -818,10 +818,12 @@ namespace Voxgig.Struct
             return EscRe(s);
         }
 
-        // URL-encode a string.
+        // URL-encode a string, keeping what encodeURIComponent keeps.
         public static string EscUrl(string? s)
         {
-            return s == null ? S_MT : Uri.EscapeDataString(s);
+            return s == null ? S_MT : Uri.EscapeDataString(s)
+                .Replace("%21", "!").Replace("%2A", "*").Replace("%27", "'")
+                .Replace("%28", "(").Replace("%29", ")");
         }
 
         // Replace in a string (all occurrences).

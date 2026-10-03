@@ -388,10 +388,11 @@ public func escre(_ v: Value) -> String {
   return out
 }
 
+// Keeps what encodeURIComponent keeps: the unreserved set and `!*'()`.
 public func escurl(_ v: Value) -> String {
   let s = (v.asString) ?? ""
   var allowed = CharacterSet.urlPathAllowed
-  allowed.remove(charactersIn: "/:?#[]@!$&'()*+,;=%")
+  allowed.remove(charactersIn: "/:?#[]@$&+,;=%")
   return s.addingPercentEncoding(withAllowedCharacters: allowed) ?? s
 }
 

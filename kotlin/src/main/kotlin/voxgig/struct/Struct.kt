@@ -615,9 +615,16 @@ object Struct {
 
     fun reEscape(s: String): String = escre(s)
 
+    // Keeps what encodeURIComponent keeps: URLEncoder encodes `~!'()` and spaces as `+`.
     fun escurl(s: Any?): String {
         if (s == null || s === UNDEF) return ""
-        return URLEncoder.encode(s.toString(), StandardCharsets.UTF_8).replace("+", "%20")
+        return URLEncoder.encode(s.toString(), StandardCharsets.UTF_8)
+            .replace("+", "%20")
+            .replace("%7E", "~")
+            .replace("%21", "!")
+            .replace("%27", "'")
+            .replace("%28", "(")
+            .replace("%29", ")")
     }
 
     fun join(

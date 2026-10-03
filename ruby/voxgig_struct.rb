@@ -197,9 +197,10 @@ module VoxgigStruct
     escre(s)
   end
 
+  # Keeps what encodeURIComponent keeps.
   def self.escurl(s)
     s = '' if s.nil?
-    URI::DEFAULT_PARSER.escape(s, /[^A-Za-z0-9\-._~]/)
+    URI::DEFAULT_PARSER.escape(s, /[^A-Za-z0-9\-._~!*'()]/)
   end
 
   # --- Internal getprop ---

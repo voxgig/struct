@@ -747,11 +747,12 @@ sub escre {
 }
 
 # Escape characters that are unsafe in a URL component.
+# Keeps what encodeURIComponent keeps.
 sub escurl {
     my ($s) = @_;
     return '' unless defined $s;
     $s = "$s";
-    $s =~ s/([^A-Za-z0-9\-_.~])/sprintf('%%%02X', ord($1))/ge;
+    $s =~ s/([^A-Za-z0-9\-_.~!*'()])/sprintf('%%%02X', ord($1))/ge;
     return $s;
 }
 

@@ -615,10 +615,13 @@ class Struct
         return self::escre($s);
     }
 
+    // Keeps what encodeURIComponent keeps.
     public static function escurl(?string $s): string
     {
         $s = $s ?? self::S_MT;
-        return rawurlencode($s);
+        return strtr(rawurlencode($s), [
+            '%21' => '!', '%2A' => '*', '%27' => "'", '%28' => '(', '%29' => ')',
+        ]);
     }
 
     public static function joinurl(array $sarr): string

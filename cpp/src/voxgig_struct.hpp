@@ -696,7 +696,9 @@ inline std::string escurl(const Value& v) {
   out.fill('0');
   out << std::hex;
   for (unsigned char c : s) {
-    if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+    // The set encodeURIComponent keeps.
+    if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~' || c == '!' || c == '*' ||
+        c == '\'' || c == '(' || c == ')') {
       out << c;
     } else {
       out << '%' << std::uppercase << std::setw(2) << static_cast<int>(c);
