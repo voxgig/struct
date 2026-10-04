@@ -5,6 +5,7 @@
 #include <iostream>
 #include <cassert>
 
+#include "value_io.hpp"
 #include "voxgig_struct.hpp"
 
 using namespace voxgig::structlib;
@@ -110,6 +111,20 @@ int main() {
   CHECK(getprop(merged, Value("a")) == Value(int64_t(1)));
   CHECK(getprop(merged, Value("b")) == Value(int64_t(3)));
   CHECK(getprop(merged, Value("c")) == Value(int64_t(4)));
+
+  // parse_json: malformed input, or anything after the value, gives undef.
+  for (const char* bad : {"{\"id\": \"x01\", \"title\": ", "[1, 2] trailing", "{} {}", "[1, 2",
+                          "[1 2]", "[1,]", "{\"a\" 1}", "{\"a\": 1,}", "{1: 2}", "nul", "01", "1.",
+                          "-", "1e+", "\"open", "\"a\\x\"", "\"tab\there\""}) {
+    if (!parse_json(bad).is_undef()) {
+      std::cerr << "FAIL: parse_json accepted " << bad << "\n";
+      ok = false;
+    }
+  }
+  Value whole = parse_json(" {\"a\": [0, -2.5e3, true, null, \"\\u00e9\"]}\n");
+  Value items = getprop(whole, Value("a"));
+  CHECK(getprop(items, Value(1)) == Value(-2500.0));
+  CHECK(getprop(items, Value(4)) == Value("\xc3\xa9"));
 
   std::cout << (ok ? "smoke OK" : "smoke FAILED") << "\n";
   return ok ? 0 : 1;

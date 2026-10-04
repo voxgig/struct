@@ -25,8 +25,9 @@ namespace structlib {
 
 // ===========================================================================
 // Parser — same algorithm as c/src/value_io.c jp_*. Accepts the standard
-// JSON grammar including \\uXXXX escapes and surrogate pairs. On any
-// malformed input returns Value::undef() (no exceptions thrown).
+// JSON grammar including \\uXXXX escapes and surrogate pairs. Any malformed
+// input, including anything but whitespace after the value, returns
+// Value::undef() (no exceptions thrown).
 // ===========================================================================
 
 namespace _jp {
@@ -34,6 +35,7 @@ namespace _jp {
 struct State {
   const std::string& src;
   size_t pos = 0;
+  bool bad = false;
 };
 
 inline void skip_ws(State& p) {
@@ -89,8 +91,10 @@ inline void put_codepoint(std::string& dst, uint32_t cp) {
 }
 
 inline bool parse_string(State& p, std::string& out) {
-  if (peek(p) != '"')
+  if (peek(p) != '"') {
+    p.bad = true;
     return false;
+  }
   p.pos++;
   while (p.pos < p.src.size()) {
     char c = p.src[p.pos++];
@@ -98,7 +102,7 @@ inline bool parse_string(State& p, std::string& out) {
       return true;
     if (c == '\\') {
       if (p.pos >= p.src.size())
-        return false;
+        break;
       char e = p.src[p.pos++];
       switch (e) {
       case '"':
@@ -126,14 +130,18 @@ inline bool parse_string(State& p, std::string& out) {
         out.push_back('\t');
         break;
       case 'u': {
-        if (p.pos + 4 > p.src.size())
+        if (p.pos + 4 > p.src.size()) {
+          p.bad = true;
           return false;
+        }
         int h1 = hex(static_cast<unsigned char>(p.src[p.pos]));
         int h2 = hex(static_cast<unsigned char>(p.src[p.pos + 1]));
         int h3 = hex(static_cast<unsigned char>(p.src[p.pos + 2]));
         int h4 = hex(static_cast<unsigned char>(p.src[p.pos + 3]));
-        if (h1 < 0 || h2 < 0 || h3 < 0 || h4 < 0)
+        if (h1 < 0 || h2 < 0 || h3 < 0 || h4 < 0) {
+          p.bad = true;
           return false;
+        }
         uint32_t cp = static_cast<uint32_t>((h1 << 12) | (h2 << 8) | (h3 << 4) | h4);
         p.pos += 4;
         if (cp >= 0xD800 && cp <= 0xDBFF && p.pos + 6 <= p.src.size() && p.src[p.pos] == '\\' &&
@@ -154,41 +162,55 @@ inline bool parse_string(State& p, std::string& out) {
         break;
       }
       default:
-        out.push_back(e);
-        break;
+        p.bad = true;
+        return false;
       }
+    } else if (static_cast<unsigned char>(c) < 0x20) {
+      p.bad = true;
+      return false;
     } else {
       out.push_back(c);
     }
   }
+  p.bad = true;
   return false;
 }
 
 inline Value parse_value(State& p);
 
+inline size_t digits(State& p) {
+  size_t start = p.pos;
+  while (p.pos < p.src.size() && p.src[p.pos] >= '0' && p.src[p.pos] <= '9')
+    p.pos++;
+  return p.pos - start;
+}
+
 inline Value parse_number(State& p) {
   size_t start = p.pos;
+  bool has_dot = false, has_exp = false;
   if (peek(p) == '-')
     p.pos++;
-  bool has_dot = false, has_exp = false;
-  while (p.pos < p.src.size()) {
-    char c = p.src[p.pos];
-    if (c >= '0' && c <= '9') {
-      p.pos++;
-    } else if (c == '.' && !has_dot && !has_exp) {
-      has_dot = true;
-      p.pos++;
-    } else if ((c == 'e' || c == 'E') && !has_exp) {
-      has_exp = true;
-      p.pos++;
-      if (p.pos < p.src.size() && (p.src[p.pos] == '+' || p.src[p.pos] == '-'))
-        p.pos++;
-    } else {
-      break;
-    }
+  bool ok = true;
+  if (peek(p) == '0')
+    p.pos++;
+  else
+    ok = 0 < digits(p);
+  if (ok && peek(p) == '.') {
+    has_dot = true;
+    p.pos++;
+    ok = 0 < digits(p);
   }
-  if (p.pos == start)
+  if (ok && (peek(p) == 'e' || peek(p) == 'E')) {
+    has_exp = true;
+    p.pos++;
+    if (peek(p) == '+' || peek(p) == '-')
+      p.pos++;
+    ok = 0 < digits(p);
+  }
+  if (!ok) {
+    p.bad = true;
     return Value();
+  }
   std::string tok = p.src.substr(start, p.pos - start);
   if (!has_dot && !has_exp) {
     return Value(static_cast<int64_t>(std::strtoll(tok.c_str(), nullptr, 10)));
@@ -206,7 +228,7 @@ inline Value parse_array(State& p) {
     p.pos++;
     return Value(std::move(out));
   }
-  while (true) {
+  while (!p.bad) {
     skip_ws(p);
     out->push_back(parse_value(p));
     skip_ws(p);
@@ -219,7 +241,7 @@ inline Value parse_array(State& p) {
       p.pos++;
       break;
     }
-    break;
+    p.bad = true;
   }
   return Value(std::move(out));
 }
@@ -234,14 +256,16 @@ inline Value parse_object(State& p) {
     p.pos++;
     return Value(std::move(out));
   }
-  while (true) {
+  while (!p.bad) {
     skip_ws(p);
     std::string key;
     if (!parse_string(p, key))
       break;
     skip_ws(p);
-    if (peek(p) != ':')
+    if (peek(p) != ':') {
+      p.bad = true;
       break;
+    }
     p.pos++;
     skip_ws(p);
     Value val = parse_value(p);
@@ -256,7 +280,7 @@ inline Value parse_object(State& p) {
       p.pos++;
       break;
     }
-    break;
+    p.bad = true;
   }
   return Value(std::move(out));
 }
@@ -264,8 +288,10 @@ inline Value parse_object(State& p) {
 inline Value parse_value(State& p) {
   skip_ws(p);
   int c = peek(p);
-  if (c < 0)
+  if (c < 0) {
+    p.bad = true;
     return Value();
+  }
   if (c == 'n' && match(p, "null"))
     return Value(nullptr);
   if (c == 't' && match(p, "true"))
@@ -283,7 +309,7 @@ inline Value parse_value(State& p) {
     return parse_array(p);
   if (c == '{')
     return parse_object(p);
-  p.pos++;
+  p.bad = true;
   return Value();
 }
 
@@ -293,7 +319,9 @@ inline Value parse_value(State& p) {
 
 inline Value parse_json(const std::string& text) {
   _jp::State p{text, 0};
-  return _jp::parse_value(p);
+  Value v = _jp::parse_value(p);
+  _jp::skip_ws(p);
+  return p.bad || p.pos < text.size() ? Value() : v;
 }
 
 inline Value parse_json_file(const std::string& path) {

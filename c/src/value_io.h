@@ -15,7 +15,8 @@
 extern "C" {
 #endif
 
-/* Parse a JSON text. Returns a new voxgig_value (owned by caller). */
+/* Parse a JSON text. Returns a new voxgig_value (owned by caller): undef for
+ * malformed input, including anything but whitespace after the value. */
 voxgig_value* voxgig_parse_json(const char* text, size_t len);
 
 /* Parse a JSON file. */
