@@ -1818,20 +1818,21 @@ func Merge(val any, maxdepths ...int) any {
 					}
 					tval := dst[pI]
 
-					// Destination empty, create node (unless override is class instance).
-					if nil == tval && 0 == (T_instance&Typify(val)) {
+					if Typify(val) == Typify(tval) {
+						// Matching override and destination, continue with their values.
+						cur[pI] = tval
+					} else if 0 == (T_instance & Typify(val)) {
+						// Otherwise the override wins: a plain node is copied, taking
+						// nothing from the destination, so no later merge writes into it.
 						if IsList(val) {
 							cur[pI] = make([]any, 0)
 						} else {
 							cur[pI] = make(map[string]any)
 						}
-					} else if Typify(val) == Typify(tval) {
-						// Matching override and destination, continue with their values.
-						cur[pI] = tval
+						dst[pI] = nil
 					} else {
-						// Override wins.
+						// A class instance is kept as is, so there is nothing to descend.
 						cur[pI] = val
-						// No need to descend (destination is discarded).
 						val = nil
 					}
 				}
@@ -1842,7 +1843,7 @@ func Merge(val any, maxdepths ...int) any {
 			after := func(
 				key *string,
 				_val any,
-				_parent any,
+				parent any,
 				path []string,
 			) any {
 				cI := len(path)
@@ -1852,10 +1853,11 @@ func Merge(val any, maxdepths ...int) any {
 					return cur[0]
 				}
 
-				value := cur[cI]
+				cur[cI-1] = SetProp(cur[cI-1], *key, cur[cI])
 
-				cur[cI-1] = SetProp(cur[cI-1], *key, value)
-				return value
+				// Walk writes this back into the override, so it is the
+				// override's own child, leaving the override unchanged.
+				return GetProp(parent, *key)
 			}
 
 			// Walk overriding node, creating paths in output as needed.

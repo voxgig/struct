@@ -1196,14 +1196,18 @@ inline Value merge_v(const Value& list, int maxdepth) {
           dst[pI] = Value::undef();
       }
       Value tval = dst[pI];
-      if (tval.is_undef() && (typify(val) & T_instance) == 0) {
+      if (typify(val) == typify(tval)) {
+        cur[pI] = tval;
+      } else if ((typify(val) & T_instance) == 0) {
+        // Otherwise the override wins: a plain node is copied, taking
+        // nothing from the destination, so no later merge writes into it.
         cur[pI] = val.is_list() ? Value(std::make_shared<List>())
                                 : Value(std::shared_ptr<Map>(new Map()));
-      } else if (typify(val) == typify(tval)) {
-        cur[pI] = tval;
+        dst[pI] = Value::undef();
       } else {
+        // A class instance is kept as is, so there is nothing to descend.
         cur[pI] = val;
-        return Value::undef(); // skip descent
+        return Value::undef();
       }
       return val;
     };
@@ -1214,9 +1218,10 @@ inline Value merge_v(const Value& list, int maxdepth) {
       if (key.is_undef() || cI <= 0) {
         return cur[0];
       }
-      Value value = cur[cI];
-      cur[cI - 1] = setprop(cur[cI - 1], key, value);
-      return value;
+      cur[cI - 1] = setprop(cur[cI - 1], key, cur[cI]);
+      // walk writes this back into the override, so it is the override's
+      // own child, leaving the override unchanged.
+      return lookup_v(parent, key);
     };
 
     walk_v(obj, before, after, md);

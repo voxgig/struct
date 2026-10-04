@@ -736,19 +736,23 @@
                                       (do (grow! dst pI) (grow! cur pI)
                                           (.set dst (int pI) (if (> pI 0) (getprop (.get dst (int (dec pI))) key) (.get dst (int pI))))
                                           (let [tval (.get dst (int pI))]
-                                            (cond
-                                              (nil? tval) (do (.set cur (int pI) (if (islist val) (alist) (lhm))) val)
-                                              (or (and (islist val) (islist tval)) (and (ismap val) (ismap tval)))
+                                            (if (or (and (islist val) (islist tval)) (and (ismap val) (ismap tval)))
                                               (do (.set cur (int pI) tval) val)
-                                              :else (do (.set cur (int pI) val) nil)))))))
-                         after (fn [key _val _parent path]
+                                              ;; Otherwise the override wins: it is copied, taking nothing
+                                              ;; from the destination, so no later merge writes into it.
+                                              (do (.set cur (int pI) (if (islist val) (alist) (lhm)))
+                                                  (.set dst (int pI) nil)
+                                                  val)))))))
+                         after (fn [key _val parent path]
                                  (let [cI (size path)]
                                    (if (< cI 1)
                                      (if (> (.size cur) 0) (.get cur 0) _val)
                                      (let [target (when (< (dec cI) (.size cur)) (.get cur (int (dec cI))))
                                            value (when (< cI (.size cur)) (.get cur (int cI)))]
                                        (setprop target key value)
-                                       value))))]
+                                       ;; walk writes this back into the override, so it is the
+                                       ;; override's own child, leaving the override unchanged.
+                                       (_lookup parent key)))))]
                      (reset! out (walk obj {:before before :after after}))))))
              (when (= md 0)
                (let [o (getprop objs (dec lenlist) nil)]

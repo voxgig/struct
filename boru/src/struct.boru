@@ -1485,15 +1485,19 @@ def vg-merge-before fn [[key:Any val:Any parent:Any pth:Any] [Any] [
       def tval (if (pi gt 0) [vg-getprop dprev key vg-noarg] [vg-getprop dst pi vg-noarg])
       (vg-setprop dst pi tval) drop
       def vtype (vg-typify val)
-      if ((tval is None) and ((vg-bit vg-t-instance vtype) not)) [
-        def fresh (if (vg-islist val) [flex []] [flex {}])
-        (vg-setprop cur pi fresh) drop
+      if (vtype eq (vg-typify tval)) [
+        (vg-setprop cur pi tval) drop
         val
       ] [
-        if (vtype eq (vg-typify tval)) [
-          (vg-setprop cur pi tval) drop
+        if ((vg-bit vg-t-instance vtype) not) [
+          # Otherwise the override wins: a plain node is copied, taking
+          # nothing from the destination, so no later merge writes into it.
+          def fresh (if (vg-islist val) [flex []] [flex {}])
+          (vg-setprop cur pi fresh) drop
+          (vg-setprop dst pi none) drop
           val
         ] [
+          # A class instance is kept as is, so there is nothing to descend.
           (vg-setprop cur pi val) drop
           none
         ]
@@ -1508,7 +1512,9 @@ def vg-merge-after fn [[key:Any val:Any parent:Any pth:Any] [Any] [
   def target (vg-getprop cur (ci sub 1) vg-noarg)
   def value (vg-getprop cur ci vg-noarg)
   (vg-setprop target key value) drop
-  value
+  # walk writes this back into the override, so below the root it is the
+  # override's own child, leaving the override unchanged.
+  if (ci gt 0) [vgi-lookup parent key] [value]
 ]]
 def vgl-merge-list fn [[oi:Integer lst:Any md:Integer obox:Any] [Any] [
   if (oi gte (size lst)) [none] [

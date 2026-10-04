@@ -1600,18 +1600,19 @@ local function merge(val, maxdepth)
           end
           local tval = dst[pI + 1]
 
-          -- Destination empty, so create node (unless override is class instance).
-          if NONE == tval and 0 == (T_instance & typify(bval)) then
-            cur[pI + 1] = islist(bval) and setmetatable({}, { __jsontype = "array" }) or {}
-
           -- Matching override and destination so continue with their values.
-          elseif typify(bval) == typify(tval) then
+          if typify(bval) == typify(tval) then
             cur[pI + 1] = tval
 
-          -- Override wins.
+          -- Otherwise the override wins: a plain node is copied, taking
+          -- nothing from the destination, so no later merge writes into it.
+          elseif 0 == (T_instance & typify(bval)) then
+            cur[pI + 1] = islist(bval) and setmetatable({}, { __jsontype = "array" }) or {}
+            dst[pI + 1] = NONE
+
+          -- A class instance is kept as is, so there is nothing to descend.
           else
             cur[pI + 1] = bval
-            -- No need to descend when override wins.
             bval = NONE
           end
         end
@@ -1619,13 +1620,23 @@ local function merge(val, maxdepth)
         return bval
       end
 
-      local function after(key, _aval, _parent, path)
+      local function after(key, _aval, parent, path)
         local cI = size(path)
         local target = cur[cI]
         local value = cur[cI + 1]
 
         setprop(target, key, value)
-        return value
+
+        if 0 == cI then
+          return value
+        end
+
+        -- walk writes this back into the override, so it is the override's
+        -- own child. Read directly: getprop scans a list for each index.
+        if islist(parent) then
+          return parent[tonumber(key) + 1]
+        end
+        return parent[key]
       end
 
       -- Walk overriding node, creating paths in output as needed.

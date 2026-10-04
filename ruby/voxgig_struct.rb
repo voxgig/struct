@@ -832,20 +832,20 @@ module VoxgigStruct
             dst[pI] = pI.positive? ? getprop(dst[pI - 1], key) : dst[pI]
             tval = dst[pI]
 
-            if tval.nil?
-              cur[pI] = islist(v) ? [] : {}
-            elsif (islist(v) && islist(tval)) || (ismap(v) && ismap(tval))
+            if (islist(v) && islist(tval)) || (ismap(v) && ismap(tval))
               cur[pI] = tval
             else
-              cur[pI] = v
-              v = nil # stop descending
+              # Otherwise the override wins: it is copied, taking nothing from
+              # the destination, so no later merge writes into it.
+              cur[pI] = islist(v) ? [] : {}
+              dst[pI] = nil
             end
           end
 
           v
         }
 
-        after_fn = lambda { |key, _v, _parent, path|
+        after_fn = lambda { |key, _v, parent, path|
           cI = path.length
           if cI < 1
             next (cur.length.positive? ? cur[0] : _v)
@@ -855,7 +855,10 @@ module VoxgigStruct
           value = cI < cur.length ? cur[cI] : nil
 
           setprop(target, key, value) if target
-          value
+
+          # walk writes this back into the override, so it is the override's
+          # own child, read raw so a nil stays nil.
+          _getprop(parent, key, nil)
         }
 
         out = walk(obj, before_fn, after_fn)

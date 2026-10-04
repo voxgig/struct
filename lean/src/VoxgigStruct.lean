@@ -1326,17 +1326,17 @@ partial def merge (objs : Value) (maxdepth : Value := .noval) : SIO Value := do
               pure ((← dst.get)[piN]!)
           let tval ← if piN > 0 then getprop dprev key else pure dprev
           dst.modify (·.set! piN tval)
-          if isNullish tval then do
-            let fresh ← if islist v then emptyList else emptyMap
-            cur.modify (·.set! piN fresh)
-            pure v
-          else if (islist v && islist tval) || (ismap v && ismap tval) then do
+          if (islist v && islist tval) || (ismap v && ismap tval) then do
             cur.modify (·.set! piN tval)
             pure v
           else do
-            cur.modify (·.set! piN v)
-            pure .noval
-      let after : WalkFn := fun key v _parent path => do
+            -- Otherwise the override wins: it is copied, taking nothing
+            -- from the destination, so no later merge writes into it.
+            let fresh ← if islist v then emptyList else emptyMap
+            cur.modify (·.set! piN fresh)
+            dst.modify (·.set! piN .noval)
+            pure v
+      let after : WalkFn := fun key v parent path => do
         let ci ← size path
         let ciN := ci.toNat
         if ci < 1 then do
@@ -1347,7 +1347,9 @@ partial def merge (objs : Value) (maxdepth : Value := .noval) : SIO Value := do
           let target := if ciN - 1 < a.size then a[ciN - 1]! else .noval
           let value := if ciN < a.size then a[ciN]! else .noval
           let _ ← setprop target key value
-          pure value
+          -- walk writes this back into the override, so it is the
+          -- override's own child, leaving the override unchanged.
+          lookupRaw parent key
       outRef.set (← walk obj (before := some before) (after := some after))
   if md == 0 then do
     let o ← getprop objs (vInt ((lenlist : Int) - 1))

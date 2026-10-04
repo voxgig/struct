@@ -948,7 +948,7 @@ function walk(
 // Merge a list of values into each other. Later values have
 // precedence.  Nodes override scalars. Node kinds (list or map)
 // override each other, and do *not* merge.  The first element is
-// modified.
+// modified; the others are not.
 function merge(val: any, maxdepth?: number): any {
   const md: number = slice(maxdepth ?? MAXDEPTH, 0)
   let out: any = NONE
@@ -997,39 +997,37 @@ function merge(val: any, maxdepth?: number): any {
 
           const vtype = typify(val)
 
-          // Destination empty, so create node (unless override is class instance).
-          if (NONE === tval && 0 === (T_instance & vtype)) {
-            cur[pI] = islist(val) ? [] : {}
+          // Matching override and destination so continue with their values.
+          if (vtype === typify(tval)) {
+            cur[pI] = tval
           }
 
-          // Matching override and destination so continue with their values.
-          else if (vtype === typify(tval)) {
-            cur[pI] = tval
+          // Otherwise the override wins: a plain node is copied, taking
+          // nothing from the destination, so no later merge writes into it.
+          else if (0 === (T_instance & vtype)) {
+            cur[pI] = islist(val) ? [] : {}
+            dst[pI] = NONE
           } else {
             cur[pI] = val
 
-            // No need to descend when override wins (destination is discarded).
+            // A class instance is kept as is, so there is nothing to descend.
             val = NONE
           }
         }
 
-        // console.log('BEFORE-END', pathify(path), '@', pI, key,
-        //   stringify(val, -1, 1), stringify(parent, -1, 1),
-        //   'CUR=', stringify(cur, -1, 1), 'DST=', stringify(dst, -1, 1))
-
         return val
       }
 
-      function after(key: string | number | undefined, _val: any, _parent: any, path: string[]) {
+      function after(key: string | number | undefined, _val: any, parent: any, path: string[]) {
         const cI = size(path)
         const target = cur[cI - 1]
         const value = cur[cI]
 
-        // console.log('AFTER-PREP', pathify(path), '@', cI, cur, '|',
-        //   stringify(key, -1, 1), stringify(value, -1, 1), 'T=', stringify(target, -1, 1))
-
         setprop(target, key, value)
-        return value
+
+        // walk writes this back into the override, so below the root it is
+        // the override's own child (_lookup keeps a null, getprop would not).
+        return 0 === cI ? value : _lookup(parent, key)
       }
 
       // Walk overriding node, creating paths in output as needed.

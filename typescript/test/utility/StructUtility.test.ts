@@ -684,6 +684,13 @@ describe('StructUtility', async () => {
     equal(b0, out.b)
     equal(b0.x, 1)
     equal(b0 instanceof Bar, true)
+
+    // A later element keeps its nulls: the corpus runner turns them into
+    // markers, so it cannot see one become undefined.
+    const n0 = { a: { c: null }, d: null, e: [null] }
+    out = merge([{ a: { b: 1 }, e: [2, 3] }, n0])
+    assert.deepStrictEqual(out, { a: { b: 1, c: null }, d: null, e: [null, 3] })
+    assert.deepStrictEqual(n0, { a: { c: null }, d: null, e: [null] })
   })
 
   // getpath tests

@@ -1070,22 +1070,29 @@ object Struct {
                                 dst[pI] = getprop(dst[pI - 1], key, UNDEF).let { if (it === UNDEF) null else it }
                             }
                             val tval = dst[pI]
-                            cur[pI] =
-                                when {
-                                    tval == null && (typify(v) and T_INSTANCE) == 0 -> if (islist(v)) mutableListOf<Any?>() else linkedMapOf<String, Any?>()
-                                    typify(v) == typify(tval) -> tval
-                                    else -> v
-                                }
+                            if (typify(v) == typify(tval)) {
+                                cur[pI] = tval
+                            } else if ((typify(v) and T_INSTANCE) == 0) {
+                                // Otherwise the override wins: a plain node is copied, taking
+                                // nothing from the destination, so no later merge writes into it.
+                                cur[pI] = if (islist(v)) mutableListOf<Any?>() else linkedMapOf<String, Any?>()
+                                dst[pI] = null
+                            } else {
+                                // A class instance is kept as is, so there is nothing to descend.
+                                cur[pI] = v
+                                return@WalkApply null
+                            }
                         }
                         v
                     }
                 val after =
-                    WalkApply { key, _, _, path ->
+                    WalkApply { key, _, parent, path ->
                         val cI = path.size
                         if (key == null || cI <= 0) return@WalkApply cur[0]
-                        val v = cur[cI]
-                        cur[cI - 1] = setprop(cur[cI - 1], key, v)
-                        v
+                        cur[cI - 1] = setprop(cur[cI - 1], key, cur[cI])
+                        // walk writes this back into the override, so it is the
+                        // override's own child, leaving the override unchanged.
+                        lookup(parent, key)
                     }
                 walk(obj, before, after, md)
                 out = cur[0]

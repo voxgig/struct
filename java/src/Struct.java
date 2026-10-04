@@ -1221,11 +1221,15 @@ public class Struct {
             }
             Object tval = dst[pI];
 
-            if (tval == null && (typify(v) & T_instance) == 0) {
-              cur[pI] = islist(v) ? new ArrayList<>() : new LinkedHashMap<String, Object>();
-            } else if (typify(v) == typify(tval)) {
+            if (typify(v) == typify(tval)) {
               cur[pI] = tval;
+            } else if ((typify(v) & T_instance) == 0) {
+              // Otherwise the override wins: a plain node is copied, taking
+              // nothing from the destination, so no later merge writes into it.
+              cur[pI] = islist(v) ? new ArrayList<>() : new LinkedHashMap<String, Object>();
+              dst[pI] = null;
             } else {
+              // A class instance is kept as is, so there is nothing to descend.
               cur[pI] = v;
               return null;
             }
@@ -1233,14 +1237,15 @@ public class Struct {
           return v;
         };
 
-        WalkApply after = (key, _val, _parent, path) -> {
+        WalkApply after = (key, _val, parent, path) -> {
           int cI = path.size();
           if (key == null || cI <= 0) {
             return cur[0];
           }
-          Object value = cur[cI];
-          cur[cI - 1] = setprop(cur[cI - 1], key, value);
-          return value;
+          cur[cI - 1] = setprop(cur[cI - 1], key, cur[cI]);
+          // walk writes this back into the override, so it is the override's
+          // own child, leaving the override unchanged.
+          return lookup(parent, key);
         };
 
         walk(obj, before, after, md);
