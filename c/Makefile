@@ -67,7 +67,7 @@ corpus: omni-check $(OMNI_OBJS)
 client: omni-check $(OMNI_OBJS)
 	$(CC) tests/client_test.c $(C_SOURCES) $(OMNI_OBJS) $(CFLAGS_COMMON) $(CFLAGS_DEBUG) -I ./src $(OMNI_INC) $(EXTRA_INC) -o client.out $(LDLIBS) && ./client.out
 
-test: corpus client
+test: smoke corpus client
 
 # Cross-port performance harness (JSON contract; see build/bench/README.md).
 # Release-optimised; build log to stderr so stdout is only the JSON line.

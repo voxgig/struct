@@ -24,14 +24,15 @@
  *     surrogate pairs are decoded to UTF-8 bytes)
  *   - arrays and objects, with arbitrary whitespace between tokens
  *
- * Anything malformed → returns voxgig_new_undef() and leaves the cursor where it
- * stopped. Mirrors cJSON's "best-effort, never throw" behaviour.
+ * Anything malformed, including anything but whitespace after the value,
+ * returns voxgig_new_undef(). Never throws.
  * ===========================================================================*/
 
 typedef struct {
   const char* src;
   size_t len;
   size_t pos;
+  bool bad;
 } jp;
 
 static void jp_skip_ws(jp* p) {
@@ -101,8 +102,10 @@ static void sb_put_codepoint(char** buf, size_t* len, size_t* cap, uint32_t cp) 
 }
 
 static char* jp_string(jp* p) {
-  if (jp_peek(p) != '"')
+  if (jp_peek(p) != '"') {
+    p->bad = true;
     return NULL;
+  }
   p->pos++; /* eat opening " */
   char* buf = NULL;
   size_t len = 0, cap = 0;
@@ -173,43 +176,55 @@ static char* jp_string(jp* p) {
         break;
       }
       default:
-        sb_putc(&buf, &len, &cap, e);
-        break;
+        goto bad;
       }
+    } else if ((unsigned char)c < 0x20) {
+      goto bad;
     } else {
       sb_putc(&buf, &len, &cap, c);
     }
   }
 bad:
+  p->bad = true;
   free(buf);
   return NULL;
 }
 
 static voxgig_value* jp_value(jp* p); /* fwd */
 
+static size_t jp_digits(jp* p) {
+  size_t start = p->pos;
+  while (p->pos < p->len && p->src[p->pos] >= '0' && p->src[p->pos] <= '9')
+    p->pos++;
+  return p->pos - start;
+}
+
 static voxgig_value* jp_number(jp* p) {
   size_t start = p->pos;
+  bool has_dot = false, has_exp = false;
   if (jp_peek(p) == '-')
     p->pos++;
-  bool has_dot = false, has_exp = false;
-  while (p->pos < p->len) {
-    char c = p->src[p->pos];
-    if (c >= '0' && c <= '9') {
-      p->pos++;
-    } else if (c == '.' && !has_dot && !has_exp) {
-      has_dot = true;
-      p->pos++;
-    } else if ((c == 'e' || c == 'E') && !has_exp) {
-      has_exp = true;
-      p->pos++;
-      if (p->pos < p->len && (p->src[p->pos] == '+' || p->src[p->pos] == '-'))
-        p->pos++;
-    } else {
-      break;
-    }
+  bool ok = true;
+  if (jp_peek(p) == '0')
+    p->pos++;
+  else
+    ok = 0 < jp_digits(p);
+  if (ok && jp_peek(p) == '.') {
+    has_dot = true;
+    p->pos++;
+    ok = 0 < jp_digits(p);
   }
-  if (p->pos == start)
+  if (ok && (jp_peek(p) == 'e' || jp_peek(p) == 'E')) {
+    has_exp = true;
+    p->pos++;
+    if (jp_peek(p) == '+' || jp_peek(p) == '-')
+      p->pos++;
+    ok = 0 < jp_digits(p);
+  }
+  if (!ok) {
+    p->bad = true;
     return voxgig_new_undef();
+  }
   size_t n = p->pos - start;
   char tmp[64];
   if (n >= sizeof(tmp))
@@ -234,7 +249,7 @@ static voxgig_value* jp_array(jp* p) {
     p->pos++;
     return lv;
   }
-  for (;;) {
+  while (!p->bad) {
     jp_skip_ws(p);
     voxgig_value* item = jp_value(p);
     voxgig_list_push(voxgig_as_list(lv), item);
@@ -248,8 +263,7 @@ static voxgig_value* jp_array(jp* p) {
       p->pos++;
       break;
     }
-    /* Malformed — return what we have. */
-    break;
+    p->bad = true;
   }
   return lv;
 }
@@ -264,7 +278,7 @@ static voxgig_value* jp_object(jp* p) {
     p->pos++;
     return mv;
   }
-  for (;;) {
+  while (!p->bad) {
     jp_skip_ws(p);
     char* key = jp_string(p);
     if (!key) {
@@ -272,6 +286,7 @@ static voxgig_value* jp_object(jp* p) {
     }
     jp_skip_ws(p);
     if (jp_peek(p) != ':') {
+      p->bad = true;
       free(key);
       break;
     }
@@ -290,7 +305,7 @@ static voxgig_value* jp_object(jp* p) {
       p->pos++;
       break;
     }
-    break;
+    p->bad = true;
   }
   return mv;
 }
@@ -298,8 +313,10 @@ static voxgig_value* jp_object(jp* p) {
 static voxgig_value* jp_value(jp* p) {
   jp_skip_ws(p);
   int c = jp_peek(p);
-  if (c < 0)
+  if (c < 0) {
+    p->bad = true;
     return voxgig_new_undef();
+  }
   if (c == 'n' && jp_match(p, "null"))
     return voxgig_new_null();
   if (c == 't' && jp_match(p, "true"))
@@ -308,7 +325,9 @@ static voxgig_value* jp_value(jp* p) {
     return voxgig_new_bool(false);
   if (c == '"') {
     char* s = jp_string(p);
-    voxgig_value* v = voxgig_new_string(s ? s : "");
+    if (!s)
+      return voxgig_new_undef();
+    voxgig_value* v = voxgig_new_string(s);
     free(s);
     return v;
   }
@@ -318,8 +337,7 @@ static voxgig_value* jp_value(jp* p) {
     return jp_array(p);
   if (c == '{')
     return jp_object(p);
-  /* Unrecognised — advance to avoid infinite loop. */
-  p->pos++;
+  p->bad = true;
   return voxgig_new_undef();
 }
 
@@ -328,8 +346,14 @@ voxgig_value* voxgig_parse_json(const char* text, size_t len) {
     return voxgig_new_undef();
   if (len == 0)
     len = strlen(text);
-  jp p = {.src = text, .len = len, .pos = 0};
-  return jp_value(&p);
+  jp p = {.src = text, .len = len, .pos = 0, .bad = false};
+  voxgig_value* v = jp_value(&p);
+  jp_skip_ws(&p);
+  if (p.bad || p.pos < p.len) {
+    voxgig_release(v);
+    return voxgig_new_undef();
+  }
+  return v;
 }
 
 voxgig_value* voxgig_parse_json_file(const char* path) {
