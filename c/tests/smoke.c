@@ -89,6 +89,35 @@ int main(void) {
   voxgig_release(mr);
   voxgig_release(ml);
 
+  /* parse_json: malformed input, or anything after the value, gives undef. */
+  const char* bad_json[] = {"{\"id\": \"x01\", \"title\": ",
+                            "[1, 2] trailing",
+                            "{} {}",
+                            "[1, 2",
+                            "[1 2]",
+                            "[1,]",
+                            "{\"a\" 1}",
+                            "{\"a\": 1,}",
+                            "{1: 2}",
+                            "nul",
+                            "01",
+                            "1.",
+                            "-",
+                            "1e+",
+                            "\"open",
+                            "\"a\\x\"",
+                            "\"tab\there\""};
+  for (size_t i = 0; i < sizeof(bad_json) / sizeof(bad_json[0]); i++) {
+    voxgig_value* bv = voxgig_parse_json(bad_json[i], 0);
+    CHECK(voxgig_is_undef(bv), bad_json[i]);
+    voxgig_release(bv);
+  }
+  voxgig_value* gj = voxgig_parse_json(" {\"a\": [0, -2.5e3, true, null, \"\\u00e9\"]}\n", 0);
+  char* gjs = voxgig_jsonify(gj, NULL);
+  CHECK(gjs && strstr(gjs, "-2500") && strstr(gjs, "\xc3\xa9"), "parse_json whole document");
+  free(gjs);
+  voxgig_release(gj);
+
   printf("smoke: %d/%d passed\n", passed, total);
   return passed == total ? 0 : 1;
 }
