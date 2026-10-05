@@ -151,6 +151,22 @@ class StructTests {
         out = Struct.merge(listOf(mutableListOf<Any?>(7, 8, 9), l1), 1)
         assertEquals(listOf<Any?>(null, 5, 9), out)
         assertEquals(listOf<Any?>(null, 5), l1)
+
+        // At the depth limit a longer override still grows the output.
+        val g0 = linkedMapOf<String, Any?>("a" to mutableListOf<Any?>(7, 8))
+        out = Struct.merge(listOf(linkedMapOf<String, Any?>("a" to mutableListOf<Any?>(1)), g0), 2)
+        assertEquals(mapOf<String, Any?>("a" to listOf(7, 8)), out)
+        assertEquals(mapOf<String, Any?>("a" to listOf(7, 8)), g0)
+
+        val g1 = mutableListOf<Any?>(6, 5)
+        out = Struct.merge(listOf(mutableListOf<Any?>(7), g1), 1)
+        assertEquals(listOf<Any?>(6, 5), out)
+        assertEquals(listOf<Any?>(6, 5), g1)
+
+        val g2 = mutableListOf<Any?>(null, null, null)
+        out = Struct.merge(listOf(mutableListOf<Any?>(1, 2), g2), 1)
+        assertEquals(listOf<Any?>(null, null, null), out)
+        assertEquals(listOf<Any?>(null, null, null), g2)
     }
 
     @Test

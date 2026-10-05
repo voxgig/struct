@@ -597,6 +597,22 @@ class StructTests {
     out = Struct.merge(List.of(Struct.jt(7, 8, 9), l1), 1);
     assertEquals(Struct.jt(null, 5, 9), out);
     assertEquals(Struct.jt(null, 5), l1);
+
+    // At the depth limit a longer override still grows the output.
+    Map<String, Object> g0 = Struct.jm("a", Struct.jt(7, 8));
+    out = Struct.merge(List.of(Struct.jm("a", Struct.jt(1)), g0), 2);
+    assertEquals(Struct.jm("a", Struct.jt(7, 8)), out);
+    assertEquals(Struct.jm("a", Struct.jt(7, 8)), g0);
+
+    List<Object> g1 = Struct.jt(6, 5);
+    out = Struct.merge(List.of(Struct.jt(7), g1), 1);
+    assertEquals(Struct.jt(6, 5), out);
+    assertEquals(Struct.jt(6, 5), g1);
+
+    List<Object> g2 = Struct.jt(null, null, null);
+    out = Struct.merge(List.of(Struct.jt(1, 2), g2), 1);
+    assertEquals(Struct.jt(null, null, null), out);
+    assertEquals(Struct.jt(null, null, null), g2);
   }
 
   @Test

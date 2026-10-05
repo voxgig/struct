@@ -883,6 +883,17 @@ func TestStruct(t *testing.T) {
 		if !reflect.DeepEqual(typed, []any{nil, "b"}) {
 			t.Errorf("walk-null typed: %#v", typed)
 		}
+
+		// WalkDescend keeps the slot its callback returns nil for.
+		descend := voxgigstruct.WalkDescend([]any{1, 2, 3}, func(_ *string, v any, _ any, _ []string) any {
+			if 2 == v {
+				return nil
+			}
+			return v
+		}, nil, nil, nil)
+		if !reflect.DeepEqual(descend, []any{1, nil, 3}) {
+			t.Errorf("walk-null descend: %s", voxgigstruct.Stringify(descend))
+		}
 	})
 
 	// merge tests
@@ -989,6 +1000,31 @@ func TestStruct(t *testing.T) {
 		}
 		if !reflect.DeepEqual(l1, []any{nil, 5}) {
 			t.Errorf("merge null depth later element: %s", voxgigstruct.Stringify(l1))
+		}
+
+		// At the depth limit a longer override still grows the output, and a
+		// typed slice, which a write replaces, keeps the written element.
+		for _, c := range []struct {
+			name string
+			dst  any
+			over any
+			md   int
+			out  any
+		}{
+			{"map", map[string]any{"a": []any{1}}, map[string]any{"a": []any{7, 8}}, 2,
+				map[string]any{"a": []any{7, 8}}},
+			{"list", []any{7}, []any{6, 5}, 1, []any{6, 5}},
+			{"null", []any{1, 2}, []any{nil, nil, nil}, 1, []any{nil, nil, nil}},
+			{"typed", []string{"a", "b"}, []string{"x"}, 1, []string{"x", "b"}},
+		} {
+			over := voxgigstruct.Stringify(c.over)
+			out = voxgigstruct.Merge([]any{c.dst, c.over}, c.md)
+			if !reflect.DeepEqual(out, c.out) {
+				t.Errorf("merge depth %s out: %s", c.name, voxgigstruct.Stringify(out))
+			}
+			if over != voxgigstruct.Stringify(c.over) {
+				t.Errorf("merge depth %s later element: %s", c.name, voxgigstruct.Stringify(c.over))
+			}
 		}
 	})
 

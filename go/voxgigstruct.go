@@ -1816,7 +1816,7 @@ func Merge(val any, maxdepths ...int) any {
 
 				if md <= pI {
 					if key != nil {
-						_storeProp(cur[pI-1], *key, val)
+						cur[pI-1] = _storeProp(cur[pI-1], *key, val)
 					}
 				} else if !IsNode(val) {
 					// Scalars just override directly.
