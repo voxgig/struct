@@ -7,9 +7,11 @@ setup:
 	chmod +x setup.sh
 	./setup.sh
 
-# Run tests
+# Run tests. regex_test.lua is a plain script that exits when it is done, so
+# it runs on its own: loaded by busted, it ended the run before any suite ran.
 test:
-	PATH="$(HOME)/.luarocks/bin:$$PATH" find ./test/ -name "*test.lua" | xargs $$(command -v busted || echo $(HOME)/.luarocks/bin/busted)
+	cd test && lua regex_test.lua
+	PATH="$(HOME)/.luarocks/bin:$$PATH" find ./test/ -name "*test.lua" ! -name regex_test.lua | xargs $$(command -v busted || echo $(HOME)/.luarocks/bin/busted)
 
 # Code quality: luacheck (lint) + StyLua (format check).
 # Install with:  luarocks install luacheck
