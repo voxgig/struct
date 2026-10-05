@@ -774,19 +774,27 @@ and merge ?(maxdepth = Noval) objs =
               grow dst pi; grow cur pi;
               !dst.(pi) <- (if pi > 0 then getprop !dst.(pi - 1) key else !dst.(pi));
               let tval = !dst.(pi) in
-              if is_nullish tval then (!cur.(pi) <- (if islist v then empty_list () else empty_map ()); v)
-              else if (islist v && islist tval) || (ismap v && ismap tval) then
+              if (islist v && islist tval) || (ismap v && ismap tval) then
                 (!cur.(pi) <- tval; v)
-              else (!cur.(pi) <- v; Noval)
+              else begin
+                (* Otherwise the override wins: it is copied, taking nothing
+                   from the destination, so no later merge writes into it. *)
+                !cur.(pi) <- (if islist v then empty_list () else empty_map ());
+                !dst.(pi) <- Noval;
+                v
+              end
             end
           in
-          let after key _v _parent path =
+          let after key _v parent path =
             let ci = size path in
             if ci < 1 then (if Array.length !cur > 0 then !cur.(0) else _v)
             else begin
               let target = if ci - 1 < Array.length !cur then !cur.(ci - 1) else Noval in
               let value = if ci < Array.length !cur then !cur.(ci) else Noval in
-              ignore (setprop target key value); value
+              ignore (setprop target key value);
+              (* walk writes this back into the override, so it is the
+                 override's own child, leaving the override unchanged. *)
+              lookup_ parent key
             end
           in
           out := walk ~before ~after obj

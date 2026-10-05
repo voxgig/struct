@@ -500,6 +500,16 @@ class StructTests {
   }
 
   @Test
+  void walkNull() {
+    // The corpus runner turns nulls into markers, so it cannot see a list
+    // slot that walk's write-back removes.
+    List<Object> list = Struct.jt(null, 2, 3);
+    Object out = Struct.walk(list, (k, v, p, t) -> v);
+    assertEquals(Struct.jt(null, 2, 3), out);
+    assertEquals(Struct.jt(null, 2, 3), list);
+  }
+
+  @Test
   void mergeExists() {
     assertTrue(Struct.merge(List.of()) == null);
   }
@@ -567,6 +577,42 @@ class StructTests {
     outer.put("a", inner);
     Map<String, Object> result4 = (Map<String, Object>) Struct.merge(List.of(outer));
     assertEquals(11, ((Supplier<Integer>) ((Map<?, ?>) result4.get("a")).get("b")).get());
+
+    // A later element keeps its nulls: the corpus runner turns them into
+    // markers, so it cannot see a list slot removed.
+    List<Object> e0 = Struct.jt((Object) null);
+    Map<String, Object> n0 = Struct.jm("a", Struct.jm("c", null), "d", null, "e", e0);
+    Object out = Struct.merge(List.of(Struct.jm("a", Struct.jm("b", 1), "e", Struct.jt(2, 3)), n0));
+    assertEquals(
+        Struct.jm("a", Struct.jm("b", 1, "c", null), "e", Struct.jt(null, 3), "d", null), out);
+    assertEquals(
+        Struct.jm("a", Struct.jm("c", null), "d", null, "e", Struct.jt((Object) null)), n0);
+
+    List<Object> l0 = Struct.jt(1, null, 3);
+    out = Struct.merge(List.of(Struct.jt(7, 8, 9, 10), l0));
+    assertEquals(Struct.jt(1, null, 3, 10), out);
+    assertEquals(Struct.jt(1, null, 3), l0);
+
+    List<Object> l1 = Struct.jt(null, 5);
+    out = Struct.merge(List.of(Struct.jt(7, 8, 9), l1), 1);
+    assertEquals(Struct.jt(null, 5, 9), out);
+    assertEquals(Struct.jt(null, 5), l1);
+
+    // At the depth limit a longer override still grows the output.
+    Map<String, Object> g0 = Struct.jm("a", Struct.jt(7, 8));
+    out = Struct.merge(List.of(Struct.jm("a", Struct.jt(1)), g0), 2);
+    assertEquals(Struct.jm("a", Struct.jt(7, 8)), out);
+    assertEquals(Struct.jm("a", Struct.jt(7, 8)), g0);
+
+    List<Object> g1 = Struct.jt(6, 5);
+    out = Struct.merge(List.of(Struct.jt(7), g1), 1);
+    assertEquals(Struct.jt(6, 5), out);
+    assertEquals(Struct.jt(6, 5), g1);
+
+    List<Object> g2 = Struct.jt(null, null, null);
+    out = Struct.merge(List.of(Struct.jt(1, 2), g2), 1);
+    assertEquals(Struct.jt(null, null, null), out);
+    assertEquals(Struct.jt(null, null, null), g2);
   }
 
   @Test

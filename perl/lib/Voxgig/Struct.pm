@@ -1361,31 +1361,23 @@ sub merge {
 
 sub _merge_pair {
     my ($a, $b, $maxdepth, $depth) = @_;
-    return $b if !defined $a || is_none($a);
-    return $b unless isnode($a);
     return $b unless isnode($b);
-    return $b if islist($a) != islist($b);  # type mismatch → replace
     if ($depth >= $maxdepth) { return $b }
+    if (!isnode($a) || islist($a) != islist($b)) {
+        # The override wins: a plain node is copied, so no later merge writes
+        # into it. A class instance is kept as is.
+        return $b if blessed($b);
+        $a = islist($b) ? _mklist() : _mkmap();
+    }
     if (islist($a)) {
         for (my $i = 0; $i < @$b; $i++) {
-            if ($i < @$a) {
-                $a->[$i] = _merge_pair($a->[$i], $b->[$i], $maxdepth, $depth + 1);
-            }
-            else {
-                $a->[$i] = $b->[$i];
-            }
+            $a->[$i] = _merge_pair($a->[$i], $b->[$i], $maxdepth, $depth + 1);
         }
         return $a;
     }
     # Map.
     for my $k (_map_keys($b)) {
-        my $bv = $b->{$k};
-        if (exists $a->{$k}) {
-            $a->{$k} = _merge_pair($a->{$k}, $bv, $maxdepth, $depth + 1);
-        }
-        else {
-            $a->{$k} = $bv;
-        }
+        $a->{$k} = _merge_pair($a->{$k}, $b->{$k}, $maxdepth, $depth + 1);
     }
     return $a;
 }

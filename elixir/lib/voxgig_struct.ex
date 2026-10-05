@@ -1215,23 +1215,20 @@ defmodule Voxgig.Struct do
                 setprop(dst, pi, dnew)
                 tval = getelem(dst, pi)
 
-                cond do
-                  tval == nil ->
-                    setprop(cur, pi, if(islist(val), do: empty_list(), else: empty_map()))
-                    val
-
-                  (islist(val) and islist(tval)) or (ismap(val) and ismap(tval)) ->
-                    setprop(cur, pi, tval)
-                    val
-
-                  true ->
-                    setprop(cur, pi, val)
-                    nil
+                if (islist(val) and islist(tval)) or (ismap(val) and ismap(tval)) do
+                  setprop(cur, pi, tval)
+                  val
+                else
+                  # Otherwise the override wins: it is copied, taking nothing
+                  # from the destination, so no later merge writes into it.
+                  setprop(cur, pi, if(islist(val), do: empty_list(), else: empty_map()))
+                  setprop(dst, pi, nil)
+                  val
                 end
             end
           end
 
-          aft = fn key, vv, _parent, path ->
+          aft = fn key, vv, parent, path ->
             ci = size(path)
 
             if ci < 1 do
@@ -1240,7 +1237,9 @@ defmodule Voxgig.Struct do
               target = if ci - 1 < size(cur), do: getelem(cur, ci - 1), else: nil
               value = if ci < size(cur), do: getelem(cur, ci), else: nil
               setprop(target, key, value)
-              value
+              # walk writes this back into the override, so it is the
+              # override's own child, leaving the override unchanged.
+              lookup_(parent, key)
             end
           end
 

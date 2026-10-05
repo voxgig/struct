@@ -1622,21 +1622,23 @@ namespace Voxgig.Struct
 
                             object? tval = dst[pI];
 
-                            if (tval == null && 0 == (T.Instance & Typify(mval)))
-                            {
-                                // Destination absent → create empty node.
-                                cur[pI] = IsList(mval)
-                                    ? (object?)new List<object?>()
-                                    : new Dictionary<string, object?>();
-                            }
-                            else if (Typify(mval) == Typify(tval))
+                            if (Typify(mval) == Typify(tval))
                             {
                                 // Same type → merge into existing destination node.
                                 cur[pI] = tval;
                             }
+                            else if (0 == (T.Instance & Typify(mval)))
+                            {
+                                // Otherwise the override wins: a plain node is copied, taking
+                                // nothing from the destination, so no later merge writes into it.
+                                cur[pI] = IsList(mval)
+                                    ? (object?)new List<object?>()
+                                    : new Dictionary<string, object?>();
+                                dst[pI] = null;
+                            }
                             else
                             {
-                                // Type mismatch → override wins, skip descending.
+                                // A class instance is kept as is, so there is nothing to descend.
                                 cur[pI] = mval;
                                 mval = null;
                             }
@@ -1645,7 +1647,7 @@ namespace Voxgig.Struct
                         return mval;
                     }
 
-                    object? mergeAfter(object? key, object? _, object? _parent, List<object?> path)
+                    object? mergeAfter(object? key, object? _, object? parent, List<object?> path)
                     {
                         int cI = path.Count;
                         if (key == null || cI <= 0)
@@ -1653,9 +1655,11 @@ namespace Voxgig.Struct
                             return cur[0];
                         }
 
-                        object? value = cur[cI];
-                        cur[cI - 1] = SetProp(cur[cI - 1], key, value) ?? cur[cI - 1];
-                        return value;
+                        cur[cI - 1] = SetProp(cur[cI - 1], key, cur[cI]) ?? cur[cI - 1];
+
+                        // Walk writes this back into the override, so it is the
+                        // override's own child, leaving the override unchanged.
+                        return Lookup(parent, key);
                     }
 
                     Walk(obj, mergeBefore, mergeAfter, md);

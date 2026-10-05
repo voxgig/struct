@@ -1385,17 +1385,17 @@ def merge(objs: list[Any] = UNDEF, maxdepth: Any = None) -> Any:
                     dst[pI] = getprop(dst[pI - 1], key) if pI > 0 else dst[pI]
                     tval = dst[pI]
 
-                    if tval == UNDEF:
-                        cur[pI] = [] if islist(val) else {}
-                    elif (islist(val) and islist(tval)) or (ismap(val) and ismap(tval)):
+                    if (islist(val) and islist(tval)) or (ismap(val) and ismap(tval)):
                         cur[pI] = tval
                     else:
-                        cur[pI] = val
-                        val = UNDEF
+                        # Otherwise the override wins: it is copied, taking nothing
+                        # from the destination, so no later merge writes into it.
+                        cur[pI] = [] if islist(val) else {}
+                        dst[pI] = UNDEF
 
                 return val
 
-            def after(key, _val, _parent, path, cur=cur):
+            def after(key, _val, parent, path, cur=cur):
                 cI = size(path)
                 if cI < 1:
                     return cur[0] if len(cur) > 0 else _val
@@ -1404,7 +1404,10 @@ def merge(objs: list[Any] = UNDEF, maxdepth: Any = None) -> Any:
                 value = cur[cI] if cI < len(cur) else UNDEF
 
                 setprop(target, key, value)
-                return value
+
+                # walk writes this back into the override, so it is the
+                # override's own child, read raw so a None stays None.
+                return _lookup(parent, key)
 
             out = walk(obj, before=before, after=after)
 

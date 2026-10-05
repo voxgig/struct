@@ -190,15 +190,19 @@ pub fn merge(val: &Value, maxdepth: Option<i64>) -> Value {
                 };
                 let mut cb = cur_b.borrow_mut();
                 grow(&mut cb, pi as usize);
-                if tval.is_noval() && (typify(v) & T_INSTANCE_I) == 0 {
+                if typify(v) == typify(&tval) {
+                    cb[pi as usize] = tval;
+                } else if (typify(v) & T_INSTANCE_I) == 0 {
+                    // Otherwise the override wins: a plain node is copied, taking
+                    // nothing from the destination, so no later merge writes into it.
                     cb[pi as usize] = if is_list(v) {
                         Value::empty_list()
                     } else {
                         Value::empty_map()
                     };
-                } else if typify(v) == typify(&tval) {
-                    cb[pi as usize] = tval;
+                    dst_b.borrow_mut()[pi as usize] = Value::Noval;
                 } else {
+                    // A class instance is kept as is, so there is nothing to descend.
                     cb[pi as usize] = v.clone();
                     ret = Value::Noval;
                 }
@@ -207,7 +211,7 @@ pub fn merge(val: &Value, maxdepth: Option<i64>) -> Value {
         };
 
         let cur_a = cur.clone();
-        let mut after = move |key: &Value, _v: &Value, _parent: &Value, path: &[String]| -> Value {
+        let mut after = move |key: &Value, _v: &Value, parent: &Value, path: &[String]| -> Value {
             let ci = path.len() as i64;
             let (target, value) = {
                 let cb = cur_a.borrow();
@@ -217,7 +221,13 @@ pub fn merge(val: &Value, maxdepth: Option<i64>) -> Value {
                 )
             };
             set_prop(target, key, value.clone());
-            value
+            // walk writes this back into the override, so below the root it is
+            // the override's own child, leaving the override unchanged.
+            if ci == 0 {
+                value
+            } else {
+                lookup(parent, key)
+            }
         };
 
         out = walk(obj, Some(&mut before), Some(&mut after), maxdepth);

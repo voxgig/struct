@@ -973,17 +973,15 @@ dynamic merge(dynamic objs, [dynamic maxdepth]) {
           grow(cur, pi);
           dst[pi] = pi > 0 ? getprop(dst[pi - 1], key) : dst[pi];
           var tval = dst[pi];
-          if (tval == null) {
-            cur[pi] = islist(val) ? <dynamic>[] : <String, dynamic>{};
-            return val;
-          } else if ((islist(val) && islist(tval)) ||
-              (ismap(val) && ismap(tval))) {
+          if ((islist(val) && islist(tval)) || (ismap(val) && ismap(tval))) {
             cur[pi] = tval;
-            return val;
           } else {
-            cur[pi] = val;
-            return null;
+            // Otherwise the override wins: it is copied, taking nothing from
+            // the destination, so no later merge writes into it.
+            cur[pi] = islist(val) ? <dynamic>[] : <String, dynamic>{};
+            dst[pi] = null;
           }
+          return val;
         }
       }
 
@@ -993,7 +991,9 @@ dynamic merge(dynamic objs, [dynamic maxdepth]) {
         var target = ci - 1 < cur.length ? cur[ci - 1] : null;
         var value = ci < cur.length ? cur[ci] : null;
         setprop(target, key, value);
-        return value;
+        // walk writes this back into the override, so it is the override's
+        // own child, leaving the override unchanged.
+        return _lookup(parent, key);
       }
 
       out = walk(obj, before: before, after: after);

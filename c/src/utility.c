@@ -1578,38 +1578,37 @@ static voxgig_value* merge_before(voxgig_value* key, voxgig_value* val, voxgig_v
   int tvt = voxgig_typify(tval);
   int valt = voxgig_typify(val);
 
-  if (voxgig_is_undef(tval)) {
-    /* Destination empty; create node unless override is instance. */
-    if (!(VOXGIG_T_INSTANCE & valt)) {
-      voxgig_value* nc = voxgig_is_list(val) ? voxgig_new_list() : voxgig_new_map();
-      voxgig_list_set(voxgig_as_list(st->cur_stack), (size_t)pI, nc);
-    }
-    voxgig_release(tval);
-    return val ? voxgig_retain(val) : voxgig_new_undef();
-  }
   if (tvt == valt) {
     voxgig_list_set(voxgig_as_list(st->cur_stack), (size_t)pI, voxgig_retain(tval));
     voxgig_release(tval);
     return val ? voxgig_retain(val) : voxgig_new_undef();
   }
-  /* Override wins. */
-  voxgig_list_set(voxgig_as_list(st->cur_stack), (size_t)pI, voxgig_retain(val));
   voxgig_release(tval);
-  /* Don't descend; set val to undef. */
+  if (!(VOXGIG_T_INSTANCE & valt)) {
+    /* Otherwise the override wins: a plain node is copied, taking nothing
+       from the destination, so no later merge writes into it. */
+    voxgig_value* nc = voxgig_is_list(val) ? voxgig_new_list() : voxgig_new_map();
+    voxgig_list_set(voxgig_as_list(st->cur_stack), (size_t)pI, nc);
+    voxgig_list_set(voxgig_as_list(st->dst_stack), (size_t)pI, voxgig_new_undef());
+    return val ? voxgig_retain(val) : voxgig_new_undef();
+  }
+  /* A class instance is kept as is, so there is nothing to descend. */
+  voxgig_list_set(voxgig_as_list(st->cur_stack), (size_t)pI, voxgig_retain(val));
   return voxgig_new_undef();
 }
 
 static voxgig_value* merge_after(voxgig_value* key, voxgig_value* val, voxgig_value* parent,
                                  voxgig_value* path, void* ud) {
-  (void)val;
-  (void)parent;
   merge_state* st = (merge_state*)ud;
   int cI = (int)voxgig_list_len(voxgig_as_list(path));
   voxgig_value* target = voxgig_list_get(voxgig_as_list(st->cur_stack), (size_t)(cI - 1));
   voxgig_value* value = voxgig_list_get(voxgig_as_list(st->cur_stack), (size_t)cI);
   if (target)
     voxgig_setprop(target, key, value);
-  return val ? voxgig_retain(val) : voxgig_new_undef();
+  /* walk writes this back into the override, so below the root it is the
+     override's own child, leaving the override unchanged. */
+  voxgig_value* own = 0 < cI ? voxgig_lookup(parent, key) : val;
+  return own ? voxgig_retain(own) : voxgig_new_undef();
 }
 
 voxgig_value* voxgig_merge(voxgig_value* val, int maxdepth) {

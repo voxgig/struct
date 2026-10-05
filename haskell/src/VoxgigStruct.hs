@@ -1046,14 +1046,16 @@ mergeD objs maxd = do
                                     else do d <- readIORef dst; return (d !! pii)
                   modifyIORef' dst (setAt pii dpi)
                   let tval = dpi
-                  if isNullish tval then do
-                    nn <- if islist vv then emptyList else emptyMap
-                    modifyIORef' cur (setAt pii nn); return vv
-                  else if (islist vv && islist tval) || (ismap vv && ismap tval) then do
+                  if (islist vv && islist tval) || (ismap vv && ismap tval) then do
                     modifyIORef' cur (setAt pii tval); return vv
                   else do
-                    modifyIORef' cur (setAt pii vv); return VNoval
-              after key vv _parent path = do
+                    -- Otherwise the override wins: it is copied, taking nothing
+                    -- from the destination, so no later merge writes into it.
+                    nn <- if islist vv then emptyList else emptyMap
+                    modifyIORef' cur (setAt pii nn)
+                    modifyIORef' dst (setAt pii VNoval)
+                    return vv
+              after key vv parent path = do
                 ci <- size path
                 if ci < 1 then do c <- readIORef cur; return (if not (null c) then head c else vv)
                 else do
@@ -1061,7 +1063,9 @@ mergeD objs maxd = do
                   let target = if ci - 1 < length c then c !! (ci - 1) else VNoval
                       value = if ci < length c then c !! ci else VNoval
                   _ <- setprop target key value
-                  return value
+                  -- walk writes this back into the override, so it is the
+                  -- override's own child, leaving the override unchanged.
+                  lookup_ parent key
           res <- walk (Just before) (Just after) VNoval obj
           writeIORef outRef res
       when (md == 0) $ do

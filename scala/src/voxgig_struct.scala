@@ -761,18 +761,26 @@ object struct {
                 grow(dst, pi); grow(cur, pi)
                 dst(pi) = if (pi > 0) getprop(dst(pi - 1), key) else dst(pi)
                 val tval = dst(pi)
-                if (isNullish(tval)) { cur(pi) = if (islist(v)) emptyList() else emptyMap(); v }
-                else if ((islist(v) && islist(tval)) || (ismap(v) && ismap(tval))) { cur(pi) = tval; v }
-                else { cur(pi) = v; Noval }
+                if ((islist(v) && islist(tval)) || (ismap(v) && ismap(tval))) cur(pi) = tval
+                else {
+                  // Otherwise the override wins: it is copied, taking nothing
+                  // from the destination, so no later merge writes into it.
+                  cur(pi) = if (islist(v)) emptyList() else emptyMap()
+                  dst(pi) = Noval
+                }
+                v
               }
             }
-            val after: WalkFn = (key, _v, _parent, path) => {
+            val after: WalkFn = (key, _v, parent, path) => {
               val ci = size(path)
               if (ci < 1) (if (cur.nonEmpty) cur(0) else _v)
               else {
                 val target = if (ci - 1 < cur.length) cur(ci - 1) else Noval
                 val value = if (ci < cur.length) cur(ci) else Noval
-                setprop(target, key, value); value
+                setprop(target, key, value)
+                // walk writes this back into the override, so it is the
+                // override's own child, leaving the override unchanged.
+                lookup_(parent, key)
               }
             }
             out = walk(obj, Some(before), Some(after))

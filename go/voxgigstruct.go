@@ -1450,6 +1450,16 @@ func DelProp(parent any, key any) any {
 }
 
 func SetProp(parent any, key any, newval any) any {
+	return _setProp(parent, key, newval, false)
+}
+
+// _storeProp is SetProp keeping a nil list element where SetProp removes it.
+// walk and merge write back through it, so a JSON null stays in its slot.
+func _storeProp(parent any, key any, newval any) any {
+	return _setProp(parent, key, newval, true)
+}
+
+func _setProp(parent any, key any, newval any, keepnil bool) any {
 	if !IsKey(key) {
 		return parent
 	}
@@ -1487,7 +1497,7 @@ func SetProp(parent any, key any, newval any) any {
 
 		// ListRef: modify .List in place, return same pointer for reference stability.
 		if lr, isLR := parent.(*ListRef[any]); isLR {
-			if newval == nil {
+			if newval == nil && !keepnil {
 				if ki >= 0 && ki < len(lr.List) {
 					copy(lr.List[ki:], lr.List[ki+1:])
 					lr.List = lr.List[:len(lr.List)-1]
@@ -1521,7 +1531,7 @@ func SetProp(parent any, key any, newval any) any {
 			}
 		}
 
-		if newval == nil {
+		if newval == nil && !keepnil {
 			if ki >= 0 && ki < len(arr) {
 				copy(arr[ki:], arr[ki+1:])
 				arr = arr[:len(arr)-1]
@@ -1682,7 +1692,7 @@ func _walkDescend(
 			ckeyStr := StrKey(ckey)
 			childPath[depth] = ckeyStr
 			newChild := _walkDescend(child, before, after, maxdepth, &ckeyStr, out, childPath, pool)
-			out = SetProp(out, ckey, newChild)
+			out = _storeProp(out, ckey, newChild)
 		}
 
 		if nil != parent && nil != key {
@@ -1730,7 +1740,7 @@ func _walkDescendAlloc(
 			copy(newPath, path)
 			newPath[len(path)] = ckeyStr
 			newChild := _walkDescendAlloc(child, before, after, maxdepth, &ckeyStr, out, newPath)
-			out = SetProp(out, ckey, newChild)
+			out = _storeProp(out, ckey, newChild)
 		}
 
 		if nil != parent && nil != key {
@@ -1806,7 +1816,7 @@ func Merge(val any, maxdepths ...int) any {
 
 				if md <= pI {
 					if key != nil {
-						SetProp(cur[pI-1], *key, val)
+						cur[pI-1] = _storeProp(cur[pI-1], *key, val)
 					}
 				} else if !IsNode(val) {
 					// Scalars just override directly.
@@ -1818,20 +1828,21 @@ func Merge(val any, maxdepths ...int) any {
 					}
 					tval := dst[pI]
 
-					// Destination empty, create node (unless override is class instance).
-					if nil == tval && 0 == (T_instance&Typify(val)) {
+					if Typify(val) == Typify(tval) {
+						// Matching override and destination, continue with their values.
+						cur[pI] = tval
+					} else if 0 == (T_instance & Typify(val)) {
+						// Otherwise the override wins: a plain node is copied, taking
+						// nothing from the destination, so no later merge writes into it.
 						if IsList(val) {
 							cur[pI] = make([]any, 0)
 						} else {
 							cur[pI] = make(map[string]any)
 						}
-					} else if Typify(val) == Typify(tval) {
-						// Matching override and destination, continue with their values.
-						cur[pI] = tval
+						dst[pI] = nil
 					} else {
-						// Override wins.
+						// A class instance is kept as is, so there is nothing to descend.
 						cur[pI] = val
-						// No need to descend (destination is discarded).
 						val = nil
 					}
 				}
@@ -1842,7 +1853,7 @@ func Merge(val any, maxdepths ...int) any {
 			after := func(
 				key *string,
 				_val any,
-				_parent any,
+				parent any,
 				path []string,
 			) any {
 				cI := len(path)
@@ -1852,10 +1863,11 @@ func Merge(val any, maxdepths ...int) any {
 					return cur[0]
 				}
 
-				value := cur[cI]
+				cur[cI-1] = _storeProp(cur[cI-1], *key, cur[cI])
 
-				cur[cI-1] = SetProp(cur[cI-1], *key, value)
-				return value
+				// Walk writes this back into the override, so it is the
+				// override's own child, leaving the override unchanged.
+				return GetProp(parent, *key)
 			}
 
 			// Walk overriding node, creating paths in output as needed.
@@ -4757,7 +4769,7 @@ func _makeArrayType(values []any, target any) any {
 
 	for i, v := range values {
 		elemVal := reflect.ValueOf(v)
-		if !elemVal.Type().ConvertibleTo(targetElem) {
+		if !elemVal.IsValid() || !elemVal.Type().ConvertibleTo(targetElem) {
 			return values
 		}
 

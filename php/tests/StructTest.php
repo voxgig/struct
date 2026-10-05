@@ -754,6 +754,14 @@ class StructTest extends TestCase
             $obj2,
             Struct::merge([$obj2])
         );
+
+        // A later element keeps its own nodes. The corpus runner passes
+        // arrays, which are copies, so it cannot see a stdClass change.
+        $over = (object)['a' => (object)['c' => 25, 'n' => null]];
+        $out = Struct::merge([(object)['a' => (object)['b' => 14]], $over]);
+        $this->assertEquals((object)['a' => (object)['b' => 14, 'c' => 25, 'n' => null]], $out);
+        $this->assertEquals((object)['a' => (object)['c' => 25, 'n' => null]], $over);
+        $this->assertNotSame($over->a, $out->a);
     }
 
     public function testGetpathBasic(): void

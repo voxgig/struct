@@ -26,28 +26,26 @@ public func merge(_ vals: Value, _ maxdepth: Int = MAXDEPTH) -> Value {
 }
 
 private func mergePair(_ a: Value, _ b: Value, _ maxdepth: Int, _ depth: Int) -> Value {
-  if a.isNoval { return b }
-  guard isnode(a), isnode(b) else { return b }
-  // Mismatched node kinds → replace.
-  if islist(a) != islist(b) { return b }
+  guard isnode(b) else { return b }
   if depth >= maxdepth { return b }
+  var a = a
+  if !isnode(a) || islist(a) != islist(b) {
+    // The override wins: it is copied, so no later merge writes into it.
+    a = islist(b) ? .list([]) : .map(VMap())
+  }
   if case .list(let la) = a, case .list(let lb) = b {
     for i in 0..<lb.items.count {
       if i < la.items.count {
         la.items[i] = mergePair(la.items[i], lb.items[i], maxdepth, depth + 1)
       } else {
-        la.items.append(lb.items[i])
+        la.items.append(mergePair(.noval, lb.items[i], maxdepth, depth + 1))
       }
     }
     return a
   }
   if case .map(let ma) = a, case .map(let mb) = b {
     for (k, bv) in mb.entries {
-      if let av = ma.entries[k] {
-        ma.entries[k] = mergePair(av, bv, maxdepth, depth + 1)
-      } else {
-        ma.entries[k] = bv
-      }
+      ma.entries[k] = mergePair(ma.entries[k] ?? .noval, bv, maxdepth, depth + 1)
     }
     return a
   }

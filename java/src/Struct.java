@@ -452,6 +452,16 @@ public class Struct {
   }
 
   public static Object setprop(Object parent, Object key, Object val) {
+    return setprop(parent, key, val, false);
+  }
+
+  // setprop keeping a null list element where setprop removes it. walk and
+  // merge write back through it, so a JSON null stays in its slot.
+  private static Object storeprop(Object parent, Object key, Object val) {
+    return setprop(parent, key, val, true);
+  }
+
+  private static Object setprop(Object parent, Object key, Object val, boolean keepNull) {
     if (!iskey(key)) {
       return parent;
     }
@@ -470,7 +480,7 @@ public class Struct {
       }
       idx = (int) Math.floor(idx);
 
-      if (val == null) {
+      if (val == null && !keepNull) {
         if (idx >= 0 && idx < l.size()) {
           l.remove((int) idx);
         }
@@ -1160,7 +1170,7 @@ public class Struct {
         List<String> newPath = new ArrayList<>(path);
         newPath.add(ckey);
         Object newChild = walkDescend(child, before, after, maxdepth, ckey, out, newPath);
-        out = setprop(out, ckey, newChild);
+        out = storeprop(out, ckey, newChild);
       }
       if (parent != null && key != null) {
         setprop(parent, key, out);
@@ -1208,7 +1218,7 @@ public class Struct {
           int pI = path.size();
           if (md <= pI) {
             if (key != null) {
-              cur[pI - 1] = setprop(cur[pI - 1], key, v);
+              cur[pI - 1] = storeprop(cur[pI - 1], key, v);
             }
           } else if (!isnode(v)) {
             cur[pI] = v;
@@ -1221,11 +1231,15 @@ public class Struct {
             }
             Object tval = dst[pI];
 
-            if (tval == null && (typify(v) & T_instance) == 0) {
-              cur[pI] = islist(v) ? new ArrayList<>() : new LinkedHashMap<String, Object>();
-            } else if (typify(v) == typify(tval)) {
+            if (typify(v) == typify(tval)) {
               cur[pI] = tval;
+            } else if ((typify(v) & T_instance) == 0) {
+              // Otherwise the override wins: a plain node is copied, taking
+              // nothing from the destination, so no later merge writes into it.
+              cur[pI] = islist(v) ? new ArrayList<>() : new LinkedHashMap<String, Object>();
+              dst[pI] = null;
             } else {
+              // A class instance is kept as is, so there is nothing to descend.
               cur[pI] = v;
               return null;
             }
@@ -1233,14 +1247,15 @@ public class Struct {
           return v;
         };
 
-        WalkApply after = (key, _val, _parent, path) -> {
+        WalkApply after = (key, _val, parent, path) -> {
           int cI = path.size();
           if (key == null || cI <= 0) {
             return cur[0];
           }
-          Object value = cur[cI];
-          cur[cI - 1] = setprop(cur[cI - 1], key, value);
-          return value;
+          cur[cI - 1] = storeprop(cur[cI - 1], key, cur[cI]);
+          // walk writes this back into the override, so it is the override's
+          // own child, leaving the override unchanged.
+          return lookup(parent, key);
         };
 
         walk(obj, before, after, md);
