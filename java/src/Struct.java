@@ -452,6 +452,16 @@ public class Struct {
   }
 
   public static Object setprop(Object parent, Object key, Object val) {
+    return setprop(parent, key, val, false);
+  }
+
+  // setprop keeping a null list element where setprop removes it. walk and
+  // merge write back through it, so a JSON null stays in its slot.
+  private static Object storeprop(Object parent, Object key, Object val) {
+    return setprop(parent, key, val, true);
+  }
+
+  private static Object setprop(Object parent, Object key, Object val, boolean keepNull) {
     if (!iskey(key)) {
       return parent;
     }
@@ -470,7 +480,7 @@ public class Struct {
       }
       idx = (int) Math.floor(idx);
 
-      if (val == null) {
+      if (val == null && !keepNull) {
         if (idx >= 0 && idx < l.size()) {
           l.remove((int) idx);
         }
@@ -1160,7 +1170,7 @@ public class Struct {
         List<String> newPath = new ArrayList<>(path);
         newPath.add(ckey);
         Object newChild = walkDescend(child, before, after, maxdepth, ckey, out, newPath);
-        out = setprop(out, ckey, newChild);
+        out = storeprop(out, ckey, newChild);
       }
       if (parent != null && key != null) {
         setprop(parent, key, out);
@@ -1208,7 +1218,7 @@ public class Struct {
           int pI = path.size();
           if (md <= pI) {
             if (key != null) {
-              cur[pI - 1] = setprop(cur[pI - 1], key, v);
+              cur[pI - 1] = storeprop(cur[pI - 1], key, v);
             }
           } else if (!isnode(v)) {
             cur[pI] = v;
@@ -1242,7 +1252,7 @@ public class Struct {
           if (key == null || cI <= 0) {
             return cur[0];
           }
-          cur[cI - 1] = setprop(cur[cI - 1], key, cur[cI]);
+          cur[cI - 1] = storeprop(cur[cI - 1], key, cur[cI]);
           // walk writes this back into the override, so it is the override's
           // own child, leaving the override unchanged.
           return lookup(parent, key);

@@ -1450,6 +1450,16 @@ func DelProp(parent any, key any) any {
 }
 
 func SetProp(parent any, key any, newval any) any {
+	return _setProp(parent, key, newval, false)
+}
+
+// _storeProp is SetProp keeping a nil list element where SetProp removes it.
+// walk and merge write back through it, so a JSON null stays in its slot.
+func _storeProp(parent any, key any, newval any) any {
+	return _setProp(parent, key, newval, true)
+}
+
+func _setProp(parent any, key any, newval any, keepnil bool) any {
 	if !IsKey(key) {
 		return parent
 	}
@@ -1487,7 +1497,7 @@ func SetProp(parent any, key any, newval any) any {
 
 		// ListRef: modify .List in place, return same pointer for reference stability.
 		if lr, isLR := parent.(*ListRef[any]); isLR {
-			if newval == nil {
+			if newval == nil && !keepnil {
 				if ki >= 0 && ki < len(lr.List) {
 					copy(lr.List[ki:], lr.List[ki+1:])
 					lr.List = lr.List[:len(lr.List)-1]
@@ -1521,7 +1531,7 @@ func SetProp(parent any, key any, newval any) any {
 			}
 		}
 
-		if newval == nil {
+		if newval == nil && !keepnil {
 			if ki >= 0 && ki < len(arr) {
 				copy(arr[ki:], arr[ki+1:])
 				arr = arr[:len(arr)-1]
@@ -1682,7 +1692,7 @@ func _walkDescend(
 			ckeyStr := StrKey(ckey)
 			childPath[depth] = ckeyStr
 			newChild := _walkDescend(child, before, after, maxdepth, &ckeyStr, out, childPath, pool)
-			out = SetProp(out, ckey, newChild)
+			out = _storeProp(out, ckey, newChild)
 		}
 
 		if nil != parent && nil != key {
@@ -1730,7 +1740,7 @@ func _walkDescendAlloc(
 			copy(newPath, path)
 			newPath[len(path)] = ckeyStr
 			newChild := _walkDescendAlloc(child, before, after, maxdepth, &ckeyStr, out, newPath)
-			out = SetProp(out, ckey, newChild)
+			out = _storeProp(out, ckey, newChild)
 		}
 
 		if nil != parent && nil != key {
@@ -1806,7 +1816,7 @@ func Merge(val any, maxdepths ...int) any {
 
 				if md <= pI {
 					if key != nil {
-						SetProp(cur[pI-1], *key, val)
+						_storeProp(cur[pI-1], *key, val)
 					}
 				} else if !IsNode(val) {
 					// Scalars just override directly.
@@ -1853,7 +1863,7 @@ func Merge(val any, maxdepths ...int) any {
 					return cur[0]
 				}
 
-				cur[cI-1] = SetProp(cur[cI-1], *key, cur[cI])
+				cur[cI-1] = _storeProp(cur[cI-1], *key, cur[cI])
 
 				// Walk writes this back into the override, so it is the
 				// override's own child, leaving the override unchanged.
@@ -4759,7 +4769,7 @@ func _makeArrayType(values []any, target any) any {
 
 	for i, v := range values {
 		elemVal := reflect.ValueOf(v)
-		if !elemVal.Type().ConvertibleTo(targetElem) {
+		if !elemVal.IsValid() || !elemVal.Type().ConvertibleTo(targetElem) {
 			return values
 		}
 

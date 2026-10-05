@@ -419,6 +419,21 @@ object Struct {
         parent: Any?,
         key: Any?,
         value: Any?,
+    ): Any? = setprop(parent, key, value, false)
+
+    // setprop keeping a null list element where setprop removes it. walk and
+    // merge write back through it, so a JSON null stays in its slot.
+    private fun storeprop(
+        parent: Any?,
+        key: Any?,
+        value: Any?,
+    ): Any? = setprop(parent, key, value, true)
+
+    private fun setprop(
+        parent: Any?,
+        key: Any?,
+        value: Any?,
+        keepNull: Boolean,
     ): Any? {
         if (!iskey(key)) return parent
         return when (parent) {
@@ -429,7 +444,7 @@ object Struct {
             is MutableList<*> -> {
                 val list = parent as MutableList<Any?>
                 val idx = parseIntKey(key) ?: return parent
-                if (value == null) {
+                if (value == null && !keepNull) {
                     if (idx in list.indices) list.removeAt(idx)
                     return list
                 }
@@ -1030,7 +1045,7 @@ object Struct {
                 val newPath = path.toMutableList()
                 newPath.add(ckey)
                 val newChild = walkDescend(child, before, after, maxdepth, ckey, out, newPath)
-                out = setprop(out, ckey, newChild)
+                out = storeprop(out, ckey, newChild)
             }
             if (parent != null && key != null) setprop(parent, key, out)
         }
@@ -1062,7 +1077,7 @@ object Struct {
                     WalkApply { key, v, _, path ->
                         val pI = path.size
                         if (md <= pI) {
-                            if (key != null) cur[pI - 1] = setprop(cur[pI - 1], key, v)
+                            if (key != null) cur[pI - 1] = storeprop(cur[pI - 1], key, v)
                         } else if (!isnode(v)) {
                             cur[pI] = v
                         } else {
@@ -1089,7 +1104,7 @@ object Struct {
                     WalkApply { key, _, parent, path ->
                         val cI = path.size
                         if (key == null || cI <= 0) return@WalkApply cur[0]
-                        cur[cI - 1] = setprop(cur[cI - 1], key, cur[cI])
+                        cur[cI - 1] = storeprop(cur[cI - 1], key, cur[cI])
                         // walk writes this back into the override, so it is the
                         // override's own child, leaving the override unchanged.
                         lookup(parent, key)

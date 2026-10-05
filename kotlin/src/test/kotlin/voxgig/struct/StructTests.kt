@@ -94,6 +94,16 @@ class StructTests {
         assertEquals(outMap["both"], logBoth)
     }
 
+    // The corpus runner turns nulls into markers, so it cannot see a list
+    // slot that walk's write-back removes.
+    @Test
+    fun walkNull() {
+        val list = mutableListOf<Any?>(null, 2, 3)
+        val out = Struct.walk(list, Struct.WalkApply { _, v, _, _ -> v })
+        assertEquals(listOf<Any?>(null, 2, 3), out)
+        assertEquals(listOf<Any?>(null, 2, 3), list)
+    }
+
     @Test
     fun mergeExists() {
         assertEquals(null, Struct.merge(emptyList<Any?>()))
@@ -111,6 +121,36 @@ class StructTests {
         val f0 = Supplier { 11 }
         val result0 = Struct.merge(listOf(f0)) as Supplier<*>
         assertEquals(11, result0.get())
+
+        // A later element keeps its nulls: the corpus runner turns them into
+        // markers, so it cannot see a list slot removed.
+        val n0 =
+            linkedMapOf<String, Any?>(
+                "a" to linkedMapOf<String, Any?>("c" to null),
+                "d" to null,
+                "e" to mutableListOf<Any?>(null),
+            )
+        val base =
+            linkedMapOf<String, Any?>(
+                "a" to linkedMapOf<String, Any?>("b" to 1),
+                "e" to mutableListOf<Any?>(2, 3),
+            )
+        var out = Struct.merge(listOf(base, n0))
+        assertEquals(
+            mapOf<String, Any?>("a" to mapOf("b" to 1, "c" to null), "d" to null, "e" to listOf(null, 3)),
+            out,
+        )
+        assertEquals(mapOf<String, Any?>("a" to mapOf("c" to null), "d" to null, "e" to listOf(null)), n0)
+
+        val l0 = mutableListOf<Any?>(1, null, 3)
+        out = Struct.merge(listOf(mutableListOf<Any?>(7, 8, 9, 10), l0))
+        assertEquals(listOf<Any?>(1, null, 3, 10), out)
+        assertEquals(listOf<Any?>(1, null, 3), l0)
+
+        val l1 = mutableListOf<Any?>(null, 5)
+        out = Struct.merge(listOf(mutableListOf<Any?>(7, 8, 9), l1), 1)
+        assertEquals(listOf<Any?>(null, 5, 9), out)
+        assertEquals(listOf<Any?>(null, 5), l1)
     }
 
     @Test
