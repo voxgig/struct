@@ -1252,6 +1252,10 @@ public class StructTests
         }
         Dictionary<string, object?> AllNull() =>
             Spec().Keys.ToDictionary(k => k, k => (object?)null);
+        object? OneSpec() => new Dictionary<string, object?>
+        {
+            ["a"] = new List<object?> { "`$ONE`", 5L, "`$STRING`" },
+        };
 
         var valid = new (string name, Func<object?> data, Func<object?> spec, Func<object?> expected)[]
         {
@@ -1275,6 +1279,17 @@ public class StructTests
             ("null-list", () => new Dictionary<string, object?> { ["tags"] = null },
                 () => new Dictionary<string, object?> { ["tags"] = new List<object?> { "a", "b" } },
                 () => new Dictionary<string, object?> { ["tags"] = new List<object?> { "a", "b" } }),
+            ("one-null", () => new Dictionary<string, object?> { ["a"] = null }, OneSpec,
+                () => new Dictionary<string, object?> { ["a"] = null }),
+            ("one-absent", () => new Dictionary<string, object?>(), OneSpec,
+                () => new Dictionary<string, object?>()),
+            ("one-null-map", () => new Dictionary<string, object?> { ["m"] = null },
+                () => new Dictionary<string, object?> { ["m"] = OneSpec() },
+                () => new Dictionary<string, object?> { ["m"] = new Dictionary<string, object?>() }),
+            ("one-list-null", () => new Dictionary<string, object?> { ["a"] = new List<object?> { null } },
+                () => new Dictionary<string, object?> { ["a"] = new List<object?> {
+                    new List<object?> { "`$ONE`", "`$STRING`", 7L } } },
+                () => new Dictionary<string, object?> { ["a"] = new List<object?>() }),
         };
         var wrong = new List<string>();
         foreach (var (name, data, spec, expected) in valid)

@@ -3110,8 +3110,9 @@ namespace Voxgig.Struct
             bool cKeyExists = TryGetDataValue(inj.DParent, key, out object? cval);
 
             // TS's getprop answers NONE for a null value too, so a null keeps
-            // the spec default exactly as an absent key does.
-            if (!exact && (!cKeyExists || cval == null))
+            // the spec default exactly as an absent key does, and so does a
+            // NONE that a $ONE alternative passes down.
+            if (!exact && (!cKeyExists || cval == null || ReferenceEquals(cval, NONE)))
             {
                 return null;
             }
