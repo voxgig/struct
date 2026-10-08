@@ -262,6 +262,23 @@ class StructMinorTest {
   }
 
   @Test
+  void setpropNull() {
+    // A null list element is stored, not removed: the corpus runner turns
+    // nulls into markers, so it cannot see the slot.
+    assertEquals(Struct.jt(1, null, 3), Struct.setprop(Struct.jt(1, 2, 3), 1, null));
+    assertEquals(Struct.jt(1, null, 3), Struct.setprop(Struct.jt(1, 2, 3), "1", null));
+    assertEquals(Struct.jt(1, 2, 3, null), Struct.setprop(Struct.jt(1, 2, 3), 5, null));
+    assertEquals(Struct.jt(null, 1, 2, 3), Struct.setprop(Struct.jt(1, 2, 3), -1, null));
+  }
+
+  @Test
+  void setpathNull() {
+    Map<String, Object> store = Struct.jm("a", Struct.jt(1, 2, 3));
+    assertEquals(Struct.jt(1, null, 3), Struct.setpath(store, "a.1", null));
+    assertEquals(Struct.jm("a", Struct.jt(1, null, 3)), store);
+  }
+
+  @Test
   void exists() {
     assertTrue(Struct.isfunc((Function<Object, Object>) v -> v));
     assertEquals("map", Struct.typename(Struct.T_map));

@@ -50,6 +50,23 @@ class StructTests {
         assertEquals("map", Struct.typename(Struct.T_MAP))
     }
 
+    // A null list element is stored, not removed: the corpus runner turns
+    // nulls into markers, so it cannot see the slot.
+    @Test
+    fun setpropNull() {
+        assertEquals(listOf<Any?>(1, null, 3), Struct.setprop(mutableListOf<Any?>(1, 2, 3), 1, null))
+        assertEquals(listOf<Any?>(1, null, 3), Struct.setprop(mutableListOf<Any?>(1, 2, 3), "1", null))
+        assertEquals(listOf<Any?>(1, 2, 3, null), Struct.setprop(mutableListOf<Any?>(1, 2, 3), 5, null))
+        assertEquals(listOf<Any?>(null, 1, 2, 3), Struct.setprop(mutableListOf<Any?>(1, 2, 3), -1, null))
+    }
+
+    @Test
+    fun setpathNull() {
+        val store = linkedMapOf<String, Any?>("a" to mutableListOf<Any?>(1, 2, 3))
+        assertEquals(listOf<Any?>(1, null, 3), Struct.setpath(store, "a.1", null))
+        assertEquals(mapOf<String, Any?>("a" to listOf(1, null, 3)), store)
+    }
+
     @Test
     fun walkExists() {
         assertTrue(Struct.walk(linkedMapOf<String, Any?>(), Struct.WalkApply { _, v, _, _ -> v }) is Map<*, *>)

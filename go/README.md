@@ -576,8 +576,9 @@ func InjectChild(child any, store any, inj *Injection) *Injection
 ### `ListRef[T]`
 
 Generic wrapper providing pointer-stable list semantics. Used
-internally by `merge` and `inject`; you only need it when writing
-custom modify callbacks that mutate lists.
+internally by `inject`, `transform` and `validate`; you only need it
+when writing custom modify callbacks that mutate lists, or to let
+`SetPath` grow a store that is itself a list.
 
 ```go
 ref := &voxgigstruct.ListRef[int]{List: []int{1, 2, 3}}
