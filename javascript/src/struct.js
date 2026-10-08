@@ -1,5 +1,5 @@
 /* Copyright (c) 2025-2026 Voxgig Ltd. MIT LICENSE. */
-// VERSION: @voxgig/struct-js 0.1.6
+// VERSION: @voxgig/struct-js 0.1.7
 /* Voxgig Struct
  * =============
  *

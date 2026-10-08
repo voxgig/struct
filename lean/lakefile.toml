@@ -1,5 +1,5 @@
 name = "voxgig-struct"
-version = "0.1.0"
+version = "0.1.1"
 defaultTargets = ["VoxgigStruct", "runner"]
 
 [[lean_lib]]
