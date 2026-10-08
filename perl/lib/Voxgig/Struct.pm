@@ -1345,7 +1345,7 @@ sub merge {
 
     my $out = $vals->[0];
     for (my $i = 1; $i < @$vals; $i++) {
-        $out = _merge_pair($out, $vals->[$i], $md, 0);
+        $out = _merge_pair($out, $vals->[$i], $md, 0, {});
     }
 
     # Depth zero means nothing merges, and canonical answers the LAST element
@@ -1360,24 +1360,36 @@ sub merge {
 }
 
 sub _merge_pair {
-    my ($a, $b, $maxdepth, $depth) = @_;
+    my ($a, $b, $maxdepth, $depth, $path) = @_;
     return $b unless isnode($b);
     if ($depth >= $maxdepth) { return $b }
-    if (!isnode($a) || islist($a) != islist($b)) {
+    # A blessed object is a class instance, so it and a plain map differ in
+    # kind as a list and a map do. typify here calls both a map.
+    if (   !isnode($a)
+        || islist($a) != islist($b)
+        || ( blessed($a) ? 1 : 0 ) != ( blessed($b) ? 1 : 0 ) )
+    {
         # The override wins: a plain node is copied, so no later merge writes
         # into it. A class instance is kept as is.
         return $b if blessed($b);
+
+        # A node already being merged further up is a cycle, which clone
+        # makes of an object that refers back to itself; its copy closes it.
+        my $copy = $path->{ refaddr($b) };
+        return $copy if defined $copy;
+
         $a = islist($b) ? _mklist() : _mkmap();
     }
+    local $path->{ refaddr($b) } = $a;
     if (islist($a)) {
         for (my $i = 0; $i < @$b; $i++) {
-            $a->[$i] = _merge_pair($a->[$i], $b->[$i], $maxdepth, $depth + 1);
+            $a->[$i] = _merge_pair($a->[$i], $b->[$i], $maxdepth, $depth + 1, $path);
         }
         return $a;
     }
     # Map.
     for my $k (_map_keys($b)) {
-        $a->{$k} = _merge_pair($a->{$k}, $b->{$k}, $maxdepth, $depth + 1);
+        $a->{$k} = _merge_pair($a->{$k}, $b->{$k}, $maxdepth, $depth + 1, $path);
     }
     return $a;
 }

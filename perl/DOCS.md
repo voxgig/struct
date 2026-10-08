@@ -211,6 +211,11 @@ Perl-specific points the signatures don't show:
 - **Booleans, null, absence are singletons.** JSON `true`/`false` are
   `$Voxgig::Struct::JTRUE` / `$JFALSE` (blessed, overload `bool`/`0+`/`""`);
   JSON `null` is `$JNULL`; "absent" is `$NONE` (predicate `is_none`).
+- **`merge` keeps a blessed object as a class instance.** One that wins is
+  kept as it is, and a plain map that wins over one is copied, as in
+  TypeScript. `typify`, `validate` and `clone` still read a blessed hash as
+  a map: `clone` copies it to a plain map, keeping any reference back to
+  itself, and `merge` copies such a cycle closed.
 - **Transform/validate/select commands are named subs**
   (`transform_COPY`, `validate_STRING`, `select_CMP`, …), wired into the
   injection store by `transform`/`validate`/`select`; you reference them by
