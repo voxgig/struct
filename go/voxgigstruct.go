@@ -1449,61 +1449,26 @@ func DelProp(parent any, key any) any {
 	return parent
 }
 
+// Safely set a property. A list key past the end appends and a negative key
+// prepends. A nil value is stored like any other; DelProp removes a key.
+// Returns the parent, which for a slice may be a new slice: keep the result.
 func SetProp(parent any, key any, newval any) any {
-	return _setProp(parent, key, newval, false)
-}
-
-// _storeProp is SetProp keeping a nil list element where SetProp removes it.
-// walk and merge write back through it, so a JSON null stays in its slot.
-func _storeProp(parent any, key any, newval any) any {
-	return _setProp(parent, key, newval, true)
-}
-
-func _setProp(parent any, key any, newval any, keepnil bool) any {
 	if !IsKey(key) {
 		return parent
 	}
 
 	if IsMap(parent) {
 		m := parent.(map[string]any)
-
-		// Convert key to string
-		ks := ""
-		ks = StrKey(key)
-
-		// Preserve nil values (like JS null). Use DelProp for explicit key removal.
-		m[ks] = newval
+		m[StrKey(key)] = newval
 
 	} else if IsList(parent) {
-
-		// Convert key to integer
-		var ki int
-		switch k := key.(type) {
-		case int:
-			ki = k
-		case float64:
-			ki = int(k)
-		case string:
-			kiParsed, e := _parseInt(k)
-			if e == nil {
-				ki = kiParsed
-			} else {
-				// no-op, can't set
-				return parent
-			}
-		default:
+		ki, ok := _listKey(key)
+		if !ok {
 			return parent
 		}
 
 		// ListRef: modify .List in place, return same pointer for reference stability.
 		if lr, isLR := parent.(*ListRef[any]); isLR {
-			if newval == nil && !keepnil {
-				if ki >= 0 && ki < len(lr.List) {
-					copy(lr.List[ki:], lr.List[ki+1:])
-					lr.List = lr.List[:len(lr.List)-1]
-				}
-				return parent
-			}
 			if ki >= 0 {
 				if ki >= len(lr.List) {
 					lr.List = append(lr.List, newval)
@@ -1521,27 +1486,11 @@ func _setProp(parent any, key any, newval any, keepnil bool) any {
 
 		arr, genarr := parent.([]any)
 
-		// If newval == nil, remove element [shift down].
-
 		if !genarr {
 			rv := reflect.ValueOf(parent)
 			arr = make([]any, rv.Len())
 			for i := 0; i < rv.Len(); i++ {
 				arr[i] = rv.Index(i).Interface()
-			}
-		}
-
-		if newval == nil && !keepnil {
-			if ki >= 0 && ki < len(arr) {
-				copy(arr[ki:], arr[ki+1:])
-				arr = arr[:len(arr)-1]
-			}
-
-			if !genarr {
-				return _makeArrayType(arr, parent)
-			} else {
-
-				return arr
 			}
 		}
 
@@ -1575,6 +1524,20 @@ func _setProp(parent any, key any, newval any, keepnil bool) any {
 	}
 
 	return parent
+}
+
+// The list index SetProp reads from key; false when key names no index.
+func _listKey(key any) (int, bool) {
+	switch k := key.(type) {
+	case int:
+		return k, true
+	case float64:
+		return int(k), true
+	case string:
+		ki, err := _parseInt(k)
+		return ki, nil == err
+	}
+	return 0, false
 }
 
 func Walk(
@@ -1692,7 +1655,7 @@ func _walkDescend(
 			ckeyStr := StrKey(ckey)
 			childPath[depth] = ckeyStr
 			newChild := _walkDescend(child, before, after, maxdepth, &ckeyStr, out, childPath, pool)
-			out = _storeProp(out, ckey, newChild)
+			out = SetProp(out, ckey, newChild)
 		}
 
 		if nil != parent && nil != key {
@@ -1740,7 +1703,7 @@ func _walkDescendAlloc(
 			copy(newPath, path)
 			newPath[len(path)] = ckeyStr
 			newChild := _walkDescendAlloc(child, before, after, maxdepth, &ckeyStr, out, newPath)
-			out = _storeProp(out, ckey, newChild)
+			out = SetProp(out, ckey, newChild)
 		}
 
 		if nil != parent && nil != key {
@@ -1816,7 +1779,7 @@ func Merge(val any, maxdepths ...int) any {
 
 				if md <= pI {
 					if key != nil {
-						cur[pI-1] = _storeProp(cur[pI-1], *key, val)
+						cur[pI-1] = SetProp(cur[pI-1], *key, val)
 					}
 				} else if !IsNode(val) {
 					// Scalars just override directly.
@@ -1863,7 +1826,7 @@ func Merge(val any, maxdepths ...int) any {
 					return cur[0]
 				}
 
-				cur[cI-1] = _storeProp(cur[cI-1], *key, cur[cI])
+				cur[cI-1] = SetProp(cur[cI-1], *key, cur[cI])
 
 				// Walk writes this back into the override, so it is the
 				// override's own child, leaving the override unchanged.
@@ -2064,10 +2027,17 @@ func SetPath(store any, path any, val any, injdefs ...map[string]any) any {
 	}
 
 	numparts := len(parts)
-	parent := GetProp(store, base, store)
 
-	var grandparent any
-	var grandKey any
+	// The nodes above parent on the path, and the key that leads down from each.
+	var holders []any
+	var keys []any
+
+	parent := store
+	if HasKey(store, base) {
+		parent = GetProp(store, base)
+		holders = []any{store}
+		keys = []any{base}
+	}
 
 	for pI := 0; pI < numparts-1; pI++ {
 		partKey := GetElem(parts, pI)
@@ -2079,27 +2049,41 @@ func SetPath(store any, path any, val any, injdefs ...map[string]any) any {
 			} else {
 				nextParent = map[string]any{}
 			}
-			SetProp(parent, partKey, nextParent)
+			slot := _listSlot(parent, partKey)
+			parent = _keepList(holders, keys, parent, SetProp(parent, partKey, nextParent))
+			partKey = slot
 		}
-		grandparent = parent
-		grandKey = partKey
+		holders = append(holders, parent)
+		keys = append(keys, partKey)
 		parent = nextParent
 	}
 
 	lastKey := GetElem(parts, -1)
 	if val == DELETE {
-		newParent := DelProp(parent, lastKey)
-		if grandparent != nil && IsList(parent) {
-			SetProp(grandparent, grandKey, newParent)
-		}
-		return newParent
-	} else {
-		newParent := SetProp(parent, lastKey, val)
-		if grandparent != nil && IsList(parent) {
-			SetProp(grandparent, grandKey, newParent)
-		}
-		return newParent
+		return _keepList(holders, keys, parent, DelProp(parent, lastKey))
 	}
+	return _keepList(holders, keys, parent, SetProp(parent, lastKey, val))
+}
+
+// The index where SetProp puts a value written to list under key.
+func _listSlot(list any, key any) any {
+	ki, ok := _listKey(key)
+	if !ok || !IsList(list) {
+		return key
+	}
+	return max(0, min(ki, Size(list)))
+}
+
+// A write to a slice can return a new slice, so it goes back into the holder,
+// and on up the path while each holder is a slice in turn.
+func _keepList(holders []any, keys []any, list any, written any) any {
+	out := written
+	for i := len(holders) - 1; 0 <= i && IsList(list); i-- {
+		list = holders[i]
+		written = SetProp(list, keys[i], written)
+		holders[i] = written
+	}
+	return out
 }
 
 func _injectStr(

@@ -215,8 +215,8 @@ language-neutral form:
   Group A readers (`getprop`, `getelem`, `haskey`, `isempty`, `isnode`)
   treat a stored `null` as absent too.
 - `null` = the JSON null scalar; `typify(null)` is `T_SCALAR or T_NULL`,
-  and Group B processors (`clone`, `merge`, `walk`, `transform`,
-  `validate`, `select`, …) preserve it literally.
+  and Group B processors (`setprop`, `clone`, `merge`, `walk`,
+  `transform`, `validate`, `select`, …) preserve it literally.
 
 [`../REPORT.md`](../design/REPORT.md) records this port as **already Group A**;
 the shared corpus passes 1360/1360 assertions here. If your data source

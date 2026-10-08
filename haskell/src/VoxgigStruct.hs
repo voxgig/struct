@@ -590,7 +590,7 @@ filter v check = do
   ps <- itemsPairs v
   mkList [x | (k, x) <- ps, check (k, x)]
 
--- | Set, or (with a nullish value) delete, a node property; returns the node.
+-- | Set a node property, storing a null like any other value; returns the node.
 setprop :: Value -> Value -> Value -> IO Value
 setprop parent key v
   | not (iskey key) = return parent

@@ -270,10 +270,20 @@ ref.Append(4)                              // ref.List == []any{1, 2, 3, 4}
 ```
 
 This is mostly internal: `Injection` carries `*ListRef[string]` for keys and
-path and `*ListRef[any]` for the node stack and error collector, and
-`Merge`/`Inject` wrap bare `[]any` on the way in and unwrap back to plain
-`[]any` on the way out (so what you pass in and get back is ordinary
-JSON-shaped data). You only meet `ListRef` directly when writing a custom
+path and `*ListRef[any]` for the node stack and error collector. `Transform`
+and `Validate` clone their input with every bare `[]any` wrapped, and unwrap
+the output back to plain `[]any`, so what you pass in and get back is
+ordinary JSON-shaped data. `Merge`, `Inject` and `SetPath` take your values
+as they are.
+
+`SetProp` returns the slice it wrote to, which is a new slice when the write
+grows a bare `[]any`, so keep its result. `Merge` assigns each of its writes
+back that way, and `SetPath` puts a slice it grows back into the node that
+holds it. The store itself has no holder, so `SetPath` cannot grow a store
+that is a bare `[]any`: pass a `*ListRef[any]` when a path has to extend the
+root list.
+
+You only meet `ListRef` directly in that case, or when writing a custom
 modify/`$APPLY` callback that mutates a list and needs that mutation to
 stick across the recursion. If you hold a value that might be a wrapped
 list, type-assert `*ListRef[any]` and read its `.List`.
