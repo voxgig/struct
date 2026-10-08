@@ -296,7 +296,7 @@ runset( 'merge-integrity', $spec->{merge}{integrity}, sub { Voxgig::Struct::merg
 runset( 'merge-depth', $spec->{merge}{depth},
     sub { Voxgig::Struct::merge( $_[0]{val}, $_[0]{depth} ) } );
 
-# A blessed object is a class instance, which the JSON corpus cannot carry.
+# A blessed hash is a class instance, which the JSON corpus cannot carry.
 # Mirrors canonical's `merge-special`: an instance that wins is kept as is
 # and never descended into, and a plain map that wins over one is copied.
 {
@@ -331,6 +331,14 @@ runset( 'merge-depth', $spec->{merge}{depth},
     $c0->{ctx} = { ent => $c0, opts => {} };
     $c0->{ctx}{opts}{ctx} = $c0->{ctx};
     is( Voxgig::Struct::merge( [ {}, $c0 ] ), $c0, 'merge-instance: a cyclic object is kept as is' );
+
+    # A blessed array is a list, as an Array subclass is in canonical.
+    my $first = [1];
+    my $l2    = bless [2], 'MergeList';
+    $out = Voxgig::Struct::merge( [ $first, $l2, bless( [3], 'MergeList' ) ] );
+    is( $out, $first, 'merge-instance: a blessed array merges into the first list' );
+    is_deeply( [@$out], [3], 'merge-instance: a blessed array, merged' );
+    is_deeply( [@$l2], [2], 'merge-instance: a later blessed array, unchanged' );
 }
 
 # clone makes a plain map of a blessed object, keeping any reference back to
@@ -345,6 +353,26 @@ runset( 'merge-depth', $spec->{merge}{depth},
     is( $out->{k}{a}, $out->{k}, 'merge-cycle: the copy closes the cycle' );
     is( $out->{k}{b}, $out->{k}, 'merge-cycle: every way round' );
     is( $n->{a}, $n, 'merge-cycle: the override is unchanged' );
+
+    # The copy takes nothing from the destination it closes under.
+    my $s = {};
+    $s->{x} = $s;
+    my $dk = { k => 1 };
+    $out = Voxgig::Struct::merge( [ $dk, $s ] );
+    ok( !exists $out->{x}{k}, 'merge-cycle: the copy is of the override alone' );
+    is( $out->{x}{x}, $out->{x}, 'merge-cycle: and closes on itself' );
+
+    # Both sides cyclic: a pair already being merged further up stops there.
+    my $da = {};
+    $da->{x} = $da;
+    $da->{y} = $da;
+    my $db = {};
+    $db->{x} = $db;
+    $db->{y} = $db;
+    $out = Voxgig::Struct::merge( [ $da, $db ] );
+    is( $out, $da, 'merge-cycle: a cycle over a cycle merges into the first' );
+    is( $da->{x}, $da, 'merge-cycle: which keeps its own cycle' );
+    is( $da->{y}, $da, 'merge-cycle: on every key' );
 
     my $e = bless { id => 'e1' }, 'MergeBar';
     $e->{ctx} = { ent => $e, all => [ $e, $e ] };

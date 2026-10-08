@@ -1359,28 +1359,42 @@ sub merge {
     return $out;
 }
 
+# A blessed array is still a list, as an Array subclass is in typescript.
+sub _isinstance {
+    my ($val) = @_;
+    return blessed($val) && !islist($val) ? 1 : 0;
+}
+
 sub _merge_pair {
     my ($a, $b, $maxdepth, $depth, $path) = @_;
     return $b unless isnode($b);
     if ($depth >= $maxdepth) { return $b }
-    # A blessed object is a class instance, so it and a plain map differ in
-    # kind as a list and a map do. typify here calls both a map.
+    my $rb    = refaddr($b);
+    my $fresh = 0;
+    # A blessed hash is a class instance, so it and a plain map differ in kind
+    # as a list and a map do. typify here calls both a map.
     if (   !isnode($a)
         || islist($a) != islist($b)
-        || ( blessed($a) ? 1 : 0 ) != ( blessed($b) ? 1 : 0 ) )
+        || _isinstance($a) != _isinstance($b) )
     {
         # The override wins: a plain node is copied, so no later merge writes
         # into it. A class instance is kept as is.
-        return $b if blessed($b);
+        return $b if _isinstance($b);
 
-        # A node already being merged further up is a cycle, which clone
-        # makes of an object that refers back to itself; its copy closes it.
-        my $copy = $path->{ refaddr($b) };
+        # An override that refers back to itself, as clone makes of such an
+        # object, closes on the copy already under way for that node.
+        my $copy = $path->{"c$rb"};
         return $copy if defined $copy;
 
-        $a = islist($b) ? _mklist() : _mkmap();
+        $a     = islist($b) ? _mklist() : _mkmap();
+        $fresh = 1;
     }
-    local $path->{ refaddr($b) } = $a;
+    elsif ( $path->{ refaddr($a) . ":$rb" } ) {
+        # Already being merged into this same node further up.
+        return $a;
+    }
+    local $path->{"c$rb"} = $a if $fresh;
+    local $path->{ refaddr($a) . ":$rb" } = 1;
     if (islist($a)) {
         for (my $i = 0; $i < @$b; $i++) {
             $a->[$i] = _merge_pair($a->[$i], $b->[$i], $maxdepth, $depth + 1, $path);
