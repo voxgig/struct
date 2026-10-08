@@ -376,8 +376,8 @@ runset( 'merge-depth', $spec->{merge}{depth},
 
     my $e = bless { id => 'e1' }, 'MergeBar';
     $e->{ctx} = { ent => $e, all => [ $e, $e ] };
-    ok( Voxgig::Struct::islist( Voxgig::Struct::select( [$e], { id => 'e1' } ) ),
-        'merge-cycle: select over an object that refers back to itself' );
+    my $found = Voxgig::Struct::select( [$e], { id => 'e1' } );
+    is( scalar(@$found), 1, 'merge-cycle: select over an object that refers back to itself' );
 }
 
 # ===========================================================================
