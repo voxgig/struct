@@ -1234,6 +1234,114 @@ public class StructTests
         }, flags: Omni.Nulls);
     }
 
+    // A null value keeps the spec default exactly as an absent key does, as
+    // the typescript reference has it; required types and $EXACT refuse both.
+    [Fact]
+    public void ValidateNullScalarDefaults()
+    {
+        Dictionary<string, object?> Spec() => new()
+        {
+            ["apikey"] = "", ["secret"] = "", ["base"] = "http://localhost:8000",
+            ["prefix"] = "", ["suffix"] = "", ["retries"] = 3L, ["enabled"] = true,
+        };
+        Dictionary<string, object?> With(params (string, object?)[] kv)
+        {
+            var m = Spec();
+            foreach (var (k, v) in kv) m[k] = v;
+            return m;
+        }
+        Dictionary<string, object?> AllNull() =>
+            Spec().Keys.ToDictionary(k => k, k => (object?)null);
+        object? OneSpec() => new Dictionary<string, object?>
+        {
+            ["a"] = new List<object?> { "`$ONE`", 5L, "`$STRING`" },
+        };
+
+        var valid = new (string name, Func<object?> data, Func<object?> spec, Func<object?> expected)[]
+        {
+            ("absent", () => new Dictionary<string, object?>(), Spec, Spec),
+            ("partial", () => new Dictionary<string, object?> { ["base"] = "http://x" }, Spec,
+                () => With(("base", "http://x"))),
+            ("null", AllNull, Spec, Spec),
+            ("overrides", () => new Dictionary<string, object?>
+                { ["apikey"] = "key", ["base"] = "", ["retries"] = 0L, ["enabled"] = false }, Spec,
+                () => With(("apikey", "key"), ("base", ""), ("retries", 0L), ("enabled", false))),
+            ("nested", () => new Dictionary<string, object?>
+                { ["options"] = new Dictionary<string, object?> { ["apikey"] = null } },
+                () => new Dictionary<string, object?> { ["options"] = Spec() },
+                () => new Dictionary<string, object?> { ["options"] = Spec() }),
+            ("list", () => new List<object?> { null, null, null },
+                () => new List<object?> { "default", 3L, true },
+                () => new List<object?> { "default", 3L, true }),
+            ("null-map", () => new Dictionary<string, object?> { ["options"] = null },
+                () => new Dictionary<string, object?> { ["options"] = Spec() },
+                () => new Dictionary<string, object?> { ["options"] = Spec() }),
+            ("null-list", () => new Dictionary<string, object?> { ["tags"] = null },
+                () => new Dictionary<string, object?> { ["tags"] = new List<object?> { "a", "b" } },
+                () => new Dictionary<string, object?> { ["tags"] = new List<object?> { "a", "b" } }),
+            ("one-null", () => new Dictionary<string, object?> { ["a"] = null }, OneSpec,
+                () => new Dictionary<string, object?> { ["a"] = null }),
+            ("one-absent", () => new Dictionary<string, object?>(), OneSpec,
+                () => new Dictionary<string, object?>()),
+            ("one-null-map", () => new Dictionary<string, object?> { ["m"] = null },
+                () => new Dictionary<string, object?> { ["m"] = OneSpec() },
+                () => new Dictionary<string, object?> { ["m"] = new Dictionary<string, object?>() }),
+            ("one-list-null", () => new Dictionary<string, object?> { ["a"] = new List<object?> { null } },
+                () => new Dictionary<string, object?> { ["a"] = new List<object?> {
+                    new List<object?> { "`$ONE`", "`$STRING`", 7L } } },
+                () => new Dictionary<string, object?> { ["a"] = new List<object?>() }),
+        };
+        var wrong = new List<string>();
+        foreach (var (name, data, spec, expected) in valid)
+        {
+            string got;
+            try { got = Canon(StructUtils.Validate(data(), spec())); }
+            catch (InvalidOperationException e) { got = "error: " + e.Message; }
+            if (Canon(expected()) != got) wrong.Add(name + " -> " + got);
+        }
+        Assert.True(0 == wrong.Count, string.Join(" || ", wrong));
+
+        var invalid = new List<(string name, object? data, object? spec)>();
+        foreach (var key in new[] { "apikey", "retries", "enabled" })
+            invalid.Add(("invalid-" + key, new Dictionary<string, object?> { [key] = new List<object?>() }, Spec()));
+        foreach (var type in new[] { "STRING", "NUMBER", "BOOLEAN" })
+        {
+            invalid.Add(("required-absent-" + type, new Dictionary<string, object?>(),
+                new Dictionary<string, object?> { ["value"] = "`$" + type + "`" }));
+            invalid.Add(("required-null-" + type, new Dictionary<string, object?> { ["value"] = null },
+                new Dictionary<string, object?> { ["value"] = "`$" + type + "`" }));
+        }
+        invalid.Add(("null-map-required", new Dictionary<string, object?> { ["options"] = null },
+            new Dictionary<string, object?> { ["options"] = new Dictionary<string, object?> { ["apikey"] = "`$STRING`" } }));
+        invalid.Add(("null-in-list-required", new List<object?> { null }, new List<object?> { "`$STRING`" }));
+        invalid.Add(("exact-null", new Dictionary<string, object?> { ["value"] = null },
+            new Dictionary<string, object?> { ["value"] = new List<object?> { "`$EXACT`", "yes" } }));
+        invalid.Add(("exact-absent", new Dictionary<string, object?>(),
+            new Dictionary<string, object?> { ["value"] = new List<object?> { "`$EXACT`", "yes" } }));
+        foreach (var (name, data, spec) in invalid)
+        {
+            Assert.True(Throws(() => StructUtils.Validate(data, spec)), name + " was accepted");
+        }
+    }
+
+    private static bool Throws(Func<object?> run)
+    {
+        try { run(); return false; }
+        catch (InvalidOperationException) { return true; }
+    }
+
+    private static string Canon(object? v) => v switch
+    {
+        null => "null",
+        string s => System.Text.Json.JsonSerializer.Serialize(s),
+        bool b => b ? "true" : "false",
+        Dictionary<string, object?> m =>
+            "{" + string.Join(",", m.OrderBy(e => e.Key, StringComparer.Ordinal)
+                .Select(e => System.Text.Json.JsonSerializer.Serialize(e.Key) + ":" + Canon(e.Value))) + "}",
+        IEnumerable<object?> l => "[" + string.Join(",", l.Select(Canon)) + "]",
+        _ => Convert.ToString(v, System.Globalization.CultureInfo.InvariantCulture) ?? "?",
+    };
+
     [Fact]
     public void ValidateInvalid()
     {
