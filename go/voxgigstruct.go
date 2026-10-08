@@ -2027,11 +2027,17 @@ func SetPath(store any, path any, val any, injdefs ...map[string]any) any {
 	}
 
 	numparts := len(parts)
-	parent := GetProp(store, base, store)
 
 	// The nodes above parent on the path, and the key that leads down from each.
 	var holders []any
 	var keys []any
+
+	parent := store
+	if HasKey(store, base) {
+		parent = GetProp(store, base)
+		holders = []any{store}
+		keys = []any{base}
+	}
 
 	for pI := 0; pI < numparts-1; pI++ {
 		partKey := GetElem(parts, pI)

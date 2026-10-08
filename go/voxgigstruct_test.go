@@ -541,6 +541,37 @@ func TestStruct(t *testing.T) {
 			}
 		}
 
+		// A path starts at the node its base names, and a slice written there goes
+		// back into the store; a base the store does not hold starts at the store.
+		for _, c := range []struct {
+			name  string
+			store any
+			base  any
+			path  any
+			val   any
+			out   any
+		}{
+			{"base empty", m("x", []any{}), "x", []any{0, "a"}, 1, m("x", []any{m("a", 1)})},
+			{"base leaf", m("x", []any{}), "x", []any{0}, 1, m("x", []any{1})},
+			{"base append", m("x", []any{5}), "x", []any{1}, 7, m("x", []any{5, 7})},
+			{"base negative", m("x", []any{5}), "x", []any{-1}, 7, m("x", []any{7, 5})},
+			{"base twice", m("x", []any{}), "x", []any{0, 0, "a"}, 1, m("x", []any{[]any{m("a", 1)}})},
+			{"base typed", m("t", []int{1}), "t", []any{1}, 2, m("t", []int{1, 2})},
+			{"base typed slot", m("t", []int{1, 2}), "t", []any{0}, 9, m("t", []int{9, 2})},
+			{"base delete", m("x", []any{1, 2}), "x", []any{0}, voxgigstruct.DELETE, m("x", []any{2})},
+			{"base index", []any{[]any{}}, 0, []any{0, "a"}, 1, []any{[]any{m("a", 1)}}},
+			{"base absent", m("x", []any{}), "y", []any{0}, 1, m("x", []any{}, "0", 1)},
+			{"base null", m("x", nil), "x", []any{0}, 1, m("x", nil, "0", 1)},
+			{"base scalar", m("x", 0), "x", []any{0}, 1, m("x", 0)},
+			{"base past end", &voxgigstruct.ListRef[any]{List: []any{5}}, 3, []any{0}, 9,
+				&voxgigstruct.ListRef[any]{List: []any{9}}},
+		} {
+			voxgigstruct.SetPath(c.store, c.path, c.val, map[string]any{"base": c.base})
+			if !reflect.DeepEqual(c.store, c.out) {
+				t.Errorf("setpath %s store: %s", c.name, voxgigstruct.Stringify(c.store))
+			}
+		}
+
 		// The caller holds a bare []any root by value, so only a ListRef root grows.
 		root := &voxgigstruct.ListRef[any]{List: []any{}}
 		leaf := voxgigstruct.SetPath(root, []any{0, "a"}, 1)
