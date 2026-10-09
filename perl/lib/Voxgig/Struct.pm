@@ -1345,7 +1345,7 @@ sub merge {
 
     my $out = $vals->[0];
     for (my $i = 1; $i < @$vals; $i++) {
-        $out = _merge_pair($out, $vals->[$i], $md, 0);
+        $out = _merge_pair($out, $vals->[$i], $md, 0, {});
     }
 
     # Depth zero means nothing merges, and canonical answers the LAST element
@@ -1359,25 +1359,51 @@ sub merge {
     return $out;
 }
 
+# A blessed array is still a list, as an Array subclass is in typescript.
+sub _isinstance {
+    my ($val) = @_;
+    return blessed($val) && !islist($val) ? 1 : 0;
+}
+
 sub _merge_pair {
-    my ($a, $b, $maxdepth, $depth) = @_;
+    my ($a, $b, $maxdepth, $depth, $path) = @_;
     return $b unless isnode($b);
     if ($depth >= $maxdepth) { return $b }
-    if (!isnode($a) || islist($a) != islist($b)) {
+    my $rb    = refaddr($b);
+    my $fresh = 0;
+    # A blessed hash is a class instance, so it and a plain map differ in kind
+    # as a list and a map do. typify here calls both a map.
+    if (   !isnode($a)
+        || islist($a) != islist($b)
+        || _isinstance($a) != _isinstance($b) )
+    {
         # The override wins: a plain node is copied, so no later merge writes
         # into it. A class instance is kept as is.
-        return $b if blessed($b);
-        $a = islist($b) ? _mklist() : _mkmap();
+        return $b if _isinstance($b);
+
+        # An override that refers back to itself, as clone makes of such an
+        # object, closes on the copy already under way for that node.
+        my $copy = $path->{"c$rb"};
+        return $copy if defined $copy;
+
+        $a     = islist($b) ? _mklist() : _mkmap();
+        $fresh = 1;
     }
+    elsif ( $path->{ refaddr($a) . ":$rb" } ) {
+        # Already being merged into this same node further up.
+        return $a;
+    }
+    local $path->{"c$rb"} = $a if $fresh;
+    local $path->{ refaddr($a) . ":$rb" } = 1;
     if (islist($a)) {
         for (my $i = 0; $i < @$b; $i++) {
-            $a->[$i] = _merge_pair($a->[$i], $b->[$i], $maxdepth, $depth + 1);
+            $a->[$i] = _merge_pair($a->[$i], $b->[$i], $maxdepth, $depth + 1, $path);
         }
         return $a;
     }
     # Map.
     for my $k (_map_keys($b)) {
-        $a->{$k} = _merge_pair($a->{$k}, $b->{$k}, $maxdepth, $depth + 1);
+        $a->{$k} = _merge_pair($a->{$k}, $b->{$k}, $maxdepth, $depth + 1, $path);
     }
     return $a;
 }

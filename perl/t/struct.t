@@ -296,6 +296,90 @@ runset( 'merge-integrity', $spec->{merge}{integrity}, sub { Voxgig::Struct::merg
 runset( 'merge-depth', $spec->{merge}{depth},
     sub { Voxgig::Struct::merge( $_[0]{val}, $_[0]{depth} ) } );
 
+# A blessed hash is a class instance, which the JSON corpus cannot carry.
+# Mirrors canonical's `merge-special`: an instance that wins is kept as is
+# and never descended into, and a plain map that wins over one is copied.
+{
+    my $b0 = bless { x => 1 }, 'MergeBar';
+    my $out;
+
+    is( Voxgig::Struct::merge( [ { x => 10 }, $b0 ] ), $b0, 'merge-instance: over a map' );
+    is( $b0->{x}, 1, 'merge-instance: over a map, unchanged' );
+
+    $out = Voxgig::Struct::merge( [ { a => $b0 }, { a => { x => 11 } } ] );
+    is_deeply( $out, { a => { x => 11 } }, 'merge-instance: a map over one' );
+    ok( !Scalar::Util::blessed( $out->{a} ), 'merge-instance: a map over one is plain' );
+    is( $b0->{x}, 1, 'merge-instance: a map over one, unchanged' );
+
+    $out = Voxgig::Struct::merge( [ $b0, { x => 20 } ] );
+    is_deeply( $out, { x => 20 }, 'merge-instance: a map over a first one' );
+    is( $b0->{x}, 1, 'merge-instance: a map over a first one, unchanged' );
+
+    $out = Voxgig::Struct::merge( [ { a => { x => 21 } }, { a => $b0 } ] );
+    is( $out->{a}, $b0, 'merge-instance: under a key, over a map' );
+
+    $out = Voxgig::Struct::merge( [ {}, { b => $b0 } ] );
+    is( $out->{b}, $b0, 'merge-instance: under an absent key' );
+
+    my $b1 = bless { y => 2 }, 'MergeBar';
+    $out = Voxgig::Struct::merge( [ { c => $b1 }, { c => bless( { x => 3 }, 'MergeBar' ) } ] );
+    is( $out->{c}, $b1, 'merge-instance: over an instance, merged into it' );
+    is_deeply( {%$b1}, { x => 3, y => 2 }, 'merge-instance: over an instance, keys merged' );
+
+    # An object whose plain maps refer back to it, as an SDK entity's do.
+    my $c0 = bless { id => 'c0' }, 'MergeBar';
+    $c0->{ctx} = { ent => $c0, opts => {} };
+    $c0->{ctx}{opts}{ctx} = $c0->{ctx};
+    is( Voxgig::Struct::merge( [ {}, $c0 ] ), $c0, 'merge-instance: a cyclic object is kept as is' );
+
+    # A blessed array is a list, as an Array subclass is in canonical.
+    my $first = [1];
+    my $l2    = bless [2], 'MergeList';
+    $out = Voxgig::Struct::merge( [ $first, $l2, bless( [3], 'MergeList' ) ] );
+    is( $out, $first, 'merge-instance: a blessed array merges into the first list' );
+    is_deeply( [@$out], [3], 'merge-instance: a blessed array, merged' );
+    is_deeply( [@$l2], [2], 'merge-instance: a later blessed array, unchanged' );
+}
+
+# clone makes a plain map of a blessed object, keeping any reference back to
+# itself, so merge's copy closes the same cycle rather than unrolling it.
+{
+    my $n = {};
+    $n->{a} = $n;
+    $n->{b} = $n;
+
+    my $out = Voxgig::Struct::merge( [ {}, { k => $n } ] );
+    isnt( $out->{k}, $n, 'merge-cycle: copied' );
+    is( $out->{k}{a}, $out->{k}, 'merge-cycle: the copy closes the cycle' );
+    is( $out->{k}{b}, $out->{k}, 'merge-cycle: every way round' );
+    is( $n->{a}, $n, 'merge-cycle: the override is unchanged' );
+
+    # The copy takes nothing from the destination it closes under.
+    my $s = {};
+    $s->{x} = $s;
+    my $dk = { k => 1 };
+    $out = Voxgig::Struct::merge( [ $dk, $s ] );
+    ok( !exists $out->{x}{k}, 'merge-cycle: the copy is of the override alone' );
+    is( $out->{x}{x}, $out->{x}, 'merge-cycle: and closes on itself' );
+
+    # Both sides cyclic: a pair already being merged further up stops there.
+    my $da = {};
+    $da->{x} = $da;
+    $da->{y} = $da;
+    my $db = {};
+    $db->{x} = $db;
+    $db->{y} = $db;
+    $out = Voxgig::Struct::merge( [ $da, $db ] );
+    is( $out, $da, 'merge-cycle: a cycle over a cycle merges into the first' );
+    is( $da->{x}, $da, 'merge-cycle: which keeps its own cycle' );
+    is( $da->{y}, $da, 'merge-cycle: on every key' );
+
+    my $e = bless { id => 'e1' }, 'MergeBar';
+    $e->{ctx} = { ent => $e, all => [ $e, $e ] };
+    my $found = Voxgig::Struct::select( [$e], { id => 'e1' } );
+    is( scalar(@$found), 1, 'merge-cycle: select over an object that refers back to itself' );
+}
+
 # ===========================================================================
 # getpath
 # ===========================================================================
