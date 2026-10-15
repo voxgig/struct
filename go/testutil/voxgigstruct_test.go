@@ -1,7 +1,7 @@
 // RUN: go test
 // RUN-SOME: go test -v -run=TestStruct/getpath
 
-package voxgigstruct_test
+package runner_test
 
 import (
 	"fmt"
@@ -25,7 +25,7 @@ func TestStruct(t *testing.T) {
 		t.Fatalf("Failed to create SDK: %v", err)
 	}
 
-	runnerFunc := runner.MakeRunner("../build/test/test.json", sdk)
+	runnerFunc := runner.MakeRunner("../../build/test/test.json", sdk)
 	runnerMap, err := runnerFunc("struct", store)
 	if err != nil {
 		t.Fatalf("Failed to create runner struct: %v", err)

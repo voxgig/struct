@@ -135,6 +135,7 @@
     "gofmt",
     "gosec",
     "govulncheck",
+    "GOWORK",
     "deadcode",
     "clippy",
     "rustfmt",

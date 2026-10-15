@@ -40,7 +40,7 @@ Working from a clone instead:
 ```bash
 cd go
 go build ./...
-go test ./...
+make test
 ```
 
 ### Your first program
@@ -316,22 +316,30 @@ zero-width replacement output. Full panel:
 ```bash
 cd go
 go build ./...                  # compile the library
-go test ./...                   # run the shared corpus suite
-golangci-lint run ./...         # static analysis (errcheck/govet/staticcheck/…)
-go vet ./...                    # vet pass
-make lint                       # gofmt check + go vet + golangci-lint
-make test                       # go test -v ./...
+make test                       # the library's own tests and the shared corpus suite
+make vet                        # go vet: this module with the workspace off, then both
+make lint                       # gofmt check + go vet + golangci-lint (errcheck/staticcheck/…)
 ```
 
-The runner in [`voxgigstruct_test.go`](./voxgigstruct_test.go) loads the
-shared corpus from [`../build/test/`](../build/test/) and mirrors the
+The runner in
+[`testutil/voxgigstruct_test.go`](./testutil/voxgigstruct_test.go) loads
+the shared corpus from [`../build/test/`](../build/test/) and mirrors the
 reference runner. This port passes 92/92 of the shared corpus suite (see
 [`../REPORT.md`](../design/REPORT.md)).
+
+The corpus tests live in `testutil`, the module that takes voxgig/omni,
+rather than beside the library. A test file ships in the module a consumer
+downloads, and `go mod tidy` in the consumer's module follows the imports
+of a dependency's tests, so a corpus test beside the library would put omni
+in every consumer's `go.sum`. The tests that stay here import only the
+standard library and the library itself, which `make vet` checks with the
+workspace off. A bare `go test ./...` runs those tests and none of the
+corpus.
 
 **To change behaviour:** behaviour is canonical, so start in the TypeScript
 source and the corpus, not here — edit
 [`../typescript/src/StructUtility.ts`](../typescript/src/StructUtility.ts),
 adjust the corpus case in `../build/test/*.aon`, then port the same logic
-here, run `go test ./...` until green, and re-run
+here, run `make test` until green, and re-run
 [`../tools/check_parity.py`](../tools/check_parity.py) plus every other
 port's tests.

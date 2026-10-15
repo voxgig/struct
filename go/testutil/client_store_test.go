@@ -1,21 +1,18 @@
 // RUN: go test
 // RUN-SOME: go test -v -run=TestStruct/getpath
 
-package voxgigstruct_test
+package runner_test
 
 import (
-	// "fmt"
-	// "reflect"
-	// "strings"
 	"testing"
 
-	// "github.com/voxgig/struct/go"
 	"github.com/voxgig/struct/go/testutil"
 )
 
-const TEST_JSON_FILE = "../build/test/test.json"
+const TEST_JSON_FILE = "../../build/test/test.json"
 
-func TestClient(t *testing.T) {
+// TestClient's check, given a store to resolve client options against.
+func TestClientWithStore(t *testing.T) {
 	store := make(map[string]any)
 
 	sdk, err := runner.TestSDK(nil)

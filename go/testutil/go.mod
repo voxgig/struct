@@ -4,6 +4,10 @@
 // point, `go mod tidy` there cannot quietly add voxgig/omni to the published
 // module's dependency graph.
 //
+// The corpus tests live here too, as package runner_test. The parent's test
+// files ship in its module zip and a consumer's `go mod tidy` follows their
+// imports, so none of them may import this module.
+//
 // omni is taken from its release tag rather than a sibling checkout. Go
 // requires the `go/` prefix for a module in a subdirectory, so the tag is
 // `go/v0.1.0` and the version Go records is v0.1.0. That means no
