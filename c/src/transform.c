@@ -1515,22 +1515,24 @@ static void _validation(voxgig_value* pval, voxgig_value* key, voxgig_value* par
   bool exact = voxgig_is_bool(exv) && voxgig_as_bool(exv);
   voxgig_release(exv);
 
+  /* As canonical getprop: a null on either side is no value. */
   voxgig_value* cp = voxgig_lookup(inj->dparent, key);
-  voxgig_value* cval = cp ? voxgig_retain(cp) : voxgig_new_undef();
-  bool cval_undef = !cval || voxgig_is_undef(cval);
+  voxgig_value* cval = cp && !voxgig_is_null(cp) ? voxgig_retain(cp) : voxgig_new_undef();
+  bool cval_undef = voxgig_is_undef(cval);
   if (!exact && cval_undef) {
     voxgig_release(cval);
     return;
   }
 
-  int ptype = voxgig_typify(pval);
+  bool pnone = !pval || voxgig_is_undef(pval) || voxgig_is_null(pval);
+  int ptype = pnone ? VOXGIG_T_NOVAL : voxgig_typify(pval);
   /* Skip if pval is a residual command string. */
   if ((ptype & VOXGIG_T_STRING) && pval && strchr(voxgig_as_string(pval), '$')) {
     voxgig_release(cval);
     return;
   }
   int ctype = voxgig_typify(cval);
-  if (ptype != ctype && pval && !voxgig_is_undef(pval)) {
+  if (ptype != ctype && !pnone) {
     voxgig_value* msg = _invalid_type_msg(&inj->path, voxgig_typename(ptype), ctype, cval);
     voxgig_list_push(voxgig_as_list(inj->errs), msg);
     voxgig_release(cval);
@@ -1600,7 +1602,7 @@ static void _validation(voxgig_value* pval, voxgig_value* key, voxgig_value* par
       voxgig_list_push(voxgig_as_list(inj->errs), msg);
     }
   } else if (exact) {
-    if (!voxgig_equals(cval, pval)) {
+    if (pnone ? !cval_undef : !voxgig_equals(cval, pval)) {
       voxgig_value* lst = voxgig_new_list();
       for (size_t i = 1; i < inj->path.len; i++)
         voxgig_list_push(voxgig_as_list(lst), voxgig_new_string(inj->path.data[i]));
