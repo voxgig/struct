@@ -15404,6 +15404,52 @@
               "B",
               "C"
             ]
+          },
+          {
+            "in": {
+              "data": [
+                {
+                  "name": "engine"
+                },
+                {
+                  "name": "q"
+                }
+              ],
+              "spec": [
+                "`$EACH`",
+                "",
+                "`$KEY.name`"
+              ]
+            },
+            "out": [
+              "engine",
+              "q"
+            ]
+          },
+          {
+            "in": {
+              "data": [
+                {
+                  "name": "engine"
+                },
+                {
+                  "name": "q"
+                }
+              ],
+              "spec": {
+                "x": [
+                  "`$EACH`",
+                  "",
+                  "`$KEY.name`"
+                ]
+              }
+            },
+            "out": {
+              "x": [
+                "engine",
+                "q"
+              ]
+            }
           }
         ]
       },

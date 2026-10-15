@@ -2507,9 +2507,13 @@ fn resolvePathOrCmd(allocator: Allocator, pathref: []const u8, store: JsonValue,
     if (std.mem.eql(u8, pathref, "$BT")) return JsonValue{ .string = S_BT };
     if (std.mem.eql(u8, pathref, "$DS")) return JsonValue{ .string = S_DS };
 
-    // Command dispatch — mode-sensitive.
+    // Command dispatch — mode-sensitive. A command is a single part: a
+    // dotted reference such as `$KEY.name` is a path, as canonical getpath reads it.
     if (pathref.len > 0 and pathref[0] == '$') {
-        return try dispatchCmd(allocator, pathref, store, inj);
+        if (std.mem.indexOfScalar(u8, pathref, '.') == null) {
+            return try dispatchCmd(allocator, pathref, store, inj);
+        }
+        return try getpathInj(allocator, JsonValue{ .string = pathref }, store, inj);
     }
 
     // Relative path — use getpathInj so ancestor traversal uses dpath.
@@ -3120,71 +3124,74 @@ fn cmdEach(allocator: Allocator, inj: *Injection, store: JsonValue) !JsonValue {
     else
         JsonValue{ .null = {} };
 
-    // Build source value list and key list.
-    var src_vals = std.array_list.Managed(JsonValue).init(allocator);
-    var src_keys = std.array_list.Managed([]const u8).init(allocator);
-    var tval_items = std.array_list.Managed(JsonValue).init(allocator);
+    // Parallel lists: the source values and a child template clone for each.
+    const tcur_list = try JsonValue.makeList(allocator);
+    const tval = try JsonValue.makeList(allocator);
 
     if (islist(src)) {
-        for (src.array.data.items, 0..) |src_item, idx| {
-            try src_vals.append(src_item);
-            try src_keys.append(try std.fmt.allocPrint(allocator, "{d}", .{idx}));
-            try tval_items.append(try clone(allocator, child_tmpl));
+        for (src.array.data.items) |src_item| {
+            try tcur_list.array.append(src_item);
+            try tval.array.append(try clone(allocator, child_tmpl));
         }
     } else if (ismap(src)) {
         const src_items = try items(allocator, src);
         if (src_items == .array) {
             for (src_items.array.data.items) |pair| {
                 if (pair != .array or pair.array.data.items.len < 2) continue;
-                const sk = if (pair.array.data.items[0] == .string) pair.array.data.items[0].string else "";
-                try src_vals.append(pair.array.data.items[1]);
-                try src_keys.append(sk);
+                try tcur_list.array.append(pair.array.data.items[1]);
                 const cclone = try clone(allocator, child_tmpl);
-                // Add $ANNO with $KEY for map sources.
+                // Note the key for $KEY transforms.
                 if (cclone == .object) {
-                    const anno = try allocator.create(MapRef);
-                    anno.* = .{ .data = .empty, .allocator = allocator };
-                    try anno.put(S_KEY, pair.array.data.items[0]);
-                    _ = try setprop(allocator, cclone, JsonValue{ .string = S_BANNO }, JsonValue{ .object = anno });
+                    const anno = try JsonValue.makeMap(allocator);
+                    try anno.object.put(S_KEY, pair.array.data.items[0]);
+                    _ = try setprop(allocator, cclone, JsonValue{ .string = S_BANNO }, anno);
                 }
-                try tval_items.append(cclone);
+                try tval.array.append(cclone);
             }
         }
     }
 
-    // Build result by injecting each template individually with per-item context.
-    const result_lr = try allocator.create(ListRef);
-    result_lr.* = .{ .data = ListData.init(allocator) };
+    var rval = try JsonValue.makeList(allocator);
 
-    for (src_vals.items, 0..) |src_item, idx| {
-        const child_clone = tval_items.items[idx];
+    if (0 < tval.array.data.items.len) {
+        // One child injection over the original store, as canonical does: the
+        // clones are injected as a list, so $KEY is the index and $TOP the source.
+        const ckey = tkey;
+        const tpath = inj.path[0..inj.path.len -| 1];
 
-        // Build per-item store: original store + $TOP = src_item.
-        // Also merge root data keys for ancestor path access.
-        const each_store = try allocator.create(MapRef);
-        each_store.* = .{ .data = .empty, .allocator = allocator };
-        if (store == .object) {
-            var sit = store.object.iterator();
-            while (sit.next()) |kv| try each_store.put(kv.key_ptr.*, kv.value_ptr.*);
+        var dpath = std.array_list.Managed([]const u8).init(allocator);
+        try dpath.append(S_DTOP);
+        var sit = std.mem.splitScalar(u8, srcpath, '.');
+        while (sit.next()) |part| try dpath.append(part);
+        try dpath.append(try std.fmt.allocPrint(allocator, "$:{s}", .{ckey}));
+
+        var tcur = try JsonValue.makeMap(allocator);
+        try tcur.object.put(ckey, tcur_list);
+
+        if (1 < tpath.len) {
+            const pkey = if (3 <= inj.path.len) inj.path[inj.path.len - 3] else S_DTOP;
+            const outer = try JsonValue.makeMap(allocator);
+            try outer.object.put(pkey, tcur);
+            tcur = outer;
+            try dpath.append(try std.fmt.allocPrint(allocator, "$:{s}", .{pkey}));
         }
-        const root_data = getpropFromStore(store);
-        if (root_data == .object) {
-            var rit = root_data.object.iterator();
-            while (rit.next()) |rkv| {
-                if (each_store.get(rkv.key_ptr.*) == null)
-                    try each_store.put(rkv.key_ptr.*, rkv.value_ptr.*);
-            }
-        }
-        try each_store.put(S_DTOP, src_item);
 
-        const injected = try inject(allocator, child_clone, JsonValue{ .object = each_store }, null);
-        try result_lr.append(injected);
+        const tinj = try inj.child(0, &.{ckey});
+        tinj.path = try allocator.dupe([]const u8, tpath);
+        tinj.nodes = try allocator.dupe(JsonValue, inj.nodes[0..inj.nodes.len -| 1]);
+        tinj.parent = if (0 < tinj.nodes.len) tinj.nodes[tinj.nodes.len - 1] else .null;
+        _ = try setprop(allocator, tinj.parent, JsonValue{ .string = ckey }, tval);
+        tinj.val = tval;
+        tinj.dpath = dpath.items;
+        tinj.dparent = tcur;
+
+        _ = try inject(allocator, tval, store, tinj);
+        rval = tinj.val;
     }
 
-    const result = JsonValue{ .array = result_lr };
-    if (target != .null) _ = setprop(allocator, target, JsonValue{ .string = tkey }, result) catch {};
+    if (target != .null) _ = setprop(allocator, target, JsonValue{ .string = tkey }, rval) catch {};
 
-    if (result_lr.data.items.len > 0) return result_lr.data.items[0];
+    if (rval == .array and 0 < rval.array.data.items.len) return rval.array.data.items[0];
     return .null;
 }
 
