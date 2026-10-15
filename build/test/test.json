@@ -18447,6 +18447,68 @@
             "out": {
               "a": {}
             }
+          },
+          {
+            "in": {
+              "data": {
+                "retries": null
+              },
+              "spec": {
+                "retries": 3
+              }
+            },
+            "out": {
+              "retries": 3
+            }
+          },
+          {
+            "in": {
+              "data": {
+                "auth": null
+              },
+              "spec": {
+                "auth": {
+                  "prefix": ""
+                }
+              }
+            },
+            "out": {
+              "auth": {
+                "prefix": ""
+              }
+            }
+          },
+          {
+            "in": {
+              "data": {
+                "tags": null
+              },
+              "spec": {
+                "tags": [
+                  "a",
+                  "b"
+                ]
+              }
+            },
+            "out": {
+              "tags": [
+                "a",
+                "b"
+              ]
+            }
+          },
+          {
+            "in": {
+              "data": {
+                "a": 1
+              },
+              "spec": {
+                "a": null
+              }
+            },
+            "out": {
+              "a": 1
+            }
           }
         ]
       },

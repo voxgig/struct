@@ -3055,11 +3055,16 @@ class Struct
             return;
         }
 
+        // A null on either side reads as no value, as canonical getprop has it.
+        if (null === $pval) {
+            $pval = self::undef();
+        }
+
         // select needs exact matches
         $exact = self::_getprop($inj->meta, '`$EXACT`', false);
 
         // Current val to verify.
-        $cval = self::_getprop($inj->dparent, $key);
+        $cval = self::getprop($inj->dparent, $key, self::undef());
 
         if (self::undef() === $inj || (!$exact && self::undef() === $cval)) {
             return;

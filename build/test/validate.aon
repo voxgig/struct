@@ -123,6 +123,14 @@ basic: {
     { in: { data: {a:null}, spec: {a:'`$ANY`'}}, out: {a:null} }
     { in: { data: {a:{}}, spec: {a:'`$ANY`'}}, out: {a:{}} }
 
+    # A null keeps the spec default, as an absent key does.
+    { in: { data: {retries:null}, spec: {retries:3} }, out: {retries:3} }
+    { in: { data: {auth:null}, spec: {auth:{prefix:''}} }, out: {auth:{prefix:''}} }
+    { in: { data: {tags:null}, spec: {tags:[a,b]} }, out: {tags:[a,b]} }
+
+    # A null spec value leaves the field unconstrained.
+    { in: { data: {a:1}, spec: {a:null} }, out: {a:1} }
+
   ]
 }
 
