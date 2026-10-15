@@ -1705,11 +1705,16 @@ voxgig_value* voxgig_setpath(voxgig_value* store, voxgig_value* path, voxgig_val
     return NULL;
   }
 
-  voxgig_value* base_v = NULL;
+  /* As canonical getprop(store, base, store): a list store takes an index
+     base, and a missing or null base value falls back to the store. */
+  voxgig_value* parent = store;
   if (injdef && injdef->base) {
-    base_v = voxgig_map_get(voxgig_as_map(store), injdef->base);
+    voxgig_value* bkey = voxgig_new_string(injdef->base);
+    parent = voxgig_getprop(store, bkey, store);
+    voxgig_release(bkey);
+    /* Borrowed: the store holds the reference. */
+    voxgig_release(parent);
   }
-  voxgig_value* parent = base_v ? base_v : store;
 
   size_t nparts = voxgig_list_len(voxgig_as_list(parts));
   for (size_t pI = 0; pI + 1 < nparts; pI++) {

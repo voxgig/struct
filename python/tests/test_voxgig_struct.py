@@ -355,6 +355,25 @@ class TestStruct(unittest.TestCase):
         self.assertEqual(setpath(x, 'y.q', DELETE), {'z': 1})
         self.assertEqual(x, {'y': {'z': 1}})
 
+    def test_minor_edge_setpath_base(self):
+        # The base is read as getprop(store, base, store): an integer key
+        # reaches a list, and a null base value falls back to the store.
+        x = [[]]
+        setpath(x, [0, 'a'], 1, {'base': 0})
+        self.assertEqual(x, [[{'a': 1}]])
+
+        x = [[]]
+        setpath(x, [0, 'a'], 1, {'base': '0'})
+        self.assertEqual(x, [[{'a': 1}]])
+
+        x = {'x': None}
+        setpath(x, [0], 1, {'base': 'x'})
+        self.assertEqual(x, {'x': None, '0': 1})
+
+        x = {'x': []}
+        setpath(x, [0, 'a'], 1, {'base': 'x'})
+        self.assertEqual(x, {'x': [{'a': 1}]})
+
     def test_minor_filter(self):
         checkmap = {
             'gt3': lambda n: n[1] > 3,

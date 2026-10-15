@@ -3614,7 +3614,7 @@ class Struct
 
         // Descend by reference, so a write under a plain array lands in the store.
         $parent = &$store;
-        if (self::undef() !== self::_getprop($store, $base)) {
+        if (null !== self::getprop($store, $base)) {
             $parent = &self::_childslot($store, $base, null);
         }
 

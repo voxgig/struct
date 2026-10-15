@@ -2034,6 +2034,12 @@ fn getpropFromStore(store: JsonValue) JsonValue {
 // ============================================================================
 
 pub fn setpath(allocator: Allocator, store: JsonValue, path_val: JsonValue, val: JsonValue) !JsonValue {
+    return setpathWith(allocator, store, path_val, val, .null);
+}
+
+/// setpath with an injdef: its `base` names the store key the path starts
+/// from, falling back to the store itself when that key is absent or null.
+pub fn setpathWith(allocator: Allocator, store: JsonValue, path_val: JsonValue, val: JsonValue, injdef: JsonValue) !JsonValue {
     var parts_buf: [64][]const u8 = undefined;
     var is_numeric: [64]bool = undefined;
     var numparts: usize = 0;
@@ -2076,7 +2082,8 @@ pub fn setpath(allocator: Allocator, store: JsonValue, path_val: JsonValue, val:
     if (numparts == 0) return store;
 
     const parts = parts_buf[0..numparts];
-    var parent = getpropFromStore(store);
+    const base = try getprop(allocator, injdef, JsonValue{ .string = S_base }, .null);
+    var parent = try getprop(allocator, store, base, store);
 
     // Navigate to the parent of the final key, creating nodes as needed.
     var i: usize = 0;

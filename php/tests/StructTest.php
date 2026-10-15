@@ -1171,6 +1171,18 @@ class StructTest extends TestCase
             Struct::setpath($store, $path, $val);
             $this->assertSame($expected, json_encode($store), json_encode($path));
         }
+
+        // The base is read as getprop(store, base, store).
+        $baserows = [
+            ['{"x":[]}', 'x', [0, 'a'], '{"x":[{"a":1}]}'],
+            ['{"x":null}', 'x', [0], '{"x":null,"0":1}'],
+            ['{"x":{"y":1}}', 'q', ['z'], '{"x":{"y":1},"z":1}'],
+        ];
+        foreach ($baserows as [$json, $base, $path, $expected]) {
+            $store = json_decode($json);
+            Struct::setpath($store, $path, 1, ['base' => $base]);
+            $this->assertSame($expected, json_encode($store), $base);
+        }
     }
 
     private function assertSubtree(mixed $expected, mixed $actual, string $at): void

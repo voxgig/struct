@@ -534,6 +534,8 @@ func TestStruct(t *testing.T) {
 			{"past", m("x", []any{5}), []any{"x", 7, 0}, 1, m("x", []any{5, []any{1}})},
 			{"negative", m("x", []any{5}), []any{"x", -1, 0}, 1, m("x", []any{[]any{1}, 5})},
 			{"typed", m("t", [][]any{{1}}), []any{"t", 0, 1}, 2, m("t", [][]any{{1, 2}})},
+			{"empty key", m("", []any{}), []any{"", 0}, 1, m("", []any{1})},
+			{"empty key made", m(), []any{"", 0}, 1, m()},
 		} {
 			voxgigstruct.SetPath(c.store, c.path, c.val)
 			if !reflect.DeepEqual(c.store, c.out) {
@@ -562,6 +564,7 @@ func TestStruct(t *testing.T) {
 			{"base index", []any{[]any{}}, 0, []any{0, "a"}, 1, []any{[]any{m("a", 1)}}},
 			{"base absent", m("x", []any{}), "y", []any{0}, 1, m("x", []any{}, "0", 1)},
 			{"base null", m("x", nil), "x", []any{0}, 1, m("x", nil, "0", 1)},
+			{"base empty key", m("", []any{}), "", []any{0}, 1, m("", []any{1})},
 			{"base scalar", m("x", 0), "x", []any{0}, 1, m("x", 0)},
 			{"base past end", &voxgigstruct.ListRef[any]{List: []any{5}}, 3, []any{0}, 9,
 				&voxgigstruct.ListRef[any]{List: []any{9}}},

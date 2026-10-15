@@ -316,6 +316,9 @@ pub fn getpathInj(allocator: Allocator, path_val: JsonValue,
                   store: JsonValue, inj: ?*Injection) anyerror!JsonValue
 pub fn setpath(allocator: Allocator, store: JsonValue,
                path_val: JsonValue, val: JsonValue) !JsonValue
+pub fn setpathWith(allocator: Allocator, store: JsonValue,
+                   path_val: JsonValue, val: JsonValue,
+                   injdef: JsonValue) !JsonValue
 pub fn pathify(allocator: Allocator, val: JsonValue,
                from: usize, end: usize) ![]const u8
 ```
