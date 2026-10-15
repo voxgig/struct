@@ -3960,8 +3960,7 @@ fn validateWalk(
                 return try validateTypeCheck(allocator, cmd, data_val, errs, path);
             }
         }
-        // Non-command string: if it matches data, use data value.
-        return data_val;
+        return try validateDefault(allocator, spec_val, data_val, errs, path);
     }
 
     if (spec_val == .array) {
@@ -4035,9 +4034,24 @@ fn validateWalk(
         return result;
     }
 
-    // Scalar spec: treat as default value, use data if available.
-    if (data_val != .null) return data_val;
-    return spec_val;
+    return try validateDefault(allocator, spec_val, data_val, errs, path);
+}
+
+// A scalar spec is a default: absent data takes it, present data must share its type.
+fn validateDefault(
+    allocator: Allocator,
+    spec_val: JsonValue,
+    data_val: JsonValue,
+    errs: *std.array_list.Managed([]const u8),
+    path: []const []const u8,
+) anyerror!JsonValue {
+    if (data_val == .null) return spec_val;
+    if (spec_val == .null) return data_val;
+    const ptype = typify(spec_val);
+    if (ptype != typify(data_val)) {
+        try errs.append(try invalidTypeMsg(allocator, path, typename(ptype), data_val));
+    }
+    return data_val;
 }
 
 fn validateTypeCheck(
@@ -4075,6 +4089,13 @@ fn validateTypeCheck(
         }
         return data_val;
     }
+    if (std.mem.eql(u8, cmd, "$DECIMAL")) {
+        if (0 == (@as(i64, T_decimal) & t)) {
+            try errs.append(try invalidTypeMsg(allocator, path, S_decimal, data_val));
+            return .null;
+        }
+        return data_val;
+    }
     if (std.mem.eql(u8, cmd, "$BOOLEAN")) {
         if (0 == (@as(i64, T_boolean) & t)) {
             try errs.append(try invalidTypeMsg(allocator, path, S_boolean, data_val));
@@ -4102,6 +4123,13 @@ fn validateTypeCheck(
     if (std.mem.eql(u8, cmd, "$NULL")) {
         if (data_val != .null) {
             try errs.append(try invalidTypeMsg(allocator, path, S_null, data_val));
+            return .null;
+        }
+        return data_val;
+    }
+    if (std.mem.eql(u8, cmd, "$NIL")) {
+        if (data_val != .null) {
+            try errs.append(try invalidTypeMsg(allocator, path, S_nil, data_val));
             return .null;
         }
         return data_val;

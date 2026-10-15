@@ -19787,6 +19787,64 @@
                 ]
               }
             }
+          },
+          {
+            "err": "Expected field a to be one of string, nil, but found integer: 1.",
+            "in": {
+              "data": {
+                "a": 1
+              },
+              "spec": {
+                "a": [
+                  "`$ONE`",
+                  "`$STRING`",
+                  "`$NIL`"
+                ]
+              }
+            }
+          },
+          {
+            "in": {
+              "data": {},
+              "spec": {
+                "a": [
+                  "`$ONE`",
+                  "`$STRING`",
+                  "`$NIL`"
+                ]
+              }
+            },
+            "out": {}
+          },
+          {
+            "err": "Expected field a to be one of decimal, string, but found integer: 1.",
+            "in": {
+              "data": {
+                "a": 1
+              },
+              "spec": {
+                "a": [
+                  "`$ONE`",
+                  "`$DECIMAL`",
+                  "`$STRING`"
+                ]
+              }
+            }
+          },
+          {
+            "err": "Expected field a to be one of string, proxy, but found integer: 1.",
+            "in": {
+              "data": {
+                "a": 1
+              },
+              "spec": {
+                "a": [
+                  "`$ONE`",
+                  "`$STRING`",
+                  "proxy"
+                ]
+              }
+            }
           }
         ]
       },
