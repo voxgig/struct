@@ -19439,6 +19439,21 @@
                 ]
               }
             }
+          },
+          {
+            "err": "Expected value exactly equal to one of [string], {x:number}, but found integer: 29.",
+            "in": {
+              "data": 29,
+              "spec": [
+                "`$EXACT`",
+                [
+                  "`$STRING`"
+                ],
+                {
+                  "x": "`$NUMBER`"
+                }
+              ]
+            }
           }
         ]
       },
@@ -19841,6 +19856,24 @@
                 "a": [
                   "`$ONE`",
                   "`$STRING`",
+                  "proxy"
+                ]
+              }
+            }
+          },
+          {
+            "err": "Expected field q to be one of [exact,library], proxy, but found integer: 42.",
+            "in": {
+              "data": {
+                "q": 42
+              },
+              "spec": {
+                "q": [
+                  "`$ONE`",
+                  [
+                    "`$EXACT`",
+                    "library"
+                  ],
                   "proxy"
                 ]
               }

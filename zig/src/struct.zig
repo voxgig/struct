@@ -2862,7 +2862,8 @@ fn cmdValidateExactCmd(allocator: Allocator, inj: *Injection) anyerror!JsonValue
     // Same parent-path rule as $ONE above.
     const reportpath = if (0 < inj.path.len) inj.path[0 .. inj.path.len - 1] else inj.path;
     const root_prefix = if (1 < reportpath.len) "" else "value ";
-    try inj.errs.append(try invalidTypeMsg(allocator, reportpath, try std.fmt.allocPrint(allocator, "{s}exactly equal to {s}{s}", .{ root_prefix, prefix, desc.items }), data_val));
+    const named = try transformNames(allocator, desc.items);
+    try inj.errs.append(try invalidTypeMsg(allocator, reportpath, try std.fmt.allocPrint(allocator, "{s}exactly equal to {s}{s}", .{ root_prefix, prefix, named }), data_val));
     return .null;
 }
 

@@ -5,6 +5,7 @@ import java.nio.charset.StandardCharsets
 import java.util.IdentityHashMap
 import java.util.Locale
 import java.util.function.Supplier
+import java.util.regex.Matcher
 import java.util.regex.Pattern
 import kotlin.math.floor
 
@@ -47,7 +48,7 @@ object Struct {
     private val R_INJECT_FULL = Pattern.compile("^`(\\$[A-Z]+|[^`]*)[0-9]*`$")
     private val R_INJECT_PART = Pattern.compile("`([^`]+)`")
     private val R_CMD_KEY = Pattern.compile("^`(\\$[A-Z]+)(\\d*)`$")
-    private val R_TRANSFORM_NAME = Pattern.compile("^`(\\$[A-Z]+)`$")
+    private val R_TRANSFORM_NAME = Pattern.compile("`\\$([A-Z]+)`")
     val SKIP: Any = Any()
 
     fun interface WalkApply {
@@ -2293,24 +2294,23 @@ object Struct {
                 if (terrs.isEmpty()) return@Injector UNDEF
             }
 
-            val valdesc = StringBuilder()
-            for (i in tvals.indices) {
-                if (i > 0) valdesc.append(", ")
-                val tv = tvals[i]
-                if (tv is String) {
-                    val mm = R_TRANSFORM_NAME.matcher(tv)
-                    if (mm.matches()) {
-                        valdesc.append(mm.group(1).substring(1).lowercase(Locale.ROOT))
-                        continue
-                    }
-                }
-                valdesc.append(stringify(tv))
-            }
+            val valdesc = describeAlternatives(tvals)
             inj.errs.add(
                 _invalidTypeMsg(inj.path, (if (size(tvals) > 1) "one of " else "") + valdesc, typify(inj.dparent), inj.dparent, "V0210"),
             )
             UNDEF
         }
+
+    // Lowers every `$NAME` marker in the joined description, nested ones included.
+    private fun describeAlternatives(tvals: List<Any?>): String {
+        val mm = R_TRANSFORM_NAME.matcher(tvals.joinToString(", ") { stringify(it) })
+        val out = StringBuilder()
+        while (mm.find()) {
+            mm.appendReplacement(out, Matcher.quoteReplacement(mm.group(1).lowercase(Locale.ROOT)))
+        }
+        mm.appendTail(out)
+        return out.toString()
+    }
 
     /** $EXACT: validate against any one of a list of literal alternatives. */
     val validate_EXACT: Injector =
@@ -2347,19 +2347,7 @@ object Struct {
                     if (exactmatch) return@Injector UNDEF
                 }
 
-                val valdesc = StringBuilder()
-                for (i in tvals.indices) {
-                    if (i > 0) valdesc.append(", ")
-                    val tv = tvals[i]
-                    if (tv is String) {
-                        val mm = R_TRANSFORM_NAME.matcher(tv)
-                        if (mm.matches()) {
-                            valdesc.append(mm.group(1).substring(1).lowercase(Locale.ROOT))
-                            continue
-                        }
-                    }
-                    valdesc.append(stringify(tv))
-                }
+                val valdesc = describeAlternatives(tvals)
                 inj.errs.add(
                     _invalidTypeMsg(
                         inj.path,
