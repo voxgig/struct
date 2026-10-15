@@ -3606,7 +3606,12 @@ class Struct
 
         $base = self::_getprop($injdef, self::S_BASE);
         $numparts = self::size($parts);
-        $parent = self::_getprop($store, $base, $store);
+
+        // Descend by reference, so a write under a plain array lands in the store.
+        $parent = &$store;
+        if (self::undef() !== self::_getprop($store, $base)) {
+            $parent = &self::_childslot($store, $base, null);
+        }
 
         for ($pI = 0; $pI < $numparts - 1; $pI++) {
             $partKey = self::getelem($parts, $pI);
@@ -3616,7 +3621,7 @@ class Struct
                     ? [] : new \stdClass();
                 self::setprop($parent, $partKey, $nextParent);
             }
-            $parent = $nextParent;
+            $parent = &self::_childslot($parent, $partKey, $nextParent);
         }
 
         if ($val === self::DELETE) {
@@ -3626,6 +3631,39 @@ class Struct
         }
 
         return $parent;
+    }
+
+
+    /**
+     * A reference to the slot setprop($parent, $key, ...) writes, or to
+     * $fallback when $parent holds no such slot.
+     */
+    private static function &_childslot(mixed &$parent, mixed $key, mixed $fallback): mixed
+    {
+        if ($parent instanceof ListRef) {
+            $last = count($parent->list) - 1;
+            if (0 <= $last && is_numeric($key)) {
+                return $parent->list[max(0, min((int) floor((float) $key), $last))];
+            }
+        } elseif (is_object($parent)) {
+            $prop = self::strkey($key);
+            if (property_exists($parent, $prop)) {
+                return $parent->$prop;
+            }
+        } elseif (is_array($parent)) {
+            if (self::islist($parent)) {
+                $last = count($parent) - 1;
+                if (0 <= $last && is_numeric($key)) {
+                    return $parent[max(0, min((int) floor((float) $key), $last))];
+                }
+            } else {
+                $prop = self::strkey($key);
+                if (array_key_exists($prop, $parent)) {
+                    return $parent[$prop];
+                }
+            }
+        }
+        return $fallback;
     }
 
 

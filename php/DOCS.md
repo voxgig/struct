@@ -86,15 +86,21 @@ Struct::select(['a' => ['age' => 30], 'b' => ['age' => 25]], ['age' => 30]);
 
 ## 2. How-to guides
 
-### Set a deep value (mutation is by return value, not by reference)
+### Set a deep value
+Hand `setpath` an object store and it writes into it, creating each map and
+list the path needs:
 ```php
-$store = [];
-$store = Struct::setpath($store, 'service.db.host', 'db.internal');
-// ['service' => ['db' => ['host' => 'db.internal']]]
+$store = new \stdClass();
+Struct::setpath($store, 'service.db.host', 'db.internal');
+// $store->service->db->host === 'db.internal'
 ```
-`setpath` and `delprop` take their store **by value** and return the updated
-structure — assign the result. The single exception is `setprop`, which takes
-its parent **by reference** (`&$parent`) and mutates in place.
+`setpath` takes its store **by value** but descends by reference, so the write
+lands in the store wherever the path runs: through an object, a `ListRef`, or a
+plain array held inside either. A plain-array store is the exception. PHP hands
+`setpath` a copy of it, so the caller's array is not written, and the return
+value is the immediate parent of the value set, not the store. `setprop` takes
+its parent **by reference** (`&$parent`); `delprop` takes it by value and
+returns the updated parent.
 
 ### Collect all validation errors instead of throwing
 ```php
@@ -228,9 +234,10 @@ by reference. Two adaptations reproduce that, mirroring the Go port:
    unwrap transparently. You only handle `ListRef` directly when writing custom
    `modify` callbacks that mutate lists.
 2. **`setprop(mixed &$parent, …)`** takes its parent by reference and mutates in
-   place. Note that `setpath` and `delprop` do **not** use `&` — they mutate
-   through the `ListRef` wrapper where applicable and otherwise return the
-   updated value, so assign the result.
+   place. `setpath` takes its store by value but walks the path by reference,
+   so a write reaches every array below the store and only a top-level array
+   store is a copy; it returns the immediate parent. `delprop` takes its parent
+   by value and returns the updated value, so assign the result.
 
 ### `null` versus absent, and the `UNDEF` sentinel
 

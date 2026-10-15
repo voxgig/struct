@@ -270,7 +270,7 @@ Struct::strkey(2.2);                               // '2'
 
 ```php
 Struct::getpath($store, $path, $injdef = null)
-Struct::setpath($store, $path, $val, $injdef = null)   // by value; returns the updated immediate parent
+Struct::setpath($store, $path, $val, $injdef = null)   // writes in place; returns the immediate parent
 Struct::pathify($val, $startin = null, $endin = null): string
 ```
 
@@ -283,11 +283,10 @@ Struct::getpath(['a' => ['b' => ['c' => 42]]], 'a.b.c');  // 42
 ```php
 Struct::getpath(['a' => [10, 20]], 'a.1');                // 20
 
-// setpath takes $store BY VALUE and returns the updated immediate parent,
-// so $store itself is NOT mutated — assign the return value.
-$store = [];
+// setpath writes into an object store, and returns the immediate parent.
+$store = new \stdClass();
 $parent = Struct::setpath($store, 'db.host', 'localhost');
-// $store stays []; $parent === (object)['host' => 'localhost']
+// $store->db->host === 'localhost'; $parent === $store->db
 ```
 
 <!-- example: minor/setpath#nested -->
@@ -618,8 +617,10 @@ PHP arrays copy on assignment. Two adaptations preserve canonical
 "reference-stable list" semantics:
 
 1. `setprop` takes its parent **by reference** (`&$parent`) and mutates
-   in place. `setpath` and `delprop` take their argument **by value** and
-   **return** the updated structure — assign the result.
+   in place. `setpath` takes its store by value but walks the path by
+   reference, so only a top-level array store is a copy. `delprop` takes
+   its argument **by value** and **returns** the updated structure, so
+   assign the result.
 2. The `ListRef` class wraps a list when it must be shared across
    calls (notably during `merge` and `inject`).
 

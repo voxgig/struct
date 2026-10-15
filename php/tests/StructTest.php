@@ -1147,27 +1147,43 @@ class StructTest extends TestCase
 
     public function testSetpath(): void
     {
-        // The `minor/setpath` entries assert that the store was mutated IN
-        // PLACE, via `match: {args: {0: {store: ...}}}`. omni's php runner
-        // models maps as PHP arrays, and a PHP array is a VALUE - so the
-        // mutation is invisible to the runner, which holds a copy:
-        //
-        //     array store  after setpath  =>  {"x":1}   runner sees no change
-        //     object store after setpath  =>  {"x":2}   correct
-        //
-        // struct/php is right here; the harness cannot observe it. Unlike the
-        // empty-map case this cannot be fixed at the shim boundary, because
-        // the mutation has to be visible to omni ITSELF, and omni's
-        // `Util::getpath` returns Absent for an object. Every other omni port
-        // gets reference semantics free - JS objects, Python dicts, Ruby
-        // hashes, Go maps - so PHP arrays are the odd one out.
-        //
-        // Marked incomplete rather than skipped-in-silence or asserted-true:
-        // it is real outstanding work, on omni's side, not this port's.
-        $this->markTestIncomplete(
-            'omni php runner models maps as PHP arrays (value semantics), '
-            . 'so the in-place mutation these entries assert is invisible to it'
-        );
+        // omni hands these entries a PHP-array store, a copy it cannot see
+        // written, so they run here over the object maps json_decode builds.
+        $corpus = json_decode((string) file_get_contents(__DIR__ . '/' . self::CORPUS));
+        foreach ($corpus->struct->minor->setpath->set as $entry) {
+            $store = json_decode((string) json_encode($entry->in->store));
+            $path = property_exists($entry->in, 'path') ? $entry->in->path : Struct::undef();
+            $out = Struct::setpath($store, $path, $entry->in->val);
+            if (property_exists($entry, 'out')) {
+                $this->assertEquals(self::normalizeMaps($entry->out), self::normalizeMaps($out));
+            }
+            $this->assertSubtree($entry->match->args->{'0'}->store, $store, 'store');
+        }
+
+        $rows = [
+            ['{"a":[1,2,3]}', 'a.1', 5, '{"a":[1,5,3]}'],
+            ['{"a":[1,2,3]}', 'a.3', 4, '{"a":[1,2,3,4]}'],
+            ['{"x":[]}', ['x', 0, 'a'], 1, '{"x":[{"a":1}]}'],
+            ['{"x":{}}', ['x', 'y', 0, 'a'], 1, '{"x":{"y":[{"a":1}]}}'],
+        ];
+        foreach ($rows as [$json, $path, $val, $expected]) {
+            $store = json_decode($json);
+            Struct::setpath($store, $path, $val);
+            $this->assertSame($expected, json_encode($store), json_encode($path));
+        }
+    }
+
+    private function assertSubtree(mixed $expected, mixed $actual, string $at): void
+    {
+        if ($expected instanceof \stdClass) {
+            $this->assertIsObject($actual, $at);
+            foreach (get_object_vars($expected) as $key => $val) {
+                $this->assertTrue(property_exists($actual, (string) $key), $at . '.' . $key);
+                $this->assertSubtree($val, $actual->{$key}, $at . '.' . $key);
+            }
+            return;
+        }
+        $this->assertSame(json_encode($expected), json_encode($actual), $at);
     }
 
     // ——— Edge tests ———
