@@ -1708,7 +1708,7 @@ voxgig_value* voxgig_setpath(voxgig_value* store, voxgig_value* path, voxgig_val
   /* As canonical getprop(store, base, store): a list store takes an index
      base, and a missing or null base value falls back to the store. */
   voxgig_value* parent = store;
-  if (injdef && injdef->base) {
+  if (injdef && injdef->base && voxgig_is_node(store)) {
     voxgig_value* bkey = voxgig_new_string(injdef->base);
     parent = voxgig_getprop(store, bkey, store);
     voxgig_release(bkey);
