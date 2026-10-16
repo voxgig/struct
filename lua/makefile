@@ -7,10 +7,13 @@ setup:
 	chmod +x setup.sh
 	./setup.sh
 
+# The port needs 5.3+; a system `lua` can still be 5.1.
+LUA ?= $(shell command -v lua5.4 2>/dev/null || echo lua)
+
 # Run tests. regex_test.lua is a plain script that exits when it is done, so
 # it runs on its own: loaded by busted, it ended the run before any suite ran.
 test:
-	cd test && lua regex_test.lua
+	cd test && $(LUA) regex_test.lua
 	PATH="$(HOME)/.luarocks/bin:$$PATH" find ./test/ -name "*test.lua" ! -name regex_test.lua | xargs $$(command -v busted || echo $(HOME)/.luarocks/bin/busted)
 
 # Code quality: luacheck (lint) + StyLua (format check).
@@ -24,13 +27,12 @@ format-check:
 	stylua --check src test
 
 # Cross-port performance harness (JSON contract; see build/bench/README.md).
-LUA ?= lua5.4
 bench:
 	@$(LUA) bench/bench.lua
 
 # Port-local walk-only micro-benchmark (human-readable).
 walk-bench:
-	WALK_BENCH=1 lua test/walk_bench.lua
+	WALK_BENCH=1 $(LUA) test/walk_bench.lua
 
 # Clean artifacts
 clean:
