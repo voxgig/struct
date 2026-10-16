@@ -2851,6 +2851,16 @@ end
 ----------------------------------------------------------
 local validate
 
+-- Join the alternatives, lowering every `$NAME` marker, nested ones included.
+local function describeAlternatives(tvals)
+  local valdesc = {}
+  for _, v in ipairs(tvals) do
+    table.insert(valdesc, stringify(v))
+  end
+  local out = table.concat(valdesc, ", "):gsub("`%$([A-Z]+)`", string.lower)
+  return out
+end
+
 -- Match at least one of the specified shapes.
 -- Syntax: ['`$ONE`', alt0, alt1, ...]
 local function validate_ONE(inj, _val, _ref, store)
@@ -2909,14 +2919,7 @@ local function validate_ONE(inj, _val, _ref, store)
     end
 
     -- There was no match.
-    local valdesc = {}
-    for _, v in ipairs(tvals) do
-      table.insert(valdesc, stringify(v))
-    end
-    local valdesc_str = table.concat(valdesc, ", ")
-    valdesc_str = valdesc_str:gsub("`%$([A-Z]+)`", function(p1)
-      return string.lower(p1)
-    end)
+    local valdesc_str = describeAlternatives(tvals)
 
     table.insert(
       inj.errs,
@@ -2985,11 +2988,7 @@ local function validate_EXACT(inj)
       end
     end
 
-    local valdesc = {}
-    for _, v in ipairs(tvals) do
-      table.insert(valdesc, stringify(v))
-    end
-    local valdesc_str = table.concat(valdesc, ", ")
+    local valdesc_str = describeAlternatives(tvals)
 
     table.insert(
       inj.errs,
