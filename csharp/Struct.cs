@@ -3022,13 +3022,15 @@ namespace Voxgig.Struct
                     return null;
                 }
 
+                // TS descends through getprop, so a null data value is NONE here.
+                object? current = inj.DParent ?? NONE;
                 string? currentStr = null;
                 foreach (object? tval in tvals)
                 {
-                    bool exactMatch = Equals(tval, inj.DParent);
+                    bool exactMatch = Equals(tval, current);
                     if (!exactMatch && IsNode(tval))
                     {
-                        currentStr ??= Stringify(inj.DParent);
+                        currentStr ??= Stringify(current);
                         exactMatch = Stringify(tval) == currentStr;
                     }
                     if (exactMatch)
@@ -3045,7 +3047,7 @@ namespace Voxgig.Struct
                     inj.Path,
                     (1 < Size(inj.Path) ? "" : "value ") +
                     "exactly equal to " + (1 == Size(tvals) ? "" : "one of ") + valdesc,
-                    Typify(inj.DParent), inj.DParent));
+                    Typify(current), current));
             }
             else
             {
@@ -3104,6 +3106,9 @@ namespace Voxgig.Struct
             {
                 return null;
             }
+
+            // TS reads the spec value through getprop, so a null spec value is NONE.
+            pval ??= NONE;
 
             bool exact = GetProp(inj.Meta, S_BEXACT) is bool b && b;
 
@@ -3194,8 +3199,8 @@ namespace Voxgig.Struct
             }
             else if (exact)
             {
-                // Missing key (TS undefined) must not match JSON null in the spec.
-                object? cExact = cKeyExists ? cval : NONE;
+                // TS getprop answers NONE for an absent key and a null alike.
+                object? cExact = cKeyExists && cval != null ? cval : NONE;
                 if (!Equals(cExact, pval))
                 {
                     string pathmsg = 1 < Size(inj.Path)

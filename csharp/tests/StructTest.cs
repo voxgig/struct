@@ -1324,6 +1324,34 @@ public class StructTests
         }
     }
 
+    // The typescript reference reads a null spec value and a null data value
+    // through getprop, so each counts as no value.
+    [Fact]
+    public void ValidateNullReadsAsNoValue()
+    {
+        InjectState Exact() => new()
+        {
+            Meta = new Dictionary<string, object?> { ["`$EXACT`"] = true },
+        };
+
+        Assert.Equal("{\"a\":1}", Canon(StructUtils.Validate(
+            new Dictionary<string, object?> { ["a"] = 1L },
+            new Dictionary<string, object?> { ["a"] = null })));
+
+        Assert.Equal("{\"a\":null}", Canon(StructUtils.Validate(
+            new Dictionary<string, object?>(),
+            new Dictionary<string, object?> { ["a"] = null }, Exact())));
+
+        Assert.Equal("{\"a\":null}", Canon(StructUtils.Validate(
+            new Dictionary<string, object?> { ["a"] = null },
+            new Dictionary<string, object?> { ["a"] = null }, Exact())));
+
+        var err = Assert.Throws<InvalidOperationException>(() => StructUtils.Validate(
+            new Dictionary<string, object?> { ["v"] = null },
+            new Dictionary<string, object?> { ["v"] = new List<object?> { "`$EXACT`", null } }));
+        Assert.Contains("Expected field v to be exactly equal to null, but found no value.", err.Message);
+    }
+
     private static bool Throws(Func<object?> run)
     {
         try { run(); return false; }

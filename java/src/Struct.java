@@ -2722,19 +2722,7 @@ public class Struct {
         }
 
         // No match; describe alternatives.
-        StringBuilder valdesc = new StringBuilder();
-        for (int i = 0; i < tvals.size(); i++) {
-          if (i > 0) valdesc.append(", ");
-          Object tv = tvals.get(i);
-          if (tv instanceof String s) {
-            Matcher m = R_TRANSFORM_NAME.matcher(s);
-            if (m.matches()) {
-              valdesc.append(m.group(1).toLowerCase(Locale.ROOT));
-              continue;
-            }
-          }
-          valdesc.append(stringify(tv));
-        }
+        String valdesc = _describeAlternatives(tvals);
         inj.errs.add(
             _invalidTypeMsg(
                 inj.path,
@@ -2744,6 +2732,22 @@ public class Struct {
                 "V0210"));
         return UNDEF;
       };
+
+  // Lowers every `$NAME` marker in the joined description, nested ones included.
+  private static String _describeAlternatives(List<Object> tvals) {
+    StringBuilder joined = new StringBuilder();
+    for (int i = 0; i < tvals.size(); i++) {
+      if (i > 0) joined.append(", ");
+      joined.append(stringify(tvals.get(i)));
+    }
+    Matcher m = R_TRANSFORM_NAME.matcher(joined);
+    StringBuilder out = new StringBuilder();
+    while (m.find()) {
+      m.appendReplacement(out, Matcher.quoteReplacement(m.group(1).toLowerCase(Locale.ROOT)));
+    }
+    m.appendTail(out);
+    return out.toString();
+  }
 
   /**
    * $EXACT: validate against any one of a list of literal alternatives.
@@ -2797,19 +2801,7 @@ public class Struct {
           }
 
           // No match.
-          StringBuilder valdesc = new StringBuilder();
-          for (int i = 0; i < tvals.size(); i++) {
-            if (i > 0) valdesc.append(", ");
-            Object tv = tvals.get(i);
-            if (tv instanceof String s) {
-              Matcher m = R_TRANSFORM_NAME.matcher(s);
-              if (m.matches()) {
-                valdesc.append(m.group(1).toLowerCase(Locale.ROOT));
-                continue;
-              }
-            }
-            valdesc.append(stringify(tv));
-          }
+          String valdesc = _describeAlternatives(tvals);
           inj.errs.add(
               _invalidTypeMsg(
                   inj.path,

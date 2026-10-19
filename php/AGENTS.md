@@ -60,8 +60,10 @@ make inspect     # PHP + project version
   passing bare arrays through the inject/merge pipeline — they'll copy and lose
   mutations.
 - **Mutation contract:** `setprop` takes `&$parent` by reference; `setpath` and
-  `delprop` do **not** — they return the updated value (or mutate via `ListRef`).
-  Don't add `&` to match a guess; match the source.
+  `delprop` do **not**. `setpath` still walks the path by reference
+  (`_childslot`), so its writes land under plain arrays; `delprop` returns the
+  updated value (or mutates via `ListRef`). Don't add `&` to match a guess;
+  match the source.
 
 ## Gotchas
 

@@ -15404,6 +15404,52 @@
               "B",
               "C"
             ]
+          },
+          {
+            "in": {
+              "data": [
+                {
+                  "name": "engine"
+                },
+                {
+                  "name": "q"
+                }
+              ],
+              "spec": [
+                "`$EACH`",
+                "",
+                "`$KEY.name`"
+              ]
+            },
+            "out": [
+              "engine",
+              "q"
+            ]
+          },
+          {
+            "in": {
+              "data": [
+                {
+                  "name": "engine"
+                },
+                {
+                  "name": "q"
+                }
+              ],
+              "spec": {
+                "x": [
+                  "`$EACH`",
+                  "",
+                  "`$KEY.name`"
+                ]
+              }
+            },
+            "out": {
+              "x": [
+                "engine",
+                "q"
+              ]
+            }
           }
         ]
       },
@@ -18447,6 +18493,68 @@
             "out": {
               "a": {}
             }
+          },
+          {
+            "in": {
+              "data": {
+                "retries": null
+              },
+              "spec": {
+                "retries": 3
+              }
+            },
+            "out": {
+              "retries": 3
+            }
+          },
+          {
+            "in": {
+              "data": {
+                "auth": null
+              },
+              "spec": {
+                "auth": {
+                  "prefix": ""
+                }
+              }
+            },
+            "out": {
+              "auth": {
+                "prefix": ""
+              }
+            }
+          },
+          {
+            "in": {
+              "data": {
+                "tags": null
+              },
+              "spec": {
+                "tags": [
+                  "a",
+                  "b"
+                ]
+              }
+            },
+            "out": {
+              "tags": [
+                "a",
+                "b"
+              ]
+            }
+          },
+          {
+            "in": {
+              "data": {
+                "a": 1
+              },
+              "spec": {
+                "a": null
+              }
+            },
+            "out": {
+              "a": 1
+            }
           }
         ]
       },
@@ -19377,6 +19485,21 @@
                 ]
               }
             }
+          },
+          {
+            "err": "Expected value exactly equal to one of [string], {x:number}, but found integer: 29.",
+            "in": {
+              "data": 29,
+              "spec": [
+                "`$EXACT`",
+                [
+                  "`$STRING`"
+                ],
+                {
+                  "x": "`$NUMBER`"
+                }
+              ]
+            }
           }
         ]
       },
@@ -19722,6 +19845,82 @@
                   {
                     "kind": "env"
                   }
+                ]
+              }
+            }
+          },
+          {
+            "err": "Expected field a to be one of string, nil, but found integer: 1.",
+            "in": {
+              "data": {
+                "a": 1
+              },
+              "spec": {
+                "a": [
+                  "`$ONE`",
+                  "`$STRING`",
+                  "`$NIL`"
+                ]
+              }
+            }
+          },
+          {
+            "in": {
+              "data": {},
+              "spec": {
+                "a": [
+                  "`$ONE`",
+                  "`$STRING`",
+                  "`$NIL`"
+                ]
+              }
+            },
+            "out": {}
+          },
+          {
+            "err": "Expected field a to be one of decimal, string, but found integer: 1.",
+            "in": {
+              "data": {
+                "a": 1
+              },
+              "spec": {
+                "a": [
+                  "`$ONE`",
+                  "`$DECIMAL`",
+                  "`$STRING`"
+                ]
+              }
+            }
+          },
+          {
+            "err": "Expected field a to be one of string, proxy, but found integer: 1.",
+            "in": {
+              "data": {
+                "a": 1
+              },
+              "spec": {
+                "a": [
+                  "`$ONE`",
+                  "`$STRING`",
+                  "proxy"
+                ]
+              }
+            }
+          },
+          {
+            "err": "Expected field q to be one of [exact,library], proxy, but found integer: 42.",
+            "in": {
+              "data": {
+                "q": 42
+              },
+              "spec": {
+                "q": [
+                  "`$ONE`",
+                  [
+                    "`$EXACT`",
+                    "library"
+                  ],
+                  "proxy"
                 ]
               }
             }

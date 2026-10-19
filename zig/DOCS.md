@@ -129,6 +129,10 @@ const d = S.getdef(maybe, .{ .string = "fallback" }); // no allocator: pure swit
 _ = try S.setpath(allocator, store, .{ .string = "service.db.host" }, .{ .string = "x" });
 ```
 
+`setpathWith` adds an `injdef` map after `val`. Its `base` names the store
+key the path starts from; a base the store does not hold, or holds as
+null, starts at the store itself, as `setpath` always does.
+
 `getelem(allocator, list, key, alt)` is list-specific: `-1` indexes from
 the end, and a `function`-valued `alt` is **invoked** when the element is
 absent (`getprop`/`getdef` do not call `alt`).

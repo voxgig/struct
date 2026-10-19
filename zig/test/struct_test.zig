@@ -772,6 +772,33 @@ test "minor-setpath" {
     try omni.rungroupargs(&r, "minor", "setpath", omni.subargs(wrap_setpath), omni.Flags.nonull());
 }
 
+// The base is read as getprop(store, base, store): a store key, absent or
+// null falling back to the store, and no injdef meaning the store itself.
+test "minor-setpath-base" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const rows = [_][4][]const u8{
+        .{ "{\"$TOP\":null}", "[0]", "{\"base\":\"$TOP\"}", "{\"$TOP\":null,\"0\":1}" },
+        .{ "{\"$TOP\":[]}", "[0,\"a\"]", "null", "{\"$TOP\":[],\"0\":{\"a\":1}}" },
+        .{ "{\"$TOP\":[]}", "[0,\"a\"]", "{\"base\":\"$TOP\"}", "{\"$TOP\":[{\"a\":1}]}" },
+        .{ "[[]]", "[0,\"a\"]", "{\"base\":0}", "[[{\"a\":1}]]" },
+        .{ "{\"x\":null}", "[0]", "{\"base\":\"x\"}", "{\"x\":null,\"0\":1}" },
+    };
+    for (rows) |row| {
+        const store = try parseValue(a, row[0]);
+        const path = try parseValue(a, row[1]);
+        const injdef = try parseValue(a, row[2]);
+        _ = try voxgig_struct.setpathWith(a, store, path, .{ .integer = 1 }, injdef);
+        try testing.expectEqualStrings(row[3], try voxgig_struct.jsonifyCompact(a, store));
+    }
+}
+
+fn parseValue(allocator: Allocator, src: []const u8) !JsonValue {
+    const parsed = try std.json.parseFromSliceLeaky(StdJsonValue, allocator, src, .{});
+    return try voxgig_struct.fromStdJson(allocator, parsed);
+}
+
 // ---- GetPath tests ----
 
 fn wrap_getpath_basic(allocator: Allocator, val: JsonValue) JsonValue {

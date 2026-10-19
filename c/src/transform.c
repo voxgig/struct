@@ -1295,6 +1295,32 @@ static voxgig_value* va_CHILD(voxgig_injection* inj, voxgig_value* val, const ch
 /* Forward decl for use in ONE / select. */
 voxgig_value* voxgig_validate(voxgig_value* data, voxgig_value* spec, voxgig_injection* injdef);
 
+/* Stringify a validator alternative, lowering each `$NAME` marker in it to
+   name (R_TRANSFORM_NAME). The caller frees the result. */
+static char* _lower_transform_names(voxgig_value* tval) {
+  char* s = voxgig_stringify(tval, -1);
+  size_t sl = strlen(s);
+  char* ls = (char*)malloc(sl + 1);
+  size_t lw = 0;
+  for (size_t k = 0; k < sl; k++) {
+    if (k + 2 < sl && s[k] == '`' && s[k + 1] == '$' && s[k + 2] >= 'A' && s[k + 2] <= 'Z') {
+      size_t e = k + 2;
+      while (e < sl && s[e] >= 'A' && s[e] <= 'Z')
+        e++;
+      if (e < sl && s[e] == '`') {
+        for (size_t q = k + 2; q < e; q++)
+          ls[lw++] = (char)(s[q] - 'A' + 'a');
+        k = e;
+        continue;
+      }
+    }
+    ls[lw++] = s[k];
+  }
+  ls[lw] = '\0';
+  free(s);
+  return ls;
+}
+
 static voxgig_value* va_ONE(voxgig_injection* inj, voxgig_value* val, const char* ref,
                             voxgig_value* store, void* ud) {
   (void)val;
@@ -1380,28 +1406,8 @@ static voxgig_value* va_ONE(voxgig_injection* inj, voxgig_value* val, const char
   bool first_tv = true;
   voxgig_list* tvl_ = voxgig_as_list(tvals);
   for (size_t i = 0; i < tvl_->len; i++) {
-    char* s = voxgig_stringify(tvl_->items[i], -1);
-    /* Lower-case any `$NAME` -> name for human readability (R_TRANSFORM_NAME). */
-    size_t sl = strlen(s);
-    char* ls = (char*)malloc(sl + 1);
-    size_t lw = 0;
-    for (size_t k = 0; k < sl; k++) {
-      if (k + 2 < sl && s[k] == '`' && s[k + 1] == '$' && s[k + 2] >= 'A' && s[k + 2] <= 'Z') {
-        /* find closing ` */
-        size_t e = k + 2;
-        while (e < sl && s[e] >= 'A' && s[e] <= 'Z')
-          e++;
-        if (e < sl && s[e] == '`') {
-          for (size_t q = k + 2; q < e; q++)
-            ls[lw++] = (char)(s[q] - 'A' + 'a');
-          k = e;
-          continue;
-        }
-      }
-      ls[lw++] = s[k];
-    }
-    ls[lw] = '\0';
-    free(s);
+    char* ls = _lower_transform_names(tvl_->items[i]);
+    size_t lw = strlen(ls);
     size_t cur = strlen(needtype);
     if (cur + lw + 4 < sizeof(needtype)) {
       if (!first_tv)
@@ -1478,7 +1484,7 @@ static voxgig_value* va_EXACT(voxgig_injection* inj, voxgig_value* val, const ch
     strcat(needtype, "one of ");
   bool first_tv = true;
   for (size_t i = 1; i < pl->len; i++) {
-    char* s = voxgig_stringify(pl->items[i], -1);
+    char* s = _lower_transform_names(pl->items[i]);
     size_t slen = strlen(s);
     size_t cur = strlen(needtype);
     if (cur + slen + 4 < sizeof(needtype)) {
@@ -1515,22 +1521,24 @@ static void _validation(voxgig_value* pval, voxgig_value* key, voxgig_value* par
   bool exact = voxgig_is_bool(exv) && voxgig_as_bool(exv);
   voxgig_release(exv);
 
+  /* As canonical getprop: a null on either side is no value. */
   voxgig_value* cp = voxgig_lookup(inj->dparent, key);
-  voxgig_value* cval = cp ? voxgig_retain(cp) : voxgig_new_undef();
-  bool cval_undef = !cval || voxgig_is_undef(cval);
+  voxgig_value* cval = cp && !voxgig_is_null(cp) ? voxgig_retain(cp) : voxgig_new_undef();
+  bool cval_undef = voxgig_is_undef(cval);
   if (!exact && cval_undef) {
     voxgig_release(cval);
     return;
   }
 
-  int ptype = voxgig_typify(pval);
+  bool pnone = !pval || voxgig_is_undef(pval) || voxgig_is_null(pval);
+  int ptype = pnone ? VOXGIG_T_NOVAL : voxgig_typify(pval);
   /* Skip if pval is a residual command string. */
   if ((ptype & VOXGIG_T_STRING) && pval && strchr(voxgig_as_string(pval), '$')) {
     voxgig_release(cval);
     return;
   }
   int ctype = voxgig_typify(cval);
-  if (ptype != ctype && pval && !voxgig_is_undef(pval)) {
+  if (ptype != ctype && !pnone) {
     voxgig_value* msg = _invalid_type_msg(&inj->path, voxgig_typename(ptype), ctype, cval);
     voxgig_list_push(voxgig_as_list(inj->errs), msg);
     voxgig_release(cval);
@@ -1600,7 +1608,7 @@ static void _validation(voxgig_value* pval, voxgig_value* key, voxgig_value* par
       voxgig_list_push(voxgig_as_list(inj->errs), msg);
     }
   } else if (exact) {
-    if (!voxgig_equals(cval, pval)) {
+    if (pnone ? !cval_undef : !voxgig_equals(cval, pval)) {
       voxgig_value* lst = voxgig_new_list();
       for (size_t i = 1; i < inj->path.len; i++)
         voxgig_list_push(voxgig_as_list(lst), voxgig_new_string(inj->path.data[i]));

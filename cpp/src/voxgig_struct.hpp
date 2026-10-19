@@ -2811,6 +2811,30 @@ inline Value CHILD_FN(Injection& inj, const Value& val, const std::string& ref,
   return Value::undef();
 }
 
+// Lowers every `$NAME` marker in the joined description, nested ones included.
+inline std::string describe_alternatives(const std::vector<Value>& tvals) {
+  std::string joined;
+  for (size_t i = 0; i < tvals.size(); i++) {
+    if (i > 0)
+      joined += ", ";
+    joined += stringify(tvals[i]);
+  }
+  std::string out;
+  auto begin = std::sregex_iterator(joined.begin(), joined.end(), R_TRANSFORM_NAME());
+  size_t last = 0;
+  for (auto it = begin; it != std::sregex_iterator(); ++it) {
+    const std::smatch& m = *it;
+    out.append(joined, last, static_cast<size_t>(m.position(0)) - last);
+    std::string lower = m[1].str();
+    for (auto& c : lower)
+      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    out += lower;
+    last = static_cast<size_t>(m.position(0) + m.length(0));
+  }
+  out.append(joined, last, std::string::npos);
+  return out;
+}
+
 inline Value ONE_FN(Injection& inj, const Value& val, const std::string& ref, const Value& store) {
   if (inj.mode != M_VAL)
     return Value::undef();
@@ -2867,23 +2891,7 @@ inline Value ONE_FN(Injection& inj, const Value& val, const std::string& ref, co
       return Value::undef();
   }
   // No match.
-  std::string valdesc;
-  for (size_t i = 0; i < tvals.size(); i++) {
-    if (i > 0)
-      valdesc += ", ";
-    if (tvals[i].is_string()) {
-      std::smatch m;
-      const std::string& s = tvals[i].as_string();
-      if (std::regex_match(s, m, R_TRANSFORM_NAME())) {
-        std::string lower = m[1].str();
-        for (auto& c : lower)
-          c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        valdesc += lower;
-        continue;
-      }
-    }
-    valdesc += stringify(tvals[i]);
-  }
+  std::string valdesc = describe_alternatives(tvals);
   inj.errs->push_back(
       Value(invalid_type_msg(inj.path, (tvals.size() > 1 ? "one of " : "") + valdesc,
                              typify(inj.dparent), inj.dparent, "V0210")));
@@ -2936,23 +2944,7 @@ inline Value EXACT_FN(Injection& inj, const Value& val, const std::string& ref,
       if (exactmatch)
         return Value::undef();
     }
-    std::string valdesc;
-    for (size_t i = 0; i < tvals.size(); i++) {
-      if (i > 0)
-        valdesc += ", ";
-      if (tvals[i].is_string()) {
-        std::smatch m;
-        const std::string& s = tvals[i].as_string();
-        if (std::regex_match(s, m, R_TRANSFORM_NAME())) {
-          std::string lower = m[1].str();
-          for (auto& c : lower)
-            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-          valdesc += lower;
-          continue;
-        }
-      }
-      valdesc += stringify(tvals[i]);
-    }
+    std::string valdesc = describe_alternatives(tvals);
     inj.errs->push_back(Value(invalid_type_msg(inj.path,
                                                std::string(inj.path.size() > 1 ? "" : "value ") +
                                                    "exactly equal to " +

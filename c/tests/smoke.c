@@ -118,6 +118,30 @@ int main(void) {
   free(gjs);
   voxgig_release(gj);
 
+  /* setpath reads its base as getprop(store, base, store). */
+  const char* base_rows[][4] = {
+      {"[[]]", "0", "[0,\"a\"]", "[[{\"a\":1}]]"},
+      {"{\"x\":null}", "x", "[0]", "{\"x\":null,\"0\":1}"},
+      {"{\"x\":[]}", "x", "[0,\"a\"]", "{\"x\":[{\"a\":1}]}"},
+  };
+  for (size_t i = 0; i < sizeof(base_rows) / sizeof(base_rows[0]); i++) {
+    voxgig_value* bstore = voxgig_parse_json(base_rows[i][0], 0);
+    voxgig_value* bpath = voxgig_parse_json(base_rows[i][2], 0);
+    voxgig_value* bval = voxgig_new_int(1);
+    voxgig_injection binj;
+    memset(&binj, 0, sizeof binj);
+    binj.base = (char*)base_rows[i][1];
+    voxgig_setpath(bstore, bpath, bval, &binj);
+    char* bout = voxgig_to_json(bstore);
+    CHECK(bout && 0 == strcmp(bout, base_rows[i][3]), base_rows[i][3]);
+    if (bout && 0 != strcmp(bout, base_rows[i][3]))
+      fprintf(stderr, "  got: %s\n", bout);
+    free(bout);
+    voxgig_release(bval);
+    voxgig_release(bpath);
+    voxgig_release(bstore);
+  }
+
   printf("smoke: %d/%d passed\n", passed, total);
   return passed == total ? 0 : 1;
 }

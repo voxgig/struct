@@ -2080,10 +2080,22 @@ func _keepList(holders []any, keys []any, list any, written any) any {
 	out := written
 	for i := len(holders) - 1; 0 <= i && IsList(list); i-- {
 		list = holders[i]
-		written = SetProp(list, keys[i], written)
+		written = _writeBack(list, keys[i], written)
 		holders[i] = written
 	}
 	return out
+}
+
+// A map slot that already holds the list takes the grown slice directly:
+// SetProp refuses some keys GetProp reads, such as "".
+func _writeBack(holder any, key any, val any) any {
+	if m, ok := holder.(map[string]any); ok {
+		if _, has := m[StrKey(key)]; has {
+			m[StrKey(key)] = val
+			return m
+		}
+	}
+	return SetProp(holder, key, val)
 }
 
 func _injectStr(

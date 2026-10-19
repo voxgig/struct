@@ -1543,7 +1543,7 @@ def setpath(store, path, val, injdef=UNDEF):
 
     base = getprop(injdef, S_base) if injdef else UNDEF
     numparts = size(parts)
-    parent = getprop(store, base, store) if base else store
+    parent = getprop(store, base, store)
 
     for pI in range(numparts - 1):
         partKey = getelem(parts, pI)
