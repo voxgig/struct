@@ -188,7 +188,7 @@ into the directory and use its `Makefile`. First run installs deps.
 | TypeScript | `typescript/` | `npm test` (needs `npm run build` first) | `npm run lint` + prettier | canonical; ESLint 10, TS 6 |
 | JavaScript | `javascript/` | `npm test` | `npm run lint` + prettier | |
 | Python | `python/` | `python3 -m unittest discover -s tests` | ruff + mypy | function names match TS (not PEP8) |
-| Go | `go/` | `go test ./...` | golangci-lint, `go vet`, gofmt | PascalCase; `ListRef` wrapper |
+| Go | `go/` | `make test` (corpus in `testutil/`) | golangci-lint, `go vet`, gofmt | PascalCase; `ListRef` wrapper |
 | PHP | `php/` | `vendor/bin/phpunit` (`composer install` first) | phpcs (PSR-12) + phpstan | PHPUnit 12 |
 | Ruby | `ruby/` | `ruby test_voxgig_struct.rb` | rubocop | |
 | Rust | `rust/` | `cargo test` | clippy + `cargo fmt --check` | snake_case; in-tree `OrderedMap`/regex |

@@ -15,15 +15,16 @@ only what is specific to the Go port.
 ```
 go/
 ├── voxgigstruct.go              # the port: all exported functions + ListRef
-├── voxgigstruct_test.go         # corpus-driven tests (loads ../build/test/)
 ├── regex_pathological_test.go   # regex edge-case panel
-├── client_test.go               # example/usage test
 ├── walk_bench_test.go           # walk benchmark
-├── testutil/                    # the test harness — its own module
-│   ├── omni.go                  #   voxgig/omni's struct shim, re-exported
+├── testutil/                    # the test harness and the corpus tests — its own module
+│   ├── voxgigstruct_test.go     #   corpus-driven tests (loads ../../build/test/)
+│   ├── client_test.go           #   the client check, no store
+│   ├── client_store_test.go     #   the client check, with a store
+│   ├── omni.go                  #   voxgig/omni's struct shim + NULL/UNDEF/EXISTS markers
 │   ├── sdkapi.go                #   the SDK shapes the harness builds
 │   ├── sdk.go, direct.go        #   the test client
-│   ├── helpers.go               #   NULL/UNDEF/EXISTS markers + Fdt
+│   ├── helpers.go               #   NullModifier, Fdt, ToJSONString
 │   └── go.mod                   #   module .../go/testutil; requires omni
 ├── go.mod                       # module github.com/voxgig/struct/go; go 1.23
 └── Makefile                     # build / test / lint / vet / fmt / audit
@@ -48,31 +49,49 @@ library compiles with no omni whatever, and `go mod tidy` here cannot write
 omni into the published dependency graph. That is unchanged by the move to a
 tag, and `tools/omni_isolation.py` asserts it as a declaration check.
 
-The trade is that `./...` no longer reaches the harness. Every Makefile
-target names it explicitly (`./... ./testutil/...`); do the same for any
-new one, or it will silently stop covering the tests.
+**The corpus tests live in `testutil/` as well, and have to.** A `_test.go`
+file in this module ships in its module zip, and `go mod tidy` in any module
+that depends on this one follows the imports of its dependencies' tests. A
+test here that imports `./testutil` therefore hands `struct/go/testutil`,
+and omni through it, to every consumer: omni lands in their go.sum, and one
+level further down (a module that depends on voxgig/station, say) in their
+go.mod. Nothing in this repository sees it happen. The workspace resolves
+the import locally, so it reaches this go.mod only when someone runs
+`go mod tidy` here, and `tools/omni_isolation.py` looks for omni itself,
+which such a test never names. `go/v0.1.6` shipped exactly that
+(voxgig/struct#173). So the tests left here import only the standard
+library and this module, and `make vet` proves it: it vets this module with
+`GOWORK=off` first, where any import from outside it fails to resolve.
+
+The trade is that `./...` reaches neither the harness nor the corpus. Every
+Makefile target that covers the tests reaches `testutil` explicitly, as
+`./testutil/...` or, for `fmt`, from inside it, since `go fmt` has no
+workspace mode. Do the same for any new one, or it will silently stop
+covering the tests.
 
 `make` still writes a gitignored `go.work`, but over **two** modules — this
-one and `./testutil` — and it no longer names omni. It exists only because
-the library's own test files import `./testutil`, and a nested module is
-invisible to its parent without a workspace. Do not add omni back to it: a
-`use` directive makes that module a root module for the build, which shadows
-the `v0.1.0` requirement and silently returns the tests to a floating
-checkout.
+one and `./testutil` — and it no longer names omni. It exists so that one
+`go` command run here can name both modules. Nothing in this module needs
+it, and a test here that builds only with it is the leak above. Do not add
+omni back to it: a `use` directive makes that module a root module for the
+build, which shadows the `v0.1.0` requirement and silently returns the tests
+to a floating checkout.
 
 ## Commands
 
 ```bash
 go build ./...                     # compile the library — no omni needed
 make test                          # go test -count=1 -v ./... ./testutil/...
-make lint                          # fmt-check + go vet + golangci-lint
+make vet                           # go vet: this module with GOWORK=off, then both
+make lint                          # fmt-check + vet + golangci-lint
 make audit                         # govulncheck + gosec
 ```
 
 Prefer the `make` targets over bare `go` commands for anything touching
 tests: they generate `go.work` first, and they name `./testutil/...`. A bare
-`go test ./...` silently runs the corpus but skips the harness's own tests,
-and a bare `go vet ./...` fails outright with no workspace.
+`go test ./...` here runs only the regex panel, none of the corpus; in
+`testutil/`, `go test ./...` runs the corpus and the harness's own test
+against the library in `../`.
 
 `make` also exposes `build`, `fmt`, `fmt-check`, `clean`, and `all`.
 
@@ -105,7 +124,10 @@ and a bare `go vet ./...` fails outright with no workspace.
   the Group A/B rule (already Group A — see
   [`../UNDEF_SPEC.md`](../design/UNDEF_SPEC.md)). Re-read it before touching any
   read/merge/clone path — the top source of port bugs.
-- **Corpus markers.** `testutil/runner.go` defines `NULLMARK = "__NULL__"`,
+- **A test that needs the harness goes in `testutil/`,** as package
+  `runner_test` — never in this module, for the reason under
+  [Two modules, deliberately](#two-modules-deliberately).
+- **Corpus markers.** `testutil/omni.go` re-exports omni's `NULLMARK = "__NULL__"`,
   `UNDEFMARK = "__UNDEF__"`, `EXISTSMARK = "__EXISTS__"`. `__UNDEFMARK__` is
   not a marker value — it's a stale string in older docs.
 - **Regex is RE2.** Go's `regexp` *is* RE2: linear-time, no backreferences or

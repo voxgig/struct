@@ -751,13 +751,15 @@ See `/design/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
 
 ## Build and test
 
+Build the library, then run its own tests and the shared corpus:
+
 ```bash
 cd go
 go build ./...
-go test ./...
-# or:
 make test
 ```
 
-Tests in [`voxgigstruct_test.go`](./voxgigstruct_test.go) consume
-fixtures from [`../build/test/`](../build/test/).
+The corpus tests sit in the `testutil` module beside the test harness, in
+[`testutil/voxgigstruct_test.go`](./testutil/voxgigstruct_test.go), and
+load the corpus from [`../build/test/`](../build/test/). A bare
+`go test ./...` runs the library's own tests and none of the corpus.

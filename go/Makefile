@@ -12,8 +12,14 @@
 # The cost is that ./... no longer reaches the harness, so each target
 # names it.
 #
-# The workspace remains, minus omni: the library's own test files import
-# ./testutil, and a nested module is invisible to its parent without one.
+# The corpus tests live in ./testutil too. A test file here ships in the
+# module zip, and `go mod tidy` in every module that depends on this one
+# follows its imports, so a test here that imported ./testutil would pull
+# omni into each of their go.sum files. Tests here import only the stdlib
+# and this module, which `vet` checks with the workspace off.
+#
+# The workspace joins the two modules so that one go command run here can
+# name both. Nothing in this module needs it.
 go.work:
 	go work init . ./testutil
 
@@ -34,11 +40,16 @@ bench:
 lint: go.work fmt-check vet
 	golangci-lint run ./... ./testutil/...
 
+# The first pass has no workspace, so an import from outside this module,
+# tests included, fails to resolve.
 vet: go.work
+	GOWORK=off go vet ./...
 	go vet ./... ./testutil/...
 
+# go fmt has no workspace mode, so each module is formatted from its own root.
 fmt:
 	go fmt ./...
+	cd testutil && go fmt ./...
 
 fmt-check:
 	@unformatted=$$(gofmt -l .); \
