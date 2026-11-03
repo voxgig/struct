@@ -456,3 +456,125 @@ directive: set: [
   { in: { data: {b:2,a:[1,{c:3}]}, spec: ['`$EXACT`',{a:[1,{c:3}],b:2}] }, out: {a:[1,{c:3}],b:2} }
 ]
 
+
+# ['$NOF', count, spec, ...] counts the specs that admit the value, where the
+# count is an integer, or a map holding min, max or both. Run this group with
+# the null flag off, as for directive.
+nof: set: [
+
+  { in: { data: 1.5, spec: ['`$NOF`',1,'`$NUMBER`','`$INTEGER`'] }, out: 1.5 }
+  { in: { data: 2, spec: ['`$NOF`',1,'`$NUMBER`','`$INTEGER`'] },
+    err: 'Expected exactly 1 of number, integer, but found integer: 2.' }
+  { in: { data: 's', spec: ['`$NOF`',1,'`$NUMBER`','`$INTEGER`'] },
+    err: 'Expected exactly 1 of number, integer, but found string: s.' }
+  { in: { data: 1, spec: ['`$NOF`',0,'`$STRING`'] }, out: 1 }
+  { in: { data: 's', spec: ['`$NOF`',0,'`$STRING`'] },
+    err: 'Expected none of string, but found string: s.' }
+  { in: { data: 's', spec: ['`$NOF`',{min:1},'`$STRING`','`$NUMBER`'] }, out: 's' }
+  { in: { data: true, spec: ['`$NOF`',{min:1},'`$STRING`','`$NUMBER`'] },
+    err: 'Expected at least 1 of string, number, but found boolean: true.' }
+  { in: { data: true, spec: ['`$NOF`',{max:1},'`$NUMBER`','`$INTEGER`'] }, out: true }
+  { in: { data: 2, spec: ['`$NOF`',{max:1},'`$NUMBER`','`$INTEGER`','`$STRING`'] },
+    err: 'Expected at most 1 of number, integer, string, but found integer: 2.' }
+  { in: { data: 2, spec: ['`$NOF`',{min:1,max:2},'`$NUMBER`','`$INTEGER`','`$STRING`'] }, out: 2 }
+  { in: { data: true, spec: ['`$NOF`',{min:1,max:2},'`$NUMBER`','`$INTEGER`'] },
+    err: 'Expected 1 to 2 of number, integer, but found boolean: true.' }
+  { in: { data: 2, spec: ['`$NOF`',{min:1,max:1},'`$NUMBER`','`$INTEGER`'] },
+    err: 'Expected exactly 1 of number, integer, but found integer: 2.' }
+  { in: { data: 's', spec: ['`$NOF`',{max:0},'`$STRING`'] },
+    err: 'Expected none of string, but found string: s.' }
+  { in: { data: 's', spec: ['`$NOF`',{min:0},'`$NUMBER`'] }, out: 's' }
+  { in: { data: 1, spec: ['`$NOF`',3,'`$NUMBER`','`$INTEGER`'] },
+    err: 'Expected exactly 3 of number, integer, but found integer: 1.' }
+
+  # A count of every spec asks for all of them. A map spec is closed unless it
+  # is open, so a closed spec refuses a key that only another names.
+  { in: { data: {a:'x',b:1}, spec: ['`$NOF`',2,{a:'`$STRING`','`$OPEN`':true},{b:'`$NUMBER`','`$OPEN`':true}] },
+    out: {a:'x',b:1} }
+  { in: { data: {a:'x',b:'y'}, spec: ['`$NOF`',2,{a:'`$STRING`','`$OPEN`':true},{b:'`$NUMBER`','`$OPEN`':true}] },
+    err: 'Expected exactly 2 of {open:true,a:string}, {open:true,b:number}, but found map: {a:x,b:y}.' }
+  { in: { data: {a:'x',b:1}, spec: ['`$NOF`',2,{a:'`$STRING`'},{b:'`$NUMBER`'}] },
+    err: 'Expected exactly 2 of {a:string}, {b:number}, but found map: {a:x,b:1}.' }
+
+  # At a field, over list data, under $CHILD, and inside another count.
+  { in: { data: {x:2}, spec: {x:['`$NOF`',1,'`$NUMBER`','`$INTEGER`']} },
+    err: 'Expected field x to be exactly 1 of number, integer, but found integer: 2.' }
+  { in: { data: [1,2], spec: ['`$NOF`',1,['`$CHILD`','`$NUMBER`'],['`$CHILD`','`$STRING`']] }, out: [1,2] }
+  { in: { data: [1,'a',true], spec: ['`$CHILD`',['`$NOF`',1,'`$NUMBER`','`$STRING`']] },
+    err: 'Expected field 2 to be exactly 1 of number, string, but found boolean: true.' }
+  { in: { data: {p:1,q:'a'}, spec: {'`$CHILD`':['`$NOF`',1,'`$NUMBER`','`$STRING`']} }, out: {p:1,q:'a'} }
+  { in: { data: 3, spec: ['`$NOF`',1,['`$NOF`',0,'`$STRING`'],'`$STRING`'] }, out: 3 }
+
+  # A null is counted as a value, not taken as absent.
+  { in: { data: {a:1}, spec: {a:['`$NOF`',0,'`$NULL`']} }, out: {a:1} }
+  { in: { data: {a:null}, spec: {a:['`$NOF`',0,'`$NULL`']} },
+    err: 'Expected field a to be none of null, but found no value.' }
+  { in: { data: {a:null}, spec: {a:['`$NOF`',{min:1},'`$STRING`','`$NULL`']} }, out: {a:null} }
+  { in: { data: [null,'x'], spec: ['`$CHILD`',['`$NOF`',1,'`$NULL`','`$STRING`']] }, out: [null,'x'] }
+
+  # An absent value is counted too, so the field is needed unless a spec
+  # admits its absence.
+  { in: { data: {}, spec: {a:['`$NOF`',1,'`$STRING`','`$NUMBER`']} },
+    err: 'Expected field a to be exactly 1 of string, number, but found no value.' }
+  { in: { data: {}, spec: {a:['`$NOF`',0,'`$STRING`']} }, out: {} }
+  { in: { data: {}, spec: {a:['`$NOF`',1,'`$STRING`','`$NIL`']} }, out: {} }
+
+  # A spec admits the value as it is: a default may fill an absent member,
+  # but a spec that changes a member the value has does not admit it. The
+  # result is the value itself, with no spec's defaults added.
+  { in: { data: {}, spec: ['`$NOF`',1,{a:1}] }, out: {} }
+  { in: { data: {r:null}, spec: ['`$NOF`',1,{r:3}] },
+    err: 'Expected exactly 1 of {r:3}, but found map: {r:null}.' }
+  { in: { data: {c:5}, spec: ['`$NOF`',1,{c:'US$'}] },
+    err: 'Expected exactly 1 of {c:US$}, but found map: {c:5}.' }
+  { in: { data: ['a',1], spec: ['`$NOF`',1,['`$STRING`']] },
+    err: 'Expected exactly 1 of [string], but found list: [a,1].' }
+
+  # Conditionals from counts: where kind is circle r is a number, else w is.
+  { in: { data: {kind:'circle',r:1}, spec: ['`$NOF`',1,
+      ['`$NOF`',2,{kind:['`$EXACT`','circle'],'`$OPEN`':true},{r:'`$NUMBER`','`$OPEN`':true}],
+      ['`$NOF`',2,['`$NOF`',0,{kind:['`$EXACT`','circle'],'`$OPEN`':true}],{w:'`$NUMBER`','`$OPEN`':true}]] },
+    out: {kind:'circle',r:1} }
+  { in: { data: {kind:'circle',w:1}, spec: ['`$NOF`',1,
+      ['`$NOF`',2,{kind:['`$EXACT`','circle'],'`$OPEN`':true},{r:'`$NUMBER`','`$OPEN`':true}],
+      ['`$NOF`',2,['`$NOF`',0,{kind:['`$EXACT`','circle'],'`$OPEN`':true}],{w:'`$NUMBER`','`$OPEN`':true}]] },
+    err: 'Expected exactly 1 of [nof,2,{open:true,kind:[exact,circle]},{open:true,r:number}], [nof,2,[nof,0,{open:true,kind:[exact,circle]}],{open:true,w:number}], but found map: {kind:circle,w:1}.' }
+  { in: { data: {kind:'square',w:2}, spec: ['`$NOF`',1,
+      ['`$NOF`',2,{kind:['`$EXACT`','circle'],'`$OPEN`':true},{r:'`$NUMBER`','`$OPEN`':true}],
+      ['`$NOF`',2,['`$NOF`',0,{kind:['`$EXACT`','circle'],'`$OPEN`':true}],{w:'`$NUMBER`','`$OPEN`':true}]] },
+    out: {kind:'square',w:2} }
+  { in: { data: {kind:'square',r:2}, spec: ['`$NOF`',1,
+      ['`$NOF`',2,{kind:['`$EXACT`','circle'],'`$OPEN`':true},{r:'`$NUMBER`','`$OPEN`':true}],
+      ['`$NOF`',2,['`$NOF`',0,{kind:['`$EXACT`','circle'],'`$OPEN`':true}],{w:'`$NUMBER`','`$OPEN`':true}]] },
+    err: 'Expected exactly 1 of [nof,2,{open:true,kind:[exact,circle]},{open:true,r:number}], [nof,2,[nof,0,{open:true,kind:[exact,circle]}],{open:true,w:number}], but found map: {kind:square,r:2}.' }
+
+  # Presence from counts: where k is present, so is a.
+  { in: { data: {}, spec: ['`$NOF`',{min:1},{k:'`$NIL`','`$OPEN`':true},{a:['`$NOF`',0,'`$NIL`'],'`$OPEN`':true}] },
+    out: {} }
+  { in: { data: {k:1}, spec: ['`$NOF`',{min:1},{k:'`$NIL`','`$OPEN`':true},{a:['`$NOF`',0,'`$NIL`'],'`$OPEN`':true}] },
+    err: 'Expected at least 1 of {open:true,k:nil}, {open:true,a:[nof,0,nil]}, but found map: {k:1}.' }
+  { in: { data: {k:1,a:2}, spec: ['`$NOF`',{min:1},{k:'`$NIL`','`$OPEN`':true},{a:['`$NOF`',0,'`$NIL`'],'`$OPEN`':true}] },
+    out: {k:1,a:2} }
+
+  # Malformed specs.
+  { in: { data: 1, spec: ['`$NOF`'] },
+    err: 'The $NOF validator at field <root> must have a count and at least one argument.' }
+  { in: { data: {a:1}, spec: {a:['`$NOF`',1]} },
+    err: 'The $NOF validator at field a must have a count and at least one argument.' }
+  { in: { data: 1, spec: ['`$NOF`','x','`$NUMBER`'] },
+    err: 'The $NOF validator at field <root> has an invalid count: x.' }
+  { in: { data: 1, spec: ['`$NOF`',-1,'`$NUMBER`'] },
+    err: 'The $NOF validator at field <root> has an invalid count: -1.' }
+  { in: { data: 1, spec: ['`$NOF`',1.5,'`$NUMBER`'] },
+    err: 'The $NOF validator at field <root> has an invalid count: 1.5.' }
+  { in: { data: 1, spec: ['`$NOF`',null,'`$NUMBER`'] },
+    err: 'The $NOF validator at field <root> has an invalid count: null.' }
+  { in: { data: 1, spec: ['`$NOF`',{},'`$NUMBER`'] },
+    err: 'The $NOF validator at field <root> has an invalid count: {}.' }
+  { in: { data: 1, spec: ['`$NOF`',{min:2,max:1},'`$NUMBER`'] },
+    err: 'The $NOF validator at field <root> has an invalid count: {max:1,min:2}.' }
+  { in: { data: 1, spec: ['`$NOF`',{least:1},'`$NUMBER`'] },
+    err: 'The $NOF validator at field <root> has an invalid count: {least:1}.' }
+  { in: { data: {a:[1,2]}, spec: {a:['`$NUMBER`','`$NOF`']} },
+    err: 'The $NOF validator at field a must be the first element of an array.' }
+]

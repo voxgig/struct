@@ -2108,6 +2108,81 @@ const validate_EXACT: Injector = (inj: Injection) => {
   }
 }
 
+// Count the specs that admit the value: ['`$NOF`', count, spec, ...], where
+// count is an integer, or a map holding min, max or both.
+const validate_NOF: Injector = (inj: Injection, _val: any, _ref: string, store: any) => {
+  const { mode, parent, keyI } = inj
+
+  if (M_VAL !== mode) {
+    return NONE
+  }
+
+  if (!islist(parent) || 0 !== keyI) {
+    inj.errs.push(
+      'The $NOF validator at field ' +
+        pathify(inj.path, 1, 1) +
+        ' must be the first element of an array.',
+    )
+    return NONE
+  }
+
+  const cval = _slotval(inj)
+
+  inj.keyI = size(inj.keys)
+
+  // Replace [$NOF, ...] with the data value, returning SKIP as $ONE does.
+  inj.setval(cval, 2)
+
+  inj.path = slice(inj.path, -1)
+
+  const count = _lookup(parent, 1)
+  const tvals = slice(parent, 2)
+  const numtvals = size(tvals)
+  const field = 'The $NOF validator at field ' + pathify(inj.path, 1)
+
+  if (0 === numtvals) {
+    inj.errs.push(field + ' must have a count and at least one argument.')
+    return SKIP
+  }
+
+  const [lo, hi, countdesc] = _nofcount(count, numtvals)
+  if (NONE === countdesc) {
+    inj.errs.push(field + ' has an invalid count: ' + stringify(count) + '.')
+    return SKIP
+  }
+
+  let admitted = 0
+  for (let tI = 0; tI < numtvals; tI++) {
+    const left = numtvals - tI
+
+    // Stop once the specs left cannot change the verdict.
+    if (hi < admitted || admitted + left < lo || (lo <= admitted && admitted + left <= hi)) {
+      break
+    }
+
+    if (_admits(cval, tvals[tI], inj, store)) {
+      admitted++
+    }
+  }
+
+  if (admitted < lo || hi < admitted) {
+    const valdesc = replace(
+      join(
+        items(tvals, (n) => stringify(n[1])),
+        ', ',
+      ),
+      R_TRANSFORM_NAME,
+      (_m: any, p1: string) => p1.toLowerCase(),
+    )
+
+    inj.errs.push(
+      _invalidTypeMsg(inj.path, countdesc + ' of ' + valdesc, typify(cval), cval, 'V0310'),
+    )
+  }
+
+  return SKIP
+}
+
 // This is the "modify" argument to inject. Use this to perform
 // generic validation. Runs *after* any special commands.
 const _validation: Modify = (pval: any, key?: any, parent?: any, inj?: Injection) => {
@@ -2227,6 +2302,7 @@ function validate(
         $CHILD: validate_CHILD,
         $ONE: validate_ONE,
         $EXACT: validate_EXACT,
+        $NOF: validate_NOF,
       },
 
       getdef(extra, {}),
@@ -2641,6 +2717,84 @@ function _deepequal(a: any, b: any): boolean {
   }
 
   return true
+}
+
+// Every member val has is in out, unchanged. A member only out has is a
+// default the spec supplied, and is ignored.
+function _keeps(val: any, out: any): boolean {
+  if (NONE === val) {
+    return true
+  }
+
+  if (0 === ((T_list | T_map) & typify(val)) || islist(val) !== islist(out) || !isnode(out)) {
+    return _deepequal(val, out)
+  }
+
+  for (const k of keysof(val)) {
+    if (!_keeps(val[k], _lookup(out, k))) {
+      return false
+    }
+  }
+
+  return true
+}
+
+// A spec admits a value when validating the value against it finds no error
+// and gives back the value as it is.
+function _admits(val: any, spec: any, inj: Injection, store: any): boolean {
+  const terrs: any[] = []
+
+  const vstore = merge([{}, store], 1)
+  vstore.$TOP = val
+
+  const out = validate(val, spec, {
+    extra: vstore,
+    errs: terrs,
+    meta: inj.meta,
+  })
+
+  return 0 === size(terrs) && _keeps(val, out)
+}
+
+// The bounds of a $NOF count, and the words for it, which are absent when
+// the count is invalid. Without a max, the bound is the number of specs.
+function _nofcount(count: any, numtvals: number): [number, number, string | undefined] {
+  const isnat = (n: any) => 0 < (T_integer & typify(n)) && 0 <= n
+
+  if (isnat(count)) {
+    return [count, count, 0 === count ? 'none' : 'exactly ' + count]
+  }
+
+  const min = _lookup(count, 'min')
+  const max = _lookup(count, 'max')
+
+  const valid =
+    ismap(count) &&
+    0 < size(count) &&
+    size(count) === (NONE === min ? 0 : 1) + (NONE === max ? 0 : 1) &&
+    (NONE === min || isnat(min)) &&
+    (NONE === max || isnat(max)) &&
+    (NONE === min || NONE === max || min <= max)
+
+  if (!valid) {
+    return [0, 0, NONE]
+  }
+
+  const lo = NONE === min ? 0 : min
+  const hi = NONE === max ? numtvals : max
+
+  const desc =
+    NONE === max
+      ? 'at least ' + lo
+      : 0 === hi
+        ? 'none'
+        : NONE === min
+          ? 'at most ' + hi
+          : lo === hi
+            ? 'exactly ' + lo
+            : lo + ' to ' + hi
+
+  return [lo, hi, desc]
 }
 
 // Default inject handler for transforms. If the path resolves to a function,

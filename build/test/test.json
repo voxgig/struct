@@ -20072,6 +20072,937 @@
         ]
       },
       "name": "validate",
+      "nof": {
+        "set": [
+          {
+            "in": {
+              "data": 1.5,
+              "spec": [
+                "`$NOF`",
+                1,
+                "`$NUMBER`",
+                "`$INTEGER`"
+              ]
+            },
+            "out": 1.5
+          },
+          {
+            "err": "Expected exactly 1 of number, integer, but found integer: 2.",
+            "in": {
+              "data": 2,
+              "spec": [
+                "`$NOF`",
+                1,
+                "`$NUMBER`",
+                "`$INTEGER`"
+              ]
+            }
+          },
+          {
+            "err": "Expected exactly 1 of number, integer, but found string: s.",
+            "in": {
+              "data": "s",
+              "spec": [
+                "`$NOF`",
+                1,
+                "`$NUMBER`",
+                "`$INTEGER`"
+              ]
+            }
+          },
+          {
+            "in": {
+              "data": 1,
+              "spec": [
+                "`$NOF`",
+                0,
+                "`$STRING`"
+              ]
+            },
+            "out": 1
+          },
+          {
+            "err": "Expected none of string, but found string: s.",
+            "in": {
+              "data": "s",
+              "spec": [
+                "`$NOF`",
+                0,
+                "`$STRING`"
+              ]
+            }
+          },
+          {
+            "in": {
+              "data": "s",
+              "spec": [
+                "`$NOF`",
+                {
+                  "min": 1
+                },
+                "`$STRING`",
+                "`$NUMBER`"
+              ]
+            },
+            "out": "s"
+          },
+          {
+            "err": "Expected at least 1 of string, number, but found boolean: true.",
+            "in": {
+              "data": true,
+              "spec": [
+                "`$NOF`",
+                {
+                  "min": 1
+                },
+                "`$STRING`",
+                "`$NUMBER`"
+              ]
+            }
+          },
+          {
+            "in": {
+              "data": true,
+              "spec": [
+                "`$NOF`",
+                {
+                  "max": 1
+                },
+                "`$NUMBER`",
+                "`$INTEGER`"
+              ]
+            },
+            "out": true
+          },
+          {
+            "err": "Expected at most 1 of number, integer, string, but found integer: 2.",
+            "in": {
+              "data": 2,
+              "spec": [
+                "`$NOF`",
+                {
+                  "max": 1
+                },
+                "`$NUMBER`",
+                "`$INTEGER`",
+                "`$STRING`"
+              ]
+            }
+          },
+          {
+            "in": {
+              "data": 2,
+              "spec": [
+                "`$NOF`",
+                {
+                  "max": 2,
+                  "min": 1
+                },
+                "`$NUMBER`",
+                "`$INTEGER`",
+                "`$STRING`"
+              ]
+            },
+            "out": 2
+          },
+          {
+            "err": "Expected 1 to 2 of number, integer, but found boolean: true.",
+            "in": {
+              "data": true,
+              "spec": [
+                "`$NOF`",
+                {
+                  "max": 2,
+                  "min": 1
+                },
+                "`$NUMBER`",
+                "`$INTEGER`"
+              ]
+            }
+          },
+          {
+            "err": "Expected exactly 1 of number, integer, but found integer: 2.",
+            "in": {
+              "data": 2,
+              "spec": [
+                "`$NOF`",
+                {
+                  "max": 1,
+                  "min": 1
+                },
+                "`$NUMBER`",
+                "`$INTEGER`"
+              ]
+            }
+          },
+          {
+            "err": "Expected none of string, but found string: s.",
+            "in": {
+              "data": "s",
+              "spec": [
+                "`$NOF`",
+                {
+                  "max": 0
+                },
+                "`$STRING`"
+              ]
+            }
+          },
+          {
+            "in": {
+              "data": "s",
+              "spec": [
+                "`$NOF`",
+                {
+                  "min": 0
+                },
+                "`$NUMBER`"
+              ]
+            },
+            "out": "s"
+          },
+          {
+            "err": "Expected exactly 3 of number, integer, but found integer: 1.",
+            "in": {
+              "data": 1,
+              "spec": [
+                "`$NOF`",
+                3,
+                "`$NUMBER`",
+                "`$INTEGER`"
+              ]
+            }
+          },
+          {
+            "in": {
+              "data": {
+                "a": "x",
+                "b": 1
+              },
+              "spec": [
+                "`$NOF`",
+                2,
+                {
+                  "`$OPEN`": true,
+                  "a": "`$STRING`"
+                },
+                {
+                  "`$OPEN`": true,
+                  "b": "`$NUMBER`"
+                }
+              ]
+            },
+            "out": {
+              "a": "x",
+              "b": 1
+            }
+          },
+          {
+            "err": "Expected exactly 2 of {open:true,a:string}, {open:true,b:number}, but found map: {a:x,b:y}.",
+            "in": {
+              "data": {
+                "a": "x",
+                "b": "y"
+              },
+              "spec": [
+                "`$NOF`",
+                2,
+                {
+                  "`$OPEN`": true,
+                  "a": "`$STRING`"
+                },
+                {
+                  "`$OPEN`": true,
+                  "b": "`$NUMBER`"
+                }
+              ]
+            }
+          },
+          {
+            "err": "Expected exactly 2 of {a:string}, {b:number}, but found map: {a:x,b:1}.",
+            "in": {
+              "data": {
+                "a": "x",
+                "b": 1
+              },
+              "spec": [
+                "`$NOF`",
+                2,
+                {
+                  "a": "`$STRING`"
+                },
+                {
+                  "b": "`$NUMBER`"
+                }
+              ]
+            }
+          },
+          {
+            "err": "Expected field x to be exactly 1 of number, integer, but found integer: 2.",
+            "in": {
+              "data": {
+                "x": 2
+              },
+              "spec": {
+                "x": [
+                  "`$NOF`",
+                  1,
+                  "`$NUMBER`",
+                  "`$INTEGER`"
+                ]
+              }
+            }
+          },
+          {
+            "in": {
+              "data": [
+                1,
+                2
+              ],
+              "spec": [
+                "`$NOF`",
+                1,
+                [
+                  "`$CHILD`",
+                  "`$NUMBER`"
+                ],
+                [
+                  "`$CHILD`",
+                  "`$STRING`"
+                ]
+              ]
+            },
+            "out": [
+              1,
+              2
+            ]
+          },
+          {
+            "err": "Expected field 2 to be exactly 1 of number, string, but found boolean: true.",
+            "in": {
+              "data": [
+                1,
+                "a",
+                true
+              ],
+              "spec": [
+                "`$CHILD`",
+                [
+                  "`$NOF`",
+                  1,
+                  "`$NUMBER`",
+                  "`$STRING`"
+                ]
+              ]
+            }
+          },
+          {
+            "in": {
+              "data": {
+                "p": 1,
+                "q": "a"
+              },
+              "spec": {
+                "`$CHILD`": [
+                  "`$NOF`",
+                  1,
+                  "`$NUMBER`",
+                  "`$STRING`"
+                ]
+              }
+            },
+            "out": {
+              "p": 1,
+              "q": "a"
+            }
+          },
+          {
+            "in": {
+              "data": 3,
+              "spec": [
+                "`$NOF`",
+                1,
+                [
+                  "`$NOF`",
+                  0,
+                  "`$STRING`"
+                ],
+                "`$STRING`"
+              ]
+            },
+            "out": 3
+          },
+          {
+            "in": {
+              "data": {
+                "a": 1
+              },
+              "spec": {
+                "a": [
+                  "`$NOF`",
+                  0,
+                  "`$NULL`"
+                ]
+              }
+            },
+            "out": {
+              "a": 1
+            }
+          },
+          {
+            "err": "Expected field a to be none of null, but found no value.",
+            "in": {
+              "data": {
+                "a": null
+              },
+              "spec": {
+                "a": [
+                  "`$NOF`",
+                  0,
+                  "`$NULL`"
+                ]
+              }
+            }
+          },
+          {
+            "in": {
+              "data": {
+                "a": null
+              },
+              "spec": {
+                "a": [
+                  "`$NOF`",
+                  {
+                    "min": 1
+                  },
+                  "`$STRING`",
+                  "`$NULL`"
+                ]
+              }
+            },
+            "out": {
+              "a": null
+            }
+          },
+          {
+            "in": {
+              "data": [
+                null,
+                "x"
+              ],
+              "spec": [
+                "`$CHILD`",
+                [
+                  "`$NOF`",
+                  1,
+                  "`$NULL`",
+                  "`$STRING`"
+                ]
+              ]
+            },
+            "out": [
+              null,
+              "x"
+            ]
+          },
+          {
+            "err": "Expected field a to be exactly 1 of string, number, but found no value.",
+            "in": {
+              "data": {},
+              "spec": {
+                "a": [
+                  "`$NOF`",
+                  1,
+                  "`$STRING`",
+                  "`$NUMBER`"
+                ]
+              }
+            }
+          },
+          {
+            "in": {
+              "data": {},
+              "spec": {
+                "a": [
+                  "`$NOF`",
+                  0,
+                  "`$STRING`"
+                ]
+              }
+            },
+            "out": {}
+          },
+          {
+            "in": {
+              "data": {},
+              "spec": {
+                "a": [
+                  "`$NOF`",
+                  1,
+                  "`$STRING`",
+                  "`$NIL`"
+                ]
+              }
+            },
+            "out": {}
+          },
+          {
+            "in": {
+              "data": {},
+              "spec": [
+                "`$NOF`",
+                1,
+                {
+                  "a": 1
+                }
+              ]
+            },
+            "out": {}
+          },
+          {
+            "err": "Expected exactly 1 of {r:3}, but found map: {r:null}.",
+            "in": {
+              "data": {
+                "r": null
+              },
+              "spec": [
+                "`$NOF`",
+                1,
+                {
+                  "r": 3
+                }
+              ]
+            }
+          },
+          {
+            "err": "Expected exactly 1 of {c:US$}, but found map: {c:5}.",
+            "in": {
+              "data": {
+                "c": 5
+              },
+              "spec": [
+                "`$NOF`",
+                1,
+                {
+                  "c": "US$"
+                }
+              ]
+            }
+          },
+          {
+            "err": "Expected exactly 1 of [string], but found list: [a,1].",
+            "in": {
+              "data": [
+                "a",
+                1
+              ],
+              "spec": [
+                "`$NOF`",
+                1,
+                [
+                  "`$STRING`"
+                ]
+              ]
+            }
+          },
+          {
+            "in": {
+              "data": {
+                "kind": "circle",
+                "r": 1
+              },
+              "spec": [
+                "`$NOF`",
+                1,
+                [
+                  "`$NOF`",
+                  2,
+                  {
+                    "`$OPEN`": true,
+                    "kind": [
+                      "`$EXACT`",
+                      "circle"
+                    ]
+                  },
+                  {
+                    "`$OPEN`": true,
+                    "r": "`$NUMBER`"
+                  }
+                ],
+                [
+                  "`$NOF`",
+                  2,
+                  [
+                    "`$NOF`",
+                    0,
+                    {
+                      "`$OPEN`": true,
+                      "kind": [
+                        "`$EXACT`",
+                        "circle"
+                      ]
+                    }
+                  ],
+                  {
+                    "`$OPEN`": true,
+                    "w": "`$NUMBER`"
+                  }
+                ]
+              ]
+            },
+            "out": {
+              "kind": "circle",
+              "r": 1
+            }
+          },
+          {
+            "err": "Expected exactly 1 of [nof,2,{open:true,kind:[exact,circle]},{open:true,r:number}], [nof,2,[nof,0,{open:true,kind:[exact,circle]}],{open:true,w:number}], but found map: {kind:circle,w:1}.",
+            "in": {
+              "data": {
+                "kind": "circle",
+                "w": 1
+              },
+              "spec": [
+                "`$NOF`",
+                1,
+                [
+                  "`$NOF`",
+                  2,
+                  {
+                    "`$OPEN`": true,
+                    "kind": [
+                      "`$EXACT`",
+                      "circle"
+                    ]
+                  },
+                  {
+                    "`$OPEN`": true,
+                    "r": "`$NUMBER`"
+                  }
+                ],
+                [
+                  "`$NOF`",
+                  2,
+                  [
+                    "`$NOF`",
+                    0,
+                    {
+                      "`$OPEN`": true,
+                      "kind": [
+                        "`$EXACT`",
+                        "circle"
+                      ]
+                    }
+                  ],
+                  {
+                    "`$OPEN`": true,
+                    "w": "`$NUMBER`"
+                  }
+                ]
+              ]
+            }
+          },
+          {
+            "in": {
+              "data": {
+                "kind": "square",
+                "w": 2
+              },
+              "spec": [
+                "`$NOF`",
+                1,
+                [
+                  "`$NOF`",
+                  2,
+                  {
+                    "`$OPEN`": true,
+                    "kind": [
+                      "`$EXACT`",
+                      "circle"
+                    ]
+                  },
+                  {
+                    "`$OPEN`": true,
+                    "r": "`$NUMBER`"
+                  }
+                ],
+                [
+                  "`$NOF`",
+                  2,
+                  [
+                    "`$NOF`",
+                    0,
+                    {
+                      "`$OPEN`": true,
+                      "kind": [
+                        "`$EXACT`",
+                        "circle"
+                      ]
+                    }
+                  ],
+                  {
+                    "`$OPEN`": true,
+                    "w": "`$NUMBER`"
+                  }
+                ]
+              ]
+            },
+            "out": {
+              "kind": "square",
+              "w": 2
+            }
+          },
+          {
+            "err": "Expected exactly 1 of [nof,2,{open:true,kind:[exact,circle]},{open:true,r:number}], [nof,2,[nof,0,{open:true,kind:[exact,circle]}],{open:true,w:number}], but found map: {kind:square,r:2}.",
+            "in": {
+              "data": {
+                "kind": "square",
+                "r": 2
+              },
+              "spec": [
+                "`$NOF`",
+                1,
+                [
+                  "`$NOF`",
+                  2,
+                  {
+                    "`$OPEN`": true,
+                    "kind": [
+                      "`$EXACT`",
+                      "circle"
+                    ]
+                  },
+                  {
+                    "`$OPEN`": true,
+                    "r": "`$NUMBER`"
+                  }
+                ],
+                [
+                  "`$NOF`",
+                  2,
+                  [
+                    "`$NOF`",
+                    0,
+                    {
+                      "`$OPEN`": true,
+                      "kind": [
+                        "`$EXACT`",
+                        "circle"
+                      ]
+                    }
+                  ],
+                  {
+                    "`$OPEN`": true,
+                    "w": "`$NUMBER`"
+                  }
+                ]
+              ]
+            }
+          },
+          {
+            "in": {
+              "data": {},
+              "spec": [
+                "`$NOF`",
+                {
+                  "min": 1
+                },
+                {
+                  "`$OPEN`": true,
+                  "k": "`$NIL`"
+                },
+                {
+                  "`$OPEN`": true,
+                  "a": [
+                    "`$NOF`",
+                    0,
+                    "`$NIL`"
+                  ]
+                }
+              ]
+            },
+            "out": {}
+          },
+          {
+            "err": "Expected at least 1 of {open:true,k:nil}, {open:true,a:[nof,0,nil]}, but found map: {k:1}.",
+            "in": {
+              "data": {
+                "k": 1
+              },
+              "spec": [
+                "`$NOF`",
+                {
+                  "min": 1
+                },
+                {
+                  "`$OPEN`": true,
+                  "k": "`$NIL`"
+                },
+                {
+                  "`$OPEN`": true,
+                  "a": [
+                    "`$NOF`",
+                    0,
+                    "`$NIL`"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "in": {
+              "data": {
+                "a": 2,
+                "k": 1
+              },
+              "spec": [
+                "`$NOF`",
+                {
+                  "min": 1
+                },
+                {
+                  "`$OPEN`": true,
+                  "k": "`$NIL`"
+                },
+                {
+                  "`$OPEN`": true,
+                  "a": [
+                    "`$NOF`",
+                    0,
+                    "`$NIL`"
+                  ]
+                }
+              ]
+            },
+            "out": {
+              "a": 2,
+              "k": 1
+            }
+          },
+          {
+            "err": "The $NOF validator at field <root> must have a count and at least one argument.",
+            "in": {
+              "data": 1,
+              "spec": [
+                "`$NOF`"
+              ]
+            }
+          },
+          {
+            "err": "The $NOF validator at field a must have a count and at least one argument.",
+            "in": {
+              "data": {
+                "a": 1
+              },
+              "spec": {
+                "a": [
+                  "`$NOF`",
+                  1
+                ]
+              }
+            }
+          },
+          {
+            "err": "The $NOF validator at field <root> has an invalid count: x.",
+            "in": {
+              "data": 1,
+              "spec": [
+                "`$NOF`",
+                "x",
+                "`$NUMBER`"
+              ]
+            }
+          },
+          {
+            "err": "The $NOF validator at field <root> has an invalid count: -1.",
+            "in": {
+              "data": 1,
+              "spec": [
+                "`$NOF`",
+                -1,
+                "`$NUMBER`"
+              ]
+            }
+          },
+          {
+            "err": "The $NOF validator at field <root> has an invalid count: 1.5.",
+            "in": {
+              "data": 1,
+              "spec": [
+                "`$NOF`",
+                1.5,
+                "`$NUMBER`"
+              ]
+            }
+          },
+          {
+            "err": "The $NOF validator at field <root> has an invalid count: null.",
+            "in": {
+              "data": 1,
+              "spec": [
+                "`$NOF`",
+                null,
+                "`$NUMBER`"
+              ]
+            }
+          },
+          {
+            "err": "The $NOF validator at field <root> has an invalid count: {}.",
+            "in": {
+              "data": 1,
+              "spec": [
+                "`$NOF`",
+                {},
+                "`$NUMBER`"
+              ]
+            }
+          },
+          {
+            "err": "The $NOF validator at field <root> has an invalid count: {max:1,min:2}.",
+            "in": {
+              "data": 1,
+              "spec": [
+                "`$NOF`",
+                {
+                  "max": 1,
+                  "min": 2
+                },
+                "`$NUMBER`"
+              ]
+            }
+          },
+          {
+            "err": "The $NOF validator at field <root> has an invalid count: {least:1}.",
+            "in": {
+              "data": 1,
+              "spec": [
+                "`$NOF`",
+                {
+                  "least": 1
+                },
+                "`$NUMBER`"
+              ]
+            }
+          },
+          {
+            "err": "The $NOF validator at field a must be the first element of an array.",
+            "in": {
+              "data": {
+                "a": [
+                  1,
+                  2
+                ]
+              },
+              "spec": {
+                "a": [
+                  "`$NUMBER`",
+                  "`$NOF`"
+                ]
+              }
+            }
+          }
+        ]
+      },
       "one": {
         "set": [
           {

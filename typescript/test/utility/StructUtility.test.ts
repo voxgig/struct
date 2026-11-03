@@ -872,6 +872,12 @@ describe('StructUtility', async () => {
     )
   })
 
+  test('validate-nof', async () => {
+    await runsetflags(spec.validate.nof, { null: false }, (vin: any) =>
+      struct.validate(vin.data, vin.spec),
+    )
+  })
+
   test('validate-edge', async () => {
     const { validate } = struct
     let errs: any[] = []

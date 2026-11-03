@@ -661,6 +661,9 @@ const { equal, deepEqual, throws } = node_assert_1.default;
     (0, node_test_1.test)('validate-directive', async () => {
         await runsetflags(spec.validate.directive, { null: false }, (vin) => struct.validate(vin.data, vin.spec));
     });
+    (0, node_test_1.test)('validate-nof', async () => {
+        await runsetflags(spec.validate.nof, { null: false }, (vin) => struct.validate(vin.data, vin.spec));
+    });
     (0, node_test_1.test)('validate-edge', async () => {
         const { validate } = struct;
         let errs = [];
