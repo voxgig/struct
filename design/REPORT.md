@@ -777,8 +777,18 @@ constants, `SKIP` / `DELETE` sentinels.
 | $CHILD | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
 | $ONE | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
 | $EXACT | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| $NOF | Y | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - |
 
 ^ Ruby uses `$OBJECT`/`$ARRAY` naming instead of `$MAP`/`$LIST`.
+
+`$NOF` is canonical TypeScript only so far, and no other port runs the
+`validate.nof` or `validate.directive` corpus groups yet. `validate.nof`
+specifies `$NOF`: the count forms, the admission trial (no error, and every
+member the value has comes back unchanged), and the messages.
+`validate.directive` specifies what `$ONE`, `$EXACT` and `$NOF` share as
+list directives: a null at the slot is a value, nothing in the directive's
+own list is checked against list data, and `$EXACT` compares as JSON. It
+also pins `$NIL` accepting null. Both groups run with the null flag off.
 
 
 ## Constant Parity
