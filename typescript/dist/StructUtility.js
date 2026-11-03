@@ -1571,7 +1571,8 @@ const validate_STRING = (inj) => {
 };
 const validate_TYPE = (inj, _val, ref) => {
     const tname = slice(ref, 1).toLowerCase();
-    const typev = 1 << (31 - TYPENAME.indexOf(tname));
+    // $NIL is absent or null.
+    const typev = (1 << (31 - TYPENAME.indexOf(tname))) | (S_nil === tname ? T_null : 0);
     const out = _lookup(inj.dparent, inj.key);
     const t = typify(out);
     // console.log('TYPE', tname, typev, tn(typev), 'O=', t, tn(t), out, 'C=', t & typev)
@@ -1657,36 +1658,36 @@ const validate_ONE = (inj, _val, _ref, store) => {
                 ' must be the first element of an array.');
             return;
         }
+        const cval = _slotval(inj);
         inj.keyI = size(inj.keys);
-        // Clean up structure, replacing [$ONE, ...] with current
-        inj.setval(inj.dparent, 2);
-        // Path shortens for the message only: `modify` reads
-        // getprop(inj.parent, inj.key), and inj.parent is still this list.
+        // Replace [$ONE, ...] with the data value; SKIP keeps inject off the detached list.
+        inj.setval(cval, 2);
+        // Path shortens for the messages only.
         inj.path = slice(inj.path, -1);
         const tvals = slice(parent, 1);
         if (0 === size(tvals)) {
             inj.errs.push('The $ONE validator at field ' +
                 pathify(inj.path, 1, 1) +
                 ' must have at least one argument.');
-            return;
+            return SKIP;
         }
         for (const tval of tvals) {
             const terrs = [];
             const vstore = merge([{}, store], 1);
-            vstore.$TOP = inj.dparent;
-            const vcurrent = validate(inj.dparent, tval, {
+            vstore.$TOP = cval;
+            validate(cval, tval, {
                 extra: vstore,
                 errs: terrs,
                 meta: inj.meta,
             });
-            inj.setval(vcurrent, -2);
             // Accept current value if there was a match
             if (0 === size(terrs)) {
-                return;
+                return SKIP;
             }
         }
         const valdesc = replace(join(items(tvals, (n) => stringify(n[1])), ', '), R_TRANSFORM_NAME, (_m, p1) => p1.toLowerCase());
-        inj.errs.push(_invalidTypeMsg(inj.path, (1 < size(tvals) ? 'one of ' : '') + valdesc, typify(inj.dparent), inj.dparent, 'V0210'));
+        inj.errs.push(_invalidTypeMsg(inj.path, (1 < size(tvals) ? 'one of ' : '') + valdesc, typify(cval), cval, 'V0210'));
+        return SKIP;
     }
 };
 const validate_EXACT = (inj) => {
@@ -1699,35 +1700,29 @@ const validate_EXACT = (inj) => {
                 ' must be the first element of an array.');
             return;
         }
+        const cval = _slotval(inj);
         inj.keyI = size(inj.keys);
-        // Clean up structure, replacing [$EXACT, ...] with current data parent
-        inj.setval(inj.dparent, 2);
+        // Replace [$EXACT, ...] with the data value, returning SKIP as $ONE does.
+        inj.setval(cval, 2);
         inj.path = slice(inj.path, 0, -1);
-        inj.key = getelem(inj.path, -1);
         const tvals = slice(parent, 1);
         if (0 === size(tvals)) {
             inj.errs.push('The $EXACT validator at field ' +
                 pathify(inj.path, 1, 1) +
                 ' must have at least one argument.');
-            return;
+            return SKIP;
         }
-        let currentstr = undefined;
         for (const tval of tvals) {
-            let exactmatch = tval === inj.dparent;
-            if (!exactmatch && isnode(tval)) {
-                currentstr = undefined === currentstr ? stringify(inj.dparent) : currentstr;
-                const tvalstr = stringify(tval);
-                exactmatch = tvalstr === currentstr;
-            }
-            if (exactmatch) {
-                return;
+            if (_deepequal(tval, cval)) {
+                return SKIP;
             }
         }
         const valdesc = replace(join(items(tvals, (n) => stringify(n[1])), ', '), R_TRANSFORM_NAME, (_m, p1) => p1.toLowerCase());
         inj.errs.push(_invalidTypeMsg(inj.path, (1 < size(inj.path) ? '' : 'value ') +
             'exactly equal to ' +
             (1 === size(tvals) ? '' : 'one of ') +
-            valdesc, typify(inj.dparent), inj.dparent, 'V0110'));
+            valdesc, typify(cval), cval, 'V0110'));
+        return SKIP;
     }
     else {
         delprop(parent, key);
@@ -2133,6 +2128,34 @@ function _invalidTypeMsg(path, needtype, vt, v, _whence) {
         // Uncomment to help debug validation errors.
         // ' [' + _whence + ']' +
         '.');
+}
+// The data value at a list directive's slot. The directive's own dparent was
+// read with getprop, which reports a stored null as absent.
+function _slotval(inj) {
+    const prior = inj.prior;
+    return NONE === prior ? inj.dparent : _lookup(prior.dparent, prior.key);
+}
+// JSON equality: numbers by value, lists in order, maps by key in any order.
+function _deepequal(a, b) {
+    if (a === b) {
+        return true;
+    }
+    const atype = typify(a);
+    if (atype !== typify(b) || 0 === ((T_list | T_map) & atype)) {
+        return false;
+    }
+    const akeys = keysof(a);
+    const bkeys = keysof(b);
+    if (size(akeys) !== size(bkeys)) {
+        return false;
+    }
+    for (let kI = 0; kI < size(akeys); kI++) {
+        const k = akeys[kI];
+        if (k !== bkeys[kI] || !_deepequal(a[k], b[k])) {
+            return false;
+        }
+    }
+    return true;
 }
 // Default inject handler for transforms. If the path resolves to a function,
 // call the function passing the injection inj. This is how transforms operate.

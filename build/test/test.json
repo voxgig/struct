@@ -19169,6 +19169,501 @@
           }
         ]
       },
+      "directive": {
+        "set": [
+          {
+            "in": {
+              "data": {
+                "a": null
+              },
+              "spec": {
+                "a": [
+                  "`$ONE`",
+                  "`$STRING`",
+                  "`$NULL`"
+                ]
+              }
+            },
+            "out": {
+              "a": null
+            }
+          },
+          {
+            "in": {
+              "data": null,
+              "spec": [
+                "`$ONE`",
+                "`$STRING`",
+                "`$NULL`"
+              ]
+            },
+            "out": null
+          },
+          {
+            "in": {
+              "data": [
+                null,
+                "x"
+              ],
+              "spec": [
+                "`$CHILD`",
+                [
+                  "`$ONE`",
+                  "`$NULL`",
+                  "`$STRING`"
+                ]
+              ]
+            },
+            "out": [
+              null,
+              "x"
+            ]
+          },
+          {
+            "in": {
+              "data": {
+                "a": null,
+                "b": "x"
+              },
+              "spec": {
+                "`$CHILD`": [
+                  "`$ONE`",
+                  "`$NULL`",
+                  "`$STRING`"
+                ]
+              }
+            },
+            "out": {
+              "a": null,
+              "b": "x"
+            }
+          },
+          {
+            "err": "Expected field a to be one of string, number, but found no value.",
+            "in": {
+              "data": {
+                "a": null
+              },
+              "spec": {
+                "a": [
+                  "`$ONE`",
+                  "`$STRING`",
+                  "`$NUMBER`"
+                ]
+              }
+            }
+          },
+          {
+            "in": {
+              "data": {
+                "a": null
+              },
+              "spec": {
+                "a": [
+                  "`$EXACT`",
+                  null
+                ]
+              }
+            },
+            "out": {
+              "a": null
+            }
+          },
+          {
+            "in": {
+              "data": null,
+              "spec": [
+                "`$EXACT`",
+                1,
+                null
+              ]
+            },
+            "out": null
+          },
+          {
+            "in": {
+              "data": [
+                null,
+                1
+              ],
+              "spec": [
+                "`$CHILD`",
+                [
+                  "`$EXACT`",
+                  null,
+                  1
+                ]
+              ]
+            },
+            "out": [
+              null,
+              1
+            ]
+          },
+          {
+            "err": "Expected field a to be exactly equal to 1, but found no value.",
+            "in": {
+              "data": {
+                "a": null
+              },
+              "spec": {
+                "a": [
+                  "`$EXACT`",
+                  1
+                ]
+              }
+            }
+          },
+          {
+            "err": "Expected field a to be exactly equal to null, but found no value.",
+            "in": {
+              "data": {},
+              "spec": {
+                "a": [
+                  "`$EXACT`",
+                  null
+                ]
+              }
+            }
+          },
+          {
+            "in": {
+              "data": {
+                "a": null
+              },
+              "spec": {
+                "a": "`$NIL`"
+              }
+            },
+            "out": {
+              "a": null
+            }
+          },
+          {
+            "in": {
+              "data": null,
+              "spec": "`$NIL`"
+            },
+            "out": null
+          },
+          {
+            "in": {
+              "data": {
+                "a": null
+              },
+              "spec": {
+                "a": [
+                  "`$ONE`",
+                  "`$STRING`",
+                  "`$NIL`"
+                ]
+              }
+            },
+            "out": {
+              "a": null
+            }
+          },
+          {
+            "err": "Expected field a to be nil, but found integer: 0.",
+            "in": {
+              "data": {
+                "a": 0
+              },
+              "spec": {
+                "a": "`$NIL`"
+              }
+            }
+          },
+          {
+            "in": {
+              "data": [
+                1,
+                2
+              ],
+              "spec": [
+                "`$ONE`",
+                [
+                  "`$CHILD`",
+                  "`$NUMBER`"
+                ]
+              ]
+            },
+            "out": [
+              1,
+              2
+            ]
+          },
+          {
+            "in": {
+              "data": {
+                "q": [
+                  1,
+                  2
+                ]
+              },
+              "spec": {
+                "q": [
+                  "`$ONE`",
+                  [
+                    "`$CHILD`",
+                    "`$NUMBER`"
+                  ]
+                ]
+              }
+            },
+            "out": {
+              "q": [
+                1,
+                2
+              ]
+            }
+          },
+          {
+            "in": {
+              "data": [
+                1
+              ],
+              "spec": [
+                "`$ONE`",
+                [
+                  1
+                ]
+              ]
+            },
+            "out": [
+              1
+            ]
+          },
+          {
+            "err": "Expected one of [child,number], string, but found list: [1,x].",
+            "in": {
+              "data": [
+                1,
+                "x"
+              ],
+              "spec": [
+                "`$ONE`",
+                [
+                  "`$CHILD`",
+                  "`$NUMBER`"
+                ],
+                "`$STRING`"
+              ]
+            }
+          },
+          {
+            "in": {
+              "data": [
+                [
+                  1
+                ]
+              ],
+              "spec": [
+                "`$EXACT`",
+                [
+                  [
+                    1
+                  ]
+                ]
+              ]
+            },
+            "out": [
+              [
+                1
+              ]
+            ]
+          },
+          {
+            "in": {
+              "data": {
+                "a": {
+                  "a": {
+                    "x": 1
+                  }
+                }
+              },
+              "spec": {
+                "a": [
+                  "`$EXACT`",
+                  {
+                    "a": {
+                      "x": 1
+                    }
+                  }
+                ]
+              }
+            },
+            "out": {
+              "a": {
+                "a": {
+                  "x": 1
+                }
+              }
+            }
+          },
+          {
+            "in": {
+              "data": {
+                "a": {
+                  "a": [
+                    1
+                  ]
+                }
+              },
+              "spec": {
+                "a": [
+                  "`$EXACT`",
+                  {
+                    "a": [
+                      1
+                    ]
+                  }
+                ]
+              }
+            },
+            "out": {
+              "a": {
+                "a": [
+                  1
+                ]
+              }
+            }
+          },
+          {
+            "err": "Expected value exactly equal to {x:1}, but found map: {x:1}.",
+            "in": {
+              "data": {
+                "x": "1"
+              },
+              "spec": [
+                "`$EXACT`",
+                {
+                  "x": 1
+                }
+              ]
+            }
+          },
+          {
+            "err": "Expected value exactly equal to {x:1}, but found string: {x:1}.",
+            "in": {
+              "data": "{x:1}",
+              "spec": [
+                "`$EXACT`",
+                {
+                  "x": 1
+                }
+              ]
+            }
+          },
+          {
+            "err": "Expected value exactly equal to {x:true}, but found map: {x:true}.",
+            "in": {
+              "data": {
+                "x": "true"
+              },
+              "spec": [
+                "`$EXACT`",
+                {
+                  "x": true
+                }
+              ]
+            }
+          },
+          {
+            "err": "Expected value exactly equal to {x:null}, but found map: {x:null}.",
+            "in": {
+              "data": {
+                "x": "null"
+              },
+              "spec": [
+                "`$EXACT`",
+                {
+                  "x": null
+                }
+              ]
+            }
+          },
+          {
+            "err": "Expected value exactly equal to [1], but found list: [1].",
+            "in": {
+              "data": [
+                "1"
+              ],
+              "spec": [
+                "`$EXACT`",
+                [
+                  1
+                ]
+              ]
+            }
+          },
+          {
+            "err": "Expected value exactly equal to [2,1], but found list: [1,2].",
+            "in": {
+              "data": [
+                1,
+                2
+              ],
+              "spec": [
+                "`$EXACT`",
+                [
+                  2,
+                  1
+                ]
+              ]
+            }
+          },
+          {
+            "err": "Expected value exactly equal to {x:1,y:null}, but found map: {x:1}.",
+            "in": {
+              "data": {
+                "x": 1
+              },
+              "spec": [
+                "`$EXACT`",
+                {
+                  "x": 1,
+                  "y": null
+                }
+              ]
+            }
+          },
+          {
+            "in": {
+              "data": {
+                "a": [
+                  1,
+                  {
+                    "c": 3
+                  }
+                ],
+                "b": 2
+              },
+              "spec": [
+                "`$EXACT`",
+                {
+                  "a": [
+                    1,
+                    {
+                      "c": 3
+                    }
+                  ],
+                  "b": 2
+                }
+              ]
+            },
+            "out": {
+              "a": [
+                1,
+                {
+                  "c": 3
+                }
+              ],
+              "b": 2
+            }
+          }
+        ]
+      },
       "exact": {
         "set": [
           {

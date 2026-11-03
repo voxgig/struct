@@ -866,6 +866,12 @@ describe('StructUtility', async () => {
     await runset(spec.validate.special, (vin: any) => struct.validate(vin.data, vin.spec, vin.inj))
   })
 
+  test('validate-directive', async () => {
+    await runsetflags(spec.validate.directive, { null: false }, (vin: any) =>
+      struct.validate(vin.data, vin.spec),
+    )
+  })
+
   test('validate-edge', async () => {
     const { validate } = struct
     let errs: any[] = []
