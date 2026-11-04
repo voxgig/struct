@@ -93,9 +93,6 @@ basic: {
     { in: { data: {s0:''}, spec: {s0:'`$STRING`'} },
       err:'Empty string at s0' }
 
-    { in: { data: {s1:''}, spec: {s1:['`$ONE`','`$STRING`','']} },
-      out: {s1:''} }
-
     { in: { data: z0, spec: '`$NUMBER`' } err: 'Expected number, but found string: z0.' }
     { in: { data: z1, spec: '`$INTEGER`' } err: 'Expected integer, but found string: z1.' }
     { in: { data: z2, spec: '`$DECIMAL`' } err: 'Expected decimal, but found string: z2.' }
@@ -226,6 +223,9 @@ child: {
 }
 
 
+# Canonical TypeScript has no $ONE: there ['$NOF', {min:1}, ...] is that
+# check, and the nof group carries these cases in that form. A port that
+# still defines $ONE runs this group.
 one: {
   set: [
     { in: { data: 33, spec: ['`$ONE`','`$STRING`','`$NUMBER`']}, out: 33 }
@@ -279,6 +279,9 @@ one: {
 
     { in: { data: {q:42}, spec: {q:['`$ONE`',['`$EXACT`',library],proxy]} },
       err: 'Expected field q to be one of [exact,library], proxy, but found integer: 42.' }
+
+    { in: { data: {s1:''}, spec: {s1:['`$ONE`','`$STRING`','']} },
+      out: {s1:''} }
   ]
 }
 
@@ -403,12 +406,12 @@ special: set: [
 directive: set: [
 
   # A null at the slot is a value, not an absent key.
-  { in: { data: {a:null}, spec: {a:['`$ONE`','`$STRING`','`$NULL`']} }, out: {a:null} }
-  { in: { data: null, spec: ['`$ONE`','`$STRING`','`$NULL`'] }, out: null }
-  { in: { data: [null,'x'], spec: ['`$CHILD`',['`$ONE`','`$NULL`','`$STRING`']] }, out: [null,'x'] }
-  { in: { data: {a:null,b:'x'}, spec: {'`$CHILD`':['`$ONE`','`$NULL`','`$STRING`']} }, out: {a:null,b:'x'} }
-  { in: { data: {a:null}, spec: {a:['`$ONE`','`$STRING`','`$NUMBER`']} },
-    err: 'Expected field a to be one of string, number, but found no value.' }
+  { in: { data: {a:null}, spec: {a:['`$NOF`',{min:1},'`$STRING`','`$NULL`']} }, out: {a:null} }
+  { in: { data: null, spec: ['`$NOF`',{min:1},'`$STRING`','`$NULL`'] }, out: null }
+  { in: { data: [null,'x'], spec: ['`$CHILD`',['`$NOF`',{min:1},'`$NULL`','`$STRING`']] }, out: [null,'x'] }
+  { in: { data: {a:null,b:'x'}, spec: {'`$CHILD`':['`$NOF`',{min:1},'`$NULL`','`$STRING`']} }, out: {a:null,b:'x'} }
+  { in: { data: {a:null}, spec: {a:['`$NOF`',{min:1},'`$STRING`','`$NUMBER`']} },
+    err: 'Expected field a to be at least 1 of string, number, but found no value.' }
   { in: { data: {a:null}, spec: {a:['`$EXACT`',null]} }, out: {a:null} }
   { in: { data: null, spec: ['`$EXACT`',1,null] }, out: null }
   { in: { data: [null,1], spec: ['`$CHILD`',['`$EXACT`',null,1]] }, out: [null,1] }
@@ -420,17 +423,17 @@ directive: set: [
   # $NIL is absent or null, alone and as an alternative.
   { in: { data: {a:null}, spec: {a:'`$NIL`'} }, out: {a:null} }
   { in: { data: null, spec: '`$NIL`' }, out: null }
-  { in: { data: {a:null}, spec: {a:['`$ONE`','`$STRING`','`$NIL`']} }, out: {a:null} }
+  { in: { data: {a:null}, spec: {a:['`$NOF`',{min:1},'`$STRING`','`$NIL`']} }, out: {a:null} }
   { in: { data: {a:0}, spec: {a:'`$NIL`'} },
     err: 'Expected field a to be nil, but found integer: 0.' }
 
   # Over list data, nothing in the directive's own list is checked against
   # the data's elements.
-  { in: { data: [1,2], spec: ['`$ONE`',['`$CHILD`','`$NUMBER`']] }, out: [1,2] }
-  { in: { data: {q:[1,2]}, spec: {q:['`$ONE`',['`$CHILD`','`$NUMBER`']]} }, out: {q:[1,2]} }
-  { in: { data: [1], spec: ['`$ONE`',[1]] }, out: [1] }
-  { in: { data: [1,'x'], spec: ['`$ONE`',['`$CHILD`','`$NUMBER`'],'`$STRING`'] },
-    err: 'Expected one of [child,number], string, but found list: [1,x].' }
+  { in: { data: [1,2], spec: ['`$ALL`',['`$CHILD`','`$NUMBER`']] }, out: [1,2] }
+  { in: { data: {q:[1,2]}, spec: {q:['`$ALL`',['`$CHILD`','`$NUMBER`']]} }, out: {q:[1,2]} }
+  { in: { data: [1], spec: ['`$ALL`',[1]] }, out: [1] }
+  { in: { data: [1,'x'], spec: ['`$NOF`',{min:1},['`$CHILD`','`$NUMBER`'],'`$STRING`'] },
+    err: 'Expected at least 1 of [child,number], string, but found list: [1,x].' }
   { in: { data: [[1]], spec: ['`$EXACT`',[[1]]] }, out: [[1]] }
 
   # A data key spelt like the field it sits in is only data.
@@ -577,6 +580,43 @@ nof: set: [
     err: 'The $NOF validator at field <root> has an invalid count: {least:1}.' }
   { in: { data: {a:[1,2]}, spec: {a:['`$NUMBER`','`$NOF`']} },
     err: 'The $NOF validator at field a must be the first element of an array.' }
+
+  # At least one: a union of alternatives.
+  { in: { data: 33, spec: ['`$NOF`',{min:1},'`$STRING`','`$NUMBER`'] }, out: 33 }
+  { in: { data: 'a31', spec: ['`$NOF`',{min:1},'`$STRING`','`$NUMBER`'] }, out: 'a31' }
+  { in: { data: {x0:true}, spec: {x0:['`$NOF`',{min:1},'`$STRING`','`$NUMBER`']} },
+    err: 'Expected field x0 to be at least 1 of string, number, but found boolean: true.' }
+  { in: { data: {x1:{a:1}}, spec: ['`$NOF`',{min:1},{x1:'`$LIST`'},{x1:'`$MAP`'}] }, out: {x1:{a:1}} }
+  { in: { data: {x2:{a:1}}, spec: ['`$NOF`',{min:1},{x2:{a:'`$STRING`'}},{x2:{a:'`$NUMBER`'}}] },
+    out: {x2:{a:1}} }
+  { in: { data: {a:{}}, spec: {a:['`$NOF`',{min:1},'`$MAP`','`$LIST`']} }, out: {a:{}} }
+  { in: { data: {a:[]}, spec: {a:['`$NOF`',{min:1},'`$MAP`','`$LIST`']} }, out: {a:[]} }
+  { in: { data: {a:1}, spec: {a:['`$NOF`',{min:1},'`$MAP`','`$LIST`']} },
+    err: 'Expected field a to be at least 1 of map, list, but found integer: 1.' }
+  { in: { data: {}, spec: {a:['`$NOF`',{min:1},'`$MAP`','`$LIST`']} },
+    err: 'Expected field a to be at least 1 of map, list, but found no value.' }
+  { in: { data: {a:1}, spec: {a:['`$NOF`',{min:1},'`$STRING`','`$NIL`']} },
+    err: 'Expected field a to be at least 1 of string, nil, but found integer: 1.' }
+  { in: { data: {}, spec: {a:['`$NOF`',{min:1},'`$STRING`','`$NIL`']} }, out: {} }
+  { in: { data: {a:1}, spec: {a:['`$NOF`',{min:1},'`$DECIMAL`','`$STRING`']} },
+    err: 'Expected field a to be at least 1 of decimal, string, but found integer: 1.' }
+  { in: { data: {a:1}, spec: {a:['`$NOF`',{min:1},'`$STRING`','proxy']} },
+    err: 'Expected field a to be at least 1 of string, proxy, but found integer: 1.' }
+  { in: { data: {q:42}, spec: {q:['`$NOF`',{min:1},['`$EXACT`','library'],'proxy']} },
+    err: 'Expected field q to be at least 1 of [exact,library], proxy, but found integer: 42.' }
+  { in: { data: {s1:''}, spec: {s1:['`$NOF`',{min:1},'`$STRING`','']} }, out: {s1:''} }
+
+  # A data key spelt like the field it sits in is only data.
+  { in: { data: {a:{a:{x:1}}}, spec: {a:['`$NOF`',{min:1},'`$MAP`','`$NIL`']} }, out: {a:{a:{x:1}}} }
+  { in: { data: {a:{a:1}}, spec: {a:['`$NOF`',{min:1},'`$MAP`']} }, out: {a:{a:1}} }
+  { in: { data: {a:{a:'s'}}, spec: {a:['`$NOF`',{min:1},'`$MAP`','`$LIST`']} }, out: {a:{a:'s'}} }
+
+  # Counts nested in another count's spec, over matching containers.
+  { in: { data: {s:{active:true, providers:[{kind:'env'}]}},
+          spec: {'`$OPEN`':true, s:['`$NOF`',{min:1},
+            {'`$OPEN`':true, active:['`$NOF`',{min:1},'`$BOOLEAN`','`$NIL`'],
+              providers:['`$NOF`',{min:1},'`$LIST`','`$NIL`']}, '`$NIL`']} },
+    out: {s:{active:true, providers:[{kind:'env'}]}} }
 ]
 
 

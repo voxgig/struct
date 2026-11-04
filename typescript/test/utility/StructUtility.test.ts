@@ -848,10 +848,6 @@ describe('StructUtility', async () => {
     await runset(spec.validate.child, (vin: any) => struct.validate(vin.data, vin.spec))
   })
 
-  test('validate-one', async () => {
-    await runset(spec.validate.one, (vin: any) => struct.validate(vin.data, vin.spec))
-  })
-
   test('validate-exact', async () => {
     await runset(spec.validate.exact, (vin: any) => struct.validate(vin.data, vin.spec))
   })

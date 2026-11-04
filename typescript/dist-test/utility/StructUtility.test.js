@@ -646,9 +646,6 @@ const { equal, deepEqual, throws } = node_assert_1.default;
     (0, node_test_1.test)('validate-child', async () => {
         await runset(spec.validate.child, (vin) => struct.validate(vin.data, vin.spec));
     });
-    (0, node_test_1.test)('validate-one', async () => {
-        await runset(spec.validate.one, (vin) => struct.validate(vin.data, vin.spec));
-    });
     (0, node_test_1.test)('validate-exact', async () => {
         await runset(spec.validate.exact, (vin) => struct.validate(vin.data, vin.spec));
     });

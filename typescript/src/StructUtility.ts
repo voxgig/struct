@@ -1966,81 +1966,6 @@ const validate_CHILD: Injector = (inj: Injection) => {
   return NONE
 }
 
-const validate_ONE: Injector = (inj: Injection, _val: any, _ref: string, store: any) => {
-  const { mode, parent, keyI } = inj
-
-  // Only operate in val mode, since parent is a list.
-  if (M_VAL === mode) {
-    if (!islist(parent) || 0 !== keyI) {
-      inj.errs.push(
-        'The $ONE validator at field ' +
-          pathify(inj.path, 1, 1) +
-          ' must be the first element of an array.',
-      )
-      return
-    }
-
-    const cval = _slotval(inj)
-
-    inj.keyI = size(inj.keys)
-
-    // Replace [$ONE, ...] with the data value; SKIP keeps inject off the detached list.
-    inj.setval(cval, 2)
-
-    // Path shortens for the messages only.
-    inj.path = slice(inj.path, -1)
-
-    const tvals = slice(parent, 1)
-    if (0 === size(tvals)) {
-      inj.errs.push(
-        'The $ONE validator at field ' +
-          pathify(inj.path, 1, 1) +
-          ' must have at least one argument.',
-      )
-      return SKIP
-    }
-
-    for (const tval of tvals) {
-      const terrs: any[] = []
-
-      const vstore = merge([{}, store], 1)
-      vstore.$TOP = cval
-
-      validate(cval, tval, {
-        extra: vstore,
-        errs: terrs,
-        meta: inj.meta,
-      })
-
-      // Accept current value if there was a match
-      if (0 === size(terrs)) {
-        return SKIP
-      }
-    }
-
-    const valdesc = replace(
-      join(
-        items(tvals, (n) => stringify(n[1])),
-        ', ',
-      ),
-      R_TRANSFORM_NAME,
-      (_m: any, p1: string) => p1.toLowerCase(),
-    )
-
-    inj.errs.push(
-      _invalidTypeMsg(
-        inj.path,
-        (1 < size(tvals) ? 'one of ' : '') + valdesc,
-        typify(cval),
-        cval,
-        'V0210',
-      ),
-    )
-
-    return SKIP
-  }
-}
-
 const validate_EXACT: Injector = (inj: Injection) => {
   const { mode, parent, key, keyI } = inj
 
@@ -2059,7 +1984,7 @@ const validate_EXACT: Injector = (inj: Injection) => {
 
     inj.keyI = size(inj.keys)
 
-    // Replace [$EXACT, ...] with the data value, returning SKIP as $ONE does.
+    // Replace [$EXACT, ...] with the data value; SKIP keeps inject off the detached list.
     inj.setval(cval, 2)
 
     inj.path = slice(inj.path, 0, -1)
@@ -2314,7 +2239,6 @@ function validate(
         $INSTANCE: validate_TYPE,
         $ANY: validate_ANY,
         $CHILD: validate_CHILD,
-        $ONE: validate_ONE,
         $EXACT: validate_EXACT,
         $NOF: validate_NOF,
         $ALL: validate_ALL,
