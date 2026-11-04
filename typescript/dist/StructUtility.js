@@ -1730,31 +1730,38 @@ const validate_EXACT = (inj) => {
 };
 // Count the specs that admit the value: ['`$NOF`', count, spec, ...], where
 // count is an integer, or a map holding min, max or both.
-const validate_NOF = (inj, _val, _ref, store) => {
+const validate_NOF = (inj, _val, _ref, store) => _validatecount(inj, store, '$NOF', true);
+// Every spec admits the value: ['`$ALL`', spec, ...].
+const validate_ALL = (inj, _val, _ref, store) => _validatecount(inj, store, '$ALL', false);
+// The counting list directives. Without a count, every spec has to admit.
+function _validatecount(inj, store, name, counted) {
     const { mode, parent, keyI } = inj;
     if (M_VAL !== mode) {
         return NONE;
     }
     if (!islist(parent) || 0 !== keyI) {
-        inj.errs.push('The $NOF validator at field ' +
+        inj.errs.push('The ' +
+            name +
+            ' validator at field ' +
             pathify(inj.path, 1, 1) +
             ' must be the first element of an array.');
         return NONE;
     }
     const cval = _slotval(inj);
     inj.keyI = size(inj.keys);
-    // Replace [$NOF, ...] with the data value, returning SKIP as $ONE does.
+    // Replace the directive's list with the data value. Each return is SKIP, so
+    // that inject leaves the detached list alone and validates nothing in it.
     inj.setval(cval, 2);
     inj.path = slice(inj.path, -1);
-    const count = _lookup(parent, 1);
-    const tvals = slice(parent, 2);
+    const count = counted ? _lookup(parent, 1) : NONE;
+    const tvals = slice(parent, counted ? 2 : 1);
     const numtvals = size(tvals);
-    const field = 'The $NOF validator at field ' + pathify(inj.path, 1);
+    const field = 'The ' + name + ' validator at field ' + pathify(inj.path, 1);
     if (0 === numtvals) {
-        inj.errs.push(field + ' must have a count and at least one argument.');
+        inj.errs.push(field + (counted ? ' must have a count and' : ' must have') + ' at least one argument.');
         return SKIP;
     }
-    const [lo, hi, countdesc] = _nofcount(count, numtvals);
+    const [lo, hi, countdesc] = counted ? _nofcount(count, numtvals) : [numtvals, numtvals, 'all'];
     if (NONE === countdesc) {
         inj.errs.push(field + ' has an invalid count: ' + stringify(count) + '.');
         return SKIP;
@@ -1775,7 +1782,7 @@ const validate_NOF = (inj, _val, _ref, store) => {
         inj.errs.push(_invalidTypeMsg(inj.path, countdesc + ' of ' + valdesc, typify(cval), cval, 'V0310'));
     }
     return SKIP;
-};
+}
 // This is the "modify" argument to inject. Use this to perform
 // generic validation. Runs *after* any special commands.
 const _validation = (pval, key, parent, inj) => {
@@ -1880,6 +1887,7 @@ injdef) {
             $ONE: validate_ONE,
             $EXACT: validate_EXACT,
             $NOF: validate_NOF,
+            $ALL: validate_ALL,
         },
         getdef(extra, {}),
         // A special top level value to collect errors.

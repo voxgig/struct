@@ -578,3 +578,52 @@ nof: set: [
   { in: { data: {a:[1,2]}, spec: {a:['`$NUMBER`','`$NOF`']} },
     err: 'The $NOF validator at field a must be the first element of an array.' }
 ]
+
+
+# ['$ALL', spec, ...] holds when every spec admits the value, admitting as
+# for nof. Run this group with the null flag off, as for directive.
+all: set: [
+
+  { in: { data: 2, spec: ['`$ALL`','`$NUMBER`','`$INTEGER`'] }, out: 2 }
+  { in: { data: 1.5, spec: ['`$ALL`','`$NUMBER`','`$INTEGER`'] },
+    err: 'Expected all of number, integer, but found decimal: 1.5.' }
+  { in: { data: 's', spec: ['`$ALL`','`$NUMBER`'] },
+    err: 'Expected all of number, but found string: s.' }
+
+  # A map spec is closed unless it is open, so a closed spec refuses a key
+  # that only another names.
+  { in: { data: {a:'x',b:1}, spec: ['`$ALL`',{a:'`$STRING`','`$OPEN`':true},{b:'`$NUMBER`','`$OPEN`':true}] },
+    out: {a:'x',b:1} }
+  { in: { data: {a:'x'}, spec: ['`$ALL`',{a:'`$STRING`','`$OPEN`':true},{b:'`$NUMBER`','`$OPEN`':true}] },
+    err: 'Expected all of {open:true,a:string}, {open:true,b:number}, but found map: {a:x}.' }
+  { in: { data: {a:'x',b:1}, spec: ['`$ALL`',{a:'`$STRING`'},{b:'`$NUMBER`'}] },
+    err: 'Expected all of {a:string}, {b:number}, but found map: {a:x,b:1}.' }
+
+  # Several checks on one value.
+  { in: { data: {x:'s'}, spec: {x:['`$ALL`','`$STRING`',['`$NOF`',0,['`$EXACT`','admin']]]} }, out: {x:'s'} }
+  { in: { data: {x:'admin'}, spec: {x:['`$ALL`','`$STRING`',['`$NOF`',0,['`$EXACT`','admin']]]} },
+    err: 'Expected field x to be all of string, [nof,0,[exact,admin]], but found string: admin.' }
+
+  # Over list data, and under $CHILD.
+  { in: { data: [1,2], spec: ['`$ALL`',['`$CHILD`','`$NUMBER`'],['`$CHILD`','`$INTEGER`']] }, out: [1,2] }
+  { in: { data: [1,'a'], spec: ['`$CHILD`',['`$ALL`','`$NUMBER`','`$INTEGER`']] },
+    err: 'Expected field 1 to be all of number, integer, but found string: a.' }
+
+  # A null is a value, and an absent value is counted.
+  { in: { data: {a:null}, spec: {a:['`$ALL`','`$NIL`','`$NULL`']} }, out: {a:null} }
+  { in: { data: {}, spec: {a:['`$ALL`','`$STRING`','`$NUMBER`']} },
+    err: 'Expected field a to be all of string, number, but found no value.' }
+  { in: { data: {}, spec: {a:['`$ALL`','`$NIL`','`$ANY`']} }, out: {} }
+
+  # Admission as for nof: no spec may change a member the value has, and no
+  # spec's defaults are added.
+  { in: { data: {r:null}, spec: ['`$ALL`',{r:3}] },
+    err: 'Expected all of {r:3}, but found map: {r:null}.' }
+  { in: { data: {}, spec: ['`$ALL`',{a:1},{b:2}] }, out: {} }
+
+  # Malformed specs.
+  { in: { data: 1, spec: ['`$ALL`'] },
+    err: 'The $ALL validator at field <root> must have at least one argument.' }
+  { in: { data: {a:[1,2]}, spec: {a:['`$NUMBER`','`$ALL`']} },
+    err: 'The $ALL validator at field a must be the first element of an array.' }
+]

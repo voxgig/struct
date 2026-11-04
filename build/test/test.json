@@ -17750,6 +17750,286 @@
       "set": []
     },
     "validate": {
+      "all": {
+        "set": [
+          {
+            "in": {
+              "data": 2,
+              "spec": [
+                "`$ALL`",
+                "`$NUMBER`",
+                "`$INTEGER`"
+              ]
+            },
+            "out": 2
+          },
+          {
+            "err": "Expected all of number, integer, but found decimal: 1.5.",
+            "in": {
+              "data": 1.5,
+              "spec": [
+                "`$ALL`",
+                "`$NUMBER`",
+                "`$INTEGER`"
+              ]
+            }
+          },
+          {
+            "err": "Expected all of number, but found string: s.",
+            "in": {
+              "data": "s",
+              "spec": [
+                "`$ALL`",
+                "`$NUMBER`"
+              ]
+            }
+          },
+          {
+            "in": {
+              "data": {
+                "a": "x",
+                "b": 1
+              },
+              "spec": [
+                "`$ALL`",
+                {
+                  "`$OPEN`": true,
+                  "a": "`$STRING`"
+                },
+                {
+                  "`$OPEN`": true,
+                  "b": "`$NUMBER`"
+                }
+              ]
+            },
+            "out": {
+              "a": "x",
+              "b": 1
+            }
+          },
+          {
+            "err": "Expected all of {open:true,a:string}, {open:true,b:number}, but found map: {a:x}.",
+            "in": {
+              "data": {
+                "a": "x"
+              },
+              "spec": [
+                "`$ALL`",
+                {
+                  "`$OPEN`": true,
+                  "a": "`$STRING`"
+                },
+                {
+                  "`$OPEN`": true,
+                  "b": "`$NUMBER`"
+                }
+              ]
+            }
+          },
+          {
+            "err": "Expected all of {a:string}, {b:number}, but found map: {a:x,b:1}.",
+            "in": {
+              "data": {
+                "a": "x",
+                "b": 1
+              },
+              "spec": [
+                "`$ALL`",
+                {
+                  "a": "`$STRING`"
+                },
+                {
+                  "b": "`$NUMBER`"
+                }
+              ]
+            }
+          },
+          {
+            "in": {
+              "data": {
+                "x": "s"
+              },
+              "spec": {
+                "x": [
+                  "`$ALL`",
+                  "`$STRING`",
+                  [
+                    "`$NOF`",
+                    0,
+                    [
+                      "`$EXACT`",
+                      "admin"
+                    ]
+                  ]
+                ]
+              }
+            },
+            "out": {
+              "x": "s"
+            }
+          },
+          {
+            "err": "Expected field x to be all of string, [nof,0,[exact,admin]], but found string: admin.",
+            "in": {
+              "data": {
+                "x": "admin"
+              },
+              "spec": {
+                "x": [
+                  "`$ALL`",
+                  "`$STRING`",
+                  [
+                    "`$NOF`",
+                    0,
+                    [
+                      "`$EXACT`",
+                      "admin"
+                    ]
+                  ]
+                ]
+              }
+            }
+          },
+          {
+            "in": {
+              "data": [
+                1,
+                2
+              ],
+              "spec": [
+                "`$ALL`",
+                [
+                  "`$CHILD`",
+                  "`$NUMBER`"
+                ],
+                [
+                  "`$CHILD`",
+                  "`$INTEGER`"
+                ]
+              ]
+            },
+            "out": [
+              1,
+              2
+            ]
+          },
+          {
+            "err": "Expected field 1 to be all of number, integer, but found string: a.",
+            "in": {
+              "data": [
+                1,
+                "a"
+              ],
+              "spec": [
+                "`$CHILD`",
+                [
+                  "`$ALL`",
+                  "`$NUMBER`",
+                  "`$INTEGER`"
+                ]
+              ]
+            }
+          },
+          {
+            "in": {
+              "data": {
+                "a": null
+              },
+              "spec": {
+                "a": [
+                  "`$ALL`",
+                  "`$NIL`",
+                  "`$NULL`"
+                ]
+              }
+            },
+            "out": {
+              "a": null
+            }
+          },
+          {
+            "err": "Expected field a to be all of string, number, but found no value.",
+            "in": {
+              "data": {},
+              "spec": {
+                "a": [
+                  "`$ALL`",
+                  "`$STRING`",
+                  "`$NUMBER`"
+                ]
+              }
+            }
+          },
+          {
+            "in": {
+              "data": {},
+              "spec": {
+                "a": [
+                  "`$ALL`",
+                  "`$NIL`",
+                  "`$ANY`"
+                ]
+              }
+            },
+            "out": {}
+          },
+          {
+            "err": "Expected all of {r:3}, but found map: {r:null}.",
+            "in": {
+              "data": {
+                "r": null
+              },
+              "spec": [
+                "`$ALL`",
+                {
+                  "r": 3
+                }
+              ]
+            }
+          },
+          {
+            "in": {
+              "data": {},
+              "spec": [
+                "`$ALL`",
+                {
+                  "a": 1
+                },
+                {
+                  "b": 2
+                }
+              ]
+            },
+            "out": {}
+          },
+          {
+            "err": "The $ALL validator at field <root> must have at least one argument.",
+            "in": {
+              "data": 1,
+              "spec": [
+                "`$ALL`"
+              ]
+            }
+          },
+          {
+            "err": "The $ALL validator at field a must be the first element of an array.",
+            "in": {
+              "data": {
+                "a": [
+                  1,
+                  2
+                ]
+              },
+              "spec": {
+                "a": [
+                  "`$NUMBER`",
+                  "`$ALL`"
+                ]
+              }
+            }
+          }
+        ]
+      },
       "basic": {
         "set": [
           {
