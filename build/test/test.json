@@ -22410,6 +22410,180 @@
             }
           }
         ]
+      },
+      "unknown": {
+        "set": [
+          {
+            "err": "Unknown validator $FOO at field <root>.",
+            "in": {
+              "data": 1,
+              "spec": "`$FOO`"
+            }
+          },
+          {
+            "err": "Unknown validator $FOO at field a.",
+            "in": {
+              "data": {
+                "a": 1
+              },
+              "spec": {
+                "a": "`$FOO`"
+              }
+            }
+          },
+          {
+            "err": "Unknown validator $ONE at field a.0.",
+            "in": {
+              "data": {
+                "a": "x"
+              },
+              "spec": {
+                "a": [
+                  "`$ONE`",
+                  "`$STRING`",
+                  "`$NIL`"
+                ]
+              }
+            }
+          },
+          {
+            "err": "Unknown validator $ONE at field a.0.",
+            "in": {
+              "data": {},
+              "spec": {
+                "a": [
+                  "`$ONE`",
+                  "`$STRING`",
+                  "`$NIL`"
+                ]
+              }
+            }
+          },
+          {
+            "err": "Unknown validator $string at field a.",
+            "in": {
+              "data": {
+                "a": "x"
+              },
+              "spec": {
+                "a": "`$string`"
+              }
+            }
+          },
+          {
+            "err": "Unknown validator $FOO at field a. | Unknown validator $BAR at field b.2.",
+            "in": {
+              "data": {},
+              "spec": {
+                "a": "`$FOO`",
+                "b": [
+                  "`$NOF`",
+                  1,
+                  "`$BAR`"
+                ]
+              }
+            }
+          },
+          {
+            "err": "Unknown validator $FOO at field 3.",
+            "in": {
+              "data": "s",
+              "spec": [
+                "`$NOF`",
+                {
+                  "min": 1
+                },
+                "`$STRING`",
+                "`$FOO`"
+              ]
+            }
+          },
+          {
+            "err": "Unknown validator $FOO at field 1.",
+            "in": {
+              "data": [],
+              "spec": [
+                "`$CHILD`",
+                "`$FOO`"
+              ]
+            }
+          },
+          {
+            "err": "Unknown validator $OPN at field <root>.",
+            "in": {
+              "data": {
+                "a": 1
+              },
+              "spec": {
+                "`$OPN`": true,
+                "a": 1
+              }
+            }
+          },
+          {
+            "err": "Unknown validator $COPY at field a.",
+            "in": {
+              "data": {
+                "a": 1
+              },
+              "spec": {
+                "a": "`$COPY`"
+              }
+            }
+          },
+          {
+            "in": {
+              "data": "`$FOO`",
+              "spec": [
+                "`$EXACT`",
+                "`$FOO`"
+              ]
+            },
+            "out": "`$FOO`"
+          },
+          {
+            "in": {
+              "data": {
+                "$id": "x"
+              },
+              "spec": {
+                "$id": "`$STRING`",
+                "b": "`$id`"
+              }
+            },
+            "out": {
+              "$id": "x",
+              "b": "x"
+            }
+          },
+          {
+            "in": {
+              "data": {},
+              "spec": {
+                "a": "`$BT`"
+              }
+            },
+            "out": {
+              "a": "`"
+            }
+          },
+          {
+            "in": {
+              "data": {
+                "a": 1,
+                "b": 2
+              },
+              "spec": {
+                "`$OPEN`": true,
+                "a": 1
+              }
+            },
+            "out": {
+              "a": 1,
+              "b": 2
+            }
+          }
+        ]
       }
     },
     "walk": {

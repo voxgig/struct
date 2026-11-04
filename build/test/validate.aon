@@ -667,3 +667,38 @@ all: set: [
   { in: { data: {a:[1,2]}, spec: {a:['`$NUMBER`','`$ALL`']} },
     err: 'The $ALL validator at field a must be the first element of an array.' }
 ]
+
+
+# A spec that names a checker validate does not define is rejected before any
+# data is read, and nothing is validated. A whole-string reference names a
+# checker when it is upper case, or a defined name in another case. Run this
+# group with the null flag off, as for directive.
+unknown: set: [
+
+  { in: { data: 1, spec: '`$FOO`' }, err: 'Unknown validator $FOO at field <root>.' }
+  { in: { data: {a:1}, spec: {a:'`$FOO`'} }, err: 'Unknown validator $FOO at field a.' }
+  { in: { data: {a:'x'}, spec: {a:['`$ONE`','`$STRING`','`$NIL`']} },
+    err: 'Unknown validator $ONE at field a.0.' }
+  { in: { data: {}, spec: {a:['`$ONE`','`$STRING`','`$NIL`']} },
+    err: 'Unknown validator $ONE at field a.0.' }
+  { in: { data: {a:'x'}, spec: {a:'`$string`'} }, err: 'Unknown validator $string at field a.' }
+  { in: { data: {}, spec: {a:'`$FOO`', b:['`$NOF`',1,'`$BAR`']} },
+    err: 'Unknown validator $FOO at field a. | Unknown validator $BAR at field b.2.' }
+
+  # Every name is read, whatever the data: a spec a count never tries, and a
+  # template over no children.
+  { in: { data: 's', spec: ['`$NOF`',{min:1},'`$STRING`','`$FOO`'] },
+    err: 'Unknown validator $FOO at field 3.' }
+  { in: { data: [], spec: ['`$CHILD`','`$FOO`'] }, err: 'Unknown validator $FOO at field 1.' }
+
+  # Keys are read too, and a transform command validate does not run is unknown.
+  { in: { data: {a:1}, spec: {a:1,'`$OPN`':true} }, err: 'Unknown validator $OPN at field <root>.' }
+  { in: { data: {a:1}, spec: {a:'`$COPY`'} }, err: 'Unknown validator $COPY at field a.' }
+
+  # Not checker names: the literal arguments of $EXACT, a reference to data,
+  # and what transform supplies.
+  { in: { data: '`$FOO`', spec: ['`$EXACT`','`$FOO`'] }, out: '`$FOO`' }
+  { in: { data: {'$id':'x'}, spec: {'$id':'`$STRING`', b:'`$id`'} }, out: {'$id':'x', b:'x'} }
+  { in: { data: {}, spec: {a:'`$BT`'} }, out: {a:'`'} }
+  { in: { data: {a:1,b:2}, spec: {a:1,'`$OPEN`':true} }, out: {a:1,b:2} }
+]

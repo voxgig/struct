@@ -176,6 +176,7 @@ const R_META_PATH = /^([^$]+)\$([=~])(.+)$/;
 const R_DOUBLE_DOLLAR = /\$\$/g;
 const R_TRANSFORM_NAME = /`\$([A-Z]+)`/g;
 const R_INJECTION_FULL = /^`(\$[A-Z]+|[^`]*)[0-9]*`$/;
+const R_CHECKER_NAME = /^\$[A-Z]+$/;
 const R_BT_ESCAPE = /\$BT/g;
 const R_DS_ESCAPE = /\$DS/g;
 const R_INJECTION_PARTIAL = /`([^`]+)`/g;
@@ -1855,13 +1856,18 @@ injdef) {
     ], 1);
     const meta = getprop(injdef, 'meta', {});
     setprop(meta, S_BEXACT, getprop(meta, S_BEXACT, false));
-    const out = transform(data, spec, {
-        meta,
-        extra: store,
-        modify: _validation,
-        handler: _validatehandler,
-        errs,
-    });
+    // A spec that names an unknown checker validates nothing.
+    const numerrs = size(errs);
+    _checknames(spec, store, [], errs);
+    const out = numerrs < size(errs)
+        ? clone(data)
+        : transform(data, spec, {
+            meta,
+            extra: store,
+            modify: _validation,
+            handler: _validatehandler,
+            errs,
+        });
     const generr = 0 < size(errs) && !collect;
     if (generr) {
         throw new Error(join(errs, ' | '));
@@ -2142,6 +2148,49 @@ function _invalidTypeMsg(path, needtype, vt, v, _whence) {
         // Uncomment to help debug validation errors.
         // ' [' + _whence + ']' +
         '.');
+}
+// Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
+const VALIDATE_NAMES = [
+    '$TOP',
+    '$SPEC',
+    '$BT',
+    '$DS',
+    '$WHEN',
+    '$ANNO',
+    '$REF',
+    '$FORMAT',
+    '$APPLY',
+    '$OPEN',
+];
+// Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
+function _checknames(spec, store, path, errs) {
+    const name = _refname(spec);
+    if (NONE !== name) {
+        if (_unknownname(name, store)) {
+            errs.push('Unknown validator ' + name + ' at field ' + pathify(path) + '.');
+        }
+        return;
+    }
+    if (islist(spec) && '$EXACT' === _refname(spec[0])) {
+        return;
+    }
+    for (const key of keysof(spec)) {
+        if (ismap(spec)) {
+            _checknames(key, store, path, errs);
+        }
+        _checknames(spec[key], store, flatten([path, key]), errs);
+    }
+}
+// The name a whole-string reference gives, when it is a checker name in any case.
+function _refname(val) {
+    const m = S_string === typeof val ? re_find(R_INJECTION_FULL, val) : null;
+    return null != m && re_test(R_CHECKER_NAME, m[1].toUpperCase()) ? m[1] : NONE;
+}
+// Unknown: undefined and upper case, or a defined name in another case. Null disables a name.
+function _unknownname(name, store) {
+    const known = (n) => VALIDATE_NAMES.includes(n) || null != _lookup(store, n);
+    const upper = name.toUpperCase();
+    return !known(name) && (upper === name || known(upper));
 }
 // The data value at a list directive's slot. The directive's own dparent was
 // read with getprop, which reports a stored null as absent.

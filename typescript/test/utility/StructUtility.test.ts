@@ -880,6 +880,42 @@ describe('StructUtility', async () => {
     )
   })
 
+  test('validate-unknown', async () => {
+    await runsetflags(spec.validate.unknown, { null: false }, (vin: any) =>
+      struct.validate(vin.data, vin.spec),
+    )
+  })
+
+  test('validate-unknown-edge', async () => {
+    const { validate, getprop } = struct
+
+    // Only the unknown name is reported, and the data comes back as it is.
+    let errs: any[] = []
+    const data = { a: 'x' }
+    const out = validate(data, { a: ['`$ONE`', '`$STRING`', '`$NIL`'] }, { errs })
+    deepEqual(errs, ['Unknown validator $ONE at field a.0.'])
+    deepEqual(out, data)
+
+    // A checker supplied in extra is defined, in any case.
+    const even = (inj: any) => {
+      const n = getprop(inj.dparent, inj.key)
+      if (0 !== n % 2) {
+        inj.errs.push('Odd at ' + inj.path.slice(1).join('.') + ': ' + n)
+      }
+      return n
+    }
+
+    errs = []
+    deepEqual(validate({ n: 2 }, { n: '`$EVEN`' }, { extra: { $EVEN: even }, errs }), { n: 2 })
+    deepEqual(validate({ n: 3 }, { n: '`$even`' }, { extra: { $even: even }, errs }), { n: 3 })
+    deepEqual(errs, ['Odd at n: 3'])
+
+    // A null in extra takes a checker away.
+    errs = []
+    validate('x', '`$STRING`', { extra: { $STRING: null }, errs })
+    deepEqual(errs, ['Unknown validator $STRING at field <root>.'])
+  })
+
   test('validate-edge', async () => {
     const { validate } = struct
     let errs: any[] = []
