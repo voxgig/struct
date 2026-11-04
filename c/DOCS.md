@@ -342,9 +342,9 @@ or beside this repository. It is compiled into the test binaries only —
 `omni_json` and this port's `voxgig_value`.
 
 [`tests/struct_corpus_test.c`](./tests/struct_corpus_test.c) runs every group
-the corpus defines except `validate.directive`, `validate.nof`, and the three
-`condense` ones, which no port implements yet: **1358 entries in 72 groups**,
-plus three single entries that are not sets.
+the corpus defines except `validate.all`, `validate.directive`,
+`validate.nof`, and the three `condense` ones, which no port implements yet:
+**1358 entries in 72 groups**, plus three single entries that are not sets.
 [`tests/client_test.c`](./tests/client_test.c) runs the two `check` entries —
 `DEF.client`, client-scoped options, and `contextify`.
 

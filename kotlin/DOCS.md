@@ -274,7 +274,7 @@ consumed as a local checkout `build.gradle.kts` finds via `$OMNI_HOME` or
 beside this repository, in its own source set so it reaches the tests and
 nothing else.
 
-`StructCorpusTest` runs every group the corpus defines except
+`StructCorpusTest` runs every group the corpus defines except `validate.all`,
 `validate.directive`, `validate.nof`, and the three `condense` ones, which no
 port implements yet: 1358 entries in 72 groups. `ClientTest` runs the two
 `check` entries — `DEF.client`, client-scoped options, and `contextify`.

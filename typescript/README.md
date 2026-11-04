@@ -769,8 +769,15 @@ Quote inside a `validate` spec, e.g. `` '`$STRING`' ``.
 | `$INSTANCE` | A class instance.                                               |
 | `$ANY`      | Any value (placeholder for "no constraint").                    |
 | `$CHILD`    | Apply a sub-spec to every direct child.                         |
-| `$ONE`      | Match exactly one of a list of alternative sub-specs.           |
 | `$EXACT`    | Match a literal value exactly (no shape coercion).              |
+| `$NOF`      | `` ['`$NOF`', n, spec, …] ``: as many specs admit the value as `n` allows, where `n` is an integer or a map with `min`, `max` or both. |
+| `$ALL`      | `` ['`$ALL`', spec, …] ``: every spec admits the value.          |
+
+A spec admits a value when validating the value against it finds no error
+and gives back every member of the value unchanged. This port has no
+`$ONE`: write `` ['`$ONE`', a, b] `` as `` ['`$NOF`', {min: 1}, a, b] ``.
+The other ports still define `$ONE` and do not define `$NOF` or `$ALL` yet;
+[`design/REPORT.md`](../design/REPORT.md) records which port has which.
 
 
 ## `StructUtility` class

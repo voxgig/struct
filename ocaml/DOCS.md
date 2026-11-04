@@ -108,7 +108,7 @@ omni is consumed as a local checkout the Makefile finds via `$OMNI_HOME` or
 beside this repository, and is compiled into the TEST binary only: `make lint`
 type-checks `src/` alone and nothing shipped names omni (register 4.13).
 
-`test/runner.ml` runs every group the corpus defines except
+`test/runner.ml` runs every group the corpus defines except `validate.all`,
 `validate.directive`, `validate.nof`, and the three `condense` ones, which no
 port implements yet — 1358 entries in 72 groups — plus the two `check` entries
 (`DEF.client`, client-scoped options, `contextify`) and four single entries

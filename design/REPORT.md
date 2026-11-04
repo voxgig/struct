@@ -254,9 +254,10 @@ Wraps all functions, constants, and sentinels as instance properties.
 `$DELETE`, `$COPY`, `$KEY`, `$META`, `$ANNO`, `$MERGE`, `$EACH`, `$PACK`,
 `$REF`, `$FORMAT`, `$APPLY`
 
-### Validate Checkers (15)
+### Validate Checkers (16)
 `$MAP`, `$LIST`, `$STRING`, `$NUMBER`, `$INTEGER`, `$DECIMAL`, `$BOOLEAN`,
-`$NULL`, `$NIL`, `$FUNCTION`, `$INSTANCE`, `$ANY`, `$CHILD`, `$ONE`, `$EXACT`
+`$NULL`, `$NIL`, `$FUNCTION`, `$INSTANCE`, `$ANY`, `$CHILD`, `$EXACT`, `$NOF`,
+`$ALL`
 
 
 ---
@@ -775,20 +776,25 @@ constants, `SKIP` / `DELETE` sentinels.
 | $INSTANCE | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
 | $ANY | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
 | $CHILD | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
-| $ONE | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| $ONE | - | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
 | $EXACT | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
 | $NOF | Y | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - |
+| $ALL | Y | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - |
 
 ^ Ruby uses `$OBJECT`/`$ARRAY` naming instead of `$MAP`/`$LIST`.
 
-`$NOF` is canonical TypeScript only so far, and no other port runs the
-`validate.nof` or `validate.directive` corpus groups yet. `validate.nof`
-specifies `$NOF`: the count forms, the admission trial (no error, and every
-member the value has comes back unchanged), and the messages.
-`validate.directive` specifies what `$ONE`, `$EXACT` and `$NOF` share as
-list directives: a null at the slot is a value, nothing in the directive's
-own list is checked against list data, and `$EXACT` compares as JSON. It
-also pins `$NIL` accepting null. Both groups run with the null flag off.
+`$NOF` and `$ALL` are canonical TypeScript only so far, and canonical
+TypeScript has dropped `$ONE`, which every other port still defines: there
+`['$NOF', {min:1}, ...]` is the same check. No other port runs the
+`validate.all`, `validate.nof` or `validate.directive` corpus groups yet.
+`validate.nof` and `validate.all` specify the counts, the admission trial (no
+error, and every member the value has comes back unchanged) and the
+messages. `validate.directive` specifies what `$EXACT`, `$NOF` and `$ALL`
+share as list directives: a null at the slot is a value, nothing in the
+directive's own list is checked against list data, and `$EXACT` compares as
+JSON. It also pins `$NIL` accepting null. These three groups run with the
+null flag off. `validate.one` stays for the ports that define `$ONE`, and
+canonical TypeScript does not run it.
 
 
 ## Constant Parity

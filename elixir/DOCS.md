@@ -111,11 +111,11 @@ the same code every other port runs. omni is consumed as a local checkout
 `test/runner.exs` finds via `$OMNI_HOME` or beside this repository, and is
 loaded only there: `make lint` compiles `lib/` alone (register 4.13).
 
-Every group the corpus defines runs except `validate.directive`,
-`validate.nof`, and the three `condense` ones, which no port implements yet —
-1358 entries in 72 groups — plus the two `check` entries (`DEF.client`,
-client-scoped options, `contextify`) and three single entries that are not
-part of any set.
+Every group the corpus defines runs except `validate.all`,
+`validate.directive`, `validate.nof`, and the three `condense` ones, which no
+port implements yet — 1358 entries in 72 groups — plus the two `check` entries
+(`DEF.client`, client-scoped options, `contextify`) and three single entries
+that are not part of any set.
 
 Five entries are dropped, each named with its reason, and guarded so the corpus
 cannot move under it: this port has one `nil` for both undefined and null, so a

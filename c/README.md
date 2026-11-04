@@ -607,10 +607,11 @@ voxgig_value
 
 `tests/struct_corpus_test.c` runs `../build/test/test.json` on
 [voxgig/omni](https://github.com/voxgig/omni), the shared test runner. Every
-group the corpus defines runs except `validate.directive`, `validate.nof`, and
-the three `condense` ones, which no port implements yet — **1358 entries in 72
-groups**, plus `merge.basic`, `inject.basic` and `transform.basic` (single
-entries, not sets) and the two `check` entries in `tests/client_test.c`.
+group the corpus defines runs except `validate.all`, `validate.directive`,
+`validate.nof`, and the three `condense` ones, which no port implements yet —
+**1358 entries in 72 groups**, plus `merge.basic`, `inject.basic` and
+`transform.basic` (single entries, not sets) and the two `check` entries in
+`tests/client_test.c`.
 
 Each group is one assertion: the runner stops at its first failing entry and
 names the index, the entry, and both values. `$LIKE` matches via the in-tree

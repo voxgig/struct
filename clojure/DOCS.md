@@ -111,12 +111,12 @@ It converts omni's persistent Clojure data into this port's mutable
 unavoidable, so the arguments go back to omni after the call, which is what
 `match.args` asserts on in `minor/setpath` and `merge/integrity`.
 
-Every group the corpus defines runs except `validate.directive`,
-`validate.nof`, and the three `condense` ones, which no port implements yet —
-1358 entries in 72 groups — plus the two `check` entries (`DEF.client`,
-client-scoped options, `contextify`) and three single entries that are not
-part of any set. Keep it green, keep `python3 ../tools/check_parity.py` green,
-and add no runtime dependencies.
+Every group the corpus defines runs except `validate.all`,
+`validate.directive`, `validate.nof`, and the three `condense` ones, which no
+port implements yet — 1358 entries in 72 groups — plus the two `check` entries
+(`DEF.client`, client-scoped options, `contextify`) and three single entries
+that are not part of any set. Keep it green, keep `python3
+../tools/check_parity.py` green, and add no runtime dependencies.
 
 ## Implementation notes
 
