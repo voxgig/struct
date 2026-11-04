@@ -779,6 +779,13 @@ and gives back every member of the value unchanged. This port has no
 The other ports still define `$ONE` and do not define `$NOF` or `$ALL` yet;
 [`design/REPORT.md`](../design/REPORT.md) records which port has which.
 
+A spec that names a checker this port does not define is rejected before
+any data is read, and nothing is validated. The whole-string reference
+`` '`$FOO`' `` names a checker, and so does a misspelling of a defined one
+in another case, such as `` '`$string`' ``. The message is
+`Unknown validator $FOO at field a.` The other ports accept such a name
+without a word.
+
 
 ## `StructUtility` class
 

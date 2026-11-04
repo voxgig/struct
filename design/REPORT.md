@@ -796,6 +796,21 @@ JSON. It also pins `$NIL` accepting null. These three groups run with the
 null flag off. `validate.one` stays for the ports that define `$ONE`, and
 canonical TypeScript does not run it.
 
+Canonical TypeScript also rejects a spec that names a checker it does not
+define (`Unknown validator $FOO at field a.`), which `validate.unknown`
+specifies. Every other port accepts such a name without a word.
+
+### Corpus groups only canonical TypeScript runs
+
+No other port runs these groups yet, and each port page that counts its
+corpus entries leaves them out:
+
+- `condense.condense`, `condense.expand`, `condense.iscondensed`
+- `validate.all`, `validate.directive`, `validate.nof`, `validate.unknown`
+
+`validate.one` is the reverse case: the other ports run it, and canonical
+TypeScript, which has no `$ONE`, does not.
+
 
 ## Constant Parity
 
