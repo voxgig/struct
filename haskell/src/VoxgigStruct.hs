@@ -41,7 +41,7 @@
 -- @
 module VoxgigStruct where
 
-import Control.Exception (Exception, throwIO)
+import Control.Exception (Exception, evaluate, throwIO)
 import Control.Monad (filterM, foldM, forM_, when)
 import Data.Bits (shiftL, (.&.), (.|.))
 import Data.Char (toLower, toUpper)
@@ -51,6 +51,7 @@ import qualified Data.List as L
 import Data.Maybe (fromMaybe)
 import Numeric (showHex)
 import System.IO.Unsafe (unsafePerformIO)
+import System.Mem.StableName (makeStableName)
 import Text.Printf (printf)
 import Text.Read (readMaybe)
 import qualified Vregex
@@ -2030,49 +2031,6 @@ validateChild inj _ _ _ = do
         return skip
   else return VNoval
 
--- | @$ONE@ validation rule (value must match one of the alternatives).
-validateOne :: Injector
-validateOne inj _ _ store = do
-  mode <- readIORef (iMode inj)
-  if mode == m_val then do
-    parent <- readIORef (iParent inj)
-    keyi <- readIORef (iKeyi inj)
-    if not (islist parent) || keyi /= 0 then do
-      path <- readIORef (iPath inj); p <- pathifyFull path (VNum 1) (VNum 1) False
-      pushErr inj ("The $ONE validator at field " ++ p ++ " must be the first element of an array."); return VNoval
-    else do
-      keys <- readIORef (iKeys inj); ksz <- size keys; writeIORef (iKeyi inj) ksz
-      dp <- readIORef (iDparent inj); _ <- injSetval 2 inj dp
-      path <- readIORef (iPath inj); psz <- size path; sl <- sliceM path (VNum 0) (VNum (fromIntegral (psz - 1))) False; writeIORef (iPath inj) sl
-      tvals <- sliceM parent (VNum 1) VNoval False
-      tsz <- size tvals
-      if tsz == 0 then do path2 <- readIORef (iPath inj); p <- pathifyFull path2 (VNum 1) (VNum 1) False; pushErr inj ("The $ONE validator at field " ++ p ++ " must have at least one argument."); return VNoval
-      else do
-        matchedRef <- newIORef False
-        tvItems <- listItems tvals
-        forM_ tvItems $ \tval -> do
-          matched <- readIORef matchedRef
-          when (not matched) $ do
-            terrs <- emptyList
-            em <- emptyMap; ls <- mkList [em, store]; vstore <- mergeD ls (VNum 1)
-            dp2 <- readIORef (iDparent inj); _ <- setprop vstore (VStr s_dtop) dp2
-            meta <- readIORef (iMeta inj)
-            let idef = (defaultInjDef terrs) { dExtra = vstore, dMeta = meta }
-            vcurrent <- validate (IDef idef) dp2 tval
-            _ <- injSetval (-2) inj vcurrent
-            tesz <- size terrs
-            when (tesz == 0) $ writeIORef matchedRef True
-        matched <- readIORef matchedRef
-        when (not matched) $ do
-          ps <- itemsPairs tvals
-          descs <- mapM (\(_, x) -> stringify x) ps
-          let valdesc = replaceTransformNames (intercalate ", " descs)
-          path3 <- readIORef (iPath inj); dp3 <- readIORef (iDparent inj)
-          m <- invalidTypeMsg path3 ((if tsz > 1 then "one of " else "") ++ valdesc) (typify dp3) dp3 "V0210"
-          pushErr inj m
-        return VNoval
-  else return VNoval
-
 -- | @\`$EXACT\`@ validation rule (value must equal exactly).
 validateExact :: Injector
 validateExact inj _ _ _ = do
@@ -2081,41 +2039,212 @@ validateExact inj _ _ _ = do
     parent <- readIORef (iParent inj); keyi <- readIORef (iKeyi inj)
     if not (islist parent) || keyi /= 0 then do path <- readIORef (iPath inj); p <- pathifyFull path (VNum 1) (VNum 1) False; pushErr inj ("The $EXACT validator at field " ++ p ++ " must be the first element of an array."); return VNoval
     else do
+      cval <- slotVal inj
       keys <- readIORef (iKeys inj); ksz <- size keys; writeIORef (iKeyi inj) ksz
-      dp <- readIORef (iDparent inj); _ <- injSetval 2 inj dp
+      -- Replace [$EXACT, ...] with the data value; SKIP keeps inject off the detached list.
+      _ <- injSetval 2 inj cval
       path <- readIORef (iPath inj); psz <- size path; sl <- sliceM path (VNum 0) (VNum (fromIntegral (psz - 1))) False; writeIORef (iPath inj) sl
-      np <- readIORef (iPath inj); nk <- getelem np (VNum (-1)); writeIORef (iKey inj) nk
       tvals <- sliceM parent (VNum 1) VNoval False
       tsz <- size tvals
-      if tsz == 0 then do path2 <- readIORef (iPath inj); p <- pathifyFull path2 (VNum 1) (VNum 1) False; pushErr inj ("The $EXACT validator at field " ++ p ++ " must have at least one argument."); return VNoval
+      if tsz == 0 then do path2 <- readIORef (iPath inj); p <- pathifyFull path2 (VNum 1) (VNum 1) False; pushErr inj ("The $EXACT validator at field " ++ p ++ " must have at least one argument."); return skip
       else do
-        matchedRef <- newIORef False
         tvItems <- listItems tvals
-        dp2 <- readIORef (iDparent inj)
-        forM_ tvItems $ \tval -> do matched <- readIORef matchedRef; when (not matched) $ do eqb <- veq tval dp2; when eqb (writeIORef matchedRef True)
-        matched <- readIORef matchedRef
+        matched <- anyM (`deepEqual` cval) tvItems
         when (not matched) $ do
           ps <- itemsPairs tvals
           descs <- mapM (\(_, x) -> stringify x) ps
           let valdesc = replaceTransformNames (intercalate ", " descs)
           path3 <- readIORef (iPath inj); psz3 <- size path3
-          m <- invalidTypeMsg path3 ((if psz3 > 1 then "" else "value ") ++ "exactly equal to " ++ (if tsz == 1 then "" else "one of ") ++ valdesc) (typify dp2) dp2 "V0110"
+          m <- invalidTypeMsg path3 ((if psz3 > 1 then "" else "value ") ++ "exactly equal to " ++ (if tsz == 1 then "" else "one of ") ++ valdesc) (typify cval) cval "V0110"
           pushErr inj m
-        return VNoval
+        return skip
   else do p <- readIORef (iParent inj); k <- readIORef (iKey inj); _ <- delprop p k; return VNoval
 
--- | Deep structural equality of two values.
-veq :: Value -> Value -> IO Bool
-veq a b = case (a, b) of
+-- | @\`$NOF\`@ validation rule: count the specs that admit the value, as
+-- @[\`$NOF\`, count, spec, ...]@, where count is an integer, or a map holding
+-- min, max or both.
+validateNof :: Injector
+validateNof inj _ _ store = validateCount inj store "$NOF" True
+
+-- | @\`$ALL\`@ validation rule: every spec admits the value, as @[\`$ALL\`, spec, ...]@.
+validateAll :: Injector
+validateAll inj _ _ store = validateCount inj store "$ALL" False
+
+-- | The counting list directives. Without a count, every spec has to admit.
+validateCount :: Inj -> Value -> String -> Bool -> IO Value
+validateCount inj store name counted = do
+  mode <- readIORef (iMode inj)
+  parent <- readIORef (iParent inj); keyi <- readIORef (iKeyi inj)
+  if mode /= m_val then return VNoval
+  else if not (islist parent) || keyi /= 0 then do
+    path <- readIORef (iPath inj); p <- pathifyFull path (VNum 1) (VNum 1) False
+    pushErr inj ("The " ++ name ++ " validator at field " ++ p ++ " must be the first element of an array.")
+    return VNoval
+  else do
+    cval <- slotVal inj
+    keys <- readIORef (iKeys inj); ksz <- size keys; writeIORef (iKeyi inj) ksz
+    -- Replace the directive's list with the data value. Each return is SKIP, so
+    -- that inject leaves the detached list alone and validates nothing in it.
+    _ <- injSetval 2 inj cval
+    path <- readIORef (iPath inj); sl <- sliceM path (VNum (-1)) VNoval False; writeIORef (iPath inj) sl
+    count <- if counted then lookup_ parent (VNum 1) else return VNoval
+    tvals <- sliceM parent (VNum (if counted then 2 else 1)) VNoval False
+    tvItems <- listItems tvals
+    let numtvals = fromIntegral (length tvItems) :: Double
+    p <- pathifyFull sl (VNum 1) VNoval False
+    let field = "The " ++ name ++ " validator at field " ++ p
+    if numtvals == 0 then pushErr inj (field ++ (if counted then " must have a count and" else " must have") ++ " at least one argument.")
+    else do
+      (lo, hi, countdesc) <- if counted then nofCount count numtvals else return (numtvals, numtvals, Just "all")
+      case countdesc of
+        Nothing -> do cs <- stringify count; pushErr inj (field ++ " has an invalid count: " ++ cs ++ ".")
+        Just desc -> do
+          -- Stop once the specs left cannot change the verdict.
+          let decided admitted left = hi < admitted || admitted + left < lo || (lo <= admitted && admitted + left <= hi)
+              trial admitted ts = case ts of
+                (tval : rest) | not (decided admitted (fromIntegral (length ts))) -> do
+                  ok <- admits cval tval inj store
+                  trial (if ok then admitted + 1 else admitted) rest
+                _ -> return admitted
+          admitted <- trial 0 tvItems
+          when (admitted < lo || hi < admitted) $ do
+            ps <- itemsPairs tvals
+            descs <- mapM (\(_, x) -> stringify x) ps
+            let valdesc = replaceTransformNames (intercalate ", " descs)
+            path2 <- readIORef (iPath inj)
+            m <- invalidTypeMsg path2 (desc ++ " of " ++ valdesc) (typify cval) cval "V0310"
+            pushErr inj m
+    return skip
+
+-- | The bounds of a @$NOF@ count, and the words for it, which are absent when
+-- the count is invalid. Without a max, the bound is the number of specs.
+nofCount :: Value -> Double -> IO (Double, Double, Maybe String)
+nofCount count numtvals = do
+  let isnat n = (t_integer .&. typify n) > 0 && (case n of VNum x -> 0 <= x; _ -> False)
+      num n = case n of VNum x -> x; _ -> 0
+  if isnat count then do
+    let c = num count
+    return (c, c, Just (if c == 0 then "none" else "exactly " ++ numToString c))
+  else do
+    mn <- lookup_ count (VStr "min")
+    mx <- lookup_ count (VStr "max")
+    csz <- size count
+    let valid = ismap count && csz > 0
+          && csz == (if isNoval mn then 0 else 1) + (if isNoval mx then 0 else 1)
+          && (isNoval mn || isnat mn)
+          && (isNoval mx || isnat mx)
+          && (isNoval mn || isNoval mx || num mn <= num mx)
+        lo = if isNoval mn then 0 else num mn
+        hi = if isNoval mx then numtvals else num mx
+        desc
+          | isNoval mx = "at least " ++ numToString lo
+          | hi == 0 = "none"
+          | isNoval mn = "at most " ++ numToString hi
+          | lo == hi = "exactly " ++ numToString lo
+          | otherwise = numToString lo ++ " to " ++ numToString hi
+    return (if valid then (lo, hi, Just desc) else (0, 0, Nothing))
+
+-- | A spec admits a value when validating the value against it finds no error
+-- and gives back the value as it is.
+admits :: Value -> Value -> Inj -> Value -> IO Bool
+admits val spec inj store = do
+  terrs <- emptyList
+  em <- emptyMap; ls <- mkList [em, store]; vstore <- mergeD ls (VNum 1)
+  _ <- setprop vstore (VStr s_dtop) val
+  meta <- readIORef (iMeta inj)
+  let idef = (defaultInjDef terrs) { dExtra = vstore, dMeta = meta }
+  out <- validate (IDef idef) val spec
+  tesz <- size terrs
+  if tesz /= 0 then return False else keeps val out
+
+-- | Every member the value has is in the output, unchanged. A member only the
+-- output has is a default the spec supplied, and is ignored.
+keeps :: Value -> Value -> IO Bool
+keeps val out
+  | isNoval val = return True
+  | (t_list .|. t_map) .&. typify val == 0 || islist val /= islist out || not (isnode out) = deepEqual val out
+  | otherwise = do
+      ks <- keysof val
+      andM (map (\k -> do v <- lookup_ val (VStr k); o <- lookup_ out (VStr k); keeps v o) ks)
+
+-- | JSON equality: numbers by value, lists in order, maps by key in any order.
+-- A node or a function equals itself whatever it holds.
+deepEqual :: Value -> Value -> IO Bool
+deepEqual a b = case (a, b) of
   (VNoval, VNoval) -> return True
   (VNull, VNull) -> return True
   (VBool x, VBool y) -> return (x == y)
   (VNum x, VNum y) -> return (x == y)
   (VStr x, VStr y) -> return (x == y)
+  (VFunc f, VFunc g) -> do sf <- makeStableName =<< evaluate f; sg <- makeStableName =<< evaluate g; return (sf == sg)
   (VSentinel x, VSentinel y) -> return (x == y)
-  (VList x, VList y) -> do xs <- readIORef x; ys <- readIORef y; if length xs /= length ys then return False else andM (zipWith veq xs ys)
-  (VMap x, VMap y) -> do xs <- readIORef x; ys <- readIORef y; if length xs /= length ys then return False else andM (map (\(k, vv) -> case lookup k ys of Just w -> veq vv w; Nothing -> return False) xs)
+  (VList x, VList y)
+    | x == y -> return True
+    | otherwise -> do xs <- readIORef x; ys <- readIORef y; if length xs /= length ys then return False else andM (zipWith deepEqual xs ys)
+  (VMap x, VMap y)
+    | x == y -> return True
+    | otherwise -> do
+        ks <- keysof a; ks2 <- keysof b
+        if ks /= ks2 then return False
+        else andM (map (\k -> do va <- lookup_ a (VStr k); vb <- lookup_ b (VStr k); deepEqual va vb) ks)
   _ -> return False
+
+-- | The data value at a list directive's slot. The directive's own dparent was
+-- read with 'getprop', which reports a stored null as absent.
+slotVal :: Inj -> IO Value
+slotVal inj = do
+  prior <- readIORef (iPrior inj)
+  case prior of
+    Nothing -> readIORef (iDparent inj)
+    Just p -> do dp <- readIORef (iDparent p); k <- readIORef (iKey p); lookup_ dp k
+
+-- | Names a validate spec may use besides its checkers: those of transform that
+-- it keeps, and @$OPEN@.
+validateNames :: [String]
+validateNames = ["$TOP", "$SPEC", "$BT", "$DS", "$WHEN", "$ANNO", "$REF", "$FORMAT", "$APPLY", "$OPEN"]
+
+-- | @R_CHECKER_NAME@: a dollar sign then capitals, nothing else.
+isCheckerName :: String -> Bool
+isCheckerName ('$' : rest) = not (null rest) && all (\c -> c >= 'A' && c <= 'Z') rest
+isCheckerName _ = False
+
+-- | Report each checker the spec names that validate lacks. The arguments of
+-- @$EXACT@ are literals.
+checkNames :: Value -> Value -> [Value] -> Value -> IO ()
+checkNames spec store path errs = case refName spec of
+  Just name -> do
+    unknown <- unknownName name store
+    when unknown $ do
+      p <- pathify =<< mkList path
+      esz <- size errs
+      _ <- setprop errs (VNum (fromIntegral esz)) (VStr ("Unknown validator " ++ name ++ " at field " ++ p ++ "."))
+      return ()
+  Nothing -> do
+    first <- lookup_ spec (VNum 0)
+    when (not (islist spec && refName first == Just "$EXACT")) $ do
+      ks <- keysof spec
+      forM_ ks $ \k -> do
+        when (ismap spec) $ checkNames (VStr k) store path errs
+        child <- lookup_ spec (VStr k)
+        checkNames child store (path ++ [VStr k]) errs
+
+-- | The name a whole-string reference gives, when it is a checker name in any case.
+refName :: Value -> Maybe String
+refName (VStr s) = case injectionFull s of
+  Just name | isCheckerName (map toUpper name) -> Just name
+  _ -> Nothing
+refName _ = Nothing
+
+-- | Unknown: undefined and upper case, or a defined name in another case. A
+-- null in the store disables a name.
+unknownName :: String -> Value -> IO Bool
+unknownName name store = do
+  let known n = if n `elem` validateNames then return True else not . isNullish <$> lookup_ store (VStr n)
+      upper = map toUpper name
+  kn <- known name
+  if kn then return False
+  else if upper == name then return True
+  else known upper
 
 -- | The 'ModifyFn' that runs shape validation as the transform mutates.
 validation :: ModifyFn
@@ -2147,7 +2276,7 @@ validation pval key parent inj = do
               when (isnode pval) (delprop pval (VStr s_bopen) >> return ())
         else if islist cval then when (not (islist pval)) $ do m <- invalidTypeMsg path (typename ptype) ctype cval "V0030"; pushErr inj m
         else if exactB then do
-          eqb <- veq cval pval
+          eqb <- deepEqual cval pval
           when (not eqb) $ do
             psz <- size path
             pathmsg <- if psz > 1 then do p <- pathifyFull path (VNum 1) VNoval False; return ("at field " ++ p ++ ": ") else return ""
@@ -2177,15 +2306,20 @@ validate injarg dat spec = do
   forM_ ["$NUMBER", "$INTEGER", "$DECIMAL", "$BOOLEAN", "$NULL", "$NIL", "$MAP", "$LIST", "$FUNCTION", "$INSTANCE"] (\k -> put k (VFunc validateType))
   put "$ANY" (VFunc validateAny)
   put "$CHILD" (VFunc validateChild)
-  put "$ONE" (VFunc validateOne)
   put "$EXACT" (VFunc validateExact)
+  put "$NOF" (VFunc validateNof)
+  put "$ALL" (VFunc validateAll)
   extraMap <- if isNoval extra then emptyMap else return extra
   errMap <- mkMap [(s_derrs, errs)]
   ls <- mkList [base, extraMap, errMap]; store <- mergeD ls (VNum 1)
   meta <- case injarg of IDef d | not (isNoval (dMeta d)) -> return (dMeta d); _ -> emptyMap
   bex <- getpropAlt (VBool False) meta (VStr s_bexact); _ <- setprop meta (VStr s_bexact) bex
   let idef = (defaultInjDef errs) { dMeta = meta, dExtra = store, dModify = Just validation, dHandler = Just validateHandler }
-  out <- transform (IDef idef) dat spec
+  -- A spec that names an unknown checker validates nothing.
+  numerrs <- size errs
+  checkNames spec store [] errs
+  esz0 <- size errs
+  out <- if numerrs < esz0 then clone dat else transform (IDef idef) dat spec
   esz <- size errs
   when (esz > 0 && not collect) $ do j <- join errs (VStr " | ") False; throwIO (StructError j)
   return out
