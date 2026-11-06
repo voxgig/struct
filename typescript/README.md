@@ -774,17 +774,14 @@ Quote inside a `validate` spec, e.g. `` '`$STRING`' ``.
 | `$ALL`      | `` ['`$ALL`', spec, …] ``: every spec admits the value.          |
 
 A spec admits a value when validating the value against it finds no error
-and gives back every member of the value unchanged. This port has no
-`$ONE`: write `` ['`$ONE`', a, b] `` as `` ['`$NOF`', {min: 1}, a, b] ``.
-The other ports still define `$ONE` and do not define `$NOF` or `$ALL` yet;
-[`design/REPORT.md`](../design/REPORT.md) records which port has which.
+and gives back every member of the value unchanged. There is no `$ONE`:
+write `` ['`$ONE`', a, b] `` as `` ['`$NOF`', {min: 1}, a, b] ``.
 
-A spec that names a checker this port does not define is rejected before
+A spec that names a checker `validate` does not define is rejected before
 any data is read, and nothing is validated. The whole-string reference
 `` '`$FOO`' `` names a checker, and so does a misspelling of a defined one
 in another case, such as `` '`$string`' ``. The message is
-`Unknown validator $FOO at field a.` The other ports accept such a name
-without a word.
+`Unknown validator $FOO at field a.`
 
 
 ## `StructUtility` class
