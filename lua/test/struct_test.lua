@@ -42,7 +42,7 @@ end
 ----------------------------------------------------------
 
 -- Lua has ONE `nil`. The corpus distinguishes JSON null from absent, and a
--- Lua table cannot hold a nil at all, so six entries have no representation
+-- Lua table cannot hold a nil at all, so some entries have no representation
 -- here. `NOVAL` (src/struct.lua) covers the ARGUMENT side -- `typify()`
 -- against `typify(null)` -- but not the RESULT side: a function that returns
 -- nothing and one that returns JSON null both return `nil`, and the runner
@@ -51,8 +51,8 @@ end
 -- It reads it as ABSENT, which is the cheaper side by a wide margin: measured
 -- entry by entry, reading it as null costs 43 entries (every missing-key and
 -- out-of-range case in getprop and getelem, where canonical answers
--- undefined), reading it as absent costs the six below (the cases that return
--- a genuine null). The alternative -- returning NOVAL from getprop - would
+-- undefined), reading it as absent costs the cases that return a genuine
+-- null, dropped below. The alternative -- returning NOVAL from getprop - would
 -- fix both sides but change what every existing caller of getprop sees, and
 -- struct/go would have to move with it.
 --
@@ -87,13 +87,19 @@ end
 local function isnull(val)
   return JSON_NULL == val
 end
+-- A numeric path part indexes a list from 0, as corpus paths do.
 local function entryin(entry, path)
   local at = entry["in"]
   for part in path:gmatch("[^%.]+") do
     if type(at) ~= "table" then
       return nil
     end
-    at = at[part]
+    local index = math.tointeger(tonumber(part))
+    if nil ~= index and nil ~= rawget(at, index + 1) then
+      at = at[index + 1]
+    else
+      at = at[part]
+    end
   end
   return at
 end
@@ -902,10 +908,10 @@ describe("struct", function()
         -- `$NULL` against null data: validate returns the null, the port
         -- returns nil, read as absent.
         { at = 14, why = "$NULL validating null data", is = function(entry)
-          return "`$NULL`" == entryin(entry, "spec")
+          return "`$NULL`" == entryin(entry, "spec") and isnull(entryin(entry, "data"))
         end },
-        { at = 54, why = "$NULL validating null data, again", is = function(entry)
-          return "`$NULL`" == entryin(entry, "spec")
+        { at = 53, why = "$NULL validating null data, again", is = function(entry)
+          return "`$NULL`" == entryin(entry, "spec") and isnull(entryin(entry, "data"))
         end },
         -- `{"a": null}` against `$ANY`, expecting `{"a": null}` back. Under
         -- `null = false` the runner passes a real null, and a Lua table
@@ -914,8 +920,8 @@ describe("struct", function()
         -- `haskey({a: null}, "a") == false` and
         -- `getprop({a: null}, "a", "D") == "D"` are corpus entries too, and
         -- they need that key ABSENT.
-        { at = 62, why = "a null value in a map under null = false", is = function(entry)
-          return nil ~= entryin(entry, "spec.a")
+        { at = 61, why = "a null value in a map under null = false", is = function(entry)
+          return "`$ANY`" == entryin(entry, "spec.a") and isnull(entryin(entry, "data.a"))
         end },
       }),
       { null = false },
@@ -927,12 +933,6 @@ describe("struct", function()
 
   test("validate-child", function()
     runset(validateSpec.child, function(vin)
-      return validate(vin.data, vin.spec)
-    end)
-  end)
-
-  test("validate-one", function()
-    runset(validateSpec.one, function(vin)
       return validate(vin.data, vin.spec)
     end)
   end)
@@ -953,6 +953,141 @@ describe("struct", function()
     runset(validateSpec.special, function(vin)
       return validate(vin.data, vin.spec, vin.inj)
     end)
+  end)
+
+  -- Under `null = false` a null map member arrives absent and cannot come back,
+  -- a null list element arrives as the string "null" and comes back as one, and
+  -- null data comes back as nil, read as absent. A null in a spec changes the
+  -- same way. The entries that turn on such a null are dropped.
+
+  test("validate-directive", function()
+    runsetflags(
+      dropentries(validateSpec.directive, {
+        { at = 0, why = "a null map member validated by $NOF", is = function(entry)
+          return isnull(entryin(entry, "data.a")) and "`$NULL`" == entryin(entry, "spec.a.3")
+        end },
+        { at = 1, why = "null data validated by $NOF", is = function(entry)
+          return isnull(entryin(entry, "data")) and "`$NOF`" == entryin(entry, "spec.0")
+        end },
+        { at = 2, why = "a null list element validated by $NOF", is = function(entry)
+          return isnull(entryin(entry, "data.0")) and "`$NOF`" == entryin(entry, "spec.1.0")
+        end },
+        { at = 3, why = "a null map member under $CHILD", is = function(entry)
+          return isnull(entryin(entry, "data.a")) and "x" == entryin(entry, "data.b")
+        end },
+        { at = 5, why = "a null map member against $EXACT null", is = function(entry)
+          return isnull(entryin(entry, "data.a")) and isnull(entryin(entry, "spec.a.1"))
+        end },
+        { at = 6, why = "null data against $EXACT null", is = function(entry)
+          return isnull(entryin(entry, "data")) and isnull(entryin(entry, "spec.2"))
+        end },
+        { at = 7, why = "a null list element against $EXACT null", is = function(entry)
+          return isnull(entryin(entry, "data.0")) and "`$EXACT`" == entryin(entry, "spec.1.0")
+        end },
+        { at = 10, why = "a null map member validated by $NIL", is = function(entry)
+          return isnull(entryin(entry, "data.a")) and "`$NIL`" == entryin(entry, "spec.a")
+        end },
+        { at = 11, why = "null data validated by $NIL", is = function(entry)
+          return isnull(entryin(entry, "data")) and "`$NIL`" == entryin(entry, "spec")
+        end },
+        { at = 12, why = "a null map member validated by $NOF with $NIL", is = function(entry)
+          return isnull(entryin(entry, "data.a")) and "`$NIL`" == entryin(entry, "spec.a.3")
+        end },
+        { at = 24, why = "$EXACT of a map with a null member", is = function(entry)
+          return "null" == entryin(entry, "data.x") and isnull(entryin(entry, "spec.1.x"))
+        end },
+        { at = 27, why = "$EXACT of a map with a null member, again", is = function(entry)
+          return 1 == entryin(entry, "data.x") and isnull(entryin(entry, "spec.1.y"))
+        end },
+      }),
+      { null = false },
+      function(vin)
+        return validate(vin.data, vin.spec)
+      end
+    )
+  end)
+
+  test("validate-nof", function()
+    runsetflags(
+      dropentries(validateSpec.nof, {
+        { at = 25, why = "a null map member validated by $NOF", is = function(entry)
+          return isnull(entryin(entry, "data.a")) and "`$NULL`" == entryin(entry, "spec.a.3")
+        end },
+        { at = 26, why = "a null list element validated by $NOF", is = function(entry)
+          return isnull(entryin(entry, "data.0")) and "`$NOF`" == entryin(entry, "spec.1.0")
+        end },
+        { at = 31, why = "a null map member a default would replace", is = function(entry)
+          return isnull(entryin(entry, "data.r")) and "`$NOF`" == entryin(entry, "spec.0")
+        end },
+      }),
+      { null = false },
+      function(vin)
+        return validate(vin.data, vin.spec)
+      end
+    )
+  end)
+
+  test("validate-all", function()
+    runsetflags(
+      dropentries(validateSpec.all, {
+        { at = 10, why = "a null map member validated by $ALL", is = function(entry)
+          return isnull(entryin(entry, "data.a")) and "`$ALL`" == entryin(entry, "spec.a.0")
+        end },
+        { at = 13, why = "a null map member a default would replace", is = function(entry)
+          return isnull(entryin(entry, "data.r")) and "`$ALL`" == entryin(entry, "spec.0")
+        end },
+      }),
+      { null = false },
+      function(vin)
+        return validate(vin.data, vin.spec)
+      end
+    )
+  end)
+
+  test("validate-unknown", function()
+    runsetflags(validateSpec.unknown, { null = false }, function(vin)
+      return validate(vin.data, vin.spec)
+    end)
+  end)
+
+  test("validate-unknown-edge", function()
+    -- Only the unknown name is reported, and the data comes back as it is.
+    local errs = array()
+    local data = object({ a = "x" })
+    local out =
+      validate(data, object({ a = array("`$ONE`", "`$STRING`", "`$NIL`") }), { errs = errs })
+    assert.same(array("Unknown validator $ONE at field a.0."), errs)
+    assert.same(data, out)
+
+    -- A checker supplied in extra is defined, in any case.
+    local function even(inj)
+      local n = getprop(inj.dparent, inj.key)
+      if 0 ~= n % 2 then
+        table.insert(inj.errs, "Odd at " .. pathify(inj.path, 1) .. ": " .. n)
+      end
+      return n
+    end
+
+    errs = array()
+    out = validate(
+      object({ n = 2 }),
+      object({ n = "`$EVEN`" }),
+      { extra = { ["$EVEN"] = even }, errs = errs }
+    )
+    assert.same({ n = 2 }, out)
+    out = validate(
+      object({ n = 3 }),
+      object({ n = "`$even`" }),
+      { extra = { ["$even"] = even }, errs = errs }
+    )
+    assert.same({ n = 3 }, out)
+    assert.same(array("Odd at n: 3"), errs)
+
+    -- A null in extra takes a checker away. A Lua table cannot hold nil, so
+    -- the port spells that null false, as validate does for transform's commands.
+    errs = array()
+    validate("x", "`$STRING`", { extra = { ["$STRING"] = false }, errs = errs })
+    assert.same(array("Unknown validator $STRING at field <root>."), errs)
   end)
 
   test("validate-custom", function()

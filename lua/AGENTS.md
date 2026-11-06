@@ -67,10 +67,17 @@ installed** — if you can't run a target, say so; don't claim a change works.
   `require("regex")` and every `re_*` matcher silently becomes nil.
 - **One `nil`, two meanings.** A function that returns nothing and one that
   returns JSON null both return `nil`, so the runner reads a bare `nil` as
-  *absent*. That is the cheap side by a wide margin (43 entries against 6);
-  the six entries it costs are dropped by index, with guards, at the top of
-  `test/struct_test.lua`. `NOVAL` covers the argument side of the same
+  *absent*. That is the cheap side by a wide margin (43 entries against 6,
+  measured over the minor and `validate.basic` groups); the entries it costs
+  are dropped by index, with guards, in `test/struct_test.lua`. So are the
+  `validate.directive`, `validate.nof` and `validate.all` entries that turn on
+  a null inside a node: a null map member arrives absent, a null list element
+  as the string `"null"`. `NOVAL` covers the argument side of the same
   problem — see below.
+- **A checker is taken away with `false`.** Canonical `validate` treats a
+  null in its store (from `extra`, or the transform commands it disables) as
+  no checker, so naming it is an unknown checker. A Lua table cannot hold
+  `nil`, so this port's store spells that null `false`.
 - **One table type, two roles.** Maps and lists are both tables; the
   `__jsontype` metatable field (`'object'` / `'array'`) distinguishes them.
   Build with `jm`/`jt` (or set the field) — don't leave an empty or literal

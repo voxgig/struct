@@ -231,6 +231,14 @@ local _injecthandler
 local _validatehandler
 local _invalidTypeMsg
 local _validation
+local _checknames
+local _refname
+local _unknownname
+local _slotval
+local _deepequal
+local _keeps
+local _admits
+local _nofcount
 local stringify
 local ismap
 local islist
@@ -2736,7 +2744,7 @@ local function validate_TYPE(inj, _val, ref)
     end
   end
 
-  -- Lua has no undefined; $NIL is equivalent to $NULL.
+  -- $NIL is absent or null.
   if tname == S_nil then
     typev = typev | T_null
   end
@@ -2861,79 +2869,6 @@ local function describeAlternatives(tvals)
   return out
 end
 
--- Match at least one of the specified shapes.
--- Syntax: ['`$ONE`', alt0, alt1, ...]
-local function validate_ONE(inj, _val, _ref, store)
-  local mode, parent, keyI = inj.mode, inj.parent, inj.keyI
-
-  -- Only operate in val mode, since parent is a list.
-  if M_VAL == mode then
-    if not islist(parent) or 0 ~= keyI then
-      table.insert(
-        inj.errs,
-        "The $ONE validator at field "
-          .. pathify(inj.path, 1, 1)
-          .. " must be the first element of an array."
-      )
-      return
-    end
-
-    inj.keyI = size(inj.keys)
-
-    -- Clean up structure, replacing [$ONE, ...] with current
-    inj:setval(inj.dparent, 2)
-
-    inj.path = slice(inj.path, 0, -1)
-
-    local tvals = slice(parent, 1)
-    if 0 == size(tvals) then
-      table.insert(
-        inj.errs,
-        "The $ONE validator at field "
-          .. pathify(inj.path, 1, 1)
-          .. " must have at least one argument."
-      )
-      return
-    end
-
-    -- See if we can find a match.
-    for _, tval in ipairs(tvals) do
-      local terrs = {}
-      setmetatable(terrs, { __jsontype = "array" })
-
-      local vstore = merge({ {}, store }, 1)
-      vstore["$TOP"] = inj.dparent
-
-      local vcurrent = validate(inj.dparent, tval, {
-        extra = vstore,
-        errs = terrs,
-        meta = inj.meta,
-      })
-
-      inj:setval(vcurrent, -2)
-
-      -- Accept current value if there was a match
-      if 0 == size(terrs) then
-        return
-      end
-    end
-
-    -- There was no match.
-    local valdesc_str = describeAlternatives(tvals)
-
-    table.insert(
-      inj.errs,
-      _invalidTypeMsg(
-        inj.path,
-        (1 < size(tvals) and "one of " or "") .. valdesc_str,
-        typify(inj.dparent),
-        inj.dparent,
-        "V0210"
-      )
-    )
-  end
-end
-
 -- Match exactly one of the specified values.
 -- Syntax: ['`$EXACT`', val1, val2, ...]
 local function validate_EXACT(inj)
@@ -2951,13 +2886,14 @@ local function validate_EXACT(inj)
       return
     end
 
+    local cval = _slotval(inj)
+
     inj.keyI = size(inj.keys)
 
-    -- Clean up structure, replacing [$EXACT, ...] with current data parent
-    inj:setval(inj.dparent, 2)
+    -- Replace [$EXACT, ...] with the data value; SKIP keeps inject off the detached list.
+    inj:setval(cval, 2)
 
     inj.path = slice(inj.path, 0, -1)
-    inj.key = getelem(inj.path, -1)
 
     local tvals = slice(parent, 1)
     if 0 == size(tvals) then
@@ -2967,24 +2903,12 @@ local function validate_EXACT(inj)
           .. pathify(inj.path, 1, 1)
           .. " must have at least one argument."
       )
-      return
+      return SKIP
     end
 
-    -- See if we can find an exact value match.
-    local currentstr = nil
     for _, tval in ipairs(tvals) do
-      local exactmatch = tval == inj.dparent
-
-      if not exactmatch and isnode(tval) then
-        if currentstr == nil then
-          currentstr = stringify(inj.dparent)
-        end
-        local tvalstr = stringify(tval)
-        exactmatch = tvalstr == currentstr
-      end
-
-      if exactmatch then
-        return
+      if _deepequal(tval, cval) then
+        return SKIP
       end
     end
 
@@ -2998,14 +2922,113 @@ local function validate_EXACT(inj)
           .. "exactly equal to "
           .. (1 == size(tvals) and "" or "one of ")
           .. valdesc_str,
-        typify(inj.dparent),
-        inj.dparent,
+        typify(cval),
+        cval,
         "V0110"
       )
     )
+
+    return SKIP
   else
     delprop(parent, key)
   end
+end
+
+-- The counting list directives. Without a count, every spec has to admit.
+local function _validatecount(inj, store, name, counted)
+  local mode, parent, keyI = inj.mode, inj.parent, inj.keyI
+
+  if M_VAL ~= mode then
+    return NONE
+  end
+
+  if not islist(parent) or 0 ~= keyI then
+    table.insert(
+      inj.errs,
+      "The "
+        .. name
+        .. " validator at field "
+        .. pathify(inj.path, 1, 1)
+        .. " must be the first element of an array."
+    )
+    return NONE
+  end
+
+  local cval = _slotval(inj)
+
+  inj.keyI = size(inj.keys)
+
+  -- Replace the directive's list with the data value. Each return is SKIP, so
+  -- that inject leaves the detached list alone and validates nothing in it.
+  inj:setval(cval, 2)
+
+  inj.path = slice(inj.path, -1)
+
+  local count = NONE
+  if counted then
+    count = getprop(parent, 1)
+  end
+  local tvals = slice(parent, counted and 2 or 1)
+  local numtvals = size(tvals)
+  local field = "The " .. name .. " validator at field " .. pathify(inj.path, 1)
+
+  if 0 == numtvals then
+    table.insert(
+      inj.errs,
+      field .. (counted and " must have a count and" or " must have") .. " at least one argument."
+    )
+    return SKIP
+  end
+
+  local lo, hi, countdesc = numtvals, numtvals, "all"
+  if counted then
+    lo, hi, countdesc = _nofcount(count, numtvals)
+  end
+
+  if NONE == countdesc then
+    table.insert(inj.errs, field .. " has an invalid count: " .. stringify(count) .. ".")
+    return SKIP
+  end
+
+  local admitted = 0
+  for tI = 0, numtvals - 1 do
+    local left = numtvals - tI
+
+    -- Stop once the specs left cannot change the verdict.
+    if hi < admitted or admitted + left < lo or (lo <= admitted and admitted + left <= hi) then
+      break
+    end
+
+    if _admits(cval, tvals[tI + 1], inj, store) then
+      admitted = admitted + 1
+    end
+  end
+
+  if admitted < lo or hi < admitted then
+    table.insert(
+      inj.errs,
+      _invalidTypeMsg(
+        inj.path,
+        countdesc .. " of " .. describeAlternatives(tvals),
+        typify(cval),
+        cval,
+        "V0310"
+      )
+    )
+  end
+
+  return SKIP
+end
+
+-- Count the specs that admit the value: ['`$NOF`', count, spec, ...], where
+-- count is an integer, or a map holding min, max or both.
+local function validate_NOF(inj, _val, _ref, store)
+  return _validatecount(inj, store, "$NOF", true)
+end
+
+-- Every spec admits the value: ['`$ALL`', spec, ...].
+local function validate_ALL(inj, _val, _ref, store)
+  return _validatecount(inj, store, "$ALL", false)
 end
 
 -- This is the "modify" argument to inject. Use this to perform
@@ -3143,8 +3166,9 @@ validate = function(data, spec, injdef)
       ["$INSTANCE"] = validate_TYPE,
       ["$ANY"] = validate_ANY,
       ["$CHILD"] = validate_CHILD,
-      ["$ONE"] = validate_ONE,
       ["$EXACT"] = validate_EXACT,
+      ["$NOF"] = validate_NOF,
+      ["$ALL"] = validate_ALL,
     },
 
     getdef(extra, {}),
@@ -3158,13 +3182,22 @@ validate = function(data, spec, injdef)
   local meta = (injdef and injdef.meta) or {}
   setprop(meta, S_BEXACT, getprop(meta, S_BEXACT, false))
 
-  local out = transform(data, spec, {
-    meta = meta,
-    extra = store,
-    modify = _validation,
-    handler = _validatehandler,
-    errs = errs,
-  })
+  -- A spec that names an unknown checker validates nothing.
+  local numerrs = size(errs)
+  _checknames(spec, store, setmetatable({}, { __jsontype = "array" }), errs)
+
+  local out
+  if numerrs < size(errs) then
+    out = clone(data)
+  else
+    out = transform(data, spec, {
+      meta = meta,
+      extra = store,
+      modify = _validation,
+      handler = _validatehandler,
+      errs = errs,
+    })
+  end
 
   local generr = (0 < size(errs) and not collect)
 
@@ -3398,6 +3431,189 @@ _invalidTypeMsg = function(path, needtype, vt, v, _whence)
 
   msg = msg .. "."
   return msg
+end
+
+-- Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
+local VALIDATE_NAMES = {
+  "$TOP",
+  "$SPEC",
+  "$BT",
+  "$DS",
+  "$WHEN",
+  "$ANNO",
+  "$REF",
+  "$FORMAT",
+  "$APPLY",
+  "$OPEN",
+}
+
+-- Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
+_checknames = function(spec, store, path, errs)
+  local name = _refname(spec)
+  if NONE ~= name then
+    if _unknownname(name, store) then
+      table.insert(errs, "Unknown validator " .. name .. " at field " .. pathify(path) .. ".")
+    end
+    return
+  end
+
+  if islist(spec) and "$EXACT" == _refname(spec[1]) then
+    return
+  end
+
+  for _, key in ipairs(keysof(spec)) do
+    if ismap(spec) then
+      _checknames(key, store, path, errs)
+    end
+    _checknames(getprop(spec, key), store, flatten({ path, key }), errs)
+  end
+end
+
+-- The name a whole-string reference gives, when it is a checker name in any case.
+-- The reference is read as _injectstr reads a full injection.
+_refname = function(val)
+  local ref = type(val) == S_string and val:match("^`([^`]*)`$") or NONE
+  if NONE ~= ref then
+    ref = ref:match("^(%$[A-Z]+)%d+$") or ref
+    if ref:upper():match("^%$[A-Z]+$") then
+      return ref
+    end
+  end
+  return NONE
+end
+
+-- Unknown: undefined and upper case, or a defined name in another case. Null
+-- disables a name; this port's store spells that null `false`.
+_unknownname = function(name, store)
+  local function known(n)
+    for _, vname in ipairs(VALIDATE_NAMES) do
+      if vname == n then
+        return true
+      end
+    end
+    local found = getprop(store, n)
+    return NONE ~= found and false ~= found
+  end
+  local upper = name:upper()
+  return not known(name) and (upper == name or known(upper))
+end
+
+-- The data value at a list directive's slot. The directive's own dparent was
+-- read with getprop, which reports a stored null as absent.
+_slotval = function(inj)
+  local prior = inj.prior
+  if NONE == prior then
+    return inj.dparent
+  end
+  return getprop(prior.dparent, prior.key)
+end
+
+-- JSON equality: numbers by value, lists in order, maps by key in any order.
+_deepequal = function(a, b)
+  if a == b then
+    return true
+  end
+
+  local atype = typify(a)
+  if atype ~= typify(b) or 0 == ((T_list | T_map) & atype) then
+    return false
+  end
+
+  local akeys = keysof(a)
+  local bkeys = keysof(b)
+  if size(akeys) ~= size(bkeys) then
+    return false
+  end
+
+  for kI = 1, #akeys do
+    local k = akeys[kI]
+    if k ~= bkeys[kI] or not _deepequal(getprop(a, k), getprop(b, k)) then
+      return false
+    end
+  end
+
+  return true
+end
+
+-- Every member val has is in out, unchanged. A member only out has is a
+-- default the spec supplied, and is ignored.
+_keeps = function(val, out)
+  if NONE == val then
+    return true
+  end
+
+  if 0 == ((T_list | T_map) & typify(val)) or islist(val) ~= islist(out) or not isnode(out) then
+    return _deepequal(val, out)
+  end
+
+  for _, k in ipairs(keysof(val)) do
+    if not _keeps(getprop(val, k), getprop(out, k)) then
+      return false
+    end
+  end
+
+  return true
+end
+
+-- A spec admits a value when validating the value against it finds no error
+-- and gives back the value as it is.
+_admits = function(val, spec, inj, store)
+  local terrs = setmetatable({}, { __jsontype = "array" })
+
+  local vstore = merge({ {}, store }, 1)
+  vstore["$TOP"] = val
+
+  local out = validate(val, spec, {
+    extra = vstore,
+    errs = terrs,
+    meta = inj.meta,
+  })
+
+  return 0 == size(terrs) and _keeps(val, out)
+end
+
+-- The bounds of a $NOF count, and the words for it, which are absent when
+-- the count is invalid. Without a max, the bound is the number of specs.
+_nofcount = function(count, numtvals)
+  local function isnat(n)
+    return 0 < (T_integer & typify(n)) and 0 <= n
+  end
+
+  if isnat(count) then
+    return count, count, 0 == count and "none" or ("exactly " .. stringify(count))
+  end
+
+  local min = getprop(count, "min")
+  local max = getprop(count, "max")
+
+  local valid = ismap(count)
+    and 0 < size(count)
+    and size(count) == (NONE == min and 0 or 1) + (NONE == max and 0 or 1)
+    and (NONE == min or isnat(min))
+    and (NONE == max or isnat(max))
+    and (NONE == min or NONE == max or min <= max)
+
+  if not valid then
+    return 0, 0, NONE
+  end
+
+  local lo = NONE == min and 0 or min
+  local hi = NONE == max and numtvals or max
+
+  local desc
+  if NONE == max then
+    desc = "at least " .. stringify(lo)
+  elseif 0 == hi then
+    desc = "none"
+  elseif NONE == min then
+    desc = "at most " .. stringify(hi)
+  elseif lo == hi then
+    desc = "exactly " .. stringify(lo)
+  else
+    desc = stringify(lo) .. " to " .. stringify(hi)
+  end
+
+  return lo, hi, desc
 end
 
 -- Default inject handler for transforms.
