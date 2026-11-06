@@ -231,6 +231,7 @@ defmodule Voxgig.Struct do
   @r_inject_part ~r/`([^`]*)`/
   @r_meta_path ~r/^([^$]+)\$([=~])(.+)$/
   @r_transform_name ~r/`\$([A-Z]+)`/
+  @r_checker_name ~r/^\$[A-Z]+$/
   @r_intkey ~r/^-?[0-9]+$/
 
   # ---------------------------------------------------------------------------
@@ -458,6 +459,16 @@ defmodule Voxgig.Struct do
 
       true ->
         nil
+    end
+  end
+
+  # Literal presence, beside lookup_: a nil the node holds is a null, not an absent key.
+  defp holds_(node, key) do
+    cond do
+      key == nil -> false
+      ismap(node) -> omap_get(map_pairs(node), mapkey(key)) != :error
+      islist(node) -> (ki = to_int(key); ki != nil and ki >= 0 and ki < length(list_items(node)))
+      true -> false
     end
   end
 
@@ -1600,8 +1611,9 @@ defmodule Voxgig.Struct do
     is_(inj, :ival, rv)
 
     cond do
-      ig(inj, :prior) == nil and ig(inj, :root) != nil and haskey(ig(inj, :root), @s_dtop) ->
-        getprop(ig(inj, :root), @s_dtop)
+      # Read literally: a null a list directive set at $TOP is the result.
+      ig(inj, :prior) == nil and holds_(ig(inj, :root), @s_dtop) ->
+        lookup_(ig(inj, :root), @s_dtop)
 
       ig(inj, :key) == @s_dtop and ig(inj, :parent) != nil and haskey(ig(inj, :parent), @s_dtop) ->
         getprop(ig(inj, :parent), @s_dtop)
@@ -2336,55 +2348,6 @@ defmodule Voxgig.Struct do
     end
   end
 
-  defp validate_one(inj, _v, _r, store) do
-    if ig(inj, :mode) != @m_val do
-      nil
-    else
-      parent = ig(inj, :parent)
-
-      if not islist(parent) or ig(inj, :keyi) != 0 do
-        push_err(inj, "The $ONE validator at field " <> pathify(ig(inj, :path), 1, 1) <> " must be the first element of an array.")
-        nil
-      else
-        is_(inj, :keyi, size(ig(inj, :keys)))
-        inj_setval(inj, ig(inj, :dparent), 2)
-        is_(inj, :path, slice(ig(inj, :path), 0, size(ig(inj, :path)) - 1))
-        tvals = slice(parent, 1)
-
-        if size(tvals) == 0 do
-          push_err(inj, "The $ONE validator at field " <> pathify(ig(inj, :path), 1, 1) <> " must have at least one argument.")
-          nil
-        else
-          matched = validate_one_loop(inj, store, list_items(tvals), false)
-
-          if not matched do
-            valdesc = Enum.map_join(list_items(tvals), ", ", &stringify/1)
-            valdesc = Regex.replace(@r_transform_name, valdesc, fn _w, g1 -> String.downcase(g1) end)
-            push_err(inj, invalid_type_msg(ig(inj, :path), (if size(tvals) > 1, do: "one of ", else: "") <> valdesc, typify(ig(inj, :dparent)), ig(inj, :dparent), "V0210"))
-          end
-
-          nil
-        end
-      end
-    end
-  end
-
-  defp validate_one_loop(_inj, _store, [], matched), do: matched
-
-  defp validate_one_loop(inj, store, [tv | rest], matched) do
-    if matched do
-      true
-    else
-      terrs = empty_list()
-      vstore = merge(vlist_new([empty_map(), store]), 1)
-      setprop(vstore, @s_dtop, ig(inj, :dparent))
-      idef = vmap_new([{"extra", vstore}, {"errs", terrs}, {"meta", ig(inj, :meta)}])
-      vcurrent = validate(ig(inj, :dparent), tv, idef)
-      inj_setval(inj, vcurrent, -2)
-      if size(terrs) == 0, do: true, else: validate_one_loop(inj, store, rest, false)
-    end
-  end
-
   defp validate_exact(inj, _v, _r, _s) do
     if ig(inj, :mode) != @m_val do
       delprop(ig(inj, :parent), ig(inj, :key))
@@ -2396,46 +2359,99 @@ defmodule Voxgig.Struct do
         push_err(inj, "The $EXACT validator at field " <> pathify(ig(inj, :path), 1, 1) <> " must be the first element of an array.")
         nil
       else
+        {cval, held} = slotval_(inj)
         is_(inj, :keyi, size(ig(inj, :keys)))
-        inj_setval(inj, ig(inj, :dparent), 2)
+
+        # Replace [$EXACT, ...] with the data value; SKIP keeps inject off the detached list.
+        slotset_(inj, cval, held)
+
         is_(inj, :path, slice(ig(inj, :path), 0, size(ig(inj, :path)) - 1))
-        is_(inj, :key, getelem(ig(inj, :path), -1))
-        tvals = slice(parent, 1)
+        tvals = list_items(slice(parent, 1))
 
-        if size(tvals) == 0 do
-          push_err(inj, "The $EXACT validator at field " <> pathify(ig(inj, :path), 1, 1) <> " must have at least one argument.")
-          nil
-        else
-          matched = Enum.any?(list_items(tvals), fn tv -> veq(tv, ig(inj, :dparent)) end)
+        cond do
+          tvals == [] ->
+            push_err(inj, "The $EXACT validator at field " <> pathify(ig(inj, :path), 1, 1) <> " must have at least one argument.")
 
-          if not matched do
-            valdesc = Enum.map_join(list_items(tvals), ", ", &stringify/1)
+          # An absent value equals no argument.
+          held and Enum.any?(tvals, fn tv -> deepequal_(tv, cval) end) ->
+            :ok
+
+          true ->
+            valdesc = Enum.map_join(tvals, ", ", &stringify/1)
             valdesc = Regex.replace(@r_transform_name, valdesc, fn _w, g1 -> String.downcase(g1) end)
-            push_err(inj, invalid_type_msg(ig(inj, :path), (if size(ig(inj, :path)) > 1, do: "", else: "value ") <> "exactly equal to " <> (if size(tvals) == 1, do: "", else: "one of ") <> valdesc, typify(ig(inj, :dparent)), ig(inj, :dparent), "V0110"))
-          end
-
-          nil
+            push_err(inj, invalid_type_msg(ig(inj, :path), (if size(ig(inj, :path)) > 1, do: "", else: "value ") <> "exactly equal to " <> (if length(tvals) == 1, do: "", else: "one of ") <> valdesc, typify(cval), cval, "V0110"))
         end
+
+        @skip
       end
     end
   end
 
-  def veq(a, b) do
-    cond do
-      a == nil and b == nil -> true
-      is_boolean(a) or is_boolean(b) -> a == b
-      is_number(a) and is_number(b) -> a == b
-      is_binary(a) and is_binary(b) -> a == b
-      islist(a) and islist(b) -> ia = list_items(a); ib = list_items(b); length(ia) == length(ib) and Enum.all?(Enum.zip(ia, ib), fn {x, y} -> veq(x, y) end)
-      ismap(a) and ismap(b) -> veq_map(a, b)
-      true -> a == b
-    end
-  end
+  # Count the specs that admit the value: ['`$NOF`', count, spec, ...], where
+  # count is an integer, or a map holding min, max or both.
+  defp validate_nof(inj, _v, _r, store), do: validatecount_(inj, store, "$NOF", true)
 
-  defp veq_map(a, b) do
-    pa = map_pairs(a)
-    pb = map_pairs(b)
-    length(pa) == length(pb) and Enum.all?(pa, fn {k, v} -> case omap_get(pb, k) do; {:ok, w} -> veq(v, w); :error -> false end end)
+  # Every spec admits the value: ['`$ALL`', spec, ...].
+  defp validate_all(inj, _v, _r, store), do: validatecount_(inj, store, "$ALL", false)
+
+  # The counting list directives. Without a count, every spec has to admit.
+  defp validatecount_(inj, store, name, counted) do
+    parent = ig(inj, :parent)
+
+    cond do
+      ig(inj, :mode) != @m_val ->
+        nil
+
+      not islist(parent) or ig(inj, :keyi) != 0 ->
+        push_err(inj, "The " <> name <> " validator at field " <> pathify(ig(inj, :path), 1, 1) <> " must be the first element of an array.")
+        nil
+
+      true ->
+        {cval, held} = slotval_(inj)
+        is_(inj, :keyi, size(ig(inj, :keys)))
+
+        # Replace the directive's list with the data value. Each return is SKIP, so
+        # that inject leaves the detached list alone and validates nothing in it.
+        slotset_(inj, cval, held)
+
+        is_(inj, :path, slice(ig(inj, :path), -1))
+        count = if counted, do: lookup_(parent, 1), else: nil
+        tvals = list_items(slice(parent, if(counted, do: 2, else: 1)))
+        numtvals = length(tvals)
+        field = "The " <> name <> " validator at field " <> pathify(ig(inj, :path), 1)
+
+        if numtvals == 0 do
+          push_err(inj, field <> (if counted, do: " must have a count and", else: " must have") <> " at least one argument.")
+        else
+          {lo, hi, countdesc} = if counted, do: nofcount_(count, numtvals), else: {numtvals, numtvals, "all"}
+
+          if countdesc == nil do
+            push_err(inj, field <> " has an invalid count: " <> stringify(count) <> ".")
+          else
+            admitted =
+              tvals
+              |> Enum.with_index()
+              |> Enum.reduce_while(0, fn {tval, ti}, admitted ->
+                left = numtvals - ti
+
+                # Stop once the specs left cannot change the verdict.
+                if hi < admitted or admitted + left < lo or (lo <= admitted and admitted + left <= hi) do
+                  {:halt, admitted}
+                else
+                  {:cont, if(admits_(cval, held, tval, inj, store), do: admitted + 1, else: admitted)}
+                end
+              end)
+
+            if admitted < lo or hi < admitted do
+              valdesc = Enum.map_join(tvals, ", ", &stringify/1)
+              valdesc = Regex.replace(@r_transform_name, valdesc, fn _w, g1 -> String.downcase(g1) end)
+              push_err(inj, invalid_type_msg(ig(inj, :path), countdesc <> " of " <> valdesc, typify(cval), cval, "V0310"))
+            end
+          end
+        end
+
+        @skip
+    end
   end
 
   defp validation(pval, key, parent, inj) do
@@ -2488,7 +2504,7 @@ defmodule Voxgig.Struct do
               if not islist(pval), do: push_err(inj, invalid_type_msg(ig(inj, :path), typename(ptype), ctype, cval, "V0030"))
 
             exact_b ->
-              if not veq(cval, pval) do
+              if not deepequal_(cval, pval) do
                 pathmsg = if size(ig(inj, :path)) > 1, do: "at field " <> pathify(ig(inj, :path), 1) <> ": ", else: ""
                 push_err(inj, "Value " <> pathmsg <> js_string(cval) <> " should equal " <> js_string(pval) <> ".")
               end
@@ -2527,15 +2543,166 @@ defmodule Voxgig.Struct do
     Enum.each(["$NUMBER", "$INTEGER", "$DECIMAL", "$BOOLEAN", "$NULL", "$NIL", "$MAP", "$LIST", "$FUNCTION", "$INSTANCE"], fn k -> setprop(base, k, &validate_type/4) end)
     setprop(base, "$ANY", &validate_any/4)
     setprop(base, "$CHILD", &validate_child/4)
-    setprop(base, "$ONE", &validate_one/4)
     setprop(base, "$EXACT", &validate_exact/4)
+    setprop(base, "$NOF", &validate_nof/4)
+    setprop(base, "$ALL", &validate_all/4)
     store = merge(vlist_new([base, if(extra == nil, do: empty_map(), else: extra), vmap_new([{@s_derrs, errs}])]), 1)
     meta = getprop(injdef, "meta", empty_map())
     setprop(meta, @s_bexact, getprop(meta, @s_bexact, false))
-    idef = vmap_new([{"meta", meta}, {"extra", store}, {"modify", &validation/4}, {"handler", &validate_handler/4}, {"errs", errs}])
-    out = transform(data, spec, idef)
+
+    # A spec that names an unknown checker validates nothing.
+    numerrs = size(errs)
+    checknames_(spec, store, [], errs)
+
+    out =
+      if numerrs < size(errs) do
+        clone(data)
+      else
+        idef = vmap_new([{"meta", meta}, {"extra", store}, {"modify", &validation/4}, {"handler", &validate_handler/4}, {"errs", errs}])
+        transform(data, spec, idef)
+      end
+
     if size(errs) > 0 and not collect, do: raise(Voxgig.Struct.Error, message: join(errs, " | "))
     out
+  end
+
+  # Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
+  @validate_names ["$TOP", "$SPEC", "$BT", "$DS", "$WHEN", "$ANNO", "$REF", "$FORMAT", "$APPLY", "$OPEN"]
+
+  # Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
+  defp checknames_(spec, store, path, errs) do
+    name = refname_(spec)
+
+    cond do
+      name != nil ->
+        if unknownname_(name, store) do
+          setprop(errs, size(errs), "Unknown validator " <> name <> " at field " <> pathify(vlist_new(path)) <> ".")
+        end
+
+      islist(spec) and refname_(lookup_(spec, 0)) == "$EXACT" ->
+        :ok
+
+      true ->
+        Enum.each(keysof(spec), fn key ->
+          if ismap(spec), do: checknames_(key, store, path, errs)
+          checknames_(lookup_(spec, key), store, path ++ [key], errs)
+        end)
+    end
+  end
+
+  # The name a whole-string reference gives, when it is a checker name in any case.
+  defp refname_(val) do
+    case if(is_binary(val), do: Regex.run(@r_inject_full, val), else: nil) do
+      [_, name] -> if Regex.match?(@r_checker_name, String.upcase(name)), do: name, else: nil
+      _ -> nil
+    end
+  end
+
+  # Unknown: undefined and upper case, or a defined name in another case. Null disables a name.
+  defp unknownname_(name, store) do
+    known = fn n -> n in @validate_names or lookup_(store, n) != nil end
+    upper = String.upcase(name)
+    not known.(name) and (upper == name or known.(upper))
+  end
+
+  # The data value at a list directive's slot, and whether the slot holds one.
+  # The directive's own dparent was read with getprop, which reports a stored
+  # null as absent, and with one nil only the slot can tell them apart.
+  defp slotval_(inj) do
+    prior = ig(inj, :prior)
+
+    if prior == nil do
+      {ig(inj, :dparent), ig(inj, :dparent) != nil}
+    else
+      {lookup_(ig(prior, :dparent), ig(prior, :key)), holds_(ig(prior, :dparent), ig(prior, :key))}
+    end
+  end
+
+  # inj_setval deletes for nil, so a null the slot holds is set directly.
+  defp slotset_(inj, cval, held) do
+    if cval == nil and held do
+      setprop(getelem(ig(inj, :nodes), -2), getelem(ig(inj, :path), -2), nil)
+    else
+      inj_setval(inj, cval, 2)
+    end
+  end
+
+  # JSON equality: numbers by value, lists in order, maps by key in any order.
+  defp deepequal_(a, b) do
+    atype = typify(a)
+
+    cond do
+      a == b ->
+        true
+
+      atype != typify(b) or Bitwise.band(Bitwise.bor(@t_list, @t_map), atype) == 0 ->
+        false
+
+      true ->
+        akeys = keysof(a)
+        bkeys = keysof(b)
+
+        length(akeys) == length(bkeys) and
+          Enum.all?(Enum.zip(akeys, bkeys), fn {ak, bk} -> ak == bk and deepequal_(lookup_(a, ak), lookup_(b, bk)) end)
+    end
+  end
+
+  # Every member val has is in out, unchanged. A member only out has is a
+  # default the spec supplied, and is ignored.
+  defp keeps_(val, out) do
+    if Bitwise.band(Bitwise.bor(@t_list, @t_map), typify(val)) == 0 or islist(val) != islist(out) or not isnode(out) do
+      deepequal_(val, out)
+    else
+      Enum.all?(keysof(val), fn k -> holds_(out, k) and keeps_(lookup_(val, k), lookup_(out, k)) end)
+    end
+  end
+
+  # A spec admits a value when validating the value against it finds no error
+  # and gives back the value as it is. Any output keeps an absent value.
+  defp admits_(val, held, spec, inj, store) do
+    terrs = empty_list()
+    vstore = merge(vlist_new([empty_map(), store]), 1)
+    setprop(vstore, @s_dtop, val)
+    out = validate(val, spec, vmap_new([{"extra", vstore}, {"errs", terrs}, {"meta", ig(inj, :meta)}]))
+    size(terrs) == 0 and (not held or keeps_(val, out))
+  end
+
+  # The bounds of a $NOF count, and the words for it, which are absent when
+  # the count is invalid. Without a max, the bound is the number of specs.
+  defp nofcount_(count, numtvals) do
+    isnat = fn n -> Bitwise.band(@t_integer, typify(n)) > 0 and n >= 0 end
+
+    if isnat.(count) do
+      {count, count, if(count == 0, do: "none", else: "exactly " <> num_to_string(count))}
+    else
+      min = lookup_(count, "min")
+      max = lookup_(count, "max")
+
+      valid =
+        ismap(count) and size(count) > 0 and
+          size(count) == (if min == nil, do: 0, else: 1) + (if max == nil, do: 0, else: 1) and
+          (min == nil or isnat.(min)) and
+          (max == nil or isnat.(max)) and
+          (min == nil or max == nil or min <= max)
+
+      if valid do
+        lo = if min == nil, do: 0, else: min
+        hi = if max == nil, do: numtvals, else: max
+
+        desc =
+          cond do
+            max == nil -> "at least " <> num_to_string(lo)
+            hi == 0 -> "none"
+            min == nil -> "at most " <> num_to_string(hi)
+            lo == hi -> "exactly " <> num_to_string(lo)
+            true -> num_to_string(lo) <> " to " <> num_to_string(hi)
+          end
+
+        {lo, hi, desc}
+      else
+        {0, 0, nil}
+      end
+    end
   end
 
   # ---------------------------------------------------------------------------

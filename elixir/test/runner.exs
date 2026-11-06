@@ -178,27 +178,27 @@ defmodule Runner do
     end
   end
 
-  # The five entries this port cannot answer, and why.
+  # The eight entries this port cannot answer, and why.
   #
   # It has ONE `nil` for undefined and null, so a bare nil coming back from a
   # subject has to be read one way and the corpus decides which. Measured entry
-  # by entry: reading it as null costs 42, reading it as absent costs these 5 -
+  # by entry: reading it as null costs 42, reading it as absent costs these 8 -
   # every one of them a genuine-null result the port cannot distinguish from
   # "no value". Absent, therefore, and these are named here rather than four
   # whole groups being marked pending.
   #
-  # Same trade, and the same margin, as struct/lua (voxgig/struct#94): 43 vs 6.
+  # Same trade as struct/lua (voxgig/struct#94), which measured 43 vs 6.
   # The way out is the one lua took - give the port a real no-value sentinel -
   # and that is a port change, not a runner change.
   #
-  # These five DID run under the in-situ runner, and passed. That pass was not
-  # evidence: its comparison read `out == @nullmark or out == nil` (old
-  # test/runner.exs:311), so a nil result satisfied an expected null and an
-  # expected absent alike - the two states this port cannot tell apart were
-  # accepted as the same answer. Dropping them costs five executed entries and
-  # removes five passes that could not have failed. It is a smaller loss than
-  # the 42 the other reading costs, but it IS a loss, and it stays visible here
-  # rather than being absorbed into a number.
+  # The five outside validate.directive DID run under the in-situ runner, and
+  # passed. That pass was not evidence: its comparison read
+  # `out == @nullmark or out == nil` (old test/runner.exs:311), so a nil result
+  # satisfied an expected null and an expected absent alike - the two states
+  # this port cannot tell apart were accepted as the same answer. Dropping them
+  # costs five executed entries and removes five passes that could not have
+  # failed. It is a smaller loss than the 42 the other reading costs, but it IS
+  # a loss, and it stays visible here rather than being absorbed into a number.
   #
   # Each drop is GUARDED: if the corpus moves under it, the guard fails loudly
   # rather than silently skipping some other entry.
@@ -210,7 +210,12 @@ defmodule Runner do
     ],
     "validate.basic" => [
       {14, "`$NULL` validates a null and returns it"},
-      {54, "`$NULL` validates a null and returns it"}
+      {53, "`$NULL` validates a null and returns it"}
+    ],
+    "validate.directive" => [
+      {1, "`$NOF` admits a null and returns it"},
+      {6, "`$EXACT` matches a null and returns it"},
+      {11, "`$NIL` validates a null and returns it"}
     ]
   }
 
@@ -558,12 +563,17 @@ defmodule Runner do
 
     run_set("validate.basic", S.getprop(validates, "basic"), arg1(fn vin -> S.validate(vget(vin, "data"), vget(vin, "spec")) end), false)
 
-    Enum.each(["child", "one", "exact"], fn gn ->
+    Enum.each(["child", "exact"], fn gn ->
       run_set("validate.#{gn}", S.getprop(validates, gn), arg1(fn vin -> S.validate(vget(vin, "data"), vget(vin, "spec")) end))
     end)
 
     run_set("validate.invalid", S.getprop(validates, "invalid"), arg1(fn vin -> S.validate(vget(vin, "data"), vget(vin, "spec")) end), false)
     run_set("validate.special", S.getprop(validates, "special"), arg1(fn vin -> S.validate(vget(vin, "data"), vget(vin, "spec"), vget(vin, "inj")) end))
+
+    # null:false, so that a null in these reaches validate as a real nil.
+    Enum.each(["directive", "nof", "all", "unknown"], fn gn ->
+      run_set("validate.#{gn}", S.getprop(validates, gn), arg1(fn vin -> S.validate(vget(vin, "data"), vget(vin, "spec")) end), false)
+    end)
 
     Enum.each(["basic", "operators", "edge", "alts"], fn gn ->
       run_set("select.#{gn}", S.getprop(selects, gn), arg1(fn vin -> S.select(vget(vin, "obj"), vget(vin, "query")) end))

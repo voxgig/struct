@@ -24,8 +24,12 @@ the regex API).
 - **A bare `nil` result reads as ABSENT.** This port has one `nil` for both
   undefined and null, so the corpus decides which a top-level nil is: measured
   entry by entry, reading it as null costs 42 entries and reading it as absent
-  costs 5. The 5 are named and guarded in `test/runner.exs`. The way out is the
+  costs 8. The 8 are named and guarded in `test/runner.exs`. The way out is the
   one struct/lua took - give the port a real no-value sentinel.
+- **Validate's list directives keep a held null.** `inj_setval` deletes a key
+  for `nil`, so `$EXACT`, `$NOF` and `$ALL` read whether their slot holds a
+  value (`slotval_`) and set a held null directly (`slotset_`); without that, a
+  null slot in list data is deleted and the elements after it shift down.
 - **`match.args` needs the arguments back.** Nothing on the BEAM is mutable
   from omni's side, so the subject returns `{args, result}` through omni's
   `runsetflags_args`.
