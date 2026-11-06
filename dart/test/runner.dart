@@ -407,7 +407,7 @@ void runAll(o.RunPack pack, dynamic spec) {
 
   rs('validate.basic', s.getprop(validates, 'basic'),
       arg1((vin) => s.validate(vget(vin, 'data'), vget(vin, 'spec'))), false);
-  for (final gn in ['child', 'one', 'exact']) {
+  for (final gn in ['child', 'exact']) {
     rs('validate.$gn', s.getprop(validates, gn),
         arg1((vin) => s.validate(vget(vin, 'data'), vget(vin, 'spec'))));
   }
@@ -418,6 +418,12 @@ void runAll(o.RunPack pack, dynamic spec) {
       s.getprop(validates, 'special'),
       arg1((vin) =>
           s.validate(vget(vin, 'data'), vget(vin, 'spec'), vget(vin, 'inj'))));
+  // `null: false`, so that a null in these groups reaches validate as a null.
+  for (final gn in ['directive', 'nof', 'all', 'unknown']) {
+    rs('validate.$gn', s.getprop(validates, gn),
+        arg1((vin) => s.validate(vget(vin, 'data'), vget(vin, 'spec'))),
+        false);
+  }
 
   for (final gn in ['basic', 'operators', 'edge', 'alts']) {
     rs('select.$gn', s.getprop(selects, gn),

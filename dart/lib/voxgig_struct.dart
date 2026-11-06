@@ -127,6 +127,7 @@ final _R_INJECT_FULL = RegExp(r'^`(\$[A-Z]+|[^`]*)[0-9]*`$');
 final _R_INJECT_PART = RegExp(r'`([^`]*)`');
 final _R_META_PATH = RegExp(r'^([^$]+)\$([=~])(.+)$');
 final _R_TRANSFORM_NAME = RegExp(r'`\$([A-Z]+)`');
+final _R_CHECKER_NAME = RegExp(r'^\$[A-Z]+$');
 
 // ---------------------------------------------------------------------------
 // Low-level helpers
@@ -1356,8 +1357,9 @@ dynamic inject(dynamic val, dynamic store, [dynamic injdef]) {
 
   inj.ival = rv;
 
-  if (inj.prior == null && inj.root != null && haskey(inj.root, S_DTOP)) {
-    return getprop(inj.root, S_DTOP);
+  // Literal presence: a list directive at the root can leave a null there.
+  if (inj.prior == null && _has(inj.root, S_DTOP)) {
+    return inj.root[S_DTOP];
   }
   if (inj.key == S_DTOP && inj.parent != null && haskey(inj.parent, S_DTOP)) {
     return getprop(inj.parent, S_DTOP);
@@ -2011,53 +2013,6 @@ dynamic _validateChild(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
   return null;
 }
 
-dynamic _validateOne(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
-  var inj = inj0 as Inj;
-  if (inj.mode != S_MVAL) return null;
-  var parent = inj.parent;
-  if (!islist(parent) || inj.keyi != 0) {
-    _pushErr(
-        inj,
-        'The \$ONE validator at field ' +
-            pathify(inj.path, 1, 1) +
-            ' must be the first element of an array.');
-    return null;
-  }
-  inj.keyi = size(inj.keys);
-  _injSetval(inj, inj.dparent, 2);
-  inj.path = slice(inj.path, 0, size(inj.path) - 1);
-  var tvals = slice(parent, 1);
-  if (size(tvals) == 0) {
-    _pushErr(
-        inj,
-        'The \$ONE validator at field ' +
-            pathify(inj.path, 1, 1) +
-            ' must have at least one argument.');
-    return null;
-  }
-  var matched = false;
-  for (var tv in (tvals as List)) {
-    if (matched) break;
-    var terrs = <dynamic>[];
-    var vstore = merge([<String, dynamic>{}, store], 1);
-    setprop(vstore, S_DTOP, inj.dparent);
-    var vcurrent = validate(
-        inj.dparent, tv, {'extra': vstore, 'errs': terrs, 'meta': inj.meta});
-    _injSetval(inj, vcurrent, -2);
-    if (size(terrs) == 0) matched = true;
-  }
-  if (!matched) {
-    var valdesc = tvals.map((x) => stringify(x)).join(', ');
-    valdesc = valdesc.replaceAllMapped(
-        _R_TRANSFORM_NAME, (m) => m.group(1)!.toLowerCase());
-    _pushErr(
-        inj,
-        _invalidTypeMsg(inj.path, (size(tvals) > 1 ? 'one of ' : '') + valdesc,
-            typify(inj.dparent), inj.dparent, 'V0210'));
-  }
-  return null;
-}
-
 dynamic _validateExact(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
   var inj = inj0 as Inj;
   if (inj.mode != S_MVAL) {
@@ -2073,41 +2028,131 @@ dynamic _validateExact(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
             ' must be the first element of an array.');
     return null;
   }
+  var cval = _slotval(inj);
+  var has = _slothas(inj);
   inj.keyi = size(inj.keys);
-  _injSetval(inj, inj.dparent, 2);
+
+  // Replace [$EXACT, ...] with the data value; SKIP keeps inject off the
+  // detached list.
+  _setslot(inj, cval, has);
+
   inj.path = slice(inj.path, 0, size(inj.path) - 1);
-  inj.key = getelem(inj.path, -1);
-  var tvals = slice(parent, 1);
-  if (size(tvals) == 0) {
+  var tvals = slice(parent, 1) as List;
+  if (tvals.isEmpty) {
     _pushErr(
         inj,
         'The \$EXACT validator at field ' +
             pathify(inj.path, 1, 1) +
             ' must have at least one argument.');
-    return null;
+    return SKIP;
   }
-  var matched = false;
-  for (var tv in (tvals as List)) {
-    if (!matched && veq(tv, inj.dparent)) matched = true;
+  for (var tv in tvals) {
+    if (has && veq(tv, cval)) return SKIP;
   }
-  if (!matched) {
-    var valdesc = tvals.map((x) => stringify(x)).join(', ');
-    valdesc = valdesc.replaceAllMapped(
-        _R_TRANSFORM_NAME, (m) => m.group(1)!.toLowerCase());
+  _pushErr(
+      inj,
+      _invalidTypeMsg(
+          inj.path,
+          (size(inj.path) > 1 ? '' : 'value ') +
+              'exactly equal to ' +
+              (tvals.length == 1 ? '' : 'one of ') +
+              _valdesc(tvals),
+          typify(cval),
+          cval,
+          'V0110'));
+  return SKIP;
+}
+
+// Count the specs that admit the value: ['`$NOF`', count, spec, ...], where
+// count is an integer, or a map holding min, max or both.
+dynamic _validateNof(dynamic inj0, dynamic val, dynamic ref, dynamic store) =>
+    _validatecount(inj0 as Inj, store, '\$NOF', true);
+
+// Every spec admits the value: ['`$ALL`', spec, ...].
+dynamic _validateAll(dynamic inj0, dynamic val, dynamic ref, dynamic store) =>
+    _validatecount(inj0 as Inj, store, '\$ALL', false);
+
+// The counting list directives. Without a count, every spec has to admit.
+dynamic _validatecount(Inj inj, dynamic store, String name, bool counted) {
+  if (inj.mode != S_MVAL) return null;
+  var parent = inj.parent;
+  if (!islist(parent) || inj.keyi != 0) {
     _pushErr(
         inj,
-        _invalidTypeMsg(
-            inj.path,
-            (size(inj.path) > 1 ? '' : 'value ') +
-                'exactly equal to ' +
-                (size(tvals) == 1 ? '' : 'one of ') +
-                valdesc,
-            typify(inj.dparent),
-            inj.dparent,
-            'V0110'));
+        'The ' +
+            name +
+            ' validator at field ' +
+            pathify(inj.path, 1, 1) +
+            ' must be the first element of an array.');
+    return null;
   }
-  return null;
+
+  var cval = _slotval(inj);
+  var has = _slothas(inj);
+  inj.keyi = size(inj.keys);
+
+  // Replace the directive's list with the data value. Each return is SKIP, so
+  // that inject leaves the detached list alone and validates nothing in it.
+  _setslot(inj, cval, has);
+
+  inj.path = slice(inj.path, 0, size(inj.path) - 1);
+
+  var count = counted ? _lookup(parent, 1) : null;
+  var tvals = slice(parent, counted ? 2 : 1) as List;
+  var numtvals = tvals.length;
+  var field = 'The ' + name + ' validator at field ' + pathify(inj.path, 1);
+
+  if (numtvals == 0) {
+    _pushErr(
+        inj,
+        field +
+            (counted ? ' must have a count and' : ' must have') +
+            ' at least one argument.');
+    return SKIP;
+  }
+
+  List<dynamic> nc = counted
+      ? _nofcount(count, numtvals)
+      : <dynamic>[numtvals, numtvals, 'all'];
+  num lo = nc[0];
+  num hi = nc[1];
+  var countdesc = nc[2];
+
+  if (countdesc == null) {
+    _pushErr(inj, field + ' has an invalid count: ' + stringify(count) + '.');
+    return SKIP;
+  }
+
+  var admitted = 0;
+  for (var ti = 0; ti < numtvals; ti++) {
+    var left = numtvals - ti;
+
+    // Stop once the specs left cannot change the verdict.
+    if (hi < admitted ||
+        admitted + left < lo ||
+        (lo <= admitted && admitted + left <= hi)) {
+      break;
+    }
+
+    if (_admits(cval, has, tvals[ti], inj, store)) {
+      admitted++;
+    }
+  }
+
+  if (admitted < lo || hi < admitted) {
+    _pushErr(
+        inj,
+        _invalidTypeMsg(inj.path, '$countdesc of ' + _valdesc(tvals),
+            typify(cval), cval, 'V0310'));
+  }
+
+  return SKIP;
 }
+
+// The specs as a message lists them, each `$NAME` as its lower-case name.
+String _valdesc(List tvals) =>
+    join(tvals.map((x) => stringify(x)).toList(), ', ').replaceAllMapped(
+        _R_TRANSFORM_NAME, (m) => m.group(1)!.toLowerCase());
 
 bool veq(dynamic a, dynamic b) {
   if (a == null && b == null) return true;
@@ -2243,8 +2288,9 @@ dynamic validate(dynamic data, dynamic spec, [dynamic injdef]) {
   }
   base['\$ANY'] = _validateAny;
   base['\$CHILD'] = _validateChild;
-  base['\$ONE'] = _validateOne;
   base['\$EXACT'] = _validateExact;
+  base['\$NOF'] = _validateNof;
+  base['\$ALL'] = _validateAll;
   var store = merge([
     base,
     extra == null ? <String, dynamic>{} : extra,
@@ -2252,17 +2298,180 @@ dynamic validate(dynamic data, dynamic spec, [dynamic injdef]) {
   ], 1);
   var meta = getprop(injdef, 'meta', <String, dynamic>{});
   setprop(meta, S_BEXACT, getprop(meta, S_BEXACT, false));
-  var out = transform(data, spec, {
-    'meta': meta,
-    'extra': store,
-    'modify': _validation,
-    'handler': _validateHandler,
-    'errs': errs,
-  });
+
+  // A spec that names an unknown checker validates nothing.
+  var numerrs = size(errs);
+  _checknames(spec, store, <dynamic>[], errs);
+
+  var out = numerrs < size(errs)
+      ? clone(data)
+      : transform(data, spec, {
+          'meta': meta,
+          'extra': store,
+          'modify': _validation,
+          'handler': _validateHandler,
+          'errs': errs,
+        });
   if (size(errs) > 0 && !collect) {
     throw StructError(join(errs, ' | '));
   }
   return out;
+}
+
+// Names a validate spec may use besides its checkers: transform's that it
+// keeps, and $OPEN.
+const _VALIDATE_NAMES = [
+  '\$TOP',
+  '\$SPEC',
+  '\$BT',
+  '\$DS',
+  '\$WHEN',
+  '\$ANNO',
+  '\$REF',
+  '\$FORMAT',
+  '\$APPLY',
+  '\$OPEN',
+];
+
+// Report each checker the spec names that validate lacks; $EXACT's arguments
+// are literals.
+void _checknames(
+    dynamic spec, dynamic store, List<dynamic> path, dynamic errs) {
+  var name = _refname(spec);
+  if (name != null) {
+    if (_unknownname(name, store)) {
+      setprop(errs, size(errs),
+          'Unknown validator ' + name + ' at field ' + pathify(path) + '.');
+    }
+    return;
+  }
+
+  if (islist(spec) && _refname(_lookup(spec, 0)) == '\$EXACT') return;
+
+  for (var key in keysof(spec)) {
+    if (ismap(spec)) _checknames(key, store, path, errs);
+    _checknames(_lookup(spec, key), store, [...path, key], errs);
+  }
+}
+
+// The name a whole-string reference gives, when it is a checker name in any
+// case.
+String? _refname(dynamic val) {
+  var m = val is String ? _R_INJECT_FULL.firstMatch(val) : null;
+  return m != null && _R_CHECKER_NAME.hasMatch(m.group(1)!.toUpperCase())
+      ? m.group(1)
+      : null;
+}
+
+// Unknown: undefined and upper case, or a defined name in another case. Null
+// disables a name.
+bool _unknownname(String name, dynamic store) {
+  bool known(String n) =>
+      _VALIDATE_NAMES.contains(n) || _lookup(store, n) != null;
+  var upper = name.toUpperCase();
+  return !known(name) && (upper == name || known(upper));
+}
+
+// Whether key is present in val, a null value included.
+bool _has(dynamic val, dynamic key) {
+  if (val is Map) return val.containsKey(_mapKey(key));
+  if (val is List) {
+    var ki = _toInt(key);
+    return ki != null && ki >= 0 && ki < val.length;
+  }
+  return false;
+}
+
+// The data value at a list directive's slot. The directive's own dparent was
+// read with getprop, which reports a stored null as absent.
+dynamic _slotval(Inj inj) {
+  final prior = inj.prior;
+  return prior == null ? inj.dparent : _lookup(prior.dparent, prior.key);
+}
+
+// Whether the slot holds a value: with one null, _slotval cannot say.
+bool _slothas(Inj inj) {
+  final prior = inj.prior;
+  return prior == null ? inj.dparent != null : _has(prior.dparent, prior.key);
+}
+
+// Set the slot that holds a list directive, as setval(val, 2) does. An absent
+// value deletes the slot; _injSetval deletes on null too, and here a null is
+// a value.
+void _setslot(Inj inj, dynamic val, bool has) {
+  if (has && val == null) {
+    setprop(getelem(inj.nodes, -2), getelem(inj.path, -2), null);
+  } else {
+    _injSetval(inj, val, 2);
+  }
+}
+
+// Every member val has is in out, unchanged, compared as JSON by veq. A member
+// only out has is a default the spec supplied, and is ignored.
+bool _keeps(dynamic val, dynamic out) {
+  if (!isnode(val) || islist(val) != islist(out) || !isnode(out)) {
+    return veq(val, out);
+  }
+  for (var k in keysof(val)) {
+    if (!_has(out, k) || !_keeps(_lookup(val, k), _lookup(out, k))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// A spec admits a value when validating the value against it finds no error
+// and gives back the value as it is. An absent value has nothing to give back.
+bool _admits(dynamic val, bool has, dynamic spec, Inj inj, dynamic store) {
+  var terrs = <dynamic>[];
+  var vstore = merge([<String, dynamic>{}, store], 1);
+  setprop(vstore, S_DTOP, val);
+  var out = validate(
+      val, spec, {'extra': vstore, 'errs': terrs, 'meta': inj.meta});
+  return size(terrs) == 0 && (!has || _keeps(val, out));
+}
+
+// The bounds of a $NOF count, and the words for it, which are null when the
+// count is invalid. Without a max, the bound is the number of specs.
+List<dynamic> _nofcount(dynamic count, int numtvals) {
+  bool isnat(dynamic n) => n is num && _isInteger(n) && n >= 0;
+
+  if (isnat(count)) {
+    return <dynamic>[
+      count,
+      count,
+      count == 0 ? 'none' : 'exactly ' + numToString(count)
+    ];
+  }
+
+  var min = _lookup(count, 'min');
+  var max = _lookup(count, 'max');
+  var hasmin = _has(count, 'min');
+  var hasmax = _has(count, 'max');
+
+  var valid = ismap(count) &&
+      size(count) > 0 &&
+      size(count) == (hasmin ? 1 : 0) + (hasmax ? 1 : 0) &&
+      (!hasmin || isnat(min)) &&
+      (!hasmax || isnat(max)) &&
+      (!hasmin || !hasmax || min <= max);
+
+  if (!valid) return <dynamic>[0, 0, null];
+
+  num lo = hasmin ? min : 0;
+  num hi = hasmax ? max : numtvals;
+
+  var desc = !hasmax
+      ? 'at least ' + numToString(lo)
+      : hi == 0
+          ? 'none'
+          : !hasmin
+              ? 'at most ' + numToString(hi)
+              : lo == hi
+                  ? 'exactly ' + numToString(lo)
+                  : numToString(lo) + ' to ' + numToString(hi);
+
+  return <dynamic>[lo, hi, desc];
 }
 
 // ---------------------------------------------------------------------------

@@ -91,6 +91,10 @@ s.transform({'name': 'alice'}, {'user': {'id': '`name`'}}); // {user: {id: alice
 // validate: plain values are typed defaults; `$STRING` etc. are commands
 s.validate({'a': 'x'}, {'a': '`\$STRING`'});         // {a: x}
 
+// validate: `$NOF` counts the specs that admit the value, `$ALL` needs all
+s.validate(2, ['`\$NOF`', {'min': 1}, '`\$STRING`', '`\$NUMBER`']); // 2
+s.validate(2, ['`\$ALL`', '`\$NUMBER`', '`\$INTEGER`']);             // 2
+
 // select: MongoDB-style query over children
 s.select([{'a': 1}, {'a': 2}], {'a': {'`\$GT`': 1}}); // [{a: 2, $KEY: 1}]
 ```
