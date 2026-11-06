@@ -295,7 +295,7 @@ object Runner {
     runSet("transform.apply", getprop(transforms, VStr("apply")), arg1(vin => transform(vget(vin, "data"), vget(vin, "spec"))))
 
     runSet("validate.basic", getprop(validates, VStr("basic")), arg1(vin => validate(vget(vin, "data"), vget(vin, "spec"))), false)
-    Seq("child", "one", "exact").foreach { gn =>
+    Seq("child", "exact").foreach { gn =>
       runSet("validate." + gn, getprop(validates, VStr(gn)), arg1(vin => validate(vget(vin, "data"), vget(vin, "spec"))))
     }
     runSet("validate.invalid", getprop(validates, VStr("invalid")), arg1(vin => validate(vget(vin, "data"), vget(vin, "spec"))), false)
@@ -304,6 +304,9 @@ object Runner {
       val d = new InjDef; d.dMeta = getprop(injm, VStr("meta"))
       validate(vget(vin, "data"), vget(vin, "spec"), if (isNullish(injm)) INone else IDef(d))
     }))
+    Seq("directive", "nof", "all", "unknown").foreach { gn =>
+      runSet("validate." + gn, getprop(validates, VStr(gn)), arg1(vin => validate(vget(vin, "data"), vget(vin, "spec"))), false)
+    }
 
     Seq("basic", "operators", "edge", "alts").foreach { gn =>
       runSet("select." + gn, getprop(selects, VStr(gn)), arg1(vin => select(vget(vin, "obj"), vget(vin, "query"))))

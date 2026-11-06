@@ -1590,61 +1590,199 @@ object struct {
     } else Noval
   }
 
-  private val validateOne: Injector = (inj, _v, _r, store) => {
-    if (inj.mode == M_VAL) {
-      val parent = inj.parent
-      if (!islist(parent) || inj.keyi != 0) { pushErr(inj, "The $ONE validator at field " + pathify(inj.path, VNum(1.0), VNum(1.0)) + " must be the first element of an array."); Noval }
-      else {
-        inj.keyi = size(inj.keys)
-        injSetval(inj, inj.dparent, 2)
-        inj.path = slice(inj.path, VNum(0.0), VNum((size(inj.path) - 1).toDouble))
-        val tvals = slice(parent, VNum(1.0))
-        if (size(tvals) == 0) { pushErr(inj, "The $ONE validator at field " + pathify(inj.path, VNum(1.0), VNum(1.0)) + " must have at least one argument."); Noval }
-        else {
-          var matched = false
-          (tvals match { case VList(b) => b.toSeq; case _ => Seq.empty }).foreach { tval =>
-            if (!matched) {
-              val terrs = emptyList()
-              val vstore = merge(mkList(Seq(emptyMap(), store)), VNum(1.0))
-              setprop(vstore, VStr(S_DTOP), inj.dparent)
-              val d = new InjDef; d.dExtra = vstore; d.dErrs = terrs; d.dMeta = inj.meta
-              val vcurrent = validate(inj.dparent, tval, IDef(d))
-              injSetval(inj, vcurrent, -2)
-              if (size(terrs) == 0) matched = true
-            }
-          }
-          if (!matched) {
-            val valdesc = replaceTransformNames(itemsPairs(tvals).map { case (_, x) => stringify(x) }.mkString(", "))
-            pushErr(inj, invalidTypeMsg(inj.path, (if (size(tvals) > 1) "one of " else "") + valdesc, typify(inj.dparent), inj.dparent, "V0210"))
-          }
-          Noval
-        }
-      }
-    } else Noval
-  }
+  // Lowers every `$NAME` marker in the joined description, nested ones included.
+  private def describeAlternatives(tvals: Value): String =
+    replaceTransformNames(join(itemsV(tvals, { case (_, x) => VStr(stringify(x)) }), VStr(", ")))
 
   private val validateExact: Injector = (inj, _v, _r, _s) => {
     if (inj.mode == M_VAL) {
       val parent = inj.parent
       if (!islist(parent) || inj.keyi != 0) { pushErr(inj, "The $EXACT validator at field " + pathify(inj.path, VNum(1.0), VNum(1.0)) + " must be the first element of an array."); Noval }
       else {
+        val cval = slotval(inj)
         inj.keyi = size(inj.keys)
-        injSetval(inj, inj.dparent, 2)
+        // Replace [$EXACT, ...] with the data value; SKIP keeps inject off the detached list.
+        injSetval(inj, cval, 2)
         inj.path = slice(inj.path, VNum(0.0), VNum((size(inj.path) - 1).toDouble))
-        inj.key = getelem(inj.path, VNum(-1.0))
         val tvals = slice(parent, VNum(1.0))
-        if (size(tvals) == 0) { pushErr(inj, "The $EXACT validator at field " + pathify(inj.path, VNum(1.0), VNum(1.0)) + " must have at least one argument."); Noval }
-        else {
-          var matched = false
-          (tvals match { case VList(b) => b.toSeq; case _ => Seq.empty }).foreach { tval => if (!matched && veq(tval, inj.dparent)) matched = true }
-          if (!matched) {
-            val valdesc = replaceTransformNames(itemsPairs(tvals).map { case (_, x) => stringify(x) }.mkString(", "))
-            pushErr(inj, invalidTypeMsg(inj.path, (if (size(inj.path) > 1) "" else "value ") + "exactly equal to " + (if (size(tvals) == 1) "" else "one of ") + valdesc, typify(inj.dparent), inj.dparent, "V0110"))
-          }
-          Noval
+        if (size(tvals) == 0) pushErr(inj, "The $EXACT validator at field " + pathify(inj.path, VNum(1.0), VNum(1.0)) + " must have at least one argument.")
+        else if (!listItems(tvals).exists(tval => deepequal(tval, cval))) {
+          val valdesc = describeAlternatives(tvals)
+          pushErr(inj, invalidTypeMsg(inj.path, (if (size(inj.path) > 1) "" else "value ") + "exactly equal to " + (if (size(tvals) == 1) "" else "one of ") + valdesc, typify(cval), cval, "V0110"))
         }
+        SKIP
       }
     } else { delprop(inj.parent, inj.key); Noval }
+  }
+
+  // Count the specs that admit the value: ['`$NOF`', count, spec, ...], where
+  // count is an integer, or a map holding min, max or both.
+  private val validateNof: Injector = (inj, _v, _r, store) => validatecount(inj, store, "$NOF", true)
+
+  // Every spec admits the value: ['`$ALL`', spec, ...].
+  private val validateAll: Injector = (inj, _v, _r, store) => validatecount(inj, store, "$ALL", false)
+
+  private def listItems(v: Value): Seq[Value] = v match { case VList(b) => b.toSeq; case _ => Seq.empty }
+
+  // The counting list directives. Without a count, every spec has to admit.
+  private def validatecount(inj: Inj, store: Value, name: String, counted: Boolean): Value = {
+    val parent = inj.parent
+    if (inj.mode != M_VAL) Noval
+    else if (!islist(parent) || inj.keyi != 0) {
+      pushErr(inj, "The " + name + " validator at field " + pathify(inj.path, VNum(1.0), VNum(1.0)) + " must be the first element of an array.")
+      Noval
+    } else {
+      val cval = slotval(inj)
+      inj.keyi = size(inj.keys)
+
+      // Replace the directive's list with the data value. Each return is SKIP, so
+      // that inject leaves the detached list alone and validates nothing in it.
+      injSetval(inj, cval, 2)
+
+      inj.path = slice(inj.path, VNum(-1.0))
+
+      val count = if (counted) lookup_(parent, VNum(1.0)) else Noval
+      val tvals = listItems(slice(parent, VNum(if (counted) 2.0 else 1.0)))
+      val numtvals = tvals.length
+      val field = "The " + name + " validator at field " + pathify(inj.path, VNum(1.0))
+
+      if (numtvals == 0) pushErr(inj, field + (if (counted) " must have a count and" else " must have") + " at least one argument.")
+      else {
+        val (lo, hi, countdesc) = if (counted) nofcount(count, numtvals) else (numtvals.toDouble, numtvals.toDouble, Some("all"))
+        countdesc match {
+          case None => pushErr(inj, field + " has an invalid count: " + stringify(count) + ".")
+          case Some(words) =>
+            var admitted = 0
+            var tI = 0
+
+            // Stop once the specs left cannot change the verdict.
+            def decided: Boolean = {
+              val left = numtvals - tI
+              hi < admitted || admitted + left < lo || (lo <= admitted && admitted + left <= hi)
+            }
+
+            while (tI < numtvals && !decided) {
+              if (admits(cval, tvals(tI), inj, store)) admitted += 1
+              tI += 1
+            }
+
+            if (admitted < lo || hi < admitted) {
+              val valdesc = describeAlternatives(mkList(tvals))
+              pushErr(inj, invalidTypeMsg(inj.path, words + " of " + valdesc, typify(cval), cval, "V0310"))
+            }
+        }
+      }
+      SKIP
+    }
+  }
+
+  // Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
+  private val VALIDATE_NAMES = Seq("$TOP", "$SPEC", "$BT", "$DS", "$WHEN", "$ANNO", "$REF", "$FORMAT", "$APPLY", "$OPEN")
+
+  // Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
+  private def checknames(spec: Value, store: Value, path: Seq[Value], errs: Value): Unit =
+    refname(spec) match {
+      case Some(name) =>
+        if (unknownname(name, store))
+          setprop(errs, VNum(size(errs).toDouble), VStr("Unknown validator " + name + " at field " + pathify(mkList(path)) + "."))
+      case None =>
+        if (!(islist(spec) && refname(lookup_(spec, VNum(0.0))).contains("$EXACT")))
+          keysof(spec).foreach { key =>
+            if (ismap(spec)) checknames(VStr(key), store, path, errs)
+            checknames(lookup_(spec, VStr(key)), store, path :+ VStr(key), errs)
+          }
+    }
+
+  // R_CHECKER_NAME = ^\$[A-Z]+$
+  private def checkerName(s: String): Boolean =
+    s.length > 1 && s.charAt(0) == '$' && s.substring(1).forall(c => c >= 'A' && c <= 'Z')
+
+  // The name a whole-string reference gives, when it is a checker name in any case.
+  private def refname(v: Value): Option[String] = v match {
+    case VStr(s) => injectionFull(s).filter(n => checkerName(n.toUpperCase(java.util.Locale.ROOT)))
+    case _ => None
+  }
+
+  // Unknown: undefined and upper case, or a defined name in another case. Null disables a name.
+  private def unknownname(name: String, store: Value): Boolean = {
+    def known(n: String): Boolean = VALIDATE_NAMES.contains(n) || !isNullish(lookup_(store, VStr(n)))
+    val upper = name.toUpperCase(java.util.Locale.ROOT)
+    !known(name) && (upper == name || known(upper))
+  }
+
+  // The data value at a list directive's slot. The directive's own dparent was
+  // read with getprop, which reports a stored null as absent.
+  private def slotval(inj: Inj): Value = inj.prior match {
+    case Some(prior) => lookup_(prior.dparent, prior.key)
+    case None => inj.dparent
+  }
+
+  // JSON equality: numbers by value, lists in order, maps by key in any order.
+  private def deepequal(a: Value, b: Value): Boolean =
+    a == b || {
+      val atype = typify(a)
+      atype == typify(b) && 0 != ((T_list | T_map) & atype) && {
+        val akeys = keysof(a)
+        val bkeys = keysof(b)
+        akeys.length == bkeys.length && akeys.indices.forall { kI =>
+          val k = akeys(kI)
+          k == bkeys(kI) && deepequal(lookup_(a, VStr(k)), lookup_(b, VStr(k)))
+        }
+      }
+    }
+
+  // Every member `v` has is in `out`, unchanged. A member only `out` has is a
+  // default the spec supplied, and is ignored.
+  private def keeps(v: Value, out: Value): Boolean =
+    if (isNoval(v)) true
+    else if (0 == ((T_list | T_map) & typify(v)) || islist(v) != islist(out) || !isnode(out)) deepequal(v, out)
+    else keysof(v).forall(k => keeps(lookup_(v, VStr(k)), lookup_(out, VStr(k))))
+
+  // A spec admits a value when validating the value against it finds no error
+  // and gives back the value as it is.
+  private def admits(v: Value, spec: Value, inj: Inj, store: Value): Boolean = {
+    val terrs = emptyList()
+    val vstore = merge(mkList(Seq(emptyMap(), store)), VNum(1.0))
+    setprop(vstore, VStr(S_DTOP), v)
+    val d = new InjDef; d.dExtra = vstore; d.dErrs = terrs; d.dMeta = inj.meta
+    val out = validate(v, spec, IDef(d))
+    size(terrs) == 0 && keeps(v, out)
+  }
+
+  // The bounds of a $NOF count, and the words for it, which are absent when
+  // the count is invalid. Without a max, the bound is the number of specs.
+  private def nofcount(count: Value, numtvals: Int): (Double, Double, Option[String]) = {
+    def isnat(n: Value): Boolean = 0 < (T_integer & typify(n)) && (n match { case VNum(x) => 0.0 <= x; case _ => false })
+    def num(n: Value): Double = n match { case VNum(x) => x; case _ => 0.0 }
+
+    if (isnat(count)) {
+      val n = num(count)
+      (n, n, Some(if (n == 0.0) "none" else "exactly " + numToString(n)))
+    } else {
+      val min = lookup_(count, VStr("min"))
+      val max = lookup_(count, VStr("max"))
+
+      val valid =
+        ismap(count) &&
+          0 < size(count) &&
+          size(count) == (if (isNoval(min)) 0 else 1) + (if (isNoval(max)) 0 else 1) &&
+          (isNoval(min) || isnat(min)) &&
+          (isNoval(max) || isnat(max)) &&
+          (isNoval(min) || isNoval(max) || num(min) <= num(max))
+
+      if (!valid) (0.0, 0.0, None)
+      else {
+        val lo = if (isNoval(min)) 0.0 else num(min)
+        val hi = if (isNoval(max)) numtvals.toDouble else num(max)
+        val desc =
+          if (isNoval(max)) "at least " + numToString(lo)
+          else if (hi == 0.0) "none"
+          else if (isNoval(min)) "at most " + numToString(hi)
+          else if (lo == hi) "exactly " + numToString(lo)
+          else numToString(lo) + " to " + numToString(hi)
+        (lo, hi, Some(desc))
+      }
+    }
   }
 
   def veq(a: Value, b: Value): Boolean = (a, b) match {
@@ -1716,14 +1854,20 @@ object struct {
     Seq("$NUMBER", "$INTEGER", "$DECIMAL", "$BOOLEAN", "$NULL", "$NIL", "$MAP", "$LIST", "$FUNCTION", "$INSTANCE").foreach(k => put(k, VFunc(validateType)))
     put("$ANY", VFunc(validateAny))
     put("$CHILD", VFunc(validateChild))
-    put("$ONE", VFunc(validateOne))
     put("$EXACT", VFunc(validateExact))
+    put("$NOF", VFunc(validateNof))
+    put("$ALL", VFunc(validateAll))
     val store = merge(mkList(Seq(base, if (isNoval(extra)) emptyMap() else extra, mkMap(Seq((S_DERRS, errs))))), VNum(1.0))
     val meta = inj match { case IDef(d) if !isNoval(d.dMeta) => d.dMeta; case _ => emptyMap() }
     setprop(meta, VStr(S_BEXACT), getprop(meta, VStr(S_BEXACT), VBool(false)))
     val idef = new InjDef
     idef.dMeta = meta; idef.dExtra = store; idef.dModify = Some(validation); idef.dHandler = Some(validateHandler); idef.dErrs = errs
-    val out = transform(data, spec, IDef(idef))
+
+    // A spec that names an unknown checker validates nothing.
+    val numerrs = size(errs)
+    checknames(spec, store, Seq.empty, errs)
+
+    val out = if (numerrs < size(errs)) clone(data) else transform(data, spec, IDef(idef))
     if (size(errs) > 0 && !collect) throw StructError(join(errs, VStr(" | ")))
     out
   }
