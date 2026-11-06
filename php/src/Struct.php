@@ -81,6 +81,7 @@ class Struct
     private const S_array = 'array';
     private const S_boolean = 'boolean';
     private const S_function = 'function';
+    private const S_nil = 'nil';
     private const S_number = 'number';
     private const S_object = 'object';
     private const S_string = 'string';
@@ -168,6 +169,11 @@ class Struct
      */
     private const R_META_PATH = '/^([^$]+)\$([=~])(.+)$/';
     private const R_TRANSFORM_NAME = '/`\$([A-Z]+)`/';
+    private const R_INJECTION_FULL = '/^`(\$[A-Z]+|[^`]*)[0-9]*`$/';
+    private const R_CHECKER_NAME = '/^\$[A-Z]+$/';
+
+    // Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
+    private const VALIDATE_NAMES = ['$TOP', '$SPEC', '$BT', '$DS', '$WHEN', '$ANNO', '$REF', '$FORMAT', '$APPLY', '$OPEN'];
 
     /* =======================
      * Private Helpers
@@ -2620,6 +2626,200 @@ class Struct
             ($missing ? '' : self::typename($vt) . ': ') . $vs . '.';
     }
 
+    /**
+     * Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
+     */
+    private static function _checknames(mixed $spec, mixed $store, array $path, \ArrayObject $errs): void
+    {
+        $name = self::_refname($spec);
+        if (null !== $name) {
+            if (self::_unknownname($name, $store)) {
+                $errs[] = 'Unknown validator ' . $name . ' at field ' . self::pathify($path) . '.';
+            }
+            return;
+        }
+
+        if (self::islist($spec) && '$EXACT' === self::_refname(self::_getprop($spec, 0))) {
+            return;
+        }
+
+        foreach (self::keysof($spec) as $key) {
+            if (self::ismap($spec)) {
+                self::_checknames($key, $store, $path, $errs);
+            }
+            self::_checknames(self::_getprop($spec, $key), $store, [...$path, $key], $errs);
+        }
+    }
+
+    /**
+     * The name a whole-string reference gives, when it is a checker name in any case.
+     */
+    private static function _refname(mixed $val): ?string
+    {
+        if (
+            is_string($val)
+            && 1 === preg_match(self::R_INJECTION_FULL, $val, $m)
+            && 1 === preg_match(self::R_CHECKER_NAME, strtoupper($m[1]))
+        ) {
+            return $m[1];
+        }
+        return null;
+    }
+
+    /**
+     * Unknown: undefined and upper case, or a defined name in another case. Null disables a name.
+     */
+    private static function _unknownname(string $name, mixed $store): bool
+    {
+        $known = fn(string $n): bool => in_array($n, self::VALIDATE_NAMES, true) || null !== self::getprop($store, $n);
+        $upper = strtoupper($name);
+        return !$known($name) && ($upper === $name || $known($upper));
+    }
+
+    /**
+     * The data value at a list directive's slot, read literally so that a
+     * stored null is a value.
+     */
+    private static function _slotval(object $inj): mixed
+    {
+        $prior = $inj->prior;
+        return null === $prior ? $inj->dparent : self::_getprop($prior->dparent, $prior->key);
+    }
+
+    /**
+     * JSON equality: numbers by value, lists in order, maps by key in any order.
+     */
+    private static function _deepequal(mixed $a, mixed $b): bool
+    {
+        if ($a === $b) {
+            return true;
+        }
+
+        $atype = self::typify($a);
+        $btype = self::typify($b);
+        if (0 < (self::T_number & $atype) && 0 < (self::T_number & $btype)) {
+            return $a == $b;
+        }
+
+        if (
+            $atype !== $btype || 0 === ((self::T_list | self::T_map) & $atype)
+            || self::_isinstance($a) || self::_isinstance($b)
+        ) {
+            return false;
+        }
+
+        $akeys = self::keysof($a);
+        $bkeys = self::keysof($b);
+        if (count($akeys) !== count($bkeys)) {
+            return false;
+        }
+
+        foreach ($akeys as $kI => $k) {
+            if ($k !== $bkeys[$kI] || !self::_deepequal(self::_getprop($a, $k), self::_getprop($b, $k))) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * typify reads any object as a map; a class instance is equal only to itself.
+     */
+    private static function _isinstance(mixed $val): bool
+    {
+        return is_object($val) && !($val instanceof \stdClass) && !($val instanceof ListRef);
+    }
+
+    /**
+     * Every member val has is in out, unchanged. A member only out has is a
+     * default the spec supplied, and is ignored.
+     */
+    private static function _keeps(mixed $val, mixed $out): bool
+    {
+        if (self::undef() === $val) {
+            return true;
+        }
+
+        // out comes from validate as plain arrays, where an empty map is [] too.
+        $samekind = self::islist($val) === self::islist($out) || [] === $out;
+
+        if (
+            0 === ((self::T_list | self::T_map) & self::typify($val)) || self::_isinstance($val)
+            || !$samekind || !self::isnode($out)
+        ) {
+            return self::_deepequal($val, $out);
+        }
+
+        foreach (self::keysof($val) as $k) {
+            if (!self::_keeps(self::_getprop($val, $k), self::_getprop($out, $k))) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * A spec admits a value when validating the value against it finds no error
+     * and gives back the value as it is.
+     */
+    private static function _admits(mixed $val, mixed $spec, object $inj, mixed $store): bool
+    {
+        $vstore = array_merge((array) $store, [self::S_DTOP => $val]);
+
+        $tinj = (object) [
+            'extra' => $vstore,
+            'errs' => [],
+            'meta' => $inj->meta,
+        ];
+        $out = self::validate($val, $spec, $tinj);
+
+        return 0 === count($tinj->errs) && self::_keeps($val, $out);
+    }
+
+    /**
+     * The bounds of a $NOF count, and the words for it, which are absent when
+     * the count is invalid. Without a max, the bound is the number of specs.
+     */
+    private static function _nofcount(mixed $count, int $numtvals): array
+    {
+        $isnat = fn(mixed $n): bool => 0 < (self::T_integer & self::typify($n)) && 0 <= $n;
+
+        if ($isnat($count)) {
+            return [$count, $count, 0 === $count ? 'none' : 'exactly ' . $count];
+        }
+
+        $min = self::_getprop($count, 'min');
+        $max = self::_getprop($count, 'max');
+        $nomin = self::undef() === $min;
+        $nomax = self::undef() === $max;
+
+        $valid = self::ismap($count)
+            && 0 < self::size($count)
+            && self::size($count) === ($nomin ? 0 : 1) + ($nomax ? 0 : 1)
+            && ($nomin || $isnat($min))
+            && ($nomax || $isnat($max))
+            && ($nomin || $nomax || $min <= $max);
+
+        if (!$valid) {
+            return [0, 0, self::undef()];
+        }
+
+        $lo = $nomin ? 0 : $min;
+        $hi = $nomax ? $numtvals : $max;
+
+        $desc = $nomax
+            ? 'at least ' . $lo
+            : (0 === $hi
+                ? 'none'
+                : ($nomin
+                    ? 'at most ' . $hi
+                    : ($lo === $hi ? 'exactly ' . $lo : $lo . ' to ' . $hi)));
+
+        return [$lo, $hi, $desc];
+    }
+
     /* =======================
      * Validation Functions
      * =======================
@@ -2734,7 +2934,9 @@ class Struct
     {
         $tname = strtolower(substr($ref ?? '', 1));
         $idx = array_search($tname, self::TYPENAME);
-        $typev = ($idx !== false) ? (1 << (31 - $idx)) : 0;
+
+        // $NIL is absent or null.
+        $typev = (($idx !== false) ? (1 << (31 - $idx)) : 0) | (self::S_nil === $tname ? self::T_null : 0);
         $out = self::_getprop($inj->dparent, $inj->key);
 
         $t = self::typify($out);
@@ -2872,95 +3074,6 @@ class Struct
     }
 
     /**
-     * Match at least one of the specified shapes.
-     * Syntax: ['`$ONE`', alt0, alt1, ...]
-     */
-    public static function validate_ONE(
-        object $inj,
-        mixed $_val,
-        string $_ref,
-        mixed $store
-    ): mixed {
-        $mode = $inj->mode;
-        $parent = $inj->parent;
-        $keyI = $inj->keyI;
-
-        // Only operate in val mode, since parent is a list.
-        if (self::M_VAL === $mode) {
-            if (!self::islist($parent) || 0 !== $keyI) {
-                $inj->errs[] = 'The $ONE validator at field ' .
-                    self::pathify($inj->path, 1, 1) .
-                    ' must be the first element of an array.';
-                return self::undef();
-            }
-
-            $inj->keyI = count($inj->keys ?? []);
-
-            // Clean up structure, replacing [$ONE, ...] with current
-            $inj->setval($inj->dparent, 2);
-
-            $inj->path = self::slice($inj->path, 0, -1);
-
-            $tvals = self::slice($parent, 1);
-            if (0 === count($tvals)) {
-                $inj->errs[] = 'The $ONE validator at field ' .
-                    self::pathify($inj->path, 1, 1) .
-                    ' must have at least one argument.';
-                return self::undef();
-            }
-
-            // See if we can find a match.
-            foreach ($tvals as $tval) {
-                // If match, then errs.length = 0
-                $vstore = array_merge((array) $store, [self::S_DTOP => $inj->dparent]);
-
-                $tinj = (object) [
-                    'extra' => $vstore,
-                    'errs' => [],
-                    'meta' => $inj->meta,
-                ];
-                $vcurrent = self::validate($inj->dparent, $tval, $tinj);
-                $terrs = $tinj->errs;
-
-                // -2, not 2. `setval` branches on `$ancestor < 2`, so a
-                // NEGATIVE ancestor selects the immediate-parent branch;
-                // 2 selects the ancestor branch and writes
-                // setprop(nodes[-2], path[-2], val) - and path[-2] here is
-                // `$TOP`, so the store key landed in the public result.
-                // Canonical passes -2 at this one site (StructUtility.ts:2230)
-                // and +2 at the other three; this port had 2 everywhere.
-                $inj->setval($vcurrent, -2);
-
-                // Accept current value if there was a match
-                if (0 === count($terrs)) {
-                    return self::undef();
-                }
-            }
-
-            // There was no match.
-            $tvArr = ($tvals instanceof ListRef) ? $tvals->list : (is_array($tvals) ? $tvals : []);
-            $valdesc = implode(', ', array_map(fn($v) => self::stringify($v), $tvArr));
-            // Lowercase the NAME, not the whole string. R_TRANSFORM_NAME matches
-            // `$([A-Z]+)`, so lowercasing first made it stop matching and left
-            // the raw `$string` spelling in the message.
-            $valdesc = preg_replace_callback(
-                self::R_TRANSFORM_NAME,
-                fn(array $m): string => strtolower($m[1]),
-                $valdesc
-            );
-
-            $inj->errs[] = self::_invalidTypeMsg(
-                $inj->path,
-                (1 < count($tvals) ? 'one of ' : '') . $valdesc,
-                self::typify($inj->dparent),
-                $inj->dparent
-            );
-        }
-
-        return self::undef();
-    }
-
-    /**
      * Match exactly one of the specified values.
      */
     public static function validate_EXACT(object $inj): mixed
@@ -2979,35 +3092,26 @@ class Struct
                 return self::undef();
             }
 
+            $cval = self::_slotval($inj);
+
             $inj->keyI = count($inj->keys ?? []);
 
-            // Clean up structure, replacing [$EXACT, ...] with current data parent
-            $inj->setval($inj->dparent, 2);
+            // Replace [$EXACT, ...] with the data value; SKIP keeps inject off the detached list.
+            $inj->setval($cval, 2);
 
             $inj->path = self::slice($inj->path, 0, count($inj->path) - 1);
-            $inj->key = self::getelem($inj->path, -1);
 
             $tvals = self::slice($parent, 1);
             if (0 === count($tvals)) {
                 $inj->errs[] = 'The $EXACT validator at field ' .
                     self::pathify($inj->path, 1, 1) .
                     ' must have at least one argument.';
-                return self::undef();
+                return self::SKIP;
             }
 
-            // See if we can find an exact value match.
-            $currentstr = null;
             foreach ($tvals as $tval) {
-                $exactmatch = $tval === $inj->dparent;
-
-                if (!$exactmatch && self::isnode($tval)) {
-                    $currentstr = $currentstr ?? self::stringify($inj->dparent);
-                    $tvalstr = self::stringify($tval);
-                    $exactmatch = $tvalstr === $currentstr;
-                }
-
-                if ($exactmatch) {
-                    return self::undef();
+                if (self::_deepequal($tval, $cval)) {
+                    return self::SKIP;
                 }
             }
 
@@ -3026,14 +3130,114 @@ class Struct
                 $inj->path,
                 (1 < count($inj->path) ? '' : 'value ') .
                 'exactly equal to ' . (1 === count($tvals) ? '' : 'one of ') . $valdesc,
-                self::typify($inj->dparent),
-                $inj->dparent
+                self::typify($cval),
+                $cval
             );
+
+            return self::SKIP;
         } else {
             self::delprop($parent, $key);
         }
 
         return self::undef();
+    }
+
+    /**
+     * Count the specs that admit the value: ['`$NOF`', count, spec, ...], where
+     * count is an integer, or a map holding min, max or both.
+     */
+    public static function validate_NOF(object $inj, mixed $_val, string $_ref, mixed $store): mixed
+    {
+        return self::_validatecount($inj, $store, '$NOF', true);
+    }
+
+    /**
+     * Every spec admits the value: ['`$ALL`', spec, ...].
+     */
+    public static function validate_ALL(object $inj, mixed $_val, string $_ref, mixed $store): mixed
+    {
+        return self::_validatecount($inj, $store, '$ALL', false);
+    }
+
+    /**
+     * The counting list directives. Without a count, every spec has to admit.
+     */
+    private static function _validatecount(object $inj, mixed $store, string $name, bool $counted): mixed
+    {
+        $mode = $inj->mode;
+        $parent = $inj->parent;
+        $keyI = $inj->keyI;
+
+        if (self::M_VAL !== $mode) {
+            return self::undef();
+        }
+
+        if (!self::islist($parent) || 0 !== $keyI) {
+            $inj->errs[] = 'The ' . $name . ' validator at field ' .
+                self::pathify($inj->path, 1, 1) .
+                ' must be the first element of an array.';
+            return self::undef();
+        }
+
+        $cval = self::_slotval($inj);
+
+        $inj->keyI = count($inj->keys ?? []);
+
+        // Replace the directive's list with the data value. Each return is SKIP, so
+        // that inject leaves the detached list alone and validates nothing in it.
+        $inj->setval($cval, 2);
+
+        $inj->path = self::slice($inj->path, -1);
+
+        $count = $counted ? self::_getprop($parent, 1) : self::undef();
+        $tvals = self::slice($parent, $counted ? 2 : 1);
+        $tvArr = ($tvals instanceof ListRef) ? $tvals->list : (is_array($tvals) ? $tvals : []);
+        $numtvals = count($tvArr);
+        $field = 'The ' . $name . ' validator at field ' . self::pathify($inj->path, 1);
+
+        if (0 === $numtvals) {
+            $inj->errs[] = $field . ($counted ? ' must have a count and' : ' must have') . ' at least one argument.';
+            return self::SKIP;
+        }
+
+        [$lo, $hi, $countdesc] = $counted ? self::_nofcount($count, $numtvals) : [$numtvals, $numtvals, 'all'];
+
+        if (self::undef() === $countdesc) {
+            $inj->errs[] = $field . ' has an invalid count: ' . self::stringify($count) . '.';
+            return self::SKIP;
+        }
+
+        $admitted = 0;
+        for ($tI = 0; $tI < $numtvals; $tI++) {
+            $left = $numtvals - $tI;
+
+            // Stop once the specs left cannot change the verdict.
+            if ($hi < $admitted || $admitted + $left < $lo || ($lo <= $admitted && $admitted + $left <= $hi)) {
+                break;
+            }
+
+            if (self::_admits($cval, $tvArr[$tI], $inj, $store)) {
+                $admitted++;
+            }
+        }
+
+        if ($admitted < $lo || $hi < $admitted) {
+            $valdesc = implode(', ', array_map(fn($v) => self::stringify($v), $tvArr));
+            $valdesc = preg_replace_callback(
+                self::R_TRANSFORM_NAME,
+                fn(array $m): string => strtolower($m[1]),
+                $valdesc
+            );
+
+            $inj->errs[] = self::_invalidTypeMsg(
+                $inj->path,
+                $countdesc . ' of ' . $valdesc,
+                self::typify($cval),
+                $cval
+            );
+        }
+
+        return self::SKIP;
     }
 
     /**
@@ -3222,8 +3426,9 @@ class Struct
                 '$INSTANCE' => [self::class, 'validate_TYPE'],
                 '$ANY' => [self::class, 'validate_ANY'],
                 '$CHILD' => [self::class, 'validate_CHILD'],
-                '$ONE' => [self::class, 'validate_ONE'],
                 '$EXACT' => [self::class, 'validate_EXACT'],
+                '$NOF' => [self::class, 'validate_NOF'],
+                '$ALL' => [self::class, 'validate_ALL'],
             ],
             (array) ($extra ?? []),
             [
@@ -3246,7 +3451,14 @@ class Struct
             $transformOpts->meta = $meta;
         }
         $transformOpts->errs = $errs;
-        $out = self::transform($data, $spec, $transformOpts);
+
+        // A spec that names an unknown checker validates nothing.
+        $numerrs = count($errs);
+        self::_checknames($spec, $store, [], $errs);
+
+        $out = $numerrs < count($errs)
+            ? self::_stdClassToArray(self::cloneUnwrap($data))
+            : self::transform($data, $spec, $transformOpts);
 
         // Unwrap shared ArrayObject back to a plain array on the caller's injdef
         // so count()/foreach work as callers (including select) expect.

@@ -1002,14 +1002,6 @@ class StructTest extends TestCase
         );
     }
 
-    public function testValidateOne(): void
-    {
-        $this->testSet(
-            $this->testSpec->validate->one,
-            fn($vin) => Struct::validate(self::vin($vin, 'data'), self::vin($vin, 'spec'))
-        );
-    }
-
     public function testValidateExact(): void
     {
         $this->testSet(
@@ -1040,6 +1032,42 @@ class StructTest extends TestCase
         $this->testSet(
             $this->testSpec->validate->special,
             fn($vin) => Struct::validate(self::vin($vin, 'data'), self::vin($vin, 'spec'), self::vin($vin, 'inj'))
+        );
+    }
+
+    public function testValidateDirective(): void
+    {
+        $this->testSet(
+            $this->testSpec->validate->directive,
+            fn($vin) => Struct::validate(self::vin($vin, 'data'), self::vin($vin, 'spec')),
+            ['null' => false]
+        );
+    }
+
+    public function testValidateNof(): void
+    {
+        $this->testSet(
+            $this->testSpec->validate->nof,
+            fn($vin) => Struct::validate(self::vin($vin, 'data'), self::vin($vin, 'spec')),
+            ['null' => false]
+        );
+    }
+
+    public function testValidateAll(): void
+    {
+        $this->testSet(
+            $this->testSpec->validate->all,
+            fn($vin) => Struct::validate(self::vin($vin, 'data'), self::vin($vin, 'spec')),
+            ['null' => false]
+        );
+    }
+
+    public function testValidateUnknown(): void
+    {
+        $this->testSet(
+            $this->testSpec->validate->unknown,
+            fn($vin) => Struct::validate(self::vin($vin, 'data'), self::vin($vin, 'spec')),
+            ['null' => false]
         );
     }
 
