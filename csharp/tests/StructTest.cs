@@ -1211,18 +1211,6 @@ public class StructTests
     }
 
     [Fact]
-    public void ValidateOne()
-    {
-        var validateSpec = (_spec["validate"] as Dictionary<string,object?>)?["one"] as Dictionary<string, object?>;
-        _pack.RunSetMap(validateSpec, input =>
-        {
-            object? data = input?.GetValueOrDefault("data");
-            object? spec = input?.GetValueOrDefault("spec");
-            return StructUtils.Validate(data, spec);
-        }, flags: Omni.Nulls);
-    }
-
-    [Fact]
     public void ValidateExact()
     {
         var validateSpec = (_spec["validate"] as Dictionary<string,object?>)?["exact"] as Dictionary<string, object?>;
@@ -1252,9 +1240,10 @@ public class StructTests
         }
         Dictionary<string, object?> AllNull() =>
             Spec().Keys.ToDictionary(k => k, k => (object?)null);
-        object? OneSpec() => new Dictionary<string, object?>
+        object? NofSpec() => new Dictionary<string, object?>
         {
-            ["a"] = new List<object?> { "`$ONE`", 5L, "`$STRING`" },
+            ["a"] = new List<object?> {
+                "`$NOF`", new Dictionary<string, object?> { ["min"] = 1L }, 5L, "`$STRING`" },
         };
 
         var valid = new (string name, Func<object?> data, Func<object?> spec, Func<object?> expected)[]
@@ -1279,17 +1268,11 @@ public class StructTests
             ("null-list", () => new Dictionary<string, object?> { ["tags"] = null },
                 () => new Dictionary<string, object?> { ["tags"] = new List<object?> { "a", "b" } },
                 () => new Dictionary<string, object?> { ["tags"] = new List<object?> { "a", "b" } }),
-            ("one-null", () => new Dictionary<string, object?> { ["a"] = null }, OneSpec,
-                () => new Dictionary<string, object?> { ["a"] = null }),
-            ("one-absent", () => new Dictionary<string, object?>(), OneSpec,
+            ("nof-absent", () => new Dictionary<string, object?>(), NofSpec,
                 () => new Dictionary<string, object?>()),
-            ("one-null-map", () => new Dictionary<string, object?> { ["m"] = null },
-                () => new Dictionary<string, object?> { ["m"] = OneSpec() },
+            ("nof-null-map", () => new Dictionary<string, object?> { ["m"] = null },
+                () => new Dictionary<string, object?> { ["m"] = NofSpec() },
                 () => new Dictionary<string, object?> { ["m"] = new Dictionary<string, object?>() }),
-            ("one-list-null", () => new Dictionary<string, object?> { ["a"] = new List<object?> { null } },
-                () => new Dictionary<string, object?> { ["a"] = new List<object?> {
-                    new List<object?> { "`$ONE`", "`$STRING`", 7L } } },
-                () => new Dictionary<string, object?> { ["a"] = new List<object?>() }),
         };
         var wrong = new List<string>();
         foreach (var (name, data, spec, expected) in valid)
@@ -1318,6 +1301,12 @@ public class StructTests
             new Dictionary<string, object?> { ["value"] = new List<object?> { "`$EXACT`", "yes" } }));
         invalid.Add(("exact-absent", new Dictionary<string, object?>(),
             new Dictionary<string, object?> { ["value"] = new List<object?> { "`$EXACT`", "yes" } }));
+
+        // A $NOF spec admits a null only as it is, so a spec default for it does not.
+        invalid.Add(("nof-null", new Dictionary<string, object?> { ["a"] = null }, NofSpec()));
+        invalid.Add(("nof-list-null", new Dictionary<string, object?> { ["a"] = new List<object?> { null } },
+            new Dictionary<string, object?> { ["a"] = new List<object?> { new List<object?> {
+                "`$NOF`", new Dictionary<string, object?> { ["min"] = 1L }, "`$STRING`", 7L } } }));
         foreach (var (name, data, spec) in invalid)
         {
             Assert.True(Throws(() => StructUtils.Validate(data, spec)), name + " was accepted");
@@ -1325,7 +1314,8 @@ public class StructTests
     }
 
     // The typescript reference reads a null spec value and a null data value
-    // through getprop, so each counts as no value.
+    // through getprop, so each counts as no value. A list directive reads its
+    // slot as it is, so there a null is a value.
     [Fact]
     public void ValidateNullReadsAsNoValue()
     {
@@ -1346,8 +1336,12 @@ public class StructTests
             new Dictionary<string, object?> { ["a"] = null },
             new Dictionary<string, object?> { ["a"] = null }, Exact())));
 
-        var err = Assert.Throws<InvalidOperationException>(() => StructUtils.Validate(
+        Assert.Equal("{\"v\":null}", Canon(StructUtils.Validate(
             new Dictionary<string, object?> { ["v"] = null },
+            new Dictionary<string, object?> { ["v"] = new List<object?> { "`$EXACT`", null } })));
+
+        var err = Assert.Throws<InvalidOperationException>(() => StructUtils.Validate(
+            new Dictionary<string, object?>(),
             new Dictionary<string, object?> { ["v"] = new List<object?> { "`$EXACT`", null } }));
         Assert.Contains("Expected field v to be exactly equal to null, but found no value.", err.Message);
     }
@@ -1399,6 +1393,112 @@ public class StructTests
             }
             return StructUtils.Validate(data, spec, injdef);
         }, flags: Omni.Nulls);
+    }
+
+    [Fact]
+    public void ValidateDirective()
+    {
+        var validateSpec = (_spec["validate"] as Dictionary<string,object?>)?["directive"] as Dictionary<string, object?>;
+        _pack.RunSetMap(validateSpec, input =>
+        {
+            object? data = input?.GetValueOrDefault("data");
+            object? spec = input?.GetValueOrDefault("spec");
+            return StructUtils.Validate(data, spec);
+        }, flags: Omni.NoNulls);
+    }
+
+    [Fact]
+    public void ValidateNof()
+    {
+        var validateSpec = (_spec["validate"] as Dictionary<string,object?>)?["nof"] as Dictionary<string, object?>;
+        _pack.RunSetMap(validateSpec, input =>
+        {
+            object? data = input?.GetValueOrDefault("data");
+            object? spec = input?.GetValueOrDefault("spec");
+            return StructUtils.Validate(data, spec);
+        }, flags: Omni.NoNulls);
+    }
+
+    [Fact]
+    public void ValidateAll()
+    {
+        var validateSpec = (_spec["validate"] as Dictionary<string,object?>)?["all"] as Dictionary<string, object?>;
+        _pack.RunSetMap(validateSpec, input =>
+        {
+            object? data = input?.GetValueOrDefault("data");
+            object? spec = input?.GetValueOrDefault("spec");
+            return StructUtils.Validate(data, spec);
+        }, flags: Omni.NoNulls);
+    }
+
+    [Fact]
+    public void ValidateUnknown()
+    {
+        var validateSpec = (_spec["validate"] as Dictionary<string,object?>)?["unknown"] as Dictionary<string, object?>;
+        _pack.RunSetMap(validateSpec, input =>
+        {
+            object? data = input?.GetValueOrDefault("data");
+            object? spec = input?.GetValueOrDefault("spec");
+            return StructUtils.Validate(data, spec);
+        }, flags: Omni.NoNulls);
+    }
+
+    [Fact]
+    public void ValidateUnknownEdge()
+    {
+        // Only the unknown name is reported, and the data comes back as it is.
+        var errs = new List<object?>();
+        var data = new Dictionary<string, object?> { ["a"] = "x" };
+        object? out_ = StructUtils.Validate(data, new Dictionary<string, object?>
+        {
+            ["a"] = new List<object?> { "`$ONE`", "`$STRING`", "`$NIL`" },
+        }, new InjectState { Errs = errs });
+        Assert.Equal(new List<object?> { "Unknown validator $ONE at field a.0." }, errs);
+        Assert.True(Omni.DeepEqual(data, out_));
+
+        // A checker supplied in extra is defined, in any case.
+        Injector even = (inj, val, refStr, store) =>
+        {
+            object? n = StructUtils.GetProp(inj.DParent, inj.Key);
+            if (0 != Convert.ToInt64(n) % 2)
+            {
+                inj.Errs!.Add("Odd at " + string.Join(".", inj.Path.Skip(1)) + ": " + n);
+            }
+            return n;
+        };
+
+        errs = [];
+        Assert.Equal("{\"n\":2}", Canon(StructUtils.Validate(
+            new Dictionary<string, object?> { ["n"] = 2L },
+            new Dictionary<string, object?> { ["n"] = "`$EVEN`" },
+            new InjectState { Extra = new Dictionary<string, object?> { ["$EVEN"] = even }, Errs = errs })));
+        Assert.Equal("{\"n\":3}", Canon(StructUtils.Validate(
+            new Dictionary<string, object?> { ["n"] = 3L },
+            new Dictionary<string, object?> { ["n"] = "`$even`" },
+            new InjectState { Extra = new Dictionary<string, object?> { ["$even"] = even }, Errs = errs })));
+        Assert.Equal(new List<object?> { "Odd at n: 3" }, errs);
+
+        // A null in extra takes a checker away.
+        errs = [];
+        StructUtils.Validate("x", "`$STRING`",
+            new InjectState { Extra = new Dictionary<string, object?> { ["$STRING"] = null }, Errs = errs });
+        Assert.Equal(new List<object?> { "Unknown validator $STRING at field <root>." }, errs);
+    }
+
+    // A null that $ANY, $NULL or $NIL accepts stays in place, beside other
+    // keys and inside a list, as the typescript reference has it.
+    [Fact]
+    public void ValidateKeepsAcceptedNull()
+    {
+        foreach (var name in new[] { "`$ANY`", "`$NULL`", "`$NIL`" })
+        {
+            Assert.Equal("{\"a\":null,\"b\":\"x\"}", Canon(StructUtils.Validate(
+                new Dictionary<string, object?> { ["a"] = null, ["b"] = "x" },
+                new Dictionary<string, object?> { ["a"] = name, ["b"] = "`$STRING`" })));
+            Assert.Equal("[null,\"x\"]", Canon(StructUtils.Validate(
+                new List<object?> { null, "x" },
+                new List<object?> { name, "`$STRING`" })));
+        }
     }
 
     // ── select ───────────────────────────────────────────────────────────────

@@ -317,6 +317,7 @@ namespace Voxgig.Struct
         private static readonly Regex R_DOUBLE_DOLLAR = R_DoubleDollarGen();
         private static readonly Regex R_META_PATH = R_MetaPathGen();
         private static readonly Regex R_TRANSFORM_NAME = R_TransformNameGen();
+        private static readonly Regex R_CHECKER_NAME = R_CheckerNameGen();
         private static readonly Regex R_DOT = R_DotGen();
 
         public const int MAXDEPTH = 32;
@@ -2815,7 +2816,9 @@ namespace Voxgig.Struct
         {
             string tname = refStr != null && refStr.Length > 1 ? refStr[1..].ToLowerInvariant() : "";
             int idx = Array.IndexOf(TYPENAME, tname);
-            int typev = idx >= 0 ? (1 << (31 - idx)) : 0;
+
+            // $NIL is absent or null.
+            int typev = (idx >= 0 ? (1 << (31 - idx)) : 0) | (S_nil == tname ? T.Null : 0);
 
             bool keyExists = TryGetDataValue(inj.DParent, inj.Key, out object? out_);
             int t = keyExists ? Typify(out_) : T.NoVal;
@@ -2826,12 +2829,20 @@ namespace Voxgig.Struct
                 return NONE;
             }
 
-            return out_;
+            return keyExists && null == out_ ? _KeepNull(inj) : out_;
         };
 
         // Allow any value without type check.
         private static readonly Injector _ValidateAny = (inj, val, refStr, store) =>
-            GetProp(inj.DParent, inj.Key);
+            TryGetDataValue(inj.DParent, inj.Key, out object? out_) && null == out_ ? _KeepNull(inj) : out_;
+
+        // Keep an accepted null in place: SetVal deletes on null, which in a list
+        // shifts the elements after it. Validation has nothing to check for a null.
+        private static Dictionary<string, object?> _KeepNull(InjectState inj)
+        {
+            SetProp(inj.Parent, inj.Key, null);
+            return SKIP;
+        }
 
         // Validate every child of a map or list against a template.
         private static readonly Injector _ValidateChild = (inj, val, refStr, store) =>
@@ -2924,76 +2935,6 @@ namespace Voxgig.Struct
             return NONE;
         };
 
-        // Match at least one of the provided alternatives.
-        private static readonly Injector _ValidateOne = (inj, val, refStr, store) =>
-        {
-            if (M_VAL != inj.Mode)
-            {
-                return null;
-            }
-
-            if (!IsList(inj.Parent) || 0 != inj.KeyI)
-            {
-                inj.Errs.Add("The $ONE validator at field " +
-                    Pathify(inj.Path, 1, 1) +
-                    " must be the first element of an array.");
-                return null;
-            }
-
-            inj.KeyI = Size(inj.Keys);
-
-            inj.SetVal(inj.DParent, 2);
-            inj.Path = (List<object?>)Slice(inj.Path, -1)!;
-
-            var tvals = (List<object?>)Slice(inj.Parent, 1)!;
-            if (0 == Size(tvals))
-            {
-                inj.Errs.Add("The $ONE validator at field " +
-                    Pathify(inj.Path, 1, 1) +
-                    " must have at least one argument.");
-                return null;
-            }
-
-            // GetProp answers null for a missing key where ts hands the nested
-            // call `undefined`, so `$NIL` rejected every optional entry the
-            // caller omitted and no default client could be constructed.
-            object? dval = inj.DParent ?? NONE;
-
-            foreach (object? tval in tvals)
-            {
-                var terrs = new List<object?>();
-                var vstore = (Dictionary<string, object?>)Merge(
-                    new List<object?> { new Dictionary<string, object?>(), store }, 1)!;
-                vstore[S_DTOP] = dval;
-
-                object? vcurrent = Validate(dval, tval, new InjectState
-                {
-                    Extra = vstore,
-                    Errs = terrs,
-                    Meta = inj.Meta,
-                });
-
-                inj.SetVal(vcurrent, -2);
-
-                if (0 == Size(terrs))
-                {
-                    return null;
-                }
-            }
-
-            // No match found.
-            string valdesc = R_TRANSFORM_NAME.Replace(
-                Join(Items(tvals, n => (object?)Stringify(n[1])), ", "),
-                m => m.Groups[1].Value.ToLowerInvariant());
-
-            inj.Errs.Add(_InvalidTypeMsg(
-                inj.Path,
-                (1 < Size(tvals) ? "one of " : "") + valdesc,
-                Typify(inj.DParent), inj.DParent));
-
-            return null;
-        };
-
         // Match one of the provided exact values.
         private static readonly Injector _ValidateExact = (inj, val, refStr, store) =>
         {
@@ -3007,11 +2948,14 @@ namespace Voxgig.Struct
                     return null;
                 }
 
+                object? cval = _SlotVal(inj);
+
                 inj.KeyI = Size(inj.Keys);
 
-                inj.SetVal(inj.DParent, 2);
+                // Replace [$EXACT, ...] with the data value; SKIP keeps inject off the detached list.
+                _SetSlot(inj, cval);
+
                 inj.Path = (List<object?>)Slice(inj.Path, 0, -1)!;
-                inj.Key = StrKey(GetElem(inj.Path, -1)) ?? S_MT;
 
                 var tvals = (List<object?>)Slice(inj.Parent, 1)!;
                 if (0 == Size(tvals))
@@ -3019,23 +2963,14 @@ namespace Voxgig.Struct
                     inj.Errs.Add("The $EXACT validator at field " +
                         Pathify(inj.Path, 1, 1) +
                         " must have at least one argument.");
-                    return null;
+                    return SKIP;
                 }
 
-                // TS descends through getprop, so a null data value is NONE here.
-                object? current = inj.DParent ?? NONE;
-                string? currentStr = null;
                 foreach (object? tval in tvals)
                 {
-                    bool exactMatch = Equals(tval, current);
-                    if (!exactMatch && IsNode(tval))
+                    if (_DeepEqual(tval, cval))
                     {
-                        currentStr ??= Stringify(current);
-                        exactMatch = Stringify(tval) == currentStr;
-                    }
-                    if (exactMatch)
-                    {
-                        return null;
+                        return SKIP;
                     }
                 }
 
@@ -3047,15 +2982,100 @@ namespace Voxgig.Struct
                     inj.Path,
                     (1 < Size(inj.Path) ? "" : "value ") +
                     "exactly equal to " + (1 == Size(tvals) ? "" : "one of ") + valdesc,
-                    Typify(current), current));
-            }
-            else
-            {
-                DelProp(inj.Parent, inj.Key);
+                    Typify(cval), cval));
+
+                return SKIP;
             }
 
+            DelProp(inj.Parent, inj.Key);
             return null;
         };
+
+        // Count the specs that admit the value: ['`$NOF`', count, spec, ...], where
+        // count is an integer, or a map holding min, max or both.
+        private static readonly Injector _ValidateNof = (inj, val, refStr, store) =>
+            _ValidateCount(inj, store, "$NOF", true);
+
+        // Every spec admits the value: ['`$ALL`', spec, ...].
+        private static readonly Injector _ValidateAll = (inj, val, refStr, store) =>
+            _ValidateCount(inj, store, "$ALL", false);
+
+        // The counting list directives. Without a count, every spec has to admit.
+        private static object? _ValidateCount(InjectState inj, object? store, string name, bool counted)
+        {
+            if (M_VAL != inj.Mode)
+            {
+                return NONE;
+            }
+
+            if (!IsList(inj.Parent) || 0 != inj.KeyI)
+            {
+                inj.Errs.Add("The " + name + " validator at field " +
+                    Pathify(inj.Path, 1, 1) +
+                    " must be the first element of an array.");
+                return NONE;
+            }
+
+            object? cval = _SlotVal(inj);
+
+            inj.KeyI = Size(inj.Keys);
+
+            // Replace the directive's list with the data value. Each return is SKIP, so
+            // that inject leaves the detached list alone and validates nothing in it.
+            _SetSlot(inj, cval);
+
+            inj.Path = (List<object?>)Slice(inj.Path, -1)!;
+
+            object? count = counted ? Lookup(inj.Parent, 1) : NONE;
+            var tvals = (List<object?>)Slice(inj.Parent, counted ? 2 : 1)!;
+            int numtvals = Size(tvals);
+            string field = "The " + name + " validator at field " + Pathify(inj.Path, 1);
+
+            if (0 == numtvals)
+            {
+                inj.Errs.Add(field + (counted ? " must have a count and" : " must have") +
+                    " at least one argument.");
+                return SKIP;
+            }
+
+            var (lo, hi, countdesc) = counted
+                ? _NofCount(count, numtvals)
+                : (numtvals, numtvals, "all");
+
+            if (null == countdesc)
+            {
+                inj.Errs.Add(field + " has an invalid count: " + Stringify(count) + ".");
+                return SKIP;
+            }
+
+            int admitted = 0;
+            for (int tI = 0; tI < numtvals; tI++)
+            {
+                int left = numtvals - tI;
+
+                // Stop once the specs left cannot change the verdict.
+                if (hi < admitted || admitted + left < lo || (lo <= admitted && admitted + left <= hi))
+                {
+                    break;
+                }
+
+                if (_Admits(cval, tvals[tI], inj, store))
+                {
+                    admitted++;
+                }
+            }
+
+            if (admitted < lo || hi < admitted)
+            {
+                string valdesc = R_TRANSFORM_NAME.Replace(
+                    Join(Items(tvals, n => (object?)Stringify(n[1])), ", "),
+                    m => m.Groups[1].Value.ToLowerInvariant());
+
+                inj.Errs.Add(_InvalidTypeMsg(inj.Path, countdesc + " of " + valdesc, Typify(cval), cval));
+            }
+
+            return SKIP;
+        }
 
         // True if key exists on node (JSON null counts as present); sets value when present.
         private static bool TryGetDataValue(object? node, object? key, out object? value)
@@ -3116,7 +3136,7 @@ namespace Voxgig.Struct
 
             // TS's getprop answers NONE for a null value too, so a null keeps
             // the spec default exactly as an absent key does, and so does a
-            // NONE that a $ONE alternative passes down.
+            // NONE that a $NOF or $ALL trial passes down.
             if (!exact && (!cKeyExists || cval == null || ReferenceEquals(cval, NONE)))
             {
                 return null;
@@ -3292,8 +3312,9 @@ namespace Voxgig.Struct
                     ["$INSTANCE"] = _ValidateType,
                     ["$ANY"]      = _ValidateAny,
                     ["$CHILD"]    = _ValidateChild,
-                    ["$ONE"]      = _ValidateOne,
                     ["$EXACT"]    = _ValidateExact,
+                    ["$NOF"]      = _ValidateNof,
+                    ["$ALL"]      = _ValidateAll,
 
                     [S_DERRS] = errs,
                 },
@@ -3306,20 +3327,260 @@ namespace Voxgig.Struct
             var meta = injdef?.Meta ?? [];
             SetProp(meta, S_BEXACT, GetProp(meta, S_BEXACT) ?? false);
 
+            // A spec that names an unknown checker validates nothing.
+            int numerrs = errs.Count;
+            _CheckNames(spec, store, [], errs);
+
             // Pass errs explicitly so Transform collects (doesn't throw) internally.
-            object? out_ = Transform(data, spec, new InjectState
-            {
-                Extra = store,
-                ModifyFn = _Validation,
-                Handler = _ValidateHandler,
-                Meta = meta,
-                Errs = errs,
-            });
+            object? out_ = numerrs < errs.Count
+                ? Clone(data)
+                : Transform(data, spec, new InjectState
+                {
+                    Extra = store,
+                    ModifyFn = _Validation,
+                    Handler = _ValidateHandler,
+                    Meta = meta,
+                    Errs = errs,
+                });
 
             return errs.Count > 0 && !collect
                 ? throw new InvalidOperationException(
                     string.Join(" | ", errs.Select(e => e?.ToString() ?? "")))
                 : out_;
+        }
+
+        // Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
+        private static readonly string[] VALIDATE_NAMES =
+        [
+            "$TOP",
+            "$SPEC",
+            "$BT",
+            "$DS",
+            "$WHEN",
+            "$ANNO",
+            "$REF",
+            "$FORMAT",
+            "$APPLY",
+            "$OPEN",
+        ];
+
+        // Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
+        private static void _CheckNames(object? spec, object? store, List<object?> path, List<object?> errs)
+        {
+            string? name = _RefName(spec);
+            if (null != name)
+            {
+                if (_UnknownName(name, store))
+                {
+                    errs.Add("Unknown validator " + name + " at field " + Pathify(path) + ".");
+                }
+                return;
+            }
+
+            if (IsList(spec) && "$EXACT" == _RefName(Lookup(spec, 0)))
+            {
+                return;
+            }
+
+            foreach (string key in KeysOf(spec))
+            {
+                if (IsMap(spec))
+                {
+                    _CheckNames(key, store, path, errs);
+                }
+                _CheckNames(Lookup(spec, key), store, [.. path, key], errs);
+            }
+        }
+
+        // The name a whole-string reference gives, when it is a checker name in any case.
+        private static string? _RefName(object? val)
+        {
+            Match? m = val is string s ? R_INJECTION_FULL.Match(s) : null;
+            return null != m && m.Success && R_CHECKER_NAME.IsMatch(m.Groups[1].Value.ToUpperInvariant())
+                ? m.Groups[1].Value
+                : null;
+        }
+
+        // Unknown: undefined and upper case, or a defined name in another case. Null disables a name.
+        private static bool _UnknownName(string name, object? store)
+        {
+            bool Known(string n)
+            {
+                object? v = Lookup(store, n);
+                return 0 <= Array.IndexOf(VALIDATE_NAMES, n) || (null != v && !ReferenceEquals(v, NONE));
+            }
+
+            string upper = name.ToUpperInvariant();
+            return !Known(name) && (upper == name || Known(upper));
+        }
+
+        // The data value at a list directive's slot. The directive's own DParent was
+        // read with GetProp, which reports a stored null as absent.
+        private static object? _SlotVal(InjectState inj)
+        {
+            InjectState? prior = inj.Prior;
+            return null == prior ? inj.DParent : Lookup(prior.DParent, prior.Key);
+        }
+
+        // Set the slot that holds a list directive, as setval(val, 2) does. SetVal
+        // deletes on null, and a null at the slot is a value.
+        private static void _SetSlot(InjectState inj, object? val)
+        {
+            if (null == val)
+            {
+                SetProp(GetElem(inj.Nodes, -2), GetElem(inj.Path, -2), null);
+            }
+            else
+            {
+                inj.SetVal(val, 2);
+            }
+        }
+
+        // JSON equality: numbers by value, lists in order, maps by key in any order.
+        // A boolean is never a number, and a function or instance equals only itself.
+        private static bool _DeepEqual(object? a, object? b)
+        {
+            if (ReferenceEquals(a, b))
+            {
+                return true;
+            }
+
+            if (a is int or long or double or float && b is int or long or double or float)
+            {
+                return Convert.ToDouble(a, CultureInfo.InvariantCulture) ==
+                    Convert.ToDouble(b, CultureInfo.InvariantCulture);
+            }
+
+            if (a is string or bool)
+            {
+                return a.Equals(b);
+            }
+
+            if (!(IsList(a) && IsList(b)) && !(IsMap(a) && IsMap(b)))
+            {
+                return false;
+            }
+
+            var akeys = KeysOf(a);
+            var bkeys = KeysOf(b);
+            if (akeys.Count != bkeys.Count)
+            {
+                return false;
+            }
+
+            for (int kI = 0; kI < akeys.Count; kI++)
+            {
+                string k = akeys[kI];
+                if (k != bkeys[kI] || !_DeepEqual(Lookup(a, k), Lookup(b, k)))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        // Every member val has is in out, unchanged. A member only out has is a
+        // default the spec supplied, and is ignored.
+        private static bool _Keeps(object? val, object? out_)
+        {
+            if (ReferenceEquals(val, NONE))
+            {
+                return true;
+            }
+
+            if (!IsNode(val) || IsList(val) != IsList(out_) || !IsNode(out_))
+            {
+                return _DeepEqual(val, out_);
+            }
+
+            foreach (string k in KeysOf(val))
+            {
+                if (!_Keeps(Lookup(val, k), Lookup(out_, k)))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        // A spec admits a value when validating the value against it finds no error
+        // and gives back the value as it is.
+        private static bool _Admits(object? val, object? spec, InjectState inj, object? store)
+        {
+            var terrs = new List<object?>();
+
+            var vstore = (Dictionary<string, object?>)Merge(
+                new List<object?> { new Dictionary<string, object?>(), store }, 1)!;
+            vstore[S_DTOP] = val;
+
+            object? out_ = Validate(val, spec, new InjectState
+            {
+                Extra = vstore,
+                Errs = terrs,
+                Meta = inj.Meta,
+            });
+
+            return 0 == Size(terrs) && _Keeps(val, out_);
+        }
+
+        // The bounds of a $NOF count, and the words for it, which are null when
+        // the count is invalid. Without a max, the bound is the number of specs.
+        private static (double lo, double hi, string? desc) _NofCount(object? count, int numtvals)
+        {
+            static bool IsNat(object? n)
+            {
+                return n is int or long or double or float && 0 < (T.Integer & Typify(n)) &&
+                    0 <= Convert.ToDouble(n, CultureInfo.InvariantCulture);
+            }
+
+            static string Num(double n)
+            {
+                return Stringify(n);
+            }
+
+            if (IsNat(count))
+            {
+                double c = Convert.ToDouble(count, CultureInfo.InvariantCulture);
+                return (c, c, 0 == c ? "none" : "exactly " + Num(c));
+            }
+
+            object? min = Lookup(count, "min");
+            object? max = Lookup(count, "max");
+            bool hasmin = !ReferenceEquals(min, NONE);
+            bool hasmax = !ReferenceEquals(max, NONE);
+
+            bool valid =
+                IsMap(count) &&
+                0 < Size(count) &&
+                Size(count) == (hasmin ? 1 : 0) + (hasmax ? 1 : 0) &&
+                (!hasmin || IsNat(min)) &&
+                (!hasmax || IsNat(max)) &&
+                (!hasmin || !hasmax ||
+                    Convert.ToDouble(min, CultureInfo.InvariantCulture) <=
+                    Convert.ToDouble(max, CultureInfo.InvariantCulture));
+
+            if (!valid)
+            {
+                return (0, 0, null);
+            }
+
+            double lo = hasmin ? Convert.ToDouble(min, CultureInfo.InvariantCulture) : 0;
+            double hi = hasmax ? Convert.ToDouble(max, CultureInfo.InvariantCulture) : numtvals;
+
+            string desc =
+                !hasmax
+                    ? "at least " + Num(lo)
+                    : 0 == hi
+                        ? "none"
+                        : !hasmin
+                            ? "at most " + Num(hi)
+                            : lo == hi
+                                ? "exactly " + Num(lo)
+                                : Num(lo) + " to " + Num(hi);
+
+            return (lo, hi, desc);
         }
 
 
@@ -3606,6 +3867,9 @@ namespace Voxgig.Struct
         private static partial Regex R_MetaPathGen();
         [GeneratedRegex(@"`\$([A-Z]+)`")]
         private static partial Regex R_TransformNameGen();
+        // \z, since .NET's $ also matches before a final newline.
+        [GeneratedRegex(@"^\$[A-Z]+\z")]
+        private static partial Regex R_CheckerNameGen();
         [GeneratedRegex(@"\.")]
         private static partial Regex R_DotGen();
     }
