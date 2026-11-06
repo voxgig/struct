@@ -189,6 +189,18 @@ let clz32 n =
     !r
   end
 
+(* R_CHECKER_NAME: a dollar sign then capitals, nothing else. *)
+let is_checker_name s =
+  let n = String.length s in
+  n > 1 && s.[0] = '$' &&
+  (let ok = ref true in
+   for i = 1 to n - 1 do if s.[i] < 'A' || s.[i] > 'Z' then ok := false done;
+   !ok)
+
+(* Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN. *)
+let validate_names =
+  ["$TOP"; "$SPEC"; "$BT"; "$DS"; "$WHEN"; "$ANNO"; "$REF"; "$FORMAT"; "$APPLY"; "$OPEN"]
+
 (* ----- ordered map ops ----- *)
 let omap_get m k = try Some (List.assoc k m.entries) with Not_found -> None
 let omap_has m k = List.mem_assoc k m.entries
@@ -1615,82 +1627,187 @@ and validate_child inj _v _ref _store =
     end
   end else Noval
 
-and validate_one inj _v _ref store =
-  if inj.mode = m_val then begin
-    let parent = inj.parent in
-    if not (islist parent) || inj.keyi <> 0 then
-      (push_err inj ("The $ONE validator at field " ^ pathify ~startin:(Num 1.0) ~endin:(Num 1.0) inj.path ^ " must be the first element of an array."); Noval)
-    else begin
-      inj.keyi <- size inj.keys;
-      ignore (inj_setval ~ancestor:2 inj inj.dparent);
-      inj.path <- slice ~start:(Num 0.0) ~stop:(Num (float_of_int (size inj.path - 1))) inj.path;
-      let tvals = slice ~start:(Num 1.0) parent in
-      if size tvals = 0 then
-        (push_err inj ("The $ONE validator at field " ^ pathify ~startin:(Num 1.0) ~endin:(Num 1.0) inj.path ^ " must have at least one argument."); Noval)
-      else begin
-        let matched = ref false in
-        List.iter (fun tval ->
-            if not !matched then begin
-              let terrs = empty_list () in
-              let vstore = merge ~maxdepth:(Num 1.0) (lst [empty_map (); store]) in
-              ignore (setprop vstore (Str s_dtop) inj.dparent);
-              let idef = { (default_injdef ()) with d_extra = vstore; d_errs = terrs; d_meta = inj.meta } in
-              let vcurrent = validate ~inj:(IDef idef) inj.dparent tval in
-              ignore (inj_setval ~ancestor:(-2) inj vcurrent);
-              if size terrs = 0 then matched := true
-            end) (match tvals with List r -> !r | _ -> []);
-        if not !matched then begin
-          let valdesc = String.concat ", " (List.map (fun (_, x) -> stringify x) (items_pairs tvals)) in
-          let valdesc = replace_transform_names valdesc in
-          push_err inj (invalid_type_msg inj.path ((if size tvals > 1 then "one of " else "") ^ valdesc) (typify inj.dparent) inj.dparent "V0210")
-        end;
-        Noval
-      end
-    end
-  end else Noval
-
 and validate_exact inj _v _ref _store =
   if inj.mode = m_val then begin
     let parent = inj.parent in
     if not (islist parent) || inj.keyi <> 0 then
       (push_err inj ("The $EXACT validator at field " ^ pathify ~startin:(Num 1.0) ~endin:(Num 1.0) inj.path ^ " must be the first element of an array."); Noval)
     else begin
+      let cval = slotval inj in
       inj.keyi <- size inj.keys;
-      ignore (inj_setval ~ancestor:2 inj inj.dparent);
+      (* Replace [$EXACT, ...] with the data value; skip keeps inject off the detached list. *)
+      ignore (inj_setval ~ancestor:2 inj cval);
       inj.path <- slice ~start:(Num 0.0) ~stop:(Num (float_of_int (size inj.path - 1))) inj.path;
-      inj.key <- getelem inj.path (Num (-1.0));
       let tvals = slice ~start:(Num 1.0) parent in
       if size tvals = 0 then
-        (push_err inj ("The $EXACT validator at field " ^ pathify ~startin:(Num 1.0) ~endin:(Num 1.0) inj.path ^ " must have at least one argument."); Noval)
+        (push_err inj ("The $EXACT validator at field " ^ pathify ~startin:(Num 1.0) ~endin:(Num 1.0) inj.path ^ " must have at least one argument."); skip)
       else begin
-        let matched = ref false in
-        List.iter (fun tval -> if not !matched && veq tval inj.dparent then matched := true)
-          (match tvals with List r -> !r | _ -> []);
-        if not !matched then begin
+        if not (List.exists (fun tval -> deepequal tval cval) (match tvals with List r -> !r | _ -> [])) then begin
           let valdesc = String.concat ", " (List.map (fun (_, x) -> stringify x) (items_pairs tvals)) in
           let valdesc = replace_transform_names valdesc in
           push_err inj (invalid_type_msg inj.path
                           ((if size inj.path > 1 then "" else "value ") ^ "exactly equal to " ^ (if size tvals = 1 then "" else "one of ") ^ valdesc)
-                          (typify inj.dparent) inj.dparent "V0110")
+                          (typify cval) cval "V0110")
         end;
-        Noval
+        skip
       end
     end
   end else (ignore (delprop inj.parent inj.key); Noval)
 
-and veq a b =
+(* Count the specs that admit the value: [`$NOF`, count, spec, ...], where
+   count is an integer, or a map holding min, max or both. *)
+and validate_nof inj _v _ref store = validatecount inj store "$NOF" true
+
+(* Every spec admits the value: [`$ALL`, spec, ...]. *)
+and validate_all inj _v _ref store = validatecount inj store "$ALL" false
+
+(* The counting list directives. Without a count, every spec has to admit. *)
+and validatecount inj store name counted =
+  if inj.mode <> m_val then Noval
+  else if not (islist inj.parent) || inj.keyi <> 0 then begin
+    push_err inj ("The " ^ name ^ " validator at field " ^ pathify ~startin:(Num 1.0) ~endin:(Num 1.0) inj.path ^ " must be the first element of an array.");
+    Noval
+  end else begin
+    let parent = inj.parent in
+    let cval = slotval inj in
+    inj.keyi <- size inj.keys;
+    (* Replace the directive's list with the data value. Each return is skip, so
+       that inject leaves the detached list alone and validates nothing in it. *)
+    ignore (inj_setval ~ancestor:2 inj cval);
+    inj.path <- slice ~start:(Num (-1.0)) inj.path;
+    let count = if counted then lookup_ parent (Num 1.0) else Noval in
+    let tvals = slice ~start:(Num (if counted then 2.0 else 1.0)) parent in
+    let numtvals = size tvals in
+    let field = "The " ^ name ^ " validator at field " ^ pathify ~startin:(Num 1.0) inj.path in
+    (if numtvals = 0 then
+       push_err inj (field ^ (if counted then " must have a count and" else " must have") ^ " at least one argument.")
+     else begin
+       let lo, hi, countdesc =
+         if counted then nofcount count (float_of_int numtvals)
+         else (float_of_int numtvals, float_of_int numtvals, Some "all") in
+       match countdesc with
+       | None -> push_err inj (field ^ " has an invalid count: " ^ stringify count ^ ".")
+       | Some countdesc ->
+         let tarr = Array.of_list (match tvals with List r -> !r | _ -> []) in
+         let admitted = ref 0.0 in
+         let ti = ref 0 in
+         (* Stop once the specs left cannot change the verdict. *)
+         let decided () =
+           let left = float_of_int (numtvals - !ti) in
+           hi < !admitted || !admitted +. left < lo || (lo <= !admitted && !admitted +. left <= hi) in
+         while !ti < numtvals && not (decided ()) do
+           if admits cval tarr.(!ti) inj store then admitted := !admitted +. 1.0;
+           incr ti
+         done;
+         if !admitted < lo || hi < !admitted then begin
+           let valdesc = String.concat ", " (List.map (fun (_, x) -> stringify x) (items_pairs tvals)) in
+           let valdesc = replace_transform_names valdesc in
+           push_err inj (invalid_type_msg inj.path (countdesc ^ " of " ^ valdesc) (typify cval) cval "V0310")
+         end
+     end);
+    skip
+  end
+
+(* The bounds of a $NOF count, and the words for it, which are absent when
+   the count is invalid. Without a max, the bound is the number of specs. *)
+and nofcount count numtvals =
+  let isnat n = (t_integer land typify n) > 0 && (match n with Num x -> 0.0 <= x | _ -> false) in
+  let num n = (match n with Num x -> x | _ -> 0.0) in
+  if isnat count then
+    let c = num count in
+    (c, c, Some (if c = 0.0 then "none" else "exactly " ^ num_to_string c))
+  else begin
+    let mn = lookup_ count (Str "min") in
+    let mx = lookup_ count (Str "max") in
+    let valid =
+      ismap count && size count > 0
+      && size count = (if is_noval mn then 0 else 1) + (if is_noval mx then 0 else 1)
+      && (is_noval mn || isnat mn)
+      && (is_noval mx || isnat mx)
+      && (is_noval mn || is_noval mx || num mn <= num mx) in
+    if not valid then (0.0, 0.0, None)
+    else begin
+      let lo = if is_noval mn then 0.0 else num mn in
+      let hi = if is_noval mx then numtvals else num mx in
+      let desc =
+        if is_noval mx then "at least " ^ num_to_string lo
+        else if hi = 0.0 then "none"
+        else if is_noval mn then "at most " ^ num_to_string hi
+        else if lo = hi then "exactly " ^ num_to_string lo
+        else num_to_string lo ^ " to " ^ num_to_string hi in
+      (lo, hi, Some desc)
+    end
+  end
+
+(* A spec admits a value when validating the value against it finds no error
+   and gives back the value as it is. *)
+and admits v spec inj store =
+  let terrs = empty_list () in
+  let vstore = merge ~maxdepth:(Num 1.0) (lst [empty_map (); store]) in
+  ignore (setprop vstore (Str s_dtop) v);
+  let idef = { (default_injdef ()) with d_extra = vstore; d_errs = terrs; d_meta = inj.meta } in
+  let out = validate ~inj:(IDef idef) v spec in
+  size terrs = 0 && keeps v out
+
+(* Every member v has is in out, unchanged. A member only out has is a
+   default the spec supplied, and is ignored. *)
+and keeps v out =
+  if is_noval v then true
+  else if (t_list lor t_map) land typify v = 0 || islist v <> islist out || not (isnode out) then
+    deepequal v out
+  else List.for_all (fun k -> keeps (lookup_ v (Str k)) (lookup_ out (Str k))) (keysof v)
+
+(* JSON equality: numbers by value, lists in order, maps by key in any order. *)
+and deepequal a b =
   match a, b with
-  | Noval, Noval -> true
-  | Null, Null -> true
+  | Noval, Noval | Null, Null -> true
   | Bool x, Bool y -> x = y
   | Num x, Num y -> x = y
   | Str x, Str y -> x = y
+  | Func f, Func g -> f == g
   | Sentinel x, Sentinel y -> x = y
-  | List x, List y -> List.length !x = List.length !y && List.for_all2 veq !x !y
+  | List x, List y -> x == y || (List.length !x = List.length !y && List.for_all2 deepequal !x !y)
   | Map x, Map y ->
-    omap_len x = omap_len y &&
-    List.for_all (fun (k, v) -> match omap_get y k with Some w -> veq v w | None -> false) x.entries
+    x == y ||
+    (let ks = keysof a in
+     ks = keysof b && List.for_all (fun k -> deepequal (lookup_ a (Str k)) (lookup_ b (Str k))) ks)
   | _ -> false
+
+(* The data value at a list directive's slot. The directive's own dparent was
+   read with getprop, which reports a stored null as absent. *)
+and slotval inj =
+  match inj.prior with
+  | None -> inj.dparent
+  | Some prior -> lookup_ prior.dparent prior.key
+
+(* Report each checker the spec names that validate lacks; $EXACT's arguments are literals. *)
+and checknames spec store path errs =
+  match refname spec with
+  | Some name ->
+    if unknownname name store then
+      ignore (setprop errs (Num (float_of_int (size errs)))
+                (Str ("Unknown validator " ^ name ^ " at field " ^ pathify (lst path) ^ ".")))
+  | None ->
+    if not (islist spec && refname (lookup_ spec (Num 0.0)) = Some "$EXACT") then
+      List.iter (fun k ->
+          if ismap spec then checknames (Str k) store path errs;
+          checknames (lookup_ spec (Str k)) store (path @ [Str k]) errs)
+        (keysof spec)
+
+(* The name a whole-string reference gives, when it is a checker name in any case. *)
+and refname v =
+  match v with
+  | Str s ->
+    (match injection_full s with
+     | Some name when is_checker_name (String.uppercase_ascii name) -> Some name
+     | _ -> None)
+  | _ -> None
+
+(* Unknown: undefined and upper case, or a defined name in another case. Null disables a name. *)
+and unknownname name store =
+  let known n = List.mem n validate_names || not (is_nullish (lookup_ store (Str n))) in
+  let upper = String.uppercase_ascii name in
+  not (known name) && (upper = name || known upper)
 
 and validation pval key parent inj =
   if not (is_skip pval) then begin
@@ -1720,7 +1837,7 @@ and validation pval key parent inj =
         end else if islist cval then
           (if not (islist pval) then push_err inj (invalid_type_msg inj.path (typename ptype) ctype cval "V0030"))
         else if exact_b then
-          (if not (veq cval pval) then
+          (if not (deepequal cval pval) then
              let pathmsg = if size inj.path > 1 then "at field " ^ pathify ~startin:(Num 1.0) inj.path ^ ": " else "" in
              push_err inj ("Value " ^ pathmsg ^ js_string cval ^ " should equal " ^ js_string pval ^ "."))
         else ignore (setprop parent key cval)
@@ -1747,13 +1864,17 @@ and validate ?(inj = INone) data spec =
     ["$NUMBER"; "$INTEGER"; "$DECIMAL"; "$BOOLEAN"; "$NULL"; "$NIL"; "$MAP"; "$LIST"; "$FUNCTION"; "$INSTANCE"];
   put "$ANY" (Func validate_any);
   put "$CHILD" (Func validate_child);
-  put "$ONE" (Func validate_one);
   put "$EXACT" (Func validate_exact);
+  put "$NOF" (Func validate_nof);
+  put "$ALL" (Func validate_all);
   let store = merge ~maxdepth:(Num 1.0) (lst [base; (if is_noval extra then empty_map () else extra); Map { entries = [(s_derrs, errs)] }]) in
   let meta = (match inj with IDef d when not (is_noval d.d_meta) -> d.d_meta | _ -> empty_map ()) in
   ignore (setprop meta (Str s_bexact) (getprop ~alt:(Bool false) meta (Str s_bexact)));
   let idef = { (default_injdef ()) with d_meta = meta; d_extra = store; d_modify = Some validation; d_handler = Some validate_handler; d_errs = errs } in
-  let out = transform ~inj:(IDef idef) data spec in
+  (* A spec that names an unknown checker validates nothing. *)
+  let numerrs = size errs in
+  checknames spec store [] errs;
+  let out = if numerrs < size errs then clone data else transform ~inj:(IDef idef) data spec in
   if size errs > 0 && not collect then raise (Struct_error (join ~sep:(Str " | ") errs));
   out
 

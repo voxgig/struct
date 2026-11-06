@@ -91,10 +91,21 @@ transform (jm [Str "name"; Str "alice"])
 (* validate: plain values are typed defaults; `$STRING` etc. are commands *)
 validate (jm [Str "a"; Str "x"]) (jm [Str "a"; Str "`$STRING`"])  (* {a:x} *)
 
+(* validate: a list led by `$NOF` counts the specs that admit the value *)
+validate (Num 1.0)
+  (jt [Str "`$NOF`"; jm [Str "min"; Num 1.0]; Str "`$STRING`"; Str "`$NUMBER`"])  (* 1 *)
+
 (* select: MongoDB-style query over children *)
 select (jt [jm [Str "a"; Num 1.0]; jm [Str "a"; Num 2.0]])
        (jm [Str "a"; jm [Str "`$GT`"; Num 1.0]])             (* [{$KEY:1,a:2}] *)
 ```
+
+The count is a `Num` or a map of `min` and `max`. `` Str "`$ALL`" `` leads a
+list the same way, without a count, and holds when every spec admits the
+value. There is no `$ONE`; the full checker list is in the
+[language-neutral reference](../DOCS.md#validate-checkers-inside-backticks-in-a-validate-spec).
+A spec that names a checker `validate` does not define is rejected before any
+data is read, with `Unknown validator $FOO at field a.`
 
 ## Testing
 

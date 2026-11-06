@@ -283,9 +283,11 @@ let rec run_all spec =
   List.iter (fun gn ->
       run_set ("validate." ^ gn) (getprop_raw_pub validates gn)
         (arg1 (fun vin -> validate (vget vin "data") (vget vin "spec"))))
-    ["child"; "one"; "exact"];
-  run_set "validate.invalid" ~flags:["null", false] (getprop_raw_pub validates "invalid")
-    (arg1 (fun vin -> validate (vget vin "data") (vget vin "spec")));
+    ["child"; "exact"];
+  List.iter (fun gn ->
+      run_set ("validate." ^ gn) ~flags:["null", false] (getprop_raw_pub validates gn)
+        (arg1 (fun vin -> validate (vget vin "data") (vget vin "spec"))))
+    ["invalid"; "directive"; "nof"; "all"; "unknown"];
   run_set "validate.special" (getprop_raw_pub validates "special")
     (arg1 (fun vin ->
          let injm = vget vin "inj" in
