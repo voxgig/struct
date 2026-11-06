@@ -10,6 +10,7 @@ import (
 	"math/bits"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -123,6 +124,10 @@ var reIntegerKey = regexp.MustCompile(`^[-0-9]+$`)
 
 // Meta path syntax regex: matches patterns like "q0$=x1" or "q0$~x1"
 var reMetaPath = regexp.MustCompile(`^([^$]+)\$([=~])(.+)$`)
+
+var reInjectionFull = regexp.MustCompile("^`(\\$[A-Z]+|[^`]*)[0-9]*`$")
+var reTransformName = regexp.MustCompile("`\\$([A-Z]+)`")
+var reCheckerName = regexp.MustCompile(`^\$[A-Z]+$`)
 
 // The standard undefined value for this language.
 // NOTE: `nil` must be used directly.
@@ -3687,108 +3692,33 @@ var validate_CHILD Injector = func(
 	return nil
 }
 
-// Forward declaration for validate_ONE
-var validate_ONE Injector
+// Set after Validate is defined: these validators call Validate.
+var validate_NOF Injector
+var validate_ALL Injector
 
 // Forward declaration for validate_EXACT
 var validate_EXACT Injector
 
-// Implementation will be set after Validate is defined
-func init_validate_ONE() {
-	validate_ONE = func(
+func init_validate_count() {
+	// Count the specs that admit the value: ['`$NOF`', count, spec, ...], where
+	// count is an integer, or a map holding min, max or both.
+	validate_NOF = func(
 		inj *Injection,
 		_val any,
 		ref *string,
 		store any,
 	) any {
-		// Only operate in "val mode" (list mode).
-		if inj.Mode == M_VAL {
-			if !IsList(inj.Parent) || inj.KeyI != 0 {
-				inj.Errs.Append("The $ONE validator at field " +
-					Pathify(inj.Path.List, 1, 1) +
-					" must be the first element of an array.")
-				return nil
-			}
+		return _validatecount(inj, store, "$NOF", true)
+	}
 
-			inj.KeyI = len(inj.Keys.List)
-
-			// The parent is assumed to be a slice: ["`$ONE`", alt0, alt1, ...].
-			parentSlice, ok := _asList(inj.Parent)
-			if !ok {
-				return nil
-			}
-
-			// setval, not a hand-held grandparent: setval DELETES on a nil
-			// value where SetProp keeps one, so an optional entry the caller
-			// omitted came back materialised.
-			inj.setval(inj.Dparent, 2)
-
-			// Path shortens for the message only: `modify` reads
-			// getprop(inj.Parent, inj.Key), and inj.Parent is still this list.
-			inj.Path.List = inj.Path.List[:len(inj.Path.List)-1]
-
-			// COPY, not a view: setval below rewrites the node this slice
-			// aliases, which rewrote the alternatives the error message reports.
-			tvals := append([]any(nil), parentSlice[1:]...) // alt0, alt1, ...
-
-			if len(tvals) == 0 {
-				inj.Errs.Append("The $ONE validator at field " +
-					Pathify(inj.Path.List, 1, 1) +
-					" must have at least one argument.")
-				return nil
-			}
-
-			// Try each alternative shape
-			for _, tval := range tvals {
-				// Collect errors in a temporary slice
-				var terrs = ListRefCreate[any]()
-
-				// Create a new store for validation
-				vstore := Clone(store).(map[string]any)
-				vstore["$TOP"] = inj.Dparent
-
-				// Attempt validation of data with shape `tval`
-				vcurrent, err := Validate(inj.Dparent, tval, &Injection{Extra: vstore, Errs: terrs})
-
-				inj.setval(vcurrent, -2)
-
-				if err == nil && len(terrs.List) == 0 {
-					return nil
-				}
-			}
-
-			mapped := make([]string, len(tvals))
-			for i, v := range tvals {
-				mapped[i] = Stringify(v)
-			}
-
-			joined := strings.Join(mapped, ", ")
-
-			re := regexp.MustCompile("`\\$([A-Z]+)`")
-			valdesc := re.ReplaceAllStringFunc(joined, func(match string) string {
-				submatches := re.FindStringSubmatch(match)
-				if len(submatches) == 2 {
-					return strings.ToLower(submatches[1])
-				}
-				return match
-			})
-
-			prefix := ""
-			if len(tvals) > 1 {
-				prefix = "one of "
-			}
-
-			msg := _invalidTypeMsg(
-				inj.Path.List,
-				prefix+valdesc,
-				Typename(Typify(inj.Dparent)),
-				inj.Dparent,
-				"V0210",
-			)
-			inj.Errs.Append(msg)
-		}
-
-		return nil
+	// Every spec admits the value: ['`$ALL`', spec, ...].
+	validate_ALL = func(
+		inj *Injection,
+		_val any,
+		ref *string,
+		store any,
+	) any {
+		return _validatecount(inj, store, "$ALL", false)
 	}
 }
 
@@ -3808,78 +3738,28 @@ func init_validate_EXACT() {
 				return nil
 			}
 
+			cval := _slotval(inj)
+
 			inj.KeyI = len(inj.Keys.List)
 
-			// The parent is assumed to be a slice: ["`$EXACT`", alt0, alt1, ...].
-			parentSlice, ok := _asList(inj.Parent)
-			if !ok {
-				return nil
-			}
+			// Replace [$EXACT, ...] with the data value; SKIP keeps inject off the detached list.
+			_setslot(inj, cval)
 
-			// Get grandparent and grandkey to replace the structure
-			grandparent := inj.Nodes.List[len(inj.Nodes.List)-2]
-			grandkey := inj.Path.List[len(inj.Path.List)-2]
-
-			// Clean up structure by replacing [$EXACT, ...] with current value
-			SetProp(grandparent, grandkey, inj.Dparent)
-			inj.Parent = inj.Dparent
-
-			// Adjust the path
 			inj.Path.List = inj.Path.List[:len(inj.Path.List)-1]
-			inj.Key = inj.Path.List[len(inj.Path.List)-1]
 
-			// The exact values to match are everything after the first element.
-			tvals := parentSlice[1:] // alt0, alt1, ...
-
+			tvals := Slice(inj.Parent, 1).([]any)
 			if len(tvals) == 0 {
 				inj.Errs.Append("The $EXACT validator at field " +
 					Pathify(inj.Path.List, 1, 1) +
 					" must have at least one argument.")
-				return nil
+				return SKIP
 			}
 
-			var currentStr *string
 			for _, tval := range tvals {
-				exactMatch := false
-
-				if !exactMatch {
-					// Unwrap ListRefs for comparison since data and spec may have
-					// different wrapping levels.
-					unwrapFlags := map[string]bool{"unwrap": true}
-					utval := CloneFlags(tval, unwrapFlags)
-					ucurrent := CloneFlags(inj.Dparent, unwrapFlags)
-					exactMatch = reflect.DeepEqual(utval, ucurrent)
-				}
-
-				if !exactMatch && IsNode(tval) {
-					if nil == currentStr {
-						tmpstr := Stringify(inj.Dparent)
-						currentStr = &tmpstr
-					}
-					tvalStr := Stringify(tval)
-					exactMatch = tvalStr == *currentStr
-				}
-
-				if exactMatch {
-					return nil
+				if _deepequal(tval, cval) {
+					return SKIP
 				}
 			}
-
-			mapped := make([]string, len(tvals))
-			for i, v := range tvals {
-				mapped[i] = Stringify(v)
-			}
-
-			joined := strings.Join(mapped, ", ")
-
-			re := regexp.MustCompile("`\\$([A-Z]+)`")
-			valdesc := re.ReplaceAllStringFunc(joined, func(match string) string {
-				submatches := re.FindStringSubmatch(match)
-				if len(submatches) == 2 {
-					return strings.ToLower(submatches[1])
-				}
-				return match
-			})
 
 			prefix := ""
 			if len(inj.Path.List) <= 1 {
@@ -3891,20 +3771,103 @@ func init_validate_EXACT() {
 				oneOf = "one of "
 			}
 
+			found := denoval(cval)
 			msg := _invalidTypeMsg(
 				inj.Path.List,
-				prefix+"exactly equal to "+oneOf+valdesc,
-				Typename(Typify(inj.Dparent)),
-				inj.Dparent,
+				prefix+"exactly equal to "+oneOf+_valdesc(tvals),
+				Typename(Typify(found)),
+				found,
 				"V0110",
 			)
 			inj.Errs.Append(msg)
+
+			return SKIP
 		} else {
 			DelProp(inj.Parent, inj.Key)
 		}
 
 		return nil
 	}
+}
+
+// The counting list directives. Without a count, every spec has to admit.
+func _validatecount(inj *Injection, store any, name string, counted bool) any {
+	if M_VAL != inj.Mode {
+		return nil
+	}
+
+	if !IsList(inj.Parent) || 0 != inj.KeyI {
+		inj.Errs.Append("The " + name + " validator at field " +
+			Pathify(inj.Path.List, 1, 1) +
+			" must be the first element of an array.")
+		return nil
+	}
+
+	cval := _slotval(inj)
+
+	inj.KeyI = len(inj.Keys.List)
+
+	// Replace the directive's list with the data value. Each return is SKIP, so
+	// that inject leaves the detached list alone and validates nothing in it.
+	_setslot(inj, cval)
+
+	inj.Path.List = inj.Path.List[:len(inj.Path.List)-1]
+
+	var count any = NOVAL
+	argsfrom := 1
+	if counted {
+		count = _lookup(inj.Parent, 1)
+		argsfrom = 2
+	}
+	tvals := Slice(inj.Parent, argsfrom).([]any)
+	numtvals := len(tvals)
+	field := "The " + name + " validator at field " + Pathify(inj.Path.List, 1)
+
+	if 0 == numtvals {
+		if counted {
+			inj.Errs.Append(field + " must have a count and at least one argument.")
+		} else {
+			inj.Errs.Append(field + " must have at least one argument.")
+		}
+		return SKIP
+	}
+
+	lo, hi, countdesc := numtvals, numtvals, "all"
+	if counted {
+		lo, hi, countdesc = _nofcount(count, numtvals)
+	}
+
+	if "" == countdesc {
+		inj.Errs.Append(field + " has an invalid count: " + Stringify(denoval(count)) + ".")
+		return SKIP
+	}
+
+	admitted := 0
+	for tI := 0; tI < numtvals; tI++ {
+		left := numtvals - tI
+
+		// Stop once the specs left cannot change the verdict.
+		if hi < admitted || admitted+left < lo || (lo <= admitted && admitted+left <= hi) {
+			break
+		}
+
+		if _admits(cval, tvals[tI], inj, store) {
+			admitted++
+		}
+	}
+
+	if admitted < lo || hi < admitted {
+		found := denoval(cval)
+		inj.Errs.Append(_invalidTypeMsg(
+			inj.Path.List,
+			countdesc+" of "+_valdesc(tvals),
+			Typename(Typify(found)),
+			found,
+			"V0310",
+		))
+	}
+
+	return SKIP
 }
 
 func makeValidation(exact bool) Modify {
@@ -4081,10 +4044,10 @@ func Validate(
 		errs = ListRefCreate[any]()
 	}
 
-	// Initialize validate_ONE if not already initialized.
-	// This avoids a circular reference error, validate_ONE calls Validate.
-	if validate_ONE == nil {
-		init_validate_ONE()
+	// Initialize validate_NOF and validate_ALL if not already initialized.
+	// This avoids a circular reference error, both call Validate.
+	if validate_NOF == nil {
+		init_validate_count()
 	}
 
 	// Initialize validate_EXACT if not already initialized.
@@ -4102,9 +4065,6 @@ func Validate(
 		"$MERGE":  nil,
 		"$EACH":   nil,
 		"$PACK":   nil,
-		"$BT":     nil,
-		"$DS":     nil,
-		"$WHEN":   nil,
 
 		// Add validation commands
 		"$STRING":   validate_STRING,
@@ -4122,8 +4082,9 @@ func Validate(
 		"$ARRAY":    validate_ARRAY,
 		"$ANY":      validate_ANY,
 		"$CHILD":    validate_CHILD,
-		"$ONE":      validate_ONE,
 		"$EXACT":    validate_EXACT,
+		"$NOF":      validate_NOF,
+		"$ALL":      validate_ALL,
 	}
 
 	// Add any extra validation commands
@@ -4155,8 +4116,16 @@ func Validate(
 		validationFn = makeValidation(true)
 	}
 
-	// Run the transformation with validation and _validatehandler
-	out := TransformModifyHandler(data, spec, store, validationFn, _validatehandler, errs, meta)
+	// A spec that names an unknown checker validates nothing.
+	numerrs := len(errs.List)
+	_checknames(spec, store, []string{}, errs)
+
+	var out any
+	if numerrs < len(errs.List) {
+		out = Clone(data)
+	} else {
+		out = TransformModifyHandler(data, spec, store, validationFn, _validatehandler, errs, meta)
+	}
 
 	var err error
 	generr := 0 < len(errs.List) && collecterrs == nil
@@ -4420,8 +4389,8 @@ func validateCollectExact(
 		errs = ListRefCreate[any]()
 	}
 
-	if validate_ONE == nil {
-		init_validate_ONE()
+	if validate_NOF == nil {
+		init_validate_count()
 	}
 	if validate_EXACT == nil {
 		init_validate_EXACT()
@@ -4435,9 +4404,6 @@ func validateCollectExact(
 		"$MERGE":  nil,
 		"$EACH":   nil,
 		"$PACK":   nil,
-		"$BT":     nil,
-		"$DS":     nil,
-		"$WHEN":   nil,
 
 		"$STRING":   validate_STRING,
 		"$NUMBER":   validate_TYPE,
@@ -4454,8 +4420,9 @@ func validateCollectExact(
 		"$ARRAY":    validate_ARRAY,
 		"$ANY":      validate_ANY,
 		"$CHILD":    validate_CHILD,
-		"$ONE":      validate_ONE,
 		"$EXACT":    validate_EXACT,
+		"$NOF":      validate_NOF,
+		"$ALL":      validate_ALL,
 	}
 
 	for k, fn := range extra {
@@ -4463,6 +4430,13 @@ func validateCollectExact(
 	}
 
 	store["$ERRS"] = errs
+
+	// A spec that names an unknown checker validates nothing.
+	numerrs := len(errs.List)
+	_checknames(spec, store, []string{}, errs)
+	if numerrs < len(errs.List) {
+		return
+	}
 
 	meta := map[string]any{S_BEXACT: true}
 	TransformModifyHandler(data, spec, store, makeValidation(true), _validatehandler, errs, meta)
@@ -4580,6 +4554,268 @@ func _invalidTypeMsg(path []string, needtype string, vt string, v any, whence ..
 	message := "Expected " + fieldPart + needtype + ", but found " + typePart + vs
 
 	return message + "."
+}
+
+// Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
+var validateNames = []string{
+	"$TOP",
+	"$SPEC",
+	"$BT",
+	"$DS",
+	"$WHEN",
+	"$ANNO",
+	"$REF",
+	"$FORMAT",
+	"$APPLY",
+	"$OPEN",
+}
+
+// Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
+func _checknames(spec any, store map[string]any, path []string, errs *ListRef[any]) {
+	name := _refname(spec)
+	if "" != name {
+		if _unknownname(name, store) {
+			errs.Append("Unknown validator " + name + " at field " + Pathify(path) + ".")
+		}
+		return
+	}
+
+	if IsList(spec) && "$EXACT" == _refname(GetProp(spec, 0)) {
+		return
+	}
+
+	for _, key := range KeysOf(spec) {
+		if IsMap(spec) {
+			_checknames(key, store, path, errs)
+		}
+		kpath := append(append(make([]string, 0, len(path)+1), path...), key)
+		_checknames(GetProp(spec, key), store, kpath, errs)
+	}
+}
+
+// The name a whole-string reference gives, when it is a checker name in any
+// case, else "".
+func _refname(val any) string {
+	if s, ok := val.(string); ok {
+		m := reInjectionFull.FindStringSubmatch(s)
+		if nil != m && reCheckerName.MatchString(strings.ToUpper(m[1])) {
+			return m[1]
+		}
+	}
+	return ""
+}
+
+// Unknown: undefined and upper case, or a defined name in another case. Nil disables a name.
+func _unknownname(name string, store map[string]any) bool {
+	known := func(n string) bool {
+		return slices.Contains(validateNames, n) || nil != store[n]
+	}
+	upper := strings.ToUpper(name)
+	return !known(name) && (upper == name || known(upper))
+}
+
+// The value stored at key, nil included, or NOVAL when val holds no such
+// key. GetProp reads both as nil.
+func _lookup(val any, key any) any {
+	if IsMap(val) {
+		if out, has := val.(map[string]any)[StrKey(key)]; has {
+			return out
+		}
+	} else if IsList(val) {
+		list := _listify(val)
+		ki, err := strconv.Atoi(StrKey(key))
+		if nil == err && 0 <= ki && ki < len(list) {
+			return list[ki]
+		}
+	}
+	return NOVAL
+}
+
+// The data value at a list directive's slot: nil when null, NOVAL when
+// absent. The directive's own Dparent was read with GetProp.
+func _slotval(inj *Injection) any {
+	prior := inj.Prior
+	if nil == prior {
+		return inj.Dparent
+	}
+	return _lookup(prior.Dparent, prior.Key)
+}
+
+// Replace a list directive's list with its slot value. setval deletes on
+// nil, so a null is set directly, and NOVAL deletes.
+func _setslot(inj *Injection, cval any) {
+	if nil == cval {
+		SetProp(GetElem(inj.Nodes.List, -2), GetElem(inj.Path.List, -2), nil)
+	} else {
+		inj.setval(denoval(cval), 2)
+	}
+}
+
+// Directive arguments for a message: stringified, with checker names
+// lower-cased.
+func _valdesc(tvals []any) string {
+	descs := make([]string, len(tvals))
+	for i, tval := range tvals {
+		descs[i] = Stringify(tval)
+	}
+	return reTransformName.ReplaceAllStringFunc(strings.Join(descs, ", "),
+		func(m string) string { return strings.ToLower(m[2 : len(m)-1]) })
+}
+
+// JSON equality: numbers by value, lists in order, maps by key in any order.
+func _deepequal(a any, b any) bool {
+	atype := Typify(a)
+	btype := Typify(b)
+
+	if 0 < (T_number&atype) && 0 < (T_number&btype) {
+		af, aerr := _toFloat64(a)
+		bf, berr := _toFloat64(b)
+		return nil == aerr && nil == berr && af == bf
+	}
+
+	if atype != btype {
+		return false
+	}
+
+	if IsNode(a) || IsNode(b) {
+		if !IsNode(a) || !IsNode(b) {
+			return false
+		}
+
+		akeys := KeysOf(a)
+		bkeys := KeysOf(b)
+		if len(akeys) != len(bkeys) {
+			return false
+		}
+
+		for kI, k := range akeys {
+			if k != bkeys[kI] || !_deepequal(_lookup(a, k), _lookup(b, k)) {
+				return false
+			}
+		}
+
+		return true
+	}
+
+	// A function or instance equals only itself; a value Go cannot compare
+	// equals nothing.
+	switch reflect.ValueOf(a).Kind() {
+	case reflect.Func:
+		return reflect.ValueOf(a).Pointer() == reflect.ValueOf(b).Pointer()
+	case reflect.Invalid, reflect.Bool, reflect.String, reflect.Pointer:
+		return a == b
+	}
+
+	return false
+}
+
+// Every member val has is in out, unchanged. A member only out has is a
+// default the spec supplied, and is ignored.
+func _keeps(val any, out any) bool {
+	if NOVAL == val {
+		return true
+	}
+
+	if !IsNode(val) || IsList(val) != IsList(out) || !IsNode(out) {
+		return _deepequal(val, out)
+	}
+
+	for _, k := range KeysOf(val) {
+		if !_keeps(_lookup(val, k), _lookup(out, k)) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// A spec admits a value when validating the value against it finds no error
+// and gives back the value as it is.
+func _admits(val any, spec any, inj *Injection, store any) bool {
+	terrs := ListRefCreate[any]()
+
+	vstore, _ := Merge([]any{map[string]any{}, store}, 1).(map[string]any)
+	if nil == vstore {
+		vstore = map[string]any{}
+	}
+	vstore[S_DTOP] = denoval(val)
+
+	// Validate reads its meta from extra.
+	if nil != inj.Meta {
+		vstore["meta"] = inj.Meta
+	}
+
+	out, _ := Validate(denoval(val), spec, &Injection{Extra: vstore, Errs: terrs})
+
+	return 0 == len(terrs.List) && _keeps(val, out)
+}
+
+// The bounds of a $NOF count, and the words for it, which are "" when the
+// count is invalid. Without a max, the bound is the number of specs.
+func _nofcount(count any, numtvals int) (int, int, string) {
+	isnat := func(n any) bool {
+		f, err := _toFloat64(n)
+		return 0 < (T_integer&Typify(n)) && nil == err && 0 <= f
+	}
+	nat := func(n any) int {
+		f, _ := _toFloat64(n)
+		return int(f)
+	}
+
+	if isnat(count) {
+		n := nat(count)
+		if 0 == n {
+			return n, n, "none"
+		}
+		return n, n, "exactly " + strconv.Itoa(n)
+	}
+
+	cmin := _lookup(count, "min")
+	cmax := _lookup(count, "max")
+
+	numkeys := 0
+	if NOVAL != cmin {
+		numkeys++
+	}
+	if NOVAL != cmax {
+		numkeys++
+	}
+
+	valid := IsMap(count) &&
+		0 < Size(count) &&
+		Size(count) == numkeys &&
+		(NOVAL == cmin || isnat(cmin)) &&
+		(NOVAL == cmax || isnat(cmax)) &&
+		(NOVAL == cmin || NOVAL == cmax || nat(cmin) <= nat(cmax))
+
+	if !valid {
+		return 0, 0, ""
+	}
+
+	lo := 0
+	if NOVAL != cmin {
+		lo = nat(cmin)
+	}
+
+	hi := numtvals
+	if NOVAL != cmax {
+		hi = nat(cmax)
+	}
+
+	desc := ""
+	if NOVAL == cmax {
+		desc = "at least " + strconv.Itoa(lo)
+	} else if 0 == hi {
+		desc = "none"
+	} else if NOVAL == cmin {
+		desc = "at most " + strconv.Itoa(hi)
+	} else if lo == hi {
+		desc = "exactly " + strconv.Itoa(lo)
+	} else {
+		desc = strconv.Itoa(lo) + " to " + strconv.Itoa(hi)
+	}
+
+	return lo, hi, desc
 }
 
 // StrKey converts different types of keys to string representation.

@@ -1471,15 +1471,6 @@ func TestStruct(t *testing.T) {
 		})
 	})
 
-	t.Run("validate-one", func(t *testing.T) {
-		runset(t, validateSpec["one"], func(v any) (any, error) {
-			m := v.(map[string]any)
-			data := m["data"]
-			spec := m["spec"]
-			return voxgigstruct.Validate(data, spec)
-		})
-	})
-
 	t.Run("validate-exact", func(t *testing.T) {
 		runset(t, validateSpec["exact"], func(v any) (any, error) {
 			m := v.(map[string]any)
@@ -1516,6 +1507,97 @@ func TestStruct(t *testing.T) {
 
 			return voxgigstruct.Validate(data, spec)
 		})
+	})
+
+	t.Run("validate-directive", func(t *testing.T) {
+		runsetFlags(t, validateSpec["directive"], map[string]bool{"null": false}, func(v any) (any, error) {
+			m := v.(map[string]any)
+			return voxgigstruct.Validate(m["data"], m["spec"])
+		})
+	})
+
+	t.Run("validate-nof", func(t *testing.T) {
+		runsetFlags(t, validateSpec["nof"], map[string]bool{"null": false}, func(v any) (any, error) {
+			m := v.(map[string]any)
+			return voxgigstruct.Validate(m["data"], m["spec"])
+		})
+	})
+
+	t.Run("validate-all", func(t *testing.T) {
+		runsetFlags(t, validateSpec["all"], map[string]bool{"null": false}, func(v any) (any, error) {
+			m := v.(map[string]any)
+			return voxgigstruct.Validate(m["data"], m["spec"])
+		})
+	})
+
+	t.Run("validate-unknown", func(t *testing.T) {
+		runsetFlags(t, validateSpec["unknown"], map[string]bool{"null": false}, func(v any) (any, error) {
+			m := v.(map[string]any)
+			return voxgigstruct.Validate(m["data"], m["spec"])
+		})
+	})
+
+	t.Run("validate-unknown-edge", func(t *testing.T) {
+		// Only the unknown name is reported, and the data comes back as it is.
+		errs := voxgigstruct.ListRefCreate[any]()
+		data := map[string]any{"a": "x"}
+		out, _ := voxgigstruct.Validate(
+			data,
+			map[string]any{"a": []any{"`$ONE`", "`$STRING`", "`$NIL`"}},
+			&voxgigstruct.Injection{Errs: errs},
+		)
+		if !reflect.DeepEqual(errs.List, []any{"Unknown validator $ONE at field a.0."}) {
+			t.Errorf("Expected Error: unknown $ONE, Got: %v", errs.List)
+		}
+		if !reflect.DeepEqual(out, data) {
+			t.Errorf("Expected: %v, Got: %v", data, out)
+		}
+
+		// A checker supplied in extra is defined, in any case.
+		even := voxgigstruct.Injector(func(
+			inj *voxgigstruct.Injection,
+			val any,
+			ref *string,
+			store any,
+		) any {
+			n := voxgigstruct.GetProp(inj.Dparent, inj.Key)
+			if i, ok := n.(int); !ok || 0 != i%2 {
+				inj.Errs.Append(fmt.Sprintf("Odd at %s: %v", strings.Join(inj.Path.List[1:], "."), n))
+			}
+			return n
+		})
+
+		errs = voxgigstruct.ListRefCreate[any]()
+		out, _ = voxgigstruct.Validate(
+			map[string]any{"n": 2},
+			map[string]any{"n": "`$EVEN`"},
+			&voxgigstruct.Injection{Extra: map[string]any{"$EVEN": even}, Errs: errs},
+		)
+		if !reflect.DeepEqual(out, map[string]any{"n": 2}) {
+			t.Errorf("Expected: {n:2}, Got: %v", out)
+		}
+		out, _ = voxgigstruct.Validate(
+			map[string]any{"n": 3},
+			map[string]any{"n": "`$even`"},
+			&voxgigstruct.Injection{Extra: map[string]any{"$even": even}, Errs: errs},
+		)
+		if !reflect.DeepEqual(out, map[string]any{"n": 3}) {
+			t.Errorf("Expected: {n:3}, Got: %v", out)
+		}
+		if !reflect.DeepEqual(errs.List, []any{"Odd at n: 3"}) {
+			t.Errorf("Expected Error: [Odd at n: 3], Got: %v", errs.List)
+		}
+
+		// A nil in extra takes a checker away.
+		errs = voxgigstruct.ListRefCreate[any]()
+		_, _ = voxgigstruct.Validate(
+			"x",
+			"`$STRING`",
+			&voxgigstruct.Injection{Extra: map[string]any{"$STRING": nil}, Errs: errs},
+		)
+		if !reflect.DeepEqual(errs.List, []any{"Unknown validator $STRING at field <root>."}) {
+			t.Errorf("Expected Error: unknown $STRING, Got: %v", errs.List)
+		}
 	})
 
 	t.Run("validate-custom", func(t *testing.T) {
