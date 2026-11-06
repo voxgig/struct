@@ -675,6 +675,11 @@ Go has only `nil`.  JSON null and "absent" both map to `nil` at the
 user-facing API.  Where the test corpus needs to distinguish them,
 the test runner uses string sentinels `__NULL__` and `__UNDEF__`.
 
+A `$NOF` or `$ALL` trial validates the value at the root of its own call,
+where a missing value arrives as `nil`. So for a missing field a trial
+spec of `` "`$NULL`" `` admits it, where canonical TypeScript
+refuses it. No corpus entry reaches the case.
+
 ### Multiple variants instead of optional parameters
 
 Go has no optional or named parameters. Where canonical TypeScript

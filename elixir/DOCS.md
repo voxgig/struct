@@ -112,6 +112,11 @@ it as that count. A spec that names a checker `validate` does not define is
 rejected before any data is read, so a leftover `$ONE` raises
 `Unknown validator $ONE at field a.0.` rather than validating anything.
 
+A `$NOF` or `$ALL` trial validates the value at the root of its own call,
+where a missing value arrives as `nil`. So for a missing field a trial
+spec of `` "`$NULL`" `` admits it, where canonical TypeScript
+refuses it. No corpus entry reaches the case.
+
 ## Testing
 
 `make test` runs the shared corpus (`../build/test/test.json`) through the port

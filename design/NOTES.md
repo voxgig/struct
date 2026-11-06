@@ -20,6 +20,16 @@
   feature. The Perl, Rust, and other ports replicate the behaviour
   faithfully; the gap is purely in the TS docstring.
 
+- **A `$NOF` or `$ALL` trial on a missing value, in the single-null
+  ports.** Canonical TypeScript tries each spec with a nested `validate`
+  whose data is the value itself, so a missing value reaches it as
+  `undefined` and a trial spec of `'$NULL'` refuses it. Python, Ruby, Go,
+  Lua, Elixir and Clojure (each run) and Dart (by its code) hand the nested
+  call their one null instead, which `'$NULL'` admits. No corpus entry
+  reaches the case. Closing it needs the nested `validate` in each of those
+  ports to see absence at its root; a corpus entry could then hold every
+  port to it. Each port's page and [`REPORT.md`](REPORT.md) record the gap.
+
 
 ## Documented JS-fidelity gaps
 

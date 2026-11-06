@@ -614,6 +614,11 @@ Ruby has `nil`.  The port distinguishes:
 `typify(nil)` returns `T_scalar | T_null`; `typify(UNDEF)` returns
 `T_noval`.
 
+A `$NOF` or `$ALL` trial validates the value at the root of its own call,
+where a missing value arrives as `nil`. So for a missing field a trial
+spec of `` '`$NULL`' `` admits it, where canonical TypeScript
+refuses it. No corpus entry reaches the case.
+
 ### Method naming
 
 Ruby method names match canonical lowercase (`getpath`, `setpath`,

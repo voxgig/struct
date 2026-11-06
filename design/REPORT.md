@@ -129,7 +129,7 @@ still pass their existing corpus.
 union with `voxgig_list` / `voxgig_map` (insertion-ordered, hash-indexed) for
 reference-stable containers. All 48 functions, 15 type bit-flags, 3
 mode constants, `SKIP` / `DELETE` sentinels (pointer identity), and
-the `voxgig_injection` state machine. All 11 transform commands, all 15
+the `voxgig_injection` state machine. All 11 transform commands, all 16
 validate checkers, all 4 select operators, the injection helpers
 (`voxgig_check_placement` / `voxgig_injector_args` / `voxgig_inject_child`) are
 wired. The full corpus runs via the `corpus.out` driver
@@ -191,15 +191,15 @@ not.
 \*\* Rust: full TS-canonical parity. Idiomatic `snake_case` API (`get_path`,
 `is_node`, …; see `rust/README.md` for the name table), `Rc<RefCell>`
 reference-stable nodes via the `indexmap` crate, `Value::Noval` vs `Value::Null`
-kept distinct. All 11 transform commands, all 15 validate checkers, all 4 select
+kept distinct. All 11 transform commands, all 16 validate checkers, all 4 select
 operators, the `Injection` state machine, and the `primary.check` SDK test pass
 (`cargo test` → 1187 corpus checks; `cargo clippy` clean).
 
 \*\* Java, C++ and C#: full TS-canonical parity. Injection state machine,
 `SKIP`/`DELETE` sentinels, mode constants, all 11 transform commands
 (`$DELETE`/`$COPY`/`$KEY`/`$ANNO`/`$MERGE`/`$EACH`/`$PACK`/`$REF`/
-`$FORMAT`/`$APPLY`), all 6 validate checkers (`$STRING`/`$TYPE`/`$ANY`/
-`$CHILD`/`$ONE`/`$EXACT`), all 4 select operators (`$AND`/`$OR`/`$NOT`/
+`$FORMAT`/`$APPLY`), all 7 validate checkers (`$STRING`/`$TYPE`/`$ANY`/
+`$CHILD`/`$EXACT`/`$NOF`/`$ALL`), all 4 select operators (`$AND`/`$OR`/`$NOT`/
 `$CMP`), and `_validation`/`_validatehandler`/`_injecthandler` internals
 all wired. Per-file: minor 506/506, walk 46/46, merge 133/133, getpath 87/87,
 inject 41/41, transform 187/187, validate 131/131, select 47/47.
@@ -280,7 +280,7 @@ Also exports `replace` as a public function (internal-only in TS).
 **Classes:** Injection class and StructUtility class both present.
 
 **Transform commands:** All 11 present.
-**Validate checkers:** All 15 present.
+**Validate checkers:** All 16 present.
 
 **Differences:**
 - `replace()` is exported publicly (not exported in TS canonical).
@@ -305,7 +305,7 @@ Also exports `replace` as a public function (internal-only in TS).
 **Classes:** `Injection` class exported (TS exports as type-only).
 
 **Transform commands:** All 11 present.
-**Validate checkers:** All 15 present.
+**Validate checkers:** All 16 present.
 
 **Language adaptations:**
 - `UNDEF = None` for undefined semantics; tests use `NULLMARK`/`UNDEFMARK` markers.
@@ -334,7 +334,7 @@ Also exports `replace` as a public function (internal-only in TS).
 **Classes/Types:** `Injection` struct, `Injector` func type, `WalkApply` func type, `Modify` func type.
 
 **Transform commands:** All 11 present.
-**Validate checkers:** All 15 present.
+**Validate checkers:** All 16 present.
 
 **Language adaptations:**
 - `nil` represents both undefined and null; tests use `NULLMARK`/`UNDEFMARK`.
@@ -360,7 +360,7 @@ MODENAME present.
 **Transform commands:** All 11 present (`$DELETE`, `$COPY`, `$KEY`, `$META`,
 `$ANNO`, `$MERGE`, `$EACH`, `$PACK`, `$REF`, `$FORMAT`, `$APPLY`).
 
-**Validate checkers:** All 15 present (registered via validate_TYPE).
+**Validate checkers:** All 16 present (registered via validate_TYPE).
 
 **Language adaptations:**
 - `UNDEF = '__UNDEFINED__'` string sentinel for undefined semantics.
@@ -387,9 +387,9 @@ sentinels (SKIP, DELETE), and MODENAME present.
 **Transform commands:** All 11 present (`$DELETE`, `$COPY`, `$KEY`, `$META`,
 `$ANNO`, `$MERGE`, `$EACH`, `$PACK`, `$REF`, `$FORMAT`, `$APPLY`).
 
-**Validate checkers:** All 15 present (`$MAP`, `$LIST`, `$STRING`, `$NUMBER`,
+**Validate checkers:** All 16 present (`$MAP`, `$LIST`, `$STRING`, `$NUMBER`,
 `$INTEGER`, `$DECIMAL`, `$BOOLEAN`, `$NULL`, `$NIL`, `$FUNCTION`, `$INSTANCE`,
-`$ANY`, `$CHILD`, `$ONE`, `$EXACT`).
+`$ANY`, `$CHILD`, `$EXACT`, `$NOF`, `$ALL`).
 
 **Language adaptations:**
 - `UNDEF = Object.new.freeze` sentinel for absent values (distinct from nil/JSON null).
@@ -415,7 +415,7 @@ typename, validate, walk, checkPlacement, injectorArgs, injectChild.
 **Constants:** All 15 type constants, mode constants, sentinels, MODENAME present.
 
 **Transform commands:** All 11 present (`$DELETE`, `$COPY`, `$KEY`, `$ANNO`, `$MERGE`, `$EACH`, `$PACK`, `$REF`, `$FORMAT`, `$APPLY`, `$META`).
-**Validate checkers:** All 15 present.
+**Validate checkers:** All 16 present.
 
 **Language adaptations:**
 - 1-based indexing internally; external API uses 0-based with translation.
@@ -449,9 +449,9 @@ select dispatchers.
 `$ANNO` / `$MERGE` / `$EACH` / `$PACK` / `$REF` / `$FORMAT` / `$APPLY`) plus
 runtime helpers `$BT` / `$DS` / `$WHEN` / `$SPEC`.
 
-**Validate checkers:** All 15 (`$MAP` / `$LIST` / `$STRING` / `$NUMBER` /
+**Validate checkers:** All 16 (`$MAP` / `$LIST` / `$STRING` / `$NUMBER` /
 `$INTEGER` / `$DECIMAL` / `$BOOLEAN` / `$NULL` / `$NIL` / `$FUNCTION` /
-`$INSTANCE` / `$ANY` / `$CHILD` / `$ONE` / `$EXACT`).
+`$INSTANCE` / `$ANY` / `$CHILD` / `$EXACT` / `$NOF` / `$ALL`).
 
 **Select operators:** `$AND` / `$OR` / `$NOT` / `$GT` / `$LT` / `$GTE` /
 `$LTE` / `$LIKE`.
@@ -514,9 +514,9 @@ dispatchers.
 **Transform commands:** All 11 present (`$DELETE`, `$COPY`, `$KEY`,
 `$META`, `$ANNO`, `$MERGE`, `$EACH`, `$PACK`, `$REF`, `$FORMAT`,
 `$APPLY`).
-**Validate checkers:** All 15 present (`$MAP`, `$LIST`, `$STRING`,
+**Validate checkers:** All 16 present (`$MAP`, `$LIST`, `$STRING`,
 `$NUMBER`, `$INTEGER`, `$DECIMAL`, `$BOOLEAN`, `$NULL`, `$NIL`,
-`$FUNCTION`, `$INSTANCE`, `$ANY`, `$CHILD`, `$ONE`, `$EXACT`).
+`$FUNCTION`, `$INSTANCE`, `$ANY`, `$CHILD`, `$EXACT`, `$NOF`, `$ALL`).
 **Select operators:** `$AND`, `$OR`, `$NOT`, and the `$GT` / `$LT` /
 `$GTE` / `$LTE` / `$LIKE` comparator family.
 
@@ -556,9 +556,9 @@ all pass.
 `$ANNO` / `$MERGE` / `$EACH` / `$PACK` / `$REF` / `$FORMAT` / `$APPLY`)
 plus the runtime helpers `$BT` / `$DS` / `$WHEN` / `$SPEC`.
 
-**Validate checkers:** All 15 (`$MAP` / `$LIST` / `$STRING` / `$NUMBER` /
+**Validate checkers:** All 16 (`$MAP` / `$LIST` / `$STRING` / `$NUMBER` /
 `$INTEGER` / `$DECIMAL` / `$BOOLEAN` / `$NULL` / `$NIL` / `$FUNCTION` /
-`$INSTANCE` / `$ANY` / `$CHILD` / `$ONE` / `$EXACT`).
+`$INSTANCE` / `$ANY` / `$CHILD` / `$EXACT` / `$NOF` / `$ALL`).
 
 **Select operators:** `$AND` / `$OR` / `$NOT` / `$GT` / `$LT` / `$GTE` /
 `$LTE` / `$LIKE`.
@@ -776,29 +776,47 @@ constants, `SKIP` / `DELETE` sentinels.
 | $INSTANCE | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
 | $ANY | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
 | $CHILD | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
-| $ONE | - | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
 | $EXACT | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
-| $NOF | Y | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - |
-| $ALL | Y | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - |
+| $NOF | Y | Y | Y* | Y* | Y | Y* | Y* | Y* | Y | Y* | Y | Y* | Y | Y | Y | Y* |
+| $ALL | Y | Y | Y* | Y* | Y | Y* | Y* | Y* | Y | Y* | Y | Y* | Y | Y | Y | Y* |
 
 ^ Ruby uses `$OBJECT`/`$ARRAY` naming instead of `$MAP`/`$LIST`.
 
-`$NOF` and `$ALL` are canonical TypeScript only so far, and canonical
-TypeScript has dropped `$ONE`, which every other port still defines: there
-`['$NOF', {min:1}, ...]` is the same check. No other port runs the
-`validate.all`, `validate.nof` or `validate.directive` corpus groups yet.
-`validate.nof` and `validate.all` specify the counts, the admission trial (no
-error, and every member the value has comes back unchanged) and the
-messages. `validate.directive` specifies what `$EXACT`, `$NOF` and `$ALL`
-share as list directives: a null at the slot is a value, nothing in the
-directive's own list is checked against list data, and `$EXACT` compares as
-JSON. It also pins `$NIL` accepting null. These three groups run with the
-null flag off. `validate.one` stays for the ports that define `$ONE`, and
-canonical TypeScript does not run it.
+Every port defines `$NOF` and `$ALL`, and none defines `$ONE`: there
+`['$NOF', {min:1}, ...]` is the same check. `validate.nof` and `validate.all`
+specify the counts, the admission trial (no error, and every member the value
+has comes back unchanged) and the messages. `validate.directive` specifies what
+`$EXACT`, `$NOF` and `$ALL` share as list directives: a null at the slot is a
+value, nothing in the directive's own list is checked against list data, and
+`$EXACT` compares as JSON. It also pins `$NIL` accepting null.
 
-Canonical TypeScript also rejects a spec that names a checker it does not
-define (`Unknown validator $FOO at field a.`), which `validate.unknown`
-specifies. Every other port accepts such a name without a word.
+Every port also rejects a spec that names a checker it does not define
+(`Unknown validator $FOO at field a.`), which `validate.unknown` specifies. Go
+and Zig still define `$OBJECT` and `$ARRAY` beside `$MAP` and `$LIST`, so those
+two names stay known there, where TypeScript reports them. The four groups run
+with the null flag off.
+
+`Y*` marks a port whose `$NOF` and `$ALL` differ from the canonical where the
+corpus does not reach, or that has not run them yet:
+
+- **py, rb, go, lua:** a `$NOF` or `$ALL` trial validates the value at the
+  root of its own call, and a missing value arrives there as the port's null.
+  So for a missing field a trial spec of `'$NULL'` admits it, where canonical
+  TypeScript refuses it. Elixir and Clojure, which this table does not list,
+  do the same when run, and Dart does by its code. JavaScript, PHP, Perl,
+  Java, Kotlin and C# refuse it when run.
+- **lua:** 17 entries of `validate.directive`, `validate.nof` and
+  `validate.all` are dropped, each named in the runner: a Lua table cannot
+  hold a JSON null inside a node.
+- **c, cpp:** `typify` reads `2.0` as a decimal, so it is an invalid `$NOF`
+  count where TypeScript, with one number type, reads `2`. The C++ trial also
+  catches exceptions, so one a custom checker throws counts as not admitted
+  where TypeScript would throw.
+- **zig, swift:** written without a toolchain, and not yet compiled or run.
+  So are the Lean, Dart and boru ports, which this table does not list.
+
+Elixir drops three `validate.directive` entries, each named in its runner, that
+expect a top-level null its runner reads as absent.
 
 ### Corpus groups only canonical TypeScript runs
 
@@ -806,10 +824,6 @@ No other port runs these groups yet, and each port page that counts its
 corpus entries leaves them out:
 
 - `condense.condense`, `condense.expand`, `condense.iscondensed`
-- `validate.all`, `validate.directive`, `validate.nof`, `validate.unknown`
-
-`validate.one` is the reverse case: the other ports run it, and canonical
-TypeScript, which has no `$ONE`, does not.
 
 
 ## Constant Parity

@@ -99,6 +99,11 @@ s.validate(2, ['`\$ALL`', '`\$NUMBER`', '`\$INTEGER`']);             // 2
 s.select([{'a': 1}, {'a': 2}], {'a': {'`\$GT`': 1}}); // [{a: 2, $KEY: 1}]
 ```
 
+A `$NOF` or `$ALL` trial validates the value at the root of its own call,
+where a missing value arrives as `null`. So for a missing field a trial
+spec of `` '`\$NULL`' `` admits it, where canonical TypeScript
+refuses it. No corpus entry reaches the case.
+
 ## Testing
 
 `make test` runs the shared corpus (`../build/test/test.json`) through the port

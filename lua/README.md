@@ -646,6 +646,11 @@ Lua has no separate undefined keyword; `nil` covers both "absent"
 and "JSON null".  Where the test corpus needs to distinguish them,
 the runner uses string sentinels.
 
+A `$NOF` or `$ALL` trial validates the value at the root of its own call,
+where a missing value arrives as `nil`. So for a missing field a trial
+spec of `` '`$NULL`' `` admits it, where canonical TypeScript
+refuses it. No corpus entry reaches the case.
+
 ### Lists are mutable in place
 
 Lua tables are reference types, so the canonical "lists are
