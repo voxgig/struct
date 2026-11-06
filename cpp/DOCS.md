@@ -212,7 +212,7 @@ transform(parse_json("{}"), parse_json(R"({"x":"`$APPLY`"})"));
 <!-- throws: invalid placement in parent map -->
 
 For the full recipe set (merge configs, rename fields, `$EACH`, `$MERGE`,
-`$FORMAT`, `$ONE`, `$EXACT`, …) see the language-neutral
+`$FORMAT`, `$NOF`, `$EXACT`, …) see the language-neutral
 [How-to guides](../DOCS.md#2-how-to-guides) — the spec syntax is identical;
 only the host literals differ.
 

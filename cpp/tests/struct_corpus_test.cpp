@@ -517,8 +517,6 @@ int main() {
       [](const Value& in) { return validate(getp(in, "data"), getp(in, "spec")); });
   run("validate", "child", true,
       [](const Value& in) { return validate(getp(in, "data"), getp(in, "spec")); });
-  run("validate", "one", true,
-      [](const Value& in) { return validate(getp(in, "data"), getp(in, "spec")); });
   run("validate", "exact", true,
       [](const Value& in) { return validate(getp(in, "data"), getp(in, "spec")); });
   run("validate", "invalid", false,
@@ -528,6 +526,14 @@ int main() {
     return inj_v.is_map() ? validate(getp(in, "data"), getp(in, "spec"), inj_v)
                           : validate(getp(in, "data"), getp(in, "spec"));
   });
+  run("validate", "directive", false,
+      [](const Value& in) { return validate(getp(in, "data"), getp(in, "spec")); });
+  run("validate", "nof", false,
+      [](const Value& in) { return validate(getp(in, "data"), getp(in, "spec")); });
+  run("validate", "all", false,
+      [](const Value& in) { return validate(getp(in, "data"), getp(in, "spec")); });
+  run("validate", "unknown", false,
+      [](const Value& in) { return validate(getp(in, "data"), getp(in, "spec")); });
 
   // ===== select =====
   run("select", "basic", true, [](const Value& in) {

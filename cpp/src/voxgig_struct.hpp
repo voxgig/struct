@@ -493,7 +493,8 @@ inline std::vector<Value> items(const Value& v) {
   for (const auto& key : keysof(v)) {
     auto pair = std::make_shared<List>();
     pair->push_back(Value(key));
-    pair->push_back(getprop(v, Value(key)));
+    // Canonical reads val[k]: a stored null is a value here (Group B).
+    pair->push_back(lookup_v(v, Value(key)));
     out.push_back(Value(std::move(pair)));
   }
   return out;
@@ -2724,7 +2725,8 @@ inline Value TYPE_FN(Injection& inj, const Value& val, const std::string& ref, c
   }
   if (idx < 0)
     return Value::undef();
-  int typev = 1 << (31 - idx);
+  // $NIL is absent or null.
+  int typev = (1 << (31 - idx)) | (tname == "nil" ? T_null : 0);
   Value out = lookup_v(inj.dparent, Value(inj.key));
   int t = typify(out);
   if ((t & typev) == 0) {
@@ -2835,85 +2837,146 @@ inline std::string describe_alternatives(const std::vector<Value>& tvals) {
   return out;
 }
 
-inline Value ONE_FN(Injection& inj, const Value& val, const std::string& ref, const Value& store) {
-  if (inj.mode != M_VAL)
-    return Value::undef();
-  if (!inj.parent.is_list() || inj.keyI != 0) {
-    auto pl = std::make_shared<List>();
-    for (auto& p : inj.path)
-      pl->push_back(Value(p));
-    inj.errs->push_back(Value("The $ONE validator at field " + pathify(Value(pl), 1, 1) +
-                              " must be the first element of an array."));
-    return Value::undef();
-  }
-  inj.keyI = static_cast<int>(inj.keys ? inj.keys->size() : 0);
-  inj.setval(inj.dparent, 2);
-  if (!inj.path.empty())
-    inj.path.pop_back();
+inline Value pathlist(const std::vector<std::string>& path) {
+  auto pl = std::make_shared<List>();
+  for (const auto& p : path)
+    pl->push_back(Value(p));
+  return Value(pl);
+}
 
-  std::vector<Value> tvals;
-  if (inj.parent.is_list()) {
-    auto pl = inj.parent.as_list();
-    for (size_t i = 1; i < pl->size(); i++)
-      tvals.push_back((*pl)[i]);
+// The data value at a list directive's slot. The directive's own dparent was
+// read with getprop, which reports a stored null as absent.
+inline Value slotval(const Injection& inj) {
+  return inj.prior ? lookup_v(inj.prior->dparent, Value(inj.prior->key)) : inj.dparent;
+}
+
+// JSON equality: numbers by value, lists in order, maps by key in any order.
+inline bool deepequal(const Value& a, const Value& b) {
+  if (a == b)
+    return true;
+
+  int atype = typify(a);
+  if (atype != typify(b) || 0 == ((T_list | T_map) & atype))
+    return false;
+
+  auto akeys = keysof(a);
+  auto bkeys = keysof(b);
+  if (akeys.size() != bkeys.size())
+    return false;
+
+  for (size_t kI = 0; kI < akeys.size(); kI++) {
+    const std::string& k = akeys[kI];
+    if (k != bkeys[kI] || !deepequal(lookup_v(a, Value(k)), lookup_v(b, Value(k))))
+      return false;
   }
-  if (tvals.empty()) {
-    auto pl = std::make_shared<List>();
-    for (auto& p : inj.path)
-      pl->push_back(Value(p));
-    inj.errs->push_back(Value("The $ONE validator at field " + pathify(Value(pl), 1, 1) +
-                              " must have at least one argument."));
-    return Value::undef();
+
+  return true;
+}
+
+// Every member val has is in out, unchanged. A member only out has is a
+// default the spec supplied, and is ignored.
+inline bool keeps(const Value& val, const Value& out) {
+  if (val.is_undef())
+    return true;
+
+  if (0 == ((T_list | T_map) & typify(val)) || val.is_list() != out.is_list() || !isnode(out))
+    return deepequal(val, out);
+
+  for (const auto& k : keysof(val)) {
+    if (!keeps(lookup_v(val, Value(k)), lookup_v(out, Value(k))))
+      return false;
   }
-  for (const auto& tval : tvals) {
-    auto terrs = std::make_shared<std::vector<Value>>();
-    auto vstore = std::shared_ptr<Map>(new Map());
-    if (store.is_map()) {
-      for (const auto& [k, v] : *store.as_map())
-        vstore->set(k, v);
-    }
-    vstore->set(S_DTOP(), inj.dparent);
-    auto opts = std::shared_ptr<Map>(new Map());
-    auto terrs_list = std::make_shared<List>();
-    opts->set("extra", Value(vstore));
-    opts->set("errs", Value(terrs_list));
-    if (inj.meta)
-      opts->set("meta", Value(inj.meta));
-    Value vcurrent;
-    try {
-      vcurrent = validate(inj.dparent, tval, Value(opts));
-    } catch (const std::exception& e) {
-      terrs_list->push_back(Value(std::string(e.what())));
-      vcurrent = inj.dparent;
-    }
-    inj.setval(vcurrent, -2);
-    if (terrs_list->empty())
-      return Value::undef();
+
+  return true;
+}
+
+// A spec admits a value when validating the value against it finds no error
+// and gives back the value as it is.
+inline bool admits(const Value& val, const Value& spec, Injection& inj, const Value& store) {
+  auto vstore = std::shared_ptr<Map>(new Map());
+  if (store.is_map()) {
+    for (const auto& [k, v] : *store.as_map())
+      vstore->set(k, v);
   }
-  // No match.
-  std::string valdesc = describe_alternatives(tvals);
-  inj.errs->push_back(
-      Value(invalid_type_msg(inj.path, (tvals.size() > 1 ? "one of " : "") + valdesc,
-                             typify(inj.dparent), inj.dparent, "V0210")));
-  return Value::undef();
+  vstore->set(S_DTOP(), val);
+
+  auto terrs = std::make_shared<List>();
+  auto opts = std::shared_ptr<Map>(new Map());
+  opts->set("extra", Value(vstore));
+  opts->set("errs", Value(terrs));
+  if (inj.meta)
+    opts->set("meta", Value(inj.meta));
+
+  Value out;
+  try {
+    out = validate(val, spec, Value(opts));
+  } catch (const std::exception& e) {
+    terrs->push_back(Value(std::string(e.what())));
+  }
+
+  return terrs->empty() && keeps(val, out);
+}
+
+// The bounds of a $NOF count, and the words for it. False when the count is
+// invalid. Without a max, the bound is the number of specs.
+inline bool nofcount(const Value& count, int64_t numtvals, int64_t& lo, int64_t& hi,
+                     std::string& desc) {
+  auto isnat = [](const Value& n) { return 0 != (T_integer & typify(n)) && 0 <= n.as_int(); };
+
+  if (isnat(count)) {
+    lo = hi = count.as_int();
+    desc = 0 == lo ? "none" : "exactly " + std::to_string(lo);
+    return true;
+  }
+
+  Value min = lookup_v(count, Value("min"));
+  Value max = lookup_v(count, Value("max"));
+
+  bool valid = count.is_map() && 0 < count.as_map()->size() &&
+               count.as_map()->size() ==
+                   static_cast<size_t>(min.is_undef() ? 0 : 1) + (max.is_undef() ? 0 : 1) &&
+               (min.is_undef() || isnat(min)) && (max.is_undef() || isnat(max)) &&
+               (min.is_undef() || max.is_undef() || min.as_int() <= max.as_int());
+
+  if (!valid)
+    return false;
+
+  lo = min.is_undef() ? 0 : min.as_int();
+  hi = max.is_undef() ? numtvals : max.as_int();
+
+  if (max.is_undef())
+    desc = "at least " + std::to_string(lo);
+  else if (0 == hi)
+    desc = "none";
+  else if (min.is_undef())
+    desc = "at most " + std::to_string(hi);
+  else if (lo == hi)
+    desc = "exactly " + std::to_string(lo);
+  else
+    desc = std::to_string(lo) + " to " + std::to_string(hi);
+
+  return true;
 }
 
 inline Value EXACT_FN(Injection& inj, const Value& val, const std::string& ref,
                       const Value& store) {
   if (inj.mode == M_VAL) {
     if (!inj.parent.is_list() || inj.keyI != 0) {
-      auto pl = std::make_shared<List>();
-      for (auto& p : inj.path)
-        pl->push_back(Value(p));
-      inj.errs->push_back(Value("The $EXACT validator at field " + pathify(Value(pl), 1, 1) +
+      inj.errs->push_back(Value("The $EXACT validator at field " +
+                                pathify(pathlist(inj.path), 1, 1) +
                                 " must be the first element of an array."));
       return Value::undef();
     }
+
+    Value cval = slotval(inj);
+
     inj.keyI = static_cast<int>(inj.keys ? inj.keys->size() : 0);
-    inj.setval(inj.dparent, 2);
+
+    // Replace [$EXACT, ...] with the data value; SKIP keeps inject off the detached list.
+    inj.setval(cval, 2);
+
     if (!inj.path.empty())
       inj.path.pop_back();
-    inj.key = inj.path.empty() ? "" : inj.path.back();
 
     std::vector<Value> tvals;
     if (inj.parent.is_list()) {
@@ -2922,38 +2985,173 @@ inline Value EXACT_FN(Injection& inj, const Value& val, const std::string& ref,
         tvals.push_back((*pl)[i]);
     }
     if (tvals.empty()) {
-      auto pl = std::make_shared<List>();
-      for (auto& p : inj.path)
-        pl->push_back(Value(p));
-      inj.errs->push_back(Value("The $EXACT validator at field " + pathify(Value(pl), 1, 1) +
+      inj.errs->push_back(Value("The $EXACT validator at field " +
+                                pathify(pathlist(inj.path), 1, 1) +
                                 " must have at least one argument."));
-      return Value::undef();
+      return SKIP();
     }
-    std::string currentstr;
-    bool currentstr_set = false;
+
     for (const auto& tval : tvals) {
-      bool exactmatch = (tval == inj.dparent);
-      if (!exactmatch && isnode(tval)) {
-        if (!currentstr_set) {
-          currentstr = stringify(inj.dparent);
-          currentstr_set = true;
-        }
-        std::string ts = stringify(tval);
-        exactmatch = (ts == currentstr);
-      }
-      if (exactmatch)
-        return Value::undef();
+      if (deepequal(tval, cval))
+        return SKIP();
     }
+
     std::string valdesc = describe_alternatives(tvals);
     inj.errs->push_back(Value(invalid_type_msg(inj.path,
                                                std::string(inj.path.size() > 1 ? "" : "value ") +
                                                    "exactly equal to " +
                                                    (tvals.size() == 1 ? "" : "one of ") + valdesc,
-                                               typify(inj.dparent), inj.dparent, "V0110")));
-    return Value::undef();
+                                               typify(cval), cval, "V0110")));
+    return SKIP();
   } else {
     delprop(inj.parent, Value(inj.key));
     return Value::undef();
+  }
+}
+
+// The counting list directives. Without a count, every spec has to admit.
+inline Value validatecount(Injection& inj, const Value& store, const std::string& name,
+                           bool counted) {
+  if (inj.mode != M_VAL)
+    return Value::undef();
+
+  if (!inj.parent.is_list() || inj.keyI != 0) {
+    inj.errs->push_back(Value("The " + name + " validator at field " +
+                              pathify(pathlist(inj.path), 1, 1) +
+                              " must be the first element of an array."));
+    return Value::undef();
+  }
+
+  Value cval = slotval(inj);
+
+  inj.keyI = static_cast<int>(inj.keys ? inj.keys->size() : 0);
+
+  // Replace the directive's list with the data value. Each return is SKIP, so
+  // that inject leaves the detached list alone and validates nothing in it.
+  inj.setval(cval, 2);
+
+  if (!inj.path.empty())
+    inj.path.pop_back();
+
+  auto pl = inj.parent.as_list();
+  size_t first = counted ? 2 : 1;
+  Value count = counted ? lookup_v(inj.parent, Value(int64_t(1))) : Value::undef();
+  std::vector<Value> tvals;
+  for (size_t i = first; i < pl->size(); i++)
+    tvals.push_back((*pl)[i]);
+  int64_t numtvals = static_cast<int64_t>(tvals.size());
+  std::string field = "The " + name + " validator at field " + pathify(pathlist(inj.path), 1);
+
+  if (0 == numtvals) {
+    inj.errs->push_back(Value(field + (counted ? " must have a count and" : " must have") +
+                              " at least one argument."));
+    return SKIP();
+  }
+
+  int64_t lo = numtvals;
+  int64_t hi = numtvals;
+  std::string countdesc = "all";
+  if (counted && !nofcount(count, numtvals, lo, hi, countdesc)) {
+    inj.errs->push_back(Value(field + " has an invalid count: " + stringify(count) + "."));
+    return SKIP();
+  }
+
+  int64_t admitted = 0;
+  for (int64_t tI = 0; tI < numtvals; tI++) {
+    int64_t left = numtvals - tI;
+
+    // Stop once the specs left cannot change the verdict.
+    if (hi < admitted || admitted + left < lo || (lo <= admitted && admitted + left <= hi))
+      break;
+
+    if (admits(cval, tvals[static_cast<size_t>(tI)], inj, store))
+      admitted++;
+  }
+
+  if (admitted < lo || hi < admitted) {
+    inj.errs->push_back(Value(invalid_type_msg(
+        inj.path, countdesc + " of " + describe_alternatives(tvals), typify(cval), cval, "V0310")));
+  }
+
+  return SKIP();
+}
+
+// Count the specs that admit the value: ['`$NOF`', count, spec, ...], where
+// count is an integer, or a map holding min, max or both.
+inline Value NOF_FN(Injection& inj, const Value& val, const std::string& ref, const Value& store) {
+  return validatecount(inj, store, "$NOF", true);
+}
+
+// Every spec admits the value: ['`$ALL`', spec, ...].
+inline Value ALL_FN(Injection& inj, const Value& val, const std::string& ref, const Value& store) {
+  return validatecount(inj, store, "$ALL", false);
+}
+
+// Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
+inline const std::vector<std::string>& VALIDATE_NAMES() {
+  static const std::vector<std::string> names = {"$TOP",  "$SPEC", "$BT",     "$DS",    "$WHEN",
+                                                 "$ANNO", "$REF",  "$FORMAT", "$APPLY", "$OPEN"};
+  return names;
+}
+
+inline const std::regex& R_CHECKER_NAME() {
+  static const std::regex r("^\\$[A-Z]+$");
+  return r;
+}
+
+inline std::string upper(std::string s) {
+  for (auto& c : s)
+    c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+  return s;
+}
+
+// The name a whole-string reference gives, when it is a checker name in any
+// case. Empty when there is none.
+inline std::string refname(const Value& val) {
+  if (!val.is_string())
+    return "";
+  std::smatch m;
+  const std::string& s = val.as_string();
+  if (!std::regex_match(s, m, R_INJECTION_FULL()))
+    return "";
+  std::string name = m[1].str();
+  return std::regex_match(upper(name), R_CHECKER_NAME()) ? name : "";
+}
+
+inline bool knownname(const std::string& n, const Value& store) {
+  const auto& names = VALIDATE_NAMES();
+  if (std::find(names.begin(), names.end(), n) != names.end())
+    return true;
+  Value found = lookup_v(store, Value(n));
+  return !found.is_undef() && !found.is_null();
+}
+
+// Unknown: undefined and upper case, or a defined name in another case. Null disables a name.
+inline bool unknownname(const std::string& name, const Value& store) {
+  std::string uname = upper(name);
+  return !knownname(name, store) && (uname == name || knownname(uname, store));
+}
+
+// Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
+inline void checknames(const Value& spec, const Value& store, std::vector<std::string>& path,
+                       std::vector<Value>& errs) {
+  std::string name = refname(spec);
+  if (!name.empty()) {
+    if (unknownname(name, store))
+      errs.push_back(
+          Value("Unknown validator " + name + " at field " + pathify(pathlist(path)) + "."));
+    return;
+  }
+
+  if (spec.is_list() && !spec.as_list()->empty() && "$EXACT" == refname((*spec.as_list())[0]))
+    return;
+
+  for (const auto& key : keysof(spec)) {
+    if (spec.is_map())
+      checknames(Value(key), store, path, errs);
+    path.push_back(key);
+    checknames(lookup_v(spec, Value(key)), store, path, errs);
+    path.pop_back();
   }
 }
 
@@ -3107,8 +3305,9 @@ inline Value validate(const Value& data, const Value& spec, const Value& options
   baseStore->set("$INSTANCE", Value(Injector(validators::TYPE_FN)));
   baseStore->set("$ANY", Value(Injector(validators::ANY_FN)));
   baseStore->set("$CHILD", Value(Injector(validators::CHILD_FN)));
-  baseStore->set("$ONE", Value(Injector(validators::ONE_FN)));
   baseStore->set("$EXACT", Value(Injector(validators::EXACT_FN)));
+  baseStore->set("$NOF", Value(Injector(validators::NOF_FN)));
+  baseStore->set("$ALL", Value(Injector(validators::ALL_FN)));
 
   auto mergeList = std::make_shared<List>();
   mergeList->push_back(Value(baseStore));
@@ -3131,22 +3330,32 @@ inline Value validate(const Value& data, const Value& spec, const Value& options
   if (!meta->find(S_BEXACT()))
     meta->set(S_BEXACT(), Value(false));
 
-  auto opts = std::shared_ptr<Map>(new Map());
-  opts->set("meta", Value(meta));
-  opts->set("extra", store);
-  opts->set("modify", Value(Modify(_validation)));
-  opts->set("handler", Value(Injector(_validatehandler)));
-  auto opt_errs_list = std::make_shared<List>();
-  for (const auto& e : *errs)
-    opt_errs_list->push_back(e);
-  opts->set("errs", Value(opt_errs_list));
+  // A spec that names an unknown checker validates nothing.
+  size_t numerrs = errs->size();
+  std::vector<std::string> namepath;
+  validators::checknames(spec, store, namepath, *errs);
 
-  Value out = transform(data, spec, Value(opts));
+  Value out;
+  if (numerrs < errs->size()) {
+    out = clone(data);
+  } else {
+    auto opts = std::shared_ptr<Map>(new Map());
+    opts->set("meta", Value(meta));
+    opts->set("extra", store);
+    opts->set("modify", Value(Modify(_validation)));
+    opts->set("handler", Value(Injector(_validatehandler)));
+    auto opt_errs_list = std::make_shared<List>();
+    for (const auto& e : *errs)
+      opt_errs_list->push_back(e);
+    opts->set("errs", Value(opt_errs_list));
 
-  // Sync opt_errs_list back to errs.
-  errs->clear();
-  for (const auto& e : *opt_errs_list)
-    errs->push_back(e);
+    out = transform(data, spec, Value(opts));
+
+    // Sync opt_errs_list back to errs.
+    errs->clear();
+    for (const auto& e : *opt_errs_list)
+      errs->push_back(e);
+  }
 
   if (!errs->empty() && !collect) {
     std::string msg;
