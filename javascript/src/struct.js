@@ -158,6 +158,7 @@ const R_META_PATH = /^([^$]+)\$([=~])(.+)$/ // Meta path syntax.
 const R_DOUBLE_DOLLAR = /\$\$/g // Double dollar escape sequence.
 const R_TRANSFORM_NAME = /`\$([A-Z]+)`/g // Transform command names.
 const R_INJECTION_FULL = /^`(\$[A-Z]+|[^`]*)[0-9]*`$/ // Full string injection pattern.
+const R_CHECKER_NAME = /^\$[A-Z]+$/ // Validate checker name.
 const R_BT_ESCAPE = /\$BT/g // Backtick escape sequence.
 const R_DS_ESCAPE = /\$DS/g // Dollar sign escape sequence.
 const R_INJECTION_PARTIAL = /`([^`]+)`/g // Partial string injection pattern.
@@ -1599,7 +1600,8 @@ const validate_STRING = (inj) => {
 }
 const validate_TYPE = (inj, _val, ref) => {
   const tname = slice(ref, 1).toLowerCase()
-  const typev = 1 << (31 - TYPENAME.indexOf(tname))
+  // $NIL is absent or null.
+  const typev = (1 << (31 - TYPENAME.indexOf(tname))) | (S_nil === tname ? T_null : 0)
   let out = _lookup(inj.dparent, inj.key)
   const t = typify(out)
   // console.log('TYPE', tname, typev, tn(typev), 'O=', t, tn(t), out, 'C=', t & typev)
@@ -1688,73 +1690,6 @@ const validate_CHILD = (inj) => {
   }
   return NONE
 }
-// TODO: implement SOME, ALL
-// FIX: ONE should mean exactly one, not at least one (=SOME)
-// TODO: implement a generate validate_ALT to do all of these
-// Match at least one of the specified shapes.
-// Syntax: ['`$ONE`', alt0, alt1, ...]
-const validate_ONE = (inj, _val, _ref, store) => {
-  const { mode, parent, keyI } = inj
-  // Only operate in val mode, since parent is a list.
-  if (M_VAL === mode) {
-    if (!islist(parent) || 0 !== keyI) {
-      inj.errs.push(
-        'The $ONE validator at field ' +
-          pathify(inj.path, 1, 1) +
-          ' must be the first element of an array.',
-      )
-      return
-    }
-    inj.keyI = size(inj.keys)
-    // Clean up structure, replacing [$ONE, ...] with current
-    inj.setval(inj.dparent, 2)
-    inj.path = slice(inj.path, -1)
-    let tvals = slice(parent, 1)
-    if (0 === size(tvals)) {
-      inj.errs.push(
-        'The $ONE validator at field ' +
-          pathify(inj.path, 1, 1) +
-          ' must have at least one argument.',
-      )
-      return
-    }
-    // See if we can find a match.
-    for (let tval of tvals) {
-      // If match, then errs.length = 0
-      let terrs = []
-      const vstore = merge([{}, store], 1)
-      vstore.$TOP = inj.dparent
-      const vcurrent = validate(inj.dparent, tval, {
-        extra: vstore,
-        errs: terrs,
-        meta: inj.meta,
-      })
-      inj.setval(vcurrent, -2)
-      // Accept current value if there was a match
-      if (0 === size(terrs)) {
-        return
-      }
-    }
-    // There was no match.
-    const valdesc = replace(
-      join(
-        items(tvals, (n) => stringify(n[1])),
-        ', ',
-      ),
-      R_TRANSFORM_NAME,
-      (_m, p1) => p1.toLowerCase(),
-    )
-    inj.errs.push(
-      _invalidTypeMsg(
-        inj.path,
-        (1 < size(tvals) ? 'one of ' : '') + valdesc,
-        typify(inj.dparent),
-        inj.dparent,
-        'V0210',
-      ),
-    )
-  }
-}
 const validate_EXACT = (inj) => {
   const { mode, parent, key, keyI } = inj
   // Only operate in val mode, since parent is a list.
@@ -1767,12 +1702,11 @@ const validate_EXACT = (inj) => {
       )
       return
     }
+    const cval = _slotval(inj)
     inj.keyI = size(inj.keys)
-    // Clean up structure, replacing [$EXACT, ...] with current data parent
-    inj.setval(inj.dparent, 2)
-    // inj.path = slice(inj.path, 0, size(inj.path) - 1)
+    // Replace [$EXACT, ...] with the data value; SKIP keeps inject off the detached list.
+    inj.setval(cval, 2)
     inj.path = slice(inj.path, 0, -1)
-    inj.key = getelem(inj.path, -1)
     let tvals = slice(parent, 1)
     if (0 === size(tvals)) {
       inj.errs.push(
@@ -1780,19 +1714,12 @@ const validate_EXACT = (inj) => {
           pathify(inj.path, 1, 1) +
           ' must have at least one argument.',
       )
-      return
+      return SKIP
     }
     // See if we can find an exact value match.
-    let currentstr = undefined
     for (let tval of tvals) {
-      let exactmatch = tval === inj.dparent
-      if (!exactmatch && isnode(tval)) {
-        currentstr = undefined === currentstr ? stringify(inj.dparent) : currentstr
-        const tvalstr = stringify(tval)
-        exactmatch = tvalstr === currentstr
-      }
-      if (exactmatch) {
-        return
+      if (_deepequal(tval, cval)) {
+        return SKIP
       }
     }
     // There was no match.
@@ -1811,14 +1738,83 @@ const validate_EXACT = (inj) => {
           'exactly equal to ' +
           (1 === size(tvals) ? '' : 'one of ') +
           valdesc,
-        typify(inj.dparent),
-        inj.dparent,
+        typify(cval),
+        cval,
         'V0110',
       ),
     )
+    return SKIP
   } else {
     delprop(parent, key)
   }
+}
+// Count the specs that admit the value: ['`$NOF`', count, spec, ...], where
+// count is an integer, or a map holding min, max or both.
+const validate_NOF = (inj, _val, _ref, store) => _validatecount(inj, store, '$NOF', true)
+// Every spec admits the value: ['`$ALL`', spec, ...].
+const validate_ALL = (inj, _val, _ref, store) => _validatecount(inj, store, '$ALL', false)
+// The counting list directives. Without a count, every spec has to admit.
+function _validatecount(inj, store, name, counted) {
+  const { mode, parent, keyI } = inj
+  if (M_VAL !== mode) {
+    return NONE
+  }
+  if (!islist(parent) || 0 !== keyI) {
+    inj.errs.push(
+      'The ' +
+        name +
+        ' validator at field ' +
+        pathify(inj.path, 1, 1) +
+        ' must be the first element of an array.',
+    )
+    return NONE
+  }
+  const cval = _slotval(inj)
+  inj.keyI = size(inj.keys)
+  // Replace the directive's list with the data value. Each return is SKIP, so
+  // that inject leaves the detached list alone and validates nothing in it.
+  inj.setval(cval, 2)
+  inj.path = slice(inj.path, -1)
+  const count = counted ? _lookup(parent, 1) : NONE
+  const tvals = slice(parent, counted ? 2 : 1)
+  const numtvals = size(tvals)
+  const field = 'The ' + name + ' validator at field ' + pathify(inj.path, 1)
+  if (0 === numtvals) {
+    inj.errs.push(
+      field + (counted ? ' must have a count and' : ' must have') + ' at least one argument.',
+    )
+    return SKIP
+  }
+  const [lo, hi, countdesc] = counted ? _nofcount(count, numtvals) : [numtvals, numtvals, 'all']
+  if (NONE === countdesc) {
+    inj.errs.push(field + ' has an invalid count: ' + stringify(count) + '.')
+    return SKIP
+  }
+  let admitted = 0
+  for (let tI = 0; tI < numtvals; tI++) {
+    const left = numtvals - tI
+    // Stop once the specs left cannot change the verdict.
+    if (hi < admitted || admitted + left < lo || (lo <= admitted && admitted + left <= hi)) {
+      break
+    }
+    if (_admits(cval, tvals[tI], inj, store)) {
+      admitted++
+    }
+  }
+  if (admitted < lo || hi < admitted) {
+    const valdesc = replace(
+      join(
+        items(tvals, (n) => stringify(n[1])),
+        ', ',
+      ),
+      R_TRANSFORM_NAME,
+      (_m, p1) => p1.toLowerCase(),
+    )
+    inj.errs.push(
+      _invalidTypeMsg(inj.path, countdesc + ' of ' + valdesc, typify(cval), cval, 'V0310'),
+    )
+  }
+  return SKIP
 }
 // This is the "modify" argument to inject. Use this to perform
 // generic validation. Runs *after* any special commands.
@@ -1931,8 +1927,9 @@ function validate(
         $INSTANCE: validate_TYPE,
         $ANY: validate_ANY,
         $CHILD: validate_CHILD,
-        $ONE: validate_ONE,
         $EXACT: validate_EXACT,
+        $NOF: validate_NOF,
+        $ALL: validate_ALL,
       },
       getdef(extra, {}),
       // A special top level value to collect errors.
@@ -1945,13 +1942,19 @@ function validate(
   )
   let meta = getprop(injdef, 'meta', {})
   setprop(meta, S_BEXACT, getprop(meta, S_BEXACT, false))
-  const out = transform(data, spec, {
-    meta,
-    extra: store,
-    modify: _validation,
-    handler: _validatehandler,
-    errs,
-  })
+  // A spec that names an unknown checker validates nothing.
+  const numerrs = size(errs)
+  _checknames(spec, store, [], errs)
+  const out =
+    numerrs < size(errs)
+      ? clone(data)
+      : transform(data, spec, {
+          meta,
+          extra: store,
+          modify: _validation,
+          handler: _validatehandler,
+          errs,
+        })
   const generr = 0 < size(errs) && !collect
   if (generr) {
     throw new Error(join(errs, ' | '))
@@ -2244,6 +2247,139 @@ function _invalidTypeMsg(path, needtype, vt, v, _whence) {
     // ' [' + _whence + ']' +
     '.'
   )
+}
+// Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
+const VALIDATE_NAMES = [
+  '$TOP',
+  '$SPEC',
+  '$BT',
+  '$DS',
+  '$WHEN',
+  '$ANNO',
+  '$REF',
+  '$FORMAT',
+  '$APPLY',
+  '$OPEN',
+]
+// Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
+function _checknames(spec, store, path, errs) {
+  const name = _refname(spec)
+  if (NONE !== name) {
+    if (_unknownname(name, store)) {
+      errs.push('Unknown validator ' + name + ' at field ' + pathify(path) + '.')
+    }
+    return
+  }
+  if (islist(spec) && '$EXACT' === _refname(spec[0])) {
+    return
+  }
+  for (const key of keysof(spec)) {
+    if (ismap(spec)) {
+      _checknames(key, store, path, errs)
+    }
+    _checknames(spec[key], store, flatten([path, key]), errs)
+  }
+}
+// The name a whole-string reference gives, when it is a checker name in any case.
+function _refname(val) {
+  const m = S_string === typeof val ? re_find(R_INJECTION_FULL, val) : null
+  return null != m && re_test(R_CHECKER_NAME, m[1].toUpperCase()) ? m[1] : NONE
+}
+// Unknown: undefined and upper case, or a defined name in another case. Null disables a name.
+function _unknownname(name, store) {
+  const known = (n) => VALIDATE_NAMES.includes(n) || null != _lookup(store, n)
+  const upper = name.toUpperCase()
+  return !known(name) && (upper === name || known(upper))
+}
+// The data value at a list directive's slot. The directive's own dparent was
+// read with getprop, which reports a stored null as absent.
+function _slotval(inj) {
+  const prior = inj.prior
+  return NONE === prior ? inj.dparent : _lookup(prior.dparent, prior.key)
+}
+// JSON equality: numbers by value, lists in order, maps by key in any order.
+function _deepequal(a, b) {
+  if (a === b) {
+    return true
+  }
+  const atype = typify(a)
+  if (atype !== typify(b) || 0 === ((T_list | T_map) & atype)) {
+    return false
+  }
+  const akeys = keysof(a)
+  const bkeys = keysof(b)
+  if (size(akeys) !== size(bkeys)) {
+    return false
+  }
+  for (let kI = 0; kI < size(akeys); kI++) {
+    const k = akeys[kI]
+    if (k !== bkeys[kI] || !_deepequal(a[k], b[k])) {
+      return false
+    }
+  }
+  return true
+}
+// Every member val has is in out, unchanged. A member only out has is a
+// default the spec supplied, and is ignored.
+function _keeps(val, out) {
+  if (NONE === val) {
+    return true
+  }
+  if (0 === ((T_list | T_map) & typify(val)) || islist(val) !== islist(out) || !isnode(out)) {
+    return _deepequal(val, out)
+  }
+  for (const k of keysof(val)) {
+    if (!_keeps(val[k], _lookup(out, k))) {
+      return false
+    }
+  }
+  return true
+}
+// A spec admits a value when validating the value against it finds no error
+// and gives back the value as it is.
+function _admits(val, spec, inj, store) {
+  const terrs = []
+  const vstore = merge([{}, store], 1)
+  vstore.$TOP = val
+  const out = validate(val, spec, {
+    extra: vstore,
+    errs: terrs,
+    meta: inj.meta,
+  })
+  return 0 === size(terrs) && _keeps(val, out)
+}
+// The bounds of a $NOF count, and the words for it, which are absent when
+// the count is invalid. Without a max, the bound is the number of specs.
+function _nofcount(count, numtvals) {
+  const isnat = (n) => 0 < (T_integer & typify(n)) && 0 <= n
+  if (isnat(count)) {
+    return [count, count, 0 === count ? 'none' : 'exactly ' + count]
+  }
+  const min = _lookup(count, 'min')
+  const max = _lookup(count, 'max')
+  const valid =
+    ismap(count) &&
+    0 < size(count) &&
+    size(count) === (NONE === min ? 0 : 1) + (NONE === max ? 0 : 1) &&
+    (NONE === min || isnat(min)) &&
+    (NONE === max || isnat(max)) &&
+    (NONE === min || NONE === max || min <= max)
+  if (!valid) {
+    return [0, 0, NONE]
+  }
+  const lo = NONE === min ? 0 : min
+  const hi = NONE === max ? numtvals : max
+  const desc =
+    NONE === max
+      ? 'at least ' + lo
+      : 0 === hi
+        ? 'none'
+        : NONE === min
+          ? 'at most ' + hi
+          : lo === hi
+            ? 'exactly ' + lo
+            : lo + ' to ' + hi
+  return [lo, hi, desc]
 }
 // Default inject handler for transforms. If the path resolves to a function,
 // call the function passing the injection inj. This is how transforms operate.

@@ -613,8 +613,17 @@ Used as backtick-quoted strings inside a `validate` spec.
 
 ```
 $MAP   $LIST   $STRING   $NUMBER   $INTEGER   $DECIMAL  $BOOLEAN
-$NULL  $NIL    $FUNCTION $INSTANCE $ANY       $CHILD    $ONE     $EXACT
+$NULL  $NIL    $FUNCTION $INSTANCE $ANY       $CHILD    $EXACT
+$NOF   $ALL
 ```
+
+`` ['`$NOF`', n, spec, …] `` holds when as many specs admit the value as `n`
+allows, where `n` is an integer or an object with `min`, `max` or both;
+`` ['`$ALL`', spec, …] `` holds when every spec admits it. There is no
+`$ONE`: write `` ['`$ONE`', a, b] `` as `` ['`$NOF`', { min: 1 }, a, b] ``.
+A spec that names any other checker, such as the misspelling
+`` '`$string`' ``, is rejected before any data is read. See the
+[top-level README](../README.md) for what each checker accepts.
 
 
 ## Notes
