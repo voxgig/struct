@@ -2956,7 +2956,9 @@ def vgi-haslit fn [[v:Any k:Any] [Boolean] [
 
 def vg-v-type fn [[inj:Any val:Any iref:Any store:Any] [Any] [
   def tname (StringUtil.lower (iref slice 1 (size iref)))
-  def typev (vg-getprop vg-vtype-map tname 0)
+  # $NIL is absent or null.
+  def typev0 (vg-getprop vg-vtype-map tname 0)
+  def typev (if (tname eq "nil") [BinUtil.bor typev0 vg-t-null] [typev0])
   def fout (vgi-lookup (inj get "dparent") (inj get "key"))
   # An ABSENT slot is canonical undefined (nil); a PRESENT null slot is
   # canonical null. Literal presence recovers the distinction none folds.
@@ -3061,69 +3063,238 @@ def vg-v-child fn [[inj:Any val:Any iref:Any store:Any] [Any] [
   ]
 ]]
 
-# Try each $ONE alternative; true as soon as one validates clean.
-def vgl-vone-alts fn [[i:Integer tvals:Any inj:Any store:Any] [Boolean] [
-  if (i gte (size tvals)) [false] [
-    def tval (tvals get i)
-    def terrs (flex [])
-    def ml (flex [])
-    (append [(flex {})] ml) drop
-    (append [store] ml) drop
-    def vstore (vg-merge ml 1)
-    (vg-setprop vstore "$TOP" (inj get "dparent")) drop
-    def idf (flex {})
-    (idf set "extra" vstore) drop
-    (idf set "errs" terrs) drop
-    (idf set "meta" (inj get "meta")) drop
-    def vcurrent (vg-validate (inj get "dparent") tval idf)
-    (vgi-inj-setval inj vcurrent -2) drop
-    if ((vgz terrs) eq 0) [true] [
-      def r (vgl-vone-alts (i add 1) tvals inj store)
+# The data value at a list directive's slot. The directive's own dparent was
+# read with getprop, which reports a stored null as absent.
+def vgi-slotval fn [[inj:Any] [Any] [
+  def prior (inj get "prior")
+  def own (inj get "dparent")
+  if (prior is None) [own] [
+    def r (vgi-lookup (prior get "dparent") (prior get "key"))
+    r
+  ]
+]]
+
+# Whether the slot holds a value: with one none, only the slot tells a null
+# from an absent key.
+def vgi-slotheld fn [[inj:Any] [Boolean] [
+  def prior (inj get "prior")
+  def own (inj get "dparent")
+  if (prior is None) [(own is None) not] [
+    def r (vgi-haslit (prior get "dparent") (prior get "key"))
+    r
+  ]
+]]
+
+# vgi-inj-setval deletes for none, so a null the slot holds is set directly.
+def vgi-slotset fn [[inj:Any cval:Any held:Boolean] [Any] [
+  if ((cval is None) and held) [
+    def tgt (vg-getelem (inj get "nodes") -2 vg-noarg)
+    def tkey (vg-getelem (inj get "path") -2 vg-noarg)
+    def r (vg-setprop tgt tkey none)
+    r
+  ] [
+    def r (vgi-inj-setval inj cval 2)
+    r
+  ]
+]]
+
+# JSON equality: numbers by value, lists in order, maps by key in any order.
+def vgi-deepequal fn [[a:Any b:Any] [Boolean] [
+  def atype (vg-typify a)
+  if ((atype eq (vg-typify b)) not) [false] [
+    if (vg-bit (BinUtil.bor vg-t-list vg-t-map) atype) [
+      def aks (vg-keysof a)
+      def bks (vg-keysof b)
+      if ((size aks) eq (size bks)) [
+        def r (vgl-deepequal 0 aks bks a b)
+        r
+      ] [false]
+    ] [
+      if (vg-bit vg-t-number atype) [a eq b] [
+        def r (vgi-exact-eq a b)
+        r
+      ]
+    ]
+  ]
+]]
+def vgl-deepequal fn [[i:Integer aks:Any bks:Any a:Any b:Any] [Boolean] [
+  if (i gte (size aks)) [true] [
+    def ak (aks get i)
+    if ((ak eq (bks get i)) not) [false] [
+      if (vgi-deepequal (vgi-raw a ak) (vgi-raw b ak)) [
+        def r (vgl-deepequal (i add 1) aks bks a b)
+        r
+      ] [false]
+    ]
+  ]
+]]
+
+# Every member val has is in out, unchanged. A member only out has is a
+# default the spec supplied, and is ignored.
+def vgi-keeps fn [[val:Any vout:Any] [Boolean] [
+  if (vg-bit (BinUtil.bor vg-t-list vg-t-map) (vg-typify val)) [
+    if (((vg-islist val) eq (vg-islist vout)) and (vg-isnode vout)) [
+      def r (vgl-keeps 0 (vg-keysof val) val vout)
+      r
+    ] [
+      def r (vgi-deepequal val vout)
+      r
+    ]
+  ] [
+    def r (vgi-deepequal val vout)
+    r
+  ]
+]]
+def vgl-keeps fn [[i:Integer ks:Any val:Any vout:Any] [Boolean] [
+  if (i gte (size ks)) [true] [
+    def k (ks get i)
+    if (vgi-haslit vout k) [
+      if (vgi-keeps (vgi-raw val k) (vgi-raw vout k)) [
+        def r (vgl-keeps (i add 1) ks val vout)
+        r
+      ] [false]
+    ] [false]
+  ]
+]]
+
+# A spec admits a value when validating the value against it finds no error
+# and gives back the value as it is. Any output keeps an absent value.
+def vgi-admits fn [[val:Any held:Boolean spec:Any inj:Any store:Any] [Boolean] [
+  def terrs (flex [])
+  def ml (flex [])
+  (append [(flex {})] ml) drop
+  (append [store] ml) drop
+  def vstore (vg-merge ml 1)
+  (vg-setprop vstore "$TOP" val) drop
+  def idf (flex {})
+  (idf set "extra" vstore) drop
+  (idf set "errs" terrs) drop
+  (idf set "meta" (inj get "meta")) drop
+  def vout (vg-validate val spec idf)
+  if ((vgz terrs) gt 0) [false] [
+    if held [
+      def r (vgi-keeps val vout)
+      r
+    ] [true]
+  ]
+]]
+
+# A $NOF count bound: a non-negative integer.
+def vgi-isnat fn [[n:Any] [Boolean] [
+  if (vg-bit vg-t-integer (vg-typify n)) [n gte 0] [false]
+]]
+
+# A $NOF count map: min, max or both and nothing else, min <= max.
+def vgi-nofvalid fn [[cnt:Any cmin:Any cmax:Any] [Boolean] [
+  if (vg-ismap cnt) [
+    def wmin (if (cmin is None) [0] [1])
+    def wmax (if (cmax is None) [0] [1])
+    if (((size cnt) gt 0) and ((size cnt) eq (wmin add wmax))) [
+      def minok (if (cmin is None) [true] [vgi-isnat cmin])
+      def maxok (if (cmax is None) [true] [vgi-isnat cmax])
+      if (minok and maxok) [
+        if ((cmin is None) or (cmax is None)) [true] [cmin lte cmax]
+      ] [false]
+    ] [false]
+  ] [false]
+]]
+
+# The bounds of a $NOF count, and the words for it, which are absent when
+# the count is invalid. Without a max, the bound is the number of specs.
+def vgi-nofcount fn [[cnt:Any numtvals:Integer] [Any] [
+  if (vgi-isnat cnt) [
+    def cwords (if (cnt eq 0) ["none"] [StringUtil.concat ["exactly " (vg-num-to-string cnt)]])
+    flex [cnt cnt cwords]
+  ] [
+    def cmin (vgi-lookup cnt "min")
+    def cmax (vgi-lookup cnt "max")
+    if (vgi-nofvalid cnt cmin cmax) [
+      def lo (if (cmin is None) [0] [cmin])
+      def hi (if (cmax is None) [numtvals] [cmax])
+      def cwords (
+        if (cmax is None) [StringUtil.concat ["at least " (vg-num-to-string lo)]] [
+          if (hi eq 0) ["none"] [
+            if (cmin is None) [StringUtil.concat ["at most " (vg-num-to-string hi)]] [
+              if (lo eq hi) [StringUtil.concat ["exactly " (vg-num-to-string lo)]] [
+                StringUtil.concat [(vg-num-to-string lo) " to " (vg-num-to-string hi)]
+              ]
+            ]
+          ]
+        ]
+      )
+      flex [lo hi cwords]
+    ] [flex [0 0 none]]
+  ]
+]]
+
+# Count the specs that admit the value, from spec ti on.
+def vgl-count-admits fn [[ti:Integer admitted:Integer lo:Any hi:Any tvals:Any cval:Any held:Boolean inj:Any store:Any] [Integer] [
+  def numtvals (size tvals)
+  if (ti gte numtvals) [admitted] [
+    def reach (admitted add (numtvals sub ti))
+    # Stop once the specs left cannot change the verdict.
+    def decided (((hi lt admitted) or (reach lt lo)) or ((lo lte admitted) and (reach lte hi)))
+    if decided [admitted] [
+      def a1 (if (vgi-admits cval held (tvals get ti) inj store) [admitted add 1] [admitted])
+      def r (vgl-count-admits (ti add 1) a1 lo hi tvals cval held inj store)
       r
     ]
   ]
 ]]
 
-def vg-v-one fn [[inj:Any val:Any iref:Any store:Any] [Any] [
+# The counting list directives. Without a count, every spec has to admit.
+def vgi-validatecount fn [[inj:Any store:Any vname:String counted:Boolean] [Any] [
   if ((inj get "mode") eq 4) [
     def parent (inj get "parent")
     def keyi (inj get "keyi")
     if (((vg-islist parent) not) or ((keyi eq 0) not)) [
-      (append [(StringUtil.concat ["The $ONE validator at field " (vg-pathify (inj get "path") 1 1) " must be the first element of an array."])] (inj get "errs")) drop
+      (append [(StringUtil.concat ["The " vname " validator at field " (vg-pathify (inj get "path") 1 1) " must be the first element of an array."])] (inj get "errs")) drop
       none
     ] [
+      def cval (vgi-slotval inj)
+      def held (vgi-slotheld inj)
       (inj set "keyi" (vgz (inj get "keys"))) drop
-      (vgi-inj-setval inj (inj get "dparent") 2) drop
+      # Replace the directive's list with the data value. Each return is SKIP, so
+      # that inject leaves the detached list alone and validates nothing in it.
+      (vgi-slotset inj cval held) drop
       (inj set "path" (vg-slice (inj get "path") -1 vg-noarg vg-noarg)) drop
-      def tvals (vg-slice parent 1 vg-noarg vg-noarg)
-      if ((vgz tvals) eq 0) [
-        (append [(StringUtil.concat ["The $ONE validator at field " (vg-pathify (inj get "path") 1 1) " must have at least one argument."])] (inj get "errs")) drop
+      def cnt0 (vgi-lookup parent 1)
+      def cnt (if counted [cnt0] [none])
+      def tstart (if counted [2] [1])
+      def tvals (vg-slice parent tstart vg-noarg vg-noarg)
+      def numtvals (vgz tvals)
+      def fieldmsg (StringUtil.concat ["The " vname " validator at field " (vg-pathify (inj get "path") 1 vg-noarg)])
+      if (numtvals eq 0) [
+        def msgtail (if counted [" must have a count and at least one argument."] [" must have at least one argument."])
+        (append [(StringUtil.concat [fieldmsg msgtail])] (inj get "errs")) drop
         none
       ] [
-        def matched (vgl-vone-alts 0 tvals inj store)
-        if (matched eq true) [none] [
-          def valdesc (vgi-valdesc tvals)
-          def pref (if ((vgz tvals) gt 1) ["one of "] [""])
-          def need (StringUtil.concat [pref valdesc])
-          (append [(vgi-invalid-type-msg (inj get "path") need (vg-typify (inj get "dparent")) (inj get "dparent"))] (inj get "errs")) drop
+        def bounds (if counted [vgi-nofcount cnt numtvals] [flex [numtvals numtvals "all"]])
+        def cdesc (bounds get 2)
+        if (cdesc is None) [
+          (append [(StringUtil.concat [fieldmsg " has an invalid count: " (vg-stringify cnt vg-noarg vg-noarg) "."])] (inj get "errs")) drop
           none
-        ]
-      ]
+        ] [
+          def lo (bounds get 0)
+          def hi (bounds get 1)
+          def admitted (vgl-count-admits 0 0 lo hi tvals cval held inj store)
+          if ((admitted lt lo) or (hi lt admitted)) [
+            def need (StringUtil.concat [cdesc " of " (vgi-valdesc tvals)])
+            (append [(vgi-invalid-type-msg (inj get "path") need (vg-typify cval) cval)] (inj get "errs")) drop
+            none
+          ] [none] drop
+          none
+        ] drop
+        none
+      ] drop
+      vg-skip-marker
     ]
   ] [none]
 ]]
 
 def vgl-vexact-alts fn [[i:Integer tvals:Any dp:Any] [Boolean] [
   if (i gte (size tvals)) [false] [
-    def tval (tvals get i)
-    def em (
-      if (vgi-exact-eq tval dp) [true] [
-        if (vg-isnode tval) [
-          (vg-stringify tval vg-noarg vg-noarg) eq (vg-stringify dp vg-noarg vg-noarg)
-        ] [false]
-      ]
-    )
-    if (em eq true) [true] [
+    if (vgi-deepequal (tvals get i) dp) [true] [
       def r (vgl-vexact-alts (i add 1) tvals dp)
       r
     ]
@@ -3138,30 +3309,48 @@ def vg-v-exact fn [[inj:Any val:Any iref:Any store:Any] [Any] [
       (append [(StringUtil.concat ["The $EXACT validator at field " (vg-pathify (inj get "path") 1 1) " must be the first element of an array."])] (inj get "errs")) drop
       none
     ] [
+      def cval (vgi-slotval inj)
+      def held (vgi-slotheld inj)
       (inj set "keyi" (vgz (inj get "keys"))) drop
-      (vgi-inj-setval inj (inj get "dparent") 2) drop
+      # Replace [$EXACT, ...] with the data value; SKIP keeps inject off the detached list.
+      (vgi-slotset inj cval held) drop
       (inj set "path" (vg-slice (inj get "path") 0 -1 vg-noarg)) drop
-      (inj set "key" (vg-getelem (inj get "path") -1 vg-noarg)) drop
       def tvals (vg-slice parent 1 vg-noarg vg-noarg)
       if ((vgz tvals) eq 0) [
         (append [(StringUtil.concat ["The $EXACT validator at field " (vg-pathify (inj get "path") 1 1) " must have at least one argument."])] (inj get "errs")) drop
         none
       ] [
-        def matched (vgl-vexact-alts 0 tvals (inj get "dparent"))
+        # An absent value equals no argument.
+        def matched (if held [vgl-vexact-alts 0 tvals cval] [false])
         if (matched eq true) [none] [
           def valdesc (vgi-valdesc tvals)
           def p1 (if ((vgz (inj get "path")) gt 1) [""] ["value "])
           def p2 (if ((vgz tvals) eq 1) [""] ["one of "])
           def need (StringUtil.concat [p1 "exactly equal to " p2 valdesc])
-          (append [(vgi-invalid-type-msg (inj get "path") need (vg-typify (inj get "dparent")) (inj get "dparent"))] (inj get "errs")) drop
+          (append [(vgi-invalid-type-msg (inj get "path") need (vg-typify cval) cval)] (inj get "errs")) drop
           none
-        ]
-      ]
+        ] drop
+        none
+      ] drop
+      vg-skip-marker
     ]
   ] [
     (vg-delprop (inj get "parent") (inj get "key")) drop
     none
   ]
+]]
+
+# Count the specs that admit the value: ['`$NOF`', count, spec, ...], where
+# count is an integer, or a map holding min, max or both.
+def vg-v-nof fn [[inj:Any val:Any iref:Any store:Any] [Any] [
+  def r (vgi-validatecount inj store "$NOF" true)
+  r
+]]
+
+# Every spec admits the value: ['`$ALL`', spec, ...].
+def vg-v-all fn [[inj:Any val:Any iref:Any store:Any] [Any] [
+  def r (vgi-validatecount inj store "$ALL" false)
+  r
 ]]
 
 # Literal key presence (stored null still counts as declared).
@@ -3273,8 +3462,70 @@ def vg-v-string-box {"`$FN`": vg-v-string/v}
 def vg-v-type-box {"`$FN`": vg-v-type/v}
 def vg-v-any-box {"`$FN`": vg-v-any/v}
 def vg-v-child-box {"`$FN`": vg-v-child/v}
-def vg-v-one-box {"`$FN`": vg-v-one/v}
 def vg-v-exact-box {"`$FN`": vg-v-exact/v}
+def vg-v-nof-box {"`$FN`": vg-v-nof/v}
+def vg-v-all-box {"`$FN`": vg-v-all/v}
+
+# Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
+def vg-validate-names {"$TOP": true "$SPEC": true "$BT": true "$DS": true "$WHEN": true "$ANNO": true "$REF": true "$FORMAT": true "$APPLY": true "$OPEN": true}
+
+# The name a whole-string reference gives, when it is a checker name in any case.
+def vgi-refname fn [[v:Any] [Any] [
+  if (v is String) [
+    def fm (vg-re-find "^`(\\$[A-Z]+|[^`]*)[0-9]*`$" v)
+    if (fm is None) [none] [
+      def nm (fm get 1)
+      if (vg-re-test "^\\$[A-Z]+$" (StringUtil.upper nm)) [nm] [none]
+    ]
+  ] [none]
+]]
+
+# Unknown: undefined and upper case, or a defined name in another case. Null disables a name.
+def vgi-knownname fn [[nm:String store:Any] [Boolean] [
+  if ((vg-getprop vg-validate-names nm false) eq true) [true] [((vgi-lookup store nm) is None) not]
+]]
+def vgi-unknownname fn [[nm:String store:Any] [Boolean] [
+  def unm (StringUtil.upper nm)
+  if (vgi-knownname nm store) [false] [
+    if (unm eq nm) [true] [
+      def r (vgi-knownname unm store)
+      r
+    ]
+  ]
+]]
+
+# Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
+def vgi-checknames fn [[spec:Any store:Any pth:Any errs:Any] [Any] [
+  def nm (vgi-refname spec)
+  if (nm is None) [
+    def exactargs (
+      if (vg-islist spec) [(vgi-refname (vgi-lookup spec 0)) eq "$EXACT"] [false]
+    )
+    if exactargs [none] [
+      (vgl-checknames 0 (vg-keysof spec) spec store pth errs) drop
+      none
+    ] drop
+    none
+  ] [
+    if (vgi-unknownname nm store) [
+      (append [(StringUtil.concat ["Unknown validator " nm " at field " (vg-pathify pth vg-noarg vg-noarg) "."])] errs) drop
+      none
+    ] [none] drop
+    none
+  ] drop
+  none
+]]
+def vgl-checknames fn [[i:Integer ks:Any spec:Any store:Any pth:Any errs:Any] [Any] [
+  if (i gte (size ks)) [none] [
+    def k (ks get i)
+    if (vg-ismap spec) [(vgi-checknames k store pth errs) drop none] [none] drop
+    def cpth (vg-clone pth)
+    (append [k] cpth) drop
+    (vgi-checknames (vgi-raw spec k) store cpth errs) drop
+    def r (vgl-checknames (i add 1) ks spec store pth errs)
+    r
+  ]
+]]
 
 def vg-validate fn [[data:Any spec:Any injdef:Any] [Any] [
   def idf (if (vg-is-noarg injdef) [none] [injdef])
@@ -3303,8 +3554,9 @@ def vg-validate fn [[data:Any spec:Any injdef:Any] [Any] [
     "$INSTANCE": (vg-v-type-box)
     "$ANY": (vg-v-any-box)
     "$CHILD": (vg-v-child-box)
-    "$ONE": (vg-v-one-box)
     "$EXACT": (vg-v-exact-box)
+    "$NOF": (vg-v-nof-box)
+    "$ALL": (vg-v-all-box)
   })
   def sl (flex [])
   (append [cmds] sl) drop
@@ -3316,13 +3568,24 @@ def vg-validate fn [[data:Any spec:Any injdef:Any] [Any] [
   def meta0 (vgi-idef idf "meta")
   def meta (if (meta0 is None) [flex {}] [meta0])
   (vg-setprop meta "`$EXACT`" (vg-getprop meta "`$EXACT`" false)) drop
-  def tidf (flex {})
-  (tidf set "meta" meta) drop
-  (tidf set "extra" store) drop
-  (tidf set "modify" vg-validation-box) drop
-  (tidf set "handler" vg-validatehandler-box) drop
-  (tidf set "errs" errs) drop
-  def vout (vg-transform data spec tidf)
+  # A spec that names an unknown checker validates nothing.
+  def numerrs (vgz errs)
+  (vgi-checknames spec store (flex []) errs) drop
+  def vout (
+    if (numerrs lt (vgz errs)) [
+      def cl (vg-clone data)
+      cl
+    ] [
+      def tidf (flex {})
+      (tidf set "meta" meta) drop
+      (tidf set "extra" store) drop
+      (tidf set "modify" vg-validation-box) drop
+      (tidf set "handler" vg-validatehandler-box) drop
+      (tidf set "errs" errs) drop
+      def tout (vg-transform data spec tidf)
+      tout
+    ]
+  )
   if (((vgz errs) gt 0) and (collect not)) [
     def msg (vg-join errs " | " vg-noarg)
     raise {code: struct_error/q message: (msg)}

@@ -747,7 +747,7 @@ def ob-build fn [[] [Any] [
 # --- driving the corpus ----------------------------------------------------------
 
 # Run one corpus group through omni. A failure is a raise, so each group is
-# caught here: the run reports all 75, not just the first that breaks.
+# caught here: the run reports every group, not just the first that breaks.
 def ob-group fn [[pack:Any section:Any name:Any subject:Any flagnull:Boolean] [Any] [
   def sec (Omni.get (pack get "spec") section)
   def nd (Omni.get sec name)
@@ -981,10 +981,13 @@ def ob-main fn [[av:Any] [Any] [
 
   (ob-group pack "validate" "basic" (subs get "validate") false) drop
   (ob-group pack "validate" "child" (subs get "validate") true) drop
-  (ob-group pack "validate" "one" (subs get "validate") true) drop
   (ob-group pack "validate" "exact" (subs get "validate") true) drop
   (ob-group pack "validate" "invalid" (subs get "validate") false) drop
   (ob-group pack "validate" "special" (subs get "validate-inj") true) drop
+  (ob-group pack "validate" "directive" (subs get "validate") false) drop
+  (ob-group pack "validate" "nof" (subs get "validate") false) drop
+  (ob-group pack "validate" "all" (subs get "validate") false) drop
+  (ob-group pack "validate" "unknown" (subs get "validate") false) drop
 
   (ob-group pack "select" "basic" (subs get "select") true) drop
   (ob-group pack "select" "operators" (subs get "select") true) drop

@@ -103,7 +103,11 @@ line restores it.
   `"null"` (the single-null way of matching canonical
   `JSON.stringify(null)` for injected nulls). Validation's `$NIL`/`$NULL`
   recover the absent-vs-stored-null distinction via literal slot
-  presence (`vgi-haslit`).
+  presence (`vgi-haslit`), and so do the list directives `$EXACT`,
+  `$NOF` and `$ALL` (`vgi-slotval`/`vgi-slotheld`). `vgi-inj-setval`
+  deletes for `none`, so `vgi-slotset` sets a held null directly;
+  without that, a null slot in list data is deleted and the elements
+  after it shift down.
 - Map literals keep **sorted key order** in boru (a plain `{b:1,a:2}` is
   key-sorted at parse, before any port code runs); `set` on a `flex` node
   appends in insertion order. `jsonify` uses the engine JSON emitter, so it
