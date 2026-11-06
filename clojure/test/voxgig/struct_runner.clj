@@ -297,13 +297,17 @@
     ;; validate
     (rs "validate.basic" (gp validateS "basic") {"null" false}
         (fn [vin] (s/validate (vget vin "data") (vget vin "spec"))))
-    (doseq [g ["child" "one" "exact"]]
+    (doseq [g ["child" "exact"]]
       (rs (str "validate." g) (gp validateS g)
           (fn [vin] (s/validate (vget vin "data") (vget vin "spec")))))
     (rs "validate.invalid" (gp validateS "invalid") {"null" false}
         (fn [vin] (s/validate (vget vin "data") (vget vin "spec"))))
     (rs "validate.special" (gp validateS "special")
         (fn [vin] (s/validate (vget vin "data") (vget vin "spec") (vget vin "inj"))))
+    ;; `null: false`, so that a null in these reaches validate as a real nil.
+    (doseq [g ["directive" "nof" "all" "unknown"]]
+      (rs (str "validate." g) (gp validateS g) {"null" false}
+          (fn [vin] (s/validate (vget vin "data") (vget vin "spec")))))
 
     ;; select
     (doseq [g ["basic" "operators" "edge" "alts"]]

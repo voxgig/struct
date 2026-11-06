@@ -95,6 +95,10 @@ Public function names are **lower-smushed, exactly the canonical names**
 - **Numbers.** JSON integers parse to `Long`, decimals to `Double`. `typify`
   splits integer/decimal on that; `stringify`/`jsonify` follow JS number
   formatting (an integral `Double` prints without `.0`).
+- **Validate's list directives keep a held null.** `inj-setval` deletes a key
+  for `nil`, so `$EXACT`, `$NOF` and `$ALL` read whether their slot holds a
+  value (`_slotval`) and set a held null directly (`_slotset`); without that,
+  a null slot in list data is deleted and the elements after it shift down.
 - **Keep `make test` and `python3 tools/check_parity.py` green**, and add no
   runtime dependencies. If you change canonical behaviour, change the
   TypeScript + corpus first, then propagate here.

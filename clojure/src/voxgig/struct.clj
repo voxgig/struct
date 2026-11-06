@@ -107,6 +107,7 @@
 (def ^:private R-INJECT-FULL (Pattern/compile "^`(\\$[A-Z]+|[^`]*)[0-9]*`$"))
 (def ^:private R-INJECT-PART (Pattern/compile "`([^`]*)`"))
 (def ^:private R-TRANSFORM-NAME (Pattern/compile "`\\$([A-Z]+)`"))
+(def ^:private R-CHECKER-NAME (Pattern/compile "^\\$[A-Z]+$"))
 
 ;; ---------------------------------------------------------------------------
 ;; Mutable-collection helpers
@@ -285,6 +286,15 @@
                    (if (and ki (<= 0 ki) (< ki (.size ^List val)))
                      (.get ^List val (int ki)) nil))
     :else nil))
+
+;; Literal presence, beside _lookup: a nil the node holds is a null, not an absent key.
+(defn- _holds [val key]
+  (cond
+    (nil? key) false
+    (ismap val) (.containsKey ^Map val (str key))
+    (islist val) (let [ki (parse-long-strict key)]
+                   (boolean (and ki (<= 0 ki) (< ki (.size ^List val)))))
+    :else false))
 
 (defn haskey
   ([val] (haskey val nil))
@@ -989,8 +999,9 @@
        (is! inj :val val)
 
        (cond
-         (and (nil? (ig inj :prior)) (some? (ig inj :root)) (haskey (ig inj :root) S-DTOP))
-         (getprop (ig inj :root) S-DTOP)
+         ;; Read literally: a null a list directive set at $TOP is the result.
+         (and (nil? (ig inj :prior)) (_holds (ig inj :root) S-DTOP))
+         (_lookup (ig inj :root) S-DTOP)
          (and (= (ig inj :key) S-DTOP) (some? (ig inj :parent)) (haskey (ig inj :parent) S-DTOP))
          (getprop (ig inj :parent) S-DTOP)
          :else val)))))
@@ -1469,64 +1480,153 @@
               SKIP)))
       :else nil)))
 
-(defn- validate_ONE [inj _val _ref store]
+;; The data value at a list directive's slot, and whether the slot holds one.
+;; The directive's own dparent was read with getprop, which reports a stored
+;; null as absent, and with one nil only the slot can tell them apart.
+(defn- _slotval [inj]
+  (let [prior (ig inj :prior)]
+    (if (nil? prior)
+      [(ig inj :dparent) (some? (ig inj :dparent))]
+      [(_lookup (ig prior :dparent) (ig prior :key)) (_holds (ig prior :dparent) (ig prior :key))])))
+
+;; inj-setval deletes for nil, so a null the slot holds is set directly.
+(defn- _slotset [inj cval held]
+  (if (and (nil? cval) held)
+    (setprop (getelem (ig inj :nodes) -2) (getelem (ig inj :path) -2) nil)
+    (inj-setval inj cval 2)))
+
+;; JSON equality: numbers by value, lists in order, maps by key in any order.
+(defn- _deepequal [a b]
+  (let [atype (typify a)]
+    (cond
+      (and (number? a) (number? b)) (== a b)
+      (= a b) true
+      (or (not= atype (typify b)) (zero? (bit-and (bit-or T_list T_map) atype))) false
+      :else
+      (let [akeys (keysof a) bkeys (keysof b)]
+        (and (= (count akeys) (count bkeys))
+             (every? true? (map (fn [ak bk] (and (= ak bk) (_deepequal (_lookup a ak) (_lookup b bk))))
+                                akeys bkeys)))))))
+
+;; Every member val has is in out, unchanged. A member only out has is a
+;; default the spec supplied, and is ignored.
+(defn- _keeps [val out]
+  (if (or (zero? (bit-and (bit-or T_list T_map) (typify val)))
+          (not= (islist val) (islist out))
+          (not (isnode out)))
+    (_deepequal val out)
+    (every? (fn [k] (and (_holds out k) (_keeps (_lookup val k) (_lookup out k)))) (keysof val))))
+
+;; A spec admits a value when validating the value against it finds no error
+;; and gives back the value as it is. Any output keeps an absent value.
+(defn- _admits [val held spec inj store]
+  (let [terrs (alist)
+        vstore (merge (alist-of [(lhm) store]) 1)]
+    (.put ^Map vstore S-DTOP val)
+    (let [out (validate val spec (doto (lhm) (.put "extra" vstore) (.put "errs" terrs) (.put "meta" (ig inj :meta))))]
+      (and (zero? (size terrs)) (or (not held) (_keeps val out))))))
+
+;; The bounds of a $NOF count, and the words for it, which are absent when
+;; the count is invalid. Without a max, the bound is the number of specs.
+(defn- _nofcount [cnt numtvals]
+  (let [isnat (fn [n] (and (pos? (bit-and T_integer (typify n))) (>= n 0)))]
+    (if (isnat cnt)
+      [cnt cnt (if (zero? cnt) "none" (str "exactly " cnt))]
+      (let [cmin (_lookup cnt "min")
+            cmax (_lookup cnt "max")
+            valid (and (ismap cnt)
+                       (pos? (size cnt))
+                       (= (size cnt) (+ (if (nil? cmin) 0 1) (if (nil? cmax) 0 1)))
+                       (or (nil? cmin) (isnat cmin))
+                       (or (nil? cmax) (isnat cmax))
+                       (or (nil? cmin) (nil? cmax) (<= cmin cmax)))]
+        (if-not valid
+          [0 0 nil]
+          (let [lo (if (nil? cmin) 0 cmin)
+                hi (if (nil? cmax) numtvals cmax)]
+            [lo hi (cond
+                     (nil? cmax) (str "at least " lo)
+                     (zero? hi) "none"
+                     (nil? cmin) (str "at most " hi)
+                     (== lo hi) (str "exactly " lo)
+                     :else (str lo " to " hi))]))))))
+
+;; The counting list directives. Without a count, every spec has to admit.
+(defn- _validatecount [inj store name counted]
   (let [mode (ig inj :mode) parent (ig inj :parent) keyI (ig inj :keyI)]
-    (when (= mode S-MVAL)
-      (if (or (not (islist parent)) (not= keyI 0))
-        (do (.add ^List (ig inj :errs) (str "The $ONE validator at field " (pathify (ig inj :path) 1 1) " must be the first element of an array.")) nil)
-        (do
-          (is! inj :keyI (size (ig inj :keys)))
-          (inj-setval inj (ig inj :dparent) 2)
-          (is! inj :path (slice (ig inj :path) 0 (dec (size (ig inj :path)))))
-          (let [tvals (alist-of (subvec (vec parent) 1))]
-            (if (= (size tvals) 0)
-              (do (.add ^List (ig inj :errs) (str "The $ONE validator at field " (pathify (ig inj :path) 1 1) " must have at least one argument.")) nil)
-              (let [matched (atom false)]
-                (doseq [tval tvals :while (not @matched)]
-                  (let [terrs (alist)
-                        vstore (merge (alist-of [(lhm) store]) 1)]
-                    (.put ^Map vstore S-DTOP (ig inj :dparent))
-                    (let [vcurrent (validate (ig inj :dparent) tval (doto (lhm) (.put "extra" vstore) (.put "errs" terrs) (.put "meta" (ig inj :meta))))]
-                      (inj-setval inj vcurrent -2)
-                      (when (= (size terrs) 0) (reset! matched true)))))
-                (when-not @matched
-                  (let [valdesc (clojure.string/join ", " (map #(stringify (nth % 1)) (items tvals)))
-                        valdesc (re_replace R-TRANSFORM-NAME valdesc (fn [g] (clojure.string/lower-case (nth g 1))))]
-                    (.add ^List (ig inj :errs)
-                          (_invalidTypeMsg (ig inj :path)
-                                           (str (if (> (size tvals) 1) "one of " "") valdesc)
-                                           (typify (ig inj :dparent)) (ig inj :dparent) "V0210"))))))))))))
+    (cond
+      (not= mode S-MVAL) nil
+
+      (or (not (islist parent)) (not= keyI 0))
+      (do (.add ^List (ig inj :errs) (str "The " name " validator at field " (pathify (ig inj :path) 1 1) " must be the first element of an array.")) nil)
+
+      :else
+      (let [[cval held] (_slotval inj)]
+        (is! inj :keyI (size (ig inj :keys)))
+        ;; Replace the directive's list with the data value. Each return is SKIP, so
+        ;; that inject leaves the detached list alone and validates nothing in it.
+        (_slotset inj cval held)
+        (is! inj :path (slice (ig inj :path) -1))
+        (let [cnt (when counted (_lookup parent 1))
+              ^List tvals (alist-of (drop (if counted 2 1) parent))
+              numtvals (size tvals)
+              field (str "The " name " validator at field " (pathify (ig inj :path) 1))]
+          (if (zero? numtvals)
+            (.add ^List (ig inj :errs) (str field (if counted " must have a count and" " must have") " at least one argument."))
+            (let [[lo hi countdesc] (if counted (_nofcount cnt numtvals) [numtvals numtvals "all"])]
+              (if (nil? countdesc)
+                (.add ^List (ig inj :errs) (str field " has an invalid count: " (stringify cnt) "."))
+                (let [admitted (loop [tI 0 admitted 0]
+                                 (let [left (- numtvals tI)]
+                                   ;; Stop once the specs left cannot change the verdict.
+                                   (if (or (>= tI numtvals) (< hi admitted) (< (+ admitted left) lo)
+                                           (and (<= lo admitted) (<= (+ admitted left) hi)))
+                                     admitted
+                                     (recur (inc tI) (if (_admits cval held (.get tvals (int tI)) inj store)
+                                                       (inc admitted) admitted)))))]
+                  (when (or (< admitted lo) (< hi admitted))
+                    (let [valdesc (clojure.string/join ", " (map #(stringify (nth % 1)) (items tvals)))
+                          valdesc (re_replace R-TRANSFORM-NAME valdesc (fn [g] (clojure.string/lower-case (nth g 1))))]
+                      (.add ^List (ig inj :errs)
+                            (_invalidTypeMsg (ig inj :path) (str countdesc " of " valdesc) (typify cval) cval "V0310"))))))))
+          SKIP)))))
 
 (defn- validate_EXACT [inj _val _ref _store]
   (let [mode (ig inj :mode) parent (ig inj :parent) key (ig inj :key) keyI (ig inj :keyI)]
     (if (= mode S-MVAL)
       (if (or (not (islist parent)) (not= keyI 0))
         (do (.add ^List (ig inj :errs) (str "The $EXACT validator at field " (pathify (ig inj :path) 1 1) " must be the first element of an array.")) nil)
-        (do
+        (let [[cval held] (_slotval inj)]
           (is! inj :keyI (size (ig inj :keys)))
-          (inj-setval inj (ig inj :dparent) 2)
+          ;; Replace [$EXACT, ...] with the data value; SKIP keeps inject off the detached list.
+          (_slotset inj cval held)
           (is! inj :path (slice (ig inj :path) 0 (dec (size (ig inj :path)))))
-          (is! inj :key (getelem (ig inj :path) -1))
           (let [tvals (alist-of (subvec (vec parent) 1))]
-            (if (= (size tvals) 0)
-              (do (.add ^List (ig inj :errs) (str "The $EXACT validator at field " (pathify (ig inj :path) 1 1) " must have at least one argument.")) nil)
-              (let [currentstr (atom nil) matched (atom false)]
-                (doseq [tval tvals :while (not @matched)]
-                  (let [em (= tval (ig inj :dparent))
-                        em (if (and (not em) (isnode tval))
-                             (do (when (nil? @currentstr) (reset! currentstr (stringify (ig inj :dparent))))
-                                 (= (stringify tval) @currentstr))
-                             em)]
-                    (when em (reset! matched true))))
-                (when-not @matched
-                  (let [valdesc (clojure.string/join ", " (map #(stringify (nth % 1)) (items tvals)))
-                        valdesc (re_replace R-TRANSFORM-NAME valdesc (fn [g] (clojure.string/lower-case (nth g 1))))]
-                    (.add ^List (ig inj :errs)
-                          (_invalidTypeMsg (ig inj :path)
-                                           (str (if (> (size (ig inj :path)) 1) "" "value ")
-                                                "exactly equal to " (if (= (size tvals) 1) "" "one of ") valdesc)
-                                           (typify (ig inj :dparent)) (ig inj :dparent) "V0110")))))))))
-      (delprop parent key))))
+            (cond
+              (= (size tvals) 0)
+              (.add ^List (ig inj :errs) (str "The $EXACT validator at field " (pathify (ig inj :path) 1 1) " must have at least one argument."))
+
+              ;; An absent value equals no argument.
+              (and held (some #(_deepequal % cval) tvals))
+              nil
+
+              :else
+              (let [valdesc (clojure.string/join ", " (map #(stringify (nth % 1)) (items tvals)))
+                    valdesc (re_replace R-TRANSFORM-NAME valdesc (fn [g] (clojure.string/lower-case (nth g 1))))]
+                (.add ^List (ig inj :errs)
+                      (_invalidTypeMsg (ig inj :path)
+                                       (str (if (> (size (ig inj :path)) 1) "" "value ")
+                                            "exactly equal to " (if (= (size tvals) 1) "" "one of ") valdesc)
+                                       (typify cval) cval "V0110")))))
+          SKIP))
+      (do (delprop parent key) nil))))
+
+;; Count the specs that admit the value: ['`$NOF`', count, spec, ...], where
+;; count is an integer, or a map holding min, max or both.
+(defn- validate_NOF [inj _val _ref store] (_validatecount inj store "$NOF" true))
+
+;; Every spec admits the value: ['`$ALL`', spec, ...].
+(defn- validate_ALL [inj _val _ref store] (_validatecount inj store "$ALL" false))
 
 (defn- _validation [pval key parent inj]
   (when (and (some? inj) (not (identical? pval SKIP)))
@@ -1581,6 +1681,38 @@
         SKIP)
       (_injecthandler inj val ref store))))
 
+;; Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
+(def ^:private VALIDATE-NAMES
+  #{"$TOP" "$SPEC" "$BT" "$DS" "$WHEN" "$ANNO" "$REF" "$FORMAT" "$APPLY" "$OPEN"})
+
+;; The name a whole-string reference gives, when it is a checker name in any case.
+(defn- _refname [val]
+  (let [m (when (string? val) (re_find R-INJECT-FULL val))]
+    (when (and (some? m) (re_test R-CHECKER-NAME (.toUpperCase ^String (nth m 1) java.util.Locale/ROOT)))
+      (nth m 1))))
+
+;; Unknown: undefined and upper case, or a defined name in another case. Null disables a name.
+(defn- _unknownname [name store]
+  (let [known (fn [n] (or (contains? VALIDATE-NAMES n) (some? (_lookup store n))))
+        upper (.toUpperCase ^String name java.util.Locale/ROOT)]
+    (and (not (known name)) (or (= upper name) (known upper)))))
+
+;; Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
+(defn- _checknames [spec store path errs]
+  (let [name (_refname spec)]
+    (cond
+      (some? name)
+      (when (_unknownname name store)
+        (.add ^List errs (str "Unknown validator " name " at field " (pathify (alist-of path)) ".")))
+
+      (and (islist spec) (= "$EXACT" (_refname (_lookup spec 0))))
+      nil
+
+      :else
+      (doseq [key (keysof spec)]
+        (when (ismap spec) (_checknames key store path errs))
+        (_checknames (_lookup spec key) store (conj path key) errs)))))
+
 (defn validate
   ([data spec] (validate data spec nil))
   ([data spec injdef]
@@ -1594,18 +1726,23 @@
                     ["$DECIMAL" validate_TYPE] ["$BOOLEAN" validate_TYPE] ["$NULL" validate_TYPE]
                     ["$NIL" validate_TYPE] ["$MAP" validate_TYPE] ["$LIST" validate_TYPE]
                     ["$FUNCTION" validate_TYPE] ["$INSTANCE" validate_TYPE]
-                    ["$ANY" validate_ANY] ["$CHILD" validate_CHILD] ["$ONE" validate_ONE]
-                    ["$EXACT" validate_EXACT]]]
+                    ["$ANY" validate_ANY] ["$CHILD" validate_CHILD]
+                    ["$EXACT" validate_EXACT] ["$NOF" validate_NOF] ["$ALL" validate_ALL]]]
        (.put base k v))
      (let [store (merge (alist-of [base (if (nil? extra) (lhm) extra) (doto (lhm) (.put "$ERRS" errs))]) 1)
-           meta (getprop injdef "meta" (lhm))]
+           meta (getprop injdef "meta" (lhm))
+           numerrs (size errs)]
        (setprop meta S-BEXACT (getprop meta S-BEXACT false))
-       (let [out (transform data spec (doto (lhm)
-                                        (.put "meta" meta)
-                                        (.put "extra" store)
-                                        (.put "modify" _validation)
-                                        (.put "handler" _validatehandler)
-                                        (.put "errs" errs)))]
+       ;; A spec that names an unknown checker validates nothing.
+       (_checknames spec store [] errs)
+       (let [out (if (< numerrs (size errs))
+                   (clone data)
+                   (transform data spec (doto (lhm)
+                                          (.put "meta" meta)
+                                          (.put "extra" store)
+                                          (.put "modify" _validation)
+                                          (.put "handler" _validatehandler)
+                                          (.put "errs" errs))))]
          (when (and (> (size errs) 0) (not collect))
            (throw (RuntimeException. (clojure.string/join " | " (vec errs)))))
          out)))))
