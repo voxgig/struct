@@ -175,9 +175,11 @@ Voxgig::Struct::stringify(Voxgig::Struct::jm(a => 1, b => [2, 3]));   # '{a:1,b:
 <!-- => "{a:1,b:[2,3]}" -->
 
 For more task recipes (merge configs, rename fields, `$EACH`, `$MERGE`,
-`$FORMAT`, `$ONE`, `$EXACT`, …) see the language-neutral
+`$FORMAT`, `$EXACT`, …) see the language-neutral
 [How-to guides](../DOCS.md#2-how-to-guides) — the spec syntax is identical;
-only the host literals differ.
+only the host literals differ. The exception is `$ONE`, which this port does
+not define: write those specs with `$NOF`, as the
+[README](./README.md#injection--validate--select) shows.
 
 ---
 
@@ -301,7 +303,8 @@ just says so).
 The corpus runs on [voxgig/omni](https://github.com/voxgig/omni), the
 shared test runner, found via `$OMNI_HOME` or beside this repository (see
 `t/OmniBridge.pm`). `t/struct.t` runs every group the corpus defines except
-those no port implements yet, which [`design/REPORT.md`](../design/REPORT.md)
+`validate.one`, for the `$ONE` this port no longer defines, and those no port
+implements yet, which [`design/REPORT.md`](../design/REPORT.md)
 lists — 1358 entries in 75 assertions — and `t/client.t` runs the two client
 entries. The full suite is 82 tests across 4 files. Tests live in
 [`t/`](./t/): `t/struct.t` (the corpus), `t/client.t` (the client path),

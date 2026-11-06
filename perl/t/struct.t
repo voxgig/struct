@@ -511,7 +511,7 @@ my $validate = $spec->{validate};
 runsetflags( 'validate-basic', $validate->{basic}, { null => 0 },
     sub { Voxgig::Struct::validate( $_[0]{data}, $_[0]{spec} ) } );
 
-for my $section (qw(child one exact)) {
+for my $section (qw(child exact)) {
     runset( "validate-$section", $validate->{$section},
         sub { Voxgig::Struct::validate( $_[0]{data}, $_[0]{spec} ) } );
 }
@@ -521,6 +521,11 @@ runsetflags( 'validate-invalid', $validate->{invalid}, { null => 0 },
 
 runset( 'validate-special', $validate->{special},
     sub { Voxgig::Struct::validate( $_[0]{data}, $_[0]{spec}, $_[0]{inj} ) } );
+
+for my $section (qw(directive nof all unknown)) {
+    runsetflags( "validate-$section", $validate->{$section}, { null => 0 },
+        sub { Voxgig::Struct::validate( $_[0]{data}, $_[0]{spec} ) } );
+}
 
 # ===========================================================================
 # select

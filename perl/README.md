@@ -100,10 +100,10 @@ because they don't preserve insertion order.
   `$FORMAT`, `$APPLY` (plus the `FORMATTER` table for $FORMAT:
   `identity`, `upper`, `lower`, `string`, `number`, `integer`,
   `concat`).
-- `validate` and the 15 validate checkers: `$STRING`, `$NUMBER`,
+- `validate` and the 16 validate checkers: `$STRING`, `$NUMBER`,
   `$INTEGER`, `$DECIMAL`, `$BOOLEAN`, `$NULL`, `$NIL`, `$MAP`,
-  `$LIST`, `$FUNCTION`, `$INSTANCE`, `$ANY`, `$CHILD`, `$ONE`,
-  `$EXACT`.
+  `$LIST`, `$FUNCTION`, `$INSTANCE`, `$ANY`, `$CHILD`, `$EXACT`,
+  `$NOF`, `$ALL`.
 - `select` and the 4 select operators: `$AND`, `$OR`, `$NOT`,
   `$CMP` (with `$GT`, `$LT`, `$GTE`, `$LTE`, `$LIKE`).
 - Type constants (`T_any`, `T_noval`, `T_boolean`, …, `T_node`),
@@ -463,6 +463,20 @@ Voxgig::Struct::validate(
 ```
 
 <!-- => {"age": 36, "name": "Ada"} -->
+
+A list led by `$NOF` or `$ALL` puts several specs on one value.
+`` jt('`$NOF`', $n, $spec, …) `` holds when as many specs admit the value
+as `$n` allows, where `$n` is an integer or a map with `min`, `max` or both.
+`` jt('`$ALL`', $spec, …) `` holds when every spec admits the value. A spec
+admits a value when validating the value against it finds no error and gives
+back every member of the value unchanged. There is no `$ONE`: write
+`` jt('`$ONE`', $a, $b) `` as `` jt('`$NOF`', jm(min => 1), $a, $b) ``.
+
+A spec that names a checker `validate` does not define is rejected before
+any data is read, and nothing is validated. The whole-string reference
+`` '`$FOO`' `` names a checker, and so does a misspelling of a defined one
+in another case, such as `` '`$string`' ``. The message is
+`Unknown validator $FOO at field a.`
 
 `select` finds children matching a query, tagging each with its `$KEY`:
 

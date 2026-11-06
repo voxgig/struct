@@ -284,6 +284,7 @@ our $R_META_PATH       = qr/^([^\$]+)\$([=~])(.+)$/;
 our $R_DOUBLE_DOLLAR   = qr/\$\$/;
 our $R_TRANSFORM_NAME  = qr/`\$([A-Z]+)`/;
 our $R_INJECTION_FULL  = qr/^`(\$[A-Z]+|[^`]*)[0-9]*`$/;
+our $R_CHECKER_NAME    = qr/^\$[A-Z]+$/;
 our $R_BT_ESCAPE       = qr/\$BT/;
 our $R_DS_ESCAPE       = qr/\$DS/;
 our $R_INJECTION_PARTIAL = qr/`([^`]+)`/;
@@ -2335,6 +2336,154 @@ sub _invalid_type_msg {
     return 'Expected ' . $field . $needtype . ', but found ' . $extra . $vs . '.';
 }
 
+# Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
+our @VALIDATE_NAMES = (
+    '$TOP', '$SPEC', '$BT', '$DS', '$WHEN', '$ANNO', '$REF', '$FORMAT', '$APPLY', '$OPEN',
+);
+
+# Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
+sub _checknames {
+    my ($spec, $store, $path, $errs) = @_;
+    my $name = _refname($spec);
+    if (!is_none($name)) {
+        if (_unknownname($name, $store)) {
+            push @$errs, 'Unknown validator ' . $name . ' at field ' . pathify($path) . '.';
+        }
+        return;
+    }
+
+    if (islist($spec)) {
+        my $first = _refname($spec->[0]);
+        return if !is_none($first) && '$EXACT' eq $first;
+    }
+
+    for my $key (@{ keysof($spec) }) {
+        _checknames($key, $store, $path, $errs) if ismap($spec);
+        _checknames(_lookup($spec, $key), $store, [ @$path, $key ], $errs);
+    }
+    return;
+}
+
+# The name a whole-string reference gives, when it is a checker name in any case.
+sub _refname {
+    my ($val) = @_;
+    return NONE() unless defined $val && !ref($val) && $val =~ $R_INJECTION_FULL;
+    my $name = $1;
+    return uc($name) =~ $R_CHECKER_NAME ? $name : NONE();
+}
+
+# Unknown: undefined and upper case, or a defined name in another case. Null disables a name.
+sub _unknownname {
+    my ($name, $store) = @_;
+    my $known = sub {
+        my ($n) = @_;
+        return 1 if grep { $_ eq $n } @VALIDATE_NAMES;
+        my $v = _lookup($store, $n);
+        return (defined $v && !is_none($v) && !is_jnull($v)) ? 1 : 0;
+    };
+    my $upper = uc $name;
+    return (!$known->($name) && ($upper eq $name || $known->($upper))) ? 1 : 0;
+}
+
+# The data value at a list directive's slot. The directive's own dparent was
+# read with getprop, which reports a stored null as absent.
+sub _slotval {
+    my ($inj) = @_;
+    my $prior = $inj->{prior};
+    return defined $prior ? _lookup($prior->{dparent}, $prior->{key}) : $inj->{dparent};
+}
+
+# JSON equality: numbers by value, lists in order, maps by key in any order.
+sub _deepequal {
+    my ($x, $y) = @_;
+    return 1 if ref($x) && ref($y) && refaddr($x) == refaddr($y);
+
+    my $xtype = typify($x);
+    my $ytype = typify($y);
+    return ($x == $y ? 1 : 0) if ($xtype & T_number) && ($ytype & T_number);
+    return 0 if $xtype != $ytype;
+    return 1 if $xtype & (T_noval | T_null);
+    return ($x eq $y ? 1 : 0) if $xtype & T_string;
+    return ($$x == $$y ? 1 : 0) if $xtype & T_boolean;
+    return 0 unless isnode($x);
+
+    my $xkeys = keysof($x);
+    my $ykeys = keysof($y);
+    return 0 if scalar(@$xkeys) != scalar(@$ykeys);
+
+    for my $kI (0 .. $#$xkeys) {
+        my $k = $xkeys->[$kI];
+        return 0 if $k ne $ykeys->[$kI] || !_deepequal(_lookup($x, $k), _lookup($y, $k));
+    }
+    return 1;
+}
+
+# Every member val has is in out, unchanged. A member only out has is a
+# default the spec supplied, and is ignored.
+sub _keeps {
+    my ($val, $out) = @_;
+    return 1 if !defined $val || is_none($val);
+    if (!isnode($val) || islist($val) != islist($out) || !isnode($out)) {
+        return _deepequal($val, $out);
+    }
+    for my $k (@{ keysof($val) }) {
+        return 0 unless _keeps(_lookup($val, $k), _lookup($out, $k));
+    }
+    return 1;
+}
+
+# A spec admits a value when validating the value against it finds no error
+# and gives back the value as it is.
+sub _admits {
+    my ($val, $spec, $inj, $store) = @_;
+    my $terrs = [];
+    my $vstore = merge([_mkmap(), $store], 1);
+    $vstore->{ S_DTOP() } = $val;
+    my $out = validate($val, $spec, {
+        extra => $vstore,
+        errs  => $terrs,
+        meta  => $inj->{meta},
+    });
+    return (size($terrs) == 0 && _keeps($val, $out)) ? 1 : 0;
+}
+
+# The bounds of a $NOF count, and the words for it, which are NONE when the
+# count is invalid. Without a max, the bound is the number of specs.
+sub _nofcount {
+    my ($count, $numtvals) = @_;
+    my $isnat = sub { my ($n) = @_; return (T_integer & typify($n)) && $n >= 0 ? 1 : 0 };
+
+    if ($isnat->($count)) {
+        return ($count, $count, 0 == $count ? 'none' : 'exactly ' . $count);
+    }
+
+    my $min = _lookup($count, 'min');
+    my $max = _lookup($count, 'max');
+    my $nomin = is_none($min);
+    my $nomax = is_none($max);
+
+    my $valid = ismap($count)
+        && 0 < size($count)
+        && size($count) == ($nomin ? 0 : 1) + ($nomax ? 0 : 1)
+        && ($nomin || $isnat->($min))
+        && ($nomax || $isnat->($max))
+        && ($nomin || $nomax || $min <= $max);
+
+    return (0, 0, NONE()) unless $valid;
+
+    my $lo = $nomin ? 0 : $min;
+    my $hi = $nomax ? $numtvals : $max;
+
+    my $desc =
+          $nomax      ? 'at least ' . $lo
+        : 0 == $hi    ? 'none'
+        : $nomin      ? 'at most ' . $hi
+        : $lo == $hi  ? 'exactly ' . $lo
+        :               $lo . ' to ' . $hi;
+
+    return ($lo, $hi, $desc);
+}
+
 sub validate_STRING {
     my ($inj) = @_;
     my $out = _lookup($inj->{dparent}, $inj->{key});
@@ -2375,6 +2524,10 @@ sub validate_TYPE {
     if ($tname eq S_number) {
         $typev = T_integer | T_decimal | T_number;
     }
+
+    # $NIL is absent or null.
+    $typev |= T_null if $tname eq S_nil;
+
     my $out = _lookup($inj->{dparent}, $inj->{key});
     my $t = typify($out);
     if (!($t & $typev)) {
@@ -2453,54 +2606,6 @@ sub validate_CHILD {
     return NONE();
 }
 
-sub validate_ONE {
-    my ($inj, $val, $ref, $store) = @_;
-    my $mode = $inj->{mode};
-    my $parent = $inj->{parent};
-    my $keyI = $inj->{keyI};
-    if ($mode == M_VAL) {
-        if (!islist($parent) || $keyI != 0) {
-            push @{ $inj->{errs} },
-                'The $ONE validator at field ' . pathify($inj->{path}, 1, 1) .
-                ' must be the first element of an array.';
-            return;
-        }
-        $inj->{keyI} = size($inj->{keys});
-        _inj_setval($inj, $inj->{dparent}, 2);
-        $inj->{path} = slice($inj->{path}, -1);
-        my $tvals = slice($parent, 1);
-        if (size($tvals) == 0) {
-            push @{ $inj->{errs} },
-                'The $ONE validator at field ' . pathify($inj->{path}, 1, 1) .
-                ' must have at least one argument.';
-            return;
-        }
-        for my $tval (@$tvals) {
-            my $terrs = [];
-            my $vstore = merge([_mkmap(), $store], 1);
-            $vstore->{ S_DTOP() } = $inj->{dparent};
-            my $vcurrent = validate($inj->{dparent}, $tval, {
-                extra => $vstore,
-                errs  => $terrs,
-                meta  => $inj->{meta},
-            });
-            _inj_setval($inj, $vcurrent, -2);
-            # SKIP: the alternative validated this subtree, so the walker must
-            # not run its generic pass over a slot $ONE has consumed.
-            return SKIP() if size($terrs) == 0;
-        }
-        my $valdesc = CORE::join(', ', map { stringify($_) } @$tvals);
-        $valdesc =~ s/`\$([A-Z]+)`/lc($1)/ge;
-        push @{ $inj->{errs} }, _invalid_type_msg(
-            $inj->{path},
-            (size($tvals) > 1 ? 'one of ' : '') . $valdesc,
-            typify($inj->{dparent}),
-            $inj->{dparent},
-            'V0210',
-        );
-    }
-}
-
 sub validate_EXACT {
     my ($inj) = @_;
     my $mode = $inj->{mode};
@@ -2514,26 +2619,22 @@ sub validate_EXACT {
                 ' must be the first element of an array.';
             return;
         }
+        my $cval = _slotval($inj);
         $inj->{keyI} = size($inj->{keys});
-        _inj_setval($inj, $inj->{dparent}, 2);
+
+        # Replace [$EXACT, ...] with the data value; SKIP keeps inject off the detached list.
+        _inj_setval($inj, $cval, 2);
+
         $inj->{path} = slice($inj->{path}, 0, -1);
-        $inj->{key} = getelem($inj->{path}, -1);
         my $tvals = slice($parent, 1);
         if (size($tvals) == 0) {
             push @{ $inj->{errs} },
                 'The $EXACT validator at field ' . pathify($inj->{path}, 1, 1) .
                 ' must have at least one argument.';
-            return;
+            return SKIP();
         }
-        my $currentstr;
         for my $tval (@$tvals) {
-            my $exactmatch = _exact_eq($tval, $inj->{dparent});
-            if (!$exactmatch && isnode($tval)) {
-                $currentstr //= stringify($inj->{dparent});
-                my $tvalstr = stringify($tval);
-                $exactmatch = ($tvalstr eq $currentstr);
-            }
-            return if $exactmatch;
+            return SKIP() if _deepequal($tval, $cval);
         }
         my $valdesc = CORE::join(', ', map { stringify($_) } @$tvals);
         $valdesc =~ s/`\$([A-Z]+)`/lc($1)/ge;
@@ -2541,14 +2642,99 @@ sub validate_EXACT {
             $inj->{path},
             (size($inj->{path}) > 1 ? '' : 'value ') . 'exactly equal to ' .
                 (size($tvals) == 1 ? '' : 'one of ') . $valdesc,
-            typify($inj->{dparent}),
-            $inj->{dparent},
+            typify($cval),
+            $cval,
             'V0110',
         );
+        return SKIP();
     }
     else {
         delprop($parent, $key);
     }
+}
+
+# Count the specs that admit the value: ['`$NOF`', count, spec, ...], where
+# count is an integer, or a map holding min, max or both.
+sub validate_NOF {
+    my ($inj, $val, $ref, $store) = @_;
+    return _validatecount($inj, $store, '$NOF', 1);
+}
+
+# Every spec admits the value: ['`$ALL`', spec, ...].
+sub validate_ALL {
+    my ($inj, $val, $ref, $store) = @_;
+    return _validatecount($inj, $store, '$ALL', 0);
+}
+
+# The counting list directives. Without a count, every spec has to admit.
+sub _validatecount {
+    my ($inj, $store, $name, $counted) = @_;
+    my $mode = $inj->{mode};
+    my $parent = $inj->{parent};
+    my $keyI = $inj->{keyI};
+
+    return NONE() if $mode != M_VAL;
+
+    if (!islist($parent) || $keyI != 0) {
+        push @{ $inj->{errs} },
+            'The ' . $name . ' validator at field ' . pathify($inj->{path}, 1, 1) .
+            ' must be the first element of an array.';
+        return NONE();
+    }
+
+    my $cval = _slotval($inj);
+
+    $inj->{keyI} = size($inj->{keys});
+
+    # Replace the directive's list with the data value. Each return is SKIP, so
+    # that inject leaves the detached list alone and validates nothing in it.
+    _inj_setval($inj, $cval, 2);
+
+    $inj->{path} = slice($inj->{path}, -1);
+
+    my $count = $counted ? _lookup($parent, 1) : NONE();
+    my $tvals = slice($parent, $counted ? 2 : 1);
+    my $numtvals = size($tvals);
+    my $field = 'The ' . $name . ' validator at field ' . pathify($inj->{path}, 1);
+
+    if (0 == $numtvals) {
+        push @{ $inj->{errs} },
+            $field . ($counted ? ' must have a count and' : ' must have') . ' at least one argument.';
+        return SKIP();
+    }
+
+    my ($lo, $hi, $countdesc) =
+        $counted ? _nofcount($count, $numtvals) : ($numtvals, $numtvals, 'all');
+
+    if (is_none($countdesc)) {
+        push @{ $inj->{errs} }, $field . ' has an invalid count: ' . stringify($count) . '.';
+        return SKIP();
+    }
+
+    my $admitted = 0;
+    for my $tI (0 .. $numtvals - 1) {
+        my $left = $numtvals - $tI;
+
+        # Stop once the specs left cannot change the verdict.
+        last if $hi < $admitted || $admitted + $left < $lo
+            || ($lo <= $admitted && $admitted + $left <= $hi);
+
+        $admitted++ if _admits($cval, $tvals->[$tI], $inj, $store);
+    }
+
+    if ($admitted < $lo || $hi < $admitted) {
+        my $valdesc = CORE::join(', ', map { stringify($_) } @$tvals);
+        $valdesc =~ s/`\$([A-Z]+)`/lc($1)/ge;
+        push @{ $inj->{errs} }, _invalid_type_msg(
+            $inj->{path},
+            $countdesc . ' of ' . $valdesc,
+            typify($cval),
+            $cval,
+            'V0310',
+        );
+    }
+
+    return SKIP();
 }
 
 sub _exact_eq {
@@ -2687,20 +2873,28 @@ sub validate {
         '$INSTANCE', \&validate_TYPE,
         '$ANY',      \&validate_ANY,
         '$CHILD',    \&validate_CHILD,
-        '$ONE',      \&validate_ONE,
         '$EXACT',    \&validate_EXACT,
+        '$NOF',      \&validate_NOF,
+        '$ALL',      \&validate_ALL,
     );
     my $errsmap = jm(S_DERRS, $errs);
     my $store = merge([$base, getdef($extra, _mkmap()), $errsmap], 1);
     my $meta = getprop($injdef, 'meta', _mkmap());
     setprop($meta, S_BEXACT, getprop($meta, S_BEXACT, $JFALSE));
-    my $out = transform($data, $spec, {
-        meta    => $meta,
-        extra   => $store,
-        modify  => \&_validation,
-        handler => \&_validatehandler,
-        errs    => $errs,
-    });
+
+    # A spec that names an unknown checker validates nothing.
+    my $numerrs = size($errs);
+    _checknames($spec, $store, [], $errs);
+
+    my $out = $numerrs < size($errs)
+        ? clone($data)
+        : transform($data, $spec, {
+            meta    => $meta,
+            extra   => $store,
+            modify  => \&_validation,
+            handler => \&_validatehandler,
+            errs    => $errs,
+        });
     if (size($errs) > 0 && !$collect) {
         die CORE::join(' | ', map { defined $_ ? "$_" : '' } @$errs);
     }
