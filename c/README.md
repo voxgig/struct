@@ -6,7 +6,7 @@
 > bit-flags, 3 mode constants (`VOXGIG_M_KEYPRE` / `VOXGIG_M_KEYPOST` / `VOXGIG_M_VAL`),
 > `SKIP` / `DELETE` sentinels (pointer-identity), and the `voxgig_injection`
 > state machine. `inject` / `transform` / `validate` / `select` all dispatch
-> through the canonical injector machinery: 13 transform commands, 15
+> through the canonical injector machinery: 13 transform commands, 16
 > validate checkers, 8 select operators.
 >
 > Passes the shared corpus (1360/1360), run on
@@ -527,6 +527,20 @@ voxgig_value* out  = voxgig_validate(data, spec, NULL);   /* {name:"Ada",age:36}
 ```
 
 <!-- => {"age": 36, "name": "Ada"} -->
+
+Besides the type checkers, a spec list led by `` `$NOF` `` counts the specs
+that admit the value: `` ["`$NOF`", n, spec, …] `` holds when as many specs
+admit it as `n` allows, where `n` is an integer or a map with `min`, `max` or
+both. `` ["`$ALL`", spec, …] `` holds when every spec admits the value. A spec
+admits a value when validating the value against it finds no error and gives
+back every member of the value unchanged. There is no `$ONE`: write
+`` ["`$ONE`", a, b] `` as `` ["`$NOF`", {"min": 1}, a, b] ``.
+
+A spec that names a checker `voxgig_validate` does not define is rejected
+before any data is read, and nothing is validated. The whole-string reference
+`` "`$FOO`" `` names a checker, and so does a misspelling of a defined one in
+another case, such as `` "`$string`" ``. The message is
+`Unknown validator $FOO at field a.`
 
 `voxgig_select` finds the children matching a query — each match is tagged
 with its `$KEY`:

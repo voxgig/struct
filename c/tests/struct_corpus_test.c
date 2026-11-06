@@ -1287,9 +1287,12 @@ int main(void) {
   run("validate", "basic", false, subj_validate, NULL);
   run("validate", "invalid", false, subj_validate, NULL);
   run("validate", "child", true, subj_validate, NULL);
-  run("validate", "one", true, subj_validate, NULL);
   run("validate", "exact", true, subj_validate, NULL);
   run("validate", "special", true, subj_validate_special, NULL);
+  run("validate", "directive", false, subj_validate, NULL);
+  run("validate", "nof", false, subj_validate, NULL);
+  run("validate", "all", false, subj_validate, NULL);
+  run("validate", "unknown", false, subj_validate, NULL);
 
   /* select */
   run("select", "basic", true, subj_select, NULL);
