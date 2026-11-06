@@ -110,10 +110,12 @@ order. `JSON.stringify(value, indent: 2)` serialises back.
   `$FORMAT`, `$APPLY` (plus the `FORMATTER` table for `$FORMAT`:
   `identity`, `upper`, `lower`, `string`, `number`, `integer`,
   `concat`).
-- `validate` and the 15 validate checkers: `$STRING`, `$NUMBER`,
+- `validate` and the 16 validate checkers: `$STRING`, `$NUMBER`,
   `$INTEGER`, `$DECIMAL`, `$BOOLEAN`, `$NULL`, `$NIL`, `$MAP`,
-  `$LIST`, `$FUNCTION`, `$INSTANCE`, `$ANY`, `$CHILD`, `$ONE`,
-  `$EXACT`.
+  `$LIST`, `$FUNCTION`, `$INSTANCE`, `$ANY`, `$CHILD`, `$EXACT`,
+  `$NOF`, `$ALL`. There is no `$ONE`: write ``["`$ONE`", a, b]`` as
+  ``["`$NOF`", {"min": 1}, a, b]``. A spec that names a checker
+  `validate` does not define is rejected before any data is read.
 - `select` and the 4 select operators: `$AND`, `$OR`, `$NOT`,
   `$CMP` (with `$GT`, `$LT`, `$GTE`, `$LTE`, `$LIKE`).
 - Type constants (`T_any`, `T_noval`, …, `T_node`), mode constants

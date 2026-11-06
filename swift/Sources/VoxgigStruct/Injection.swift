@@ -115,8 +115,8 @@ public final class Injection: @unchecked Sendable {
     // Canonical branches on the RAW ancestor (`null == ancestor || ancestor <
     // 2`), not its magnitude: a NEGATIVE ancestor writes through `parent` /
     // `key` like the default. This port took `abs()` first, so `setval(v, -2)`
-    // walked two nodes up instead - which `validate_ONE` is the only caller
-    // of, and no entry could notice while every `err:` entry was skipped.
+    // walked two nodes up instead, which no entry could notice while every
+    // `err:` entry was skipped.
     let absAnc = abs(ancestor)
     if ancestor < 2 {
       if v.isNoval {
