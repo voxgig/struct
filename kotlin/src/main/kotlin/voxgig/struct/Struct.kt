@@ -46,6 +46,7 @@ object Struct {
 
     private val R_META_PATH = Pattern.compile("^([^$]+)\\$([=~])(.+)$")
     private val R_INJECT_FULL = Pattern.compile("^`(\\$[A-Z]+|[^`]*)[0-9]*`$")
+    private val R_CHECKER_NAME = Pattern.compile("^\\$[A-Z]+$")
     private val R_INJECT_PART = Pattern.compile("`([^`]+)`")
     private val R_CMD_KEY = Pattern.compile("^`(\\$[A-Z]+)(\\d*)`$")
     private val R_TRANSFORM_NAME = Pattern.compile("`\\$([A-Z]+)`")
@@ -2167,7 +2168,8 @@ object Struct {
             if (idx < 0) {
                 UNDEF
             } else {
-                val typev = 1 shl (31 - idx)
+                // $NIL is absent or null.
+                val typev = (1 shl (31 - idx)) or (if ("nil" == tname) T_NULL else 0)
                 val out = lookup(inj.dparent, inj.key)
                 val t = typify(out)
                 if ((t and typev) == 0) {
@@ -2249,61 +2251,9 @@ object Struct {
             }
         }
 
-    /** $ONE: validate against any one of a list of alternative shapes. */
-    val validate_ONE: Injector =
-        Injector { inj, _, _, store ->
-            if (inj.mode != M_VAL) return@Injector UNDEF
-            if (!islist(inj.parent) || inj.keyI != 0) {
-                inj.errs.add("The \$ONE validator at field " + pathify(inj.path, 1, 1) + " must be the first element of an array.")
-                return@Injector UNDEF
-            }
-            inj.keyI = size(inj.keys)
-            inj.setval(inj.dparent, 2)
-            val sp = slice(inj.path, -1, null)
-            @Suppress("UNCHECKED_CAST")
-            inj.path = if (sp is List<*>) (sp as List<String>).toMutableList() else mutableListOf()
-
-            val tvalsRaw = slice(inj.parent, 1, null)
-
-            @Suppress("UNCHECKED_CAST")
-            val tvals: List<Any?> = if (tvalsRaw is List<*>) tvalsRaw as List<Any?> else listOf()
-            if (tvals.isEmpty()) {
-                inj.errs.add("The \$ONE validator at field " + pathify(inj.path, 1, 1) + " must have at least one argument.")
-                return@Injector UNDEF
-            }
-
-            for (tval in tvals) {
-                val terrs = mutableListOf<Any?>()
-                val vstore = linkedMapOf<String, Any?>()
-                if (store is Map<*, *>) for ((k, v) in store) vstore[k.toString()] = v
-                vstore[S_DTOP] = inj.dparent
-                val opts =
-                    linkedMapOf<String, Any?>(
-                        "extra" to vstore,
-                        "errs" to terrs,
-                        "meta" to inj.meta,
-                    )
-                val vcurrent: Any? =
-                    try {
-                        validate(inj.dparent, tval, opts)
-                    } catch (e: Exception) {
-                        terrs.add(e.message)
-                        inj.dparent
-                    }
-                inj.setval(vcurrent, -2)
-                if (terrs.isEmpty()) return@Injector UNDEF
-            }
-
-            val valdesc = describeAlternatives(tvals)
-            inj.errs.add(
-                _invalidTypeMsg(inj.path, (if (size(tvals) > 1) "one of " else "") + valdesc, typify(inj.dparent), inj.dparent, "V0210"),
-            )
-            UNDEF
-        }
-
     // Lowers every `$NAME` marker in the joined description, nested ones included.
     private fun describeAlternatives(tvals: List<Any?>): String {
-        val mm = R_TRANSFORM_NAME.matcher(tvals.joinToString(", ") { stringify(it) })
+        val mm = R_TRANSFORM_NAME.matcher(join(tvals.map { stringify(it) }, ", ", false))
         val out = StringBuilder()
         while (mm.find()) {
             mm.appendReplacement(out, Matcher.quoteReplacement(mm.group(1).lowercase(Locale.ROOT)))
@@ -2320,31 +2270,26 @@ object Struct {
                     inj.errs.add("The \$EXACT validator at field " + pathify(inj.path, 1, 1) + " must be the first element of an array.")
                     return@Injector UNDEF
                 }
+
+                val cval = _slotval(inj)
+
                 inj.keyI = size(inj.keys)
-                inj.setval(inj.dparent, 2)
-                val sp = slice(inj.path, 0, -1)
-                @Suppress("UNCHECKED_CAST")
-                inj.path = if (sp is List<*>) (sp as List<String>).toMutableList() else mutableListOf()
-                inj.key = strkey(getelem(inj.path, -1))
 
-                val tvalsRaw = slice(inj.parent, 1, null)
+                // Replace [$EXACT, ...] with the data value; SKIP keeps inject off the detached list.
+                inj.setval(cval, 2)
 
                 @Suppress("UNCHECKED_CAST")
-                val tvals: List<Any?> = if (tvalsRaw is List<*>) tvalsRaw as List<Any?> else listOf()
+                inj.path = slice(inj.path, 0, -1) as MutableList<String>
+
+                @Suppress("UNCHECKED_CAST")
+                val tvals = slice(inj.parent, 1, null) as List<Any?>
                 if (tvals.isEmpty()) {
                     inj.errs.add("The \$EXACT validator at field " + pathify(inj.path, 1, 1) + " must have at least one argument.")
-                    return@Injector UNDEF
+                    return@Injector SKIP
                 }
 
-                var currentstr: String? = null
                 for (tval in tvals) {
-                    var exactmatch = tval == inj.dparent
-                    if (!exactmatch && isnode(tval)) {
-                        if (currentstr == null) currentstr = stringify(inj.dparent)
-                        val tvalstr = stringify(tval)
-                        exactmatch = tvalstr == currentstr
-                    }
-                    if (exactmatch) return@Injector UNDEF
+                    if (_deepequal(tval, cval)) return@Injector SKIP
                 }
 
                 val valdesc = describeAlternatives(tvals)
@@ -2352,17 +2297,251 @@ object Struct {
                     _invalidTypeMsg(
                         inj.path,
                         (if (size(inj.path) > 1) "" else "value ") + "exactly equal to " + (if (size(tvals) == 1) "" else "one of ") + valdesc,
-                        typify(inj.dparent),
-                        inj.dparent,
+                        typify(cval),
+                        cval,
                         "V0110",
                     ),
                 )
-                UNDEF
+                SKIP
             } else {
                 delprop(inj.parent, inj.key)
                 UNDEF
             }
         }
+
+    /** $NOF: count the specs that admit the value, `[$NOF, count, spec, ...]`; count is an integer or a map of min and max. */
+    val validate_NOF: Injector = Injector { inj, _, _, store -> _validatecount(inj, store, "\$NOF", true) }
+
+    /** $ALL: every spec admits the value, `[$ALL, spec, ...]`. */
+    val validate_ALL: Injector = Injector { inj, _, _, store -> _validatecount(inj, store, "\$ALL", false) }
+
+    // The counting list directives. Without a count, every spec has to admit.
+    private fun _validatecount(
+        inj: Injection,
+        store: Any?,
+        name: String,
+        counted: Boolean,
+    ): Any? {
+        if (M_VAL != inj.mode) return UNDEF
+
+        val parent = inj.parent
+
+        if (!islist(parent) || 0 != inj.keyI) {
+            inj.errs.add("The " + name + " validator at field " + pathify(inj.path, 1, 1) + " must be the first element of an array.")
+            return UNDEF
+        }
+
+        val cval = _slotval(inj)
+
+        inj.keyI = size(inj.keys)
+
+        // Replace the directive's list with the data value. Each return is SKIP, so
+        // that inject leaves the detached list alone and validates nothing in it.
+        inj.setval(cval, 2)
+
+        @Suppress("UNCHECKED_CAST")
+        inj.path = slice(inj.path, -1, null) as MutableList<String>
+
+        val count = if (counted) lookup(parent, 1) else UNDEF
+
+        @Suppress("UNCHECKED_CAST")
+        val tvals = slice(parent, if (counted) 2 else 1, null) as List<Any?>
+        val numtvals = tvals.size
+        val field = "The " + name + " validator at field " + pathify(inj.path, 1)
+
+        if (0 == numtvals) {
+            inj.errs.add(field + (if (counted) " must have a count and" else " must have") + " at least one argument.")
+            return SKIP
+        }
+
+        val (lo, hi, countdesc) =
+            if (counted) _nofcount(count, numtvals) else Triple(numtvals.toLong(), numtvals.toLong(), "all")
+
+        if (null == countdesc) {
+            inj.errs.add(field + " has an invalid count: " + stringify(count) + ".")
+            return SKIP
+        }
+
+        var admitted = 0
+        for (tI in 0 until numtvals) {
+            val left = numtvals - tI
+
+            // Stop once the specs left cannot change the verdict.
+            if (hi < admitted || admitted + left < lo || (lo <= admitted && admitted + left <= hi)) break
+
+            if (_admits(cval, tvals[tI], inj, store)) admitted++
+        }
+
+        if (admitted < lo || hi < admitted) {
+            val valdesc = describeAlternatives(tvals)
+            inj.errs.add(_invalidTypeMsg(inj.path, countdesc + " of " + valdesc, typify(cval), cval, "V0310"))
+        }
+
+        return SKIP
+    }
+
+    // Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
+    private val VALIDATE_NAMES =
+        listOf("\$TOP", "\$SPEC", "\$BT", "\$DS", "\$WHEN", "\$ANNO", "\$REF", "\$FORMAT", "\$APPLY", "\$OPEN")
+
+    // Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
+    private fun _checknames(
+        spec: Any?,
+        store: Any?,
+        path: List<String>,
+        errs: MutableList<Any?>,
+    ) {
+        val name = _refname(spec)
+        if (null != name) {
+            if (_unknownname(name, store)) {
+                errs.add("Unknown validator " + name + " at field " + pathify(path) + ".")
+            }
+            return
+        }
+
+        if (islist(spec) && "\$EXACT" == _refname(lookup(spec, 0))) return
+
+        for (key in keysof(spec)) {
+            if (ismap(spec)) _checknames(key, store, path, errs)
+            _checknames(lookup(spec, key), store, path + key, errs)
+        }
+    }
+
+    // The name a whole-string reference gives, when it is a checker name in any case.
+    private fun _refname(value: Any?): String? {
+        val m = if (value is String) R_INJECT_FULL.matcher(value) else null
+        return if (null != m && m.matches() && R_CHECKER_NAME.matcher(m.group(1).uppercase(Locale.ROOT)).matches()) m.group(1) else null
+    }
+
+    // Unknown: undefined and upper case, or a defined name in another case. Null disables a name.
+    private fun _unknownname(
+        name: String,
+        store: Any?,
+    ): Boolean {
+        val known = { n: String -> VALIDATE_NAMES.contains(n) || lookup(store, n).let { null != it && UNDEF !== it } }
+        val upper = name.uppercase(Locale.ROOT)
+        return !known(name) && (upper == name || known(upper))
+    }
+
+    // The data value at a list directive's slot. The directive's own dparent was
+    // read with getprop, which reports a stored null as absent.
+    private fun _slotval(inj: Injection): Any? {
+        val prior = inj.prior
+        return if (null == prior) inj.dparent else lookup(prior.dparent, prior.key)
+    }
+
+    // JSON equality: numbers by value, lists in order, maps by key in any order.
+    private fun _deepequal(
+        a: Any?,
+        b: Any?,
+    ): Boolean {
+        // TS ===: identity, or value equality for numbers, strings and booleans.
+        if (a === b || (a is Number && b is Number && a.toDouble() == b.toDouble()) || ((a is String || a is Boolean) && a == b)) {
+            return true
+        }
+
+        val atype = typify(a)
+        if (atype != typify(b) || 0 == ((T_LIST or T_MAP) and atype)) return false
+
+        val akeys = keysof(a)
+        val bkeys = keysof(b)
+        if (akeys.size != bkeys.size) return false
+
+        for (kI in akeys.indices) {
+            val k = akeys[kI]
+            if (k != bkeys[kI] || !_deepequal(lookup(a, k), lookup(b, k))) return false
+        }
+
+        return true
+    }
+
+    // Every member `value` has is in `out`, unchanged. A member only `out` has
+    // is a default the spec supplied, and is ignored.
+    private fun _keeps(
+        value: Any?,
+        out: Any?,
+    ): Boolean {
+        if (UNDEF === value) return true
+
+        if (0 == ((T_LIST or T_MAP) and typify(value)) || islist(value) != islist(out) || !isnode(out)) {
+            return _deepequal(value, out)
+        }
+
+        for (k in keysof(value)) {
+            if (!_keeps(lookup(value, k), lookup(out, k))) return false
+        }
+
+        return true
+    }
+
+    // A spec admits a value when validating the value against it finds no error
+    // and gives back the value as it is.
+    private fun _admits(
+        value: Any?,
+        spec: Any?,
+        inj: Injection,
+        store: Any?,
+    ): Boolean {
+        val terrs = mutableListOf<Any?>()
+
+        @Suppress("UNCHECKED_CAST")
+        val vstore = merge(mutableListOf(linkedMapOf<String, Any?>(), store), 1) as MutableMap<String, Any?>
+        vstore[S_DTOP] = value
+
+        val out =
+            validate(
+                value,
+                spec,
+                linkedMapOf<String, Any?>(
+                    "extra" to vstore,
+                    "errs" to terrs,
+                    "meta" to inj.meta,
+                ),
+            )
+
+        return terrs.isEmpty() && _keeps(value, out)
+    }
+
+    // The bounds of a $NOF count, and the words for it, which are null when the
+    // count is invalid. Without a max, the bound is the number of specs.
+    private fun _nofcount(
+        count: Any?,
+        numtvals: Int,
+    ): Triple<Long, Long, String?> {
+        val isnat = { n: Any? -> 0 != (T_INTEGER and typify(n)) && 0.0 <= (n as Number).toDouble() }
+
+        if (isnat(count)) {
+            val n = (count as Number).toLong()
+            return Triple(n, n, if (0L == n) "none" else "exactly $n")
+        }
+
+        val min = lookup(count, "min")
+        val max = lookup(count, "max")
+
+        val valid =
+            ismap(count) &&
+                0 < size(count) &&
+                size(count) == (if (UNDEF === min) 0 else 1) + (if (UNDEF === max) 0 else 1) &&
+                (UNDEF === min || isnat(min)) &&
+                (UNDEF === max || isnat(max)) &&
+                (UNDEF === min || UNDEF === max || (min as Number).toDouble() <= (max as Number).toDouble())
+
+        if (!valid) return Triple(0L, 0L, null)
+
+        val lo = if (UNDEF === min) 0L else (min as Number).toLong()
+        val hi = if (UNDEF === max) numtvals.toLong() else (max as Number).toLong()
+
+        val desc =
+            when {
+                UNDEF === max -> "at least $lo"
+                0L == hi -> "none"
+                UNDEF === min -> "at most $hi"
+                lo == hi -> "exactly $lo"
+                else -> "$lo to $hi"
+            }
+
+        return Triple(lo, hi, desc)
+    }
 
     /** Modify hook used by validate(): runs after each inject step. */
     val _validation: Modify =
@@ -2483,8 +2662,9 @@ object Struct {
         baseStore["\$INSTANCE"] = validate_TYPE
         baseStore["\$ANY"] = validate_ANY
         baseStore["\$CHILD"] = validate_CHILD
-        baseStore["\$ONE"] = validate_ONE
         baseStore["\$EXACT"] = validate_EXACT
+        baseStore["\$NOF"] = validate_NOF
+        baseStore["\$ALL"] = validate_ALL
 
         val mergeList = mutableListOf<Any?>(baseStore)
         if (extraRaw is Map<*, *>) mergeList.add(extraRaw)
@@ -2504,7 +2684,12 @@ object Struct {
                 "handler" to _validatehandler,
                 "errs" to errs,
             )
-        val out = transform(data, spec, opts)
+
+        // A spec that names an unknown checker validates nothing.
+        val numerrs = errs.size
+        _checknames(spec, store, emptyList(), errs)
+
+        val out = if (numerrs < errs.size) clone(data) else transform(data, spec, opts)
         if (errs.isNotEmpty() && !collect) {
             throw IllegalArgumentException(errs.joinToString(" | ") { it?.toString() ?: "" })
         }

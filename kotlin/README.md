@@ -9,8 +9,8 @@
 > `inject()`/`transform()`/`validate()`/`select()` all dispatch through
 > the canonical injector machinery: 10 transform commands
 > (`$DELETE`/`$COPY`/`$KEY`/`$ANNO`/`$MERGE`/`$EACH`/`$PACK`/`$REF`/
-> `$FORMAT`/`$APPLY`), 6 validate checkers (`$STRING`/`$TYPE`/`$ANY`/
-> `$CHILD`/`$ONE`/`$EXACT`), and 4 select operators (`$AND`/`$OR`/
+> `$FORMAT`/`$APPLY`), 7 validate checkers (`$STRING`/`$TYPE`/`$ANY`/
+> `$CHILD`/`$EXACT`/`$NOF`/`$ALL`), and 4 select operators (`$AND`/`$OR`/
 > `$NOT`/`$CMP`). `python3 ../tools/check_parity.py` reports it `ok`.
 >
 > Passes the shared corpus (1360/1360), run on
@@ -555,12 +555,24 @@ implemented as `Injector` values (`transform_DELETE`, `transform_COPY`,
 ## Validate checkers
 
 Inside backticks in a `validate` spec (implemented as `validate_STRING`,
-`validate_TYPE`, `validate_ANY`, `validate_CHILD`, `validate_ONE`,
-`validate_EXACT`):
+`validate_TYPE`, `validate_ANY`, `validate_CHILD`, `validate_EXACT`,
+`validate_NOF`, `validate_ALL`):
 
 `$STRING`, `$NUMBER`, `$INTEGER`, `$DECIMAL`, `$BOOLEAN`, `$NULL`,
 `$NIL`, `$MAP`, `$LIST`, `$FUNCTION`, `$INSTANCE`, `$ANY`, `$CHILD`,
-`$ONE`, `$EXACT`. (`$NUMBER`..`$INSTANCE` all share `validate_TYPE`.)
+`$EXACT`, `$NOF`, `$ALL`. (`$NUMBER`..`$INSTANCE` all share `validate_TYPE`.)
+
+`$NOF` and `$ALL` are list directives. `` ['`$NOF`', n, spec, …] `` holds
+when as many specs admit the value as `n` allows, where `n` is an integer
+or a map with `min`, `max` or both; `` ['`$ALL`', spec, …] `` holds when
+every spec admits it. A spec admits a value when validating the value
+against it finds no error and gives back every member of the value
+unchanged. This port has no `$ONE`: write `` ['`$ONE`', a, b] `` as
+`` ['`$NOF`', {min: 1}, a, b] ``.
+
+A spec that names a checker this port does not define is rejected before
+any data is read, and nothing is validated. The message is
+`Unknown validator $FOO at field a.`
 
 `select()` adds the operators `$AND`, `$OR`, `$NOT`, and the comparators
 `$GT`/`$LT`/`$GTE`/`$LTE`/`$LIKE` (the `select_CMP` injector).

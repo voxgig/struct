@@ -268,6 +268,45 @@ class StructTests {
     }
 
     @Test
+    fun validateUnknownEdge() {
+        // Only the unknown name is reported, and the data comes back as it is.
+        val errs = mutableListOf<Any?>()
+        val data = linkedMapOf<String, Any?>("a" to "x")
+        var out =
+            Struct.validate(
+                data,
+                mapOf("a" to listOf("`\$ONE`", "`\$STRING`", "`\$NIL`")),
+                linkedMapOf<String, Any?>("errs" to errs),
+            )
+        assertEquals(listOf<Any?>("Unknown validator \$ONE at field a.0."), errs)
+        assertEquals(normalize(data), normalize(out))
+
+        // A checker supplied in extra is defined, in any case.
+        val even =
+            Struct.Injector { inj, _, _, _ ->
+                val n = Struct.getprop(inj.dparent, inj.key)
+                if (0L != (n as Number).toLong() % 2) {
+                    inj.errs.add("Odd at " + inj.path.drop(1).joinToString(".") + ": " + Struct.stringify(n))
+                }
+                n
+            }
+
+        errs.clear()
+        var extra = linkedMapOf<String, Any?>("\$EVEN" to even)
+        out = Struct.validate(mapOf("n" to 2), mapOf("n" to "`\$EVEN`"), linkedMapOf("extra" to extra, "errs" to errs))
+        assertEquals(normalize(mapOf("n" to 2)), normalize(out))
+        extra = linkedMapOf("\$even" to even)
+        out = Struct.validate(mapOf("n" to 3), mapOf("n" to "`\$even`"), linkedMapOf("extra" to extra, "errs" to errs))
+        assertEquals(normalize(mapOf("n" to 3)), normalize(out))
+        assertEquals(listOf<Any?>("Odd at n: 3"), errs)
+
+        // A null in extra takes a checker away.
+        errs.clear()
+        Struct.validate("x", "`\$STRING`", linkedMapOf("extra" to linkedMapOf<String, Any?>("\$STRING" to null), "errs" to errs))
+        assertEquals(listOf<Any?>("Unknown validator \$STRING at field <root>."), errs)
+    }
+
+    @Test
     fun transformEdgeApply() {
         val spec =
             mutableListOf<Any?>(
