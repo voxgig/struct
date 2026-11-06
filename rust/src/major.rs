@@ -1896,10 +1896,12 @@ fn validate_string(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
 
 fn validate_type(inj: &Inj, _v: &Value, r: &str, _store: &Value) -> Value {
     let tname: String = r.chars().skip(1).collect::<String>().to_lowercase();
+
+    // $NIL is absent or null.
     let typev: i64 = match TYPENAME.iter().position(|x| *x == tname) {
         Some(idx) => 1i64 << (31 - idx as i64),
         None => 0,
-    };
+    } | if S_nil == tname { T_NULL as i64 } else { 0 };
     let (dparent, key, path) = {
         let b = inj.borrow();
         (b.dparent.clone(), b.key.clone(), b.path.clone())
@@ -2034,92 +2036,6 @@ fn validate_child(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
     Value::Noval
 }
 
-// `$ONE`: value must match exactly one of a list of alternative sub-specs.
-fn validate_one(inj: &Inj, _v: &Value, _r: &str, store: &Value) -> Value {
-    let (mode, parent, key_i) = {
-        let b = inj.borrow();
-        (b.mode, b.parent.clone(), b.key_i)
-    };
-    if mode != M_VAL {
-        return Value::Noval;
-    }
-    if !is_list(&parent) || key_i != 0 {
-        let path = inj.borrow().path.clone();
-        errs_push(
-            inj,
-            format!(
-                "The $ONE validator at field {} must be the first element of an array.",
-                pathify(&path_value(&path), Some(1), Some(1))
-            ),
-        );
-        return Value::Noval;
-    }
-    let keylen = inj.borrow().keys.borrow().len() as i64;
-    inj.borrow_mut().key_i = keylen;
-    let dparent = inj.borrow().dparent.clone();
-    Injection::setval(inj, dparent.clone(), Some(2));
-    {
-        let mut b = inj.borrow_mut();
-        let n = b.path.len();
-        b.path.truncate(n.saturating_sub(1));
-    }
-    let path_after = inj.borrow().path.clone();
-    let meta = inj.borrow().meta.clone();
-    let tvals: Vec<Value> = slice(parent.clone(), Some(1), None, false)
-        .as_list()
-        .map(|l| l.borrow().clone())
-        .unwrap_or_default();
-    if tvals.is_empty() {
-        errs_push(
-            inj,
-            format!(
-                "The $ONE validator at field {} must have at least one argument.",
-                pathify(&path_value(&path_after), Some(1), Some(1))
-            ),
-        );
-        return Value::Noval;
-    }
-    for tval in &tvals {
-        let terrs = Value::empty_list();
-        let mut vstore = match merge(
-            &Value::list(vec![Value::empty_map(), store.clone()]),
-            Some(1),
-        ) {
-            v @ Value::Map(_) => v,
-            _ => Value::empty_map(),
-        };
-        set_prop(vstore.clone(), &Value::str(S_DTOP), dparent.clone());
-        let _ = &mut vstore;
-        let vd = InjectDef {
-            extra: Some(vstore.clone()),
-            errs: Some(terrs.clone()),
-            meta: Some(meta.clone()),
-            ..Default::default()
-        };
-        let vcur = validate(&dparent, tval, Some(&vd)).unwrap_or(Value::Noval);
-        Injection::setval(inj, vcur, Some(-2)); // hmm: ancestor -2 -> handled below
-        let terrlen = terrs.as_list().map(|l| l.borrow().len()).unwrap_or(0);
-        if terrlen == 0 {
-            return Value::Noval;
-        }
-    }
-    let valdesc = tvals_desc(&tvals);
-    errs_push(
-        inj,
-        invalid_type_msg(
-            &path_after,
-            &format!(
-                "{}{}",
-                if tvals.len() > 1 { "one of " } else { "" },
-                valdesc
-            ),
-            typify(&dparent),
-            &dparent,
-        ),
-    );
-    Value::Noval
-}
-
 // `$EXACT`: value must equal a literal exactly (no shape coercion).
 fn validate_exact(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
     let (mode, parent, key, key_i) = {
@@ -2141,15 +2057,16 @@ fn validate_exact(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
         );
         return Value::Noval;
     }
+    let cval = slotval(inj);
     let keylen = inj.borrow().keys.borrow().len() as i64;
     inj.borrow_mut().key_i = keylen;
-    let dparent = inj.borrow().dparent.clone();
-    Injection::setval(inj, dparent.clone(), Some(2));
+
+    // Replace [$EXACT, ...] with the data value; SKIP keeps inject off the detached list.
+    Injection::setval(inj, cval.clone(), Some(2));
     {
         let mut b = inj.borrow_mut();
         let n = b.path.len();
         b.path.truncate(n.saturating_sub(1));
-        b.key = b.path.last().cloned().unwrap_or_default();
     }
     let path_after = inj.borrow().path.clone();
     let tvals: Vec<Value> = slice(parent.clone(), Some(1), None, false)
@@ -2164,19 +2081,11 @@ fn validate_exact(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
                 pathify(&path_value(&path_after), Some(1), Some(1))
             ),
         );
-        return Value::Noval;
+        return Value::skip();
     }
-    let mut currentstr: Option<String> = None;
     for tval in &tvals {
-        let mut exactmatch = tval == &dparent;
-        if !exactmatch && is_node(tval) {
-            let cs = currentstr
-                .get_or_insert_with(|| stringify(&dparent, None, false))
-                .clone();
-            exactmatch = stringify(tval, None, false) == cs;
-        }
-        if exactmatch {
-            return Value::Noval;
+        if deepequal(tval, &cval) {
+            return Value::skip();
         }
     }
     let valdesc = tvals_desc(&tvals);
@@ -2188,9 +2097,134 @@ fn validate_exact(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
     );
     errs_push(
         inj,
-        invalid_type_msg(&path_after, &need, typify(&dparent), &dparent),
+        invalid_type_msg(&path_after, &need, typify(&cval), &cval),
     );
-    Value::Noval
+    Value::skip()
+}
+
+// Count the specs that admit the value: ['`$NOF`', count, spec, ...], where
+// count is an integer, or a map holding min, max or both.
+fn validate_nof(inj: &Inj, _v: &Value, _r: &str, store: &Value) -> Value {
+    validatecount(inj, store, "$NOF", true)
+}
+
+// Every spec admits the value: ['`$ALL`', spec, ...].
+fn validate_all(inj: &Inj, _v: &Value, _r: &str, store: &Value) -> Value {
+    validatecount(inj, store, "$ALL", false)
+}
+
+// The counting list directives. Without a count, every spec has to admit.
+fn validatecount(inj: &Inj, store: &Value, name: &str, counted: bool) -> Value {
+    let (mode, parent, key_i) = {
+        let b = inj.borrow();
+        (b.mode, b.parent.clone(), b.key_i)
+    };
+    if mode != M_VAL {
+        return Value::Noval;
+    }
+    if !is_list(&parent) || key_i != 0 {
+        let path = inj.borrow().path.clone();
+        errs_push(
+            inj,
+            format!(
+                "The {name} validator at field {} must be the first element of an array.",
+                pathify(&path_value(&path), Some(1), Some(1))
+            ),
+        );
+        return Value::Noval;
+    }
+
+    let cval = slotval(inj);
+
+    let keylen = inj.borrow().keys.borrow().len() as i64;
+    inj.borrow_mut().key_i = keylen;
+
+    // Replace the directive's list with the data value. Each return is SKIP, so
+    // that inject leaves the detached list alone and validates nothing in it.
+    Injection::setval(inj, cval.clone(), Some(2));
+
+    {
+        let mut b = inj.borrow_mut();
+        let n = b.path.len();
+        b.path.truncate(n.saturating_sub(1));
+    }
+    let path = inj.borrow().path.clone();
+
+    let count = if counted {
+        lookup(&parent, &Value::Num(1.0))
+    } else {
+        Value::Noval
+    };
+    let argsfrom = if counted { 2 } else { 1 };
+    let tvals: Vec<Value> = slice(parent.clone(), Some(argsfrom), None, false)
+        .as_list()
+        .map(|l| l.borrow().clone())
+        .unwrap_or_default();
+    let numtvals = tvals.len() as i64;
+    let field = format!(
+        "The {name} validator at field {}",
+        pathify(&path_value(&path), Some(1), None)
+    );
+
+    if 0 == numtvals {
+        errs_push(
+            inj,
+            format!(
+                "{field}{} at least one argument.",
+                if counted {
+                    " must have a count and"
+                } else {
+                    " must have"
+                }
+            ),
+        );
+        return Value::skip();
+    }
+
+    let (lo, hi, countdesc) = if counted {
+        nofcount(&count, numtvals)
+    } else {
+        (numtvals, numtvals, Some("all".to_string()))
+    };
+
+    let Some(countdesc) = countdesc else {
+        errs_push(
+            inj,
+            format!(
+                "{field} has an invalid count: {}.",
+                stringify(&count, None, false)
+            ),
+        );
+        return Value::skip();
+    };
+
+    let mut admitted: i64 = 0;
+    for (t_i, tval) in tvals.iter().enumerate() {
+        let left = numtvals - t_i as i64;
+
+        // Stop once the specs left cannot change the verdict.
+        if hi < admitted || admitted + left < lo || (lo <= admitted && admitted + left <= hi) {
+            break;
+        }
+
+        if admits(&cval, tval, inj, store) {
+            admitted += 1;
+        }
+    }
+
+    if admitted < lo || hi < admitted {
+        errs_push(
+            inj,
+            invalid_type_msg(
+                &path,
+                &format!("{countdesc} of {}", tvals_desc(&tvals)),
+                typify(&cval),
+                &cval,
+            ),
+        );
+    }
+
+    Value::skip()
 }
 
 /// `_validation` — the modify hook installed by `validate` (runs after the
@@ -2355,8 +2389,9 @@ pub fn validate(
     }
     vmap.insert("$ANY".to_string(), Value::func(validate_any));
     vmap.insert("$CHILD".to_string(), Value::func(validate_child));
-    vmap.insert("$ONE".to_string(), Value::func(validate_one));
     vmap.insert("$EXACT".to_string(), Value::func(validate_exact));
+    vmap.insert("$NOF".to_string(), Value::func(validate_nof));
+    vmap.insert("$ALL".to_string(), Value::func(validate_all));
 
     let extra_or_empty = match &extra {
         Some(e) => e.clone(),
@@ -2378,16 +2413,24 @@ pub fn validate(
     let exact_cur = get_prop(&meta, &Value::str(S_BEXACT), Value::Bool(false));
     set_prop(meta.clone(), &Value::str(S_BEXACT), exact_cur);
 
-    let td = InjectDef {
-        meta: Some(meta),
-        extra: Some(store),
-        modify: Some(Rc::new(validation_modify) as Modify),
-        handler: Some(Rc::new(validatehandler) as NativeFn),
-        errs: Some(errs.clone()),
-        ..Default::default()
-    };
+    // A spec that names an unknown checker validates nothing.
+    let errcount = |errs: &Value| errs.as_list().map(|l| l.borrow().len()).unwrap_or(0);
+    let numerrs = errcount(&errs);
+    checknames(spec, &store, &[], &errs);
 
-    let out = transform(data, spec, Some(&td)).unwrap_or(Value::Noval);
+    let out = if numerrs < errcount(&errs) {
+        clone(data)
+    } else {
+        let td = InjectDef {
+            meta: Some(meta),
+            extra: Some(store),
+            modify: Some(Rc::new(validation_modify) as Modify),
+            handler: Some(Rc::new(validatehandler) as NativeFn),
+            errs: Some(errs.clone()),
+            ..Default::default()
+        };
+        transform(data, spec, Some(&td)).unwrap_or(Value::Noval)
+    };
 
     let errlen = errs.as_list().map(|l| l.borrow().len()).unwrap_or(0);
     if errlen > 0 && !collect {
@@ -2401,6 +2444,195 @@ pub fn validate(
     }
 
     Ok(out)
+}
+
+// Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
+const VALIDATE_NAMES: [&str; 10] = [
+    "$TOP", "$SPEC", "$BT", "$DS", "$WHEN", "$ANNO", "$REF", "$FORMAT", "$APPLY", "$OPEN",
+];
+
+// Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
+fn checknames(spec: &Value, store: &Value, path: &[String], errs: &Value) {
+    if let Some(name) = refname(spec) {
+        if unknownname(&name, store) {
+            if let Value::List(l) = errs {
+                l.borrow_mut().push(Value::Str(format!(
+                    "Unknown validator {name} at field {}.",
+                    pathify(&path_value(path), None, None)
+                )));
+            }
+        }
+        return;
+    }
+
+    if is_list(spec) && Some("$EXACT") == refname(&lookup(spec, &Value::Num(0.0))).as_deref() {
+        return;
+    }
+
+    for key in keysof_vec(spec) {
+        if is_map(spec) {
+            checknames(&Value::str(key.clone()), store, path, errs);
+        }
+        let mut kpath = path.to_vec();
+        kpath.push(key.clone());
+        checknames(&lookup(spec, &Value::str(key)), store, &kpath, errs);
+    }
+}
+
+// The name a whole-string reference gives, when it is a checker name in any case.
+fn refname(val: &Value) -> Option<String> {
+    let Value::Str(s) = val else {
+        return None;
+    };
+    let caps = R_INJECTION_FULL.captures(s)?;
+    let name = caps[1].to_string();
+    R_CHECKER_NAME
+        .is_match(&name.to_uppercase())
+        .then_some(name)
+}
+
+// Unknown: undefined and upper case, or a defined name in another case. Null disables a name.
+fn unknownname(name: &str, store: &Value) -> bool {
+    let known =
+        |n: &str| VALIDATE_NAMES.contains(&n) || !lookup(store, &Value::str(n)).is_nullish();
+    let upper = name.to_uppercase();
+    !known(name) && (upper == name || known(&upper))
+}
+
+// The data value at a list directive's slot. The directive's own dparent was
+// read with get_prop, which reports a stored null as absent.
+fn slotval(inj: &Inj) -> Value {
+    let prior = inj.borrow().prior.clone();
+    match prior {
+        None => inj.borrow().dparent.clone(),
+        Some(p) => {
+            let b = p.borrow();
+            lookup(&b.dparent, &Value::str(b.key.clone()))
+        }
+    }
+}
+
+// JSON equality: numbers by value, lists in order, maps by key in any order.
+fn deepequal(a: &Value, b: &Value) -> bool {
+    let same = match (a, b) {
+        (Value::List(x), Value::List(y)) => Rc::ptr_eq(x, y),
+        (Value::Map(x), Value::Map(y)) => Rc::ptr_eq(x, y),
+        (Value::Func(x), Value::Func(y)) => Rc::ptr_eq(x, y),
+        _ => a == b,
+    };
+    if same {
+        return true;
+    }
+
+    let atype = typify(a);
+    if atype != typify(b) || 0 == ((T_LIST | T_MAP) as i64 & atype) {
+        return false;
+    }
+
+    let akeys = keysof_vec(a);
+    let bkeys = keysof_vec(b);
+    if akeys.len() != bkeys.len() {
+        return false;
+    }
+
+    akeys.iter().zip(bkeys.iter()).all(|(k, bk)| {
+        let kv = Value::str(k.clone());
+        k == bk && deepequal(&lookup(a, &kv), &lookup(b, &kv))
+    })
+}
+
+// Every member val has is in out, unchanged. A member only out has is a
+// default the spec supplied, and is ignored.
+fn keeps(val: &Value, out: &Value) -> bool {
+    if val.is_noval() {
+        return true;
+    }
+
+    if 0 == ((T_LIST | T_MAP) as i64 & typify(val)) || is_list(val) != is_list(out) || !is_node(out)
+    {
+        return deepequal(val, out);
+    }
+
+    keysof_vec(val).into_iter().all(|k| {
+        let kv = Value::str(k);
+        keeps(&lookup(val, &kv), &lookup(out, &kv))
+    })
+}
+
+// A spec admits a value when validating the value against it finds no error
+// and gives back the value as it is.
+fn admits(val: &Value, spec: &Value, inj: &Inj, store: &Value) -> bool {
+    let terrs = Value::empty_list();
+
+    let vstore = match merge(
+        &Value::list(vec![Value::empty_map(), store.clone()]),
+        Some(1),
+    ) {
+        v @ Value::Map(_) => v,
+        _ => Value::empty_map(),
+    };
+    set_prop(vstore.clone(), &Value::str(S_DTOP), val.clone());
+
+    let meta = inj.borrow().meta.clone();
+    let vd = InjectDef {
+        extra: Some(vstore),
+        errs: Some(terrs.clone()),
+        meta: Some(meta),
+        ..Default::default()
+    };
+    let out = validate(val, spec, Some(&vd)).unwrap_or(Value::Noval);
+
+    let terrlen = terrs.as_list().map(|l| l.borrow().len()).unwrap_or(0);
+    0 == terrlen && keeps(val, &out)
+}
+
+// The bounds of a $NOF count, and the words for it, which are absent when
+// the count is invalid. Without a max, the bound is the number of specs.
+fn nofcount(count: &Value, numtvals: i64) -> (i64, i64, Option<String>) {
+    let isnat =
+        |n: &Value| 0 != (T_INTEGER as i64 & typify(n)) && n.as_num().is_some_and(|x| 0.0 <= x);
+    let nat = |n: &Value| n.as_num().unwrap_or(0.0) as i64;
+
+    if isnat(count) {
+        let n = nat(count);
+        let desc = if 0 == n {
+            "none".to_string()
+        } else {
+            format!("exactly {n}")
+        };
+        return (n, n, Some(desc));
+    }
+
+    let min = lookup(count, &Value::str("min"));
+    let max = lookup(count, &Value::str("max"));
+
+    let valid = is_map(count)
+        && 0 < size(count)
+        && size(count) == i64::from(!min.is_noval()) + i64::from(!max.is_noval())
+        && (min.is_noval() || isnat(&min))
+        && (max.is_noval() || isnat(&max))
+        && (min.is_noval() || max.is_noval() || nat(&min) <= nat(&max));
+
+    if !valid {
+        return (0, 0, None);
+    }
+
+    let lo = if min.is_noval() { 0 } else { nat(&min) };
+    let hi = if max.is_noval() { numtvals } else { nat(&max) };
+
+    let desc = if max.is_noval() {
+        format!("at least {lo}")
+    } else if 0 == hi {
+        "none".to_string()
+    } else if min.is_noval() {
+        format!("at most {hi}")
+    } else if lo == hi {
+        format!("exactly {lo}")
+    } else {
+        format!("{lo} to {hi}")
+    };
+
+    (lo, hi, Some(desc))
 }
 
 // ---- select ----------------------------------------------------------

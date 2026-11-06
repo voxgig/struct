@@ -82,6 +82,7 @@ pub static R_META_PATH: Lazy<Regex> = Lazy::new(|| Regex::new(r"^([^$]+)\$([=~])
 pub static R_TRANSFORM_NAME: Lazy<Regex> = Lazy::new(|| Regex::new(r"`\$([A-Z]+)`").unwrap());
 pub static R_INJECTION_FULL: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^`(\$[A-Z]+|[^`]*)[0-9]*`$").unwrap());
+pub static R_CHECKER_NAME: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\$[A-Z]+$").unwrap());
 pub static R_INJECTION_PARTIAL: Lazy<Regex> = Lazy::new(|| Regex::new(r"`([^`]+)`").unwrap());
 
 pub fn mode_name(mode: i64) -> &'static str {

@@ -707,10 +707,18 @@ fn corpus() {
             |vin| validate(&vget(&vin, "data"), &vget(&vin, "spec"), None).map_err(|e| e.message),
         );
     }
-    for name in ["child", "one", "exact"] {
+    for name in ["child", "exact"] {
         run.run_set_fallible(
             &set!("validate", name),
             true,
+            &format!("validate-{name}"),
+            |vin| validate(&vget(&vin, "data"), &vget(&vin, "spec"), None).map_err(|e| e.message),
+        );
+    }
+    for name in ["directive", "nof", "all", "unknown"] {
+        run.run_set_fallible(
+            &set!("validate", name),
+            false,
             &format!("validate-{name}"),
             |vin| validate(&vget(&vin, "data"), &vget(&vin, "spec"), None).map_err(|e| e.message),
         );
@@ -773,6 +781,96 @@ fn corpus() {
         panic!("{msg}");
     }
     eprintln!("corpus: {} checks passed", run.passed);
+}
+
+#[test]
+fn validate_unknown_edge() {
+    let strs = |errs: &Value| -> Vec<String> {
+        errs.as_list()
+            .map(|l| {
+                l.borrow()
+                    .iter()
+                    .map(voxgig_struct::value::js_string)
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+
+    // Only the unknown name is reported, and the data comes back as it is.
+    let errs = Value::empty_list();
+    let data = Value::map_of([("a".to_string(), Value::str("x"))]);
+    let spec = Value::map_of([(
+        "a".to_string(),
+        Value::list(vec![
+            Value::str("`$ONE`"),
+            Value::str("`$STRING`"),
+            Value::str("`$NIL`"),
+        ]),
+    )]);
+    let d = InjectDef {
+        errs: Some(errs.clone()),
+        ..Default::default()
+    };
+    let out = validate(&data, &spec, Some(&d)).unwrap();
+    assert_eq!(strs(&errs), vec!["Unknown validator $ONE at field a.0."]);
+    assert_eq!(out, data);
+
+    // A checker supplied in extra is defined, in any case.
+    let even = Value::func(|inj: &Inj, _v: &Value, _r: &str, _s: &Value| {
+        let (dparent, key, path, errs) = {
+            let b = inj.borrow();
+            (
+                b.dparent.clone(),
+                b.key.clone(),
+                b.path.clone(),
+                b.errs.clone(),
+            )
+        };
+        let n = get_prop(&dparent, &Value::str(key), Value::Noval);
+        if 0.0 != n.as_num().unwrap_or(f64::NAN) % 2.0 {
+            if let Value::List(l) = &errs {
+                l.borrow_mut().push(Value::Str(format!(
+                    "Odd at {}: {}",
+                    path[1..].join("."),
+                    voxgig_struct::value::js_string(&n)
+                )));
+            }
+        }
+        n
+    });
+
+    let errs = Value::empty_list();
+    let n2 = Value::map_of([("n".to_string(), Value::Num(2.0))]);
+    let d = InjectDef {
+        extra: Some(Value::map_of([("$EVEN".to_string(), even.clone())])),
+        errs: Some(errs.clone()),
+        ..Default::default()
+    };
+    let spec = Value::map_of([("n".to_string(), Value::str("`$EVEN`"))]);
+    assert_eq!(validate(&n2, &spec, Some(&d)).unwrap(), n2);
+
+    let n3 = Value::map_of([("n".to_string(), Value::Num(3.0))]);
+    let d = InjectDef {
+        extra: Some(Value::map_of([("$even".to_string(), even)])),
+        errs: Some(errs.clone()),
+        ..Default::default()
+    };
+    let spec = Value::map_of([("n".to_string(), Value::str("`$even`"))]);
+    assert_eq!(validate(&n3, &spec, Some(&d)).unwrap(), n3);
+    assert_eq!(strs(&errs), vec!["Odd at n: 3"]);
+
+    // A null in extra takes a checker away.
+    let errs = Value::empty_list();
+    let d = InjectDef {
+        extra: Some(Value::map_of([("$STRING".to_string(), Value::Null)])),
+        errs: Some(errs.clone()),
+        ..Default::default()
+    };
+    let _ = validate(&Value::str("x"), &Value::str("`$STRING`"), Some(&d));
+    assert_eq!(
+        strs(&errs),
+        vec!["Unknown validator $STRING at field <root>."]
+    );
 }
 
 #[test]
