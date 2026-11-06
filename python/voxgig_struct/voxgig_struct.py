@@ -45,6 +45,8 @@ from typing import Any
 # Regex patterns for path processing
 R_META_PATH = re.compile(r'^([^$]+)\$([=~])(.+)$')  # Meta path syntax.
 R_DOUBLE_DOLLAR = re.compile(r'\$\$')  # Double dollar escape sequence.
+R_INJECTION_FULL = re.compile(r'^`(\$[A-Z]+|[^`]*)[0-9]*`$')  # Full string injection pattern.
+R_CHECKER_NAME = re.compile(r'^\$[A-Z]+$')  # Validate checker name.
 
 # Mode value for inject step.
 S_MKEYPRE = 'key:pre'
@@ -1676,12 +1678,13 @@ def inject(val, store, injdef=UNDEF):
     inj.val = val
 
     # Return the (possibly transform-replaced) root only at top level (prior is None).
+    # Presence, not haskey, so that a root replaced by a null returns None.
     if (
         getattr(inj, 'prior', None) is None
         and getattr(inj, 'root', None) is not None
-        and haskey(inj.root, S_DTOP)
+        and _present(inj.root, S_DTOP)
     ):
-        return getprop(inj.root, S_DTOP)
+        return _lookup(inj.root, S_DTOP)
     if inj.key == S_DTOP and inj.parent is not UNDEF and haskey(inj.parent, S_DTOP):
         return getprop(inj.parent, S_DTOP)
     return val
@@ -2406,11 +2409,20 @@ def validate_TYPE(inj, _val=UNDEF, ref=UNDEF, _store=UNDEF):
         inj.errs.append(_invalidTypeMsg(inj.path, tname, t, out, 'V1001'))
         return UNDEF
 
-    return out
+    return _keepnull(inj, out)
 
 
 def validate_ANY(inj, _val=UNDEF, _ref=UNDEF, _store=UNDEF):
-    return getprop(inj.dparent, inj.key)
+    return _keepnull(inj, getprop(inj.dparent, inj.key))
+
+
+# A checker's accepted value, where a null the data holds stays in the output:
+# returned as None, inject's setval would delete the slot instead.
+def _keepnull(inj, out):
+    if out is None and inj.mode == S_MVAL and _present(inj.dparent, inj.key):
+        setprop(inj.parent, inj.key, out)
+        return SKIP
+    return out
 
 
 def validate_CHILD(inj, _val=UNDEF, _ref=UNDEF, _store=UNDEF):
@@ -2480,70 +2492,6 @@ def validate_CHILD(inj, _val=UNDEF, _ref=UNDEF, _store=UNDEF):
     return UNDEF
 
 
-def validate_ONE(inj, _val=UNDEF, _ref=UNDEF, store=UNDEF):
-    mode = inj.mode
-    parent = inj.parent
-    keyI = inj.keyI
-
-    if mode == S_MVAL:
-        if not islist(parent) or keyI != 0:
-            inj.errs.append(
-                'The $ONE validator at field '
-                + pathify(inj.path, 1, 1)
-                + ' must be the first element of an array.'
-            )
-            return None
-
-        inj.keyI = size(inj.keys)
-
-        inj.setval(inj.dparent, 2)
-
-        inj.path = inj.path[:-1]
-
-        tvals = parent[1:]
-        if size(tvals) == 0:
-            inj.errs.append(
-                'The $ONE validator at field '
-                + pathify(inj.path, 1, 1)
-                + ' must have at least one argument.'
-            )
-            return None
-
-        for tval in tvals:
-            terrs = []
-
-            vstore = merge([{}, store], 1)
-            vstore[S_DTOP] = inj.dparent
-
-            vcurrent = validate(
-                inj.dparent,
-                tval,
-                {
-                    'extra': vstore,
-                    'errs': terrs,
-                    'meta': inj.meta,
-                },
-            )
-
-            inj.setval(vcurrent, -2)
-
-            if size(terrs) == 0:
-                return None
-
-        valdesc = ', '.join(stringify(n[1]) for n in items(tvals))
-        valdesc = re.sub(r'`\$([A-Z]+)`', lambda m: m.group(1).lower(), valdesc)
-
-        inj.errs.append(
-            _invalidTypeMsg(
-                inj.path,
-                ('one of ' if size(tvals) > 1 else '') + valdesc,
-                typify(inj.dparent),
-                inj.dparent,
-                'V0210',
-            )
-        )
-
-
 def validate_EXACT(inj, _val=UNDEF, _ref=UNDEF, _store=UNDEF):
     mode = inj.mode
     parent = inj.parent
@@ -2559,12 +2507,14 @@ def validate_EXACT(inj, _val=UNDEF, _ref=UNDEF, _store=UNDEF):
             )
             return None
 
+        cval, present = _slotval(inj)
+
         inj.keyI = size(inj.keys)
 
-        inj.setval(inj.dparent, 2)
+        # Replace [$EXACT, ...] with the data value; SKIP keeps inject off the detached list.
+        _setslot(inj, cval, present)
 
         inj.path = inj.path[:-1]
-        inj.key = getelem(inj.path, -1)
 
         tvals = parent[1:]
         if size(tvals) == 0:
@@ -2573,19 +2523,12 @@ def validate_EXACT(inj, _val=UNDEF, _ref=UNDEF, _store=UNDEF):
                 + pathify(inj.path, 1, 1)
                 + ' must have at least one argument.'
             )
-            return None
+            return SKIP
 
-        currentstr = None
+        # An absent value equals no literal, not even null.
         for tval in tvals:
-            exactmatch = tval == inj.dparent
-
-            if not exactmatch and isnode(tval):
-                currentstr = stringify(inj.dparent) if currentstr is None else currentstr
-                tvalstr = stringify(tval)
-                exactmatch = tvalstr == currentstr
-
-            if exactmatch:
-                return None
+            if present and _deepequal(tval, cval):
+                return SKIP
 
         valdesc = ', '.join(stringify(n[1]) for n in items(tvals))
         valdesc = re.sub(r'`\$([A-Z]+)`', lambda m: m.group(1).lower(), valdesc)
@@ -2597,13 +2540,96 @@ def validate_EXACT(inj, _val=UNDEF, _ref=UNDEF, _store=UNDEF):
                 + 'exactly equal to '
                 + ('' if size(tvals) == 1 else 'one of ')
                 + valdesc,
-                typify(inj.dparent),
-                inj.dparent,
+                typify(cval),
+                cval,
                 'V0110',
             )
         )
+
+        return SKIP
     else:
         delprop(parent, key)
+
+
+# Count the specs that admit the value: ['`$NOF`', count, spec, ...], where
+# count is an integer, or a map holding min, max or both.
+def validate_NOF(inj, _val=UNDEF, _ref=UNDEF, store=UNDEF):
+    return _validatecount(inj, store, '$NOF', True)
+
+
+# Every spec admits the value: ['`$ALL`', spec, ...].
+def validate_ALL(inj, _val=UNDEF, _ref=UNDEF, store=UNDEF):
+    return _validatecount(inj, store, '$ALL', False)
+
+
+# The counting list directives. Without a count, every spec has to admit.
+def _validatecount(inj, store, name, counted):
+    mode = inj.mode
+    parent = inj.parent
+    keyI = inj.keyI
+
+    if mode != S_MVAL:
+        return UNDEF
+
+    if not islist(parent) or keyI != 0:
+        inj.errs.append(
+            'The '
+            + name
+            + ' validator at field '
+            + pathify(inj.path, 1, 1)
+            + ' must be the first element of an array.'
+        )
+        return UNDEF
+
+    cval, present = _slotval(inj)
+
+    inj.keyI = size(inj.keys)
+
+    # Replace the directive's list with the data value. Each return is SKIP, so
+    # that inject leaves the detached list alone and validates nothing in it.
+    _setslot(inj, cval, present)
+
+    inj.path = inj.path[:-1]
+
+    count = _lookup(parent, 1) if counted else UNDEF
+    tvals = parent[2:] if counted else parent[1:]
+    numtvals = size(tvals)
+    field = 'The ' + name + ' validator at field ' + pathify(inj.path, 1)
+
+    if numtvals == 0:
+        inj.errs.append(
+            field
+            + (' must have a count and' if counted else ' must have')
+            + ' at least one argument.'
+        )
+        return SKIP
+
+    lo, hi, countdesc = _nofcount(count, numtvals) if counted else (numtvals, numtvals, 'all')
+
+    if countdesc is UNDEF:
+        inj.errs.append(field + ' has an invalid count: ' + stringify(count) + '.')
+        return SKIP
+
+    admitted = 0
+    for tI in range(numtvals):
+        left = numtvals - tI
+
+        # Stop once the specs left cannot change the verdict.
+        if hi < admitted or admitted + left < lo or (lo <= admitted and admitted + left <= hi):
+            break
+
+        if _admits(cval, present, tvals[tI], inj, store):
+            admitted += 1
+
+    if admitted < lo or hi < admitted:
+        valdesc = ', '.join(stringify(n[1]) for n in items(tvals))
+        valdesc = re.sub(r'`\$([A-Z]+)`', lambda m: m.group(1).lower(), valdesc)
+
+        inj.errs.append(
+            _invalidTypeMsg(inj.path, countdesc + ' of ' + valdesc, typify(cval), cval, 'V0310')
+        )
+
+    return SKIP
 
 
 def _validation(pval, key, parent, inj):
@@ -2718,8 +2744,9 @@ def validate(data, spec, injdef=UNDEF):
                 '$INSTANCE': validate_TYPE,
                 '$ANY': validate_ANY,
                 '$CHILD': validate_CHILD,
-                '$ONE': validate_ONE,
                 '$EXACT': validate_EXACT,
+                '$NOF': validate_NOF,
+                '$ALL': validate_ALL,
             },
             ({} if extra is UNDEF or extra is None else extra),
             {
@@ -2732,17 +2759,24 @@ def validate(data, spec, injdef=UNDEF):
     meta = getprop(injdef, 'meta', {})
     setprop(meta, S_BEXACT, getprop(meta, S_BEXACT, False))
 
-    out = transform(
-        data,
-        spec,
-        {
-            'meta': meta,
-            'extra': store,
-            'modify': _validation,
-            'handler': _validatehandler,
-            'errs': errs,
-        },
-    )
+    # A spec that names an unknown checker validates nothing.
+    numerrs = size(errs)
+    _checknames(spec, store, [], errs)
+
+    if numerrs < size(errs):
+        out = clone(data)
+    else:
+        out = transform(
+            data,
+            spec,
+            {
+                'meta': meta,
+                'extra': store,
+                'modify': _validation,
+                'handler': _validatehandler,
+                'errs': errs,
+            },
+        )
 
     generr = len(errs) > 0 and not collect
     if generr:
@@ -2798,7 +2832,6 @@ def _updateAncestors(_state, target, tkey, tval):
 # optionally allows transforms to be ordered by alphanumeric sorting.
 def _injectstr(val, store, inj=UNDEF):
     # Can't inject into non-strings
-    full_re = re.compile(r'^`(\$[A-Z]+|[^`]*)[0-9]*`$')
     part_re = re.compile(r'`([^`]*)`')
 
     if not isinstance(val, str) or val == S_MT:
@@ -2807,7 +2840,7 @@ def _injectstr(val, store, inj=UNDEF):
     out = val
 
     # Pattern examples: "`a.b.c`", "`$NAME`", "`$NAME1`"
-    m = full_re.match(val)
+    m = R_INJECTION_FULL.match(val)
 
     # Full string of the val is an injection.
     if m:
@@ -2877,6 +2910,190 @@ def _invalidTypeMsg(path, needtype, vt, v, _whence=None):
         + vs
         + '.'
     )
+
+
+# Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
+VALIDATE_NAMES = [
+    '$TOP',
+    '$SPEC',
+    '$BT',
+    '$DS',
+    '$WHEN',
+    '$ANNO',
+    '$REF',
+    '$FORMAT',
+    '$APPLY',
+    '$OPEN',
+]
+
+
+# Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
+def _checknames(spec, store, path, errs):
+    name = _refname(spec)
+    if name is not UNDEF:
+        if _unknownname(name, store):
+            errs.append('Unknown validator ' + name + ' at field ' + pathify(path) + '.')
+        return
+
+    if islist(spec) and _refname(_lookup(spec, 0)) == '$EXACT':
+        return
+
+    for key in keysof(spec):
+        if ismap(spec):
+            _checknames(key, store, path, errs)
+        _checknames(_lookup(spec, key), store, [*path, key], errs)
+
+
+# The name a whole-string reference gives, when it is a checker name in any case.
+def _refname(val):
+    m = re_find(R_INJECTION_FULL, val) if isinstance(val, str) else None
+    return m[1] if m is not None and re_test(R_CHECKER_NAME, m[1].upper()) else UNDEF
+
+
+# Unknown: undefined and upper case, or a defined name in another case. None disables a name.
+def _unknownname(name, store):
+    def known(n):
+        return n in VALIDATE_NAMES or _lookup(store, n) is not None
+
+    upper = name.upper()
+    return not known(name) and (upper == name or known(upper))
+
+
+# Whether a node holds a key or index at all, even with a None value.
+def _present(val, key):
+    if ismap(val):
+        return str(key) in val
+    if islist(val):
+        try:
+            ki = int(key)
+        except (ValueError, TypeError):
+            return False
+        return 0 <= ki < len(val)
+    return False
+
+
+# The data value at a list directive's slot, and whether the slot holds one:
+# a stored null and an absent value are both None, so presence tells them apart.
+def _slotval(inj):
+    prior = inj.prior
+    if prior is None:
+        return inj.dparent, inj.dparent is not None
+    return _lookup(prior.dparent, prior.key), _present(prior.dparent, prior.key)
+
+
+# Put the slot's value in place of the directive's list. Injection.setval
+# deletes on None, which would drop a null the data holds.
+def _setslot(inj, cval, present):
+    if cval is None and present:
+        setprop(getelem(inj.nodes, -2), getelem(inj.path, -2), cval)
+    else:
+        inj.setval(cval, 2)
+
+
+# JSON equality: numbers by value, lists in order, maps by key in any order.
+def _deepequal(a, b):
+    atype = typify(a)
+    btype = typify(b)
+
+    # An integer equals a decimal of the same value; typify keeps bool apart.
+    if (T_number & atype) > 0 and (T_number & btype) > 0:
+        return a == b
+
+    if atype != btype:
+        return False
+
+    # Functions and instances equal only themselves.
+    if ((T_list | T_map) & atype) == 0:
+        return a == b if ((T_string | T_boolean | T_null) & atype) > 0 else a is b
+
+    akeys = keysof(a)
+    bkeys = keysof(b)
+    if size(akeys) != size(bkeys):
+        return False
+
+    for kI in range(size(akeys)):
+        k = akeys[kI]
+        if k != bkeys[kI] or not _deepequal(_lookup(a, k), _lookup(b, k)):
+            return False
+
+    return True
+
+
+# Every member val has is in out, unchanged. A member only out has is a
+# default the spec supplied, and is ignored.
+def _keeps(val, out):
+    if ((T_list | T_map) & typify(val)) == 0 or islist(val) != islist(out) or not isnode(out):
+        return _deepequal(val, out)
+
+    for k in keysof(val):
+        if not _present(out, k) or not _keeps(_lookup(val, k), _lookup(out, k)):
+            return False
+
+    return True
+
+
+# A spec admits a value when validating the value against it finds no error
+# and gives back the value as it is. An absent value has nothing to give back.
+def _admits(val, present, spec, inj, store):
+    terrs = []
+
+    vstore = merge([{}, store], 1)
+    vstore[S_DTOP] = val
+
+    out = validate(
+        val,
+        spec,
+        {
+            'extra': vstore,
+            'errs': terrs,
+            'meta': inj.meta,
+        },
+    )
+
+    return size(terrs) == 0 and (not present or _keeps(val, out))
+
+
+# The bounds of a $NOF count, and the words for it, which are absent when
+# the count is invalid. Without a max, the bound is the number of specs.
+def _nofcount(count, numtvals):
+    def isnat(n):
+        return (T_integer & typify(n)) > 0 and n >= 0
+
+    if isnat(count):
+        return count, count, 'none' if count == 0 else 'exactly ' + str(count)
+
+    hasmin = _present(count, 'min')
+    hasmax = _present(count, 'max')
+    mn = _lookup(count, 'min')
+    mx = _lookup(count, 'max')
+
+    valid = (
+        ismap(count)
+        and size(count) > 0
+        and size(count) == (1 if hasmin else 0) + (1 if hasmax else 0)
+        and (not hasmin or isnat(mn))
+        and (not hasmax or isnat(mx))
+        and (not hasmin or not hasmax or mn <= mx)
+    )
+
+    if not valid:
+        return 0, 0, UNDEF
+
+    lo = mn if hasmin else 0
+    hi = mx if hasmax else numtvals
+
+    if not hasmax:
+        desc = 'at least ' + str(lo)
+    elif hi == 0:
+        desc = 'none'
+    elif not hasmin:
+        desc = 'at most ' + str(hi)
+    elif lo == hi:
+        desc = 'exactly ' + str(lo)
+    else:
+        desc = str(lo) + ' to ' + str(hi)
+
+    return lo, hi, desc
 
 
 # Create a StructUtils class with all utility functions as attributes

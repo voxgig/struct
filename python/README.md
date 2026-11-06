@@ -614,8 +614,17 @@ $MERGE   $EACH    $PACK    $REF     $FORMAT  $APPLY
 
 ```
 $MAP   $LIST   $STRING   $NUMBER   $INTEGER   $DECIMAL  $BOOLEAN
-$NULL  $NIL    $FUNCTION $INSTANCE $ANY       $CHILD    $ONE     $EXACT
+$NULL  $NIL    $FUNCTION $INSTANCE $ANY       $CHILD    $EXACT
+$NOF   $ALL
 ```
+
+`` ['`$NOF`', n, spec, …] `` holds when as many specs admit the value as `n`
+allows, where `n` is an integer or a dict with `'min'`, `'max'` or both;
+`` ['`$ALL`', spec, …] `` holds when every spec admits it. There is no
+`$ONE`: write `` ['`$ONE`', a, b] `` as `` ['`$NOF`', {'min': 1}, a, b] ``.
+A spec that names any other checker, such as the misspelling
+`` '`$string`' ``, is rejected before any data is read. See the
+[top-level README](../README.md) for what each checker accepts.
 
 
 ## Notes
@@ -629,6 +638,16 @@ both map to `None` at the user-facing API.
 `typify(None)` returns `T_scalar | T_null`.  Where the test corpus
 needs to disambiguate, the runner uses string sentinels `__NULL__`
 and `__UNDEF__`.
+
+Inside a dict or list, `validate` tells a stored `None` from a missing
+key by the key's presence: `$NULL`, `$NIL` and `$ANY` keep a null the
+data holds in the output, and the list directives `$EXACT`, `$NOF` and
+`$ALL` read it as a value. The root of a call has no key to test, so
+`validate(None, spec)` reads `None` as null. Each `$NOF` or `$ALL` trial
+validates the value at the root of its own call, so for a missing field
+a trial spec of `` '`$NULL`' `` or `` ['`$EXACT`', None] `` admits it,
+where canonical TypeScript refuses it. The absent-versus-null rule is in
+[`UNDEF_SPEC.md`](../design/UNDEF_SPEC.md).
 
 ### Walk uses keyword arguments
 

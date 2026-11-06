@@ -709,12 +709,6 @@ class TestStruct(unittest.TestCase):
 
         runset(spec['validate']['child'], validate_wrapper)
 
-    def test_validate_one(self):
-        def validate_wrapper(vin):
-            return validate(vin.get('data'), vin.get('spec'))
-
-        runset(spec['validate']['one'], validate_wrapper)
-
     def test_validate_exact(self):
         def validate_wrapper(vin):
             return validate(vin.get('data'), vin.get('spec'))
@@ -733,6 +727,76 @@ class TestStruct(unittest.TestCase):
             return validate(vin.get('data'), vin.get('spec'), vin.get('inj'))
 
         runset(spec['validate']['special'], validate_wrapper)
+
+    def test_validate_directive(self):
+        runsetflags(
+            spec['validate']['directive'],
+            {'null': False},
+            lambda vin: validate(vin.get('data'), vin.get('spec')),
+        )
+
+    def test_validate_nof(self):
+        runsetflags(
+            spec['validate']['nof'],
+            {'null': False},
+            lambda vin: validate(vin.get('data'), vin.get('spec')),
+        )
+
+    def test_validate_all(self):
+        runsetflags(
+            spec['validate']['all'],
+            {'null': False},
+            lambda vin: validate(vin.get('data'), vin.get('spec')),
+        )
+
+    def test_validate_unknown(self):
+        runsetflags(
+            spec['validate']['unknown'],
+            {'null': False},
+            lambda vin: validate(vin.get('data'), vin.get('spec')),
+        )
+
+    def test_validate_unknown_edge(self):
+        # Only the unknown name is reported, and the data comes back as it is.
+        errs = []
+        data = {'a': 'x'}
+        out = validate(data, {'a': ['`$ONE`', '`$STRING`', '`$NIL`']}, {'errs': errs})
+        self.assertEqual(errs, ['Unknown validator $ONE at field a.0.'])
+        self.assertEqual(out, data)
+
+        # A checker supplied in extra is defined, in any case.
+        def even(inj, _val=None, _ref=None, _store=None):
+            n = getprop(inj.dparent, inj.key)
+            if n % 2 != 0:
+                inj.errs.append('Odd at ' + '.'.join(inj.path[1:]) + ': ' + str(n))
+            return n
+
+        errs = []
+        self.assertEqual(
+            validate({'n': 2}, {'n': '`$EVEN`'}, {'extra': {'$EVEN': even}, 'errs': errs}),
+            {'n': 2},
+        )
+        self.assertEqual(
+            validate({'n': 3}, {'n': '`$even`'}, {'extra': {'$even': even}, 'errs': errs}),
+            {'n': 3},
+        )
+        self.assertEqual(errs, ['Odd at n: 3'])
+
+        # A None in extra takes a checker away.
+        errs = []
+        validate('x', '`$STRING`', {'extra': {'$STRING': None}, 'errs': errs})
+        self.assertEqual(errs, ['Unknown validator $STRING at field <root>.'])
+
+    def test_validate_null_kept(self):
+        # A null the data holds is a value: a checker that accepts it keeps it,
+        # beside other keys and in a list. An absent key stays absent.
+        data = {'a': None, 'b': 1}
+        self.assertEqual(validate(data, {'a': '`$NIL`', 'b': 1}), data)
+        self.assertEqual(validate(data, {'a': '`$NULL`', 'b': 1}), data)
+        self.assertEqual(validate(data, {'a': '`$ANY`', 'b': 1}), data)
+        self.assertEqual(validate({'b': 1}, {'a': '`$NIL`', 'b': 1}), {'b': 1})
+        self.assertEqual(validate([None, 1], ['`$CHILD`', '`$ANY`']), [None, 1])
+        self.assertEqual(validate([None, 1], ['`$NOF`', 1, ['`$CHILD`', '`$ANY`']]), [None, 1])
 
     def test_validate_custom(self):
         errs = []
