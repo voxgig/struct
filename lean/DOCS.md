@@ -108,6 +108,21 @@ loose `Partial<Injection>` options record.
 Errors (failed `transform`/`validate`) are thrown as `IO.userError` with the
 canonical joined message; catch with `try … catch`.
 
+A list led by `` .str "`$NOF`" `` counts the specs that admit the value:
+
+```lean
+    let cnt ← jm [.str "min", .num 1.0]
+    let spec ← jt [.str "`$NOF`", cnt, .str "`$STRING`", .str "`$NUMBER`"]
+    IO.println (← stringify (← validate (.num 1.0) spec))   -- "1"
+```
+
+The count is a `.num` or a map of `min` and `max`. `` .str "`$ALL`" `` leads
+a list the same way, without a count, and holds when every spec admits the
+value. There is no `$ONE`; the full checker list is in the
+[language-neutral reference](../DOCS.md#validate-checkers-inside-backticks-in-a-validate-spec).
+A spec that names a checker `validate` does not define is rejected before any
+data is read, with `Unknown validator $FOO at field a.`
+
 ## Numbers
 
 `Value.num` is a `Float` (like the OCaml and Rust ports). `typify` splits

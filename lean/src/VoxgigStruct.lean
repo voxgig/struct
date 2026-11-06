@@ -2466,35 +2466,128 @@ partial def validateChild : InjectorFn := fun inj _v _ref _store => do
       pure SKIP
   else pure .noval
 
-/-- Deep structural equality (validate $EXACT). -/
-partial def veq (a b : Value) : SIO Bool := do
+/-- JSON equality: numbers by value, lists in order, maps by key in any order.
+    A node or a function equals itself whatever it holds. -/
+partial def deepEqual (a b : Value) : SIO Bool := do
   match a, b with
   | .noval, .noval => pure true
   | .null, .null => pure true
   | .bool x, .bool y => pure (x == y)
   | .num x, .num y => pure (x == y)
   | .str x, .str y => pure (x == y)
+  | .func x, .func y => pure (x == y)
   | .sentinel x, .sentinel y => pure (x == y)
   | .list x, .list y => do
+    if x == y then return true
     let xs ← listItems x
     let ys ← listItems y
-    if xs.size != ys.size then pure false
-    else do
-      for i in [0:xs.size] do
-        if !(← veq xs[i]! ys[i]!) then return false
-      pure true
+    if xs.size != ys.size then return false
+    for i in [0:xs.size] do
+      if !(← deepEqual xs[i]! ys[i]!) then return false
+    pure true
   | .map x, .map y => do
-    let xes ← mapEntries x
-    let yes ← mapEntries y
-    if xes.size != yes.size then pure false
-    else do
-      for (k, v) in xes do
-        match omapGet yes k with
-        | some w =>
-          if !(← veq v w) then return false
-        | none => return false
-      pure true
+    if x == y then return true
+    let ks ← keysof a
+    if ks != (← keysof b) then return false
+    for k in ks do
+      if !(← deepEqual (← lookupRaw a (.str k)) (← lookupRaw b (.str k))) then return false
+    pure true
   | _, _ => pure false
+
+/-- Every member `val` has is in `out`, unchanged. A member only `out` has is a
+    default the spec supplied, and is ignored. -/
+partial def keeps (val out : Value) : SIO Bool := do
+  if isNoval val then return true
+  if ((T_LIST ||| T_MAP) &&& typify val) == 0 || islist val != islist out || !(isnode out) then
+    return (← deepEqual val out)
+  for k in (← keysof val) do
+    if !(← keeps (← lookupRaw val (.str k)) (← lookupRaw out (.str k))) then return false
+  pure true
+
+/-- The data value at a list directive's slot. The directive's own dparent was
+    read with `getprop`, which reports a stored null as absent. -/
+def slotVal (inj : InjId) : SIO Value := do
+  let d ← getInj inj
+  match d.prior with
+  | none => pure d.dparent
+  | some p => do
+    let pd ← getInj p
+    lookupRaw pd.dparent pd.key
+
+/-- The bounds of a `$NOF` count, and the words for it, which are absent when
+    the count is invalid. Without a max, the bound is the number of specs. -/
+def nofCount (count : Value) (numtvals : Float) : SIO (Float × Float × Option String) := do
+  let isnat (n : Value) : Bool :=
+    (T_INTEGER &&& typify n) > 0 && (match n with | .num x => decide (0.0 <= x) | _ => false)
+  let numOf (n : Value) : Float := match n with | .num x => x | _ => 0.0
+  if isnat count then
+    let c := numOf count
+    return (c, c, some (if c == 0.0 then "none" else "exactly " ++ numToString c))
+  let mn ← lookupRaw count (.str "min")
+  let mx ← lookupRaw count (.str "max")
+  let csz ← size count
+  let valid := ismap count && csz > 0
+    && csz == (if isNoval mn then 0 else 1) + (if isNoval mx then 0 else 1)
+    && (isNoval mn || isnat mn)
+    && (isNoval mx || isnat mx)
+    && (isNoval mn || isNoval mx || decide (numOf mn <= numOf mx))
+  if !valid then return (0.0, 0.0, none)
+  let lo := if isNoval mn then 0.0 else numOf mn
+  let hi := if isNoval mx then numtvals else numOf mx
+  let desc :=
+    if isNoval mx then "at least " ++ numToString lo
+    else if hi == 0.0 then "none"
+    else if isNoval mn then "at most " ++ numToString hi
+    else if lo == hi then "exactly " ++ numToString lo
+    else numToString lo ++ " to " ++ numToString hi
+  return (lo, hi, some desc)
+
+/-- Names a validate spec may use besides its checkers: those of transform that
+    it keeps, and `$OPEN`. -/
+def validateNames : List String :=
+  ["$TOP", "$SPEC", "$BT", "$DS", "$WHEN", "$ANNO", "$REF", "$FORMAT", "$APPLY", "$OPEN"]
+
+/-- R_CHECKER_NAME: a dollar sign then capitals, nothing else. -/
+def isCheckerName (s : String) : Bool :=
+  match s.toList with
+  | '$' :: rest => !rest.isEmpty && rest.all (fun c => c >= 'A' && c <= 'Z')
+  | _ => false
+
+/-- The name a whole-string reference gives, when it is a checker name in any case. -/
+def refName (v : Value) : Option String :=
+  match v with
+  | .str s =>
+    match injectionFull s with
+    | some name => if isCheckerName name.toUpper then some name else none
+    | none => none
+  | _ => none
+
+/-- Unknown: undefined and upper case, or a defined name in another case. A
+    null in the store disables a name. -/
+def unknownName (name : String) (store : Value) : SIO Bool := do
+  let known (n : String) : SIO Bool := do
+    if validateNames.contains n then return true
+    return !(isNullish (← lookupRaw store (.str n)))
+  let upper := name.toUpper
+  if (← known name) then return false
+  if upper == name then return true
+  known upper
+
+/-- Report each checker the spec names that validate lacks. The arguments of
+    `$EXACT` are literals. -/
+partial def checkNames (spec store : Value) (path : Array Value) (errs : Value) : SIO Unit := do
+  match refName spec with
+  | some name =>
+    if (← unknownName name store) then
+      let n ← size errs
+      let p ← pathify (← newList path)
+      let _ ← setprop errs (vInt n) (.str ("Unknown validator " ++ name ++ " at field " ++ p ++ "."))
+  | none =>
+    let first ← lookupRaw spec (.num 0.0)
+    if !(islist spec && refName first == some "$EXACT") then
+      for k in (← keysof spec) do
+        if ismap spec then checkNames (.str k) store path errs
+        checkNames (← lookupRaw spec (.str k)) store (path.push (.str k)) errs
 
 partial def validateExact : InjectorFn := fun inj _v _ref _store => do
   let d ← getInj inj
@@ -2506,24 +2599,25 @@ partial def validateExact : InjectorFn := fun inj _v _ref _store => do
         ++ " must be the first element of an array.")
       pure .noval
     else do
+      let cval ← slotVal inj
       let nk ← size d.keys
       modInj inj (fun dd => { dd with keyi := nk })
-      injSetval inj d.dparent (ancestor := 2)
+      -- Replace [$EXACT, ...] with the data value; SKIP keeps inject off the detached list.
+      injSetval inj cval (ancestor := 2)
       let psize ← size d.path
       let npath ← slice d.path (start := .num 0.0) (stop := vInt (psize - 1))
-      let nkey ← getelem npath (.num (-1.0))
-      modInj inj (fun dd => { dd with path := npath, key := nkey })
+      modInj inj (fun dd => { dd with path := npath })
       let tvals ← slice parent (start := .num 1.0)
       if (← size tvals) == 0 then do
         let d2 ← getInj inj
         pushErr inj ("The $EXACT validator at field "
           ++ (← pathify d2.path (startin := .num 1.0) (endin := .num 1.0))
           ++ " must have at least one argument.")
-        pure .noval
+        pure SKIP
       else do
         let mut matched := false
         for tval in (← listItemsOf tvals) do
-          if !matched && (← veq tval d.dparent) then matched := true
+          if !matched && (← deepEqual tval cval) then matched := true
         if !matched then do
           let d2 ← getInj inj
           let mut descs : List String := []
@@ -2534,8 +2628,8 @@ partial def validateExact : InjectorFn := fun inj _v _ref _store => do
           pushErr inj (← invalidTypeMsg d2.path
             ((if (← size d2.path) > 1 then "" else "value ")
               ++ "exactly equal to " ++ (if ntv == 1 then "" else "one of ") ++ valdesc)
-            ((typify d.dparent : Nat) : Int) d.dparent)
-        pure .noval
+            ((typify cval : Nat) : Int) cval)
+        pure SKIP
   else do
     let _ ← delprop d.parent d.key
     pure .noval
@@ -2579,7 +2673,7 @@ partial def validation : ModifyFn := fun pval key parent inj => do
           if !(islist pval) then
             pushErr inj (← invalidTypeMsg d.path (typename (ptype : Int)) (ctype : Int) cval)
         else if exactB then do
-          if !(← veq cval pval) then do
+          if !(← deepEqual cval pval) then do
             let pathmsg ← if (← size d.path) > 1 then do
                 pure ("at field " ++ (← pathify d.path (startin := .num 1.0)) ++ ": ")
               else pure ""
@@ -2601,53 +2695,76 @@ partial def validateHandler : InjectorFn := fun inj v refstr store => do
 
 mutual
 
-partial def validateOne : InjectorFn := fun inj _v _ref store => do
+/-- Count the specs that admit the value: `` [`$NOF`, count, spec, ...] ``,
+    where count is an integer, or a map holding min, max or both. -/
+partial def validateNof : InjectorFn := fun inj _v _ref store =>
+  validateCount inj store "$NOF" true
+
+/-- Every spec admits the value: `` [`$ALL`, spec, ...] ``. -/
+partial def validateAll : InjectorFn := fun inj _v _ref store =>
+  validateCount inj store "$ALL" false
+
+/-- The counting list directives. Without a count, every spec has to admit. -/
+partial def validateCount (inj : InjId) (store : Value) (name : String) (counted : Bool) :
+    SIO Value := do
   let d ← getInj inj
-  if d.mode == M_VAL then do
-    let parent := d.parent
-    if !(islist parent) || d.keyi != 0 then do
-      pushErr inj ("The $ONE validator at field "
-        ++ (← pathify d.path (startin := .num 1.0) (endin := .num 1.0))
-        ++ " must be the first element of an array.")
-      pure .noval
-    else do
-      let nk ← size d.keys
-      modInj inj (fun dd => { dd with keyi := nk })
-      injSetval inj d.dparent (ancestor := 2)
-      let psize ← size d.path
-      let npath ← slice d.path (start := .num 0.0) (stop := vInt (psize - 1))
-      modInj inj (fun dd => { dd with path := npath })
-      let tvals ← slice parent (start := .num 1.0)
-      if (← size tvals) == 0 then do
-        let d2 ← getInj inj
-        pushErr inj ("The $ONE validator at field "
-          ++ (← pathify d2.path (startin := .num 1.0) (endin := .num 1.0))
-          ++ " must have at least one argument.")
-        pure .noval
-      else do
-        let mut matched := false
-        for tval in (← listItemsOf tvals) do
-          if !matched then do
-            let terrs ← emptyList
-            let em ← emptyMap
-            let vstore ← merge (← newList #[em, store]) (maxdepth := .num 1.0)
-            let _ ← setprop vstore (.str S_DTOP) d.dparent
-            let idef : InjDef := { dExtra := vstore, dErrs := terrs, dMeta := d.imeta }
-            let vcurrent ← validate d.dparent tval (.idef idef)
-            injSetval inj vcurrent (ancestor := -2)
-            if (← size terrs) == 0 then matched := true
-        if !matched then do
-          let d2 ← getInj inj
-          let mut descs : List String := []
-          for (_, x) in (← itemsPairs tvals) do
-            descs := (← stringify x) :: descs
-          let valdesc := replaceTransformNames (String.intercalate ", " descs.reverse)
-          let ntv ← size tvals
-          pushErr inj (← invalidTypeMsg d2.path
-            ((if ntv > 1 then "one of " else "") ++ valdesc)
-            ((typify d.dparent : Nat) : Int) d.dparent)
-        pure .noval
-  else pure .noval
+  if d.mode != M_VAL then return .noval
+  let parent := d.parent
+  if !(islist parent) || d.keyi != 0 then
+    pushErr inj ("The " ++ name ++ " validator at field "
+      ++ (← pathify d.path (startin := .num 1.0) (endin := .num 1.0))
+      ++ " must be the first element of an array.")
+    return .noval
+  let cval ← slotVal inj
+  let nk ← size d.keys
+  modInj inj (fun dd => { dd with keyi := nk })
+  -- Replace the directive's list with the data value. Each return is SKIP, so
+  -- that inject leaves the detached list alone and validates nothing in it.
+  injSetval inj cval (ancestor := 2)
+  let npath ← slice d.path (start := .num (-1.0))
+  modInj inj (fun dd => { dd with path := npath })
+  let count ← if counted then lookupRaw parent (.num 1.0) else pure Value.noval
+  let tvals ← slice parent (start := .num (if counted then 2.0 else 1.0))
+  let titems ← listItemsOf tvals
+  let numtvals := titems.size.toFloat
+  let field := "The " ++ name ++ " validator at field " ++ (← pathify npath (startin := .num 1.0))
+  if titems.size == 0 then
+    pushErr inj (field ++ (if counted then " must have a count and" else " must have")
+      ++ " at least one argument.")
+    return SKIP
+  let (lo, hi, countdesc) ←
+    if counted then nofCount count numtvals else pure (numtvals, numtvals, some "all")
+  match countdesc with
+  | none => pushErr inj (field ++ " has an invalid count: " ++ (← stringify count) ++ ".")
+  | some desc =>
+    let mut admitted : Float := 0.0
+    for i in [0:titems.size] do
+      let left := (titems.size - i).toFloat
+      -- Stop once the specs left cannot change the verdict.
+      if hi < admitted || admitted + left < lo || (lo <= admitted && admitted + left <= hi) then
+        break
+      if (← admits cval titems[i]! inj store) then admitted := admitted + 1.0
+    if admitted < lo || hi < admitted then
+      let mut descs : List String := []
+      for (_, x) in (← itemsPairs tvals) do
+        descs := (← stringify x) :: descs
+      let valdesc := replaceTransformNames (String.intercalate ", " descs.reverse)
+      pushErr inj (← invalidTypeMsg npath (desc ++ " of " ++ valdesc)
+        ((typify cval : Nat) : Int) cval)
+  return SKIP
+
+/-- A spec admits a value when validating the value against it finds no error
+    and gives back the value as it is. -/
+partial def admits (val spec : Value) (inj : InjId) (store : Value) : SIO Bool := do
+  let d ← getInj inj
+  let terrs ← emptyList
+  let em ← emptyMap
+  let vstore ← merge (← newList #[em, store]) (maxdepth := .num 1.0)
+  let _ ← setprop vstore (.str S_DTOP) val
+  let idef : InjDef := { dExtra := vstore, dErrs := terrs, dMeta := d.imeta }
+  let out ← validate val spec (.idef idef)
+  if (← size terrs) != 0 then return false
+  keeps val out
 
 partial def validate (data spec : Value) (inj : InjArg := .inone) : SIO Value := do
   let extra := match inj with
@@ -2670,8 +2787,9 @@ partial def validate (data spec : Value) (inj : InjArg := .inone) : SIO Value :=
     put k (← vFunc validateType)
   put "$ANY" (← vFunc validateAny)
   put "$CHILD" (← vFunc validateChild)
-  put "$ONE" (← vFunc validateOne)
   put "$EXACT" (← vFunc validateExact)
+  put "$NOF" (← vFunc validateNof)
+  put "$ALL" (← vFunc validateAll)
   let extraV ← if isNoval extra then emptyMap else pure extra
   let errsWrap ← newMap #[(S_DERRS, errs)]
   let store ← merge (← newList #[base, extraV, errsWrap]) (maxdepth := .num 1.0)
@@ -2684,7 +2802,10 @@ partial def validate (data spec : Value) (inj : InjArg := .inone) : SIO Value :=
   let handlerId ← registerFunc validateHandler
   let idef : InjDef := { dMeta := meta0, dExtra := store, dModify := some modId,
                          dHandler := some handlerId, dErrs := errs }
-  let out ← transform data spec (.idef idef)
+  -- A spec that names an unknown checker validates nothing.
+  let numerrs ← size errs
+  checkNames spec store #[] errs
+  let out ← if numerrs < (← size errs) then clone data else transform data spec (.idef idef)
   if (← size errs) > 0 && !collect then
     throw (IO.userError (← join errs (sep := .str " | ")))
   pure out
