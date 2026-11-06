@@ -1034,11 +1034,6 @@ test "validate-child" {
     try omni.rungroup(&r, "validate", "child", omni.subres(wrap_validate), .{});
 }
 
-test "validate-one" {
-    const r = try omni.makeRunner();
-    try omni.rungroup(&r, "validate", "one", omni.subres(wrap_validate), .{});
-}
-
 test "validate-exact" {
     const r = try omni.makeRunner();
     try omni.rungroup(&r, "validate", "exact", omni.subres(wrap_validate), .{});
@@ -1052,6 +1047,26 @@ test "validate-invalid" {
 test "validate-special" {
     const r = try omni.makeRunner();
     try omni.rungroup(&r, "validate", "special", omni.subres(wrap_validate), .{});
+}
+
+test "validate-directive" {
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "validate", "directive", omni.subres(wrap_validate), omni.Flags.nonull());
+}
+
+test "validate-nof" {
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "validate", "nof", omni.subres(wrap_validate), omni.Flags.nonull());
+}
+
+test "validate-all" {
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "validate", "all", omni.subres(wrap_validate), omni.Flags.nonull());
+}
+
+test "validate-unknown" {
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "validate", "unknown", omni.subres(wrap_validate), omni.Flags.nonull());
 }
 
 // ---- Select tests ----
