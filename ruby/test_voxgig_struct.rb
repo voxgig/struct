@@ -660,12 +660,6 @@ class TestVoxgigStruct < Minitest::Test
     })
   end
 
-  def test_validate_one
-    @runsetflags.call(@spec['validate']['one'], {}, lambda { |vin|
-      VoxgigStruct.validate(vin['data'], vin['spec'])
-    })
-  end
-
   def test_validate_exact
     @runsetflags.call(@spec['validate']['exact'], {}, lambda { |vin|
       VoxgigStruct.validate(vin['data'], vin['spec'])
@@ -683,6 +677,58 @@ class TestVoxgigStruct < Minitest::Test
       injdef = vin.key?('inj') ? vin['inj'] : nil
       VoxgigStruct.validate(vin['data'], vin['spec'], injdef)
     })
+  end
+
+  def test_validate_directive
+    @runsetflags.call(@spec['validate']['directive'], { 'null' => false }, lambda { |vin|
+      VoxgigStruct.validate(vin['data'], vin['spec'])
+    })
+  end
+
+  def test_validate_nof
+    @runsetflags.call(@spec['validate']['nof'], { 'null' => false }, lambda { |vin|
+      VoxgigStruct.validate(vin['data'], vin['spec'])
+    })
+  end
+
+  def test_validate_all
+    @runsetflags.call(@spec['validate']['all'], { 'null' => false }, lambda { |vin|
+      VoxgigStruct.validate(vin['data'], vin['spec'])
+    })
+  end
+
+  def test_validate_unknown
+    @runsetflags.call(@spec['validate']['unknown'], { 'null' => false }, lambda { |vin|
+      VoxgigStruct.validate(vin['data'], vin['spec'])
+    })
+  end
+
+  def test_validate_unknown_edge
+    # Only the unknown name is reported, and the data comes back as it is.
+    errs = []
+    data = { 'a' => 'x' }
+    out = VoxgigStruct.validate(data, { 'a' => ['`$ONE`', '`$STRING`', '`$NIL`'] }, { 'errs' => errs })
+    assert_equal ['Unknown validator $ONE at field a.0.'], errs
+    assert deep_equal(out, data)
+
+    # A checker supplied in extra is defined, in any case.
+    even = lambda { |inj, *_args|
+      n = VoxgigStruct.getprop(inj.dparent, inj.key)
+      inj.errs.push("Odd at #{inj.path[1..].join('.')}: #{n}") unless n.even?
+      n
+    }
+
+    errs = []
+    out = VoxgigStruct.validate({ 'n' => 2 }, { 'n' => '`$EVEN`' }, { 'extra' => { '$EVEN' => even }, 'errs' => errs })
+    assert deep_equal(out, { 'n' => 2 })
+    out = VoxgigStruct.validate({ 'n' => 3 }, { 'n' => '`$even`' }, { 'extra' => { '$even' => even }, 'errs' => errs })
+    assert deep_equal(out, { 'n' => 3 })
+    assert_equal ['Odd at n: 3'], errs
+
+    # A null in extra takes a checker away.
+    errs = []
+    VoxgigStruct.validate('x', '`$STRING`', { 'extra' => { '$STRING' => nil }, 'errs' => errs })
+    assert_equal ['Unknown validator $STRING at field <root>.'], errs
   end
 
   def test_validate_edge

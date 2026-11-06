@@ -321,7 +321,7 @@ module VoxgigStruct
       valstr = val
     else
       begin
-        v = val.is_a?(Hash) ? sorted(val) : val
+        v = sorted(val)
         valstr = JSON.generate(v)
         valstr = valstr.gsub('"', '')
       rescue StandardError
@@ -999,6 +999,7 @@ module VoxgigStruct
   S_DSPEC = '$SPEC'.freeze
 
   R_FULL_INJECT = /\A`(\$[A-Z]+|[^`]*)[0-9]*`\z/.freeze
+  R_CHECKER_NAME = /\A\$[A-Z]+\z/.freeze
   R_PART_INJECT = /`([^`]*)`/.freeze
   R_META_PATH = /\A([^$]+)\$([=~])(.+)\z/.freeze
   R_DOUBLE_DOLLAR = /\$\$/.freeze
@@ -1144,7 +1145,11 @@ module VoxgigStruct
 
     inj.val = val
 
-    return getprop(inj.root, S_DTOP) if inj.prior.nil? && inj.root && haskey(inj.root, S_DTOP)
+    # Read the top literally: a null stored there is the result.
+    if inj.prior.nil? && ismap(inj.root)
+      top = _getprop(inj.root, S_DTOP)
+      return top unless top.equal?(UNDEF)
+    end
     return getprop(inj.parent, S_DTOP) if inj.key == S_DTOP && inj.parent && haskey(inj.parent, S_DTOP)
 
     val
@@ -1695,6 +1700,139 @@ module VoxgigStruct
                 end}#{needtype}, but found #{typename(vt) + S_VIZ unless v.nil? || v.equal?(UNDEF)}#{vs}."
   end
 
+  # Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
+  VALIDATE_NAMES = %w[$TOP $SPEC $BT $DS $WHEN $ANNO $REF $FORMAT $APPLY $OPEN].freeze
+
+  # Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
+  def self._checknames(spec, store, path, errs)
+    name = _refname(spec)
+    unless name.nil?
+      errs << "Unknown validator #{name} at field #{pathify(path)}." if _unknownname(name, store)
+      return
+    end
+
+    return if islist(spec) && _refname(spec[0]) == '$EXACT'
+
+    keysof(spec).each do |key|
+      _checknames(key, store, path, errs) if ismap(spec)
+      _checknames(_getprop(spec, key), store, flatten([path, key]), errs)
+    end
+  end
+
+  # The name a whole-string reference gives, when it is a checker name in any case.
+  def self._refname(val)
+    m = val.is_a?(String) ? R_FULL_INJECT.match(val) : nil
+    !m.nil? && R_CHECKER_NAME.match?(m[1].upcase) ? m[1] : nil
+  end
+
+  # Unknown: undefined and upper case, or a defined name in another case. Null disables a name.
+  def self._unknownname(name, store)
+    known = ->(n) { VALIDATE_NAMES.include?(n) || !getprop(store, n).nil? }
+    upper = name.upcase
+    !known.call(name) && (upper == name || known.call(upper))
+  end
+
+  # The data value at a list directive's slot. The directive's own dparent was
+  # read with getprop, which reports a stored null as absent.
+  def self._slotval(inj)
+    prior = inj.prior
+    prior.nil? ? inj.dparent : _getprop(prior.dparent, prior.key)
+  end
+
+  # Replace a list directive's list with the data value. setval deletes on
+  # nil, so a null is set as itself.
+  def self._setslot(inj, val)
+    return inj.setval(val, 2) unless val.nil?
+
+    setprop(getelem(inj.nodes, -2), getelem(inj.path, -2), nil)
+  end
+
+  # JSON equality: numbers by value, lists in order, maps by key in any order.
+  def self._deepequal(a, b)
+    return true if a.equal?(b)
+
+    atype = typify(a)
+    btype = typify(b)
+    return a == b if T_number.anybits?(atype) && T_number.anybits?(btype)
+    return a == b if T_string.anybits?(atype) && T_string.anybits?(btype)
+    return false if atype != btype || !isnode(a)
+
+    akeys = keysof(a)
+    bkeys = keysof(b)
+    return false if akeys.length != bkeys.length
+
+    akeys.each_with_index.all? do |k, kI|
+      k == bkeys[kI] && _deepequal(_getprop(a, k), _getprop(b, k))
+    end
+  end
+
+  # Every member val has is in out, unchanged. A member only out has is a
+  # default the spec supplied, and is ignored.
+  def self._keeps(val, out)
+    return true if val.equal?(UNDEF)
+    return _deepequal(val, out) if !isnode(val) || islist(val) != islist(out) || !isnode(out)
+
+    keysof(val).all? { |k| _keeps(_getprop(val, k), _getprop(out, k)) }
+  end
+
+  # A spec admits a value when validating the value against it finds no error
+  # and gives back the value as it is.
+  def self._admits(val, spec, inj, store)
+    terrs = []
+
+    vstore = merge([{}, store], 1)
+    vstore[S_DTOP] = val
+
+    out = validate(val, spec, {
+                     'extra' => vstore,
+                     'errs' => terrs,
+                     'meta' => inj.meta
+                   })
+
+    terrs.empty? && _keeps(val, out)
+  end
+
+  # The bounds of a $NOF count, and the words for it, which are nil when the
+  # count is invalid. Without a max, the bound is the number of specs.
+  def self._nofcount(count, numtvals)
+    isnat = ->(n) { T_integer.anybits?(typify(n)) && n >= 0 }
+
+    return [count, count, count.zero? ? 'none' : "exactly #{count}"] if isnat.call(count)
+
+    min = _getprop(count, 'min')
+    max = _getprop(count, 'max')
+    nomin = min.equal?(UNDEF)
+    nomax = max.equal?(UNDEF)
+
+    valid =
+      ismap(count) &&
+      size(count).positive? &&
+      size(count) == (nomin ? 0 : 1) + (nomax ? 0 : 1) &&
+      (nomin || isnat.call(min)) &&
+      (nomax || isnat.call(max)) &&
+      (nomin || nomax || min <= max)
+
+    return [0, 0, nil] unless valid
+
+    lo = nomin ? 0 : min
+    hi = nomax ? numtvals : max
+
+    desc =
+      if nomax
+        "at least #{lo}"
+      elsif hi.zero?
+        'none'
+      elsif nomin
+        "at most #{hi}"
+      elsif lo == hi
+        "exactly #{lo}"
+      else
+        "#{lo} to #{hi}"
+      end
+
+    [lo, hi, desc]
+  end
+
   def self.validate_STRING(inj, _val = nil, _ref = nil, _store = nil)
     out = getprop(inj.dparent, inj.key)
     t = typify(out)
@@ -1715,7 +1853,7 @@ module VoxgigStruct
     S_decimal => ->(v) { v.is_a?(Float) },
     S_boolean => ->(v) { [true, false].include?(v) },
     S_null => lambda(&:nil?),
-    S_nil => ->(v) { v.equal?(UNDEF) },
+    S_nil => ->(v) { v.nil? || v.equal?(UNDEF) },
     S_map => ->(v) { v.is_a?(Hash) },
     S_list => ->(v) { v.is_a?(Array) },
     S_function => ->(v) { v.respond_to?(:call) },
@@ -1729,6 +1867,8 @@ module VoxgigStruct
     tname = ref.is_a?(String) && ref.length > 1 ? ref[1..].downcase : S_any
     idx = TYPENAME.index(tname)
     typev = idx ? (1 << (31 - idx)) : 0
+
+    # $NIL is absent or null.
     typev |= T_null if tname == S_nil
 
     out = getprop(inj.dparent, inj.key)
@@ -1816,62 +1956,6 @@ module VoxgigStruct
     nil
   end
 
-  def self.validate_ONE(inj, _val = nil, _ref = nil, store = nil)
-    mode = inj.mode
-    parent = inj.parent
-    keyI = inj.keyI
-
-    return unless mode == S_MVAL
-
-    if !islist(parent) || keyI != 0
-      inj.errs << "The $ONE validator at field #{pathify(inj.path, 1, 1)} must be the first element of an array."
-      return nil
-    end
-
-    inj.keyI = size(inj.keys)
-
-    # DELETE the node when the data has no value there, as ts does: setval's
-    # nil-with-ancestor case preserves the key, so an optional entry the
-    # caller omitted came back as a nil-valued key rather than staying absent.
-    if inj.dparent.nil?
-      delprop(getelem(inj.nodes, -2), getelem(inj.path, -2))
-    else
-      inj.setval(inj.dparent, 2)
-    end
-
-    inj.path = inj.path[0...-1]
-
-    tvals = parent[1..]
-    if size(tvals).zero?
-      inj.errs << "The $ONE validator at field #{pathify(inj.path, 1, 1)} must have at least one argument."
-      return nil
-    end
-
-    tvals.each do |tval|
-      terrs = []
-      vstore = merge([{}, store], 1)
-      vstore[S_DTOP] = inj.dparent
-
-      vcurrent = validate(inj.dparent, tval, {
-                            'extra' => vstore,
-                            'errs' => terrs,
-                            'meta' => inj.meta
-                          })
-
-      inj.setval(vcurrent, -2)
-      return nil if size(terrs).zero?
-    end
-
-    valdesc = items(tvals).map { |n| stringify(n[1]) }.join(', ')
-    valdesc = valdesc.gsub(/`\$([A-Z]+)`/) { ::Regexp.last_match(1).downcase }
-
-    inj.errs << _invalidTypeMsg(
-      inj.path,
-      (size(tvals) > 1 ? 'one of ' : '') + valdesc,
-      typify(inj.dparent), inj.dparent, 'V0210'
-    )
-  end
-
   def self.validate_EXACT(inj, _val = nil, _ref = nil, _store = nil)
     mode = inj.mode
     parent = inj.parent
@@ -1884,25 +1968,23 @@ module VoxgigStruct
         return nil
       end
 
+      cval = _slotval(inj)
+
       inj.keyI = size(inj.keys)
-      inj.setval(inj.dparent, 2)
+
+      # Replace [$EXACT, ...] with the data value; SKIP keeps inject off the detached list.
+      _setslot(inj, cval)
+
       inj.path = inj.path[0...-1]
-      inj.key = getelem(inj.path, -1)
 
       tvals = parent[1..]
       if size(tvals).zero?
         inj.errs << "The $EXACT validator at field #{pathify(inj.path, 1, 1)} must have at least one argument."
-        return nil
+        return SKIP
       end
 
-      currentstr = nil
       tvals.each do |tval|
-        exactmatch = (tval == inj.dparent)
-        if !exactmatch && isnode(tval)
-          currentstr ||= stringify(inj.dparent)
-          exactmatch = stringify(tval) == currentstr
-        end
-        return nil if exactmatch
+        return SKIP if _deepequal(tval, cval)
       end
 
       valdesc = items(tvals).map { |n| stringify(n[1]) }.join(', ')
@@ -1911,11 +1993,82 @@ module VoxgigStruct
       inj.errs << _invalidTypeMsg(
         inj.path,
         "#{'value ' unless size(inj.path) > 1}exactly equal to #{'one of ' unless size(tvals) == 1}#{valdesc}",
-        typify(inj.dparent), inj.dparent, 'V0110'
+        typify(cval), cval, 'V0110'
       )
+
+      SKIP
     else
       delprop(parent, key)
     end
+  end
+
+  # Count the specs that admit the value: ['`$NOF`', count, spec, ...], where
+  # count is an integer, or a map holding min, max or both.
+  def self.validate_NOF(inj, _val = nil, _ref = nil, store = nil)
+    _validatecount(inj, store, '$NOF', true)
+  end
+
+  # Every spec admits the value: ['`$ALL`', spec, ...].
+  def self.validate_ALL(inj, _val = nil, _ref = nil, store = nil)
+    _validatecount(inj, store, '$ALL', false)
+  end
+
+  # The counting list directives. Without a count, every spec has to admit.
+  def self._validatecount(inj, store, name, counted)
+    parent = inj.parent
+
+    return nil unless inj.mode == S_MVAL
+
+    if !islist(parent) || inj.keyI != 0
+      inj.errs << "The #{name} validator at field #{pathify(inj.path, 1, 1)} must be the first element of an array."
+      return nil
+    end
+
+    cval = _slotval(inj)
+
+    inj.keyI = size(inj.keys)
+
+    # Replace the directive's list with the data value. Each return is SKIP, so
+    # that inject leaves the detached list alone and validates nothing in it.
+    _setslot(inj, cval)
+
+    inj.path = slice(inj.path, -1)
+
+    count = counted ? _getprop(parent, 1) : UNDEF
+    tvals = slice(parent, counted ? 2 : 1)
+    numtvals = size(tvals)
+    field = "The #{name} validator at field #{pathify(inj.path, 1)}"
+
+    if numtvals.zero?
+      inj.errs << "#{field}#{counted ? ' must have a count and' : ' must have'} at least one argument."
+      return SKIP
+    end
+
+    lo, hi, countdesc = counted ? _nofcount(count, numtvals) : [numtvals, numtvals, 'all']
+
+    if countdesc.nil?
+      inj.errs << "#{field} has an invalid count: #{stringify(count)}."
+      return SKIP
+    end
+
+    admitted = 0
+    tvals.each_with_index do |tval, tI|
+      left = numtvals - tI
+
+      # Stop once the specs left cannot change the verdict.
+      break if hi < admitted || admitted + left < lo || (lo <= admitted && admitted + left <= hi)
+
+      admitted += 1 if _admits(cval, tval, inj, store)
+    end
+
+    if admitted < lo || hi < admitted
+      valdesc = items(tvals).map { |n| stringify(n[1]) }.join(', ')
+      valdesc = valdesc.gsub(/`\$([A-Z]+)`/) { ::Regexp.last_match(1).downcase }
+
+      inj.errs << _invalidTypeMsg(inj.path, "#{countdesc} of #{valdesc}", typify(cval), cval, 'V0310')
+    end
+
+    SKIP
   end
 
   # --- _validation: Modify callback for validate ---
@@ -2023,8 +2176,9 @@ module VoxgigStruct
                       '$INSTANCE' => method(:validate_TYPE),
                       '$ANY' => method(:validate_ANY),
                       '$CHILD' => method(:validate_CHILD),
-                      '$ONE' => method(:validate_ONE),
-                      '$EXACT' => method(:validate_EXACT)
+                      '$EXACT' => method(:validate_EXACT),
+                      '$NOF' => method(:validate_NOF),
+                      '$ALL' => method(:validate_ALL)
                     },
                     (extra.nil? ? {} : extra),
                     { S_DERRS => errs }
@@ -2033,13 +2187,22 @@ module VoxgigStruct
     meta = _injdef_prop(injdef, 'meta') || {}
     setprop(meta, S_BEXACT, getprop(meta, S_BEXACT, false)) if ismap(meta)
 
-    out = transform(data, spec, {
-                      'meta' => meta,
-                      'extra' => store,
-                      'modify' => method(:_validation),
-                      'handler' => method(:_validatehandler),
-                      'errs' => errs
-                    })
+    # A spec that names an unknown checker validates nothing.
+    numerrs = errs.length
+    _checknames(spec, store, [], errs)
+
+    out =
+      if numerrs < errs.length
+        clone(data)
+      else
+        transform(data, spec, {
+                    'meta' => meta,
+                    'extra' => store,
+                    'modify' => method(:_validation),
+                    'handler' => method(:_validatehandler),
+                    'errs' => errs
+                  })
+      end
 
     raise errs.join(' | ') if !errs.empty? && !collect
 
