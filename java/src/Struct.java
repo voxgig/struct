@@ -75,6 +75,7 @@ public class Struct {
 
   private static final Pattern R_META_PATH = Pattern.compile("^([^$]+)\\$([=~])(.+)$");
   private static final Pattern R_INJECT_FULL = Pattern.compile("^`(\\$[A-Z]+|[^`]*)[0-9]*`$");
+  private static final Pattern R_CHECKER_NAME = Pattern.compile("^\\$[A-Z]+$");
   private static final Pattern R_INJECT_PART = Pattern.compile("`([^`]+)`");
   private static final Pattern R_CMD_KEY = Pattern.compile("^`(\\$[A-Z]+)(\\d*)`$");
   private static final Pattern R_BT_ESCAPE = Pattern.compile("\\$BT");
@@ -2559,7 +2560,8 @@ public class Struct {
           }
         }
         if (idx < 0) return UNDEF;
-        int typev = 1 << (31 - idx);
+        // $NIL is absent or null.
+        int typev = (1 << (31 - idx)) | ("nil".equals(tname) ? T_null : 0);
         // Group B: type-check the raw data value (TS _lookup(dparent,key)).
         Object out = lookup(inj.dparent, inj.key);
         int t = typify(out);
@@ -2658,89 +2660,13 @@ public class Struct {
         return UNDEF;
       };
 
-  /**
-   * $ONE: validate against any one of a list of alternative shapes.
-   * Format: {@code [`$ONE`, alt0, alt1, ...]}. Mirrors TS lines 2109–2175.
-   */
-  public static final Injector validate_ONE =
-      (injObj, val, ref, store) -> {
-        if (!(injObj instanceof Injection inj)) return UNDEF;
-        if (inj.mode != M_VAL) return UNDEF;
-
-        if (!islist(inj.parent) || inj.keyI != 0) {
-          inj.errs.add(
-              "The $ONE validator at field "
-                  + pathify(inj.path, 1, 1)
-                  + " must be the first element of an array.");
-          return UNDEF;
-        }
-
-        inj.keyI = size(inj.keys);
-        inj.setval(inj.dparent, 2);
-
-        Object slicedPath = slice(inj.path, -1, null);
-        inj.path =
-            slicedPath instanceof List<?> spl
-                ? new ArrayList<>((List<String>) spl)
-                : new ArrayList<>();
-
-        Object tvalsRaw = slice(inj.parent, 1, null);
-        List<Object> tvals =
-            tvalsRaw instanceof List<?> tl
-                ? new ArrayList<>((List<Object>) tl)
-                : new ArrayList<>();
-        if (tvals.isEmpty()) {
-          inj.errs.add(
-              "The $ONE validator at field "
-                  + pathify(inj.path, 1, 1)
-                  + " must have at least one argument.");
-          return UNDEF;
-        }
-
-        for (Object tval : tvals) {
-          List<Object> terrs = new ArrayList<>();
-          Map<String, Object> vstore = new LinkedHashMap<>();
-          if (store instanceof Map<?, ?> sm) {
-            for (Map.Entry<?, ?> e : sm.entrySet()) {
-              vstore.put(Objects.toString(e.getKey()), e.getValue());
-            }
-          }
-          vstore.put(S_DTOP, inj.dparent);
-          Map<String, Object> opts = new LinkedHashMap<>();
-          opts.put("extra", vstore);
-          opts.put("errs", terrs);
-          opts.put("meta", inj.meta);
-          Object vcurrent;
-          try {
-            vcurrent = validate(inj.dparent, tval, opts);
-          } catch (Exception e) {
-            terrs.add(e.getMessage());
-            vcurrent = inj.dparent;
-          }
-          inj.setval(vcurrent, -2);
-          if (terrs.isEmpty()) return UNDEF;
-        }
-
-        // No match; describe alternatives.
-        String valdesc = _describeAlternatives(tvals);
-        inj.errs.add(
-            _invalidTypeMsg(
-                inj.path,
-                (size(tvals) > 1 ? "one of " : "") + valdesc,
-                typify(inj.dparent),
-                inj.dparent,
-                "V0210"));
-        return UNDEF;
-      };
-
   // Lowers every `$NAME` marker in the joined description, nested ones included.
   private static String _describeAlternatives(List<Object> tvals) {
-    StringBuilder joined = new StringBuilder();
-    for (int i = 0; i < tvals.size(); i++) {
-      if (i > 0) joined.append(", ");
-      joined.append(stringify(tvals.get(i)));
+    List<Object> parts = new ArrayList<>(tvals.size());
+    for (Object tval : tvals) {
+      parts.add(stringify(tval));
     }
-    Matcher m = R_TRANSFORM_NAME.matcher(joined);
+    Matcher m = R_TRANSFORM_NAME.matcher(join(parts, ", ", false));
     StringBuilder out = new StringBuilder();
     while (m.find()) {
       m.appendReplacement(out, Matcher.quoteReplacement(m.group(1).toLowerCase(Locale.ROOT)));
@@ -2751,7 +2677,7 @@ public class Struct {
 
   /**
    * $EXACT: validate against any one of a list of literal alternatives.
-   * Format: {@code [`$EXACT`, lit0, lit1, ...]}. Mirrors TS lines 2178–2237.
+   * Format: {@code [`$EXACT`, lit0, lit1, ...]}. Mirrors TS {@code validate_EXACT}.
    */
   public static final Injector validate_EXACT =
       (injObj, val, ref, store) -> {
@@ -2766,41 +2692,28 @@ public class Struct {
             return UNDEF;
           }
 
+          Object cval = _slotval(inj);
+
           inj.keyI = size(inj.keys);
-          inj.setval(inj.dparent, 2);
 
-          Object slicedPath = slice(inj.path, 0, -1);
-          inj.path =
-              slicedPath instanceof List<?> spl
-                  ? new ArrayList<>((List<String>) spl)
-                  : new ArrayList<>();
-          inj.key = strkey(getelem(inj.path, -1));
+          // Replace [$EXACT, ...] with the data value; SKIP keeps inject off the detached list.
+          inj.setval(cval, 2);
 
-          Object tvalsRaw = slice(inj.parent, 1, null);
-          List<Object> tvals =
-              tvalsRaw instanceof List<?> tl
-                  ? new ArrayList<>((List<Object>) tl)
-                  : new ArrayList<>();
+          inj.path = (List<String>) slice(inj.path, 0, -1);
+
+          List<Object> tvals = (List<Object>) slice(inj.parent, 1, null);
           if (tvals.isEmpty()) {
             inj.errs.add(
                 "The $EXACT validator at field "
                     + pathify(inj.path, 1, 1)
                     + " must have at least one argument.");
-            return UNDEF;
+            return SKIP;
           }
 
-          String currentstr = null;
           for (Object tval : tvals) {
-            boolean exactmatch = Objects.equals(tval, inj.dparent);
-            if (!exactmatch && isnode(tval)) {
-              if (currentstr == null) currentstr = stringify(inj.dparent);
-              String tvalstr = stringify(tval);
-              exactmatch = tvalstr.equals(currentstr);
-            }
-            if (exactmatch) return UNDEF;
+            if (_deepequal(tval, cval)) return SKIP;
           }
 
-          // No match.
           String valdesc = _describeAlternatives(tvals);
           inj.errs.add(
               _invalidTypeMsg(
@@ -2809,15 +2722,275 @@ public class Struct {
                       + "exactly equal to "
                       + (size(tvals) == 1 ? "" : "one of ")
                       + valdesc,
-                  typify(inj.dparent),
-                  inj.dparent,
+                  typify(cval),
+                  cval,
                   "V0110"));
-          return UNDEF;
+          return SKIP;
         } else {
           delprop(inj.parent, inj.key);
           return UNDEF;
         }
       };
+
+  /**
+   * $NOF: count the specs that admit the value. Format:
+   * {@code [`$NOF`, count, spec, ...]}, where count is an integer, or a map
+   * holding {@code min}, {@code max} or both. Mirrors TS {@code validate_NOF}.
+   */
+  public static final Injector validate_NOF =
+      (injObj, val, ref, store) ->
+          injObj instanceof Injection inj ? _validatecount(inj, store, "$NOF", true) : UNDEF;
+
+  /**
+   * $ALL: every spec admits the value. Format: {@code [`$ALL`, spec, ...]}.
+   * Mirrors TS {@code validate_ALL}.
+   */
+  public static final Injector validate_ALL =
+      (injObj, val, ref, store) ->
+          injObj instanceof Injection inj ? _validatecount(inj, store, "$ALL", false) : UNDEF;
+
+  // The counting list directives. Without a count, every spec has to admit.
+  private static Object _validatecount(Injection inj, Object store, String name, boolean counted) {
+    if (inj.mode != M_VAL) {
+      return UNDEF;
+    }
+
+    Object parent = inj.parent;
+
+    if (!islist(parent) || inj.keyI != 0) {
+      inj.errs.add(
+          "The "
+              + name
+              + " validator at field "
+              + pathify(inj.path, 1, 1)
+              + " must be the first element of an array.");
+      return UNDEF;
+    }
+
+    Object cval = _slotval(inj);
+
+    inj.keyI = size(inj.keys);
+
+    // Replace the directive's list with the data value. Each return is SKIP, so
+    // that inject leaves the detached list alone and validates nothing in it.
+    inj.setval(cval, 2);
+
+    inj.path = (List<String>) slice(inj.path, -1, null);
+
+    Object count = counted ? lookup(parent, 1) : UNDEF;
+    List<Object> tvals = (List<Object>) slice(parent, counted ? 2 : 1, null);
+    int numtvals = tvals.size();
+    String field = "The " + name + " validator at field " + pathify(inj.path, 1);
+
+    if (0 == numtvals) {
+      inj.errs.add(
+          field + (counted ? " must have a count and" : " must have") + " at least one argument.");
+      return SKIP;
+    }
+
+    Object[] bounds =
+        counted ? _nofcount(count, numtvals) : new Object[] {(long) numtvals, (long) numtvals, "all"};
+    long lo = (Long) bounds[0];
+    long hi = (Long) bounds[1];
+    String countdesc = (String) bounds[2];
+
+    if (null == countdesc) {
+      inj.errs.add(field + " has an invalid count: " + stringify(count) + ".");
+      return SKIP;
+    }
+
+    int admitted = 0;
+    for (int tI = 0; tI < numtvals; tI++) {
+      int left = numtvals - tI;
+
+      // Stop once the specs left cannot change the verdict.
+      if (hi < admitted || admitted + left < lo || (lo <= admitted && admitted + left <= hi)) {
+        break;
+      }
+
+      if (_admits(cval, tvals.get(tI), inj, store)) {
+        admitted++;
+      }
+    }
+
+    if (admitted < lo || hi < admitted) {
+      String valdesc = _describeAlternatives(tvals);
+      inj.errs.add(
+          _invalidTypeMsg(inj.path, countdesc + " of " + valdesc, typify(cval), cval, "V0310"));
+    }
+
+    return SKIP;
+  }
+
+  // Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
+  private static final List<String> VALIDATE_NAMES =
+      List.of("$TOP", "$SPEC", "$BT", "$DS", "$WHEN", "$ANNO", "$REF", "$FORMAT", "$APPLY", "$OPEN");
+
+  // Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
+  private static void _checknames(Object spec, Object store, List<String> path, List<Object> errs) {
+    String name = _refname(spec);
+    if (null != name) {
+      if (_unknownname(name, store)) {
+        errs.add("Unknown validator " + name + " at field " + pathify(path) + ".");
+      }
+      return;
+    }
+
+    if (islist(spec) && "$EXACT".equals(_refname(lookup(spec, 0)))) {
+      return;
+    }
+
+    for (String key : keysof(spec)) {
+      if (ismap(spec)) {
+        _checknames(key, store, path, errs);
+      }
+      List<String> kpath = new ArrayList<>(path);
+      kpath.add(key);
+      _checknames(lookup(spec, key), store, kpath, errs);
+    }
+  }
+
+  // The name a whole-string reference gives, when it is a checker name in any case.
+  private static String _refname(Object val) {
+    Matcher m = val instanceof String s ? R_INJECT_FULL.matcher(s) : null;
+    return null != m && m.matches() && R_CHECKER_NAME.matcher(m.group(1).toUpperCase(Locale.ROOT)).matches()
+        ? m.group(1)
+        : null;
+  }
+
+  // Unknown: undefined and upper case, or a defined name in another case. Null disables a name.
+  private static boolean _unknownname(String name, Object store) {
+    String upper = name.toUpperCase(Locale.ROOT);
+    return !_knownname(name, store) && (upper.equals(name) || _knownname(upper, store));
+  }
+
+  private static boolean _knownname(String name, Object store) {
+    Object val = lookup(store, name);
+    return VALIDATE_NAMES.contains(name) || (null != val && UNDEF != val);
+  }
+
+  // The data value at a list directive's slot. The directive's own dparent was
+  // read with getprop, which reports a stored null as absent.
+  private static Object _slotval(Injection inj) {
+    Injection prior = inj.prior;
+    return null == prior ? inj.dparent : lookup(prior.dparent, prior.key);
+  }
+
+  // JSON equality: numbers by value, lists in order, maps by key in any order.
+  private static boolean _deepequal(Object a, Object b) {
+    // TS ===: identity, or value equality for numbers, strings and booleans.
+    if (a == b
+        || (a instanceof Number an && b instanceof Number bn && an.doubleValue() == bn.doubleValue())
+        || ((a instanceof String || a instanceof Boolean) && a.equals(b))) {
+      return true;
+    }
+
+    int atype = typify(a);
+    if (atype != typify(b) || 0 == ((T_list | T_map) & atype)) {
+      return false;
+    }
+
+    List<String> akeys = keysof(a);
+    List<String> bkeys = keysof(b);
+    if (akeys.size() != bkeys.size()) {
+      return false;
+    }
+
+    for (int kI = 0; kI < akeys.size(); kI++) {
+      String k = akeys.get(kI);
+      if (!k.equals(bkeys.get(kI)) || !_deepequal(lookup(a, k), lookup(b, k))) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  // Every member val has is in out, unchanged. A member only out has is a
+  // default the spec supplied, and is ignored.
+  private static boolean _keeps(Object val, Object out) {
+    if (UNDEF == val) {
+      return true;
+    }
+
+    if (0 == ((T_list | T_map) & typify(val)) || islist(val) != islist(out) || !isnode(out)) {
+      return _deepequal(val, out);
+    }
+
+    for (String k : keysof(val)) {
+      if (!_keeps(lookup(val, k), lookup(out, k))) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  // A spec admits a value when validating the value against it finds no error
+  // and gives back the value as it is.
+  private static boolean _admits(Object val, Object spec, Injection inj, Object store) {
+    List<Object> terrs = new ArrayList<>();
+
+    List<Object> mergeList = new ArrayList<>();
+    mergeList.add(new LinkedHashMap<String, Object>());
+    mergeList.add(store);
+    Map<String, Object> vstore = (Map<String, Object>) merge(mergeList, 1);
+    vstore.put(S_DTOP, val);
+
+    Map<String, Object> opts = new LinkedHashMap<>();
+    opts.put("extra", vstore);
+    opts.put("errs", terrs);
+    opts.put("meta", inj.meta);
+    Object out = validate(val, spec, opts);
+
+    return terrs.isEmpty() && _keeps(val, out);
+  }
+
+  // The bounds of a $NOF count, and the words for it, which are null when the
+  // count is invalid. Without a max, the bound is the number of specs.
+  private static Object[] _nofcount(Object count, int numtvals) {
+    if (_isnat(count)) {
+      long n = ((Number) count).longValue();
+      return new Object[] {n, n, 0 == n ? "none" : "exactly " + n};
+    }
+
+    Object min = lookup(count, "min");
+    Object max = lookup(count, "max");
+
+    boolean valid =
+        ismap(count)
+            && 0 < size(count)
+            && size(count) == (UNDEF == min ? 0 : 1) + (UNDEF == max ? 0 : 1)
+            && (UNDEF == min || _isnat(min))
+            && (UNDEF == max || _isnat(max))
+            && (UNDEF == min
+                || UNDEF == max
+                || ((Number) min).doubleValue() <= ((Number) max).doubleValue());
+
+    if (!valid) {
+      return new Object[] {0L, 0L, null};
+    }
+
+    long lo = UNDEF == min ? 0 : ((Number) min).longValue();
+    long hi = UNDEF == max ? numtvals : ((Number) max).longValue();
+
+    String desc =
+        UNDEF == max
+            ? "at least " + lo
+            : 0 == hi
+                ? "none"
+                : UNDEF == min
+                    ? "at most " + hi
+                    : lo == hi
+                        ? "exactly " + lo
+                        : lo + " to " + hi;
+
+    return new Object[] {lo, hi, desc};
+  }
+
+  private static boolean _isnat(Object n) {
+    return 0 != (T_integer & typify(n)) && 0 <= ((Number) n).doubleValue();
+  }
 
   /**
    * Modify hook used by {@link #validate(Object, Object)}: runs after each
@@ -3121,8 +3294,9 @@ public class Struct {
     baseStore.put("$INSTANCE", validate_TYPE);
     baseStore.put("$ANY", validate_ANY);
     baseStore.put("$CHILD", validate_CHILD);
-    baseStore.put("$ONE", validate_ONE);
     baseStore.put("$EXACT", validate_EXACT);
+    baseStore.put("$NOF", validate_NOF);
+    baseStore.put("$ALL", validate_ALL);
 
     List<Object> mergeList = new ArrayList<>();
     mergeList.add(baseStore);
@@ -3153,7 +3327,11 @@ public class Struct {
     opts.put("handler", _validatehandler);
     opts.put("errs", errs);
 
-    Object out = transform(data, spec, opts);
+    // A spec that names an unknown checker validates nothing.
+    int numerrs = errs.size();
+    _checknames(spec, store, new ArrayList<>(), errs);
+
+    Object out = numerrs < errs.size() ? clone(data) : transform(data, spec, opts);
 
     if (!errs.isEmpty() && !collect) {
       throw new IllegalArgumentException(String.join(" | ", errsAsStrings(errs)));

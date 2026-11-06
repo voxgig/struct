@@ -34,7 +34,6 @@ class StructTests {
   private static Map<String, Object> formatSpec;
   private static Map<String, Object> refSpec;
   private static Map<String, Object> validateSpec;
-  private static Map<String, Object> validateOneSpec;
   private static Map<String, Object> validateExactSpec;
   private static Map<String, Object> validateInvalidSpec;
   private static Map<String, Object> validateSpecialSpec;
@@ -59,7 +58,6 @@ class StructTests {
     formatSpec = (Map<String, Object>) transformSpec.get("format");
     refSpec = (Map<String, Object>) transformSpec.get("ref");
     validateSpec = (Map<String, Object>) struct.get("validate");
-    validateOneSpec = (Map<String, Object>) validateSpec.get("one");
     validateExactSpec = (Map<String, Object>) validateSpec.get("exact");
     validateInvalidSpec = (Map<String, Object>) validateSpec.get("invalid");
     validateSpecialSpec = (Map<String, Object>) validateSpec.get("special");
@@ -839,21 +837,6 @@ class StructTests {
   }
 
   @Test
-  void validateOne() {
-    runSet(
-        validateOneSpec,
-        v -> {
-          Map<String, Object> m = (Map<String, Object>) v;
-          // NO `errs` collector. Canonical calls `struct.validate(data, spec)`
-          // with two arguments, so a failure THROWS - which is what the
-          // corpus's `err` entries assert on. Passing a collector made
-          // validate accumulate instead, and every one of those entries was
-          // skipped by the old loop ("happy-path only"), so nothing noticed.
-          return Struct.validate(m.get("data"), m.get("spec"));
-        });
-  }
-
-  @Test
   void validateExact() {
     runSet(
         validateExactSpec,
@@ -876,6 +859,75 @@ class StructTests {
   @Test
   void validateSpecial() {
     runValidateSet(validateSpecialSpec, true);
+  }
+
+  @Test
+  void validateDirective() {
+    runValidateSet((Map<String, Object>) validateSpec.get("directive"), false);
+  }
+
+  @Test
+  void validateNof() {
+    runValidateSet((Map<String, Object>) validateSpec.get("nof"), false);
+  }
+
+  @Test
+  void validateAll() {
+    runValidateSet((Map<String, Object>) validateSpec.get("all"), false);
+  }
+
+  @Test
+  void validateUnknown() {
+    runValidateSet((Map<String, Object>) validateSpec.get("unknown"), false);
+  }
+
+  @Test
+  void validateUnknownEdge() {
+    // Only the unknown name is reported, and the data comes back as it is.
+    List<Object> errs = new ArrayList<>();
+    Map<String, Object> data = Struct.jm("a", "x");
+    Object out =
+        Struct.validate(
+            data,
+            Struct.jm("a", Struct.jt("`$ONE`", "`$STRING`", "`$NIL`")),
+            Struct.jm("errs", errs));
+    assertEquals(List.of("Unknown validator $ONE at field a.0."), errs);
+    assertTrue(equalNorm(data, out));
+
+    // A checker supplied in extra is defined, in any case.
+    Struct.Injector even =
+        (injObj, val, ref, store) -> {
+          Struct.Injection inj = (Struct.Injection) injObj;
+          Object n = Struct.getprop(inj.dparent, inj.key);
+          if (0 != ((Number) n).longValue() % 2) {
+            inj.errs.add(
+                "Odd at "
+                    + String.join(".", inj.path.subList(1, inj.path.size()))
+                    + ": "
+                    + Struct.stringify(n));
+          }
+          return n;
+        };
+
+    errs.clear();
+    out =
+        Struct.validate(
+            Struct.jm("n", 2),
+            Struct.jm("n", "`$EVEN`"),
+            Struct.jm("extra", Struct.jm("$EVEN", even), "errs", errs));
+    assertTrue(equalNorm(Struct.jm("n", 2), out));
+    out =
+        Struct.validate(
+            Struct.jm("n", 3),
+            Struct.jm("n", "`$even`"),
+            Struct.jm("extra", Struct.jm("$even", even), "errs", errs));
+    assertTrue(equalNorm(Struct.jm("n", 3), out));
+    assertEquals(List.of("Odd at n: 3"), errs);
+
+    // A null in extra takes a checker away.
+    errs.clear();
+    Struct.validate("x", "`$STRING`", Struct.jm("extra", Struct.jm("$STRING", null), "errs", errs));
+    assertEquals(List.of("Unknown validator $STRING at field <root>."), errs);
   }
 
   @Test
