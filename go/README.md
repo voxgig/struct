@@ -334,6 +334,10 @@ func Clone(val any) any
 func CloneFlags(val any, flags map[string]bool) any
 func Flatten(list any, depths ...int) any
 func Filter(val any, check func([2]any) bool) []any
+func Condense(val any) any
+func Expand(cond any) any
+func IsCondensed(val any) bool
+func CondenseView(cond any, opts ...any) *CondensedView
 
 type WalkApply func(key *string, val any, parent any, path []string) any
 ```
@@ -674,11 +678,6 @@ so does a misspelling of a defined one in another case, such as
 Go has only `nil`.  JSON null and "absent" both map to `nil` at the
 user-facing API.  Where the test corpus needs to distinguish them,
 the test runner uses string sentinels `__NULL__` and `__UNDEF__`.
-
-A `$NOF` or `$ALL` trial validates the value at the root of its own call,
-where a missing value arrives as `nil`. So for a missing field a trial
-spec of `` "`$NULL`" `` admits it, where canonical TypeScript
-refuses it. No corpus entry reaches the case.
 
 ### Multiple variants instead of optional parameters
 

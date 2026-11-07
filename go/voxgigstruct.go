@@ -1412,6 +1412,10 @@ func DelProp(parent any, key any) any {
 		return parent
 	}
 
+	if IsCondensed(parent) {
+		panic(errCondensedImmutable)
+	}
+
 	if IsMap(parent) {
 		ks := StrKey(key)
 		delete(parent.(map[string]any), ks)
@@ -1460,6 +1464,10 @@ func DelProp(parent any, key any) any {
 func SetProp(parent any, key any, newval any) any {
 	if !IsKey(key) {
 		return parent
+	}
+
+	if IsCondensed(parent) {
+		panic(errCondensedImmutable)
 	}
 
 	if IsMap(parent) {
@@ -1885,6 +1893,17 @@ func GetPath(store any, path any, injdefs ...*Injection) any {
 		}
 	}
 
+	// A condensed store reads as the node it was built from, touching only the
+	// nodes on the path. A base changes what the walk below starts from, so a
+	// read with one expands the store instead.
+	if IsCondensed(store) {
+		if nil == inj || S_MT == inj.Base {
+			root := _condenseInt(store.(map[string]any)[S_condroot])
+			return _condenseMaterialise(store, _condenseResolve(store, root, parts))
+		}
+		store = Expand(store)
+	}
+
 	val := store
 	var base any = nil
 	if nil != inj {
@@ -2009,6 +2028,10 @@ func GetPath(store any, path any, injdefs ...*Injection) any {
 // String paths are split on ".". If val is the DELETE sentinel,
 // the final key is deleted instead of set.
 func SetPath(store any, path any, val any, injdefs ...map[string]any) any {
+	if IsCondensed(store) {
+		panic(errCondensedImmutable)
+	}
+
 	pathType := Typify(path)
 
 	var parts []any
@@ -3493,44 +3516,6 @@ var validate_STRING Injector = func(
 	return out
 }
 
-var validate_OBJECT Injector = func(
-	inj *Injection,
-	_val any,
-	ref *string,
-	store any,
-) any {
-	out := GetProp(inj.Dparent, inj.Key)
-
-	t := Typify(out)
-
-	if 0 == (T_map & t) {
-		msg := _invalidTypeMsg(inj.Path.List, S_object, Typename(t), out)
-		inj.Errs.Append(msg)
-
-		return nil
-	}
-
-	return out
-}
-
-var validate_ARRAY Injector = func(
-	inj *Injection,
-	_val any,
-	ref *string,
-	store any,
-) any {
-	out := GetProp(inj.Dparent, inj.Key)
-
-	t := Typify(out)
-	if 0 == (T_list & t) {
-		msg := _invalidTypeMsg(inj.Path.List, S_array, Typename(t), out)
-		inj.Errs.Append(msg)
-		return nil
-	}
-
-	return out
-}
-
 var validate_ANY Injector = func(
 	inj *Injection,
 	_val any,
@@ -3563,19 +3548,25 @@ var validate_TYPE Injector = func(
 	}
 
 	out := GetProp(inj.Dparent, inj.Key)
+
+	// A $NOF or $ALL trial of a missing value holds NOVAL at its root, which
+	// GetProp reads as nil.
+	if m, ok := inj.Dparent.(map[string]any); ok && NOVAL == m[inj.Key] {
+		out = NOVAL
+	}
 	t := Typify(out)
 
 	// In Go, nil represents both null and noval (undefined).
 	// $NIL should match nil values, and $NULL should also match nil.
-	if tname == "nil" && out == nil {
-		return out
+	if tname == "nil" && nil == denoval(out) {
+		return nil
 	}
 	if tname == "null" && out == nil {
 		return out
 	}
 
 	if 0 == (t & typev) {
-		msg := _invalidTypeMsg(inj.Path.List, tname, Typename(t), out)
+		msg := _invalidTypeMsg(inj.Path.List, tname, Typename(t), denoval(out))
 		inj.Errs.Append(msg)
 		return nil
 	}
@@ -4078,8 +4069,6 @@ func Validate(
 		"$LIST":     validate_TYPE,
 		"$FUNCTION": validate_TYPE,
 		"$INSTANCE": validate_TYPE,
-		"$OBJECT":   validate_OBJECT,
-		"$ARRAY":    validate_ARRAY,
 		"$ANY":      validate_ANY,
 		"$CHILD":    validate_CHILD,
 		"$EXACT":    validate_EXACT,
@@ -4416,8 +4405,6 @@ func validateCollectExact(
 		"$LIST":     validate_TYPE,
 		"$FUNCTION": validate_TYPE,
 		"$INSTANCE": validate_TYPE,
-		"$OBJECT":   validate_OBJECT,
-		"$ARRAY":    validate_ARRAY,
 		"$ANY":      validate_ANY,
 		"$CHILD":    validate_CHILD,
 		"$EXACT":    validate_EXACT,
@@ -4511,6 +4498,471 @@ func Select(children any, query any) []any {
 	}
 
 	return results
+}
+
+// Condensed structures
+// ====================
+
+const CONDENSE_VERSION = 1
+
+// Node kinds: the first element of every node encoding.
+const (
+	CONDENSE_MAP = iota
+	CONDENSE_LIST
+	CONDENSE_STR
+	CONDENSE_NUM
+	CONDENSE_TRUE
+	CONDENSE_FALSE
+	CONDENSE_NULL
+)
+
+const (
+	S_condense = "$condense"
+	S_condsym  = "sym"
+	S_condnode = "node"
+	S_condroot = "root"
+)
+
+var errCondensedImmutable = errors.New(
+	"struct: condensed structures are immutable - expand() first, then modify the copy")
+
+var reCondenseIndex = regexp.MustCompile(`^(0|[1-9][0-9]*)$`)
+
+// The version must match, not merely be numeric: a future profile would
+// otherwise be decoded under this one's schema.
+func IsCondensed(val any) bool {
+	m, ok := val.(map[string]any)
+	if !ok {
+		return false
+	}
+	version, verr := _toFloat64(m[S_condense])
+	_, rerr := _toFloat64(m[S_condroot])
+	return nil == verr && CONDENSE_VERSION == version &&
+		IsList(m[S_condsym]) && IsList(m[S_condnode]) && nil == rerr
+}
+
+// Condense any JSON-shaped node. Pure: the same input always produces the
+// same result, on every port.
+func Condense(val any) any {
+	// Pass one: every distinct map key and string value, once, sorted. Byte
+	// order is code-point order in UTF-8.
+	symset := map[string]bool{}
+	var collect func(n any)
+	collect = func(n any) {
+		if m, ok := n.(map[string]any); ok {
+			for k, v := range m {
+				symset[k] = true
+				collect(v)
+			}
+		} else if IsList(n) {
+			for _, v := range _listify(n) {
+				collect(v)
+			}
+		} else if s, ok := n.(string); ok {
+			symset[s] = true
+		}
+	}
+	collect(val)
+
+	syms := make([]string, 0, len(symset))
+	for s := range symset {
+		syms = append(syms, s)
+	}
+	sort.Strings(syms)
+
+	sym := make([]any, len(syms))
+	symid := make(map[string]int, len(syms))
+	for i, s := range syms {
+		sym[i] = s
+		symid[s] = i
+	}
+
+	// Pass two: build post-order, interning on the encoding, so identical
+	// subtrees are one node by the time a parent refers to them.
+	node := []any{}
+	seen := map[string]int{}
+
+	intern := func(enc []any) int {
+		enckey := _condenseKey(enc)
+		if hit, has := seen[enckey]; has {
+			return hit
+		}
+		idx := len(node)
+		node = append(node, enc)
+		seen[enckey] = idx
+		return idx
+	}
+
+	var build func(n any) int
+	build = func(n any) int {
+		if m, ok := n.(map[string]any); ok {
+			enc := []any{CONDENSE_MAP}
+			// KeysOf sorts by byte, which is code-point order in UTF-8, so the
+			// key ids ascend and lookup can bisect.
+			for _, k := range KeysOf(m) {
+				enc = append(enc, symid[k], build(m[k]))
+			}
+			return intern(enc)
+		}
+		if IsList(n) {
+			enc := []any{CONDENSE_LIST}
+			for _, v := range _listify(n) {
+				enc = append(enc, build(v))
+			}
+			return intern(enc)
+		}
+		if s, ok := n.(string); ok {
+			return intern([]any{CONDENSE_STR, symid[s]})
+		}
+		if _, err := _toFloat64(n); nil == err {
+			return intern([]any{CONDENSE_NUM, n})
+		}
+		if b, ok := n.(bool); ok {
+			if b {
+				return intern([]any{CONDENSE_TRUE})
+			}
+			return intern([]any{CONDENSE_FALSE})
+		}
+		return intern([]any{CONDENSE_NULL})
+	}
+
+	root := build(val)
+
+	return map[string]any{
+		S_condense: CONDENSE_VERSION,
+		S_condsym:  sym,
+		S_condnode: node,
+		S_condroot: root,
+	}
+}
+
+// The value a condensed structure stands for. Any other value comes back
+// unchanged, so a caller holding either shape can call Expand.
+func Expand(cond any) any {
+	if !IsCondensed(cond) {
+		return cond
+	}
+	return _condenseMaterialise(cond, _condenseInt(cond.(map[string]any)[S_condroot]))
+}
+
+// A cursor into a condensed structure. Reads resolve by integer index and
+// touch only the nodes on the path, so the cost of a lookup follows path
+// depth and result size, never total structure size.
+type CondensedView struct {
+	cond  any
+	start int
+	memo  map[int]any
+}
+
+// CondenseView starts at node opts[0] when given, else at the root. Views
+// made with At share opts[1], the memo that Ref reads.
+func CondenseView(cond any, opts ...any) *CondensedView {
+	start := -1
+	if 0 < len(opts) && nil != denoval(opts[0]) {
+		start = _condenseInt(opts[0])
+	} else if IsCondensed(cond) {
+		start = _condenseInt(cond.(map[string]any)[S_condroot])
+	}
+
+	var memo map[int]any
+	if 1 < len(opts) {
+		memo, _ = opts[1].(map[int]any)
+	}
+	if nil == memo {
+		memo = map[int]any{}
+	}
+
+	return &CondensedView{cond: cond, start: start, memo: memo}
+}
+
+// The value at path, materialised: a container comes back as a copy.
+func (v *CondensedView) Get(path ...any) any {
+	return _condenseMaterialise(v.cond, v.resolve(path))
+}
+
+// The key names at path, with no value decoded.
+func (v *CondensedView) Keys(path ...any) []string {
+	at := v.resolve(path)
+	if 0 > at {
+		return []string{}
+	}
+	return _condenseKeys(v.cond, at)
+}
+
+func (v *CondensedView) Has(path ...any) bool {
+	return 0 <= v.resolve(path)
+}
+
+// A cursor at path, sharing this view's memo. Nothing is decoded.
+func (v *CondensedView) At(path ...any) *CondensedView {
+	return CondenseView(v.cond, v.resolve(path), v.memo)
+}
+
+func (v *CondensedView) Value() any {
+	return _condenseMaterialise(v.cond, v.start)
+}
+
+func (v *CondensedView) Size() int {
+	enc, has := _condenseEnc(v.cond, v.start)
+	if !has {
+		return 0
+	}
+	switch _condenseKind(enc) {
+	case CONDENSE_MAP:
+		return (len(enc) - 1) / 2
+	case CONDENSE_LIST:
+		return len(enc) - 1
+	}
+	return 0
+}
+
+func (v *CondensedView) Exists() bool {
+	return 0 <= v.start
+}
+
+// Unlike Value and Get, a shared materialisation: the same container for the
+// same node from every view on the memo, so a change to it reaches them all.
+func (v *CondensedView) Ref() any {
+	if out, has := v.memo[v.start]; has {
+		return out
+	}
+	out := _condenseMaterialise(v.cond, v.start)
+	v.memo[v.start] = out
+	return out
+}
+
+func (v *CondensedView) resolve(path []any) int {
+	var p any
+	if 0 < len(path) {
+		p = path[0]
+	}
+	return _condenseResolve(v.cond, v.start, _condenseParts(p))
+}
+
+// The interning key of a node encoding. Every element is a number, keyed by
+// value, so an integer and a decimal with the same value share a node.
+func _condenseKey(enc []any) string {
+	parts := make([]string, len(enc))
+	for i, e := range enc {
+		f, _ := _toFloat64(e)
+		if 0 == f {
+			f = 0 // Negative zero keys as zero.
+		}
+		parts[i] = strconv.FormatFloat(f, 'g', -1, 64)
+	}
+	return strings.Join(parts, ",")
+}
+
+// A kind, symbol id or node index from an encoding, or -1 for anything but a
+// non-negative integer.
+func _condenseInt(v any) int {
+	f, err := _toFloat64(v)
+	if nil != err || f != math.Trunc(f) || f < 0 || f > math.MaxInt32 {
+		return -1
+	}
+	return int(f)
+}
+
+func _condenseTable(cond any, name string) []any {
+	m, _ := cond.(map[string]any)
+	return _listify(m[name])
+}
+
+// The encoding of node idx, and whether there is such a node.
+func _condenseEnc(cond any, idx int) ([]any, bool) {
+	node := _condenseTable(cond, S_condnode)
+	if idx < 0 || idx >= len(node) || nil == node[idx] {
+		return nil, false
+	}
+	return _listify(node[idx]), true
+}
+
+func _condenseKind(enc []any) int {
+	if 0 == len(enc) {
+		return -1
+	}
+	return _condenseInt(enc[0])
+}
+
+func _condenseSymAt(sym []any, v any) (string, bool) {
+	i := _condenseInt(v)
+	if i < 0 || i >= len(sym) {
+		return S_MT, false
+	}
+	s, ok := sym[i].(string)
+	return s, ok
+}
+
+// Resolve a symbol to its id by bisecting the sorted symbol table. -1 when
+// the string occurs nowhere in the structure, a fast negative for a key.
+func _condenseSymId(cond any, key string) int {
+	sym := _condenseTable(cond, S_condsym)
+	lo, hi := 0, len(sym)-1
+	for lo <= hi {
+		mid := (lo + hi) >> 1
+		s, _ := sym[mid].(string)
+		if s == key {
+			return mid
+		}
+		if s < key {
+			lo = mid + 1
+		} else {
+			hi = mid - 1
+		}
+	}
+	return -1
+}
+
+// The node index of key inside node idx, or -1. Touches only this node.
+func _condenseChild(cond any, idx int, key string) int {
+	enc, has := _condenseEnc(cond, idx)
+	if !has {
+		return -1
+	}
+
+	switch _condenseKind(enc) {
+	case CONDENSE_MAP:
+		symid := _condenseSymId(cond, key)
+		if 0 > symid {
+			return -1
+		}
+		// Pairs live at [1,2], [3,4], ... with keys ascending: bisect the pairs.
+		lo, hi := 0, (len(enc)-1)/2-1
+		for lo <= hi {
+			mid := (lo + hi) >> 1
+			k := _condenseInt(enc[1+mid*2])
+			if k == symid {
+				return _condenseInt(enc[2+mid*2])
+			}
+			if k < symid {
+				lo = mid + 1
+			} else {
+				hi = mid - 1
+			}
+		}
+
+	case CONDENSE_LIST:
+		// Canonical integer keys only: "01", "1e0", " 1" and "+1" name no element.
+		if !reCondenseIndex.MatchString(key) {
+			return -1
+		}
+		if i, err := strconv.Atoi(key); nil == err && i < len(enc)-1 {
+			return _condenseInt(enc[1+i])
+		}
+	}
+
+	return -1
+}
+
+// A path as parts: a list is its parts, a string splits on dots, no path is
+// no parts, and any other value is one part, its string form.
+func _condenseParts(path any) []string {
+	path = denoval(path)
+	if IsList(path) {
+		list := _listify(path)
+		parts := make([]string, len(list))
+		for i, p := range list {
+			parts[i] = Stringify(p)
+		}
+		return parts
+	}
+	if s, ok := path.(string); ok {
+		if S_MT == s {
+			return nil
+		}
+		return strings.Split(s, S_DT)
+	}
+	if nil == path {
+		return nil
+	}
+	return []string{Stringify(path)}
+}
+
+// Walk path parts from a starting node, returning the node index or -1.
+func _condenseResolve(cond any, idx int, parts []string) int {
+	at := idx
+	for _, part := range parts {
+		if 0 > at {
+			return -1
+		}
+		if S_MT == part {
+			continue
+		}
+		at = _condenseChild(cond, at, part)
+	}
+	return at
+}
+
+// The value of node idx as a fresh tree, nil when there is no such node.
+// Materialisations never share a container, though the condensed form shares
+// nodes.
+func _condenseMaterialise(cond any, idx int) any {
+	sym := _condenseTable(cond, S_condsym)
+	node := _condenseTable(cond, S_condnode)
+
+	var rebuild func(i int) any
+	rebuild = func(i int) any {
+		if i < 0 || i >= len(node) || nil == node[i] {
+			return nil
+		}
+		enc := _listify(node[i])
+		switch _condenseKind(enc) {
+		case CONDENSE_MAP:
+			out := map[string]any{}
+			for j := 1; j+1 < len(enc); j += 2 {
+				if k, ok := _condenseSymAt(sym, enc[j]); ok {
+					out[k] = rebuild(_condenseInt(enc[j+1]))
+				}
+			}
+			return out
+		case CONDENSE_LIST:
+			out := make([]any, 0, len(enc)-1)
+			for _, e := range enc[1:] {
+				out = append(out, rebuild(_condenseInt(e)))
+			}
+			return out
+		case CONDENSE_STR:
+			if 1 < len(enc) {
+				if s, ok := _condenseSymAt(sym, enc[1]); ok {
+					return s
+				}
+			}
+		case CONDENSE_NUM:
+			if 1 < len(enc) {
+				return enc[1]
+			}
+		case CONDENSE_TRUE:
+			return true
+		case CONDENSE_FALSE:
+			return false
+		}
+		return nil
+	}
+
+	return rebuild(idx)
+}
+
+// The keys of node idx, without materialising any of its values.
+func _condenseKeys(cond any, idx int) []string {
+	out := []string{}
+	enc, has := _condenseEnc(cond, idx)
+	if !has {
+		return out
+	}
+	switch _condenseKind(enc) {
+	case CONDENSE_MAP:
+		sym := _condenseTable(cond, S_condsym)
+		for j := 1; j < len(enc); j += 2 {
+			if k, ok := _condenseSymAt(sym, enc[j]); ok {
+				out = append(out, k)
+			}
+		}
+	case CONDENSE_LIST:
+		for j := 1; j < len(enc); j++ {
+			out = append(out, strconv.Itoa(j-1))
+		}
+	}
+	return out
 }
 
 // Internal utilities
@@ -4738,14 +5190,14 @@ func _admits(val any, spec any, inj *Injection, store any) bool {
 	if nil == vstore {
 		vstore = map[string]any{}
 	}
-	vstore[S_DTOP] = denoval(val)
+	vstore[S_DTOP] = val
 
 	// Validate reads its meta from extra.
 	if nil != inj.Meta {
 		vstore["meta"] = inj.Meta
 	}
 
-	out, _ := Validate(denoval(val), spec, &Injection{Extra: vstore, Errs: terrs})
+	out, _ := Validate(val, spec, &Injection{Extra: vstore, Errs: terrs})
 
 	return 0 == len(terrs.List) && _keeps(val, out)
 }

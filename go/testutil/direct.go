@@ -20,7 +20,7 @@ func DirectTest() {
 			// kind: undefined
 		},
 		map[string]any{
-			"resform": []any{"`$NOF`", map[string]any{"min": 1}, "`$OBJECT`"},
+			"resform": []any{"`$NOF`", map[string]any{"min": 1}, "`$MAP`"},
 		},
 		&voxgigstruct.Injection{Errs: errs})
 	fmt.Println("OUT", out, errs.List)
