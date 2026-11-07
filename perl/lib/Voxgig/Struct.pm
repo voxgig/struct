@@ -288,7 +288,8 @@ our $R_CHECKER_NAME    = qr/^\$[A-Z]+$/;
 our $R_BT_ESCAPE       = qr/\$BT/;
 our $R_DS_ESCAPE       = qr/\$DS/;
 our $R_INJECTION_PARTIAL = qr/`([^`]+)`/;
-our $R_CONDENSE_INDEX  = qr/^(?:0|[1-9][0-9]*)\z/;
+our $R_LIST_INDEX      = qr/^(?:0|[1-9][0-9]*)\z/;
+our $R_NEGATIVE_INDEX  = qr/^-0*[1-9][0-9]*\z/;
 
 use constant MAXDEPTH => 32;
 
@@ -586,22 +587,29 @@ sub typify {
     return T_scalar | T_string;
 }
 
+# The index $key reads in a list of $size items, or -1. As JavaScript reads
+# list[key], only a canonical integer names one: '1', not '01', '+1' or '-0'.
+# With $fromend, as getelem reads it, a negative one counts back from the end.
+sub _listindex {
+    my ($key, $size, $fromend) = @_;
+    return -1 if !defined $key || ref $key;
+    my $i;
+    if ($key =~ $R_LIST_INDEX) { $i = 0 + $key }
+    elsif ($fromend && $key =~ $R_NEGATIVE_INDEX) { $i = $size + $key }
+    else { return -1 }
+    return (0 <= $i && $i < $size) ? $i : -1;
+}
+
 # Get an element from a list with negative-index support and a fallback.
 # Mirrors TS getelem.
 sub getelem {
     my ($val, $key, $alt) = @_;
     $alt = is_none($_[2]) ? $NONE : (exists $_[2] ? $alt : $NONE);
     return $alt unless islist($val);
-    my $len = scalar @$val;
-    my $k;
-    if (defined $key && !ref($key) && looks_like_number($key)) { $k = int($key) }
-    elsif (ref $key eq 'CODE') {
-        # Fallback callback (TS supports getelem(val, key, () => ...)).
-        return $key->();
-    }
-    else { return $alt }
-    $k = $len + $k if $k < 0;
-    return $alt if $k < 0 || $k >= $len;
+    # Fallback callback (TS supports getelem(val, key, () => ...)).
+    return $key->() if ref $key eq 'CODE';
+    my $k = _listindex($key, scalar @$val, 1);
+    return $alt if $k < 0;
     my $v = $val->[$k];
     # A null (or absent/NONE) slot counts as "no value" → alt, the same
     # Group A rule getprop applies; a function alt is called.
@@ -616,7 +624,11 @@ sub getprop {
     $alt = NONE() unless exists $_[2];
     return $alt unless defined $val && ref $val;
     if (islist($val)) {
-        return getelem($val, $key, $alt);
+        my $k = _listindex($key, scalar @$val);
+        return $alt if $k < 0;
+        my $v = $val->[$k];
+        return $alt if !defined $v || is_jnull($v) || is_none($v);
+        return $v;
     }
     if (ismap($val)) {
         my $k = strkey($key);
@@ -635,11 +647,8 @@ sub _lookup {
     my ($val, $key) = @_;
     return NONE() unless defined $val && ref $val;
     if (islist($val)) {
-        return NONE() unless defined $key && !ref($key) && looks_like_number($key);
-        my $k = int($key);
-        my $len = scalar @$val;
-        $k = $len + $k if $k < 0;
-        return NONE() if $k < 0 || $k >= $len;
+        my $k = _listindex($key, scalar @$val);
+        return NONE() if $k < 0;
         my $v = $val->[$k];
         return is_none($v) ? NONE() : $v;
     }
@@ -683,11 +692,8 @@ sub haskey {
     my ($val, $key) = @_;
     return 0 unless defined $val && ref $val;
     if (islist($val)) {
-        return 0 unless defined $key && !ref($key) && looks_like_number($key);
-        my $k = int($key);
-        my $len = scalar @$val;
-        $k = $len + $k if $k < 0;
-        return 0 if $k < 0 || $k >= $len;
+        my $k = _listindex($key, scalar @$val);
+        return 0 if $k < 0;
         my $v = $val->[$k];
         return (defined $v && !is_jnull($v) && !is_none($v)) ? 1 : 0;
     }
@@ -3428,11 +3434,9 @@ sub _condense_child {
 
     if ( CONDENSE_LIST == $kind ) {
 
-        # Canonical integer keys only: canonical's list lookup treats "01",
-        # "1e0", " 1" and "+1" as absent, so a condensed one must too.
-        return -1 unless $k =~ $R_CONDENSE_INDEX;
-        return -1 if $k >= @$enc - 1;
-        return $enc->[ 1 + $k ];
+        # Read as an ordinary list is, so condensing never changes which value a path selects.
+        my $i = _listindex( $key, @$enc - 1 );
+        return 0 > $i ? -1 : $enc->[ 1 + $i ];
     }
 
     return -1;

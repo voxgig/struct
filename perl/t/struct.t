@@ -674,11 +674,12 @@ runsetflags( 'condense-iscondensed', $condense->{iscondensed}, { null => 0 },
     is( $getpath->( $condense->($store), 'x', { base => 'base' } ),
         $getpath->( $store, 'x', { base => 'base' } ), 'condense-getpath-base' );
 
-    # Canonical list keys only. This port's plain list lookup reads these as
-    # numbers; canonical's, and so the condensed read, finds nothing.
-    my $lc = $condense->( $pj->('{"l":[10,20]}') );
+    # Only a canonical integer selects an element, condensed or not.
+    my $lp = $pj->('{"l":[10,20]}');
+    my $lc = $condense->($lp);
     for my $k ( '01', '1e0', ' 1', '+1', '1.0', '-0', "1\n" ) {
         ( my $label = $k ) =~ s/\n/\\n/g;
+        ok( $none->( $getpath->( $lp, [ 'l', $k ] ) ), "condense-list-key: plain '$label'" );
         ok( $none->( $getpath->( $lc, [ 'l', $k ] ) ), "condense-list-key: '$label'" );
     }
     is( $getpath->( $lc, [ 'l', '1' ] ), 20, 'condense-list-key: 1' );
