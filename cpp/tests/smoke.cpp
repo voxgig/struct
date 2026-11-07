@@ -182,11 +182,12 @@ int main() {
   CHECK(getpath_v(condense(bstore), Value("x"), &binj) == Value(1));
   CHECK(getpath_v(bstore, Value("x"), &binj) == Value(1));
 
-  // Only canonical integers index a list. This port's plain getpath reads "01" and "-0"
-  // as indexes, so the condensed answer is checked on its own.
-  Value cl = condense(parse_json("{\"l\":[10,20]}"));
+  // Unary + would accept these; a plain list read does not, so condensing must not change
+  // which value a path selects.
+  Value pl = parse_json("{\"l\":[10,20]}");
+  Value cl = condense(pl);
   for (const char* k : {"01", "1e0", " 1", "+1", "1.0", "-0"})
-    CHECK(getpath_v(cl, jt({"l", k})).is_undef());
+    CHECK(getpath_v(cl, jt({"l", k})) == getpath_v(pl, jt({"l", k})));
   CHECK(getpath_v(cl, jt({"l", "1"})) == Value(20));
 
   Value sym = getprop(condense(parse_json("{\"a\":\"\xF0\x90\x80\x80\",\"b\":\"\xEF\xBF\xBF\"}")),

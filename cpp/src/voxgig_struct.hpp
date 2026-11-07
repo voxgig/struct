@@ -235,6 +235,59 @@ inline std::string strkey(const Value& key) {
   return S_MT();
 }
 
+namespace detail {
+
+// ^(0|[1-9][0-9]*)$ as an index, else -1. A list reads only a canonical integer key, as a
+// JavaScript array does: "01", "+1" or "1.0" name no element. A key too long to parse
+// could not index a list anyway.
+inline int64_t canon_listindex(const std::string& key) {
+  if (key.empty() || 18 < key.size() || ('0' == key[0] && 1 < key.size()))
+    return -1;
+  int64_t i = 0;
+  for (char c : key) {
+    if (c < '0' || '9' < c)
+      return -1;
+    i = i * 10 + (c - '0');
+  }
+  return i;
+}
+
+// The element a list read selects, else -1: a canonical integer string, or a number whose
+// value is a non-negative integer.
+inline int64_t list_readindex(const Value& key) {
+  if (key.is_int())
+    return 0 <= key.as_int() ? key.as_int() : -1;
+  if (key.is_double()) {
+    double d = key.as_double();
+    return 0 <= d && d < 1e18 && std::floor(d) == d ? static_cast<int64_t>(d) : -1;
+  }
+  if (key.is_string())
+    return canon_listindex(key.as_string());
+  return -1;
+}
+
+// A negative integer key, which getelem alone counts from the end; 0 for any other key.
+inline int64_t list_backindex(const Value& key) {
+  int64_t back = 0;
+  if (key.is_int()) {
+    back = key.as_int();
+  } else if (key.is_double()) {
+    double d = key.as_double();
+    if (-1e18 < d && std::floor(d) == d)
+      back = static_cast<int64_t>(d);
+  } else if (key.is_string() && !key.as_string().empty() && '-' == key.as_string()[0] &&
+             std::regex_match(key.as_string(), R_INTEGER_KEY())) {
+    try {
+      back = std::stoll(key.as_string());
+    } catch (...) {
+      back = 0;
+    }
+  }
+  return 0 > back ? back : 0;
+}
+
+} // namespace detail
+
 inline Value getprop(const Value& val, const Value& key, const Value& alt) {
   if (val.is_undef() || key.is_undef())
     return alt;
@@ -256,42 +309,16 @@ inline Value getprop(const Value& val, const Value& key, const Value& alt) {
     auto l = val.as_list();
     if (!l)
       return alt;
-    int idx;
-    if (key.is_int()) {
-      idx = static_cast<int>(key.as_int());
-    } else if (key.is_string()) {
-      // Match TS: only accept strings that match /^[-0-9]+$/ entirely.
-      if (!std::regex_match(key.as_string(), R_INTEGER_KEY()))
-        return alt;
-      try {
-        idx = std::stoi(key.as_string());
-      } catch (...) {
-        return alt;
-      }
-    } else if (key.is_double()) {
-      idx = static_cast<int>(key.as_double());
-    } else {
+    int64_t idx = detail::list_readindex(key);
+    if (idx < 0 || idx >= static_cast<int64_t>(l->size()))
       return alt;
-    }
-    if (idx < 0 || idx >= static_cast<int>(l->size()))
-      return alt;
-    Value v = (*l)[idx];
+    Value v = (*l)[static_cast<size_t>(idx)];
     // Group A: a stored JSON null counts as "no value" — substitute the alt.
     if (v.is_undef() || v.is_null())
       return alt;
     return v;
   }
   return alt;
-}
-
-// Match TS regex /^[-0-9]+$/ check.
-inline bool is_integer_key_string(const Value& key) {
-  if (key.is_int() || key.is_double())
-    return true;
-  if (key.is_string()) {
-    return std::regex_match(key.as_string(), R_INTEGER_KEY());
-  }
-  return false;
 }
 
 inline Value getelem(const Value& val, const Value& key, const Value& alt) {
@@ -303,27 +330,12 @@ inline Value getelem(const Value& val, const Value& key, const Value& alt) {
   }
   if (val.is_list()) {
     auto l = val.as_list();
-    int nkey;
-    if (key.is_int()) {
-      nkey = static_cast<int>(key.as_int());
-    } else if (key.is_string()) {
-      if (!is_integer_key_string(key))
-        return alt;
-      try {
-        nkey = std::stoi(key.as_string());
-      } catch (...) {
-        return alt;
-      }
-    } else if (key.is_double()) {
-      nkey = static_cast<int>(key.as_double());
-    } else {
+    int64_t size = static_cast<int64_t>(l->size());
+    int64_t back = detail::list_backindex(key);
+    int64_t nkey = 0 > back ? size + back : detail::list_readindex(key);
+    if (nkey < 0 || nkey >= size)
       return alt;
-    }
-    if (nkey < 0)
-      nkey = static_cast<int>(l->size()) + nkey;
-    if (nkey < 0 || nkey >= static_cast<int>(l->size()))
-      return alt;
-    out = (*l)[nkey];
+    out = (*l)[static_cast<size_t>(nkey)];
   }
   // Group A: a stored JSON null at the slot counts as "no value" (canonical
   // `null == out` is true for both undefined and null) — substitute the alt.
@@ -344,27 +356,10 @@ inline Value lookup_v(const Value& val, const Value& key) {
     auto l = val.as_list();
     if (!l)
       return Value::undef();
-    int idx;
-    if (key.is_int()) {
-      idx = static_cast<int>(key.as_int());
-    } else if (key.is_double()) {
-      idx = static_cast<int>(key.as_double());
-    } else if (key.is_string()) {
-      if (!std::regex_match(key.as_string(), R_INTEGER_KEY()))
-        return Value::undef();
-      try {
-        idx = std::stoi(key.as_string());
-      } catch (...) {
-        return Value::undef();
-      }
-    } else {
+    int64_t idx = detail::list_readindex(key);
+    if (idx < 0 || idx >= static_cast<int64_t>(l->size()))
       return Value::undef();
-    }
-    if (idx < 0)
-      idx = static_cast<int>(l->size()) + idx;
-    if (idx < 0 || idx >= static_cast<int>(l->size()))
-      return Value::undef();
-    Value v = (*l)[idx];
+    Value v = (*l)[static_cast<size_t>(idx)];
     return v.is_undef() ? Value::undef() : v;
   }
   if (val.is_map()) {
@@ -1639,18 +1634,6 @@ inline int64_t cond_symid(const Value& cond, const std::string& key) {
   return -1;
 }
 
-// ^(0|[1-9][0-9]*)$: "01", "+1" or "1.0" would select a different value than a plain
-// list lookup. A key too long to parse could not index a list anyway.
-inline bool cond_listkey(const std::string& key) {
-  if (key.empty() || 18 < key.size() || ('0' == key[0] && 1 < key.size()))
-    return false;
-  for (char c : key) {
-    if (c < '0' || '9' < c)
-      return false;
-  }
-  return true;
-}
-
 // The node index of key inside node idx, or -1. Touches only this node.
 inline int64_t cond_child(const Value& cond, int64_t idx, const std::string& key) {
   const Value* enc = cond_enc(cond, idx);
@@ -1674,10 +1657,11 @@ inline int64_t cond_child(const Value& cond, int64_t idx, const std::string& key
     return -1;
   }
 
-  if (CONDENSE_LIST == kind && cond_listkey(key)) {
-    int64_t i = std::stoll(key);
-    return i < static_cast<int64_t>(el->size()) - 1 ? cond_idx((*el)[static_cast<size_t>(1 + i)])
-                                                    : -1;
+  if (CONDENSE_LIST == kind) {
+    int64_t i = canon_listindex(key);
+    return 0 <= i && i < static_cast<int64_t>(el->size()) - 1
+               ? cond_idx((*el)[static_cast<size_t>(1 + i)])
+               : -1;
   }
 
   return -1;
