@@ -1704,12 +1704,14 @@ public class StructTests
     [Fact]
     public void CondenseListKeysAreCanonicalIntegers()
     {
-        // This port's plain GetPath reads "01", " 1", "+1" and "-0" as list indexes, so the
-        // condensed answer is checked on its own.
-        var cond = StructUtils.Condense(StructUtils.Jm("l", StructUtils.Jt(10, 20)));
+        // Unary + would accept these; a plain list read does not, so condensing must not change
+        // which value a path selects.
+        var plain = StructUtils.Jm("l", StructUtils.Jt(10, 20));
+        var cond = StructUtils.Condense(plain);
         foreach (string key in new[] { "01", "1e0", " 1", "+1", "1.0", "-0" })
         {
-            Assert.Null(StructUtils.GetPath(cond, StructUtils.Jt("l", key)));
+            Assert.Equal(StructUtils.GetPath(plain, StructUtils.Jt("l", key)),
+                StructUtils.GetPath(cond, StructUtils.Jt("l", key)));
         }
         Assert.Equal(20.0, Omni.ToNum(StructUtils.GetPath(cond, StructUtils.Jt("l", "1"))));
     }

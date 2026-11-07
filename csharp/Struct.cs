@@ -522,6 +522,65 @@ namespace Voxgig.Struct
             return padding >= 0 ? s.PadRight(padding, pc[0]) : s.PadLeft(-padding, pc[0]);
         }
 
+        // ^(0|[1-9][0-9]*)$ as an index, else -1. A list reads only a canonical integer key, as a
+        // JavaScript array does: "01", "+1" or "1.0" name no element. A key too long to parse
+        // could not index a list anyway.
+        private static long CanonListIndex(string key)
+        {
+            if (0 == key.Length || 18 < key.Length || ('0' == key[0] && 1 < key.Length))
+            {
+                return -1;
+            }
+
+            long i = 0;
+            foreach (char c in key)
+            {
+                if (c is < '0' or > '9')
+                {
+                    return -1;
+                }
+
+                i = (i * 10) + (c - '0');
+            }
+
+            return i;
+        }
+
+        // The element a list read selects, else -1: a canonical integer string, or a number
+        // whose value is a non-negative integer.
+        private static long ListIndex(object? key)
+        {
+            if (key is string s)
+            {
+                return CanonListIndex(s);
+            }
+
+            double d = ListKeyNumber(key);
+            return d is >= 0 and < 1e18 && d == Math.Floor(d) ? (long)d : -1;
+        }
+
+        // A numeric key's value; NaN for any other key.
+        private static double ListKeyNumber(object? key)
+        {
+            return key is IConvertible c && c.GetTypeCode() is >= TypeCode.SByte and <= TypeCode.Decimal
+                ? c.ToDouble(CultureInfo.InvariantCulture)
+                : double.NaN;
+        }
+
+        // A negative integer key, which GetElem alone counts from the end; 0 for any other key.
+        private static long ListBackIndex(object? key)
+        {
+            if (key is string s)
+            {
+                return s.StartsWith('-') && R_INTEGER_KEY.IsMatch(s)
+                    && long.TryParse(s, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out long n)
+                    && n < 0 ? n : 0;
+            }
+
+            double d = ListKeyNumber(key);
+            return d is < 0 and > -1e18 && d == Math.Floor(d) ? (long)d : 0;
+        }
+
         // Get a list element by integer index (negative counts from end).
         public static object? GetElem(object? val, object? key, object? alt = null)
         {
@@ -533,24 +592,11 @@ namespace Voxgig.Struct
             object? out2 = alt;
             if (val is List<object?> list)
             {
-                if (!int.TryParse(key?.ToString(), out int nkey))
-                {
-                    return alt;
-                }
-
-                if (!R_INTEGER_KEY.IsMatch(key!.ToString()!))
-                {
-                    return alt;
-                }
-
-                if (nkey < 0)
-                {
-                    nkey = list.Count + nkey;
-                }
-
+                long back = ListBackIndex(key);
+                long nkey = 0 > back ? list.Count + back : ListIndex(key);
                 if (nkey >= 0 && nkey < list.Count)
                 {
-                    out2 = list[nkey];
+                    out2 = list[(int)nkey];
                 }
             }
 
@@ -582,18 +628,10 @@ namespace Voxgig.Struct
             }
             else if (val is List<object?> list)
             {
-                string? ks = key?.ToString();
-                if (ks != null && int.TryParse(ks, out int i))
+                long i = ListIndex(key);
+                if (i >= 0 && i < list.Count)
                 {
-                    if (i < 0)
-                    {
-                        i = list.Count + i;
-                    }
-
-                    if (i >= 0 && i < list.Count)
-                    {
-                        out2 = list[i];
-                    }
+                    out2 = list[(int)i];
                 }
             }
 
@@ -626,19 +664,8 @@ namespace Voxgig.Struct
             }
             if (val is List<object?> list)
             {
-                string? ks = key.ToString();
-                if (ks != null && int.TryParse(ks, out int i))
-                {
-                    if (i < 0)
-                    {
-                        i = list.Count + i;
-                    }
-                    if (i >= 0 && i < list.Count)
-                    {
-                        return list[i];
-                    }
-                }
-                return NONE;
+                long i = ListIndex(key);
+                return i >= 0 && i < list.Count ? list[(int)i] : NONE;
             }
             return NONE;
         }
@@ -3122,19 +3149,11 @@ namespace Voxgig.Struct
             }
             if (node is List<object?> list)
             {
-                string? ks = key?.ToString();
-                if (ks != null && int.TryParse(ks, out int i))
+                long i = ListIndex(key);
+                if (i >= 0 && i < list.Count)
                 {
-                    if (i < 0)
-                    {
-                        i = list.Count + i;
-                    }
-
-                    if (i >= 0 && i < list.Count)
-                    {
-                        value = list[i];
-                        return true;
-                    }
+                    value = list[(int)i];
+                    return true;
                 }
                 return false;
             }
@@ -4212,26 +4231,6 @@ namespace Voxgig.Struct
             return -1;
         }
 
-        // ^(0|[1-9][0-9]*)$: "01", "+1" or "1.0" would select a different value than a plain
-        // list lookup. A key too long to parse could not index a list anyway.
-        private static bool CondenseListKey(string key)
-        {
-            if (0 == key.Length || 18 < key.Length || ('0' == key[0] && 1 < key.Length))
-            {
-                return false;
-            }
-
-            foreach (char c in key)
-            {
-                if (c is < '0' or > '9')
-                {
-                    return false;
-                }
-            }
-
-            return true;
-        }
-
         // The node index of key inside node idx, or -1. Touches only this node.
         private static long CondenseChild(object? cond, long idx, string key)
         {
@@ -4265,10 +4264,10 @@ namespace Voxgig.Struct
                 return -1;
             }
 
-            if (CONDENSE_LIST == kind && CondenseListKey(key))
+            if (CONDENSE_LIST == kind)
             {
-                long i = long.Parse(key, CultureInfo.InvariantCulture);
-                return i < el!.Count - 1 ? CondenseIdx(el[(int)(1 + i)]) : -1;
+                long i = CanonListIndex(key);
+                return 0 <= i && i < el!.Count - 1 ? CondenseIdx(el[(int)(1 + i)]) : -1;
             }
 
             return -1;
