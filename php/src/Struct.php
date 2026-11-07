@@ -171,6 +171,8 @@ class Struct
     private const R_TRANSFORM_NAME = '/`\$([A-Z]+)`/';
     private const R_INJECTION_FULL = '/^`(\$[A-Z]+|[^`]*)[0-9]*`$/';
     private const R_CHECKER_NAME = '/^\$[A-Z]+$/';
+    private const R_LIST_INDEX = '/^(0|[1-9][0-9]*)\z/';
+    private const R_INTEGER_KEY = '/^[-0-9]+\z/';
 
     // Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
     private const VALIDATE_NAMES = ['$TOP', '$SPEC', '$BT', '$DS', '$WHEN', '$ANNO', '$REF', '$FORMAT', '$APPLY', '$OPEN'];
@@ -454,11 +456,14 @@ class Struct
 
         // 2) ListRef branch
         if ($val instanceof ListRef) {
-            $ki = is_numeric($key) ? (int)$key : -1;
-            $out = ($ki >= 0 && $ki < count($val->list)) ? $val->list[$ki] : $alt;
+            $ki = self::_listindex($key, count($val->list));
+            $out = 0 > $ki ? $alt : $val->list[$ki];
         }
-        // 3) array branch
-        elseif (is_array($val) && array_key_exists($key, $val)) {
+        // 3) array branch: array_key_exists would truncate a float key
+        elseif (is_array($val) && is_float($key) && self::islist($val)) {
+            $ki = self::_listindex($key, count($val));
+            $out = 0 > $ki ? $alt : $val[$ki];
+        } elseif (is_array($val) && array_key_exists($key, $val)) {
             $out = $val[$key];
         }
         // 4) object branch: cast $key to string
@@ -477,6 +482,21 @@ class Struct
 
         // 5) JSON‐null‐marker check
         return ($out === self::undef() ? $alt : $out);
+    }
+
+    /**
+     * The index $key reads in a list of $len elements, or -1. As in a
+     * JavaScript array only a canonical integer reads: "01", "+1", "1.0",
+     * "-0" and 1.5 do not.
+     */
+    private static function _listindex(mixed $key, int $len): int
+    {
+        if (is_string($key)) {
+            $key = 1 === preg_match(self::R_LIST_INDEX, $key) ? (int) $key : -1;
+        } elseif (is_float($key)) {
+            $key = floor($key) === $key && 0 <= $key && $key < $len ? (int) $key : -1;
+        }
+        return is_int($key) && 0 <= $key && $key < $len ? $key : -1;
     }
 
 
@@ -3732,22 +3752,19 @@ class Struct
         if (self::islist($val)) {
             $listArr = ($val instanceof ListRef) ? $val->list : $val;
             $listLen = count($listArr);
-            if (is_string($key)) {
-                if (!preg_match('/^[-0-9]+$/', $key)) {
-                    $out = self::undef();
-                } else {
-                    $nkey = (int) $key;
-                    if ($nkey < 0) {
-                        $nkey = $listLen + $nkey;
-                    }
-                    $out = ($nkey >= 0 && $nkey < $listLen) ? $listArr[$nkey] : self::undef();
+            $nkey = -1;
+            if (is_int($key)) {
+                $nkey = 0 > $key ? $listLen + $key : $key;
+            } else {
+                $skey = self::_condenseStr($key);
+                if (1 === preg_match(self::R_INTEGER_KEY, $skey)) {
+                    // Only a negative integer counts from the end; "-0" and "01" read as getprop does.
+                    $nkey = (int) $skey;
+                    $nkey = 0 > $nkey ? $listLen + $nkey : self::_listindex($skey, $listLen);
                 }
-            } elseif (is_int($key)) {
-                $nkey = $key;
-                if ($nkey < 0) {
-                    $nkey = $listLen + $nkey;
-                }
-                $out = ($nkey >= 0 && $nkey < $listLen) ? $listArr[$nkey] : self::undef();
+            }
+            if (0 <= $nkey && $nkey < $listLen) {
+                $out = $listArr[$nkey];
             }
         }
 
@@ -3924,8 +3941,6 @@ class Struct
     private const S_condsym = 'sym';
     private const S_condnode = 'node';
     private const S_condroot = 'root';
-
-    private const R_CONDENSE_INDEX = '/^(0|[1-9][0-9]*)\z/';
 
     private const S_CONDENSE_IMMUTABLE =
         'struct: condensed structures are immutable - expand() first, then modify the copy';
@@ -4191,16 +4206,8 @@ class Struct
         }
 
         if (self::CONDENSE_LIST === $kind) {
-            // Canonical integer keys only: an ordinary list lookup treats "01",
-            // "1e0", " 1" and "+1" as absent, so a condensed one must too.
-            if (1 !== preg_match(self::R_CONDENSE_INDEX, $k)) {
-                return -1;
-            }
-            $i = (int) $k;
-            if ($i >= count($enc) - 1) {
-                return -1;
-            }
-            return $enc[1 + $i];
+            $i = self::_listindex($k, count($enc) - 1);
+            return 0 > $i ? -1 : $enc[1 + $i];
         }
 
         return -1;
