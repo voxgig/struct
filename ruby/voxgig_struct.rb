@@ -286,6 +286,7 @@ module VoxgigStruct
   def self.setprop(parent, key, val = :no_val_provided)
     log { ">>> setprop called with parent=#{parent.inspect}, key=#{key.inspect}, val=#{val.inspect}" }
     return parent unless iskey(key)
+    raise S_CONDENSED_IMMUTABLE if iscondensed(parent)
 
     if ismap(parent)
       key_str = key.to_s
@@ -504,6 +505,7 @@ module VoxgigStruct
 
   def self.delprop(parent, key)
     return parent unless iskey(key)
+    raise S_CONDENSED_IMMUTABLE if iscondensed(parent)
 
     if ismap(parent)
       ks = strkey(key)
@@ -888,6 +890,17 @@ module VoxgigStruct
       parts = [strkey(path)]
     else
       return nil
+    end
+
+    # A condensed store answers a path as the node it was built from does,
+    # touching only the nodes on the path. A base needs the whole node.
+    if iscondensed(store)
+      if _injdef_prop(injdef, 'base').nil?
+        # A stored null reads as absent, as through getprop.
+        return condenseMaterialise(store, condenseResolve(store, store[S_condroot], parts))
+      end
+
+      store = expand(store)
     end
 
     val = store
@@ -1871,7 +1884,8 @@ module VoxgigStruct
     # $NIL is absent or null.
     typev |= T_null if tname == S_nil
 
-    out = getprop(inj.dparent, inj.key)
+    # A trial on a missing value stores UNDEF at its root, which getprop reads as null.
+    out = _getprop(inj.dparent, inj.key, nil)
     t = typify(out)
 
     if t.nobits?(typev)
@@ -2377,6 +2391,9 @@ module VoxgigStruct
 
   # --- setpath ---
   def self.setpath(store, path, val, injdef = nil)
+    # Same contract as setprop/delprop: a condensed store is immutable.
+    raise S_CONDENSED_IMMUTABLE if iscondensed(store)
+
     pt = typify(path)
     if T_list.anybits?(pt)
       parts = path
@@ -2410,6 +2427,344 @@ module VoxgigStruct
     end
 
     parent
+  end
+
+  # --- Condensed structures ---
+
+  CONDENSE_VERSION = 1
+
+  CONDENSE_MAP = 0
+  CONDENSE_LIST = 1
+  CONDENSE_STR = 2
+  CONDENSE_NUM = 3
+  CONDENSE_TRUE = 4
+  CONDENSE_FALSE = 5
+  CONDENSE_NULL = 6
+
+  S_condense = '$condense'.freeze
+  S_condsym = 'sym'.freeze
+  S_condnode = 'node'.freeze
+  S_condroot = 'root'.freeze
+
+  S_CONDENSED_IMMUTABLE =
+    'struct: condensed structures are immutable - expand() first, then modify the copy'.freeze
+
+  R_CONDENSE_INDEX = /\A(0|[1-9][0-9]*)\z/.freeze
+
+  # The item at index i, or nil. A negative or fractional i is no item, as in JavaScript.
+  def self._condenseat(list, i)
+    i = i.to_i if i.is_a?(Float) && i.finite? && i == i.to_i
+    return nil unless islist(list) && i.is_a?(Integer) && i >= 0 && i < list.length
+
+    list[i]
+  end
+
+  # A path part's string form, as JavaScript writes it: nil is 'null', 1.0 is '1'.
+  def self._condensestr(key)
+    return key if key.is_a?(String)
+    return 'null' if key.nil?
+    return key.to_i.to_s if key.is_a?(Float) && key.finite? && key == key.to_i
+
+    key.to_s
+  end
+
+  # Reads with fetch, which never runs a Hash default proc.
+  def self.iscondensed(val = UNDEF)
+    return false unless ismap(val)
+
+    # The version must MATCH, not merely be numeric: a future profile would
+    # otherwise be decoded under this one's schema.
+    version = val.fetch(S_condense, nil)
+    version.is_a?(Numeric) && version == CONDENSE_VERSION &&
+      islist(val.fetch(S_condsym, nil)) &&
+      islist(val.fetch(S_condnode, nil)) &&
+      val.fetch(S_condroot, nil).is_a?(Numeric)
+  end
+
+  # Condense any JSON-shaped node. Pure: the same input always produces a
+  # byte-identical result, on every port.
+  def self.condense(val = UNDEF)
+    # Pass one: every distinct map key and string value, once, sorted.
+    symset = {}
+    collect = lambda do |n|
+      if ismap(n)
+        keysof(n).each do |k|
+          symset[k] = true
+          collect.call(n[k])
+        end
+      elsif islist(n)
+        n.each { |item| collect.call(item) }
+      elsif n.is_a?(String)
+        symset[n] = true
+      end
+    end
+    collect.call(val)
+
+    # Ruby sorts strings by byte, which for UTF-8 is code point order.
+    sym = symset.keys.sort
+    symid = {}
+    sym.each_with_index { |s, i| symid[s] = i }
+
+    # Pass two: build post-order, interning on the encoding. Because children
+    # are built first, identical subtrees have already been interned by the
+    # time a parent references them, so sharing costs nothing extra.
+    node = []
+    seen = {}
+    intern = lambda do |enc, enckey = enc|
+      hit = seen[enckey]
+      return hit unless hit.nil?
+
+      idx = node.length
+      node << enc
+      seen[enckey] = idx
+      idx
+    end
+
+    build = lambda do |n|
+      if ismap(n)
+        enc = [CONDENSE_MAP]
+        # keysof sorts, so the key ids ascend and lookup can bisect.
+        keysof(n).each do |k|
+          enc << symid[k]
+          enc << build.call(n[k])
+        end
+        intern.call(enc)
+      elsif islist(n)
+        intern.call([CONDENSE_LIST] + n.map { |item| build.call(item) })
+      elsif n.is_a?(String)
+        intern.call([CONDENSE_STR, symid[n]])
+      elsif n.is_a?(Numeric)
+        # Keyed by value, so 1 and 1.0 are one number.
+        numkey = n.is_a?(Float) && n.finite? && n == n.to_i ? n.to_i : n
+        intern.call([CONDENSE_NUM, n], [CONDENSE_NUM, numkey])
+      elsif n == true
+        intern.call([CONDENSE_TRUE])
+      elsif n == false
+        intern.call([CONDENSE_FALSE])
+      else
+        intern.call([CONDENSE_NULL])
+      end
+    end
+
+    root = build.call(val)
+
+    out = {}
+    out[S_condense] = CONDENSE_VERSION
+    out[S_condsym] = sym
+    out[S_condnode] = node
+    out[S_condroot] = root
+    out
+  end
+
+  # Resolve a symbol to its id by bisecting the sorted symbol table. -1 when
+  # the string does not occur anywhere in the structure, which is itself a fast
+  # negative answer for a key lookup.
+  def self.condenseSymId(cond, key)
+    sym = _getprop(cond, S_condsym, nil)
+    lo = 0
+    hi = islist(sym) ? sym.length - 1 : -1
+    while lo <= hi
+      mid = (lo + hi) >> 1
+      s = sym[mid]
+      return mid if s == key
+
+      if s.is_a?(String) && s < key
+        lo = mid + 1
+      else
+        hi = mid - 1
+      end
+    end
+    -1
+  end
+
+  # The node index of `key` inside node `idx`, or -1. Touches only this node.
+  def self.condenseChild(cond, idx, key)
+    enc = _condenseat(_getprop(cond, S_condnode, nil), idx)
+    kind = _condenseat(enc, 0)
+
+    if kind == CONDENSE_MAP
+      symid = condenseSymId(cond, _condensestr(key))
+      return -1 if symid.negative?
+
+      # Pairs live at [1,2], [3,4], ... with keys ascending: bisect the pairs.
+      lo = 0
+      hi = ((enc.length - 1) / 2) - 1
+      while lo <= hi
+        mid = (lo + hi) >> 1
+        k = enc[1 + (mid * 2)]
+        return enc[2 + (mid * 2)] if k == symid
+
+        if k.is_a?(Numeric) && k < symid
+          lo = mid + 1
+        else
+          hi = mid - 1
+        end
+      end
+      return -1
+    end
+
+    if kind == CONDENSE_LIST
+      # Canonical integer keys ONLY: an ordinary list lookup misses "01",
+      # "1e0", " 1" and "+1", and condensing must not change which value a
+      # path selects.
+      k = _condensestr(key)
+      return -1 unless R_CONDENSE_INDEX.match?(k)
+
+      i = k.to_i
+      return -1 if i >= enc.length - 1
+
+      return enc[1 + i]
+    end
+
+    -1
+  end
+
+  # Walk a path from a starting node, returning the node index or -1.
+  def self.condenseResolve(cond, idx, path)
+    parts =
+      if islist(path)
+        path
+      elsif path.is_a?(String)
+        path == S_MT ? [] : path.split(S_DT, -1)
+      elsif path.nil? || path.equal?(UNDEF)
+        []
+      else
+        [_condensestr(path)]
+      end
+
+    at = idx
+    parts.each do |part|
+      return -1 unless at.is_a?(Numeric) && !at.negative?
+      next if part == S_MT
+
+      at = condenseChild(cond, at, part)
+    end
+    # A child index that is not a number names no node.
+    at.is_a?(Numeric) ? at : -1
+  end
+
+  # A missing node materialises as nil, so no UNDEF reaches a container.
+  def self.condenseMaterialise(cond, idx)
+    sym = _getprop(cond, S_condsym, nil)
+    node = _getprop(cond, S_condnode, nil)
+
+    rebuild = lambda do |i|
+      enc = _condenseat(node, i)
+      return nil if enc.nil?
+
+      case _condenseat(enc, 0)
+      when CONDENSE_MAP
+        out = {}
+        (1...enc.length).step(2) { |j| out[_condenseat(sym, enc[j])] = rebuild.call(_condenseat(enc, j + 1)) }
+        out
+      when CONDENSE_LIST
+        (1...enc.length).map { |j| rebuild.call(enc[j]) }
+      when CONDENSE_STR
+        _condenseat(sym, _condenseat(enc, 1))
+      when CONDENSE_NUM
+        _condenseat(enc, 1)
+      when CONDENSE_TRUE
+        true
+      when CONDENSE_FALSE
+        false
+      end
+    end
+
+    rebuild.call(idx)
+  end
+
+  # Fully materialise a condensed structure. The escape hatch: correct for any
+  # caller, but it gives up every benefit of condensing, so prefer a view or a
+  # path read.
+  def self.expand(cond = UNDEF)
+    return cond unless iscondensed(cond)
+
+    condenseMaterialise(cond, cond[S_condroot])
+  end
+
+  # The keys of node `idx`, WITHOUT materialising any of its values. This is
+  # the point of the whole exercise for enumeration: listing the names in a
+  # large collection should cost a symbol-table read, not a full decode.
+  def self.condenseKeys(cond, idx)
+    enc = _condenseat(_getprop(cond, S_condnode, nil), idx)
+    case _condenseat(enc, 0)
+    when CONDENSE_MAP
+      sym = _getprop(cond, S_condsym, nil)
+      (1...enc.length).step(2).map { |j| _condenseat(sym, enc[j]) }
+    when CONDENSE_LIST
+      (1...enc.length).map { |j| (j - 1).to_s }
+    else
+      []
+    end
+  end
+
+  # A cursor into a condensed structure. Reads resolve by integer index and
+  # touch only the nodes on the path, so the cost of a lookup is proportional
+  # to path depth and result size, never to total structure size.
+  class CondenseView
+    def initialize(cond, start, refmemo)
+      @cond = cond
+      @start = start
+      # Shared materialisations, handed out ONLY by ref(). Threaded through
+      # at() so every cursor into the same structure shares one memo.
+      @refmemo = refmemo
+    end
+
+    # The value at path, materialised. Scalars come back directly; a
+    # container comes back as an independent copy.
+    def get(path = nil)
+      VoxgigStruct.condenseMaterialise(@cond, VoxgigStruct.condenseResolve(@cond, @start, path))
+    end
+
+    # Key names at path, with no value decoding at all.
+    def keys(path = nil)
+      at = VoxgigStruct.condenseResolve(@cond, @start, path)
+      at.negative? ? [] : VoxgigStruct.condenseKeys(@cond, at)
+    end
+
+    def has(path = nil)
+      !VoxgigStruct.condenseResolve(@cond, @start, path).negative?
+    end
+
+    # Chainable cursor. Cheap: no decoding happens here.
+    def at(path = nil)
+      VoxgigStruct.condenseview(@cond, VoxgigStruct.condenseResolve(@cond, @start, path), @refmemo)
+    end
+
+    def value
+      VoxgigStruct.condenseMaterialise(@cond, @start)
+    end
+
+    def size
+      enc = VoxgigStruct._condenseat(VoxgigStruct._getprop(@cond, S_condnode, nil), @start)
+      case VoxgigStruct._condenseat(enc, 0)
+      when CONDENSE_MAP then (enc.length - 1) / 2
+      when CONDENSE_LIST then enc.length - 1
+      else 0
+      end
+    end
+
+    def exists
+      !@start.negative?
+    end
+
+    # DANGER, and named to say so. Returns a SHARED materialisation: the same
+    # object for the same node, every time. Mutating it corrupts every other
+    # reader of that node, including ones reached by a different path,
+    # because the structure is a DAG. Use value() unless a profile says this
+    # matters.
+    def ref
+      @refmemo[@start] = VoxgigStruct.condenseMaterialise(@cond, @start) unless @refmemo.key?(@start)
+      @refmemo[@start]
+    end
+  end
+
+  private_constant :CondenseView
+
+  def self.condenseview(cond = UNDEF, idx = nil, memo = nil)
+    start = idx.nil? || idx.equal?(UNDEF) ? (iscondensed(cond) ? cond[S_condroot] : -1) : idx
+    # A start that is not a number reads as no node, as it does in JavaScript.
+    CondenseView.new(cond, start.is_a?(Numeric) ? start : -1, memo.nil? ? {} : memo)
   end
 
   # --- Injection class ---

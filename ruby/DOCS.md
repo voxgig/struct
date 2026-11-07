@@ -189,7 +189,7 @@ Ruby-specific points the signatures don't show:
 - **Type flags** combine bitwise: `typify('hi')` is `T_scalar | T_string`;
   test with `0 < (T_string & t)`. `typify(UNDEF)` is `T_noval` (not a
   scalar); `typify(nil)` is `T_scalar | T_null`.
-- **Extras beyond the canonical 48.** This port also exposes `joinurl`,
+- **Extras beyond the canonical 52.** This port also exposes `joinurl`,
   `replace`, and the `select` operators (`AND`/`OR`/`NOT`/`CMP`).
 
 ---

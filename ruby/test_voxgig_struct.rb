@@ -22,6 +22,9 @@ rescue StandardError
   a == b
 end
 
+# The corpus is UTF-8 JSON; File.read would otherwise decode it in the locale's encoding.
+Encoding.default_external = Encoding::UTF_8
+
 # Path to the JSON test file
 TEST_JSON_FILE = File.join(File.dirname(__FILE__), '..', 'build', 'test', 'test.json')
 
@@ -65,6 +68,132 @@ class TestVoxgigStruct < Minitest::Test
     ].each do |meth|
       assert_respond_to @struct, meth, "Expected VoxgigStruct to respond to #{meth}"
     end
+  end
+
+  # --- Condense tests ---
+
+  def test_condense_condense
+    @runsetflags.call(@spec['condense']['condense'], { 'null' => false }, VoxgigStruct.method(:condense))
+  end
+
+  def test_condense_expand
+    @runsetflags.call(@spec['condense']['expand'], { 'null' => false }, VoxgigStruct.method(:expand))
+  end
+
+  def test_condense_iscondensed
+    @runsetflags.call(@spec['condense']['iscondensed'], { 'null' => false }, VoxgigStruct.method(:iscondensed))
+  end
+
+  # Properties the corpus shape cannot express: identity, sharing, laziness
+  # and the immutability contract.
+
+  def test_condense_deterministic
+    src = { 'b' => { 'm' => 'GET' }, 'a' => { 'm' => 'GET' }, 'l' => [1, 'x', true] }
+    assert_equal JSON.generate(VoxgigStruct.condense(src)), JSON.generate(VoxgigStruct.condense(src))
+    # Insertion order must not change the bytes: keys are stored by symbol id.
+    reordered = { 'l' => [1, 'x', true], 'a' => { 'm' => 'GET' }, 'b' => { 'm' => 'GET' } }
+    assert_equal JSON.generate(VoxgigStruct.condense(src)), JSON.generate(VoxgigStruct.condense(reordered))
+  end
+
+  def test_condense_shares_identical_subtrees
+    one = VoxgigStruct.condense({ 'x' => { 'm' => 'GET', 'p' => '/1' } })
+    two = VoxgigStruct.condense({ 'x' => { 'm' => 'GET', 'p' => '/1' }, 'y' => { 'm' => 'GET', 'p' => '/1' } })
+    # A second reference to an identical subtree adds no node.
+    assert_equal one['node'].length, two['node'].length
+    three = VoxgigStruct.condense({ 'x' => { 'm' => 'GET' }, 'y' => { 'm' => 'PUT' }, 'z' => { 'm' => 'POST' } })
+    assert three['node'].length > two['node'].length
+    # An integer and a decimal of the same value are one number.
+    assert_equal [[3, 1], [1, 0, 0]], VoxgigStruct.condense([1, 1.0])['node']
+  end
+
+  def test_condense_round_trips_by_value
+    src = { 'a' => { 'b' => [1, 'x', true, nil, {}] }, 'c' => 'z' }
+    assert_equal src, VoxgigStruct.expand(VoxgigStruct.condense(src))
+  end
+
+  def test_condense_getpath_is_transparent
+    src = { 'entity' => { 'p' => { 'op' => { 'list' => { 'method' => 'GET' } } } } }
+    c = VoxgigStruct.condense(src)
+    assert_equal VoxgigStruct.getpath(src, %w[entity p op list]), VoxgigStruct.getpath(c, %w[entity p op list])
+    assert_equal 'GET', VoxgigStruct.getpath(c, %w[entity p op list method])
+    assert_nil VoxgigStruct.getpath(c, %w[entity nope])
+  end
+
+  def test_condense_view_reads_without_materialising
+    c = VoxgigStruct.condense({ 'entity' => { 'a' => { 'v' => 1 }, 'b' => { 'v' => 2 } }, 'other' => 9 })
+    v = VoxgigStruct.condenseview(c)
+    # keys() answers from the node and symbol tables alone.
+    assert_equal %w[a b], v.keys('entity')
+    assert_equal 2, v.at('entity').at('b').get('v')
+    assert v.has('entity.a')
+    refute v.has('entity.zz')
+    assert_equal 2, v.size
+  end
+
+  def test_condense_value_copies_and_ref_shares
+    c = VoxgigStruct.condense({ 'a' => { 'm' => 'GET' }, 'b' => { 'm' => 'GET' } })
+    v = VoxgigStruct.condenseview(c)
+    # a and b share one node. get() must not let that be observable.
+    x = v.get('a')
+    y = v.get('b')
+    assert_equal x, y
+    refute_same x, y
+    x['m'] = 'MUTATED'
+    assert_equal 'GET', v.get('b')['m']
+    # ref() is the opt-in escape hatch and DOES share.
+    assert_same v.at('a').ref, v.at('a').ref
+  end
+
+  def test_condense_preserves_proto_named_keys_and_values
+    as_value = JSON.parse('{"x":"__proto__"}')
+    assert_equal as_value, VoxgigStruct.expand(VoxgigStruct.condense(as_value))
+    as_key = JSON.parse('{"__proto__":1}')
+    assert_equal '{"__proto__":1}', JSON.generate(VoxgigStruct.expand(VoxgigStruct.condense(as_key)))
+  end
+
+  def test_condense_getpath_matches_plain_on_null_and_options
+    # A stored null reads as absent either way.
+    assert_nil VoxgigStruct.getpath({ 'a' => nil }, 'a')
+    assert_nil VoxgigStruct.getpath(VoxgigStruct.condense({ 'a' => nil }), 'a')
+    # A base must not be ignored by the condensed fast path.
+    store = { 'base' => { 'x' => 1 } }
+    assert_equal VoxgigStruct.getpath(store, 'x', { 'base' => 'base' }),
+                 VoxgigStruct.getpath(VoxgigStruct.condense(store), 'x', { 'base' => 'base' })
+  end
+
+  def test_condense_list_keys_are_canonical_integers
+    c = VoxgigStruct.condense({ 'l' => [10, 20] })
+    # Only a canonical integer selects an element, as in canonical TypeScript.
+    ['01', '1e0', ' 1', '+1', '1.0', '-0', "1\n"].each do |k|
+      assert_nil VoxgigStruct.getpath(c, ['l', k]), "list key #{k.inspect}"
+    end
+    assert_equal 20, VoxgigStruct.getpath(c, %w[l 1])
+    assert_equal 20, VoxgigStruct.getpath(c, ['l', 1])
+  end
+
+  def test_condense_symbols_sort_by_code_point
+    sym = VoxgigStruct.condense({ 'a' => "\u{10000}", 'b' => "\uFFFF" })['sym']
+    assert sym.index("\uFFFF") < sym.index("\u{10000}"), "symbol table is not in code-point order: #{sym.inspect}"
+  end
+
+  def test_condense_invalid_key_mutations_stay_no_ops
+    # An invalid key is ignored, so a call that cannot write does not raise.
+    c = VoxgigStruct.condense({ 'a' => 1 })
+    assert_same c, VoxgigStruct.delprop(c, nil)
+    assert_same c, VoxgigStruct.setprop(c, nil, 1)
+    # A call that COULD write still raises.
+    assert_match(/immutable/, assert_raises(RuntimeError) { VoxgigStruct.delprop(c, 'sym') }.message)
+  end
+
+  def test_condense_is_immutable
+    c = VoxgigStruct.condense({ 'a' => 1 })
+    assert_match(/immutable/, assert_raises(RuntimeError) { VoxgigStruct.setpath(c, 'a', 2) }.message)
+    assert_match(/immutable/, assert_raises(RuntimeError) { VoxgigStruct.setprop(c, 'a', 2) }.message)
+    assert_match(/immutable/, assert_raises(RuntimeError) { VoxgigStruct.delprop(c, 'sym') }.message)
+    # The expanded copy is ordinary and mutable.
+    e = VoxgigStruct.expand(c)
+    VoxgigStruct.setpath(e, 'a', 2)
+    assert_equal 2, e['a']
   end
 
   # --- Minor tests ---
