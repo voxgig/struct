@@ -70,10 +70,10 @@ installed** — if you can't run a target, say so; don't claim a change works.
   *absent*. That is the cheap side by a wide margin (43 entries against 6,
   measured over the minor and `validate.basic` groups); the entries it costs
   are dropped by index, with guards, in `test/struct_test.lua`. So are the
-  `validate.directive`, `validate.nof` and `validate.all` entries that turn on
-  a null inside a node: a null map member arrives absent, a null list element
-  as the string `"null"`. `NOVAL` covers the argument side of the same
-  problem — see below.
+  `validate.directive`, `validate.nof`, `validate.all` and `condense.condense`
+  entries that turn on a null inside a node: a null map member arrives absent,
+  a null list element as the string `"null"`. `NOVAL` covers the argument side
+  of the same problem — see below.
 - **A checker is taken away with `false`.** Canonical `validate` treats a
   null in its store (from `extra`, or the transform commands it disables) as
   no checker, so naming it is an unknown checker. A Lua table cannot hold

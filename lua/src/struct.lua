@@ -223,6 +223,24 @@ end
 
 local MAXDEPTH = 32
 
+-- Condensed structures: the format version, and the kind leading each node.
+local CONDENSE_VERSION = 1
+local CONDENSE_MAP = 0
+local CONDENSE_LIST = 1
+local CONDENSE_STR = 2
+local CONDENSE_NUM = 3
+local CONDENSE_TRUE = 4
+local CONDENSE_FALSE = 5
+local CONDENSE_NULL = 6
+
+local S_condense = "$condense"
+local S_condsym = "sym"
+local S_condnode = "node"
+local S_condroot = "root"
+
+local S_CONDENSE_IMMUTABLE =
+  "struct: condensed structures are immutable - expand() first, then modify the copy"
+
 ----------------------------------------------------------
 -- Forward declarations to work around the lack of function hoisting
 ----------------------------------------------------------
@@ -247,6 +265,10 @@ local setprop
 local delprop
 local checkPlacement
 local injectorArgs
+local iscondensed
+local expand
+local condenseResolve
+local condenseMaterialise
 
 -- Return type string for narrowest type.
 local function typename(t)
@@ -860,6 +882,10 @@ delprop = function(parent, key)
     return parent
   end
 
+  if iscondensed(parent) then
+    error(S_CONDENSE_IMMUTABLE)
+  end
+
   if ismap(parent) then
     key = tostring(key)
     parent[key] = nil
@@ -1297,6 +1323,11 @@ end
 
 -- Set a value deep inside a node at a key path.
 local function setpath(store, path, val, injdef)
+  -- Same contract as setprop/delprop: a condensed store is immutable.
+  if iscondensed(store) then
+    error(S_CONDENSE_IMMUTABLE)
+  end
+
   local pathType = typify(path)
 
   local parts
@@ -1428,6 +1459,10 @@ end
 setprop = function(parent, key, val)
   if not iskey(key) then
     return parent
+  end
+
+  if iscondensed(parent) then
+    error(S_CONDENSE_IMMUTABLE)
   end
 
   if ismap(parent) then
@@ -1702,6 +1737,17 @@ getpath = function(store, path, injdef)
     return NONE
   end
 
+  -- A condensed store answers a path as the node it was built from does,
+  -- touching only the nodes on the path. A base changes what the path
+  -- resolves against, so then it is expanded instead.
+  if iscondensed(store) then
+    if nil == injdef or nil == getprop(injdef, S_base) then
+      -- A stored null materialises as nil, so it reads as absent (Group A).
+      return condenseMaterialise(store, condenseResolve(store, store[S_condroot], parts))
+    end
+    store = expand(store)
+  end
+
   local val = store
   local base = getprop(injdef, S_base)
   local src = getprop(store, base, store)
@@ -1874,7 +1920,7 @@ function Injection:descend()
     end
   else
     if parentkey ~= nil then
-      self.dparent = getprop(self.dparent, parentkey)
+      self.dparent = denoval(getprop(self.dparent, parentkey))
 
       local lastpart = getelem(self.dpath, -1)
       if lastpart == "$:" .. tostring(parentkey) then
@@ -2632,6 +2678,15 @@ local function transform_APPLY(inj, _val, _ref, store)
   return out
 end
 
+-- merge reads NOVAL as nil and writes that back into extra, so a $TOP that
+-- extra gives as NOVAL (canonical undefined, from a $NOF or $ALL trial) is
+-- read before the merge and put back after it.
+local function _keeptop(store, top)
+  if NOVAL == top then
+    store[S_DTOP] = NOVAL
+  end
+end
+
 -- Transform data using spec.
 -- @param data (any) Source data to transform
 -- @param spec (any) Transform specification
@@ -2668,6 +2723,7 @@ local function transform(data, spec, injdef)
   end
 
   -- Define a top level store that provides transform operations.
+  local top = getprop(extra, S_DTOP)
   local store = merge({
     {
       [S_DTOP] = dataClone,
@@ -2700,6 +2756,7 @@ local function transform(data, spec, injdef)
     extraTransforms,
     { ["$ERRS"] = errs },
   }, 1)
+  _keeptop(store, top)
 
   local out = inject(spec, store, injdef)
 
@@ -2778,7 +2835,7 @@ local function validate_CHILD(inj)
 
     -- Get corresponding current object.
     local pkey = getelem(path, -2)
-    local tval = getprop(inj.dparent, pkey)
+    local tval = denoval(getprop(inj.dparent, pkey))
 
     if NONE == tval then
       tval = {}
@@ -3046,7 +3103,7 @@ _validation = function(pval, key, parent, inj)
   local exact = getprop(inj.meta, S_BEXACT, false)
 
   -- Current val to verify.
-  local cval = getprop(inj.dparent, key)
+  local cval = denoval(getprop(inj.dparent, key))
 
   if NONE == inj or (not exact and NONE == cval) then
     return
@@ -3141,6 +3198,7 @@ validate = function(data, spec, injdef)
   local errs = (injdef and injdef.errs) or {}
   setmetatable(errs, { __jsontype = "array" })
 
+  local top = getprop(extra, S_DTOP)
   local store = merge({
     {
       -- Remove the transform commands.
@@ -3178,6 +3236,7 @@ validate = function(data, spec, injdef)
       ["$ERRS"] = errs,
     },
   }, 1)
+  _keeptop(store, top)
 
   local meta = (injdef and injdef.meta) or {}
   setprop(meta, S_BEXACT, getprop(meta, S_BEXACT, false))
@@ -3419,6 +3478,7 @@ end
 
 -- Build a type validation error message.
 _invalidTypeMsg = function(path, needtype, vt, v, _whence)
+  v = denoval(v)
   local vs = (v == nil or v == S_null) and "no value" or stringify(v)
   local vtname = type(vt) == S_number and typename(vt) or tostring(vt)
 
@@ -3558,6 +3618,12 @@ end
 -- A spec admits a value when validating the value against it finds no error
 -- and gives back the value as it is.
 _admits = function(val, spec, inj, store)
+  -- A Lua node holds no null, so a nil slot below the root is a missing value,
+  -- which the nested validation must see as no value: NOVAL.
+  if nil == val and NONE ~= inj.prior and NONE ~= inj.prior.prior then
+    val = NOVAL
+  end
+
   local terrs = setmetatable({}, { __jsontype = "array" })
 
   local vstore = merge({ {}, store }, 1)
@@ -3569,7 +3635,7 @@ _admits = function(val, spec, inj, store)
     meta = inj.meta,
   })
 
-  return 0 == size(terrs) and _keeps(val, out)
+  return 0 == size(terrs) and _keeps(denoval(val), out)
 end
 
 -- The bounds of a $NOF count, and the words for it, which are absent when
@@ -3731,10 +3797,404 @@ _injectstr = function(val, store, inj)
   return out
 end
 
+----------------------------------------------------------
+-- Condense: a JSON-shaped node as a symbol table and a list of shared nodes.
+----------------------------------------------------------
+
+iscondensed = function(val)
+  -- The version must MATCH, not merely be numeric: a future profile would
+  -- otherwise be decoded under this one's schema.
+  return type(val) == "table"
+    and CONDENSE_VERSION == val[S_condense]
+    and ismap(val)
+    and islist(val[S_condsym])
+    and islist(val[S_condnode])
+    and type(val[S_condroot]) == S_number
+end
+
+-- One key per number value, as joining a JS number gives: -0 is 0.
+local function condenseNumKey(n)
+  local f = n + 0.0
+  if 0 == f then
+    return "0"
+  end
+  return string.format("%.17g", f)
+end
+
+-- Condense any JSON-shaped node. Pure: the same input always produces a
+-- byte-identical result, on every port.
+local function condense(val)
+  val = denoval(val)
+
+  local symset = {}
+
+  local function collect(n)
+    if ismap(n) then
+      for k, v in pairs(n) do
+        symset[k] = true
+        collect(v)
+      end
+    elseif islist(n) then
+      for i = 1, #n do
+        collect(n[i])
+      end
+    elseif type(n) == S_string then
+      symset[n] = true
+    end
+  end
+  collect(val)
+
+  local sym = setmetatable({}, { __jsontype = "array" })
+  for s in pairs(symset) do
+    table.insert(sym, s)
+  end
+  table.sort(sym)
+  local symid = {}
+  for i, s in ipairs(sym) do
+    symid[s] = i - 1
+  end
+
+  local node = setmetatable({}, { __jsontype = "array" })
+  local seen = {}
+
+  local function intern(enc)
+    local enckey
+    if CONDENSE_NUM == enc[1] then
+      -- Numbers key by value, as a JS join spells them: 1 and 1.0 share a node.
+      enckey = CONDENSE_NUM .. "," .. condenseNumKey(enc[2])
+    else
+      enckey = table.concat(enc, ",")
+    end
+    local hit = seen[enckey]
+    if nil ~= hit then
+      return hit
+    end
+    local idx = #node
+    table.insert(node, enc)
+    seen[enckey] = idx
+    return idx
+  end
+
+  -- Post-order, so identical subtrees are interned before a parent refers to them.
+  local function build(n)
+    local enc
+    if ismap(n) then
+      enc = { CONDENSE_MAP }
+      -- keysof sorts bytewise, which is code-point order, so the key ids ascend for bisection.
+      for _, k in ipairs(keysof(n)) do
+        table.insert(enc, symid[k])
+        table.insert(enc, build(n[k]))
+      end
+    elseif islist(n) then
+      enc = { CONDENSE_LIST }
+      for i = 1, #n do
+        table.insert(enc, build(n[i]))
+      end
+    elseif type(n) == S_string then
+      enc = { CONDENSE_STR, symid[n] }
+    elseif type(n) == S_number then
+      enc = { CONDENSE_NUM, n }
+    elseif true == n then
+      enc = { CONDENSE_TRUE }
+    elseif false == n then
+      enc = { CONDENSE_FALSE }
+    else
+      enc = { CONDENSE_NULL }
+    end
+    return intern(setmetatable(enc, { __jsontype = "array" }))
+  end
+
+  local root = build(val)
+
+  local out = setmetatable({}, { __jsontype = "object" })
+  out[S_condense] = CONDENSE_VERSION
+  out[S_condsym] = sym
+  out[S_condnode] = node
+  out[S_condroot] = root
+  return out
+end
+
+-- A path part as JavaScript's String() spells it.
+local function condenseStr(val)
+  if type(val) == S_string then
+    return val
+  elseif type(val) == S_number then
+    return tostring(math.tointeger(val) or val)
+  elseif type(val) == S_boolean then
+    return tostring(val)
+  end
+  return stringify(val)
+end
+
+-- The encoding of node idx, or nil when there is none.
+local function condenseEnc(cond, idx)
+  local node = type(cond) == "table" and cond[S_condnode] or nil
+  if type(idx) ~= S_number or not islist(node) then
+    return nil
+  end
+  local enc = node[idx + 1]
+  if islist(enc) then
+    return enc
+  end
+  return nil
+end
+
+-- Bisect the sorted symbol table: -1 when the string occurs nowhere.
+local function condenseSymId(cond, key)
+  local sym = cond[S_condsym]
+  local lo, hi = 0, #sym - 1
+  while lo <= hi do
+    local mid = (lo + hi) // 2
+    local s = condenseStr(sym[mid + 1])
+    if s == key then
+      return mid
+    elseif s < key then
+      lo = mid + 1
+    else
+      hi = mid - 1
+    end
+  end
+  return -1
+end
+
+-- The node index of key inside node idx, or -1. Touches only this node.
+local function condenseChild(cond, idx, key)
+  local enc = condenseEnc(cond, idx)
+  if nil == enc then
+    return -1
+  end
+
+  local k = condenseStr(key)
+
+  if CONDENSE_MAP == enc[1] then
+    local symid = condenseSymId(cond, k)
+    if 0 > symid then
+      return -1
+    end
+    -- Pairs live at [2,3], [4,5], ... with keys ascending: bisect the pairs.
+    local lo, hi = 0, (#enc - 1) // 2 - 1
+    while lo <= hi do
+      local mid = (lo + hi) // 2
+      local pk = enc[2 + mid * 2] or -1
+      if pk == symid then
+        return enc[3 + mid * 2] or -1
+      elseif pk < symid then
+        lo = mid + 1
+      else
+        hi = mid - 1
+      end
+    end
+    return -1
+  end
+
+  if CONDENSE_LIST == enc[1] then
+    -- Canonical integer keys only: an ordinary list lookup treats "01",
+    -- "1e0", " 1" and "+1" as absent, so a condensed one must too.
+    if "0" ~= k and not k:match("^[1-9][0-9]*$") then
+      return -1
+    end
+    local i = math.tointeger(tonumber(k))
+    if nil == i or i >= #enc - 1 then
+      return -1
+    end
+    return enc[2 + i]
+  end
+
+  return -1
+end
+
+-- Walk a path from node idx, returning the node index or -1.
+condenseResolve = function(cond, idx, path)
+  local parts
+  if islist(path) then
+    parts = path
+  elseif type(path) == S_string then
+    -- As JavaScript's split('.'), except that "" is no parts.
+    parts = {}
+    if S_MT ~= path then
+      for part in (path .. S_DT):gmatch("(.-)%.") do
+        table.insert(parts, part)
+      end
+    end
+  elseif nil == denoval(path) then
+    parts = {}
+  else
+    parts = { condenseStr(path) }
+  end
+
+  local at = idx
+  for i = 1, #parts do
+    if 0 > at then
+      return -1
+    end
+    if S_MT ~= parts[i] then
+      at = condenseChild(cond, at, parts[i])
+    end
+  end
+  return at
+end
+
+-- Node idx as a fresh, independent tree; nil when there is no such node.
+condenseMaterialise = function(cond, idx)
+  if type(idx) ~= S_number or 0 > idx then
+    return nil
+  end
+
+  local sym = cond[S_condsym]
+
+  local function rebuild(i)
+    local enc = condenseEnc(cond, i)
+    if nil == enc then
+      return nil
+    end
+    local kind = enc[1]
+    if CONDENSE_MAP == kind then
+      local out = setmetatable({}, { __jsontype = "object" })
+      for j = 2, #enc, 2 do
+        local key = type(enc[j]) == S_number and sym[enc[j] + 1] or nil
+        if nil ~= key then
+          out[condenseStr(key)] = rebuild(enc[j + 1])
+        end
+      end
+      return out
+    end
+    if CONDENSE_LIST == kind then
+      local out = setmetatable({}, { __jsontype = "array" })
+      for j = 2, #enc do
+        local child = rebuild(enc[j])
+        -- A Lua list cannot hold nil, so a null element is NULLMARK.
+        if nil == child then
+          child = NULLMARK
+        end
+        table.insert(out, child)
+      end
+      return out
+    end
+    if CONDENSE_STR == kind then
+      return type(enc[2]) == S_number and sym[enc[2] + 1] or nil
+    end
+    if CONDENSE_NUM == kind then
+      return enc[2]
+    end
+    if CONDENSE_TRUE == kind then
+      return true
+    end
+    if CONDENSE_FALSE == kind then
+      return false
+    end
+    return nil
+  end
+
+  return rebuild(idx)
+end
+
+-- Fully materialise a condensed structure. A value that is not condensed comes
+-- back unchanged.
+expand = function(cond)
+  if not iscondensed(cond) then
+    return cond
+  end
+  return condenseMaterialise(cond, cond[S_condroot])
+end
+
+-- The keys of node idx, without materialising any of its values.
+local function condenseKeys(cond, idx)
+  local out = setmetatable({}, { __jsontype = "array" })
+  local enc = condenseEnc(cond, idx)
+  if nil == enc then
+    return out
+  end
+  if CONDENSE_MAP == enc[1] then
+    local sym = cond[S_condsym]
+    for j = 2, #enc, 2 do
+      local key = type(enc[j]) == S_number and sym[enc[j] + 1] or nil
+      if nil ~= key then
+        table.insert(out, condenseStr(key))
+      end
+    end
+  elseif CONDENSE_LIST == enc[1] then
+    for j = 2, #enc do
+      table.insert(out, tostring(j - 2))
+    end
+  end
+  return out
+end
+
+-- A cursor into a condensed structure. Reads resolve by node index and touch
+-- only the nodes on the path, so a lookup costs path depth, not total size.
+local function condenseview(cond, idx, memo)
+  local start = denoval(idx)
+  if nil == start then
+    start = iscondensed(cond) and cond[S_condroot] or -1
+  elseif type(start) ~= S_number or start ~= start then
+    start = -1
+  end
+
+  -- Shared through at(), so that every view into the structure shares one
+  -- memo: otherwise ref() would hand out a different node per view.
+  local refmemo = type(memo) == "table" and memo or {}
+
+  local view = {}
+
+  -- The value at path, materialised: a container comes back as a fresh copy.
+  view.get = function(path)
+    return condenseMaterialise(cond, condenseResolve(cond, start, path))
+  end
+
+  -- Key names at path, with no value decoding at all.
+  view.keys = function(path)
+    return condenseKeys(cond, condenseResolve(cond, start, path))
+  end
+
+  view.has = function(path)
+    return 0 <= condenseResolve(cond, start, path)
+  end
+
+  -- Chainable cursor. Cheap: no decoding happens here.
+  view.at = function(path)
+    return condenseview(cond, condenseResolve(cond, start, path), refmemo)
+  end
+
+  view.value = function()
+    return condenseMaterialise(cond, start)
+  end
+
+  view.size = function()
+    local enc = condenseEnc(cond, start)
+    if nil == enc then
+      return 0
+    elseif CONDENSE_MAP == enc[1] then
+      return (#enc - 1) // 2
+    elseif CONDENSE_LIST == enc[1] then
+      return #enc - 1
+    end
+    return 0
+  end
+
+  view.exists = function()
+    return 0 <= start
+  end
+
+  -- DANGER, and named to say so: the SAME node for the same index, every time.
+  -- Mutating it corrupts every other reader of that node, however reached.
+  view.ref = function()
+    if nil == refmemo[start] then
+      refmemo[start] = condenseMaterialise(cond, start)
+    end
+    return refmemo[start]
+  end
+
+  return view
+end
+
 -- Define the StructUtility "class"
 local StructUtility = {
   NOVAL = NOVAL,
   clone = clone,
+  condense = condense,
+  condenseview = condenseview,
+  expand = expand,
+  iscondensed = iscondensed,
   delprop = delprop,
   escre = escre,
   escurl = escurl,
@@ -3825,6 +4285,10 @@ return {
   StructUtility = StructUtility,
   NOVAL = NOVAL,
   clone = clone,
+  condense = condense,
+  condenseview = condenseview,
+  expand = expand,
+  iscondensed = iscondensed,
   delprop = delprop,
   escre = escre,
   escurl = escurl,

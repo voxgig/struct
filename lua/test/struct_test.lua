@@ -118,6 +118,10 @@ describe("struct", function()
   local struct_util = client:utility().struct
   -- Extract test specifications for different function groups
   local clone = struct_util.clone
+  local condense = struct_util.condense
+  local condenseview = struct_util.condenseview
+  local expand = struct_util.expand
+  local iscondensed = struct_util.iscondensed
   local delprop = struct_util.delprop
   local escre = struct_util.escre
   local escurl = struct_util.escurl
@@ -163,6 +167,7 @@ describe("struct", function()
   local validate = struct_util.validate
   local walk = struct_util.walk
 
+  local condenseSpec = spec.condense
   local minorSpec = spec.minor
   local walkSpec = spec.walk
   local mergeSpec = spec.merge
@@ -217,6 +222,203 @@ describe("struct", function()
 
     assert.equal("function", type(validate))
     assert.equal("function", type(walk))
+  end)
+
+  ----------------------------------------------------------
+  -- Condense Tests
+  ----------------------------------------------------------
+
+  test("condense-condense", function()
+    runsetflags(
+      dropentries(condenseSpec.condense, {
+        -- The null list element arrives as the string "null", which condenses
+        -- as a string.
+        { at = 10, why = "condense of a null list element", is = function(entry)
+          return "condense/list-mixed" == entry.id and isnull(entryin(entry, "3"))
+        end },
+      }),
+      { null = false },
+      condense
+    )
+  end)
+
+  test("condense-expand", function()
+    runsetflags(
+      dropentries(condenseSpec.expand, {
+        -- `expand` gives back the null root as nil, read as absent.
+        { at = 3, why = "expand of a null root", is = function(entry)
+          return "expand/scalar-null" == entry.id and isnull(entry.out)
+        end },
+      }),
+      { null = false },
+      expand
+    )
+  end)
+
+  test("condense-iscondensed", function()
+    runsetflags(condenseSpec.iscondensed, { null = false }, iscondensed)
+  end)
+
+  -- What the corpus shape cannot express: identity, sharing, laziness and the
+  -- immutability contract.
+
+  test("condense-deterministic", function()
+    local function flat(val)
+      return jsonify(condense(val), { indent = 0 })
+    end
+    local function get()
+      return object({ m = "GET" })
+    end
+    local src = object({ b = get(), a = get(), l = array(1, "x", true) })
+    assert.equal(flat(src), flat(src))
+    -- Keys are stored by symbol id, so the order a table was built in does not
+    -- change the bytes.
+    local reordered = object()
+    reordered.l = array(1, "x", true)
+    reordered.a = get()
+    reordered.b = get()
+    assert.equal(flat(src), flat(reordered))
+  end)
+
+  test("condense-shares-identical-subtrees", function()
+    local function op(m)
+      return object({ m = m, p = "/1" })
+    end
+    local one = condense(object({ x = op("GET") }))
+    local two = condense(object({ x = op("GET"), y = op("GET") }))
+    assert.equal(#one.node, #two.node)
+    local three = condense(object({ x = op("GET"), y = op("PUT"), z = op("POST") }))
+    assert.is_true(#three.node > #two.node)
+  end)
+
+  test("condense-round-trips-by-value", function()
+    local src = object({ a = object({ b = array(1, "x", true, "__NULL__", object()) }), c = "z" })
+    assert.same(src, expand(condense(src)))
+    -- NULLMARK is an ordinary string to condense, as a key and as a value.
+    local marked = object({ __NULL__ = "__NULL__" })
+    assert.same(marked, expand(condense(marked)))
+    assert.equal("__NULL__", getpath(condense(marked), "__NULL__"))
+  end)
+
+  test("condense-getpath-is-transparent", function()
+    local op = object({ list = object({ method = "GET" }) })
+    local src = object({ entity = object({ p = object({ op = op }) }) })
+    local c = condense(src)
+    assert.same(
+      getpath(src, array("entity", "p", "op", "list")),
+      getpath(c, array("entity", "p", "op", "list"))
+    )
+    assert.equal("GET", getpath(c, array("entity", "p", "op", "list", "method")))
+    assert.is_nil(getpath(c, array("entity", "nope")))
+  end)
+
+  test("condense-view-reads-without-materialising", function()
+    local entity = object({ a = object({ v = 1 }), b = object({ v = 2 }) })
+    local v = condenseview(condense(object({ entity = entity, other = 9 })))
+    assert.same(array("a", "b"), v.keys("entity"))
+    assert.equal(2, v.at("entity").at("b").get("v"))
+    assert.is_true(v.has("entity.a"))
+    assert.is_false(v.has("entity.zz"))
+    assert.equal(2, v.size())
+    assert.is_false(v.at("entity.zz").exists())
+    assert.equal(0, v.at("entity.zz").size())
+    assert.same(array("0", "1"), condenseview(condense(array(7, 8))).keys())
+  end)
+
+  test("condense-value-copies-and-ref-shares", function()
+    local src = object({ a = object({ m = "GET" }), b = object({ m = "GET" }) })
+    local v = condenseview(condense(src))
+    -- a and b share one node, which get() must not make observable.
+    local x = v.get("a")
+    local y = v.get("b")
+    assert.same(x, y)
+    assert.is_false(x == y)
+    x.m = "MUTATED"
+    assert.equal("GET", v.get("b").m)
+    -- ref() is the opt-in shared materialisation.
+    assert.equal(v.at("a").ref(), v.at("a").ref())
+  end)
+
+  test("condense-preserves-proto-named-keys-and-values", function()
+    local asvalue = object({ x = "__proto__" })
+    assert.same(asvalue, expand(condense(asvalue)))
+    local askey = object({ __proto__ = 1 })
+    assert.equal('{"__proto__":1}', jsonify(expand(condense(askey)), { indent = 0 }))
+  end)
+
+  test("condense-getpath-matches-plain-on-null-and-options", function()
+    -- A Lua table holds no null, so this structure is spelt condensed: {a: null}.
+    local c = object({ ["$condense"] = 1, sym = array("a"), root = 1 })
+    c.node = array(array(6), array(0, 0, 0))
+    assert.is_true(iscondensed(c))
+    assert.is_nil(getpath(c, "a"))
+    -- A null list element materialises as NULLMARK, since a list cannot hold nil.
+    local l = object({ ["$condense"] = 1, sym = array(), root = 1 })
+    l.node = array(array(6), array(1, 0))
+    assert.same(array("__NULL__"), expand(l))
+    -- injdef.base must not be ignored by the condensed read.
+    local store = object({ base = object({ x = 1 }) })
+    local base = { base = "base" }
+    assert.equal(getpath(store, "x", base), getpath(condense(store), "x", base))
+    assert.equal(1, getpath(condense(store), "x", base))
+  end)
+
+  test("condense-list-keys-are-canonical-integers", function()
+    local plain = object({ l = array(10, 20) })
+    local c = condense(plain)
+    for _, k in ipairs({ "01", "1e0", " 1", "+1", "1.0", "-0", "1\n" }) do
+      assert.equal(getpath(plain, array("l", k)), getpath(c, array("l", k)), "list key " .. k)
+    end
+    assert.equal(20, getpath(c, array("l", "1")))
+    assert.equal(20, getpath(c, array("l", 1)))
+  end)
+
+  test("condense-symbols-sort-by-code-point", function()
+    local sym = condense(object({ a = "\u{10000}", b = "\u{FFFF}" })).sym
+    local at = {}
+    for i, s in ipairs(sym) do
+      at[s] = i
+    end
+    assert.is_true(at["\u{FFFF}"] < at["\u{10000}"])
+  end)
+
+  test("condense-astral-keys-resolve", function()
+    -- Code-unit order would put the astral key first; the stored pairs must not.
+    local c = condense(object({ ["\u{FF21}"] = 1, ["\u{1F600}"] = 2 }))
+    assert.equal(2, getpath(c, array("\u{1F600}")))
+    assert.equal(1, getpath(c, array("\u{FF21}")))
+    assert.equal(2, condenseview(c).get("\u{1F600}"))
+  end)
+
+  test("condense-numbers-intern-by-value", function()
+    local node = condense(array(1, 1.0, 2)).node
+    assert.equal("[[3,1],[3,2],[1,0,0,1]]", jsonify(node, { indent = 0 }))
+  end)
+
+  test("condense-invalid-key-mutations-stay-no-ops", function()
+    -- An invalid key is ignored, so a call that cannot write does not raise.
+    local c = condense(object({ a = 1 }))
+    assert.equal(c, delprop(c, nil))
+    assert.equal(c, setprop(c, nil, 1))
+    -- A call that could write still raises.
+    local ok, err = pcall(delprop, c, "sym")
+    assert.is_false(ok)
+    assert.truthy(string.find(err, "immutable", 1, true))
+  end)
+
+  test("condense-is-immutable", function()
+    local function raises(fn, ...)
+      local ok, err = pcall(fn, ...)
+      return not ok and nil ~= string.find(tostring(err), "immutable", 1, true)
+    end
+    local c = condense(object({ a = 1 }))
+    assert.is_true(raises(setpath, c, "a", 2))
+    assert.is_true(raises(setprop, c, "a", 2))
+    assert.is_true(raises(delprop, c, "sym"))
+    -- The expanded copy is ordinary and mutable.
+    local e = expand(c)
+    setpath(e, "a", 2)
+    assert.equal(2, e.a)
   end)
 
   ----------------------------------------------------------
@@ -1010,6 +1212,11 @@ describe("struct", function()
   test("validate-nof", function()
     runsetflags(
       dropentries(validateSpec.nof, {
+        -- The member arrives absent, which no spec of $NULL admits, so the
+        -- count of none holds where canonical counts the null.
+        { at = 24, why = "a null map member counted by $NOF", is = function(entry)
+          return isnull(entryin(entry, "data.a")) and 0 == entryin(entry, "spec.a.1")
+        end },
         { at = 25, why = "a null map member validated by $NOF", is = function(entry)
           return isnull(entryin(entry, "data.a")) and "`$NULL`" == entryin(entry, "spec.a.3")
         end },

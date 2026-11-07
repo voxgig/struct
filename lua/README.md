@@ -327,6 +327,10 @@ struct.merge(val, maxdepth)
 struct.clone(val)
 struct.flatten(list, depth)
 struct.filter(val, check)
+struct.condense(val)
+struct.expand(cond)
+struct.iscondensed(val)
+struct.condenseview(cond, idx, memo)
 ```
 
 ```lua
@@ -645,11 +649,6 @@ port's own `re_*` engine — `string.match('a.b', escre('a.b'))` returns
 Lua has no separate undefined keyword; `nil` covers both "absent"
 and "JSON null".  Where the test corpus needs to distinguish them,
 the runner uses string sentinels.
-
-A `$NOF` or `$ALL` trial validates the value at the root of its own call,
-where a missing value arrives as `nil`. So for a missing field a trial
-spec of `` '`$NULL`' `` admits it, where canonical TypeScript
-refuses it. No corpus entry reaches the case.
 
 ### Lists are mutable in place
 
