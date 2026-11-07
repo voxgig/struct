@@ -18027,6 +18027,30 @@
                 ]
               }
             }
+          },
+          {
+            "err": "Expected field a to be all of null, but found no value.",
+            "in": {
+              "data": {},
+              "spec": {
+                "a": [
+                  "`$ALL`",
+                  "`$NULL`"
+                ]
+              }
+            }
+          },
+          {
+            "in": {
+              "data": {},
+              "spec": {
+                "a": [
+                  "`$ALL`",
+                  "`$NIL`"
+                ]
+              }
+            },
+            "out": {}
           }
         ]
       },
@@ -21699,6 +21723,97 @@
                 ]
               }
             }
+          },
+          {
+            "err": "Expected field a to be exactly 1 of null, string, but found no value.",
+            "in": {
+              "data": {},
+              "spec": {
+                "a": [
+                  "`$NOF`",
+                  1,
+                  "`$NULL`",
+                  "`$STRING`"
+                ]
+              }
+            }
+          },
+          {
+            "err": "Expected field a to be exactly 1 of [exact,null], string, but found no value.",
+            "in": {
+              "data": {},
+              "spec": {
+                "a": [
+                  "`$NOF`",
+                  1,
+                  [
+                    "`$EXACT`",
+                    null
+                  ],
+                  "`$STRING`"
+                ]
+              }
+            }
+          },
+          {
+            "err": "Expected field a.b to be exactly 1 of null, but found no value.",
+            "in": {
+              "data": {},
+              "spec": {
+                "a": {
+                  "b": [
+                    "`$NOF`",
+                    1,
+                    "`$NULL`"
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "in": {
+              "data": {},
+              "spec": {
+                "a": [
+                  "`$NOF`",
+                  {
+                    "max": 0
+                  },
+                  "`$NULL`"
+                ]
+              }
+            },
+            "out": {}
+          },
+          {
+            "in": {
+              "data": {},
+              "spec": {
+                "a": [
+                  "`$NOF`",
+                  {
+                    "min": 1
+                  },
+                  "`$NULL`",
+                  "`$ANY`"
+                ]
+              }
+            },
+            "out": {}
+          },
+          {
+            "in": {
+              "data": {},
+              "spec": {
+                "a": [
+                  "`$NOF`",
+                  1,
+                  "dflt",
+                  "`$NUMBER`"
+                ]
+              }
+            },
+            "out": {}
           }
         ]
       },

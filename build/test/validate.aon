@@ -554,6 +554,18 @@ nof: set: [
             {'`$OPEN`':true, active:['`$NOF`',{min:1},'`$BOOLEAN`','`$NIL`'],
               providers:['`$NOF`',{min:1},'`$LIST`','`$NIL`']}, '`$NIL`']} },
     out: {s:{active:true, providers:[{kind:'env'}]}} }
+
+  # A missing field is no value inside a trial too: '$NULL' and
+  # ['$EXACT', null] refuse it, while '$NIL', '$ANY' and a default admit it.
+  { in: { data: {}, spec: {a:['`$NOF`',1,'`$NULL`','`$STRING`']} },
+    err: 'Expected field a to be exactly 1 of null, string, but found no value.' }
+  { in: { data: {}, spec: {a:['`$NOF`',1,['`$EXACT`',null],'`$STRING`']} },
+    err: 'Expected field a to be exactly 1 of [exact,null], string, but found no value.' }
+  { in: { data: {}, spec: {a:{b:['`$NOF`',1,'`$NULL`']}} },
+    err: 'Expected field a.b to be exactly 1 of null, but found no value.' }
+  { in: { data: {}, spec: {a:['`$NOF`',{max:0},'`$NULL`']} }, out: {} }
+  { in: { data: {}, spec: {a:['`$NOF`',{min:1},'`$NULL`','`$ANY`']} }, out: {} }
+  { in: { data: {}, spec: {a:['`$NOF`',1,'dflt','`$NUMBER`']} }, out: {} }
 ]
 
 
@@ -603,6 +615,11 @@ all: set: [
     err: 'The $ALL validator at field <root> must have at least one argument.' }
   { in: { data: {a:[1,2]}, spec: {a:['`$NUMBER`','`$ALL`']} },
     err: 'The $ALL validator at field a must be the first element of an array.' }
+
+  # A missing field is no value inside a trial too.
+  { in: { data: {}, spec: {a:['`$ALL`','`$NULL`']} },
+    err: 'Expected field a to be all of null, but found no value.' }
+  { in: { data: {}, spec: {a:['`$ALL`','`$NIL`']} }, out: {} }
 ]
 
 
