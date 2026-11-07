@@ -203,6 +203,21 @@ module VoxgigStruct
     URI::DEFAULT_PARSER.escape(s, /[^A-Za-z0-9\-._~!*'()]/)
   end
 
+  R_LIST_INDEX = /\A(0|[1-9][0-9]*)\z/.freeze
+  R_NEGATIVE_INDEX = /\A-0*[1-9][0-9]*\z/.freeze
+
+  # The index key reads in a list of size items, or -1. As JavaScript reads
+  # list[key], only a canonical integer names one: "1", not "01", "+1" or "-0".
+  # With fromend, as getelem reads it, a negative one counts back from the end.
+  def self._listindex(key, size, fromend = false)
+    key = key.to_i if key.is_a?(Float) && key.finite? && key == key.to_i
+    key = key.to_i if key.is_a?(String) && (R_LIST_INDEX.match?(key) || (fromend && R_NEGATIVE_INDEX.match?(key)))
+    return -1 unless key.is_a?(Integer)
+
+    key += size if fromend && key.negative?
+    key >= 0 && key < size ? key : -1
+  end
+
   # --- Internal getprop ---
   # Returns the value if found; otherwise returns alt (default is UNDEF)
   def self._getprop(val, key, alt = UNDEF)
@@ -210,12 +225,12 @@ module VoxgigStruct
     return alt if val.nil? || key.nil?
 
     if islist(val)
-      key = key.to_i if key.to_s =~ /\A\d+\z/
-      unless key.is_a?(Numeric) && key >= 0 && key < val.size
+      index = _listindex(key, val.size)
+      if index.negative?
         log { "(_getprop) index #{key.inspect} out of bounds; returning alt" }
         return alt
       end
-      result = val[key]
+      result = val[index]
       log { "(_getprop) returning #{result.inspect} from array for key #{key}" }
       result
     elsif ismap(val)
@@ -463,15 +478,9 @@ module VoxgigStruct
 
   def self.getelem(val, key, alt = UNDEF)
     out = UNDEF
-    if islist(val) && !key.nil? && !key.equal?(UNDEF)
-      begin
-        nkey = key.to_i
-        if key.to_s.strip.match?(/\A-?\d+\z/)
-          nkey = val.length + nkey if nkey.negative?
-          out = nkey >= 0 && nkey < val.length ? val[nkey] : UNDEF
-        end
-      rescue StandardError
-      end
+    if islist(val)
+      nkey = _listindex(key, val.length, true)
+      out = val[nkey] unless nkey.negative?
     end
     # A null (or absent) slot counts as "no value" — the same Group A rule
     # getprop applies (canonical TS: `if (null == out) return alt`).
@@ -1884,8 +1893,8 @@ module VoxgigStruct
     # $NIL is absent or null.
     typev |= T_null if tname == S_nil
 
-    # A trial on a missing value stores UNDEF at its root, which getprop reads as null.
-    out = _getprop(inj.dparent, inj.key, nil)
+    # Read literally: a missing field, or a trial's UNDEF root, is no value, not null.
+    out = _getprop(inj.dparent, inj.key)
     t = typify(out)
 
     if t.nobits?(typev)
@@ -2449,8 +2458,6 @@ module VoxgigStruct
   S_CONDENSED_IMMUTABLE =
     'struct: condensed structures are immutable - expand() first, then modify the copy'.freeze
 
-  R_CONDENSE_INDEX = /\A(0|[1-9][0-9]*)\z/.freeze
-
   # The item at index i, or nil. A negative or fractional i is no item, as in JavaScript.
   def self._condenseat(list, i)
     i = i.to_i if i.is_a?(Float) && i.finite? && i == i.to_i
@@ -2604,16 +2611,9 @@ module VoxgigStruct
     end
 
     if kind == CONDENSE_LIST
-      # Canonical integer keys ONLY: an ordinary list lookup misses "01",
-      # "1e0", " 1" and "+1", and condensing must not change which value a
-      # path selects.
-      k = _condensestr(key)
-      return -1 unless R_CONDENSE_INDEX.match?(k)
-
-      i = k.to_i
-      return -1 if i >= enc.length - 1
-
-      return enc[1 + i]
+      # Read as an ordinary list is, so condensing never changes which value a path selects.
+      i = _listindex(key, enc.length - 1)
+      return i.negative? ? -1 : enc[1 + i]
     end
 
     -1

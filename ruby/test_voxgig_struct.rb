@@ -162,9 +162,11 @@ class TestVoxgigStruct < Minitest::Test
   end
 
   def test_condense_list_keys_are_canonical_integers
-    c = VoxgigStruct.condense({ 'l' => [10, 20] })
-    # Only a canonical integer selects an element, as in canonical TypeScript.
+    plain = { 'l' => [10, 20] }
+    c = VoxgigStruct.condense(plain)
+    # Only a canonical integer selects an element, condensed or not.
     ['01', '1e0', ' 1', '+1', '1.0', '-0', "1\n"].each do |k|
+      assert_nil VoxgigStruct.getpath(plain, ['l', k]), "plain list key #{k.inspect}"
       assert_nil VoxgigStruct.getpath(c, ['l', k]), "list key #{k.inspect}"
     end
     assert_equal 20, VoxgigStruct.getpath(c, %w[l 1])
