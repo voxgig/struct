@@ -1163,6 +1163,11 @@ namespace Voxgig.Struct
                 return parent;
             }
 
+            if (IsCondensed(parent))
+            {
+                throw new InvalidOperationException(S_IMMUTABLE);
+            }
+
             if (parent is Dictionary<string, object?> map)
             {
                 string k = StrKey(key) ?? S_MT;
@@ -1204,6 +1209,11 @@ namespace Voxgig.Struct
                 return parent;
             }
 
+            if (IsCondensed(parent))
+            {
+                throw new InvalidOperationException(S_IMMUTABLE);
+            }
+
             if (parent is Dictionary<string, object?> map)
             {
                 string k = StrKey(key) ?? S_MT;
@@ -1235,6 +1245,11 @@ namespace Voxgig.Struct
         // last key was set (matches TypeScript behavior).
         public static object? SetPath(object? store, object? path, object? val)
         {
+            if (IsCondensed(store))
+            {
+                throw new InvalidOperationException(S_IMMUTABLE);
+            }
+
             if (store == null)
             {
                 return null;
@@ -1330,6 +1345,20 @@ namespace Voxgig.Struct
             else
             {
                 return null;
+            }
+
+            // A base changes what the path resolves against, so honour it on the expansion.
+            if (IsCondensed(store))
+            {
+                if (state?.Base == null)
+                {
+                    object? cpath = 0 < (T.Number & Typify(path)) ? new List<object?> { StrKey(path) } : path;
+                    object? found = CondenseRebuild(store, CondenseResolve(store, CondenseRoot(store), cpath));
+                    // Group A, as a plain getpath reads it: a stored null is absent.
+                    return ReferenceEquals(found, NONE) ? null : found;
+                }
+
+                store = Expand(store);
             }
 
             string? baseKey = state?.Base;
@@ -3851,6 +3880,548 @@ namespace Voxgig.Struct
             return results;
         }
 
+
+        // ========================================================================
+        // Condense
+        // ========================================================================
+
+        private const long CONDENSE_VERSION = 1;
+
+        private const long CONDENSE_MAP = 0;
+        private const long CONDENSE_LIST = 1;
+        private const long CONDENSE_STR = 2;
+        private const long CONDENSE_NUM = 3;
+        private const long CONDENSE_TRUE = 4;
+        private const long CONDENSE_FALSE = 5;
+        private const long CONDENSE_NULL = 6;
+
+        private const string S_condense = "$condense";
+        private const string S_condsym = "sym";
+        private const string S_condnode = "node";
+        private const string S_condroot = "root";
+
+        private const string S_IMMUTABLE =
+            "struct: condensed structures are immutable - expand() first, then modify the copy";
+
+        private const double TWO_POW_63 = 9223372036854775808.0;
+
+        public static bool IsCondensed(object? val = null)
+        {
+            return val is Dictionary<string, object?> map
+                && map.TryGetValue(S_condense, out object? version)
+                && CondenseInt(version, out long v)
+                && CONDENSE_VERSION == v
+                && map.TryGetValue(S_condsym, out object? sym) && sym is List<object?>
+                && map.TryGetValue(S_condnode, out object? node) && node is List<object?>
+                && map.TryGetValue(S_condroot, out object? root) && root is int or long or double or float;
+        }
+
+        // Pure: the same input gives the same bytes, on every port.
+        public static object? Condense(object? val)
+        {
+            var symset = new HashSet<string>(StringComparer.Ordinal);
+            CondenseCollect(val, symset);
+            List<string> sym = [.. symset];
+            sym.Sort(CondenseCmp);
+            var symid = new Dictionary<string, long>(StringComparer.Ordinal);
+            for (int i = 0; i < sym.Count; i++)
+            {
+                symid[sym[i]] = i;
+            }
+
+            List<object?> node = [];
+            var seen = new Dictionary<string, long>(StringComparer.Ordinal);
+            long root = CondenseBuild(val, symid, node, seen);
+
+            return new Dictionary<string, object?>
+            {
+                [S_condense] = CONDENSE_VERSION,
+                [S_condsym] = sym.Cast<object?>().ToList(),
+                [S_condnode] = node,
+                [S_condroot] = root,
+            };
+        }
+
+        // A value that is not condensed comes back as itself.
+        public static object? Expand(object? cond)
+        {
+            if (!IsCondensed(cond))
+            {
+                return cond;
+            }
+
+            object? out2 = CondenseRebuild(cond, CondenseRoot(cond));
+            return ReferenceEquals(out2, NONE) ? null : out2;
+        }
+
+        public static CondenseView CondenseView(object? cond, long? idx = null,
+                                                Dictionary<string, object?>? memo = null)
+        {
+            long start = idx ?? (IsCondensed(cond) ? CondenseRoot(cond) : -1);
+            return new CondenseView(cond, start, memo ?? []);
+        }
+
+        private static void CondenseCollect(object? n, HashSet<string> symset)
+        {
+            if (n is Dictionary<string, object?> map)
+            {
+                foreach (KeyValuePair<string, object?> entry in map)
+                {
+                    symset.Add(entry.Key);
+                    CondenseCollect(entry.Value, symset);
+                }
+            }
+            else if (n is List<object?> list)
+            {
+                foreach (object? item in list)
+                {
+                    CondenseCollect(item, symset);
+                }
+            }
+            else if (n is string s)
+            {
+                symset.Add(s);
+            }
+        }
+
+        // Post-order, so identical subtrees are already interned when a parent names them.
+        private static long CondenseBuild(object? n, Dictionary<string, long> symid,
+                                          List<object?> node, Dictionary<string, long> seen)
+        {
+            List<object?> enc;
+            if (n is Dictionary<string, object?> map)
+            {
+                enc = [CONDENSE_MAP];
+                foreach (KeyValuePair<string, object?> entry in map.OrderBy(e => symid[e.Key]))
+                {
+                    enc.Add(symid[entry.Key]);
+                    enc.Add(CondenseBuild(entry.Value, symid, node, seen));
+                }
+            }
+            else if (n is List<object?> list)
+            {
+                enc = [CONDENSE_LIST];
+                foreach (object? item in list)
+                {
+                    enc.Add(CondenseBuild(item, symid, node, seen));
+                }
+            }
+            else if (n is string s)
+            {
+                enc = [CONDENSE_STR, symid[s]];
+            }
+            else if (n is int or long or double or float)
+            {
+                enc = [CONDENSE_NUM, n];
+            }
+            else if (n is bool b)
+            {
+                enc = [b ? CONDENSE_TRUE : CONDENSE_FALSE];
+            }
+            else
+            {
+                enc = [CONDENSE_NULL];
+            }
+
+            string key = string.Join(S_CM, enc.Select(CondenseNumKey));
+            if (seen.TryGetValue(key, out long hit))
+            {
+                return hit;
+            }
+
+            long idx = node.Count;
+            node.Add(enc);
+            seen[key] = idx;
+            return idx;
+        }
+
+        // Equal numbers spell the same, so an integer and a decimal of one value share a node.
+        private static string CondenseNumKey(object? v)
+        {
+            return CondenseInt(v, out long n)
+                ? n.ToString(CultureInfo.InvariantCulture)
+                : Convert.ToDouble(v, CultureInfo.InvariantCulture).ToString("R", CultureInfo.InvariantCulture);
+        }
+
+        // The integer a number holds: false for anything else, a fraction included.
+        private static bool CondenseInt(object? v, out long n)
+        {
+            if (v is int i)
+            {
+                n = i;
+                return true;
+            }
+
+            if (v is long l)
+            {
+                n = l;
+                return true;
+            }
+
+            double d = v is double dv ? dv : v is float fv ? fv : double.NaN;
+            if (Math.Floor(d) == d && -TWO_POW_63 <= d && d < TWO_POW_63)
+            {
+                n = (long)d;
+                return true;
+            }
+
+            n = -1;
+            return false;
+        }
+
+        // An index read from the format, or -1 when the value cannot be one.
+        private static long CondenseIdx(object? v)
+        {
+            return CondenseInt(v, out long n) ? n : -1;
+        }
+
+        private static List<object?>? CondenseField(object? cond, string name)
+        {
+            return cond is Dictionary<string, object?> map && map.TryGetValue(name, out object? v)
+                ? v as List<object?>
+                : null;
+        }
+
+        internal static long CondenseRoot(object? cond)
+        {
+            return cond is Dictionary<string, object?> map && map.TryGetValue(S_condroot, out object? root)
+                ? CondenseIdx(root)
+                : -1;
+        }
+
+        // Node idx's encoding; NONE when it is absent or null.
+        private static object? CondenseEnc(object? cond, long idx)
+        {
+            List<object?>? node = CondenseField(cond, S_condnode);
+            object? enc = node != null && 0 <= idx && idx < node.Count ? node[(int)idx] : null;
+            return enc ?? NONE;
+        }
+
+        private static long CondenseKind(List<object?>? el)
+        {
+            return el != null && 0 < el.Count ? CondenseIdx(el[0]) : -1;
+        }
+
+        // sym[id]; NONE when id does not index sym.
+        private static object? CondenseSym(object? cond, object? id)
+        {
+            List<object?>? sym = CondenseField(cond, S_condsym);
+            long i = CondenseIdx(id);
+            return sym != null && 0 <= i && i < sym.Count ? sym[(int)i] : NONE;
+        }
+
+        // sym[id] as a map key: its string form when it is not a string.
+        private static string CondenseKeyName(object? cond, object? id)
+        {
+            object? s = CondenseSym(cond, id);
+            return s as string ?? CondenseStr(s);
+        }
+
+        // Code-point order, unlike string.CompareOrdinal: a surrogate pair sorts as the
+        // character it encodes, after every other character up to U+FFFF.
+        private static int CondenseCmp(string a, string b)
+        {
+            int i = 0;
+            int j = 0;
+            while (i < a.Length && j < b.Length)
+            {
+                int ca = CondenseCodePoint(a, i);
+                int cb = CondenseCodePoint(b, j);
+                if (ca != cb)
+                {
+                    return ca < cb ? -1 : 1;
+                }
+
+                i += 0xffff < ca ? 2 : 1;
+                j += 0xffff < cb ? 2 : 1;
+            }
+
+            return a.Length - i - (b.Length - j);
+        }
+
+        private static int CondenseCodePoint(string s, int i)
+        {
+            return char.IsHighSurrogate(s[i]) && i + 1 < s.Length && char.IsLowSurrogate(s[i + 1])
+                ? char.ConvertToUtf32(s[i], s[i + 1])
+                : s[i];
+        }
+
+        // JS `'' + v`.
+        private static string CondenseStr(object? v)
+        {
+            return v switch
+            {
+                null => S_null,
+                string s => s,
+                bool b => b ? "true" : "false",
+                int or long => Convert.ToString(v, CultureInfo.InvariantCulture) ?? S_MT,
+                double or float => CondenseNumStr(Convert.ToDouble(v, CultureInfo.InvariantCulture)),
+                List<object?> l => string.Join(S_CM, l.Select(e => e == null || ReferenceEquals(e, NONE)
+                    ? S_MT
+                    : CondenseStr(e))),
+                _ => ReferenceEquals(v, NONE) ? "undefined" : "[object Object]",
+            };
+        }
+
+        private static string CondenseNumStr(double d)
+        {
+            if (double.IsNaN(d))
+            {
+                return "NaN";
+            }
+
+            if (double.IsInfinity(d))
+            {
+                return d < 0 ? "-Infinity" : "Infinity";
+            }
+
+            return Math.Floor(d) == d && Math.Abs(d) < 1e21
+                ? (0 == d ? 0.0 : d).ToString("F0", CultureInfo.InvariantCulture)
+                : d.ToString("R", CultureInfo.InvariantCulture);
+        }
+
+        private static long CondenseSymId(object? cond, string key)
+        {
+            List<object?>? sym = CondenseField(cond, S_condsym);
+            if (sym == null)
+            {
+                return -1;
+            }
+
+            long lo = 0;
+            long hi = sym.Count - 1;
+            while (lo <= hi)
+            {
+                long mid = (lo + hi) / 2;
+                int c = CondenseCmp(sym[(int)mid] as string ?? S_MT, key);
+                if (0 == c)
+                {
+                    return mid;
+                }
+
+                if (0 > c)
+                {
+                    lo = mid + 1;
+                }
+                else
+                {
+                    hi = mid - 1;
+                }
+            }
+
+            return -1;
+        }
+
+        // ^(0|[1-9][0-9]*)$: "01", "+1" or "1.0" would select a different value than a plain
+        // list lookup. A key too long to parse could not index a list anyway.
+        private static bool CondenseListKey(string key)
+        {
+            if (0 == key.Length || 18 < key.Length || ('0' == key[0] && 1 < key.Length))
+            {
+                return false;
+            }
+
+            foreach (char c in key)
+            {
+                if (c is < '0' or > '9')
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        // The node index of key inside node idx, or -1. Touches only this node.
+        private static long CondenseChild(object? cond, long idx, string key)
+        {
+            List<object?>? el = CondenseEnc(cond, idx) as List<object?>;
+            long kind = CondenseKind(el);
+
+            if (CONDENSE_MAP == kind)
+            {
+                long symid = CondenseSymId(cond, key);
+                long lo = 0;
+                long hi = ((el!.Count - 1) / 2) - 1;
+                while (0 <= symid && lo <= hi)
+                {
+                    long mid = (lo + hi) / 2;
+                    long k = CondenseIdx(el[(int)(1 + (mid * 2))]);
+                    if (k == symid)
+                    {
+                        return CondenseIdx(el[(int)(2 + (mid * 2))]);
+                    }
+
+                    if (k < symid)
+                    {
+                        lo = mid + 1;
+                    }
+                    else
+                    {
+                        hi = mid - 1;
+                    }
+                }
+
+                return -1;
+            }
+
+            if (CONDENSE_LIST == kind && CondenseListKey(key))
+            {
+                long i = long.Parse(key, CultureInfo.InvariantCulture);
+                return i < el!.Count - 1 ? CondenseIdx(el[(int)(1 + i)]) : -1;
+            }
+
+            return -1;
+        }
+
+        // Walk a path from node idx: the node index reached, or -1.
+        internal static long CondenseResolve(object? cond, long idx, object? path)
+        {
+            long at = idx;
+
+            if (path is System.Collections.IList parts)
+            {
+                foreach (object? part in parts)
+                {
+                    if (0 > at)
+                    {
+                        return -1;
+                    }
+
+                    if (part is not string { Length: 0 })
+                    {
+                        at = CondenseChild(cond, at, CondenseStr(part));
+                    }
+                }
+            }
+            else if (path is string s)
+            {
+                foreach (string part in 0 < s.Length ? s.Split('.') : [])
+                {
+                    if (0 > at)
+                    {
+                        return -1;
+                    }
+
+                    if (0 < part.Length)
+                    {
+                        at = CondenseChild(cond, at, part);
+                    }
+                }
+            }
+            else if (path != null && !ReferenceEquals(path, NONE))
+            {
+                if (0 > at)
+                {
+                    return -1;
+                }
+
+                at = CondenseChild(cond, at, CondenseStr(path));
+            }
+
+            return at;
+        }
+
+        // A fresh, independent tree for node idx; NONE when there is no such node.
+        internal static object? CondenseRebuild(object? cond, long idx)
+        {
+            object? enc = CondenseEnc(cond, idx);
+            if (ReferenceEquals(enc, NONE))
+            {
+                return NONE;
+            }
+
+            List<object?>? el = enc as List<object?>;
+            long kind = CondenseKind(el);
+
+            if (CONDENSE_MAP == kind)
+            {
+                Dictionary<string, object?> out2 = [];
+                for (int j = 1; j < el!.Count; j += 2)
+                {
+                    object? child = CondenseRebuild(cond, j + 1 < el.Count ? CondenseIdx(el[j + 1]) : -1);
+                    string key = CondenseKeyName(cond, el[j]);
+                    // As setprop does for an absent value, the key goes.
+                    if (ReferenceEquals(child, NONE))
+                    {
+                        out2.Remove(key);
+                    }
+                    else
+                    {
+                        out2[key] = child;
+                    }
+                }
+
+                return out2;
+            }
+
+            if (CONDENSE_LIST == kind)
+            {
+                List<object?> out2 = new(el!.Count - 1);
+                for (int j = 1; j < el.Count; j++)
+                {
+                    object? child = CondenseRebuild(cond, CondenseIdx(el[j]));
+                    out2.Add(ReferenceEquals(child, NONE) ? null : child);
+                }
+
+                return out2;
+            }
+
+            if (CONDENSE_STR == kind)
+            {
+                object? s = 1 < el!.Count ? CondenseSym(cond, el[1]) : NONE;
+                return ReferenceEquals(s, NONE) ? NONE : Clone(s);
+            }
+
+            if (CONDENSE_NUM == kind)
+            {
+                return 1 < el!.Count ? Clone(el[1]) : NONE;
+            }
+
+            if (kind is CONDENSE_TRUE or CONDENSE_FALSE)
+            {
+                return CONDENSE_TRUE == kind;
+            }
+
+            return null;
+        }
+
+        internal static List<string> CondenseKeys(object? cond, long idx)
+        {
+            List<string> out2 = [];
+            List<object?>? el = CondenseEnc(cond, idx) as List<object?>;
+            long kind = CondenseKind(el);
+
+            if (CONDENSE_MAP == kind)
+            {
+                for (int j = 1; j < el!.Count; j += 2)
+                {
+                    out2.Add(CondenseKeyName(cond, el[j]));
+                }
+            }
+            else if (CONDENSE_LIST == kind)
+            {
+                for (int j = 1; j < el!.Count; j++)
+                {
+                    out2.Add((j - 1).ToString(CultureInfo.InvariantCulture));
+                }
+            }
+
+            return out2;
+        }
+
+        internal static int CondenseSize(object? cond, long idx)
+        {
+            List<object?>? el = CondenseEnc(cond, idx) as List<object?>;
+            long kind = CondenseKind(el);
+            if (CONDENSE_MAP == kind)
+            {
+                return (el!.Count - 1) / 2;
+            }
+
+            return CONDENSE_LIST == kind ? el!.Count - 1 : 0;
+        }
+
         [GeneratedRegex(@"^[-0-9]+$")]
         private static partial Regex R_IntegerKeyGen();
         [GeneratedRegex(@"[.*+?^${}()|[\]\\]")]
@@ -3872,5 +4443,81 @@ namespace Voxgig.Struct
         private static partial Regex R_CheckerNameGen();
         [GeneratedRegex(@"\.")]
         private static partial Regex R_DotGen();
+    }
+
+
+    // A cursor into a condensed structure. Views made by At share the memo, so Ref hands
+    // every one of them the same node.
+    public sealed class CondenseView
+    {
+        private readonly object? _cond;
+        private readonly long _start;
+        private readonly Dictionary<string, object?> _memo;
+
+        internal CondenseView(object? cond, long start, Dictionary<string, object?> memo)
+        {
+            _cond = cond;
+            _start = start;
+            _memo = memo;
+        }
+
+        public object? Get(object? path = null)
+        {
+            return Present(StructUtils.CondenseRebuild(_cond, StructUtils.CondenseResolve(_cond, _start, path)));
+        }
+
+        public List<string> Keys(object? path = null)
+        {
+            return StructUtils.CondenseKeys(_cond, StructUtils.CondenseResolve(_cond, _start, path));
+        }
+
+        public bool Has(object? path = null)
+        {
+            return 0 <= StructUtils.CondenseResolve(_cond, _start, path);
+        }
+
+        public CondenseView At(object? path = null)
+        {
+            return new CondenseView(_cond, StructUtils.CondenseResolve(_cond, _start, path), _memo);
+        }
+
+        public object? Value()
+        {
+            return Present(StructUtils.CondenseRebuild(_cond, _start));
+        }
+
+        public int Size()
+        {
+            return StructUtils.CondenseSize(_cond, _start);
+        }
+
+        public bool Exists()
+        {
+            return 0 <= _start;
+        }
+
+        // Shared, unlike Get and Value: mutating the result changes every reader of the node.
+        public object? Ref()
+        {
+            string k = _start.ToString(CultureInfo.InvariantCulture);
+            if (_memo.TryGetValue(k, out object? hit))
+            {
+                return hit;
+            }
+
+            object? out2 = StructUtils.CondenseRebuild(_cond, _start);
+            if (ReferenceEquals(out2, StructUtils.NONE))
+            {
+                return null;
+            }
+
+            _memo[k] = out2;
+            return out2;
+        }
+
+        private static object? Present(object? val)
+        {
+            return ReferenceEquals(val, StructUtils.NONE) ? null : val;
+        }
     }
 }

@@ -221,7 +221,7 @@ only the host literals differ.
 
 The full C# signatures, with examples for every function, are in
 [`README.md` → Function reference](./README.md#function-reference). The
-canonical public surface (the 48 functions, 15 type flags, 2 sentinels)
+canonical public surface (the 52 functions, 15 type flags, 2 sentinels)
 is checked against the canonical TypeScript by
 [`../tools/check_parity.py`](../tools/check_parity.py), case- and
 underscore-insensitively (`GetPath` ↔ `getpath`).

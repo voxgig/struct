@@ -1564,4 +1564,197 @@ public class StructTests
                 return (object?)StructUtils.Select(obj, query);
             }, flags: Omni.Nulls);
     }
+
+
+    // ========================================================================
+    // Condense
+    // ========================================================================
+
+    private Dictionary<string, object?> CondenseSpec =>
+        _spec["condense"] as Dictionary<string, object?> ?? [];
+
+    [Fact]
+    public void CondenseCondense()
+    {
+        _pack.RunSet(CondenseSpec["condense"],
+            input => StructUtils.Condense(input), flags: Omni.NoNulls);
+    }
+
+    [Fact]
+    public void CondenseExpand()
+    {
+        _pack.RunSet(CondenseSpec["expand"],
+            input => StructUtils.Expand(input), flags: Omni.NoNulls);
+    }
+
+    [Fact]
+    public void CondenseIsCondensed()
+    {
+        _pack.RunSet(CondenseSpec["iscondensed"],
+            input => StructUtils.IsCondensed(input), flags: Omni.NoNulls);
+    }
+
+    // What the corpus shape cannot express: identity, sharing and the immutability contract.
+
+    private static int CondensedNodes(object? val)
+    {
+        var cond = StructUtils.Condense(val) as Dictionary<string, object?>;
+        return (cond!["node"] as List<object?>)!.Count;
+    }
+
+    [Fact]
+    public void CondenseDeterministic()
+    {
+        var src = StructUtils.Jm("b", StructUtils.Jm("m", "GET"), "a", StructUtils.Jm("m", "GET"),
+            "l", StructUtils.Jt(1, "x", true));
+        var reordered = StructUtils.Jm("l", StructUtils.Jt(1, "x", true), "a", StructUtils.Jm("m", "GET"),
+            "b", StructUtils.Jm("m", "GET"));
+        string once = StructUtils.Jsonify(StructUtils.Condense(src), 0);
+        Assert.Equal(once, StructUtils.Jsonify(StructUtils.Condense(src), 0));
+        Assert.Equal(once, StructUtils.Jsonify(StructUtils.Condense(reordered), 0));
+    }
+
+    [Fact]
+    public void CondenseSharesIdenticalSubtrees()
+    {
+        int one = CondensedNodes(StructUtils.Jm("x", StructUtils.Jm("m", "GET", "p", "/1")));
+        int two = CondensedNodes(StructUtils.Jm("x", StructUtils.Jm("m", "GET", "p", "/1"),
+            "y", StructUtils.Jm("m", "GET", "p", "/1")));
+        Assert.Equal(one, two);
+        Assert.True(CondensedNodes(StructUtils.Jm("x", StructUtils.Jm("m", "GET"),
+            "y", StructUtils.Jm("m", "PUT"), "z", StructUtils.Jm("m", "POST"))) > two);
+    }
+
+    [Fact]
+    public void CondenseRoundTripsByValue()
+    {
+        var src = StructUtils.Jm("a", StructUtils.Jm("b", StructUtils.Jt(1, "x", true, null, StructUtils.Jm())),
+            "c", "z");
+        Assert.True(Omni.DeepEqual(src, StructUtils.Expand(StructUtils.Condense(src))));
+    }
+
+    [Fact]
+    public void CondenseGetPathIsTransparent()
+    {
+        var src = StructUtils.Jm("entity", StructUtils.Jm("p", StructUtils.Jm("op",
+            StructUtils.Jm("list", StructUtils.Jm("method", "GET")))));
+        var cond = StructUtils.Condense(src);
+        Assert.True(Omni.DeepEqual(
+            StructUtils.GetPath(src, StructUtils.Jt("entity", "p", "op", "list")),
+            StructUtils.GetPath(cond, StructUtils.Jt("entity", "p", "op", "list"))));
+        Assert.Equal("GET", StructUtils.GetPath(cond, StructUtils.Jt("entity", "p", "op", "list", "method")));
+        Assert.Null(StructUtils.GetPath(cond, StructUtils.Jt("entity", "nope")));
+    }
+
+    [Fact]
+    public void CondenseViewReadsWithoutMaterialising()
+    {
+        var view = StructUtils.CondenseView(StructUtils.Condense(StructUtils.Jm(
+            "entity", StructUtils.Jm("a", StructUtils.Jm("v", 1), "b", StructUtils.Jm("v", 2)), "other", 9)));
+        Assert.Equal(new List<string> { "a", "b" }, view.Keys("entity"));
+        Assert.Equal(2.0, Omni.ToNum(view.At("entity").At("b").Get("v")));
+        Assert.True(view.Has("entity.a"));
+        Assert.False(view.Has("entity.zz"));
+        Assert.Equal(2, view.Size());
+
+        var miss = view.At("entity.zz");
+        Assert.False(miss.Exists());
+        Assert.Equal(0, miss.Size());
+        Assert.Empty(miss.Keys());
+        Assert.Null(miss.Value());
+        Assert.Null(miss.Ref());
+    }
+
+    [Fact]
+    public void CondenseValueCopiesAndRefShares()
+    {
+        var view = StructUtils.CondenseView(StructUtils.Condense(StructUtils.Jm(
+            "a", StructUtils.Jm("m", "GET"), "b", StructUtils.Jm("m", "GET"))));
+        var x = view.Get("a") as Dictionary<string, object?>;
+        var y = view.Get("b") as Dictionary<string, object?>;
+        Assert.True(Omni.DeepEqual(x, y));
+        Assert.NotSame(x, y);
+        x!["m"] = "MUTATED";
+        Assert.Equal("GET", view.Get("b.m"));
+        Assert.Same(view.At("a").Ref(), view.At("a").Ref());
+    }
+
+    [Fact]
+    public void CondensePreservesProtoNamedKeysAndValues()
+    {
+        var asValue = StructUtils.Jm("x", "__proto__");
+        Assert.True(Omni.DeepEqual(asValue, StructUtils.Expand(StructUtils.Condense(asValue))));
+        Assert.Equal("{\"__proto__\":1}",
+            StructUtils.Jsonify(StructUtils.Expand(StructUtils.Condense(StructUtils.Jm("__proto__", 1))), 0));
+    }
+
+    [Fact]
+    public void CondenseGetPathMatchesPlainOnNullAndOptions()
+    {
+        var withNull = StructUtils.Jm("a", null);
+        Assert.Null(StructUtils.GetPath(StructUtils.Condense(withNull), "a"));
+        Assert.Null(StructUtils.GetPath(withNull, "a"));
+
+        var store = StructUtils.Jm("base", StructUtils.Jm("x", 1));
+        var state = new InjectState { Base = "base" };
+        Assert.Equal(1.0, Omni.ToNum(StructUtils.GetPath(StructUtils.Condense(store), "x", null, state)));
+        Assert.Equal(1.0, Omni.ToNum(StructUtils.GetPath(store, "x", null, state)));
+    }
+
+    [Fact]
+    public void CondenseListKeysAreCanonicalIntegers()
+    {
+        // This port's plain GetPath reads "01", " 1", "+1" and "-0" as list indexes, so the
+        // condensed answer is checked on its own.
+        var cond = StructUtils.Condense(StructUtils.Jm("l", StructUtils.Jt(10, 20)));
+        foreach (string key in new[] { "01", "1e0", " 1", "+1", "1.0", "-0" })
+        {
+            Assert.Null(StructUtils.GetPath(cond, StructUtils.Jt("l", key)));
+        }
+        Assert.Equal(20.0, Omni.ToNum(StructUtils.GetPath(cond, StructUtils.Jt("l", "1"))));
+    }
+
+    [Fact]
+    public void CondenseSymbolsSortByCodePoint()
+    {
+        var cond = StructUtils.Condense(StructUtils.Jm("a", "\U00010000", "b", "￿")) as Dictionary<string, object?>;
+        var sym = cond!["sym"] as List<object?>;
+        Assert.True(sym!.IndexOf("￿") < sym.IndexOf("\U00010000"));
+    }
+
+    [Fact]
+    public void CondenseAstralKeysResolve()
+    {
+        // Code-unit order puts the astral key first; the stored pairs must not.
+        var cond = StructUtils.Condense(StructUtils.Jm("Ａ", 1, "\U0001F600", 2));
+        Assert.Equal(2.0, Omni.ToNum(StructUtils.GetPath(cond, StructUtils.Jt("\U0001F600"))));
+        Assert.Equal(1.0, Omni.ToNum(StructUtils.GetPath(cond, StructUtils.Jt("Ａ"))));
+        Assert.Equal(2.0, Omni.ToNum(StructUtils.CondenseView(cond).Get("\U0001F600")));
+    }
+
+    [Fact]
+    public void CondenseInvalidKeyMutationsStayNoOps()
+    {
+        var cond = StructUtils.Condense(StructUtils.Jm("a", 1));
+        Assert.Same(cond, StructUtils.DelProp(cond, null));
+        Assert.Same(cond, StructUtils.SetProp(cond, null, 1));
+        var err = Assert.Throws<InvalidOperationException>(() => StructUtils.DelProp(cond, "sym"));
+        Assert.Contains("immutable", err.Message);
+    }
+
+    [Fact]
+    public void CondenseIsImmutable()
+    {
+        var cond = StructUtils.Condense(StructUtils.Jm("a", 1));
+        Assert.Contains("immutable",
+            Assert.Throws<InvalidOperationException>(() => StructUtils.SetPath(cond, "a", 2)).Message);
+        Assert.Contains("immutable",
+            Assert.Throws<InvalidOperationException>(() => StructUtils.SetProp(cond, "a", 2)).Message);
+        Assert.Contains("immutable",
+            Assert.Throws<InvalidOperationException>(() => StructUtils.DelProp(cond, "sym")).Message);
+
+        var copy = StructUtils.Expand(cond);
+        StructUtils.SetPath(copy, "a", 2);
+        Assert.Equal(2.0, Omni.ToNum(StructUtils.GetProp(copy, "a")));
+    }
 }

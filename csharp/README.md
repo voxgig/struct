@@ -2,7 +2,7 @@
 
 > C# / .NET port of the canonical TypeScript implementation.
 >
-> **Status: complete.**  Full TS-canonical parity: all 48 functions,
+> **Status: complete.**  Full TS-canonical parity: all 52 functions,
 > 15 type bit-flags, 3 mode constants (`M_KEYPRE`/`M_KEYPOST`/`M_VAL`),
 > `SKIP`/`DELETE` sentinels, and the `InjectState` machinery.
 > `Inject`/`Transform`/`Validate`/`Select` all dispatch through the
@@ -458,6 +458,16 @@ StructUtils.Select(
 ```
 
 <!-- => [{"$KEY": "a", "age": 30, "name": "Alice"}] -->
+
+### Condensed structures
+
+```csharp
+StructUtils.Condense(object? val)
+StructUtils.Expand(object? cond)
+StructUtils.IsCondensed(object? val = null)        // bool
+StructUtils.CondenseView(object? cond, long? idx = null,
+               Dictionary<string, object?>? memo = null)   // CondenseView
+```
 
 ### Builders
 
