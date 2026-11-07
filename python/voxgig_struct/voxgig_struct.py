@@ -47,6 +47,8 @@ R_META_PATH = re.compile(r'^([^$]+)\$([=~])(.+)$')  # Meta path syntax.
 R_DOUBLE_DOLLAR = re.compile(r'\$\$')  # Double dollar escape sequence.
 R_INJECTION_FULL = re.compile(r'^`(\$[A-Z]+|[^`]*)[0-9]*`$')  # Full string injection pattern.
 R_CHECKER_NAME = re.compile(r'^\$[A-Z]+$')  # Validate checker name.
+R_LIST_INDEX = re.compile(r'0|[1-9][0-9]*')  # Canonical list index, for fullmatch.
+R_NEGATIVE_INDEX = re.compile(r'-0*[1-9][0-9]*')  # Negative integer, for fullmatch.
 
 # Mode value for inject step.
 S_MKEYPRE = 'key:pre'
@@ -493,6 +495,23 @@ def typify(value: Any = _TYPIFY_NO_ARG) -> int:
     return T_node | T_instance
 
 
+# The index key reads in a list of size items, or -1. As JavaScript reads
+# list[key], only a canonical integer names one: "1", not "01", "+1" or "-0".
+# With fromend, as getelem reads it, a negative one counts back from the end.
+def _listindex(key, size, fromend=False):
+    if isinstance(key, float) and key.is_integer():
+        key = int(key)
+    if isinstance(key, str) and (
+        R_LIST_INDEX.fullmatch(key) or (fromend and R_NEGATIVE_INDEX.fullmatch(key))
+    ):
+        key = int(key)
+    if not isinstance(key, int) or isinstance(key, bool):
+        return -1
+    if key < 0 and fromend:
+        key += size
+    return key if 0 <= key < size else -1
+
+
 def getelem(val: Any, key: Any, alt: Any = UNDEF) -> Any:
     """
     Get a list element. Group A semantics: a stored None at the slot
@@ -504,14 +523,9 @@ def getelem(val: Any, key: Any, alt: Any = UNDEF) -> Any:
         return alt
 
     if islist(val):
-        try:
-            nkey = int(key)
-            if isinstance(nkey, int) and str(key).strip('-').isdigit():
-                if nkey < 0:
-                    nkey = len(val) + nkey
-                out = val[nkey] if 0 <= nkey < len(val) else UNDEF
-        except (ValueError, IndexError):
-            pass
+        nkey = _listindex(key, len(val), True)
+        if nkey >= 0:
+            out = val[nkey]
 
     if out is UNDEF or out is None:
         return alt() if (T_function & typify(alt)) > 0 else alt
@@ -537,12 +551,8 @@ def getprop(val: Any = UNDEF, key: Any = UNDEF, alt: Any = UNDEF) -> Any:
             out = val[skey]
 
     elif islist(val):
-        try:
-            ki = int(key)
-        except (ValueError, TypeError):
-            return alt
-
-        if 0 <= ki < len(val):
+        ki = _listindex(key, len(val))
+        if ki >= 0:
             out = val[ki]
 
     if out is None:
@@ -562,13 +572,8 @@ def _lookup(val: Any, key: Any) -> Any:
         skey = str(key)
         return val.get(skey, UNDEF)
     if islist(val):
-        try:
-            ki = int(key)
-        except (ValueError, TypeError):
-            return UNDEF
-        if 0 <= ki < len(val):
-            return val[ki]
-        return UNDEF
+        ki = _listindex(key, len(val))
+        return val[ki] if ki >= 0 else UNDEF
     return UNDEF
 
 
@@ -2426,8 +2431,8 @@ def validate_TYPE(inj, _val=UNDEF, ref=UNDEF, _store=UNDEF):
     if tname == S_nil:
         typev = typev | T_null
     out = getprop(inj.dparent, inj.key)
-    # The root of a trial on a missing value has no $TOP: no value, not null.
-    t = typify(out) if inj.prior is not None or _present(inj.dparent, inj.key) else T_noval
+    # A missing field, or a trial's missing $TOP, is no value, not null.
+    t = typify(out) if _present(inj.dparent, inj.key) else T_noval
 
     if (t & typev) == 0:
         inj.errs.append(_invalidTypeMsg(inj.path, tname, t, out, 'V1001'))
@@ -2988,11 +2993,7 @@ def _present(val, key):
     if ismap(val):
         return str(key) in val
     if islist(val):
-        try:
-            ki = int(key)
-        except (ValueError, TypeError):
-            return False
-        return 0 <= ki < len(val)
+        return _listindex(key, len(val)) >= 0
     return False
 
 
@@ -3213,8 +3214,6 @@ S_CONDENSED_IMMUTABLE = (
     'struct: condensed structures are immutable - expand() first, then modify the copy'
 )
 
-R_CONDENSE_INDEX = re.compile(r'0|[1-9][0-9]*')  # Canonical list index, for fullmatch.
-
 
 def _isnumber(val):
     return isinstance(val, (int, float)) and not isinstance(val, bool)
@@ -3371,16 +3370,9 @@ def condenseChild(cond, idx, key):
         return -1
 
     if kind == CONDENSE_LIST:
-        # Canonical integer keys ONLY: an ordinary list lookup misses "01",
-        # "1e0", " 1" and "+1", and condensing must not change which value a
-        # path selects.
-        k = _condensestr(key)
-        if not R_CONDENSE_INDEX.fullmatch(k):
-            return -1
-        i = int(k)
-        if i >= len(enc) - 1:
-            return -1
-        return enc[1 + i]
+        # Read as an ordinary list is, so condensing never changes which value a path selects.
+        i = _listindex(key, len(enc) - 1)
+        return -1 if i < 0 else enc[1 + i]
 
     return -1
 

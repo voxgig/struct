@@ -220,8 +220,9 @@ class TestStruct(unittest.TestCase):
     def test_condense_list_keys_are_canonical_integers(self):
         plain = {'l': [10, 20]}
         c = condense(plain)
-        # Only a canonical integer selects an element, as in an ordinary lookup.
+        # Only a canonical integer selects an element, condensed or not.
         for k in ['01', '1e0', ' 1', '+1', '1.0', '-0', '1\n']:
+            self.assertEqual(getpath(c, ['l', k]), getpath(plain, ['l', k]), 'list key ' + repr(k))
             self.assertIsNone(getpath(c, ['l', k]), 'list key ' + repr(k))
         self.assertEqual(getpath(c, ['l', '1']), 20)
         self.assertEqual(getpath(c, ['l', 1]), 20)
