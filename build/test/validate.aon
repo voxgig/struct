@@ -128,6 +128,10 @@ basic: {
     # A null spec value leaves the field unconstrained.
     { in: { data: {a:1}, spec: {a:null} }, out: {a:1} }
 
+    # A missing field is no value, which '$NULL' refuses.
+    { in: { data: {}, spec: {a:'`$NULL`'} }, err: 'Expected field a to be null, but found no value.' }
+    { in: { data: {}, spec: {a:{b:'`$NULL`'}} }, err: 'Expected field a.b to be null, but found no value.' }
+    { in: { data: [], spec: ['`$NULL`'] }, err: 'Expected field 0 to be null, but found no value.' }
   ]
 }
 

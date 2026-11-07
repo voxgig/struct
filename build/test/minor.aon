@@ -176,6 +176,14 @@ getprop: {
     { in: { val: {}, key: x, alt: null }, out: null }
     { in: { val: {}, key: null, alt: null }, out: null }
     { in: {} }
+    # A list read hits only a canonical integer string, as a JavaScript array does.
+    { in: { val: [10,20], key: '01' } }
+    { in: { val: [10,20], key: '+1' } }
+    { in: { val: [10,20], key: ' 1' } }
+    { in: { val: [10,20], key: '1e0' } }
+    { in: { val: [10,20], key: '1.0' } }
+    { in: { val: [10,20], key: '-0' } }
+    { in: { val: [10,20], key: '-1' } }
   ]
 }
 
@@ -213,6 +221,12 @@ getelem: {
     { in: { key: 1 }}
     { in: { key: '1' }}
     { in: { key: 'x' }}
+    { in: { val: [10,20], key: '01' } }
+    { in: { val: [10,20], key: '+1' } }
+    { in: { val: [10,20], key: ' 1' } }
+    { in: { val: [10,20], key: '1e0' } }
+    { in: { val: [10,20], key: '1.0' } }
+    { in: { val: [10,20], key: '-0' } }
   ]
 }
 
@@ -305,6 +319,10 @@ haskey: {
     { in: { src: []}, out: false }
     { in: { src: {}}, out: false }
     { in: {}, out: false }
+    { in: { src: [10,20], key: '01' }, out: false }
+    { in: { src: [10,20], key: '+1' }, out: false }
+    { in: { src: [10,20], key: '-0' }, out: false }
+    { in: { src: [10,20], key: '1' }, out: true }
   ]
 }
 
