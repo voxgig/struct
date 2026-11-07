@@ -62,7 +62,8 @@ camelCased names:
 haskey inject isempty isfunc iskey islist ismap isnode items join jsonify
 keysof merge pad pathify select setpath setprop size slice strkey stringify
 transform typify typename validate walk re_compile re_find re_find_all
-re_replace re_test re_escape jm jt checkPlacement injectorArgs injectChild`
+re_replace re_test re_escape jm jt checkPlacement injectorArgs injectChild
+condense condenseview expand iscondensed`
 
 See [`DOCS.md`](./DOCS.md) for the full guide and
 [the language-neutral docs](../DOCS.md) for concepts and examples.

@@ -69,6 +69,8 @@ to the canonical export list:
   `re_replace`, `re_test`, `re_escape`. Backed by the core `RegExp`.
 - **By-example engine:** `inject`, `transform`, `validate`, `select`, and the
   injector helpers `checkPlacement`, `injectorArgs`, `injectChild`.
+- **Condensed structures:** `condense`, `condenseview`, `expand`,
+  `iscondensed`.
 - **Builders / markers:** `jm`, `jt`, `SKIP`, `DELETE`, the `T_*` type
   constants and `M_KEYPRE` / `M_KEYPOST` / `M_VAL`.
 
@@ -98,11 +100,6 @@ s.validate(2, ['`\$ALL`', '`\$NUMBER`', '`\$INTEGER`']);             // 2
 // select: MongoDB-style query over children
 s.select([{'a': 1}, {'a': 2}], {'a': {'`\$GT`': 1}}); // [{a: 2, $KEY: 1}]
 ```
-
-A `$NOF` or `$ALL` trial validates the value at the root of its own call,
-where a missing value arrives as `null`. So for a missing field a trial
-spec of `` '`\$NULL`' `` admits it, where canonical TypeScript
-refuses it. No corpus entry reaches the case.
 
 ## Testing
 

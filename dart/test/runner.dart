@@ -215,11 +215,19 @@ void runAll(o.RunPack pack, dynamic spec) {
   final selects = g('select');
   final sentinels = g('sentinels');
   final regexs = g('regex');
+  final condenses = g('condense');
   dynamic mg(String n) => s.getprop(minor, n);
 
   void rs(String group, dynamic node, o.Subject subject,
           [bool flagNull = true]) =>
       runSet(pack, group, node, subject, flagNull);
+
+  rs('condense.condense', s.getprop(condenses, 'condense'),
+      arg1((v) => s.condense(v)), false);
+  rs('condense.expand', s.getprop(condenses, 'expand'),
+      arg1((v) => s.expand(v)), false);
+  rs('condense.iscondensed', s.getprop(condenses, 'iscondensed'),
+      arg1((v) => s.iscondensed(v)), false);
 
   rs('minor.isnode', mg('isnode'), arg1((v) => s.isnode(v)));
   rs('minor.ismap', mg('ismap'), arg1((v) => s.ismap(v)));
@@ -472,6 +480,226 @@ void runAll(o.RunPack pack, dynamic spec) {
 }
 
 // ---------------------------------------------------------------------------
+// condense: what the corpus shape cannot express
+// ---------------------------------------------------------------------------
+
+// Identity, sharing, laziness and the immutability contract, after canonical's
+// condense-* tests. Each group is a list of named checks, all of which hold.
+void checks(String group, List<List<dynamic>> Function() fn) {
+  try {
+    final failed = [
+      for (final c in fn())
+        if (c[1] != true) c[0]
+    ];
+    record(group, failed.isEmpty, 'failed: ${failed.join('; ')}');
+  } catch (e) {
+    record(group, false, errmsg(e));
+  }
+}
+
+bool raises(void Function() fn, String part) {
+  try {
+    fn();
+    return false;
+  } catch (e) {
+    return errmsg(e).contains(part);
+  }
+}
+
+void runCondenseLocal() {
+  dynamic m(List<dynamic> kv) => s.jm(kv);
+  dynamic l(List<dynamic> v) => s.jt(v);
+  String json(dynamic v) => s.jsonify(v, {'indent': 0});
+  int nodes(dynamic c) => s.size(s.getprop(c, 'node'));
+  bool eqv(dynamic a, dynamic b) => o.deepequal(a, b);
+
+  checks('condense-deterministic', () {
+    final src = m([
+      'b', m(['m', 'GET']), 'a', m(['m', 'GET']), 'l', l([1, 'x', true])
+    ]);
+    final reordered = m([
+      'l', l([1, 'x', true]), 'a', m(['m', 'GET']), 'b', m(['m', 'GET'])
+    ]);
+    return [
+      [
+        'the same input gives the same bytes',
+        json(s.condense(src)) == json(s.condense(src))
+      ],
+      [
+        'insertion order does not change the bytes',
+        json(s.condense(src)) == json(s.condense(reordered))
+      ],
+    ];
+  });
+
+  checks('condense-shares-identical-subtrees', () {
+    final one = s.condense(m([
+      'x', m(['m', 'GET', 'p', '/1'])
+    ]));
+    final two = s.condense(m([
+      'x', m(['m', 'GET', 'p', '/1']), 'y', m(['m', 'GET', 'p', '/1'])
+    ]));
+    final three = s.condense(m([
+      'x', m(['m', 'GET']), 'y', m(['m', 'PUT']), 'z', m(['m', 'POST'])
+    ]));
+    return [
+      ['a second identical subtree adds no node', nodes(two) == nodes(one)],
+      ['distinct subtrees add nodes', nodes(three) > nodes(two)],
+    ];
+  });
+
+  checks('condense-round-trips-by-value', () {
+    final src = m([
+      'a', m(['b', l([1, 'x', true, null, m([])])]), 'c', 'z'
+    ]);
+    return [
+      ['expand undoes condense', eqv(s.expand(s.condense(src)), src)],
+    ];
+  });
+
+  checks('condense-getpath-is-transparent', () {
+    final src = m([
+      'entity', m(['p', m(['op', m(['list', m(['method', 'GET'])])])])
+    ]);
+    final c = s.condense(src);
+    final path = ['entity', 'p', 'op', 'list'];
+    return [
+      [
+        'a node reads as the plain one',
+        eqv(s.getpath(c, path), s.getpath(src, path))
+      ],
+      [
+        'a scalar reads',
+        s.getpath(c, ['entity', 'p', 'op', 'list', 'method']) == 'GET'
+      ],
+      ['a miss is absent', s.getpath(c, ['entity', 'nope']) == null],
+    ];
+  });
+
+  checks('condense-view-reads-without-materialising', () {
+    final v = s.condenseview(s.condense(m([
+      'entity', m(['a', m(['v', 1]), 'b', m(['v', 2])]), 'other', 9
+    ])));
+    return [
+      ['keys', eqv(v.keys('entity'), ['a', 'b'])],
+      ['at and get', v.at('entity').at('b').get('v') == 2],
+      ['has a path', v.has('entity.a')],
+      ['has no path', !v.has('entity.zz')],
+      ['size', v.size() == 2],
+    ];
+  });
+
+  checks('condense-value-copies-and-ref-shares', () {
+    final v = s.condenseview(s.condense(m([
+      'a', m(['m', 'GET']), 'b', m(['m', 'GET'])
+    ])));
+    final x = v.get('a');
+    final y = v.get('b');
+    final same = eqv(x, y);
+    s.setprop(x, 'm', 'MUTATED');
+    return [
+      ['equal by value', same],
+      ['distinct nodes', !identical(x, y)],
+      [
+        "a copy's mutation stays in the copy",
+        s.getprop(v.get('b'), 'm') == 'GET'
+      ],
+      ['ref hands out one node', identical(v.at('a').ref(), v.at('a').ref())],
+    ];
+  });
+
+  checks('condense-preserves-proto-named-keys-and-values', () {
+    final asvalue = m(['x', '__proto__']);
+    return [
+      ['as a value', eqv(s.expand(s.condense(asvalue)), asvalue)],
+      [
+        'as a key',
+        json(s.expand(s.condense(m(['__proto__', 1])))) == '{"__proto__":1}'
+      ],
+    ];
+  });
+
+  checks('condense-getpath-matches-plain-on-null-and-options', () {
+    final store = m([
+      'base', m(['x', 1])
+    ]);
+    final opts = m(['base', 'base']);
+    return [
+      [
+        'a stored null reads as the plain one',
+        s.getpath(s.condense(m(['a', null])), 'a') ==
+            s.getpath(m(['a', null]), 'a')
+      ],
+      [
+        'a stored null reads as absent',
+        s.getpath(s.condense(m(['a', null])), 'a') == null
+      ],
+      [
+        'base is honoured',
+        s.getpath(s.condense(store), 'x', opts) == s.getpath(store, 'x', opts)
+      ],
+      ['base reads the value', s.getpath(s.condense(store), 'x', opts) == 1],
+    ];
+  });
+
+  // This port's getprop reads "01", " 1", "+1" and "-0" as list indexes where
+  // canonical does not, so the misses are asserted directly.
+  checks('condense-list-keys-are-canonical-integers', () {
+    final c = s.condense(m([
+      'l', l([10, 20])
+    ]));
+    return [
+      for (final k in ['01', '1e0', ' 1', '+1', '1.0', '-0'])
+        ['"$k" misses', s.getpath(c, ['l', k]) == null],
+      ['"1" reads', s.getpath(c, ['l', '1']) == 20],
+    ];
+  });
+
+  checks('condense-symbols-sort-by-code-point', () {
+    final sym = s.getprop(
+        s.condense(m(['a', '\u{10000}', 'b', '￿'])), 'sym') as List;
+    return [
+      [
+        'U+FFFF sorts before U+10000',
+        sym.indexOf('￿') < sym.indexOf('\u{10000}')
+      ],
+    ];
+  });
+
+  checks('condense-map-pairs-ascend-by-symbol-id', () {
+    final c = s.condense(m(['\u{10000}', 1, '￿', 2]));
+    return [
+      ['U+10000 reads', s.getpath(c, '\u{10000}') == 1],
+      ['U+FFFF reads', s.getpath(c, '￿') == 2],
+    ];
+  });
+
+  checks('condense-invalid-key-mutations-stay-no-ops', () {
+    final c = s.condense(m(['a', 1]));
+    return [
+      ['delprop with no key', identical(s.delprop(c, null), c)],
+      ['setprop with no key', identical(s.setprop(c, null, 1), c)],
+      [
+        'delprop with a key raises',
+        raises(() => s.delprop(c, 'sym'), 'immutable')
+      ],
+    ];
+  });
+
+  checks('condense-is-immutable', () {
+    final c = s.condense(m(['a', 1]));
+    final e = s.expand(c);
+    s.setpath(e, 'a', 2);
+    return [
+      ['setpath raises', raises(() => s.setpath(c, 'a', 2), 'immutable')],
+      ['setprop raises', raises(() => s.setprop(c, 'a', 2), 'immutable')],
+      ['delprop raises', raises(() => s.delprop(c, 'sym'), 'immutable')],
+      ['the expanded copy is mutable', s.getprop(e, 'a') == 2],
+    ];
+  });
+}
+
+// ---------------------------------------------------------------------------
 // The client path
 // ---------------------------------------------------------------------------
 
@@ -525,6 +753,7 @@ void main(List<String> argv) {
   final testfile = argv.isNotEmpty ? argv[0] : '../build/test/test.json';
   final pack = o.makeRunner(testfile).runner('struct');
   runAll(pack, pack.spec);
+  runCondenseLocal();
   runClient(testfile);
   for (final f in failures) {
     print(f);

@@ -273,7 +273,7 @@ dynamic getprop(dynamic val, dynamic key, [dynamic alt]) {
     var ki = _toInt(key);
     if (ki != null && ki >= 0 && ki < val.length) out = val[ki];
   }
-  if (out == null) return alt;
+  if (out == null || identical(out, _noarg)) return alt;
   return out;
 }
 
@@ -357,6 +357,7 @@ dynamic filter(dynamic val, bool Function(List<dynamic>) check) {
 
 dynamic setprop(dynamic parent, dynamic key, dynamic val) {
   if (!iskey(key)) return parent;
+  if (iscondensed(parent)) throw StructError(_CONDENSE_IMMUTABLE);
   if (parent is Map) {
     parent[_mapKey(key)] = val;
   } else if (parent is List) {
@@ -379,6 +380,7 @@ dynamic setprop(dynamic parent, dynamic key, dynamic val) {
 
 dynamic delprop(dynamic parent, dynamic key) {
   if (!iskey(key)) return parent;
+  if (iscondensed(parent)) throw StructError(_CONDENSE_IMMUTABLE);
   if (parent is Map) {
     parent.remove(_mapKey(key));
   } else if (parent is List) {
@@ -1044,6 +1046,16 @@ dynamic getpath(dynamic store, dynamic path, [dynamic injdef]) {
     return null;
   }
 
+  if (iscondensed(store)) {
+    // Reads only the nodes on the path. A base changes what the path resolves
+    // against, so that read walks the expanded copy instead.
+    if (_idef(injdef, 'base') == null) {
+      return _condenseMaterialise(
+          store, _condenseResolve(store, store[_S_condroot], parts));
+    }
+    store = expand(store);
+  }
+
   var hasInj = injdef != null;
   var base = _idef(injdef, 'base');
   var dparent = _idef(injdef, 'dparent');
@@ -1129,6 +1141,7 @@ dynamic getpath(dynamic store, dynamic path, [dynamic injdef]) {
 }
 
 dynamic setpath(dynamic store, dynamic path, dynamic val, [dynamic injdef]) {
+  if (iscondensed(store)) throw StructError(_CONDENSE_IMMUTABLE);
   var ptype = typify(path);
   dynamic parts;
   if ((T_list & ptype) > 0) {
@@ -1891,12 +1904,13 @@ class StructError implements Exception {
 
 String _invalidTypeMsg(
     dynamic path, String needtype, int vt, dynamic v, String whence) {
-  var vs = v == null ? 'no value' : stringify(v);
+  final novalue = v == null || identical(v, _noarg);
+  var vs = novalue ? 'no value' : stringify(v);
   return 'Expected ' +
       (size(path) > 1 ? 'field ' + pathify(path, 1) + ' to be ' : '') +
       needtype +
       ', but found ' +
-      (v != null ? typename(vt) + S_VIZ : '') +
+      (novalue ? '' : typename(vt) + S_VIZ) +
       vs +
       '.';
 }
@@ -2383,16 +2397,20 @@ bool _has(dynamic val, dynamic key) {
 }
 
 // The data value at a list directive's slot. The directive's own dparent was
-// read with getprop, which reports a stored null as absent.
+// read with getprop, which reports a stored null as absent. A trial hands an
+// absent value down as _noarg, which holds no value.
 dynamic _slotval(Inj inj) {
   final prior = inj.prior;
-  return prior == null ? inj.dparent : _lookup(prior.dparent, prior.key);
+  final val = prior == null ? inj.dparent : _lookup(prior.dparent, prior.key);
+  return identical(val, _noarg) ? null : val;
 }
 
 // Whether the slot holds a value: with one null, _slotval cannot say.
 bool _slothas(Inj inj) {
   final prior = inj.prior;
-  return prior == null ? inj.dparent != null : _has(prior.dparent, prior.key);
+  final val = prior == null ? inj.dparent : _lookup(prior.dparent, prior.key);
+  if (identical(val, _noarg)) return false;
+  return prior == null ? val != null : _has(prior.dparent, prior.key);
 }
 
 // Set the slot that holds a list directive, as setval(val, 2) does. An absent
@@ -2421,13 +2439,16 @@ bool _keeps(dynamic val, dynamic out) {
 }
 
 // A spec admits a value when validating the value against it finds no error
-// and gives back the value as it is. An absent value has nothing to give back.
+// and gives back the value as it is. An absent value has nothing to give
+// back, and goes down as _noarg so that the nested validation reads it as no
+// value.
 bool _admits(dynamic val, bool has, dynamic spec, Inj inj, dynamic store) {
+  final tval = has ? val : _noarg;
   var terrs = <dynamic>[];
   var vstore = merge([<String, dynamic>{}, store], 1);
-  setprop(vstore, S_DTOP, val);
+  setprop(vstore, S_DTOP, tval);
   var out = validate(
-      val, spec, {'extra': vstore, 'errs': terrs, 'meta': inj.meta});
+      tval, spec, {'extra': vstore, 'errs': terrs, 'meta': inj.meta});
   return size(terrs) == 0 && (!has || _keeps(val, out));
 }
 
@@ -2673,6 +2694,341 @@ dynamic select(dynamic children0, dynamic query) {
     if (size(errs) == 0) results.add(child);
   }
   return results;
+}
+
+// ---------------------------------------------------------------------------
+// condense
+// ---------------------------------------------------------------------------
+
+const _CONDENSE_VERSION = 1;
+const _CONDENSE_MAP = 0;
+const _CONDENSE_LIST = 1;
+const _CONDENSE_STR = 2;
+const _CONDENSE_NUM = 3;
+const _CONDENSE_TRUE = 4;
+const _CONDENSE_FALSE = 5;
+const _CONDENSE_NULL = 6;
+
+const _S_condense = '\$condense';
+const _S_condsym = 'sym';
+const _S_condnode = 'node';
+const _S_condroot = 'root';
+
+const _CONDENSE_IMMUTABLE = 'struct: condensed structures are immutable - '
+    'expand() first, then modify the copy';
+
+final _R_CONDENSE_INDEX = RegExp(r'^(0|[1-9][0-9]*)$');
+
+// Code-point order, the order the format sorts symbols in. String.compareTo
+// orders by code unit, which would put U+10000 before U+FFFF.
+int _condenseCmp(String a, String b) {
+  final ra = a.runes.iterator;
+  final rb = b.runes.iterator;
+  while (true) {
+    final hasa = ra.moveNext();
+    final hasb = rb.moveNext();
+    if (!hasa || !hasb) return hasa ? 1 : (hasb ? -1 : 0);
+    if (ra.current != rb.current) return ra.current < rb.current ? -1 : 1;
+  }
+}
+
+// The version has to match, not merely be a number: a later format read with
+// this one's schema would decode wrongly without failing.
+bool iscondensed([dynamic val]) {
+  if (val is! Map) return false;
+  final v = val[_S_condense];
+  return v is num &&
+      v == _CONDENSE_VERSION &&
+      val[_S_condsym] is List &&
+      val[_S_condnode] is List &&
+      val[_S_condroot] is num;
+}
+
+void _condenseCollect(dynamic val, Set<String> acc) {
+  if (val is Map) {
+    val.forEach((k, v) {
+      acc.add(k.toString());
+      _condenseCollect(v, acc);
+    });
+  } else if (val is List) {
+    for (final x in val) {
+      _condenseCollect(x, acc);
+    }
+  } else if (val is String) {
+    acc.add(val);
+  }
+}
+
+// An integral number keys as its integer, so 1 and 1.0 share one node.
+String _condenseNumKey(num n) {
+  final d = n.toDouble();
+  return d == d.truncateToDouble() && d.abs() < 9007199254740992.0
+      ? d.toInt().toString()
+      : d.toString();
+}
+
+dynamic condense(dynamic val) {
+  final symset = <String>{};
+  _condenseCollect(val, symset);
+  final sym = symset.toList()..sort(_condenseCmp);
+  final symid = <String, int>{};
+  for (var i = 0; i < sym.length; i++) {
+    symid[sym[i]] = i;
+  }
+
+  final node = <dynamic>[];
+  final seen = <String, int>{};
+
+  int intern(List<dynamic> enc) {
+    final enckey =
+        enc.map((x) => x is num ? _condenseNumKey(x) : '$x').join(',');
+    final hit = seen[enckey];
+    if (hit != null) return hit;
+    seen[enckey] = node.length;
+    node.add(enc);
+    return node.length - 1;
+  }
+
+  // Post-order, so a subtree is interned before its parent refers to it, and
+  // map pairs in ascending symbol id, so that a lookup can bisect them.
+  int build(dynamic n) {
+    if (n is Map) {
+      final enc = <dynamic>[_CONDENSE_MAP];
+      final keys = n.keys.map((k) => k.toString()).toList()
+        ..sort(_condenseCmp);
+      for (final k in keys) {
+        enc.add(symid[k]);
+        enc.add(build(n[k]));
+      }
+      return intern(enc);
+    }
+    if (n is List) {
+      final enc = <dynamic>[_CONDENSE_LIST];
+      for (final x in n) {
+        enc.add(build(x));
+      }
+      return intern(enc);
+    }
+    if (n is String) return intern(<dynamic>[_CONDENSE_STR, symid[n]]);
+    if (n is num) return intern(<dynamic>[_CONDENSE_NUM, n]);
+    if (n == true) return intern(<dynamic>[_CONDENSE_TRUE]);
+    if (n == false) return intern(<dynamic>[_CONDENSE_FALSE]);
+    return intern(<dynamic>[_CONDENSE_NULL]);
+  }
+
+  final root = build(val);
+
+  return <String, dynamic>{
+    _S_condense: _CONDENSE_VERSION,
+    _S_condsym: List<dynamic>.from(sym),
+    _S_condnode: node,
+    _S_condroot: root,
+  };
+}
+
+int? _condenseIndex(dynamic idx) {
+  if (idx is int) return idx;
+  if (idx is double &&
+      idx.isFinite &&
+      idx == idx.truncateToDouble() &&
+      idx.abs() < 4294967296.0) {
+    return idx.toInt();
+  }
+  return null;
+}
+
+bool _condenseFound(dynamic idx) => idx is num && 0 <= idx;
+
+dynamic _condenseSym(dynamic cond, dynamic id) {
+  final sym = cond is Map ? cond[_S_condsym] : null;
+  final i = _condenseIndex(id);
+  return sym is List && i != null && 0 <= i && i < sym.length ? sym[i] : null;
+}
+
+// Node idx as the list of its encoding, or null when there is no such node.
+List<dynamic>? _condenseEnc(dynamic cond, dynamic idx) {
+  final node = cond is Map ? cond[_S_condnode] : null;
+  final i = _condenseIndex(idx);
+  if (node is! List || i == null || i < 0 || i >= node.length) return null;
+  final enc = node[i];
+  if (enc == null) return null;
+  return enc is List ? enc : <dynamic>[];
+}
+
+dynamic _condenseKind(List<dynamic> enc) => enc.isEmpty ? null : enc[0];
+
+int _condenseSymId(dynamic cond, String key) {
+  final sym = cond is Map ? cond[_S_condsym] : null;
+  if (sym is! List) return -1;
+  var lo = 0;
+  var hi = sym.length - 1;
+  while (lo <= hi) {
+    final mid = (lo + hi) >> 1;
+    final s = sym[mid];
+    if (s == key) return mid;
+    if (s is String && _condenseCmp(s, key) < 0) {
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return -1;
+}
+
+dynamic _condenseChild(dynamic cond, dynamic idx, dynamic key) {
+  final enc = _condenseEnc(cond, idx);
+  if (enc == null) return -1;
+  final kind = _condenseKind(enc);
+
+  if (kind == _CONDENSE_MAP) {
+    final symid = _condenseSymId(cond, jsString(key));
+    if (symid < 0) return -1;
+    var lo = 0;
+    var hi = (enc.length - 1) ~/ 2 - 1;
+    while (lo <= hi) {
+      final mid = (lo + hi) >> 1;
+      final k = enc[1 + mid * 2];
+      if (k == symid) return enc[2 + mid * 2];
+      if (k is num && k < symid) {
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return -1;
+  }
+
+  // Canonical integer keys only: getprop would also take "01" or " 1", and
+  // condensing must not change which value a path selects.
+  if (kind == _CONDENSE_LIST) {
+    final k = jsString(key);
+    final i = _R_CONDENSE_INDEX.hasMatch(k) ? int.tryParse(k) : null;
+    return i != null && i < enc.length - 1 ? enc[1 + i] : -1;
+  }
+
+  return -1;
+}
+
+// Walk a path from node idx: the node index reached, or -1.
+dynamic _condenseResolve(dynamic cond, dynamic idx, dynamic path) {
+  final List<dynamic> parts = path is List
+      ? path
+      : path is String
+          ? (path == S_MT ? <dynamic>[] : path.split(S_DT))
+          : (path == null || identical(path, _noarg))
+              ? <dynamic>[]
+              : <dynamic>[jsString(path)];
+  dynamic at = idx;
+  for (final part in parts) {
+    if (at is num && at < 0) return -1;
+    if (part == S_MT) continue;
+    at = _condenseChild(cond, at, part);
+  }
+  return at;
+}
+
+// A fresh tree each call: no materialisation shares a container with another,
+// even where the condensed form shares the node.
+dynamic _condenseMaterialise(dynamic cond, dynamic idx) {
+  dynamic rebuild(dynamic i) {
+    final enc = _condenseEnc(cond, i);
+    if (enc == null) return null;
+    final kind = _condenseKind(enc);
+    if (kind == _CONDENSE_MAP) {
+      final out = <String, dynamic>{};
+      for (var j = 1; j < enc.length; j += 2) {
+        out[jsString(_condenseSym(cond, enc[j]))] =
+            rebuild(j + 1 < enc.length ? enc[j + 1] : null);
+      }
+      return out;
+    }
+    if (kind == _CONDENSE_LIST) {
+      final out = <dynamic>[];
+      for (var j = 1; j < enc.length; j++) {
+        out.add(rebuild(enc[j]));
+      }
+      return out;
+    }
+    if (kind == _CONDENSE_STR) {
+      return enc.length > 1 ? _condenseSym(cond, enc[1]) : null;
+    }
+    if (kind == _CONDENSE_NUM) return enc.length > 1 ? enc[1] : null;
+    if (kind == _CONDENSE_TRUE) return true;
+    if (kind == _CONDENSE_FALSE) return false;
+    return null;
+  }
+
+  return idx is num && idx < 0 ? null : rebuild(idx);
+}
+
+dynamic expand(dynamic cond) =>
+    iscondensed(cond) ? _condenseMaterialise(cond, cond[_S_condroot]) : cond;
+
+List<String> _condenseKeys(dynamic cond, dynamic idx) {
+  final enc = _condenseEnc(cond, idx);
+  if (enc == null) return <String>[];
+  final kind = _condenseKind(enc);
+  if (kind == _CONDENSE_MAP) {
+    final out = <String>[];
+    for (var j = 1; j < enc.length; j += 2) {
+      out.add(jsString(_condenseSym(cond, enc[j])));
+    }
+    return out;
+  }
+  if (kind == _CONDENSE_LIST) {
+    return List<String>.generate(enc.length - 1, (j) => j.toString());
+  }
+  return <String>[];
+}
+
+int _condenseSize(dynamic cond, dynamic idx) {
+  final enc = _condenseEnc(cond, idx);
+  if (enc == null) return 0;
+  final kind = _condenseKind(enc);
+  if (kind == _CONDENSE_MAP) return (enc.length - 1) ~/ 2;
+  if (kind == _CONDENSE_LIST) return enc.length - 1;
+  return 0;
+}
+
+/// A cursor into a condensed structure. [ref] hands out ONE shared
+/// materialisation per node, through a memo every view reached by [at]
+/// shares; mutating it changes what every other [ref] of that node sees.
+class CondenseView {
+  final dynamic _cond;
+  final dynamic _start;
+  final Map<String, dynamic> _memo;
+
+  CondenseView._(this._cond, this._start, this._memo);
+
+  dynamic get([dynamic path]) =>
+      _condenseMaterialise(_cond, _condenseResolve(_cond, _start, path));
+
+  List<String> keys([dynamic path]) =>
+      _condenseKeys(_cond, _condenseResolve(_cond, _start, path));
+
+  bool has([dynamic path]) =>
+      _condenseFound(_condenseResolve(_cond, _start, path));
+
+  CondenseView at([dynamic path]) =>
+      CondenseView._(_cond, _condenseResolve(_cond, _start, path), _memo);
+
+  dynamic value() => _condenseMaterialise(_cond, _start);
+
+  int size() => _condenseSize(_cond, _start);
+
+  bool exists() => _condenseFound(_start);
+
+  dynamic ref() {
+    final k = jsString(_start);
+    if (!_memo.containsKey(k)) _memo[k] = _condenseMaterialise(_cond, _start);
+    return _memo[k];
+  }
+}
+
+CondenseView condenseview(dynamic cond,
+    [dynamic idx, Map<String, dynamic>? memo]) {
+  final start = idx ?? (iscondensed(cond) ? cond[_S_condroot] : -1);
+  return CondenseView._(cond, start, memo ?? <String, dynamic>{});
 }
 
 // ---------------------------------------------------------------------------
