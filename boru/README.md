@@ -44,7 +44,9 @@ print (Struct.stringify out Struct.NOARG Struct.NOARG)   ;# {x:1}
 The canonical public names are the keys of the `Struct` export map —
 `Struct.getpath`, `Struct.merge`, `Struct.transform`, `Struct.validate`,
 `Struct.select`, … — plus the `T_*`/`M_*` constants and the `NOARG`,
-`SKIP` and `DELETE` sentinels.
+`SKIP` and `DELETE` sentinels. A view from `Struct.condenseview` is a
+handle, read through the `condenseview_*` functions:
+`Struct.condenseview_get view "a.b"`.
 
 ### Calling conventions (differences from the canonical API)
 
