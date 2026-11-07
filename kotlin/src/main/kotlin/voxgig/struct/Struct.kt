@@ -50,6 +50,8 @@ object Struct {
     private val R_INJECT_PART = Pattern.compile("`([^`]+)`")
     private val R_CMD_KEY = Pattern.compile("^`(\\$[A-Z]+)(\\d*)`$")
     private val R_TRANSFORM_NAME = Pattern.compile("`\\$([A-Z]+)`")
+    private val R_INTEGER_KEY = Pattern.compile("^[-0-9]+$")
+    private val R_LIST_INDEX = Pattern.compile("^(0|[1-9][0-9]*)$")
     val SKIP: Any = Any()
 
     fun interface WalkApply {
@@ -347,10 +349,15 @@ object Struct {
         alt: Any?,
     ): Any? {
         if (value !is List<*> || key == null || key === UNDEF) return resolveAlt(alt)
-        val idx = parseIntKey(key) ?: return resolveAlt(alt)
-        val useIdx = if (idx < 0) value.size + idx else idx
-        if (useIdx < 0 || useIdx >= value.size) return resolveAlt(alt)
-        val out = value[useIdx]
+        val k = jsString(key)
+        var idx = listIndex(k)
+        if (0 > idx && R_INTEGER_KEY.matcher(k).matches()) {
+            // A negative key counts from the end.
+            val n = k.toIntOrNull()
+            if (n != null && n < 0) idx = value.size.toLong() + n
+        }
+        if (idx < 0 || idx >= value.size) return resolveAlt(alt)
+        val out = value[idx.toInt()]
         // Group A null-unification: a JSON null (or absent) slot counts as "no
         // value" — return the alt (canonical TS getelem `if (null == out)`).
         if (out == null || out === UNDEF) return resolveAlt(alt)
@@ -375,8 +382,8 @@ object Struct {
                 if (value.containsKey(sk)) out = value[sk]
             }
             is List<*> -> {
-                val idx = parseIntKey(key)
-                if (idx != null && idx >= 0 && idx < value.size) out = value[idx]
+                val idx = listIndex(key)
+                if (0 <= idx && idx < value.size) out = value[idx.toInt()]
             }
             else -> {}
         }
@@ -404,12 +411,19 @@ object Struct {
                 if (value.containsKey(sk)) value[sk] else UNDEF
             }
             is List<*> -> {
-                val idx = parseIntKey(key) ?: return UNDEF
-                val i = if (idx < 0) value.size + idx else idx
-                if (i < 0 || i >= value.size) UNDEF else value[i]
+                val idx = listIndex(key)
+                if (0 <= idx && idx < value.size) value[idx.toInt()] else UNDEF
             }
             else -> UNDEF
         }
+    }
+
+    // The index a list read takes key to, or -1: only a canonical index, as a
+    // JavaScript array reads one ("01", "+1", "1.0" and "-0" are not).
+    private fun listIndex(key: Any?): Long {
+        val k = jsString(key)
+        if (!R_LIST_INDEX.matcher(k).matches()) return -1
+        return if (18 < k.length) Long.MAX_VALUE else k.toLong()
     }
 
     fun haskey(
@@ -2929,8 +2943,6 @@ object Struct {
     private const val CONDENSE_IMMUTABLE =
         "struct: condensed structures are immutable - expand() first, then modify the copy"
 
-    private val R_CONDENSE_INDEX = Pattern.compile("^(0|[1-9][0-9]*)$")
-
     // Code point order: String.compareTo uses UTF-16 code unit order, which
     // puts U+FFFF after a supplementary character.
     private fun condenseCmp(
@@ -3132,12 +3144,9 @@ object Struct {
         }
 
         if (condenseIs(enc, CONDENSE_LIST)) {
-            // Canonical integer keys only: "01", "+1", "1.0" and "-0" all miss.
-            val k = condenseKey(key)
-            if (!R_CONDENSE_INDEX.matcher(k).matches()) return -1
             val items = enc as List<*>
-            val i = if (18 < k.length) Long.MAX_VALUE else k.toLong()
-            if (i >= items.size - 1) return -1
+            val i = listIndex(key)
+            if (0 > i || i >= items.size - 1) return -1
             return condenseIndex(items[1 + i.toInt()])
         }
 

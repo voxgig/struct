@@ -284,11 +284,12 @@ class StructTests {
 
     @Test
     fun condenseListKeysAreCanonicalIntegers() {
-        val c = Struct.condense(Struct.jm("l", Struct.jt(10, 20)))
-        // Pinned to canonical rather than compared with a plain getpath: this
-        // port's plain list lookup also reads "01", "+1" and "-0" as indexes.
+        val plain = Struct.jm("l", Struct.jt(10, 20))
+        val c = Struct.condense(plain)
+        // A plain list read misses each of these, and condensing must not change
+        // which value a path selects.
         for (k in listOf("01", "1e0", " 1", "+1", "1.0", "-0")) {
-            assertSame(Struct.UNDEF, Struct.getpath(c, listOf("l", k)), "list key $k")
+            assertEquals(Struct.getpath(plain, listOf("l", k)), Struct.getpath(c, listOf("l", k)), "list key $k")
         }
         assertEquals<Any?>(20, Struct.getpath(c, listOf("l", "1")))
     }
