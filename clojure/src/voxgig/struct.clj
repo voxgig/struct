@@ -154,7 +154,7 @@
          inj-descend inj-child inj-setval
          checkPlacement injectorArgs injectChild
          validate transform select jsonify FORMATTER
-         iscondensed expand condenseresolve condensematerialise)
+         iscondensed expand condenseresolve condensematerialise condensekey)
 
 ;; ---------------------------------------------------------------------------
 ;; Low-level numeric / key helpers
@@ -173,6 +173,13 @@
     (jdouble? k) (long (Math/floor (double k)))
     (string? k) (try (Long/parseLong (.trim ^String k)) (catch Exception _ nil))
     :else nil))
+
+;; The index a list read takes key to, or nil: only a canonical index, as a
+;; JavaScript array reads one ("01", " 1", "+1" and "-0" are not).
+(defn- listindex [key]
+  (let [k (condensekey key)]
+    (when (re-matches #"0|[1-9][0-9]*" k)
+      (try (Long/parseLong k) (catch NumberFormatException _ Long/MAX_VALUE)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Minor utilities
@@ -267,13 +274,15 @@
        alt
        (do
          (when (islist val)
-           (let [ks (str key)]
-             (when (re-matches #"-?[0-9]+" ks)
-               (let [len (.size ^List val)
-                     nk0 (Long/parseLong ks)
-                     nk (if (neg? nk0) (+ len nk0) nk0)]
-                 (when (and (<= 0 nk) (< nk len))
-                   (reset! out (.get ^List val (int nk))))))))
+           (let [len (.size ^List val)
+                 ks (condensekey key)
+                 nk (or (listindex ks)
+                        ;; A negative key counts from the end.
+                        (when (re-matches #"-[0-9]+" ks)
+                          (let [n (try (Long/parseLong ks) (catch NumberFormatException _ 0))]
+                            (when (neg? n) (+ len n)))))]
+             (when (and nk (<= 0 nk) (< nk len))
+               (reset! out (.get ^List val (int nk))))))
          (if (nil? @out)
            (if (isfunc alt) (alt) alt)
            @out))))))
@@ -287,8 +296,8 @@
                  (ismap val) (let [skey (str key)]
                                (if (.containsKey ^Map val skey)
                                  (.get ^Map val skey) alt))
-                 (islist val) (let [ki (parse-long-strict key)]
-                                (if (and ki (<= 0 ki) (< ki (.size ^List val)))
+                 (islist val) (let [ki (listindex key)]
+                                (if (and ki (< ki (.size ^List val)))
                                   (.get ^List val (int ki)) alt))
                  :else alt)]
        (if (or (nil? out) (identical? out NOARG)) alt out)))))
@@ -298,8 +307,8 @@
     (or (nil? val) (nil? key)) nil
     (ismap val) (let [skey (str key)]
                   (if (.containsKey ^Map val skey) (.get ^Map val skey) nil))
-    (islist val) (let [ki (parse-long-strict key)]
-                   (if (and ki (<= 0 ki) (< ki (.size ^List val)))
+    (islist val) (let [ki (listindex key)]
+                   (if (and ki (< ki (.size ^List val)))
                      (.get ^List val (int ki)) nil))
     :else nil))
 
@@ -308,8 +317,8 @@
   (cond
     (nil? key) false
     (ismap val) (.containsKey ^Map val (str key))
-    (islist val) (let [ki (parse-long-strict key)]
-                   (boolean (and ki (<= 0 ki) (< ki (.size ^List val)))))
+    (islist val) (let [ki (listindex key)]
+                   (boolean (and ki (< ki (.size ^List val)))))
     :else false))
 
 (defn haskey
@@ -1461,8 +1470,11 @@
         idx (.indexOf ^java.util.List (vec TYPENAME) tname)
         typev0 (if (>= idx 0) (bit-shift-left 1 (- 31 idx)) 0)
         typev (if (= tname S-nil) (bit-or typev0 T_null) typev0)
-        out (_lookup (ig inj :dparent) (ig inj :key))
-        t (typify out)]
+        dparent (ig inj :dparent)
+        key (ig inj :key)
+        out (_lookup dparent key)
+        ;; One nil: only the slot tells a missing field (no value) from a held null.
+        t (if (or (some? out) (_holds dparent key)) (typify out) T_noval)]
     (if (zero? (bit-and t typev))
       (do (.add ^List (ig inj :errs) (_invalidTypeMsg (ig inj :path) tname t out "V1001")) nil)
       out)))
@@ -2048,14 +2060,9 @@
                   :else (recur lo (dec mid))))
               -1))))
 
-      ;; Canonical integer keys only: getprop would also take "01" or " 1",
-      ;; and condensing must not change which value a path selects.
       (condenseis enc CONDENSE_LIST)
-      (let [k (condensekey key)
-            i (if (re-matches #"0|[1-9][0-9]*" k)
-                (try (Long/parseLong k) (catch NumberFormatException _ Long/MAX_VALUE))
-                -1)]
-        (if (and (<= 0 i) (< i (dec (.size enc))))
+      (let [i (listindex key)]
+        (if (and i (< i (dec (.size enc))))
           (.get enc (int (inc i)))
           -1))
 

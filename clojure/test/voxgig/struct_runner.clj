@@ -500,13 +500,15 @@
                  ["base is honoured" (= (s/getpath (s/condense store) "x" opts) (s/getpath store "x" opts))]
                  ["base reads the value" (= 1 (s/getpath (s/condense store) "x" opts))]])))
 
-    ;; This port's getprop reads "01", " 1", "+1" and "-0" as list indexes where
-    ;; canonical does not, so the misses are asserted directly.
+    ;; A plain list read misses each of these, and condensing must not change
+    ;; which value a path selects.
     (checks "condense-list-keys-are-canonical-integers"
             (fn []
-              (let [c (s/condense (m "l" (l 10 20)))]
+              (let [plain (m "l" (l 10 20))
+                    c (s/condense plain)]
                 (conj (vec (for [k ["01" "1e0" " 1" "+1" "1.0" "-0"]]
-                             [(str (pr-str k) " misses") (nil? (s/getpath c (l "l" k)))]))
+                             [(str (pr-str k) " reads as the plain one")
+                              (= (s/getpath c (l "l" k)) (s/getpath plain (l "l" k)))]))
                       ["\"1\" reads" (= 20 (s/getpath c (l "l" "1")))]))))
 
     (checks "condense-symbols-sort-by-code-point"
