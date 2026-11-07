@@ -92,6 +92,8 @@ because they don't preserve insertion order.
   `filter`, `escre`, `escurl`, `join`, `jsonify`, `stringify`,
   `pathify`, `clone`, `delprop`, `setprop`, `typename`, `getdef`.
 - Major utilities: `walk`, `merge`, `setpath`, `getpath`.
+- Condensed structures: `condense`, `expand`, `iscondensed`,
+  `condenseview`.
 - `inject` (three-phase key processing) with `_injectstr` (full
   and partial backtick refs) and `_injecthandler` (default command
   dispatcher).

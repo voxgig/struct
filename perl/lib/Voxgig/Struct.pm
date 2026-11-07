@@ -288,8 +288,27 @@ our $R_CHECKER_NAME    = qr/^\$[A-Z]+$/;
 our $R_BT_ESCAPE       = qr/\$BT/;
 our $R_DS_ESCAPE       = qr/\$DS/;
 our $R_INJECTION_PARTIAL = qr/`([^`]+)`/;
+our $R_CONDENSE_INDEX  = qr/^(?:0|[1-9][0-9]*)\z/;
 
 use constant MAXDEPTH => 32;
+
+# Condensed structures: the format version, and the kind leading each node.
+use constant CONDENSE_VERSION => 1;
+use constant CONDENSE_MAP     => 0;
+use constant CONDENSE_LIST    => 1;
+use constant CONDENSE_STR     => 2;
+use constant CONDENSE_NUM     => 3;
+use constant CONDENSE_TRUE    => 4;
+use constant CONDENSE_FALSE   => 5;
+use constant CONDENSE_NULL    => 6;
+
+use constant S_condense => '$condense';
+use constant S_condsym  => 'sym';
+use constant S_condnode => 'node';
+use constant S_condroot => 'root';
+
+use constant S_CONDENSE_IMMUTABLE =>
+  'struct: condensed structures are immutable - expand() first, then modify the copy';
 
 # ============================================================================
 # Map helpers (insertion-ordered hashes via Tie::IxHash).
@@ -1053,6 +1072,8 @@ sub _clone_inner {
 sub delprop {
     my ($val, $key) = @_;
     return $val unless defined $val && ref $val;
+    return $val unless iskey($key);
+    die S_CONDENSE_IMMUTABLE if iscondensed($val);
     if (islist($val)) {
         return $val unless defined $key && !ref($key) && looks_like_number($key);
         my $k = int($key);
@@ -1075,6 +1096,8 @@ sub delprop {
 sub setprop {
     my ($val, $key, $newval) = @_;
     return $val unless defined $val && ref $val;
+    return $val unless iskey($key);
+    die S_CONDENSE_IMMUTABLE if iscondensed($val);
     if (is_sentinel($newval)) {
         my ($mark) = _map_keys($newval);
         if ($mark eq '`$SKIP`')   { return $val }
@@ -1416,6 +1439,9 @@ sub _merge_pair {
 sub setpath {
     my ($store, $path_in, $val, $injdef) = @_;
 
+    # Same contract as setprop/delprop: a condensed store is immutable.
+    die S_CONDENSE_IMMUTABLE if iscondensed($store);
+
     # Coerce the path into a parts list via typify, matching canonical:
     # a list path is used as-is, a string path is dot-split, a number path
     # becomes a single-element list; anything else returns NONE.
@@ -1489,6 +1515,19 @@ sub getpath {
     }
     else {
         return NONE();
+    }
+
+    # A condensed store answers a path as the node it was built from does,
+    # touching only the nodes on the path. A base changes what the path
+    # resolves against, so then it is expanded instead.
+    if (iscondensed($store)) {
+        if (!defined $inj || is_none(getprop($inj, S_base))) {
+            my $at = _condense_resolve($store, $store->{ S_condroot() }, \@parts);
+            my $found = 0 > $at ? NONE() : _condense_materialise($store, $at);
+            # Group A: a stored null reads as absent, as getprop has it.
+            return is_jnull($found) ? NONE() : $found;
+        }
+        $store = expand($store);
     }
 
     my $val = $store;
@@ -3184,5 +3223,381 @@ sub re_replace {
 }
 
 sub re_escape { return escre($_[0]) }
+
+# ============================================================================
+# Condense: a JSON-shaped tree as a symbol table and a list of shared nodes.
+# ============================================================================
+
+sub iscondensed {
+    my ($val) = @_;
+    return 0 unless ismap($val);
+
+    # The version must MATCH, not merely be numeric: a future profile would
+    # otherwise be decoded under this one's schema.
+    my $version = $val->{ S_condense() };
+    return 0 unless _is_number_sv($version) && CONDENSE_VERSION == $version;
+
+    return ( islist( $val->{ S_condsym() } )
+          && islist( $val->{ S_condnode() } )
+          && _is_number_sv( $val->{ S_condroot() } ) ) ? 1 : 0;
+}
+
+# Pure: the same input always produces a byte-identical result, on every port.
+sub condense {
+    my ($val) = @_;
+
+    my %symset;
+    _condense_collect( $val, \%symset );
+    my @sym = sort keys %symset;
+    my %symid;
+    @symid{@sym} = ( 0 .. $#sym );
+
+    my ( @node, %seen );
+    my $root = _condense_build( $val, \%symid, \@node, \%seen );
+
+    my $out = _mkmap();
+    $out->{ S_condense() } = CONDENSE_VERSION;
+    $out->{ S_condsym() }  = \@sym;
+    $out->{ S_condnode() } = \@node;
+    $out->{ S_condroot() } = $root;
+    return $out;
+}
+
+# A value that is not condensed comes back unchanged.
+sub expand {
+    my ($cond) = @_;
+    return $cond unless iscondensed($cond);
+    return _condense_materialise( $cond, $cond->{ S_condroot() } );
+}
+
+# A cursor into a condensed structure. A memo passed in is shared with every
+# view it reaches.
+sub condenseview {
+    my ( $cond, $idx, $memo ) = @_;
+    my $start =
+      ( !defined $idx || is_none($idx) || is_jnull($idx) )
+      ? ( iscondensed($cond) ? $cond->{ S_condroot() } : -1 )
+      : $idx;
+    return Voxgig::Struct::CondenseView->_new( $cond, $start,
+        ref($memo) eq 'HASH' ? $memo : {} );
+}
+
+sub _condense_isstr {
+    my ($val) = @_;
+    return ( defined $val && !ref $val && !_is_number_sv($val) ) ? 1 : 0;
+}
+
+sub _condense_collect {
+    my ( $n, $symset ) = @_;
+    if ( ismap($n) ) {
+        for my $k ( _map_keys($n) ) {
+            $symset->{$k} = 1;
+            _condense_collect( $n->{$k}, $symset );
+        }
+    }
+    elsif ( islist($n) ) {
+        _condense_collect( $_, $symset ) for @$n;
+    }
+    elsif ( _condense_isstr($n) ) {
+        $symset->{$n} = 1;
+    }
+    return;
+}
+
+# Post-order, so identical subtrees are interned before a parent refers to them.
+sub _condense_build {
+    my ( $n, $symid, $node, $seen ) = @_;
+    my $enc;
+    if ( ismap($n) ) {
+        $enc = [CONDENSE_MAP];
+
+        # keysof sorts by code point, as the symbols are, so the key ids ascend for bisection.
+        for my $k ( @{ keysof($n) } ) {
+            push @$enc, $symid->{$k}, _condense_build( $n->{$k}, $symid, $node, $seen );
+        }
+    }
+    elsif ( islist($n) ) {
+        $enc = [ CONDENSE_LIST, map { _condense_build( $_, $symid, $node, $seen ) } @$n ];
+    }
+    elsif ( _condense_isstr($n) ) {
+        $enc = [ CONDENSE_STR, $symid->{$n} ];
+    }
+    elsif ( defined $n && !ref $n ) {
+        $enc = [ CONDENSE_NUM, $n ];
+    }
+    elsif ( is_jbool($n) ) {
+        $enc = [ $$n ? CONDENSE_TRUE : CONDENSE_FALSE ];
+    }
+    else {
+        $enc = [CONDENSE_NULL];
+    }
+    return _condense_intern( $enc, $node, $seen );
+}
+
+# Numbers key by value, as a JS join spells them: 1 and 1.0 share a node.
+sub _condense_intern {
+    my ( $enc, $node, $seen ) = @_;
+    my $key =
+      CONDENSE_NUM == $enc->[0]
+      ? CONDENSE_NUM . ',' . _condense_numkey( $enc->[1] )
+      : CORE::join( ',', map { sprintf( '%d', $_ ) } @$enc );
+    return $seen->{$key} if exists $seen->{$key};
+    push @$node, $enc;
+    return $seen->{$key} = $#$node;
+}
+
+sub _condense_numkey {
+    my ($n) = @_;
+    return 0 == $n ? '0' : sprintf( '%.17g', $n );
+}
+
+# A path part as JavaScript's String() spells it.
+sub _condense_str {
+    my ($val) = @_;
+    return 'undefined' if !defined $val || is_none($val);
+    return 'null' if is_jnull($val);
+    return ( $$val ? 'true' : 'false' ) if is_jbool($val);
+    return "$val" unless ref $val;
+    return stringify($val);
+}
+
+# The encoding of node $idx, or nothing.
+sub _condense_enc {
+    my ( $cond, $idx ) = @_;
+    my $node = $cond->{ S_condnode() };
+    return unless islist($node) && defined $idx && !ref $idx && looks_like_number($idx);
+    return unless $idx == int($idx) && 0 <= $idx && $idx < @$node;
+    my $enc = $node->[$idx];
+    return unless islist($enc);
+    return $enc;
+}
+
+sub _condense_kind {
+    my ($enc) = @_;
+    my $kind = $enc->[0];
+    return ( _is_number_sv($kind) && $kind == int($kind) ) ? $kind : -1;
+}
+
+# Symbol $id, or NONE when the table has none.
+sub _condense_sym {
+    my ( $sym, $id ) = @_;
+    return NONE()
+      unless islist($sym) && _is_number_sv($id) && $id == int($id) && 0 <= $id && $id < @$sym;
+    return $sym->[$id];
+}
+
+# Bisect the sorted symbol table: -1 when the string occurs nowhere.
+sub _condense_symid {
+    my ( $cond, $key ) = @_;
+    my $sym = $cond->{ S_condsym() };
+    my ( $lo, $hi ) = ( 0, $#$sym );
+    while ( $lo <= $hi ) {
+        my $mid = ( $lo + $hi ) >> 1;
+        my $cmp = _condense_str( $sym->[$mid] ) cmp $key;
+        return $mid if 0 == $cmp;
+        if   ( $cmp < 0 ) { $lo = $mid + 1 }
+        else              { $hi = $mid - 1 }
+    }
+    return -1;
+}
+
+# The node index of $key inside node $idx, or -1. Touches only this node.
+sub _condense_child {
+    my ( $cond, $idx, $key ) = @_;
+    my $enc = _condense_enc( $cond, $idx );
+    return -1 unless defined $enc;
+
+    my $kind = _condense_kind($enc);
+    my $k    = _condense_str($key);
+
+    if ( CONDENSE_MAP == $kind ) {
+        my $symid = _condense_symid( $cond, $k );
+        return -1 if 0 > $symid;
+
+        # Pairs live at [1,2], [3,4], ... with keys ascending: bisect the pairs.
+        my ( $lo, $hi ) = ( 0, int( ( @$enc - 1 ) / 2 ) - 1 );
+        while ( $lo <= $hi ) {
+            my $mid = ( $lo + $hi ) >> 1;
+            my $pk  = $enc->[ 1 + $mid * 2 ] // -1;
+            return $enc->[ 2 + $mid * 2 ] // -1 if $pk == $symid;
+            if   ( $pk < $symid ) { $lo = $mid + 1 }
+            else                  { $hi = $mid - 1 }
+        }
+        return -1;
+    }
+
+    if ( CONDENSE_LIST == $kind ) {
+
+        # Canonical integer keys only: canonical's list lookup treats "01",
+        # "1e0", " 1" and "+1" as absent, so a condensed one must too.
+        return -1 unless $k =~ $R_CONDENSE_INDEX;
+        return -1 if $k >= @$enc - 1;
+        return $enc->[ 1 + $k ];
+    }
+
+    return -1;
+}
+
+# Walk a path from node $idx, returning the node index or -1.
+sub _condense_resolve {
+    my ( $cond, $idx, $path ) = @_;
+    my @parts;
+    if ( islist($path) ) {
+        @parts = @$path;
+    }
+    elsif ( !defined $path || is_none($path) || is_jnull($path) ) {
+        @parts = ();
+    }
+    elsif ( _condense_isstr($path) ) {
+        @parts = split /\./, $path, -1;
+    }
+    else {
+        @parts = ( _condense_str($path) );
+    }
+
+    my $at = $idx;
+    for my $part (@parts) {
+        return -1 if 0 > $at;
+        next if _condense_isstr($part) && '' eq $part;
+        $at = _condense_child( $cond, $at, $part );
+    }
+    return $at;
+}
+
+# Node $idx as a fresh, independent tree; NONE when there is no such node.
+sub _condense_materialise {
+    my ( $cond, $idx ) = @_;
+    return NONE() unless defined $idx && !ref $idx && looks_like_number($idx) && 0 <= $idx;
+    return _condense_rebuild( $cond, $cond->{ S_condsym() }, $idx );
+}
+
+sub _condense_rebuild {
+    my ( $cond, $sym, $i ) = @_;
+    my $enc = _condense_enc( $cond, $i );
+    return NONE() unless defined $enc;
+    my $kind = _condense_kind($enc);
+
+    if ( CONDENSE_MAP == $kind ) {
+        my $out = _mkmap();
+        for ( my $j = 1 ; $j + 1 < @$enc ; $j += 2 ) {
+            my $key   = _condense_sym( $sym, $enc->[$j] );
+            my $child = _condense_rebuild( $cond, $sym, $enc->[ $j + 1 ] );
+            $out->{ _condense_str($key) } = $child unless is_none($key) || is_none($child);
+        }
+        return $out;
+    }
+    if ( CONDENSE_LIST == $kind ) {
+        my @out;
+        for my $item ( @{$enc}[ 1 .. $#$enc ] ) {
+            my $child = _condense_rebuild( $cond, $sym, $item );
+            push @out, is_none($child) ? $JNULL : $child;
+        }
+        return \@out;
+    }
+    return _condense_sym( $sym, $enc->[1] ) if CONDENSE_STR == $kind;
+    return $enc->[1]                        if CONDENSE_NUM == $kind;
+    return $JTRUE                           if CONDENSE_TRUE == $kind;
+    return $JFALSE                          if CONDENSE_FALSE == $kind;
+    return $JNULL;
+}
+
+# The keys of node $idx, without materialising any of its values.
+sub _condense_keys {
+    my ( $cond, $idx ) = @_;
+    my $enc = _condense_enc( $cond, $idx );
+    return [] unless defined $enc;
+    my $kind = _condense_kind($enc);
+    if ( CONDENSE_MAP == $kind ) {
+        my $sym = $cond->{ S_condsym() };
+        my @out;
+        for ( my $j = 1 ; $j < @$enc ; $j += 2 ) {
+            my $key = _condense_sym( $sym, $enc->[$j] );
+            push @out, _condense_str($key) unless is_none($key);
+        }
+        return \@out;
+    }
+    return [ map { "$_" } 0 .. $#$enc - 1 ] if CONDENSE_LIST == $kind;
+    return [];
+}
+
+# Map pair count, list length, else 0.
+sub _condense_size {
+    my ( $cond, $idx ) = @_;
+    my $enc = _condense_enc( $cond, $idx );
+    return 0 unless defined $enc;
+    my $kind = _condense_kind($enc);
+    return int( ( @$enc - 1 ) / 2 ) if CONDENSE_MAP == $kind;
+    return scalar(@$enc) - 1 if CONDENSE_LIST == $kind;
+    return 0;
+}
+
+# ----------------------------------------------------------------------------
+# A view into a condensed structure. Reads resolve by node index and touch only
+# the nodes on the path; nothing is decoded until a value is asked for.
+# ----------------------------------------------------------------------------
+
+package Voxgig::Struct::CondenseView;
+
+sub _new {
+    my ( $class, $cond, $start, $memo ) = @_;
+    return bless { cond => $cond, start => $start, memo => $memo }, $class;
+}
+
+# The value at a path, materialised: a container comes back as a fresh copy.
+sub get {
+    my ( $self, $path ) = @_;
+    my $at = Voxgig::Struct::_condense_resolve( $self->{cond}, $self->{start}, $path );
+    return Voxgig::Struct::_condense_materialise( $self->{cond}, $at );
+}
+
+sub keys {
+    my ( $self, $path ) = @_;
+    my $at = Voxgig::Struct::_condense_resolve( $self->{cond}, $self->{start}, $path );
+    return 0 > $at ? [] : Voxgig::Struct::_condense_keys( $self->{cond}, $at );
+}
+
+sub has {
+    my ( $self, $path ) = @_;
+    my $at = Voxgig::Struct::_condense_resolve( $self->{cond}, $self->{start}, $path );
+    return 0 <= $at ? 1 : 0;
+}
+
+# A view at a path, sharing this view's memo.
+sub at {
+    my ( $self, $path ) = @_;
+    my $at = Voxgig::Struct::_condense_resolve( $self->{cond}, $self->{start}, $path );
+    return __PACKAGE__->_new( $self->{cond}, $at, $self->{memo} );
+}
+
+sub value {
+    my ($self) = @_;
+    return Voxgig::Struct::_condense_materialise( $self->{cond}, $self->{start} );
+}
+
+sub size {
+    my ($self) = @_;
+    return 0 > $self->{start} ? 0 : Voxgig::Struct::_condense_size( $self->{cond}, $self->{start} );
+}
+
+sub exists {
+    my ($self) = @_;
+    return 0 <= $self->{start} ? 1 : 0;
+}
+
+# A SHARED materialisation: the same node for the same index, in every view
+# sharing the memo. Mutating it changes what every one of them reads.
+sub ref {
+    my ($self) = @_;
+    my $memo  = $self->{memo};
+    my $k     = "$self->{start}";
+    my $found = $memo->{$k};
+    if ( !defined $found || Voxgig::Struct::is_none($found) ) {
+        $found = Voxgig::Struct::_condense_materialise( $self->{cond}, $self->{start} );
+        $memo->{$k} = $found;
+    }
+    return $found;
+}
+
+package Voxgig::Struct;
 
 1;
