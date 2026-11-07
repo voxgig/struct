@@ -187,9 +187,11 @@ func TestStruct(t *testing.T) {
 	})
 
 	t.Run("condense-list-keys-are-canonical-integers", func(t *testing.T) {
-		c := voxgigstruct.Condense(jm("l", jt(10, 20)))
+		plain := jm("l", jt(10, 20))
+		c := voxgigstruct.Condense(plain)
 		for _, k := range []string{"01", "1e0", " 1", "+1", "1.0", "-0"} {
-			if out := voxgigstruct.GetPath(c, []any{"l", k}); nil != out {
+			out := voxgigstruct.GetPath(c, []any{"l", k})
+			if nil != out || nil != voxgigstruct.GetPath(plain, []any{"l", k}) {
 				t.Errorf("list key %q: %v", k, out)
 			}
 		}

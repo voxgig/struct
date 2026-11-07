@@ -119,8 +119,8 @@ var DELETE = &_sentinel{"DELETE"}
 
 var NOVAL = &_sentinel{"NOVAL"}
 
-// Regex matching integer keys (including negative).
-var reIntegerKey = regexp.MustCompile(`^[-0-9]+$`)
+// A list index as a JavaScript array reads one: "01", "+1" and "-0" are not.
+var reListIndex = regexp.MustCompile(`^(0|[1-9][0-9]*)$`)
 
 // Meta path syntax regex: matches patterns like "q0$=x1" or "q0$~x1"
 var reMetaPath = regexp.MustCompile(`^([^$]+)\$([=~])(.+)$`)
@@ -687,21 +687,19 @@ func GetElem(val any, key any, alts ...any) any {
 	var out any
 
 	if IsList(val) {
-		ks := StrKey(key)
-		if reIntegerKey.MatchString(ks) {
-			nkey, err := strconv.Atoi(ks)
-			if err == nil {
-				list, ok := _asList(val)
-				if !ok {
-					list = _listify(val)
-				}
-				if nkey < 0 {
-					nkey = len(list) + nkey
-				}
-				if nkey >= 0 && nkey < len(list) {
-					out = list[nkey]
-				}
+		list, ok := _asList(val)
+		if !ok {
+			list = _listify(val)
+		}
+		nkey := _listIndex(key)
+		// StrKey truncates a decimal, which names no element.
+		if 0 > nkey && 0 < ((T_string|T_integer)&Typify(key)) {
+			if n, err := strconv.Atoi(StrKey(key)); nil == err && 0 > n {
+				nkey = len(list) + n
 			}
+		}
+		if 0 <= nkey && nkey < len(list) {
+			out = list[nkey]
 		}
 	}
 
@@ -750,20 +748,7 @@ func GetProp(val any, key any, alts ...any) any {
 		}
 
 	} else if IsList(val) {
-		ki, ok := key.(int)
-		if !ok {
-			switch kf := key.(type) {
-			case float64:
-				ki = int(kf)
-
-			case string:
-				ki = -1
-				ski, err := strconv.Atoi(key.(string))
-				if nil == err {
-					ki = ski
-				}
-			}
-		}
+		ki := _listIndex(key)
 
 		if lr, isLR := val.(*ListRef[any]); isLR {
 			if 0 <= ki && ki < len(lr.List) {
@@ -1551,6 +1536,18 @@ func _listKey(key any) (int, bool) {
 		return ki, nil == err
 	}
 	return 0, false
+}
+
+// The index a list read takes key to, or -1. Reads accept only what a
+// JavaScript array does, a stricter rule than _listKey's for writes.
+func _listIndex(key any) int {
+	if s, ok := key.(string); ok {
+		if i, err := strconv.Atoi(s); nil == err && reListIndex.MatchString(s) {
+			return i
+		}
+		return -1
+	}
+	return _condenseInt(key)
 }
 
 func Walk(
@@ -3547,22 +3544,17 @@ var validate_TYPE Injector = func(
 		}
 	}
 
+	// GetProp reads a missing field as nil, and _lookup tells it from a stored
+	// null as NOVAL, which $NULL refuses.
 	out := GetProp(inj.Dparent, inj.Key)
-
-	// A $NOF or $ALL trial of a missing value holds NOVAL at its root, which
-	// GetProp reads as nil.
-	if m, ok := inj.Dparent.(map[string]any); ok && NOVAL == m[inj.Key] {
-		out = NOVAL
+	if nil == out {
+		out = _lookup(inj.Dparent, inj.Key)
 	}
 	t := Typify(out)
 
-	// In Go, nil represents both null and noval (undefined).
-	// $NIL should match nil values, and $NULL should also match nil.
+	// $NIL is absent or null.
 	if tname == "nil" && nil == denoval(out) {
 		return nil
-	}
-	if tname == "null" && out == nil {
-		return out
 	}
 
 	if 0 == (t & typev) {
@@ -4526,8 +4518,6 @@ const (
 var errCondensedImmutable = errors.New(
 	"struct: condensed structures are immutable - expand() first, then modify the copy")
 
-var reCondenseIndex = regexp.MustCompile(`^(0|[1-9][0-9]*)$`)
-
 // The version must match, not merely be numeric: a future profile would
 // otherwise be decoded under this one's schema.
 func IsCondensed(val any) bool {
@@ -4842,11 +4832,7 @@ func _condenseChild(cond any, idx int, key string) int {
 		}
 
 	case CONDENSE_LIST:
-		// Canonical integer keys only: "01", "1e0", " 1" and "+1" name no element.
-		if !reCondenseIndex.MatchString(key) {
-			return -1
-		}
-		if i, err := strconv.Atoi(key); nil == err && i < len(enc)-1 {
+		if i := _listIndex(key); 0 <= i && i < len(enc)-1 {
 			return _condenseInt(enc[1+i])
 		}
 	}
@@ -5075,8 +5061,7 @@ func _lookup(val any, key any) any {
 		}
 	} else if IsList(val) {
 		list := _listify(val)
-		ki, err := strconv.Atoi(StrKey(key))
-		if nil == err && 0 <= ki && ki < len(list) {
+		if ki := _listIndex(key); 0 <= ki && ki < len(list) {
 			return list[ki]
 		}
 	}
