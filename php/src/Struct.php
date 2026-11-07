@@ -353,7 +353,7 @@ class Struct
             }
         }
         if (is_object($value)) {
-            return self::T_node | self::T_map;
+            return self::T_node | (self::_isinstance($value) ? self::T_instance : self::T_map);
         }
         return self::T_noval;
     }
@@ -1197,6 +1197,10 @@ class Struct
             return $parent;
         }
 
+        if (self::iscondensed($parent)) {
+            throw new \Exception(self::S_CONDENSE_IMMUTABLE);
+        }
+
         // ─── LISTREF ────────────────────────────────────────────────
         if ($parent instanceof ListRef) {
             if (!is_numeric($key)) {
@@ -1511,6 +1515,19 @@ class Struct
 
         if ($parts === self::undef()) {
             return self::undef();
+        }
+
+        // A condensed store answers a path as the node it was built from does,
+        // touching only the nodes on the path. A base changes what the path
+        // resolves against, so then it is expanded instead.
+        if (self::iscondensed($store)) {
+            if (null === $injdef || null === self::getprop($injdef, self::S_BASE)) {
+                $at = self::_condenseResolve($store, self::_getprop($store, self::S_condroot), $parts);
+                $found = 0 > $at ? self::undef() : self::_condenseMaterialise($store, $at);
+                // Group A: a stored null reads as absent, as getprop has it.
+                return null === $found ? self::undef() : $found;
+            }
+            $store = self::expand($store);
         }
 
         $val = $store;
@@ -2701,10 +2718,7 @@ class Struct
             return $a == $b;
         }
 
-        if (
-            $atype !== $btype || 0 === ((self::T_list | self::T_map) & $atype)
-            || self::_isinstance($a) || self::_isinstance($b)
-        ) {
+        if ($atype !== $btype || 0 === ((self::T_list | self::T_map) & $atype)) {
             return false;
         }
 
@@ -2724,11 +2738,13 @@ class Struct
     }
 
     /**
-     * typify reads any object as a map; a class instance is equal only to itself.
+     * A class instance: an object that is not a map (stdClass), a list
+     * (ListRef) or a function (Closure).
      */
     private static function _isinstance(mixed $val): bool
     {
-        return is_object($val) && !($val instanceof \stdClass) && !($val instanceof ListRef);
+        return is_object($val) && !($val instanceof \stdClass) && !($val instanceof ListRef)
+            && !($val instanceof \Closure);
     }
 
     /**
@@ -2744,10 +2760,7 @@ class Struct
         // out comes from validate as plain arrays, where an empty map is [] too.
         $samekind = self::islist($val) === self::islist($out) || [] === $out;
 
-        if (
-            0 === ((self::T_list | self::T_map) & self::typify($val)) || self::_isinstance($val)
-            || !$samekind || !self::isnode($out)
-        ) {
+        if (0 === ((self::T_list | self::T_map) & self::typify($val)) || !$samekind || !self::isnode($out)) {
             return self::_deepequal($val, $out);
         }
 
@@ -3763,6 +3776,10 @@ class Struct
             return $parent;
         }
 
+        if (self::iscondensed($parent)) {
+            throw new \Exception(self::S_CONDENSE_IMMUTABLE);
+        }
+
         if ($parent instanceof ListRef) {
             $keyI = (int)$key;
             if (!is_numeric($key)) {
@@ -3811,6 +3828,10 @@ class Struct
         mixed $val,
         mixed $injdef = null
     ): mixed {
+        if (self::iscondensed($store)) {
+            throw new \Exception(self::S_CONDENSE_IMMUTABLE);
+        }
+
         $pathType = self::typify($path);
 
         $parts = (0 < (self::T_list & $pathType)) ? $path :
@@ -3881,6 +3902,445 @@ class Struct
             }
         }
         return $fallback;
+    }
+
+
+    /* =======================
+     * Condense
+     * =======================
+     */
+
+    private const CONDENSE_VERSION = 1;
+
+    private const CONDENSE_MAP = 0;
+    private const CONDENSE_LIST = 1;
+    private const CONDENSE_STR = 2;
+    private const CONDENSE_NUM = 3;
+    private const CONDENSE_TRUE = 4;
+    private const CONDENSE_FALSE = 5;
+    private const CONDENSE_NULL = 6;
+
+    private const S_condense = '$condense';
+    private const S_condsym = 'sym';
+    private const S_condnode = 'node';
+    private const S_condroot = 'root';
+
+    private const R_CONDENSE_INDEX = '/^(0|[1-9][0-9]*)\z/';
+
+    private const S_CONDENSE_IMMUTABLE =
+        'struct: condensed structures are immutable - expand() first, then modify the copy';
+
+    public static function iscondensed(mixed $val = null): bool
+    {
+        // The version must MATCH, not merely be numeric: a future profile would
+        // otherwise be decoded under this one's schema.
+        $version = self::_getprop($val, self::S_condense);
+        if (!(is_int($version) || is_float($version)) || self::CONDENSE_VERSION != $version) {
+            return false;
+        }
+        $root = self::_getprop($val, self::S_condroot);
+        return self::ismap($val)
+            && self::islist(self::_getprop($val, self::S_condsym))
+            && self::islist(self::_getprop($val, self::S_condnode))
+            && (is_int($root) || is_float($root));
+    }
+
+    /**
+     * Condense any JSON-shaped node. Pure: the same input always produces a
+     * byte-identical result, on every port.
+     */
+    public static function condense(mixed $val = null): object
+    {
+        $symset = [];
+
+        $collect = function (mixed $n) use (&$collect, &$symset): void {
+            if (self::ismap($n)) {
+                foreach (self::keysof($n) as $k) {
+                    $symset[$k] = true;
+                    $collect(self::_getprop($n, $k));
+                }
+            } elseif (self::islist($n)) {
+                foreach ($n as $item) {
+                    $collect($item);
+                }
+            } elseif (is_string($n)) {
+                $symset[$n] = true;
+            }
+        };
+        $collect($val);
+
+        // Array keys turn integer-like strings into integers; strval undoes it.
+        $sym = array_map('strval', array_keys($symset));
+        sort($sym, SORT_STRING);
+        $symid = array_flip($sym);
+
+        $node = [];
+        $seen = [];
+
+        $intern = function (array $enc) use (&$node, &$seen): int {
+            $enckey = self::CONDENSE_NUM === $enc[0]
+                ? self::CONDENSE_NUM . ',' . self::_condenseNumKey($enc[1])
+                : implode(',', $enc);
+            if (isset($seen[$enckey])) {
+                return $seen[$enckey];
+            }
+            $idx = count($node);
+            $node[] = $enc;
+            $seen[$enckey] = $idx;
+            return $idx;
+        };
+
+        // Post-order, so identical subtrees are interned before a parent refers to them.
+        $build = function (mixed $n) use (&$build, $intern, $symid): int {
+            if (self::ismap($n)) {
+                $enc = [self::CONDENSE_MAP];
+                // keysof sorts bytewise, which is code-point order, so the key ids ascend for bisection.
+                foreach (self::keysof($n) as $k) {
+                    $enc[] = $symid[$k];
+                    $enc[] = $build(self::_getprop($n, $k));
+                }
+                return $intern($enc);
+            }
+            if (self::islist($n)) {
+                $enc = [self::CONDENSE_LIST];
+                foreach ($n as $item) {
+                    $enc[] = $build($item);
+                }
+                return $intern($enc);
+            }
+            if (is_string($n)) {
+                return $intern([self::CONDENSE_STR, $symid[$n]]);
+            }
+            if (is_int($n) || is_float($n)) {
+                return $intern([self::CONDENSE_NUM, $n]);
+            }
+            if (true === $n) {
+                return $intern([self::CONDENSE_TRUE]);
+            }
+            if (false === $n) {
+                return $intern([self::CONDENSE_FALSE]);
+            }
+            return $intern([self::CONDENSE_NULL]);
+        };
+
+        $root = $build($val);
+
+        $out = new \stdClass();
+        $out->{self::S_condense} = self::CONDENSE_VERSION;
+        $out->{self::S_condsym} = $sym;
+        $out->{self::S_condnode} = $node;
+        $out->{self::S_condroot} = $root;
+        return $out;
+    }
+
+    /**
+     * Fully materialise a condensed structure. A value that is not condensed
+     * comes back unchanged.
+     */
+    public static function expand(mixed $cond = null): mixed
+    {
+        if (!self::iscondensed($cond)) {
+            return $cond;
+        }
+        return self::_condenseMaterialise($cond, self::_getprop($cond, self::S_condroot));
+    }
+
+    /**
+     * A cursor into a condensed structure. Its reads touch only the nodes on
+     * the path; a memo passed in is shared with every view it reaches.
+     */
+    public static function condenseview(mixed $cond = null, mixed $idx = null, mixed $memo = null): CondenseView
+    {
+        $start = (null === $idx || self::undef() === $idx)
+            ? (self::iscondensed($cond) ? self::_getprop($cond, self::S_condroot) : -1)
+            : $idx;
+        return new CondenseView($cond, $start, $memo instanceof \ArrayObject ? $memo : new \ArrayObject());
+    }
+
+    /**
+     * One key per number value, as joining a JS number gives: 1 and 1.0 share
+     * a node, and -0 is 0.
+     */
+    private static function _condenseNumKey(int|float $n): string
+    {
+        $f = (float) $n;
+        return 0.0 == $f ? '0' : sprintf('%.17g', $f);
+    }
+
+    /** A path part as JavaScript's String() spells it. */
+    private static function _condenseStr(mixed $v): string
+    {
+        if (is_string($v)) {
+            return $v;
+        }
+        if (is_int($v)) {
+            return (string) $v;
+        }
+        if (is_float($v)) {
+            if (is_finite($v) && floor($v) == $v && abs($v) < 1e21) {
+                return 0.0 == $v ? '0' : sprintf('%.0f', $v);
+            }
+            return (string) json_encode($v);
+        }
+        if (is_bool($v)) {
+            return $v ? 'true' : 'false';
+        }
+        if (null === $v) {
+            return 'null';
+        }
+        return self::stringify($v);
+    }
+
+    /** @return array<mixed> */
+    private static function _condenseList(mixed $v): array
+    {
+        return $v instanceof ListRef ? $v->list : (is_array($v) ? $v : []);
+    }
+
+    /**
+     * The encoding of node $idx, or null when there is none.
+     *
+     * @internal
+     * @return array<mixed>|null
+     */
+    public static function _condenseEnc(mixed $cond, mixed $idx): ?array
+    {
+        $node = self::_condenseList(self::_getprop($cond, self::S_condnode));
+        if (is_float($idx) && floor($idx) == $idx) {
+            $idx = (int) $idx;
+        }
+        if (!is_int($idx) || 0 > $idx || $idx >= count($node)) {
+            return null;
+        }
+        $enc = $node[$idx];
+        return self::islist($enc) ? self::_condenseList($enc) : null;
+    }
+
+    /** The kind leading an encoding, or -1. */
+    private static function _condenseKind(array $enc): int
+    {
+        $kind = $enc[0] ?? null;
+        return (is_int($kind) || (is_float($kind) && floor($kind) == $kind)) ? (int) $kind : -1;
+    }
+
+    /** Symbol $id, or absent when the table has none. */
+    private static function _condenseSym(array $sym, mixed $id): mixed
+    {
+        if (is_float($id) && floor($id) == $id) {
+            $id = (int) $id;
+        }
+        return (is_int($id) && array_key_exists($id, $sym)) ? $sym[$id] : self::undef();
+    }
+
+    /**
+     * The id of a symbol by bisecting the sorted symbol table, or -1 when the
+     * string does not occur anywhere in the structure.
+     */
+    private static function _condenseSymId(mixed $cond, string $key): int
+    {
+        $sym = self::_condenseList(self::_getprop($cond, self::S_condsym));
+        $lo = 0;
+        $hi = count($sym) - 1;
+        while ($lo <= $hi) {
+            $mid = ($lo + $hi) >> 1;
+            $cmp = strcmp(self::_condenseStr($sym[$mid]), $key);
+            if (0 === $cmp) {
+                return $mid;
+            }
+            if (0 > $cmp) {
+                $lo = $mid + 1;
+            } else {
+                $hi = $mid - 1;
+            }
+        }
+        return -1;
+    }
+
+    /** The node index of $key inside node $idx, or -1. Touches only this node. */
+    private static function _condenseChild(mixed $cond, mixed $idx, mixed $key): mixed
+    {
+        $enc = self::_condenseEnc($cond, $idx);
+        if (null === $enc) {
+            return -1;
+        }
+
+        $kind = self::_condenseKind($enc);
+        $k = self::_condenseStr($key);
+
+        if (self::CONDENSE_MAP === $kind) {
+            $symid = self::_condenseSymId($cond, $k);
+            if (0 > $symid) {
+                return -1;
+            }
+            // Pairs live at [1,2], [3,4], ... with keys ascending: bisect the pairs.
+            $lo = 0;
+            $hi = intdiv(count($enc) - 1, 2) - 1;
+            while ($lo <= $hi) {
+                $mid = ($lo + $hi) >> 1;
+                $pk = $enc[1 + $mid * 2] ?? -1;
+                if ($pk == $symid) {
+                    return $enc[2 + $mid * 2] ?? -1;
+                }
+                if ($pk < $symid) {
+                    $lo = $mid + 1;
+                } else {
+                    $hi = $mid - 1;
+                }
+            }
+            return -1;
+        }
+
+        if (self::CONDENSE_LIST === $kind) {
+            // Canonical integer keys only: an ordinary list lookup treats "01",
+            // "1e0", " 1" and "+1" as absent, so a condensed one must too.
+            if (1 !== preg_match(self::R_CONDENSE_INDEX, $k)) {
+                return -1;
+            }
+            $i = (int) $k;
+            if ($i >= count($enc) - 1) {
+                return -1;
+            }
+            return $enc[1 + $i];
+        }
+
+        return -1;
+    }
+
+    /**
+     * Walk a path from node $idx, returning the node index or -1.
+     *
+     * @internal
+     */
+    public static function _condenseResolve(mixed $cond, mixed $idx, mixed $path): mixed
+    {
+        if (self::islist($path)) {
+            $parts = self::_condenseList($path);
+        } elseif (is_string($path)) {
+            $parts = self::S_MT === $path ? [] : explode(self::S_DT, $path);
+        } elseif (null === $path || self::undef() === $path) {
+            $parts = [];
+        } else {
+            $parts = [self::_condenseStr($path)];
+        }
+
+        $at = $idx;
+        foreach ($parts as $part) {
+            if (0 > $at) {
+                return -1;
+            }
+            if (self::S_MT === $part) {
+                continue;
+            }
+            $at = self::_condenseChild($cond, $at, $part);
+        }
+        return $at;
+    }
+
+    /**
+     * Node $idx as a fresh, independent tree; absent when there is no such node.
+     *
+     * @internal
+     */
+    public static function _condenseMaterialise(mixed $cond, mixed $idx): mixed
+    {
+        if (!(is_int($idx) || is_float($idx)) || 0 > $idx) {
+            return self::undef();
+        }
+
+        $sym = self::_condenseList(self::_getprop($cond, self::S_condsym));
+
+        $rebuild = function (mixed $i) use (&$rebuild, $cond, $sym): mixed {
+            $enc = self::_condenseEnc($cond, $i);
+            if (null === $enc) {
+                return self::undef();
+            }
+            $kind = self::_condenseKind($enc);
+            if (self::CONDENSE_MAP === $kind) {
+                $out = new \stdClass();
+                for ($j = 1; $j + 1 < count($enc); $j += 2) {
+                    $key = self::_condenseSym($sym, $enc[$j]);
+                    $child = $rebuild($enc[$j + 1]);
+                    if (self::undef() !== $key && self::undef() !== $child) {
+                        $out->{self::_condenseStr($key)} = $child;
+                    }
+                }
+                return $out;
+            }
+            if (self::CONDENSE_LIST === $kind) {
+                $out = [];
+                for ($j = 1; $j < count($enc); $j++) {
+                    $child = $rebuild($enc[$j]);
+                    $out[] = self::undef() === $child ? null : $child;
+                }
+                return $out;
+            }
+            if (self::CONDENSE_STR === $kind) {
+                return self::_condenseSym($sym, $enc[1] ?? null);
+            }
+            if (self::CONDENSE_NUM === $kind) {
+                return $enc[1] ?? null;
+            }
+            if (self::CONDENSE_TRUE === $kind) {
+                return true;
+            }
+            if (self::CONDENSE_FALSE === $kind) {
+                return false;
+            }
+            return null;
+        };
+
+        return $rebuild($idx);
+    }
+
+    /**
+     * The keys of node $idx, without materialising any of its values.
+     *
+     * @internal
+     * @return array<string>
+     */
+    public static function _condenseKeys(mixed $cond, mixed $idx): array
+    {
+        $enc = self::_condenseEnc($cond, $idx);
+        if (null === $enc) {
+            return [];
+        }
+        $out = [];
+        $kind = self::_condenseKind($enc);
+        if (self::CONDENSE_MAP === $kind) {
+            $sym = self::_condenseList(self::_getprop($cond, self::S_condsym));
+            for ($j = 1; $j < count($enc); $j += 2) {
+                $key = self::_condenseSym($sym, $enc[$j]);
+                if (self::undef() !== $key) {
+                    $out[] = self::_condenseStr($key);
+                }
+            }
+        } elseif (self::CONDENSE_LIST === $kind) {
+            for ($j = 1; $j < count($enc); $j++) {
+                $out[] = (string) ($j - 1);
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Map pair count, list length, else 0.
+     *
+     * @internal
+     */
+    public static function _condenseSize(mixed $cond, mixed $idx): int
+    {
+        $enc = self::_condenseEnc($cond, $idx);
+        if (null === $enc) {
+            return 0;
+        }
+        $kind = self::_condenseKind($enc);
+        if (self::CONDENSE_MAP === $kind) {
+            return intdiv(count($enc) - 1, 2);
+        }
+        if (self::CONDENSE_LIST === $kind) {
+            return count($enc) - 1;
+        }
+        return 0;
     }
 
 
@@ -4106,5 +4566,74 @@ class Injection
         }
 
         return $parent;
+    }
+}
+
+
+/**
+ * A cursor into a condensed structure. Reads resolve by node index and touch
+ * only the nodes on the path; nothing is decoded until a value is asked for.
+ */
+final class CondenseView
+{
+    public function __construct(
+        private mixed $cond,
+        private mixed $start,
+        private \ArrayObject $memo
+    ) {
+    }
+
+    /** The value at $path, materialised: a container comes back as a fresh copy. */
+    public function get(mixed $path = null): mixed
+    {
+        return Struct::_condenseMaterialise($this->cond, Struct::_condenseResolve($this->cond, $this->start, $path));
+    }
+
+    /** @return array<string> */
+    public function keys(mixed $path = null): array
+    {
+        $at = Struct::_condenseResolve($this->cond, $this->start, $path);
+        return 0 > $at ? [] : Struct::_condenseKeys($this->cond, $at);
+    }
+
+    public function has(mixed $path = null): bool
+    {
+        return 0 <= Struct::_condenseResolve($this->cond, $this->start, $path);
+    }
+
+    /** A view at $path, sharing this view's memo. */
+    public function at(mixed $path = null): CondenseView
+    {
+        return new CondenseView($this->cond, Struct::_condenseResolve($this->cond, $this->start, $path), $this->memo);
+    }
+
+    public function value(): mixed
+    {
+        return Struct::_condenseMaterialise($this->cond, $this->start);
+    }
+
+    public function size(): int
+    {
+        return 0 > $this->start ? 0 : Struct::_condenseSize($this->cond, $this->start);
+    }
+
+    public function exists(): bool
+    {
+        return 0 <= $this->start;
+    }
+
+    /**
+     * A SHARED materialisation: the same object for the same node, in every
+     * view sharing the memo. Mutating it changes what every one of them reads.
+     */
+    public function ref(): mixed
+    {
+        $k = (string) $this->start;
+        $found = $this->memo->offsetExists($k) ? $this->memo[$k] : Struct::undef();
+        if (Struct::undef() === $found) {
+            $found = Struct::_condenseMaterialise($this->cond, $this->start);
+            $this->memo[$k] = $found;
+        }
+        return $found;
     }
 }

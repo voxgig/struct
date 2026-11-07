@@ -313,6 +313,10 @@ Struct::cloneWrap($val)        // with ListRef wrapping
 Struct::cloneUnwrap($val)
 Struct::flatten($list, $depth = null)
 Struct::filter($val, $check)
+Struct::condense($val): object
+Struct::expand($cond)
+Struct::iscondensed($val): bool
+Struct::condenseview($cond, $idx = null, $memo = null): CondenseView
 ```
 
 ```php

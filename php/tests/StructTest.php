@@ -179,6 +179,177 @@ class StructTest extends TestCase
         $this->assertEquals('string', gettype([Struct::class, 'walk'][0]));
     }
 
+    // ——— Condense ———
+
+    public function testCondenseCondense(): void
+    {
+        $this->testSet($this->testSpec->condense->condense, [Struct::class, 'condense'], ['null' => false]);
+    }
+
+    public function testCondenseExpand(): void
+    {
+        $this->testSet($this->testSpec->condense->expand, [Struct::class, 'expand'], ['null' => false]);
+    }
+
+    public function testCondenseIscondensed(): void
+    {
+        $this->testSet($this->testSpec->condense->iscondensed, [Struct::class, 'iscondensed'], ['null' => false]);
+    }
+
+    // What the corpus shape cannot express: identity, sharing, laziness and
+    // the immutability contract.
+
+    public function testCondenseDeterministic(): void
+    {
+        $src = json_decode('{"b":{"m":"GET"},"a":{"m":"GET"},"l":[1,"x",true]}');
+        $this->assertSame(json_encode(Struct::condense($src)), json_encode(Struct::condense($src)));
+        // Keys are stored by symbol id, so insertion order does not change the bytes.
+        $reordered = json_decode('{"l":[1,"x",true],"a":{"m":"GET"},"b":{"m":"GET"}}');
+        $this->assertSame(json_encode(Struct::condense($src)), json_encode(Struct::condense($reordered)));
+    }
+
+    public function testCondenseSharesIdenticalSubtrees(): void
+    {
+        $one = Struct::condense(json_decode('{"x":{"m":"GET","p":"/1"}}'));
+        $two = Struct::condense(json_decode('{"x":{"m":"GET","p":"/1"},"y":{"m":"GET","p":"/1"}}'));
+        $this->assertCount(count($one->node), $two->node);
+        $three = Struct::condense(json_decode('{"x":{"m":"GET"},"y":{"m":"PUT"},"z":{"m":"POST"}}'));
+        $this->assertGreaterThan(count($two->node), count($three->node));
+    }
+
+    public function testCondenseRoundTripsByValue(): void
+    {
+        $json = '{"a":{"b":[1,"x",true,null,{}]},"c":"z"}';
+        $this->assertSame($json, json_encode(Struct::expand(Struct::condense(json_decode($json)))));
+    }
+
+    public function testCondenseGetpathIsTransparent(): void
+    {
+        $src = json_decode('{"entity":{"p":{"op":{"list":{"method":"GET"}}}}}');
+        $c = Struct::condense($src);
+        $this->assertEquals(
+            Struct::getpath($src, ['entity', 'p', 'op', 'list']),
+            Struct::getpath($c, ['entity', 'p', 'op', 'list'])
+        );
+        $this->assertSame('GET', Struct::getpath($c, ['entity', 'p', 'op', 'list', 'method']));
+        $this->assertSame(Struct::undef(), Struct::getpath($c, ['entity', 'nope']));
+    }
+
+    public function testCondenseViewReadsWithoutMaterialising(): void
+    {
+        $v = Struct::condenseview(Struct::condense(json_decode('{"entity":{"a":{"v":1},"b":{"v":2}},"other":9}')));
+        $this->assertSame(['a', 'b'], $v->keys('entity'));
+        $this->assertSame(2, $v->at('entity')->at('b')->get('v'));
+        $this->assertTrue($v->has('entity.a'));
+        $this->assertFalse($v->has('entity.zz'));
+        $this->assertSame(2, $v->size());
+        $this->assertSame(['0', '1'], Struct::condenseview(Struct::condense([7, 8]))->keys());
+        $this->assertFalse($v->at('entity.zz')->exists());
+        $this->assertSame(0, $v->at('entity.zz')->size());
+        $this->assertSame([], $v->keys('other'));
+    }
+
+    public function testCondenseValueCopiesAndRefShares(): void
+    {
+        $v = Struct::condenseview(Struct::condense(json_decode('{"a":{"m":"GET"},"b":{"m":"GET"}}')));
+        // a and b share one node, which get() must not make observable.
+        $x = $v->get('a');
+        $y = $v->get('b');
+        $this->assertEquals($x, $y);
+        $this->assertNotSame($x, $y);
+        $x->m = 'MUTATED';
+        $this->assertSame('GET', $v->get('b')->m);
+        $this->assertNotSame($v->at('a')->value(), $v->at('a')->value());
+        // ref() is the opt-in shared materialisation.
+        $this->assertSame($v->at('a')->ref(), $v->at('a')->ref());
+    }
+
+    public function testCondensePreservesProtoNamedKeysAndValues(): void
+    {
+        $this->assertSame('{"x":"__proto__"}', json_encode(Struct::expand(Struct::condense(json_decode('{"x":"__proto__"}')))));
+        $this->assertSame('{"__proto__":1}', json_encode(Struct::expand(Struct::condense(json_decode('{"__proto__":1}')))));
+    }
+
+    public function testCondenseGetpathMatchesPlainOnNullAndOptions(): void
+    {
+        // Group A: a stored null reads as no value either way.
+        $this->assertSame(Struct::undef(), Struct::getpath(Struct::condense(json_decode('{"a":null}')), 'a'));
+        $this->assertNull(Struct::getdef(Struct::getpath(json_decode('{"a":null}'), 'a'), null));
+        // A view reads the stored null as it is.
+        $this->assertNull(Struct::condenseview(Struct::condense(json_decode('{"a":null}')))->get('a'));
+        // A base is honoured, not skipped by the condensed read.
+        $store = json_decode('{"base":{"x":1}}');
+        $this->assertSame(
+            Struct::getpath($store, 'x', ['base' => 'base']),
+            Struct::getpath(Struct::condense($store), 'x', ['base' => 'base'])
+        );
+        $this->assertSame(1, Struct::getpath(Struct::condense($store), 'x', ['base' => 'base']));
+    }
+
+    public function testCondenseListKeysAreCanonicalIntegers(): void
+    {
+        $plain = json_decode('{"l":[10,20]}');
+        $c = Struct::condense($plain);
+        foreach (['01', '1e0', ' 1', '+1', '1.0', '-0', "1\n"] as $k) {
+            $this->assertSame(Struct::getpath($plain, ['l', $k]), Struct::getpath($c, ['l', $k]), 'list key ' . $k);
+        }
+        $this->assertSame(20, Struct::getpath($c, ['l', '1']));
+        $this->assertSame(20, Struct::getpath($c, ['l', 1]));
+    }
+
+    public function testCondenseSymbolsSortByCodePoint(): void
+    {
+        $sym = Struct::condense((object) ['a' => "\u{10000}", 'b' => "\u{FFFF}"])->sym;
+        $this->assertLessThan(array_search("\u{10000}", $sym, true), array_search("\u{FFFF}", $sym, true));
+    }
+
+    public function testCondenseAstralKeysResolve(): void
+    {
+        // Code-unit order would put the astral key first; the stored pairs must not.
+        $c = Struct::condense((object) ["\u{FF21}" => 1, "\u{1F600}" => 2]);
+        $this->assertSame(2, Struct::getpath($c, ["\u{1F600}"]));
+        $this->assertSame(1, Struct::getpath($c, ["\u{FF21}"]));
+        $this->assertSame(2, Struct::condenseview($c)->get("\u{1F600}"));
+    }
+
+    public function testCondenseNumbersInternByValue(): void
+    {
+        $c = Struct::condense([1, 1.0, 2]);
+        $this->assertSame('[[3,1],[3,2],[1,0,0,1]]', json_encode($c->node));
+    }
+
+    public function testCondenseInvalidKeyMutationsStayNoOps(): void
+    {
+        // An invalid key is ignored, so a call that cannot write does not raise.
+        $c = Struct::condense((object) ['a' => 1]);
+        $this->assertSame($c, Struct::delprop($c, null));
+        $this->assertSame($c, Struct::setprop($c, null, 1));
+        $this->assertSame($c, Struct::setprop($c, '', 1));
+        // A call that could write still raises.
+        $this->expectExceptionMessage('immutable');
+        Struct::delprop($c, 'sym');
+    }
+
+    public function testCondenseIsImmutable(): void
+    {
+        $c = Struct::condense((object) ['a' => 1]);
+        $raises = function (callable $fn): string {
+            try {
+                $fn();
+            } catch (\Exception $err) {
+                return $err->getMessage();
+            }
+            return '';
+        };
+        $this->assertStringContainsString('immutable', $raises(fn() => Struct::setpath($c, 'a', 2)));
+        $this->assertStringContainsString('immutable', $raises(fn() => Struct::setprop($c, 'a', 2)));
+        $this->assertStringContainsString('immutable', $raises(fn() => Struct::delprop($c, 'sym')));
+        // The expanded copy is ordinary and mutable.
+        $e = Struct::expand($c);
+        Struct::setpath($e, 'a', 2);
+        $this->assertSame(2, $e->a);
+    }
+
     // ——— Minor/simple tests ———
     public function testIsnode()
     {
@@ -1474,10 +1645,23 @@ class StructTest extends TestCase
 
     public function testValidateEdge(): void
     {
-        // Was `$this->assertTrue(true)` with a TODO comment - a test that
-        // passed while asserting nothing. Marked incomplete instead, so it
-        // shows up as work rather than as coverage.
-        $this->markTestIncomplete('$INSTANCE validator is unimplemented in this port');
+        $inj = (object) ['errs' => []];
+        Struct::validate((object) ['x' => 1], (object) ['x' => '`$INSTANCE`'], $inj);
+        $this->assertSame('Expected field x to be instance, but found integer: 1.', $inj->errs[0]);
+
+        $inj = (object) ['errs' => []];
+        Struct::validate((object) ['x' => new \stdClass()], (object) ['x' => '`$INSTANCE`'], $inj);
+        $this->assertSame('Expected field x to be instance, but found map: {}.', $inj->errs[0]);
+
+        $inj = (object) ['errs' => []];
+        Struct::validate((object) ['x' => []], (object) ['x' => '`$INSTANCE`'], $inj);
+        $this->assertSame('Expected field x to be instance, but found list: [].', $inj->errs[0]);
+
+        $c = new class {
+        };
+        $inj = (object) ['errs' => []];
+        Struct::validate((object) ['x' => $c], (object) ['x' => '`$INSTANCE`'], $inj);
+        $this->assertCount(0, $inj->errs);
     }
 
     // ——— Transform apply and format ———
