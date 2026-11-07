@@ -178,13 +178,13 @@ defmodule Runner do
     end
   end
 
-  # The eight entries this port cannot answer, and why.
+  # The nine entries this port cannot answer, and why.
   #
   # It has ONE `nil` for undefined and null, so a bare nil coming back from a
   # subject has to be read one way and the corpus decides which. Measured entry
-  # by entry: reading it as null costs 42, reading it as absent costs these 8 -
+  # by entry: reading it as null costs 42, reading it as absent costs these 9 -
   # every one of them a genuine-null result the port cannot distinguish from
-  # "no value". Absent, therefore, and these are named here rather than four
+  # "no value". Absent, therefore, and these are named here rather than five
   # whole groups being marked pending.
   #
   # Same trade as struct/lua (voxgig/struct#94), which measured 43 vs 6.
@@ -203,6 +203,7 @@ defmodule Runner do
   # Each drop is GUARDED: if the corpus moves under it, the guard fails loudly
   # rather than silently skipping some other entry.
   @drops %{
+    "condense.expand" => [{3, "expand of a null node is null, and this port answers nil for both"}],
     "minor.clone" => [{6, "clone(null) is null, and this port answers nil for both"}],
     "minor.getprop" => [
       {51, "getprop with an explicit null alt returns that null"},
@@ -409,7 +410,12 @@ defmodule Runner do
     selects = g.("select")
     sentinels = g.("sentinels")
     regexs = g.("regex")
+    condenses = g.("condense")
     mg = fn n -> S.getprop(minor, n) end
+
+    run_set("condense.condense", S.getprop(condenses, "condense"), arg1(fn v -> S.condense(v) end), false)
+    run_set("condense.expand", S.getprop(condenses, "expand"), arg1(fn v -> S.expand(v) end), false)
+    run_set("condense.iscondensed", S.getprop(condenses, "iscondensed"), arg1(fn v -> S.iscondensed(v) end), false)
 
     run_set("minor.isnode", mg.("isnode"), arg1(fn v -> S.isnode(v) end))
     run_set("minor.ismap", mg.("ismap"), arg1(fn v -> S.ismap(v) end))
@@ -607,6 +613,7 @@ defmodule Runner do
     pack = O.make_runner(testfile).("struct", nil)
     Process.put(:omni_pack, pack)
     run_all(tostruct(pack.spec))
+    run_condense_local()
 
     run_client(testfile)
 
@@ -614,6 +621,166 @@ defmodule Runner do
     total = Process.get(:npass, 0) + Process.get(:nfail, 0)
     IO.puts("\n#{total} groups, #{Process.get(:nfail, 0)} failed")
     if Process.get(:nfail, 0) > 0, do: System.halt(1)
+  end
+
+  # ---------------------------------------------------------------------------
+  # condense: what the corpus shape cannot express
+  # ---------------------------------------------------------------------------
+
+  # Identity, sharing, laziness and the immutability contract, after canonical's
+  # condense-* tests. Each group is a list of named checks, all of which hold.
+
+  defp checks(group, fun) do
+    try do
+      failed = for {label, ok} <- fun.(), ok != true, do: label
+      record(group, "", failed == [], "failed: " <> Enum.join(failed, "; "))
+    rescue
+      e -> record(group, "", false, errmsg(e))
+    end
+  end
+
+  defp raises?(fun, part) do
+    try do
+      fun.()
+      false
+    rescue
+      e -> String.contains?(errmsg(e), part)
+    end
+  end
+
+  defp run_condense_local do
+    m = &S.jm/1
+    l = &S.jt/1
+    json = fn v -> S.jsonify(v, m.(["indent", 0])) end
+    nodes = fn c -> S.size(S.getprop(c, "node")) end
+
+    checks("condense-deterministic", fn ->
+      src = m.(["b", m.(["m", "GET"]), "a", m.(["m", "GET"]), "l", l.([1, "x", true])])
+      reordered = m.(["l", l.([1, "x", true]), "a", m.(["m", "GET"]), "b", m.(["m", "GET"])])
+
+      [
+        {"the same input gives the same bytes", json.(S.condense(src)) == json.(S.condense(src))},
+        {"insertion order does not change the bytes", json.(S.condense(src)) == json.(S.condense(reordered))}
+      ]
+    end)
+
+    checks("condense-shares-identical-subtrees", fn ->
+      one = S.condense(m.(["x", m.(["m", "GET", "p", "/1"])]))
+      two = S.condense(m.(["x", m.(["m", "GET", "p", "/1"]), "y", m.(["m", "GET", "p", "/1"])]))
+      three = S.condense(m.(["x", m.(["m", "GET"]), "y", m.(["m", "PUT"]), "z", m.(["m", "POST"])]))
+
+      [
+        {"a second identical subtree adds no node", nodes.(two) == nodes.(one)},
+        {"distinct subtrees add nodes", nodes.(three) > nodes.(two)}
+      ]
+    end)
+
+    checks("condense-round-trips-by-value", fn ->
+      src = m.(["a", m.(["b", l.([1, "x", true, nil, m.([])])]), "c", "z"])
+      [{"expand undoes condense", eqv(S.expand(S.condense(src)), src)}]
+    end)
+
+    checks("condense-getpath-is-transparent", fn ->
+      src = m.(["entity", m.(["p", m.(["op", m.(["list", m.(["method", "GET"])])])])])
+      c = S.condense(src)
+      path = l.(["entity", "p", "op", "list"])
+
+      [
+        {"a node reads as the plain one", eqv(S.getpath(c, path), S.getpath(src, path))},
+        {"a scalar reads", S.getpath(c, l.(["entity", "p", "op", "list", "method"])) == "GET"},
+        {"a miss is absent", S.getpath(c, l.(["entity", "nope"])) == nil}
+      ]
+    end)
+
+    checks("condense-view-reads-without-materialising", fn ->
+      v = S.condenseview(S.condense(m.(["entity", m.(["a", m.(["v", 1]), "b", m.(["v", 2])]), "other", 9])))
+
+      [
+        {"keys", v.keys.("entity") == ["a", "b"]},
+        {"at and get", v.at.("entity").at.("b").get.("v") == 2},
+        {"has a path", v.has.("entity.a") == true},
+        {"has no path", v.has.("entity.zz") == false},
+        {"size", v.size.() == 2}
+      ]
+    end)
+
+    checks("condense-value-copies-and-ref-shares", fn ->
+      v = S.condenseview(S.condense(m.(["a", m.(["m", "GET"]), "b", m.(["m", "GET"])])))
+      x = v.get.("a")
+      y = v.get.("b")
+      same = eqv(x, y)
+      S.setprop(x, "m", "MUTATED")
+
+      [
+        {"equal by value", same},
+        {"distinct nodes", x != y},
+        {"a copy's mutation stays in the copy", S.getprop(v.get.("b"), "m") == "GET"},
+        {"ref hands out one node", v.at.("a").ref.() == v.at.("a").ref.()}
+      ]
+    end)
+
+    checks("condense-preserves-proto-named-keys-and-values", fn ->
+      asvalue = m.(["x", "__proto__"])
+
+      [
+        {"as a value", eqv(S.expand(S.condense(asvalue)), asvalue)},
+        {"as a key", json.(S.expand(S.condense(m.(["__proto__", 1])))) == "{\"__proto__\":1}"}
+      ]
+    end)
+
+    checks("condense-getpath-matches-plain-on-null-and-options", fn ->
+      store = m.(["base", m.(["x", 1])])
+      opts = m.(["base", "base"])
+
+      [
+        {"a stored null reads as the plain one", S.getpath(S.condense(m.(["a", nil])), "a") == S.getpath(m.(["a", nil]), "a")},
+        {"a stored null reads as absent", S.getpath(S.condense(m.(["a", nil])), "a") == nil},
+        {"base is honoured", S.getpath(S.condense(store), "x", opts) == S.getpath(store, "x", opts)},
+        {"base reads the value", S.getpath(S.condense(store), "x", opts) == 1}
+      ]
+    end)
+
+    # This port's getprop reads "01", " 1", "+1" and "-0" as list indexes where
+    # canonical does not, so the misses are asserted directly.
+    checks("condense-list-keys-are-canonical-integers", fn ->
+      c = S.condense(m.(["l", l.([10, 20])]))
+
+      for(k <- ["01", "1e0", " 1", "+1", "1.0", "-0"], do: {"#{inspect(k)} misses", S.getpath(c, l.(["l", k])) == nil}) ++
+        [{"\"1\" reads", S.getpath(c, l.(["l", "1"])) == 20}]
+    end)
+
+    checks("condense-symbols-sort-by-code-point", fn ->
+      sym = velems(S.getprop(S.condense(m.(["a", "\u{10000}", "b", "\u{FFFF}"])), "sym"))
+      [{"U+FFFF sorts before U+10000", Enum.find_index(sym, &(&1 == "\u{FFFF}")) < Enum.find_index(sym, &(&1 == "\u{10000}"))}]
+    end)
+
+    checks("condense-map-pairs-ascend-by-symbol-id", fn ->
+      c = S.condense(m.(["\u{10000}", 1, "\u{FFFF}", 2]))
+      [{"U+10000 reads", S.getpath(c, "\u{10000}") == 1}, {"U+FFFF reads", S.getpath(c, "\u{FFFF}") == 2}]
+    end)
+
+    checks("condense-invalid-key-mutations-stay-no-ops", fn ->
+      c = S.condense(m.(["a", 1]))
+
+      [
+        {"delprop with no key", S.delprop(c, nil) == c},
+        {"setprop with no key", S.setprop(c, nil, 1) == c},
+        {"delprop with a key raises", raises?(fn -> S.delprop(c, "sym") end, "immutable")}
+      ]
+    end)
+
+    checks("condense-is-immutable", fn ->
+      c = S.condense(m.(["a", 1]))
+      e = S.expand(c)
+      S.setpath(e, "a", 2)
+
+      [
+        {"setpath raises", raises?(fn -> S.setpath(c, "a", 2) end, "immutable")},
+        {"setprop raises", raises?(fn -> S.setprop(c, "a", 2) end, "immutable")},
+        {"delprop raises", raises?(fn -> S.delprop(c, "sym") end, "immutable")},
+        {"the expanded copy is mutable", S.getprop(e, "a") == 2}
+      ]
+    end)
   end
 
   # ---------------------------------------------------------------------------

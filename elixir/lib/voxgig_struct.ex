@@ -234,6 +234,23 @@ defmodule Voxgig.Struct do
   @r_checker_name ~r/^\$[A-Z]+$/
   @r_intkey ~r/^-?[0-9]+$/
 
+  @condense_version 1
+  @condense_map 0
+  @condense_list 1
+  @condense_str 2
+  @condense_num 3
+  @condense_true 4
+  @condense_false 5
+  @condense_null 6
+  @s_condense "$condense"
+  @s_condsym "sym"
+  @s_condnode "node"
+  @s_condroot "root"
+  @condense_immutable "struct: condensed structures are immutable - expand() first, then modify the copy"
+
+  # \z, not $: PCRE's $ also matches before a trailing newline.
+  @r_condense_index ~r/^(0|[1-9][0-9]*)\z/
+
   # ---------------------------------------------------------------------------
   # Low-level helpers
   # ---------------------------------------------------------------------------
@@ -437,7 +454,7 @@ defmodule Voxgig.Struct do
             nil
         end
 
-      if out == nil, do: alt, else: out
+      if out == nil or out == @noarg, do: alt, else: out
     end
   end
 
@@ -559,7 +576,9 @@ defmodule Voxgig.Struct do
         parent
 
       ismap(parent) ->
-        map_set_pairs(parent, omap_put(map_pairs(parent), mapkey(key), val))
+        pairs = map_pairs(parent)
+        if condensedpairs_(pairs), do: raise(Voxgig.Struct.Error, message: @condense_immutable)
+        map_set_pairs(parent, omap_put(pairs, mapkey(key), val))
         parent
 
       islist(parent) ->
@@ -596,7 +615,9 @@ defmodule Voxgig.Struct do
         parent
 
       ismap(parent) ->
-        map_set_pairs(parent, omap_del(map_pairs(parent), mapkey(key)))
+        pairs = map_pairs(parent)
+        if condensedpairs_(pairs), do: raise(Voxgig.Struct.Error, message: @condense_immutable)
+        map_set_pairs(parent, omap_del(pairs, mapkey(key)))
         parent
 
       islist(parent) ->
@@ -1195,7 +1216,7 @@ defmodule Voxgig.Struct do
     if oi >= lenlist do
       out
     else
-      obj = getprop(objs, oi)
+      obj = lookup_(objs, oi)
 
       out2 =
         if not isnode(obj) do
@@ -1296,50 +1317,63 @@ defmodule Voxgig.Struct do
         true -> nil
       end
 
-    if parts == nil do
-      nil
-    else
-      has_inj = injdef != nil
-      base = idef(injdef, "base")
-      dparent = idef(injdef, "dparent")
-      inj_meta = idef(injdef, "meta")
-      inj_key = idef(injdef, "key")
-      dpath = idef(injdef, "dpath")
-      src = if iskey(base), do: getprop(store, base, store), else: store
-      numparts = length(parts)
+    condensed = parts != nil and iscondensed(store)
 
-      val =
-        cond do
-          path == nil or store == nil or (numparts == 1 and Enum.at(parts, 0) == @s_mt) or numparts == 0 ->
-            src
+    cond do
+      parts == nil ->
+        nil
 
-          true ->
-            val0 = if numparts == 1, do: getprop(store, Enum.at(parts, 0)), else: store
+      # Reads only the nodes on the path. A base changes what the path
+      # resolves against, so that read walks the expanded copy instead.
+      condensed and idef(injdef, "base") == nil ->
+        condensematerialise_(store, condensewalk_(store, lookup_(store, @s_condroot), parts))
 
-            if isfunc(val0) do
-              val0
-            else
-              {val1, parts1} =
-                case if(is_binary(Enum.at(parts, 0)), do: Regex.run(@r_meta_path, Enum.at(parts, 0)), else: nil) do
-                  [_, g1, _, g3] when inj_meta != nil and has_inj ->
-                    {getprop(inj_meta, g1), List.replace_at(parts, 0, g3)}
+      true ->
+        getpath_parts(if(condensed, do: expand(store), else: store), path, parts, injdef)
+    end
+  end
 
-                  _ ->
-                    {src, parts}
-                end
+  defp getpath_parts(store, path, parts, injdef) do
+    has_inj = injdef != nil
+    base = idef(injdef, "base")
+    dparent = idef(injdef, "dparent")
+    inj_meta = idef(injdef, "meta")
+    inj_key = idef(injdef, "key")
+    dpath = idef(injdef, "dpath")
+    src = if iskey(base), do: getprop(store, base, store), else: store
+    numparts = length(parts)
 
-              getpath_loop(store, parts1, 0, val1, has_inj, inj_key, inj_meta, src, dparent, dpath)
-            end
-        end
+    val =
+      cond do
+        path == nil or store == nil or (numparts == 1 and Enum.at(parts, 0) == @s_mt) or numparts == 0 ->
+          src
 
-      handler = idef(injdef, "handler")
+        true ->
+          val0 = if numparts == 1, do: getprop(store, Enum.at(parts, 0)), else: store
 
-      if has_inj and isfunc(handler) do
-        ref = pathify(path)
-        if isinj(injdef), do: handler.(injdef, val, ref, store), else: handler.(dummy_inj(), val, ref, store)
-      else
-        val
+          if isfunc(val0) do
+            val0
+          else
+            {val1, parts1} =
+              case if(is_binary(Enum.at(parts, 0)), do: Regex.run(@r_meta_path, Enum.at(parts, 0)), else: nil) do
+                [_, g1, _, g3] when inj_meta != nil and has_inj ->
+                  {getprop(inj_meta, g1), List.replace_at(parts, 0, g3)}
+
+                _ ->
+                  {src, parts}
+              end
+
+            getpath_loop(store, parts1, 0, val1, has_inj, inj_key, inj_meta, src, dparent, dpath)
+          end
       end
+
+    handler = idef(injdef, "handler")
+
+    if has_inj and isfunc(handler) do
+      ref = pathify(path)
+      if isinj(injdef), do: handler.(injdef, val, ref, store), else: handler.(dummy_inj(), val, ref, store)
+    else
+      val
     end
   end
 
@@ -1398,6 +1432,7 @@ defmodule Voxgig.Struct do
   end
 
   def setpath(store, path, val, injdef \\ nil) do
+    if iscondensed(store), do: raise(Voxgig.Struct.Error, message: @condense_immutable)
     ptype = typify(path)
 
     parts =
@@ -2234,13 +2269,14 @@ defmodule Voxgig.Struct do
   defp push_err(inj, msg), do: setprop(ig(inj, :errs), size(ig(inj, :errs)), msg)
 
   defp invalid_type_msg(path, needtype, vt, v, _whence) do
-    vs = if v == nil, do: "no value", else: stringify(v)
+    novalue = v == nil or v == @noarg
+    vs = if novalue, do: "no value", else: stringify(v)
 
     "Expected " <>
       (if size(path) > 1, do: "field " <> pathify(path, 1) <> " to be ", else: "") <>
       needtype <>
       ", but found " <>
-      (if v != nil, do: typename(vt) <> @s_viz, else: "") <>
+      (if novalue, do: "", else: typename(vt) <> @s_viz) <>
       vs <> "."
   end
 
@@ -2611,11 +2647,15 @@ defmodule Voxgig.Struct do
   defp slotval_(inj) do
     prior = ig(inj, :prior)
 
-    if prior == nil do
-      {ig(inj, :dparent), ig(inj, :dparent) != nil}
-    else
-      {lookup_(ig(prior, :dparent), ig(prior, :key)), holds_(ig(prior, :dparent), ig(prior, :key))}
-    end
+    slot =
+      if prior == nil do
+        {ig(inj, :dparent), ig(inj, :dparent) != nil}
+      else
+        {lookup_(ig(prior, :dparent), ig(prior, :key)), holds_(ig(prior, :dparent), ig(prior, :key))}
+      end
+
+    # A trial hands an absent value down as noarg: the slot holds no value.
+    if elem(slot, 0) == @noarg, do: {nil, false}, else: slot
   end
 
   # inj_setval deletes for nil, so a null the slot holds is set directly.
@@ -2658,12 +2698,14 @@ defmodule Voxgig.Struct do
   end
 
   # A spec admits a value when validating the value against it finds no error
-  # and gives back the value as it is. Any output keeps an absent value.
+  # and gives back the value as it is. Any output keeps an absent value, which
+  # goes down as noarg so that the nested validation reads it as no value.
   defp admits_(val, held, spec, inj, store) do
+    tval = if held, do: val, else: @noarg
     terrs = empty_list()
     vstore = merge(vlist_new([empty_map(), store]), 1)
-    setprop(vstore, @s_dtop, val)
-    out = validate(val, spec, vmap_new([{"extra", vstore}, {"errs", terrs}, {"meta", ig(inj, :meta)}]))
+    setprop(vstore, @s_dtop, tval)
+    out = validate(tval, spec, vmap_new([{"extra", vstore}, {"errs", terrs}, {"meta", ig(inj, :meta)}]))
     size(terrs) == 0 and (not held or keeps_(val, out))
   end
 
@@ -2866,6 +2908,293 @@ defmodule Voxgig.Struct do
   end
 
   # ---------------------------------------------------------------------------
+  # condense
+  # ---------------------------------------------------------------------------
+
+  def iscondensed(val \\ nil), do: ismap(val) and condensedpairs_(map_pairs(val))
+
+  # The version has to match, not merely be a number: a later format read with
+  # this one's schema would decode wrongly without failing.
+  defp condensedpairs_(pairs) do
+    case List.keyfind(pairs, @s_condense, 0) do
+      {_, v} when is_number(v) and v == @condense_version ->
+        islist(pairval_(pairs, @s_condsym)) and islist(pairval_(pairs, @s_condnode)) and
+          is_number(pairval_(pairs, @s_condroot))
+
+      _ ->
+        false
+    end
+  end
+
+  defp pairval_(pairs, k) do
+    case List.keyfind(pairs, k, 0) do
+      {_, v} -> v
+      nil -> nil
+    end
+  end
+
+  def condense(val) do
+    # UTF-8 byte order is code-point order, the order the format sorts symbols in.
+    sym = val |> condensecollect_(MapSet.new()) |> Enum.sort()
+    symid = sym |> Enum.with_index() |> Map.new()
+    {root, {nodes, _, _}} = condensebuild_(val, symid, {[], 0, %{}})
+
+    vmap_new([
+      {@s_condense, @condense_version},
+      {@s_condsym, vlist_new(sym)},
+      {@s_condnode, vlist_new(nodes |> Enum.reverse() |> Enum.map(&vlist_new/1))},
+      {@s_condroot, root}
+    ])
+  end
+
+  defp condensecollect_(n, acc) do
+    cond do
+      ismap(n) -> Enum.reduce(map_pairs(n), acc, fn {k, v}, a -> condensecollect_(v, MapSet.put(a, k)) end)
+      islist(n) -> Enum.reduce(list_items(n), acc, &condensecollect_/2)
+      is_binary(n) -> MapSet.put(acc, n)
+      true -> acc
+    end
+  end
+
+  # Post-order, so a subtree is interned before its parent refers to it, and
+  # map pairs in ascending symbol id, so that a lookup can bisect them.
+  defp condensebuild_(n, symid, acc) do
+    cond do
+      ismap(n) ->
+        {enc, acc} =
+          map_pairs(n)
+          |> Enum.sort_by(&elem(&1, 0))
+          |> Enum.reduce({[], acc}, fn {k, v}, {enc, a} ->
+            {vi, a} = condensebuild_(v, symid, a)
+            {[vi, Map.fetch!(symid, k) | enc], a}
+          end)
+
+        condenseintern_([@condense_map | Enum.reverse(enc)], acc)
+
+      islist(n) ->
+        {enc, acc} =
+          Enum.reduce(list_items(n), {[], acc}, fn v, {enc, a} ->
+            {vi, a} = condensebuild_(v, symid, a)
+            {[vi | enc], a}
+          end)
+
+        condenseintern_([@condense_list | Enum.reverse(enc)], acc)
+
+      is_binary(n) ->
+        condenseintern_([@condense_str, Map.fetch!(symid, n)], acc)
+
+      is_number(n) ->
+        condenseintern_([@condense_num, n], acc)
+
+      n == true ->
+        condenseintern_([@condense_true], acc)
+
+      n == false ->
+        condenseintern_([@condense_false], acc)
+
+      true ->
+        condenseintern_([@condense_null], acc)
+    end
+  end
+
+  # An integral float keys as its integer, so 1 and 1.0 share one node.
+  defp condenseintern_(enc, {nodes, count, seen} = acc) do
+    key = Enum.map(enc, &condenseint_/1)
+
+    case Map.fetch(seen, key) do
+      {:ok, idx} -> {idx, acc}
+      :error -> {count, {[enc | nodes], count + 1, Map.put(seen, key, count)}}
+    end
+  end
+
+  defp condenseint_(n) when is_float(n), do: if(n == Float.floor(n), do: trunc(n), else: n)
+  defp condenseint_(n), do: n
+
+  defp condensefound_(idx), do: is_number(idx) and idx >= 0
+
+  defp condensetuple_(cd, key) do
+    v = lookup_(cd, key)
+    if islist(v), do: List.to_tuple(list_items(v)), else: {}
+  end
+
+  defp condensesym_(syms, id) do
+    i = condenseint_(id)
+    if is_integer(i) and i >= 0 and i < tuple_size(syms), do: elem(syms, i)
+  end
+
+  # Node idx as a list of its encoding, or nil when there is no such node.
+  defp condenseenc_(nodes, idx) do
+    i = condenseint_(idx)
+
+    if is_integer(i) and i >= 0 and i < tuple_size(nodes) do
+      enc = elem(nodes, i)
+
+      cond do
+        islist(enc) -> list_items(enc)
+        enc == nil -> nil
+        true -> []
+      end
+    end
+  end
+
+  defp condensesymid_(syms, key, lo, hi) when lo <= hi do
+    mid = div(lo + hi, 2)
+    s = elem(syms, mid)
+
+    cond do
+      s == key -> mid
+      s < key -> condensesymid_(syms, key, mid + 1, hi)
+      true -> condensesymid_(syms, key, lo, mid - 1)
+    end
+  end
+
+  defp condensesymid_(_syms, _key, _lo, _hi), do: -1
+
+  defp condensepair_(enc, id, lo, hi) when lo <= hi do
+    mid = div(lo + hi, 2)
+    k = elem(enc, 1 + mid * 2)
+
+    cond do
+      k == id -> elem(enc, 2 + mid * 2)
+      k < id -> condensepair_(enc, id, mid + 1, hi)
+      true -> condensepair_(enc, id, lo, mid - 1)
+    end
+  end
+
+  defp condensepair_(_enc, _id, _lo, _hi), do: -1
+
+  defp condensechild_(syms, nodes, idx, key) do
+    case condenseenc_(nodes, idx) do
+      [kind | _] = enc when kind == @condense_map ->
+        case condensesymid_(syms, js_string(key), 0, tuple_size(syms) - 1) do
+          -1 -> -1
+          id -> condensepair_(List.to_tuple(enc), id, 0, div(length(enc) - 1, 2) - 1)
+        end
+
+      # Canonical integer keys only: getprop would also take "01" or " 1",
+      # and condensing must not change which value a path selects.
+      [kind | items] when kind == @condense_list ->
+        k = js_string(key)
+        i = if Regex.match?(@r_condense_index, k), do: String.to_integer(k), else: -1
+        if i >= 0 and i < length(items), do: Enum.at(items, i), else: -1
+
+      _ ->
+        -1
+    end
+  end
+
+  defp condenseparts_(path) do
+    cond do
+      islist(path) -> list_items(path)
+      path == @s_mt or path == nil or path == @noarg -> []
+      is_binary(path) -> String.split(path, ".")
+      true -> [js_string(path)]
+    end
+  end
+
+  defp condensewalk_(cd, idx, parts) do
+    syms = condensetuple_(cd, @s_condsym)
+    nodes = condensetuple_(cd, @s_condnode)
+
+    Enum.reduce_while(parts, idx, fn part, at ->
+      cond do
+        is_number(at) and at < 0 -> {:halt, -1}
+        part == @s_mt -> {:cont, at}
+        true -> {:cont, condensechild_(syms, nodes, at, part)}
+      end
+    end)
+  end
+
+  # A fresh tree each call: no materialisation shares a container with another,
+  # even where the condensed form shares the node.
+  defp condensematerialise_(cd, idx) do
+    if is_number(idx) and idx < 0 do
+      nil
+    else
+      condenserebuild_(condensetuple_(cd, @s_condsym), condensetuple_(cd, @s_condnode), idx)
+    end
+  end
+
+  defp condenserebuild_(syms, nodes, idx) do
+    case condenseenc_(nodes, idx) do
+      [kind | pairs] when kind == @condense_map ->
+        pairs
+        |> Enum.chunk_every(2)
+        |> Enum.map(fn [k | v] -> {mapkey(condensesym_(syms, k)), condenserebuild_(syms, nodes, List.first(v))} end)
+        |> vmap_new()
+
+      [kind | items] when kind == @condense_list ->
+        vlist_new(Enum.map(items, &condenserebuild_(syms, nodes, &1)))
+
+      [kind | rest] when kind == @condense_str ->
+        condensesym_(syms, List.first(rest))
+
+      [kind | rest] when kind == @condense_num ->
+        List.first(rest)
+
+      [kind | _] when kind == @condense_true ->
+        true
+
+      [kind | _] when kind == @condense_false ->
+        false
+
+      _ ->
+        nil
+    end
+  end
+
+  def expand(cd) do
+    if iscondensed(cd), do: condensematerialise_(cd, lookup_(cd, @s_condroot)), else: cd
+  end
+
+  defp condensekeys_(cd, idx) do
+    case condenseenc_(condensetuple_(cd, @s_condnode), idx) do
+      [kind | pairs] when kind == @condense_map ->
+        syms = condensetuple_(cd, @s_condsym)
+        pairs |> Enum.take_every(2) |> Enum.map(&condensesym_(syms, &1))
+
+      [kind | items] when kind == @condense_list ->
+        items |> Enum.with_index() |> Enum.map(fn {_, i} -> Integer.to_string(i) end)
+
+      _ ->
+        []
+    end
+  end
+
+  defp condensesize_(cd, idx) do
+    case condenseenc_(condensetuple_(cd, @s_condnode), idx) do
+      [kind | pairs] when kind == @condense_map -> div(length(pairs), 2)
+      [kind | items] when kind == @condense_list -> length(items)
+      _ -> 0
+    end
+  end
+
+  # A cursor, as a map of closures: get, keys, has and at take a path (nil for
+  # none), the rest take nothing. ref() hands out ONE shared materialisation
+  # per node, through a memo every view reached by at() shares; mutating it
+  # changes what every other ref() of that node sees.
+  def condenseview(cd, idx \\ nil, memo \\ nil) do
+    start = if idx == nil, do: (if iscondensed(cd), do: lookup_(cd, @s_condroot), else: -1), else: idx
+    refmemo = if memo == nil, do: empty_map(), else: memo
+    resolve = fn path -> condensewalk_(cd, start, condenseparts_(path)) end
+
+    %{
+      get: fn path -> condensematerialise_(cd, resolve.(path)) end,
+      keys: fn path -> condensekeys_(cd, resolve.(path)) end,
+      has: fn path -> condensefound_(resolve.(path)) end,
+      at: fn path -> condenseview(cd, resolve.(path), refmemo) end,
+      value: fn -> condensematerialise_(cd, start) end,
+      size: fn -> condensesize_(cd, start) end,
+      exists: fn -> condensefound_(start) end,
+      ref: fn ->
+        k = js_string(start)
+        if not holds_(refmemo, k), do: setprop(refmemo, k, condensematerialise_(cd, start))
+        lookup_(refmemo, k)
+      end
+    }
+  end
+
+  # ---------------------------------------------------------------------------
   # builders
   # ---------------------------------------------------------------------------
 
@@ -2882,7 +3211,8 @@ defmodule Voxgig.Struct do
     else
       k0 = Enum.at(kv, i)
       k = cond do; k0 == nil -> "null"; is_binary(k0) -> k0; true -> stringify(k0) end
-      setprop(m, k, if(i + 1 < n, do: Enum.at(kv, i + 1), else: nil))
+      # Written directly, as canonical's jm assigns: a builder never refuses a condensed shape.
+      map_set_pairs(m, omap_put(map_pairs(m), k, if(i + 1 < n, do: Enum.at(kv, i + 1), else: nil)))
       jm_loop(m, kv, n, i + 2)
     end
   end

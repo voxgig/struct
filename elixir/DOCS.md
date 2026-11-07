@@ -75,6 +75,8 @@ to the canonical export list:
   `re_replace`, `re_test`, `re_escape`. Backed by the core `Regex`/`:re`.
 - **By-example engine:** `inject`, `transform`, `validate`, `select`, and the
   injector helpers `check_placement`, `injector_args`, `inject_child`.
+- **Condensed structures:** `condense`, `condenseview`, `expand`,
+  `iscondensed`.
 - **Builders / markers:** `jm`, `jt`, `skip/0`, `delete/0`, `noarg/0`, the
   `t_*` type constants and `m_keypre` / `m_keypost` / `m_val`.
 
@@ -112,11 +114,6 @@ it as that count. A spec that names a checker `validate` does not define is
 rejected before any data is read, so a leftover `$ONE` raises
 `Unknown validator $ONE at field a.0.` rather than validating anything.
 
-A `$NOF` or `$ALL` trial validates the value at the root of its own call,
-where a missing value arrives as `nil`. So for a missing field a trial
-spec of `` "`$NULL`" `` admits it, where canonical TypeScript
-refuses it. No corpus entry reaches the case.
-
 ## Testing
 
 `make test` runs the shared corpus (`../build/test/test.json`) through the port
@@ -131,10 +128,10 @@ Every group the corpus defines runs except those no port implements yet, which
 plus the two `check` entries (`DEF.client`, client-scoped options,
 `contextify`) and three single entries that are not part of any set.
 
-Eight entries are dropped, each named with its reason, and guarded so the corpus
+Nine entries are dropped, each named with its reason, and guarded so the corpus
 cannot move under it: this port has one `nil` for both undefined and null, so a
 bare nil coming back from a subject has to be read one way. Measured entry by
-entry, reading it as null costs 42 and reading it as absent costs those 8. Keep
+entry, reading it as null costs 42 and reading it as absent costs those 9. Keep
 it green, keep `python3 ../tools/check_parity.py` green, and add no runtime
 dependencies.
 
