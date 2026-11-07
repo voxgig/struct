@@ -12,7 +12,7 @@
 
 package voxgig
 
-import scala.collection.mutable.{ArrayBuffer, LinkedHashMap}
+import scala.collection.mutable.{ArrayBuffer, HashMap, HashSet, LinkedHashMap}
 
 object struct {
 
@@ -349,6 +349,7 @@ object struct {
   }
 
   def setprop(parent: Value, key: Value, v: Value): Value = {
+    if (iskey(key) && iscondensed(parent)) throw StructError(CONDENSE_IMMUTABLE)
     if (iskey(key)) parent match {
       case VMap(m) => omapSet(m, jsString(key), v)
       case VList(b) =>
@@ -367,6 +368,7 @@ object struct {
   }
 
   def delprop(parent: Value, key: Value): Value = {
+    if (iskey(key) && iscondensed(parent)) throw StructError(CONDENSE_IMMUTABLE)
     if (iskey(key)) parent match {
       case VMap(m) => omapDel(m, jsString(key))
       case VList(b) =>
@@ -827,81 +829,92 @@ object struct {
     }
     pa match {
       case None => Noval
-      case Some(parts) =>
-        val base = iaBase(inj)
-        val dparent = iaDparent(inj)
-        val injMeta = iaMeta(inj)
-        val injKey = iaKey(inj)
-        val dpath = iaDpath(inj)
-        val src = if (iskey(base)) getprop(store, base, store) else store
-        val numparts = parts.length
-        var v: Value = store
-        def arrGet(i: Int): Value = if (i >= 0 && i < parts.length) parts(i) else Noval
-        if (isNoval(path) || isNoval(store) || (numparts == 1 && parts(0) == VStr(S_MT)) || numparts == 0) {
-          v = src
-        } else {
-          if (numparts == 1) v = getprop(store, parts(0))
-          if (!isfunc(v)) {
-            v = src
-            parts(0) match {
-              case VStr(s0) =>
-                metaPathMatch(s0) match {
-                  case Some((g1, _, g3)) if !isNoval(injMeta) && iaIsSome(inj) =>
-                    v = getprop(injMeta, VStr(g1)); parts(0) = VStr(g3)
-                  case _ =>
-                }
-              case _ =>
-            }
-            var pi = 0
-            var continue = true
-            while (continue && !isNoval(v) && pi < numparts) {
-              val raw = parts(pi)
-              val part0: Value = raw match {
-                case VStr(s) if iaIsSome(inj) && s == S_DKEY => if (!isNoval(injKey)) injKey else raw
-                case VStr(s) if startsWith(s, "$GET:") =>
-                  VStr(stringify(getpath(src, slice(VStr(s), VNum(5.0), VNum(-1.0)), INone)))
-                case VStr(s) if startsWith(s, "$REF:") =>
-                  VStr(stringify(getpath(getprop(store, VStr(S_DSPEC)), slice(VStr(s), VNum(5.0), VNum(-1.0)), INone)))
-                case VStr(s) if iaIsSome(inj) && startsWith(s, "$META:") =>
-                  VStr(stringify(getpath(injMeta, slice(VStr(s), VNum(6.0), VNum(-1.0)), INone)))
-                case _ => raw
-              }
-              val part: Value = part0 match {
-                case VStr(s) => VStr(replaceAll(s, "$$", "$"))
-                case _ => VStr(strkey(part0))
-              }
-              if (part == VStr(S_MT)) {
-                var ascends = 0
-                while (arrGet(pi + 1) == VStr(S_MT)) { ascends += 1; pi += 1 }
-                if (iaIsSome(inj) && ascends > 0) {
-                  if (pi == numparts - 1) ascends -= 1
-                  if (ascends == 0) { v = dparent }
-                  else {
-                    val tail = parts.slice(pi + 1, numparts).toSeq
-                    val fullpath = flatten(mkList(Seq(slice(dpath, VNum((-ascends).toDouble)), mkList(tail))))
-                    v = if (ascends <= size(dpath)) getpath(store, fullpath, INone) else Noval
-                    continue = false
-                  }
-                } else { v = dparent }
-              } else v = getprop(v, part)
-              if (continue) pi += 1
-            }
-          }
-        }
-        iaHandler(inj) match {
-          case Some(h) if iaIsSome(inj) =>
-            val refp = pathify(path)
-            inj match {
-              case IInj(i) => v = h(i, v, refp, store)
-              case _ => v = h(dummyInj, v, refp, store)
-            }
-          case _ =>
-        }
-        v
+      // A condensed store answers as the node it was built from, touching only
+      // the nodes on the path. A base changes what the path resolves against,
+      // so that read needs the materialised store.
+      case Some(parts) if iscondensed(store) && isNullish(iaBase(inj)) =>
+        val found = condenseMaterialise(store, condenseResolve(store, condenseRoot(store), mkList(parts.toSeq)))
+        // Group A: a stored null reads as absent, as it does through getprop.
+        if (isNullish(found)) Noval else found
+      case Some(parts) => getpathParts(if (iscondensed(store)) expand(store) else store, path, parts, inj)
     }
   }
 
+  private def getpathParts(store: Value, path: Value, parts: Array[Value], inj: InjArg): Value = {
+    val base = iaBase(inj)
+    val dparent = iaDparent(inj)
+    val injMeta = iaMeta(inj)
+    val injKey = iaKey(inj)
+    val dpath = iaDpath(inj)
+    val src = if (iskey(base)) getprop(store, base, store) else store
+    val numparts = parts.length
+    var v: Value = store
+    def arrGet(i: Int): Value = if (i >= 0 && i < parts.length) parts(i) else Noval
+    if (isNoval(path) || isNoval(store) || (numparts == 1 && parts(0) == VStr(S_MT)) || numparts == 0) {
+      v = src
+    } else {
+      if (numparts == 1) v = getprop(store, parts(0))
+      if (!isfunc(v)) {
+        v = src
+        parts(0) match {
+          case VStr(s0) =>
+            metaPathMatch(s0) match {
+              case Some((g1, _, g3)) if !isNoval(injMeta) && iaIsSome(inj) =>
+                v = getprop(injMeta, VStr(g1)); parts(0) = VStr(g3)
+              case _ =>
+            }
+          case _ =>
+        }
+        var pi = 0
+        var continue = true
+        while (continue && !isNoval(v) && pi < numparts) {
+          val raw = parts(pi)
+          val part0: Value = raw match {
+            case VStr(s) if iaIsSome(inj) && s == S_DKEY => if (!isNoval(injKey)) injKey else raw
+            case VStr(s) if startsWith(s, "$GET:") =>
+              VStr(stringify(getpath(src, slice(VStr(s), VNum(5.0), VNum(-1.0)), INone)))
+            case VStr(s) if startsWith(s, "$REF:") =>
+              VStr(stringify(getpath(getprop(store, VStr(S_DSPEC)), slice(VStr(s), VNum(5.0), VNum(-1.0)), INone)))
+            case VStr(s) if iaIsSome(inj) && startsWith(s, "$META:") =>
+              VStr(stringify(getpath(injMeta, slice(VStr(s), VNum(6.0), VNum(-1.0)), INone)))
+            case _ => raw
+          }
+          val part: Value = part0 match {
+            case VStr(s) => VStr(replaceAll(s, "$$", "$"))
+            case _ => VStr(strkey(part0))
+          }
+          if (part == VStr(S_MT)) {
+            var ascends = 0
+            while (arrGet(pi + 1) == VStr(S_MT)) { ascends += 1; pi += 1 }
+            if (iaIsSome(inj) && ascends > 0) {
+              if (pi == numparts - 1) ascends -= 1
+              if (ascends == 0) { v = dparent }
+              else {
+                val tail = parts.slice(pi + 1, numparts).toSeq
+                val fullpath = flatten(mkList(Seq(slice(dpath, VNum((-ascends).toDouble)), mkList(tail))))
+                v = if (ascends <= size(dpath)) getpath(store, fullpath, INone) else Noval
+                continue = false
+              }
+            } else { v = dparent }
+          } else v = getprop(v, part)
+          if (continue) pi += 1
+        }
+      }
+    }
+    iaHandler(inj) match {
+      case Some(h) if iaIsSome(inj) =>
+        val refp = pathify(path)
+        inj match {
+          case IInj(i) => v = h(i, v, refp, store)
+          case _ => v = h(dummyInj, v, refp, store)
+        }
+      case _ =>
+    }
+    v
+  }
+
   def setpath(store: Value, path: Value, v: Value, inj: InjArg = INone): Value = {
+    if (iscondensed(store)) throw StructError(CONDENSE_IMMUTABLE)
     val ptype = typify(path)
     val parts: Value =
       if ((T_list & ptype) > 0) (path match { case VList(b) => mkList(b.toSeq); case _ => emptyList() })
@@ -1983,6 +1996,289 @@ object struct {
       }
       results
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // condense
+  // ---------------------------------------------------------------------------
+
+  private val CONDENSE_VERSION = 1
+
+  private val CONDENSE_MAP = 0
+  private val CONDENSE_LIST = 1
+  private val CONDENSE_STR = 2
+  private val CONDENSE_NUM = 3
+  private val CONDENSE_TRUE = 4
+  private val CONDENSE_FALSE = 5
+  private val CONDENSE_NULL = 6
+
+  private val S_condense = "$condense"
+  private val S_condsym = "sym"
+  private val S_condnode = "node"
+  private val S_condroot = "root"
+
+  private val CONDENSE_IMMUTABLE =
+    "struct: condensed structures are immutable - expand() first, then modify the copy"
+
+  private val R_CONDENSE_INDEX = java.util.regex.Pattern.compile("^(0|[1-9][0-9]*)$")
+
+  // Code point order: String.compareTo uses UTF-16 code unit order, which
+  // puts U+FFFF after a supplementary character.
+  private def condenseCmp(a: String, b: String): Int = {
+    var i = 0
+    var j = 0
+    while (i < a.length && j < b.length) {
+      val ca = a.codePointAt(i)
+      val cb = b.codePointAt(j)
+      if (ca != cb) return if (ca < cb) -1 else 1
+      i += Character.charCount(ca)
+      j += Character.charCount(cb)
+    }
+    a.length - i - (b.length - j)
+  }
+
+  // The version must MATCH, not merely be numeric: a future profile would
+  // otherwise be decoded under this one's schema.
+  def iscondensed(v: Value = Noval): Boolean = v match {
+    case VMap(m) =>
+      m.get(S_condense).contains(vint(CONDENSE_VERSION)) &&
+        m.get(S_condsym).exists(islist) &&
+        m.get(S_condnode).exists(islist) &&
+        m.get(S_condroot).exists { case VNum(_) => true; case _ => false }
+    case _ => false
+  }
+
+  // Condense any JSON-shaped node. Pure: the same input always produces a
+  // byte-identical result, on every port.
+  def condense(v: Value): Value = {
+    val symset = HashSet.empty[String]
+    def collect(n: Value): Unit = n match {
+      case VMap(m) => keysof(n).foreach { k => symset += k; collect(m(k)) }
+      case VList(b) => b.foreach(collect)
+      case VStr(s) => symset += s
+      case _ =>
+    }
+    collect(v)
+
+    val sym = symset.toSeq.sortWith((a, b) => condenseCmp(a, b) < 0)
+    val symid = sym.zipWithIndex.toMap
+
+    val node = ArrayBuffer.empty[Value]
+    val seen = HashMap.empty[String, Int]
+
+    def intern(enc: ArrayBuffer[Value]): Int = {
+      val enckey = enc.map { case VNum(n) => condenseNumKey(n); case _ => "" }.mkString(",")
+      seen.getOrElseUpdate(enckey, { node.append(VList(enc)); node.length - 1 })
+    }
+
+    // Post-order, so identical subtrees are already interned when a parent
+    // refers to them.
+    def build(n: Value): Int = n match {
+      case VMap(m) =>
+        val enc = ArrayBuffer[Value](vint(CONDENSE_MAP))
+        // Code-point order, not keysof's code-unit order, so the key ids ascend.
+        keysof(n).sortWith((a, b) => condenseCmp(a, b) < 0).foreach { k => enc.append(vint(symid(k))); enc.append(vint(build(m(k)))) }
+        intern(enc)
+      case VList(b) =>
+        val enc = ArrayBuffer[Value](vint(CONDENSE_LIST))
+        b.foreach(x => enc.append(vint(build(x))))
+        intern(enc)
+      case VStr(s) => intern(ArrayBuffer(vint(CONDENSE_STR), vint(symid(s))))
+      case VNum(_) => intern(ArrayBuffer(vint(CONDENSE_NUM), n))
+      case VBool(true) => intern(ArrayBuffer(vint(CONDENSE_TRUE)))
+      case VBool(false) => intern(ArrayBuffer(vint(CONDENSE_FALSE)))
+      case _ => intern(ArrayBuffer(vint(CONDENSE_NULL)))
+    }
+
+    val root = build(v)
+
+    mkMap(Seq(
+      S_condense -> vint(CONDENSE_VERSION),
+      S_condsym -> mkList(sym.map(VStr(_))),
+      S_condnode -> VList(node),
+      S_condroot -> vint(root)))
+  }
+
+  // By value, with -0 and 0 as one number.
+  private def condenseNumKey(n: Double): String =
+    if (isIntegerF(n) && Math.abs(n) < Long.MaxValue.toDouble) n.toLong.toString else n.toString
+
+  private def condenseList(cond: Value, name: String): ArrayBuffer[Value] = cond match {
+    case VMap(m) => m.get(name) match { case Some(VList(b)) => b; case _ => ArrayBuffer.empty[Value] }
+    case _ => ArrayBuffer.empty[Value]
+  }
+
+  private def condenseAt(b: ArrayBuffer[Value], i: Int): Value = if (i >= 0 && i < b.length) b(i) else Noval
+
+  // A stored index: -1 when negative, past every node when not an integer.
+  private def condenseIndex(v: Value): Int = v match {
+    case VNum(d) if !d.isNaN && d >= 0 => if (isIntegerF(d) && d < Int.MaxValue) d.toInt else Int.MaxValue
+    case _ => -1
+  }
+
+  private def condenseRoot(cond: Value): Int = condenseIndex(lookup_(cond, VStr(S_condroot)))
+
+  private def condenseEnc(cond: Value, idx: Int): Value = condenseAt(condenseList(cond, S_condnode), idx)
+
+  private def condenseIs(enc: Value, kind: Int): Boolean = enc match {
+    case VList(b) => b.nonEmpty && b(0) == vint(kind)
+    case _ => false
+  }
+
+  // Bisects the sorted symbol table; -1 when the string occurs nowhere.
+  private def condenseSymId(cond: Value, key: String): Int = {
+    val sym = condenseList(cond, S_condsym)
+    var lo = 0
+    var hi = sym.length - 1
+    while (lo <= hi) {
+      val mid = (lo + hi) >>> 1
+      if (sym(mid) == VStr(key)) return mid
+      if (condenseCmp(jsString(sym(mid)), key) < 0) lo = mid + 1 else hi = mid - 1
+    }
+    -1
+  }
+
+  // The node index of key inside node idx, or -1. Touches only this node.
+  private def condenseChild(cond: Value, idx: Int, key: Value): Int = {
+    val enc = condenseEnc(cond, idx)
+    enc match {
+      case VList(pairs) if condenseIs(enc, CONDENSE_MAP) =>
+        val symid = condenseSymId(cond, jsString(key))
+        if (symid < 0) return -1
+        // Pairs live at [1,2], [3,4], ... with keys ascending: bisect the pairs.
+        var lo = 0
+        var hi = (pairs.length - 1) / 2 - 1
+        while (lo <= hi) {
+          val mid = (lo + hi) >>> 1
+          val k = pairs(1 + mid * 2) match { case VNum(n) => n; case _ => Double.NaN }
+          if (k == symid) return condenseIndex(pairs(2 + mid * 2))
+          if (k < symid) lo = mid + 1 else hi = mid - 1
+        }
+        -1
+      case VList(items) if condenseIs(enc, CONDENSE_LIST) =>
+        // Canonical integer keys only: "01", "+1", "1.0" and "-0" all miss.
+        val k = jsString(key)
+        if (!R_CONDENSE_INDEX.matcher(k).matches()) return -1
+        val i = if (k.length > 18) Long.MaxValue else k.toLong
+        if (i >= items.length - 1) -1 else condenseIndex(items(1 + i.toInt))
+      case _ => -1
+    }
+  }
+
+  private def condenseResolve(cond: Value, idx: Int, path: Value): Int = {
+    val parts: Seq[Value] = path match {
+      case VList(b) => b.toSeq
+      case VStr(s) => if (s.isEmpty) Seq.empty else s.split("\\.", -1).toSeq.map(VStr(_))
+      case Noval | VNull => Seq.empty
+      case _ => Seq(VStr(jsString(path)))
+    }
+
+    var at = idx
+    var i = 0
+    while (i < parts.length) {
+      if (at < 0) return -1
+      if (parts(i) != VStr(S_MT)) at = condenseChild(cond, at, parts(i))
+      i += 1
+    }
+    at
+  }
+
+  private def condenseMaterialise(cond: Value, idx: Int): Value = {
+    val sym = condenseList(cond, S_condsym)
+    val node = condenseList(cond, S_condnode)
+
+    // Every call builds new containers, so materialisations never share one.
+    def rebuild(i: Int): Value = {
+      val enc = condenseAt(node, i)
+      enc match {
+        case _ if isNullish(enc) => Noval
+        case VList(pairs) if condenseIs(enc, CONDENSE_MAP) =>
+          val out = LinkedHashMap.empty[String, Value]
+          var j = 1
+          while (j < pairs.length) {
+            out.put(jsString(condenseAt(sym, condenseIndex(pairs(j)))), rebuild(condenseIndex(condenseAt(pairs, j + 1))))
+            j += 2
+          }
+          VMap(out)
+        case VList(items) if condenseIs(enc, CONDENSE_LIST) =>
+          VList(ArrayBuffer.from(items.iterator.drop(1).map(x => rebuild(condenseIndex(x)))))
+        case VList(e) if condenseIs(enc, CONDENSE_STR) => condenseAt(sym, condenseIndex(condenseAt(e, 1)))
+        case VList(e) if condenseIs(enc, CONDENSE_NUM) => condenseAt(e, 1)
+        case _ if condenseIs(enc, CONDENSE_TRUE) => VBool(true)
+        case _ if condenseIs(enc, CONDENSE_FALSE) => VBool(false)
+        case _ => VNull
+      }
+    }
+
+    if (idx < 0) Noval else rebuild(idx)
+  }
+
+  // Fully materialise a condensed structure; any other value comes back
+  // unchanged. Correct for any caller, but it gives up every benefit of
+  // condensing, so prefer a view or a path read.
+  def expand(cond: Value): Value =
+    if (!iscondensed(cond)) cond else condenseMaterialise(cond, condenseRoot(cond))
+
+  // The keys of node idx, without materialising any of its values.
+  private def condenseKeys(cond: Value, idx: Int): Seq[String] = {
+    val enc = condenseEnc(cond, idx)
+    enc match {
+      case VList(pairs) if condenseIs(enc, CONDENSE_MAP) =>
+        val sym = condenseList(cond, S_condsym)
+        (1 until pairs.length by 2).map(j => jsString(condenseAt(sym, condenseIndex(pairs(j)))))
+      case VList(items) if condenseIs(enc, CONDENSE_LIST) => (1 until items.length).map(j => (j - 1).toString)
+      case _ => Seq.empty
+    }
+  }
+
+  // A cursor into a condensed structure. Reads resolve by integer index and
+  // touch only the nodes on the path, so a lookup costs path depth and result
+  // size, never total structure size.
+  final class CondenseView private[struct] (cond: Value, start: Int, refmemo: HashMap[Int, Value]) {
+    // The value at path, materialised: a container comes back as an independent copy.
+    def get(path: Value = Noval): Value = condenseMaterialise(cond, condenseResolve(cond, start, path))
+
+    // Key names at path, with no value decoding at all.
+    def keys(path: Value = Noval): Seq[String] = {
+      val found = condenseResolve(cond, start, path)
+      if (found < 0) Seq.empty else condenseKeys(cond, found)
+    }
+
+    def has(path: Value = Noval): Boolean = condenseResolve(cond, start, path) >= 0
+
+    // A view at path, sharing this view's ref() memo. No decoding happens here.
+    def at(path: Value = Noval): CondenseView = new CondenseView(cond, condenseResolve(cond, start, path), refmemo)
+
+    def value(): Value = condenseMaterialise(cond, start)
+
+    def size(): Int = {
+      val enc = condenseEnc(cond, start)
+      enc match {
+        case VList(pairs) if condenseIs(enc, CONDENSE_MAP) => (pairs.length - 1) / 2
+        case VList(items) if condenseIs(enc, CONDENSE_LIST) => items.length - 1
+        case _ => 0
+      }
+    }
+
+    def exists(): Boolean = start >= 0
+
+    // A SHARED materialisation: the same node for the same index, every time.
+    // Mutating it corrupts every other reader of that node, including ones
+    // reached by a different path, because the structure is a DAG.
+    def ref(): Value = refmemo.getOrElse(start, Noval) match {
+      case Noval =>
+        val got = condenseMaterialise(cond, start)
+        refmemo.put(start, got)
+        got
+      case got => got
+    }
+  }
+
+  def condenseview(cond: Value, idx: Value = Noval, memo: Option[HashMap[Int, Value]] = None): CondenseView = {
+    val start = if (isNullish(idx)) (if (iscondensed(cond)) condenseRoot(cond) else -1) else condenseIndex(idx)
+    // The memo is threaded through at(), so every view into one structure
+    // hands out the same ref() node.
+    new CondenseView(cond, start, memo.getOrElse(HashMap.empty[Int, Value]))
   }
 
   // ---------------------------------------------------------------------------

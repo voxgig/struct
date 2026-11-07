@@ -64,6 +64,7 @@ Names are the canonical names, lower-smushed or camelCased:
   `isempty`, `typify`, `typename`.
 - **Values:** `clone`, `merge`, `walk`, `size`, `slice`, `pad`, `flatten`,
   `filter`, `getdef`, `strkey`.
+- **Condensed form:** `condense`, `expand`, `iscondensed`, `condenseview`.
 - **Strings / formatting:** `stringify`, `jsonify`, `pathify`, `join`,
   `escre`, `escurl`.
 - **Regex (RE2-subset uniform API):** `re_compile`, `re_find`, `re_find_all`,
