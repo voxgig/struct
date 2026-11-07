@@ -56,8 +56,9 @@ module.exports = {
   // 6 regex functions
   re_compile, re_find, re_find_all, re_replace, re_test, re_escape,
 
-  // 42 utility functions (48 canonical = these 42 + the 6 re_* above)
-  clone, delprop, escre, escurl, filter, flatten, getdef, getelem,
+  // 46 utility functions (52 canonical = these 46 + the 6 re_* above)
+  clone, condense, condenseview, expand, iscondensed, delprop, escre,
+  escurl, filter, flatten, getdef, getelem,
   getpath, getprop, haskey, inject, isempty, isfunc, iskey, islist,
   ismap, isnode, items, join, jsonify, keysof, merge, pad, pathify,
   select, setpath, setprop, size, slice, strkey, stringify,
@@ -647,7 +648,7 @@ JavaScript arrays satisfy this natively.
 
 ### Difference from canonical TypeScript
 
-The exported function surface is identical (48 canonical functions,
+The exported function surface is identical (52 canonical functions,
 including the six `re_*` regex helpers). The only export difference is
 `Injection`: the JS port exports it as a runtime value, whereas TypeScript
 exports it only as a type. Otherwise functionally identical -- both run on

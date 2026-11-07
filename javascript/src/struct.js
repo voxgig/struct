@@ -733,6 +733,11 @@ function delprop(parent, key) {
   if (!iskey(key)) {
     return parent
   }
+  if (iscondensed(parent)) {
+    throw new Error(
+      'struct: condensed structures are immutable - ' + 'expand() first, then modify the copy',
+    )
+  }
   if (ismap(parent)) {
     key = strkey(key)
     delete parent[key]
@@ -762,6 +767,11 @@ function delprop(parent, key) {
 function setprop(parent, key, val) {
   if (!iskey(key)) {
     return parent
+  }
+  if (iscondensed(parent)) {
+    throw new Error(
+      'struct: condensed structures are immutable - ' + 'expand() first, then modify the copy',
+    )
   }
   if (ismap(parent)) {
     key = S_MT + key
@@ -931,6 +941,12 @@ function merge(val, maxdepth) {
 // Set a value using a path. Missing path parts are created.
 // String paths create only maps. Use a string list to create list  parts.
 function setpath(store, path, val, injdef) {
+  // Same contract as setprop/delprop: a condensed store is immutable.
+  if (iscondensed(store)) {
+    throw new Error(
+      'struct: condensed structures are immutable - ' + 'expand() first, then modify the copy',
+    )
+  }
   const pathType = typify(path)
   const parts =
     0 < (T_list & pathType)
@@ -973,6 +989,25 @@ function getpath(store, path, injdef) {
         : NONE
   if (NONE === parts) {
     return NONE
+  }
+  // TRANSPARENT CONDENSED READ. A condensed store answers the same path with
+  // the same value as the ordinary node it was built from - the caller does
+  // not need to know which it holds. Only the nodes ON the path are touched,
+  // so this never materialises the whole structure.
+  if (iscondensed(store)) {
+    // The fast path applies only when there are no injection options to
+    // honour. base/dparent/dpath/meta change what the walk below resolves
+    // against, and silently ignoring them would make a condensed store
+    // answer differently from the node it was built from - the opposite of
+    // the transparent-read contract. Rare enough to be worth materialising.
+    if (null == injdef || null == getprop(injdef, S_base)) {
+      const found = condenseResolve(store, store[S_condroot], parts)
+      const val = 0 > found ? undefined : condenseMaterialise(store, found)
+      // Group A null-as-absent: an ordinary getpath observes a stored null
+      // through getprop and reports it as absent, so this must too.
+      return null == val ? undefined : val
+    }
+    store = expand(store)
   }
   // let root = store
   let val = store
@@ -2562,9 +2597,12 @@ function injectChild(child, store, inj) {
 class StructUtility {
   constructor() {
     this.clone = clone
+    this.condense = condense
+    this.condenseview = condenseview
     this.delprop = delprop
     this.escre = escre
     this.escurl = escurl
+    this.expand = expand
     this.filter = filter
     this.flatten = flatten
     this.getdef = getdef
@@ -2574,6 +2612,7 @@ class StructUtility {
     this.haskey = haskey
     this.inject = inject
     this.isempty = isempty
+    this.iscondensed = iscondensed
     this.isfunc = isfunc
     this.iskey = iskey
     this.islist = islist
@@ -2629,6 +2668,350 @@ class StructUtility {
     this.injectChild = injectChild
   }
 }
+const CONDENSE_VERSION = 1
+const CONDENSE_MAP = 0
+const CONDENSE_LIST = 1
+const CONDENSE_STR = 2
+const CONDENSE_NUM = 3
+const CONDENSE_TRUE = 4
+const CONDENSE_FALSE = 5
+const CONDENSE_NULL = 6
+const S_condense = '$condense'
+const S_condsym = 'sym'
+const S_condnode = 'node'
+const S_condroot = 'root'
+function condenseCmp(a, b) {
+  let i = 0
+  let j = 0
+  while (i < a.length && j < b.length) {
+    const ca = a.codePointAt(i)
+    const cb = b.codePointAt(j)
+    if (ca !== cb) {
+      return ca < cb ? -1 : 1
+    }
+    i += 0xffff < ca ? 2 : 1
+    j += 0xffff < cb ? 2 : 1
+  }
+  return a.length - i - (b.length - j)
+}
+function condenseSet(obj, key, val) {
+  if ('__proto__' === key) {
+    Object.defineProperty(obj, key, {
+      value: val,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    })
+  } else {
+    obj[key] = val
+  }
+}
+function iscondensed(val) {
+  // The version must MATCH, not merely be numeric: a future profile would
+  // otherwise be decoded under this one's schema.
+  return (
+    ismap(val) &&
+    CONDENSE_VERSION === val[S_condense] &&
+    islist(val[S_condsym]) &&
+    islist(val[S_condnode]) &&
+    'number' === typeof val[S_condroot]
+  )
+}
+// Condense any JSON-shaped node. Pure: the same input always produces a
+// byte-identical result, on every port.
+function condense(val) {
+  // Pass one: every distinct map key and string value, once, sorted.
+  const symset = Object.create(null)
+  const collect = (n) => {
+    if (ismap(n)) {
+      const keys = keysof(n)
+      for (let i = 0; i < keys.length; i++) {
+        symset[keys[i]] = true
+        collect(n[keys[i]])
+      }
+    } else if (islist(n)) {
+      for (let i = 0; i < n.length; i++) {
+        collect(n[i])
+      }
+    } else if ('string' === typeof n) {
+      symset[n] = true
+    }
+  }
+  collect(val)
+  const sym = Object.keys(symset).sort(condenseCmp)
+  const symid = Object.create(null)
+  for (let i = 0; i < sym.length; i++) {
+    symid[sym[i]] = i
+  }
+  // Pass two: build post-order, interning on the canonical encoding. Because
+  // children are built first, identical subtrees have already been interned
+  // by the time a parent references them, so sharing costs nothing extra.
+  const node = []
+  const seen = Object.create(null)
+  const intern = (enc) => {
+    // The kind tag leads every encoding, so a string node and a number node
+    // can never collide on the same joined key.
+    const enckey = enc.join(',')
+    const hit = seen[enckey]
+    if (undefined !== hit) {
+      return hit
+    }
+    const idx = node.length
+    node.push(enc)
+    seen[enckey] = idx
+    return idx
+  }
+  const build = (n) => {
+    if (ismap(n)) {
+      const enc = [CONDENSE_MAP]
+      // Code-point order, not keysof's code-unit order, so the key ids ascend for bisection.
+      const keys = keysof(n).sort(condenseCmp)
+      for (let i = 0; i < keys.length; i++) {
+        enc.push(symid[keys[i]])
+        enc.push(build(n[keys[i]]))
+      }
+      return intern(enc)
+    }
+    if (islist(n)) {
+      const enc = [CONDENSE_LIST]
+      for (let i = 0; i < n.length; i++) {
+        enc.push(build(n[i]))
+      }
+      return intern(enc)
+    }
+    if ('string' === typeof n) {
+      return intern([CONDENSE_STR, symid[n]])
+    }
+    if ('number' === typeof n) {
+      return intern([CONDENSE_NUM, n])
+    }
+    if (true === n) {
+      return intern([CONDENSE_TRUE])
+    }
+    if (false === n) {
+      return intern([CONDENSE_FALSE])
+    }
+    return intern([CONDENSE_NULL])
+  }
+  const root = build(val)
+  const out = {}
+  out[S_condense] = CONDENSE_VERSION
+  out[S_condsym] = sym
+  out[S_condnode] = node
+  out[S_condroot] = root
+  return out
+}
+// Resolve a symbol to its id by bisecting the sorted symbol table. -1 when
+// the string does not occur anywhere in the structure, which is itself a fast
+// negative answer for a key lookup.
+function condenseSymId(cond, key) {
+  const sym = cond[S_condsym]
+  let lo = 0
+  let hi = sym.length - 1
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1
+    if (sym[mid] === key) {
+      return mid
+    }
+    if (0 > condenseCmp(sym[mid], key)) {
+      lo = mid + 1
+    } else {
+      hi = mid - 1
+    }
+  }
+  return -1
+}
+// The node index of `key` inside node `idx`, or -1. Touches only this node.
+function condenseChild(cond, idx, key) {
+  const enc = cond[S_condnode][idx]
+  if (null == enc) {
+    return -1
+  }
+  if (CONDENSE_MAP === enc[0]) {
+    const symid = condenseSymId(cond, S_MT + key)
+    if (0 > symid) {
+      return -1
+    }
+    // Pairs live at [1,2], [3,4], ... with keys ascending: bisect the pairs.
+    let lo = 0
+    let hi = (enc.length - 1) / 2 - 1
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1
+      const k = enc[1 + mid * 2]
+      if (k === symid) {
+        return enc[2 + mid * 2]
+      }
+      if (k < symid) {
+        lo = mid + 1
+      } else {
+        hi = mid - 1
+      }
+    }
+    return -1
+  }
+  if (CONDENSE_LIST === enc[0]) {
+    // Canonical integer keys ONLY. Unary + would accept "01", "1e0", " 1"
+    // and "+1", which an ordinary list lookup treats as plain (absent)
+    // properties - condensing must not change which value a path selects.
+    const k = S_MT + key
+    if (!/^(0|[1-9][0-9]*)$/.test(k)) {
+      return -1
+    }
+    const i = +k
+    if (i >= enc.length - 1) {
+      return -1
+    }
+    return enc[1 + i]
+  }
+  return -1
+}
+// Walk a path from a starting node, returning the node index or -1.
+function condenseResolve(cond, idx, path) {
+  const parts = islist(path)
+    ? path
+    : 'string' === typeof path
+      ? '' === path
+        ? []
+        : path.split(S_DT)
+      : null == path
+        ? []
+        : [S_MT + path]
+  let at = idx
+  for (let i = 0; i < parts.length; i++) {
+    if (0 > at) {
+      return -1
+    }
+    if (S_MT === parts[i]) {
+      continue
+    }
+    at = condenseChild(cond, at, parts[i])
+  }
+  return at
+}
+function condenseMaterialise(cond, idx) {
+  const sym = cond[S_condsym]
+  const node = cond[S_condnode]
+  const rebuild = (i) => {
+    const enc = node[i]
+    if (null == enc) {
+      return undefined
+    }
+    const kind = enc[0]
+    if (CONDENSE_MAP === kind) {
+      const out = {}
+      for (let j = 1; j < enc.length; j += 2) {
+        condenseSet(out, sym[enc[j]], rebuild(enc[j + 1]))
+      }
+      return out
+    }
+    if (CONDENSE_LIST === kind) {
+      const out = []
+      for (let j = 1; j < enc.length; j++) {
+        out.push(rebuild(enc[j]))
+      }
+      return out
+    }
+    if (CONDENSE_STR === kind) {
+      return sym[enc[1]]
+    }
+    if (CONDENSE_NUM === kind) {
+      return enc[1]
+    }
+    if (CONDENSE_TRUE === kind) {
+      return true
+    }
+    if (CONDENSE_FALSE === kind) {
+      return false
+    }
+    return null
+  }
+  return 0 > idx ? undefined : rebuild(idx)
+}
+// Fully materialise a condensed structure. The escape hatch: correct for any
+// caller, but it gives up every benefit of condensing, so prefer a view or a
+// path read.
+function expand(cond) {
+  if (!iscondensed(cond)) {
+    return cond
+  }
+  return condenseMaterialise(cond, cond[S_condroot])
+}
+// The keys of node `idx`, WITHOUT materialising any of its values. This is
+// the point of the whole exercise for enumeration: listing the names in a
+// large collection should cost a symbol-table read, not a full decode.
+function condenseKeys(cond, idx) {
+  const enc = cond[S_condnode][idx]
+  if (null == enc) {
+    return []
+  }
+  const sym = cond[S_condsym]
+  const out = []
+  if (CONDENSE_MAP === enc[0]) {
+    for (let j = 1; j < enc.length; j += 2) {
+      out.push(sym[enc[j]])
+    }
+    return out
+  }
+  if (CONDENSE_LIST === enc[0]) {
+    for (let j = 1; j < enc.length; j++) {
+      out.push(S_MT + (j - 1))
+    }
+    return out
+  }
+  return []
+}
+// A cursor into a condensed structure. Reads resolve by integer index and
+// touch only the nodes on the path, so the cost of a lookup is proportional
+// to path depth and result size, never to total structure size.
+function condenseview(cond, idx, memo) {
+  const start = null == idx ? (iscondensed(cond) ? cond[S_condroot] : -1) : idx
+  // Shared materialisations, handed out ONLY by ref(). Threaded through at()
+  // so every cursor into the same structure shares one memo - otherwise
+  // ref() would hand out a different object per cursor and quietly stop
+  // being the shared-reference escape hatch it claims to be.
+  const refmemo = null == memo ? {} : memo
+  const view = {
+    // The value at path, materialised. Scalars come back directly; a
+    // container comes back as an independent copy.
+    get: (path) => condenseMaterialise(cond, condenseResolve(cond, start, path)),
+    // Key names at path, with no value decoding at all.
+    keys: (path) => {
+      const at = condenseResolve(cond, start, path)
+      return 0 > at ? [] : condenseKeys(cond, at)
+    },
+    has: (path) => 0 <= condenseResolve(cond, start, path),
+    // Chainable cursor. Cheap: no decoding happens here.
+    at: (path) => condenseview(cond, condenseResolve(cond, start, path), refmemo),
+    value: () => condenseMaterialise(cond, start),
+    size: () => {
+      const enc = 0 > start ? null : cond[S_condnode][start]
+      if (null == enc) {
+        return 0
+      }
+      if (CONDENSE_MAP === enc[0]) {
+        return (enc.length - 1) / 2
+      }
+      if (CONDENSE_LIST === enc[0]) {
+        return enc.length - 1
+      }
+      return 0
+    },
+    exists: () => 0 <= start,
+    // DANGER, and named to say so. Returns a SHARED materialisation: the same
+    // object for the same node, every time. Mutating it corrupts every other
+    // reader of that node, including ones reached by a different path,
+    // because the structure is a DAG. Use value() unless a profile says this
+    // matters.
+    ref: () => {
+      const k = S_MT + start
+      if (undefined === refmemo[k]) {
+        refmemo[k] = condenseMaterialise(cond, start)
+      }
+      return refmemo[k]
+    },
+  }
+  return view
+}
 
 module.exports = {
   StructUtility,
@@ -2642,6 +3025,10 @@ module.exports = {
   re_escape,
 
   clone,
+  condense,
+  condenseview,
+  expand,
+  iscondensed,
   delprop,
   escre,
   escurl,
