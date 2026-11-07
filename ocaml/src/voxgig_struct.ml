@@ -199,6 +199,12 @@ let is_int_key s =
        ignore i) s;
    !ok)
 
+(* A canonical list index: 0, or digits with no leading zero. *)
+let is_canon_index s =
+  s = "0" ||
+  (String.length s > 0 && s.[0] >= '1' && s.[0] <= '9'
+   && String.for_all (fun c -> c >= '0' && c <= '9') s)
+
 let clz32 n =
   let n = n land 0xFFFFFFFF in
   if n = 0 then 32
@@ -293,11 +299,16 @@ and keysof v =
   | List r -> List.mapi (fun i _ -> string_of_int i) !r
   | _ -> []
 
-(* internal: list element by numeric key, no negative wrap, returns Noval if oob *)
+(* internal: a list read as JS reads an array: a whole number from 0 or a
+   canonical index string, so 01, +1 and -0 miss. Noval if oob. *)
 and list_index lr key =
-  let ks = (match key with Str s -> s | Num n -> num_to_string n | _ -> "") in
-  match int_of_string_opt ks with
-  | Some i when i >= 0 && i < List.length !lr -> List.nth !lr i
+  let len = List.length !lr in
+  let idx = match key with
+    | Num n when is_integer_f n && n >= 0.0 && n < float_of_int len -> Some (int_of_float n)
+    | Str s when is_canon_index s -> int_of_string_opt s
+    | _ -> None in
+  match idx with
+  | Some i when i < len -> List.nth !lr i
   | _ -> Noval
 
 and getprop ?(alt = Noval) v key =
@@ -327,12 +338,11 @@ and getelem ?(alt = Noval) v key =
     (match v with
      | List r ->
        let ks = (match key with Str s -> s | Num n -> num_to_string n | _ -> "") in
-       if is_int_key ks then begin
-         let len = List.length !r in
-         let nk0 = int_of_string ks in
-         let nk = if nk0 < 0 then len + nk0 else nk0 in
-         if nk >= 0 && nk < len then out := List.nth !r nk
-       end
+       (* A negative key counts from the end; any other reads as getprop does. *)
+       (match (if is_int_key ks then int_of_string_opt ks else None) with
+        | Some nk when nk < 0 -> out := list_index r (vint (List.length !r + nk))
+        | Some _ -> out := list_index r key
+        | None -> ())
      | _ -> ());
     if is_nullish !out then
       (match alt with
@@ -2141,12 +2151,6 @@ and condense_symid cond key =
       | _ -> bisect lo (mid - 1)
   in
   bisect 0 (Array.length sym - 1)
-
-(* A canonical list index: 0, or digits with no leading zero. *)
-and is_canon_index s =
-  s = "0" ||
-  (String.length s > 0 && s.[0] >= '1' && s.[0] <= '9'
-   && String.for_all (fun c -> c >= '0' && c <= '9') s)
 
 (* The node index of key inside node idx, or -1. Touches only this node. *)
 and condense_child cond idx key =

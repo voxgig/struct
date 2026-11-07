@@ -242,11 +242,14 @@ let run_condense_local () =
       expect (getpath ~inj:(IDef d) (condense store) (Str "x") = getpath ~inj:(IDef d) store (Str "x"))
         "base was ignored");
 
-  (* Canonical's ordinary list lookup misses every one of these; this port's
-     reads 01, +1 and -0 as indexes, so the miss is asserted directly. *)
+  (* Unary + would accept these; an ordinary list lookup does not, so
+     condensing must not change which value a path selects. *)
   run_local "condense.list-keys-are-canonical-integers" (fun () ->
-      let c = condense (jm [Str "l"; jt [Num 10.0; Num 20.0]]) in
-      List.iter (fun k -> expect (getpath c (jt [Str "l"; Str k]) = Noval) ("list key " ^ k))
+      let plain = jm [Str "l"; jt [Num 10.0; Num 20.0]] in
+      let c = condense plain in
+      List.iter (fun k ->
+          let path = jt [Str "l"; Str k] in
+          expect (getpath c path = getpath plain path) ("list key " ^ k))
         ["01"; "1e0"; " 1"; "+1"; "1.0"; "-0"];
       expect (getpath c (jt [Str "l"; Str "1"]) = Num 20.0) "list key 1");
 
