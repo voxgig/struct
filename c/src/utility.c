@@ -119,6 +119,55 @@ static bool match_integer_key(const char* s, size_t n) {
   return ok;
 }
 
+/* ^(0|[1-9][0-9]*)$ as an index, else -1. A list reads only a canonical integer key, as
+   a JavaScript array does: "01", "+1" or "1.0" name no element. A key too long to parse
+   could not index a list anyway. */
+static int64_t canon_listindex(const char* key, size_t klen) {
+  if (0 == klen || 18 < klen || ('0' == key[0] && 1 < klen))
+    return -1;
+  int64_t i = 0;
+  for (size_t j = 0; j < klen; j++) {
+    if (key[j] < '0' || '9' < key[j])
+      return -1;
+    i = i * 10 + (key[j] - '0');
+  }
+  return i;
+}
+
+/* The element a list read selects, else -1: a canonical integer string, or a number
+   whose value is a non-negative integer. */
+static int64_t list_readindex(const voxgig_value* key) {
+  if (voxgig_is_int(key))
+    return 0 <= voxgig_as_int(key) ? voxgig_as_int(key) : -1;
+  if (voxgig_is_double(key)) {
+    double d = voxgig_as_double(key);
+    return 0 <= d && d < 1e18 && floor(d) == d ? (int64_t)d : -1;
+  }
+  if (voxgig_is_string(key))
+    return canon_listindex(voxgig_as_string(key), voxgig_string_len(key));
+  return -1;
+}
+
+/* A negative integer key, which getelem alone counts from the end; 0 for any other key. */
+static int64_t list_backindex(const voxgig_value* key) {
+  int64_t back = 0;
+  if (voxgig_is_int(key)) {
+    back = voxgig_as_int(key);
+  } else if (voxgig_is_double(key)) {
+    double d = voxgig_as_double(key);
+    if (-1e18 < d && floor(d) == d)
+      back = (int64_t)d;
+  } else if (voxgig_is_string(key)) {
+    const char* s = voxgig_as_string(key);
+    size_t n = voxgig_string_len(key);
+    int64_t nk = 0;
+    /* A longer key could not index a list, and parse_intstr does not guard overflow. */
+    if ('-' == s[0] && n <= 19 && match_integer_key(s, n) && parse_intstr(s, n, &nk))
+      back = nk;
+  }
+  return 0 > back ? back : 0;
+}
+
 /* ===========================================================================
  * String vector
  * ===========================================================================*/
@@ -490,26 +539,8 @@ voxgig_value* voxgig_getelem(voxgig_value* val, voxgig_value* key, voxgig_value*
   }
   if (voxgig_is_list(val)) {
     voxgig_list* l = voxgig_as_list(val);
-    int64_t nk = 0;
-    bool ok = false;
-    if (voxgig_is_int(key)) {
-      nk = voxgig_as_int(key);
-      ok = true;
-    } else if (voxgig_is_double(key)) {
-      nk = (int64_t)voxgig_as_double(key);
-      ok = true;
-    } else if (voxgig_is_string(key)) {
-      ok = match_integer_key(voxgig_as_string(key), voxgig_string_len(key)) &&
-           parse_intstr(voxgig_as_string(key), voxgig_string_len(key), &nk);
-    }
-    if (!ok) {
-      if (alt && voxgig_is_injector(alt)) {
-        return alt->as.fn.fn.inj(NULL, alt, "", NULL, alt->as.fn.ud);
-      }
-      return alt ? voxgig_retain(alt) : voxgig_new_undef();
-    }
-    if (nk < 0)
-      nk = (int64_t)l->len + nk;
+    int64_t back = list_backindex(key);
+    int64_t nk = 0 > back ? (int64_t)l->len + back : list_readindex(key);
     if (nk < 0 || nk >= (int64_t)l->len) {
       if (alt && voxgig_is_injector(alt)) {
         return alt->as.fn.fn.inj(NULL, alt, "", NULL, alt->as.fn.ud);
@@ -548,19 +579,7 @@ voxgig_value* voxgig_getprop(voxgig_value* val, voxgig_value* key, voxgig_value*
   }
   if (voxgig_is_list(val)) {
     voxgig_list* l = voxgig_as_list(val);
-    int64_t nk = 0;
-    if (voxgig_is_int(key)) {
-      nk = voxgig_as_int(key);
-    } else if (voxgig_is_double(key)) {
-      nk = (int64_t)voxgig_as_double(key);
-    } else if (voxgig_is_string(key)) {
-      if (!match_integer_key(voxgig_as_string(key), voxgig_string_len(key)) ||
-          !parse_intstr(voxgig_as_string(key), voxgig_string_len(key), &nk)) {
-        return alt ? voxgig_retain(alt) : voxgig_new_undef();
-      }
-    } else {
-      return alt ? voxgig_retain(alt) : voxgig_new_undef();
-    }
+    int64_t nk = list_readindex(key);
     if (nk < 0 || nk >= (int64_t)l->len) {
       return alt ? voxgig_retain(alt) : voxgig_new_undef();
     }
@@ -592,17 +611,8 @@ voxgig_value* voxgig_lookup(voxgig_value* val, voxgig_value* key) {
     return v;
   }
   if (voxgig_is_list(val)) {
-    int64_t nk = 0;
-    if (voxgig_is_int(key))
-      nk = voxgig_as_int(key);
-    else if (voxgig_is_double(key))
-      nk = (int64_t)voxgig_as_double(key);
-    else if (voxgig_is_string(key)) {
-      if (!parse_intstr(voxgig_as_string(key), voxgig_string_len(key), &nk))
-        return NULL;
-    } else
-      return NULL;
     voxgig_list* l = voxgig_as_list(val);
+    int64_t nk = list_readindex(key);
     if (nk < 0 || nk >= (int64_t)l->len)
       return NULL;
     return voxgig_list_get(l, (size_t)nk);
@@ -1842,18 +1852,6 @@ static int64_t cond_symid(const voxgig_value* cond, const char* key, size_t klen
   return -1;
 }
 
-/* ^(0|[1-9][0-9]*)$: "01", "+1" or "1.0" would select a different value than a plain
-   list lookup. A key too long to parse could not index a list anyway. */
-static bool cond_listkey(const char* key, size_t klen) {
-  if (0 == klen || 18 < klen || ('0' == key[0] && 1 < klen))
-    return false;
-  for (size_t j = 0; j < klen; j++) {
-    if (key[j] < '0' || '9' < key[j])
-      return false;
-  }
-  return true;
-}
-
 /* The node index of key inside node idx, or -1. Touches only this node. */
 static int64_t cond_child(const voxgig_value* cond, int64_t idx, const char* key, size_t klen) {
   voxgig_list* el = voxgig_as_list(cond_enc(cond, idx));
@@ -1876,11 +1874,9 @@ static int64_t cond_child(const voxgig_value* cond, int64_t idx, const char* key
     return -1;
   }
 
-  if (CONDENSE_LIST == kind && cond_listkey(key, klen)) {
-    int64_t i = 0;
-    for (size_t j = 0; j < klen; j++)
-      i = i * 10 + (key[j] - '0');
-    return i < (int64_t)el->len - 1 ? cond_idx(el->items[1 + i]) : -1;
+  if (CONDENSE_LIST == kind) {
+    int64_t i = canon_listindex(key, klen);
+    return 0 <= i && i < (int64_t)el->len - 1 ? cond_idx(el->items[1 + i]) : -1;
   }
 
   return -1;
