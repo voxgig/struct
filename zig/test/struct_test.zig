@@ -47,6 +47,247 @@ fn wrap_isfunc(_: Allocator, val: JsonValue) JsonValue {
     return .{ .bool = voxgig_struct.isfunc(val) };
 }
 
+// ---- condense tests ----
+
+fn wrap_condense(allocator: Allocator, val: JsonValue) JsonValue {
+    return voxgig_struct.condense(allocator, val) catch .null;
+}
+
+fn wrap_expand(allocator: Allocator, val: JsonValue) JsonValue {
+    return voxgig_struct.expand(allocator, val) catch .null;
+}
+
+fn wrap_iscondensed(_: Allocator, val: JsonValue) JsonValue {
+    return .{ .bool = voxgig_struct.iscondensed(val) };
+}
+
+test "condense-condense" {
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "condense", "condense", omni.sub(wrap_condense), omni.Flags.nonull());
+}
+
+test "condense-expand" {
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "condense", "expand", omni.sub(wrap_expand), omni.Flags.nonull());
+}
+
+test "condense-iscondensed" {
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "condense", "iscondensed", omni.sub(wrap_iscondensed), omni.Flags.nonull());
+}
+
+// Identity, sharing and immutability, which the corpus cannot express.
+
+fn jstr(s: []const u8) JsonValue {
+    return .{ .string = s };
+}
+
+fn condenseJson(a: Allocator, src: []const u8) !JsonValue {
+    return voxgig_struct.condense(a, try parseValue(a, src));
+}
+
+fn condenseNodes(a: Allocator, src: []const u8) !usize {
+    const c = try condenseJson(a, src);
+    return c.object.get("node").?.array.data.items.len;
+}
+
+fn baseInj(a: Allocator) !*voxgig_struct.Injection {
+    const errs = try a.create(std.array_list.Managed([]const u8));
+    errs.* = std.array_list.Managed([]const u8).init(a);
+    const inj = try a.create(voxgig_struct.Injection);
+    inj.* = voxgig_struct.Injection{
+        .allocator = a,
+        .base = "base",
+        .keys = try a.alloc([]const u8, 0),
+        .path = try a.alloc([]const u8, 0),
+        .nodes = try a.alloc(JsonValue, 0),
+        .dpath = try a.alloc([]const u8, 0),
+        .errs = errs,
+    };
+    return inj;
+}
+
+test "condense-deterministic" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const src = "{\"b\":{\"m\":\"GET\"},\"a\":{\"m\":\"GET\"},\"l\":[1,\"x\",true]}";
+    const once = try voxgig_struct.jsonifyCompact(a, try condenseJson(a, src));
+    try testing.expectEqualStrings(once, try voxgig_struct.jsonifyCompact(a, try condenseJson(a, src)));
+    // Insertion order must not change the bytes: keys are stored by symbol id.
+    const reordered = "{\"l\":[1,\"x\",true],\"a\":{\"m\":\"GET\"},\"b\":{\"m\":\"GET\"}}";
+    try testing.expectEqualStrings(once, try voxgig_struct.jsonifyCompact(a, try condenseJson(a, reordered)));
+}
+
+test "condense-shares-identical-subtrees" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const one = try condenseNodes(a, "{\"x\":{\"m\":\"GET\",\"p\":\"/1\"}}");
+    const two = try condenseNodes(a, "{\"x\":{\"m\":\"GET\",\"p\":\"/1\"},\"y\":{\"m\":\"GET\",\"p\":\"/1\"}}");
+    try testing.expectEqual(one, two);
+    const three = try condenseNodes(a, "{\"x\":{\"m\":\"GET\"},\"y\":{\"m\":\"PUT\"},\"z\":{\"m\":\"POST\"}}");
+    try testing.expect(three > two);
+}
+
+test "condense-round-trips-by-value" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const src = "{\"a\":{\"b\":[1,\"x\",true,null,{}]},\"c\":\"z\"}";
+    const out = try voxgig_struct.expand(a, try condenseJson(a, src));
+    try testing.expectEqualStrings(src, try voxgig_struct.jsonifyCompact(a, out));
+}
+
+test "condense-getpath-is-transparent" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const src = try parseValue(a, "{\"entity\":{\"p\":{\"op\":{\"list\":{\"method\":\"GET\"}}}}}");
+    const c = try voxgig_struct.condense(a, src);
+    const path = try parseValue(a, "[\"entity\",\"p\",\"op\",\"list\"]");
+    try testing.expectEqualStrings(
+        try voxgig_struct.jsonifyCompact(a, try voxgig_struct.getpath(a, path, src)),
+        try voxgig_struct.jsonifyCompact(a, try voxgig_struct.getpath(a, path, c)),
+    );
+    const method = try voxgig_struct.getpath(a, jstr("entity.p.op.list.method"), c);
+    try testing.expect(method == .string);
+    try testing.expectEqualStrings("GET", method.string);
+    const miss = try voxgig_struct.getpath(a, jstr("entity.nope"), c);
+    try testing.expect(miss == .null);
+}
+
+test "condense-view-reads-without-materialising" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const c = try condenseJson(a, "{\"entity\":{\"a\":{\"v\":1},\"b\":{\"v\":2}},\"other\":9}");
+    const v = try voxgig_struct.condenseview(a, c, null, null);
+    // keys() answers from the node and symbol tables alone.
+    try testing.expectEqualStrings("[\"a\",\"b\"]", try voxgig_struct.jsonifyCompact(a, try v.keys(jstr("entity"))));
+    const vb = try (try v.at(jstr("entity"))).at(jstr("b"));
+    try testing.expectEqual(@as(i64, 2), (try vb.get(jstr("v"))).integer);
+    try testing.expect(try v.has(jstr("entity.a")));
+    try testing.expect(!(try v.has(jstr("entity.zz"))));
+    try testing.expectEqual(@as(i64, 2), v.size());
+    try testing.expect(v.exists());
+    try testing.expect(!(try v.at(jstr("zz"))).exists());
+}
+
+test "condense-value-copies-and-ref-shares" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const c = try condenseJson(a, "{\"a\":{\"m\":\"GET\"},\"b\":{\"m\":\"GET\"}}");
+    const v = try voxgig_struct.condenseview(a, c, null, null);
+    // a and b share one node. get() must not let that be observable.
+    const x = try v.get(jstr("a"));
+    const y = try v.get(jstr("b"));
+    try testing.expectEqualStrings(try voxgig_struct.jsonifyCompact(a, x), try voxgig_struct.jsonifyCompact(a, y));
+    try testing.expect(x.object != y.object);
+    try x.object.put("m", jstr("MUTATED"));
+    try testing.expectEqualStrings("GET", (try v.get(jstr("b.m"))).string);
+    // ref() is the opt-in escape hatch and DOES share.
+    const r1 = try (try v.at(jstr("a"))).ref();
+    const r2 = try (try v.at(jstr("a"))).ref();
+    try testing.expect(r1.object == r2.object);
+}
+
+test "condense-preserves-proto-named-keys-and-values" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    for ([_][]const u8{ "{\"x\":\"__proto__\"}", "{\"__proto__\":1}" }) |src| {
+        const out = try voxgig_struct.expand(a, try condenseJson(a, src));
+        try testing.expectEqualStrings(src, try voxgig_struct.jsonifyCompact(a, out));
+    }
+}
+
+test "condense-getpath-matches-plain-on-null-and-options" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    // Group A null-as-absent: a stored null reads as absent either way.
+    const nulled = try parseValue(a, "{\"a\":null}");
+    try testing.expect((try voxgig_struct.getpath(a, jstr("a"), nulled)) == .null);
+    try testing.expect((try voxgig_struct.getpath(a, jstr("a"), try voxgig_struct.condense(a, nulled))) == .null);
+    // An injection with a base must not be ignored by the condensed fast path.
+    const store = try parseValue(a, "{\"base\":{\"x\":1}}");
+    const plain = try voxgig_struct.getpathInj(a, jstr("x"), store, try baseInj(a));
+    const cond = try voxgig_struct.getpathInj(a, jstr("x"), try voxgig_struct.condense(a, store), try baseInj(a));
+    try testing.expectEqualStrings(try voxgig_struct.jsonifyCompact(a, plain), try voxgig_struct.jsonifyCompact(a, cond));
+}
+
+test "condense-list-keys-are-canonical-integers" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const c = try condenseJson(a, "{\"l\":[10,20]}");
+    for ([_][]const u8{ "01", "1e0", " 1", "+1", "1.0", "-0" }) |k| {
+        const path = try JsonValue.makeList(a);
+        try path.array.append(jstr("l"));
+        try path.array.append(jstr(k));
+        try testing.expect((try voxgig_struct.getpath(a, path, c)) == .null);
+    }
+    try testing.expectEqual(@as(i64, 20), (try voxgig_struct.getpath(a, jstr("l.1"), c)).integer);
+}
+
+test "condense-symbols-sort-by-code-point" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const src = try JsonValue.makeMap(a);
+    try src.object.put("a", jstr("\u{10000}"));
+    try src.object.put("b", jstr("\u{FFFF}"));
+    const sym = (try voxgig_struct.condense(a, src)).object.get("sym").?.array.data.items;
+    var bmp: usize = sym.len;
+    var astral: usize = sym.len;
+    for (sym, 0..) |s, i| {
+        if (std.mem.eql(u8, s.string, "\u{FFFF}")) bmp = i;
+        if (std.mem.eql(u8, s.string, "\u{10000}")) astral = i;
+    }
+    try testing.expect(bmp < astral);
+}
+
+test "condense-astral-keys-resolve" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    // Pairs follow code-point order: U+FF21 before U+1F600.
+    const c = try condenseJson(a, "{\"\u{FF21}\":1,\"\u{1F600}\":2}");
+    const path = try JsonValue.makeList(a);
+    try path.array.append(jstr("\u{1F600}"));
+    try testing.expectEqual(@as(i64, 2), (try voxgig_struct.getpath(a, path, c)).integer);
+    try testing.expectEqual(@as(i64, 1), (try voxgig_struct.getpath(a, jstr("\u{FF21}"), c)).integer);
+    const v = try voxgig_struct.condenseview(a, c, null, null);
+    try testing.expectEqual(@as(i64, 2), (try v.get(jstr("\u{1F600}"))).integer);
+}
+
+test "condense-invalid-key-mutations-stay-no-ops" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const c = try condenseJson(a, "{\"a\":1}");
+    try testing.expect((try voxgig_struct.delprop(a, c, .null)).object == c.object);
+    try testing.expect((try voxgig_struct.setprop(a, c, .null, .{ .integer = 1 })).object == c.object);
+    // A call that could write still raises.
+    try testing.expectError(error.CondensedImmutable, voxgig_struct.delprop(a, c, jstr("sym")));
+}
+
+test "condense-is-immutable" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const c = try condenseJson(a, "{\"a\":1}");
+    try testing.expectError(error.CondensedImmutable, voxgig_struct.setpath(a, c, jstr("a"), .{ .integer = 2 }));
+    try testing.expectError(error.CondensedImmutable, voxgig_struct.setprop(a, c, jstr("a"), .{ .integer = 2 }));
+    try testing.expectError(error.CondensedImmutable, voxgig_struct.delprop(a, c, jstr("sym")));
+    // The expanded copy is ordinary and mutable.
+    const e = try voxgig_struct.expand(a, c);
+    _ = try voxgig_struct.setpath(a, e, jstr("a"), .{ .integer = 2 });
+    try testing.expectEqual(@as(i64, 2), e.object.get("a").?.integer);
+}
+
 // ---- minor tests ----
 
 test "minor-isnode" {

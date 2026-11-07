@@ -648,6 +648,7 @@ pub fn jt(allocator: Allocator, v: []const JsonValue) !JsonValue {
 pub fn delprop(allocator: Allocator, parent: JsonValue, key: JsonValue) !JsonValue {
     _ = allocator;
     if (!iskey(key)) return parent;
+    if (iscondensed(parent)) return error.CondensedImmutable;
 
     if (parent == .object) {
         var obj = parent.object;
@@ -685,6 +686,7 @@ pub fn delprop(allocator: Allocator, parent: JsonValue, key: JsonValue) !JsonVal
 // Set a property value by key.
 pub fn setprop(allocator: Allocator, parent: JsonValue, key: JsonValue, newval: JsonValue) !JsonValue {
     if (!iskey(key)) return parent;
+    if (iscondensed(parent)) return error.CondensedImmutable;
 
     if (parent == .object) {
         var obj = parent.object;
@@ -1787,7 +1789,8 @@ pub fn getpath(allocator: Allocator, path_val: JsonValue, store: JsonValue) anye
     return getpathInj(allocator, path_val, store, null);
 }
 
-pub fn getpathInj(allocator: Allocator, path_val: JsonValue, store: JsonValue, inj: ?*Injection) anyerror!JsonValue {
+pub fn getpathInj(allocator: Allocator, path_val: JsonValue, store_in: JsonValue, inj: ?*Injection) anyerror!JsonValue {
+    var store = store_in;
     var parts_buf: [64][]const u8 = undefined;
     var numparts: usize = 0;
 
@@ -1825,6 +1828,16 @@ pub fn getpathInj(allocator: Allocator, path_val: JsonValue, store: JsonValue, i
     }
 
     const parts = parts_buf[0..numparts];
+
+    // A condensed store reads as the node it was built from, touching only the
+    // nodes on the path. A base changes what the walk below starts from, so a
+    // read with one expands the store instead.
+    if (iscondensed(store)) {
+        if (inj == null or 0 == inj.?.base.len) {
+            return condenseMaterialise(allocator, store, condenseWalk(store, condenseRoot(store), parts));
+        }
+        store = try expand(allocator, store);
+    }
 
     // Single empty part (empty string path) → return source/dparent.
     // But NOT for multiple empty parts (.. ancestor paths).
@@ -2040,6 +2053,9 @@ pub fn setpath(allocator: Allocator, store: JsonValue, path_val: JsonValue, val:
 /// setpath with an injdef: its `base` names the store key the path starts
 /// from, falling back to the store itself when that key is absent or null.
 pub fn setpathWith(allocator: Allocator, store: JsonValue, path_val: JsonValue, val: JsonValue, injdef: JsonValue) !JsonValue {
+    // Same contract as setprop and delprop: a condensed store is immutable.
+    if (iscondensed(store)) return error.CondensedImmutable;
+
     var parts_buf: [64][]const u8 = undefined;
     var is_numeric: [64]bool = undefined;
     var numparts: usize = 0;
@@ -2605,10 +2621,8 @@ fn dispatchCmd(allocator: Allocator, cmd: []const u8, store: JsonValue, inj: *In
         if (std.mem.eql(u8, cmd, "$BOOLEAN")) return try cmdValidateType(allocator, inj, S_boolean, T_boolean);
         if (std.mem.eql(u8, cmd, "$NULL")) return try cmdValidateType(allocator, inj, S_null, T_null);
         if (std.mem.eql(u8, cmd, "$NIL")) return try cmdValidateNil(allocator, inj);
-        if (std.mem.eql(u8, cmd, "$OBJECT") or std.mem.eql(u8, cmd, "$MAP"))
-            return try cmdValidateType(allocator, inj, S_map, T_map);
-        if (std.mem.eql(u8, cmd, "$ARRAY") or std.mem.eql(u8, cmd, "$LIST"))
-            return try cmdValidateType(allocator, inj, S_list, T_list);
+        if (std.mem.eql(u8, cmd, "$MAP")) return try cmdValidateType(allocator, inj, S_map, T_map);
+        if (std.mem.eql(u8, cmd, "$LIST")) return try cmdValidateType(allocator, inj, S_list, T_list);
         if (std.mem.eql(u8, cmd, "$FUNCTION")) return try cmdValidateType(allocator, inj, S_function, T_function);
         if (std.mem.eql(u8, cmd, "$INSTANCE")) return try cmdValidateType(allocator, inj, S_instance, T_instance);
         if (std.mem.eql(u8, cmd, "$ANY")) return cmdValidateAny(inj);
@@ -2733,6 +2747,13 @@ fn cmdValidateType(allocator: Allocator, inj: *Injection, tname: []const u8, tbi
     if (inj.mode != M_VAL) return .null;
     const out = getprop(allocator, inj.dparent, JsonValue{ .string = inj.key }, .null) catch .null;
     const t = typify(out);
+
+    // A $NOF or $ALL trial of a missing value leaves $TOP out of its store: no
+    // value, where getprop reads .null.
+    if (tbit == T_null and 1 == inj.path.len and null == lookupLiteral(inj.dparent, inj.key)) {
+        try inj.errs.append(try invalidTypeMsg(allocator, inj.path, tname, .null));
+        return .null;
+    }
 
     // $STRING: also reject empty strings.
     if (tbit == T_string) {
@@ -3040,14 +3061,14 @@ fn keeps(val: ?JsonValue, out: ?JsonValue) bool {
 // A spec admits a value when validating the value against it finds no error
 // and gives back the value as it is.
 fn admits(allocator: Allocator, val: ?JsonValue, spec: JsonValue, inj: *Injection) anyerror!bool {
-    // validateWith reads the meta, and with it the exact flag, from injdef.
+    // validateValue reads the meta, and with it the exact flag, from injdef.
     const injdef: JsonValue = if (inj.meta == .object) blk: {
         const d = try JsonValue.makeMap(allocator);
         try d.object.put("meta", inj.meta);
         break :blk d;
     } else .null;
 
-    const result = try validateWith(allocator, val orelse .null, spec, injdef);
+    const result = try validateValue(allocator, val, spec, injdef);
     return result.err == null and keeps(val, result.out);
 }
 
@@ -3144,8 +3165,6 @@ const VALIDATE_CHECKERS = [_][]const u8{
     "$EXACT",
     "$NOF",
     "$ALL",
-    "$OBJECT",
-    "$ARRAY",
     S_DERRS,
 };
 
@@ -4186,14 +4205,20 @@ pub fn validate(allocator: Allocator, data: JsonValue, spec: JsonValue) anyerror
 }
 
 pub fn validateWith(allocator: Allocator, data: JsonValue, spec: JsonValue, injdef: JsonValue) anyerror!ValidateResult {
+    return validateValue(allocator, data, spec, injdef);
+}
+
+// validateWith over a value that may be absent. A missing value leaves $TOP
+// out of the store, so the checkers at the root find no value.
+fn validateValue(allocator: Allocator, data: ?JsonValue, spec: JsonValue, injdef: JsonValue) anyerror!ValidateResult {
     const spec_clone = try clone(allocator, spec);
-    const data_clone = if (data == .null) JsonValue{ .null = {} } else try clone(allocator, data);
+    const data_clone: ?JsonValue = if (data) |d| try clone(allocator, d) else null;
     const orig_spec = try clone(allocator, spec);
 
     // Build store with data and spec.
     const store = try allocator.create(MapRef);
     store.* = .{ .data = .empty, .allocator = allocator };
-    try store.put(S_DTOP, data_clone);
+    if (data_clone) |d| try store.put(S_DTOP, d);
     try store.put(S_DSPEC, orig_spec);
     const store_val = JsonValue{ .object = store };
 
@@ -4225,7 +4250,7 @@ pub fn validateWith(allocator: Allocator, data: JsonValue, spec: JsonValue, injd
 
     // A spec that names an unknown checker validates nothing.
     try checknames(allocator, spec, &[_][]const u8{}, errs, &[_][]const u8{});
-    const result = if (0 < errs.items.len) try clone(allocator, data) else try inject(allocator, spec_clone, store_val, inj_init);
+    const result = if (0 < errs.items.len) try clone(allocator, data orelse .null) else try inject(allocator, spec_clone, store_val, inj_init);
 
     if (errs.items.len > 0) {
         // Canonical is `throw new Error(join(errs, ' | '))` - the collected
@@ -4385,14 +4410,14 @@ fn validateTypeCheck(
         }
         return data_val;
     }
-    if (std.mem.eql(u8, cmd, "$OBJECT") or std.mem.eql(u8, cmd, "$MAP")) {
+    if (std.mem.eql(u8, cmd, "$MAP")) {
         if (0 == (@as(i64, T_map) & t)) {
             try errs.append(try invalidTypeMsg(allocator, path, S_map, data_val));
             return .null;
         }
         return data_val;
     }
-    if (std.mem.eql(u8, cmd, "$ARRAY") or std.mem.eql(u8, cmd, "$LIST")) {
+    if (std.mem.eql(u8, cmd, "$LIST")) {
         if (0 == (@as(i64, T_list) & t)) {
             try errs.append(try invalidTypeMsg(allocator, path, S_list, data_val));
             return .null;
@@ -4876,4 +4901,433 @@ fn regexMatch(pattern: []const u8, subject: []const u8) bool {
     var regex = _re_engine.compile(std.heap.page_allocator, pattern) orelse return false;
     defer regex.deinit();
     return regex.isMatch(subject);
+}
+
+// ============================================================================
+// Condense — a structure as a sorted symbol table and a table of shared
+// nodes, each node an encoding list led by its kind.
+// ============================================================================
+
+const CONDENSE_VERSION = 1;
+
+const CONDENSE_MAP = 0;
+const CONDENSE_LIST = 1;
+const CONDENSE_STR = 2;
+const CONDENSE_NUM = 3;
+const CONDENSE_TRUE = 4;
+const CONDENSE_FALSE = 5;
+const CONDENSE_NULL = 6;
+
+pub const S_condense = "$condense";
+pub const S_condsym = "sym";
+pub const S_condnode = "node";
+pub const S_condroot = "root";
+
+/// The message for error.CondensedImmutable, which setprop, delprop and
+/// setpath return for a condensed structure.
+pub const CONDENSED_IMMUTABLE = "struct: condensed structures are immutable - expand() first, then modify the copy";
+
+// The version must match, not merely be numeric: a future profile would
+// otherwise be decoded under this one's schema.
+pub fn iscondensed(val: JsonValue) bool {
+    if (val != .object) return false;
+    const m = val.object;
+    const version = numval(m.get(S_condense) orelse .null) orelse return false;
+    return CONDENSE_VERSION == version and
+        islist(m.get(S_condsym) orelse .null) and
+        islist(m.get(S_condnode) orelse .null) and
+        null != numval(m.get(S_condroot) orelse .null);
+}
+
+// Condense any JSON-shaped node. Pure: the same input always produces a
+// byte-identical result, on every port.
+pub fn condense(allocator: Allocator, val: JsonValue) !JsonValue {
+    // Pass one: every distinct map key and string value, once, sorted. Byte
+    // order is code-point order in UTF-8.
+    var all = std.array_list.Managed([]const u8).init(allocator);
+    defer all.deinit();
+    try condenseCollect(&all, val);
+    std.mem.sort([]const u8, all.items, {}, stringLessThan);
+
+    const sym = try JsonValue.makeList(allocator);
+    for (all.items, 0..) |s, i| {
+        if (0 == i or !std.mem.eql(u8, all.items[i - 1], s)) try sym.array.append(JsonValue{ .string = s });
+    }
+
+    var condenser = Condenser{
+        .allocator = allocator,
+        .sym = sym.array.data.items,
+        .node = (try JsonValue.makeList(allocator)).array,
+        .seen = (try JsonValue.makeMap(allocator)).object,
+    };
+    const root = try condenser.build(val);
+
+    const out = try JsonValue.makeMap(allocator);
+    try out.object.put(S_condense, JsonValue{ .integer = CONDENSE_VERSION });
+    try out.object.put(S_condsym, sym);
+    try out.object.put(S_condnode, JsonValue{ .array = condenser.node });
+    try out.object.put(S_condroot, JsonValue{ .integer = root });
+    return out;
+}
+
+fn condenseCollect(all: *std.array_list.Managed([]const u8), n: JsonValue) anyerror!void {
+    switch (n) {
+        .object => |m| {
+            var it = m.iterator();
+            while (it.next()) |kv| {
+                try all.append(kv.key_ptr.*);
+                try condenseCollect(all, kv.value_ptr.*);
+            }
+        },
+        .array => |l| {
+            for (l.data.items) |item| try condenseCollect(all, item);
+        },
+        .string => |s| try all.append(s),
+        else => {},
+    }
+}
+
+const Condenser = struct {
+    allocator: Allocator,
+    sym: []const JsonValue,
+    node: *ListRef,
+    seen: *MapRef,
+
+    // Build post-order, interning on the encoding. Children are built first,
+    // so identical subtrees are one node by the time a parent refers to them.
+    fn build(self: *Condenser, n: JsonValue) anyerror!i64 {
+        const enc = (try JsonValue.makeList(self.allocator)).array;
+        switch (n) {
+            .object => |m| {
+                try enc.append(JsonValue{ .integer = CONDENSE_MAP });
+                // keysof sorts by byte, which is code-point order in UTF-8, so the
+                // key ids ascend and lookup can bisect.
+                const names = try keysof(self.allocator, n);
+                for (names.array.data.items) |k| {
+                    try enc.append(JsonValue{ .integer = condenseBisect(self.sym, k.string) });
+                    try enc.append(JsonValue{ .integer = try self.build(m.get(k.string) orelse .null) });
+                }
+            },
+            .array => |l| {
+                try enc.append(JsonValue{ .integer = CONDENSE_LIST });
+                for (l.data.items) |item| {
+                    try enc.append(JsonValue{ .integer = try self.build(item) });
+                }
+            },
+            .string => |s| {
+                try enc.append(JsonValue{ .integer = CONDENSE_STR });
+                try enc.append(JsonValue{ .integer = condenseBisect(self.sym, s) });
+            },
+            .integer, .float, .number_string => {
+                try enc.append(JsonValue{ .integer = CONDENSE_NUM });
+                try enc.append(n);
+            },
+            .bool => |b| {
+                const kind: i64 = if (b) CONDENSE_TRUE else CONDENSE_FALSE;
+                try enc.append(JsonValue{ .integer = kind });
+            },
+            .null, .function => {
+                try enc.append(JsonValue{ .integer = CONDENSE_NULL });
+            },
+        }
+        return self.intern(enc);
+    }
+
+    // The kind leads every encoding, so nodes of different kinds never share
+    // a key.
+    fn intern(self: *Condenser, enc: *ListRef) anyerror!i64 {
+        var enckey = std.array_list.Managed(u8).init(self.allocator);
+        for (enc.data.items) |e| {
+            var buf: [32]u8 = undefined;
+            try enckey.appendSlice(condenseNumText(&buf, e));
+            try enckey.append(',');
+        }
+        if (self.seen.get(enckey.items)) |hit| return hit.integer;
+        const idx: i64 = @intCast(self.node.data.items.len);
+        try self.node.append(JsonValue{ .array = enc });
+        try self.seen.put(enckey.items, JsonValue{ .integer = idx });
+        return idx;
+    }
+};
+
+// An encoding element as interning text. A number is keyed by value, so an
+// integer and a decimal with the same value share a node.
+fn condenseNumText(buf: *[32]u8, e: JsonValue) []const u8 {
+    return switch (e) {
+        .integer => |i| std.fmt.bufPrint(buf, "{d}", .{i}) catch S_MT,
+        .float => |f| blk: {
+            if (f == @trunc(f) and -9.0e18 < f and f < 9.0e18) {
+                break :blk std.fmt.bufPrint(buf, "{d}", .{@as(i64, @intFromFloat(f))}) catch S_MT;
+            }
+            break :blk std.fmt.bufPrint(buf, "f{d}", .{@as(u64, @bitCast(f))}) catch S_MT;
+        },
+        .number_string => |s| s,
+        else => S_MT,
+    };
+}
+
+// Bisect the sorted symbol table for key: its id, or -1 when the string
+// occurs nowhere in the structure, a fast negative answer for a key lookup.
+fn condenseBisect(sym: []const JsonValue, key: []const u8) i64 {
+    var lo: usize = 0;
+    var hi: usize = sym.len;
+    while (lo < hi) {
+        const mid = lo + (hi - lo) / 2;
+        const s = if (sym[mid] == .string) sym[mid].string else return -1;
+        switch (std.mem.order(u8, s, key)) {
+            .eq => return @intCast(mid),
+            .lt => lo = mid + 1,
+            .gt => hi = mid,
+        }
+    }
+    return -1;
+}
+
+// A kind, symbol id or node index read from an encoding, or -1 for anything
+// but a non-negative integer.
+fn condenseInt(v: JsonValue) i64 {
+    return switch (v) {
+        .integer => |i| if (0 <= i) i else -1,
+        .float => |f| if (f == @trunc(f) and 0 <= f and f < 9.0e15) @as(i64, @intFromFloat(f)) else -1,
+        else => -1,
+    };
+}
+
+fn condenseTable(cond: JsonValue, name: []const u8) ?[]const JsonValue {
+    if (cond != .object) return null;
+    const t = cond.object.get(name) orelse return null;
+    return if (t == .array) t.array.data.items else null;
+}
+
+fn condenseRoot(cond: JsonValue) i64 {
+    if (cond != .object) return -1;
+    return condenseInt(cond.object.get(S_condroot) orelse .null);
+}
+
+// The encoding of node idx, or null when there is no such node.
+fn condenseEnc(cond: JsonValue, idx: i64) ?[]const JsonValue {
+    const node = condenseTable(cond, S_condnode) orelse return null;
+    if (0 > idx or idx >= @as(i64, @intCast(node.len))) return null;
+    const enc = node[@intCast(idx)];
+    return if (enc == .array) enc.array.data.items else null;
+}
+
+fn condenseKind(enc: []const JsonValue) i64 {
+    return if (0 < enc.len) condenseInt(enc[0]) else -1;
+}
+
+fn condenseSymAt(sym: []const JsonValue, v: JsonValue) ?[]const u8 {
+    const i = condenseInt(v);
+    if (0 > i or i >= @as(i64, @intCast(sym.len))) return null;
+    const s = sym[@intCast(i)];
+    return if (s == .string) s.string else null;
+}
+
+// The canonical form of a list index: digits only, with no sign and no
+// leading zero.
+fn condenseIndexKey(key: []const u8) bool {
+    if (0 == key.len or (1 < key.len and '0' == key[0])) return false;
+    for (key) |c| {
+        if (c < '0' or '9' < c) return false;
+    }
+    return true;
+}
+
+// The node index of key inside node idx, or -1. Touches only this node.
+fn condenseChild(cond: JsonValue, idx: i64, key: []const u8) i64 {
+    const enc = condenseEnc(cond, idx) orelse return -1;
+    switch (condenseKind(enc)) {
+        CONDENSE_MAP => {
+            const symid = condenseBisect(condenseTable(cond, S_condsym) orelse return -1, key);
+            if (0 > symid) return -1;
+            // Pairs live at [1,2], [3,4], ... with keys ascending: bisect the pairs.
+            var lo: usize = 0;
+            var hi: usize = (enc.len - 1) / 2;
+            while (lo < hi) {
+                const mid = lo + (hi - lo) / 2;
+                const k = condenseInt(enc[1 + mid * 2]);
+                if (k == symid) return condenseInt(enc[2 + mid * 2]);
+                if (k < symid) lo = mid + 1 else hi = mid;
+            }
+            return -1;
+        },
+        CONDENSE_LIST => {
+            // Canonical integer keys only: "01", "1e0", " 1" and "+1" name no element.
+            if (!condenseIndexKey(key)) return -1;
+            const i = std.fmt.parseInt(usize, key, 10) catch return -1;
+            return if (i < enc.len - 1) condenseInt(enc[1 + i]) else -1;
+        },
+        else => return -1,
+    }
+}
+
+// Walk path parts from a starting node, returning the node index or -1.
+fn condenseWalk(cond: JsonValue, idx: i64, parts: []const []const u8) i64 {
+    var at = idx;
+    for (parts) |part| {
+        if (0 > at) return -1;
+        if (0 == part.len) continue;
+        at = condenseChild(cond, at, part);
+    }
+    return at;
+}
+
+// A path as parts: a list is its parts, a string splits on dots, and any
+// other value is one part, its string form. No path is no parts.
+fn condenseParts(allocator: Allocator, path: JsonValue) ![]const []const u8 {
+    var parts = std.array_list.Managed([]const u8).init(allocator);
+    switch (path) {
+        .null => {},
+        .array => |l| {
+            for (l.data.items) |p| try parts.append(try stringify(allocator, p, null));
+        },
+        .string => |s| {
+            if (0 < s.len) {
+                var it = std.mem.splitScalar(u8, s, '.');
+                while (it.next()) |p| try parts.append(p);
+            }
+        },
+        else => try parts.append(try stringify(allocator, path, null)),
+    }
+    return parts.items;
+}
+
+// Node idx as a fresh tree, .null when there is no such node. Every
+// materialisation is independent, even where the condensed form shares a node.
+fn condenseMaterialise(allocator: Allocator, cond: JsonValue, idx: i64) anyerror!JsonValue {
+    const node = condenseTable(cond, S_condnode) orelse return .null;
+    const sym = condenseTable(cond, S_condsym) orelse &[_]JsonValue{};
+    return condenseRebuild(allocator, sym, node, idx);
+}
+
+fn condenseRebuild(allocator: Allocator, sym: []const JsonValue, node: []const JsonValue, i: i64) anyerror!JsonValue {
+    if (0 > i or i >= @as(i64, @intCast(node.len))) return .null;
+    const encv = node[@intCast(i)];
+    if (encv != .array) return .null;
+    const enc = encv.array.data.items;
+    switch (condenseKind(enc)) {
+        CONDENSE_MAP => {
+            const out = try JsonValue.makeMap(allocator);
+            var j: usize = 1;
+            while (j + 1 < enc.len) : (j += 2) {
+                const key = condenseSymAt(sym, enc[j]) orelse continue;
+                try out.object.put(key, try condenseRebuild(allocator, sym, node, condenseInt(enc[j + 1])));
+            }
+            return out;
+        },
+        CONDENSE_LIST => {
+            const out = try JsonValue.makeList(allocator);
+            for (enc[1..]) |e| try out.array.append(try condenseRebuild(allocator, sym, node, condenseInt(e)));
+            return out;
+        },
+        CONDENSE_STR => {
+            const s = condenseSymAt(sym, if (1 < enc.len) enc[1] else .null) orelse return .null;
+            return JsonValue{ .string = s };
+        },
+        CONDENSE_NUM => return if (1 < enc.len) enc[1] else .null,
+        CONDENSE_TRUE => return JsonValue{ .bool = true },
+        CONDENSE_FALSE => return JsonValue{ .bool = false },
+        else => return .null,
+    }
+}
+
+// The value a condensed structure stands for. Any other value comes back as
+// it is, so a caller holding either shape can call expand.
+pub fn expand(allocator: Allocator, cond: JsonValue) !JsonValue {
+    if (!iscondensed(cond)) return cond;
+    return condenseMaterialise(allocator, cond, condenseRoot(cond));
+}
+
+// The keys of node idx, without materialising any of its values.
+fn condenseKeys(allocator: Allocator, cond: JsonValue, idx: i64) !JsonValue {
+    const out = try JsonValue.makeList(allocator);
+    const enc = condenseEnc(cond, idx) orelse return out;
+    switch (condenseKind(enc)) {
+        CONDENSE_MAP => {
+            const sym = condenseTable(cond, S_condsym) orelse return out;
+            var j: usize = 1;
+            while (j < enc.len) : (j += 2) {
+                if (condenseSymAt(sym, enc[j])) |k| try out.array.append(JsonValue{ .string = k });
+            }
+        },
+        CONDENSE_LIST => {
+            for (1..enc.len) |j| {
+                try out.array.append(JsonValue{ .string = try std.fmt.allocPrint(allocator, "{d}", .{j - 1}) });
+            }
+        },
+        else => {},
+    }
+    return out;
+}
+
+// A cursor into a condensed structure. Reads resolve by integer index and
+// touch only the nodes on the path, so the cost of a lookup follows path
+// depth and result size, never total structure size.
+pub const CondenseView = struct {
+    allocator: Allocator,
+    cond: JsonValue,
+    start: i64,
+    memo: *MapRef,
+
+    // The value at path, materialised: a container comes back as an
+    // independent copy.
+    pub fn get(self: CondenseView, path: JsonValue) !JsonValue {
+        return condenseMaterialise(self.allocator, self.cond, try self.resolve(path));
+    }
+
+    // The key names at path, with no value decoded.
+    pub fn keys(self: CondenseView, path: JsonValue) !JsonValue {
+        const found = try self.resolve(path);
+        if (0 > found) return JsonValue.makeList(self.allocator);
+        return condenseKeys(self.allocator, self.cond, found);
+    }
+
+    pub fn has(self: CondenseView, path: JsonValue) !bool {
+        return 0 <= try self.resolve(path);
+    }
+
+    // A cursor at path, sharing this view's memo. Nothing is decoded.
+    pub fn at(self: CondenseView, path: JsonValue) !CondenseView {
+        return condenseview(self.allocator, self.cond, try self.resolve(path), self.memo);
+    }
+
+    pub fn value(self: CondenseView) !JsonValue {
+        return condenseMaterialise(self.allocator, self.cond, self.start);
+    }
+
+    pub fn size(self: CondenseView) i64 {
+        const enc = condenseEnc(self.cond, self.start) orelse return 0;
+        return switch (condenseKind(enc)) {
+            CONDENSE_MAP => @intCast((enc.len - 1) / 2),
+            CONDENSE_LIST => @intCast(enc.len - 1),
+            else => 0,
+        };
+    }
+
+    pub fn exists(self: CondenseView) bool {
+        return 0 <= self.start;
+    }
+
+    // Unlike value and get, a shared materialisation: the same container for
+    // the same node from every view on the memo, so a change to it reaches
+    // them all.
+    pub fn ref(self: CondenseView) !JsonValue {
+        const k = try std.fmt.allocPrint(self.allocator, "{d}", .{self.start});
+        if (self.memo.get(k)) |hit| return hit;
+        const out = try condenseMaterialise(self.allocator, self.cond, self.start);
+        try self.memo.put(k, out);
+        return out;
+    }
+
+    fn resolve(self: CondenseView, path: JsonValue) !i64 {
+        return condenseWalk(self.cond, self.start, try condenseParts(self.allocator, path));
+    }
+};
+
+// A cursor at node idx when given, else at the root of cond. Views made by at
+// share memo, the cache that ref reads.
+pub fn condenseview(allocator: Allocator, cond: JsonValue, idx: ?i64, memo: ?*MapRef) !CondenseView {
+    const start: i64 = idx orelse (if (iscondensed(cond)) condenseRoot(cond) else -1);
+    const refmemo = memo orelse (try JsonValue.makeMap(allocator)).object;
+    return .{ .allocator = allocator, .cond = cond, .start = start, .memo = refmemo };
 }

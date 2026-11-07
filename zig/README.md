@@ -364,6 +364,11 @@ pub fn merge(allocator: Allocator, val: JsonValue,
 pub fn clone(allocator: Allocator, val: JsonValue) !JsonValue
 pub fn flatten(allocator: Allocator, val: JsonValue,
                depth: i64) !JsonValue
+pub fn condense(allocator: Allocator, val: JsonValue) !JsonValue
+pub fn expand(allocator: Allocator, cond: JsonValue) !JsonValue
+pub fn iscondensed(val: JsonValue) bool
+pub fn condenseview(allocator: Allocator, cond: JsonValue, idx: ?i64,
+                    memo: ?*MapRef) !CondenseView
 ```
 
 Last input wins; maps deep-merge; lists merge by index:
