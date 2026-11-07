@@ -43,6 +43,7 @@ module VoxgigStruct where
 
 import Control.Exception (Exception, evaluate, throwIO)
 import Control.Monad (filterM, foldM, forM_, when)
+import qualified Data.Array as A
 import Data.Bits (shiftL, (.&.), (.|.))
 import Data.Char (toLower, toUpper)
 import Data.IORef
@@ -202,6 +203,31 @@ delete = VSentinel "delete"
 -- | Maximum recursion depth for 'walk' and the engines (32).
 maxdepth :: Int
 maxdepth = 32
+
+-- | The condensed-structure format version 'iscondensed' accepts.
+condense_version :: Double
+condense_version = 1
+
+-- | Node encoding kinds: the first element of every entry in a condensed node table.
+condense_map, condense_list, condense_str, condense_num, condense_true, condense_false, condense_null :: Double
+condense_map = 0
+condense_list = 1
+condense_str = 2
+condense_num = 3
+condense_true = 4
+condense_false = 5
+condense_null = 6
+
+-- | The field names of a condensed structure.
+s_condense, s_condsym, s_condnode, s_condroot :: String
+s_condense = "$condense"
+s_condsym = "sym"
+s_condnode = "node"
+s_condroot = "root"
+
+-- | The message of the error a write to a condensed structure raises.
+s_condimmutable :: String
+s_condimmutable = "struct: condensed structures are immutable - expand() first, then modify the copy"
 
 -- ---------------------------------------------------------------------------
 -- Small helpers
@@ -596,6 +622,7 @@ setprop :: Value -> Value -> Value -> IO Value
 setprop parent key v
   | not (iskey key) = return parent
   | otherwise = do
+      condenseGuard parent
       case parent of
         VMap m -> do k <- jsString key; modifyIORef' m (opPut k v)
         VList r -> do
@@ -617,6 +644,7 @@ delprop :: Value -> Value -> IO Value
 delprop parent key
   | not (iskey key) = return parent
   | otherwise = do
+      condenseGuard parent
       case parent of
         VMap m -> do k <- jsString key; modifyIORef' m (opDel k)
         VList r -> do
@@ -1111,16 +1139,28 @@ metaPathMatch s = case break (== '$') s of
 
 -- | Resolve a dotted\/list path against a store; the by-example @\`$...\`@ path reader.
 getpath :: InjArg -> Value -> Value -> IO Value
-getpath inj store path = do
+getpath inj store0 path = do
   mpa <- case path of
     VList r -> Just <$> readIORef r
     VStr s -> return (Just (map VStr (splitOn '.' s)))
     VNum n -> return (Just [VStr (strkey (VNum n))])
     _ -> return Nothing
+  base <- iaBase inj
+  condensed <- iscondensed store0
   case mpa of
     Nothing -> return VNoval
+    -- A condensed store answers as the node it was built from, touching only
+    -- the nodes on the path. base would change what the walk resolves
+    -- against, so with one the store is expanded instead.
+    Just pa0 | condensed && isNullish base -> do
+      parts <- mkList pa0
+      root <- condenseRoot store0
+      found <- condenseResolve store0 root parts
+      v <- if found < 0 then return VNoval else condenseMaterialise store0 found
+      -- Group A: an ordinary getpath reads a stored null as absent.
+      return (if isNullish v then VNoval else v)
     Just pa0 -> do
-      base <- iaBase inj
+      store <- if condensed then expand store0 else return store0
       dparent <- iaDparent inj
       injMeta <- iaMeta inj
       injKey <- iaKey inj
@@ -1197,6 +1237,7 @@ getpath inj store path = do
 -- | Set the value at a path within a node, creating intermediate nodes as needed.
 setpath :: Value -> Value -> Value -> IO Value
 setpath store path v = do
+  condenseGuard store
   let ptype = typify path
   parts <- if (t_list .&. ptype) > 0 then (listItems path >>= mkList)
            else if (t_string .&. ptype) > 0 then (case path of VStr s -> mkList (map VStr (splitOn '.' s)); _ -> emptyList)
@@ -2476,3 +2517,301 @@ jt = mkList
 -- | Alias for 'typename'.
 tn :: Int -> String
 tn = typename
+
+-- ---------------------------------------------------------------------------
+-- condense
+-- ---------------------------------------------------------------------------
+
+-- | Raise 'StructError' when the value is a condensed structure, which is immutable.
+condenseGuard :: Value -> IO ()
+condenseGuard v = do
+  c <- iscondensed v
+  when c (throwIO (StructError s_condimmutable))
+
+-- | True for a condensed structure of this format version.
+iscondensed :: Value -> IO Bool
+iscondensed v = case v of
+  -- The version must match, not merely be numeric: a future profile would
+  -- otherwise be decoded under this one's schema.
+  VMap m -> do
+    es <- readIORef m
+    let field k = fromMaybe VNoval (lookup k es)
+    return (case (field s_condense, field s_condsym, field s_condnode, field s_condroot) of
+      (VNum n, VList _, VList _, VNum _) -> n == condense_version
+      _ -> False)
+  _ -> return False
+
+-- | Condense a JSON-shaped value into a sorted symbol table and a node table.
+-- Pure: the same input gives byte-identical output, on every port.
+condense :: Value -> IO Value
+condense val = do
+  found <- collect val []
+  let sym = dedupe (sort found)
+      symtab = A.listArray (0, length sym - 1) (map VStr sym)
+      symref s = vint (condenseBisect symtab s)
+  nodesRef <- newIORef []
+  countRef <- newIORef (0 :: Int)
+  seenRef <- newIORef []
+  -- Built post-order and interned on the encoding, so identical subtrees are
+  -- already one node by the time a parent references them.
+  let intern enc = do
+        let key = intercalate "," (map jsstrPure enc)
+        seen <- readIORef seenRef
+        case lookup key seen of
+          Just i -> return i
+          Nothing -> do
+            i <- readIORef countRef
+            modifyIORef' nodesRef (enc :)
+            writeIORef countRef (i + 1)
+            writeIORef seenRef ((key, i) : seen)
+            return i
+      build n = case n of
+        VMap _ -> do
+          pairs <- itemsPairs n
+          encs <- mapM (\(k, x) -> do c <- build x; return [symref k, vint c]) pairs
+          intern (VNum condense_map : concat encs)
+        VList r -> do
+          cs <- readIORef r >>= mapM build
+          intern (VNum condense_list : map vint cs)
+        VStr s -> intern [VNum condense_str, symref s]
+        VNum x -> intern [VNum condense_num, VNum x]
+        VBool True -> intern [VNum condense_true]
+        VBool False -> intern [VNum condense_false]
+        _ -> intern [VNum condense_null]
+  root <- build val
+  nodes <- readIORef nodesRef >>= mapM mkList . reverse
+  symlist <- mkList (map VStr sym)
+  nodelist <- mkList nodes
+  mkMap [ (s_condense, VNum condense_version), (s_condsym, symlist)
+        , (s_condnode, nodelist), (s_condroot, vint root) ]
+  where
+    collect n acc = case n of
+      VMap m -> readIORef m >>= foldM (\a (k, x) -> collect x (k : a)) acc
+      VList r -> readIORef r >>= foldM (flip collect) acc
+      VStr s -> return (s : acc)
+      _ -> return acc
+    dedupe = foldr (\x acc -> case acc of { (y:_) | y == x -> acc; _ -> x : acc }) []
+
+-- | Bisect a sorted symbol table: the string's id, or -1 when it occurs
+-- nowhere in the structure, which is itself a fast miss.
+condenseBisect :: A.Array Int Value -> String -> Int
+condenseBisect sym key = uncurry go (A.bounds sym)
+  where
+    go lo hi
+      | lo > hi = -1
+      | otherwise =
+          let mid = (lo + hi) `div` 2
+          in case sym A.! mid of
+               VStr s | s == key -> mid
+                      | s < key -> go (mid + 1) hi
+               _ -> go lo (mid - 1)
+
+-- | One field of a condensed structure ('VNoval' when it has none).
+condenseField :: Value -> String -> IO Value
+condenseField cond name = case cond of
+  VMap m -> fromMaybe VNoval . lookup name <$> readIORef m
+  _ -> return VNoval
+
+-- | The items of a list node as an array (empty for anything else).
+condenseArray :: Value -> IO (A.Array Int Value)
+condenseArray v = do
+  xs <- listItems v
+  return (A.listArray (0, length xs - 1) xs)
+
+-- | A condensed structure's symbol or node table.
+condenseTable :: Value -> String -> IO (A.Array Int Value)
+condenseTable cond name = condenseField cond name >>= condenseArray
+
+-- | Element @i@ of an array, or 'VNoval' out of range.
+condenseAt :: A.Array Int Value -> Int -> Value
+condenseAt a i = let (lo, hi) = A.bounds a in if i >= lo && i <= hi then a A.! i else VNoval
+
+-- | The number of elements in an array.
+condenseLen :: A.Array Int Value -> Int
+condenseLen a = let (lo, hi) = A.bounds a in hi - lo + 1
+
+-- | A node or symbol index read out of the structure; -1 when it is not one.
+condenseIndex :: Value -> Int
+condenseIndex v = case v of
+  VNum n | n >= 0 && n < 1e15 && isIntegerF n -> truncate n
+  _ -> -1
+
+-- | The kind of a node encoding: its first element.
+condenseKind :: A.Array Int Value -> Maybe Double
+condenseKind e = case condenseAt e 0 of
+  VNum k -> Just k
+  _ -> Nothing
+
+-- | The root node index of a condensed structure.
+condenseRoot :: Value -> IO Int
+condenseRoot cond = condenseIndex <$> condenseField cond s_condroot
+
+-- | The encoding of node @idx@ (empty when there is none).
+condenseNode :: Value -> Int -> IO (A.Array Int Value)
+condenseNode cond idx = do
+  node <- condenseTable cond s_condnode
+  condenseArray (condenseAt node idx)
+
+-- | A canonical list index, as a JS array lookup reads one: @0@, or digits
+-- with no leading zero.
+isCanonIndex :: String -> Bool
+isCanonIndex s = case s of
+  "0" -> True
+  (c:rest) -> c >= '1' && c <= '9' && all (\d -> d >= '0' && d <= '9') rest
+  [] -> False
+
+-- | The node index of @key@ inside node @idx@, or -1. Touches only this node.
+condenseChild :: Value -> Int -> Value -> IO Int
+condenseChild cond idx key = do
+  e <- condenseNode cond idx
+  k <- jsString key
+  case condenseKind e of
+    Just kind
+      | kind == condense_map -> do
+          sym <- condenseTable cond s_condsym
+          let symid = condenseBisect sym k
+              target = fromIntegral symid :: Double
+              -- Pairs live at [1,2], [3,4], ... with keys ascending: bisect them.
+              go lo hi
+                | lo > hi = -1
+                | otherwise =
+                    let mid = (lo + hi) `div` 2
+                    in case condenseAt e (1 + mid * 2) of
+                         VNum p | p == target -> condenseIndex (condenseAt e (2 + mid * 2))
+                                | p < target -> go (mid + 1) hi
+                         _ -> go lo (mid - 1)
+          return (if symid < 0 then -1 else go 0 ((condenseLen e - 1) `div` 2 - 1))
+      -- Canonical integer keys only, as a JS list lookup: 01, 1e0, " 1" and
+      -- +1 miss, so condensing never changes which value a path selects.
+      | kind == condense_list ->
+          let i = read k :: Integer
+          in return (if not (isCanonIndex k) || i >= fromIntegral (condenseLen e - 1) then -1
+                     else condenseIndex (condenseAt e (1 + fromIntegral i)))
+    _ -> return (-1)
+
+-- | Walk a path from a starting node, returning the node index or -1. A list
+-- path is its parts, a string splits on dots, and no path is no parts.
+condenseResolve :: Value -> Int -> Value -> IO Int
+condenseResolve cond idx path = do
+  parts <- case path of
+    VList r -> readIORef r
+    VStr "" -> return []
+    VStr s -> return (map VStr (splitOn '.' s))
+    VNoval -> return []
+    VNull -> return []
+    _ -> do s <- jsString path; return [VStr s]
+  foldM step idx parts
+  where
+    step at part
+      | at < 0 = return (-1)
+      | vStrEq part s_mt = return at
+      | otherwise = condenseChild cond at part
+
+-- | Node @idx@ as a fresh, independent tree; 'VNoval' when the node does not exist.
+condenseMaterialise :: Value -> Int -> IO Value
+condenseMaterialise cond idx = do
+  sym <- condenseTable cond s_condsym
+  node <- condenseTable cond s_condnode
+  let rebuild i = do
+        let enc = condenseAt node i
+        e <- condenseArray enc
+        let at j = condenseAt e j
+            n = condenseLen e
+        case condenseKind e of
+          _ | isNullish enc -> return VNoval
+          Just kind
+            | kind == condense_map -> do
+                es <- foldM (\acc j -> do
+                        x <- rebuild (condenseIndex (at (j + 1)))
+                        k <- jsString (condenseAt sym (condenseIndex (at j)))
+                        return (opPut k x acc)) [] (takeWhile (< n) [1, 3 ..])
+                mkMap es
+            | kind == condense_list -> mapM (rebuild . condenseIndex . at) [1 .. n - 1] >>= mkList
+            | kind == condense_str -> return (condenseAt sym (condenseIndex (at 1)))
+            | kind == condense_num -> return (at 1)
+            | kind == condense_true -> return (VBool True)
+            | kind == condense_false -> return (VBool False)
+          _ -> return VNull
+  if idx < 0 then return VNoval else rebuild idx
+
+-- | The root of a condensed structure, fully materialised; any other value
+-- comes back unchanged. It gives up every benefit of condensing, so prefer a
+-- view or a path read.
+expand :: Value -> IO Value
+expand cond = do
+  ok <- iscondensed cond
+  if ok then condenseRoot cond >>= condenseMaterialise cond else return cond
+
+-- | The key names of node @idx@, decoding none of its values.
+condenseKeys :: Value -> Int -> IO [String]
+condenseKeys cond idx = do
+  e <- condenseNode cond idx
+  let n = condenseLen e
+  case condenseKind e of
+    Just kind
+      | kind == condense_map -> do
+          sym <- condenseTable cond s_condsym
+          mapM (\j -> jsString (condenseAt sym (condenseIndex (condenseAt e j)))) (takeWhile (< n) [1, 3 ..])
+      | kind == condense_list -> return (map show [0 .. n - 2])
+    _ -> return []
+
+-- | The pair count of a map node or the length of a list node; 0 for anything else.
+condenseSize :: Value -> Int -> IO Int
+condenseSize cond idx = do
+  e <- condenseNode cond idx
+  let n = condenseLen e
+  return (case condenseKind e of
+    Just kind
+      | kind == condense_map -> (n - 1) `div` 2
+      | kind == condense_list -> n - 1
+    _ -> 0)
+
+-- | A cursor into a condensed structure. Reads resolve by node index and touch
+-- only the nodes on the path.
+data CondenseView = CondenseView
+  { cvGet :: Value -> IO Value        -- ^ the value at a path ('VNoval' for none), materialised
+  , cvKeys :: Value -> IO [String]    -- ^ the key names at a path, decoding no values
+  , cvHas :: Value -> IO Bool         -- ^ whether a path resolves
+  , cvAt :: Value -> IO CondenseView  -- ^ a cursor at a path, sharing this one's 'cvRef' memo
+  , cvValue :: IO Value               -- ^ the start node, materialised afresh on every call
+  , cvSize :: IO Int                  -- ^ the pair count of a map node or the length of a list node
+  , cvExists :: Bool                  -- ^ whether the start node index is non-negative
+  , cvRef :: IO Value                 -- ^ one materialisation per node, shared through the memo
+  }
+
+-- | The memo 'cvRef' hands out its shared materialisations from, by node index.
+type CondenseMemo = IORef [(Int, Value)]
+
+-- | A cursor at the root of a condensed structure, or at no node for any other value.
+condenseview :: Value -> IO CondenseView
+condenseview cond = do
+  ok <- iscondensed cond
+  start <- if ok then condenseRoot cond else return (-1)
+  memo <- newIORef []
+  return (condenseviewAt cond start memo)
+
+-- | A cursor at node @start@, sharing @memo@ with every cursor 'cvAt' derives from it.
+condenseviewAt :: Value -> Int -> CondenseMemo -> CondenseView
+condenseviewAt cond start memo = CondenseView
+  { cvGet = \path -> condenseResolve cond start path >>= condenseMaterialise cond
+  , cvKeys = \path -> do
+      at <- condenseResolve cond start path
+      if at < 0 then return [] else condenseKeys cond at
+  , cvHas = \path -> (>= 0) <$> condenseResolve cond start path
+  , cvAt = \path -> do
+      at <- condenseResolve cond start path
+      return (condenseviewAt cond at memo)
+  , cvValue = condenseMaterialise cond start
+  , cvSize = condenseSize cond start
+  , cvExists = start >= 0
+  -- Shared on purpose: a mutation is seen by every holder of the node, even
+  -- one that reached it by another path, as the structure is a DAG.
+  , cvRef = do
+      cache <- readIORef memo
+      case lookup start cache of
+        Just v -> return v
+        Nothing -> do
+          v <- condenseMaterialise cond start
+          modifyIORef' memo ((start, v) :)
+          return v
+  }
