@@ -189,6 +189,27 @@ def vgi-to-int fn [[k:Any] [Any] [
   ]
 ]]
 
+# "0", or digits with no leading zero: the only keys a JavaScript array reads
+# as an index, so "01", " 1", "+1" and "-0" name no element.
+def vgi-isindex fn [[s:String] [Boolean] [
+  if ((size s) eq 0) [false] [
+    (s mini re `^(0|[1-9][0-9]*)$` {}).ok
+  ]
+]]
+
+# The element a list read selects. Writes coerce with vgi-to-int instead.
+def vgi-list-index fn [[k:Any] [Any] [
+  def r (
+    if (k is Boolean) [none] [
+      if (k is Integer) [if (k lt 0) [none] [k]] [
+        def ks (if (k is String) [k] [if (k is Number) [vg-num-to-string k] [""]])
+        if (vgi-isindex ks) [vgi-parse-int ks] [none]
+      ]
+    ]
+  )
+  r
+]]
+
 # JS truthiness (Boolean(v)): none/false/0/NaN/"" are false, all else true.
 def vgi-js-truthy fn [[v:Any] [Boolean] [
   if ((v is None) or (vg-is-noarg v)) [false] [
@@ -430,7 +451,7 @@ def vg-getprop fn [[v:Any k:Any alt:Any] [Any] [
     def found (
       if (vg-ismap v) [v get (vgi-map-key k)] [
         if (vg-islist v) [
-          def ki (vgi-to-int k)
+          def ki (vgi-list-index k)
           if (ki is None) [none] [
             if ((ki gte 0) and (ki lt (size v))) [v get ki] [none]
           ]
@@ -470,8 +491,15 @@ def vg-getelem fn [[v:Any k:Any alt:Any] [Any] [
         def ks (if (k is String) [k] [if (k is Number) [vg-num-to-string k] [""]])
         if (vgi-intkey-ok ks) [
           def n0 (vgi-parse-int ks)
-          def n (if (n0 lt 0) [(size v) add n0] [n0])
-          if ((n gte 0) and (n lt (size v))) [v get n] [none]
+          # Only a negative key counts from the end; any other reads as getprop.
+          def n (
+            if (n0 is None) [none] [
+              if (n0 lt 0) [(size v) add n0] [vgi-list-index ks]
+            ]
+          )
+          if (n is None) [none] [
+            if ((n gte 0) and (n lt (size v))) [v get n] [none]
+          ]
         ] [none]
       ] [none]
     )
@@ -488,7 +516,7 @@ def vg-getelem fn [[v:Any k:Any alt:Any] [Any] [
 def vgi-raw fn [[v:Any k:String] [Any] [
   if (vg-ismap v) [v get (k)] [
     if (vg-islist v) [
-      def ki (vgi-parse-int k)
+      def ki (vgi-list-index k)
       if (ki is None) [none] [
         if ((ki gte 0) and (ki lt (size v))) [v get ki] [none]
       ]
@@ -3000,7 +3028,7 @@ def vg-v-string fn [[inj:Any val:Any iref:Any store:Any] [Any] [
 def vgi-haslit fn [[v:Any k:Any] [Boolean] [
   if (vg-ismap v) [v has (vgi-map-key k)] [
     if (vg-islist v) [
-      def ki (vgi-to-int k)
+      def ki (vgi-list-index k)
       if (ki is None) [false] [(ki gte 0) and (ki lt (size v))]
     ] [false]
   ]
@@ -4092,14 +4120,6 @@ def vgl-cond-bisect-pairs fn [[lo:Integer hi:Integer enc:Any sid:Integer] [Any] 
   ]
 ]]
 
-# Canonical integer keys only: "01", "1e0", " 1", "+1" and "-0" select
-# nothing in a canonical list read, so they must not select here either.
-def vgi-cond-isindex fn [[s:String] [Boolean] [
-  if ((size s) eq 0) [false] [
-    (s mini re `^(0|[1-9][0-9]*)$` {}).ok
-  ]
-]]
-
 def vgi-cond-child fn [[cd:Any ix:Any key:String] [Any] [
   def enc (vgi-cond-enc cd ix)
   def r (
@@ -4113,8 +4133,10 @@ def vgi-cond-child fn [[cd:Any ix:Any key:String] [Any] [
           found
         ]
       ] [
+        # The plain list read's rule: condensing must not change which value
+        # a path selects.
         if (kd eq vg-cond-list) [
-          if (vgi-cond-isindex key) [
+          if (vgi-isindex key) [
             def li (vgi-parse-int key)
             if (li is None) [-1] [
               if (li lt ((size enc) sub 1)) [

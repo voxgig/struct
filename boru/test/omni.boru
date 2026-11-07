@@ -1078,21 +1078,32 @@ def ck-cond-null-base fn [[ig:Any] [Any] [
   r
 ]]
 
-# Canonical selects nothing for these. This port's plain list read still
-# parses "01", " 1", "+1" and "-0" as indexes, so compare with canonical.
+# A plain list read selects nothing for these, so a condensed one must not.
 def ck-cond-listkeys fn [[ig:Any] [Any] [
-  def c (Struct.condense {l: [10 20]})
+  def src {l: [10 20]}
+  def c (Struct.condense src)
   def m1 (Struct.getpath c ["l" "01"] Struct.NOARG)
   def m2 (Struct.getpath c ["l" "1e0"] Struct.NOARG)
   def m3 (Struct.getpath c ["l" " 1"] Struct.NOARG)
   def m4 (Struct.getpath c ["l" "+1"] Struct.NOARG)
   def m5 (Struct.getpath c ["l" "1.0"] Struct.NOARG)
   def m6 (Struct.getpath c ["l" "-0"] Struct.NOARG)
+  def p1 (Struct.getpath src ["l" "01"] Struct.NOARG)
+  def p2 (Struct.getpath src ["l" "1e0"] Struct.NOARG)
+  def p3 (Struct.getpath src ["l" " 1"] Struct.NOARG)
+  def p4 (Struct.getpath src ["l" "+1"] Struct.NOARG)
+  def p5 (Struct.getpath src ["l" "1.0"] Struct.NOARG)
+  def p6 (Struct.getpath src ["l" "-0"] Struct.NOARG)
   def hit (Struct.getpath c ["l" "1"] Struct.NOARG)
   def miss12 ((m1 is None) and (m2 is None))
   def miss34 ((m3 is None) and (m4 is None))
   def miss56 ((m5 is None) and (m6 is None))
-  def r ((miss12 and miss34) and (miss56 and (hit eq 20)))
+  def plain12 ((p1 is None) and (p2 is None))
+  def plain34 ((p3 is None) and (p4 is None))
+  def plain56 ((p5 is None) and (p6 is None))
+  def misses ((miss12 and miss34) and miss56)
+  def plains ((plain12 and plain34) and plain56)
+  def r ((misses and plains) and (hit eq 20))
   r
 ]]
 
