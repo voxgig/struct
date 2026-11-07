@@ -310,6 +310,25 @@ def DELETE : Value := .sentinel "delete"
 
 def MAXDEPTH : Int := 32
 
+def CONDENSE_VERSION : Float := 1.0
+
+/-- Node encoding kinds: the first element of every entry in a node table. -/
+def CONDENSE_MAP : Float := 0.0
+def CONDENSE_LIST : Float := 1.0
+def CONDENSE_STR : Float := 2.0
+def CONDENSE_NUM : Float := 3.0
+def CONDENSE_TRUE : Float := 4.0
+def CONDENSE_FALSE : Float := 5.0
+def CONDENSE_NULL : Float := 6.0
+
+def S_CONDENSE : String := "$condense"
+def S_CONDSYM : String := "sym"
+def S_CONDNODE : String := "node"
+def S_CONDROOT : String := "root"
+
+def S_CONDIMMUTABLE : String :=
+  "struct: condensed structures are immutable - expand() first, then modify the copy"
+
 -- ---------------------------------------------------------------------------
 -- Small helpers
 -- ---------------------------------------------------------------------------
@@ -754,8 +773,342 @@ def filter (v : Value) (check : (String × Value) → Bool) : SIO Value := do
     if check (k, x) then out := out.push x
   newList out
 
+-- ---------------------------------------------------------------------------
+-- condense: ahead of the setprop, delprop, setpath and getpath hooks that
+-- refuse or read a condensed structure
+-- ---------------------------------------------------------------------------
+
+def condenseField (cond : Value) (name : String) : SIO Value := do
+  match cond with
+  | .map id => pure ((omapGet (← mapEntries id) name).getD .noval)
+  | _ => pure .noval
+
+/-- True for a condensed structure of this format version. The version must
+    match, not merely be numeric: a future profile would otherwise be decoded
+    under this one's schema. -/
+def iscondensed (v : Value) : SIO Bool := do
+  match v with
+  | .map id =>
+    let es ← mapEntries id
+    match omapGet es S_CONDENSE, omapGet es S_CONDSYM, omapGet es S_CONDNODE,
+        omapGet es S_CONDROOT with
+    | some (.num n), some (.list _), some (.list _), some (.num _) =>
+      pure (n == CONDENSE_VERSION)
+    | _, _, _, _ => pure false
+  | _ => pure false
+
+/-- Raise when `v` is a condensed structure, which is immutable. -/
+def condenseGuard (v : Value) : SIO Unit := do
+  if (← iscondensed v) then throw (IO.userError S_CONDIMMUTABLE)
+
+/-- A node or symbol index read out of a condensed structure; -1 when it is
+    not one. -/
+def condenseIndex (v : Value) : Int :=
+  match v with
+  | .num n => if isIntegerF n && decide (n >= 0.0) && decide (n < 1e15) then fToInt n else -1
+  | _ => -1
+
+def condenseRoot (cond : Value) : SIO Int := do
+  return condenseIndex (← condenseField cond S_CONDROOT)
+
+def condenseItems (cond : Value) (name : String) : SIO (Array Value) := do
+  listItemsOf (← condenseField cond name)
+
+/-- Element `i` of an array, or noval out of range. -/
+def condenseAt (xs : Array Value) (i : Int) : Value :=
+  if i >= 0 && i < (xs.size : Int) then xs[i.toNat]! else .noval
+
+/-- The kind of a node encoding: its first element. -/
+def condenseKind (enc : Array Value) : Option Float :=
+  match enc[0]? with
+  | some (.num k) => some k
+  | _ => none
+
+/-- The encoding of node `idx` (empty when there is none). -/
+def condenseNode (cond : Value) (idx : Int) : SIO (Array Value) := do
+  listItemsOf (condenseAt (← condenseItems cond S_CONDNODE) idx)
+
+/-- Bisect a sorted symbol table: the string's id, or -1 when it occurs nowhere
+    in the structure, which is itself a fast miss. -/
+def condenseBisect (sym : Array Value) (key : String) : Int := Id.run do
+  let mut lo : Int := 0
+  let mut hi : Int := (sym.size : Int) - 1
+  while lo <= hi do
+    let mid := (lo + hi) / 2
+    match condenseAt sym mid with
+    | .str s =>
+      if s == key then return mid
+      if strLtB s key then lo := mid + 1 else hi := mid - 1
+    | _ => hi := mid - 1
+  return (-1)
+
+/-- Bisect the pairs of a map encoding, which hold ascending symbol ids: the
+    node index paired with `symid`, or -1. -/
+def condensePair (enc : Array Value) (symid : Int) : Int := Id.run do
+  let target := intToFloat symid
+  let mut lo : Int := 0
+  let mut hi : Int := ((enc.size : Int) - 1) / 2 - 1
+  while lo <= hi do
+    let mid := (lo + hi) / 2
+    match condenseAt enc (1 + mid * 2) with
+    | .num k =>
+      if k == target then return condenseIndex (condenseAt enc (2 + mid * 2))
+      if k < target then lo := mid + 1 else hi := mid - 1
+    | _ => hi := mid - 1
+  return (-1)
+
+/-- A canonical list index, as a JS array lookup reads one: `0`, or digits with
+    no leading zero. -/
+def isCanonIndex (s : String) : Bool :=
+  match s.toList with
+  | ['0'] => true
+  | c :: rest => c >= '1' && c <= '9' && rest.all (fun d => d >= '0' && d <= '9')
+  | [] => false
+
+/-- The node index of `key` inside node `idx`, or -1. Touches only this node. -/
+def condenseChild (cond : Value) (idx : Int) (key : Value) : SIO Int := do
+  let enc ← condenseNode cond idx
+  let k ← jsString key
+  let kind := condenseKind enc
+  if kind == some CONDENSE_MAP then
+    let symid := condenseBisect (← condenseItems cond S_CONDSYM) k
+    return (if symid < 0 then -1 else condensePair enc symid)
+  -- Canonical integer keys only, as a JS list lookup: 01, 1e0, " 1" and +1
+  -- miss, so condensing never changes which value a path selects.
+  if kind == some CONDENSE_LIST then
+    if !(isCanonIndex k) then return (-1)
+    match strToInt? k with
+    | some i =>
+      return (if i < (enc.size : Int) - 1 then condenseIndex (condenseAt enc (1 + i)) else -1)
+    | none => return (-1)
+  return (-1)
+
+/-- Walk a path from a starting node, returning the node index or -1. A list
+    path is its parts, a string splits on dots, and no path is no parts. -/
+def condenseResolve (cond : Value) (idx : Int) (path : Value) : SIO Int := do
+  let parts : Array Value ← match path with
+    | .list id => listItems id
+    | .str s => pure (if s == "" then #[] else ((s.splitOn ".").map (fun x => Value.str x)).toArray)
+    | .noval | .null => pure #[]
+    | _ => do pure #[Value.str (← jsString path)]
+  let mut cur := idx
+  for part in parts do
+    if cur < 0 then return (-1)
+    if part == .str S_MT then continue
+    cur := (← condenseChild cond cur part)
+  return cur
+
+/-- Node `i` of a node table as a fresh, independent tree; noval when the node
+    does not exist. Two rebuilds never share a container, even where the
+    condensed form shares a node. -/
+partial def condenseRebuild (sym node : Array Value) (i : Int) : SIO Value := do
+  let enc := condenseAt node i
+  if isNullish enc then return .noval
+  let e ← listItemsOf enc
+  let kind := condenseKind e
+  if kind == some CONDENSE_MAP then
+    let mut out : Array (String × Value) := #[]
+    let mut j : Int := 1
+    while j < (e.size : Int) do
+      let k ← jsString (condenseAt sym (condenseIndex (condenseAt e j)))
+      out := omapSet out k (← condenseRebuild sym node (condenseIndex (condenseAt e (j + 1))))
+      j := j + 2
+    return (← newMap out)
+  if kind == some CONDENSE_LIST then
+    let mut out : Array Value := #[]
+    for j in [1:e.size] do
+      out := out.push (← condenseRebuild sym node (condenseIndex (condenseAt e (j : Int))))
+    return (← newList out)
+  if kind == some CONDENSE_STR then return condenseAt sym (condenseIndex (condenseAt e 1))
+  if kind == some CONDENSE_NUM then return condenseAt e 1
+  if kind == some CONDENSE_TRUE then return .bool true
+  if kind == some CONDENSE_FALSE then return .bool false
+  return .null
+
+/-- Node `idx` of a condensed structure, materialised; noval when it does not
+    exist. -/
+def condenseMaterialise (cond : Value) (idx : Int) : SIO Value := do
+  if idx < 0 then return .noval
+  condenseRebuild (← condenseItems cond S_CONDSYM) (← condenseItems cond S_CONDNODE) idx
+
+/-- The root of a condensed structure, fully materialised; any other value
+    comes back unchanged. It gives up every benefit of condensing, so prefer a
+    view or a path read. -/
+def expand (cond : Value) : SIO Value := do
+  if !(← iscondensed cond) then return cond
+  condenseMaterialise cond (← condenseRoot cond)
+
+/-- The key names of node `idx`, decoding none of its values. -/
+def condenseKeys (cond : Value) (idx : Int) : SIO (Array String) := do
+  let enc ← condenseNode cond idx
+  let kind := condenseKind enc
+  if kind == some CONDENSE_MAP then
+    let sym ← condenseItems cond S_CONDSYM
+    let mut out : Array String := #[]
+    let mut j : Int := 1
+    while j < (enc.size : Int) do
+      out := out.push (← jsString (condenseAt sym (condenseIndex (condenseAt enc j))))
+      j := j + 2
+    return out
+  if kind == some CONDENSE_LIST then
+    return (Array.range (enc.size - 1)).map (fun i => toString i)
+  return #[]
+
+/-- The pair count of map node `idx` or the length of list node `idx`; 0 for
+    anything else. -/
+def condenseSize (cond : Value) (idx : Int) : SIO Int := do
+  let enc ← condenseNode cond idx
+  let kind := condenseKind enc
+  if kind == some CONDENSE_MAP then return ((enc.size : Int) - 1) / 2
+  if kind == some CONDENSE_LIST then return (enc.size : Int) - 1
+  return 0
+
+/-- Every map key and string value in `n`, appended to `acc`. -/
+partial def condenseCollect (n : Value) (acc : Array String) : SIO (Array String) := do
+  match n with
+  | .map id =>
+    let mut out := acc
+    for (k, x) in (← mapEntries id) do
+      out := (← condenseCollect x (out.push k))
+    return out
+  | .list id =>
+    let mut out := acc
+    for x in (← listItems id) do
+      out := (← condenseCollect x out)
+    return out
+  | .str s => return acc.push s
+  | _ => return acc
+
+/-- The interning key of an encoding element: -0 keys as 0, one JS number. -/
+def condenseKey (v : Value) : String :=
+  match v with
+  | .num n => numToString n
+  | _ => ""
+
+/-- The index of an encoding in the node table, appending it when no identical
+    one exists yet. The kind leads every encoding, so kinds never collide on
+    one key. -/
+def condenseIntern (st : IO.Ref (Array Value × Array (String × Nat))) (enc : Array Value) :
+    SIO Nat := do
+  let key := String.intercalate "," (enc.toList.map condenseKey)
+  let (node, seen) ← st.get
+  match seen.find? (fun p => p.1 == key) with
+  | some p => return p.2
+  | none =>
+    st.set (node.push (← newList enc), seen.push (key, node.size))
+    return node.size
+
+/-- Built post-order, so identical subtrees are already one node by the time a
+    parent references them. -/
+partial def condenseBuild (sym : Array Value) (st : IO.Ref (Array Value × Array (String × Nat)))
+    (n : Value) : SIO Nat := do
+  match n with
+  | .map _ =>
+    let mut enc : Array Value := #[.num CONDENSE_MAP]
+    for (k, x) in (← itemsPairs n) do
+      let child ← condenseBuild sym st x
+      enc := (enc.push (vInt (condenseBisect sym k))).push (vInt (child : Int))
+    condenseIntern st enc
+  | .list id =>
+    let mut enc : Array Value := #[.num CONDENSE_LIST]
+    for x in (← listItems id) do
+      let child ← condenseBuild sym st x
+      enc := enc.push (vInt (child : Int))
+    condenseIntern st enc
+  | .str s => condenseIntern st #[.num CONDENSE_STR, vInt (condenseBisect sym s)]
+  | .num x => condenseIntern st #[.num CONDENSE_NUM, .num x]
+  | .bool true => condenseIntern st #[.num CONDENSE_TRUE]
+  | .bool false => condenseIntern st #[.num CONDENSE_FALSE]
+  | _ => condenseIntern st #[.num CONDENSE_NULL]
+
+/-- Condense a JSON-shaped value into a sorted symbol table and a node table.
+    Pure: the same input gives byte-identical output, on every port. -/
+def condense (v : Value) : SIO Value := do
+  let found := (← condenseCollect v #[]).qsort strLtB
+  let mut sym : Array Value := #[]
+  let mut prev : Option String := none
+  for s in found do
+    if prev != some s then
+      sym := sym.push (.str s)
+      prev := some s
+  let st ← IO.mkRef ((#[] : Array Value), (#[] : Array (String × Nat)))
+  let root ← condenseBuild sym st v
+  let (node, _) ← st.get
+  newMap #[(S_CONDENSE, .num CONDENSE_VERSION), (S_CONDSYM, ← newList sym),
+    (S_CONDNODE, ← newList node), (S_CONDROOT, vInt (root : Int))]
+
+/-- A cursor into a condensed structure: reads resolve by node index and touch
+    only the nodes on the path. `at` and `exists` are Lean keywords, so those
+    two operations carry escaped names. -/
+structure CondenseView where
+  cond : Value
+  start : Int
+  memo : IO.Ref (Array (Int × Value))
+
+/-- A cursor at node `idx`, or at the root when `cond` is condensed and no index
+    is given; `memo` holds the materialisations `ref` shares. -/
+def condenseview (cond : Value) (idx : Option Int := none)
+    (memo : Option (IO.Ref (Array (Int × Value))) := none) : SIO CondenseView := do
+  let start ← match idx with
+    | some i => pure i
+    | none => do
+      if (← iscondensed cond) then condenseRoot cond else pure (-1)
+  let refmemo ← match memo with
+    | some m => pure m
+    | none => do
+      let r ← IO.mkRef (#[] : Array (Int × Value))
+      pure r
+  return { cond := cond, start := start, memo := refmemo }
+
+namespace CondenseView
+
+/-- The value at `path`, materialised; noval when the path misses. -/
+def get (v : CondenseView) (path : Value := .noval) : SIO Value := do
+  condenseMaterialise v.cond (← condenseResolve v.cond v.start path)
+
+/-- The key names at `path`, decoding no values. -/
+def keys (v : CondenseView) (path : Value := .noval) : SIO (Array String) := do
+  let pos ← condenseResolve v.cond v.start path
+  if pos < 0 then return #[]
+  condenseKeys v.cond pos
+
+/-- Whether `path` resolves. -/
+def has (v : CondenseView) (path : Value := .noval) : SIO Bool := do
+  return decide ((← condenseResolve v.cond v.start path) >= 0)
+
+/-- A cursor at `path`, sharing this one's `ref` memo. Nothing is decoded. -/
+def «at» (v : CondenseView) (path : Value := .noval) : SIO CondenseView := do
+  condenseview v.cond (some (← condenseResolve v.cond v.start path)) (some v.memo)
+
+/-- The start node, materialised afresh on every call. -/
+def value (v : CondenseView) : SIO Value :=
+  condenseMaterialise v.cond v.start
+
+/-- The pair count of a map start node or the length of a list one; 0 for
+    anything else. -/
+def size (v : CondenseView) : SIO Int :=
+  condenseSize v.cond v.start
+
+/-- Whether the start node index is non-negative. -/
+def «exists» (v : CondenseView) : Bool :=
+  decide (v.start >= 0)
+
+/-- One materialisation per node, shared by every `ref` through the memo:
+    mutating it is seen by every other holder of the node, even one that
+    reached it by another path. -/
+def ref (v : CondenseView) : SIO Value := do
+  match (← v.memo.get).find? (fun p => p.1 == v.start) with
+  | some p => return p.2
+  | none =>
+    let x ← condenseMaterialise v.cond v.start
+    v.memo.modify (fun a => a.push (v.start, x))
+    return x
+
+end CondenseView
+
 partial def setprop (parent key v : Value) : SIO Value := do
   if !(iskey key) then return parent
+  condenseGuard parent
   match parent with
   | .map id => mapSetKV id (← jsString key) v
   | .list id => do
@@ -776,6 +1129,7 @@ partial def setprop (parent key v : Value) : SIO Value := do
 
 partial def delprop (parent key : Value) : SIO Value := do
   if !(iskey key) then return parent
+  condenseGuard parent
   match parent with
   | .map id => mapDelK id (← jsString key)
   | .list id => do
@@ -1499,6 +1853,15 @@ partial def getpath (store path : Value) (inj : InjArg := .inone) : SIO Value :=
   match pa0 with
   | none => return .noval
   | some pa0 => do
+    -- A condensed store answers as the node it was built from, touching only
+    -- the nodes on the path. base would change what the walk resolves
+    -- against, so with one the store is expanded instead.
+    if (← iscondensed store) && isNullish (← iaBase inj) then
+      let found ← condenseResolve store (← condenseRoot store) (← newList pa0)
+      let v ← if found < 0 then pure Value.noval else condenseMaterialise store found
+      -- Group A: an ordinary getpath reads a stored null as absent.
+      return (if isNullish v then .noval else v)
+    let store ← expand store
     let paRef ← IO.mkRef pa0
     let base ← iaBase inj
     let dparent ← iaDparent inj
@@ -1599,6 +1962,7 @@ partial def getpath (store path : Value) (inj : InjArg := .inone) : SIO Value :=
     vRef.get
 
 partial def setpath (store path v : Value) (inj : InjArg := .inone) : SIO Value := do
+  condenseGuard store
   let ptype := typify path
   let parts ←
     if (T_LIST &&& ptype) > 0 then do

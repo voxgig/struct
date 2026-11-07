@@ -258,8 +258,176 @@ def walkDepthSubject (vin : Value) : SIO Value := do
   let _ ← walk (← vget vin "src") (before := some copy) (maxdepth := ← vget vin "maxdepth")
   top.get
 
+-- ---------------- condense: what the corpus cannot express ----------------
+
+-- Identity, sharing and the immutability contract, as canonical's
+-- `condense-*` tests check them.
+
+def expectOk (ok : Bool) (what : String) : SIO Unit :=
+  if ok then pure () else throw (IO.userError what)
+
+def runLocal (group : String) (act : SIO Unit) : SIO Unit := do
+  try
+    act
+    record group true ""
+  catch e => record group false e.toString
+
+def raisesImmutable (act : SIO Value) : SIO Bool := do
+  try
+    let _ ← act
+    pure false
+  catch e =>
+    pure (decide ((e.toString.splitOn "immutable").length > 1))
+
+def compactJson (v : Value) : SIO String := do
+  jsonify v (flags := ← jm [.str "indent", .num 0.0])
+
+def nodeCount (cd : Value) : SIO Int := do
+  size (← getpropRawPub cd "node")
+
+def isNum (n : Float) (v : Value) : Bool :=
+  match v with
+  | .num x => x == n
+  | _ => false
+
+def runCondenseLocal : SIO Unit := do
+  runLocal "condense.deterministic" do
+    let mk : SIO Value := do
+      jm [.str "b", ← jm [.str "m", .str "GET"], .str "a", ← jm [.str "m", .str "GET"],
+        .str "l", ← jt [.num 1.0, .str "x", .bool true]]
+    let s1 ← compactJson (← condense (← mk))
+    let s2 ← compactJson (← condense (← mk))
+    expectOk (s1 == s2) "condense is not deterministic"
+    let reordered ← jm [.str "l", ← jt [.num 1.0, .str "x", .bool true],
+      .str "a", ← jm [.str "m", .str "GET"], .str "b", ← jm [.str "m", .str "GET"]]
+    let s3 ← compactJson (← condense reordered)
+    expectOk (s1 == s3) "insertion order changed the bytes"
+
+  runLocal "condense.shares-identical-subtrees" do
+    let xm : SIO Value := jm [.str "m", .str "GET", .str "p", .str "/1"]
+    let one ← nodeCount (← condense (← jm [.str "x", ← xm]))
+    let two ← nodeCount (← condense (← jm [.str "x", ← xm, .str "y", ← xm]))
+    expectOk (one == two) "a second identical subtree added nodes"
+    let three ← nodeCount (← condense (← jm [.str "x", ← jm [.str "m", .str "GET"],
+      .str "y", ← jm [.str "m", .str "PUT"], .str "z", ← jm [.str "m", .str "POST"]]))
+    expectOk (decide (three > two)) "distinct subtrees added no nodes"
+
+  runLocal "condense.round-trips-by-value" do
+    let src ← jm [.str "a", ← jm [.str "b",
+      ← jt [.num 1.0, .str "x", .bool true, .null, ← emptyMap]], .str "c", .str "z"]
+    expectOk (← eqv (← expand (← condense src)) src) "expand did not give back the value"
+
+  runLocal "condense.getpath-is-transparent" do
+    let src ← jm [.str "entity", ← jm [.str "p", ← jm [.str "op",
+      ← jm [.str "list", ← jm [.str "method", .str "GET"]]]]]
+    let cd ← condense src
+    let path ← jt [.str "entity", .str "p", .str "op", .str "list"]
+    expectOk (← eqv (← getpath cd path) (← getpath src path)) "a node read differs"
+    let leaf ← getpath cd (← jt [.str "entity", .str "p", .str "op", .str "list", .str "method"])
+    expectOk (leaf == .str "GET") "a leaf read differs"
+    let miss ← getpath cd (← jt [.str "entity", .str "nope"])
+    expectOk (isNoval miss) "a miss is not absent"
+
+  runLocal "condense.view-reads-without-materialising" do
+    let cd ← condense (← jm [.str "entity", ← jm [.str "a", ← jm [.str "v", .num 1.0],
+      .str "b", ← jm [.str "v", .num 2.0]], .str "other", .num 9.0])
+    let v ← condenseview cd
+    expectOk ((← v.keys (.str "entity")) == #["a", "b"]) "keys"
+    let e ← CondenseView.«at» v (.str "entity")
+    let b ← CondenseView.«at» e (.str "b")
+    expectOk (isNum 2.0 (← b.get (.str "v"))) "at then get"
+    expectOk (← v.has (.str "entity.a")) "has entity.a"
+    expectOk (!(← v.has (.str "entity.zz"))) "has entity.zz"
+    expectOk ((← v.size) == 2) "size"
+
+  runLocal "condense.value-copies-and-ref-shares" do
+    let v ← condenseview (← condense (← jm [.str "a", ← jm [.str "m", .str "GET"],
+      .str "b", ← jm [.str "m", .str "GET"]]))
+    -- a and b share one node; get must not let that be observed.
+    let x ← v.get (.str "a")
+    let y ← v.get (.str "b")
+    expectOk (← eqv x y) "a and b differ"
+    expectOk (x != y) "get handed out one node twice"
+    let _ ← setprop x (.str "m") (.str "MUTATED")
+    let m ← getprop (← v.get (.str "b")) (.str "m")
+    expectOk (m == .str "GET") "a mutation reached another read"
+    let r1 ← (← CondenseView.«at» v (.str "a")).ref
+    let r2 ← (← CondenseView.«at» v (.str "a")).ref
+    expectOk (r1 == r2) "ref did not share"
+
+  runLocal "condense.preserves-proto-named-keys-and-values" do
+    let asValue ← jm [.str "x", .str "__proto__"]
+    expectOk (← eqv (← expand (← condense asValue)) asValue) "a value named __proto__"
+    let asKey ← jm [.str "__proto__", .num 1.0]
+    let shown ← compactJson (← expand (← condense asKey))
+    expectOk (shown == "{\"__proto__\":1}") "a key named __proto__"
+
+  runLocal "condense.getpath-matches-plain-on-null-and-options" do
+    let plain ← jm [.str "a", .null]
+    let viaCondensed ← getpath (← condense plain) (.str "a")
+    let viaPlain ← getpath plain (.str "a")
+    expectOk (isNoval viaCondensed && isNoval viaPlain) "a stored null is not absent"
+    let store ← jm [.str "base", ← jm [.str "x", .num 1.0]]
+    let d : InjDef := { dBase := .str "base" }
+    let baseCondensed ← getpath (← condense store) (.str "x") (.idef d)
+    let basePlain ← getpath store (.str "x") (.idef d)
+    expectOk (isNum 1.0 baseCondensed && isNum 1.0 basePlain) "base was ignored"
+
+  -- Canonical's ordinary list lookup misses every one of these; this port's
+  -- reads 01 and -0 as indexes, so the miss is asserted directly.
+  runLocal "condense.list-keys-are-canonical-integers" do
+    let cd ← condense (← jm [.str "l", ← jt [.num 10.0, .num 20.0]])
+    for k in ["01", "1e0", " 1", "+1", "1.0", "-0"] do
+      let r ← getpath cd (← jt [.str "l", .str k])
+      expectOk (isNoval r) ("list key " ++ k)
+    let one ← getpath cd (← jt [.str "l", .str "1"])
+    expectOk (isNum 20.0 one) "list key 1"
+
+  runLocal "condense.symbols-sort-by-code-point" do
+    let ffff := String.singleton (Char.ofNat 0xFFFF)
+    let astral := String.singleton (Char.ofNat 0x10000)
+    let sym ← getpropRawPub (← condense (← jm [.str "a", .str astral, .str "b", .str ffff])) "sym"
+    let syms ← listItemsOf sym
+    let position (s : String) : Nat := (syms.toList.takeWhile (fun x => x != Value.str s)).length
+    let shown ← compactJson sym
+    expectOk (decide (position ffff < position astral))
+      ("symbol table is not in code-point order: " ++ shown)
+
+  runLocal "condense.astral-keys-resolve" do
+    let fullwidth := String.singleton (Char.ofNat 0xFF21)
+    let grin := String.singleton (Char.ofNat 0x1F600)
+    let cd ← condense (← jm [.str fullwidth, .num 1.0, .str grin, .num 2.0])
+    expectOk (isNum 2.0 (← getpath cd (← jt [.str grin]))) "the astral key"
+    expectOk (isNum 1.0 (← getpath cd (← jt [.str fullwidth]))) "the BMP key"
+    expectOk (isNum 2.0 (← (← condenseview cd).get (.str grin))) "the astral key through a view"
+
+  runLocal "condense.invalid-key-mutations-stay-no-ops" do
+    let cd ← condense (← jm [.str "a", .num 1.0])
+    expectOk ((← delprop cd .noval) == cd) "delprop with an invalid key"
+    expectOk ((← setprop cd .noval (.num 1.0)) == cd) "setprop with an invalid key"
+    expectOk (← raisesImmutable (delprop cd (.str "sym"))) "a valid delprop did not raise"
+
+  runLocal "condense.is-immutable" do
+    let cd ← condense (← jm [.str "a", .num 1.0])
+    expectOk (← raisesImmutable (setpath cd (.str "a") (.num 2.0))) "setpath"
+    expectOk (← raisesImmutable (setprop cd (.str "a") (.num 2.0))) "setprop"
+    expectOk (← raisesImmutable (delprop cd (.str "sym"))) "delprop"
+    let e ← expand cd
+    let _ ← setpath e (.str "a") (.num 2.0)
+    expectOk (isNum 2.0 (← getprop e (.str "a"))) "the expanded copy is not mutable"
+
 def runAll (spec : Value) : SIO Unit := do
   let g := getpropRawPub spec
+  let condenses ← g "condense"
+  runSet "condense.condense" (← getpropRawPub condenses "condense") (arg1 condense)
+    (flagNull := false)
+  runSet "condense.expand" (← getpropRawPub condenses "expand") (arg1 expand)
+    (flagNull := false)
+  runSet "condense.iscondensed" (← getpropRawPub condenses "iscondensed")
+    (arg1 (fun v => do pure (.bool (← iscondensed v))))
+    (flagNull := false)
+  runCondenseLocal
+
   let minor ← g "minor"
   let walks ← g "walk"
   let merges ← g "merge"

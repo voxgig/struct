@@ -95,6 +95,8 @@ Names are the canonical names, lower-smushed or camelCased:
 - **Builders:** `jm` (map from alternating key/value list), `jt` (list)
 - **Injection internals (canonical):** `checkPlacement`, `injectorArgs`,
   `injectChild`
+- **Condensed structures:** `condense`, `condenseview`, `expand`,
+  `iscondensed`
 
 Optional arguments use Lean default parameters, e.g.
 `getprop v key (alt := .noval)`, `slice v (start := …) (stop := …)
