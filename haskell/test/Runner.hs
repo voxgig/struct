@@ -487,13 +487,17 @@ runCondenseLocal c = do
     basePlain <- getpath (IDef d) store (VStr "x")
     expect (isNum 1 baseCondensed && isNum 1 basePlain) "base was ignored"
 
-  -- Canonical's ordinary list lookup misses every one of these; this port's
-  -- reads 01, " 1", +1 and -0 as indexes, so the miss is asserted directly.
+  -- Unary + would accept these; an ordinary list lookup does not, so
+  -- condensing must not change which value a path selects.
   runLocal c "condense.list-keys-are-canonical-integers" $ do
-    cd <- condensed (O.JMap [("l", O.JList [O.Num 10, O.Num 20])])
+    plain <- tostruct (O.JMap [("l", O.JList [O.Num 10, O.Num 20])])
+    cd <- condense plain
     forM_ ["01", "1e0", " 1", "+1", "1.0", "-0"] $ \k -> do
-      r <- mkList [VStr "l", VStr k] >>= getpath INone cd
-      expect (isNoval r) ("list key " ++ k)
+      path <- mkList [VStr "l", VStr k]
+      viaCondensed <- getpath INone cd path
+      viaPlain <- getpath INone plain path
+      same <- eqv viaCondensed viaPlain
+      expect same ("list key " ++ k)
     one <- mkList [VStr "l", VStr "1"] >>= getpath INone cd
     expect (isNum 20 one) "list key 1"
 

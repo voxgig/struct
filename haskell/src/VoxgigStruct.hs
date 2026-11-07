@@ -381,9 +381,17 @@ jsstrPure v = case v of
   VSentinel s -> s
   _ -> ""
 
--- | True when a string is a valid non-negative integer list index.
+-- | True when a string is nonempty and every character is a digit or @-@.
 isIntKey :: String -> Bool
 isIntKey s = not (null s) && all (\c -> (c >= '0' && c <= '9') || c == '-') s
+
+-- | A canonical list index, as a JS array lookup reads one: @0@, or digits
+-- with no leading zero.
+isCanonIndex :: String -> Bool
+isCanonIndex s = case s of
+  "0" -> True
+  (c:rest) -> c >= '1' && c <= '9' && all (\d -> d >= '0' && d <= '9') rest
+  [] -> False
 
 -- | Count leading zero bits of a 32-bit word (JavaScript @Math.clz32@).
 clz32 :: Int -> Int
@@ -506,14 +514,18 @@ keysof v = case v of
   VList r -> do elems <- readIORef r; return [show i | i <- [0 .. length elems - 1]]
   _ -> return []
 
--- | Read a list element by numeric\/string key ('VNoval' when out of range).
+-- | Read a list element as JS reads an array: a whole number from 0 or a
+-- canonical index string, so @01@, @+1@ and @-0@ miss ('VNoval' when out of range).
 listIndex :: IORef [Value] -> Value -> IO Value
 listIndex r key = do
-  let ks = case key of VStr s -> s; VNum n -> numToString n; _ -> ""
   elems <- readIORef r
-  case readIntOpt ks of
-    Just i | i >= 0 && i < length elems -> return (elems !! i)
-    _ -> return VNoval
+  let idx = case key of
+        VNum n | isIntegerF n && n >= 0 -> Just (truncate n :: Integer)
+        VStr s | isCanonIndex s -> Just (read s)
+        _ -> Nothing
+  return (case idx of
+    Just i | i < toInteger (length elems) -> elems !! fromInteger i
+    _ -> VNoval)
 
 -- | Read a node property by key, returning the alt value when absent.
 getpropAlt :: Value -> Value -> Value -> IO Value
@@ -551,15 +563,13 @@ getelemAlt alt v key
       out <- case v of
         VList r -> do
           let ks = case key of VStr s -> s; VNum n -> numToString n; _ -> ""
-          if isIntKey ks
-            then do
-              elems <- readIORef r
-              let len = length elems
-              case readIntOpt ks of
-                Just nk0 -> let nk = if nk0 < 0 then len + nk0 else nk0
-                            in return (if nk >= 0 && nk < len then elems !! nk else VNoval)
-                Nothing -> return VNoval
-            else return VNoval
+          -- A negative key counts from the end; any other reads as getprop does.
+          case (if isIntKey ks then readMaybe ks else Nothing) :: Maybe Integer of
+            Just nk | nk < 0 -> do
+              len <- length <$> readIORef r
+              listIndex r (VNum (fromInteger (toInteger len + nk)))
+            Just _ -> listIndex r key
+            Nothing -> return VNoval
         _ -> return VNoval
       if isNullish out
         then case alt of VFunc f -> f dummyInj VNoval "" VNoval; _ -> return alt
@@ -2651,14 +2661,6 @@ condenseNode :: Value -> Int -> IO (A.Array Int Value)
 condenseNode cond idx = do
   node <- condenseTable cond s_condnode
   condenseArray (condenseAt node idx)
-
--- | A canonical list index, as a JS array lookup reads one: @0@, or digits
--- with no leading zero.
-isCanonIndex :: String -> Bool
-isCanonIndex s = case s of
-  "0" -> True
-  (c:rest) -> c >= '1' && c <= '9' && all (\d -> d >= '0' && d <= '9') rest
-  [] -> False
 
 -- | The node index of @key@ inside node @idx@, or -1. Touches only this node.
 condenseChild :: Value -> Int -> Value -> IO Int
