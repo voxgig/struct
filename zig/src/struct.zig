@@ -375,6 +375,42 @@ pub fn strkey(allocator: Allocator, key: JsonValue) ![]const u8 {
     };
 }
 
+// The index a list read takes key to, as a JavaScript array reads one: a
+// non-negative integer, or its string with no sign and no leading zero.
+// Writes coerce a list key more loosely.
+fn listIndex(key: JsonValue) ?usize {
+    return switch (key) {
+        .integer => |i| if (0 <= i and i <= std.math.maxInt(u32)) @as(usize, @intCast(i)) else null,
+        .float => |f| if (0 <= f and f == @trunc(f) and f <= std.math.maxInt(u32)) @as(usize, @intFromFloat(f)) else null,
+        .string => |s| blk: {
+            if (0 == s.len or (1 < s.len and '0' == s[0])) break :blk null;
+            for (s) |c| {
+                if (c < '0' or '9' < c) break :blk null;
+            }
+            const n = std.fmt.parseInt(u32, s, 10) catch break :blk null;
+            break :blk @as(usize, n);
+        },
+        else => null,
+    };
+}
+
+// A negative integer key, which getelem counts from the end of a list.
+fn negativeKey(key: JsonValue) ?i64 {
+    return switch (key) {
+        .integer => |i| if (i < 0) i else null,
+        .float => |f| if (f < 0 and f == @trunc(f) and -std.math.maxInt(u32) <= f) @as(i64, @intFromFloat(f)) else null,
+        .string => |s| blk: {
+            if (s.len < 2 or '-' != s[0]) break :blk null;
+            for (s[1..]) |c| {
+                if (c < '0' or '9' < c) break :blk null;
+            }
+            const n = std.fmt.parseInt(i64, s, 10) catch break :blk null;
+            break :blk if (n < 0) n else null;
+        },
+        else => null,
+    };
+}
+
 // Get a list element by integer index. Only works on lists.
 pub fn getelem(allocator: Allocator, val: JsonValue, key: JsonValue, alt: JsonValue) !JsonValue {
     if (val == .null or key == .null) return resolveAlt(allocator, alt);
@@ -382,19 +418,16 @@ pub fn getelem(allocator: Allocator, val: JsonValue, key: JsonValue, alt: JsonVa
     if (val != .array) return resolveAlt(allocator, alt);
 
     const list = val.array.data.items;
+    const len: i64 = @intCast(list.len);
 
-    // Get the key as string first
-    const ks = try strkey(allocator, key);
-
-    // Parse as integer
-    const nkey_raw = std.fmt.parseInt(i64, ks, 10) catch return resolveAlt(allocator, alt);
-    var nkey = nkey_raw;
-
-    if (nkey < 0) {
-        nkey = @as(i64, @intCast(list.len)) + nkey;
+    var nkey: i64 = -1;
+    if (listIndex(key)) |i| {
+        nkey = @intCast(i);
+    } else if (negativeKey(key)) |n| {
+        nkey = len + n;
     }
 
-    if (nkey >= 0 and nkey < @as(i64, @intCast(list.len))) {
+    if (nkey >= 0 and nkey < len) {
         const v = list[@intCast(nkey)];
         // Group A: a stored JSON null counts as "no value" → alt.
         if (v == .null) return resolveAlt(allocator, alt);
@@ -425,18 +458,9 @@ pub fn getprop(allocator: Allocator, val: JsonValue, key: JsonValue, alt: JsonVa
     }
 
     if (val == .array) {
-        var ki: ?i64 = null;
-        switch (key) {
-            .integer => |i| ki = i,
-            .float => |f| ki = @intFromFloat(f),
-            .string => |s| {
-                ki = std.fmt.parseInt(i64, s, 10) catch null;
-            },
-            else => {},
-        }
-        if (ki) |idx| {
-            if (idx >= 0 and idx < @as(i64, @intCast(val.array.data.items.len))) {
-                const v = val.array.data.items[@intCast(idx)];
+        if (listIndex(key)) |idx| {
+            if (idx < val.array.data.items.len) {
+                const v = val.array.data.items[idx];
                 // Group A: a stored JSON null counts as "no value" → alt.
                 if (v == .null) return alt;
                 return v;
@@ -1967,12 +1991,12 @@ pub fn getpathInj(allocator: Allocator, path_val: JsonValue, store_in: JsonValue
                                     resolved = .null;
                                 }
                             } else if (resolved == .array) {
-                                const idx = std.fmt.parseInt(i64, fp, 10) catch {
+                                const idx = listIndex(JsonValue{ .string = fp }) orelse {
                                     resolved = .null;
                                     break;
                                 };
-                                if (idx >= 0 and idx < @as(i64, @intCast(resolved.array.data.items.len))) {
-                                    resolved = resolved.array.data.items[@intCast(idx)];
+                                if (idx < resolved.array.data.items.len) {
+                                    resolved = resolved.array.data.items[idx];
                                 } else {
                                     resolved = .null;
                                 }
@@ -2026,9 +2050,9 @@ fn resolvePart(allocator: Allocator, val: JsonValue, part_in: []const u8, inj: ?
     if (val == .object) {
         return val.object.get(part) orelse .null;
     } else if (val == .array) {
-        const idx = std.fmt.parseInt(i64, part, 10) catch return .null;
-        if (idx >= 0 and idx < @as(i64, @intCast(val.array.data.items.len))) {
-            return val.array.data.items[@intCast(idx)];
+        const idx = listIndex(JsonValue{ .string = part }) orelse return .null;
+        if (idx < val.array.data.items.len) {
+            return val.array.data.items[idx];
         }
         return .null;
     }
@@ -2748,9 +2772,9 @@ fn cmdValidateType(allocator: Allocator, inj: *Injection, tname: []const u8, tbi
     const out = getprop(allocator, inj.dparent, JsonValue{ .string = inj.key }, .null) catch .null;
     const t = typify(out);
 
-    // A $NOF or $ALL trial of a missing value leaves $TOP out of its store: no
-    // value, where getprop reads .null.
-    if (tbit == T_null and 1 == inj.path.len and null == lookupLiteral(inj.dparent, inj.key)) {
+    // A missing slot is no value, where getprop reads .null. A $NOF or $ALL
+    // trial of a missing value leaves $TOP out of its store.
+    if (tbit == T_null and null == lookupLiteral(inj.dparent, inj.key)) {
         try inj.errs.append(try invalidTypeMsg(allocator, inj.path, tname, .null));
         return .null;
     }
@@ -2967,7 +2991,7 @@ fn lookupLiteral(val: JsonValue, key: []const u8) ?JsonValue {
     return switch (val) {
         .object => |obj| obj.get(key),
         .array => |arr| blk: {
-            const idx = std.fmt.parseInt(usize, key, 10) catch break :blk null;
+            const idx = listIndex(JsonValue{ .string = key }) orelse break :blk null;
             break :blk if (idx < arr.data.items.len) arr.data.items[idx] else null;
         },
         else => null,
@@ -5123,16 +5147,6 @@ fn condenseSymAt(sym: []const JsonValue, v: JsonValue) ?[]const u8 {
     return if (s == .string) s.string else null;
 }
 
-// The canonical form of a list index: digits only, with no sign and no
-// leading zero.
-fn condenseIndexKey(key: []const u8) bool {
-    if (0 == key.len or (1 < key.len and '0' == key[0])) return false;
-    for (key) |c| {
-        if (c < '0' or '9' < c) return false;
-    }
-    return true;
-}
-
 // The node index of key inside node idx, or -1. Touches only this node.
 fn condenseChild(cond: JsonValue, idx: i64, key: []const u8) i64 {
     const enc = condenseEnc(cond, idx) orelse return -1;
@@ -5152,9 +5166,7 @@ fn condenseChild(cond: JsonValue, idx: i64, key: []const u8) i64 {
             return -1;
         },
         CONDENSE_LIST => {
-            // Canonical integer keys only: "01", "1e0", " 1" and "+1" name no element.
-            if (!condenseIndexKey(key)) return -1;
-            const i = std.fmt.parseInt(usize, key, 10) catch return -1;
+            const i = listIndex(JsonValue{ .string = key }) orelse return -1;
             return if (i < enc.len - 1) condenseInt(enc[1 + i]) else -1;
         },
         else => return -1,

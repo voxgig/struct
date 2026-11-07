@@ -222,12 +222,14 @@ test "condense-list-keys-are-canonical-integers" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const c = try condenseJson(a, "{\"l\":[10,20]}");
+    const plain = try parseValue(a, "{\"l\":[10,20]}");
+    const c = try voxgig_struct.condense(a, plain);
     for ([_][]const u8{ "01", "1e0", " 1", "+1", "1.0", "-0" }) |k| {
         const path = try JsonValue.makeList(a);
         try path.array.append(jstr("l"));
         try path.array.append(jstr(k));
         try testing.expect((try voxgig_struct.getpath(a, path, c)) == .null);
+        try testing.expect((try voxgig_struct.getpath(a, path, plain)) == .null);
     }
     try testing.expectEqual(@as(i64, 20), (try voxgig_struct.getpath(a, jstr("l.1"), c)).integer);
 }
