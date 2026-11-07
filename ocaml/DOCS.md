@@ -121,9 +121,8 @@ omni is consumed as a local checkout the Makefile finds via `$OMNI_HOME` or
 beside this repository, and is compiled into the TEST binary only: `make lint`
 type-checks `src/` alone and nothing shipped names omni (register 4.13).
 
-`test/runner.ml` runs every group the corpus defines except those no port
-implements yet, which [`design/REPORT.md`](../design/REPORT.md) lists — 1358
-entries in 72 groups — plus the two `check` entries (`DEF.client`,
+`test/runner.ml` runs every group the corpus defines — 1549 entries in 78
+groups — plus the two `check` entries (`DEF.client`,
 client-scoped options, `contextify`) and four single entries that are not part
 of any set. Keep it green, keep `python3 ../tools/check_parity.py` green, and
 add no runtime dependencies.

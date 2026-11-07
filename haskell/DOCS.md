@@ -119,8 +119,7 @@ omni's `Json` into the library's `IORef`-backed nodes (`tostruct`) and back
 arguments go back to omni after the call, which is what `match.args` asserts on
 in `minor/setpath` and `merge/integrity`.
 
-Every group the corpus defines runs except those no port implements yet, which
-[`design/REPORT.md`](../design/REPORT.md) lists — 1358 entries in 72 groups —
+Every group the corpus defines runs — 1549 entries in 78 groups —
 plus the two `check` entries (`DEF.client`, client-scoped options,
 `contextify`) and three single entries that are not part of any set. Keep it
 green, keep `python3 ../tools/check_parity.py` green, and add no runtime

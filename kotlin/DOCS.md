@@ -274,9 +274,8 @@ consumed as a local checkout `build.gradle.kts` finds via `$OMNI_HOME` or
 beside this repository, in its own source set so it reaches the tests and
 nothing else.
 
-`StructCorpusTest` runs every group the corpus defines except those no port
-implements yet, which [`design/REPORT.md`](../design/REPORT.md) lists: 1358
-entries in 72 groups. `ClientTest` runs the two `check` entries —
+`StructCorpusTest` runs every group the corpus defines: 1549 entries in 78
+groups. `ClientTest` runs the two `check` entries —
 `DEF.client`, client-scoped options, and `contextify`. `StructTests` holds
 what the corpus shape cannot express: identity, presence, and the hand-built
 injectors and modifiers a JSON entry has no way to carry. `Omni.kt` is the

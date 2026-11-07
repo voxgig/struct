@@ -677,7 +677,6 @@ sources only, since omni has its own source set. Tests live in
 [`src/test/kotlin/voxgig/struct/`](./src/test/kotlin/voxgig/struct/) and run
 the shared corpus from [`../build/test/`](../build/test/) on
 [voxgig/omni](https://github.com/voxgig/omni). `StructCorpusTest` runs every
-group the corpus defines except those no port implements yet, which
-[`design/REPORT.md`](../design/REPORT.md) lists — 1358 entries in 72 groups;
+group the corpus defines — 1549 entries in 78 groups;
 `ClientTest` runs the two `check` entries; `StructTests` holds what the corpus
 shape cannot express. JVM target 17.

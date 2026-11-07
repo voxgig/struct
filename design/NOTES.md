@@ -20,15 +20,24 @@
   feature. The Perl, Rust, and other ports replicate the behaviour
   faithfully; the gap is purely in the TS docstring.
 
-- **A `$NOF` or `$ALL` trial on a missing value, in the single-null
-  ports.** Canonical TypeScript tries each spec with a nested `validate`
-  whose data is the value itself, so a missing value reaches it as
-  `undefined` and a trial spec of `'$NULL'` refuses it. Python, Ruby, Go,
-  Lua, Elixir and Clojure (each run) and Dart (by its code) hand the nested
-  call their one null instead, which `'$NULL'` admits. No corpus entry
-  reaches the case. Closing it needs the nested `validate` in each of those
-  ports to see absence at its root; a corpus entry could then hold every
-  port to it. Each port's page and [`REPORT.md`](REPORT.md) record the gap.
+- **Plain list reads accept non-canonical integer keys in most ports.**
+  Canonical `getprop`, `getelem` and `getpath` read a list with JavaScript
+  property semantics, so `"01"`, `"+1"`, `" 1"`, `"1e0"`, `"1.0"` and `"-0"`
+  all miss. JavaScript, PHP and Lua agree; most other ports parse such keys as
+  indexes. Every port's condensed lookup follows the canonical rule, so on a
+  lenient port a condensed store and its plain original disagree for these
+  keys. No corpus entry covers it yet.
+
+- **`'$NULL'` on a missing field in the single-null ports.** Canonical
+  `validate({}, {a: '$NULL'})` reports `Expected field a to be null, but found
+  no value.`; Python, Ruby, Elixir, Clojure and Dart accept it, reading the
+  missing field as their one null. A `$NOF` or `$ALL` trial on a missing field
+  sees no value in every port; this is the same rule at field level.
+
+- **A number inside a `getpath` path list throws in canonical TypeScript.**
+  `getpath({l: [10, 20]}, ['l', 1])` throws `part.indexOf is not a function`,
+  while the string part `'1'` reads 20. No corpus entry puts a number in a
+  path list, so the ports are unconstrained there.
 
 
 ## Documented JS-fidelity gaps
