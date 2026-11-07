@@ -891,10 +891,8 @@ none of it reached by the corpus yet:
 
 - The Lean, Dart, Swift, Zig and boru ports were last changed without a
   toolchain; their CI jobs have to confirm them.
-- Most ports' plain list lookup reads keys such as `"01"`, `"+1"` or `"-0"` as
-  indexes, where canonical `getprop`, `getelem` and `getpath` miss.
-- Several single-null ports accept `'$NULL'` on a missing field, where the
-  canonical reports `found no value`.
+- The edge cases [`NOTES.md`](NOTES.md) lists under its open follow-ups, none
+  of them pinned by the corpus.
 
 Beyond that, the ports stay in lockstep by changing the canonical first, then
 propagating to every port and re-testing.

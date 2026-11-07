@@ -20,24 +20,25 @@
   feature. The Perl, Rust, and other ports replicate the behaviour
   faithfully; the gap is purely in the TS docstring.
 
-- **Plain list reads accept non-canonical integer keys in most ports.**
-  Canonical `getprop`, `getelem` and `getpath` read a list with JavaScript
-  property semantics, so `"01"`, `"+1"`, `" 1"`, `"1e0"`, `"1.0"` and `"-0"`
-  all miss. JavaScript, PHP and Lua agree; most other ports parse such keys as
-  indexes. Every port's condensed lookup follows the canonical rule, so on a
-  lenient port a condensed store and its plain original disagree for these
-  keys. No corpus entry covers it yet.
-
-- **`'$NULL'` on a missing field in the single-null ports.** Canonical
-  `validate({}, {a: '$NULL'})` reports `Expected field a to be null, but found
-  no value.`; Python, Ruby, Elixir, Clojure and Dart accept it, reading the
-  missing field as their one null. A `$NOF` or `$ALL` trial on a missing field
-  sees no value in every port; this is the same rule at field level.
-
 - **A number inside a `getpath` path list throws in canonical TypeScript.**
   `getpath({l: [10, 20]}, ['l', 1])` throws `part.indexOf is not a function`,
   while the string part `'1'` reads 20. No corpus entry puts a number in a
   path list, so the ports are unconstrained there.
+
+- **Edge cases no corpus entry reaches, where ports still differ.**
+  - Writes coerce a list key with JavaScript's `+key` in the canonical
+    `setprop` and `delprop` (`" 1"` and `"1e0"` write index 1); the ports
+    parse write keys their own way. Reads are pinned and agree.
+  - `getelem` follows `parseInt`'s prefix rule, so `"-1-"` counts from the
+    end in TypeScript; most ports miss it. `"-01"` counts from the end in
+    every port, as in TypeScript.
+  - A list- or map-valued key is coerced with `String(key)` in TypeScript
+    (`getprop(list, [1])` reads index 1); most ports miss it.
+  - `validate([null], ['$NULL'])` answers `[null]` in TypeScript and `[]` in
+    the Ruby, Go, Clojure and Elixir ports, whose write-back of a null
+    removes the list element.
+  - C and C++ type `2.0` as a decimal, so it is an invalid `$NOF` count
+    there.
 
 
 ## Documented JS-fidelity gaps
