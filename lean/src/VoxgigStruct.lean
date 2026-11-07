@@ -409,6 +409,14 @@ def strToInt? (s : String) : Option Int := Id.run do
 def isIntKey (s : String) : Bool :=
   s.length > 0 && s.toList.all (fun c => (c >= '0' && c <= '9') || c == '-')
 
+/-- A canonical list index, as a JS array lookup reads one: `0`, or digits with
+    no leading zero. -/
+def isCanonIndex (s : String) : Bool :=
+  match s.toList with
+  | ['0'] => true
+  | c :: rest => c >= '1' && c <= '9' && rest.all (fun d => d >= '0' && d <= '9')
+  | [] => false
+
 -- ----- JS number formatting (shortest round-trip, ECMA Number::toString) -----
 
 /-- Shortest round-trip decimal digits of a positive finite float. Returns
@@ -657,18 +665,18 @@ partial def jsString (v : Value) : SIO String := do
   | .func _ => pure "function"
   | .sentinel s => pure s
 
-/-- internal: list element by numeric key, no negative wrap, noval if oob. -/
+/-- internal: a list read as JS reads an array: a whole number from 0 or a
+    canonical index string, so 01, +1 and -0 miss. noval if oob. -/
 def listIndex (id : Nat) (key : Value) : SIO Value := do
-  let ks := match key with
-    | .str s => s
-    | .num n => numToString n
-    | _ => ""
-  match strToInt? ks with
-  | some i =>
-    if i >= 0 then
-      let xs ← listItems id
-      if i < (xs.size : Int) then return xs[i.toNat]! else return .noval
-    else return .noval
+  let xs ← listItems id
+  let idx : Option Int := match key with
+    | .num n =>
+      if isIntegerF n && decide (n >= 0.0) && decide (n < xs.size.toFloat) then some (fToInt n)
+      else none
+    | .str s => if isCanonIndex s then strToInt? s else none
+    | _ => none
+  match idx with
+  | some i => return (if i < (xs.size : Int) then xs[i.toNat]! else .noval)
   | none => return .noval
 
 partial def getprop (v key : Value) (alt : Value := .noval) : SIO Value := do
@@ -701,13 +709,15 @@ partial def getelem (v key : Value) (alt : Value := .noval) : SIO Value := do
         | .str s => s
         | .num n => numToString n
         | _ => ""
+      -- A negative key counts from the end; any other reads as getprop does.
       if isIntKey ks then
         match strToInt? ks with
-        | some nk0 => do
-          let xs ← listItems id
-          let len : Int := xs.size
-          let nk := if nk0 < 0 then len + nk0 else nk0
-          if nk >= 0 && nk < len then pure xs[nk.toNat]! else pure .noval
+        | some nk => do
+          if nk < 0 then
+            let xs ← listItems id
+            let len : Int := xs.size
+            listIndex id (vInt (len + nk))
+          else listIndex id key
         | none => pure .noval
       else pure .noval
     | _ => pure .noval
@@ -856,14 +866,6 @@ def condensePair (enc : Array Value) (symid : Int) : Int := Id.run do
       if k < target then lo := mid + 1 else hi := mid - 1
     | _ => hi := mid - 1
   return (-1)
-
-/-- A canonical list index, as a JS array lookup reads one: `0`, or digits with
-    no leading zero. -/
-def isCanonIndex (s : String) : Bool :=
-  match s.toList with
-  | ['0'] => true
-  | c :: rest => c >= '1' && c <= '9' && rest.all (fun d => d >= '0' && d <= '9')
-  | [] => false
 
 /-- The node index of `key` inside node `idx`, or -1. Touches only this node. -/
 def condenseChild (cond : Value) (idx : Int) (key : Value) : SIO Int := do
