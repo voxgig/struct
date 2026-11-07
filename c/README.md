@@ -2,7 +2,7 @@
 
 > C99/C11 port of the canonical TypeScript implementation.
 >
-> **Status: complete.** Full TS-canonical parity: all 48 functions, 15 type
+> **Status: complete.** Full TS-canonical parity: all 52 functions, 15 type
 > bit-flags, 3 mode constants (`VOXGIG_M_KEYPRE` / `VOXGIG_M_KEYPOST` / `VOXGIG_M_VAL`),
 > `SKIP` / `DELETE` sentinels (pointer-identity), and the `voxgig_injection`
 > state machine. `inject` / `transform` / `validate` / `select` all dispatch
@@ -555,6 +555,16 @@ voxgig_value* hits  = voxgig_select(children, query);   /* [{name:"Alice",age:30
 
 <!-- => [{"$KEY": "a", "age": 30, "name": "Alice"}] -->
 
+### Condensed structures (4)
+
+```c
+voxgig_value*    voxgig_condense(voxgig_value* val);
+voxgig_value*    voxgig_expand(voxgig_value* cond);
+bool         voxgig_iscondensed(const voxgig_value* val);
+voxgig_cview     voxgig_condenseview(voxgig_value* cond, voxgig_value* idx,
+                         voxgig_value* memo);   /* release with voxgig_cview_free */
+```
+
 ### Builder helpers (2)
 
 ```c
@@ -621,9 +631,7 @@ voxgig_value
 
 `tests/struct_corpus_test.c` runs `../build/test/test.json` on
 [voxgig/omni](https://github.com/voxgig/omni), the shared test runner. Every
-group the corpus defines runs except those no port implements yet, which
-[`design/REPORT.md`](../design/REPORT.md) lists — **1358 entries in 72
-groups**, plus `merge.basic`, `inject.basic` and `transform.basic` (single
+group the corpus defines runs — **1549 entries in 78 groups**, plus `merge.basic`, `inject.basic` and `transform.basic` (single
 entries, not sets) and the two `check` entries in `tests/client_test.c`.
 
 Each group is one assertion: the runner stops at its first failing entry and
@@ -695,7 +703,7 @@ See `/design/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
 cd c
 make build      # compile the library alone
 make test       # the shared corpus + the client test
-make smoke      # the 13-check API smoke test
+make smoke      # the API smoke test
 make sanitize   # corpus driver with ASan + UBSan
 make check_leak # corpus driver under valgrind
 make lint       # clang-format --dry-run + clang-tidy

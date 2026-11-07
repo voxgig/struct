@@ -639,6 +639,8 @@ voxgig_value* voxgig_items_v(voxgig_value* val) {
 voxgig_value* voxgig_setprop(voxgig_value* parent, voxgig_value* key, voxgig_value* val) {
   if (!parent || !voxgig_iskey(key))
     return parent;
+  if (voxgig_iscondensed(parent))
+    return NULL;
   if (voxgig_is_map(parent)) {
     char* k = voxgig_strkey(key);
     if (val && voxgig_is_undef(val)) {
@@ -677,6 +679,8 @@ voxgig_value* voxgig_setprop(voxgig_value* parent, voxgig_value* key, voxgig_val
 voxgig_value* voxgig_delprop(voxgig_value* parent, voxgig_value* key) {
   if (!parent || !voxgig_iskey(key))
     return parent;
+  if (voxgig_iscondensed(parent))
+    return NULL;
   if (voxgig_is_map(parent)) {
     char* k = voxgig_strkey(key);
     voxgig_map_erase(voxgig_as_map(parent), k);
@@ -1672,11 +1676,641 @@ voxgig_value* voxgig_merge(voxgig_value* val, int maxdepth) {
 }
 
 /* ===========================================================================
+ * condense / expand / iscondensed / condenseview
+ * ===========================================================================*/
+
+#define CONDENSE_VERSION 1
+
+enum {
+  CONDENSE_MAP = 0,
+  CONDENSE_LIST = 1,
+  CONDENSE_STR = 2,
+  CONDENSE_NUM = 3,
+  CONDENSE_TRUE = 4,
+  CONDENSE_FALSE = 5,
+  CONDENSE_NULL = 6
+};
+
+static const char* const S_condense = "$condense";
+static const char* const S_condsym = "sym";
+static const char* const S_condnode = "node";
+static const char* const S_condroot = "root";
+static const char* const S_IMMUTABLE =
+    "struct: condensed structures are immutable - expand() first, then modify the copy";
+
+/* The integer a number holds: false for anything else, a fraction included. */
+static bool cond_int(const voxgig_value* v, int64_t* out) {
+  if (voxgig_is_int(v)) {
+    *out = voxgig_as_int(v);
+    return true;
+  }
+  double d = voxgig_as_double(v);
+  if (voxgig_is_double(v) && floor(d) == d && -0x1p63 <= d && d < 0x1p63) {
+    *out = (int64_t)d;
+    return true;
+  }
+  return false;
+}
+
+/* An index read from the format, or -1 when the value cannot be one. */
+static int64_t cond_idx(const voxgig_value* v) {
+  int64_t i = -1;
+  return cond_int(v, &i) ? i : -1;
+}
+
+static voxgig_value* cond_field(const voxgig_value* cond, const char* name) {
+  return voxgig_is_map(cond) ? voxgig_map_get(voxgig_as_map(cond), name) : NULL;
+}
+
+static int64_t cond_root(const voxgig_value* cond) {
+  return cond_idx(cond_field(cond, S_condroot));
+}
+
+/* Node idx's encoding; NULL when it is absent or null. */
+static voxgig_value* cond_enc(const voxgig_value* cond, int64_t idx) {
+  voxgig_list* node = voxgig_as_list(cond_field(cond, S_condnode));
+  if (!node || idx < 0 || (uint64_t)idx >= node->len)
+    return NULL;
+  voxgig_value* enc = node->items[idx];
+  return voxgig_is_undef(enc) || voxgig_is_null(enc) ? NULL : enc;
+}
+
+static int64_t cond_kind(const voxgig_list* el) {
+  return el && 0 < el->len ? cond_idx(el->items[0]) : -1;
+}
+
+/* sym[id], borrowed; NULL when id does not index sym. */
+static voxgig_value* cond_sym(const voxgig_value* cond, const voxgig_value* id) {
+  voxgig_list* sym = voxgig_as_list(cond_field(cond, S_condsym));
+  int64_t i = cond_idx(id);
+  return sym && 0 <= i && (uint64_t)i < sym->len ? sym->items[i] : NULL;
+}
+
+/* Code-point order, which in UTF-8 is byte order. */
+static int cond_cmp(const char* a, size_t an, const char* b, size_t bn) {
+  int c = memcmp(a, b, an < bn ? an : bn);
+  return 0 != c ? c : (an > bn) - (an < bn);
+}
+
+static void cond_numstr(double d, char* buf, size_t cap) {
+  if (isnan(d)) {
+    snprintf(buf, cap, "NaN");
+  } else if (isinf(d)) {
+    snprintf(buf, cap, "%s", d < 0 ? "-Infinity" : "Infinity");
+  } else if (floor(d) == d && fabs(d) < 1e21) {
+    snprintf(buf, cap, "%.0f", 0 == d ? 0.0 : d);
+  } else {
+    for (int p = 1; p <= 17; p++) {
+      snprintf(buf, cap, "%.*g", p, d);
+      if (strtod(buf, NULL) == d)
+        break;
+    }
+  }
+}
+
+/* JS `'' + v`, appended. */
+static void cond_str(const voxgig_value* v, char** buf, size_t* len, size_t* cap) {
+  char num[40];
+  if (voxgig_is_string(v)) {
+    sb_append(buf, len, cap, voxgig_as_string(v), voxgig_string_len(v));
+  } else if (voxgig_is_int(v)) {
+    snprintf(num, sizeof num, "%lld", (long long)voxgig_as_int(v));
+    sb_append_str(buf, len, cap, num);
+  } else if (voxgig_is_double(v)) {
+    cond_numstr(voxgig_as_double(v), num, sizeof num);
+    sb_append_str(buf, len, cap, num);
+  } else if (voxgig_is_bool(v)) {
+    sb_append_str(buf, len, cap, voxgig_as_bool(v) ? "true" : "false");
+  } else if (voxgig_is_null(v)) {
+    sb_append_str(buf, len, cap, "null");
+  } else if (voxgig_is_undef(v)) {
+    sb_append_str(buf, len, cap, "undefined");
+  } else if (voxgig_is_list(v)) {
+    voxgig_list* l = voxgig_as_list(v);
+    for (size_t i = 0; i < l->len; i++) {
+      if (0 < i)
+        sb_append(buf, len, cap, ",", 1);
+      if (!voxgig_is_undef(l->items[i]) && !voxgig_is_null(l->items[i]))
+        cond_str(l->items[i], buf, len, cap);
+    }
+  } else {
+    sb_append_str(buf, len, cap, "[object Object]");
+  }
+}
+
+/* Caller frees. */
+static char* cond_strof(const voxgig_value* v, size_t* n) {
+  char* buf = NULL;
+  size_t len = 0;
+  size_t cap = 0;
+  sb_append(&buf, &len, &cap, "", 0);
+  cond_str(v, &buf, &len, &cap);
+  *n = len;
+  return buf;
+}
+
+/* sym[id] as a map key: borrowed when it is a string, else its string form in *tmp. */
+static const char* cond_keyname(const voxgig_value* cond, const voxgig_value* id, size_t* n,
+                                char** tmp) {
+  voxgig_value* s = cond_sym(cond, id);
+  *tmp = NULL;
+  if (voxgig_is_string(s)) {
+    *n = voxgig_string_len(s);
+    return voxgig_as_string(s);
+  }
+  *tmp = cond_strof(s, n);
+  return *tmp;
+}
+
+static int64_t cond_symid(const voxgig_value* cond, const char* key, size_t klen) {
+  voxgig_list* sym = voxgig_as_list(cond_field(cond, S_condsym));
+  if (!sym)
+    return -1;
+  int64_t lo = 0;
+  int64_t hi = (int64_t)sym->len - 1;
+  while (lo <= hi) {
+    int64_t mid = (lo + hi) / 2;
+    voxgig_value* s = sym->items[mid];
+    int c = cond_cmp(voxgig_as_string(s), voxgig_string_len(s), key, klen);
+    if (0 == c)
+      return mid;
+    if (0 > c)
+      lo = mid + 1;
+    else
+      hi = mid - 1;
+  }
+  return -1;
+}
+
+/* ^(0|[1-9][0-9]*)$: "01", "+1" or "1.0" would select a different value than a plain
+   list lookup. A key too long to parse could not index a list anyway. */
+static bool cond_listkey(const char* key, size_t klen) {
+  if (0 == klen || 18 < klen || ('0' == key[0] && 1 < klen))
+    return false;
+  for (size_t j = 0; j < klen; j++) {
+    if (key[j] < '0' || '9' < key[j])
+      return false;
+  }
+  return true;
+}
+
+/* The node index of key inside node idx, or -1. Touches only this node. */
+static int64_t cond_child(const voxgig_value* cond, int64_t idx, const char* key, size_t klen) {
+  voxgig_list* el = voxgig_as_list(cond_enc(cond, idx));
+  int64_t kind = cond_kind(el);
+
+  if (CONDENSE_MAP == kind) {
+    int64_t symid = cond_symid(cond, key, klen);
+    int64_t lo = 0;
+    int64_t hi = ((int64_t)el->len - 1) / 2 - 1;
+    while (0 <= symid && lo <= hi) {
+      int64_t mid = (lo + hi) / 2;
+      int64_t k = cond_idx(el->items[1 + mid * 2]);
+      if (k == symid)
+        return cond_idx(el->items[2 + mid * 2]);
+      if (k < symid)
+        lo = mid + 1;
+      else
+        hi = mid - 1;
+    }
+    return -1;
+  }
+
+  if (CONDENSE_LIST == kind && cond_listkey(key, klen)) {
+    int64_t i = 0;
+    for (size_t j = 0; j < klen; j++)
+      i = i * 10 + (key[j] - '0');
+    return i < (int64_t)el->len - 1 ? cond_idx(el->items[1 + i]) : -1;
+  }
+
+  return -1;
+}
+
+/* Walk a path from node idx: the node index reached, or -1. */
+static int64_t cond_resolve(const voxgig_value* cond, int64_t idx, const voxgig_value* path) {
+  int64_t at = idx;
+
+  if (voxgig_is_list(path)) {
+    voxgig_list* parts = voxgig_as_list(path);
+    for (size_t i = 0; i < parts->len; i++) {
+      voxgig_value* part = parts->items[i];
+      if (0 > at)
+        return -1;
+      if (voxgig_is_string(part)) {
+        if (0 < voxgig_string_len(part))
+          at = cond_child(cond, at, voxgig_as_string(part), voxgig_string_len(part));
+      } else {
+        size_t n = 0;
+        char* s = cond_strof(part, &n);
+        at = cond_child(cond, at, s, n);
+        free(s);
+      }
+    }
+  } else if (voxgig_is_string(path)) {
+    const char* s = voxgig_as_string(path);
+    size_t n = voxgig_string_len(path);
+    size_t from = 0;
+    for (size_t j = 0; 0 < n && j <= n; j++) {
+      if (j < n && '.' != s[j])
+        continue;
+      if (0 > at)
+        return -1;
+      if (from < j)
+        at = cond_child(cond, at, s + from, j - from);
+      from = j + 1;
+    }
+  } else if (!voxgig_is_undef(path) && !voxgig_is_null(path)) {
+    if (0 > at)
+      return -1;
+    size_t n = 0;
+    char* s = cond_strof(path, &n);
+    at = cond_child(cond, at, s, n);
+    free(s);
+  }
+
+  return at;
+}
+
+/* A fresh, independent tree for node idx; undef when there is no such node. */
+static voxgig_value* cond_rebuild(const voxgig_value* cond, int64_t idx) {
+  voxgig_value* enc = cond_enc(cond, idx);
+  voxgig_list* el = voxgig_as_list(enc);
+  int64_t kind = cond_kind(el);
+
+  if (!enc)
+    return voxgig_new_undef();
+
+  if (CONDENSE_MAP == kind) {
+    voxgig_value* out = voxgig_new_map();
+    for (size_t j = 1; j < el->len; j += 2) {
+      voxgig_value* child = cond_rebuild(cond, j + 1 < el->len ? cond_idx(el->items[j + 1]) : -1);
+      char* tmp = NULL;
+      size_t kn = 0;
+      const char* key = cond_keyname(cond, el->items[j], &kn, &tmp);
+      /* As setprop does, an absent value removes the key. */
+      if (voxgig_is_undef(child)) {
+        voxgig_map_erase(voxgig_as_map(out), key);
+        voxgig_release(child);
+      } else {
+        voxgig_map_set_n(voxgig_as_map(out), key, kn, child);
+      }
+      free(tmp);
+    }
+    return out;
+  }
+
+  if (CONDENSE_LIST == kind) {
+    voxgig_value* out = voxgig_new_list();
+    for (size_t j = 1; j < el->len; j++)
+      voxgig_list_push(voxgig_as_list(out), cond_rebuild(cond, cond_idx(el->items[j])));
+    return out;
+  }
+
+  if (CONDENSE_STR == kind)
+    return voxgig_clone(1 < el->len ? cond_sym(cond, el->items[1]) : NULL);
+
+  if (CONDENSE_NUM == kind)
+    return voxgig_clone(1 < el->len ? el->items[1] : NULL);
+
+  if (CONDENSE_TRUE == kind || CONDENSE_FALSE == kind)
+    return voxgig_new_bool(CONDENSE_TRUE == kind);
+
+  return voxgig_new_null();
+}
+
+static voxgig_strvec cond_keys(const voxgig_value* cond, int64_t idx) {
+  voxgig_strvec out;
+  voxgig_strvec_init(&out);
+  voxgig_list* el = voxgig_as_list(cond_enc(cond, idx));
+  int64_t kind = cond_kind(el);
+
+  if (CONDENSE_MAP == kind) {
+    for (size_t j = 1; j < el->len; j += 2) {
+      char* tmp = NULL;
+      size_t kn = 0;
+      const char* key = cond_keyname(cond, el->items[j], &kn, &tmp);
+      voxgig_strvec_push_n(&out, key, kn);
+      free(tmp);
+    }
+  } else if (CONDENSE_LIST == kind) {
+    char num[24];
+    for (size_t j = 1; j < el->len; j++) {
+      snprintf(num, sizeof num, "%zu", j - 1);
+      voxgig_strvec_push(&out, num);
+    }
+  }
+
+  return out;
+}
+
+bool voxgig_iscondensed(const voxgig_value* val) {
+  int64_t version = -1;
+  return cond_int(cond_field(val, S_condense), &version) && CONDENSE_VERSION == version &&
+         voxgig_is_list(cond_field(val, S_condsym)) &&
+         voxgig_is_list(cond_field(val, S_condnode)) &&
+         voxgig_is_number(cond_field(val, S_condroot));
+}
+
+typedef struct cond_sref {
+  const char* s;
+  size_t n;
+} cond_sref;
+
+typedef struct cond_pair {
+  int64_t symid;
+  voxgig_value* val;
+} cond_pair;
+
+typedef struct cond_ctx {
+  cond_sref* sym;
+  size_t nsym;
+  size_t capsym;
+  voxgig_value* node; /* encodings, in first-creation order */
+  voxgig_value* seen; /* encoding joined with ',' -> node index */
+  char* key;
+  size_t keylen;
+  size_t keycap;
+} cond_ctx;
+
+static int cond_srefcmp(const void* a, const void* b) {
+  const cond_sref* x = (const cond_sref*)a;
+  const cond_sref* y = (const cond_sref*)b;
+  return cond_cmp(x->s, x->n, y->s, y->n);
+}
+
+static int cond_paircmp(const void* a, const void* b) {
+  int64_t x = ((const cond_pair*)a)->symid;
+  int64_t y = ((const cond_pair*)b)->symid;
+  return (x > y) - (x < y);
+}
+
+static void cond_addsym(cond_ctx* cx, const char* s, size_t n) {
+  if (cx->nsym == cx->capsym) {
+    size_t capsym = cx->capsym ? cx->capsym * 2 : 16;
+    cond_sref* grown = (cond_sref*)realloc(cx->sym, capsym * sizeof(cond_sref));
+    if (!grown)
+      abort();
+    cx->sym = grown;
+    cx->capsym = capsym;
+  }
+  cx->sym[cx->nsym].s = s;
+  cx->sym[cx->nsym].n = n;
+  cx->nsym++;
+}
+
+/* Every map key and string value, borrowed from n. */
+static void cond_collect(cond_ctx* cx, const voxgig_value* n) {
+  if (voxgig_is_map(n)) {
+    voxgig_map* m = voxgig_as_map(n);
+    for (size_t i = 0; i < m->len; i++) {
+      cond_addsym(cx, m->entries[i].key, m->entries[i].klen);
+      cond_collect(cx, m->entries[i].value);
+    }
+  } else if (voxgig_is_list(n)) {
+    voxgig_list* l = voxgig_as_list(n);
+    for (size_t i = 0; i < l->len; i++)
+      cond_collect(cx, l->items[i]);
+  } else if (voxgig_is_string(n)) {
+    cond_addsym(cx, voxgig_as_string(n), voxgig_string_len(n));
+  }
+}
+
+static int64_t cond_findsym(const cond_ctx* cx, const char* s, size_t n) {
+  if (0 == cx->nsym)
+    return -1;
+  cond_sref want = {s, n};
+  const cond_sref* hit =
+      (const cond_sref*)bsearch(&want, cx->sym, cx->nsym, sizeof(cond_sref), cond_srefcmp);
+  return hit ? hit - cx->sym : -1;
+}
+
+/* Equal numbers spell the same, so an integer and a decimal of one value share a node. */
+static void cond_numkey(const voxgig_value* v, char* buf, size_t cap) {
+  int64_t i = 0;
+  if (cond_int(v, &i))
+    snprintf(buf, cap, "%lld", (long long)i);
+  else
+    snprintf(buf, cap, "%.17g", voxgig_as_double(v));
+}
+
+/* Takes enc. An encoding equal to one already built reuses that node. */
+static int64_t cond_intern(cond_ctx* cx, voxgig_value* enc) {
+  voxgig_list* el = voxgig_as_list(enc);
+  cx->keylen = 0;
+  for (size_t i = 0; i < el->len; i++) {
+    char num[40];
+    cond_numkey(el->items[i], num, sizeof num);
+    if (0 < i)
+      sb_append(&cx->key, &cx->keylen, &cx->keycap, ",", 1);
+    sb_append_str(&cx->key, &cx->keylen, &cx->keycap, num);
+  }
+
+  voxgig_map* seen = voxgig_as_map(cx->seen);
+  voxgig_value* hit = voxgig_map_get_n(seen, cx->key, cx->keylen);
+  if (hit) {
+    voxgig_release(enc);
+    return voxgig_as_int(hit);
+  }
+
+  voxgig_list* node = voxgig_as_list(cx->node);
+  int64_t idx = (int64_t)node->len;
+  voxgig_list_push(node, enc);
+  voxgig_map_set_n(seen, cx->key, cx->keylen, voxgig_new_int(idx));
+  return idx;
+}
+
+/* Post-order, so identical subtrees are already interned when a parent names them. */
+static int64_t cond_build(cond_ctx* cx, voxgig_value* n) {
+  voxgig_value* enc = voxgig_new_list();
+  voxgig_list* el = voxgig_as_list(enc);
+
+  if (voxgig_is_map(n)) {
+    voxgig_map* m = voxgig_as_map(n);
+    cond_pair* pairs = NULL;
+    if (0 < m->len) {
+      pairs = (cond_pair*)malloc(m->len * sizeof(cond_pair));
+      if (!pairs)
+        abort();
+    }
+    for (size_t i = 0; i < m->len; i++) {
+      pairs[i].symid = cond_findsym(cx, m->entries[i].key, m->entries[i].klen);
+      pairs[i].val = m->entries[i].value;
+    }
+    if (1 < m->len)
+      qsort(pairs, m->len, sizeof(cond_pair), cond_paircmp);
+    voxgig_list_push(el, voxgig_new_int(CONDENSE_MAP));
+    for (size_t i = 0; i < m->len; i++) {
+      voxgig_list_push(el, voxgig_new_int(pairs[i].symid));
+      voxgig_list_push(el, voxgig_new_int(cond_build(cx, pairs[i].val)));
+    }
+    free(pairs);
+  } else if (voxgig_is_list(n)) {
+    voxgig_list* l = voxgig_as_list(n);
+    voxgig_list_push(el, voxgig_new_int(CONDENSE_LIST));
+    for (size_t i = 0; i < l->len; i++)
+      voxgig_list_push(el, voxgig_new_int(cond_build(cx, l->items[i])));
+  } else if (voxgig_is_string(n)) {
+    voxgig_list_push(el, voxgig_new_int(CONDENSE_STR));
+    voxgig_list_push(el,
+                     voxgig_new_int(cond_findsym(cx, voxgig_as_string(n), voxgig_string_len(n))));
+  } else if (voxgig_is_number(n)) {
+    voxgig_list_push(el, voxgig_new_int(CONDENSE_NUM));
+    voxgig_list_push(el, voxgig_clone(n));
+  } else if (voxgig_is_bool(n)) {
+    voxgig_list_push(el, voxgig_new_int(voxgig_as_bool(n) ? CONDENSE_TRUE : CONDENSE_FALSE));
+  } else {
+    voxgig_list_push(el, voxgig_new_int(CONDENSE_NULL));
+  }
+
+  return cond_intern(cx, enc);
+}
+
+voxgig_value* voxgig_condense(voxgig_value* val) {
+  cond_ctx cx;
+  memset(&cx, 0, sizeof cx);
+
+  cond_collect(&cx, val);
+  if (1 < cx.nsym)
+    qsort(cx.sym, cx.nsym, sizeof(cond_sref), cond_srefcmp);
+  size_t nsym = 0;
+  for (size_t i = 0; i < cx.nsym; i++) {
+    if (0 == nsym || 0 != cond_srefcmp(&cx.sym[nsym - 1], &cx.sym[i]))
+      cx.sym[nsym++] = cx.sym[i];
+  }
+  cx.nsym = nsym;
+
+  cx.node = voxgig_new_list();
+  cx.seen = voxgig_new_map();
+  int64_t root = cond_build(&cx, val);
+
+  voxgig_value* sym = voxgig_new_list();
+  for (size_t i = 0; i < cx.nsym; i++)
+    voxgig_list_push(voxgig_as_list(sym), voxgig_new_string_n(cx.sym[i].s, cx.sym[i].n));
+
+  voxgig_value* out = voxgig_new_map();
+  voxgig_map* om = voxgig_as_map(out);
+  voxgig_map_set(om, S_condense, voxgig_new_int(CONDENSE_VERSION));
+  voxgig_map_set(om, S_condsym, sym);
+  voxgig_map_set(om, S_condnode, cx.node);
+  voxgig_map_set(om, S_condroot, voxgig_new_int(root));
+
+  voxgig_release(cx.seen);
+  free(cx.sym);
+  free(cx.key);
+  return out;
+}
+
+voxgig_value* voxgig_expand(voxgig_value* cond) {
+  if (!voxgig_iscondensed(cond))
+    return cond ? voxgig_retain(cond) : voxgig_new_undef();
+  return cond_rebuild(cond, cond_root(cond));
+}
+
+voxgig_cview voxgig_condenseview(voxgig_value* cond, voxgig_value* idx, voxgig_value* memo) {
+  voxgig_cview view;
+  view.cond = cond ? voxgig_retain(cond) : voxgig_new_undef();
+  if (voxgig_is_undef(idx) || voxgig_is_null(idx))
+    view.start = voxgig_iscondensed(cond) ? cond_root(cond) : -1;
+  else
+    view.start = cond_idx(idx);
+  view.memo = voxgig_is_map(memo) ? voxgig_retain(memo) : voxgig_new_map();
+  return view;
+}
+
+voxgig_value* voxgig_cview_get(const voxgig_cview* view, voxgig_value* path) {
+  return cond_rebuild(view->cond, cond_resolve(view->cond, view->start, path));
+}
+
+voxgig_strvec voxgig_cview_keys(const voxgig_cview* view, voxgig_value* path) {
+  return cond_keys(view->cond, cond_resolve(view->cond, view->start, path));
+}
+
+bool voxgig_cview_has(const voxgig_cview* view, voxgig_value* path) {
+  return 0 <= cond_resolve(view->cond, view->start, path);
+}
+
+voxgig_cview voxgig_cview_at(const voxgig_cview* view, voxgig_value* path) {
+  voxgig_cview at;
+  at.cond = voxgig_retain(view->cond);
+  at.start = cond_resolve(view->cond, view->start, path);
+  at.memo = voxgig_retain(view->memo);
+  return at;
+}
+
+voxgig_value* voxgig_cview_value(const voxgig_cview* view) {
+  return cond_rebuild(view->cond, view->start);
+}
+
+int64_t voxgig_cview_size(const voxgig_cview* view) {
+  voxgig_list* el = voxgig_as_list(cond_enc(view->cond, view->start));
+  int64_t kind = cond_kind(el);
+  if (CONDENSE_MAP == kind)
+    return ((int64_t)el->len - 1) / 2;
+  if (CONDENSE_LIST == kind)
+    return (int64_t)el->len - 1;
+  return 0;
+}
+
+bool voxgig_cview_exists(const voxgig_cview* view) {
+  return 0 <= view->start;
+}
+
+/* Shared, unlike get and value: mutating the result changes every reader of the node. */
+voxgig_value* voxgig_cview_ref(const voxgig_cview* view) {
+  char k[24];
+  snprintf(k, sizeof k, "%lld", (long long)view->start);
+  voxgig_map* memo = voxgig_as_map(view->memo);
+  voxgig_value* hit = voxgig_map_get(memo, k);
+  if (hit)
+    return voxgig_retain(hit);
+  voxgig_value* out = cond_rebuild(view->cond, view->start);
+  if (!voxgig_is_undef(out))
+    voxgig_map_set(memo, k, voxgig_retain(out));
+  return out;
+}
+
+void voxgig_cview_free(voxgig_cview* view) {
+  if (!view)
+    return;
+  voxgig_release(view->cond);
+  voxgig_release(view->memo);
+  view->cond = NULL;
+  view->memo = NULL;
+  view->start = -1;
+}
+
+/* getpath on a condensed store, touching only the nodes on the path. */
+static voxgig_value* cond_getpath(voxgig_value* store, voxgig_value* path) {
+  voxgig_value* parts = NULL;
+  if (voxgig_is_number(path)) {
+    char* k = voxgig_strkey(path);
+    parts = voxgig_new_list();
+    voxgig_list_push(voxgig_as_list(parts), voxgig_new_string_take(k, strlen(k)));
+  }
+  voxgig_value* val =
+      cond_rebuild(store, cond_resolve(store, cond_root(store), parts ? parts : path));
+  voxgig_release(parts);
+  /* Group A, as a plain getpath reads it: a stored null is absent. */
+  if (voxgig_is_null(val)) {
+    voxgig_release(val);
+    return voxgig_new_undef();
+  }
+  return val;
+}
+
+/* ===========================================================================
  * setpath / getpath
  * ===========================================================================*/
 
 voxgig_value* voxgig_setpath(voxgig_value* store, voxgig_value* path, voxgig_value* val,
                              voxgig_injection* injdef) {
+  /* Canonical throws here; this port records the reason where transform and validate do. */
+  if (voxgig_iscondensed(store)) {
+    if (injdef && voxgig_is_list(injdef->errs))
+      voxgig_list_push(voxgig_as_list(injdef->errs), voxgig_new_string(S_IMMUTABLE));
+    return NULL;
+  }
+
   int pt = voxgig_typify(path);
   voxgig_value* parts = NULL;
   bool parts_owned = false;
@@ -1786,6 +2420,16 @@ voxgig_value* voxgig_getpath(voxgig_value* store, voxgig_value* path, voxgig_inj
   }
   if (!path_ok)
     return voxgig_new_undef();
+
+  /* A base changes what the path resolves against, so honour it on the expansion. */
+  voxgig_value* expanded = NULL;
+  if (voxgig_iscondensed(store)) {
+    if (!injdef || !injdef->base) {
+      voxgig_strvec_free(&parts);
+      return cond_getpath(store, path);
+    }
+    store = expanded = voxgig_expand(store);
+  }
 
   voxgig_value* val = store ? voxgig_retain(store) : voxgig_new_undef();
   voxgig_value* base_v = NULL;
@@ -1973,5 +2617,6 @@ voxgig_value* voxgig_getpath(voxgig_value* store, voxgig_value* path, voxgig_inj
     val = tv;
   }
 
+  voxgig_release(expanded);
   return val ? val : voxgig_new_undef();
 }

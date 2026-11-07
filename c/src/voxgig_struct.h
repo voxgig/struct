@@ -177,7 +177,8 @@ char* voxgig_pathify(voxgig_value* val, int startin, int endin);
 voxgig_value* voxgig_jm_va(int n, voxgig_value** kv);
 voxgig_value* voxgig_jt_va(int n, voxgig_value** v);
 
-voxgig_value* voxgig_delprop(voxgig_value* parent, voxgig_value* key); /* returns parent */
+/* Both return parent, or NULL when parent is condensed (immutable) and key is valid. */
+voxgig_value* voxgig_delprop(voxgig_value* parent, voxgig_value* key);
 voxgig_value* voxgig_setprop(voxgig_value* parent, voxgig_value* key, voxgig_value* val);
 
 /* ===========================================================================
@@ -189,6 +190,7 @@ voxgig_value* voxgig_walk(voxgig_value* val, voxgig_walkapply_fn before, voxgig_
 
 voxgig_value* voxgig_merge(voxgig_value* val, int maxdepth);
 
+/* Returns NULL for a condensed store, recording why in injdef->errs when given. */
 voxgig_value* voxgig_setpath(voxgig_value* store, voxgig_value* path, voxgig_value* val,
                              voxgig_injection* injdef);
 voxgig_value* voxgig_getpath(voxgig_value* store, voxgig_value* path, voxgig_injection* injdef);
@@ -200,6 +202,35 @@ voxgig_value* voxgig_validate(voxgig_value* data, voxgig_value* spec, voxgig_inj
 
 /* select returns a new List. */
 voxgig_value* voxgig_select(voxgig_value* children, voxgig_value* query);
+
+/* ===========================================================================
+ * Condensed structures
+ * ===========================================================================*/
+
+bool voxgig_iscondensed(const voxgig_value* val);
+voxgig_value* voxgig_condense(voxgig_value* val);
+/* A value that is not condensed comes back as itself, retained. */
+voxgig_value* voxgig_expand(voxgig_value* cond);
+
+/* A cursor into a condensed structure. Views made by voxgig_cview_at share
+   the memo, so voxgig_cview_ref hands every one of them the same node. */
+typedef struct voxgig_cview {
+  voxgig_value* cond; /* owned */
+  int64_t start;      /* node index; negative when there is none */
+  voxgig_value* memo; /* owned */
+} voxgig_cview;
+
+/* idx and memo may be NULL. Release the view with voxgig_cview_free. */
+voxgig_cview voxgig_condenseview(voxgig_value* cond, voxgig_value* idx, voxgig_value* memo);
+voxgig_value* voxgig_cview_get(const voxgig_cview* view, voxgig_value* path);
+voxgig_strvec voxgig_cview_keys(const voxgig_cview* view, voxgig_value* path);
+bool voxgig_cview_has(const voxgig_cview* view, voxgig_value* path);
+voxgig_cview voxgig_cview_at(const voxgig_cview* view, voxgig_value* path);
+voxgig_value* voxgig_cview_value(const voxgig_cview* view);
+int64_t voxgig_cview_size(const voxgig_cview* view);
+bool voxgig_cview_exists(const voxgig_cview* view);
+voxgig_value* voxgig_cview_ref(const voxgig_cview* view);
+void voxgig_cview_free(voxgig_cview* view);
 
 /* Injection helpers. */
 bool voxgig_check_placement(int modes, const char* ijname, int parent_types, voxgig_injection* inj);
