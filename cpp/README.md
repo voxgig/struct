@@ -2,7 +2,7 @@
 
 > C++ port of the canonical TypeScript implementation.
 >
-> **Status: complete.**  Full TS-canonical parity: all 48 functions,
+> **Status: complete.**  Full TS-canonical parity: all 52 functions,
 > 15 type bit-flags, 3 mode constants (`M_KEYPRE`/`M_KEYPOST`/`M_VAL`),
 > `SKIP`/`DELETE` sentinels (pointer-identity), and the `Injection`
 > state machine.  `inject`/`transform`/`validate`/`select` all
@@ -353,6 +353,16 @@ select(jm({"a", jm({"name", "Alice", "age", 30}),
 ```
 
 <!-- => [{"$KEY": "a", "age": 30, "name": "Alice"}] -->
+
+### Condensed structures
+
+```cpp
+Value condense(const Value& val);
+Value expand(const Value& cond);
+bool iscondensed(const Value& val = Value::undef());
+CondenseView condenseview(const Value& cond, const Value& idx = Value::undef(),
+                          const Value& memo = Value::undef());
+```
 
 
 ## Notes

@@ -220,7 +220,7 @@ only the host literals differ.
 
 ## 3. Reference
 
-The canonical public surface (48 names) is the `export { … }` block in
+The canonical public surface (52 names) is the `export { … }` block in
 [`typescript/src/StructUtility.ts`](../typescript/src/StructUtility.ts);
 `../tools/check_parity.py` checks every port against it. The C++
 implementations are declared near the top of
@@ -356,8 +356,7 @@ units only. [`tests/omni_bridge.hpp`](./tests/omni_bridge.hpp) converts
 between `omni::Json` and this port's `Value`.
 
 [`tests/struct_corpus_test.cpp`](./tests/struct_corpus_test.cpp) runs every
-group the corpus defines except those no port implements yet, which
-[`design/REPORT.md`](../design/REPORT.md) lists: **1358 entries in 72 groups**, plus four single entries
+group the corpus defines: **1549 entries in 78 groups**, plus four single entries
 that are not sets - `merge.basic`, `inject.basic`, `transform.basic` and `walk.log`. `walk.log` is driven
 in all three callback configurations (before, after, both), as canonical does.
 [`tests/client_test.cpp`](./tests/client_test.cpp) runs the two `check` entries — `DEF.client`,

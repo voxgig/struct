@@ -13,6 +13,8 @@
 #include <cctype>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <iomanip>
 #include <regex>
 #include <sstream>
@@ -203,6 +205,13 @@ inline Value inject(const Value& val, const Value& store, Injection* injdef = nu
 inline Value transform(const Value& data, const Value& spec, const Value& options = Value::undef());
 inline Value validate(const Value& data, const Value& spec, const Value& options = Value::undef());
 inline std::vector<Value> select(const Value& children, const Value& query);
+inline bool iscondensed(const Value& val = Value::undef());
+
+inline const std::string& S_IMMUTABLE() {
+  static const std::string s =
+      "struct: condensed structures are immutable - expand() first, then modify the copy";
+  return s;
+}
 
 // ===========================================================================
 // strkey / getprop / setprop / delprop / getelem
@@ -376,6 +385,8 @@ inline Value lookup_v(const Value& val, const Value& key) {
 inline Value setprop(Value parent, const Value& key, const Value& val) {
   if (!iskey(key))
     return parent;
+  if (iscondensed(parent))
+    throw std::runtime_error(S_IMMUTABLE());
   if (parent.is_map()) {
     auto m = parent.as_map();
     std::string sk = strkey(key);
@@ -415,6 +426,8 @@ inline Value setprop(Value parent, const Value& key, const Value& val) {
 inline Value delprop(Value parent, const Value& key) {
   if (!iskey(key))
     return parent;
+  if (iscondensed(parent))
+    throw std::runtime_error(S_IMMUTABLE());
   if (parent.is_map()) {
     parent.as_map()->erase(strkey(key));
     return parent;
@@ -1291,6 +1304,9 @@ inline std::vector<std::string> path_parts(const Value& path) {
 // ===========================================================================
 
 inline Value setpath_v(const Value& store, const Value& path, const Value& val) {
+  if (iscondensed(store))
+    throw std::runtime_error(S_IMMUTABLE());
+
   std::vector<std::string> parts;
   bool path_is_list = path.is_list();
   if (path.is_undef() || path.is_null())
@@ -1456,6 +1472,512 @@ public:
 };
 
 // ===========================================================================
+// condense / expand / iscondensed / condenseview
+// ===========================================================================
+
+namespace detail {
+
+constexpr int64_t CONDENSE_VERSION = 1;
+
+constexpr int64_t CONDENSE_MAP = 0;
+constexpr int64_t CONDENSE_LIST = 1;
+constexpr int64_t CONDENSE_STR = 2;
+constexpr int64_t CONDENSE_NUM = 3;
+constexpr int64_t CONDENSE_TRUE = 4;
+constexpr int64_t CONDENSE_FALSE = 5;
+constexpr int64_t CONDENSE_NULL = 6;
+
+inline const std::string& S_condense() {
+  static const std::string s = "$condense";
+  return s;
+}
+inline const std::string& S_condsym() {
+  static const std::string s = "sym";
+  return s;
+}
+inline const std::string& S_condnode() {
+  static const std::string s = "node";
+  return s;
+}
+inline const std::string& S_condroot() {
+  static const std::string s = "root";
+  return s;
+}
+
+// The integer a number holds: false for anything else, a fraction included.
+inline bool cond_int(const Value& v, int64_t& out) {
+  if (v.is_int()) {
+    out = v.as_int();
+    return true;
+  }
+  if (v.is_double()) {
+    double d = v.as_double();
+    if (std::floor(d) == d && -0x1p63 <= d && d < 0x1p63) {
+      out = static_cast<int64_t>(d);
+      return true;
+    }
+  }
+  return false;
+}
+
+// An index read from the format, or -1 when the value cannot be one.
+inline int64_t cond_idx(const Value& v) {
+  int64_t i = -1;
+  return cond_int(v, i) ? i : -1;
+}
+
+inline const List* cond_list(const Value& v) {
+  const auto* l = std::get_if<std::shared_ptr<List>>(&v.storage);
+  return l ? l->get() : nullptr;
+}
+
+inline const Value* cond_field(const Value& cond, const std::string& name) {
+  const auto* m = std::get_if<std::shared_ptr<Map>>(&cond.storage);
+  return m && *m ? (*m)->find(name) : nullptr;
+}
+
+inline const List* cond_fieldlist(const Value& cond, const std::string& name) {
+  const Value* f = cond_field(cond, name);
+  return f ? cond_list(*f) : nullptr;
+}
+
+inline int64_t cond_root(const Value& cond) {
+  const Value* root = cond_field(cond, S_condroot());
+  return root ? cond_idx(*root) : -1;
+}
+
+// Node idx's encoding; nullptr when it is absent or null.
+inline const Value* cond_enc(const Value& cond, int64_t idx) {
+  const List* node = cond_fieldlist(cond, S_condnode());
+  if (!node || idx < 0 || static_cast<uint64_t>(idx) >= node->size())
+    return nullptr;
+  const Value& enc = (*node)[static_cast<size_t>(idx)];
+  return enc.is_undef() || enc.is_null() ? nullptr : &enc;
+}
+
+inline int64_t cond_kind(const List* el) {
+  return el && !el->empty() ? cond_idx((*el)[0]) : -1;
+}
+
+// sym[id]; nullptr when id does not index sym.
+inline const Value* cond_sym(const Value& cond, const Value& id) {
+  const List* sym = cond_fieldlist(cond, S_condsym());
+  int64_t i = cond_idx(id);
+  return sym && 0 <= i && static_cast<uint64_t>(i) < sym->size() ? &(*sym)[static_cast<size_t>(i)]
+                                                                 : nullptr;
+}
+
+inline std::string cond_numstr(double d) {
+  char buf[40];
+  if (std::isnan(d))
+    return "NaN";
+  if (std::isinf(d))
+    return d < 0 ? "-Infinity" : "Infinity";
+  if (std::floor(d) == d && std::fabs(d) < 1e21) {
+    std::snprintf(buf, sizeof buf, "%.0f", 0 == d ? 0.0 : d);
+    return buf;
+  }
+  for (int p = 1; p <= 17; p++) {
+    std::snprintf(buf, sizeof buf, "%.*g", p, d);
+    if (std::strtod(buf, nullptr) == d)
+      break;
+  }
+  return buf;
+}
+
+// JS `'' + v`.
+inline std::string cond_str(const Value& v) {
+  if (v.is_string())
+    return v.as_string();
+  if (v.is_int())
+    return std::to_string(v.as_int());
+  if (v.is_double())
+    return cond_numstr(v.as_double());
+  if (v.is_bool())
+    return v.as_bool() ? "true" : "false";
+  if (v.is_null())
+    return "null";
+  if (v.is_undef())
+    return "undefined";
+  if (const List* l = cond_list(v)) {
+    std::string out;
+    for (size_t i = 0; i < l->size(); i++) {
+      if (0 < i)
+        out += ",";
+      if (!(*l)[i].is_undef() && !(*l)[i].is_null())
+        out += cond_str((*l)[i]);
+    }
+    return out;
+  }
+  return "[object Object]";
+}
+
+// sym[id] as a map key: its string form when it is not a string.
+inline std::string cond_keyname(const Value& cond, const Value& id) {
+  const Value* s = cond_sym(cond, id);
+  return s ? cond_str(*s) : "undefined";
+}
+
+// Code-point order: in UTF-8, std::string's unsigned byte order.
+inline int64_t cond_symid(const Value& cond, const std::string& key) {
+  const List* sym = cond_fieldlist(cond, S_condsym());
+  if (!sym)
+    return -1;
+  int64_t lo = 0;
+  int64_t hi = static_cast<int64_t>(sym->size()) - 1;
+  while (lo <= hi) {
+    int64_t mid = (lo + hi) / 2;
+    const Value& s = (*sym)[static_cast<size_t>(mid)];
+    int c = (s.is_string() ? s.as_string() : S_MT()).compare(key);
+    if (0 == c)
+      return mid;
+    if (0 > c)
+      lo = mid + 1;
+    else
+      hi = mid - 1;
+  }
+  return -1;
+}
+
+// ^(0|[1-9][0-9]*)$: "01", "+1" or "1.0" would select a different value than a plain
+// list lookup. A key too long to parse could not index a list anyway.
+inline bool cond_listkey(const std::string& key) {
+  if (key.empty() || 18 < key.size() || ('0' == key[0] && 1 < key.size()))
+    return false;
+  for (char c : key) {
+    if (c < '0' || '9' < c)
+      return false;
+  }
+  return true;
+}
+
+// The node index of key inside node idx, or -1. Touches only this node.
+inline int64_t cond_child(const Value& cond, int64_t idx, const std::string& key) {
+  const Value* enc = cond_enc(cond, idx);
+  const List* el = enc ? cond_list(*enc) : nullptr;
+  int64_t kind = cond_kind(el);
+
+  if (CONDENSE_MAP == kind) {
+    int64_t symid = cond_symid(cond, key);
+    int64_t lo = 0;
+    int64_t hi = (static_cast<int64_t>(el->size()) - 1) / 2 - 1;
+    while (0 <= symid && lo <= hi) {
+      int64_t mid = (lo + hi) / 2;
+      int64_t k = cond_idx((*el)[static_cast<size_t>(1 + mid * 2)]);
+      if (k == symid)
+        return cond_idx((*el)[static_cast<size_t>(2 + mid * 2)]);
+      if (k < symid)
+        lo = mid + 1;
+      else
+        hi = mid - 1;
+    }
+    return -1;
+  }
+
+  if (CONDENSE_LIST == kind && cond_listkey(key)) {
+    int64_t i = std::stoll(key);
+    return i < static_cast<int64_t>(el->size()) - 1 ? cond_idx((*el)[static_cast<size_t>(1 + i)])
+                                                    : -1;
+  }
+
+  return -1;
+}
+
+// Walk a path from node idx: the node index reached, or -1.
+inline int64_t cond_resolve(const Value& cond, int64_t idx, const Value& path) {
+  int64_t at = idx;
+
+  if (const List* parts = cond_list(path)) {
+    for (const Value& part : *parts) {
+      if (0 > at)
+        return -1;
+      if (!part.is_string() || !part.as_string().empty())
+        at = cond_child(cond, at, cond_str(part));
+    }
+  } else if (path.is_string()) {
+    const std::string& s = path.as_string();
+    size_t from = 0;
+    for (size_t j = 0; !s.empty() && j <= s.size(); j++) {
+      if (j < s.size() && '.' != s[j])
+        continue;
+      if (0 > at)
+        return -1;
+      if (from < j)
+        at = cond_child(cond, at, s.substr(from, j - from));
+      from = j + 1;
+    }
+  } else if (!path.is_undef() && !path.is_null()) {
+    if (0 > at)
+      return -1;
+    at = cond_child(cond, at, cond_str(path));
+  }
+
+  return at;
+}
+
+// A fresh, independent tree for node idx; undefined when there is no such node.
+inline Value cond_rebuild(const Value& cond, int64_t idx) {
+  const Value* enc = cond_enc(cond, idx);
+  if (!enc)
+    return Value::undef();
+  const List* el = cond_list(*enc);
+  int64_t kind = cond_kind(el);
+
+  if (CONDENSE_MAP == kind) {
+    auto out = std::shared_ptr<Map>(new Map());
+    for (size_t j = 1; j < el->size(); j += 2) {
+      Value child = cond_rebuild(cond, j + 1 < el->size() ? cond_idx((*el)[j + 1]) : -1);
+      std::string key = cond_keyname(cond, (*el)[j]);
+      // As setprop does for an absent value, the key goes.
+      if (child.is_undef())
+        out->erase(key);
+      else
+        out->set(key, std::move(child));
+    }
+    return Value(out);
+  }
+
+  if (CONDENSE_LIST == kind) {
+    auto out = std::make_shared<List>();
+    out->reserve(el->size() - 1);
+    for (size_t j = 1; j < el->size(); j++)
+      out->push_back(cond_rebuild(cond, cond_idx((*el)[j])));
+    return Value(out);
+  }
+
+  if (CONDENSE_STR == kind) {
+    const Value* s = 1 < el->size() ? cond_sym(cond, (*el)[1]) : nullptr;
+    return s ? clone(*s) : Value::undef();
+  }
+
+  if (CONDENSE_NUM == kind)
+    return 1 < el->size() ? clone((*el)[1]) : Value::undef();
+
+  if (CONDENSE_TRUE == kind || CONDENSE_FALSE == kind)
+    return Value(CONDENSE_TRUE == kind);
+
+  return Value(nullptr);
+}
+
+inline std::vector<std::string> cond_keys(const Value& cond, int64_t idx) {
+  std::vector<std::string> out;
+  const Value* enc = cond_enc(cond, idx);
+  const List* el = enc ? cond_list(*enc) : nullptr;
+  int64_t kind = cond_kind(el);
+
+  if (CONDENSE_MAP == kind) {
+    for (size_t j = 1; j < el->size(); j += 2)
+      out.push_back(cond_keyname(cond, (*el)[j]));
+  } else if (CONDENSE_LIST == kind) {
+    for (size_t j = 1; j < el->size(); j++)
+      out.push_back(std::to_string(j - 1));
+  }
+
+  return out;
+}
+
+// Equal numbers spell the same, so an integer and a decimal of one value share a node.
+inline std::string cond_numkey(const Value& v) {
+  int64_t i = 0;
+  if (cond_int(v, i))
+    return std::to_string(i);
+  char buf[40];
+  std::snprintf(buf, sizeof buf, "%.17g", v.as_double());
+  return buf;
+}
+
+class Condenser {
+public:
+  // Pass one: every distinct map key and string value, sorted.
+  explicit Condenser(const Value& val) {
+    collect(val);
+    std::sort(syms_.begin(), syms_.end(),
+              [](const std::string* a, const std::string* b) { return *a < *b; });
+    syms_.erase(std::unique(syms_.begin(), syms_.end(),
+                            [](const std::string* a, const std::string* b) { return *a == *b; }),
+                syms_.end());
+  }
+
+  Value condense(const Value& val) {
+    int64_t root = build(val);
+
+    auto sym = std::make_shared<List>();
+    sym->reserve(syms_.size());
+    for (const std::string* s : syms_)
+      sym->push_back(Value(*s));
+
+    auto out = std::shared_ptr<Map>(new Map());
+    out->set(S_condense(), Value(CONDENSE_VERSION));
+    out->set(S_condsym(), Value(sym));
+    out->set(S_condnode(), Value(node_));
+    out->set(S_condroot(), Value(root));
+    return Value(out);
+  }
+
+private:
+  std::vector<const std::string*> syms_;
+  std::shared_ptr<List> node_ = std::make_shared<List>();
+  std::unordered_map<std::string, int64_t> seen_;
+
+  void collect(const Value& n) {
+    if (n.is_map()) {
+      for (const auto& [k, v] : *n.as_map()) {
+        syms_.push_back(&k);
+        collect(v);
+      }
+    } else if (const List* l = cond_list(n)) {
+      for (const Value& c : *l)
+        collect(c);
+    } else if (n.is_string()) {
+      syms_.push_back(&n.as_string());
+    }
+  }
+
+  int64_t symid(const std::string& s) const {
+    auto it = std::lower_bound(syms_.begin(), syms_.end(), &s,
+                               [](const std::string* a, const std::string* b) { return *a < *b; });
+    return it != syms_.end() && **it == s ? it - syms_.begin() : -1;
+  }
+
+  // Post-order, so identical subtrees are already interned when a parent names them.
+  int64_t build(const Value& n) {
+    auto enc = std::make_shared<List>();
+
+    if (n.is_map()) {
+      std::vector<std::pair<int64_t, const Value*>> pairs;
+      for (const auto& [k, v] : *n.as_map())
+        pairs.emplace_back(symid(k), &v);
+      std::sort(pairs.begin(), pairs.end(),
+                [](const auto& a, const auto& b) { return a.first < b.first; });
+      enc->push_back(Value(CONDENSE_MAP));
+      for (const auto& [id, v] : pairs) {
+        enc->push_back(Value(id));
+        enc->push_back(Value(build(*v)));
+      }
+    } else if (const List* l = cond_list(n)) {
+      enc->push_back(Value(CONDENSE_LIST));
+      for (const Value& c : *l)
+        enc->push_back(Value(build(c)));
+    } else if (n.is_string()) {
+      enc->push_back(Value(CONDENSE_STR));
+      enc->push_back(Value(symid(n.as_string())));
+    } else if (n.is_number()) {
+      enc->push_back(Value(CONDENSE_NUM));
+      enc->push_back(n);
+    } else if (n.is_bool()) {
+      enc->push_back(Value(n.as_bool() ? CONDENSE_TRUE : CONDENSE_FALSE));
+    } else {
+      enc->push_back(Value(CONDENSE_NULL));
+    }
+
+    return intern(enc);
+  }
+
+  // An encoding equal to one already built reuses that node.
+  int64_t intern(const std::shared_ptr<List>& enc) {
+    std::string key;
+    for (size_t i = 0; i < enc->size(); i++) {
+      if (0 < i)
+        key += ",";
+      key += cond_numkey((*enc)[i]);
+    }
+    auto hit = seen_.find(key);
+    if (hit != seen_.end())
+      return hit->second;
+    int64_t idx = static_cast<int64_t>(node_->size());
+    node_->push_back(Value(enc));
+    seen_.emplace(std::move(key), idx);
+    return idx;
+  }
+};
+
+} // namespace detail
+
+inline bool iscondensed(const Value& val) {
+  int64_t version = -1;
+  const Value* ver = detail::cond_field(val, detail::S_condense());
+  const Value* root = detail::cond_field(val, detail::S_condroot());
+  return ver && detail::cond_int(*ver, version) && detail::CONDENSE_VERSION == version &&
+         detail::cond_fieldlist(val, detail::S_condsym()) &&
+         detail::cond_fieldlist(val, detail::S_condnode()) && root && root->is_number();
+}
+
+// Pure: the same input gives the same bytes, on every port.
+inline Value condense(const Value& val) {
+  return detail::Condenser(val).condense(val);
+}
+
+// A value that is not condensed comes back as itself.
+inline Value expand(const Value& cond) {
+  if (!iscondensed(cond))
+    return cond;
+  return detail::cond_rebuild(cond, detail::cond_root(cond));
+}
+
+// A cursor into a condensed structure. Views made by at() share the memo, so ref()
+// hands every one of them the same node.
+class CondenseView {
+public:
+  CondenseView(Value cond, int64_t start, std::shared_ptr<Map> memo)
+      : cond_(std::move(cond)), start_(start), memo_(std::move(memo)) {}
+
+  Value get(const Value& path = Value::undef()) const {
+    return detail::cond_rebuild(cond_, detail::cond_resolve(cond_, start_, path));
+  }
+
+  std::vector<std::string> keys(const Value& path = Value::undef()) const {
+    return detail::cond_keys(cond_, detail::cond_resolve(cond_, start_, path));
+  }
+
+  bool has(const Value& path = Value::undef()) const {
+    return 0 <= detail::cond_resolve(cond_, start_, path);
+  }
+
+  CondenseView at(const Value& path = Value::undef()) const {
+    return CondenseView(cond_, detail::cond_resolve(cond_, start_, path), memo_);
+  }
+
+  Value value() const { return detail::cond_rebuild(cond_, start_); }
+
+  int64_t size() const {
+    const Value* enc = detail::cond_enc(cond_, start_);
+    const List* el = enc ? detail::cond_list(*enc) : nullptr;
+    int64_t kind = detail::cond_kind(el);
+    if (detail::CONDENSE_MAP == kind)
+      return (static_cast<int64_t>(el->size()) - 1) / 2;
+    if (detail::CONDENSE_LIST == kind)
+      return static_cast<int64_t>(el->size()) - 1;
+    return 0;
+  }
+
+  bool exists() const { return 0 <= start_; }
+
+  // Shared, unlike get() and value(): mutating the result changes every reader of the node.
+  Value ref() const {
+    std::string k = std::to_string(start_);
+    if (const Value* hit = memo_->find(k))
+      return *hit;
+    Value out = detail::cond_rebuild(cond_, start_);
+    if (!out.is_undef())
+      memo_->set(k, out);
+    return out;
+  }
+
+private:
+  Value cond_;
+  int64_t start_;
+  std::shared_ptr<Map> memo_;
+};
+
+inline CondenseView condenseview(const Value& cond, const Value& idx = Value::undef(),
+                                 const Value& memo = Value::undef()) {
+  int64_t start = idx.is_undef() || idx.is_null()
+                      ? (iscondensed(cond) ? detail::cond_root(cond) : -1)
+                      : detail::cond_idx(idx);
+  return CondenseView(cond, start, memo.is_map() ? memo.as_map() : std::shared_ptr<Map>(new Map()));
+}
+
+// ===========================================================================
 // getpath
 // ===========================================================================
 
@@ -1482,6 +2004,19 @@ inline Value getpath_v(const Value& store, const Value& path, Injection* inj) {
   // Note: undef / null / bool / map paths are invalid (matches TS lines 1147-1153).
   if (!valid_path)
     return Value::undef();
+
+  // A base changes what the path resolves against, so honour it on the expansion.
+  if (iscondensed(store)) {
+    if (!inj || inj->base.empty()) {
+      Value cparts = path.is_number() ? Value::list({Value(strkey(path))}) : path;
+      Value found = detail::cond_rebuild(
+          store, detail::cond_resolve(store, detail::cond_root(store), cparts));
+      // Group A, as a plain getpath reads it: a stored null is absent.
+      return found.is_null() ? Value::undef() : found;
+    }
+    return getpath_v(expand(store), path, inj);
+  }
+
   Value val = detail::getpath_inner(store, path, parts, inj);
   if (inj && inj->handler) {
     std::string ref = path.is_undef() ? "" : pathify(path);
@@ -2907,12 +3442,7 @@ inline bool admits(const Value& val, const Value& spec, Injection& inj, const Va
   if (inj.meta)
     opts->set("meta", Value(inj.meta));
 
-  Value out;
-  try {
-    out = validate(val, spec, Value(opts));
-  } catch (const std::exception& e) {
-    terrs->push_back(Value(std::string(e.what())));
-  }
+  Value out = validate(val, spec, Value(opts));
 
   return terrs->empty() && keeps(val, out);
 }
