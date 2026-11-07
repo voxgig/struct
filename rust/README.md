@@ -102,6 +102,7 @@ Rust convention is `get_path`.
 | `size` / `slice` / `pad` / `typify` | (same) | `clone` / `walk` / `merge` / `inject` | (same) |
 | `items` / `flatten` / `filter` / `join` | (same) | `transform` / `validate` / `select` | (same) |
 | `jsonify` / `stringify` / `pathify` | (same) | `jm` / `jt` | (same) |
+| `condense` / `expand` | (same) | `condenseview` / `iscondensed` | `condense_view` / `is_condensed` |
 
 Type constants are SCREAMING_SNAKE: `T_ANY` … `T_NODE`, `M_KEYPRE` / `M_KEYPOST`
 / `M_VAL`. Sentinels: `SKIP`, `DELETE`.

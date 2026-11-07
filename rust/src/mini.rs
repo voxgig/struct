@@ -92,6 +92,27 @@ pub fn is_func(val: &Value) -> bool {
     matches!(val, Value::Func(_))
 }
 
+/// `iscondensed(val)` — a condensed structure of this version. The version
+/// must match, not merely be numeric: a future profile would otherwise be
+/// decoded under this one's schema.
+pub fn is_condensed(val: &Value) -> bool {
+    match val {
+        Value::Map(m) => {
+            let m = m.borrow();
+            matches!(m.get(S_condense), Some(Value::Num(v)) if CONDENSE_VERSION == *v)
+                && matches!(m.get(S_condsym), Some(Value::List(_)))
+                && matches!(m.get(S_condnode), Some(Value::List(_)))
+                && matches!(m.get(S_condroot), Some(Value::Num(_)))
+        }
+        _ => false,
+    }
+}
+
+/// The panic `set_prop`, `del_prop` and `set_path` raise on a condensed
+/// structure.
+pub const CONDENSE_IMMUTABLE: &str =
+    "struct: condensed structures are immutable - expand() first, then modify the copy";
+
 pub fn size(val: &Value) -> i64 {
     match val {
         Value::List(l) => l.borrow().len() as i64,
@@ -985,6 +1006,9 @@ pub fn del_prop(parent: Value, key: &Value) -> Value {
     if !is_key(key) {
         return parent;
     }
+    if is_condensed(&parent) {
+        panic!("{CONDENSE_IMMUTABLE}");
+    }
     match &parent {
         Value::Map(m) => {
             let k = str_key(key.clone());
@@ -1009,6 +1033,9 @@ pub fn del_prop(parent: Value, key: &Value) -> Value {
 pub fn set_prop(parent: Value, key: &Value, val: Value) -> Value {
     if !is_key(key) {
         return parent;
+    }
+    if is_condensed(&parent) {
+        panic!("{CONDENSE_IMMUTABLE}");
     }
     match &parent {
         Value::Map(m) => {

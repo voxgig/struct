@@ -126,6 +126,23 @@ fn corpus() {
         };
     }
 
+    // -------- condense -----------------------------------------------
+    run.run_set(
+        &set!("condense", "condense"),
+        false,
+        "condense-condense",
+        |v| condense(&v),
+    );
+    run.run_set(&set!("condense", "expand"), false, "condense-expand", |v| {
+        expand(&v)
+    });
+    run.run_set(
+        &set!("condense", "iscondensed"),
+        false,
+        "condense-iscondensed",
+        |v| b(is_condensed(&v)),
+    );
+
     // -------- minor --------------------------------------------------
     run.run_set(&set!("minor", "isnode"), true, "minor-isnode", |v| {
         b(is_node(&v))
@@ -920,6 +937,206 @@ fn function_values() {
     ]);
     let out = transform(&Value::empty_map(), &spec, None).unwrap();
     assert_eq!(out, Value::str("[hi]"));
+}
+
+// ---- condense: identity, sharing and immutability ----------------------
+
+fn json(src: &str) -> Value {
+    omni::tostruct(&voxgig_omni::json::parse(src).unwrap())
+}
+
+fn obj(pairs: Vec<(&str, Value)>) -> Value {
+    Value::map_of(pairs.into_iter().map(|(k, v)| (k.to_string(), v)))
+}
+
+fn same(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Map(x), Value::Map(y)) => Rc::ptr_eq(x, y),
+        (Value::List(x), Value::List(y)) => Rc::ptr_eq(x, y),
+        _ => false,
+    }
+}
+
+fn immutable<F: FnOnce() -> Value>(f: F) -> bool {
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+    match res {
+        Err(e) => e
+            .downcast_ref::<String>()
+            .map(|m| m.contains("immutable"))
+            .unwrap_or(false),
+        Ok(_) => false,
+    }
+}
+
+#[test]
+fn condense_deterministic() {
+    let get = || obj(vec![("m", Value::str("GET"))]);
+    let l = || Value::list(vec![Value::Num(1.0), Value::str("x"), Value::Bool(true)]);
+    let src = obj(vec![("b", get()), ("a", get()), ("l", l())]);
+    let once = jsonify(&condense(&src), None);
+    assert_eq!(once, jsonify(&condense(&src), None));
+    // Insertion order must not change the bytes: keys are stored by symbol id.
+    let reordered = obj(vec![("l", l()), ("a", get()), ("b", get())]);
+    assert_eq!(once, jsonify(&condense(&reordered), None));
+}
+
+#[test]
+fn condense_shares_identical_subtrees() {
+    let nodes = |src: &str| {
+        size(&get_prop(
+            &condense(&json(src)),
+            &Value::str("node"),
+            Value::Noval,
+        ))
+    };
+    let one = nodes(r#"{"x":{"m":"GET","p":"/1"}}"#);
+    let two = nodes(r#"{"x":{"m":"GET","p":"/1"},"y":{"m":"GET","p":"/1"}}"#);
+    assert_eq!(one, two);
+    let three = nodes(r#"{"x":{"m":"GET"},"y":{"m":"PUT"},"z":{"m":"POST"}}"#);
+    assert!(three > two);
+}
+
+#[test]
+fn condense_round_trips_by_value() {
+    let src = json(r#"{"a":{"b":[1,"x",true,null,{}]},"c":"z"}"#);
+    assert_eq!(expand(&condense(&src)), src);
+}
+
+#[test]
+fn condense_getpath_is_transparent() {
+    let src = json(r#"{"entity":{"p":{"op":{"list":{"method":"GET"}}}}}"#);
+    let c = condense(&src);
+    let path = json(r#"["entity","p","op","list"]"#);
+    assert_eq!(get_path(&c, &path, None), get_path(&src, &path, None));
+    assert_eq!(
+        get_path(&c, &json(r#"["entity","p","op","list","method"]"#), None),
+        Value::str("GET")
+    );
+    assert!(get_path(&c, &json(r#"["entity","nope"]"#), None).is_noval());
+}
+
+#[test]
+fn condense_view_reads_without_materialising() {
+    let c = condense(&json(r#"{"entity":{"a":{"v":1},"b":{"v":2}},"other":9}"#));
+    let v = condense_view(&c, None, None);
+    assert_eq!(v.keys(&Value::str("entity")), json(r#"["a","b"]"#));
+    let e = v.at(&Value::str("entity"));
+    assert_eq!(
+        e.at(&Value::str("b")).get(&Value::str("v")),
+        Value::Num(2.0)
+    );
+    assert!(v.has(&Value::str("entity.a")));
+    assert!(!v.has(&Value::str("entity.zz")));
+    assert_eq!(v.size(), 2);
+    assert!(v.exists());
+    assert!(!v.at(&Value::str("zz")).exists());
+}
+
+#[test]
+fn condense_value_copies_and_ref_shares() {
+    let c = condense(&json(r#"{"a":{"m":"GET"},"b":{"m":"GET"}}"#));
+    let v = condense_view(&c, None, None);
+    // a and b share one node. get() must not let that be observable.
+    let x = v.get(&Value::str("a"));
+    let y = v.get(&Value::str("b"));
+    assert_eq!(x, y);
+    assert!(!same(&x, &y));
+    set_prop(x, &Value::str("m"), Value::str("MUTATED"));
+    assert_eq!(v.get(&Value::str("b.m")), Value::str("GET"));
+    // ref() is the opt-in escape hatch and DOES share.
+    let a = Value::str("a");
+    assert!(same(&v.at(&a).r#ref(), &v.at(&a).r#ref()));
+}
+
+#[test]
+fn condense_preserves_proto_named_keys_and_values() {
+    for src in [r#"{"x":"__proto__"}"#, r#"{"__proto__":1}"#] {
+        assert_eq!(expand(&condense(&json(src))), json(src));
+    }
+}
+
+#[test]
+fn condense_getpath_matches_plain_on_null_and_options() {
+    // Group A null-as-absent: a stored null reads as absent either way.
+    let a = Value::str("a");
+    assert!(get_path(&condense(&json(r#"{"a":null}"#)), &a, None).is_noval());
+    assert!(get_path(&json(r#"{"a":null}"#), &a, None).is_noval());
+    // The base must not be ignored by the condensed fast path.
+    let store = json(r#"{"base":{"x":1}}"#);
+    let d = InjectDef {
+        base: Some("base".to_string()),
+        ..Default::default()
+    };
+    let x = Value::str("x");
+    assert_eq!(get_path(&store, &x, Some(&d)), Value::Num(1.0));
+    assert_eq!(get_path(&condense(&store), &x, Some(&d)), Value::Num(1.0));
+}
+
+#[test]
+fn condense_list_keys_are_canonical_integers() {
+    let c = condense(&json(r#"{"l":[10,20]}"#));
+    for k in ["01", "1e0", " 1", "+1", "1.0", "-0"] {
+        let path = Value::list(vec![Value::str("l"), Value::str(k)]);
+        assert!(get_path(&c, &path, None).is_noval(), "list key {k}");
+    }
+    assert_eq!(get_path(&c, &json(r#"["l","1"]"#), None), Value::Num(20.0));
+}
+
+#[test]
+fn condense_symbols_sort_by_code_point() {
+    let c = condense(&obj(vec![
+        ("a", Value::str("\u{10000}")),
+        ("b", Value::str("\u{FFFF}")),
+    ]));
+    let sym = get_prop(&c, &Value::str("sym"), Value::Noval);
+    let at = |s: &str| {
+        sym.as_list()
+            .unwrap()
+            .borrow()
+            .iter()
+            .position(|x| x.as_str() == Some(s))
+    };
+    assert!(at("\u{FFFF}") < at("\u{10000}"));
+}
+
+#[test]
+fn condense_astral_keys_resolve() {
+    // Pairs follow code-point order: U+FF21 before U+1F600.
+    let c = condense(&obj(vec![
+        ("\u{FF21}", Value::Num(1.0)),
+        ("\u{1F600}", Value::Num(2.0)),
+    ]));
+    let astral = Value::str("\u{1F600}");
+    let path = Value::list(vec![astral.clone()]);
+    assert_eq!(get_path(&c, &path, None), Value::Num(2.0));
+    let bmp = Value::list(vec![Value::str("\u{FF21}")]);
+    assert_eq!(get_path(&c, &bmp, None), Value::Num(1.0));
+    assert_eq!(condense_view(&c, None, None).get(&astral), Value::Num(2.0));
+}
+
+#[test]
+fn condense_invalid_key_mutations_stay_no_ops() {
+    let c = condense(&json(r#"{"a":1}"#));
+    assert!(same(&c, &del_prop(c.clone(), &Value::Noval)));
+    assert!(same(
+        &c,
+        &set_prop(c.clone(), &Value::Noval, Value::Num(1.0))
+    ));
+    // A call that could write still raises.
+    assert!(immutable(|| del_prop(c.clone(), &Value::str("sym"))));
+}
+
+#[test]
+fn condense_is_immutable() {
+    let c = condense(&json(r#"{"a":1}"#));
+    let a = Value::str("a");
+    assert!(immutable(|| set_path(&c, &a, Value::Num(2.0), None)));
+    assert!(immutable(|| set_prop(c.clone(), &a, Value::Num(2.0))));
+    assert!(immutable(|| del_prop(c.clone(), &Value::str("sym"))));
+    // The expanded copy is ordinary and mutable.
+    let e = expand(&c);
+    set_path(&e, &a, Value::Num(2.0), None);
+    assert_eq!(get_prop(&e, &a, Value::Noval), Value::Num(2.0));
 }
 
 // quiet unused-import warnings for the staged bits

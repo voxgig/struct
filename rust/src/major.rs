@@ -10,12 +10,13 @@
 // `&mut` to the same Vec).
 
 use std::cell::RefCell;
+use std::collections::{BTreeSet, HashMap};
 use std::rc::Rc;
 
 use crate::consts::*;
 use crate::mini::*;
 use crate::ordered_map::OrderedMap;
-use crate::value::{js_string, js_to_int32, js_to_number, Value};
+use crate::value::{is_integer_f64, js_string, js_to_int32, js_to_number, num_to_string, Value};
 use crate::StructError;
 
 // ---------------------------------------------------------------------
@@ -562,6 +563,23 @@ pub fn get_path_inj(store: &Value, path: &Value, injdef: Option<&Inj>) -> Value 
         _ => return Value::Noval,
     };
 
+    // A condensed store answers a path with the value of the node it was built
+    // from, touching only the nodes on the path. A base changes what the walk
+    // below starts from, so a read with one expands the store instead.
+    let expanded = if is_condensed(store) {
+        if injdef.map(|i| i.borrow().base.is_none()).unwrap_or(true) {
+            let partlist = Value::list(parts.iter().cloned().map(Value::Str).collect());
+            let found = condense_resolve(store, condense_root(store), &partlist);
+            let val = condense_materialise(store, found);
+            // Group A: an ordinary getpath reads a stored null as absent.
+            return if val.is_nullish() { Value::Noval } else { val };
+        }
+        Some(expand(store))
+    } else {
+        None
+    };
+    let store = expanded.as_ref().unwrap_or(store);
+
     let base = injdef.and_then(|i| i.borrow().base.clone());
     let src = match &base {
         Some(b) => get_prop(store, &Value::str(b.clone()), store.clone()),
@@ -701,6 +719,11 @@ fn drop_last(s: &str) -> String {
 // ---------------------------------------------------------------------
 
 pub fn set_path(store: &Value, path: &Value, val: Value, injdef: Option<&InjectDef>) -> Value {
+    // Same contract as set_prop and del_prop: a condensed store is immutable.
+    if is_condensed(store) {
+        panic!("{CONDENSE_IMMUTABLE}");
+    }
+
     // Keep parts as Values so a numeric part (only possible when `path` is an
     // array) makes its parent a list, while a string part makes a map.
     let parts: Vec<Value> = match path {
@@ -2934,6 +2957,435 @@ pub fn select(children: &Value, query: &Value) -> Value {
         }
     }
     Value::list(results)
+}
+
+// ---------------------------------------------------------------------
+// condense
+// ---------------------------------------------------------------------
+
+const CONDENSE_MAP: f64 = 0.0;
+const CONDENSE_LIST: f64 = 1.0;
+const CONDENSE_STR: f64 = 2.0;
+const CONDENSE_NUM: f64 = 3.0;
+const CONDENSE_TRUE: f64 = 4.0;
+const CONDENSE_FALSE: f64 = 5.0;
+const CONDENSE_NULL: f64 = 6.0;
+
+/// `condense(val)` — any JSON-shaped node as a sorted symbol table and a table
+/// of shared nodes. Pure: the same input always produces a byte-identical
+/// result, on every port.
+pub fn condense(val: &Value) -> Value {
+    // Pass one: every distinct map key and string value, once, sorted. Byte
+    // order is code-point order in UTF-8.
+    fn collect(n: &Value, symset: &mut BTreeSet<String>) {
+        match n {
+            Value::Map(m) => {
+                for (k, v) in m.borrow().iter() {
+                    symset.insert(k.clone());
+                    collect(v, symset);
+                }
+            }
+            Value::List(l) => {
+                for v in l.borrow().iter() {
+                    collect(v, symset);
+                }
+            }
+            Value::Str(s) => {
+                symset.insert(s.clone());
+            }
+            _ => {}
+        }
+    }
+
+    // Pass two: build post-order, interning on the encoding. Children are built
+    // first, so identical subtrees are one node by the time a parent refers to
+    // them.
+    fn build(
+        n: &Value,
+        symid: &HashMap<&str, f64>,
+        node: &mut Vec<Value>,
+        seen: &mut HashMap<String, usize>,
+    ) -> usize {
+        let enc: Vec<f64> = match n {
+            Value::Map(m) => {
+                let m = m.borrow();
+                let mut enc = vec![CONDENSE_MAP];
+                // keysof sorts by byte, which is code-point order in UTF-8, so
+                // the key ids ascend and lookup can bisect.
+                for k in keysof_vec(n) {
+                    enc.push(symid[k.as_str()]);
+                    enc.push(build(&m[k.as_str()], symid, node, seen) as f64);
+                }
+                enc
+            }
+            Value::List(l) => {
+                let mut enc = vec![CONDENSE_LIST];
+                for v in l.borrow().iter() {
+                    enc.push(build(v, symid, node, seen) as f64);
+                }
+                enc
+            }
+            Value::Str(s) => vec![CONDENSE_STR, symid[s.as_str()]],
+            Value::Num(x) => vec![CONDENSE_NUM, *x],
+            Value::Bool(true) => vec![CONDENSE_TRUE],
+            Value::Bool(false) => vec![CONDENSE_FALSE],
+            _ => vec![CONDENSE_NULL],
+        };
+
+        // The kind leads every encoding, so a string node and a number node
+        // never share a key.
+        let enckey = enc
+            .iter()
+            .map(|x| num_to_string(*x))
+            .collect::<Vec<_>>()
+            .join(",");
+        if let Some(&hit) = seen.get(&enckey) {
+            return hit;
+        }
+        let idx = node.len();
+        node.push(Value::list(enc.into_iter().map(Value::Num).collect()));
+        seen.insert(enckey, idx);
+        idx
+    }
+
+    let mut symset = BTreeSet::new();
+    collect(val, &mut symset);
+    let sym: Vec<String> = symset.into_iter().collect();
+    let symid: HashMap<&str, f64> = sym
+        .iter()
+        .enumerate()
+        .map(|(i, s)| (s.as_str(), i as f64))
+        .collect();
+
+    let mut node: Vec<Value> = Vec::new();
+    let mut seen: HashMap<String, usize> = HashMap::new();
+    let root = build(val, &symid, &mut node, &mut seen);
+
+    let mut out = OrderedMap::new();
+    out.insert(S_condense.to_string(), Value::Num(CONDENSE_VERSION));
+    out.insert(
+        S_condsym.to_string(),
+        Value::list(sym.iter().cloned().map(Value::Str).collect()),
+    );
+    out.insert(S_condnode.to_string(), Value::list(node));
+    out.insert(S_condroot.to_string(), Value::Num(root as f64));
+    Value::map(out)
+}
+
+/// A kind, symbol id or node index read from an encoding, or -1 for anything
+/// but a non-negative integer.
+fn condense_index(v: &Value) -> i64 {
+    match v {
+        Value::Num(n) if is_integer_f64(*n) && 0.0 <= *n => *n as i64,
+        _ => -1,
+    }
+}
+
+/// Element `i` of a list, or `Noval`. Unlike `lookup`, a negative index
+/// counts from nowhere.
+fn condense_at(list: &Value, i: i64) -> Value {
+    let found = match list {
+        Value::List(l) if 0 <= i => l.borrow().get(i as usize).cloned(),
+        _ => None,
+    };
+    found.unwrap_or(Value::Noval)
+}
+
+fn condense_root(cond: &Value) -> i64 {
+    condense_index(&lookup(cond, &Value::str(S_condroot)))
+}
+
+/// The encoding of node `idx`, or `Noval` when there is no such node.
+fn condense_enc(cond: &Value, idx: i64) -> Value {
+    condense_at(&lookup(cond, &Value::str(S_condnode)), idx)
+}
+
+/// Resolve a symbol to its id by bisecting the sorted symbol table. -1 when
+/// the string occurs nowhere in the structure, which is itself a fast negative
+/// answer for a key lookup.
+fn condense_sym_id(cond: &Value, key: &str) -> i64 {
+    let sym = lookup(cond, &Value::str(S_condsym));
+    let Value::List(sym) = &sym else {
+        return -1;
+    };
+    let sym = sym.borrow();
+    let mut lo: i64 = 0;
+    let mut hi: i64 = sym.len() as i64 - 1;
+    while lo <= hi {
+        let mid = (lo + hi) >> 1;
+        match sym[mid as usize].as_str() {
+            Some(s) if s == key => return mid,
+            Some(s) if s < key => lo = mid + 1,
+            _ => hi = mid - 1,
+        }
+    }
+    -1
+}
+
+/// The node index of `key` inside node `idx`, or -1. Touches only this node.
+fn condense_child(cond: &Value, idx: i64, key: &str) -> i64 {
+    let enc = condense_enc(cond, idx);
+    let Value::List(enc) = &enc else {
+        return -1;
+    };
+    let enc = enc.borrow();
+    let kind = enc.first().and_then(Value::as_num);
+
+    if Some(CONDENSE_MAP) == kind {
+        let symid = condense_sym_id(cond, key);
+        if 0 > symid {
+            return -1;
+        }
+        // Pairs live at [1,2], [3,4], ... with keys ascending: bisect the pairs.
+        let mut lo: i64 = 0;
+        let mut hi: i64 = (enc.len() as i64 - 1) / 2 - 1;
+        while lo <= hi {
+            let mid = (lo + hi) >> 1;
+            let k = condense_index(&enc[(1 + mid * 2) as usize]);
+            if k == symid {
+                return condense_index(&enc[(2 + mid * 2) as usize]);
+            }
+            if k < symid {
+                lo = mid + 1;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        return -1;
+    }
+
+    if Some(CONDENSE_LIST) == kind {
+        // Canonical integer keys only: "01", "1e0", " 1" and "+1" name no element.
+        if !R_CONDENSE_INDEX.is_match(key) {
+            return -1;
+        }
+        return match key.parse::<usize>() {
+            Ok(i) if i < enc.len() - 1 => condense_index(&enc[1 + i]),
+            _ => -1,
+        };
+    }
+
+    -1
+}
+
+/// Walk a path from a starting node, returning the node index or -1.
+fn condense_resolve(cond: &Value, idx: i64, path: &Value) -> i64 {
+    let parts: Vec<Value> = match path {
+        Value::List(l) => l.borrow().clone(),
+        Value::Str(s) if s.is_empty() => Vec::new(),
+        Value::Str(s) => s.split('.').map(Value::str).collect(),
+        Value::Noval | Value::Null => Vec::new(),
+        other => vec![Value::str(js_string(other))],
+    };
+
+    let mut at = idx;
+    for part in &parts {
+        if 0 > at {
+            return -1;
+        }
+        if matches!(part, Value::Str(s) if s.is_empty()) {
+            continue;
+        }
+        at = condense_child(cond, at, &js_string(part));
+    }
+    at
+}
+
+/// Node `idx` as a fresh tree, `Noval` when there is no such node. Every
+/// materialisation is independent, even where the condensed form shares a node.
+fn condense_materialise(cond: &Value, idx: i64) -> Value {
+    fn rebuild(sym: &Value, node: &Value, i: i64) -> Value {
+        let enc = condense_at(node, i);
+        let Value::List(enc) = &enc else {
+            return if enc.is_nullish() {
+                Value::Noval
+            } else {
+                Value::Null
+            };
+        };
+        let enc = enc.borrow();
+        let kind = enc.first().and_then(Value::as_num);
+        let arg = |j: usize| enc.get(j).cloned().unwrap_or(Value::Noval);
+
+        if Some(CONDENSE_MAP) == kind {
+            let mut out = OrderedMap::new();
+            for j in (1..enc.len()).step_by(2) {
+                out.insert(
+                    js_string(&condense_at(sym, condense_index(&enc[j]))),
+                    rebuild(sym, node, condense_index(&arg(j + 1))),
+                );
+            }
+            return Value::map(out);
+        }
+        if Some(CONDENSE_LIST) == kind {
+            return Value::list(
+                enc.iter()
+                    .skip(1)
+                    .map(|e| rebuild(sym, node, condense_index(e)))
+                    .collect(),
+            );
+        }
+        if Some(CONDENSE_STR) == kind {
+            return condense_at(sym, condense_index(&arg(1)));
+        }
+        if Some(CONDENSE_NUM) == kind {
+            return arg(1);
+        }
+        if Some(CONDENSE_TRUE) == kind {
+            return Value::Bool(true);
+        }
+        if Some(CONDENSE_FALSE) == kind {
+            return Value::Bool(false);
+        }
+        Value::Null
+    }
+
+    let sym = lookup(cond, &Value::str(S_condsym));
+    let node = lookup(cond, &Value::str(S_condnode));
+    if 0 > idx {
+        Value::Noval
+    } else {
+        rebuild(&sym, &node, idx)
+    }
+}
+
+/// `expand(cond)` — the value a condensed structure stands for. Any other
+/// value comes back unchanged, so a caller holding either shape can call it.
+pub fn expand(cond: &Value) -> Value {
+    if !is_condensed(cond) {
+        return cond.clone();
+    }
+    condense_materialise(cond, condense_root(cond))
+}
+
+/// The keys of node `idx`, without materialising any of its values.
+fn condense_keys(cond: &Value, idx: i64) -> Value {
+    let enc = condense_enc(cond, idx);
+    let Value::List(enc) = &enc else {
+        return Value::empty_list();
+    };
+    let enc = enc.borrow();
+    let kind = enc.first().and_then(Value::as_num);
+
+    if Some(CONDENSE_MAP) == kind {
+        let sym = lookup(cond, &Value::str(S_condsym));
+        return Value::list(
+            enc.iter()
+                .skip(1)
+                .step_by(2)
+                .map(|k| condense_at(&sym, condense_index(k)))
+                .collect(),
+        );
+    }
+    if Some(CONDENSE_LIST) == kind {
+        return Value::list(
+            (1..enc.len())
+                .map(|j| Value::str((j - 1).to_string()))
+                .collect(),
+        );
+    }
+    Value::empty_list()
+}
+
+/// A cursor into a condensed structure. Reads resolve by integer index and
+/// touch only the nodes on the path, so the cost of a lookup follows path depth
+/// and result size, never total structure size.
+#[derive(Clone)]
+pub struct CondenseView {
+    cond: Value,
+    start: i64,
+    refmemo: Value,
+}
+
+/// `condenseview(cond, idx?, memo?)` — a cursor at node `idx`, else at the
+/// root of `cond`.
+pub fn condense_view(cond: &Value, idx: Option<i64>, memo: Option<&Value>) -> CondenseView {
+    let start = match idx {
+        Some(i) => i,
+        None if is_condensed(cond) => condense_root(cond),
+        None => -1,
+    };
+
+    // Shared materialisations, handed out only by `ref`. Threaded through `at`,
+    // so every cursor into one structure shares one memo.
+    let refmemo = match memo {
+        Some(m) if !m.is_nullish() => m.clone(),
+        _ => Value::empty_map(),
+    };
+
+    CondenseView {
+        cond: cond.clone(),
+        start,
+        refmemo,
+    }
+}
+
+impl CondenseView {
+    /// The value at `path`, materialised: a container comes back as an
+    /// independent copy.
+    pub fn get(&self, path: &Value) -> Value {
+        condense_materialise(&self.cond, condense_resolve(&self.cond, self.start, path))
+    }
+
+    /// The key names at `path`, with no value decoded.
+    pub fn keys(&self, path: &Value) -> Value {
+        let at = condense_resolve(&self.cond, self.start, path);
+        if 0 > at {
+            Value::empty_list()
+        } else {
+            condense_keys(&self.cond, at)
+        }
+    }
+
+    pub fn has(&self, path: &Value) -> bool {
+        0 <= condense_resolve(&self.cond, self.start, path)
+    }
+
+    /// A cursor at `path`, sharing this view's memo. Nothing is decoded.
+    pub fn at(&self, path: &Value) -> CondenseView {
+        let idx = condense_resolve(&self.cond, self.start, path);
+        condense_view(&self.cond, Some(idx), Some(&self.refmemo))
+    }
+
+    pub fn value(&self) -> Value {
+        condense_materialise(&self.cond, self.start)
+    }
+
+    pub fn size(&self) -> i64 {
+        let enc = condense_enc(&self.cond, self.start);
+        let Value::List(enc) = &enc else {
+            return 0;
+        };
+        let enc = enc.borrow();
+        let len = enc.len() as i64;
+        let kind = enc.first().and_then(Value::as_num);
+        if Some(CONDENSE_MAP) == kind {
+            (len - 1) / 2
+        } else if Some(CONDENSE_LIST) == kind {
+            len - 1
+        } else {
+            0
+        }
+    }
+
+    pub fn exists(&self) -> bool {
+        0 <= self.start
+    }
+
+    /// Unlike `value` and `get`, a SHARED materialisation: the same node every
+    /// time for the same index, across views sharing the memo. Mutating it
+    /// changes what every other such reader sees.
+    pub fn r#ref(&self) -> Value {
+        let k = Value::str(self.start.to_string());
+        if lookup(&self.refmemo, &k).is_noval() {
+            set_prop(
+                self.refmemo.clone(),
+                &k,
+                condense_materialise(&self.cond, self.start),
+            );
+        }
+        lookup(&self.refmemo, &k)
+    }
 }
 
 // keep `Injection::has_handler` referenced (used once staging is complete)
