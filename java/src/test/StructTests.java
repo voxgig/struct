@@ -3,6 +3,7 @@ package voxgig.struct;
 import com.google.gson.Gson;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -18,6 +19,10 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SuppressWarnings({"unchecked", "rawtypes"})
@@ -40,6 +45,7 @@ class StructTests {
   private static Map<String, Object> selectSpec;
   private static Map<String, Object> sentinelsSpec;
   private static Map<String, Object> regexSpec;
+  private static Map<String, Object> condenseSpec;
 
   private static Omni.Run run;
 
@@ -64,6 +70,7 @@ class StructTests {
     selectSpec = (Map<String, Object>) struct.get("select");
     sentinelsSpec = (Map<String, Object>) struct.get("sentinels");
     regexSpec = (Map<String, Object>) struct.get("regex");
+    condenseSpec = (Map<String, Object>) struct.get("condense");
   }
 
   private static String slog(Object v) {
@@ -683,6 +690,162 @@ class StructTests {
                   });
           return Struct.getpath(store, m.get("path"), inj);
         });
+  }
+
+  @Test
+  void condenseCondense() {
+    runSet((Map<String, Object>) condenseSpec.get("condense"), Struct::condense, false);
+  }
+
+  @Test
+  void condenseExpand() {
+    runSet((Map<String, Object>) condenseSpec.get("expand"), Struct::expand, false);
+  }
+
+  @Test
+  void condenseIscondensed() {
+    runSet((Map<String, Object>) condenseSpec.get("iscondensed"), Struct::iscondensed, false);
+  }
+
+  // Properties the corpus shape cannot express: identity, sharing, laziness
+  // and the immutability contract.
+
+  @Test
+  void condenseDeterministic() {
+    Map<String, Object> src =
+        Struct.jm("b", Struct.jm("m", "GET"), "a", Struct.jm("m", "GET"), "l", Struct.jt(1, "x", true));
+    assertEquals(Struct.jsonify(Struct.condense(src)), Struct.jsonify(Struct.condense(src)));
+    // Insertion order must not change the bytes: keys are stored by symbol id.
+    Map<String, Object> reordered =
+        Struct.jm("l", Struct.jt(1, "x", true), "a", Struct.jm("m", "GET"), "b", Struct.jm("m", "GET"));
+    assertEquals(Struct.jsonify(Struct.condense(src)), Struct.jsonify(Struct.condense(reordered)));
+  }
+
+  @Test
+  void condenseSharesIdenticalSubtrees() {
+    Map<String, Object> one = Struct.condense(Struct.jm("x", Struct.jm("m", "GET", "p", "/1")));
+    Map<String, Object> two = Struct.condense(
+        Struct.jm("x", Struct.jm("m", "GET", "p", "/1"), "y", Struct.jm("m", "GET", "p", "/1")));
+    // A second reference to an identical subtree adds no node.
+    assertEquals(Struct.size(one.get("node")), Struct.size(two.get("node")));
+    Map<String, Object> three = Struct.condense(
+        Struct.jm("x", Struct.jm("m", "GET"), "y", Struct.jm("m", "PUT"), "z", Struct.jm("m", "POST")));
+    assertTrue(Struct.size(three.get("node")) > Struct.size(two.get("node")));
+  }
+
+  @Test
+  void condenseRoundTripsByValue() {
+    Map<String, Object> src =
+        Struct.jm("a", Struct.jm("b", Struct.jt(1, "x", true, null, Struct.jm())), "c", "z");
+    assertEquals(src, Struct.expand(Struct.condense(src)));
+  }
+
+  @Test
+  void condenseGetpathIsTransparent() {
+    Map<String, Object> src = Struct.jm(
+        "entity", Struct.jm("p", Struct.jm("op", Struct.jm("list", Struct.jm("method", "GET")))));
+    Map<String, Object> c = Struct.condense(src);
+    assertEquals(
+        Struct.getpath(src, List.of("entity", "p", "op", "list")),
+        Struct.getpath(c, List.of("entity", "p", "op", "list")));
+    assertEquals("GET", Struct.getpath(c, List.of("entity", "p", "op", "list", "method")));
+    assertSame(Struct.UNDEF, Struct.getpath(c, List.of("entity", "nope")));
+  }
+
+  @Test
+  void condenseViewReadsWithoutMaterialising() {
+    Map<String, Object> c = Struct.condense(
+        Struct.jm("entity", Struct.jm("a", Struct.jm("v", 1), "b", Struct.jm("v", 2)), "other", 9));
+    Struct.CondenseView v = Struct.condenseview(c);
+    // keys() answers from the node and symbol tables alone.
+    assertEquals(List.of("a", "b"), v.keys("entity"));
+    assertEquals(2, v.at("entity").at("b").get("v"));
+    assertTrue(v.has("entity.a"));
+    assertFalse(v.has("entity.zz"));
+    assertEquals(2, v.size());
+  }
+
+  @Test
+  void condenseValueCopiesAndRefShares() {
+    Map<String, Object> c = Struct.condense(Struct.jm("a", Struct.jm("m", "GET"), "b", Struct.jm("m", "GET")));
+    Struct.CondenseView v = Struct.condenseview(c);
+    // a and b share one node; get() must not let that be observable.
+    Map<String, Object> x = (Map<String, Object>) v.get("a");
+    Map<String, Object> y = (Map<String, Object>) v.get("b");
+    assertEquals(x, y);
+    assertNotSame(x, y);
+    x.put("m", "MUTATED");
+    assertEquals("GET", Struct.getprop(v.get("b"), "m"));
+    // ref() is the opt-in escape hatch and does share.
+    assertSame(v.at("a").ref(), v.at("a").ref());
+  }
+
+  @Test
+  void condensePreservesProtoNamedKeysAndValues() {
+    Map<String, Object> asValue = Struct.jm("x", "__proto__");
+    assertEquals(asValue, Struct.expand(Struct.condense(asValue)));
+    Map<String, Object> asKey = Struct.jm("__proto__", 1);
+    assertEquals(
+        "{\"__proto__\":1}", Struct.jsonify(Struct.expand(Struct.condense(asKey)), Map.of("indent", 0)));
+  }
+
+  @Test
+  void condenseGetpathMatchesPlainOnNullAndOptions() {
+    // Group A: a stored null reads as absent either way.
+    Map<String, Object> nullval = Struct.jm("a", null);
+    assertEquals(Struct.getpath(nullval, "a"), Struct.getpath(Struct.condense(nullval), "a"));
+    assertSame(Struct.UNDEF, Struct.getpath(Struct.condense(nullval), "a"));
+    // A base must not be ignored by the condensed fast path.
+    Map<String, Object> store = Struct.jm("base", Struct.jm("x", 1));
+    Map<String, Object> inj = Struct.jm("base", "base");
+    assertEquals(Struct.getpath(store, "x", inj), Struct.getpath(Struct.condense(store), "x", inj));
+    assertEquals(1, Struct.getpath(Struct.condense(store), "x", inj));
+  }
+
+  @Test
+  void condenseListKeysAreCanonicalIntegers() {
+    Map<String, Object> c = Struct.condense(Struct.jm("l", Struct.jt(10, 20)));
+    // Pinned to canonical rather than compared with a plain getpath: this
+    // port's plain list lookup also reads "01", "+1" and "-0" as indexes.
+    for (String k : List.of("01", "1e0", " 1", "+1", "1.0", "-0")) {
+      assertSame(Struct.UNDEF, Struct.getpath(c, List.of("l", k)), "list key " + k);
+    }
+    assertEquals(20, Struct.getpath(c, List.of("l", "1")));
+  }
+
+  @Test
+  void condenseSymbolsSortByCodePoint() {
+    List<Object> sym = (List<Object>) Struct.condense(Struct.jm("a", "\uD800\uDC00", "b", "\uFFFF")).get("sym");
+    assertTrue(
+        sym.indexOf("\uFFFF") < sym.indexOf("\uD800\uDC00"),
+        "symbol table is not in code-point order: " + sym);
+  }
+
+  @Test
+  void condenseInvalidKeyMutationsStayNoOps() {
+    // An invalid key is ignored, so a call that cannot write must not raise.
+    Map<String, Object> c = Struct.condense(Struct.jm("a", 1));
+    assertSame(c, Struct.delprop(c, Struct.UNDEF));
+    assertSame(c, Struct.setprop(c, Struct.UNDEF, 1));
+    // A call that could write still raises.
+    assertImmutable(() -> Struct.delprop(c, "sym"));
+  }
+
+  @Test
+  void condenseIsImmutable() {
+    Map<String, Object> c = Struct.condense(Struct.jm("a", 1));
+    assertImmutable(() -> Struct.setpath(c, "a", 2));
+    assertImmutable(() -> Struct.setprop(c, "a", 2));
+    assertImmutable(() -> Struct.delprop(c, "sym"));
+    // The expanded copy is ordinary and mutable.
+    Map<String, Object> e = (Map<String, Object>) Struct.expand(c);
+    Struct.setpath(e, "a", 2);
+    assertEquals(2, e.get("a"));
+  }
+
+  private static void assertImmutable(Executable call) {
+    IllegalArgumentException err = assertThrows(IllegalArgumentException.class, call);
+    assertTrue(err.getMessage().contains("immutable"), err.getMessage());
   }
 
   @Test

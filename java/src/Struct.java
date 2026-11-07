@@ -4,14 +4,18 @@ package voxgig.struct;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.regex.Matcher;
@@ -457,6 +461,10 @@ public class Struct {
       return parent;
     }
 
+    if (iscondensed(parent)) {
+      throw new IllegalArgumentException(CONDENSE_IMMUTABLE);
+    }
+
     if (parent instanceof Map<?, ?>) {
       Map<Object, Object> m = (Map<Object, Object>) parent;
       m.put(strkey(key), val);
@@ -490,6 +498,10 @@ public class Struct {
   public static Object delprop(Object parent, Object key) {
     if (!iskey(key)) {
       return parent;
+    }
+
+    if (iscondensed(parent)) {
+      throw new IllegalArgumentException(CONDENSE_IMMUTABLE);
     }
 
     if (parent instanceof Map<?, ?> m) {
@@ -1085,6 +1097,10 @@ public class Struct {
   }
 
   public static Object setpath(Object store, Object path, Object val) {
+    if (iscondensed(store)) {
+      throw new IllegalArgumentException(CONDENSE_IMMUTABLE);
+    }
+
     List<Object> parts;
     if (path instanceof List<?> l) {
       parts = new ArrayList<>(l);
@@ -1265,6 +1281,19 @@ public class Struct {
 
   public static Object getpath(Object store, Object path, Map<String, Object> inj) {
     List<String> parts = pathParts(path);
+
+    // A condensed store answers as the node it was built from, touching only
+    // the nodes on the path. A base changes what the path resolves against,
+    // so that read needs the materialised store.
+    if (null != parts && iscondensed(store)) {
+      if (null == inj || UNDEF == getprop(inj, "base")) {
+        Object found = condenseMaterialise(store, condenseResolve(store, condenseRoot(store), parts));
+        // Group A: a stored null reads as absent, as it does through getprop.
+        return null == found ? UNDEF : found;
+      }
+      store = expand(store);
+    }
+
     Object val = getpathInner(store, path, parts, inj);
     if (inj != null) {
       Object handlerObj = inj.get("handler");
@@ -1626,7 +1655,8 @@ public class Struct {
    * can hook command dispatch.
    */
   public static Object getpath(Object store, Object path, Injection inj) {
-    if (inj == null) {
+    // A condensed read without a base returns before any handler runs, as in canonical.
+    if (inj == null || (inj.base == null && iscondensed(store))) {
       return getpath(store, path, (Map<String, Object>) null);
     }
     Map<String, Object> view = new LinkedHashMap<>();
@@ -3420,6 +3450,468 @@ public class Struct {
 
 
   // ===========================================================================
+  // Condense
+  // ===========================================================================
+
+  private static final int CONDENSE_VERSION = 1;
+
+  private static final int CONDENSE_MAP = 0;
+  private static final int CONDENSE_LIST = 1;
+  private static final int CONDENSE_STR = 2;
+  private static final int CONDENSE_NUM = 3;
+  private static final int CONDENSE_TRUE = 4;
+  private static final int CONDENSE_FALSE = 5;
+  private static final int CONDENSE_NULL = 6;
+
+  private static final String S_condense = "$condense";
+  private static final String S_condsym = "sym";
+  private static final String S_condnode = "node";
+  private static final String S_condroot = "root";
+
+  private static final String CONDENSE_IMMUTABLE =
+      "struct: condensed structures are immutable - expand() first, then modify the copy";
+
+  private static final Pattern R_CONDENSE_INDEX = Pattern.compile("^(0|[1-9][0-9]*)$");
+
+  // Code point order: String.compareTo uses UTF-16 code unit order, which
+  // puts U+FFFF after a supplementary character.
+  private static int condenseCmp(String a, String b) {
+    int i = 0;
+    int j = 0;
+    while (i < a.length() && j < b.length()) {
+      int ca = a.codePointAt(i);
+      int cb = b.codePointAt(j);
+      if (ca != cb) {
+        return ca < cb ? -1 : 1;
+      }
+      i += Character.charCount(ca);
+      j += Character.charCount(cb);
+    }
+    return a.length() - i - (b.length() - j);
+  }
+
+  public static boolean iscondensed(Object val) {
+    // The version must MATCH, not merely be numeric: a future profile would
+    // otherwise be decoded under this one's schema.
+    return val instanceof Map<?, ?> m
+        && m.get(S_condense) instanceof Number version
+        && CONDENSE_VERSION == version.doubleValue()
+        && m.get(S_condsym) instanceof List
+        && m.get(S_condnode) instanceof List
+        && m.get(S_condroot) instanceof Number;
+  }
+
+  /**
+   * Condense any JSON-shaped node. Pure: the same input always produces a
+   * byte-identical result, on every port.
+   */
+  public static Map<String, Object> condense(Object val) {
+    Set<String> symset = new HashSet<>();
+    condenseCollect(val, symset);
+
+    List<String> sym = new ArrayList<>(symset);
+    sym.sort(Struct::condenseCmp);
+    Map<String, Integer> symid = new HashMap<>();
+    for (int i = 0; i < sym.size(); i++) {
+      symid.put(sym.get(i), i);
+    }
+
+    List<Object> node = new ArrayList<>();
+    int root = condenseBuild(val, symid, node, new HashMap<>());
+
+    Map<String, Object> out = new LinkedHashMap<>();
+    out.put(S_condense, CONDENSE_VERSION);
+    out.put(S_condsym, new ArrayList<Object>(sym));
+    out.put(S_condnode, node);
+    out.put(S_condroot, root);
+    return out;
+  }
+
+  private static void condenseCollect(Object n, Set<String> symset) {
+    if (ismap(n)) {
+      for (String key : keysof(n)) {
+        symset.add(key);
+        condenseCollect(((Map<?, ?>) n).get(key), symset);
+      }
+    } else if (n instanceof List<?> l) {
+      for (Object item : l) {
+        condenseCollect(item, symset);
+      }
+    } else if (n instanceof String s) {
+      symset.add(s);
+    }
+  }
+
+  // Post-order, so identical subtrees are already interned when a parent
+  // refers to them.
+  private static int condenseBuild(Object n, Map<String, Integer> symid, List<Object> node,
+                                   Map<String, Integer> seen) {
+    List<Object> enc = new ArrayList<>();
+    if (ismap(n)) {
+      enc.add(CONDENSE_MAP);
+      // Code-point order, not keysof's code-unit order, so the key ids ascend.
+      List<String> keys = new ArrayList<>(keysof(n));
+      keys.sort(Struct::condenseCmp);
+      for (String key : keys) {
+        enc.add(symid.get(key));
+        enc.add(condenseBuild(((Map<?, ?>) n).get(key), symid, node, seen));
+      }
+    } else if (n instanceof List<?> l) {
+      enc.add(CONDENSE_LIST);
+      for (Object item : l) {
+        enc.add(condenseBuild(item, symid, node, seen));
+      }
+    } else if (n instanceof String s) {
+      enc.add(CONDENSE_STR);
+      enc.add(symid.get(s));
+    } else if (n instanceof Number num) {
+      enc.add(CONDENSE_NUM);
+      enc.add(num);
+    } else if (Boolean.TRUE.equals(n)) {
+      enc.add(CONDENSE_TRUE);
+    } else if (Boolean.FALSE.equals(n)) {
+      enc.add(CONDENSE_FALSE);
+    } else {
+      enc.add(CONDENSE_NULL);
+    }
+    return condenseIntern(enc, node, seen);
+  }
+
+  private static int condenseIntern(List<Object> enc, List<Object> node, Map<String, Integer> seen) {
+    StringBuilder key = new StringBuilder();
+    for (Object part : enc) {
+      key.append(condenseNumKey((Number) part)).append(',');
+    }
+    String enckey = key.toString();
+    Integer hit = seen.get(enckey);
+    if (null != hit) {
+      return hit;
+    }
+    int idx = node.size();
+    node.add(enc);
+    seen.put(enckey, idx);
+    return idx;
+  }
+
+  // By value, so an integer and a decimal that are equal share one node.
+  private static String condenseNumKey(Number n) {
+    if (n instanceof Integer || n instanceof Long || n instanceof Short || n instanceof Byte) {
+      return Long.toString(n.longValue());
+    }
+    double d = n.doubleValue();
+    return Math.floor(d) == d && Math.abs(d) < Long.MAX_VALUE ? Long.toString((long) d) : Double.toString(d);
+  }
+
+  private static List<?> condenseList(Object cond, String name) {
+    return cond instanceof Map<?, ?> m && m.get(name) instanceof List<?> l ? l : List.of();
+  }
+
+  private static Object condenseAt(List<?> list, int i) {
+    return 0 <= i && i < list.size() ? list.get(i) : UNDEF;
+  }
+
+  // A stored index: -1 when negative, past every node when not an integer.
+  private static int condenseIndex(Object n) {
+    if (!(n instanceof Number num)) {
+      return -1;
+    }
+    double d = num.doubleValue();
+    if (Double.isNaN(d) || d < 0) {
+      return -1;
+    }
+    return Math.floor(d) == d && d < Integer.MAX_VALUE ? (int) d : Integer.MAX_VALUE;
+  }
+
+  private static int condenseRoot(Object cond) {
+    return condenseIndex(((Map<?, ?>) cond).get(S_condroot));
+  }
+
+  private static Object condenseEnc(Object cond, int idx) {
+    Object enc = condenseAt(condenseList(cond, S_condnode), idx);
+    return UNDEF == enc ? null : enc;
+  }
+
+  private static boolean condenseIs(Object enc, int kind) {
+    return enc instanceof List<?> l && !l.isEmpty() && l.get(0) instanceof Number n && n.doubleValue() == kind;
+  }
+
+  private static String condenseKey(Object key) {
+    if (key instanceof String s) {
+      return s;
+    }
+    return UNDEF == key ? "undefined" : jsString(key);
+  }
+
+  // Bisects the sorted symbol table; -1 when the string occurs nowhere.
+  private static int condenseSymId(Object cond, String key) {
+    List<?> sym = condenseList(cond, S_condsym);
+    int lo = 0;
+    int hi = sym.size() - 1;
+    while (lo <= hi) {
+      int mid = (lo + hi) >>> 1;
+      Object s = sym.get(mid);
+      if (key.equals(s)) {
+        return mid;
+      }
+      if (0 > condenseCmp(condenseKey(s), key)) {
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return -1;
+  }
+
+  // The node index of key inside node idx, or -1. Touches only this node.
+  private static int condenseChild(Object cond, int idx, Object key) {
+    Object enc = condenseEnc(cond, idx);
+    if (null == enc) {
+      return -1;
+    }
+
+    if (condenseIs(enc, CONDENSE_MAP)) {
+      int symid = condenseSymId(cond, condenseKey(key));
+      if (0 > symid) {
+        return -1;
+      }
+      // Pairs live at [1,2], [3,4], ... with keys ascending: bisect the pairs.
+      List<?> pairs = (List<?>) enc;
+      int lo = 0;
+      int hi = (pairs.size() - 1) / 2 - 1;
+      while (lo <= hi) {
+        int mid = (lo + hi) >>> 1;
+        double k = pairs.get(1 + mid * 2) instanceof Number n ? n.doubleValue() : Double.NaN;
+        if (k == symid) {
+          return condenseIndex(pairs.get(2 + mid * 2));
+        }
+        if (k < symid) {
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
+      }
+      return -1;
+    }
+
+    if (condenseIs(enc, CONDENSE_LIST)) {
+      // Canonical integer keys only: "01", "+1", "1.0" and "-0" all miss.
+      String k = condenseKey(key);
+      if (!R_CONDENSE_INDEX.matcher(k).matches()) {
+        return -1;
+      }
+      List<?> items = (List<?>) enc;
+      long i = 18 < k.length() ? Long.MAX_VALUE : Long.parseLong(k);
+      if (i >= items.size() - 1) {
+        return -1;
+      }
+      return condenseIndex(items.get(1 + (int) i));
+    }
+
+    return -1;
+  }
+
+  private static int condenseResolve(Object cond, int idx, Object path) {
+    List<?> parts;
+    if (path instanceof List<?> l) {
+      parts = l;
+    } else if (path instanceof String s) {
+      parts = s.isEmpty() ? List.of() : Arrays.asList(s.split("\\.", -1));
+    } else if (null == path || UNDEF == path) {
+      parts = List.of();
+    } else {
+      parts = List.of(condenseKey(path));
+    }
+
+    int at = idx;
+    for (Object part : parts) {
+      if (0 > at) {
+        return -1;
+      }
+      if (S_MT.equals(part)) {
+        continue;
+      }
+      at = condenseChild(cond, at, part);
+    }
+    return at;
+  }
+
+  private static Object condenseMaterialise(Object cond, int idx) {
+    return 0 > idx
+        ? UNDEF
+        : condenseRebuild(condenseList(cond, S_condsym), condenseList(cond, S_condnode), idx);
+  }
+
+  // Every call builds new containers, so materialisations never share one.
+  private static Object condenseRebuild(List<?> sym, List<?> node, int i) {
+    Object enc = condenseAt(node, i);
+    if (null == enc || UNDEF == enc) {
+      return UNDEF;
+    }
+    if (condenseIs(enc, CONDENSE_MAP)) {
+      List<?> pairs = (List<?>) enc;
+      Map<String, Object> out = new LinkedHashMap<>();
+      for (int j = 1; j < pairs.size(); j += 2) {
+        out.put(condenseKey(condenseAt(sym, condenseIndex(pairs.get(j)))),
+            condenseRebuild(sym, node, condenseIndex(condenseAt(pairs, j + 1))));
+      }
+      return out;
+    }
+    if (condenseIs(enc, CONDENSE_LIST)) {
+      List<?> items = (List<?>) enc;
+      List<Object> out = new ArrayList<>(items.size() - 1);
+      for (int j = 1; j < items.size(); j++) {
+        out.add(condenseRebuild(sym, node, condenseIndex(items.get(j))));
+      }
+      return out;
+    }
+    if (condenseIs(enc, CONDENSE_STR)) {
+      return condenseAt(sym, condenseIndex(condenseAt((List<?>) enc, 1)));
+    }
+    if (condenseIs(enc, CONDENSE_NUM)) {
+      return condenseAt((List<?>) enc, 1);
+    }
+    if (condenseIs(enc, CONDENSE_TRUE)) {
+      return true;
+    }
+    if (condenseIs(enc, CONDENSE_FALSE)) {
+      return false;
+    }
+    return null;
+  }
+
+  /**
+   * Fully materialise a condensed structure; any other value comes back
+   * unchanged. Correct for any caller, but it gives up every benefit of
+   * condensing, so prefer a view or a path read.
+   */
+  public static Object expand(Object cond) {
+    if (!iscondensed(cond)) {
+      return cond;
+    }
+    return condenseMaterialise(cond, condenseRoot(cond));
+  }
+
+  // The keys of node idx, without materialising any of its values.
+  private static List<String> condenseKeys(Object cond, int idx) {
+    Object enc = condenseEnc(cond, idx);
+    List<String> out = new ArrayList<>();
+    if (condenseIs(enc, CONDENSE_MAP)) {
+      List<?> sym = condenseList(cond, S_condsym);
+      List<?> pairs = (List<?>) enc;
+      for (int j = 1; j < pairs.size(); j += 2) {
+        out.add(condenseKey(condenseAt(sym, condenseIndex(pairs.get(j)))));
+      }
+    } else if (condenseIs(enc, CONDENSE_LIST)) {
+      for (int j = 1; j < ((List<?>) enc).size(); j++) {
+        out.add(Integer.toString(j - 1));
+      }
+    }
+    return out;
+  }
+
+  /**
+   * A cursor into a condensed structure. Reads resolve by integer index and
+   * touch only the nodes on the path, so a lookup costs path depth and result
+   * size, never total structure size.
+   */
+  public static final class CondenseView {
+    private final Object cond;
+    private final int start;
+    private final Map<Integer, Object> refmemo;
+
+    private CondenseView(Object cond, int start, Map<Integer, Object> refmemo) {
+      this.cond = cond;
+      this.start = start;
+      this.refmemo = refmemo;
+    }
+
+    /** The value at path, materialised: a container comes back as an independent copy. */
+    public Object get(Object path) {
+      return condenseMaterialise(cond, condenseResolve(cond, start, path));
+    }
+
+    public Object get() {
+      return get(UNDEF);
+    }
+
+    /** Key names at path, with no value decoding at all. */
+    public List<String> keys(Object path) {
+      int at = condenseResolve(cond, start, path);
+      return 0 > at ? new ArrayList<>() : condenseKeys(cond, at);
+    }
+
+    public List<String> keys() {
+      return keys(UNDEF);
+    }
+
+    public boolean has(Object path) {
+      return 0 <= condenseResolve(cond, start, path);
+    }
+
+    public boolean has() {
+      return has(UNDEF);
+    }
+
+    /** A view at path, sharing this view's ref() memo. No decoding happens here. */
+    public CondenseView at(Object path) {
+      return condenseview(cond, condenseResolve(cond, start, path), refmemo);
+    }
+
+    public CondenseView at() {
+      return at(UNDEF);
+    }
+
+    public Object value() {
+      return condenseMaterialise(cond, start);
+    }
+
+    public int size() {
+      Object enc = condenseEnc(cond, start);
+      if (condenseIs(enc, CONDENSE_MAP)) {
+        return (((List<?>) enc).size() - 1) / 2;
+      }
+      if (condenseIs(enc, CONDENSE_LIST)) {
+        return ((List<?>) enc).size() - 1;
+      }
+      return 0;
+    }
+
+    public boolean exists() {
+      return 0 <= start;
+    }
+
+    /**
+     * A SHARED materialisation: the same object for the same node, every time.
+     * Mutating it corrupts every other reader of that node, including ones
+     * reached by a different path, because the structure is a DAG.
+     */
+    public Object ref() {
+      Object got = refmemo.getOrDefault(start, UNDEF);
+      if (UNDEF == got) {
+        got = condenseMaterialise(cond, start);
+        refmemo.put(start, got);
+      }
+      return got;
+    }
+  }
+
+  public static CondenseView condenseview(Object cond) {
+    return condenseview(cond, null, null);
+  }
+
+  public static CondenseView condenseview(Object cond, Integer idx) {
+    return condenseview(cond, idx, null);
+  }
+
+  public static CondenseView condenseview(Object cond, Integer idx, Map<Integer, Object> memo) {
+    int start = null != idx ? idx : iscondensed(cond) ? condenseRoot(cond) : -1;
+    // The memo is threaded through at(), so every view into one structure
+    // hands out the same ref() node.
+    return new CondenseView(cond, start, null == memo ? new HashMap<>() : memo);
+  }
+
+
+  // ===========================================================================
   // Injection
   // ===========================================================================
 
@@ -3716,6 +4208,16 @@ public class Struct {
       return Struct.validate(d, s, o);
     }
     public List<Object> select(Object c, Object q) { return Struct.select(c, q); }
+
+    // Condense
+    public Map<String, Object> condense(Object v) { return Struct.condense(v); }
+    public Object expand(Object c) { return Struct.expand(c); }
+    public boolean iscondensed(Object v) { return Struct.iscondensed(v); }
+    public CondenseView condenseview(Object c) { return Struct.condenseview(c); }
+    public CondenseView condenseview(Object c, Integer i) { return Struct.condenseview(c, i); }
+    public CondenseView condenseview(Object c, Integer i, Map<Integer, Object> m) {
+      return Struct.condenseview(c, i, m);
+    }
 
     // Injection helpers
     public boolean checkPlacement(int m, String n, int pt, Injection i) {

@@ -2,7 +2,7 @@
 
 > Java port of the canonical TypeScript implementation.
 >
-> **Status: complete.**  Full TS-canonical parity: all 48 functions,
+> **Status: complete.**  Full TS-canonical parity: all 52 functions,
 > 15 type bit-flags, 3 mode constants (`M_KEYPRE`/`M_KEYPOST`/`M_VAL`),
 > `SKIP`/`DELETE` sentinel marker maps, and the `Injection` state
 > machine. `inject()`/`transform()`/`validate()`/`select()` all dispatch
