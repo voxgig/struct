@@ -70,6 +70,8 @@ Names are lower-smushed, identical to the canonical export list:
   `re_replace`, `re_test`, `re_escape`.
 - **By-example engine:** `inject`, `transform`, `validate`, `select`, plus the
   injector helpers `checkPlacement`, `injectorArgs`, `injectChild`.
+- **Condensed structures:** `condense`, `condenseview`, `expand`,
+  `iscondensed`.
 - **Builders / markers:** `jm`, `jt`, `SKIP`, `DELETE`, and the `T_*` /
   `M_*` constants.
 
@@ -106,11 +108,6 @@ both, so `(s/jm "min" 1)` reads "at least one". There is no `$ONE`: write it
 as that count. A spec that names a checker `validate` does not define is
 rejected before any data is read, so a leftover `$ONE` throws
 `Unknown validator $ONE at field a.0.` rather than validating anything.
-
-A `$NOF` or `$ALL` trial validates the value at the root of its own call,
-where a missing value arrives as `nil`. So for a missing field a trial
-spec of `` "`$NULL`" `` admits it, where canonical TypeScript
-refuses it. No corpus entry reaches the case.
 
 ## Testing
 

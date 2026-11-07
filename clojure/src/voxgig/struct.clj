@@ -109,6 +109,21 @@
 (def ^:private R-TRANSFORM-NAME (Pattern/compile "`\\$([A-Z]+)`"))
 (def ^:private R-CHECKER-NAME (Pattern/compile "^\\$[A-Z]+$"))
 
+(def ^:private CONDENSE_VERSION 1)
+(def ^:private CONDENSE_MAP 0)
+(def ^:private CONDENSE_LIST 1)
+(def ^:private CONDENSE_STR 2)
+(def ^:private CONDENSE_NUM 3)
+(def ^:private CONDENSE_TRUE 4)
+(def ^:private CONDENSE_FALSE 5)
+(def ^:private CONDENSE_NULL 6)
+(def ^:private S-condense "$condense")
+(def ^:private S-condsym "sym")
+(def ^:private S-condnode "node")
+(def ^:private S-condroot "root")
+(def ^:private CONDENSE-IMMUTABLE
+  "struct: condensed structures are immutable - expand() first, then modify the copy")
+
 ;; ---------------------------------------------------------------------------
 ;; Mutable-collection helpers
 ;; ---------------------------------------------------------------------------
@@ -138,7 +153,8 @@
          _injecthandler _validatehandler _invalidTypeMsg
          inj-descend inj-child inj-setval
          checkPlacement injectorArgs injectChild
-         validate transform select jsonify FORMATTER)
+         validate transform select jsonify FORMATTER
+         iscondensed expand condenseresolve condensematerialise)
 
 ;; ---------------------------------------------------------------------------
 ;; Low-level numeric / key helpers
@@ -275,7 +291,7 @@
                                 (if (and ki (<= 0 ki) (< ki (.size ^List val)))
                                   (.get ^List val (int ki)) alt))
                  :else alt)]
-       (if (nil? out) alt out)))))
+       (if (or (nil? out) (identical? out NOARG)) alt out)))))
 
 (defn- _lookup [val key]
   (cond
@@ -334,6 +350,7 @@
 
 (defn setprop [parent key val]
   (when (iskey key)
+    (when (iscondensed parent) (throw (RuntimeException. ^String CONDENSE-IMMUTABLE)))
     (cond
       (ismap parent) (.put ^Map parent (str key) val)
       (islist parent)
@@ -348,6 +365,7 @@
 
 (defn delprop [parent key]
   (when (iskey key)
+    (when (iscondensed parent) (throw (RuntimeException. ^String CONDENSE-IMMUTABLE)))
     (cond
       (ismap parent) (.remove ^Map parent (str key))
       (islist parent)
@@ -780,9 +798,21 @@
                  (islist path) (alist-of path)
                  (string? path) (alist-of (.split ^String path "\\." -1))
                  (and (number? path) (not (jbool? path))) (alist-of [(strkey path)])
-                 :else nil)]
-     (if (nil? parts)
+                 :else nil)
+         condensed (and (some? parts) (iscondensed store))
+         direct (and condensed
+                     (nil? (if (inj? injdef) (ig injdef :base) (when injdef (getprop injdef S-base)))))
+         store (if (and condensed (not direct)) (expand store) store)]
+     (cond
+       (nil? parts)
        nil
+
+       ;; Reads only the nodes on the path. A base changes what the path
+       ;; resolves against, so that read walks the expanded copy instead.
+       direct
+       (condensematerialise store (condenseresolve store (_lookup store S-condroot) parts))
+
+       :else
        (let [is-inj (inj? injdef)
              base (if is-inj (ig injdef :base) (when injdef (getprop injdef S-base)))
              dparent (if is-inj (ig injdef :dparent) (when injdef (getprop injdef "dparent")))
@@ -845,6 +875,7 @@
 (defn setpath
   ([store path val] (setpath store path val nil))
   ([store path val injdef]
+   (when (iscondensed store) (throw (RuntimeException. ^String CONDENSE-IMMUTABLE)))
    (let [ptype (typify path)
          parts (cond
                  (pos? (bit-and T_list ptype)) (alist-of path)
@@ -1419,7 +1450,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- validate_STRING [inj _val _ref _store]
-  (let [out (getprop (ig inj :dparent) (ig inj :key)) t (typify out)]
+  (let [out (_lookup (ig inj :dparent) (ig inj :key)) t (typify out)]
     (cond
       (zero? (bit-and T_string t)) (do (.add ^List (ig inj :errs) (_invalidTypeMsg (ig inj :path) S-string t out "V1010")) nil)
       (= out S-MT) (do (.add ^List (ig inj :errs) (str "Empty string at " (pathify (ig inj :path) 1))) nil)
@@ -1430,14 +1461,14 @@
         idx (.indexOf ^java.util.List (vec TYPENAME) tname)
         typev0 (if (>= idx 0) (bit-shift-left 1 (- 31 idx)) 0)
         typev (if (= tname S-nil) (bit-or typev0 T_null) typev0)
-        out (getprop (ig inj :dparent) (ig inj :key))
+        out (_lookup (ig inj :dparent) (ig inj :key))
         t (typify out)]
     (if (zero? (bit-and t typev))
       (do (.add ^List (ig inj :errs) (_invalidTypeMsg (ig inj :path) tname t out "V1001")) nil)
       out)))
 
 (defn- validate_ANY [inj _val _ref _store]
-  (getprop (ig inj :dparent) (ig inj :key)))
+  (_lookup (ig inj :dparent) (ig inj :key)))
 
 (defn- validate_CHILD [inj _val _ref _store]
   (let [mode (ig inj :mode) key (ig inj :key) parent (ig inj :parent)
@@ -1484,10 +1515,12 @@
 ;; The directive's own dparent was read with getprop, which reports a stored
 ;; null as absent, and with one nil only the slot can tell them apart.
 (defn- _slotval [inj]
-  (let [prior (ig inj :prior)]
-    (if (nil? prior)
-      [(ig inj :dparent) (some? (ig inj :dparent))]
-      [(_lookup (ig prior :dparent) (ig prior :key)) (_holds (ig prior :dparent) (ig prior :key))])))
+  (let [prior (ig inj :prior)
+        [cval held] (if (nil? prior)
+                      [(ig inj :dparent) (some? (ig inj :dparent))]
+                      [(_lookup (ig prior :dparent) (ig prior :key)) (_holds (ig prior :dparent) (ig prior :key))])]
+    ;; A trial hands an absent value down as NOARG: the slot holds no value.
+    (if (identical? cval NOARG) [nil false] [cval held])))
 
 ;; inj-setval deletes for nil, so a null the slot holds is set directly.
 (defn- _slotset [inj cval held]
@@ -1518,12 +1551,14 @@
     (every? (fn [k] (and (_holds out k) (_keeps (_lookup val k) (_lookup out k)))) (keysof val))))
 
 ;; A spec admits a value when validating the value against it finds no error
-;; and gives back the value as it is. Any output keeps an absent value.
+;; and gives back the value as it is. Any output keeps an absent value, which
+;; goes down as NOARG so that the nested validation reads it as no value.
 (defn- _admits [val held spec inj store]
-  (let [terrs (alist)
+  (let [tval (if held val NOARG)
+        terrs (alist)
         vstore (merge (alist-of [(lhm) store]) 1)]
-    (.put ^Map vstore S-DTOP val)
-    (let [out (validate val spec (doto (lhm) (.put "extra" vstore) (.put "errs" terrs) (.put "meta" (ig inj :meta))))]
+    (.put ^Map vstore S-DTOP tval)
+    (let [out (validate tval spec (doto (lhm) (.put "extra" vstore) (.put "errs" terrs) (.put "meta" (ig inj :meta))))]
       (and (zero? (size terrs)) (or (not held) (_keeps val out))))))
 
 ;; The bounds of a $NOF count, and the words for it, which are absent when
@@ -1748,12 +1783,13 @@
          out)))))
 
 (defn- _invalidTypeMsg [path needtype vt v _whence]
-  (let [vs (if (nil? v) "no value" (stringify v))]
+  (let [novalue (or (nil? v) (identical? v NOARG))
+        vs (if novalue "no value" (stringify v))]
     (str "Expected "
          (if (> (size path) 1) (str "field " (pathify path 1) " to be ") "")
          (str needtype)
          ", but found "
-         (if (some? v) (str (typename vt) S-VIZ) "")
+         (if novalue "" (str (typename vt) S-VIZ))
          vs ".")))
 
 ;; ---------------------------------------------------------------------------
@@ -1854,6 +1890,263 @@
       results)))
 
 ;; ---------------------------------------------------------------------------
+;; condense
+;; ---------------------------------------------------------------------------
+
+;; Code-point order, the order the format sorts symbols in. String.compareTo
+;; orders by code unit, which would put U+10000 before U+FFFF.
+(defn- condensecmp [^String a ^String b]
+  (let [na (.length a) nb (.length b)]
+    (loop [i 0 j 0]
+      (if (and (< i na) (< j nb))
+        (let [ca (.codePointAt a (int i)) cb (.codePointAt b (int j))]
+          (if (== ca cb)
+            (recur (+ i (Character/charCount ca)) (+ j (Character/charCount cb)))
+            (if (< ca cb) -1 1)))
+        (compare (- na i) (- nb j))))))
+
+;; The version has to match, not merely be a number: a later format read with
+;; this one's schema would decode wrongly without failing.
+(defn iscondensed
+  ([] false)
+  ([val]
+   (and (ismap val)
+        (let [v (_lookup val S-condense)] (and (number? v) (== v CONDENSE_VERSION)))
+        (islist (_lookup val S-condsym))
+        (islist (_lookup val S-condnode))
+        (number? (_lookup val S-condroot)))))
+
+(defn- condensecollect [val ^java.util.Set acc]
+  (cond
+    (ismap val) (doseq [k (map-keys val)]
+                  (.add acc (str k))
+                  (condensecollect (.get ^Map val k) acc))
+    (islist val) (doseq [x val] (condensecollect x acc))
+    (string? val) (.add acc val))
+  acc)
+
+;; An integral number keys as a long, so 1 and 1.0 share one node.
+(defn- condensenumkey [n]
+  (cond
+    (jdouble? n) (let [d (double n)]
+                   (if (and (== d (Math/rint d)) (< (Math/abs d) 9.0E18)) (long d) d))
+    (instance? Integer n) (long n)
+    :else n))
+
+;; Post-order, so a subtree is interned before its parent refers to it, and
+;; map pairs in ascending symbol id, so that a lookup can bisect them.
+(defn- condensebuild [val ^Map symid intern]
+  (cond
+    (ismap val)
+    (let [enc (alist-of [CONDENSE_MAP])]
+      (doseq [k (sort condensecmp (map str (map-keys val)))]
+        (.add enc (.get symid k))
+        (.add enc (condensebuild (.get ^Map val k) symid intern)))
+      (intern enc))
+
+    (islist val)
+    (let [enc (alist-of [CONDENSE_LIST])]
+      (doseq [x val] (.add enc (condensebuild x symid intern)))
+      (intern enc))
+
+    (string? val) (intern (alist-of [CONDENSE_STR (.get symid val)]))
+    (and (number? val) (not (jbool? val))) (intern (alist-of [CONDENSE_NUM val]))
+    (true? val) (intern (alist-of [CONDENSE_TRUE]))
+    (false? val) (intern (alist-of [CONDENSE_FALSE]))
+    :else (intern (alist-of [CONDENSE_NULL]))))
+
+(defn condense [val]
+  (let [sym (vec (sort condensecmp (condensecollect val (java.util.HashSet.))))
+        symid (java.util.HashMap.)
+        nodes (alist)
+        seen (java.util.HashMap.)
+        intern (fn [^List enc]
+                 (let [k (mapv condensenumkey enc)
+                       hit (.get seen k)]
+                   (if (some? hit)
+                     hit
+                     (let [idx (long (.size nodes))]
+                       (.add nodes enc)
+                       (.put seen k idx)
+                       idx))))]
+    (doseq [[i s] (map-indexed vector sym)] (.put symid s (long i)))
+    (let [root (condensebuild val symid intern)]
+      (doto (lhm)
+        (.put S-condense CONDENSE_VERSION)
+        (.put S-condsym (alist-of sym))
+        (.put S-condnode nodes)
+        (.put S-condroot root)))))
+
+;; The string form a key takes, as canonical's '' + key gives it.
+(defn- condensekey [key]
+  (cond
+    (string? key) key
+    (jdouble? key) (let [d (double key)]
+                     (if (and (== d (Math/rint d)) (< (Math/abs d) 1.0E15)) (str (long d)) (str d)))
+    :else (jsstr key)))
+
+(defn- condenseindex [idx]
+  (cond
+    (integer? idx) idx
+    (jdouble? idx) (let [d (double idx)]
+                     (when (and (== d (Math/rint d)) (< (Math/abs d) 2.0E9)) (long d)))
+    :else nil))
+
+(defn- condensefound [idx] (and (number? idx) (not (neg? idx))))
+
+(defn- condensesym [cd id]
+  (let [sym (_lookup cd S-condsym)
+        i (condenseindex id)]
+    (when (and (islist sym) (some? i) (<= 0 i) (< i (.size ^List sym)))
+      (.get ^List sym (int i)))))
+
+;; Node idx as the list of its encoding, or nil when there is no such node.
+(defn- condenseenc [cd idx]
+  (let [node (_lookup cd S-condnode)
+        i (condenseindex idx)]
+    (when (and (islist node) (some? i) (<= 0 i) (< i (.size ^List node)))
+      (let [enc (.get ^List node (int i))]
+        (cond
+          (islist enc) enc
+          (nil? enc) nil
+          :else (alist))))))
+
+(defn- condenseis [^List enc kind]
+  (let [k (when (pos? (.size enc)) (.get enc 0))]
+    (and (number? k) (== k kind))))
+
+(defn- condensesymid [cd ^String key]
+  (let [sym (_lookup cd S-condsym)]
+    (if-not (islist sym)
+      -1
+      (loop [lo 0 hi (dec (.size ^List sym))]
+        (if (<= lo hi)
+          (let [mid (quot (+ lo hi) 2)
+                s (.get ^List sym (int mid))]
+            (cond
+              (= s key) mid
+              (and (string? s) (neg? (condensecmp s key))) (recur (inc mid) hi)
+              :else (recur lo (dec mid))))
+          -1)))))
+
+(defn- condensechild [cd idx key]
+  (let [^List enc (condenseenc cd idx)]
+    (cond
+      (nil? enc) -1
+
+      (condenseis enc CONDENSE_MAP)
+      (let [symid (condensesymid cd (condensekey key))]
+        (if (neg? symid)
+          -1
+          (loop [lo 0 hi (dec (quot (dec (.size enc)) 2))]
+            (if (<= lo hi)
+              (let [mid (quot (+ lo hi) 2)
+                    k (.get enc (int (inc (* 2 mid))))]
+                (cond
+                  (and (number? k) (== k symid)) (.get enc (int (+ 2 (* 2 mid))))
+                  (and (number? k) (< k symid)) (recur (inc mid) hi)
+                  :else (recur lo (dec mid))))
+              -1))))
+
+      ;; Canonical integer keys only: getprop would also take "01" or " 1",
+      ;; and condensing must not change which value a path selects.
+      (condenseis enc CONDENSE_LIST)
+      (let [k (condensekey key)
+            i (if (re-matches #"0|[1-9][0-9]*" k)
+                (try (Long/parseLong k) (catch NumberFormatException _ Long/MAX_VALUE))
+                -1)]
+        (if (and (<= 0 i) (< i (dec (.size enc))))
+          (.get enc (int (inc i)))
+          -1))
+
+      :else -1)))
+
+;; Walk a path from node idx: the node index reached, or -1.
+(defn- condenseresolve [cd idx path]
+  (let [parts (cond
+                (islist path) (vec path)
+                (string? path) (if (= path S-MT) [] (vec (.split ^String path "\\." -1)))
+                (or (nil? path) (identical? path NOARG)) []
+                :else [(condensekey path)])]
+    (loop [at idx ps (seq parts)]
+      (cond
+        (nil? ps) at
+        (and (number? at) (neg? at)) -1
+        (= S-MT (first ps)) (recur at (next ps))
+        :else (recur (condensechild cd at (first ps)) (next ps))))))
+
+;; A fresh tree each call: no materialisation shares a container with another,
+;; even where the condensed form shares the node.
+(defn- condensematerialise [cd idx]
+  (letfn [(rebuild [i]
+            (when-let [^List enc (condenseenc cd i)]
+              (let [n (.size enc)]
+                (cond
+                  (condenseis enc CONDENSE_MAP)
+                  (let [out (lhm)]
+                    (doseq [j (range 1 n 2)]
+                      (.put out (condensekey (condensesym cd (.get enc (int j))))
+                            (rebuild (when (< (inc j) n) (.get enc (int (inc j)))))))
+                    out)
+
+                  (condenseis enc CONDENSE_LIST)
+                  (let [out (alist)]
+                    (doseq [j (range 1 n)] (.add out (rebuild (.get enc (int j)))))
+                    out)
+
+                  (condenseis enc CONDENSE_STR) (when (> n 1) (condensesym cd (.get enc 1)))
+                  (condenseis enc CONDENSE_NUM) (when (> n 1) (.get enc 1))
+                  (condenseis enc CONDENSE_TRUE) true
+                  (condenseis enc CONDENSE_FALSE) false
+                  :else nil))))]
+    (when-not (and (number? idx) (neg? idx))
+      (rebuild idx))))
+
+(defn expand [cd]
+  (if (iscondensed cd) (condensematerialise cd (_lookup cd S-condroot)) cd))
+
+(defn- condensekeys [cd idx]
+  (let [^List enc (condenseenc cd idx)]
+    (cond
+      (nil? enc) []
+      (condenseis enc CONDENSE_MAP) (mapv #(condensesym cd (.get enc (int %))) (range 1 (.size enc) 2))
+      (condenseis enc CONDENSE_LIST) (mapv str (range (dec (.size enc))))
+      :else [])))
+
+(defn- condensesize [cd idx]
+  (let [^List enc (condenseenc cd idx)]
+    (cond
+      (nil? enc) 0
+      (condenseis enc CONDENSE_MAP) (quot (dec (.size enc)) 2)
+      (condenseis enc CONDENSE_LIST) (dec (.size enc))
+      :else 0)))
+
+;; A cursor, as a map of closures: :get, :keys, :has and :at take an optional
+;; path, the rest take nothing. :ref hands out ONE shared materialisation per
+;; node, through a memo every view reached by :at shares; mutating it changes
+;; what every other :ref of that node sees.
+(defn condenseview
+  ([cd] (condenseview cd nil nil))
+  ([cd idx] (condenseview cd idx nil))
+  ([cd idx memo]
+   (let [start (if (nil? idx) (if (iscondensed cd) (_lookup cd S-condroot) -1) idx)
+         ^Map refmemo (if (nil? memo) (java.util.HashMap.) memo)
+         walkto (fn [path] (condenseresolve cd start path))
+         pathfn (fn [f] (fn ([] (f nil)) ([path] (f path))))]
+     {:get (pathfn #(condensematerialise cd (walkto %)))
+      :keys (pathfn #(condensekeys cd (walkto %)))
+      :has (pathfn #(condensefound (walkto %)))
+      :at (pathfn #(condenseview cd (walkto %) refmemo))
+      :value (fn [] (condensematerialise cd start))
+      :size (fn [] (condensesize cd start))
+      :exists (fn [] (condensefound start))
+      :ref (fn []
+             (let [k (condensekey start)]
+               (when-not (.containsKey refmemo k)
+                 (.put refmemo k (condensematerialise cd start)))
+               (.get refmemo k)))})))
+
+;; ---------------------------------------------------------------------------
 ;; JSON builders
 ;; ---------------------------------------------------------------------------
 
@@ -1886,4 +2179,5 @@
    :re_compile re_compile :re_find re_find :re_find_all re_find_all
    :re_replace re_replace :re_test re_test :re_escape re_escape
    :SKIP SKIP :DELETE DELETE :tn tn
-   :checkPlacement checkPlacement :injectorArgs injectorArgs :injectChild injectChild})
+   :checkPlacement checkPlacement :injectorArgs injectorArgs :injectChild injectChild
+   :condense condense :condenseview condenseview :expand expand :iscondensed iscondensed})
