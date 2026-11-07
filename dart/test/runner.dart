@@ -642,15 +642,18 @@ void runCondenseLocal() {
     ];
   });
 
-  // This port's getprop reads "01", " 1", "+1" and "-0" as list indexes where
-  // canonical does not, so the misses are asserted directly.
+  // A plain list read selects nothing for these, so a condensed one must not.
   checks('condense-list-keys-are-canonical-integers', () {
-    final c = s.condense(m([
+    final plain = m([
       'l', l([10, 20])
-    ]));
+    ]);
+    final c = s.condense(plain);
     return [
       for (final k in ['01', '1e0', ' 1', '+1', '1.0', '-0'])
-        ['"$k" misses', s.getpath(c, ['l', k]) == null],
+        [
+          '"$k" reads as the plain one',
+          s.getpath(c, ['l', k]) == s.getpath(plain, ['l', k])
+        ],
       ['"1" reads', s.getpath(c, ['l', '1']) == 20],
     ];
   });

@@ -172,6 +172,16 @@ int? _toInt(dynamic k) {
   return null;
 }
 
+final _R_LIST_INDEX = RegExp(r'^(0|[1-9][0-9]*)$');
+
+// A list read hits only a canonical index, as a JavaScript array does: "01",
+// "+1", " 1" and "-0" hit nothing. Writes coerce with _toInt instead.
+int? _listIndex(dynamic key) {
+  if (key is int) return key < 0 ? null : key;
+  final k = jsString(key);
+  return _R_LIST_INDEX.hasMatch(k) ? int.tryParse(k) : null;
+}
+
 int _clz32(int n0) {
   var n = n0 & 0xFFFFFFFF;
   if (n == 0) return 32;
@@ -270,7 +280,7 @@ dynamic getprop(dynamic val, dynamic key, [dynamic alt]) {
     var sk = _mapKey(key);
     if (val.containsKey(sk)) out = val[sk];
   } else if (val is List) {
-    var ki = _toInt(key);
+    var ki = _listIndex(key);
     if (ki != null && ki >= 0 && ki < val.length) out = val[ki];
   }
   if (out == null || identical(out, _noarg)) return alt;
@@ -284,7 +294,7 @@ dynamic _lookup(dynamic val, dynamic key) {
     return val.containsKey(sk) ? val[sk] : null;
   }
   if (val is List) {
-    var ki = _toInt(key);
+    var ki = _listIndex(key);
     return (ki != null && ki >= 0 && ki < val.length) ? val[ki] : null;
   }
   return null;
@@ -299,11 +309,12 @@ dynamic getelem(dynamic val, dynamic key, [dynamic alt]) {
   dynamic out;
   if (val is List) {
     var ks = key is String ? key : (key is num ? numToString(key) : '');
-    if (_R_INTKEY.hasMatch(ks)) {
+    var nk0 = _R_INTKEY.hasMatch(ks) ? int.tryParse(ks) : null;
+    if (nk0 != null) {
       var len = val.length;
-      var nk0 = int.parse(ks);
-      var nk = nk0 < 0 ? len + nk0 : nk0;
-      if (nk >= 0 && nk < len) out = val[nk];
+      // Only a negative key counts from the end; any other reads as getprop.
+      var nk = nk0 < 0 ? len + nk0 : _listIndex(ks);
+      if (nk != null && nk >= 0 && nk < len) out = val[nk];
     }
   }
   if (out == null) {
@@ -315,7 +326,7 @@ dynamic getelem(dynamic val, dynamic key, [dynamic alt]) {
 dynamic _getpropRaw(dynamic v, String k) {
   if (v is Map) return v.containsKey(k) ? v[k] : null;
   if (v is List) {
-    var i = int.tryParse(k);
+    var i = _listIndex(k);
     return (i != null && i >= 0 && i < v.length) ? v[i] : null;
   }
   return null;
@@ -1941,7 +1952,8 @@ dynamic _validateType(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
   var typev0 = idx >= 0 ? (1 << (31 - idx)) : 0;
   var typev = tname == S_nil ? (typev0 | T_null) : typev0;
   var out = _lookup(inj.dparent, inj.key);
-  var t = typify(out);
+  // One null: a missing field types as no value, which $NULL refuses.
+  var t = _has(inj.dparent, inj.key) ? typify(out) : T_noval;
   if ((t & typev) == 0) {
     _pushErr(inj, _invalidTypeMsg(inj.path, tname, t, out, 'V1001'));
     return null;
@@ -2390,7 +2402,7 @@ bool _unknownname(String name, dynamic store) {
 bool _has(dynamic val, dynamic key) {
   if (val is Map) return val.containsKey(_mapKey(key));
   if (val is List) {
-    var ki = _toInt(key);
+    var ki = _listIndex(key);
     return ki != null && ki >= 0 && ki < val.length;
   }
   return false;
@@ -2717,8 +2729,6 @@ const _S_condroot = 'root';
 const _CONDENSE_IMMUTABLE = 'struct: condensed structures are immutable - '
     'expand() first, then modify the copy';
 
-final _R_CONDENSE_INDEX = RegExp(r'^(0|[1-9][0-9]*)$');
-
 // Code-point order, the order the format sorts symbols in. String.compareTo
 // orders by code unit, which would put U+10000 before U+FFFF.
 int _condenseCmp(String a, String b) {
@@ -2898,11 +2908,10 @@ dynamic _condenseChild(dynamic cond, dynamic idx, dynamic key) {
     return -1;
   }
 
-  // Canonical integer keys only: getprop would also take "01" or " 1", and
-  // condensing must not change which value a path selects.
+  // The plain list read's rule: condensing must not change which value a path
+  // selects.
   if (kind == _CONDENSE_LIST) {
-    final k = jsString(key);
-    final i = _R_CONDENSE_INDEX.hasMatch(k) ? int.tryParse(k) : null;
+    final i = _listIndex(key);
     return i != null && i < enc.length - 1 ? enc[1 + i] : -1;
   }
 
