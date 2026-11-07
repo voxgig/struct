@@ -87,6 +87,7 @@ public class Struct {
   private static final Pattern R_TRANSFORM_NAME = Pattern.compile("`\\$([A-Z]+)`");
   private static final Pattern R_DOUBLE_DOLLAR = Pattern.compile("\\$\\$");
   private static final Pattern R_CLONE_REF = Pattern.compile("^`\\$REF:([0-9]+)`$");
+  private static final Pattern R_LIST_INDEX = Pattern.compile("^(0|[1-9][0-9]*)$");
 
   /**
    * Sentinel returned from a transform/inject step to omit the current key.
@@ -363,16 +364,14 @@ public class Struct {
       return alt;
     }
 
-    Integer idx = parseIntKey(key);
-    if (idx == null || !isIntegerKeyString(key)) {
-      if (alt instanceof Function<?, ?> f) {
-        return ((Function<Object, Object>) f).apply(null);
+    String k = jsString(key);
+    long idx = listIndex(k);
+    if (idx < 0 && isIntegerKeyString(k)) {
+      // A negative key counts from the end.
+      Integer n = parseIntKey(k);
+      if (n != null && n < 0) {
+        idx = list.size() + (long) n;
       }
-      return alt;
-    }
-
-    if (idx < 0) {
-      idx = list.size() + idx;
     }
     if (idx < 0 || idx >= list.size()) {
       if (alt instanceof Function<?, ?> f) {
@@ -381,7 +380,7 @@ public class Struct {
       return alt;
     }
 
-    Object out = list.get(idx);
+    Object out = list.get((int) idx);
     // Group A null-unification: a JSON null (or absent) slot counts as "no
     // value" — return the alt. Mirrors canonical TS getelem `if (null == out)`.
     if (out == null || out == UNDEF) {
@@ -410,9 +409,9 @@ public class Struct {
         out = ((Map<Object, Object>) m).get(sk);
       }
     } else if (val instanceof List<?> l) {
-      Integer idx = parseIntKey(key);
-      if (idx != null && idx >= 0 && idx < l.size()) {
-        out = l.get(idx);
+      long idx = listIndex(key);
+      if (0 <= idx && idx < l.size()) {
+        out = l.get((int) idx);
       }
     }
 
@@ -443,17 +442,20 @@ public class Struct {
       return m.containsKey(sk) ? ((Map<Object, Object>) m).get(sk) : UNDEF;
     }
     if (val instanceof List<?> l) {
-      Integer idx = parseIntKey(key);
-      if (idx == null) {
-        return UNDEF;
-      }
-      int i = idx < 0 ? l.size() + idx : idx;
-      if (i < 0 || i >= l.size()) {
-        return UNDEF;
-      }
-      return l.get(i);
+      long idx = listIndex(key);
+      return 0 <= idx && idx < l.size() ? l.get((int) idx) : UNDEF;
     }
     return UNDEF;
+  }
+
+  // The index a list read takes key to, or -1: only a canonical index, as a
+  // JavaScript array reads one ("01", "+1", "1.0" and "-0" are not).
+  private static long listIndex(Object key) {
+    String k = jsString(key);
+    if (!R_LIST_INDEX.matcher(k).matches()) {
+      return -1;
+    }
+    return 18 < k.length() ? Long.MAX_VALUE : Long.parseLong(k);
   }
 
   public static Object setprop(Object parent, Object key, Object val) {
@@ -3471,8 +3473,6 @@ public class Struct {
   private static final String CONDENSE_IMMUTABLE =
       "struct: condensed structures are immutable - expand() first, then modify the copy";
 
-  private static final Pattern R_CONDENSE_INDEX = Pattern.compile("^(0|[1-9][0-9]*)$");
-
   // Code point order: String.compareTo uses UTF-16 code unit order, which
   // puts U+FFFF after a supplementary character.
   private static int condenseCmp(String a, String b) {
@@ -3694,14 +3694,9 @@ public class Struct {
     }
 
     if (condenseIs(enc, CONDENSE_LIST)) {
-      // Canonical integer keys only: "01", "+1", "1.0" and "-0" all miss.
-      String k = condenseKey(key);
-      if (!R_CONDENSE_INDEX.matcher(k).matches()) {
-        return -1;
-      }
       List<?> items = (List<?>) enc;
-      long i = 18 < k.length() ? Long.MAX_VALUE : Long.parseLong(k);
-      if (i >= items.size() - 1) {
+      long i = listIndex(key);
+      if (0 > i || i >= items.size() - 1) {
         return -1;
       }
       return condenseIndex(items.get(1 + (int) i));
