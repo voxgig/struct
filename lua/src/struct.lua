@@ -501,6 +501,21 @@ local function typify(value)
   return T_any
 end
 
+-- The 0-based index a key reads in a list, or nil. As in a JavaScript array
+-- only a canonical integer reads: "01", "+1", " 1", "1.0", "-0" and 1.5 do not.
+local function listindex(key)
+  local i
+  if type(key) == S_number then
+    i = math.tointeger(key)
+  elseif type(key) == S_string and ("0" == key or key:match("^[1-9][0-9]*$")) then
+    i = math.tointeger(tonumber(key))
+  end
+  if nil ~= i and 0 <= i then
+    return i
+  end
+  return nil
+end
+
 -- Safely get a property of a node. Nil arguments return nil.
 -- If the key is not found, return the alternative value, if any.
 -- @param val (any) The parent object/table
@@ -517,25 +532,21 @@ local function getprop(val, key, alt)
 
   -- Handle tables (maps and arrays in Lua)
   if type(val) == "table" then
-    -- Convert key to string if it's a number
-    local lookup_key = key
-    if type(key) == "number" then
-      -- Lua arrays are 1-based
-      lookup_key = tostring(math.floor(key))
-    elseif type(key) ~= "string" then
-      -- Convert other types to string
-      lookup_key = tostring(key)
-    end
     if islist(val) then
-      -- Lua arrays are 1-based, so we need to adjust the index
-      for i = 1, #val do
-        local zero_based_index = i - 1
-        if lookup_key == tostring(zero_based_index) then
-          out = val[i]
-          break
-        end
+      local i = listindex(key)
+      if nil ~= i then
+        -- Lua arrays are 1-based
+        out = val[i + 1]
       end
     else
+      -- Convert key to string if it's a number
+      local lookup_key = key
+      if type(key) == "number" then
+        lookup_key = tostring(math.floor(key))
+      elseif type(key) ~= "string" then
+        -- Convert other types to string
+        lookup_key = tostring(key)
+      end
       out = val[lookup_key]
     end
   end
@@ -559,11 +570,15 @@ local function getelem(val, key, alt)
   end
 
   if islist(val) then
-    local nkey = tonumber(key)
-    if nkey ~= nil and nkey == math.floor(nkey) then
-      if nkey < 0 then
-        nkey = #val + nkey
+    local nkey = listindex(key)
+    if nil == nkey and (type(key) == S_number or tostring(key):match("^%-[0-9]+$")) then
+      -- Only a negative integer counts from the end; "-0" and "01" read as getprop does.
+      local neg = math.tointeger(tonumber(key))
+      if nil ~= neg and neg < 0 then
+        nkey = #val + neg
       end
+    end
+    if nil ~= nkey then
       -- Convert 0-based to 1-based
       out = val[nkey + 1]
     end
@@ -1675,7 +1690,7 @@ local function merge(val, maxdepth)
         end
 
         -- walk writes this back into the override, so it is the override's
-        -- own child. Read directly: getprop scans a list for each index.
+        -- own child.
         if islist(parent) then
           return parent[tonumber(key) + 1]
         end
@@ -2808,7 +2823,8 @@ local function validate_TYPE(inj, _val, ref)
 
   local out = getprop(inj.dparent, inj.key)
 
-  local t = typify(out)
+  -- A Lua node holds no null, so a nil slot below the root is a missing value.
+  local t = typify(nil == out and 1 < #inj.path and NOVAL or out)
   if 0 == (t & typev) then
     table.insert(inj.errs, _invalidTypeMsg(inj.path, tname, t, out, "V1001"))
     return NONE
@@ -3988,12 +4004,7 @@ local function condenseChild(cond, idx, key)
   end
 
   if CONDENSE_LIST == enc[1] then
-    -- Canonical integer keys only: an ordinary list lookup treats "01",
-    -- "1e0", " 1" and "+1" as absent, so a condensed one must too.
-    if "0" ~= k and not k:match("^[1-9][0-9]*$") then
-      return -1
-    end
-    local i = math.tointeger(tonumber(k))
+    local i = listindex(k)
     if nil == i or i >= #enc - 1 then
       return -1
     end

@@ -564,7 +564,7 @@ describe("struct", function()
     runsetflags(
       dropentries(minorSpec.getprop, {
         -- A null `alt`, which getprop must hand straight back. The port
-        -- receives it as nil and returns nil, read as absent. The other 52
+        -- receives it as nil and returns nil, read as absent. The other
         -- entries - every missing-key case among them - pass.
         { at = 51, why = "getprop with a null alt", is = function(entry)
           return "x" == entryin(entry, "key") and isnull(entryin(entry, "alt"))
