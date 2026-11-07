@@ -271,10 +271,12 @@ object Runner {
     }
 
     runLocal("condense-list-keys-are-canonical-integers") {
-      val c = condense(jm(VStr("l"), jt(VNum(10), VNum(20))))
-      // Pinned to canonical rather than compared with a plain getpath: this
-      // port's plain list lookup also reads "01", "+1" and "-0" as indexes.
-      Seq("01", "1e0", " 1", "+1", "1.0", "-0").forall(k => getpath(c, jt(VStr("l"), VStr(k))) == Noval) &&
+      val plain = jm(VStr("l"), jt(VNum(10), VNum(20)))
+      val c = condense(plain)
+      // A plain list read misses each of these, and condensing must not change
+      // which value a path selects.
+      Seq("01", "1e0", " 1", "+1", "1.0", "-0").forall(k =>
+        getpath(c, jt(VStr("l"), VStr(k))) == getpath(plain, jt(VStr("l"), VStr(k)))) &&
         getpath(c, jt(VStr("l"), VStr("1"))) == VNum(20)
     }
 

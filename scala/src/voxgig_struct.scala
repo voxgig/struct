@@ -252,12 +252,20 @@ object struct {
   private def isIntKey(s: String): Boolean =
     s.nonEmpty && s.forall(c => (c >= '0' && c <= '9') || c == '-')
 
-  private def listIndex(b: ArrayBuffer[Value], key: Value): Value = {
-    val ks = key match { case VStr(s) => s; case VNum(n) => numToString(n); case _ => "" }
-    try {
-      val i = ks.toInt
-      if (i >= 0 && i < b.length) b(i) else Noval
-    } catch { case _: NumberFormatException => Noval }
+  private val R_LIST_INDEX = java.util.regex.Pattern.compile("^(0|[1-9][0-9]*)$")
+
+  // The index a list read takes key to, or -1: only a canonical index, as a
+  // JavaScript array reads one ("01", "+1", "1.0" and "-0" are not).
+  private def listIndex(key: Value): Long = {
+    val k = jsString(key)
+    if (!R_LIST_INDEX.matcher(k).matches()) -1L
+    else if (k.length > 18) Long.MaxValue
+    else k.toLong
+  }
+
+  private def listGet(b: ArrayBuffer[Value], key: Value): Value = {
+    val i = listIndex(key)
+    if (i >= 0 && i < b.length) b(i.toInt) else Noval
   }
 
   def getprop(v: Value, key: Value, alt: Value = Noval): Value = {
@@ -265,7 +273,7 @@ object struct {
     else {
       val out = v match {
         case VMap(m) => omapGet(m, jsString(key)).getOrElse(Noval)
-        case VList(b) => listIndex(b, key)
+        case VList(b) => listGet(b, key)
         case _ => Noval
       }
       if (isNullish(out)) alt else out
@@ -277,7 +285,7 @@ object struct {
     if (isNoval(v) || isNoval(key)) Noval
     else v match {
       case VMap(m) => omapGet(m, jsString(key)).getOrElse(Noval)
-      case VList(b) => listIndex(b, key)
+      case VList(b) => listGet(b, key)
       case _ => Noval
     }
   }
@@ -293,13 +301,13 @@ object struct {
       var out: Value = Noval
       v match {
         case VList(b) =>
-          val ks = key match { case VStr(s) => s; case VNum(n) => numToString(n); case _ => "" }
-          if (isIntKey(ks)) {
-            val len = b.length
-            val nk0 = ks.toInt
-            val nk = if (nk0 < 0) len + nk0 else nk0
-            if (nk >= 0 && nk < len) out = b(nk)
-          }
+          val ks = jsString(key)
+          val ci = listIndex(key)
+          // A negative key counts from the end.
+          val nk =
+            if (ci >= 0 || !isIntKey(ks)) ci
+            else ks.toIntOption match { case Some(n) if n < 0 => b.length.toLong + n; case _ => -1L }
+          if (nk >= 0 && nk < b.length) out = b(nk.toInt)
         case _ =>
       }
       if (isNullish(out)) (alt match {
@@ -2020,8 +2028,6 @@ object struct {
   private val CONDENSE_IMMUTABLE =
     "struct: condensed structures are immutable - expand() first, then modify the copy"
 
-  private val R_CONDENSE_INDEX = java.util.regex.Pattern.compile("^(0|[1-9][0-9]*)$")
-
   // Code point order: String.compareTo uses UTF-16 code unit order, which
   // puts U+FFFF after a supplementary character.
   private def condenseCmp(a: String, b: String): Int = {
@@ -2156,11 +2162,8 @@ object struct {
         }
         -1
       case VList(items) if condenseIs(enc, CONDENSE_LIST) =>
-        // Canonical integer keys only: "01", "+1", "1.0" and "-0" all miss.
-        val k = jsString(key)
-        if (!R_CONDENSE_INDEX.matcher(k).matches()) return -1
-        val i = if (k.length > 18) Long.MaxValue else k.toLong
-        if (i >= items.length - 1) -1 else condenseIndex(items(1 + i.toInt))
+        val i = listIndex(key)
+        if (i < 0 || i >= items.length - 1) -1 else condenseIndex(items(1 + i.toInt))
       case _ => -1
     }
   }
