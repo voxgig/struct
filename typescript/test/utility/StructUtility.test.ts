@@ -214,6 +214,16 @@ describe('StructUtility', async () => {
     )
   })
 
+  test('condense-astral-keys-resolve', () => {
+    const s = struct
+    // Code-unit order puts the astral key first; the stored pairs must not.
+    const src = { 'Ａ': 1, '\u{1F600}': 2 }
+    const c = s.condense(src)
+    equal(s.getpath(c, ['\u{1F600}']), 2)
+    equal(s.getpath(c, ['Ａ']), 1)
+    equal(s.condenseview(c).get('\u{1F600}'), 2)
+  })
+
   test('condense-invalid-key-mutations-stay-no-ops', () => {
     // Both helpers define an invalid key as ignored, so a call that cannot
     // write must not start throwing just because the store is condensed.
