@@ -95,12 +95,12 @@ final class CondenseTests: XCTestCase {
     XCTAssertEqual(getpath(condense(store), .string("x"), inj), .int(1))
   }
 
-  // Canonical selects nothing for these. This port's plain list read still
-  // parses "01", "+1" and "-0" as indexes, so compare with canonical instead.
+  // A plain list read selects nothing for these, so a condensed one must not.
   func testListKeysAreCanonicalIntegers() throws {
-    let c = condense(try JSON.parse(#"{"l":[10,20]}"#))
+    let plain = try JSON.parse(#"{"l":[10,20]}"#)
+    let c = condense(plain)
     for k in ["01", "1e0", " 1", "+1", "1.0", "-0"] {
-      XCTAssertEqual(getpath(c, segs("l", k)), .noval, "list key \(k)")
+      XCTAssertEqual(getpath(c, segs("l", k)), getpath(plain, segs("l", k)), "list key \(k)")
     }
     XCTAssertEqual(getpath(c, segs("l", "1")), .int(20))
   }

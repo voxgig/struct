@@ -176,21 +176,43 @@ public func strkey(_ key: Value) -> String {
   }
 }
 
+// MARK: - list index
+
+// JS String(key) for a key that can name a list element.
+private func indexText(_ key: Value) -> String? {
+  switch key {
+  case .string(let s): return s
+  case .int(let n): return String(n)
+  case .double(let d): return JSON.formatDouble(d)
+  default: return nil
+  }
+}
+
+// "0", or digits with no leading zero: the only keys a JavaScript array
+// reads as an index, so "01", "+1", " 1" and "-0" name no element.
+func isListIndex(_ key: String) -> Bool {
+  let digits = Array(key.utf8)
+  guard let first = digits.first else { return false }
+  if UInt8(ascii: "0") == first { return 1 == digits.count }
+  return digits.allSatisfy { UInt8(ascii: "0") <= $0 && $0 <= UInt8(ascii: "9") }
+}
+
+// The element a list read selects. Writes coerce a key more loosely.
+func listIndex(_ key: Value) -> Int? {
+  if case .int(let n) = key { return 0 <= n ? Int(exactly: n) : nil }
+  guard let text = indexText(key), isListIndex(text) else { return nil }
+  return Int(text)
+}
+
 // MARK: - getelem
 
 public func getelem(_ val: Value, _ key: Value, _ alt: Value = .noval) -> Value {
-  guard case .list(let l) = val else { return alt }
-  var k: Int? = nil
-  switch key {
-  case .int(let n): k = Int(n)
-  case .double(let d): k = Int(d)
-  case .string(let s): k = Int(s)
-  default: break
-  }
-  guard var idx = k else { return alt }
-  if idx < 0 { idx = l.items.count + idx }
-  guard idx >= 0, idx < l.items.count else { return alt }
-  let v = l.items[idx]
+  guard case .list(let l) = val, let text = indexText(key) else { return alt }
+  var idx = isListIndex(text) ? Int(text) : nil
+  // Only a negative key counts from the end; any other reads as getprop does.
+  if let n = Int(text), n < 0 { idx = l.items.count + n }
+  guard let i = idx, i >= 0, i < l.items.count else { return alt }
+  let v = l.items[i]
   // Group A: a null (or absent) slot counts as "no value" → alt.
   return (v.isNoval || v.isNull) ? alt : v
 }
@@ -200,7 +222,9 @@ public func getelem(_ val: Value, _ key: Value, _ alt: Value = .noval) -> Value 
 public func getprop(_ val: Value, _ key: Value, _ alt: Value = .noval) -> Value {
   switch val {
   case .list(let l):
-    return getelem(.list(l), key, alt)
+    guard let i = listIndex(key), i < l.items.count else { return alt }
+    let v = l.items[i]
+    return (v.isNoval || v.isNull) ? alt : v
   case .map(let m):
     let k = strkey(key)
     if k.isEmpty { return alt }
@@ -216,17 +240,8 @@ public func getprop(_ val: Value, _ key: Value, _ alt: Value = .noval) -> Value 
 public func lookup(_ val: Value, _ key: Value) -> Value {
   switch val {
   case .list(let l):
-    var k: Int? = nil
-    switch key {
-    case .int(let n): k = Int(n)
-    case .double(let d): k = Int(d)
-    case .string(let s): k = Int(s)
-    default: break
-    }
-    guard var idx = k else { return .noval }
-    if idx < 0 { idx = l.items.count + idx }
-    guard idx >= 0, idx < l.items.count else { return .noval }
-    return l.items[idx]
+    guard let i = listIndex(key), i < l.items.count else { return .noval }
+    return l.items[i]
   case .map(let m):
     let k = strkey(key)
     if k.isEmpty { return .noval }
@@ -335,17 +350,8 @@ public func keysof(_ v: Value) -> [String] {
 public func haskey(_ v: Value, _ key: Value) -> Bool {
   switch v {
   case .list(let l):
-    var k: Int? = nil
-    switch key {
-    case .int(let n): k = Int(n)
-    case .double(let d): k = Int(d)
-    case .string(let s): k = Int(s)
-    default: break
-    }
-    guard var idx = k else { return false }
-    if idx < 0 { idx = l.items.count + idx }
-    guard idx >= 0, idx < l.items.count else { return false }
-    let v = l.items[idx]
+    guard let i = listIndex(key), i < l.items.count else { return false }
+    let v = l.items[i]
     return !(v.isNoval || v.isNull)
   case .map(let m):
     let k = strkey(key)

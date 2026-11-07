@@ -250,15 +250,6 @@ private func condenseSymId(_ cond: Value, _ key: String) -> Int {
   return -1
 }
 
-// Canonical integer keys only: "01", "1e0", " 1", "+1" and "-0" select
-// nothing in a canonical list read, so they must not select here either.
-private func condenseIsIndex(_ key: String) -> Bool {
-  let digits = Array(key.utf8)
-  guard let first = digits.first else { return false }
-  if UInt8(ascii: "0") == first { return 1 == digits.count }
-  return digits.allSatisfy { UInt8(ascii: "0") <= $0 && $0 <= UInt8(ascii: "9") }
-}
-
 private func condenseChild(_ cond: Value, _ idx: Int, _ key: String) -> Int {
   guard let enc = condenseEnc(cond, idx), let first = enc.first else { return -1 }
   let kind = condenseInt(first)
@@ -278,8 +269,10 @@ private func condenseChild(_ cond: Value, _ idx: Int, _ key: String) -> Int {
     return -1
   }
 
+  // The plain list read's rule: condensing must not change which value a path
+  // selects.
   if CONDENSE_LIST == kind {
-    guard condenseIsIndex(key), let i = Int(key), i < enc.count - 1 else { return -1 }
+    guard isListIndex(key), let i = Int(key), i < enc.count - 1 else { return -1 }
     return condenseInt(enc[1 + i]) ?? -1
   }
 
