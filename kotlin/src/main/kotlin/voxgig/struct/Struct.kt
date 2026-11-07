@@ -423,6 +423,7 @@ object Struct {
         value: Any?,
     ): Any? {
         if (!iskey(key)) return parent
+        if (iscondensed(parent)) throw IllegalArgumentException(CONDENSE_IMMUTABLE)
         return when (parent) {
             is MutableMap<*, *> -> {
                 (parent as MutableMap<String, Any?>)[strkey(key)] = value
@@ -448,6 +449,7 @@ object Struct {
         key: Any?,
     ): Any? {
         if (!iskey(key)) return parent
+        if (iscondensed(parent)) throw IllegalArgumentException(CONDENSE_IMMUTABLE)
         return when (parent) {
             is MutableMap<*, *> -> {
                 (parent as MutableMap<String, Any?>).remove(strkey(key))
@@ -964,6 +966,7 @@ object Struct {
         path: Any?,
         value: Any?,
     ): Any? {
+        if (iscondensed(store)) throw IllegalArgumentException(CONDENSE_IMMUTABLE)
         val parts: MutableList<Any?> =
             when (path) {
                 is List<*> -> path.toMutableList()
@@ -1123,6 +1126,21 @@ object Struct {
         path: Any?,
         inj: Injection?,
     ): Any? {
+        val parts = pathParts(path)
+        var target = store
+
+        // A condensed store answers as the node it was built from, touching only
+        // the nodes on the path. A base changes what the path resolves against,
+        // so that read needs the materialised store.
+        if (parts != null && iscondensed(store)) {
+            if (inj?.base == null) {
+                val found = condenseMaterialise(store, condenseResolve(store, condenseRoot(store), parts))
+                // Group A: a stored null reads as absent, as it does through getprop.
+                return found ?: UNDEF
+            }
+            target = expand(store)
+        }
+
         val view: MutableMap<String, Any?>? =
             if (inj == null) {
                 null
@@ -1135,10 +1153,9 @@ object Struct {
                     it["key"] = inj.key
                 }
             }
-        val parts = pathParts(path)
-        var value = getpathInner(store, path, parts, view)
+        var value = getpathInner(target, path, parts, view)
         if (inj?.handler != null) {
-            value = inj.handler!!.apply(inj, value, pathifyForHandler(path), store)
+            value = inj.handler!!.apply(inj, value, pathifyForHandler(path), target)
         }
         return value
     }
@@ -2888,5 +2905,402 @@ object Struct {
             if (errs.isEmpty()) results.add(child)
         }
         return results
+    }
+
+    // ===========================================================================
+    // Condense
+    // ===========================================================================
+
+    private const val CONDENSE_VERSION = 1
+
+    private const val CONDENSE_MAP = 0
+    private const val CONDENSE_LIST = 1
+    private const val CONDENSE_STR = 2
+    private const val CONDENSE_NUM = 3
+    private const val CONDENSE_TRUE = 4
+    private const val CONDENSE_FALSE = 5
+    private const val CONDENSE_NULL = 6
+
+    private const val S_CONDENSE = "\$condense"
+    private const val S_CONDSYM = "sym"
+    private const val S_CONDNODE = "node"
+    private const val S_CONDROOT = "root"
+
+    private const val CONDENSE_IMMUTABLE =
+        "struct: condensed structures are immutable - expand() first, then modify the copy"
+
+    private val R_CONDENSE_INDEX = Pattern.compile("^(0|[1-9][0-9]*)$")
+
+    // Code point order: String.compareTo uses UTF-16 code unit order, which
+    // puts U+FFFF after a supplementary character.
+    private fun condenseCmp(
+        a: String,
+        b: String,
+    ): Int {
+        var i = 0
+        var j = 0
+        while (i < a.length && j < b.length) {
+            val ca = a.codePointAt(i)
+            val cb = b.codePointAt(j)
+            if (ca != cb) return if (ca < cb) -1 else 1
+            i += Character.charCount(ca)
+            j += Character.charCount(cb)
+        }
+        return a.length - i - (b.length - j)
+    }
+
+    fun iscondensed(value: Any?): Boolean {
+        // The version must MATCH, not merely be numeric: a future profile would
+        // otherwise be decoded under this one's schema.
+        if (value !is Map<*, *>) return false
+        val version = value[S_CONDENSE]
+        return version is Number &&
+            CONDENSE_VERSION.toDouble() == version.toDouble() &&
+            value[S_CONDSYM] is List<*> &&
+            value[S_CONDNODE] is List<*> &&
+            value[S_CONDROOT] is Number
+    }
+
+    /**
+     * Condense any JSON-shaped node. Pure: the same input always produces a
+     * byte-identical result, on every port.
+     */
+    fun condense(value: Any?): MutableMap<String, Any?> {
+        val symset = HashSet<String>()
+        condenseCollect(value, symset)
+
+        val sym = symset.sortedWith { a, b -> condenseCmp(a, b) }
+        val symid = HashMap<String, Int>()
+        sym.forEachIndexed { i, s -> symid[s] = i }
+
+        val node = mutableListOf<Any?>()
+        val root = condenseBuild(value, symid, node, HashMap())
+
+        return linkedMapOf(
+            S_CONDENSE to CONDENSE_VERSION,
+            S_CONDSYM to sym.toMutableList<Any?>(),
+            S_CONDNODE to node,
+            S_CONDROOT to root,
+        )
+    }
+
+    private fun condenseCollect(
+        n: Any?,
+        symset: MutableSet<String>,
+    ) {
+        when (n) {
+            is Map<*, *> ->
+                for (key in keysof(n)) {
+                    symset.add(key)
+                    condenseCollect(n[key], symset)
+                }
+            is List<*> -> for (item in n) condenseCollect(item, symset)
+            is String -> symset.add(n)
+        }
+    }
+
+    // Post-order, so identical subtrees are already interned when a parent
+    // refers to them.
+    private fun condenseBuild(
+        n: Any?,
+        symid: Map<String, Int>,
+        node: MutableList<Any?>,
+        seen: MutableMap<String, Int>,
+    ): Int {
+        val enc = mutableListOf<Any?>()
+        when {
+            n is Map<*, *> -> {
+                enc.add(CONDENSE_MAP)
+                // Code-point order, not keysof's code-unit order, so the key ids ascend.
+                for (key in keysof(n).sortedWith { a, b -> condenseCmp(a, b) }) {
+                    enc.add(symid[key])
+                    enc.add(condenseBuild(n[key], symid, node, seen))
+                }
+            }
+            n is List<*> -> {
+                enc.add(CONDENSE_LIST)
+                for (item in n) enc.add(condenseBuild(item, symid, node, seen))
+            }
+            n is String -> {
+                enc.add(CONDENSE_STR)
+                enc.add(symid[n])
+            }
+            n is Number -> {
+                enc.add(CONDENSE_NUM)
+                enc.add(n)
+            }
+            true == n -> enc.add(CONDENSE_TRUE)
+            false == n -> enc.add(CONDENSE_FALSE)
+            else -> enc.add(CONDENSE_NULL)
+        }
+        val enckey = enc.joinToString(",") { condenseNumKey(it as Number) }
+        return seen.getOrPut(enckey) {
+            node.add(enc)
+            node.size - 1
+        }
+    }
+
+    // By value, so an integer and a decimal that are equal share one node.
+    private fun condenseNumKey(n: Number): String {
+        if (n is Int || n is Long || n is Short || n is Byte) return n.toLong().toString()
+        val d = n.toDouble()
+        return if (floor(d) == d && Math.abs(d) < Long.MAX_VALUE) d.toLong().toString() else d.toString()
+    }
+
+    private fun condenseList(
+        cond: Any?,
+        name: String,
+    ): List<*> = (cond as? Map<*, *>)?.get(name) as? List<*> ?: emptyList<Any?>()
+
+    private fun condenseAt(
+        list: List<*>,
+        i: Int,
+    ): Any? = if (0 <= i && i < list.size) list[i] else UNDEF
+
+    // A stored index: -1 when negative, past every node when not an integer.
+    private fun condenseIndex(n: Any?): Int {
+        if (n !is Number) return -1
+        val d = n.toDouble()
+        if (d.isNaN() || d < 0) return -1
+        return if (floor(d) == d && d < Int.MAX_VALUE) d.toInt() else Int.MAX_VALUE
+    }
+
+    private fun condenseRoot(cond: Any?): Int = condenseIndex((cond as Map<*, *>)[S_CONDROOT])
+
+    private fun condenseEnc(
+        cond: Any?,
+        idx: Int,
+    ): Any? {
+        val enc = condenseAt(condenseList(cond, S_CONDNODE), idx)
+        return if (enc === UNDEF) null else enc
+    }
+
+    private fun condenseIs(
+        enc: Any?,
+        kind: Int,
+    ): Boolean {
+        val tag = (enc as? List<*>)?.firstOrNull()
+        return tag is Number && tag.toDouble() == kind.toDouble()
+    }
+
+    private fun condenseKey(key: Any?): String =
+        when {
+            key is String -> key
+            key === UNDEF -> "undefined"
+            else -> jsString(key)
+        }
+
+    // Bisects the sorted symbol table; -1 when the string occurs nowhere.
+    private fun condenseSymId(
+        cond: Any?,
+        key: String,
+    ): Int {
+        val sym = condenseList(cond, S_CONDSYM)
+        var lo = 0
+        var hi = sym.size - 1
+        while (lo <= hi) {
+            val mid = (lo + hi) ushr 1
+            val s = sym[mid]
+            if (key == s) return mid
+            if (0 > condenseCmp(condenseKey(s), key)) lo = mid + 1 else hi = mid - 1
+        }
+        return -1
+    }
+
+    // The node index of key inside node idx, or -1. Touches only this node.
+    private fun condenseChild(
+        cond: Any?,
+        idx: Int,
+        key: Any?,
+    ): Int {
+        val enc = condenseEnc(cond, idx) ?: return -1
+
+        if (condenseIs(enc, CONDENSE_MAP)) {
+            val symid = condenseSymId(cond, condenseKey(key))
+            if (0 > symid) return -1
+            // Pairs live at [1,2], [3,4], ... with keys ascending: bisect the pairs.
+            val pairs = enc as List<*>
+            var lo = 0
+            var hi = (pairs.size - 1) / 2 - 1
+            while (lo <= hi) {
+                val mid = (lo + hi) ushr 1
+                val k = (pairs[1 + mid * 2] as? Number)?.toDouble() ?: Double.NaN
+                if (k == symid.toDouble()) return condenseIndex(pairs[2 + mid * 2])
+                if (k < symid) lo = mid + 1 else hi = mid - 1
+            }
+            return -1
+        }
+
+        if (condenseIs(enc, CONDENSE_LIST)) {
+            // Canonical integer keys only: "01", "+1", "1.0" and "-0" all miss.
+            val k = condenseKey(key)
+            if (!R_CONDENSE_INDEX.matcher(k).matches()) return -1
+            val items = enc as List<*>
+            val i = if (18 < k.length) Long.MAX_VALUE else k.toLong()
+            if (i >= items.size - 1) return -1
+            return condenseIndex(items[1 + i.toInt()])
+        }
+
+        return -1
+    }
+
+    private fun condenseResolve(
+        cond: Any?,
+        idx: Int,
+        path: Any?,
+    ): Int {
+        val parts: List<*> =
+            when {
+                path is List<*> -> path
+                path is String -> if (path.isEmpty()) emptyList<Any?>() else path.split(".")
+                null == path || UNDEF === path -> emptyList<Any?>()
+                else -> listOf(condenseKey(path))
+            }
+
+        var at = idx
+        for (part in parts) {
+            if (0 > at) return -1
+            if ("" == part) continue
+            at = condenseChild(cond, at, part)
+        }
+        return at
+    }
+
+    private fun condenseMaterialise(
+        cond: Any?,
+        idx: Int,
+    ): Any? = if (0 > idx) UNDEF else condenseRebuild(condenseList(cond, S_CONDSYM), condenseList(cond, S_CONDNODE), idx)
+
+    // Every call builds new containers, so materialisations never share one.
+    private fun condenseRebuild(
+        sym: List<*>,
+        node: List<*>,
+        i: Int,
+    ): Any? {
+        val enc = condenseAt(node, i)
+        if (null == enc || UNDEF === enc) return UNDEF
+        if (condenseIs(enc, CONDENSE_MAP)) {
+            val pairs = enc as List<*>
+            val out = linkedMapOf<String, Any?>()
+            for (j in 1 until pairs.size step 2) {
+                out[condenseKey(condenseAt(sym, condenseIndex(pairs[j])))] =
+                    condenseRebuild(sym, node, condenseIndex(condenseAt(pairs, j + 1)))
+            }
+            return out
+        }
+        if (condenseIs(enc, CONDENSE_LIST)) {
+            val items = enc as List<*>
+            val out = mutableListOf<Any?>()
+            for (j in 1 until items.size) out.add(condenseRebuild(sym, node, condenseIndex(items[j])))
+            return out
+        }
+        if (condenseIs(enc, CONDENSE_STR)) return condenseAt(sym, condenseIndex(condenseAt(enc as List<*>, 1)))
+        if (condenseIs(enc, CONDENSE_NUM)) return condenseAt(enc as List<*>, 1)
+        if (condenseIs(enc, CONDENSE_TRUE)) return true
+        if (condenseIs(enc, CONDENSE_FALSE)) return false
+        return null
+    }
+
+    /**
+     * Fully materialise a condensed structure; any other value comes back
+     * unchanged. Correct for any caller, but it gives up every benefit of
+     * condensing, so prefer a view or a path read.
+     */
+    fun expand(cond: Any?): Any? {
+        if (!iscondensed(cond)) return cond
+        return condenseMaterialise(cond, condenseRoot(cond))
+    }
+
+    // The keys of node idx, without materialising any of its values.
+    private fun condenseKeys(
+        cond: Any?,
+        idx: Int,
+    ): MutableList<String> {
+        val enc = condenseEnc(cond, idx)
+        val out = mutableListOf<String>()
+        if (condenseIs(enc, CONDENSE_MAP)) {
+            val sym = condenseList(cond, S_CONDSYM)
+            val pairs = enc as List<*>
+            for (j in 1 until pairs.size step 2) out.add(condenseKey(condenseAt(sym, condenseIndex(pairs[j]))))
+        } else if (condenseIs(enc, CONDENSE_LIST)) {
+            for (j in 1 until (enc as List<*>).size) out.add((j - 1).toString())
+        }
+        return out
+    }
+
+    /**
+     * A cursor into a condensed structure. Reads resolve by integer index and
+     * touch only the nodes on the path, so a lookup costs path depth and result
+     * size, never total structure size.
+     */
+    class CondenseView internal constructor(
+        private val cond: Any?,
+        private val start: Int,
+        private val refmemo: MutableMap<Int, Any?>,
+    ) {
+        /** The value at path, materialised: a container comes back as an independent copy. */
+        fun get(path: Any?): Any? = condenseMaterialise(cond, condenseResolve(cond, start, path))
+
+        fun get(): Any? = get(UNDEF)
+
+        /** Key names at path, with no value decoding at all. */
+        fun keys(path: Any?): MutableList<String> {
+            val at = condenseResolve(cond, start, path)
+            return if (0 > at) mutableListOf() else condenseKeys(cond, at)
+        }
+
+        fun keys(): MutableList<String> = keys(UNDEF)
+
+        fun has(path: Any?): Boolean = 0 <= condenseResolve(cond, start, path)
+
+        fun has(): Boolean = has(UNDEF)
+
+        /** A view at path, sharing this view's ref() memo. No decoding happens here. */
+        fun at(path: Any?): CondenseView = condenseview(cond, condenseResolve(cond, start, path), refmemo)
+
+        fun at(): CondenseView = at(UNDEF)
+
+        fun value(): Any? = condenseMaterialise(cond, start)
+
+        fun size(): Int {
+            val enc = condenseEnc(cond, start)
+            if (condenseIs(enc, CONDENSE_MAP)) return ((enc as List<*>).size - 1) / 2
+            if (condenseIs(enc, CONDENSE_LIST)) return (enc as List<*>).size - 1
+            return 0
+        }
+
+        fun exists(): Boolean = 0 <= start
+
+        /**
+         * A SHARED materialisation: the same object for the same node, every time.
+         * Mutating it corrupts every other reader of that node, including ones
+         * reached by a different path, because the structure is a DAG.
+         */
+        fun ref(): Any? {
+            var got = refmemo.getOrDefault(start, UNDEF)
+            if (UNDEF === got) {
+                got = condenseMaterialise(cond, start)
+                refmemo[start] = got
+            }
+            return got
+        }
+    }
+
+    fun condenseview(cond: Any?): CondenseView = condenseview(cond, null, null)
+
+    fun condenseview(
+        cond: Any?,
+        idx: Int?,
+    ): CondenseView = condenseview(cond, idx, null)
+
+    fun condenseview(
+        cond: Any?,
+        idx: Int?,
+        memo: MutableMap<Int, Any?>?,
+    ): CondenseView {
+        val start = idx ?: if (iscondensed(cond)) condenseRoot(cond) else -1
+        // The memo is threaded through at(), so every view into one structure
+        // hands out the same ref() node.
+        return CondenseView(cond, start, memo ?: HashMap())
     }
 }

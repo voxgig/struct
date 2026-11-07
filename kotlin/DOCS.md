@@ -198,7 +198,7 @@ Kotlin-specific points the signatures don't show:
 
 The root [`README.md`](../README.md) classifies Kotlin as a **Partial**
 port (the same bracket as Java), yet it
-already carries the entire canonical public surface — all 48 functions,
+already carries the entire canonical public surface — all 52 functions,
 15 type flags, the three mode constants, the sentinels, and the full
 `Injection` machine — and `check_parity.py` reports it `ok`. "Partial"
 reflects port maturity, not a missing API. Behavioural authority rests

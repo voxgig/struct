@@ -49,6 +49,14 @@ class StructCorpusTest {
         def: Any?,
     ): Any? = if (input is Map<*, *> && (input as Map<String, Any?>).containsKey(key)) input[key] else def
 
+    // ===== condense =====
+
+    @Test fun condenseCondense() = runsetnull("condense", "condense", donull = false) { Struct.condense(it) }
+
+    @Test fun condenseExpand() = runsetnull("condense", "expand", donull = false) { Struct.expand(it) }
+
+    @Test fun condenseIscondensed() = runsetnull("condense", "iscondensed", donull = false) { Struct.iscondensed(it) }
+
     // ===== minor =====
 
     @Test fun minorIsnode() = runset("minor", "isnode") { Struct.isnode(it) }

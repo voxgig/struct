@@ -3,7 +3,7 @@
 > Kotlin/JVM port of the canonical TypeScript implementation.
 >
 > **Status: complete.** Carries the **full** TS-canonical public API and
-> passes the shared corpus in full (1360/1360). All 48 functions, 15 type
+> passes the shared corpus in full (1360/1360). All 52 functions, 15 type
 > bit-flags, 3 mode constants (`M_KEYPRE`/`M_KEYPOST`/`M_VAL`),
 > `SKIP`/`DELETE` sentinels, and the `Injection` state machine.
 > `inject()`/`transform()`/`validate()`/`select()` all dispatch through
@@ -90,7 +90,7 @@ the three injection helpers. Parity is checked case-insensitively
 Source: [`src/main/kotlin/voxgig/struct/Struct.kt`](./src/main/kotlin/voxgig/struct/Struct.kt).
 Package `voxgig.struct`; everything is a member of `object Struct`. The
 data model is JSON-shaped `Any?`: `null` is the JSON null scalar and the
-`Struct.UNDEF` marker stands for "absent" (see [Notes](#notes)). All 48
+`Struct.UNDEF` marker stands for "absent" (see [Notes](#notes)). All 52
 canonical functions are present.
 
 ### Predicates
@@ -284,6 +284,13 @@ fun walk(value: Any?, before: WalkApply?, after: WalkApply?, maxdepth: Int): Any
 fun interface WalkApply {
     fun apply(key: String?, value: Any?, parent: Any?, path: List<String>): Any?
 }
+
+fun condense(value: Any?): MutableMap<String, Any?>
+fun expand(cond: Any?): Any?
+fun iscondensed(value: Any?): Boolean
+fun condenseview(cond: Any?): CondenseView
+fun condenseview(cond: Any?, idx: Int?): CondenseView
+fun condenseview(cond: Any?, idx: Int?, memo: MutableMap<Int, Any?>?): CondenseView
 ```
 
 Last input wins; maps deep-merge; lists merge by index:
