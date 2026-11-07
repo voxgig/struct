@@ -249,11 +249,11 @@ public func injectChild(_ child: Value, _ store: Value, _ inj: Injection) -> Inj
     if let prior2 = prior.prior {
       cinj = prior2.child(prior.keyI, prior.keys)
       cinj.val = child
-      setprop(cinj.parent, .string(prior.key), child)
+      _setprop(cinj.parent, .string(prior.key), child)
     } else {
       cinj = prior.child(inj.keyI, inj.keys)
       cinj.val = child
-      setprop(cinj.parent, .string(inj.key), child)
+      _setprop(cinj.parent, .string(inj.key), child)
     }
   }
   inject(child, store, cinj)

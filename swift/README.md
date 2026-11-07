@@ -49,7 +49,8 @@ let out  = inject(spec, store)
 Source: [`Sources/VoxgigStruct/`](./Sources/VoxgigStruct/), split per
 subsystem (`Value.swift`, `Constants.swift`, `JSON.swift`, `Minor.swift`,
 `Walk.swift`, `Merge.swift`, `Path.swift`, `Inject.swift`,
-`Transform.swift`, `Validate.swift`, `Select.swift`, `Injection.swift`).
+`Transform.swift`, `Validate.swift`, `Select.swift`, `Injection.swift`,
+`Condense.swift`).
 
 Functions live as top-level `public func`s in module `VoxgigStruct`. The
 port keeps the canonical TS names (`isnode`, `getpath`, `keysof`, …)
@@ -102,6 +103,8 @@ order. `JSON.stringify(value, indent: 2)` serialises back.
   `filter`, `escre`, `escurl`, `join`, `jsonify`, `stringify`,
   `pathify`, `clone`, `delprop`, `setprop`, `typename`, `getdef`.
 - Major utilities: `walk`, `merge`, `setpath`, `getpath`.
+- Condensed structures: `condense`, `condenseview`, `expand`,
+  `iscondensed`.
 - `inject` (three-phase key processing) with `_injectstr` (full and
   partial backtick refs) and `_injecthandler` (default command
   dispatcher).
@@ -197,14 +200,14 @@ getelem(.list([.int(10), .int(20), .int(30)]), .int(-1))   // .int(30)
 
 <!-- example: minor/setprop#set -->
 ```swift
-setprop(.map([("a", .int(1))]), .string("b"), .int(2))   // { a: 1, b: 2 }
+try setprop(.map([("a", .int(1))]), .string("b"), .int(2))   // { a: 1, b: 2 }
 ```
 
 <!-- => {"a": 1, "b": 2} -->
 
 <!-- example: minor/delprop#del -->
 ```swift
-delprop(.map([("a", .int(1)), ("b", .int(2))]), .string("a"))   // { b: 2 }
+try delprop(.map([("a", .int(1)), ("b", .int(2))]), .string("a"))   // { b: 2 }
 ```
 
 <!-- => {"b": 2} -->
@@ -234,7 +237,7 @@ strkey(.double(2.2))   // "2"
 
 <!-- example: minor/setpath#nested -->
 ```swift
-setpath(.map([("a", .int(1)), ("b", .int(2))]), .string("b"), .int(22))   // { a: 1, b: 22 }
+try setpath(.map([("a", .int(1)), ("b", .int(2))]), .string("b"), .int(22))   // { a: 1, b: 22 }
 ```
 
 <!-- => {"a": 1, "b": 22} -->

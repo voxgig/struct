@@ -243,14 +243,32 @@ public func lookup(_ val: Value, _ key: Value) -> Value {
 
 // MARK: - setprop / delprop
 
+/// Throws a `StructError` when `val` is condensed and `key` is a valid key.
 @discardableResult
-public func setprop(_ val: Value, _ key: Value, _ newval: Value) -> Value {
+public func setprop(_ val: Value, _ key: Value, _ newval: Value) throws -> Value {
+  if !iskey(key) { return val }
+  if iscondensed(val) { throw StructError(S_condimmutable) }
+  return _setprop(val, key, newval)
+}
+
+/// Throws a `StructError` when `val` is condensed and `key` is a valid key.
+@discardableResult
+public func delprop(_ val: Value, _ key: Value) throws -> Value {
+  if !iskey(key) { return val }
+  if iscondensed(val) { throw StructError(S_condimmutable) }
+  return _delprop(val, key)
+}
+
+// The library's own writes. They do not refuse a condensed node, so a write
+// inside inject, transform, validate or select never throws.
+@discardableResult
+func _setprop(_ val: Value, _ key: Value, _ newval: Value) -> Value {
   // Sentinel handling.
   if case .sentinel(let s) = newval {
     if s === SKIP { return val }
-    if s === DELETE { return delprop(val, key) }
+    if s === DELETE { return _delprop(val, key) }
   }
-  if newval.isNoval { return delprop(val, key) }
+  if newval.isNoval { return _delprop(val, key) }
   switch val {
   case .list(let l):
     var k: Int? = nil
@@ -281,7 +299,7 @@ public func setprop(_ val: Value, _ key: Value, _ newval: Value) -> Value {
 }
 
 @discardableResult
-public func delprop(_ val: Value, _ key: Value) -> Value {
+func _delprop(_ val: Value, _ key: Value) -> Value {
   switch val {
   case .list(let l):
     var k: Int? = nil

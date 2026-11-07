@@ -98,7 +98,7 @@ public func validate_CHILD(_ inj: Injection, _ val: Value, _ ref: String, _ stor
     }
     let ckeys = keysof(tval)
     for ck in ckeys {
-      setprop(parent, .string(ck), clone(childtm))
+      _setprop(parent, .string(ck), clone(childtm))
       inj.keys.append(ck)
     }
     inj.setval(.noval)
@@ -124,7 +124,7 @@ public func validate_CHILD(_ inj: Injection, _ val: Value, _ ref: String, _ stor
     }
     if case .list(let dl) = inj.dparent {
       for i in 0..<dl.items.count {
-        setprop(parent, .int(Int64(i)), clone(childtm))
+        _setprop(parent, .int(Int64(i)), clone(childtm))
       }
       slice(parent, 0, dl.items.count, mutate: true)
 
@@ -197,7 +197,7 @@ public func validate_EXACT(_ inj: Injection, _ val: Value, _ ref: String, _ stor
           typify(cval), cval, "V0110")))
     return .sentinel(SKIP)
   }
-  delprop(parent, .string(key))
+  _delprop(parent, .string(key))
   return .noval
 }
 
@@ -332,7 +332,7 @@ public func _validation(
         }
       } else {
         _ = merge(.list([.map(pm), .map(cm)]))
-        delprop(.map(pm), .string(S_BOPEN))
+        _delprop(.map(pm), .string(S_BOPEN))
       }
     }
   } else if cval.isList {
@@ -350,7 +350,7 @@ public func _validation(
         .string("Value " + pathmsg + stringify(cval) + " should equal " + stringify(pval) + S_DT))
     }
   } else {
-    setprop(parent, key, cval)
+    _setprop(parent, key, cval)
   }
 }
 

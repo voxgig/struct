@@ -191,8 +191,16 @@ final class CorpusTests: XCTestCase {
     let selects = getprop(spec, .string("select"))
     let sentinels = getprop(spec, .string("sentinels"))
     let regexs = getprop(spec, .string("regex"))
+    let condenses = getprop(spec, .string("condense"))
     func mg(_ name: String) -> Value { getprop(minor, .string(name)) }
     func sub(_ node: Value, _ name: String) -> Value { getprop(node, .string(name)) }
+
+    // condense
+    runSet("condense.condense", sub(condenses, "condense"), false, arg1 { condense($0) })
+    runSet("condense.expand", sub(condenses, "expand"), false, arg1 { expand($0) })
+    runSet(
+      "condense.iscondensed", sub(condenses, "iscondensed"), false,
+      arg1 { .bool(iscondensed($0)) })
 
     // minor
     runSet("minor.isnode", mg("isnode"), true, arg1 { .bool(isnode($0)) })
@@ -232,7 +240,7 @@ final class CorpusTests: XCTestCase {
       })
     runSet(
       "minor.delprop", mg("delprop"), true,
-      arg1 { vin in delprop(self.vget(vin, "parent"), self.vget(vin, "key")) })
+      arg1 { vin in try delprop(self.vget(vin, "parent"), self.vget(vin, "key")) })
     runSet("minor.size", mg("size"), false, arg1 { .int(Int64(size($0))) })
     runSet(
       "minor.slice", mg("slice"), false,
@@ -268,7 +276,7 @@ final class CorpusTests: XCTestCase {
     runSet(
       "minor.setprop", mg("setprop"), true,
       arg1 { vin in
-        setprop(self.vget(vin, "parent"), self.vget(vin, "key"), lookup(vin, .string("val")))
+        try setprop(self.vget(vin, "parent"), self.vget(vin, "key"), lookup(vin, .string("val")))
       })
     runSet(
       "minor.haskey", mg("haskey"), false,
@@ -289,7 +297,7 @@ final class CorpusTests: XCTestCase {
     runSet(
       "minor.setpath", mg("setpath"), false,
       arg1 { vin in
-        setpath(self.vget(vin, "store"), self.vget(vin, "path"), lookup(vin, .string("val")))
+        try setpath(self.vget(vin, "store"), self.vget(vin, "path"), lookup(vin, .string("val")))
       })
     let filterChecks: [String: (Value, Value) -> Bool] = [
       "gt3": { _, v in (v.asDouble ?? 0) > 3 },
@@ -391,9 +399,9 @@ final class CorpusTests: XCTestCase {
         inj.modify = { val, key, parent, _, _ in
           if case .string(let text) = val {
             if text == NULLMARK {
-              setprop(parent, key, .null)
+              _ = try? setprop(parent, key, .null)
             } else if text.contains(NULLMARK) {
-              setprop(
+              _ = try? setprop(
                 parent, key,
                 .string(text.replacingOccurrences(of: NULLMARK, with: "null")))
             }
@@ -421,7 +429,7 @@ final class CorpusTests: XCTestCase {
         let inj = Injection(val: .noval, parent: .noval)
         inj.modify = { val, key, parent, _, _ in
           if case .string(let text) = val, !key.isNoval, !parent.isNoval {
-            setprop(parent, key, .string("@" + text))
+            _ = try? setprop(parent, key, .string("@" + text))
           }
         }
         inj.extra = self.vget(vin, "store")
@@ -574,7 +582,7 @@ final class CorpusTests: XCTestCase {
           next = ismap(val) ? .map(VMap()) : .list(VList())
           cur.items[index] = next
         }
-        _ = setprop(cur.items[index - 1], key, next)
+        _ = try? setprop(cur.items[index - 1], key, next)
         return val
       }, nil)
     return cur.items[0]
@@ -592,11 +600,11 @@ final class CorpusTests: XCTestCase {
             top = child
             curr = child
           } else {
-            _ = setprop(curr, key, child)
+            _ = try? setprop(curr, key, child)
             curr = child
           }
         } else {
-          _ = setprop(curr, key, val)
+          _ = try? setprop(curr, key, val)
         }
         return val
       }, nil,

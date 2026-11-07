@@ -21,7 +21,8 @@ swift/
 │   ├── Constants.swift  JSON.swift     # S_*/T_*/M_* constants; JSON parse/stringify
 │   ├── Minor.swift  Walk.swift  Merge.swift  Path.swift
 │   ├── Inject.swift  Injection.swift   # inject engine + Injection reference class
-│   └── Transform.swift  Validate.swift  Select.swift
+│   ├── Transform.swift  Validate.swift  Select.swift
+│   └── Condense.swift                  # condense / expand / condenseview / iscondensed
 └── Tests/VoxgigStructTests/            # XCTest target VoxgigStructTests
     ├── CorpusTests.swift               # shared-corpus driver (loads ../build/test/test.json)
     ├── SmokeTests.swift  QuickTest.swift  RegexPathologicalTests.swift
@@ -86,9 +87,12 @@ don't claim a change works.
   = JSON null. They are distinct under `==`. Group A readers (`getprop`,
   `getelem`, `haskey`, `isempty`, `isnode`) treat stored `.null` as absent;
   Group B (`setprop`, `clone`, `walk`, `merge`, …) preserve it.
-- **No throwing surface:** only `JSON.parse` throws. `validate`/`transform`
-  accumulate `inj.errs.items` instead of throwing; `re_compile` returns
-  `nil` on a bad pattern. Don't add `throws` to the public functions.
+- **Throwing surface:** `JSON.parse`; `validate`/`transform` unless the
+  caller supplies `inj.errs`; and `setprop`/`delprop`/`setpath` on a
+  condensed structure. Library-internal writes go through the non-throwing
+  `_setprop`/`_delprop`, so inject, transform, validate and select never
+  throw from a write. `re_compile` returns `nil` on a bad pattern. Add
+  `throws` only where canonical throws.
 - **Zero runtime deps:** Foundation only; `OrderedDictionary.swift` is the
   in-tree ordered-map. Do not add a SwiftPM dependency to the library target.
 

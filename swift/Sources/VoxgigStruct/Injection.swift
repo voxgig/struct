@@ -120,9 +120,9 @@ public final class Injection: @unchecked Sendable {
     let absAnc = abs(ancestor)
     if ancestor < 2 {
       if v.isNoval {
-        parent = delprop(parent, .string(key))
+        parent = _delprop(parent, .string(key))
       } else {
-        parent = setprop(parent, .string(key), v)
+        parent = _setprop(parent, .string(key), v)
       }
       return parent
     }
@@ -132,8 +132,8 @@ public final class Injection: @unchecked Sendable {
     let target = nodes[nlen - absAnc]
     let tkey = path[plen - absAnc]
     if v.isNoval {
-      return delprop(target, .string(tkey))
+      return _delprop(target, .string(tkey))
     }
-    return setprop(target, .string(tkey), v)
+    return _setprop(target, .string(tkey), v)
   }
 }
