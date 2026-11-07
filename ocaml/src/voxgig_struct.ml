@@ -128,6 +128,25 @@ let delete = Sentinel "delete"
 
 let maxdepth = 32
 
+let condense_version = 1.0
+
+(* Encoding kinds: the first element of every node table entry. *)
+let condense_map = 0.0
+let condense_list = 1.0
+let condense_str = 2.0
+let condense_num = 3.0
+let condense_true = 4.0
+let condense_false = 5.0
+let condense_null = 6.0
+
+let s_condense = "$condense"
+let s_condsym = "sym"
+let s_condnode = "node"
+let s_condroot = "root"
+
+let s_condimmutable =
+  "struct: condensed structures are immutable - expand() first, then modify the copy"
+
 (* ---------------------------------------------------------------------------
  * Small helpers
  * ------------------------------------------------------------------------- *)
@@ -362,6 +381,7 @@ and filter v check =
 and setprop parent key v =
   if not (iskey key) then parent
   else begin
+    condense_guard parent;
     (match parent with
      | Map m -> omap_set m (js_string key) v
      | List r ->
@@ -382,6 +402,7 @@ and setprop parent key v =
 and delprop parent key =
   if not (iskey key) then parent
   else begin
+    condense_guard parent;
     (match parent with
      | Map m -> omap_del m (js_string key)
      | List r ->
@@ -840,7 +861,16 @@ and getpath ?(inj = INone) store path =
   in
   match pa with
   | None -> Noval
+  (* A condensed store answers as the node it was built from, touching only
+     the nodes on the path. base would change what the walk resolves against,
+     so with one the store is expanded instead. *)
+  | Some pa when iscondensed store && is_nullish (ia_base inj) ->
+    let found = condense_resolve store (condense_root store) (lst (Array.to_list pa)) in
+    let v = if found < 0 then Noval else condense_materialise store found in
+    (* Group A: an ordinary getpath reads a stored null as absent. *)
+    if is_nullish v then Noval else v
   | Some pa ->
+    let store = expand store in
     let base = ia_base inj in
     let dparent = ia_dparent inj in
     let inj_meta = ia_meta inj in
@@ -912,6 +942,7 @@ and getpath ?(inj = INone) store path =
     !v
 
 and setpath ?(inj = INone) store path v =
+  condense_guard store;
   let ptype = typify path in
   let parts =
     if (t_list land ptype) > 0 then (match path with List r -> lst !r | _ -> empty_list ())
@@ -1997,6 +2028,255 @@ and jm kv =
   done; m
 
 and jt v = lst v
+
+(* ----- condense ----- *)
+
+and condense_guard v =
+  if iscondensed v then raise (Struct_error s_condimmutable)
+
+(* The version must match, not merely be numeric: a future profile would
+   otherwise be decoded under this one's schema. *)
+and iscondensed v =
+  match v with
+  | Map m ->
+    (match omap_get m s_condense, omap_get m s_condsym, omap_get m s_condnode,
+           omap_get m s_condroot with
+     | Some (Num n), Some (List _), Some (List _), Some (Num _) -> n = condense_version
+     | _ -> false)
+  | _ -> false
+
+(* Pure: the same input gives byte-identical output, on every port. *)
+and condense v =
+  let symset = Hashtbl.create 64 in
+  let rec collect n =
+    match n with
+    | Map m -> List.iter (fun (k, x) -> Hashtbl.replace symset k (); collect x) m.entries
+    | List r -> List.iter collect !r
+    | Str s -> Hashtbl.replace symset s ()
+    | _ -> ()
+  in
+  collect v;
+  let sym = List.sort compare (Hashtbl.fold (fun s () acc -> s :: acc) symset []) in
+  let symid = Hashtbl.create 64 in
+  List.iteri (fun i s -> Hashtbl.replace symid s i) sym;
+  let symref s = vint (Hashtbl.find symid s) in
+  (* Built post-order and interned on the encoding, so identical subtrees are
+     already one node by the time a parent references them. *)
+  let node = ref [] and count = ref 0 and seen = Hashtbl.create 64 in
+  let intern enc =
+    (* -0 is 0: one JS number, so one node. *)
+    let part = function Num n when n = 0.0 -> "0" | x -> js_string x in
+    let key = String.concat "," (List.map part enc) in
+    match Hashtbl.find_opt seen key with
+    | Some i -> i
+    | None ->
+      let i = !count in
+      node := lst enc :: !node;
+      incr count;
+      Hashtbl.replace seen key i;
+      i
+  in
+  let rec build n =
+    match n with
+    | Map m ->
+      let enc = ref [Num condense_map] in
+      List.iter (fun k ->
+          let child = build (match omap_get m k with Some x -> x | None -> Noval) in
+          enc := vint child :: symref k :: !enc) (keysof n);
+      intern (List.rev !enc)
+    | List r ->
+      let enc = ref [Num condense_list] in
+      List.iter (fun x -> let child = build x in enc := vint child :: !enc) !r;
+      intern (List.rev !enc)
+    | Str s -> intern [Num condense_str; symref s]
+    | Num x -> intern [Num condense_num; Num x]
+    | Bool true -> intern [Num condense_true]
+    | Bool false -> intern [Num condense_false]
+    | _ -> intern [Num condense_null]
+  in
+  let root = build v in
+  Map { entries = [ (s_condense, Num condense_version);
+                    (s_condsym, lst (List.map vstr sym));
+                    (s_condnode, lst (List.rev !node));
+                    (s_condroot, vint root) ] }
+
+and condense_field cond name =
+  match cond with
+  | Map m -> (match omap_get m name with Some x -> x | None -> Noval)
+  | _ -> Noval
+
+and condense_items cond name =
+  match condense_field cond name with List r -> Array.of_list !r | _ -> [||]
+
+and condense_item a i = if i >= 0 && i < Array.length a then a.(i) else Noval
+
+(* A node or symbol index read out of the structure; -1 when it is not one. *)
+and condense_index v =
+  match v with
+  | Num n when n >= 0.0 && n < 1e15 && is_integer_f n -> int_of_float n
+  | _ -> -1
+
+and condense_root cond = condense_index (condense_field cond s_condroot)
+
+and condense_enc cond idx =
+  match condense_field cond s_condnode with
+  | List r when idx >= 0 -> (match List.nth_opt !r idx with Some e -> e | None -> Noval)
+  | _ -> Noval
+
+and condense_encoding enc = match enc with List r -> Array.of_list !r | _ -> [||]
+
+and condense_kind enc =
+  match enc with List r -> (match !r with Num k :: _ -> Some k | _ -> None) | _ -> None
+
+(* -1 when the string occurs nowhere in the structure: itself a fast miss. *)
+and condense_symid cond key =
+  let sym = condense_items cond s_condsym in
+  let rec bisect lo hi =
+    if lo > hi then -1
+    else
+      let mid = (lo + hi) / 2 in
+      match sym.(mid) with
+      | Str s when s = key -> mid
+      | Str s when compare s key < 0 -> bisect (mid + 1) hi
+      | _ -> bisect lo (mid - 1)
+  in
+  bisect 0 (Array.length sym - 1)
+
+(* A canonical list index: 0, or digits with no leading zero. *)
+and is_canon_index s =
+  s = "0" ||
+  (String.length s > 0 && s.[0] >= '1' && s.[0] <= '9'
+   && String.for_all (fun c -> c >= '0' && c <= '9') s)
+
+(* The node index of key inside node idx, or -1. Touches only this node. *)
+and condense_child cond idx key =
+  let enc = condense_enc cond idx in
+  let e = condense_encoding enc in
+  let at j = condense_item e j in
+  let kind = condense_kind enc in
+  if kind = Some condense_map then begin
+    let symid = condense_symid cond (js_string key) in
+    let target = float_of_int symid in
+    (* Pairs live at [1,2], [3,4], ... with keys ascending: bisect them. *)
+    let rec bisect lo hi =
+      if lo > hi then -1
+      else
+        let mid = (lo + hi) / 2 in
+        match at (1 + mid * 2) with
+        | Num k when k = target -> condense_index (at (2 + mid * 2))
+        | Num k when k < target -> bisect (mid + 1) hi
+        | _ -> bisect lo (mid - 1)
+    in
+    if symid < 0 then -1 else bisect 0 ((Array.length e - 1) / 2 - 1)
+  end
+  else if kind = Some condense_list then begin
+    (* Canonical integer keys only, as a JS list lookup: 01, 1e0, " 1" and +1
+       miss, so condensing never changes which value a path selects. *)
+    let k = js_string key in
+    if not (is_canon_index k) then -1
+    else match int_of_string_opt k with
+      | Some i when i < Array.length e - 1 -> condense_index (at (1 + i))
+      | _ -> -1
+  end
+  else -1
+
+(* Walk a path from a starting node, returning the node index or -1. *)
+and condense_resolve cond idx path =
+  let parts =
+    match path with
+    | List r -> !r
+    | Str "" | Noval | Null -> []
+    | Str s -> List.map vstr (String.split_on_char '.' s)
+    | p -> [Str (js_string p)]
+  in
+  List.fold_left (fun at part ->
+      if at < 0 then -1
+      else match part with Str "" -> at | _ -> condense_child cond at part) idx parts
+
+and condense_materialise cond idx =
+  let sym = condense_items cond s_condsym in
+  let node = condense_items cond s_condnode in
+  let rec rebuild i =
+    let enc = condense_item node i in
+    let e = condense_encoding enc in
+    let at j = condense_item e j in
+    let kind = condense_kind enc in
+    if is_nullish enc then Noval
+    else if kind = Some condense_map then begin
+      let m = { entries = [] } in
+      let rec pairs j =
+        if j < Array.length e then begin
+          omap_set m (js_string (condense_item sym (condense_index (at j))))
+            (rebuild (condense_index (at (j + 1))));
+          pairs (j + 2)
+        end
+      in
+      pairs 1;
+      Map m
+    end
+    else if kind = Some condense_list then
+      lst (List.init (Array.length e - 1) (fun j -> rebuild (condense_index (at (j + 1)))))
+    else if kind = Some condense_str then condense_item sym (condense_index (at 1))
+    else if kind = Some condense_num then at 1
+    else if kind = Some condense_true then Bool true
+    else if kind = Some condense_false then Bool false
+    else Null
+  in
+  if idx < 0 then Noval else rebuild idx
+
+(* Correct for any caller, but it gives up every benefit of condensing. *)
+and expand cond =
+  if iscondensed cond then condense_materialise cond (condense_root cond) else cond
+
+(* The keys of node idx, decoding none of its values. *)
+and condense_keys cond idx =
+  let enc = condense_enc cond idx in
+  let e = condense_encoding enc in
+  let kind = condense_kind enc in
+  if kind = Some condense_map then begin
+    let sym = condense_items cond s_condsym in
+    let rec pairs j =
+      if j >= Array.length e then []
+      else js_string (condense_item sym (condense_index e.(j))) :: pairs (j + 2)
+    in
+    pairs 1
+  end
+  else if kind = Some condense_list then List.init (Array.length e - 1) string_of_int
+  else []
+
+and condense_size cond idx =
+  let enc = condense_enc cond idx in
+  let n = Array.length (condense_encoding enc) in
+  let kind = condense_kind enc in
+  if kind = Some condense_map then (n - 1) / 2
+  else if kind = Some condense_list then n - 1
+  else 0
+
+(* A cursor: reads resolve by node index and touch only the nodes on the
+   path. ref alone hands out shared materialisations, memoised per node and
+   threaded through at, so every cursor into one structure shares them. *)
+and condenseview ?idx ?memo cond =
+  let start =
+    match idx with Some i -> i | None -> if iscondensed cond then condense_root cond else -1 in
+  let refmemo = match memo with Some m -> m | None -> Hashtbl.create 8 in
+  object
+    method get path = condense_materialise cond (condense_resolve cond start path)
+    method keys path =
+      let at = condense_resolve cond start path in
+      if at < 0 then [] else condense_keys cond at
+    method has path = 0 <= condense_resolve cond start path
+    method at path = condenseview ~idx:(condense_resolve cond start path) ~memo:refmemo cond
+    method value = condense_materialise cond start
+    method size = condense_size cond start
+    method exists = 0 <= start
+    method ref =
+      match Hashtbl.find_opt refmemo start with
+      | Some v -> v
+      | None ->
+        let v = condense_materialise cond start in
+        Hashtbl.replace refmemo start v;
+        v
+  end
 
 (* ---------------------------------------------------------------------------
  * Finish: set the dummy inj for getelem's function-alt path

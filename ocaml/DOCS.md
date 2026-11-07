@@ -69,6 +69,8 @@ Names are the canonical names, lower-smushed or snake_cased:
   `re_replace`, `re_test`, `re_escape`. Backed by the in-tree `Vregex` engine.
 - **By-example engine:** `inject`, `transform`, `validate`, `select`, and the
   injector helpers `check_placement`, `injector_args`, `inject_child`.
+- **Condensed structures:** `condense`, `condenseview`, `expand`,
+  `iscondensed`.
 - **Builders / markers:** `jm`, `jt`, `skip`, `delete`, the `t_*` type
   constants and `m_keypre` / `m_keypost` / `m_val`.
 
