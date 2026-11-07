@@ -245,6 +245,16 @@ pub fn pad(s: Value, padding: Option<i64>, padchar: Option<String>) -> String {
 
 // ---- node accessors ---------------------------------------------------
 
+/// The index a list read takes `key` to, as a JavaScript array reads one:
+/// "01", "+1" and "-0" name no element. Writes coerce keys more loosely.
+pub fn list_index(key: &str) -> Option<usize> {
+    if R_CONDENSE_INDEX.is_match(key) {
+        key.parse::<usize>().ok()
+    } else {
+        None
+    }
+}
+
 /// `getelem(list, key, alt?)` — list lookup by integer key, negative counts
 /// from the end. If the element is absent and `alt` is a callable value, it
 /// is invoked (with the uniform `(inj, val, ref, store)` shape — a fresh
@@ -269,25 +279,15 @@ pub fn get_elem_or_else<F: FnOnce() -> Value>(val: &Value, key: &Value, alt: F) 
         return alt();
     }
     let out = if let Value::List(l) = val {
+        let lb = l.borrow();
         let keystr = js_string(key);
-        if R_INTEGER_KEY.is_match(&keystr) {
-            match keystr.parse::<i64>() {
-                Ok(mut n) => {
-                    let lb = l.borrow();
-                    if n < 0 {
-                        n += lb.len() as i64;
-                    }
-                    if n >= 0 && (n as usize) < lb.len() {
-                        lb[n as usize].clone()
-                    } else {
-                        Value::Noval
-                    }
-                }
-                Err(_) => Value::Noval,
+        let idx = list_index(&keystr).or_else(|| match keystr.parse::<i64>() {
+            Ok(n) if n < 0 && R_INTEGER_KEY.is_match(&keystr) => {
+                usize::try_from(lb.len() as i64 + n).ok()
             }
-        } else {
-            Value::Noval
-        }
+            _ => None,
+        });
+        idx.and_then(|i| lb.get(i).cloned()).unwrap_or(Value::Noval)
     } else {
         Value::Noval
     };
@@ -306,15 +306,9 @@ pub fn get_prop(val: &Value, key: &Value, alt: Value) -> Value {
         return alt;
     }
     let out = match val {
-        Value::List(l) => {
-            let lb = l.borrow();
-            // Array index: a non-negative integer (string or number).
-            let ks = js_string(key);
-            ks.parse::<usize>()
-                .ok()
-                .and_then(|i| lb.get(i).cloned())
-                .unwrap_or(Value::Noval)
-        }
+        Value::List(l) => list_index(&js_string(key))
+            .and_then(|i| l.borrow().get(i).cloned())
+            .unwrap_or(Value::Noval),
         Value::Map(m) => m
             .borrow()
             .get(&js_string(key))
@@ -343,27 +337,9 @@ pub fn lookup(val: &Value, key: &Value) -> Value {
         return Value::Noval;
     }
     match val {
-        Value::List(l) => {
-            let lb = l.borrow();
-            let keystr = js_string(key);
-            if R_INTEGER_KEY.is_match(&keystr) {
-                match keystr.parse::<i64>() {
-                    Ok(mut n) => {
-                        if n < 0 {
-                            n += lb.len() as i64;
-                        }
-                        if n >= 0 && (n as usize) < lb.len() {
-                            lb[n as usize].clone()
-                        } else {
-                            Value::Noval
-                        }
-                    }
-                    Err(_) => Value::Noval,
-                }
-            } else {
-                Value::Noval
-            }
-        }
+        Value::List(l) => list_index(&js_string(key))
+            .and_then(|i| l.borrow().get(i).cloned())
+            .unwrap_or(Value::Noval),
         Value::Map(m) => m
             .borrow()
             .get(&js_string(key))

@@ -3155,12 +3155,8 @@ fn condense_child(cond: &Value, idx: i64, key: &str) -> i64 {
     }
 
     if Some(CONDENSE_LIST) == kind {
-        // Canonical integer keys only: "01", "1e0", " 1" and "+1" name no element.
-        if !R_CONDENSE_INDEX.is_match(key) {
-            return -1;
-        }
-        return match key.parse::<usize>() {
-            Ok(i) if i < enc.len() - 1 => condense_index(&enc[1 + i]),
+        return match list_index(key) {
+            Some(i) if i < enc.len() - 1 => condense_index(&enc[1 + i]),
             _ => -1,
         };
     }

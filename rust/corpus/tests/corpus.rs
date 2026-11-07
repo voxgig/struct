@@ -1074,10 +1074,12 @@ fn condense_getpath_matches_plain_on_null_and_options() {
 
 #[test]
 fn condense_list_keys_are_canonical_integers() {
-    let c = condense(&json(r#"{"l":[10,20]}"#));
+    let plain = json(r#"{"l":[10,20]}"#);
+    let c = condense(&plain);
     for k in ["01", "1e0", " 1", "+1", "1.0", "-0"] {
         let path = Value::list(vec![Value::str("l"), Value::str(k)]);
         assert!(get_path(&c, &path, None).is_noval(), "list key {k}");
+        assert!(get_path(&plain, &path, None).is_noval(), "plain {k}");
     }
     assert_eq!(get_path(&c, &json(r#"["l","1"]"#), None), Value::Num(20.0));
 }
