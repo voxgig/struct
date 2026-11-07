@@ -232,7 +232,9 @@ defmodule Voxgig.Struct do
   @r_meta_path ~r/^([^$]+)\$([=~])(.+)$/
   @r_transform_name ~r/`\$([A-Z]+)`/
   @r_checker_name ~r/^\$[A-Z]+$/
-  @r_intkey ~r/^-?[0-9]+$/
+  # \z, not $: PCRE's $ also matches before a trailing newline.
+  @r_intkey ~r/^-?[0-9]+\z/
+  @r_list_index ~r/^(0|[1-9][0-9]*)\z/
 
   @condense_version 1
   @condense_map 0
@@ -247,9 +249,6 @@ defmodule Voxgig.Struct do
   @s_condnode "node"
   @s_condroot "root"
   @condense_immutable "struct: condensed structures are immutable - expand() first, then modify the copy"
-
-  # \z, not $: PCRE's $ also matches before a trailing newline.
-  @r_condense_index ~r/^(0|[1-9][0-9]*)\z/
 
   # ---------------------------------------------------------------------------
   # Low-level helpers
@@ -307,6 +306,13 @@ defmodule Voxgig.Struct do
   end
 
   defp to_int(_), do: nil
+
+  # The index a key reads in a list. As in a JavaScript array only a canonical
+  # integer reads: "01", "+1", " 1", "1.0", "-0" and 1.5 do not.
+  defp listidx_(k) when is_integer(k), do: if(k >= 0, do: k, else: nil)
+  defp listidx_(k) when is_float(k), do: listidx_(num_to_string(k))
+  defp listidx_(k) when is_binary(k), do: if(Regex.match?(@r_list_index, k), do: String.to_integer(k), else: nil)
+  defp listidx_(_), do: nil
 
   defp clz32(n0) do
     n = Bitwise.band(n0, 0xFFFFFFFF)
@@ -446,9 +452,9 @@ defmodule Voxgig.Struct do
             end
 
           islist(val) ->
-            ki = to_int(key)
+            ki = listidx_(key)
             items = if ki == nil, do: [], else: list_items(val)
-            if ki != nil and ki >= 0 and ki < length(items), do: Enum.at(items, ki), else: nil
+            if ki != nil and ki < length(items), do: Enum.at(items, ki), else: nil
 
           true ->
             nil
@@ -470,9 +476,9 @@ defmodule Voxgig.Struct do
         end
 
       islist(val) ->
-        ki = to_int(key)
+        ki = listidx_(key)
         items = if ki == nil, do: [], else: list_items(val)
-        if ki != nil and ki >= 0 and ki < length(items), do: Enum.at(items, ki), else: nil
+        if ki != nil and ki < length(items), do: Enum.at(items, ki), else: nil
 
       true ->
         nil
@@ -484,7 +490,7 @@ defmodule Voxgig.Struct do
     cond do
       key == nil -> false
       ismap(node) -> omap_get(map_pairs(node), mapkey(key)) != :error
-      islist(node) -> (ki = to_int(key); ki != nil and ki >= 0 and ki < length(list_items(node)))
+      islist(node) -> (ki = listidx_(key); ki != nil and ki < length(list_items(node)))
       true -> false
     end
   end
@@ -503,7 +509,8 @@ defmodule Voxgig.Struct do
             items = list_items(val)
             len = length(items)
             nk0 = String.to_integer(ks)
-            nk = if nk0 < 0, do: len + nk0, else: nk0
+            # Only a negative integer counts from the end; "-0" and "01" read as getprop does.
+            nk = if nk0 < 0, do: len + nk0, else: listidx_(ks) || -1
             if nk >= 0 and nk < len, do: Enum.at(items, nk), else: nil
           else
             nil
@@ -2296,8 +2303,11 @@ defmodule Voxgig.Struct do
     idx = type_index(tname)
     typev0 = if idx >= 0, do: Bitwise.bsl(1, 31 - idx), else: 0
     typev = if tname == "nil", do: Bitwise.bor(typev0, @t_null), else: typev0
-    out = lookup_(ig(inj, :dparent), ig(inj, :key))
-    t = typify(out)
+    dparent = ig(inj, :dparent)
+    key = ig(inj, :key)
+    out = lookup_(dparent, key)
+    # With one nil, only the parent tells a missing field (no value) from a null one.
+    t = typify(if out == nil and not holds_(dparent, key), do: @noarg, else: out)
 
     if Bitwise.band(t, typev) == 0 do
       push_err(inj, invalid_type_msg(ig(inj, :path), tname, t, out, "V1001"))
@@ -3071,11 +3081,8 @@ defmodule Voxgig.Struct do
           id -> condensepair_(List.to_tuple(enc), id, 0, div(length(enc) - 1, 2) - 1)
         end
 
-      # Canonical integer keys only: getprop would also take "01" or " 1",
-      # and condensing must not change which value a path selects.
       [kind | items] when kind == @condense_list ->
-        k = js_string(key)
-        i = if Regex.match?(@r_condense_index, k), do: String.to_integer(k), else: -1
+        i = listidx_(js_string(key)) || -1
         if i >= 0 and i < length(items), do: Enum.at(items, i), else: -1
 
       _ ->

@@ -740,12 +740,13 @@ defmodule Runner do
       ]
     end)
 
-    # This port's getprop reads "01", " 1", "+1" and "-0" as list indexes where
-    # canonical does not, so the misses are asserted directly.
     checks("condense-list-keys-are-canonical-integers", fn ->
-      c = S.condense(m.(["l", l.([10, 20])]))
+      plain = m.(["l", l.([10, 20])])
+      c = S.condense(plain)
 
-      for(k <- ["01", "1e0", " 1", "+1", "1.0", "-0"], do: {"#{inspect(k)} misses", S.getpath(c, l.(["l", k])) == nil}) ++
+      for(k <- ["01", "1e0", " 1", "+1", "1.0", "-0", "1\n"],
+        do: {"#{inspect(k)} reads as the plain one", S.getpath(c, l.(["l", k])) == S.getpath(plain, l.(["l", k]))}
+      ) ++
         [{"\"1\" reads", S.getpath(c, l.(["l", "1"])) == 20}]
     end)
 
