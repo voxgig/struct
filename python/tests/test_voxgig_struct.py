@@ -1,6 +1,7 @@
 # RUN: python -m unittest discover -s tests
 # RUN-SOME: python -m unittest discover -s tests -k getpath
 
+import json
 import unittest
 
 try:
@@ -41,9 +42,12 @@ client = runparts['client']
 # Get all the struct utilities from the client
 struct_utils = client.utility().struct
 clone = struct_utils.clone
+condense = struct_utils.condense
+condenseview = struct_utils.condenseview
 delprop = struct_utils.delprop
 escre = struct_utils.escre
 escurl = struct_utils.escurl
+expand = struct_utils.expand
 filter_fn = struct_utils.filter
 flatten = struct_utils.flatten
 getelem = struct_utils.getelem
@@ -51,6 +55,7 @@ getpath = struct_utils.getpath
 getprop = struct_utils.getprop
 haskey = struct_utils.haskey
 inject = struct_utils.inject
+iscondensed = struct_utils.iscondensed
 isempty = struct_utils.isempty
 isfunc = struct_utils.isfunc
 iskey = struct_utils.iskey
@@ -88,6 +93,7 @@ injectSpec = spec['inject']
 transformSpec = spec['transform']
 validateSpec = spec['validate']
 selectSpec = spec['select']
+condenseSpec = spec['condense']
 
 
 class TestStruct(unittest.TestCase):
@@ -124,6 +130,130 @@ class TestStruct(unittest.TestCase):
         self.assertTrue(callable(typify))
         self.assertTrue(callable(validate))
         self.assertTrue(callable(walk))
+
+    # condense tests
+    # ==============
+
+    def test_condense_condense(self):
+        runsetflags(condenseSpec['condense'], {'null': False}, condense)
+
+    def test_condense_expand(self):
+        runsetflags(condenseSpec['expand'], {'null': False}, expand)
+
+    def test_condense_iscondensed(self):
+        runsetflags(condenseSpec['iscondensed'], {'null': False}, iscondensed)
+
+    # Properties the corpus shape cannot express: identity, sharing, laziness
+    # and the immutability contract.
+
+    def test_condense_deterministic(self):
+        src = {'b': {'m': 'GET'}, 'a': {'m': 'GET'}, 'l': [1, 'x', True]}
+        self.assertEqual(json.dumps(condense(src)), json.dumps(condense(src)))
+        # Insertion order must not change the bytes: keys are stored by symbol id.
+        reordered = {'l': [1, 'x', True], 'a': {'m': 'GET'}, 'b': {'m': 'GET'}}
+        self.assertEqual(json.dumps(condense(src)), json.dumps(condense(reordered)))
+
+    def test_condense_shares_identical_subtrees(self):
+        one = condense({'x': {'m': 'GET', 'p': '/1'}})
+        two = condense({'x': {'m': 'GET', 'p': '/1'}, 'y': {'m': 'GET', 'p': '/1'}})
+        # A second reference to an identical subtree adds no node.
+        self.assertEqual(len(two['node']), len(one['node']))
+        three = condense({'x': {'m': 'GET'}, 'y': {'m': 'PUT'}, 'z': {'m': 'POST'}})
+        self.assertTrue(len(three['node']) > len(two['node']))
+        # An integer and a decimal of the same value are one number.
+        self.assertEqual(condense([1, 1.0])['node'], [[3, 1], [1, 0, 0]])
+
+    def test_condense_round_trips_by_value(self):
+        src = {'a': {'b': [1, 'x', True, None, {}]}, 'c': 'z'}
+        self.assertEqual(expand(condense(src)), src)
+
+    def test_condense_getpath_is_transparent(self):
+        src = {'entity': {'p': {'op': {'list': {'method': 'GET'}}}}}
+        c = condense(src)
+        self.assertEqual(
+            getpath(c, ['entity', 'p', 'op', 'list']),
+            getpath(src, ['entity', 'p', 'op', 'list']),
+        )
+        self.assertEqual(getpath(c, ['entity', 'p', 'op', 'list', 'method']), 'GET')
+        self.assertIsNone(getpath(c, ['entity', 'nope']))
+
+    def test_condense_view_reads_without_materialising(self):
+        c = condense({'entity': {'a': {'v': 1}, 'b': {'v': 2}}, 'other': 9})
+        v = condenseview(c)
+        # keys() answers from the node and symbol tables alone.
+        self.assertEqual(v.keys('entity'), ['a', 'b'])
+        self.assertEqual(v.at('entity').at('b').get('v'), 2)
+        self.assertTrue(v.has('entity.a'))
+        self.assertFalse(v.has('entity.zz'))
+        self.assertEqual(v.size(), 2)
+
+    def test_condense_value_copies_and_ref_shares(self):
+        c = condense({'a': {'m': 'GET'}, 'b': {'m': 'GET'}})
+        v = condenseview(c)
+        # a and b share one node. get() must not let that be observable.
+        x = v.get('a')
+        y = v.get('b')
+        self.assertEqual(x, y)
+        self.assertIsNot(x, y)
+        x['m'] = 'MUTATED'
+        self.assertEqual(v.get('b')['m'], 'GET')
+        # ref() is the opt-in escape hatch and DOES share.
+        self.assertIs(v.at('a').ref(), v.at('a').ref())
+
+    def test_condense_preserves_proto_named_keys_and_values(self):
+        as_value = json.loads('{"x":"__proto__"}')
+        self.assertEqual(expand(condense(as_value)), as_value)
+        as_key = json.loads('{"__proto__":1}')
+        self.assertEqual(json.dumps(expand(condense(as_key))), '{"__proto__": 1}')
+
+    def test_condense_getpath_matches_plain_on_null_and_options(self):
+        # A stored null reads as absent either way.
+        self.assertEqual(getpath(condense({'a': None}), 'a'), getpath({'a': None}, 'a'))
+        self.assertIsNone(getpath(condense({'a': None}), 'a'))
+        # injdef.base must not be ignored by the condensed fast path.
+        store = {'base': {'x': 1}}
+        self.assertEqual(
+            getpath(condense(store), 'x', {'base': 'base'}),
+            getpath(store, 'x', {'base': 'base'}),
+        )
+
+    def test_condense_list_keys_are_canonical_integers(self):
+        plain = {'l': [10, 20]}
+        c = condense(plain)
+        # Only a canonical integer selects an element, as in an ordinary lookup.
+        for k in ['01', '1e0', ' 1', '+1', '1.0', '-0', '1\n']:
+            self.assertIsNone(getpath(c, ['l', k]), 'list key ' + repr(k))
+        self.assertEqual(getpath(c, ['l', '1']), 20)
+        self.assertEqual(getpath(c, ['l', 1]), 20)
+
+    def test_condense_symbols_sort_by_code_point(self):
+        sym = condense({'a': '\U00010000', 'b': '\uffff'})['sym']
+        self.assertTrue(
+            sym.index('\uffff') < sym.index('\U00010000'),
+            'symbol table is not in code-point order: ' + repr(sym),
+        )
+
+    def test_condense_invalid_key_mutations_stay_no_ops(self):
+        # An invalid key is ignored, so a call that cannot write does not raise.
+        c = condense({'a': 1})
+        self.assertIs(delprop(c, None), c)
+        self.assertIs(setprop(c, None, 1), c)
+        # A call that COULD write still raises.
+        with self.assertRaisesRegex(ValueError, 'immutable'):
+            delprop(c, 'sym')
+
+    def test_condense_is_immutable(self):
+        c = condense({'a': 1})
+        with self.assertRaisesRegex(ValueError, 'immutable'):
+            setpath(c, 'a', 2)
+        with self.assertRaisesRegex(ValueError, 'immutable'):
+            setprop(c, 'a', 2)
+        with self.assertRaisesRegex(ValueError, 'immutable'):
+            delprop(c, 'sym')
+        # The expanded copy is ordinary and mutable.
+        e = expand(c)
+        setpath(e, 'a', 2)
+        self.assertEqual(e['a'], 2)
 
     def test_minor_isnode(self):
         runset(minorSpec['isnode'], isnode)

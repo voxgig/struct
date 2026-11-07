@@ -55,11 +55,12 @@ validate(
 
 ```python
 from voxgig_struct import (
-    # core canonical functions (the full canonical API is 48 names,
+    # core canonical functions (the full canonical API is 52 names,
     # including the builders, re_* helpers, and injection helpers below)
-    clone, delprop, escre, escurl, filter, flatten,
+    clone, condense, condenseview, delprop, escre, escurl,
+    expand, filter, flatten,
     getdef, getelem, getpath, getprop, haskey,
-    inject, isempty, isfunc, iskey, islist, ismap, isnode,
+    inject, iscondensed, isempty, isfunc, iskey, islist, ismap, isnode,
     items, join, jsonify, keysof, merge,
     pad, pathify, select, setpath, setprop,
     size, slice, strkey, stringify, transform,
@@ -642,11 +643,7 @@ and `__UNDEF__`.
 Inside a dict or list, `validate` tells a stored `None` from a missing
 key by the key's presence: `$NULL`, `$NIL` and `$ANY` keep a null the
 data holds in the output, and the list directives `$EXACT`, `$NOF` and
-`$ALL` read it as a value. The root of a call has no key to test, so
-`validate(None, spec)` reads `None` as null. Each `$NOF` or `$ALL` trial
-validates the value at the root of its own call, so for a missing field
-a trial spec of `` '`$NULL`' `` or `` ['`$EXACT`', None] `` admits it,
-where canonical TypeScript refuses it. The absent-versus-null rule is in
+`$ALL` read it as a value. The absent-versus-null rule is in
 [`UNDEF_SPEC.md`](../design/UNDEF_SPEC.md).
 
 ### Walk uses keyword arguments

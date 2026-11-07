@@ -162,8 +162,8 @@ DELETE = {'`$DELETE`': True}
 # Python collapses the canonical "undefined" (TS `undefined`) and JSON `null`
 # both onto None, which loses a distinction the corpus depends on (e.g.
 # stringify(null) is "null" but stringify(undefined) is ""). _ABSENT is a
-# private sentinel used ONLY as a default argument value so a function can tell
-# "no argument supplied" (undefined) apart from an explicit None (JSON null).
+# private sentinel: a default argument value that tells "no argument supplied"
+# (undefined) from an explicit None, and the $TOP of a trial on a missing value.
 class _Absent:
     __slots__ = ()
 
@@ -775,6 +775,9 @@ def delprop(parent: Any, key: Any):
     if not iskey(key):
         return parent
 
+    if iscondensed(parent):
+        raise ValueError(S_CONDENSED_IMMUTABLE)
+
     if ismap(parent):
         key = strkey(key)
         if key in parent:
@@ -1224,6 +1227,9 @@ def setprop(parent: Any, key: Any, val: Any):
     if not iskey(key):
         return parent
 
+    if iscondensed(parent):
+        raise ValueError(S_CONDENSED_IMMUTABLE)
+
     if ismap(parent):
         key = str(key)
         parent[key] = val
@@ -1435,6 +1441,15 @@ def getpath(store, path, injdef=UNDEF):
     else:
         return UNDEF
 
+    # A condensed store answers a path as the node it was built from does,
+    # touching only the nodes on the path. A base needs the whole node.
+    if iscondensed(store):
+        base = injdef.base if isinstance(injdef, Injection) else getprop(injdef, S_base)
+        if base is None:
+            # A stored null reads as absent, as through getprop.
+            return condenseMaterialise(store, condenseResolve(store, store[S_condroot], parts))
+        store = expand(store)
+
     val = store
     # Support both dict-style injdef and Injection instance
     if isinstance(injdef, Injection):
@@ -1532,6 +1547,10 @@ def getpath(store, path, injdef=UNDEF):
 
 
 def setpath(store, path, val, injdef=UNDEF):
+    # Same contract as setprop/delprop: a condensed store is immutable.
+    if iscondensed(store):
+        raise ValueError(S_CONDENSED_IMMUTABLE)
+
     pathType = typify(path)
 
     if (T_list & pathType) > 0:
@@ -2351,6 +2370,10 @@ def transform(data, spec, injdef=UNDEF):
         S_DERRS: errs,
     }
 
+    # Absent data has no $TOP, so that presence tells it from a null.
+    if store[S_DTOP] is _ABSENT:
+        del store[S_DTOP]
+
     if injdef is UNDEF or injdef is None:
         injdef = {}
     if not isinstance(injdef, dict):
@@ -2403,7 +2426,8 @@ def validate_TYPE(inj, _val=UNDEF, ref=UNDEF, _store=UNDEF):
     if tname == S_nil:
         typev = typev | T_null
     out = getprop(inj.dparent, inj.key)
-    t = typify(out)
+    # The root of a trial on a missing value has no $TOP: no value, not null.
+    t = typify(out) if inj.prior is not None or _present(inj.dparent, inj.key) else T_noval
 
     if (t & typev) == 0:
         inj.errs.append(_invalidTypeMsg(inj.path, tname, t, out, 'V1001'))
@@ -3038,7 +3062,7 @@ def _admits(val, present, spec, inj, store):
     terrs = []
 
     vstore = merge([{}, store], 1)
-    vstore[S_DTOP] = val
+    vstore[S_DTOP] = val if present else _ABSENT
 
     out = validate(
         val,
@@ -3100,9 +3124,12 @@ def _nofcount(count, numtvals):
 class StructUtility:
     def __init__(self):
         self.clone = clone
+        self.condense = condense
+        self.condenseview = condenseview
         self.delprop = delprop
         self.escre = escre
         self.escurl = escurl
+        self.expand = expand
         self.filter = filter
         self.flatten = flatten
         self.getdef = getdef
@@ -3112,6 +3139,7 @@ class StructUtility:
         self.haskey = haskey
         self.inject = inject
         self.isempty = isempty
+        self.iscondensed = iscondensed
         self.isfunc = isfunc
         self.iskey = iskey
         self.islist = islist
@@ -3166,6 +3194,334 @@ class StructUtility:
         self.injectChild = injectChild
 
 
+CONDENSE_VERSION = 1
+
+CONDENSE_MAP = 0
+CONDENSE_LIST = 1
+CONDENSE_STR = 2
+CONDENSE_NUM = 3
+CONDENSE_TRUE = 4
+CONDENSE_FALSE = 5
+CONDENSE_NULL = 6
+
+S_condense = '$condense'
+S_condsym = 'sym'
+S_condnode = 'node'
+S_condroot = 'root'
+
+S_CONDENSED_IMMUTABLE = (
+    'struct: condensed structures are immutable - expand() first, then modify the copy'
+)
+
+R_CONDENSE_INDEX = re.compile(r'0|[1-9][0-9]*')  # Canonical list index, for fullmatch.
+
+
+def _isnumber(val):
+    return isinstance(val, (int, float)) and not isinstance(val, bool)
+
+
+# The item at index i, or None. A negative or fractional i is no item, as in JavaScript.
+def _condenseat(lst, i):
+    if isinstance(i, float) and i.is_integer():
+        i = int(i)
+    if islist(lst) and isinstance(i, int) and not isinstance(i, bool) and 0 <= i < len(lst):
+        return lst[i]
+    return None
+
+
+# An encoding's kind tag, or None. A boolean is no kind: JavaScript compares kinds strictly.
+def _condensekind(enc):
+    kind = _condenseat(enc, 0)
+    return None if isinstance(kind, bool) else kind
+
+
+# A path part's string form, as JavaScript writes it: True is 'true', 1.0 is '1'.
+def _condensestr(key):
+    if isinstance(key, float) and key.is_integer():
+        return str(int(key))
+    return key if isinstance(key, str) else _jsstr(key)
+
+
+def iscondensed(val: Any = UNDEF) -> bool:
+    # The version must MATCH, not merely be numeric: a future profile would
+    # otherwise be decoded under this one's schema.
+    return (
+        ismap(val)
+        and _isnumber(val.get(S_condense))
+        and val.get(S_condense) == CONDENSE_VERSION
+        and islist(val.get(S_condsym))
+        and islist(val.get(S_condnode))
+        and _isnumber(val.get(S_condroot))
+    )
+
+
+# Condense any JSON-shaped node. Pure: the same input always produces a
+# byte-identical result, on every port.
+def condense(val: Any = UNDEF) -> dict[str, Any]:
+    # Pass one: every distinct map key and string value, once, sorted.
+    symset: set[str] = set()
+
+    def collect(n):
+        if ismap(n):
+            for k in keysof(n):
+                symset.add(k)
+                collect(n[k])
+        elif islist(n):
+            for item in n:
+                collect(item)
+        elif isinstance(n, str):
+            symset.add(n)
+
+    collect(val)
+
+    # Python orders strings by code point.
+    sym = sorted(symset)
+    symid = {s: i for i, s in enumerate(sym)}
+
+    # Pass two: build post-order, interning on the encoding. Because children
+    # are built first, identical subtrees have already been interned by the
+    # time a parent references them, so sharing costs nothing extra.
+    node: list[list[Any]] = []
+    seen: dict[tuple[Any, ...], int] = {}
+
+    def intern(enc):
+        # A tuple compares numbers by value, so 1 and 1.0 share a node.
+        enckey = tuple(enc)
+        hit = seen.get(enckey)
+        if hit is not None:
+            return hit
+        idx = len(node)
+        node.append(enc)
+        seen[enckey] = idx
+        return idx
+
+    def build(n):
+        if ismap(n):
+            enc = [CONDENSE_MAP]
+            # keysof sorts, so the key ids ascend and lookup can bisect.
+            for k in keysof(n):
+                enc.append(symid[k])
+                enc.append(build(n[k]))
+            return intern(enc)
+        if islist(n):
+            enc = [CONDENSE_LIST]
+            for item in n:
+                enc.append(build(item))
+            return intern(enc)
+        if isinstance(n, str):
+            return intern([CONDENSE_STR, symid[n]])
+        if n is True:
+            return intern([CONDENSE_TRUE])
+        if n is False:
+            return intern([CONDENSE_FALSE])
+        if _isnumber(n):
+            return intern([CONDENSE_NUM, n])
+        return intern([CONDENSE_NULL])
+
+    root = build(val)
+
+    out: dict[str, Any] = {}
+    out[S_condense] = CONDENSE_VERSION
+    out[S_condsym] = sym
+    out[S_condnode] = node
+    out[S_condroot] = root
+    return out
+
+
+# Resolve a symbol to its id by bisecting the sorted symbol table. -1 when
+# the string does not occur anywhere in the structure, which is itself a fast
+# negative answer for a key lookup.
+def condenseSymId(cond, key):
+    sym = _lookup(cond, S_condsym)
+    lo = 0
+    hi = len(sym) - 1 if islist(sym) else -1
+    while lo <= hi:
+        mid = (lo + hi) >> 1
+        s = sym[mid]
+        if s == key:
+            return mid
+        if isinstance(s, str) and s < key:
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    return -1
+
+
+# The node index of `key` inside node `idx`, or -1. Touches only this node.
+def condenseChild(cond, idx, key):
+    enc = _condenseat(_lookup(cond, S_condnode), idx)
+    kind = _condensekind(enc)
+
+    if kind == CONDENSE_MAP:
+        symid = condenseSymId(cond, _condensestr(key))
+        if symid < 0:
+            return -1
+        # Pairs live at [1,2], [3,4], ... with keys ascending: bisect the pairs.
+        lo = 0
+        hi = (len(enc) - 1) // 2 - 1
+        while lo <= hi:
+            mid = (lo + hi) >> 1
+            k = enc[1 + mid * 2]
+            if k == symid:
+                return enc[2 + mid * 2]
+            if _isnumber(k) and k < symid:
+                lo = mid + 1
+            else:
+                hi = mid - 1
+        return -1
+
+    if kind == CONDENSE_LIST:
+        # Canonical integer keys ONLY: an ordinary list lookup misses "01",
+        # "1e0", " 1" and "+1", and condensing must not change which value a
+        # path selects.
+        k = _condensestr(key)
+        if not R_CONDENSE_INDEX.fullmatch(k):
+            return -1
+        i = int(k)
+        if i >= len(enc) - 1:
+            return -1
+        return enc[1 + i]
+
+    return -1
+
+
+# Walk a path from a starting node, returning the node index or -1.
+def condenseResolve(cond, idx, path):
+    if islist(path):
+        parts = path
+    elif isinstance(path, str):
+        parts = [] if path == S_MT else path.split(S_DT)
+    elif path is None:
+        parts = []
+    else:
+        parts = [_condensestr(path)]
+
+    at = idx
+    for part in parts:
+        if not _isnumber(at) or at < 0:
+            return -1
+        if part == S_MT:
+            continue
+        at = condenseChild(cond, at, part)
+    # A child index that is not a number names no node.
+    return at if _isnumber(at) else -1
+
+
+def condenseMaterialise(cond, idx):
+    sym = _lookup(cond, S_condsym)
+    node = _lookup(cond, S_condnode)
+
+    def rebuild(i):
+        enc = _condenseat(node, i)
+        if enc is None:
+            return UNDEF
+        kind = _condensekind(enc)
+        if kind == CONDENSE_MAP:
+            out = {}
+            for j in range(1, len(enc), 2):
+                out[_condenseat(sym, enc[j])] = rebuild(_condenseat(enc, j + 1))
+            return out
+        if kind == CONDENSE_LIST:
+            return [rebuild(enc[j]) for j in range(1, len(enc))]
+        if kind == CONDENSE_STR:
+            return _condenseat(sym, _condenseat(enc, 1))
+        if kind == CONDENSE_NUM:
+            return _condenseat(enc, 1)
+        if kind == CONDENSE_TRUE:
+            return True
+        if kind == CONDENSE_FALSE:
+            return False
+        return None
+
+    return rebuild(idx)
+
+
+# Fully materialise a condensed structure. The escape hatch: correct for any
+# caller, but it gives up every benefit of condensing, so prefer a view or a
+# path read.
+def expand(cond: Any = UNDEF) -> Any:
+    if not iscondensed(cond):
+        return cond
+    return condenseMaterialise(cond, cond[S_condroot])
+
+
+# The keys of node `idx`, WITHOUT materialising any of its values. This is
+# the point of the whole exercise for enumeration: listing the names in a
+# large collection should cost a symbol-table read, not a full decode.
+def condenseKeys(cond, idx):
+    enc = _condenseat(_lookup(cond, S_condnode), idx)
+    kind = _condensekind(enc)
+    if kind == CONDENSE_MAP:
+        sym = _lookup(cond, S_condsym)
+        return [_condenseat(sym, enc[j]) for j in range(1, len(enc), 2)]
+    if kind == CONDENSE_LIST:
+        return [str(j - 1) for j in range(1, len(enc))]
+    return []
+
+
+class CondenseView:
+    """
+    A cursor into a condensed structure. Reads resolve by integer index and
+    touch only the nodes on the path, so the cost of a lookup is proportional
+    to path depth and result size, never to total structure size.
+    """
+
+    def __init__(self, cond: Any, start: Any, refmemo: dict[Any, Any]) -> None:
+        self.cond = cond
+        self.start = start
+        # Shared materialisations, handed out ONLY by ref(). Threaded through
+        # at() so every cursor into the same structure shares one memo.
+        self.refmemo = refmemo
+
+    # The value at path, materialised. Scalars come back directly; a
+    # container comes back as an independent copy.
+    def get(self, path: Any = UNDEF) -> Any:
+        return condenseMaterialise(self.cond, condenseResolve(self.cond, self.start, path))
+
+    # Key names at path, with no value decoding at all.
+    def keys(self, path: Any = UNDEF) -> list[Any]:
+        at = condenseResolve(self.cond, self.start, path)
+        return [] if at < 0 else condenseKeys(self.cond, at)
+
+    def has(self, path: Any = UNDEF) -> bool:
+        return condenseResolve(self.cond, self.start, path) >= 0
+
+    # Chainable cursor. Cheap: no decoding happens here.
+    def at(self, path: Any = UNDEF) -> 'CondenseView':
+        return condenseview(self.cond, condenseResolve(self.cond, self.start, path), self.refmemo)
+
+    def value(self) -> Any:
+        return condenseMaterialise(self.cond, self.start)
+
+    def size(self) -> int:
+        enc = _condenseat(_lookup(self.cond, S_condnode), self.start)
+        kind = _condensekind(enc)
+        if kind == CONDENSE_MAP:
+            return (len(enc) - 1) // 2
+        if kind == CONDENSE_LIST:
+            return len(enc) - 1
+        return 0
+
+    def exists(self) -> bool:
+        return self.start >= 0
+
+    # DANGER, and named to say so. Returns a SHARED materialisation: the same
+    # object for the same node, every time. Mutating it corrupts every other
+    # reader of that node, including ones reached by a different path,
+    # because the structure is a DAG. Use value() unless a profile says this
+    # matters.
+    def ref(self) -> Any:
+        if self.start not in self.refmemo:
+            self.refmemo[self.start] = condenseMaterialise(self.cond, self.start)
+        return self.refmemo[self.start]
+
+
+def condenseview(cond: Any = UNDEF, idx: Any = UNDEF, memo: Any = UNDEF) -> CondenseView:
+    start = (cond[S_condroot] if iscondensed(cond) else -1) if idx is None else idx
+    # A start that is not a number reads as no node, as it does in JavaScript.
+    return CondenseView(cond, start if _isnumber(start) else -1, {} if memo is None else memo)
+
+
 __all__ = [
     'DELETE',
     'MODENAME',
@@ -3192,9 +3548,12 @@ __all__ = [
     'T_symbol',
     'checkPlacement',
     'clone',
+    'condense',
+    'condenseview',
     'delprop',
     'escre',
     'escurl',
+    'expand',
     'filter',
     'flatten',
     'getdef',
@@ -3205,6 +3564,7 @@ __all__ = [
     'inject',
     'injectChild',
     'injectorArgs',
+    'iscondensed',
     'isempty',
     'isfunc',
     'iskey',
