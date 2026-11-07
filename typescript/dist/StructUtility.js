@@ -2605,8 +2605,8 @@ function condense(val) {
     const build = (n) => {
         if (ismap(n)) {
             const enc = [CONDENSE_MAP];
-            // keysof sorts, so the key ids ascend and lookup can bisect.
-            const keys = keysof(n);
+            // Code-point order, not keysof's code-unit order, so the key ids ascend for bisection.
+            const keys = keysof(n).sort(condenseCmp);
             for (let i = 0; i < keys.length; i++) {
                 enc.push(symid[keys[i]]);
                 enc.push(build(n[keys[i]]));
