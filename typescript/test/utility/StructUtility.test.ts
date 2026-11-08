@@ -214,6 +214,32 @@ describe('StructUtility', async () => {
     )
   })
 
+  test('proto-keys-stay-own-properties', () => {
+    const s = struct
+    // JSON.parse keeps __proto__ as an own key; the corpus compiler cannot.
+    const evil = JSON.parse('{"__proto__":{"polluted":"yes"}}')
+    const out = s.merge([{}, evil])
+    equal(undefined, ({} as any).polluted)
+    deepEqual(Object.keys(out), ['__proto__'])
+    deepEqual(out.__proto__, { polluted: 'yes' })
+    s.merge([{ a: {} }, JSON.parse('{"a":{"__proto__":{"deep":1}}}')])
+    equal(undefined, ({} as any).deep)
+    s.setprop({}, '__proto__', { viaset: 1 })
+    equal(undefined, ({} as any).viaset)
+    deepEqual(Object.keys(s.jm('__proto__', 1)), ['__proto__'])
+    equal(1, s.getprop(JSON.parse('{"__proto__":1}'), '__proto__'))
+    equal(undefined, s.getprop({}, '__proto__'))
+  })
+
+  test('validate-child-one-error-per-failure', () => {
+    const s = struct
+    for (const spec of [{ x: { '`$CHILD`': '`$NUMBER`' } }, { x: ['`$CHILD`', '`$NUMBER`'] }]) {
+      const errs: any[] = []
+      s.validate({ x: 1 }, spec, { errs })
+      equal(errs.length, 1, JSON.stringify(errs))
+    }
+  })
+
   test('condense-astral-keys-resolve', () => {
     const s = struct
     // Code-unit order puts the astral key first; the stored pairs must not.

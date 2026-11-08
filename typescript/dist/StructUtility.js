@@ -167,7 +167,7 @@ const SKIP = { '`$SKIP`': true };
 exports.SKIP = SKIP;
 const DELETE = { '`$DELETE`': true };
 exports.DELETE = DELETE;
-const R_INTEGER_KEY = /^[-0-9]+$/;
+const R_INTEGER_KEY = /^(0|-?[1-9][0-9]*)$/;
 const R_ESCAPE_REGEXP = /[.*+?^${}()|[\]\\]/g; // Chars that need escaping in regexp.
 const R_QUOTES = /"/g;
 const R_DOT = /\./g;
@@ -360,20 +360,53 @@ function typify(value) {
     // Anything else (e.g. bigint) is considered T_any
     return T_any;
 }
-// Get a list element. The key should be an integer, or a string
-// that can parse to an integer only. Negative integers count from the end of the list.
+// A list key's index: an integral number, or the string String(n) prints, else NaN.
+function _listkey(key) {
+    if (S_number === typeof key) {
+        return Number.isInteger(key) ? key + 0 : NaN;
+    }
+    return S_string === typeof key && R_INTEGER_KEY.test(key) ? +key : NaN;
+}
+// The stored value; a plain map yields own properties only, never __proto__.
+function _readprop(val, key) {
+    if (islist(val)) {
+        const keyI = _listkey(key);
+        return 0 <= keyI ? val[keyI] : NONE;
+    }
+    if (S_string !== typeof key && S_number !== typeof key) {
+        return NONE;
+    }
+    if (ismap(val)) {
+        return Object.prototype.hasOwnProperty.call(val, key) ? val[key] : NONE;
+    }
+    return val[key];
+}
+function _setown(obj, key, val) {
+    if ('__proto__' === key) {
+        Object.defineProperty(obj, key, {
+            value: val,
+            enumerable: true,
+            writable: true,
+            configurable: true,
+        });
+    }
+    else {
+        obj[key] = val;
+    }
+}
+// Get a list element; a negative integer key counts from the end.
 function getelem(val, key, alt) {
     let out = NONE;
     if (NONE === val || NONE === key) {
         return alt;
     }
     if (islist(val)) {
-        const nkey = parseInt(key);
-        if (Number.isInteger(nkey) && re_test(R_INTEGER_KEY, '' + key)) {
-            if (nkey < 0) {
-                key = val.length + nkey;
-            }
-            out = val[key];
+        let keyI = _listkey(key);
+        if (keyI < 0) {
+            keyI = val.length + keyI;
+        }
+        if (0 <= keyI) {
+            out = val[keyI];
         }
     }
     // null at a slot counts as "no value" — same Group A rule as getprop.
@@ -390,7 +423,7 @@ function getprop(val, key, alt) {
         return alt;
     }
     if (isnode(val)) {
-        out = val[key];
+        out = _readprop(val, key);
     }
     // JSON null at a key is treated as "no value" for the default-substitution
     // rule. This unifies cross-port behaviour: every host language conflates
@@ -410,7 +443,7 @@ function _lookup(val, key) {
     if (NONE === val || NONE === key)
         return NONE;
     if (isnode(val))
-        return val[key];
+        return _readprop(val, key);
     return NONE;
 }
 // Convert different types of keys to string representation.
@@ -742,7 +775,7 @@ function jm(...kv) {
         // with value null" from "slot beyond end of kv".
         let k = i < kv.length ? kv[i] : '$KEY' + i;
         k = 'string' === typeof k ? k : stringify(k);
-        o[k] = i + 1 < kv.length ? kv[i + 1] : null;
+        _setown(o, k, i + 1 < kv.length ? kv[i + 1] : null);
     }
     return o;
 }
@@ -767,11 +800,10 @@ function delprop(parent, key) {
         delete parent[key];
     }
     else if (islist(parent)) {
-        let keyI = +key;
+        const keyI = _listkey(key);
         if (isNaN(keyI)) {
             return parent;
         }
-        keyI = Math.floor(keyI);
         // Delete list element at position keyI, shifting later elements down.
         const psize = size(parent);
         if (0 <= keyI && keyI < psize) {
@@ -796,16 +828,13 @@ function setprop(parent, key, val) {
         throw new Error('struct: condensed structures are immutable - ' + 'expand() first, then modify the copy');
     }
     if (ismap(parent)) {
-        key = S_MT + key;
-        const pany = parent;
-        pany[key] = val;
+        _setown(parent, S_MT + key, val);
     }
     else if (islist(parent)) {
-        let keyI = +key;
+        const keyI = _listkey(key);
         if (isNaN(keyI)) {
             return parent;
         }
-        keyI = Math.floor(keyI);
         // Set or append value at position keyI, or append if keyI out of bounds.
         if (0 <= keyI) {
             parent[slice(keyI, 0, size(parent) + 1)] = val;
@@ -974,13 +1003,27 @@ function setpath(store, path, val, injdef) {
     return parent;
 }
 function getpath(store, path, injdef) {
-    const parts = islist(path)
-        ? path
-        : 'string' === typeof path
-            ? path.split(S_DT)
-            : 'number' === typeof path
-                ? [strkey(path)]
-                : NONE;
+    let parts = NONE;
+    if (islist(path)) {
+        parts = [];
+        for (const part of path) {
+            if (S_number === typeof part) {
+                parts.push(S_MT + part);
+            }
+            else if (S_string === typeof part) {
+                parts.push(part);
+            }
+            else {
+                return NONE;
+            }
+        }
+    }
+    else if (S_string === typeof path) {
+        parts = path.split(S_DT);
+    }
+    else if (S_number === typeof path) {
+        parts = [S_MT + path];
+    }
     if (NONE === parts) {
         return NONE;
     }
@@ -1601,7 +1644,7 @@ const validate_CHILD = (inj) => {
             tval = {};
         }
         else if (!ismap(tval)) {
-            inj.errs.push(_invalidTypeMsg(slice(inj.path, -1), S_object, typify(tval), tval), 'V0220');
+            // _validation reports the mismatch, once.
             return NONE;
         }
         const ckeys = keysof(tval);
@@ -1624,8 +1667,6 @@ const validate_CHILD = (inj) => {
             return NONE;
         }
         if (!islist(inj.dparent)) {
-            const msg = _invalidTypeMsg(slice(inj.path, -1), S_list, typify(inj.dparent), inj.dparent, 'V0230');
-            inj.errs.push(msg);
             inj.keyI = size(parent);
             return inj.dparent;
         }
@@ -2534,19 +2575,6 @@ function condenseCmp(a, b) {
     }
     return a.length - i - (b.length - j);
 }
-function condenseSet(obj, key, val) {
-    if ('__proto__' === key) {
-        Object.defineProperty(obj, key, {
-            value: val,
-            enumerable: true,
-            writable: true,
-            configurable: true,
-        });
-    }
-    else {
-        obj[key] = val;
-    }
-}
 function iscondensed(val) {
     // The version must MATCH, not merely be numeric: a future profile would
     // otherwise be decoded under this one's schema.
@@ -2666,7 +2694,7 @@ function condenseSymId(cond, key) {
 // The node index of `key` inside node `idx`, or -1. Touches only this node.
 function condenseChild(cond, idx, key) {
     const enc = cond[S_condnode][idx];
-    if (null == enc) {
+    if (null == enc || (S_string !== typeof key && S_number !== typeof key)) {
         return -1;
     }
     if (CONDENSE_MAP === enc[0]) {
@@ -2743,7 +2771,7 @@ function condenseMaterialise(cond, idx) {
         if (CONDENSE_MAP === kind) {
             const out = {};
             for (let j = 1; j < enc.length; j += 2) {
-                condenseSet(out, sym[enc[j]], rebuild(enc[j + 1]));
+                _setown(out, sym[enc[j]], rebuild(enc[j + 1]));
             }
             return out;
         }

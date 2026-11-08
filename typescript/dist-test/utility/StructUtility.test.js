@@ -174,6 +174,30 @@ const { equal, deepEqual, throws } = node_assert_1.default;
         const sym = s.condense({ a: '\u{10000}', b: '\uFFFF' }).sym;
         equal(true, sym.indexOf('\uFFFF') < sym.indexOf('\u{10000}'), 'symbol table is not in code-point order: ' + JSON.stringify(sym));
     });
+    (0, node_test_1.test)('proto-keys-stay-own-properties', () => {
+        const s = struct;
+        // JSON.parse keeps __proto__ as an own key; the corpus compiler cannot.
+        const evil = JSON.parse('{"__proto__":{"polluted":"yes"}}');
+        const out = s.merge([{}, evil]);
+        equal(undefined, {}.polluted);
+        deepEqual(Object.keys(out), ['__proto__']);
+        deepEqual(out.__proto__, { polluted: 'yes' });
+        s.merge([{ a: {} }, JSON.parse('{"a":{"__proto__":{"deep":1}}}')]);
+        equal(undefined, {}.deep);
+        s.setprop({}, '__proto__', { viaset: 1 });
+        equal(undefined, {}.viaset);
+        deepEqual(Object.keys(s.jm('__proto__', 1)), ['__proto__']);
+        equal(1, s.getprop(JSON.parse('{"__proto__":1}'), '__proto__'));
+        equal(undefined, s.getprop({}, '__proto__'));
+    });
+    (0, node_test_1.test)('validate-child-one-error-per-failure', () => {
+        const s = struct;
+        for (const spec of [{ x: { '`$CHILD`': '`$NUMBER`' } }, { x: ['`$CHILD`', '`$NUMBER`'] }]) {
+            const errs = [];
+            s.validate({ x: 1 }, spec, { errs });
+            equal(errs.length, 1, JSON.stringify(errs));
+        }
+    });
     (0, node_test_1.test)('condense-astral-keys-resolve', () => {
         const s = struct;
         // Code-unit order puts the astral key first; the stored pairs must not.
