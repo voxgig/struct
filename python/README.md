@@ -663,7 +663,7 @@ parity with other ports beats style here.
 
 ### Test status
 
-94 tests pass against the shared corpus (3 skipped).
+123 tests pass against the shared corpus (3 skipped).
 
 
 ## Regex

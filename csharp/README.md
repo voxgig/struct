@@ -9,8 +9,8 @@
 > canonical injector machinery: 11 transform commands, 6 validate
 > checkers, 4 select operators.
 >
-> Passes the full shared corpus (1178/1178). The xUnit suite
-> (`StructTest.cs`, 74 tests) is the green-bar regression baseline;
+> Passes the full shared corpus (1602/1602). The xUnit suite
+> (`StructTest.cs`, 115 tests) is the green-bar regression baseline;
 > the `CorpusScoreboard` test mirrors the Java/C++ runners and writes
 > `corpus-scoreboard.json` after each run with per-`.aon`-file pass
 > counts. The committed baseline lives at `test-baseline.json`.

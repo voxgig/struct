@@ -16,7 +16,7 @@ covers only what is specific to the Kotlin port.
 **Complete.** The full canonical surface is present (40 functions, 15 type
 flags, 3 mode constants, the sentinels, the `Injection` machine),
 `../tools/check_parity.py` reports it `ok`, and the shared corpus passes in
-full (1360/1360) on [voxgig/omni](https://github.com/voxgig/omni), the shared
+full (1602/1602) on [voxgig/omni](https://github.com/voxgig/omni), the shared
 test runner.
 
 ## Layout

@@ -657,7 +657,7 @@ reference-stable" assumption holds without a wrapper.
 
 ### Test status
 
-74/74 tests pass against the shared corpus.
+109/109 tests pass against the shared corpus.
 
 
 ## Regex

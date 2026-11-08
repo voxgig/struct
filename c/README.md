@@ -9,7 +9,7 @@
 > through the canonical injector machinery: 13 transform commands, 16
 > validate checkers, 8 select operators.
 >
-> Passes the shared corpus (1360/1360), run on
+> Passes the shared corpus (1602/1602), run on
 > [voxgig/omni](https://github.com/voxgig/omni) — the shared test runner,
 > consumed as a local checkout. Run it with `make test` from `c/`.
 
@@ -631,7 +631,7 @@ voxgig_value
 
 `tests/struct_corpus_test.c` runs `../build/test/test.json` on
 [voxgig/omni](https://github.com/voxgig/omni), the shared test runner. Every
-group the corpus defines runs — **1549 entries in 78 groups**, plus `merge.basic`, `inject.basic` and `transform.basic` (single
+group the corpus defines runs — **1602 entries in 78 groups**, plus `merge.basic`, `inject.basic` and `transform.basic` (single
 entries, not sets) and the two `check` entries in `tests/client_test.c`.
 
 Each group is one assertion: the runner stops at its first failing entry and

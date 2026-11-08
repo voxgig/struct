@@ -20,25 +20,27 @@
   feature. The Perl, Rust, and other ports replicate the behaviour
   faithfully; the gap is purely in the TS docstring.
 
-- **A number inside a `getpath` path list throws in canonical TypeScript.**
-  `getpath({l: [10, 20]}, ['l', 1])` throws `part.indexOf is not a function`,
-  while the string part `'1'` reads 20. No corpus entry puts a number in a
-  path list, so the ports are unconstrained there.
-
-- **Edge cases no corpus entry reaches, where ports still differ.**
-  - Writes coerce a list key with JavaScript's `+key` in the canonical
-    `setprop` and `delprop` (`" 1"` and `"1e0"` write index 1); the ports
-    parse write keys their own way. Reads are pinned and agree.
-  - `getelem` follows `parseInt`'s prefix rule, so `"-1-"` counts from the
-    end in TypeScript; most ports miss it. `"-01"` counts from the end in
-    every port, as in TypeScript.
-  - A list- or map-valued key is coerced with `String(key)` in TypeScript
-    (`getprop(list, [1])` reads index 1); most ports miss it.
-  - `validate([null], ['$NULL'])` answers `[null]` in TypeScript and `[]` in
-    the Ruby, Go, Clojure and Elixir ports, whose write-back of a null
-    removes the list element.
-  - C and C++ type `2.0` as a decimal, so it is an invalid `$NOF` count
-    there.
+- **Edge cases no corpus entry reaches, where ports still differ.** List
+  keys, a numeric `getpath` part, a null written back into a list, a `2.0`
+  count and one `$CHILD` error per failure are pinned and agree in every
+  port. What is left:
+  - A decimal number key on a map: the canonical `setprop` and `getprop`
+    use `String(n)` (`1.5` is `"1.5"`), but `delprop` floors it through
+    `strkey` (`"1"`). The ports split between the two.
+  - Number spelling at the edges: a map key or path part built from an
+    exponent-form or non-finite number follows each host's float formatter
+    (`1.5e-07` against JavaScript's `1.5e-7`; OCaml prints `inf`).
+  - `$COPY` of a null in the single-null ports (Elixir and boru at least):
+    `transform([null,1], ['$COPY','$COPY'])` loses the null that TypeScript
+    keeps.
+  - Go's `select` drops a child that lacks a key checked with `$NIL` or
+    `$ANY`, and a checker injected into part of a string over a null gives
+    `x` where TypeScript gives `xnull`.
+  - Ruby's `getpath(store, ['x', ''])` without injection options returns the
+    store; Haskell's `jm('', v)` drops the empty key; Swift's `setpath`
+    returns nothing for a numeric path; Zig's `delprop` panics on a NaN map
+    key; PHP answers `[]` for some empty-map data where TypeScript answers
+    `{}`.
 
 
 ## Documented JS-fidelity gaps

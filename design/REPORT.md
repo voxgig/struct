@@ -41,40 +41,40 @@ NFA engine in-tree (c/cpp/lua/rust/zig).
 
 | Language | Functions | Type Constants | Sentinels | Tests | Status |
 |----------|-----------|---------------|-----------|-------|--------|
-| **typescript** (canonical) | 52 | 15 | 2 | 89/89 pass | Reference (Group A/B) |
-| **javascript** | 52 | 15 | 2 | 90/90 pass | Group A/B applied |
-| **python** | 52+ | 15 | 2 | 90/93 pass (3 skip) | Group A/B applied |
-| **go** | 54+ | 15 | 2 | 92/92 pass | already Group A |
-| **php** | 52 | 15 | 2 | 84/84 pass | already Group A |
-| **ruby** | 52+ | 15 | 2 | 81/81 pass | Group A/B + UNDEF setval |
-| **lua** | 52+ | 15 | 2 | 74/74 pass | already Group A |
-| **rust** | 52+ | 15 | 2 | corpus pass | already Group A |
-| **c** | 52 | 15 | 2 | 1360/1360 corpus | Group A/B applied |
-| **java** | 52 | 15 | 2 | 1300/1300 corpus | full TS-canonical parity |
-| **cpp** | 52 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
-| **csharp** | 52 | 15 | 2 | 78/78 corpus | already Group A |
-| **kotlin** | 52 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
-| **zig** | 52 | 15 | 2 | 60/60 corpus sets \*1 \*4 | cycle-break + 7 latent-bug fixes |
-| **perl** | 52 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
-| **swift** | 52 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
-| **clojure** | 52 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
-| **ocaml** | 52 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
-| **scala** | 52 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
-| **dart** | 52 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
-| **elixir** | 52 | 15 | 2 | 1355/1360 corpus \*2 | full TS-canonical parity |
-| **haskell** | 52 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
-| **lean** | 52 | 15 | 2 | 1360/1360 corpus | full TS-canonical parity |
-| **boru** | 52 | 15 | 2 | 1360/1360 corpus \*3 | full TS-canonical parity |
+| **typescript** (canonical) | 52 | 15 | 2 | 122 tests, 0 fail (3 bench skip) | Reference (Group A/B) |
+| **javascript** | 52 | 15 | 2 | 116/116 pass | Group A/B applied |
+| **python** | 52+ | 15 | 2 | 123 tests, OK (3 bench skip) | Group A/B applied |
+| **go** | 54+ | 15 | 2 | 123/123 subtests pass | already Group A |
+| **php** | 52 | 15 | 2 | 120 tests, 0 fail (2 incomplete) | already Group A |
+| **ruby** | 52+ | 15 | 2 | 115 runs, 0 fail | Group A/B + UNDEF setval |
+| **lua** | 52+ | 15 | 2 | 109/109 pass (20 entries dropped) | already Group A |
+| **rust** | 52+ | 15 | 2 | 1608 corpus checks pass | already Group A |
+| **c** | 52 | 15 | 2 | 1602/1602 corpus | Group A/B applied |
+| **java** | 52 | 15 | 2 | 113/113 pass | full TS-canonical parity |
+| **cpp** | 52 | 15 | 2 | 1602/1602 corpus | full TS-canonical parity |
+| **csharp** | 52 | 15 | 2 | 115/115 pass | already Group A |
+| **kotlin** | 52 | 15 | 2 | 115/115 pass | full TS-canonical parity |
+| **zig** | 52 | 15 | 2 | unverified on this branch \*1 \*4 | cycle-break + 7 latent-bug fixes |
+| **perl** | 52 | 15 | 2 | 172/172 pass | full TS-canonical parity |
+| **swift** | 52 | 15 | 2 | unverified on this branch | full TS-canonical parity |
+| **clojure** | 52 | 15 | 2 | 98 groups, 0 failed | full TS-canonical parity |
+| **ocaml** | 52 | 15 | 2 | 97 groups, 0 failed | full TS-canonical parity |
+| **scala** | 52 | 15 | 2 | 96 groups, 0 failed | full TS-canonical parity |
+| **dart** | 52 | 15 | 2 | unverified on this branch | full TS-canonical parity |
+| **elixir** | 52 | 15 | 2 | 98 groups, 0 failed (9 entries dropped) \*2 | full TS-canonical parity |
+| **haskell** | 52 | 15 | 2 | 97 groups, 0 failed | full TS-canonical parity |
+| **lean** | 52 | 15 | 2 | unverified on this branch | full TS-canonical parity |
+| **boru** | 52 | 15 | 2 | unverified on this branch \*3 | full TS-canonical parity |
 
 \*3 Boru: the only port that CANNOT move onto voxgig/omni, because omni has
 no boru port to move onto — its 22 ports do not include one. Until it does,
 `test/runner.boru` stays this repository's own copy of the runner algorithm.
 That is a gap in omni, not in this port.
 
-\*2 Elixir: five entries are dropped, named and guarded in
+\*2 Elixir: nine entries are dropped, named and guarded in
 `elixir/test/runner.exs`. The port has one `nil` for undefined and null, so a
-bare nil result must be read one way; measured entry by entry, reading it as
-null costs 42 and as absent costs 5. Absent, therefore.
+bare nil result must be read one way, and reading it as null costs far more
+entries than reading it as absent. Absent, therefore.
 
 \*1 Zig: previously reported "60/60 passing with a SIGSEGV" was
 misleading — the test process actually died at test 47/60
@@ -154,7 +154,7 @@ failures the SIGSEGV had been hiding — all now fixed (see \*1 above
 for the `transform.ref[20]` and `cmdEach` follow-up). `zig build test`
 is 60/60 passing.
 
-\*4 Zig: the 60/60 above counts test BLOCKS the in-situ runner chose to check, not corpus entries it verified. `test/runner.zig` skips the result check on every entry with an `err:` field (`if (err_field != null) continue;` - 59 of them), never looks at a `match:` block (15), never reads `args` or `ctx`, and runs most groups with `null_flag = false` where canonical uses true. So it cannot establish parity on error paths or in-place mutation, and the "100% parity" this report claimed for zig is an API claim, not a behavioural one. This is what moving onto voxgig/omni would settle, and why this port is the one that needs it most.
+\*4 Zig: the 60/60 this table once reported counted test BLOCKS the in-situ runner chose to check, not corpus entries it verified. `test/runner.zig` skips the result check on every entry with an `err:` field (`if (err_field != null) continue;` - 59 of them), never looks at a `match:` block (15), never reads `args` or `ctx`, and runs most groups with `null_flag = false` where canonical uses true. So it cannot establish parity on error paths or in-place mutation, and the "100% parity" this report claimed for zig is an API claim, not a behavioural one. This is what moving onto voxgig/omni would settle, and why this port is the one that needs it most.
 
 **The corpus is NOT yet on voxgig/omni here, and this is the port that
 needs it most.** `test/runner.zig` is the weakest driver of the 24: it
@@ -795,8 +795,8 @@ identity holds for maps only.
 | $ANY | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
 | $CHILD | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
 | $EXACT | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
-| $NOF | Y | Y | Y | Y | Y | Y* | Y | Y* | Y | Y* | Y | Y* | Y | Y | Y | Y* |
-| $ALL | Y | Y | Y | Y | Y | Y* | Y | Y* | Y | Y* | Y | Y* | Y | Y | Y | Y* |
+| $NOF | Y | Y | Y | Y | Y | Y* | Y | Y | Y | Y | Y | Y* | Y | Y | Y | Y* |
+| $ALL | Y | Y | Y | Y | Y | Y* | Y | Y | Y | Y | Y | Y* | Y | Y | Y | Y* |
 
 Every port defines `$NOF` and `$ALL`, and none defines `$ONE`: there
 `['$NOF', {min:1}, ...]` is the same check. `validate.nof` and `validate.all`
@@ -817,8 +817,6 @@ corpus does not reach, or that has not run them yet:
 - **lua:** 18 entries of `validate.directive`, `validate.nof` and
   `validate.all` are dropped, each named in the runner: a Lua table cannot
   hold a JSON null inside a node.
-- **c, cpp:** `typify` reads `2.0` as a decimal, so it is an invalid `$NOF`
-  count where TypeScript, with one number type, reads `2`.
 - **zig, swift:** written without a toolchain, and not yet compiled or run.
   So are the Lean, Dart and boru ports, which this table does not list.
 
@@ -891,8 +889,8 @@ none of it reached by the corpus yet:
 
 - The Lean, Dart, Swift, Zig and boru ports were last changed without a
   toolchain; their CI jobs have to confirm them.
-- The edge cases [`NOTES.md`](NOTES.md) lists under its open follow-ups, none
-  of them pinned by the corpus.
+- The smaller edge cases [`NOTES.md`](NOTES.md) lists under its open
+  follow-ups, none of them pinned by the corpus.
 
 Beyond that, the ports stay in lockstep by changing the canonical first, then
 propagating to every port and re-testing.

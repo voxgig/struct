@@ -665,7 +665,8 @@ PHP method names match canonical lowercase: `getpath`, `setpath`,
 
 ### Test status
 
-85/85 tests pass, 1022 assertions.
+120 tests and 391 assertions pass, apart from two tests marked incomplete
+because no corpus group covers them.
 
 
 ## Regex
