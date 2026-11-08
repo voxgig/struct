@@ -217,8 +217,10 @@ Ruby has `nil` but no separate "absent" value, so the port adds one — the
   treat a stored `nil` as absent too.
 - `nil` = the JSON null scalar; `typify(nil)` is `T_scalar | T_null`, and
   Group B processors (`clone`, `merge`, `walk`, …) preserve it literally.
-  Internally `setval` keeps the UNDEF/`nil` distinction so a deliberately
-  stored null is never confused with a vacated slot.
+  Internally `setval` vacates a slot on either `UNDEF` or `nil`, so a
+  checker that accepts a null the data holds writes it back itself:
+  `$NULL`, `$NIL` and `$ANY` keep that null in the output, in a map or a
+  list.
 
 If your data source returns `nil` for "not set", decide which you mean
 before handing it to `struct`.

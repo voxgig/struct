@@ -868,6 +868,39 @@ class TestVoxgigStruct < Minitest::Test
     assert_equal 'Expected field x to be instance, but found integer: 1.', errs[0]
   end
 
+  def test_validate_null_kept
+    # A null the data holds is a value: a checker that accepts it keeps it,
+    # beside other keys and in a list. An absent key stays absent.
+    data = { 'a' => nil, 'b' => 1 }
+    assert_equal data, VoxgigStruct.validate(data, { 'a' => '`$NIL`', 'b' => 1 })
+    assert_equal data, VoxgigStruct.validate(data, { 'a' => '`$NULL`', 'b' => 1 })
+    assert_equal data, VoxgigStruct.validate(data, { 'a' => '`$ANY`', 'b' => 1 })
+    assert_equal({ 'b' => 1 }, VoxgigStruct.validate({ 'b' => 1 }, { 'a' => '`$NIL`', 'b' => 1 }))
+    assert_equal [nil, 1], VoxgigStruct.validate([nil, 1], ['`$CHILD`', '`$ANY`'])
+    assert_equal [nil, 1], VoxgigStruct.validate([nil, 1], ['`$NOF`', 1, ['`$CHILD`', '`$ANY`']])
+  end
+
+  def test_validate_child_one_error_per_failure
+    [{ 'x' => { '`$CHILD`' => '`$NUMBER`' } }, { 'x' => ['`$CHILD`', '`$NUMBER`'] }].each do |spec|
+      errs = []
+      VoxgigStruct.validate({ 'x' => 1 }, spec, { 'errs' => errs })
+      assert_equal 1, errs.length, JSON.generate(errs)
+    end
+  end
+
+  def test_validate_nof_whole_decimal_count
+    # JSON writes 2.0 as 2, so only a host Float can pin this.
+    nof = ['`$NUMBER`', '`$INTEGER`']
+    assert_equal 1, VoxgigStruct.validate(1, ['`$NOF`', 2.0, *nof])
+    assert_equal 1, VoxgigStruct.validate(1, ['`$NOF`', { 'min' => 1.0, 'max' => 2.0 }, *nof])
+    err = assert_raises(RuntimeError) { VoxgigStruct.validate('x', ['`$NOF`', 2.0, *nof]) }
+    assert_match(/\AExpected exactly 2 of number, integer, but/, err.message)
+    err = assert_raises(RuntimeError) { VoxgigStruct.validate('x', ['`$NOF`', { 'min' => 1.0, 'max' => 2.0 }, *nof]) }
+    assert_match(/\AExpected 1 to 2 of number, integer, but/, err.message)
+    err = assert_raises(RuntimeError) { VoxgigStruct.validate('x', ['`$NOF`', 2.5, *nof]) }
+    assert_match(/has an invalid count: 2\.5/, err.message)
+  end
+
   def test_validate_custom
     errs = []
     extra = {

@@ -203,19 +203,26 @@ module VoxgigStruct
     URI::DEFAULT_PARSER.escape(s, /[^A-Za-z0-9\-._~!*'()]/)
   end
 
-  R_LIST_INDEX = /\A(0|[1-9][0-9]*)\z/.freeze
-  R_NEGATIVE_INDEX = /\A-0*[1-9][0-9]*\z/.freeze
+  R_LIST_KEY = /\A(0|-?[1-9][0-9]*)\z/.freeze
 
-  # The index key reads in a list of size items, or -1. As JavaScript reads
-  # list[key], only a canonical integer names one: "1", not "01", "+1" or "-0".
-  # With fromend, as getelem reads it, a negative one counts back from the end.
+  # A list key's index, or nil. As JavaScript reads list[key], that is an integral
+  # number or the string String(n) prints for one: "1" and "-1", not "01", "+1" or "-0".
+  def self._listkey(key)
+    return key if key.is_a?(Integer)
+    return key.to_i if key.is_a?(Float) && key.finite? && key == key.to_i
+    return key.to_i if key.is_a?(String) && R_LIST_KEY.match?(key)
+
+    nil
+  end
+
+  # The index key reads in a list of size items, or -1. With fromend, as getelem
+  # reads it, a negative key counts back from the end.
   def self._listindex(key, size, fromend = false)
-    key = key.to_i if key.is_a?(Float) && key.finite? && key == key.to_i
-    key = key.to_i if key.is_a?(String) && (R_LIST_INDEX.match?(key) || (fromend && R_NEGATIVE_INDEX.match?(key)))
-    return -1 unless key.is_a?(Integer)
+    index = _listkey(key)
+    return -1 if index.nil?
 
-    key += size if fromend && key.negative?
-    key >= 0 && key < size ? key : -1
+    index += size if fromend && index.negative?
+    index >= 0 && index < size ? index : -1
   end
 
   # --- Internal getprop ---
@@ -235,7 +242,11 @@ module VoxgigStruct
       result
     elsif ismap(val)
       key_str = key.to_s
-      if val.key?(key_str)
+      # As in JavaScript, only a string or a number names a map entry: true and [1] do not.
+      if !key.is_a?(String) && !key.is_a?(Numeric)
+        log { "(_getprop) key #{key.inspect} names no entry; returning alt" }
+        alt
+      elsif val.key?(key_str)
         result = val[key_str]
         log { "(_getprop) found key #{key_str.inspect} in hash, returning #{result.inspect}" }
         result
@@ -311,11 +322,9 @@ module VoxgigStruct
         parent[key_str] = val
       end
     elsif islist(parent)
-      begin
-        key_i = Integer(key)
-      rescue ArgumentError
-        return parent
-      end
+      key_i = _listkey(key)
+      return parent if key_i.nil?
+
       if val == :no_val_provided
         parent.delete_at(key_i) if key_i >= 0 && key_i < parent.length
       elsif key_i >= 0
@@ -520,13 +529,8 @@ module VoxgigStruct
       ks = strkey(key)
       parent.delete(ks)
     elsif islist(parent)
-      return parent unless key.to_s.match?(/\A-?\d+\z/)
-
-      begin
-        ki = key.to_i
-        parent.delete_at(ki) if ki >= 0 && ki < parent.length
-      rescue StandardError
-      end
+      ki = _listkey(key)
+      parent.delete_at(ki) if !ki.nil? && ki >= 0 && ki < parent.length
     end
     parent
   end
@@ -892,11 +896,20 @@ module VoxgigStruct
   def self.getpath(store, path, injdef = nil)
     # Operate on a string array.
     if islist(path)
-      parts = path.dup
+      parts = []
+      path.each do |part|
+        if part.is_a?(Numeric)
+          parts << _condensestr(part)
+        elsif part.is_a?(String)
+          parts << part
+        else
+          return nil
+        end
+      end
     elsif path.is_a?(String)
       parts = path.split(S_DT, -1)
     elsif path.is_a?(Numeric)
-      parts = [strkey(path)]
+      parts = [_condensestr(path)]
     else
       return nil
     end
@@ -1818,11 +1831,14 @@ module VoxgigStruct
   # count is invalid. Without a max, the bound is the number of specs.
   def self._nofcount(count, numtvals)
     isnat = ->(n) { T_integer.anybits?(typify(n)) && n >= 0 }
+    # JavaScript has one number type, so 2.0 is the count 2.
+    whole = ->(n) { n.is_a?(Float) && n.finite? && n == n.to_i ? n.to_i : n }
 
+    count = whole.call(count)
     return [count, count, count.zero? ? 'none' : "exactly #{count}"] if isnat.call(count)
 
-    min = _getprop(count, 'min')
-    max = _getprop(count, 'max')
+    min = whole.call(_getprop(count, 'min'))
+    max = whole.call(_getprop(count, 'max'))
     nomin = min.equal?(UNDEF)
     nomax = max.equal?(UNDEF)
 
@@ -1901,11 +1917,20 @@ module VoxgigStruct
       inj.errs << _invalidTypeMsg(inj.path, tname, t, out, 'V1001')
       return nil
     end
-    out
+    _keepnull(inj, out)
   end
 
   def self.validate_ANY(inj, _val = nil, _ref = nil, _store = nil)
-    getprop(inj.dparent, inj.key)
+    _keepnull(inj, getprop(inj.dparent, inj.key))
+  end
+
+  # A checker's accepted value, where a null the data holds stays in the output:
+  # returned as nil, inject's setval would delete the slot instead.
+  def self._keepnull(inj, out)
+    return out unless out.nil? && inj.mode == S_MVAL && !_getprop(inj.dparent, inj.key).equal?(UNDEF)
+
+    setprop(inj.parent, inj.key, nil)
+    SKIP
   end
 
   def self.validate_CHILD(inj, _val = nil, _ref = nil, _store = nil)
@@ -1923,7 +1948,7 @@ module VoxgigStruct
       if tval.nil?
         tval = {}
       elsif !ismap(tval)
-        inj.errs << _invalidTypeMsg(path[0...-1], S_object, typify(tval), tval, 'V0220')
+        # _validation reports the mismatch, once.
         return nil
       end
 
@@ -1950,7 +1975,6 @@ module VoxgigStruct
       end
 
       unless islist(inj.dparent)
-        inj.errs << _invalidTypeMsg(path[0...-1], S_list, typify(inj.dparent), inj.dparent, 'V0230')
         inj.keyI = size(parent)
         return inj.dparent
       end
@@ -2590,6 +2614,8 @@ module VoxgigStruct
     kind = _condenseat(enc, 0)
 
     if kind == CONDENSE_MAP
+      return -1 unless key.is_a?(String) || key.is_a?(Numeric)
+
       symid = condenseSymId(cond, _condensestr(key))
       return -1 if symid.negative?
 
