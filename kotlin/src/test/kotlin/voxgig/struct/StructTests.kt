@@ -443,6 +443,38 @@ class StructTests {
     }
 
     @Test
+    fun validateChildOneErrorPerFailure() {
+        for (spec in listOf(mapOf("x" to mapOf("`\$CHILD`" to "`\$NUMBER`")), mapOf("x" to listOf("`\$CHILD`", "`\$NUMBER`")))) {
+            val errs = mutableListOf<Any?>()
+            Struct.validate(mapOf("x" to 1), spec, linkedMapOf<String, Any?>("errs" to errs))
+            assertEquals(1, errs.size, errs.toString())
+        }
+
+        val errs = mutableListOf<Any?>()
+        Struct.validate(1, mapOf("`\$CHILD`" to "`\$NUMBER`"), linkedMapOf<String, Any?>("errs" to errs))
+        assertEquals(listOf<Any?>("Expected map, but found integer: 1."), errs)
+        errs.clear()
+        Struct.validate(1, listOf("`\$CHILD`", "`\$NUMBER`"), linkedMapOf<String, Any?>("errs" to errs))
+        assertEquals(listOf<Any?>("Expected list, but found integer: 1."), errs)
+    }
+
+    @Test
+    fun validateNofIntegralDecimalCount() {
+        // A count is the integer it holds, whatever the host number type.
+        for (two in listOf<Any>(2, 2L, 2.0)) {
+            assertEquals(1L, normalize(Struct.validate(1, listOf("`\$NOF`", two, "`\$NUMBER`", "`\$INTEGER`"))))
+            val err = assertFailsWith<Exception> { Struct.validate(1.5, listOf("`\$NOF`", two, "`\$NUMBER`", "`\$INTEGER`")) }
+            assertEquals("Expected exactly 2 of number, integer, but found decimal: 1.5.", err.message)
+        }
+
+        for (range in listOf(mapOf("min" to 1, "max" to 2), mapOf("min" to 1.0, "max" to 2.0))) {
+            assertEquals(1L, normalize(Struct.validate(1, listOf("`\$NOF`", range, "`\$NUMBER`", "`\$INTEGER`"))))
+            val err = assertFailsWith<Exception> { Struct.validate("x", listOf("`\$NOF`", range, "`\$NUMBER`", "`\$INTEGER`")) }
+            assertEquals("Expected 1 to 2 of number, integer, but found string: x.", err.message)
+        }
+    }
+
+    @Test
     fun transformEdgeApply() {
         val spec =
             mutableListOf<Any?>(

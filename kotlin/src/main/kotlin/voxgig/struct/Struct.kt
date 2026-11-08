@@ -50,8 +50,7 @@ object Struct {
     private val R_INJECT_PART = Pattern.compile("`([^`]+)`")
     private val R_CMD_KEY = Pattern.compile("^`(\\$[A-Z]+)(\\d*)`$")
     private val R_TRANSFORM_NAME = Pattern.compile("`\\$([A-Z]+)`")
-    private val R_INTEGER_KEY = Pattern.compile("^[-0-9]+$")
-    private val R_LIST_INDEX = Pattern.compile("^(0|[1-9][0-9]*)$")
+    private val R_LIST_INDEX = Pattern.compile("^(0|-?[1-9][0-9]*)$")
     val SKIP: Any = Any()
 
     fun interface WalkApply {
@@ -349,14 +348,10 @@ object Struct {
         alt: Any?,
     ): Any? {
         if (value !is List<*> || key == null || key === UNDEF) return resolveAlt(alt)
-        val k = jsString(key)
-        var idx = listIndex(k)
-        if (0 > idx && R_INTEGER_KEY.matcher(k).matches()) {
-            // A negative key counts from the end.
-            val n = k.toIntOrNull()
-            if (n != null && n < 0) idx = value.size.toLong() + n
-        }
-        if (idx < 0 || idx >= value.size) return resolveAlt(alt)
+        var idx = listIndex(key)
+        // A negative key counts from the end.
+        if (idx < 0.0) idx += value.size
+        if (!(0.0 <= idx && idx < value.size)) return resolveAlt(alt)
         val out = value[idx.toInt()]
         // Group A null-unification: a JSON null (or absent) slot counts as "no
         // value" — return the alt (canonical TS getelem `if (null == out)`).
@@ -378,12 +373,12 @@ object Struct {
         var out: Any? = UNDEF
         when (value) {
             is Map<*, *> -> {
-                val sk = strkey(key)
-                if (value.containsKey(sk)) out = value[sk]
+                val sk = mapKey(key)
+                if (sk != null && value.containsKey(sk)) out = value[sk]
             }
             is List<*> -> {
                 val idx = listIndex(key)
-                if (0 <= idx && idx < value.size) out = value[idx.toInt()]
+                if (0.0 <= idx && idx < value.size) out = value[idx.toInt()]
             }
             else -> {}
         }
@@ -407,24 +402,29 @@ object Struct {
         if (value == null || value === UNDEF || key == null || key === UNDEF) return UNDEF
         return when (value) {
             is Map<*, *> -> {
-                val sk = strkey(key)
-                if (value.containsKey(sk)) value[sk] else UNDEF
+                val sk = mapKey(key)
+                if (sk != null && value.containsKey(sk)) value[sk] else UNDEF
             }
             is List<*> -> {
                 val idx = listIndex(key)
-                if (0 <= idx && idx < value.size) value[idx.toInt()] else UNDEF
+                if (0.0 <= idx && idx < value.size) value[idx.toInt()] else UNDEF
             }
             else -> UNDEF
         }
     }
 
-    // The index a list read takes key to, or -1: only a canonical index, as a
-    // JavaScript array reads one ("01", "+1", "1.0" and "-0" are not).
-    private fun listIndex(key: Any?): Long {
-        val k = jsString(key)
-        if (!R_LIST_INDEX.matcher(k).matches()) return -1
-        return if (18 < k.length) Long.MAX_VALUE else k.toLong()
-    }
+    // The key a map read takes, or null for one that is neither a string nor a
+    // number, which misses.
+    private fun mapKey(key: Any?): String? = if (key is String || key is Number) strkey(key) else null
+
+    // A list key's index, or NaN: an integral number, or the string String(n)
+    // prints for one, negative or not ("01", "+1", "1.0" and "-0" are not).
+    private fun listIndex(key: Any?): Double =
+        when (key) {
+            is Number -> key.toDouble().let { if (it.isFinite() && floor(it) == it) it else Double.NaN }
+            is String -> if (R_LIST_INDEX.matcher(key).matches()) key.toDouble() else Double.NaN
+            else -> Double.NaN
+        }
 
     fun haskey(
         value: Any?,
@@ -445,10 +445,10 @@ object Struct {
             }
             is MutableList<*> -> {
                 val list = parent as MutableList<Any?>
-                val idx = parseIntKey(key) ?: return parent
-                if (idx >= 0) {
-                    val target = idx.coerceIn(0, list.size)
-                    if (target < list.size) list[target] = value else list.add(value)
+                val idx = listIndex(key)
+                if (idx.isNaN()) return parent
+                if (idx >= 0.0) {
+                    if (idx < list.size) list[idx.toInt()] = value else list.add(value)
                 } else {
                     list.add(0, value)
                 }
@@ -470,9 +470,9 @@ object Struct {
                 parent
             }
             is MutableList<*> -> {
-                val idx = parseIntKey(key)
+                val idx = listIndex(key)
                 val list = parent as MutableList<Any?>
-                if (idx != null && idx in list.indices) list.removeAt(idx)
+                if (0.0 <= idx && idx < list.size) list.removeAt(idx.toInt())
                 list
             }
             else -> parent
@@ -1140,13 +1140,13 @@ object Struct {
         path: Any?,
         inj: Injection?,
     ): Any? {
-        val parts = pathParts(path)
+        val parts = pathParts(path) ?: return UNDEF
         var target = store
 
         // A condensed store answers as the node it was built from, touching only
         // the nodes on the path. A base changes what the path resolves against,
         // so that read needs the materialised store.
-        if (parts != null && iscondensed(store)) {
+        if (iscondensed(store)) {
             if (inj?.base == null) {
                 val found = condenseMaterialise(store, condenseResolve(store, condenseRoot(store), parts))
                 // Group A: a stored null reads as absent, as it does through getprop.
@@ -2022,15 +2022,18 @@ object Struct {
         }
     }
 
+    // A new list, so the caller's path is never rewritten; null when it is no
+    // path, or names a part that is neither a string nor a number.
     private fun pathParts(path: Any?): MutableList<String>? {
         return when (path) {
             is String -> if (path.isEmpty()) mutableListOf("") else path.split(".").toMutableList()
+            is Number -> mutableListOf(jsString(path))
             is List<*> ->
                 path.map {
                     when (it) {
                         is String -> it
-                        is Number -> strkey(it)
-                        else -> strkey(it)
+                        is Number -> jsString(it)
+                        else -> return null
                     }
                 }.toMutableList()
             else -> null
@@ -2040,10 +2043,9 @@ object Struct {
     private fun getpathInner(
         store: Any?,
         pathOrig: Any?,
-        parts: MutableList<String>?,
+        parts: MutableList<String>,
         inj: MutableMap<String, Any?>?,
     ): Any? {
-        if (parts == null) return null
         val base = inj?.get("base")
         val src = getprop(store, base, store)
         val dparent = inj?.get("dparent")
@@ -2109,14 +2111,6 @@ object Struct {
             }
         }
         return value
-    }
-
-    private fun parseIntKey(key: Any?): Int? {
-        return when (key) {
-            is Number -> floor(key.toDouble()).toInt()
-            is String -> key.toIntOrNull()
-            else -> null
-        }
     }
 
     private fun unescapeInjectRef(ref: String?): String? {
@@ -2226,8 +2220,7 @@ object Struct {
                     if (tval === UNDEF || tval == null) {
                         tval = linkedMapOf<String, Any?>()
                     } else if (!ismap(tval)) {
-                        val sp = slice(inj.path, -1, null)
-                        inj.errs.add(_invalidTypeMsg(sp, "object", typify(tval), tval, "V0220"))
+                        // _validation reports the mismatch, once.
                         return@Injector UNDEF
                     }
                     val ckeys = keysof(tval)
@@ -2250,8 +2243,6 @@ object Struct {
                         return@Injector UNDEF
                     }
                     if (!islist(inj.dparent)) {
-                        val sp = slice(inj.path, -1, null)
-                        inj.errs.add(_invalidTypeMsg(sp, "list", typify(inj.dparent), inj.dparent, "V0230"))
                         inj.keyI = size(inj.parent)
                         return@Injector inj.dparent
                     }
@@ -3126,6 +3117,7 @@ object Struct {
         key: Any?,
     ): Int {
         val enc = condenseEnc(cond, idx) ?: return -1
+        if (key !is String && key !is Number) return -1
 
         if (condenseIs(enc, CONDENSE_MAP)) {
             val symid = condenseSymId(cond, condenseKey(key))
@@ -3146,7 +3138,7 @@ object Struct {
         if (condenseIs(enc, CONDENSE_LIST)) {
             val items = enc as List<*>
             val i = listIndex(key)
-            if (0 > i || i >= items.size - 1) return -1
+            if (!(0.0 <= i && i < items.size - 1)) return -1
             return condenseIndex(items[1 + i.toInt()])
         }
 
