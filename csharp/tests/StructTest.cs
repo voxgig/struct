@@ -1211,6 +1211,46 @@ public class StructTests
     }
 
     [Fact]
+    public void ValidateChildOneErrorPerFailure()
+    {
+        // $CHILD over the wrong type is one error, in either form and at the root.
+        var cases = new (object? data, object? spec)[]
+        {
+            (new Dictionary<string, object?> { ["x"] = 1L },
+                new Dictionary<string, object?> { ["x"] = new Dictionary<string, object?> { ["`$CHILD`"] = "`$NUMBER`" } }),
+            (new Dictionary<string, object?> { ["x"] = 1L },
+                new Dictionary<string, object?> { ["x"] = new List<object?> { "`$CHILD`", "`$NUMBER`" } }),
+            (1L, new Dictionary<string, object?> { ["`$CHILD`"] = "`$NUMBER`" }),
+            (1L, new List<object?> { "`$CHILD`", "`$NUMBER`" }),
+        };
+        foreach (var (data, spec) in cases)
+        {
+            var errs = new List<object?>();
+            StructUtils.Validate(data, spec, new InjectState { Errs = errs });
+            Assert.Single(errs);
+        }
+    }
+
+    [Fact]
+    public void ValidateNofDecimalCount()
+    {
+        // A $NOF count of 2.0 is 2. The corpus cannot carry one: its compiler writes 2.
+        var errs = new List<object?>();
+        StructUtils.Validate("x", new List<object?> { "`$NOF`", 2.0, "`$STRING`", "`$STRING`" },
+            new InjectState { Errs = errs });
+        Assert.Empty(errs);
+        StructUtils.Validate("x", new List<object?> { "`$NOF`", 2.0, "`$STRING`", "`$NUMBER`" },
+            new InjectState { Errs = errs });
+        Assert.Equal(new List<object?> { "Expected exactly 2 of string, number, but found string: x." }, errs);
+        errs = [];
+        StructUtils.Validate("x", new List<object?>
+        {
+            "`$NOF`", new Dictionary<string, object?> { ["min"] = 1.0, ["max"] = 2.0 }, "`$STRING`", "`$NUMBER`",
+        }, new InjectState { Errs = errs });
+        Assert.Empty(errs);
+    }
+
+    [Fact]
     public void ValidateExact()
     {
         var validateSpec = (_spec["validate"] as Dictionary<string,object?>)?["exact"] as Dictionary<string, object?>;

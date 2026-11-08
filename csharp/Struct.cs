@@ -309,7 +309,6 @@ namespace Voxgig.Struct
         ];
 
         // Regular expressions (compile-time generated; see partial methods at end of class).
-        private static readonly Regex R_INTEGER_KEY = R_IntegerKeyGen();
         private static readonly Regex R_ESCAPE_REGEXP = R_EscapeRegexpGen();
         private static readonly Regex R_CLONE_REF = R_CloneRefGen();
         private static readonly Regex R_INJECTION_FULL = R_InjectionFullGen();
@@ -522,41 +521,64 @@ namespace Voxgig.Struct
             return padding >= 0 ? s.PadRight(padding, pc[0]) : s.PadLeft(-padding, pc[0]);
         }
 
-        // ^(0|[1-9][0-9]*)$ as an index, else -1. A list reads only a canonical integer key, as a
-        // JavaScript array does: "01", "+1" or "1.0" name no element. A key too long to parse
-        // could not index a list anyway.
-        private static long CanonListIndex(string key)
+        // A list key this far from zero is past any list: a write appends or prepends, a read misses.
+        private const long LISTKEY_HUGE = 1_000_000_000_000_000_000;
+
+        // ^(0|-?[1-9][0-9]*)$, the form String(n) gives an integer n, as that integer. So "01",
+        // "+1", " 1", "1.0" and "-0" are not list keys.
+        private static bool CanonListIndex(string key, out long index)
         {
-            if (0 == key.Length || 18 < key.Length || ('0' == key[0] && 1 < key.Length))
+            index = 0;
+            int j = key.StartsWith('-') ? 1 : 0;
+            if (j == key.Length || ('0' == key[j] && 1 < key.Length))
             {
-                return -1;
+                return false;
             }
 
             long i = 0;
-            foreach (char c in key)
+            for (; j < key.Length; j++)
             {
-                if (c is < '0' or > '9')
+                if (key[j] is < '0' or > '9')
                 {
-                    return -1;
+                    return false;
                 }
 
-                i = (i * 10) + (c - '0');
+                i = i < LISTKEY_HUGE / 10 ? (i * 10) + (key[j] - '0') : LISTKEY_HUGE;
             }
 
-            return i;
+            index = key.StartsWith('-') ? -i : i;
+            return true;
         }
 
-        // The element a list read selects, else -1: a canonical integer string, or a number
-        // whose value is a non-negative integer.
-        private static long ListIndex(object? key)
+        // The canonical _listkey: an integral number, or a string CanonListIndex accepts.
+        private static bool ListKey(object? key, out long index)
         {
             if (key is string s)
             {
-                return CanonListIndex(s);
+                return CanonListIndex(s, out index);
             }
 
             double d = ListKeyNumber(key);
-            return d is >= 0 and < 1e18 && d == Math.Floor(d) ? (long)d : -1;
+            if (!double.IsFinite(d) || d != Math.Floor(d))
+            {
+                index = 0;
+                return false;
+            }
+
+            index = Math.Abs(d) < LISTKEY_HUGE ? (long)d : d < 0 ? -LISTKEY_HUGE : LISTKEY_HUGE;
+            return true;
+        }
+
+        // The element a list read selects, else -1. Only GetElem counts a negative key from the end.
+        private static long ListIndex(object? key)
+        {
+            return ListKey(key, out long i) && 0 <= i ? i : -1;
+        }
+
+        // A map reads a string or number key; any other key names no member.
+        private static bool MapReadKey(object? key)
+        {
+            return key is string or int or long or double or float;
         }
 
         // A numeric key's value; NaN for any other key.
@@ -565,20 +587,6 @@ namespace Voxgig.Struct
             return key is IConvertible c && c.GetTypeCode() is >= TypeCode.SByte and <= TypeCode.Decimal
                 ? c.ToDouble(CultureInfo.InvariantCulture)
                 : double.NaN;
-        }
-
-        // A negative integer key, which GetElem alone counts from the end; 0 for any other key.
-        private static long ListBackIndex(object? key)
-        {
-            if (key is string s)
-            {
-                return s.StartsWith('-') && R_INTEGER_KEY.IsMatch(s)
-                    && long.TryParse(s, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out long n)
-                    && n < 0 ? n : 0;
-            }
-
-            double d = ListKeyNumber(key);
-            return d is < 0 and > -1e18 && d == Math.Floor(d) ? (long)d : 0;
         }
 
         // Get a list element by integer index (negative counts from end).
@@ -590,10 +598,13 @@ namespace Voxgig.Struct
             }
 
             object? out2 = alt;
-            if (val is List<object?> list)
+            if (val is List<object?> list && ListKey(key, out long nkey))
             {
-                long back = ListBackIndex(key);
-                long nkey = 0 > back ? list.Count + back : ListIndex(key);
+                if (nkey < 0)
+                {
+                    nkey += list.Count;
+                }
+
                 if (nkey >= 0 && nkey < list.Count)
                 {
                     out2 = list[(int)nkey];
@@ -621,7 +632,7 @@ namespace Voxgig.Struct
             if (val is Dictionary<string, object?> map)
             {
                 string k = StrKey(key) ?? S_MT;
-                if (map.TryGetValue(k, out object? v))
+                if (MapReadKey(key) && map.TryGetValue(k, out object? v))
                 {
                     out2 = v;
                 }
@@ -660,7 +671,7 @@ namespace Voxgig.Struct
             if (val is Dictionary<string, object?> map)
             {
                 string k = StrKey(key) ?? S_MT;
-                return map.TryGetValue(k, out object? v) ? v : NONE;
+                return MapReadKey(key) && map.TryGetValue(k, out object? v) ? v : NONE;
             }
             if (val is List<object?> list)
             {
@@ -1202,13 +1213,11 @@ namespace Voxgig.Struct
             }
             else if (parent is List<object?> list)
             {
-                string? ks = key?.ToString();
-                if (ks == null || !long.TryParse(ks, out long keyL))
+                if (!ListKey(key, out long keyI))
                 {
                     return parent;
                 }
 
-                int keyI = (int)Math.Floor((double)keyL);
                 if (keyI >= 0)
                 {
                     int clamped = Convert.ToInt32(Slice(keyI, 0, list.Count + 1), CultureInfo.InvariantCulture);
@@ -1246,18 +1255,9 @@ namespace Voxgig.Struct
                 string k = StrKey(key) ?? S_MT;
                 map.Remove(k);
             }
-            else if (parent is List<object?> list)
+            else if (parent is List<object?> list && ListKey(key, out long keyI) && keyI >= 0 && keyI < list.Count)
             {
-                if (!int.TryParse(key?.ToString(), out int keyI))
-                {
-                    return parent;
-                }
-
-                keyI = (int)Math.Floor((double)keyI);
-                if (keyI >= 0 && keyI < list.Count)
-                {
-                    list.RemoveAt(keyI);
-                }
+                list.RemoveAt((int)keyI);
             }
 
             return parent;
@@ -1355,7 +1355,23 @@ namespace Voxgig.Struct
             List<string> parts;
             if (path is List<object?> lp)
             {
-                parts = lp.Select(p => StrKey(p) ?? S_MT).ToList();
+                // A number part reads as its string form; any other part makes the whole path miss.
+                parts = new List<string>(lp.Count);
+                foreach (object? part in lp)
+                {
+                    if (part is string ps)
+                    {
+                        parts.Add(ps);
+                    }
+                    else if (part is int or long or double or float)
+                    {
+                        parts.Add(CondenseStr(part));
+                    }
+                    else
+                    {
+                        return null;
+                    }
+                }
             }
             else if (path is List<string> ls)
             {
@@ -1367,7 +1383,7 @@ namespace Voxgig.Struct
             }
             else if (0 < (T.Number & Typify(path)))
             {
-                parts = [StrKey(path) ?? S_MT];
+                parts = [CondenseStr(path)];
             }
             else
             {
@@ -1379,8 +1395,7 @@ namespace Voxgig.Struct
             {
                 if (state?.Base == null)
                 {
-                    object? cpath = 0 < (T.Number & Typify(path)) ? new List<object?> { StrKey(path) } : path;
-                    object? found = CondenseRebuild(store, CondenseResolve(store, CondenseRoot(store), cpath));
+                    object? found = CondenseRebuild(store, CondenseResolve(store, CondenseRoot(store), path));
                     // Group A, as a plain getpath reads it: a stored null is absent.
                     return ReferenceEquals(found, NONE) ? null : found;
                 }
@@ -2919,8 +2934,7 @@ namespace Voxgig.Struct
                 }
                 else if (!IsMap(tval))
                 {
-                    inj.Errs.Add(_InvalidTypeMsg(Slice(inj.Path, -1), S_object, Typify(tval), tval));
-                    inj.SetVal(NONE);
+                    // _Validation reports the mismatch, once.
                     return NONE;
                 }
 
@@ -2953,9 +2967,6 @@ namespace Voxgig.Struct
 
                 if (!IsList(inj.DParent))
                 {
-                    string msg = _InvalidTypeMsg(
-                        Slice(inj.Path, -1), S_list, Typify(inj.DParent), inj.DParent);
-                    inj.Errs.Add(msg);
                     inj.KeyI = Size(inj.Parent);
                     return inj.DParent;
                 }
@@ -4266,8 +4277,9 @@ namespace Voxgig.Struct
 
             if (CONDENSE_LIST == kind)
             {
-                long i = CanonListIndex(key);
-                return 0 <= i && i < el!.Count - 1 ? CondenseIdx(el[(int)(1 + i)]) : -1;
+                return CanonListIndex(key, out long i) && 0 <= i && i < el!.Count - 1
+                    ? CondenseIdx(el[(int)(1 + i)])
+                    : -1;
             }
 
             return -1;
@@ -4282,7 +4294,7 @@ namespace Voxgig.Struct
             {
                 foreach (object? part in parts)
                 {
-                    if (0 > at)
+                    if (0 > at || part is not (string or int or long or double or float))
                     {
                         return -1;
                     }
@@ -4421,8 +4433,6 @@ namespace Voxgig.Struct
             return CONDENSE_LIST == kind ? el!.Count - 1 : 0;
         }
 
-        [GeneratedRegex(@"^[-0-9]+$")]
-        private static partial Regex R_IntegerKeyGen();
         [GeneratedRegex(@"[.*+?^${}()|[\]\\]")]
         private static partial Regex R_EscapeRegexpGen();
         [GeneratedRegex(@"^`\$REF:([0-9]+)`$")]
