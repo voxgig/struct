@@ -540,6 +540,34 @@
                  ["the expanded copy is mutable" (= 2 (s/getprop e "a"))]])))))
 
 ;; ---------------------------------------------------------------------------
+;; validate: what the corpus shape cannot express
+;; ---------------------------------------------------------------------------
+
+(defn run-validate-local []
+  (let [m omap
+        l olist
+        errsof (fn [data spec]
+                 (let [errs (ArrayList.)]
+                   (s/validate data spec (omap "errs" errs))
+                   (vec errs)))]
+
+    (checks "validate-child-one-error-per-failure"
+            (fn []
+              (vec (for [spec [(m "x" (m "`$CHILD`" "`$NUMBER`")) (m "x" (l "`$CHILD`" "`$NUMBER`"))]]
+                     [(s/stringify spec) (= 1 (count (errsof (m "x" 1) spec)))]))))
+
+    ;; The corpus cannot carry 2.0, which JavaScript reads as 2.
+    (checks "validate-nof-integral-decimal-count"
+            (fn []
+              (let [nof (fn [cnt] (l "`$NOF`" cnt "`$NUMBER`" "`$INTEGER`"))]
+                [["2.0 admits" (empty? (errsof 1 (nof 2.0)))]
+                 ["2.0 counts as 2"
+                  (= ["Expected exactly 2 of number, integer, but found string: x."] (errsof "x" (nof 2.0)))]
+                 ["min 1.0 and max 2.0 count as 1 and 2"
+                  (= ["Expected 1 to 2 of number, integer, but found string: x."]
+                     (errsof "x" (nof (m "min" 1.0 "max" 2.0))))]])))))
+
+;; ---------------------------------------------------------------------------
 ;; The client path
 ;; ---------------------------------------------------------------------------
 
@@ -589,6 +617,7 @@
     (binding [*results* (atom {:pass [] :fail []})]
       (run-all runpack (tostruct (:spec runpack)))
       (run-condense-local)
+      (run-validate-local)
       (run-client testfile)
       (let [r @*results*
             np (count (:pass r))

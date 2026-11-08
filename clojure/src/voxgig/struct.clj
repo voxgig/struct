@@ -98,6 +98,7 @@
 ;; Private markers (compared by identity).
 (def SKIP (doto (LinkedHashMap.) (.put "`$SKIP`" true)))
 (def DELETE (doto (LinkedHashMap.) (.put "`$DELETE`" true)))
+(def ^:private HELDNULL (Object.))
 
 (def ^:const MAXDEPTH 32)
 
@@ -174,12 +175,26 @@
     (string? k) (try (Long/parseLong (.trim ^String k)) (catch Exception _ nil))
     :else nil))
 
-;; The index a list read takes key to, or nil: only a canonical index, as a
-;; JavaScript array reads one ("01", " 1", "+1" and "-0" are not).
+;; A list key's index, possibly negative, or nil: an integral number, or the
+;; string String(n) prints for one ("01", " 1", "+1", "1.0" and "-0" are not).
 (defn- listindex [key]
-  (let [k (condensekey key)]
-    (when (re-matches #"0|[1-9][0-9]*" k)
-      (try (Long/parseLong k) (catch NumberFormatException _ Long/MAX_VALUE)))))
+  (cond
+    (jdouble? key) (let [d (double key)]
+                     (when (and (== d (Math/rint d)) (not (Double/isInfinite d))) (unchecked-long d)))
+    (or (string? key) (number? key))
+    (let [k (str key)]
+      (when (re-matches #"0|-?[1-9][0-9]*" k)
+        (try (Long/parseLong k)
+             (catch NumberFormatException _ (if (.startsWith k "-") Long/MIN_VALUE Long/MAX_VALUE)))))
+    :else nil))
+
+;; The index a list read takes key to, or nil: a non-negative list key in range.
+(defn- readindex [^List lst key]
+  (let [ki (listindex key)]
+    (when (and ki (<= 0 ki) (< ki (.size lst))) ki)))
+
+;; Only a string or a number names a property.
+(defn- readkey? [key] (or (string? key) (number? key)))
 
 ;; ---------------------------------------------------------------------------
 ;; Minor utilities
@@ -273,15 +288,11 @@
      (if (or (nil? val) (nil? key))
        alt
        (do
-         (when (islist val)
+         (when-let [ki (when (islist val) (listindex key))]
            (let [len (.size ^List val)
-                 ks (condensekey key)
-                 nk (or (listindex ks)
-                        ;; A negative key counts from the end.
-                        (when (re-matches #"-[0-9]+" ks)
-                          (let [n (try (Long/parseLong ks) (catch NumberFormatException _ 0))]
-                            (when (neg? n) (+ len n)))))]
-             (when (and nk (<= 0 nk) (< nk len))
+                 ;; A negative key counts from the end.
+                 nk (if (neg? ki) (+ len ki) ki)]
+             (when (and (<= 0 nk) (< nk len))
                (reset! out (.get ^List val (int nk))))))
          (if (nil? @out)
            (if (isfunc alt) (alt) alt)
@@ -292,33 +303,22 @@
   ([val key alt]
    (if (or (nil? val) (nil? key))
      alt
-     (let [out (cond
-                 (ismap val) (let [skey (str key)]
-                               (if (.containsKey ^Map val skey)
-                                 (.get ^Map val skey) alt))
-                 (islist val) (let [ki (listindex key)]
-                                (if (and ki (< ki (.size ^List val)))
-                                  (.get ^List val (int ki)) alt))
-                 :else alt)]
+     (let [out (_lookup val key)]
        (if (or (nil? out) (identical? out NOARG)) alt out)))))
 
 (defn- _lookup [val key]
   (cond
     (or (nil? val) (nil? key)) nil
-    (ismap val) (let [skey (str key)]
-                  (if (.containsKey ^Map val skey) (.get ^Map val skey) nil))
-    (islist val) (let [ki (listindex key)]
-                   (if (and ki (< ki (.size ^List val)))
-                     (.get ^List val (int ki)) nil))
+    (ismap val) (when (readkey? key) (.get ^Map val (str key)))
+    (islist val) (when-let [ki (readindex val key)] (.get ^List val (int ki)))
     :else nil))
 
 ;; Literal presence, beside _lookup: a nil the node holds is a null, not an absent key.
 (defn- _holds [val key]
   (cond
     (nil? key) false
-    (ismap val) (.containsKey ^Map val (str key))
-    (islist val) (let [ki (listindex key)]
-                   (boolean (and ki (< ki (.size ^List val)))))
+    (ismap val) (and (readkey? key) (.containsKey ^Map val (str key)))
+    (islist val) (some? (readindex val key))
     :else false))
 
 (defn haskey
@@ -363,7 +363,7 @@
     (cond
       (ismap parent) (.put ^Map parent (str key) val)
       (islist parent)
-      (let [ki (parse-long-strict key)]
+      (let [ki (listindex key)]
         (when ki
           (let [^List p parent len (.size p)]
             (if (>= ki 0)
@@ -378,7 +378,7 @@
     (cond
       (ismap parent) (.remove ^Map parent (str key))
       (islist parent)
-      (let [ki (parse-long-strict key)]
+      (let [ki (listindex key)]
         (when ki
           (let [^List p parent]
             (when (and (<= 0 ki) (< ki (.size p)))
@@ -800,13 +800,19 @@
 ;; getpath / setpath
 ;; ---------------------------------------------------------------------------
 
+;; A number part reads as String(n) prints it; any part neither string nor
+;; number makes the whole path miss.
+(defn- pathparts ^ArrayList [path]
+  (when (every? #(or (string? %) (number? %)) path)
+    (alist-of (map condensekey path))))
+
 (defn getpath
   ([store path] (getpath store path nil))
   ([store path injdef]
    (let [parts (cond
-                 (islist path) (alist-of path)
+                 (islist path) (pathparts path)
                  (string? path) (alist-of (.split ^String path "\\." -1))
-                 (and (number? path) (not (jbool? path))) (alist-of [(strkey path)])
+                 (number? path) (alist-of [(condensekey path)])
                  :else nil)
          condensed (and (some? parts) (iscondensed store))
          direct (and condensed
@@ -961,9 +967,10 @@
    (let [[target key] (if (or (nil? ancestor) (< ancestor 2))
                         [(ig inj :parent) (ig inj :key)]
                         [(getelem (ig inj :nodes) (- ancestor)) (getelem (ig inj :path) (- ancestor))])]
-     (if (nil? val)
-       (delprop target key)
-       (setprop target key val)))))
+     (cond
+       (nil? val) (delprop target key)
+       (identical? val HELDNULL) (setprop target key nil)
+       :else (setprop target key val)))))
 
 ;; ---------------------------------------------------------------------------
 ;; inject
@@ -1027,7 +1034,7 @@
                (is! inj :mode S-MVAL)
                (let [v (_injectstr val store inj)]
                  (when-not (identical? v SKIP) (inj-setval inj v))
-                 v))
+                 (if (identical? v HELDNULL) nil v)))
 
              :else val)]
 
@@ -1465,6 +1472,13 @@
       (= out S-MT) (do (.add ^List (ig inj :errs) (str "Empty string at " (pathify (ig inj :path) 1))) nil)
       :else out)))
 
+;; A null the data holds comes back as HELDNULL, which inj-setval writes:
+;; it deletes the slot for nil, and a list would shift down.
+(defn- _keepnull [inj out]
+  (if (and (nil? out) (= (ig inj :mode) S-MVAL) (true? (ig inj :full)) (_holds (ig inj :dparent) (ig inj :key)))
+    HELDNULL
+    out))
+
 (defn- validate_TYPE [inj _val ref _store]
   (let [tname (if (and (string? ref) (> (count ref) 1)) (clojure.string/lower-case (slice ref 1)) S-any)
         idx (.indexOf ^java.util.List (vec TYPENAME) tname)
@@ -1477,10 +1491,10 @@
         t (if (or (some? out) (_holds dparent key)) (typify out) T_noval)]
     (if (zero? (bit-and t typev))
       (do (.add ^List (ig inj :errs) (_invalidTypeMsg (ig inj :path) tname t out "V1001")) nil)
-      out)))
+      (_keepnull inj out))))
 
 (defn- validate_ANY [inj _val _ref _store]
-  (_lookup (ig inj :dparent) (ig inj :key)))
+  (_keepnull inj (_lookup (ig inj :dparent) (ig inj :key))))
 
 (defn- validate_CHILD [inj _val _ref _store]
   (let [mode (ig inj :mode) key (ig inj :key) parent (ig inj :parent)
@@ -1494,8 +1508,8 @@
           (nil? tval) (let [tval (lhm)]
                         (doseq [ckey (keysof tval)] (setprop parent ckey (clone childtm)) (.add ^List keys ckey))
                         (delprop parent key) nil)
-          (not (ismap tval))
-          (do (.add ^List (ig inj :errs) (_invalidTypeMsg (slice path 0 (dec (size path))) S-object (typify tval) tval "V0220")) nil)
+          ;; _validation reports the mismatch, once.
+          (not (ismap tval)) nil
           :else
           (do (doseq [ckey (keysof tval)] (setprop parent ckey (clone childtm)) (.add ^List keys ckey))
               (delprop parent key) nil)))
@@ -1506,8 +1520,7 @@
           (not (islist parent)) (do (.add ^List (ig inj :errs) "Invalid $CHILD as value") nil)
           (nil? (ig inj :dparent)) (do (.clear ^List parent) nil)
           (not (islist (ig inj :dparent)))
-          (do (.add ^List (ig inj :errs) (_invalidTypeMsg (slice path 0 (dec (size path))) S-list (typify (ig inj :dparent)) (ig inj :dparent) "V0230"))
-              (is! inj :keyI (size parent)) (ig inj :dparent))
+          (do (is! inj :keyI (size parent)) (ig inj :dparent))
           :else
           (do (doseq [n (items (ig inj :dparent))] (setprop parent (nth n 0) (clone childtm)))
               (while (> (.size ^List parent) (.size ^List (ig inj :dparent))) (.remove ^List parent (int (dec (.size ^List parent)))))
@@ -1575,12 +1588,17 @@
 
 ;; The bounds of a $NOF count, and the words for it, which are absent when
 ;; the count is invalid. Without a max, the bound is the number of specs.
+;; An integral decimal counts as that integer, as 2.0 is 2 in JavaScript.
 (defn- _nofcount [cnt numtvals]
-  (let [isnat (fn [n] (and (pos? (bit-and T_integer (typify n))) (>= n 0)))]
+  (let [whole (fn [n] (if (and (jdouble? n) (== n (Math/rint (double n))) (< (Math/abs (double n)) 9.0E18))
+                        (long n)
+                        n))
+        isnat (fn [n] (and (pos? (bit-and T_integer (typify n))) (>= n 0)))
+        cnt (whole cnt)]
     (if (isnat cnt)
       [cnt cnt (if (zero? cnt) "none" (str "exactly " cnt))]
-      (let [cmin (_lookup cnt "min")
-            cmax (_lookup cnt "max")
+      (let [cmin (whole (_lookup cnt "min"))
+            cmax (whole (_lookup cnt "max"))
             valid (and (ismap cnt)
                        (pos? (size cnt))
                        (= (size cnt) (+ (if (nil? cmin) 0 1) (if (nil? cmax) 0 1)))
@@ -2044,7 +2062,7 @@
 (defn- condensechild [cd idx key]
   (let [^List enc (condenseenc cd idx)]
     (cond
-      (nil? enc) -1
+      (or (nil? enc) (not (readkey? key))) -1
 
       (condenseis enc CONDENSE_MAP)
       (let [symid (condensesymid cd (condensekey key))]
@@ -2062,7 +2080,7 @@
 
       (condenseis enc CONDENSE_LIST)
       (let [i (listindex key)]
-        (if (and i (< i (dec (.size enc))))
+        (if (and i (<= 0 i) (< i (dec (.size enc))))
           (.get enc (int (inc i)))
           -1))
 
