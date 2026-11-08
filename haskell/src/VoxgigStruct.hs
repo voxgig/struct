@@ -381,17 +381,30 @@ jsstrPure v = case v of
   VSentinel s -> s
   _ -> ""
 
--- | True when a string is nonempty and every character is a digit or @-@.
-isIntKey :: String -> Bool
-isIntKey s = not (null s) && all (\c -> (c >= '0' && c <= '9') || c == '-') s
-
--- | A canonical list index, as a JS array lookup reads one: @0@, or digits
--- with no leading zero.
+-- | A canonical integer key, as @String(n)@ prints one: @0@, or digits with no
+-- leading zero after an optional minus.
 isCanonIndex :: String -> Bool
 isCanonIndex s = case s of
   "0" -> True
-  (c:rest) -> c >= '1' && c <= '9' && all (\d -> d >= '0' && d <= '9') rest
+  ('-':c:rest) -> digits c rest
+  (c:rest) -> digits c rest
   [] -> False
+  where digits c rest = c >= '1' && c <= '9' && all (\d -> d >= '0' && d <= '9') rest
+
+-- | The canonical @_listkey@: a whole number, or a string 'isCanonIndex'
+-- accepts; 'Nothing' for any other key.
+listKey :: Value -> Maybe Integer
+listKey key = case key of
+  VNum n | isIntegerF n -> Just (truncate n)
+  VStr s | isCanonIndex s -> Just (read s)
+  _ -> Nothing
+
+-- | True for a string or number key; a key of any other type misses a map.
+isPropKey :: Value -> Bool
+isPropKey key = case key of
+  VStr _ -> True
+  VNum _ -> True
+  _ -> False
 
 -- | Count leading zero bits of a 32-bit word (JavaScript @Math.clz32@).
 clz32 :: Int -> Int
@@ -514,28 +527,29 @@ keysof v = case v of
   VList r -> do elems <- readIORef r; return [show i | i <- [0 .. length elems - 1]]
   _ -> return []
 
--- | Read a list element as JS reads an array: a whole number from 0 or a
--- canonical index string, so @01@, @+1@ and @-0@ miss ('VNoval' when out of range).
+-- | Read a list element as JS reads an array: a 'listKey' from 0, so @01@,
+-- @+1@, @-0@ and @-1@ miss ('VNoval' when out of range).
 listIndex :: IORef [Value] -> Value -> IO Value
 listIndex r key = do
   elems <- readIORef r
-  let idx = case key of
-        VNum n | isIntegerF n && n >= 0 -> Just (truncate n :: Integer)
-        VStr s | isCanonIndex s -> Just (read s)
-        _ -> Nothing
-  return (case idx of
-    Just i | i < toInteger (length elems) -> elems !! fromInteger i
+  return (case listKey key of
+    Just i | 0 <= i && i < toInteger (length elems) -> elems !! fromInteger i
     _ -> VNoval)
+
+-- | The stored value at a key, as the canonical @_readprop@: a list reads
+-- 'listIndex', a map only a key 'isPropKey' accepts.
+readprop :: Value -> Value -> IO Value
+readprop v key = case v of
+  VList r -> listIndex r key
+  VMap m | isPropKey key -> do k <- jsString key; fromMaybe VNoval . lookup k <$> readIORef m
+  _ -> return VNoval
 
 -- | Read a node property by key, returning the alt value when absent.
 getpropAlt :: Value -> Value -> Value -> IO Value
 getpropAlt alt v key
   | isNoval v || isNoval key = return alt
   | otherwise = do
-      out <- case v of
-        VMap m -> do k <- jsString key; fromMaybe VNoval . lookup k <$> readIORef m
-        VList r -> listIndex r key
-        _ -> return VNoval
+      out <- readprop v key
       return (if isNullish out then alt else out)
 
 -- | Read a node property by key ('VNoval' when absent).
@@ -546,10 +560,7 @@ getprop = getpropAlt VNoval
 lookup_ :: Value -> Value -> IO Value
 lookup_ v key
   | isNoval v || isNoval key = return VNoval
-  | otherwise = case v of
-      VMap m -> do k <- jsString key; fromMaybe VNoval . lookup k <$> readIORef m
-      VList r -> listIndex r key
-      _ -> return VNoval
+  | otherwise = readprop v key
 
 -- | True when a node has a (non-nullish) value at the given key.
 haskey :: Value -> Value -> IO Bool
@@ -561,10 +572,9 @@ getelemAlt alt v key
   | isNoval v || isNoval key = return alt
   | otherwise = do
       out <- case v of
-        VList r -> do
-          let ks = case key of VStr s -> s; VNum n -> numToString n; _ -> ""
+        VList r ->
           -- A negative key counts from the end; any other reads as getprop does.
-          case (if isIntKey ks then readMaybe ks else Nothing) :: Maybe Integer of
+          case listKey key of
             Just nk | nk < 0 -> do
               len <- length <$> readIORef r
               listIndex r (VNum (fromInteger (toInteger len + nk)))
@@ -635,16 +645,14 @@ setprop parent key v
       condenseGuard parent
       case parent of
         VMap m -> do k <- jsString key; modifyIORef' m (opPut k v)
-        VList r -> do
-          let ks = case key of VStr s -> s; VNum n -> floorNumStr n; _ -> ""
-          case readIntOpt ks of
+        VList r ->
+          case listKey key of
             Nothing -> return ()
             Just ki -> do
               its <- readIORef r
-              let len = length its
               if ki >= 0
-                then let ki' = if ki > len then len else ki
-                     in if ki' >= len then writeIORef r (its ++ [v]) else writeIORef r (setAt ki' v its)
+                then if ki >= toInteger (length its) then writeIORef r (its ++ [v])
+                     else writeIORef r (setAt (fromInteger ki) v its)
                 else writeIORef r (v : its)
         _ -> return ()
       return parent
@@ -657,12 +665,11 @@ delprop parent key
       condenseGuard parent
       case parent of
         VMap m -> do k <- jsString key; modifyIORef' m (opDel k)
-        VList r -> do
-          let ks = case key of VStr s -> s; VNum n -> floorNumStr n; _ -> ""
-          case readIntOpt ks of
+        VList r ->
+          case listKey key of
             Just ki | ki >= 0 -> do
               its <- readIORef r
-              when (ki < length its) $ writeIORef r [x | (j, x) <- zip [0 ..] its, j /= ki]
+              when (ki < toInteger (length its)) $ writeIORef r [x | (j, x) <- zip [0 ..] its, j /= ki]
             _ -> return ()
         _ -> return ()
       return parent
@@ -1151,9 +1158,9 @@ metaPathMatch s = case break (== '$') s of
 getpath :: InjArg -> Value -> Value -> IO Value
 getpath inj store0 path = do
   mpa <- case path of
-    VList r -> Just <$> readIORef r
+    VList r -> mapM listPart <$> readIORef r
     VStr s -> return (Just (map VStr (splitOn '.' s)))
-    VNum n -> return (Just [VStr (strkey (VNum n))])
+    VNum n -> return (Just [VStr (numToString n)])
     _ -> return Nothing
   base <- iaBase inj
   condensed <- iscondensed store0
@@ -1243,6 +1250,12 @@ getpath inj store0 path = do
             _ -> do r <- h dummyInj vc refp store; writeIORef vRef r
         _ -> return ()
       readIORef vRef
+  where
+    -- A number part reads as String(n); any other part misses the path.
+    listPart p = case p of
+      VNum n -> Just (VStr (numToString n))
+      VStr _ -> Just p
+      _ -> Nothing
 
 -- | Set the value at a path within a node, creating intermediate nodes as needed.
 setpath :: Value -> Value -> Value -> IO Value
@@ -2046,9 +2059,8 @@ validateChild inj _ _ _ = do
       em <- emptyMap; eks <- keysof em
       forM_ eks $ \ckey -> do cc <- clone childtm; _ <- setprop parent (VStr ckey) cc; ksz <- size keys; _ <- setprop keys (VNum (fromIntegral ksz)) (VStr ckey); return ()
       _ <- delprop parent key; return VNoval
-    else if not (ismap tval) then do
-      psz <- size path; sl <- sliceM path (VNum 0) (VNum (fromIntegral (psz - 1))) False
-      m <- invalidTypeMsg sl s_object (typify tval) tval "V0220"; pushErr inj m; return VNoval
+    -- validation reports the mismatch, once.
+    else if not (ismap tval) then return VNoval
     else do
       tks <- keysof tval
       forM_ tks $ \ckey -> do cc <- clone childtm; _ <- setprop parent (VStr ckey) cc; ksz <- size keys; _ <- setprop keys (VNum (fromIntegral ksz)) (VStr ckey); return ()
@@ -2060,9 +2072,7 @@ validateChild inj _ _ _ = do
       dp <- readIORef (iDparent inj)
       if isNoval dp then case parent of VList r -> writeIORef r [] >> return VNoval; _ -> return VNoval
       else if not (islist dp) then do
-        psz <- size path; sl <- sliceM path (VNum 0) (VNum (fromIntegral (psz - 1))) False
-        m <- invalidTypeMsg sl s_list (typify dp) dp "V0230"; pushErr inj m
-        psz2 <- size parent; writeIORef (iKeyi inj) psz2; return dp
+        psz <- size parent; writeIORef (iKeyi inj) psz; return dp
       else do
         ps <- itemsPairs dp
         forM_ ps $ \(k, _) -> do cc <- clone childtm; _ <- setprop parent (VStr k) cc; return ()
@@ -2668,6 +2678,7 @@ condenseChild cond idx key = do
   e <- condenseNode cond idx
   k <- jsString key
   case condenseKind e of
+    _ | not (isPropKey key) -> return (-1)
     Just kind
       | kind == condense_map -> do
           sym <- condenseTable cond s_condsym
@@ -2683,12 +2694,13 @@ condenseChild cond idx key = do
                                 | p < target -> go (mid + 1) hi
                          _ -> go lo (mid - 1)
           return (if symid < 0 then -1 else go 0 ((condenseLen e - 1) `div` 2 - 1))
-      -- Canonical integer keys only, as a JS list lookup: 01, 1e0, " 1" and
-      -- +1 miss, so condensing never changes which value a path selects.
+      -- A listKey from 0 only, as a JS list lookup: 01, 1e0, " 1", +1 and
+      -- -1 miss, so condensing never changes which value a path selects.
       | kind == condense_list ->
-          let i = read k :: Integer
-          in return (if not (isCanonIndex k) || i >= fromIntegral (condenseLen e - 1) then -1
-                     else condenseIndex (condenseAt e (1 + fromIntegral i)))
+          return (case listKey key of
+            Just i | 0 <= i && i < toInteger (condenseLen e - 1) ->
+              condenseIndex (condenseAt e (1 + fromInteger i))
+            _ -> -1)
     _ -> return (-1)
 
 -- | Walk a path from a starting node, returning the node index or -1. A list

@@ -332,6 +332,19 @@ runAll c pack spec = do
     mt <- getprop injm (VStr "meta")
     let d = (defaultInjDef VNoval) { dMeta = mt }
     validate (if isNullish injm then INone else IDef d) dat sp))
+  -- The corpus pins the message; this counts the errs, root forms included.
+  runLocal c "validate.child-one-error-per-failure" $ do
+    let x1 = O.JMap [("x", O.Num 1)]
+        child = O.JMap [("`$CHILD`", O.Str "`$NUMBER`")]
+        childl = O.JList [O.Str "`$CHILD`", O.Str "`$NUMBER`"]
+    forM_ [(x1, O.JMap [("x", child)]), (x1, O.JMap [("x", childl)]), (O.Num 1, child), (O.Num 1, childl)] $ \(dj, sj) -> do
+      dat <- tostruct dj
+      sp <- tostruct sj
+      errs <- emptyList
+      _ <- validate (IDef (defaultInjDef errs)) dat sp
+      n <- size errs
+      shown <- compact errs
+      expect (n == 1) shown
 
   forM_ ["basic", "operators", "edge", "alts"] $ \gn ->
     rsT ("select." ++ gn) (getpropRaw selects gn) (arg1 (\vin -> do obj <- vget vin "obj"; qry <- vget vin "query"; select obj qry))
