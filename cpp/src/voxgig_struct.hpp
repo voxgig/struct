@@ -78,10 +78,6 @@ inline const std::string& S_BOPEN() {
   return s;
 }
 
-inline const std::regex& R_INTEGER_KEY() {
-  static const std::regex r("^[-0-9]+$");
-  return r;
-}
 inline const std::regex& R_META_PATH() {
   static const std::regex r("^([^$]+)\\$([=~])(.+)$");
   return r;
@@ -237,53 +233,53 @@ inline std::string strkey(const Value& key) {
 
 namespace detail {
 
-// ^(0|[1-9][0-9]*)$ as an index, else -1. A list reads only a canonical integer key, as a
-// JavaScript array does: "01", "+1" or "1.0" name no element. A key too long to parse
-// could not index a list anyway.
-inline int64_t canon_listindex(const std::string& key) {
-  if (key.empty() || 18 < key.size() || ('0' == key[0] && 1 < key.size()))
-    return -1;
+// A list key this far from zero is past any list: a write appends or prepends, a read misses.
+constexpr int64_t LISTKEY_HUGE = 1000000000000000000;
+
+// ^(0|-?[1-9][0-9]*)$, the form String(n) gives an integer n, as that integer. So "01",
+// "+1", " 1", "1.0" and "-0" are not list keys.
+inline bool canon_listindex(const std::string& key, int64_t& index) {
+  size_t j = !key.empty() && '-' == key[0] ? 1 : 0;
+  if (j == key.size() || ('0' == key[j] && 1 < key.size()))
+    return false;
   int64_t i = 0;
-  for (char c : key) {
-    if (c < '0' || '9' < c)
-      return -1;
-    i = i * 10 + (c - '0');
+  for (; j < key.size(); j++) {
+    if (key[j] < '0' || '9' < key[j])
+      return false;
+    i = i < LISTKEY_HUGE / 10 ? i * 10 + (key[j] - '0') : LISTKEY_HUGE;
   }
-  return i;
+  index = '-' == key[0] ? -i : i;
+  return true;
 }
 
-// The element a list read selects, else -1: a canonical integer string, or a number whose
-// value is a non-negative integer.
-inline int64_t list_readindex(const Value& key) {
-  if (key.is_int())
-    return 0 <= key.as_int() ? key.as_int() : -1;
+// The canonical _listkey: an integral number, or a string canon_listindex accepts.
+inline bool list_key(const Value& key, int64_t& index) {
+  if (key.is_int()) {
+    index = key.as_int();
+    return true;
+  }
   if (key.is_double()) {
     double d = key.as_double();
-    return 0 <= d && d < 1e18 && std::floor(d) == d ? static_cast<int64_t>(d) : -1;
+    if (!std::isfinite(d) || std::floor(d) != d)
+      return false;
+    if (std::fabs(d) < static_cast<double>(LISTKEY_HUGE))
+      index = static_cast<int64_t>(d);
+    else
+      index = 0 < d ? LISTKEY_HUGE : -LISTKEY_HUGE;
+    return true;
   }
-  if (key.is_string())
-    return canon_listindex(key.as_string());
-  return -1;
+  return key.is_string() && canon_listindex(key.as_string(), index);
 }
 
-// A negative integer key, which getelem alone counts from the end; 0 for any other key.
-inline int64_t list_backindex(const Value& key) {
-  int64_t back = 0;
-  if (key.is_int()) {
-    back = key.as_int();
-  } else if (key.is_double()) {
-    double d = key.as_double();
-    if (-1e18 < d && std::floor(d) == d)
-      back = static_cast<int64_t>(d);
-  } else if (key.is_string() && !key.as_string().empty() && '-' == key.as_string()[0] &&
-             std::regex_match(key.as_string(), R_INTEGER_KEY())) {
-    try {
-      back = std::stoll(key.as_string());
-    } catch (...) {
-      back = 0;
-    }
-  }
-  return 0 > back ? back : 0;
+// The element a list read selects, else -1. Only getelem counts a negative key from the end.
+inline int64_t list_readindex(const Value& key) {
+  int64_t i = -1;
+  return list_key(key, i) && 0 <= i ? i : -1;
+}
+
+// A map reads a string or number key; any other key names no member.
+inline bool map_readkey(const Value& key) {
+  return key.is_string() || key.is_number();
 }
 
 } // namespace detail
@@ -293,7 +289,7 @@ inline Value getprop(const Value& val, const Value& key, const Value& alt) {
     return alt;
   if (val.is_map()) {
     auto m = val.as_map();
-    if (!m)
+    if (!m || !detail::map_readkey(key))
       return alt;
     std::string sk = strkey(key);
     Value* found = m->find(sk);
@@ -331,8 +327,9 @@ inline Value getelem(const Value& val, const Value& key, const Value& alt) {
   if (val.is_list()) {
     auto l = val.as_list();
     int64_t size = static_cast<int64_t>(l->size());
-    int64_t back = detail::list_backindex(key);
-    int64_t nkey = 0 > back ? size + back : detail::list_readindex(key);
+    int64_t nkey = -1;
+    if (detail::list_key(key, nkey) && nkey < 0)
+      nkey += size;
     if (nkey < 0 || nkey >= size)
       return alt;
     out = (*l)[static_cast<size_t>(nkey)];
@@ -364,7 +361,7 @@ inline Value lookup_v(const Value& val, const Value& key) {
   }
   if (val.is_map()) {
     auto m = val.as_map();
-    if (!m)
+    if (!m || !detail::map_readkey(key))
       return Value::undef();
     std::string sk = strkey(key);
     if (sk.empty())
@@ -390,25 +387,15 @@ inline Value setprop(Value parent, const Value& key, const Value& val) {
   }
   if (parent.is_list()) {
     auto l = parent.as_list();
-    int idx;
-    if (key.is_int())
-      idx = static_cast<int>(key.as_int());
-    else if (key.is_string()) {
-      try {
-        idx = std::stoi(key.as_string());
-      } catch (...) {
-        return parent;
-      }
-    } else if (key.is_double())
-      idx = static_cast<int>(key.as_double());
-    else
+    int64_t idx = 0;
+    if (!detail::list_key(key, idx))
       return parent;
 
     if (idx >= 0) {
-      if (idx >= static_cast<int>(l->size())) {
+      if (idx >= static_cast<int64_t>(l->size())) {
         l->push_back(val);
       } else {
-        (*l)[idx] = val;
+        (*l)[static_cast<size_t>(idx)] = val;
       }
     } else {
       l->insert(l->begin(), val);
@@ -429,22 +416,9 @@ inline Value delprop(Value parent, const Value& key) {
   }
   if (parent.is_list()) {
     auto l = parent.as_list();
-    int idx;
-    if (key.is_int())
-      idx = static_cast<int>(key.as_int());
-    else if (key.is_string()) {
-      try {
-        idx = std::stoi(key.as_string());
-      } catch (...) {
-        return parent;
-      }
-    } else if (key.is_double())
-      idx = static_cast<int>(key.as_double());
-    else
-      return parent;
-    if (idx >= 0 && idx < static_cast<int>(l->size())) {
+    int64_t idx = -1;
+    if (detail::list_key(key, idx) && 0 <= idx && idx < static_cast<int64_t>(l->size()))
       l->erase(l->begin() + idx);
-    }
     return parent;
   }
   return parent;
@@ -1250,47 +1224,27 @@ inline Value merge_v(const Value& list, int maxdepth) {
 }
 
 // ===========================================================================
-// pathParts — shared helper for getpath / setpath
+// pathParts — a string path's parts, shared by getpath / setpath
 // ===========================================================================
 
 namespace detail {
-inline std::vector<std::string> path_parts(const Value& path) {
+inline std::vector<std::string> path_parts(const std::string& s) {
   std::vector<std::string> out;
-  if (path.is_string()) {
-    const std::string& s = path.as_string();
-    if (s.empty()) {
-      out.push_back("");
-      return out;
-    }
-    size_t pos = 0;
-    while (pos <= s.size()) {
-      size_t dot = s.find('.', pos);
-      if (dot == std::string::npos) {
-        out.push_back(s.substr(pos));
-        break;
-      }
-      out.push_back(s.substr(pos, dot - pos));
-      pos = dot + 1;
-    }
+  if (s.empty()) {
+    out.push_back("");
     return out;
   }
-  if (path.is_list()) {
-    auto l = path.as_list();
-    for (const auto& e : *l) {
-      if (e.is_string())
-        out.push_back(e.as_string());
-      else if (e.is_number())
-        out.push_back(strkey(e));
-      else
-        out.push_back(strkey(e));
+  size_t pos = 0;
+  while (pos <= s.size()) {
+    size_t dot = s.find('.', pos);
+    if (dot == std::string::npos) {
+      out.push_back(s.substr(pos));
+      break;
     }
-    return out;
+    out.push_back(s.substr(pos, dot - pos));
+    pos = dot + 1;
   }
-  if (path.is_number()) {
-    out.push_back(strkey(path));
-    return out;
-  }
-  return {};
+  return out;
 }
 } // namespace detail
 
@@ -1302,44 +1256,36 @@ inline Value setpath_v(const Value& store, const Value& path, const Value& val) 
   if (iscondensed(store))
     throw std::runtime_error(S_IMMUTABLE());
 
-  std::vector<std::string> parts;
-  bool path_is_list = path.is_list();
-  if (path.is_undef() || path.is_null())
+  // The parts stay as given: setprop decides what a number or string key names.
+  std::vector<Value> parts;
+  if (path.is_string()) {
+    for (const auto& part : detail::path_parts(path.as_string()))
+      parts.emplace_back(part);
+  } else if (path.is_list()) {
+    parts.assign(path.as_list()->begin(), path.as_list()->end());
+  } else if (path.is_number()) {
+    parts.push_back(path);
+  } else {
     return Value::undef();
-  if (path.is_string())
-    parts = detail::path_parts(path);
-  else if (path.is_list())
-    parts = detail::path_parts(path);
-  else if (path.is_number())
-    parts.push_back(strkey(path));
-  else
-    return Value::undef();
+  }
   if (parts.empty())
     return Value::undef();
 
-  // String paths only create maps (TS: "Use a string list to create list parts").
-  // For list paths, decide list-vs-map by whether the next part is integer.
+  // A number next part makes a list; string paths only create maps.
   Value parent = store;
   for (size_t i = 0; i + 1 < parts.size(); i++) {
-    Value next = getprop(parent, Value(parts[i]));
+    Value next = getprop(parent, parts[i]);
     if (!isnode(next)) {
-      bool make_list = false;
-      if (path_is_list) {
-        // Check the original list for whether parts[i+1] came from a number.
-        Value el = getprop(path, Value(static_cast<int64_t>(i + 1)));
-        if (el.is_number())
-          make_list = true;
-      }
-      next = make_list ? Value(std::make_shared<List>()) : Value(std::shared_ptr<Map>(new Map()));
-      setprop(parent, Value(parts[i]), next);
+      next = 0 != (T_number & typify(parts[i + 1])) ? Value(std::make_shared<List>())
+                                                    : Value(std::shared_ptr<Map>(new Map()));
+      setprop(parent, parts[i], next);
     }
     parent = next;
   }
-  Value last_key(parts.back());
   if (is_delete(val)) {
-    delprop(parent, last_key);
+    delprop(parent, parts.back());
   } else {
-    setprop(parent, last_key, val);
+    setprop(parent, parts.back(), val);
   }
   return parent;
 }
@@ -1658,8 +1604,8 @@ inline int64_t cond_child(const Value& cond, int64_t idx, const std::string& key
   }
 
   if (CONDENSE_LIST == kind) {
-    int64_t i = canon_listindex(key);
-    return 0 <= i && i < static_cast<int64_t>(el->size()) - 1
+    int64_t i = -1;
+    return canon_listindex(key, i) && 0 <= i && i < static_cast<int64_t>(el->size()) - 1
                ? cond_idx((*el)[static_cast<size_t>(1 + i)])
                : -1;
   }
@@ -1673,7 +1619,7 @@ inline int64_t cond_resolve(const Value& cond, int64_t idx, const Value& path) {
 
   if (const List* parts = cond_list(path)) {
     for (const Value& part : *parts) {
-      if (0 > at)
+      if (0 > at || (!part.is_string() && !part.is_number()))
         return -1;
       if (!part.is_string() || !part.as_string().empty())
         at = cond_child(cond, at, cond_str(part));
@@ -1974,27 +1920,29 @@ inline Value getpath_inner(const Value& store, const Value& path, std::vector<st
 
 inline Value getpath_v(const Value& store, const Value& path, Injection* inj) {
   std::vector<std::string> parts;
-  bool valid_path = false;
   if (path.is_string()) {
-    parts = detail::path_parts(path);
-    valid_path = true;
+    parts = detail::path_parts(path.as_string());
   } else if (path.is_list()) {
-    parts = detail::path_parts(path);
-    valid_path = true;
+    // A number part reads as its string form; any other part makes the whole path miss.
+    for (const Value& part : *path.as_list()) {
+      if (part.is_string())
+        parts.push_back(part.as_string());
+      else if (part.is_number())
+        parts.push_back(detail::cond_str(part));
+      else
+        return Value::undef();
+    }
   } else if (path.is_number()) {
-    parts.push_back(strkey(path));
-    valid_path = true;
-  }
-  // Note: undef / null / bool / map paths are invalid (matches TS lines 1147-1153).
-  if (!valid_path)
+    parts.push_back(detail::cond_str(path));
+  } else {
     return Value::undef();
+  }
 
   // A base changes what the path resolves against, so honour it on the expansion.
   if (iscondensed(store)) {
     if (!inj || inj->base.empty()) {
-      Value cparts = path.is_number() ? Value::list({Value(strkey(path))}) : path;
-      Value found = detail::cond_rebuild(
-          store, detail::cond_resolve(store, detail::cond_root(store), cparts));
+      Value found =
+          detail::cond_rebuild(store, detail::cond_resolve(store, detail::cond_root(store), path));
       // Group A, as a plain getpath reads it: a stored null is absent.
       return found.is_null() ? Value::undef() : found;
     }
@@ -3269,11 +3217,7 @@ inline Value CHILD_FN(Injection& inj, const Value& val, const std::string& ref,
     if (tval.is_undef() || tval.is_null()) {
       tval = Value(std::shared_ptr<Map>(new Map()));
     } else if (!ismap(tval)) {
-      auto pl = std::make_shared<List>();
-      for (size_t i = 0; i + 1 < inj.path.size(); i++)
-        pl->push_back(Value(inj.path[i]));
-      inj.errs->push_back(
-          Value(invalid_type_msg(Value(pl), "object", typify(tval), tval, "V0220")));
+      // _validation reports the mismatch, once.
       return Value::undef();
     }
     auto ckeys = keysof(tval);
@@ -3296,11 +3240,6 @@ inline Value CHILD_FN(Injection& inj, const Value& val, const std::string& ref,
       return Value::undef();
     }
     if (!inj.dparent.is_list()) {
-      auto pl = std::make_shared<List>();
-      for (size_t i = 0; i + 1 < inj.path.size(); i++)
-        pl->push_back(Value(inj.path[i]));
-      inj.errs->push_back(
-          Value(invalid_type_msg(Value(pl), "list", typify(inj.dparent), inj.dparent, "V0230")));
       inj.keyI = static_cast<int>(size(inj.parent));
       return inj.dparent;
     }
@@ -3435,10 +3374,20 @@ inline bool admits(const Value& val, const Value& spec, Injection& inj, const Va
 // invalid. Without a max, the bound is the number of specs.
 inline bool nofcount(const Value& count, int64_t numtvals, int64_t& lo, int64_t& hi,
                      std::string& desc) {
-  auto isnat = [](const Value& n) { return 0 != (T_integer & typify(n)) && 0 <= n.as_int(); };
+  // A decimal with an integral value counts, as JavaScript does not tell 2.0 from 2.
+  auto isnat = [](const Value& n, int64_t& nat) {
+    double d = n.as_double();
+    if (n.is_int())
+      nat = n.as_int();
+    else if (n.is_double() && 0 <= d && d < static_cast<double>(INT64_MAX) && std::floor(d) == d)
+      nat = static_cast<int64_t>(d);
+    else
+      return false;
+    return 0 <= nat;
+  };
 
-  if (isnat(count)) {
-    lo = hi = count.as_int();
+  if (isnat(count, lo)) {
+    hi = lo;
     desc = 0 == lo ? "none" : "exactly " + std::to_string(lo);
     return true;
   }
@@ -3446,17 +3395,16 @@ inline bool nofcount(const Value& count, int64_t numtvals, int64_t& lo, int64_t&
   Value min = lookup_v(count, Value("min"));
   Value max = lookup_v(count, Value("max"));
 
+  lo = 0;
+  hi = numtvals;
   bool valid = count.is_map() && 0 < count.as_map()->size() &&
                count.as_map()->size() ==
                    static_cast<size_t>(min.is_undef() ? 0 : 1) + (max.is_undef() ? 0 : 1) &&
-               (min.is_undef() || isnat(min)) && (max.is_undef() || isnat(max)) &&
-               (min.is_undef() || max.is_undef() || min.as_int() <= max.as_int());
+               (min.is_undef() || isnat(min, lo)) && (max.is_undef() || isnat(max, hi)) &&
+               (min.is_undef() || max.is_undef() || lo <= hi);
 
   if (!valid)
     return false;
-
-  lo = min.is_undef() ? 0 : min.as_int();
-  hi = max.is_undef() ? numtvals : max.as_int();
 
   if (max.is_undef())
     desc = "at least " + std::to_string(lo);

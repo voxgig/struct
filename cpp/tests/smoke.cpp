@@ -235,6 +235,29 @@ int main() {
     CHECK(thrown == "boom");
   }
 
+  auto verrs = [](const Value& data, const Value& spec) {
+    auto errs = std::make_shared<List>();
+    auto opts = std::shared_ptr<Map>(new Map());
+    opts->set("errs", Value(errs));
+    validate(data, spec, Value(opts));
+    return errs;
+  };
+
+  // $CHILD over the wrong type is one error, in either form and at the root.
+  for (const Value& spec :
+       {jm({"x", jm({"`$CHILD`", "`$NUMBER`"})}), jm({"x", jt({"`$CHILD`", "`$NUMBER`"})})})
+    CHECK(1 == verrs(jm({"x", 1}), spec)->size());
+  CHECK(1 == verrs(Value(1), jm({"`$CHILD`", "`$NUMBER`"}))->size());
+  CHECK(1 == verrs(Value(1), jt({"`$CHILD`", "`$NUMBER`"}))->size());
+
+  // A $NOF count of 2.0 is 2. The corpus cannot carry one: its compiler writes 2.
+  CHECK(verrs(Value("x"), jt({"`$NOF`", 2.0, "`$STRING`", "`$STRING`"}))->empty());
+  auto nof2 = verrs(Value("x"), jt({"`$NOF`", 2.0, "`$STRING`", "`$NUMBER`"}));
+  CHECK(1 == nof2->size() &&
+        (*nof2)[0] == Value("Expected exactly 2 of string, number, but found string: x."));
+  CHECK(verrs(Value("x"), jt({"`$NOF`", jm({"min", 1.0, "max", 2.0}), "`$STRING`", "`$NUMBER`"}))
+            ->empty());
+
   std::cout << (ok ? "smoke OK" : "smoke FAILED") << "\n";
   return ok ? 0 : 1;
 }
