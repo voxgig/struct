@@ -166,6 +166,8 @@ let is_integer_f n = Float.is_finite n && Float.rem n 1.0 = 0.0
 
 let num_to_string n =
   if Float.is_nan n then "NaN"
+  (* -0 included: String(-0) is "0". *)
+  else if n = 0.0 then "0"
   else if Float.is_integer n && Float.abs n < 1e16 then Printf.sprintf "%.0f" n
   else begin
     let rec try_prec p =
@@ -190,20 +192,22 @@ let rec js_string v =
   | Func _ -> "function"
   | Sentinel s -> s
 
-let is_int_key s =
-  let n = String.length s in
-  n > 0 &&
-  (let ok = ref true in
-   String.iteri (fun i c ->
-       if not ((c >= '0' && c <= '9') || (c = '-')) then ok := false;
-       ignore i) s;
-   !ok)
-
-(* A canonical list index: 0, or digits with no leading zero. *)
+(* A canonical integer key, as String(n) prints one: 0, or digits with no
+   leading zero after an optional minus. *)
 let is_canon_index s =
+  let n = String.length s in
+  let d = if n > 1 && s.[0] = '-' then 1 else 0 in
   s = "0" ||
-  (String.length s > 0 && s.[0] >= '1' && s.[0] <= '9'
-   && String.for_all (fun c -> c >= '0' && c <= '9') s)
+  (n > d && s.[d] >= '1' && s.[d] <= '9'
+   && String.for_all (fun c -> c >= '0' && c <= '9') (String.sub s d (n - d)))
+
+(* The canonical _listkey: a whole number, or a string is_canon_index accepts.
+   A float, so that a key past the end of any list still compares. *)
+let list_key k =
+  match k with
+  | Num n when is_integer_f n -> Some n
+  | Str s when is_canon_index s -> float_of_string_opt s
+  | _ -> None
 
 let clz32 n =
   let n = n land 0xFFFFFFFF in
@@ -299,35 +303,30 @@ and keysof v =
   | List r -> List.mapi (fun i _ -> string_of_int i) !r
   | _ -> []
 
-(* internal: a list read as JS reads an array: a whole number from 0 or a
-   canonical index string, so 01, +1 and -0 miss. Noval if oob. *)
+(* internal: a list read as JS reads an array: a list_key from 0, so 01, +1,
+   -0 and -1 miss. Noval if oob. *)
 and list_index lr key =
-  let len = List.length !lr in
-  let idx = match key with
-    | Num n when is_integer_f n && n >= 0.0 && n < float_of_int len -> Some (int_of_float n)
-    | Str s when is_canon_index s -> int_of_string_opt s
-    | _ -> None in
-  match idx with
-  | Some i when i < len -> List.nth !lr i
+  match list_key key with
+  | Some k when 0.0 <= k && k < float_of_int (List.length !lr) -> List.nth !lr (int_of_float k)
+  | _ -> Noval
+
+(* internal: the stored value at a key, as the canonical _readprop. A map
+   reads only a string or number key. *)
+and readprop v key =
+  match v, key with
+  | List r, _ -> list_index r key
+  | Map m, (Str _ | Num _) -> (match omap_get m (js_string key) with Some x -> x | None -> Noval)
   | _ -> Noval
 
 and getprop ?(alt = Noval) v key =
   if is_noval v || is_noval key then alt
   else
-    let out =
-      match v with
-      | Map m -> (match omap_get m (js_string key) with Some x -> x | None -> Noval)
-      | List r -> list_index r key
-      | _ -> Noval
-    in
+    let out = readprop v key in
     if is_nullish out then alt else out
 
 and lookup_ v key =
   if is_noval v || is_noval key then Noval
-  else match v with
-    | Map m -> (match omap_get m (js_string key) with Some x -> x | None -> Noval)
-    | List r -> list_index r key
-    | _ -> Noval
+  else readprop v key
 
 and haskey v key = not (is_nullish (getprop v key))
 
@@ -337,10 +336,9 @@ and getelem ?(alt = Noval) v key =
     let out = ref Noval in
     (match v with
      | List r ->
-       let ks = (match key with Str s -> s | Num n -> num_to_string n | _ -> "") in
        (* A negative key counts from the end; any other reads as getprop does. *)
-       (match (if is_int_key ks then int_of_string_opt ks else None) with
-        | Some nk when nk < 0 -> out := list_index r (vint (List.length !r + nk))
+       (match list_key key with
+        | Some k when k < 0.0 -> out := list_index r (Num (float_of_int (List.length !r) +. k))
         | Some _ -> out := list_index r key
         | None -> ())
      | _ -> ());
@@ -395,15 +393,12 @@ and setprop parent key v =
     (match parent with
      | Map m -> omap_set m (js_string key) v
      | List r ->
-       let ks = (match key with Str s -> s | Num n -> num_to_string (Float.floor n) | _ -> "") in
-       (match int_of_string_opt ks with
+       (match list_key key with
         | None -> ()
-        | Some ki ->
-          let len = List.length !r in
-          if ki >= 0 then begin
-            let ki = if ki > len then len else ki in
-            if ki >= len then r := !r @ [v]
-            else r := List.mapi (fun i x -> if i = ki then v else x) !r
+        | Some k ->
+          if k >= 0.0 then begin
+            if k >= float_of_int (List.length !r) then r := !r @ [v]
+            else let ki = int_of_float k in r := List.mapi (fun i x -> if i = ki then v else x) !r
           end else r := v :: !r)
      | _ -> ());
     parent
@@ -416,9 +411,9 @@ and delprop parent key =
     (match parent with
      | Map m -> omap_del m (js_string key)
      | List r ->
-       let ks = (match key with Str s -> s | Num n -> num_to_string (Float.floor n) | _ -> "") in
-       (match int_of_string_opt ks with
-        | Some ki when ki >= 0 && ki < List.length !r ->
+       (match list_key key with
+        | Some k when 0.0 <= k && k < float_of_int (List.length !r) ->
+          let ki = int_of_float k in
           r := List.filteri (fun i _ -> i <> ki) !r
         | _ -> ())
      | _ -> ());
@@ -864,9 +859,11 @@ and ia_is_some = function INone -> false | _ -> true
 and getpath ?(inj = INone) store path =
   let pa =
     match path with
-    | List r -> Some (Array.of_list !r)
+    (* A number part reads as String(n); any other part misses the path. *)
+    | List r when List.for_all (function Str _ | Num _ -> true | _ -> false) !r ->
+      Some (Array.of_list (List.map (function Num n -> Str (num_to_string n) | p -> p) !r))
     | Str s -> Some (Array.of_list (List.map (fun x -> Str x) (String.split_on_char '.' s)))
-    | Num n -> Some [| Str (strkey ~key:(Num n) ()) |]
+    | Num n -> Some [| Str (num_to_string n) |]
     | _ -> None
   in
   match pa with
@@ -1638,7 +1635,8 @@ and validate_child inj _v _ref _store =
       List.iter (fun ckey -> ignore (setprop parent (Str ckey) (clone childtm)); ignore (setprop keys (Num (float_of_int (size keys))) (Str ckey))) (keysof (empty_map ()));
       ignore (delprop parent key); Noval
     end else if not (ismap tval) then
-      (push_err inj (invalid_type_msg (slice ~start:(Num 0.0) ~stop:(Num (float_of_int (size path - 1))) path) s_object (typify tval) tval "V0220"); Noval)
+      (* validation reports the mismatch, once. *)
+      Noval
     else begin
       List.iter (fun ckey -> ignore (setprop parent (Str ckey) (clone childtm)); ignore (setprop keys (Num (float_of_int (size keys))) (Str ckey))) (keysof tval);
       ignore (delprop parent key); Noval
@@ -1648,7 +1646,6 @@ and validate_child inj _v _ref _store =
     if not (islist parent) then (push_err inj "Invalid $CHILD as value"; Noval)
     else if is_noval inj.dparent then (match parent with List r -> r := []; Noval | _ -> Noval)
     else if not (islist inj.dparent) then begin
-      push_err inj (invalid_type_msg (slice ~start:(Num 0.0) ~stop:(Num (float_of_int (size path - 1))) path) s_list (typify inj.dparent) inj.dparent "V0230");
       inj.keyi <- size parent; inj.dparent
     end else begin
       List.iter (fun (k, _) -> ignore (setprop parent (Str k) (clone childtm))) (items_pairs inj.dparent);
@@ -2158,7 +2155,8 @@ and condense_child cond idx key =
   let e = condense_encoding enc in
   let at j = condense_item e j in
   let kind = condense_kind enc in
-  if kind = Some condense_map then begin
+  if (match key with Str _ | Num _ -> false | _ -> true) then -1
+  else if kind = Some condense_map then begin
     let symid = condense_symid cond (js_string key) in
     let target = float_of_int symid in
     (* Pairs live at [1,2], [3,4], ... with keys ascending: bisect them. *)
@@ -2174,13 +2172,12 @@ and condense_child cond idx key =
     if symid < 0 then -1 else bisect 0 ((Array.length e - 1) / 2 - 1)
   end
   else if kind = Some condense_list then begin
-    (* Canonical integer keys only, as a JS list lookup: 01, 1e0, " 1" and +1
+    (* A list_key from 0 only, as a JS list lookup: 01, 1e0, " 1", +1 and -1
        miss, so condensing never changes which value a path selects. *)
-    let k = js_string key in
-    if not (is_canon_index k) then -1
-    else match int_of_string_opt k with
-      | Some i when i < Array.length e - 1 -> condense_index (at (1 + i))
-      | _ -> -1
+    match list_key key with
+    | Some k when 0.0 <= k && k < float_of_int (Array.length e - 1) ->
+      condense_index (at (1 + int_of_float k))
+    | _ -> -1
   end
   else -1
 

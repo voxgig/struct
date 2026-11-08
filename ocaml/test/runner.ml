@@ -445,6 +445,16 @@ let rec run_all spec =
          let injm = vget vin "inj" in
          let d = { (default_injdef_pub ()) with d_meta = getprop injm (Str "meta") } in
          validate ~inj:(if is_nullish injm then INone else IDef d) (vget vin "data") (vget vin "spec")));
+  (* The corpus pins the message; this counts the errs, root forms included. *)
+  run_local "validate.child-one-error-per-failure" (fun () ->
+      List.iter (fun (dat, sp) ->
+          let errs = empty_list () in
+          ignore (validate ~inj:(IDef { (default_injdef_pub ()) with d_errs = errs }) dat sp);
+          expect (size errs = 1) (compact errs))
+        [jm [Str "x"; Num 1.0], jm [Str "x"; jm [Str "`$CHILD`"; Str "`$NUMBER`"]];
+         jm [Str "x"; Num 1.0], jm [Str "x"; jt [Str "`$CHILD`"; Str "`$NUMBER`"]];
+         Num 1.0, jm [Str "`$CHILD`"; Str "`$NUMBER`"];
+         Num 1.0, jt [Str "`$CHILD`"; Str "`$NUMBER`"]]);
 
   (* select *)
   List.iter (fun gn ->
@@ -582,6 +592,9 @@ let run_client testfile =
 (* ---------------- main ---------------- *)
 
 let () =
+  (* omni reads an error it does not know through Printexc; an `err` pattern
+     anchored at both ends needs the bare message. *)
+  Printexc.register_printer (function Struct_error message -> Some message | _ -> None);
   let testfile = if Array.length Sys.argv > 1 then Sys.argv.(1) else "../build/test/test.json" in
   let resolved = O.make_runner testfile O.empty_provider "struct" None in
   runpack := Some resolved;
