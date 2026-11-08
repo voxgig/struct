@@ -376,10 +376,10 @@ function _readprop(val, key) {
     if (S_string !== typeof key && S_number !== typeof key) {
         return NONE;
     }
-    if (ismap(val)) {
-        return Object.prototype.hasOwnProperty.call(val, key) ? val[key] : NONE;
+    if (0 < (T_instance & typify(val))) {
+        return val[key];
     }
-    return val[key];
+    return Object.prototype.hasOwnProperty.call(val, key) ? val[key] : NONE;
 }
 function _setown(obj, key, val) {
     if ('__proto__' === key) {

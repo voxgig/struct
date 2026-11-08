@@ -229,6 +229,13 @@ describe('StructUtility', async () => {
     deepEqual(Object.keys(s.jm('__proto__', 1)), ['__proto__'])
     equal(1, s.getprop(JSON.parse('{"__proto__":1}'), '__proto__'))
     equal(undefined, s.getprop({}, '__proto__'))
+    // A class instance still reads inherited members.
+    class A {
+      get g() {
+        return 7
+      }
+    }
+    equal(7, s.getprop(new A(), 'g'))
   })
 
   test('validate-child-one-error-per-failure', () => {
