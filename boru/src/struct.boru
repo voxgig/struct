@@ -189,24 +189,34 @@ def vgi-to-int fn [[k:Any] [Any] [
   ]
 ]]
 
-# "0", or digits with no leading zero: the only keys a JavaScript array reads
-# as an index, so "01", " 1", "+1" and "-0" name no element.
+# "0", or digits with no leading zero after an optional "-": the text
+# JavaScript prints for an integer, so "01", " 1", "+1", "-0" and "1.0" name
+# no element.
 def vgi-isindex fn [[s:String] [Boolean] [
   if ((size s) eq 0) [false] [
-    (s mini re `^(0|[1-9][0-9]*)$` {}).ok
+    (s mini re `^(0|-?[1-9][0-9]*)$` {}).ok
   ]
 ]]
 
-# The element a list read selects. Writes coerce with vgi-to-int instead.
-def vgi-list-index fn [[k:Any] [Any] [
+# The integer a list key names, read or write: an integral number, or a string
+# vgi-isindex accepts; none for any other key.
+def vgi-list-key fn [[k:Any] [Any] [
   def r (
-    if (k is Boolean) [none] [
-      if (k is Integer) [if (k lt 0) [none] [k]] [
-        def ks (if (k is String) [k] [if (k is Number) [vg-num-to-string k] [""]])
-        if (vgi-isindex ks) [vgi-parse-int ks] [none]
-      ]
+    if (k is String) [
+      if (vgi-isindex k) [vgi-parse-int k] [none]
+    ] [
+      if (vg-bit vg-t-integer (vg-typify k)) [
+        if (k is Float) [MathUtil.floor k] [k]
+      ] [none]
     ]
   )
+  r
+]]
+
+# The element a list read selects: a list key that is not negative.
+def vgi-list-index fn [[k:Any] [Any] [
+  def ki (vgi-list-key k)
+  def r (if (ki is None) [none] [if (ki lt 0) [none] [ki]])
   r
 ]]
 
@@ -449,7 +459,12 @@ def vg-getprop fn [[v:Any k:Any alt:Any] [Any] [
   def alt2 (if (vg-is-noarg alt) [none] [alt])
   if ((v is None) or (k is None) or (vg-is-noarg v) or (vg-is-noarg k)) [alt2] [
     def found (
-      if (vg-ismap v) [v get (vgi-map-key k)] [
+      if (vg-ismap v) [
+        # A key that is neither a string nor a number names nothing.
+        if (k is Boolean) [none] [
+          if ((k is String) or (k is Number)) [v get (vgi-map-key k)] [none]
+        ]
+      ] [
         if (vg-islist v) [
           def ki (vgi-list-index k)
           if (ki is None) [none] [
@@ -474,33 +489,22 @@ def vg-haskey fn [[v:Any k:Any] [Boolean] [
   ((vg-getprop v k none) is None) not
 ]]
 
-# ^[-0-9]+$ — integer-looking key (mirrors R_INTEGER_KEY).
-def vgi-intkey-ok fn [[s:String] [Boolean] [
-  if ((size s) eq 0) [false] [
-    (s mini re `^[-0-9]+$` {}).ok
-  ]
-]]
-
-# Get a list element by integer(ish) key; negative counts from the end.
+# Get a list element by list key; a negative key counts from the end.
 # A function alt is called lazily when the slot is empty.
 def vg-getelem fn [[v:Any k:Any alt:Any] [Any] [
   def alt2 (if (vg-is-noarg alt) [none] [alt])
   if ((v is None) or (k is None) or (vg-is-noarg v) or (vg-is-noarg k)) [alt2] [
     def found (
       if (vg-islist v) [
-        def ks (if (k is String) [k] [if (k is Number) [vg-num-to-string k] [""]])
-        if (vgi-intkey-ok ks) [
-          def n0 (vgi-parse-int ks)
-          # Only a negative key counts from the end; any other reads as getprop.
-          def n (
-            if (n0 is None) [none] [
-              if (n0 lt 0) [(size v) add n0] [vgi-list-index ks]
-            ]
-          )
-          if (n is None) [none] [
-            if ((n gte 0) and (n lt (size v))) [v get n] [none]
+        def n0 (vgi-list-key k)
+        def n (
+          if (n0 is None) [none] [
+            if (n0 lt 0) [(size v) add n0] [n0]
           ]
-        ] [none]
+        )
+        if (n is None) [none] [
+          if ((n gte 0) and (n lt (size v))) [v get n] [none]
+        ]
       ] [none]
     )
     if (found is None) [
@@ -661,7 +665,7 @@ def vg-clone fn [[v:Any] [Any] [
   ]
 ]]
 
-# Safely set a property in place. Lists: int keys only; above-size appends,
+# Safely set a property in place. Lists: a list key only; above-size appends,
 # negative prepends. Returns the (possibly modified) parent.
 def vg-setprop fn [[parent:Any k:Any v:Any] [Any] [
   if (vg-iskey k) [
@@ -673,7 +677,7 @@ def vg-setprop fn [[parent:Any k:Any v:Any] [Any] [
       none
     ] [
       if (vg-islist parent) [
-        def ki (vgi-to-int k)
+        def ki (vgi-list-key k)
         if (ki is None) [none] [
           def n (size parent)
           if (ki gte 0) [
@@ -709,7 +713,7 @@ def vg-delprop fn [[parent:Any k:Any] [Any] [
       none
     ] [
       if (vg-islist parent) [
-        def ki (vgi-to-int k)
+        def ki (vgi-list-key k)
         if (ki is None) [none] [
           def n (size parent)
           if ((ki gte 0) and (ki lt n)) [
@@ -1612,6 +1616,41 @@ def vgi-idef fn [[injdef:Any k:String] [Any] [
   if (injdef is Map) [injdef get (k)] [none]
 ]]
 
+# A path's parts as a fresh list of strings: a number part reads as JavaScript
+# prints it, and a part that is neither a string nor a number makes the whole
+# path miss (none).
+def vgl-pathparts fn [[i:Integer path:Any acc:Any] [Any] [
+  if (i gte (size path)) [acc] [
+    def p (path get i)
+    def ps (
+      if (p is String) [p] [
+        if (p is Boolean) [none] [
+          if (p is Number) [vg-num-to-string p] [none]
+        ]
+      ]
+    )
+    if (ps is None) [none] [
+      (append [ps] acc) drop
+      def r (vgl-pathparts (i add 1) path acc)
+      r
+    ]
+  ]
+]]
+def vgi-pathparts fn [[path:Any] [Any] [
+  def r (
+    if (vg-islist path) [vgl-pathparts 0 path (flex [])] [
+      if (path is String) [
+        make FlexList (StringUtil.split "." path {keepEmpty: true})
+      ] [
+        if (path is Boolean) [none] [
+          if (path is Number) [flex [(vg-num-to-string path)]] [none]
+        ]
+      ]
+    ]
+  )
+  r
+]]
+
 def vgl-getpath-parts fn [[pi:Integer parts:Any vbox:Any store:Any src:Any injdef:Any dparent:Any dpath:Any contbox:Any] [Any] [
   def numparts (size parts)
   def going (
@@ -1736,15 +1775,7 @@ def vg-getpath fn [[store:Any path:Any injdef:Any] [Any] [
 # takes the fast read.
 def vgi-getpath-condensed fn [[store:Any path:Any injdef:Any] [Any] [
   def idf (if (vg-is-noarg injdef) [none] [injdef])
-  def parts (
-    if (vg-islist path) [path] [
-      if (path is String) [
-        make FlexList (StringUtil.split "." path {keepEmpty: true})
-      ] [
-        if (path is Number) [flex [(vg-strkey path)]] [none]
-      ]
-    ]
-  )
+  def parts (vgi-pathparts path)
   def r (
     if (parts is None) [none] [
       if ((vgi-idef idf "base") is None) [
@@ -1763,15 +1794,7 @@ def vgi-getpath-condensed fn [[store:Any path:Any injdef:Any] [Any] [
 
 def vgi-getpath-plain fn [[store:Any path:Any injdef:Any] [Any] [
   def idf (if (vg-is-noarg injdef) [none] [injdef])
-  def parts (
-    if (vg-islist path) [vg-clone path] [
-      if (path is String) [
-        make FlexList (StringUtil.split "." path {keepEmpty: true})
-      ] [
-        if (path is Number) [flex [(vg-strkey path)]] [none]
-      ]
-    ]
-  )
+  def parts (vgi-pathparts path)
   if (parts is None) [none] [
     def ibase (vgi-idef idf "base")
     def src (vg-getprop store ibase store)
@@ -3034,6 +3057,19 @@ def vgi-haslit fn [[v:Any k:Any] [Boolean] [
   ]
 ]]
 
+# The null a checker finds in its slot is written back here, as vgi-slotset
+# does for the list directives, and SKIP keeps inject from deleting it again.
+# Only a whole value is written back: a key or a partial string has no slot.
+def vgi-heldnull fn [[inj:Any] [Any] [
+  def r (
+    if (((inj get "full") eq true) and ((inj get "mode") eq 4)) [
+      (vg-setprop (inj get "parent") (inj get "key") none) drop
+      vg-skip-marker
+    ] [none]
+  )
+  r
+]]
+
 def vg-v-type fn [[inj:Any val:Any iref:Any store:Any] [Any] [
   def tname (StringUtil.lower (iref slice 1 (size iref)))
   # $NIL is absent or null.
@@ -3050,12 +3086,25 @@ def vg-v-type fn [[inj:Any val:Any iref:Any store:Any] [Any] [
   if ((BinUtil.band t typev) eq 0) [
     (append [(vgi-invalid-type-msg (inj get "path") tname t fout)] (inj get "errs")) drop
     none
-  ] [fout]
+  ] [
+    if (t eq vg-t-null) [
+      def hn (vgi-heldnull inj)
+      hn
+    ] [fout]
+  ]
 ]]
 
 def vg-v-any fn [[inj:Any val:Any iref:Any store:Any] [Any] [
   def fout (vgi-lookup (inj get "dparent") (inj get "key"))
-  fout
+  def r (
+    if (fout is None) [
+      if (vgi-haslit (inj get "dparent") (inj get "key")) [
+        def hn (vgi-heldnull inj)
+        hn
+      ] [none]
+    ] [fout]
+  )
+  r
 ]]
 
 def vgl-vchild-keys fn [[i:Integer ckeys:Any parent:Any childtm:Any vkeys:Any] [Any] [
@@ -3095,7 +3144,7 @@ def vg-v-child fn [[inj:Any val:Any iref:Any store:Any] [Any] [
     def pkey (vg-getelem path -2 vg-noarg)
     def tval0 (vg-getprop (inj get "dparent") pkey vg-noarg)
     if (((tval0 is None) not) and ((vg-ismap tval0) not)) [
-      (append [(vgi-invalid-type-msg (vg-slice path -1 vg-noarg vg-noarg) "object" (vg-typify tval0) tval0)] (inj get "errs")) drop
+      # vg-validation reports the mismatch, once.
       none
     ] [
       def tval (if (tval0 is None) [flex {}] [tval0])
@@ -3118,8 +3167,6 @@ def vg-v-child fn [[inj:Any val:Any iref:Any store:Any] [Any] [
           none
         ] [
           if ((vg-islist dparent) not) [
-            def msg (vgi-invalid-type-msg (vg-slice (inj get "path") -1 vg-noarg vg-noarg) "list" (vg-typify dparent) dparent)
-            (append [msg] (inj get "errs")) drop
             (inj set "keyi" (vgz parent)) drop
             dparent
           ] [
@@ -4136,15 +4183,13 @@ def vgi-cond-child fn [[cd:Any ix:Any key:String] [Any] [
         # The plain list read's rule: condensing must not change which value
         # a path selects.
         if (kd eq vg-cond-list) [
-          if (vgi-isindex key) [
-            def li (vgi-parse-int key)
-            if (li is None) [-1] [
-              if (li lt ((size enc) sub 1)) [
-                def found (vgi-cond-ix (enc get (li add 1)))
-                found
-              ] [-1]
-            ]
-          ] [-1]
+          def li (vgi-list-index key)
+          if (li is None) [-1] [
+            if (li lt ((size enc) sub 1)) [
+              def found (vgi-cond-ix (enc get (li add 1)))
+              found
+            ] [-1]
+          ]
         ] [-1]
       ]
     ]
@@ -4167,10 +4212,15 @@ def vgl-cond-resolve fn [[i:Integer parts:Any cd:Any at0:Any] [Any] [
   if (i gte (size parts)) [at0] [
     if (at0 lt 0) [-1] [
       def p (parts get i)
+      # A part that is neither a string nor a number names nothing.
       def nxt (
         if (p is String) [
           if (p eq "") [at0] [vgi-cond-child cd at0 p]
-        ] [vgi-cond-child cd at0 (vg-js-string p)]
+        ] [
+          if (p is Boolean) [-1] [
+            if (p is Number) [vgi-cond-child cd at0 (vg-num-to-string p)] [-1]
+          ]
+        ]
       )
       def r (vgl-cond-resolve (i add 1) parts cd nxt)
       r

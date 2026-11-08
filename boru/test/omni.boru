@@ -1107,6 +1107,17 @@ def ck-cond-listkeys fn [[ig:Any] [Any] [
   r
 ]]
 
+# A part that is neither a string nor a number names nothing, condensed or
+# plain, even where its text is a key.
+def ck-cond-nonkey fn [[ig:Any] [Any] [
+  def src {"true": 1 l: [10 20]}
+  def vw (Struct.condenseview (Struct.condense src) Struct.NOARG Struct.NOARG)
+  def g1 (Struct.condenseview_get vw [true])
+  def g2 (Struct.getpath src ["l" true] Struct.NOARG)
+  def r ((g1 is None) and (g2 is None))
+  r
+]]
+
 # U+FFFF sorts before U+10000 by code point, and after it by UTF-16 unit.
 def ck-cond-codepoint fn [[ig:Any] [Any] [
   def bmp "\uffff"
@@ -1168,6 +1179,36 @@ def ck-cond-immutable fn [[ig:Any] [Any] [
   r
 ]]
 
+# A $CHILD over the wrong type is one error, in the map form and the list form
+# alike: the type check reports it and $CHILD adds nothing.
+def ck-validate-child-errs fn [[ig:Any] [Any] [
+  def em (flex [])
+  def im (flex {})
+  (im set "errs" em) drop
+  (Struct.validate {x: 1} {x: {"`$CHILD`": "`$NUMBER`"}} im) drop
+  def el (flex [])
+  def il (flex {})
+  (il set "errs" el) drop
+  (Struct.validate {x: 1} {x: ["`$CHILD`" "`$NUMBER`"]} il) drop
+  def r (((size em) eq 1) and ((size el) eq 1))
+  r
+]]
+
+# The corpus compiler writes 2.0 as 2, so the host decimal is built here: an
+# integral one is a $NOF count, as 2.0 is 2 in JavaScript.
+def ck-validate-nof-decimal fn [[ig:Any] [Any] [
+  def two (Struct.validate 1 ["`$NOF`" 2.0 "`$NUMBER`" "`$INTEGER`"] Struct.NOARG)
+  def rng (Struct.validate 1.5 ["`$NOF`" {min: 1.0 max: 2.0} "`$NUMBER`" "`$INTEGER`"] Struct.NOARG)
+  def errs (flex [])
+  def idf (flex {})
+  (idf set "errs" errs) drop
+  (Struct.validate 1 ["`$NOF`" 2.0 "`$NUMBER`" "`$STRING`"] idf) drop
+  def msg (if ((size errs) eq 1) [errs get 0] [""])
+  def want "Expected exactly 2 of number, string, but found integer: 1."
+  def r (((two eq 1) and (rng eq 1.5)) and (msg eq want))
+  r
+]]
+
 # --- main --------------------------------------------------------------------
 # The null flags are the in-situ runner's, group for group: this change swaps
 # the runner, not what is asserted.
@@ -1194,6 +1235,7 @@ def ob-main fn [[av:Any] [Any] [
   (ob-local "condense.local.proto" [ck-cond-proto/v]) drop
   (ob-local "condense.local.nullbase" [ck-cond-null-base/v]) drop
   (ob-local "condense.local.listkeys" [ck-cond-listkeys/v]) drop
+  (ob-local "condense.local.nonkey" [ck-cond-nonkey/v]) drop
   (ob-local "condense.local.codepoint" [ck-cond-codepoint/v]) drop
   (ob-local "condense.local.invalidkey" [ck-cond-invalidkey/v]) drop
   (ob-local "condense.local.immutable" [ck-cond-immutable/v]) drop
@@ -1263,6 +1305,8 @@ def ob-main fn [[av:Any] [Any] [
   (ob-group pack "validate" "nof" (subs get "validate") false) drop
   (ob-group pack "validate" "all" (subs get "validate") false) drop
   (ob-group pack "validate" "unknown" (subs get "validate") false) drop
+  (ob-local "validate.local.childerrs" [ck-validate-child-errs/v]) drop
+  (ob-local "validate.local.nofdecimal" [ck-validate-nof-decimal/v]) drop
 
   (ob-group pack "select" "basic" (subs get "select") true) drop
   (ob-group pack "select" "operators" (subs get "select") true) drop
