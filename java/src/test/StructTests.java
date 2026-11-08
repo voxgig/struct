@@ -1095,6 +1095,47 @@ class StructTests {
   }
 
   @Test
+  void validateChildOneErrorPerFailure() {
+    for (Object spec :
+        List.of(
+            Struct.jm("x", Struct.jm("`$CHILD`", "`$NUMBER`")),
+            Struct.jm("x", Struct.jt("`$CHILD`", "`$NUMBER`")))) {
+      List<Object> errs = new ArrayList<>();
+      Struct.validate(Struct.jm("x", 1), spec, Struct.jm("errs", errs));
+      assertEquals(1, errs.size(), errs.toString());
+    }
+
+    List<Object> errs = new ArrayList<>();
+    Struct.validate(1, Struct.jm("`$CHILD`", "`$NUMBER`"), Struct.jm("errs", errs));
+    assertEquals(List.of("Expected map, but found integer: 1."), errs);
+    errs.clear();
+    Struct.validate(1, Struct.jt("`$CHILD`", "`$NUMBER`"), Struct.jm("errs", errs));
+    assertEquals(List.of("Expected list, but found integer: 1."), errs);
+  }
+
+  @Test
+  void validateNofIntegralDecimalCount() {
+    // A count is the integer it holds, whatever the host number type.
+    for (Object two : List.of(2, 2L, 2.0)) {
+      assertEquals(1, Struct.validate(1, Struct.jt("`$NOF`", two, "`$NUMBER`", "`$INTEGER`")));
+      Throwable err =
+          assertThrows(
+              Exception.class,
+              () -> Struct.validate(1.5, Struct.jt("`$NOF`", two, "`$NUMBER`", "`$INTEGER`")));
+      assertEquals("Expected exactly 2 of number, integer, but found decimal: 1.5.", err.getMessage());
+    }
+
+    for (Object range : List.of(Struct.jm("min", 1, "max", 2), Struct.jm("min", 1.0, "max", 2.0))) {
+      assertEquals(1, Struct.validate(1, Struct.jt("`$NOF`", range, "`$NUMBER`", "`$INTEGER`")));
+      Throwable err =
+          assertThrows(
+              Exception.class,
+              () -> Struct.validate("x", Struct.jt("`$NOF`", range, "`$NUMBER`", "`$INTEGER`")));
+      assertEquals("Expected 1 to 2 of number, integer, but found string: x.", err.getMessage());
+    }
+  }
+
+  @Test
   void validateEdge() {
     List<String> errs = new ArrayList<>();
     Map<String, Object> opts = new LinkedHashMap<>();

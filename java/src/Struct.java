@@ -87,7 +87,7 @@ public class Struct {
   private static final Pattern R_TRANSFORM_NAME = Pattern.compile("`\\$([A-Z]+)`");
   private static final Pattern R_DOUBLE_DOLLAR = Pattern.compile("\\$\\$");
   private static final Pattern R_CLONE_REF = Pattern.compile("^`\\$REF:([0-9]+)`$");
-  private static final Pattern R_LIST_INDEX = Pattern.compile("^(0|[1-9][0-9]*)$");
+  private static final Pattern R_LIST_INDEX = Pattern.compile("^(0|-?[1-9][0-9]*)$");
 
   /**
    * Sentinel returned from a transform/inject step to omit the current key.
@@ -364,16 +364,12 @@ public class Struct {
       return alt;
     }
 
-    String k = jsString(key);
-    long idx = listIndex(k);
-    if (idx < 0 && isIntegerKeyString(k)) {
+    double idx = listIndex(key);
+    if (idx < 0) {
       // A negative key counts from the end.
-      Integer n = parseIntKey(k);
-      if (n != null && n < 0) {
-        idx = list.size() + (long) n;
-      }
+      idx += list.size();
     }
-    if (idx < 0 || idx >= list.size()) {
+    if (!(0 <= idx && idx < list.size())) {
       if (alt instanceof Function<?, ?> f) {
         return ((Function<Object, Object>) f).apply(null);
       }
@@ -404,12 +400,12 @@ public class Struct {
     Object out = UNDEF;
 
     if (val instanceof Map<?, ?> m) {
-      String sk = strkey(key);
-      if (m.containsKey(sk)) {
+      String sk = mapKey(key);
+      if (null != sk && m.containsKey(sk)) {
         out = ((Map<Object, Object>) m).get(sk);
       }
     } else if (val instanceof List<?> l) {
-      long idx = listIndex(key);
+      double idx = listIndex(key);
       if (0 <= idx && idx < l.size()) {
         out = l.get((int) idx);
       }
@@ -438,24 +434,30 @@ public class Struct {
       return UNDEF;
     }
     if (val instanceof Map<?, ?> m) {
-      String sk = strkey(key);
-      return m.containsKey(sk) ? ((Map<Object, Object>) m).get(sk) : UNDEF;
+      String sk = mapKey(key);
+      return null != sk && m.containsKey(sk) ? ((Map<Object, Object>) m).get(sk) : UNDEF;
     }
     if (val instanceof List<?> l) {
-      long idx = listIndex(key);
+      double idx = listIndex(key);
       return 0 <= idx && idx < l.size() ? l.get((int) idx) : UNDEF;
     }
     return UNDEF;
   }
 
-  // The index a list read takes key to, or -1: only a canonical index, as a
-  // JavaScript array reads one ("01", "+1", "1.0" and "-0" are not).
-  private static long listIndex(Object key) {
-    String k = jsString(key);
-    if (!R_LIST_INDEX.matcher(k).matches()) {
-      return -1;
+  // The key a map read takes, or null for one that is neither a string nor a
+  // number, which misses.
+  private static String mapKey(Object key) {
+    return key instanceof String || key instanceof Number ? strkey(key) : null;
+  }
+
+  // A list key's index, or NaN: an integral number, or the string String(n)
+  // prints for one, negative or not ("01", "+1", "1.0" and "-0" are not).
+  private static double listIndex(Object key) {
+    if (key instanceof Number n) {
+      double d = n.doubleValue();
+      return Double.isFinite(d) && Math.floor(d) == d ? d : Double.NaN;
     }
-    return 18 < k.length() ? Long.MAX_VALUE : Long.parseLong(k);
+    return key instanceof String s && R_LIST_INDEX.matcher(s).matches() ? Double.parseDouble(s) : Double.NaN;
   }
 
   public static Object setprop(Object parent, Object key, Object val) {
@@ -475,16 +477,14 @@ public class Struct {
 
     if (parent instanceof List<?>) {
       List<Object> l = (List<Object>) parent;
-      Integer idx = parseIntKey(key);
-      if (idx == null) {
+      double idx = listIndex(key);
+      if (Double.isNaN(idx)) {
         return parent;
       }
-      idx = (int) Math.floor(idx);
 
       if (idx >= 0) {
-        int target = Math.min(Math.max(idx, 0), l.size());
-        if (target < l.size()) {
-          l.set(target, val);
+        if (idx < l.size()) {
+          l.set((int) idx, val);
         } else {
           l.add(val);
         }
@@ -512,38 +512,14 @@ public class Struct {
     }
 
     if (parent instanceof List<?> l) {
-      Integer idx = parseIntKey(key);
-      if (idx != null && idx >= 0 && idx < l.size()) {
+      double idx = listIndex(key);
+      if (0 <= idx && idx < l.size()) {
         ((List<Object>) l).remove((int) idx);
       }
       return parent;
     }
 
     return parent;
-  }
-
-  public static boolean isIntegerKeyString(Object key) {
-    if (key instanceof Number) {
-      return true;
-    }
-    if (!(key instanceof String s)) {
-      return false;
-    }
-    return s.matches("^[-0-9]+$");
-  }
-
-  private static Integer parseIntKey(Object key) {
-    if (key instanceof Number n) {
-      return (int) Math.floor(n.doubleValue());
-    }
-    if (key instanceof String s) {
-      try {
-        return Integer.parseInt(s);
-      } catch (Exception e) {
-        return null;
-      }
-    }
-    return null;
   }
 
   public static Object clone(Object val) {
@@ -1283,11 +1259,14 @@ public class Struct {
 
   public static Object getpath(Object store, Object path, Map<String, Object> inj) {
     List<String> parts = pathParts(path);
+    if (null == parts) {
+      return UNDEF;
+    }
 
     // A condensed store answers as the node it was built from, touching only
     // the nodes on the path. A base changes what the path resolves against,
     // so that read needs the materialised store.
-    if (null != parts && iscondensed(store)) {
+    if (iscondensed(store)) {
       if (null == inj || UNDEF == getprop(inj, "base")) {
         Object found = condenseMaterialise(store, condenseResolve(store, condenseRoot(store), parts));
         // Group A: a stored null reads as absent, as it does through getprop.
@@ -1331,6 +1310,8 @@ public class Struct {
     return pathify(path);
   }
 
+  // A new list, so the caller's path is never rewritten; null when it is no
+  // path, or names a part that is neither a string nor a number.
   private static List<String> pathParts(Object path) {
     if (path instanceof String s) {
       if (s.isEmpty()) {
@@ -1338,15 +1319,18 @@ public class Struct {
       }
       return new ArrayList<>(List.of(s.split("\\.", -1)));
     }
+    if (path instanceof Number n) {
+      return new ArrayList<>(List.of(jsString(n)));
+    }
     if (path instanceof List<?> l) {
       List<String> out = new ArrayList<>();
       for (Object x : l) {
-        if (x instanceof String) {
-          out.add((String) x);
+        if (x instanceof String s) {
+          out.add(s);
         } else if (x instanceof Number n) {
-          out.add(strkey(n));
+          out.add(jsString(n));
         } else {
-          out.add(strkey(x));
+          return null;
         }
       }
       return out;
@@ -1355,10 +1339,6 @@ public class Struct {
   }
 
   private static Object getpathInner(Object store, Object pathOrig, List<String> parts, Map<String, Object> inj) {
-    if (parts == null) {
-      return null;
-    }
-
     Object base = inj != null ? inj.get("base") : null;
     Object src = getprop(store, base, store);
     Object dparent = inj != null ? inj.get("dparent") : null;
@@ -1657,8 +1637,9 @@ public class Struct {
    * can hook command dispatch.
    */
   public static Object getpath(Object store, Object path, Injection inj) {
-    // A condensed read without a base returns before any handler runs, as in canonical.
-    if (inj == null || (inj.base == null && iscondensed(store))) {
+    // No path, or a condensed read without a base, returns before any handler
+    // runs, as in canonical.
+    if (inj == null || null == pathParts(path) || (inj.base == null && iscondensed(store))) {
       return getpath(store, path, (Map<String, Object>) null);
     }
     Map<String, Object> view = new LinkedHashMap<>();
@@ -2631,8 +2612,7 @@ public class Struct {
           if (tval == UNDEF || tval == null) {
             tval = new LinkedHashMap<>();
           } else if (!ismap(tval)) {
-            Object sp = slice(inj.path, -1, null);
-            inj.errs.add(_invalidTypeMsg(sp, "object", typify(tval), tval, "V0220"));
+            // _validation reports the mismatch, once.
             return UNDEF;
           }
 
@@ -2659,9 +2639,6 @@ public class Struct {
           }
 
           if (!islist(inj.dparent)) {
-            Object sp = slice(inj.path, -1, null);
-            inj.errs.add(
-                _invalidTypeMsg(sp, "list", typify(inj.dparent), inj.dparent, "V0230"));
             inj.keyI = size(inj.parent);
             return inj.dparent;
           }
@@ -3665,7 +3642,7 @@ public class Struct {
   // The node index of key inside node idx, or -1. Touches only this node.
   private static int condenseChild(Object cond, int idx, Object key) {
     Object enc = condenseEnc(cond, idx);
-    if (null == enc) {
+    if (null == enc || !(key instanceof String || key instanceof Number)) {
       return -1;
     }
 
@@ -3695,8 +3672,8 @@ public class Struct {
 
     if (condenseIs(enc, CONDENSE_LIST)) {
       List<?> items = (List<?>) enc;
-      long i = listIndex(key);
-      if (0 > i || i >= items.size() - 1) {
+      double i = listIndex(key);
+      if (!(0 <= i && i < items.size() - 1)) {
         return -1;
       }
       return condenseIndex(items.get(1 + (int) i));
