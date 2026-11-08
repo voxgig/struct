@@ -405,17 +405,30 @@ def strToInt? (s : String) : Option Int := Id.run do
       return none
   return some (if neg then -(n : Int) else (n : Int))
 
-/-- OCaml `is_int_key`: nonempty and every char is a digit or `-`. -/
-def isIntKey (s : String) : Bool :=
-  s.length > 0 && s.toList.all (fun c => (c >= '0' && c <= '9') || c == '-')
-
-/-- A canonical list index, as a JS array lookup reads one: `0`, or digits with
-    no leading zero. -/
+/-- A canonical integer key, as `String(n)` prints one: `0`, or digits with no
+    leading zero after an optional minus. -/
 def isCanonIndex (s : String) : Bool :=
+  let digits (c : Char) (rest : List Char) : Bool :=
+    c >= '1' && c <= '9' && rest.all (fun d => d >= '0' && d <= '9')
   match s.toList with
   | ['0'] => true
-  | c :: rest => c >= '1' && c <= '9' && rest.all (fun d => d >= '0' && d <= '9')
+  | '-' :: c :: rest => digits c rest
+  | c :: rest => digits c rest
   | [] => false
+
+/-- The canonical `_listkey`: a whole number, or a string `isCanonIndex`
+    accepts; none for any other key. -/
+def listKey (key : Value) : Option Int :=
+  match key with
+  | .num n => if isIntegerF n then some (fToInt n) else none
+  | .str s => if isCanonIndex s then strToInt? s else none
+  | _ => none
+
+/-- True for a string or number key; a key of any other type misses a map. -/
+def isPropKey (key : Value) : Bool :=
+  match key with
+  | .str _ | .num _ => true
+  | _ => false
 
 -- ----- JS number formatting (shortest round-trip, ECMA Number::toString) -----
 
@@ -665,37 +678,37 @@ partial def jsString (v : Value) : SIO String := do
   | .func _ => pure "function"
   | .sentinel s => pure s
 
-/-- internal: a list read as JS reads an array: a whole number from 0 or a
-    canonical index string, so 01, +1 and -0 miss. noval if oob. -/
+/-- internal: a list read as JS reads an array: a `listKey` from 0, so 01, +1,
+    -0 and -1 miss. noval if oob. -/
 def listIndex (id : Nat) (key : Value) : SIO Value := do
   let xs ← listItems id
-  let idx : Option Int := match key with
-    | .num n =>
-      if isIntegerF n && decide (n >= 0.0) && decide (n < xs.size.toFloat) then some (fToInt n)
-      else none
-    | .str s => if isCanonIndex s then strToInt? s else none
-    | _ => none
-  match idx with
-  | some i => return (if i < (xs.size : Int) then xs[i.toNat]! else .noval)
+  match listKey key with
+  | some i =>
+    if i >= 0 && i < (xs.size : Int) then return xs[i.toNat]! else return .noval
   | none => return .noval
+
+/-- internal: the stored value at a key, as the canonical `_readprop`: a list
+    reads `listIndex`, a map only a key `isPropKey` accepts. -/
+def readProp (v key : Value) : SIO Value := do
+  match v with
+  | .map id =>
+    if isPropKey key then
+      let es ← mapEntries id
+      let k ← jsString key
+      pure ((omapGet es k).getD .noval)
+    else pure .noval
+  | .list id => listIndex id key
+  | _ => pure .noval
 
 partial def getprop (v key : Value) (alt : Value := .noval) : SIO Value := do
   if isNoval v || isNoval key then return alt
-  let out ←
-    match v with
-    | .map id => do
-      pure ((omapGet (← mapEntries id) (← jsString key)).getD .noval)
-    | .list id => listIndex id key
-    | _ => pure .noval
+  let out ← readProp v key
   if isNullish out then return alt else return out
 
 /-- Raw lookup preserving stored `null` (canonical TS bracket access). -/
 partial def lookupRaw (v key : Value) : SIO Value := do
   if isNoval v || isNoval key then return .noval
-  match v with
-  | .map id => pure ((omapGet (← mapEntries id) (← jsString key)).getD .noval)
-  | .list id => listIndex id key
-  | _ => pure .noval
+  readProp v key
 
 def haskey (v key : Value) : SIO Bool := do
   return !(isNullish (← getprop v key))
@@ -705,21 +718,15 @@ partial def getelem (v key : Value) (alt : Value := .noval) : SIO Value := do
   let out ←
     match v with
     | .list id => do
-      let ks := match key with
-        | .str s => s
-        | .num n => numToString n
-        | _ => ""
       -- A negative key counts from the end; any other reads as getprop does.
-      if isIntKey ks then
-        match strToInt? ks with
-        | some nk => do
-          if nk < 0 then
-            let xs ← listItems id
-            let len : Int := xs.size
-            listIndex id (vInt (len + nk))
-          else listIndex id key
-        | none => pure .noval
-      else pure .noval
+      match listKey key with
+      | some nk => do
+        if nk < 0 then
+          let xs ← listItems id
+          let len : Int := xs.size
+          listIndex id (vInt (len + nk))
+        else listIndex id key
+      | none => pure .noval
     | _ => pure .noval
   if isNullish out then
     match alt with
@@ -869,19 +876,19 @@ def condensePair (enc : Array Value) (symid : Int) : Int := Id.run do
 
 /-- The node index of `key` inside node `idx`, or -1. Touches only this node. -/
 def condenseChild (cond : Value) (idx : Int) (key : Value) : SIO Int := do
+  if !(isPropKey key) then return (-1)
   let enc ← condenseNode cond idx
   let k ← jsString key
   let kind := condenseKind enc
   if kind == some CONDENSE_MAP then
     let symid := condenseBisect (← condenseItems cond S_CONDSYM) k
     return (if symid < 0 then -1 else condensePair enc symid)
-  -- Canonical integer keys only, as a JS list lookup: 01, 1e0, " 1" and +1
+  -- A listKey from 0 only, as a JS list lookup: 01, 1e0, " 1", +1 and -1
   -- miss, so condensing never changes which value a path selects.
   if kind == some CONDENSE_LIST then
-    if !(isCanonIndex k) then return (-1)
-    match strToInt? k with
+    match listKey key with
     | some i =>
-      return (if i < (enc.size : Int) - 1 then condenseIndex (condenseAt enc (1 + i)) else -1)
+      return (if i >= 0 && i < (enc.size : Int) - 1 then condenseIndex (condenseAt enc (1 + i)) else -1)
     | none => return (-1)
   return (-1)
 
@@ -1114,14 +1121,12 @@ partial def setprop (parent key v : Value) : SIO Value := do
   match parent with
   | .map id => mapSetKV id (← jsString key) v
   | .list id => do
-    let keyF : Float := jsNumber key
-    if keyF.isNaN then pure ()
-    else do
-      let ki0 : Int := fToInt keyF.floor
+    match listKey key with
+    | none => pure ()
+    | some ki => do
       let xs ← listItems id
       let len : Int := xs.size
-      if ki0 >= 0 then
-        let ki := if ki0 > len then len else ki0
+      if ki >= 0 then
         if ki >= len then setListItems id (xs.push v)
         else setListItems id (xs.set! ki.toNat v)
       else
@@ -1135,14 +1140,13 @@ partial def delprop (parent key : Value) : SIO Value := do
   match parent with
   | .map id => mapDelK id (← jsString key)
   | .list id => do
-    let keyF : Float := jsNumber key
-    if keyF.isNaN then pure ()
-    else do
-      let ki : Int := fToInt keyF.floor
+    match listKey key with
+    | some ki => do
       if ki >= 0 then do
         let xs ← listItems id
         if ki < (xs.size : Int) then
           setListItems id ((xs.toList.eraseIdx ki.toNat).toArray)
+    | none => pure ()
   | _ => pure ()
   return parent
 
@@ -1845,12 +1849,23 @@ def iaHandler (a : InjArg) : SIO (Option Nat) := do
   | .idef d => pure d.dHandler
   | .inone => pure none
 
+/-- A list path's part as `getpath` reads it: a number as `String(n)`, a string
+    as itself; none for any other part, which misses the path. -/
+def pathPart (p : Value) : Option Value :=
+  match p with
+  | .num n => some (Value.str (numToString n))
+  | .str _ => some p
+  | _ => none
+
 partial def getpath (store path : Value) (inj : InjArg := .inone) : SIO Value := do
   let pa0 : Option (Array Value) ←
     match path with
-    | .list _ => pure (some (← listItemsOf path))
+    | .list _ => do
+      let ps ← listItemsOf path
+      let parts := ps.filterMap pathPart
+      pure (if parts.size == ps.size then some parts else none)
     | .str s => pure (some ((s.splitOn ".").map (fun x => Value.str x)).toArray)
-    | .num n => pure (some #[.str (strkey (.num n))])
+    | .num n => pure (some #[.str (numToString n)])
     | _ => pure none
   match pa0 with
   | none => return .noval
@@ -2779,9 +2794,7 @@ partial def validateChild : InjectorFn := fun inj _v _ref _store => do
       let _ ← delprop parent key
       pure .noval
     else if !(ismap tval) then do
-      let psize ← size path
-      let ppath ← slice path (start := .num 0.0) (stop := vInt (psize - 1))
-      pushErr inj (← invalidTypeMsg ppath S_OBJECT ((typify tval : Nat) : Int) tval)
+      -- validation reports the mismatch, once.
       pure .noval
     else do
       for ckey in (← keysof tval) do
@@ -2801,9 +2814,6 @@ partial def validateChild : InjectorFn := fun inj _v _ref _store => do
        | _ => pure ())
       pure .noval
     else if !(islist d.dparent) then do
-      let psize ← size path
-      let ppath ← slice path (start := .num 0.0) (stop := vInt (psize - 1))
-      pushErr inj (← invalidTypeMsg ppath S_LIST ((typify d.dparent : Nat) : Int) d.dparent)
       let np ← size parent
       modInj inj (fun dd => { dd with keyi := np })
       pure d.dparent

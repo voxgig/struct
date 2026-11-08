@@ -653,6 +653,18 @@ def runAll (spec : Value) : SIO Unit := do
       let d : InjDef := { dMeta := ← getprop injm (.str "meta") }
       validate (← vget vin "data") (← vget vin "spec")
         (if isNullish injm then .inone else .idef d)))
+  -- The corpus pins the message; this counts the errs, root forms included.
+  runLocal "validate.child-one-error-per-failure" do
+    let cases : List (Value × Value) := [
+      (← jm [.str "x", .num 1.0], ← jm [.str "x", ← jm [.str "`$CHILD`", .str "`$NUMBER`"]]),
+      (← jm [.str "x", .num 1.0], ← jm [.str "x", ← jt [.str "`$CHILD`", .str "`$NUMBER`"]]),
+      (.num 1.0, ← jm [.str "`$CHILD`", .str "`$NUMBER`"]),
+      (.num 1.0, ← jt [.str "`$CHILD`", .str "`$NUMBER`"])]
+    for (dat, sp) in cases do
+      let errs ← emptyList
+      let d : InjDef := { dErrs := errs }
+      let _ ← validate dat sp (.idef d)
+      expectOk ((← size errs) == 1) (← compactJson errs)
 
   -- select
   for gn in ["basic", "operators", "edge", "alts"] do
