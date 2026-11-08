@@ -176,42 +176,65 @@ public func strkey(_ key: Value) -> String {
   }
 }
 
-// MARK: - list index
-
-// JS String(key) for a key that can name a list element.
-private func indexText(_ key: Value) -> String? {
-  switch key {
-  case .string(let s): return s
-  case .int(let n): return String(n)
-  case .double(let d): return JSON.formatDouble(d)
-  default: return nil
+// JavaScript's String(n) for a number.
+func numtext(_ n: Value) -> String {
+  switch n {
+  case .int(let i): return String(i)
+  case .double(let d):
+    if d.isNaN { return "NaN" }
+    if d.isInfinite { return 0 < d ? "Infinity" : "-Infinity" }
+    return JSON.formatDouble(d)
+  default: return ""
   }
 }
 
-// "0", or digits with no leading zero: the only keys a JavaScript array
-// reads as an index, so "01", "+1", " 1" and "-0" name no element.
-func isListIndex(_ key: String) -> Bool {
-  let digits = Array(key.utf8)
+// MARK: - list keys
+
+// "0", or digits with no leading zero, after a "-" when signed: the text
+// JavaScript's String(n) prints for an integer, so "01", "+1", " 1", "-0" and
+// "1.0" name no element.
+func isListIndex(_ key: String, signed: Bool = false) -> Bool {
+  var digits = Array(key.utf8)
+  if signed, UInt8(ascii: "-") == digits.first {
+    digits.removeFirst()
+    if UInt8(ascii: "0") == digits.first { return false }
+  }
   guard let first = digits.first else { return false }
   if UInt8(ascii: "0") == first { return 1 == digits.count }
   return digits.allSatisfy { UInt8(ascii: "0") <= $0 && $0 <= UInt8(ascii: "9") }
 }
 
-// The element a list read selects. Writes coerce a key more loosely.
+// The integer a list key names, read or write: an integral number, or a string
+// isListIndex accepts signed. Past Int's range it saturates, so a read misses
+// and a write appends or prepends, as a JavaScript number that large does.
+func listKey(_ key: Value) -> Int? {
+  switch key {
+  case .int(let n):
+    return Int(exactly: n) ?? (n < 0 ? Int.min : Int.max)
+  case .double(let d):
+    guard d.isFinite, d == d.rounded() else { return nil }
+    return Int(exactly: d) ?? (d < 0 ? Int.min : Int.max)
+  case .string(let s):
+    guard isListIndex(s, signed: true) else { return nil }
+    return Int(s) ?? (s.hasPrefix("-") ? Int.min : Int.max)
+  default:
+    return nil
+  }
+}
+
+// The element a list read selects: a list key that is not negative.
 func listIndex(_ key: Value) -> Int? {
-  if case .int(let n) = key { return 0 <= n ? Int(exactly: n) : nil }
-  guard let text = indexText(key), isListIndex(text) else { return nil }
-  return Int(text)
+  guard let i = listKey(key), 0 <= i else { return nil }
+  return i
 }
 
 // MARK: - getelem
 
 public func getelem(_ val: Value, _ key: Value, _ alt: Value = .noval) -> Value {
-  guard case .list(let l) = val, let text = indexText(key) else { return alt }
-  var idx = isListIndex(text) ? Int(text) : nil
-  // Only a negative key counts from the end; any other reads as getprop does.
-  if let n = Int(text), n < 0 { idx = l.items.count + n }
-  guard let i = idx, i >= 0, i < l.items.count else { return alt }
+  guard case .list(let l) = val, var i = listKey(key) else { return alt }
+  // A negative key counts from the end.
+  if i < 0 { i += l.items.count }
+  guard 0 <= i, i < l.items.count else { return alt }
   let v = l.items[i]
   // Group A: a null (or absent) slot counts as "no value" → alt.
   return (v.isNoval || v.isNull) ? alt : v
@@ -286,14 +309,7 @@ func _setprop(_ val: Value, _ key: Value, _ newval: Value) -> Value {
   if newval.isNoval { return _delprop(val, key) }
   switch val {
   case .list(let l):
-    var k: Int? = nil
-    switch key {
-    case .int(let n): k = Int(n)
-    case .double(let d): k = Int(d)
-    case .string(let s): k = Int(s)
-    default: break
-    }
-    guard let idx = k else { return val }
+    guard let idx = listKey(key) else { return val }
     if idx >= 0 {
       // Set or append; an out-of-range index clamps to the end (no null gap).
       let target = min(idx, l.items.count)
@@ -317,16 +333,8 @@ func _setprop(_ val: Value, _ key: Value, _ newval: Value) -> Value {
 func _delprop(_ val: Value, _ key: Value) -> Value {
   switch val {
   case .list(let l):
-    var k: Int? = nil
-    switch key {
-    case .int(let n): k = Int(n)
-    case .double(let d): k = Int(d)
-    case .string(let s): k = Int(s)
-    default: break
-    }
-    guard let idx = k else { return val }
     // A negative or out-of-range index is a no-op (no end-relative delete).
-    if idx >= 0, idx < l.items.count { l.items.remove(at: idx) }
+    if let idx = listIndex(key), idx < l.items.count { l.items.remove(at: idx) }
     return val
   case .map(let m):
     let k = strkey(key)

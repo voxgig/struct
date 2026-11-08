@@ -188,11 +188,7 @@ private func condenseIntern(
 private func condenseKeystr(_ key: Value) -> String {
   switch key {
   case .string(let s): return s
-  case .int(let n): return String(n)
-  case .double(let d):
-    if d.isNaN { return "NaN" }
-    if d.isInfinite { return 0 < d ? "Infinity" : "-Infinity" }
-    return JSON.formatDouble(d)
+  case .int, .double: return numtext(key)
   case .bool(let b): return b ? "true" : "false"
   case .null: return "null"
   case .noval: return "undefined"
@@ -250,8 +246,12 @@ private func condenseSymId(_ cond: Value, _ key: String) -> Int {
   return -1
 }
 
-private func condenseChild(_ cond: Value, _ idx: Int, _ key: String) -> Int {
+private func condenseChild(_ cond: Value, _ idx: Int, _ part: Value) -> Int {
+  // A key that is neither a string nor a number names no child, as in a plain
+  // read.
+  guard part.isString || part.isNumber else { return -1 }
   guard let enc = condenseEnc(cond, idx), let first = enc.first else { return -1 }
+  let key = condenseKeystr(part)
   let kind = condenseInt(first)
 
   if CONDENSE_MAP == kind {
@@ -297,7 +297,7 @@ func condenseResolve(_ cond: Value, _ idx: Int, _ path: Value) -> Int {
   for part in parts {
     if 0 > at { return -1 }
     if case .string(let s) = part, s.isEmpty { continue }
-    at = condenseChild(cond, at, condenseKeystr(part))
+    at = condenseChild(cond, at, part)
   }
   return at
 }

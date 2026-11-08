@@ -48,15 +48,23 @@ public func setpath(_ store: Value, _ pathIn: Value, _ val: Value) throws -> Val
 public func getpath(_ store: Value, _ pathIn: Value, _ inj: Injection? = nil) -> Value {
   var parts: [String] = []
   switch pathIn {
-  case .list(let l): parts = l.items.map { strkey($0) }
+  case .list(let l):
+    // A number part reads as JavaScript prints it, and a part that is neither
+    // a string nor a number misses the whole path.
+    for part in l.items {
+      switch part {
+      case .string(let s): parts.append(s)
+      case .int, .double: parts.append(numtext(part))
+      default: return .noval
+      }
+    }
   case .string(let s):
     if s.isEmpty {
       parts = [""]
     } else {
       parts = s.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
     }
-  case .int(let n): parts = [String(n)]
-  case .double(let d): parts = [JSON.formatDouble(d)]
+  case .int, .double: parts = [numtext(pathIn)]
   default:
     return .noval
   }

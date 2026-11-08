@@ -63,6 +63,20 @@ final class ErrSinkTests: XCTestCase {
     XCTAssertThrowsError(try transform(data, spec))
   }
 
+  // A `$CHILD` over the wrong type is one error, in the map form and the list
+  // form alike: the type check reports it and `$CHILD` adds nothing.
+  func testValidateChildOneErrorPerFailure() throws {
+    let data = try JSON.parse(#"{"x":1}"#)
+    for text in [#"{"x":{"`$CHILD`":"`$NUMBER`"}}"#, #"{"x":["`$CHILD`","`$NUMBER`"]}"#] {
+      let spec = try JSON.parse(text)
+      let inj = Injection(val: .noval, parent: .noval)
+      let errs = VList()
+      inj.errs = errs
+      XCTAssertNoThrow(try validate(data, spec, inj))
+      XCTAssertEqual(1, errs.items.count, "\(text): \(stringify(.list(errs)))")
+    }
+  }
+
   // Reading `errs` is what the collecting internals do on every error; only
   // assigning it may flip the gate.
   func testReadingErrsDoesNotSupplyASink() {

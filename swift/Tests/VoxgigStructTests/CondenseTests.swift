@@ -105,6 +105,17 @@ final class CondenseTests: XCTestCase {
     XCTAssertEqual(getpath(c, segs("l", "1")), .int(20))
   }
 
+  // A part that is neither a string nor a number names nothing, condensed or
+  // plain, even where its text is a key.
+  func testNonKeyPartsMiss() throws {
+    let plain = try JSON.parse(#"{"true":1,"l":[10,20]}"#)
+    let c = condense(plain)
+    for part in [Value.bool(true), .null, .list([.int(1)])] {
+      XCTAssertEqual(condenseview(c).get(.list([part])), .noval, "part \(part)")
+      XCTAssertEqual(getpath(plain, .list([.string("l"), part])), .noval, "part \(part)")
+    }
+  }
+
   func testSymbolsSortByCodePoint() throws {
     let c = condense(.map([("a", .string("\u{10000}")), ("b", .string("\u{FFFF}"))]))
     let strs = symbols(c)

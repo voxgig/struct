@@ -90,10 +90,7 @@ public func validate_CHILD(_ inj: Injection, _ val: Value, _ ref: String, _ stor
     if tval.isNoval {
       tval = .map(VMap())
     } else if !tval.isMap {
-      inj.errs.items.append(
-        .string(
-          invalidTypeMsg(
-            Array(inj.path.suffix(1)), S_object, typify(tval), tval, "V0220")))
+      // _validation reports the mismatch, once.
       return .noval
     }
     let ckeys = keysof(tval)
@@ -115,10 +112,6 @@ public func validate_CHILD(_ inj: Injection, _ val: Value, _ ref: String, _ stor
       return .noval
     }
     if !inj.dparent.isList {
-      let msg = invalidTypeMsg(
-        Array(inj.path.suffix(1)),
-        S_list, typify(inj.dparent), inj.dparent, "V0230")
-      inj.errs.items.append(.string(msg))
       inj.keyI = size(parent)
       return inj.dparent
     }
@@ -548,9 +541,13 @@ private func _admits(_ val: Value, _ spec: Value, _ inj: Injection, _ store: Val
 // The bounds of a $NOF count, and the words for it, which are nil when the
 // count is invalid. Without a max, the bound is the number of specs.
 private func _nofcount(_ count: Value, _ numtvals: Int) -> (Int, Int, String?) {
+  // An integral decimal counts too: 2.0 is 2 in JavaScript.
   func nat(_ n: Value) -> Int? {
-    if case .int(let i) = n, 0 <= i { return Int(i) }
-    return nil
+    switch n {
+    case .int(let i): return 0 <= i ? Int(exactly: i) : nil
+    case .double(let d): return 0 <= d && d == d.rounded() ? Int(exactly: d) : nil
+    default: return nil
+    }
   }
 
   if let c = nat(count) {
