@@ -929,6 +929,24 @@ class TestStruct(unittest.TestCase):
         self.assertEqual(validate([None, 1], ['`$CHILD`', '`$ANY`']), [None, 1])
         self.assertEqual(validate([None, 1], ['`$NOF`', 1, ['`$CHILD`', '`$ANY`']]), [None, 1])
 
+    def test_validate_child_one_error_per_failure(self):
+        for vspec in [{'x': {'`$CHILD`': '`$NUMBER`'}}, {'x': ['`$CHILD`', '`$NUMBER`']}]:
+            errs = []
+            validate({'x': 1}, vspec, {'errs': errs})
+            self.assertEqual(len(errs), 1, json.dumps(errs))
+
+    def test_validate_nof_whole_decimal_count(self):
+        # JSON writes 2.0 as 2, so only a host float can pin this.
+        nof = ['`$NUMBER`', '`$INTEGER`']
+        self.assertEqual(validate(1, ['`$NOF`', 2.0, *nof]), 1)
+        self.assertEqual(validate(1, ['`$NOF`', {'min': 1.0, 'max': 2.0}, *nof]), 1)
+        with self.assertRaisesRegex(ValueError, r'^Expected exactly 2 of number, integer, but'):
+            validate('x', ['`$NOF`', 2.0, *nof])
+        with self.assertRaisesRegex(ValueError, r'^Expected 1 to 2 of number, integer, but'):
+            validate('x', ['`$NOF`', {'min': 1.0, 'max': 2.0}, *nof])
+        with self.assertRaisesRegex(ValueError, 'has an invalid count: 2.5'):
+            validate('x', ['`$NOF`', 2.5, *nof])
+
     def test_validate_custom(self):
         errs = []
 

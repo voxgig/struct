@@ -47,8 +47,7 @@ R_META_PATH = re.compile(r'^([^$]+)\$([=~])(.+)$')  # Meta path syntax.
 R_DOUBLE_DOLLAR = re.compile(r'\$\$')  # Double dollar escape sequence.
 R_INJECTION_FULL = re.compile(r'^`(\$[A-Z]+|[^`]*)[0-9]*`$')  # Full string injection pattern.
 R_CHECKER_NAME = re.compile(r'^\$[A-Z]+$')  # Validate checker name.
-R_LIST_INDEX = re.compile(r'0|[1-9][0-9]*')  # Canonical list index, for fullmatch.
-R_NEGATIVE_INDEX = re.compile(r'-0*[1-9][0-9]*')  # Negative integer, for fullmatch.
+R_LIST_KEY = re.compile(r'0|-?[1-9][0-9]*')  # Integer key as String(n) prints it, for fullmatch.
 
 # Mode value for inject step.
 S_MKEYPRE = 'key:pre'
@@ -495,21 +494,32 @@ def typify(value: Any = _TYPIFY_NO_ARG) -> int:
     return T_node | T_instance
 
 
-# The index key reads in a list of size items, or -1. As JavaScript reads
-# list[key], only a canonical integer names one: "1", not "01", "+1" or "-0".
-# With fromend, as getelem reads it, a negative one counts back from the end.
-def _listindex(key, size, fromend=False):
+# A list key's index, or None. As JavaScript reads list[key], that is an integral
+# number or the string String(n) prints for one: "1" and "-1", not "01", "+1" or "-0".
+def _listkey(key):
     if isinstance(key, float) and key.is_integer():
-        key = int(key)
-    if isinstance(key, str) and (
-        R_LIST_INDEX.fullmatch(key) or (fromend and R_NEGATIVE_INDEX.fullmatch(key))
-    ):
-        key = int(key)
-    if not isinstance(key, int) or isinstance(key, bool):
+        return int(key)
+    if isinstance(key, str) and R_LIST_KEY.fullmatch(key):
+        return int(key)
+    if isinstance(key, int) and not isinstance(key, bool):
+        return key
+    return None
+
+
+# The index key reads in a list of size items, or -1. With fromend, as getelem
+# reads it, a negative key counts back from the end.
+def _listindex(key, size, fromend=False):
+    index = _listkey(key)
+    if index is None:
         return -1
-    if key < 0 and fromend:
-        key += size
-    return key if 0 <= key < size else -1
+    if index < 0 and fromend:
+        index += size
+    return index if 0 <= index < size else -1
+
+
+# As in JavaScript, only a string or a number names a map entry: True and [1] do not.
+def _ismapkey(key):
+    return isinstance(key, str) or _isnumber(key)
 
 
 def getelem(val: Any, key: Any, alt: Any = UNDEF) -> Any:
@@ -547,7 +557,7 @@ def getprop(val: Any = UNDEF, key: Any = UNDEF, alt: Any = UNDEF) -> Any:
 
     if ismap(val):
         skey = str(key)
-        if skey in val:
+        if _ismapkey(key) and skey in val:
             out = val[skey]
 
     elif islist(val):
@@ -569,8 +579,7 @@ def _lookup(val: Any, key: Any) -> Any:
     if val is UNDEF or key is UNDEF:
         return UNDEF
     if ismap(val):
-        skey = str(key)
-        return val.get(skey, UNDEF)
+        return val.get(str(key), UNDEF) if _ismapkey(key) else UNDEF
     if islist(val):
         ki = _listindex(key, len(val))
         return val[ki] if ki >= 0 else UNDEF
@@ -789,13 +798,9 @@ def delprop(parent: Any, key: Any):
             del parent[key]
 
     elif islist(parent):
-        # Convert key to int
-        try:
-            key_i = int(key)
-        except ValueError:
+        key_i = _listkey(key)
+        if key_i is None:
             return parent
-
-        key_i = int(key_i)  # Floor the value
 
         # Delete list element at position key_i, shifting later elements down
         if 0 <= key_i < len(parent):
@@ -1240,22 +1245,18 @@ def setprop(parent: Any, key: Any, val: Any):
         parent[key] = val
 
     elif islist(parent):
-        try:
-            key_i = int(key)
-        except ValueError:
+        key_i = _listkey(key)
+        if key_i is None:
             return parent
 
-        if False:
-            pass
-        else:
-            if key_i >= 0:
-                key_i = min(key_i, len(parent))
-                if key_i >= len(parent):
-                    parent.append(val)
-                else:
-                    parent[key_i] = val
+        if key_i >= 0:
+            key_i = min(key_i, len(parent))
+            if key_i >= len(parent):
+                parent.append(val)
             else:
-                parent.insert(0, val)
+                parent[key_i] = val
+        else:
+            parent.insert(0, val)
 
     return parent
 
@@ -1438,11 +1439,18 @@ def getpath(store, path, injdef=UNDEF):
     """
     # Operate on a string array.
     if islist(path):
-        parts = path[:]
+        parts = []
+        for part in path:
+            if _isnumber(part):
+                parts.append(_condensestr(part))
+            elif isinstance(part, str):
+                parts.append(part)
+            else:
+                return UNDEF
     elif isinstance(path, str):
         parts = path.split(S_DT)
-    elif isinstance(path, (int, float)) and not isinstance(path, bool):
-        parts = [strkey(path)]
+    elif _isnumber(path):
+        parts = [_condensestr(path)]
     else:
         return UNDEF
 
@@ -2471,7 +2479,7 @@ def validate_CHILD(inj, _val=UNDEF, _ref=UNDEF, _store=UNDEF):
         if tval == UNDEF:
             tval = {}
         elif not ismap(tval):
-            inj.errs.append(_invalidTypeMsg(path[:-1], S_object, typify(tval), tval, 'V0220'))
+            # _validation reports the mismatch, once.
             return UNDEF
 
         ckeys = keysof(tval)
@@ -2495,8 +2503,6 @@ def validate_CHILD(inj, _val=UNDEF, _ref=UNDEF, _store=UNDEF):
             return UNDEF
 
         if not islist(inj.dparent):
-            msg = _invalidTypeMsg(path[:-1], S_list, typify(inj.dparent), inj.dparent, 'V0230')
-            inj.errs.append(msg)
             inj.keyI = size(parent)
             return inj.dparent
 
@@ -2991,7 +2997,7 @@ def _unknownname(name, store):
 # Whether a node holds a key or index at all, even with a None value.
 def _present(val, key):
     if ismap(val):
-        return str(key) in val
+        return _ismapkey(key) and str(key) in val
     if islist(val):
         return _listindex(key, len(val)) >= 0
     return False
@@ -3084,13 +3090,18 @@ def _nofcount(count, numtvals):
     def isnat(n):
         return (T_integer & typify(n)) > 0 and n >= 0
 
+    # JavaScript has one number type, so 2.0 is the count 2.
+    def whole(n):
+        return int(n) if isinstance(n, float) and n.is_integer() else n
+
+    count = whole(count)
     if isnat(count):
         return count, count, 'none' if count == 0 else 'exactly ' + str(count)
 
     hasmin = _present(count, 'min')
     hasmax = _present(count, 'max')
-    mn = _lookup(count, 'min')
-    mx = _lookup(count, 'max')
+    mn = whole(_lookup(count, 'min'))
+    mx = whole(_lookup(count, 'max'))
 
     valid = (
         ismap(count)
@@ -3352,7 +3363,7 @@ def condenseChild(cond, idx, key):
     kind = _condensekind(enc)
 
     if kind == CONDENSE_MAP:
-        symid = condenseSymId(cond, _condensestr(key))
+        symid = condenseSymId(cond, _condensestr(key)) if _ismapkey(key) else -1
         if symid < 0:
             return -1
         # Pairs live at [1,2], [3,4], ... with keys ascending: bisect the pairs.
