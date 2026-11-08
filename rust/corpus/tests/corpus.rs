@@ -891,6 +891,22 @@ fn validate_unknown_edge() {
 }
 
 #[test]
+fn validate_child_one_error_per_failure() {
+    for spec in [
+        r#"{"x":{"`$CHILD`":"`$NUMBER`"}}"#,
+        r#"{"x":["`$CHILD`","`$NUMBER`"]}"#,
+    ] {
+        let errs = Value::empty_list();
+        let d = InjectDef {
+            errs: Some(errs.clone()),
+            ..Default::default()
+        };
+        let _ = validate(&json(r#"{"x":1}"#), &json(spec), Some(&d));
+        assert_eq!(errs.as_list().unwrap().borrow().len(), 1, "{spec}");
+    }
+}
+
+#[test]
 fn function_values() {
     // get_elem: absent element + callable alt -> alt is invoked
     assert_eq!(

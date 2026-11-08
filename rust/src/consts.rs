@@ -80,7 +80,7 @@ pub const TYPENAME: [&str; 26] = [
 
 pub const MAXDEPTH: i64 = 32;
 
-pub static R_INTEGER_KEY: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[-0-9]+$").unwrap());
+pub static R_INTEGER_KEY: Lazy<Regex> = Lazy::new(|| Regex::new(r"^(0|-?[1-9][0-9]*)$").unwrap());
 pub static R_ESCAPE_REGEXP: Lazy<Regex> = Lazy::new(|| Regex::new(r"[.*+?^${}()|\[\]\\]").unwrap());
 pub static R_QUOTES: Lazy<Regex> = Lazy::new(|| Regex::new(r#"""#).unwrap());
 pub static R_DOT: Lazy<Regex> = Lazy::new(|| Regex::new(r"\.").unwrap());

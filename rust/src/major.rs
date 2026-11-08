@@ -550,16 +550,19 @@ pub fn get_path(store: &Value, path: &Value, injdef: Option<&InjectDef>) -> Valu
 /// machinery and by the public `get_path` wrapper).
 pub fn get_path_inj(store: &Value, path: &Value, injdef: Option<&Inj>) -> Value {
     let mut parts: Vec<String> = match path {
-        Value::List(l) => l
-            .borrow()
-            .iter()
-            .map(|x| match x {
-                Value::Str(s) => s.clone(),
-                other => js_string(other),
-            })
-            .collect(),
+        Value::List(l) => {
+            let mut parts = Vec::new();
+            for part in l.borrow().iter() {
+                match part {
+                    Value::Num(n) => parts.push(num_to_string(*n)),
+                    Value::Str(s) => parts.push(s.clone()),
+                    _ => return Value::Noval,
+                }
+            }
+            parts
+        }
         Value::Str(s) => s.split('.').map(|p| p.to_string()).collect(),
-        Value::Num(n) => vec![str_key(Value::Num(*n))],
+        Value::Num(n) => vec![num_to_string(*n)],
         _ => return Value::Noval,
     };
 
@@ -1983,15 +1986,7 @@ fn validate_child(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
         if tval.is_noval() {
             tval = Value::empty_map();
         } else if !is_map(&tval) {
-            errs_push(
-                inj,
-                invalid_type_msg(
-                    &path[..path.len().saturating_sub(1)],
-                    S_object,
-                    typify(&tval),
-                    &tval,
-                ),
-            );
+            // validation_modify reports the mismatch, once.
             return Value::Noval;
         }
         let ckeys = keysof_vec(&tval);
@@ -2016,15 +2011,6 @@ fn validate_child(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
             return Value::Noval;
         }
         if !is_list(&dparent) {
-            errs_push(
-                inj,
-                invalid_type_msg(
-                    &path[..path.len().saturating_sub(1)],
-                    S_list,
-                    typify(&dparent),
-                    &dparent,
-                ),
-            );
             let plen = parent.as_list().map(|l| l.borrow().len()).unwrap_or(0) as i64;
             inj.borrow_mut().key_i = plen;
             return dparent;
@@ -3123,16 +3109,19 @@ fn condense_sym_id(cond: &Value, key: &str) -> i64 {
 }
 
 /// The node index of `key` inside node `idx`, or -1. Touches only this node.
-fn condense_child(cond: &Value, idx: i64, key: &str) -> i64 {
+fn condense_child(cond: &Value, idx: i64, key: &Value) -> i64 {
     let enc = condense_enc(cond, idx);
     let Value::List(enc) = &enc else {
         return -1;
     };
+    if !matches!(key, Value::Str(_) | Value::Num(_)) {
+        return -1;
+    }
     let enc = enc.borrow();
     let kind = enc.first().and_then(Value::as_num);
 
     if Some(CONDENSE_MAP) == kind {
-        let symid = condense_sym_id(cond, key);
+        let symid = condense_sym_id(cond, &js_string(key));
         if 0 > symid {
             return -1;
         }
@@ -3155,7 +3144,7 @@ fn condense_child(cond: &Value, idx: i64, key: &str) -> i64 {
     }
 
     if Some(CONDENSE_LIST) == kind {
-        return match list_index(key) {
+        return match list_key(key).and_then(|i| usize::try_from(i).ok()) {
             Some(i) if i < enc.len() - 1 => condense_index(&enc[1 + i]),
             _ => -1,
         };
@@ -3182,7 +3171,7 @@ fn condense_resolve(cond: &Value, idx: i64, path: &Value) -> i64 {
         if matches!(part, Value::Str(s) if s.is_empty()) {
             continue;
         }
-        at = condense_child(cond, at, &js_string(part));
+        at = condense_child(cond, at, part);
     }
     at
 }
