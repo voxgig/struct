@@ -1125,6 +1125,15 @@ describe("struct", function()
         { at = 61, why = "a null value in a map under null = false", is = function(entry)
           return "`$ANY`" == entryin(entry, "spec.a") and isnull(entryin(entry, "data.a"))
         end },
+        -- A null list element arrives as the string "null", the only way a
+        -- Lua list keeps the slot: `$NULL` meets a string, and there is no
+        -- null for the port to write back into the list.
+        { at = 70, why = "$NULL validating a null list element", is = function(entry)
+          return "`$NULL`" == entryin(entry, "spec.0") and isnull(entryin(entry, "data.0"))
+        end },
+        { at = 71, why = "$NULL validating a null between numbers", is = function(entry)
+          return "`$NULL`" == entryin(entry, "spec.1") and isnull(entryin(entry, "data.1"))
+        end },
       }),
       { null = false },
       function(vin)
@@ -1295,6 +1304,33 @@ describe("struct", function()
     errs = array()
     validate("x", "`$STRING`", { extra = { ["$STRING"] = false }, errs = errs })
     assert.same(array("Unknown validator $STRING at field <root>."), errs)
+  end)
+
+  test("validate-child-one-error-per-failure", function()
+    local cases = {
+      { object({ x = 1 }), object({ x = object({ ["`$CHILD`"] = "`$NUMBER`" }) }) },
+      { object({ x = 1 }), object({ x = array("`$CHILD`", "`$NUMBER`") }) },
+      { 1, object({ ["`$CHILD`"] = "`$NUMBER`" }) },
+      { 1, array("`$CHILD`", "`$NUMBER`") },
+    }
+    for _, case in ipairs(cases) do
+      local errs = array()
+      validate(case[1], case[2], { errs = errs })
+      assert.equal(1, #errs, jsonify(errs))
+    end
+  end)
+
+  test("validate-nof-integral-decimal-count", function()
+    -- A Lua 2.0 is a float; as the JavaScript number 2 it is a valid count.
+    local specs = { "`$NUMBER`", "`$INTEGER`", "`$STRING`" }
+    assert.equal(3, validate(3, array("`$NOF`", 2.0, table.unpack(specs))))
+    assert.equal(
+      3,
+      validate(3, array("`$NOF`", object({ min = 1.0, max = 2.0 }), table.unpack(specs)))
+    )
+    local errs = array()
+    validate("x", array("`$NOF`", 2.0, table.unpack(specs)), { errs = errs })
+    assert.same(array("Expected exactly 2 of number, integer, string, but found string: x."), errs)
   end)
 
   test("validate-custom", function()

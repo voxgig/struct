@@ -501,15 +501,29 @@ local function typify(value)
   return T_any
 end
 
--- The 0-based index a key reads in a list, or nil. As in a JavaScript array
--- only a canonical integer reads: "01", "+1", " 1", "1.0", "-0" and 1.5 do not.
-local function listindex(key)
-  local i
-  if type(key) == S_number then
-    i = math.tointeger(key)
-  elseif type(key) == S_string and ("0" == key or key:match("^[1-9][0-9]*$")) then
-    i = math.tointeger(tonumber(key))
+-- A number as JavaScript's String(n) prints it: 2.0 is "2" and -0.0 is "0".
+local function numstr(n)
+  return tostring(math.tointeger(n) or n)
+end
+
+-- A list key's index, or nil: an integral number, or a string as JavaScript's
+-- String(n) prints one, so "1" and "-1" but not "01", "+1", " 1", "1.0", "-0" or 1.5.
+local function listkey(key)
+  if type(key) == S_string then
+    if "0" ~= key and nil == key:match("^%-?[1-9][0-9]*$") then
+      return nil
+    end
+    key = tonumber(key)
+  elseif type(key) ~= S_number or key % 1 ~= 0 then
+    return nil
   end
+  -- Beyond the integer range a key can only fall past an end of the list.
+  return math.tointeger(key) or (0 < key and math.maxinteger or math.mininteger)
+end
+
+-- The 0-based index a key reads in a list, or nil.
+local function listindex(key)
+  local i = listkey(key)
   if nil ~= i and 0 <= i then
     return i
   end
@@ -534,20 +548,14 @@ local function getprop(val, key, alt)
   if type(val) == "table" then
     if islist(val) then
       local i = listindex(key)
-      if nil ~= i then
+      if nil ~= i and i < #val then
         -- Lua arrays are 1-based
         out = val[i + 1]
       end
-    else
-      -- Convert key to string if it's a number
-      local lookup_key = key
-      if type(key) == "number" then
-        lookup_key = tostring(math.floor(key))
-      elseif type(key) ~= "string" then
-        -- Convert other types to string
-        lookup_key = tostring(key)
-      end
-      out = val[lookup_key]
+    elseif type(key) == S_number then
+      out = val[numstr(key)]
+    elseif type(key) == S_string then
+      out = val[key]
     end
   end
 
@@ -560,8 +568,7 @@ local function getprop(val, key, alt)
   return out
 end
 
--- Get a list element. The key should be an integer, or a string
--- that can parse to an integer only. Negative integers count from the end of the list.
+-- Get a list element; a negative integer key counts from the end.
 local function getelem(val, key, alt)
   local out = NONE
 
@@ -570,15 +577,11 @@ local function getelem(val, key, alt)
   end
 
   if islist(val) then
-    local nkey = listindex(key)
-    if nil == nkey and (type(key) == S_number or tostring(key):match("^%-[0-9]+$")) then
-      -- Only a negative integer counts from the end; "-0" and "01" read as getprop does.
-      local neg = math.tointeger(tonumber(key))
-      if nil ~= neg and neg < 0 then
-        nkey = #val + neg
-      end
+    local nkey = listkey(key)
+    if nil ~= nkey and nkey < 0 then
+      nkey = #val + nkey
     end
-    if nil ~= nkey then
+    if nil ~= nkey and 0 <= nkey and nkey < #val then
       -- Convert 0-based to 1-based
       out = val[nkey + 1]
     end
@@ -902,17 +905,12 @@ delprop = function(parent, key)
   end
 
   if ismap(parent) then
-    key = tostring(key)
-    parent[key] = nil
+    parent[strkey(key)] = nil
   elseif islist(parent) then
-    local keyI = tonumber(key)
-    if keyI ~= nil then
-      keyI = math.floor(keyI)
+    local keyI = listindex(key)
+    if nil ~= keyI and keyI < #parent then
       -- Convert 0-based to 1-based
-      local luaIndex = keyI + 1
-      if luaIndex >= 1 and luaIndex <= #parent then
-        table.remove(parent, luaIndex)
-      end
+      table.remove(parent, keyI + 1)
     end
   end
 
@@ -1481,28 +1479,18 @@ setprop = function(parent, key, val)
   end
 
   if ismap(parent) then
-    key = tostring(key)
-    parent[key] = val
+    parent[type(key) == S_number and numstr(key) or key] = val
   elseif islist(parent) then
-    -- Ensure key is an integer
-    local keyI = tonumber(key)
+    local keyI = listkey(key)
 
     if keyI == nil then
       return parent
     end
 
-    keyI = math.floor(keyI)
-
     -- Set or append value at position keyI
     if keyI >= 0 then
-      -- Convert from 0-based indexing to Lua 1-based indexing
-      local luaIndex = keyI + 1
-
-      -- Clamp: if index is beyond current length, append to end
-      if luaIndex > #parent + 1 then
-        luaIndex = #parent + 1
-      end
-      parent[luaIndex] = val
+      -- Clamp to the end (append), then convert to Lua 1-based indexing.
+      parent[math.min(keyI, #parent) + 1] = val
     -- Prepend value if keyI is negative
     else
       table.insert(parent, 1, val)
@@ -1716,10 +1704,21 @@ end
 -- @param injdef (table) Optional injection definition
 -- @return (any) The value at the path
 getpath = function(store, path, injdef)
-  -- Operate on a string array.
+  -- Operate on a string array, a copy: a number part reads as its string
+  -- form, and any other non-string part misses.
   local parts
   if islist(path) then
-    parts = path
+    parts = setmetatable({}, { __jsontype = "array" })
+    for i = 1, #path do
+      local part = path[i]
+      if type(part) == S_number then
+        parts[i] = numstr(part)
+      elseif type(part) == S_string then
+        parts[i] = part
+      else
+        return NONE
+      end
+    end
   elseif type(path) == S_string then
     -- Split by '.' like JS split('.'): "a.b" -> ["a","b"], "." -> ["",""], "" -> [""]
     parts = {}
@@ -1747,7 +1746,7 @@ getpath = function(store, path, injdef)
       table.insert(parts, S_MT)
     end
   elseif type(path) == S_number then
-    parts = { strkey(path) }
+    parts = { numstr(path) }
   else
     return NONE
   end
@@ -2856,10 +2855,7 @@ local function validate_CHILD(inj)
     if NONE == tval then
       tval = {}
     elseif not ismap(tval) then
-      table.insert(
-        inj.errs,
-        _invalidTypeMsg(slice(inj.path, 0, -1), S_object, typify(tval), tval, "V0220")
-      )
+      -- _validation reports the mismatch, once.
       return NONE
     end
 
@@ -2893,9 +2889,6 @@ local function validate_CHILD(inj)
     end
 
     if not islist(inj.dparent) then
-      local msg =
-        _invalidTypeMsg(slice(inj.path, 0, -1), S_list, typify(inj.dparent), inj.dparent, "V0230")
-      table.insert(inj.errs, msg)
       inj.keyI = size(parent)
       return inj.dparent
     end
@@ -3935,7 +3928,7 @@ local function condenseStr(val)
   if type(val) == S_string then
     return val
   elseif type(val) == S_number then
-    return tostring(math.tointeger(val) or val)
+    return numstr(val)
   elseif type(val) == S_boolean then
     return tostring(val)
   end
@@ -3976,7 +3969,7 @@ end
 -- The node index of key inside node idx, or -1. Touches only this node.
 local function condenseChild(cond, idx, key)
   local enc = condenseEnc(cond, idx)
-  if nil == enc then
+  if nil == enc or (type(key) ~= S_string and type(key) ~= S_number) then
     return -1
   end
 

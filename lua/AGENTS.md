@@ -64,16 +64,19 @@ installed** — if you can't run a target, say so; don't claim a change works.
   gains nothing for it. `test/omni.lua` appends exactly one directory to
   `package.path` and it must stay that way: omni ships `src/regex.lua` too,
   so putting omni's `src/` on the path ahead of this port's shadows
-  `require("regex")` and every `re_*` matcher silently becomes nil.
+  `require("regex")` and every `re_*` matcher silently becomes nil. The
+  clash runs the other way too: omni's runner loads its engine as
+  `src.regex`, which `./?.lua` resolves to this port's file, so
+  `test/omni.lua` pins that name to omni's engine before loading the shim.
 - **One `nil`, two meanings.** A function that returns nothing and one that
   returns JSON null both return `nil`, so the runner reads a bare `nil` as
   *absent*. That is the cheap side by a wide margin (43 entries against 6,
   measured over the minor and `validate.basic` groups); the entries it costs
   are dropped by index, with guards, in `test/struct_test.lua`. So are the
-  `validate.directive`, `validate.nof`, `validate.all` and `condense.condense`
-  entries that turn on a null inside a node: a null map member arrives absent,
-  a null list element as the string `"null"`. `NOVAL` covers the argument side
-  of the same problem — see below.
+  `validate.basic`, `validate.directive`, `validate.nof`, `validate.all` and
+  `condense.condense` entries that turn on a null inside a node: a null map
+  member arrives absent, a null list element as the string `"null"`. `NOVAL`
+  covers the argument side of the same problem — see below.
 - **A checker is taken away with `false`.** Canonical `validate` treats a
   null in its store (from `extra`, or the transform commands it disables) as
   no checker, so naming it is an unknown checker. A Lua table cannot hold
