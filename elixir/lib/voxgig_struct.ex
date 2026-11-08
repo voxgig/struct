@@ -156,6 +156,7 @@ defmodule Voxgig.Struct do
 
   @skip :vox_skip
   @delete :vox_delete
+  @heldnull :vox_heldnull
   def skip, do: @skip
   def delete, do: @delete
   def is_skip(v), do: v == @skip
@@ -233,8 +234,7 @@ defmodule Voxgig.Struct do
   @r_transform_name ~r/`\$([A-Z]+)`/
   @r_checker_name ~r/^\$[A-Z]+$/
   # \z, not $: PCRE's $ also matches before a trailing newline.
-  @r_intkey ~r/^-?[0-9]+\z/
-  @r_list_index ~r/^(0|[1-9][0-9]*)\z/
+  @r_list_key ~r/^(0|-?[1-9][0-9]*)\z/
 
   @condense_version 1
   @condense_map 0
@@ -294,24 +294,11 @@ defmodule Voxgig.Struct do
   defp mapkey(k) when is_number(k), do: num_to_string(k)
   defp mapkey(k), do: js_string(k)
 
-  defp to_int(k) when is_boolean(k), do: nil
-  defp to_int(k) when is_integer(k), do: k
-  defp to_int(k) when is_float(k), do: trunc(Float.floor(k))
-
-  defp to_int(k) when is_binary(k) do
-    case Integer.parse(String.trim(k)) do
-      {n, ""} -> n
-      _ -> nil
-    end
-  end
-
-  defp to_int(_), do: nil
-
-  # The index a key reads in a list. As in a JavaScript array only a canonical
-  # integer reads: "01", "+1", " 1", "1.0", "-0" and 1.5 do not.
-  defp listidx_(k) when is_integer(k), do: if(k >= 0, do: k, else: nil)
-  defp listidx_(k) when is_float(k), do: listidx_(num_to_string(k))
-  defp listidx_(k) when is_binary(k), do: if(Regex.match?(@r_list_index, k), do: String.to_integer(k), else: nil)
+  # A list key's index, possibly negative: an integral number, or the string an
+  # integer prints as. "01", "+1", " 1", "1.0", "-0" and 1.5 are not list keys.
+  defp listidx_(k) when is_integer(k), do: k
+  defp listidx_(k) when is_float(k), do: if(is_intish(k), do: trunc(k), else: nil)
+  defp listidx_(k) when is_binary(k), do: if(Regex.match?(@r_list_key, k), do: String.to_integer(k), else: nil)
   defp listidx_(_), do: nil
 
   defp clz32(n0) do
@@ -439,61 +426,46 @@ defmodule Voxgig.Struct do
 
   defp omap_del(pairs, k), do: Enum.reject(pairs, fn {kk, _} -> kk == k end)
 
+  # The value a node stores at key, or :error. A list reads only a non-negative
+  # list key, a map only a string or number key.
+  defp readprop_(val, key) do
+    cond do
+      islist(val) ->
+        case listidx_(key) do
+          ki when is_integer(ki) and ki >= 0 ->
+            items = list_items(val)
+            if ki < length(items), do: {:ok, Enum.at(items, ki)}, else: :error
+
+          _ ->
+            :error
+        end
+
+      ismap(val) and (is_binary(key) or is_number(key)) ->
+        omap_get(map_pairs(val), mapkey(key))
+
+      true ->
+        :error
+    end
+  end
+
   def getprop(val, key, alt \\ nil) do
     if val == nil or key == nil do
       alt
     else
-      out =
-        cond do
-          ismap(val) ->
-            case omap_get(map_pairs(val), mapkey(key)) do
-              {:ok, v} -> v
-              :error -> nil
-            end
-
-          islist(val) ->
-            ki = listidx_(key)
-            items = if ki == nil, do: [], else: list_items(val)
-            if ki != nil and ki < length(items), do: Enum.at(items, ki), else: nil
-
-          true ->
-            nil
-        end
-
+      out = lookup_(val, key)
       if out == nil or out == @noarg, do: alt, else: out
     end
   end
 
   defp lookup_(val, key) do
-    cond do
-      val == nil or key == nil ->
-        nil
-
-      ismap(val) ->
-        case omap_get(map_pairs(val), mapkey(key)) do
-          {:ok, v} -> v
-          :error -> nil
-        end
-
-      islist(val) ->
-        ki = listidx_(key)
-        items = if ki == nil, do: [], else: list_items(val)
-        if ki != nil and ki < length(items), do: Enum.at(items, ki), else: nil
-
-      true ->
-        nil
+    case readprop_(val, key) do
+      {:ok, v} -> v
+      :error -> nil
     end
   end
 
   # Literal presence, beside lookup_: a nil the node holds is a null, not an absent key.
-  defp holds_(node, key) do
-    cond do
-      key == nil -> false
-      ismap(node) -> omap_get(map_pairs(node), mapkey(key)) != :error
-      islist(node) -> (ki = listidx_(key); ki != nil and ki < length(list_items(node)))
-      true -> false
-    end
-  end
+  defp holds_(node, key), do: readprop_(node, key) != :error
 
   def haskey(val \\ nil, key \\ nil), do: getprop(val, key) != nil
 
@@ -502,21 +474,15 @@ defmodule Voxgig.Struct do
       alt
     else
       out =
-        if islist(val) do
-          ks = cond do; is_binary(key) -> key; is_number(key) -> num_to_string(key); true -> "" end
-
-          if Regex.match?(@r_intkey, ks) do
-            items = list_items(val)
-            len = length(items)
-            nk0 = String.to_integer(ks)
-            # Only a negative integer counts from the end; "-0" and "01" read as getprop does.
-            nk = if nk0 < 0, do: len + nk0, else: listidx_(ks) || -1
-            if nk >= 0 and nk < len, do: Enum.at(items, nk), else: nil
-          else
+        case if(islist(val), do: listidx_(key), else: nil) do
+          nil ->
             nil
-          end
-        else
-          nil
+
+          ki ->
+            items = list_items(val)
+            # A negative key counts from the end.
+            nk = if ki < 0, do: length(items) + ki, else: ki
+            if nk >= 0, do: Enum.at(items, nk), else: nil
         end
 
       if out == nil do
@@ -589,7 +555,7 @@ defmodule Voxgig.Struct do
         parent
 
       islist(parent) ->
-        case to_int(key) do
+        case listidx_(key) do
           nil ->
             parent
 
@@ -628,7 +594,7 @@ defmodule Voxgig.Struct do
         parent
 
       islist(parent) ->
-        case to_int(key) do
+        case listidx_(key) do
           nil ->
             parent
 
@@ -1318,9 +1284,9 @@ defmodule Voxgig.Struct do
   def getpath(store, path, injdef \\ nil) do
     parts =
       cond do
-        islist(path) -> list_items(path)
+        islist(path) -> pathparts_(list_items(path))
         is_binary(path) -> String.split(path, ".")
-        is_number(path) and not is_boolean(path) -> [strkey(path)]
+        is_number(path) -> [num_to_string(path)]
         true -> nil
       end
 
@@ -1338,6 +1304,11 @@ defmodule Voxgig.Struct do
       true ->
         getpath_parts(if(condensed, do: expand(store), else: store), path, parts, injdef)
     end
+  end
+
+  # A number part reads as it prints; any part neither string nor number misses.
+  defp pathparts_(items) do
+    if Enum.all?(items, &(is_binary(&1) or is_number(&1))), do: Enum.map(items, &mapkey/1), else: nil
   end
 
   defp getpath_parts(store, path, parts, injdef) do
@@ -1585,7 +1556,11 @@ defmodule Voxgig.Struct do
         {getelem(ig(inj, :nodes), -ancestor), getelem(ig(inj, :path), -ancestor)}
       end
 
-    if val == nil, do: delprop(target, key), else: setprop(target, key, val)
+    cond do
+      val == nil -> delprop(target, key)
+      val == @heldnull -> setprop(target, key, nil)
+      true -> setprop(target, key, val)
+    end
   end
 
   # ---------------------------------------------------------------------------
@@ -1637,7 +1612,7 @@ defmodule Voxgig.Struct do
           is_(inj, :mode, @m_val)
           nv = injectstr(val, store, inj)
           if not is_skip(nv), do: inj_setval(inj, nv)
-          nv
+          if nv == @heldnull, do: nil, else: nv
 
         true ->
           val
@@ -2313,7 +2288,7 @@ defmodule Voxgig.Struct do
       push_err(inj, invalid_type_msg(ig(inj, :path), tname, t, out, "V1001"))
       nil
     else
-      out
+      keepnull_(inj, out)
     end
   end
 
@@ -2321,7 +2296,15 @@ defmodule Voxgig.Struct do
     Enum.find_index(Tuple.to_list(@typename), fn x -> x == tname end) || -1
   end
 
-  defp validate_any(inj, _v, _r, _s), do: lookup_(ig(inj, :dparent), ig(inj, :key))
+  defp validate_any(inj, _v, _r, _s), do: keepnull_(inj, lookup_(ig(inj, :dparent), ig(inj, :key)))
+
+  # A null the data holds comes back as @heldnull, which inj_setval writes:
+  # it deletes the slot for nil, and a list would shift down.
+  defp keepnull_(inj, out) do
+    if out == nil and ig(inj, :mode) == @m_val and ig(inj, :full) == true and holds_(ig(inj, :dparent), ig(inj, :key)),
+      do: @heldnull,
+      else: out
+  end
 
   defp validate_child(inj, _v, _r, _s) do
     parent = ig(inj, :parent)
@@ -2342,7 +2325,7 @@ defmodule Voxgig.Struct do
             nil
 
           not ismap(tval) ->
-            push_err(inj, invalid_type_msg(slice(path, 0, size(path) - 1), "object", typify(tval), tval, "V0220"))
+            # validation reports the mismatch, once.
             nil
 
           true ->
@@ -2364,7 +2347,6 @@ defmodule Voxgig.Struct do
             nil
 
           not islist(ig(inj, :dparent)) ->
-            push_err(inj, invalid_type_msg(slice(path, 0, size(path) - 1), "list", typify(ig(inj, :dparent)), ig(inj, :dparent), "V0230"))
             is_(inj, :keyi, size(parent))
             ig(inj, :dparent)
 
@@ -3072,6 +3054,8 @@ defmodule Voxgig.Struct do
   end
 
   defp condensepair_(_enc, _id, _lo, _hi), do: -1
+
+  defp condensechild_(_syms, _nodes, _idx, key) when not (is_binary(key) or is_number(key)), do: -1
 
   defp condensechild_(syms, nodes, idx, key) do
     case condenseenc_(nodes, idx) do

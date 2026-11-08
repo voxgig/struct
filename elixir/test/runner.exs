@@ -614,6 +614,7 @@ defmodule Runner do
     Process.put(:omni_pack, pack)
     run_all(tostruct(pack.spec))
     run_condense_local()
+    run_validate_local()
 
     run_client(testfile)
 
@@ -780,6 +781,38 @@ defmodule Runner do
         {"setprop raises", raises?(fn -> S.setprop(c, "a", 2) end, "immutable")},
         {"delprop raises", raises?(fn -> S.delprop(c, "sym") end, "immutable")},
         {"the expanded copy is mutable", S.getprop(e, "a") == 2}
+      ]
+    end)
+  end
+
+  # ---------------------------------------------------------------------------
+  # validate: what the corpus shape cannot express
+  # ---------------------------------------------------------------------------
+
+  defp run_validate_local do
+    m = &S.jm/1
+    l = &S.jt/1
+
+    errsof = fn data, spec ->
+      errs = l.([])
+      S.validate(data, spec, m.(["errs", errs]))
+      velems(errs)
+    end
+
+    checks("validate-child-one-error-per-failure", fn ->
+      for spec <- [m.(["x", m.(["`$CHILD`", "`$NUMBER`"])]), m.(["x", l.(["`$CHILD`", "`$NUMBER`"])])],
+          do: {S.stringify(spec), length(errsof.(m.(["x", 1]), spec)) == 1}
+    end)
+
+    # The corpus cannot carry 2.0, which JavaScript reads as 2.
+    checks("validate-nof-integral-decimal-count", fn ->
+      nof = fn count -> l.(["`$NOF`", count, "`$NUMBER`", "`$INTEGER`"]) end
+
+      [
+        {"2.0 admits", errsof.(1, nof.(2.0)) == []},
+        {"2.0 counts as 2", errsof.("x", nof.(2.0)) == ["Expected exactly 2 of number, integer, but found string: x."]},
+        {"min 1.0 and max 2.0 count as 1 and 2",
+         errsof.("x", nof.(m.(["min", 1.0, "max", 2.0]))) == ["Expected 1 to 2 of number, integer, but found string: x."]}
       ]
     end)
   end
