@@ -275,7 +275,7 @@ sub _make_sentinel {
 }
 
 # Common regex patterns (precompiled).
-our $R_INTEGER_KEY     = qr/^-?[0-9]+$/;
+our $R_INTEGER_KEY     = qr/^(?:0|-?[1-9][0-9]*)\z/;
 our $R_ESCAPE_REGEXP   = qr/[.*+?^\${}()|\[\]\\]/;
 our $R_QUOTES          = qr/"/;
 our $R_DOT             = qr/\./;
@@ -288,8 +288,6 @@ our $R_CHECKER_NAME    = qr/^\$[A-Z]+$/;
 our $R_BT_ESCAPE       = qr/\$BT/;
 our $R_DS_ESCAPE       = qr/\$DS/;
 our $R_INJECTION_PARTIAL = qr/`([^`]+)`/;
-our $R_LIST_INDEX      = qr/^(?:0|[1-9][0-9]*)\z/;
-our $R_NEGATIVE_INDEX  = qr/^-0*[1-9][0-9]*\z/;
 
 use constant MAXDEPTH => 32;
 
@@ -587,17 +585,33 @@ sub typify {
     return T_scalar | T_string;
 }
 
-# The index $key reads in a list of $size items, or -1. As JavaScript reads
-# list[key], only a canonical integer names one: '1', not '01', '+1' or '-0'.
-# With $fromend, as getelem reads it, a negative one counts back from the end.
+# A list key's index, or undef: an integral number, or a string as
+# JavaScript's String(n) prints one, so '1' and '-1' but not '01', '+1',
+# ' 1', '1.0', '-0' or 1.5.
+sub _listkey {
+    my ($key) = @_;
+    return if !defined $key || ref $key;
+    if (_is_number_sv($key)) {
+        # $key - $key is 0 only when $key is finite.
+        return (0 == $key - $key && $key == int($key)) ? int($key) : undef;
+    }
+    return $key =~ $R_INTEGER_KEY ? 0 + $key : undef;
+}
+
+# The index $key reads in a list of $size items, or -1. With $fromend, as
+# getelem reads it, a negative key counts back from the end.
 sub _listindex {
     my ($key, $size, $fromend) = @_;
-    return -1 if !defined $key || ref $key;
-    my $i;
-    if ($key =~ $R_LIST_INDEX) { $i = 0 + $key }
-    elsif ($fromend && $key =~ $R_NEGATIVE_INDEX) { $i = $size + $key }
-    else { return -1 }
+    my $i = _listkey($key);
+    return -1 unless defined $i;
+    $i += $size if $fromend && $i < 0;
     return (0 <= $i && $i < $size) ? $i : -1;
+}
+
+# A map key, or undef when $key is neither a string nor a number.
+sub _mapkey {
+    my ($key) = @_;
+    return (!defined $key || ref $key) ? undef : "$key";
 }
 
 # Get an element from a list with negative-index support and a fallback.
@@ -631,9 +645,8 @@ sub getprop {
         return $v;
     }
     if (ismap($val)) {
-        my $k = strkey($key);
-        return $alt if $k eq '';
-        return $alt unless exists $val->{$k};
+        my $k = _mapkey($key);
+        return $alt unless defined $k && exists $val->{$k};
         my $v = $val->{$k};
         # Group A semantics: stored null counts as absent for getprop.
         return $alt if !defined $v || is_jnull($v) || is_none($v);
@@ -653,9 +666,8 @@ sub _lookup {
         return is_none($v) ? NONE() : $v;
     }
     if (ismap($val)) {
-        my $k = strkey($key);
-        return NONE() if $k eq '';
-        return NONE() unless exists $val->{$k};
+        my $k = _mapkey($key);
+        return NONE() unless defined $k && exists $val->{$k};
         return $val->{$k};
     }
     return NONE();
@@ -698,9 +710,8 @@ sub haskey {
         return (defined $v && !is_jnull($v) && !is_none($v)) ? 1 : 0;
     }
     if (ismap($val)) {
-        my $k = strkey($key);
-        return 0 if $k eq '';
-        return 0 unless exists $val->{$k};
+        my $k = _mapkey($key);
+        return 0 unless defined $k && exists $val->{$k};
         my $v = $val->{$k};
         return (defined $v && !is_jnull($v) && !is_none($v)) ? 1 : 0;
     }
@@ -1081,12 +1092,8 @@ sub delprop {
     return $val unless iskey($key);
     die S_CONDENSE_IMMUTABLE if iscondensed($val);
     if (islist($val)) {
-        return $val unless defined $key && !ref($key) && looks_like_number($key);
-        my $k = int($key);
-        my $len = scalar @$val;
-        # A negative or out-of-bounds index is a no-op (no end-relative delete).
-        return $val if $k < 0 || $k >= $len;
-        splice(@$val, $k, 1);
+        my $k = _listindex($key, scalar @$val);
+        splice(@$val, $k, 1) if 0 <= $k;
         return $val;
     }
     if (ismap($val)) {
@@ -1111,8 +1118,8 @@ sub setprop {
     }
     if (is_none($newval)) { return delprop($val, $key) }
     if (islist($val)) {
-        return $val unless defined $key && !ref($key) && looks_like_number($key);
-        my $k = int($key);
+        my $k = _listkey($key);
+        return $val unless defined $k;
         my $len = scalar @$val;
         if ($k >= 0) {
             # Set or append; an out-of-bounds index clamps to the end (append).
@@ -1126,9 +1133,7 @@ sub setprop {
         return $val;
     }
     if (ismap($val)) {
-        my $k = strkey($key);
-        return $val if $k eq '';
-        $val->{$k} = $newval;
+        $val->{ _mapkey($key) } = $newval;
         return $val;
     }
     return $val;
@@ -1503,14 +1508,19 @@ sub setpath {
 sub getpath {
     my ($store, $path_in, $inj) = @_;
 
-    # Coerce path into a parts list. Anything else returns NONE.
+    # Coerce path into a parts list. Anything else returns NONE, as does a
+    # list holding a part that is neither a string nor a number.
     my @parts;
     if (islist($path_in)) {
-        @parts = @$path_in;
+        for my $part (@$path_in) {
+            my $k = _mapkey($part);
+            return NONE() unless defined $k;
+            push @parts, $k;
+        }
     }
     elsif (defined $path_in && !ref($path_in) && !is_jbool($path_in) && !is_jnull($path_in)) {
         if (_is_number_sv($path_in)) {
-            @parts = (strkey($path_in));
+            @parts = (_mapkey($path_in));
         }
         elsif ("$path_in" eq '') {
             @parts = ('');
@@ -2600,7 +2610,7 @@ sub validate_CHILD {
         my $tval = getprop($inj->{dparent}, $pkey);
         if (!defined $tval || is_none($tval)) { $tval = _mkmap() }
         elsif (!ismap($tval)) {
-            push @{ $inj->{errs} }, _invalid_type_msg(slice($inj->{path}, -1), S_object, typify($tval), $tval, 'V0220');
+            # _validation reports the mismatch, once.
             return NONE();
         }
         my $ckeys = keysof($tval);
@@ -2622,8 +2632,6 @@ sub validate_CHILD {
             return NONE();
         }
         if (!islist($inj->{dparent})) {
-            my $msg = _invalid_type_msg(slice($inj->{path}, -1), S_list, typify($inj->{dparent}), $inj->{dparent}, 'V0230');
-            push @{ $inj->{errs} }, $msg;
             $inj->{keyI} = size($parent);
             return $inj->{dparent};
         }
@@ -3411,7 +3419,7 @@ sub _condense_symid {
 sub _condense_child {
     my ( $cond, $idx, $key ) = @_;
     my $enc = _condense_enc( $cond, $idx );
-    return -1 unless defined $enc;
+    return -1 unless defined $enc && defined _mapkey($key);
 
     my $kind = _condense_kind($enc);
     my $k    = _condense_str($key);

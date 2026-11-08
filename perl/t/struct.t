@@ -527,6 +527,34 @@ for my $section (qw(directive nof all unknown)) {
         sub { Voxgig::Struct::validate( $_[0]{data}, $_[0]{spec} ) } );
 }
 
+{
+    my $pj = \&Voxgig::Struct::parse_json;
+    for my $case (
+        [ '{"x":1}', '{"x":{"`$CHILD`":"`$NUMBER`"}}' ],
+        [ '{"x":1}', '{"x":["`$CHILD`","`$NUMBER`"]}' ],
+        [ '1',       '{"`$CHILD`":"`$NUMBER`"}' ],
+        [ '1',       '["`$CHILD`","`$NUMBER`"]' ],
+      )
+    {
+        my $errs = [];
+        Voxgig::Struct::validate( $pj->( $case->[0] ), $pj->( $case->[1] ), { errs => $errs } );
+        is( scalar @$errs, 1, "validate-child-one-error-per-failure: $case->[1]" );
+    }
+
+    # A Perl 2.0 is a float; as the JavaScript number 2 it is a valid count.
+    my $jt    = \&Voxgig::Struct::jt;
+    my @specs = ( '`$NUMBER`', '`$INTEGER`', '`$STRING`' );
+    is( Voxgig::Struct::validate( 3, $jt->( '`$NOF`', 2.0, @specs ) ), 3,
+        'validate-nof-integral-decimal-count' );
+    my $minmax = Voxgig::Struct::jm( min => 1.0, max => 2.0 );
+    is( Voxgig::Struct::validate( 3, $jt->( '`$NOF`', $minmax, @specs ) ), 3,
+        'validate-nof-integral-decimal-count: min and max' );
+    my $errs = [];
+    Voxgig::Struct::validate( 'x', $jt->( '`$NOF`', 2.0, @specs ), { errs => $errs } );
+    is_deeply( $errs, ['Expected exactly 2 of number, integer, string, but found string: x.'],
+        'validate-nof-integral-decimal-count: message' );
+}
+
 # ===========================================================================
 # select
 # ===========================================================================
