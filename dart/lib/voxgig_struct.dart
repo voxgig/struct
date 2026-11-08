@@ -35,6 +35,7 @@ class _Sentinel {
 
 final SKIP = _Sentinel('skip');
 final DELETE = _Sentinel('delete');
+final _heldnull = _Sentinel('heldnull');
 
 const S_MKEYPRE = 'key:pre';
 const S_MKEYPOST = 'key:post';
@@ -164,23 +165,19 @@ String jsString(dynamic v) {
 String _mapKey(dynamic k) =>
     k is String ? k : (k is num ? numToString(k) : jsString(k));
 
-int? _toInt(dynamic k) {
-  if (k is bool) return null;
-  if (k is int) return k;
-  if (k is double) return k.floor();
-  if (k is String) return int.tryParse(k.trim());
-  return null;
-}
+final _R_LIST_KEY = RegExp(r'^(0|-?[1-9][0-9]*)$');
 
-final _R_LIST_INDEX = RegExp(r'^(0|[1-9][0-9]*)$');
-
-// A list read hits only a canonical index, as a JavaScript array does: "01",
-// "+1", " 1" and "-0" hit nothing. Writes coerce with _toInt instead.
+// A list key's index, possibly negative: an integral number, or the string
+// String(n) prints for one ("01", "+1", " 1", "1.0" and "-0" are not).
 int? _listIndex(dynamic key) {
-  if (key is int) return key < 0 ? null : key;
-  final k = jsString(key);
-  return _R_LIST_INDEX.hasMatch(k) ? int.tryParse(k) : null;
+  if (key is int) return key;
+  if (key is! num && key is! String) return null;
+  final k = key is String ? key : numToString(key as num);
+  return _R_LIST_KEY.hasMatch(k) ? int.tryParse(k) : null;
 }
+
+// Only a string or a number names a property.
+bool _readkey(dynamic key) => key is String || key is num;
 
 int _clz32(int n0) {
   var n = n0 & 0xFFFFFFFF;
@@ -276,7 +273,7 @@ List<String> keysof([dynamic v]) {
 dynamic getprop(dynamic val, dynamic key, [dynamic alt]) {
   if (val == null || key == null) return alt;
   dynamic out = alt;
-  if (val is Map) {
+  if (val is Map && _readkey(key)) {
     var sk = _mapKey(key);
     if (val.containsKey(sk)) out = val[sk];
   } else if (val is List) {
@@ -289,7 +286,7 @@ dynamic getprop(dynamic val, dynamic key, [dynamic alt]) {
 
 dynamic _lookup(dynamic val, dynamic key) {
   if (val == null || key == null) return null;
-  if (val is Map) {
+  if (val is Map && _readkey(key)) {
     var sk = _mapKey(key);
     return val.containsKey(sk) ? val[sk] : null;
   }
@@ -302,20 +299,15 @@ dynamic _lookup(dynamic val, dynamic key) {
 
 bool haskey([dynamic val, dynamic key]) => getprop(val, key) != null;
 
-final _R_INTKEY = RegExp(r'^-?[0-9]+$');
-
 dynamic getelem(dynamic val, dynamic key, [dynamic alt]) {
   if (val == null || key == null) return alt;
   dynamic out;
   if (val is List) {
-    var ks = key is String ? key : (key is num ? numToString(key) : '');
-    var nk0 = _R_INTKEY.hasMatch(ks) ? int.tryParse(ks) : null;
-    if (nk0 != null) {
-      var len = val.length;
-      // Only a negative key counts from the end; any other reads as getprop.
-      var nk = nk0 < 0 ? len + nk0 : _listIndex(ks);
-      if (nk != null && nk >= 0 && nk < len) out = val[nk];
-    }
+    var len = val.length;
+    var ki = _listIndex(key);
+    // A negative key counts from the end.
+    if (ki != null && ki < 0) ki = len + ki;
+    if (ki != null && ki >= 0 && ki < len) out = val[ki];
   }
   if (out == null) {
     return isfunc(alt) ? alt() : alt;
@@ -372,7 +364,7 @@ dynamic setprop(dynamic parent, dynamic key, dynamic val) {
   if (parent is Map) {
     parent[_mapKey(key)] = val;
   } else if (parent is List) {
-    var ki = _toInt(key is num ? key.floor() : key);
+    var ki = _listIndex(key);
     if (ki == null) return parent;
     var len = parent.length;
     if (ki >= 0) {
@@ -395,7 +387,7 @@ dynamic delprop(dynamic parent, dynamic key) {
   if (parent is Map) {
     parent.remove(_mapKey(key));
   } else if (parent is List) {
-    var ki = _toInt(key);
+    var ki = _listIndex(key);
     if (ki != null && ki >= 0 && ki < parent.length) parent.removeAt(ki);
   }
   return parent;
@@ -1048,11 +1040,21 @@ dynamic _idef(dynamic injdef, String field) {
 dynamic getpath(dynamic store, dynamic path, [dynamic injdef]) {
   List<dynamic>? parts;
   if (path is List) {
-    parts = List<dynamic>.from(path);
+    parts = <dynamic>[];
+    for (final part in path) {
+      // A number reads as it prints; a part neither string nor number misses.
+      if (part is num) {
+        parts.add(numToString(part));
+      } else if (part is String) {
+        parts.add(part);
+      } else {
+        return null;
+      }
+    }
   } else if (path is String) {
     parts = path.split(S_DT);
   } else if (path is num && path is! bool) {
-    parts = [strkey(path)];
+    parts = [numToString(path)];
   } else {
     return null;
   }
@@ -1301,6 +1303,7 @@ dynamic _injSetval(Inj inj, dynamic val, [int ancestor = 1]) {
     key = getelem(inj.path, -ancestor);
   }
   if (val == null) return delprop(target, key);
+  if (identical(val, _heldnull)) return setprop(target, key, null);
   return setprop(target, key, val);
 }
 
@@ -1367,7 +1370,7 @@ dynamic inject(dynamic val, dynamic store, [dynamic injdef]) {
     inj.mode = S_MVAL;
     var nv = _injectstr(val, store, inj);
     if (!isSkip(nv)) _injSetval(inj, nv);
-    rv = nv;
+    rv = identical(nv, _heldnull) ? null : nv;
   } else {
     rv = val;
   }
@@ -1958,11 +1961,25 @@ dynamic _validateType(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
     _pushErr(inj, _invalidTypeMsg(inj.path, tname, t, out, 'V1001'));
     return null;
   }
-  return out;
+  return _keepnull(inj, out);
 }
 
-dynamic _validateAny(dynamic inj0, dynamic val, dynamic ref, dynamic store) =>
-    _lookup((inj0 as Inj).dparent, inj0.key);
+dynamic _validateAny(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
+  var inj = inj0 as Inj;
+  return _keepnull(inj, _lookup(inj.dparent, inj.key));
+}
+
+// A null the data holds comes back as _heldnull, which _injSetval writes: it
+// deletes the slot for null, and a list would shift down.
+dynamic _keepnull(Inj inj, dynamic out) {
+  if (out == null &&
+      inj.mode == S_MVAL &&
+      inj.full &&
+      _has(inj.dparent, inj.key)) {
+    return _heldnull;
+  }
+  return out;
+}
 
 dynamic _validateChild(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
   var inj = inj0 as Inj;
@@ -1982,10 +1999,7 @@ dynamic _validateChild(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
       delprop(parent, key);
       return null;
     } else if (!ismap(tval)) {
-      _pushErr(
-          inj,
-          _invalidTypeMsg(slice(path, 0, size(path) - 1), S_object,
-              typify(tval), tval, 'V0220'));
+      // _validation reports the mismatch, once.
       return null;
     } else {
       for (var ckey in keysof(tval)) {
@@ -2004,10 +2018,6 @@ dynamic _validateChild(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
       (parent as List).clear();
       return null;
     } else if (!islist(inj.dparent)) {
-      _pushErr(
-          inj,
-          _invalidTypeMsg(slice(path, 0, size(path) - 1), S_list,
-              typify(inj.dparent), inj.dparent, 'V0230'));
       inj.keyi = size(parent);
       return inj.dparent;
     } else {
@@ -2400,7 +2410,7 @@ bool _unknownname(String name, dynamic store) {
 
 // Whether key is present in val, a null value included.
 bool _has(dynamic val, dynamic key) {
-  if (val is Map) return val.containsKey(_mapKey(key));
+  if (val is Map) return _readkey(key) && val.containsKey(_mapKey(key));
   if (val is List) {
     var ki = _listIndex(key);
     return ki != null && ki >= 0 && ki < val.length;
@@ -2887,7 +2897,7 @@ int _condenseSymId(dynamic cond, String key) {
 
 dynamic _condenseChild(dynamic cond, dynamic idx, dynamic key) {
   final enc = _condenseEnc(cond, idx);
-  if (enc == null) return -1;
+  if (enc == null || !_readkey(key)) return -1;
   final kind = _condenseKind(enc);
 
   if (kind == _CONDENSE_MAP) {
@@ -2912,7 +2922,7 @@ dynamic _condenseChild(dynamic cond, dynamic idx, dynamic key) {
   // selects.
   if (kind == _CONDENSE_LIST) {
     final i = _listIndex(key);
-    return i != null && i < enc.length - 1 ? enc[1 + i] : -1;
+    return i != null && i >= 0 && i < enc.length - 1 ? enc[1 + i] : -1;
   }
 
   return -1;

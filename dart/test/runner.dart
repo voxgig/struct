@@ -703,6 +703,54 @@ void runCondenseLocal() {
 }
 
 // ---------------------------------------------------------------------------
+// validate: what the corpus shape cannot express
+// ---------------------------------------------------------------------------
+
+void runValidateLocal() {
+  dynamic m(List<dynamic> kv) => s.jm(kv);
+  dynamic l(List<dynamic> v) => s.jt(v);
+  dynamic errsof(dynamic data, dynamic spec) {
+    final errs = <dynamic>[];
+    s.validate(data, spec, m(['errs', errs]));
+    return errs;
+  }
+
+  checks('validate-child-one-error-per-failure', () {
+    final specs = [
+      m([
+        'x', m(['`\$CHILD`', '`\$NUMBER`'])
+      ]),
+      m([
+        'x', l(['`\$CHILD`', '`\$NUMBER`'])
+      ]),
+    ];
+    return [
+      for (final spec in specs)
+        [s.stringify(spec), s.size(errsof(m(['x', 1]), spec)) == 1],
+    ];
+  });
+
+  // The corpus cannot carry 2.0, which JavaScript reads as 2.
+  checks('validate-nof-integral-decimal-count', () {
+    dynamic nof(dynamic count) =>
+        l(['`\$NOF`', count, '`\$NUMBER`', '`\$INTEGER`']);
+    return [
+      ['2.0 admits', s.size(errsof(1, nof(2.0))) == 0],
+      [
+        '2.0 counts as 2',
+        o.deepequal(errsof('x', nof(2.0)),
+            ['Expected exactly 2 of number, integer, but found string: x.'])
+      ],
+      [
+        'min 1.0 and max 2.0 count as 1 and 2',
+        o.deepequal(errsof('x', nof(m(['min', 1.0, 'max', 2.0]))),
+            ['Expected 1 to 2 of number, integer, but found string: x.'])
+      ],
+    ];
+  });
+}
+
+// ---------------------------------------------------------------------------
 // The client path
 // ---------------------------------------------------------------------------
 
@@ -757,6 +805,7 @@ void main(List<String> argv) {
   final pack = o.makeRunner(testfile).runner('struct');
   runAll(pack, pack.spec);
   runCondenseLocal();
+  runValidateLocal();
   runClient(testfile);
   for (final f in failures) {
     print(f);
