@@ -119,8 +119,8 @@ var DELETE = &_sentinel{"DELETE"}
 
 var NOVAL = &_sentinel{"NOVAL"}
 
-// A list index as a JavaScript array reads one: "01", "+1" and "-0" are not.
-var reListIndex = regexp.MustCompile(`^(0|[1-9][0-9]*)$`)
+// A list key as String(n) prints an integer: "01", "+1" and "-0" are not.
+var reIntegerKey = regexp.MustCompile(`^(0|-?[1-9][0-9]*)$`)
 
 // Meta path syntax regex: matches patterns like "q0$=x1" or "q0$~x1"
 var reMetaPath = regexp.MustCompile(`^([^$]+)\$([=~])(.+)$`)
@@ -669,8 +669,7 @@ func Pad(str any, args ...any) string {
 	return s
 }
 
-// Get a list element. The key should be an integer, or a string
-// that parses to an integer. Negative integers count from the end.
+// Get a list element; a negative integer key counts from the end.
 func GetElem(val any, key any, alts ...any) any {
 	var alt any
 	if len(alts) > 0 {
@@ -691,15 +690,13 @@ func GetElem(val any, key any, alts ...any) any {
 		if !ok {
 			list = _listify(val)
 		}
-		nkey := _listIndex(key)
-		// StrKey truncates a decimal, which names no element.
-		if 0 > nkey && 0 < ((T_string|T_integer)&Typify(key)) {
-			if n, err := strconv.Atoi(StrKey(key)); nil == err && 0 > n {
-				nkey = len(list) + n
+		if ki, ok := _listkey(key); ok {
+			if 0 > ki {
+				ki += len(list)
 			}
-		}
-		if 0 <= nkey && nkey < len(list) {
-			out = list[nkey]
+			if 0 <= ki && ki < len(list) {
+				out = list[ki]
+			}
 		}
 	}
 
@@ -735,53 +732,16 @@ func GetProp(val any, key any, alts ...any) any {
 		return alt
 	}
 
-	if IsMap(val) {
-		ks, ok := key.(string)
-		if !ok {
-			ks = StrKey(key)
-		}
+	if IsNode(val) {
+		out = _readprop(val, key)
 
-		v := val.(map[string]any)
-		res, has := v[ks]
-		if has {
-			out = res
-		}
-
-	} else if IsList(val) {
-		ki := _listIndex(key)
-
-		if lr, isLR := val.(*ListRef[any]); isLR {
-			if 0 <= ki && ki < len(lr.List) {
-				out = lr.List[ki]
-			}
-		} else {
-			v, ok := val.([]any)
-
-			if !ok {
-				rv := reflect.ValueOf(val)
-				if rv.Kind() == reflect.Slice && 0 <= ki && ki < rv.Len() {
-					out = rv.Index(ki).Interface()
-				}
-
-			} else {
-				if 0 <= ki && ki < len(v) {
-					out = v[ki]
-				}
-			}
-		}
-
-	} else {
+	} else if ks, ok := _keystr(key); ok {
 		valRef := reflect.ValueOf(val)
 		if valRef.Kind() == reflect.Pointer {
 			valRef = valRef.Elem()
 		}
 
 		if valRef.Kind() == reflect.Struct {
-			ks, ok := key.(string)
-			if !ok {
-				ks = StrKey(key)
-			}
-
 			field := valRef.FieldByName(ks)
 			if field.IsValid() {
 				out = field.Interface()
@@ -794,6 +754,120 @@ func GetProp(val any, key any, alts ...any) any {
 	}
 
 	return out
+}
+
+// The value stored at key in a map or list, nil included, or NOVAL. A list
+// reads a non-negative list key, a map a string or number key.
+func _readprop(val any, key any) any {
+	if m, ok := val.(map[string]any); ok {
+		if ks, ok := _keystr(key); ok {
+			if out, has := m[ks]; has {
+				return out
+			}
+		}
+		return NOVAL
+	}
+
+	if !IsList(val) {
+		return NOVAL
+	}
+
+	ki, ok := _listkey(key)
+	if !ok || 0 > ki {
+		return NOVAL
+	}
+
+	switch list := val.(type) {
+	case *ListRef[any]:
+		if ki < len(list.List) {
+			return list.List[ki]
+		}
+	case []any:
+		if ki < len(list) {
+			return list[ki]
+		}
+	default:
+		if rv := reflect.ValueOf(val); ki < rv.Len() {
+			return rv.Index(ki).Interface()
+		}
+	}
+
+	return NOVAL
+}
+
+// A list key's index: an integral number, or the string String(n) prints for
+// one. An index beyond int saturates, so it stays past that end of any list.
+func _listkey(key any) (int, bool) {
+	switch k := key.(type) {
+	case int:
+		return k, true
+	case string:
+		if !reIntegerKey.MatchString(k) {
+			return 0, false
+		}
+		if n, err := strconv.Atoi(k); nil == err {
+			return n, true
+		}
+		if '-' == k[0] {
+			return math.MinInt, true
+		}
+		return math.MaxInt, true
+	}
+
+	f, err := _toFloat64(key)
+	if nil != err || f != math.Trunc(f) || math.IsInf(f, 0) {
+		return 0, false
+	}
+	if f >= math.MaxInt {
+		return math.MaxInt, true
+	}
+	if f <= math.MinInt {
+		return math.MinInt, true
+	}
+	return int(f), true
+}
+
+// The string a key names in a map: a string itself, a number as String(n)
+// prints it. Anything else names no key.
+func _keystr(key any) (string, bool) {
+	switch k := key.(type) {
+	case string:
+		return k, true
+	case *string:
+		if nil != k {
+			return *k, true
+		}
+		return S_MT, false
+	}
+
+	if _, err := _toFloat64(key); nil != err {
+		return S_MT, false
+	}
+	return _numstr(key), true
+}
+
+// The string JavaScript's String(n) prints for a number.
+func _numstr(n any) string {
+	switch n.(type) {
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		return fmt.Sprintf("%d", n)
+	}
+
+	f, _ := _toFloat64(n)
+	switch {
+	case 0 == f:
+		return "0"
+	case math.IsNaN(f):
+		return "NaN"
+	case math.IsInf(f, 1):
+		return "Infinity"
+	case math.IsInf(f, -1):
+		return "-Infinity"
+	}
+
+	// encoding/json writes a float as ES6 Number.prototype.toString does.
+	b, _ := json.Marshal(f)
+	return string(b)
 }
 
 // Sorted keys of a map, or indexes of a list.
@@ -1405,9 +1479,8 @@ func DelProp(parent any, key any) any {
 		ks := StrKey(key)
 		delete(parent.(map[string]any), ks)
 	} else if IsList(parent) {
-		ks := StrKey(key)
-		ki, err := _parseInt(ks)
-		if err != nil {
+		ki, ok := _listkey(key)
+		if !ok {
 			return parent
 		}
 		if lr, isLR := parent.(*ListRef[any]); isLR {
@@ -1456,11 +1529,11 @@ func SetProp(parent any, key any, newval any) any {
 	}
 
 	if IsMap(parent) {
-		m := parent.(map[string]any)
-		m[StrKey(key)] = newval
+		ks, _ := _keystr(key)
+		parent.(map[string]any)[ks] = newval
 
 	} else if IsList(parent) {
-		ki, ok := _listKey(key)
+		ki, ok := _listkey(key)
 		if !ok {
 			return parent
 		}
@@ -1522,32 +1595,6 @@ func SetProp(parent any, key any, newval any) any {
 	}
 
 	return parent
-}
-
-// The list index SetProp reads from key; false when key names no index.
-func _listKey(key any) (int, bool) {
-	switch k := key.(type) {
-	case int:
-		return k, true
-	case float64:
-		return int(k), true
-	case string:
-		ki, err := _parseInt(k)
-		return ki, nil == err
-	}
-	return 0, false
-}
-
-// The index a list read takes key to, or -1. Reads accept only what a
-// JavaScript array does, a stricter rule than _listKey's for writes.
-func _listIndex(key any) int {
-	if s, ok := key.(string); ok {
-		if i, err := strconv.Atoi(s); nil == err && reListIndex.MatchString(s) {
-			return i
-		}
-		return -1
-	}
-	return _condenseInt(key)
 }
 
 func Walk(
@@ -1870,7 +1917,8 @@ func GetPath(store any, path any, injdefs ...*Injection) any {
 
 	var parts []string
 
-	// Operate on a string array.
+	// Operate on a string array: a number part reads as String(n), and any
+	// other part that is not a string makes the whole path miss.
 	switch pp := path.(type) {
 	case []string:
 		parts = make([]string, len(pp))
@@ -1884,7 +1932,17 @@ func GetPath(store any, path any, injdefs ...*Injection) any {
 		}
 	default:
 		if IsList(path) {
-			parts = _resolveStrings(_listify(path))
+			list := _listify(path)
+			parts = make([]string, len(list))
+			for i, part := range list {
+				ps, ok := _keystr(part)
+				if !ok {
+					return nil
+				}
+				parts[i] = ps
+			}
+		} else if _, err := _toFloat64(path); nil == err {
+			parts = []string{_numstr(path)}
 		} else {
 			return nil
 		}
@@ -2092,7 +2150,7 @@ func SetPath(store any, path any, val any, injdefs ...map[string]any) any {
 
 // The index where SetProp puts a value written to list under key.
 func _listSlot(list any, key any) any {
-	ki, ok := _listKey(key)
+	ki, ok := _listkey(key)
 	if !ok || !IsList(list) {
 		return key
 	}
@@ -2115,9 +2173,11 @@ func _keepList(holders []any, keys []any, list any, written any) any {
 // SetProp refuses some keys GetProp reads, such as "".
 func _writeBack(holder any, key any, val any) any {
 	if m, ok := holder.(map[string]any); ok {
-		if _, has := m[StrKey(key)]; has {
-			m[StrKey(key)] = val
-			return m
+		if ks, ok := _keystr(key); ok {
+			if _, has := m[ks]; has {
+				m[ks] = val
+				return m
+			}
 		}
 	}
 	return SetProp(holder, key, val)
@@ -3519,7 +3579,11 @@ var validate_ANY Injector = func(
 	ref *string,
 	store any,
 ) any {
-	return GetProp(inj.Dparent, inj.Key)
+	out := GetProp(inj.Dparent, inj.Key)
+	if nil == out {
+		out = _lookup(inj.Dparent, inj.Key)
+	}
+	return _checked(inj, out)
 }
 
 // Generic type validator: handles $INTEGER, $DECIMAL, $NULL, $NIL, $MAP, $LIST, $INSTANCE
@@ -3554,7 +3618,7 @@ var validate_TYPE Injector = func(
 
 	// $NIL is absent or null.
 	if tname == "nil" && nil == denoval(out) {
-		return nil
+		return _checked(inj, out)
 	}
 
 	if 0 == (t & typev) {
@@ -3563,7 +3627,17 @@ var validate_TYPE Injector = func(
 		return nil
 	}
 
-	return out
+	return _checked(inj, out)
+}
+
+// A checker's result from a _lookup read. setval deletes on nil, so a null
+// the data holds is written into the slot here, and inject skips the slot.
+func _checked(inj *Injection, out any) any {
+	if nil == out && M_VAL == inj.Mode && inj.Full {
+		SetProp(inj.Parent, inj.Key, nil)
+		return SKIP
+	}
+	return denoval(out)
 }
 
 var validate_CHILD Injector = func(
@@ -3583,13 +3657,7 @@ var validate_CHILD Injector = func(
 			tval = map[string]any{}
 
 		} else if !IsMap(tval) {
-			inj.Errs.Append(
-				_invalidTypeMsg(
-					inj.Path.List[:len(inj.Path.List)-1],
-					S_object,
-					Typename(Typify(tval)),
-					tval,
-				))
+			// The validation modify reports the mismatch, once.
 			return nil
 		}
 
@@ -3626,15 +3694,8 @@ var validate_CHILD Injector = func(
 			return nil
 		}
 
-		// If dparent is not a list => error
+		// Not a list: the validation modify reports the mismatch.
 		if !IsList(dparent) {
-			inj.Errs.Append(
-				_invalidTypeMsg(
-					inj.Path.List[:len(inj.Path.List)-1],
-					S_array,
-					Typename(Typify(dparent)),
-					dparent,
-				))
 			parentList := _listify(inj.Parent)
 			inj.KeyI = len(parentList)
 			return dparent
@@ -4726,7 +4787,11 @@ func (v *CondensedView) resolve(path []any) int {
 	if 0 < len(path) {
 		p = path[0]
 	}
-	return _condenseResolve(v.cond, v.start, _condenseParts(p))
+	parts, ok := _condenseParts(p)
+	if !ok {
+		return -1
+	}
+	return _condenseResolve(v.cond, v.start, parts)
 }
 
 // The interning key of a node encoding. Every element is a number, keyed by
@@ -4832,7 +4897,7 @@ func _condenseChild(cond any, idx int, key string) int {
 		}
 
 	case CONDENSE_LIST:
-		if i := _listIndex(key); 0 <= i && i < len(enc)-1 {
+		if i, ok := _listkey(key); ok && 0 <= i && i < len(enc)-1 {
 			return _condenseInt(enc[1+i])
 		}
 	}
@@ -4841,27 +4906,32 @@ func _condenseChild(cond any, idx int, key string) int {
 }
 
 // A path as parts: a list is its parts, a string splits on dots, no path is
-// no parts, and any other value is one part, its string form.
-func _condenseParts(path any) []string {
+// no parts, and any other value is one part, its string form. False when a
+// list part is neither a string nor a number, which names no child.
+func _condenseParts(path any) ([]string, bool) {
 	path = denoval(path)
 	if IsList(path) {
 		list := _listify(path)
 		parts := make([]string, len(list))
 		for i, p := range list {
-			parts[i] = Stringify(p)
+			ps, ok := _keystr(p)
+			if !ok {
+				return nil, false
+			}
+			parts[i] = ps
 		}
-		return parts
+		return parts, true
 	}
 	if s, ok := path.(string); ok {
 		if S_MT == s {
-			return nil
+			return nil, true
 		}
-		return strings.Split(s, S_DT)
+		return strings.Split(s, S_DT), true
 	}
 	if nil == path {
-		return nil
+		return nil, true
 	}
-	return []string{Stringify(path)}
+	return []string{Stringify(path)}, true
 }
 
 // Walk path parts from a starting node, returning the node index or -1.
@@ -5055,17 +5125,7 @@ func _unknownname(name string, store map[string]any) bool {
 // The value stored at key, nil included, or NOVAL when val holds no such
 // key. GetProp reads both as nil.
 func _lookup(val any, key any) any {
-	if IsMap(val) {
-		if out, has := val.(map[string]any)[StrKey(key)]; has {
-			return out
-		}
-	} else if IsList(val) {
-		list := _listify(val)
-		if ki := _listIndex(key); 0 <= ki && ki < len(list) {
-			return list[ki]
-		}
-	}
-	return NOVAL
+	return _readprop(val, key)
 }
 
 // The data value at a list directive's slot: nil when null, NOVAL when
@@ -5291,20 +5351,6 @@ func StrKey(key any) string {
 	}
 }
 
-func _resolveStrings(input []any) []string {
-	var result []string
-
-	for _, v := range input {
-		if str, ok := v.(string); ok {
-			result = append(result, str)
-		} else {
-			result = append(result, StrKey(v))
-		}
-	}
-
-	return result
-}
-
 // Extract a bare []any from either a []any or a *ListRef[any].
 // Recursively unwrap *ListRef[any] to []any for JSON marshaling.
 func _unwrapListRefs(val any) any {
@@ -5407,23 +5453,6 @@ func _toFloat64(val any) (float64, error) {
 	default:
 		return 0, fmt.Errorf("not a numeric type")
 	}
-}
-
-// _parseInt is a helper to convert a string to int safely.
-func _parseInt(s string) (int, error) {
-	var x int
-	sign := 1
-	for i, c := range s {
-		if c == '-' && i == 0 {
-			sign = -1
-			continue
-		}
-		if c < '0' || c > '9' {
-			return 0, &ParseIntError{s}
-		}
-		x = 10*x + int(c-'0')
-	}
-	return x * sign, nil
 }
 
 type ParseIntError struct{ input string }

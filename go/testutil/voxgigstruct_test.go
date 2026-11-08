@@ -1664,6 +1664,31 @@ func TestStruct(t *testing.T) {
 		})
 	})
 
+	t.Run("validate-child-one-error-per-failure", func(t *testing.T) {
+		for _, spec := range []any{
+			map[string]any{"x": map[string]any{"`$CHILD`": "`$NUMBER`"}},
+			map[string]any{"x": []any{"`$CHILD`", "`$NUMBER`"}},
+		} {
+			errs := voxgigstruct.ListRefCreate[any]()
+			_, err := voxgigstruct.Validate(map[string]any{"x": 1}, spec, &voxgigstruct.Injection{Errs: errs})
+			if nil != err || 1 != len(errs.List) {
+				t.Errorf("%s: %v %v", voxgigstruct.Stringify(spec), errs.List, err)
+			}
+		}
+	})
+
+	t.Run("validate-null-stays", func(t *testing.T) {
+		// A null the data holds is written back, in a closed map as in a list.
+		data := map[string]any{"a": nil, "b": []any{1, nil}}
+		out, err := voxgigstruct.Validate(data, map[string]any{
+			"a": "`$NULL`",
+			"b": []any{"`$NUMBER`", "`$NIL`"},
+		})
+		if nil != err || !reflect.DeepEqual(out, data) {
+			t.Errorf("Expected: %v, Got: %v %v", data, out, err)
+		}
+	})
+
 	t.Run("validate-exact", func(t *testing.T) {
 		runset(t, validateSpec["exact"], func(v any) (any, error) {
 			m := v.(map[string]any)
@@ -1714,6 +1739,25 @@ func TestStruct(t *testing.T) {
 			m := v.(map[string]any)
 			return voxgigstruct.Validate(m["data"], m["spec"])
 		})
+	})
+
+	t.Run("validate-nof-integral-decimal-count", func(t *testing.T) {
+		// The corpus writes 2.0 as 2; a float64 count with an integral value is that integer.
+		data := map[string]any{"a": "x"}
+		spec := func(count any) any {
+			return map[string]any{"a": []any{"`$NOF`", count, "`$STRING`", "`$NUMBER`"}}
+		}
+		for _, count := range []any{1.0, map[string]any{"min": 1.0, "max": 2.0}} {
+			out, err := voxgigstruct.Validate(data, spec(count))
+			if nil != err || !reflect.DeepEqual(out, data) {
+				t.Errorf("count %v: %v %v", count, out, err)
+			}
+		}
+		_, err := voxgigstruct.Validate(data, spec(2.0))
+		if nil == err || !strings.HasSuffix(err.Error(),
+			"Expected field a to be exactly 2 of string, number, but found string: x.") {
+			t.Errorf("count 2.0: %v", err)
+		}
 	})
 
 	t.Run("validate-all", func(t *testing.T) {
