@@ -375,43 +375,53 @@ pub fn strkey(allocator: Allocator, key: JsonValue) ![]const u8 {
     };
 }
 
-// The index a list read takes key to, as a JavaScript array reads one: a
-// non-negative integer, or its string with no sign and no leading zero.
-// Writes coerce a list key more loosely.
+// The string String(n) prints for a number, as a map key or a path part.
+fn numtext(allocator: Allocator, n: JsonValue) ![]const u8 {
+    return switch (n) {
+        .integer => |i| try std.fmt.allocPrint(allocator, "{d}", .{i}),
+        .float => |f| blk: {
+            if (f == @trunc(f) and -9.0e15 < f and f < 9.0e15) {
+                break :blk try std.fmt.allocPrint(allocator, "{d}", .{@as(i64, @intFromFloat(f))});
+            }
+            break :blk try std.fmt.allocPrint(allocator, "{d}", .{f});
+        },
+        else => S_MT,
+    };
+}
+
+// A list key's index: an integral number, or the string String(n) prints for
+// one, so "01", "+1" and "-0" are not. An index beyond i64 saturates, so it
+// stays past that end of any list.
+fn listkey(key: JsonValue) ?i64 {
+    return switch (key) {
+        .integer => |i| i,
+        .float => |f| blk: {
+            if (std.math.isNan(f) or std.math.isInf(f) or f != @trunc(f)) break :blk null;
+            if (9223372036854775808.0 <= f) break :blk std.math.maxInt(i64);
+            if (f < -9223372036854775808.0) break :blk std.math.minInt(i64);
+            break :blk @as(i64, @intFromFloat(f));
+        },
+        .string => |s| blk: {
+            const neg = 0 < s.len and '-' == s[0];
+            const digits = if (neg) s[1..] else s;
+            if (0 == digits.len or ('0' == digits[0] and (neg or 1 < digits.len))) break :blk null;
+            for (digits) |c| {
+                if (c < '0' or '9' < c) break :blk null;
+            }
+            const past: i64 = if (neg) std.math.minInt(i64) else std.math.maxInt(i64);
+            break :blk std.fmt.parseInt(i64, s, 10) catch past;
+        },
+        else => null,
+    };
+}
+
+// The index a non-negative list key reads, or null.
 fn listIndex(key: JsonValue) ?usize {
-    return switch (key) {
-        .integer => |i| if (0 <= i and i <= std.math.maxInt(u32)) @as(usize, @intCast(i)) else null,
-        .float => |f| if (0 <= f and f == @trunc(f) and f <= std.math.maxInt(u32)) @as(usize, @intFromFloat(f)) else null,
-        .string => |s| blk: {
-            if (0 == s.len or (1 < s.len and '0' == s[0])) break :blk null;
-            for (s) |c| {
-                if (c < '0' or '9' < c) break :blk null;
-            }
-            const n = std.fmt.parseInt(u32, s, 10) catch break :blk null;
-            break :blk @as(usize, n);
-        },
-        else => null,
-    };
+    const k = listkey(key) orelse return null;
+    return if (0 <= k and k <= std.math.maxInt(u32)) @as(usize, @intCast(k)) else null;
 }
 
-// A negative integer key, which getelem counts from the end of a list.
-fn negativeKey(key: JsonValue) ?i64 {
-    return switch (key) {
-        .integer => |i| if (i < 0) i else null,
-        .float => |f| if (f < 0 and f == @trunc(f) and -std.math.maxInt(u32) <= f) @as(i64, @intFromFloat(f)) else null,
-        .string => |s| blk: {
-            if (s.len < 2 or '-' != s[0]) break :blk null;
-            for (s[1..]) |c| {
-                if (c < '0' or '9' < c) break :blk null;
-            }
-            const n = std.fmt.parseInt(i64, s, 10) catch break :blk null;
-            break :blk if (n < 0) n else null;
-        },
-        else => null,
-    };
-}
-
-// Get a list element by integer index. Only works on lists.
+// Get a list element; a negative integer key counts from the end.
 pub fn getelem(allocator: Allocator, val: JsonValue, key: JsonValue, alt: JsonValue) !JsonValue {
     if (val == .null or key == .null) return resolveAlt(allocator, alt);
 
@@ -420,18 +430,14 @@ pub fn getelem(allocator: Allocator, val: JsonValue, key: JsonValue, alt: JsonVa
     const list = val.array.data.items;
     const len: i64 = @intCast(list.len);
 
-    var nkey: i64 = -1;
-    if (listIndex(key)) |i| {
-        nkey = @intCast(i);
-    } else if (negativeKey(key)) |n| {
-        nkey = len + n;
-    }
-
-    if (nkey >= 0 and nkey < len) {
-        const v = list[@intCast(nkey)];
-        // Group A: a stored JSON null counts as "no value" → alt.
-        if (v == .null) return resolveAlt(allocator, alt);
-        return v;
+    if (listkey(key)) |k| {
+        const nkey = if (k < 0) len + k else k;
+        if (0 <= nkey and nkey < len) {
+            const v = list[@intCast(nkey)];
+            // Group A: a stored JSON null counts as "no value" → alt.
+            if (v == .null) return resolveAlt(allocator, alt);
+            return v;
+        }
     }
 
     return resolveAlt(allocator, alt);
@@ -448,7 +454,12 @@ pub fn getprop(allocator: Allocator, val: JsonValue, key: JsonValue, alt: JsonVa
     if (val == .null or key == .null) return alt;
 
     if (val == .object) {
-        const ks = try strkey(allocator, key);
+        // Only a string or a number names a map key.
+        const ks: []const u8 = switch (key) {
+            .string => |s| s,
+            .integer, .float => try numtext(allocator, key),
+            else => return alt,
+        };
         if (val.object.get(ks)) |v| {
             // Group A: a stored JSON null counts as "no value" → alt.
             if (v == .null) return alt;
@@ -683,23 +694,13 @@ pub fn delprop(allocator: Allocator, parent: JsonValue, key: JsonValue) !JsonVal
     }
 
     if (parent == .array) {
-        var ki: ?i64 = null;
-        switch (key) {
-            .integer => |i| ki = i,
-            .float => |f| ki = @intFromFloat(@trunc(f)),
-            .string => |s| {
-                ki = std.fmt.parseInt(i64, s, 10) catch null;
-            },
-            else => {},
-        }
-        if (ki) |idx| {
-            const plen: i64 = @intCast(parent.array.data.items.len);
-            // No negative index support for delprop
-            if (idx >= 0 and idx < plen) {
-                var arr = parent.array;
-                _ = arr.orderedRemove(@intCast(idx));
-                return JsonValue{ .array = arr };
-            }
+        const idx = listkey(key) orelse return parent;
+        const plen: i64 = @intCast(parent.array.data.items.len);
+        // No negative index support for delprop
+        if (idx >= 0 and idx < plen) {
+            var arr = parent.array;
+            _ = arr.orderedRemove(@intCast(idx));
+            return JsonValue{ .array = arr };
         }
         return parent;
     }
@@ -714,45 +715,28 @@ pub fn setprop(allocator: Allocator, parent: JsonValue, key: JsonValue, newval: 
 
     if (parent == .object) {
         var obj = parent.object;
-        var buf: [20]u8 = undefined;
-        const ks = keyStr(&buf, key);
-        // Dupe the key if it was generated from the stack buffer (integer/float keys)
-        const owned_key = if (key != .string)
-            try allocator.dupe(u8, ks)
-        else
-            ks;
-        try obj.put(owned_key, newval);
+        const ks = if (key == .string) key.string else try numtext(allocator, key);
+        try obj.put(ks, newval);
         return JsonValue{ .object = obj };
     }
 
     if (parent == .array) {
-        var ki: ?i64 = null;
-        switch (key) {
-            .integer => |i| ki = i,
-            .float => |f| ki = @intFromFloat(f),
-            .string => |s| {
-                ki = std.fmt.parseInt(i64, s, 10) catch null;
-            },
-            else => {},
-        }
-        if (ki) |idx| {
-            var arr = parent.array;
-            const plen: i64 = @intCast(arr.data.items.len);
-            if (idx >= 0) {
-                if (idx >= plen) {
-                    // Append
-                    try arr.append(newval);
-                } else {
-                    // Replace
-                    arr.data.items[@intCast(idx)] = newval;
-                }
+        const idx = listkey(key) orelse return parent;
+        var arr = parent.array;
+        const plen: i64 = @intCast(arr.data.items.len);
+        if (idx >= 0) {
+            if (idx >= plen) {
+                // Append
+                try arr.append(newval);
             } else {
-                // Prepend
-                try arr.insert(0, newval);
+                // Replace
+                arr.data.items[@intCast(idx)] = newval;
             }
-            return JsonValue{ .array = arr };
+        } else {
+            // Prepend
+            try arr.insert(0, newval);
         }
-        return parent;
+        return JsonValue{ .array = arr };
     }
 
     return parent;
@@ -1835,12 +1819,23 @@ pub fn getpathInj(allocator: Allocator, path_val: JsonValue, store_in: JsonValue
             }
         },
         .array => |arr| {
+            // A number part reads as String(n); any other part that is not a
+            // string makes the whole path miss.
             for (arr.data.items) |item| {
+                const part: []const u8 = switch (item) {
+                    .string => |s| s,
+                    .integer, .float => try numtext(allocator, item),
+                    else => return .null,
+                };
                 if (numparts < parts_buf.len) {
-                    parts_buf[numparts] = if (item == .string) item.string else "";
+                    parts_buf[numparts] = part;
                     numparts += 1;
                 }
             }
+        },
+        .integer, .float => {
+            parts_buf[0] = try numtext(allocator, path_val);
+            numparts = 1;
         },
         .null => {
             // Null path without injection → return null.
@@ -2649,7 +2644,7 @@ fn dispatchCmd(allocator: Allocator, cmd: []const u8, store: JsonValue, inj: *In
         if (std.mem.eql(u8, cmd, "$LIST")) return try cmdValidateType(allocator, inj, S_list, T_list);
         if (std.mem.eql(u8, cmd, "$FUNCTION")) return try cmdValidateType(allocator, inj, S_function, T_function);
         if (std.mem.eql(u8, cmd, "$INSTANCE")) return try cmdValidateType(allocator, inj, S_instance, T_instance);
-        if (std.mem.eql(u8, cmd, "$ANY")) return cmdValidateAny(inj);
+        if (std.mem.eql(u8, cmd, "$ANY")) return try cmdValidateAny(allocator, inj);
         if (std.mem.eql(u8, cmd, "$EXACT")) return try cmdValidateExactCmd(allocator, inj);
         if (std.mem.eql(u8, cmd, "$NOF")) return try validateCount(allocator, inj, "$NOF", true);
         if (std.mem.eql(u8, cmd, "$ALL")) return try validateCount(allocator, inj, "$ALL", false);
@@ -2797,15 +2792,13 @@ fn cmdValidateType(allocator: Allocator, inj: *Injection, tname: []const u8, tbi
         try inj.errs.append(try invalidTypeMsg(allocator, inj.path, tname, out));
         return .null;
     }
-    _ = try inj.setval(out, 0);
-    return out;
+    return try setchecked(allocator, inj, out);
 }
 
-fn cmdValidateAny(inj: *Injection) JsonValue {
+fn cmdValidateAny(allocator: Allocator, inj: *Injection) anyerror!JsonValue {
     if (inj.mode != M_VAL) return .null;
-    const out = getprop(inj.allocator, inj.dparent, JsonValue{ .string = inj.key }, .null) catch .null;
-    _ = inj.setval(out, 0) catch {};
-    return out;
+    const out = getprop(allocator, inj.dparent, JsonValue{ .string = inj.key }, .null) catch .null;
+    return try setchecked(allocator, inj, out);
 }
 
 fn cmdValidateNil(allocator: Allocator, inj: *Injection) anyerror!JsonValue {
@@ -2813,6 +2806,21 @@ fn cmdValidateNil(allocator: Allocator, inj: *Injection) anyerror!JsonValue {
     const out = getprop(allocator, inj.dparent, JsonValue{ .string = inj.key }, .null) catch .null;
     if (out != .null) {
         try inj.errs.append(try invalidTypeMsg(allocator, inj.path, S_nil, out));
+    }
+    return try setchecked(allocator, inj, out);
+}
+
+// Write a checker's result to its slot. setval deletes on .null, so a JSON
+// null the data holds is set directly, and skip keeps inject from deleting it.
+fn setchecked(allocator: Allocator, inj: *Injection, out: JsonValue) anyerror!JsonValue {
+    if (out == .null) {
+        if (lookupLiteral(inj.dparent, inj.key)) |lit| {
+            if (lit == .null) {
+                _ = try setprop(allocator, inj.parent, JsonValue{ .string = inj.key }, .null);
+                inj.skip = true;
+                return .null;
+            }
+        }
     }
     _ = try inj.setval(out, 0);
     return out;
@@ -3304,6 +3312,9 @@ fn cmdValidateChildCmd(allocator: Allocator, inj: *Injection, store: JsonValue) 
         const pkey = if (inj.path.len >= 2) inj.path[inj.path.len - 2] else S_DTOP;
         const tval = getprop(allocator, inj.dparent, JsonValue{ .string = pkey }, .null) catch .null;
 
+        // validationModify reports a mismatch, once.
+        if (tval != .null and tval != .object) return .null;
+
         if (tval == .object) {
             // For each key in data, clone the child spec into the parent.
             const ckeys = try keysof(allocator, tval);
@@ -3316,8 +3327,6 @@ fn cmdValidateChildCmd(allocator: Allocator, inj: *Injection, store: JsonValue) 
                     }
                 }
             }
-        } else if (tval != .null) {
-            try inj.errs.append(try invalidTypeMsg(allocator, if (inj.path.len > 1) inj.path[0 .. inj.path.len - 1] else inj.path, S_object, tval));
         }
 
         // Remove the $CHILD key.
@@ -3336,8 +3345,9 @@ fn cmdValidateChildCmd(allocator: Allocator, inj: *Injection, store: JsonValue) 
             return .null;
         }
 
+        // validationModify reports the mismatch; the loop stops past the list.
         if (dparent_val != .array) {
-            try inj.errs.append(try invalidTypeMsg(allocator, if (inj.path.len > 1) inj.path[0 .. inj.path.len - 1] else inj.path, S_list, dparent_val));
+            inj.key_i = inj.parent.array.data.items.len;
             return dparent_val;
         }
 
@@ -5185,13 +5195,21 @@ fn condenseWalk(cond: JsonValue, idx: i64, parts: []const []const u8) i64 {
 }
 
 // A path as parts: a list is its parts, a string splits on dots, and any
-// other value is one part, its string form. No path is no parts.
-fn condenseParts(allocator: Allocator, path: JsonValue) ![]const []const u8 {
+// other value is one part, its string form. No path is no parts. Null when a
+// list part is neither a string nor a number, which names no child.
+fn condenseParts(allocator: Allocator, path: JsonValue) !?[]const []const u8 {
     var parts = std.array_list.Managed([]const u8).init(allocator);
     switch (path) {
         .null => {},
         .array => |l| {
-            for (l.data.items) |p| try parts.append(try stringify(allocator, p, null));
+            for (l.data.items) |p| {
+                const part: []const u8 = switch (p) {
+                    .string => |s| s,
+                    .integer, .float => try numtext(allocator, p),
+                    else => return null,
+                };
+                try parts.append(part);
+            }
         },
         .string => |s| {
             if (0 < s.len) {
@@ -5332,7 +5350,8 @@ pub const CondenseView = struct {
     }
 
     fn resolve(self: CondenseView, path: JsonValue) !i64 {
-        return condenseWalk(self.cond, self.start, try condenseParts(self.allocator, path));
+        const parts = try condenseParts(self.allocator, path) orelse return -1;
+        return condenseWalk(self.cond, self.start, parts);
     }
 };
 
