@@ -1217,9 +1217,7 @@ static voxgig_value* va_CHILD(voxgig_injection* inj, voxgig_value* val, const ch
       voxgig_release(tval);
       tval = voxgig_new_map();
     } else if (!voxgig_is_map(tval)) {
-      /* error */
-      voxgig_value* msg = _invalid_type_msg(&inj->path, "object", voxgig_typify(tval), tval);
-      voxgig_list_push(voxgig_as_list(inj->errs), msg);
+      /* _validation reports the mismatch, once. */
       voxgig_release(tval);
       voxgig_release(childtm);
       return voxgig_new_undef();
@@ -1258,9 +1256,6 @@ static voxgig_value* va_CHILD(voxgig_injection* inj, voxgig_value* val, const ch
       return voxgig_new_undef();
     }
     if (!voxgig_is_list(inj->dparent)) {
-      voxgig_value* msg =
-          _invalid_type_msg(&inj->path, "list", voxgig_typify(inj->dparent), inj->dparent);
-      voxgig_list_push(voxgig_as_list(inj->errs), msg);
       inj->keyI = voxgig_list_len(voxgig_as_list(inj->parent));
       voxgig_release(childtm);
       return inj->dparent ? voxgig_retain(inj->dparent) : voxgig_new_undef();
@@ -1459,16 +1454,28 @@ static bool _admits(voxgig_value* val, voxgig_value* spec, voxgig_injection* inj
   return admits;
 }
 
-static bool _isnat(voxgig_value* n) {
-  return 0 != (VOXGIG_T_INTEGER & voxgig_typify(n)) && 0 <= voxgig_as_int(n);
+/* A natural number, into *nat. A decimal with an integral value counts, as JavaScript does
+   not tell 2.0 from 2. */
+static bool _isnat(voxgig_value* n, int64_t* nat) {
+  if (voxgig_is_int(n)) {
+    *nat = voxgig_as_int(n);
+    return 0 <= *nat;
+  }
+  if (!voxgig_is_double(n))
+    return false;
+  double d = voxgig_as_double(n);
+  if (d < 0 || (double)INT64_MAX <= d || floor(d) != d)
+    return false;
+  *nat = (int64_t)d;
+  return true;
 }
 
 /* The bounds of a $NOF count, and the words for it. False when the count is
    invalid. Without a max, the bound is the number of specs. */
 static bool _nofcount(voxgig_value* count, int64_t numtvals, int64_t* lo, int64_t* hi, char* desc,
                       size_t desclen) {
-  if (_isnat(count)) {
-    *lo = *hi = voxgig_as_int(count);
+  if (_isnat(count, lo)) {
+    *hi = *lo;
     if (0 == *lo)
       snprintf(desc, desclen, "none");
     else
@@ -1485,16 +1492,15 @@ static bool _nofcount(voxgig_value* count, int64_t numtvals, int64_t* lo, int64_
   bool hasmin = min && !voxgig_is_undef(min);
   bool hasmax = max && !voxgig_is_undef(max);
 
+  *lo = 0;
+  *hi = numtvals;
   bool valid =
       voxgig_is_map(count) && 0 < voxgig_map_len(voxgig_as_map(count)) &&
       voxgig_map_len(voxgig_as_map(count)) == (size_t)(hasmin ? 1 : 0) + (hasmax ? 1 : 0) &&
-      (!hasmin || _isnat(min)) && (!hasmax || _isnat(max)) &&
-      (!hasmin || !hasmax || voxgig_as_int(min) <= voxgig_as_int(max));
+      (!hasmin || _isnat(min, lo)) && (!hasmax || _isnat(max, hi)) &&
+      (!hasmin || !hasmax || *lo <= *hi);
   if (!valid)
     return false;
-
-  *lo = hasmin ? voxgig_as_int(min) : 0;
-  *hi = hasmax ? voxgig_as_int(max) : numtvals;
 
   if (!hasmax)
     snprintf(desc, desclen, "at least %lld", (long long)*lo);

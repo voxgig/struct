@@ -64,108 +64,54 @@ static char* doublestr(double v) {
   return xstrdup_s(buf);
 }
 
-/* parseInt-style: returns true if the string represents an integer (possibly
- * with leading sign). Outputs the integer in *out.
- */
-static bool parse_intstr(const char* s, size_t n, int64_t* out) {
-  if (!s || n == 0)
+/* A list key this far from zero is past any list: a write appends or prepends, a read misses. */
+#define LISTKEY_HUGE INT64_C(1000000000000000000)
+
+/* ^(0|-?[1-9][0-9]*)$, the form String(n) gives an integer n, as that integer. So "01",
+   "+1", " 1", "1.0" and "-0" are not list keys. */
+static bool canon_listindex(const char* key, size_t klen, int64_t* index) {
+  size_t j = 0 < klen && '-' == key[0] ? 1 : 0;
+  if (j == klen || ('0' == key[j] && 1 < klen))
     return false;
-  size_t i = 0;
-  int sign = 1;
-  if (s[0] == '-') {
-    sign = -1;
-    i = 1;
-  } else if (s[0] == '+') {
-    i = 1;
-  }
-  if (i >= n)
-    return false;
-  int64_t v = 0;
-  for (; i < n; i++) {
-    if (s[i] < '0' || s[i] > '9')
+  int64_t i = 0;
+  for (; j < klen; j++) {
+    if (key[j] < '0' || '9' < key[j])
       return false;
-    v = v * 10 + (s[i] - '0');
+    i = i < LISTKEY_HUGE / 10 ? i * 10 + (key[j] - '0') : LISTKEY_HUGE;
   }
-  *out = sign * v;
+  *index = '-' == key[0] ? -i : i;
   return true;
 }
 
-/* R_INTEGER_KEY: ^[-0-9]+$ — goes through the vendored regex engine so the
-   call sites read the same as the canonical TS. */
-static voxgig_regex* R_INTEGER_KEY_re(void) {
-  static voxgig_regex* re = NULL;
-  if (!re)
-    re = voxgig_re_compile("^[-0-9]+$");
-  return re;
-}
-static bool match_integer_key(const char* s, size_t n) {
-  if (!s || n == 0)
-    return false;
-  char buf[64];
-  char* tmp = NULL;
-  const char* z;
-  if (n < sizeof(buf)) {
-    memcpy(buf, s, n);
-    buf[n] = '\0';
-    z = buf;
-  } else {
-    tmp = (char*)malloc(n + 1);
-    memcpy(tmp, s, n);
-    tmp[n] = '\0';
-    z = tmp;
+/* The canonical _listkey: an integral number, or a string canon_listindex accepts. */
+static bool list_key(const voxgig_value* key, int64_t* index) {
+  if (voxgig_is_int(key)) {
+    *index = voxgig_as_int(key);
+    return true;
   }
-  bool ok = voxgig_re_test_re(R_INTEGER_KEY_re(), z);
-  free(tmp);
-  return ok;
-}
-
-/* ^(0|[1-9][0-9]*)$ as an index, else -1. A list reads only a canonical integer key, as
-   a JavaScript array does: "01", "+1" or "1.0" name no element. A key too long to parse
-   could not index a list anyway. */
-static int64_t canon_listindex(const char* key, size_t klen) {
-  if (0 == klen || 18 < klen || ('0' == key[0] && 1 < klen))
-    return -1;
-  int64_t i = 0;
-  for (size_t j = 0; j < klen; j++) {
-    if (key[j] < '0' || '9' < key[j])
-      return -1;
-    i = i * 10 + (key[j] - '0');
-  }
-  return i;
-}
-
-/* The element a list read selects, else -1: a canonical integer string, or a number
-   whose value is a non-negative integer. */
-static int64_t list_readindex(const voxgig_value* key) {
-  if (voxgig_is_int(key))
-    return 0 <= voxgig_as_int(key) ? voxgig_as_int(key) : -1;
   if (voxgig_is_double(key)) {
     double d = voxgig_as_double(key);
-    return 0 <= d && d < 1e18 && floor(d) == d ? (int64_t)d : -1;
+    if (!isfinite(d) || floor(d) != d)
+      return false;
+    if (fabs(d) < (double)LISTKEY_HUGE)
+      *index = (int64_t)d;
+    else
+      *index = 0 < d ? LISTKEY_HUGE : -LISTKEY_HUGE;
+    return true;
   }
-  if (voxgig_is_string(key))
-    return canon_listindex(voxgig_as_string(key), voxgig_string_len(key));
-  return -1;
+  return voxgig_is_string(key) &&
+         canon_listindex(voxgig_as_string(key), voxgig_string_len(key), index);
 }
 
-/* A negative integer key, which getelem alone counts from the end; 0 for any other key. */
-static int64_t list_backindex(const voxgig_value* key) {
-  int64_t back = 0;
-  if (voxgig_is_int(key)) {
-    back = voxgig_as_int(key);
-  } else if (voxgig_is_double(key)) {
-    double d = voxgig_as_double(key);
-    if (-1e18 < d && floor(d) == d)
-      back = (int64_t)d;
-  } else if (voxgig_is_string(key)) {
-    const char* s = voxgig_as_string(key);
-    size_t n = voxgig_string_len(key);
-    int64_t nk = 0;
-    /* A longer key could not index a list, and parse_intstr does not guard overflow. */
-    if ('-' == s[0] && n <= 19 && match_integer_key(s, n) && parse_intstr(s, n, &nk))
-      back = nk;
-  }
-  return 0 > back ? back : 0;
+/* The element a list read selects, else -1. Only getelem counts a negative key from the end. */
+static int64_t list_readindex(const voxgig_value* key) {
+  int64_t i = -1;
+  return list_key(key, &i) && 0 <= i ? i : -1;
+}
+
+/* A map reads a string or number key; any other key names no member. */
+static bool map_readkey(const voxgig_value* key) {
+  return voxgig_is_string(key) || voxgig_is_number(key);
 }
 
 /* ===========================================================================
@@ -539,8 +485,9 @@ voxgig_value* voxgig_getelem(voxgig_value* val, voxgig_value* key, voxgig_value*
   }
   if (voxgig_is_list(val)) {
     voxgig_list* l = voxgig_as_list(val);
-    int64_t back = list_backindex(key);
-    int64_t nk = 0 > back ? (int64_t)l->len + back : list_readindex(key);
+    int64_t nk = -1;
+    if (list_key(key, &nk) && nk < 0)
+      nk += (int64_t)l->len;
     if (nk < 0 || nk >= (int64_t)l->len) {
       if (alt && voxgig_is_injector(alt)) {
         return alt->as.fn.fn.inj(NULL, alt, "", NULL, alt->as.fn.ud);
@@ -567,7 +514,7 @@ voxgig_value* voxgig_getprop(voxgig_value* val, voxgig_value* key, voxgig_value*
   if (!val || voxgig_is_undef(val) || !key || voxgig_is_undef(key)) {
     return alt ? voxgig_retain(alt) : voxgig_new_undef();
   }
-  if (voxgig_is_map(val)) {
+  if (voxgig_is_map(val) && map_readkey(key)) {
     char* k = voxgig_strkey(key);
     voxgig_value* v = voxgig_map_get(voxgig_as_map(val), k);
     free(k);
@@ -604,7 +551,7 @@ bool voxgig_haskey(voxgig_value* val, voxgig_value* key) {
 voxgig_value* voxgig_lookup(voxgig_value* val, voxgig_value* key) {
   if (!val || voxgig_is_undef(val) || !key || voxgig_is_undef(key))
     return NULL;
-  if (voxgig_is_map(val)) {
+  if (voxgig_is_map(val) && map_readkey(key)) {
     char* k = voxgig_strkey(key);
     voxgig_value* v = voxgig_map_get(voxgig_as_map(val), k);
     free(k);
@@ -661,16 +608,8 @@ voxgig_value* voxgig_setprop(voxgig_value* parent, voxgig_value* key, voxgig_val
     free(k);
   } else if (voxgig_is_list(parent)) {
     int64_t ki = 0;
-    if (voxgig_is_int(key))
-      ki = voxgig_as_int(key);
-    else if (voxgig_is_double(key))
-      ki = (int64_t)floor(voxgig_as_double(key));
-    else if (voxgig_is_string(key)) {
-      if (!parse_intstr(voxgig_as_string(key), voxgig_string_len(key), &ki))
-        return parent;
-    } else {
+    if (!list_key(key, &ki))
       return parent;
-    }
     voxgig_list* l = voxgig_as_list(parent);
     if (ki >= 0) {
       int64_t cap = (int64_t)l->len + 1;
@@ -696,21 +635,10 @@ voxgig_value* voxgig_delprop(voxgig_value* parent, voxgig_value* key) {
     voxgig_map_erase(voxgig_as_map(parent), k);
     free(k);
   } else if (voxgig_is_list(parent)) {
-    int64_t ki = 0;
-    if (voxgig_is_int(key))
-      ki = voxgig_as_int(key);
-    else if (voxgig_is_double(key))
-      ki = (int64_t)floor(voxgig_as_double(key));
-    else if (voxgig_is_string(key)) {
-      if (!parse_intstr(voxgig_as_string(key), voxgig_string_len(key), &ki))
-        return parent;
-    } else {
-      return parent;
-    }
+    int64_t ki = -1;
     voxgig_list* l = voxgig_as_list(parent);
-    if (ki >= 0 && ki < (int64_t)l->len) {
+    if (list_key(key, &ki) && 0 <= ki && ki < (int64_t)l->len)
       voxgig_list_erase(l, (size_t)ki);
-    }
   }
   return parent;
 }
@@ -1875,8 +1803,10 @@ static int64_t cond_child(const voxgig_value* cond, int64_t idx, const char* key
   }
 
   if (CONDENSE_LIST == kind) {
-    int64_t i = canon_listindex(key, klen);
-    return 0 <= i && i < (int64_t)el->len - 1 ? cond_idx(el->items[1 + i]) : -1;
+    int64_t i = -1;
+    return canon_listindex(key, klen, &i) && 0 <= i && i < (int64_t)el->len - 1
+               ? cond_idx(el->items[1 + i])
+               : -1;
   }
 
   return -1;
@@ -1895,11 +1825,13 @@ static int64_t cond_resolve(const voxgig_value* cond, int64_t idx, const voxgig_
       if (voxgig_is_string(part)) {
         if (0 < voxgig_string_len(part))
           at = cond_child(cond, at, voxgig_as_string(part), voxgig_string_len(part));
-      } else {
+      } else if (voxgig_is_number(part)) {
         size_t n = 0;
         char* s = cond_strof(part, &n);
         at = cond_child(cond, at, s, n);
         free(s);
+      } else {
+        return -1;
       }
     }
   } else if (voxgig_is_string(path)) {
@@ -2277,15 +2209,7 @@ void voxgig_cview_free(voxgig_cview* view) {
 
 /* getpath on a condensed store, touching only the nodes on the path. */
 static voxgig_value* cond_getpath(voxgig_value* store, voxgig_value* path) {
-  voxgig_value* parts = NULL;
-  if (voxgig_is_number(path)) {
-    char* k = voxgig_strkey(path);
-    parts = voxgig_new_list();
-    voxgig_list_push(voxgig_as_list(parts), voxgig_new_string_take(k, strlen(k)));
-  }
-  voxgig_value* val =
-      cond_rebuild(store, cond_resolve(store, cond_root(store), parts ? parts : path));
-  voxgig_release(parts);
+  voxgig_value* val = cond_rebuild(store, cond_resolve(store, cond_root(store), path));
   /* Group A, as a plain getpath reads it: a stored null is absent. */
   if (voxgig_is_null(val)) {
     voxgig_release(val);
@@ -2355,11 +2279,8 @@ voxgig_value* voxgig_setpath(voxgig_value* store, voxgig_value* path, voxgig_val
       voxgig_value* nextKey = voxgig_list_get(voxgig_as_list(parts), pI + 1);
       int nkt = voxgig_typify(nextKey);
       nextParent = (nkt & VOXGIG_T_NUMBER) ? voxgig_new_list() : voxgig_new_map();
+      /* Continue in this node even when the write lands elsewhere (appended) or nowhere. */
       voxgig_setprop(parent, partKey, nextParent);
-      /* nextParent ref ownership: voxgig_setprop retains, so we need to release our own. */
-      voxgig_value* held = nextParent;
-      nextParent = voxgig_getprop(parent, partKey, NULL);
-      voxgig_release(held);
     }
     parent = nextParent;
     /* Release temporary borrowed ref carefully. nextParent was returned with
@@ -2389,9 +2310,18 @@ voxgig_value* voxgig_getpath(voxgig_value* store, voxgig_value* path, voxgig_inj
   if (voxgig_is_list(path)) {
     voxgig_list* l = voxgig_as_list(path);
     for (size_t i = 0; i < l->len; i++) {
-      char* sk = voxgig_strkey(l->items[i]);
-      voxgig_strvec_push(&parts, sk);
-      free(sk);
+      voxgig_value* part = l->items[i];
+      if (voxgig_is_string(part)) {
+        voxgig_strvec_push(&parts, voxgig_as_string(part));
+      } else if (voxgig_is_number(part)) {
+        size_t n = 0;
+        char* sk = cond_strof(part, &n);
+        voxgig_strvec_push_n(&parts, sk, n);
+        free(sk);
+      } else {
+        voxgig_strvec_free(&parts);
+        return voxgig_new_undef();
+      }
     }
     path_ok = true;
   } else if (voxgig_is_string(path)) {
@@ -2409,8 +2339,9 @@ voxgig_value* voxgig_getpath(voxgig_value* store, voxgig_value* path, voxgig_inj
     }
     path_ok = true;
   } else if (voxgig_is_number(path)) {
-    char* sk = voxgig_strkey(path);
-    voxgig_strvec_push(&parts, sk);
+    size_t n = 0;
+    char* sk = cond_strof(path, &n);
+    voxgig_strvec_push_n(&parts, sk, n);
     free(sk);
     path_ok = true;
   }

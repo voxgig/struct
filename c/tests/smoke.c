@@ -211,6 +211,43 @@ static void condense_checks(void) {
   release_held();
 }
 
+/* The errors validate collects for data against spec, held. */
+static voxgig_value* verrs(voxgig_value* data, voxgig_value* spec) {
+  voxgig_injection inj;
+  memset(&inj, 0, sizeof inj);
+  inj.errs = hold(voxgig_new_list());
+  hold(voxgig_validate(data, spec, &inj));
+  return inj.errs;
+}
+
+/* What the corpus cannot express: the number of $CHILD errors, and a decimal $NOF count,
+   which the corpus compiler writes as an integer. */
+static void validate_checks(void) {
+  const char* child[][2] = {
+      {"{\"x\":1}", "{\"x\":{\"`$CHILD`\":\"`$NUMBER`\"}}"},
+      {"{\"x\":1}", "{\"x\":[\"`$CHILD`\",\"`$NUMBER`\"]}"},
+      {"1", "{\"`$CHILD`\":\"`$NUMBER`\"}"},
+      {"1", "[\"`$CHILD`\",\"`$NUMBER`\"]"},
+  };
+  for (size_t i = 0; i < sizeof(child) / sizeof(child[0]); i++)
+    CHECK(1 == voxgig_size(verrs(J(child[i][0]), J(child[i][1]))), child[i][1]);
+
+  voxgig_value* nof2 = J("[\"`$NOF`\",2.0,\"`$STRING`\",\"`$STRING`\"]");
+  CHECK(voxgig_is_double(voxgig_list_get(voxgig_as_list(nof2), 1)) &&
+            0 == voxgig_size(verrs(J("\"x\""), nof2)),
+        "nof: a 2.0 count admits");
+  voxgig_value* nof2miss = verrs(J("\"x\""), J("[\"`$NOF`\",2.0,\"`$STRING`\",\"`$NUMBER`\"]"));
+  CHECK(1 == voxgig_size(nof2miss) &&
+            is_str(voxgig_list_get(voxgig_as_list(nof2miss), 0),
+                   "Expected exactly 2 of string, number, but found string: x."),
+        "nof: a 2.0 count is exactly 2");
+  CHECK(0 == voxgig_size(
+                 verrs(J("\"x\""),
+                       J("[\"`$NOF`\",{\"min\":1.0,\"max\":2.0},\"`$STRING`\",\"`$NUMBER`\"]"))),
+        "nof: a decimal min and max");
+  release_held();
+}
+
 int main(void) {
   /* Type predicates. */
   voxgig_value* m = voxgig_new_map();
@@ -334,6 +371,7 @@ int main(void) {
   }
 
   condense_checks();
+  validate_checks();
 
   printf("smoke: %d/%d passed\n", passed, total);
   return passed == total ? 0 : 1;
