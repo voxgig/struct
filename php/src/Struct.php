@@ -171,8 +171,7 @@ class Struct
     private const R_TRANSFORM_NAME = '/`\$([A-Z]+)`/';
     private const R_INJECTION_FULL = '/^`(\$[A-Z]+|[^`]*)[0-9]*`$/';
     private const R_CHECKER_NAME = '/^\$[A-Z]+$/';
-    private const R_LIST_INDEX = '/^(0|[1-9][0-9]*)\z/';
-    private const R_INTEGER_KEY = '/^[-0-9]+\z/';
+    private const R_INTEGER_KEY = '/^(0|-?[1-9][0-9]*)\z/';
 
     // Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
     private const VALIDATE_NAMES = ['$TOP', '$SPEC', '$BT', '$DS', '$WHEN', '$ANNO', '$REF', '$FORMAT', '$APPLY', '$OPEN'];
@@ -463,12 +462,13 @@ class Struct
         elseif (is_array($val) && is_float($key) && self::islist($val)) {
             $ki = self::_listindex($key, count($val));
             $out = 0 > $ki ? $alt : $val[$ki];
-        } elseif (is_array($val) && array_key_exists($key, $val)) {
-            $out = $val[$key];
+        } elseif (is_array($val)) {
+            $mkey = is_string($key) ? $key : self::_mapkey($key);
+            $out = array_key_exists($mkey, $val) ? $val[$mkey] : $alt;
         }
-        // 4) object branch: cast $key to string
+        // 4) object branch: the key as a string
         elseif (is_object($val)) {
-            $prop = (string) $key;
+            $prop = is_string($key) ? $key : self::_mapkey($key);
             if (property_exists($val, $prop)) {
                 $out = $val->$prop;
             } else {
@@ -485,18 +485,36 @@ class Struct
     }
 
     /**
-     * The index $key reads in a list of $len elements, or -1. As in a
-     * JavaScript array only a canonical integer reads: "01", "+1", "1.0",
-     * "-0" and 1.5 do not.
+     * A list key's index, or null: an integral number, or a string as
+     * JavaScript's String(n) prints one, so "1" and "-1" but not "01", "+1",
+     * " 1", "1.0", "-0" or 1.5.
      */
+    private static function _listkey(mixed $key): ?int
+    {
+        if (is_int($key)) {
+            return $key;
+        }
+        if (is_float($key)) {
+            if (!is_finite($key) || floor($key) !== $key) {
+                return null;
+            }
+            // Beyond the int range a key can only fall past an end of the list.
+            return abs($key) < 9.2e18 ? (int) $key : (0 < $key ? PHP_INT_MAX : PHP_INT_MIN);
+        }
+        return is_string($key) && 1 === preg_match(self::R_INTEGER_KEY, $key) ? (int) $key : null;
+    }
+
+    /** The index $key reads in a list of $len elements, or -1. */
     private static function _listindex(mixed $key, int $len): int
     {
-        if (is_string($key)) {
-            $key = 1 === preg_match(self::R_LIST_INDEX, $key) ? (int) $key : -1;
-        } elseif (is_float($key)) {
-            $key = floor($key) === $key && 0 <= $key && $key < $len ? (int) $key : -1;
-        }
-        return is_int($key) && 0 <= $key && $key < $len ? $key : -1;
+        $i = self::_listkey($key);
+        return null !== $i && 0 <= $i && $i < $len ? $i : -1;
+    }
+
+    /** A map key: a number as JavaScript's String(n) prints it. */
+    private static function _mapkey(mixed $key): string
+    {
+        return is_string($key) ? $key : self::_condenseStr($key);
     }
 
 
@@ -1223,10 +1241,10 @@ class Struct
 
         // ─── LISTREF ────────────────────────────────────────────────
         if ($parent instanceof ListRef) {
-            if (!is_numeric($key)) {
+            $keyI = self::_listkey($key);
+            if (null === $keyI) {
                 return $parent;
             }
-            $keyI = (int) floor((float) $key);
             if ($val === self::undef()) {
                 if ($keyI >= 0 && $keyI < count($parent->list)) {
                     array_splice($parent->list, $keyI, 1);
@@ -1245,7 +1263,7 @@ class Struct
 
         // ─── OBJECT (map) ───────────────────────────────────────────
         if (is_object($parent)) {
-            $keyStr = self::strkey($key);
+            $keyStr = self::_mapkey($key);
             if ($val === self::undef()) {
                 unset($parent->$keyStr);
             } else {
@@ -1258,7 +1276,7 @@ class Struct
         if (is_array($parent)) {
             if (!self::islist($parent)) {
                 // map‐array
-                $keyStr = self::strkey($key);
+                $keyStr = self::_mapkey($key);
                 if ($val === self::undef()) {
                     unset($parent[$keyStr]);
                 } elseif (ctype_digit((string) $key)) {
@@ -1269,10 +1287,10 @@ class Struct
                 }
             } else {
                 // list‐array
-                if (!is_numeric($key)) {
+                $keyI = self::_listkey($key);
+                if (null === $keyI) {
                     return $parent;
                 }
-                $keyI = (int) floor((float) $key);
                 if ($val === self::undef()) {
                     if ($keyI >= 0 && $keyI < count($parent)) {
                         array_splice($parent, $keyI, 1);
@@ -1528,12 +1546,23 @@ class Struct
     ): mixed {
         $injdef = self::_injdef($injdef);
 
-        // Convert path to array of parts
-        $parts = is_array($path) ? $path :
-            (is_string($path) ? explode('.', $path) :
-                (is_numeric($path) ? [self::strkey($path)] : self::undef()));
-
-        if ($parts === self::undef()) {
+        // A number part reads as its string form; any other non-string part misses.
+        if (self::islist($path)) {
+            $parts = [];
+            foreach (($path instanceof ListRef ? $path->list : $path) as $part) {
+                if (is_int($part) || is_float($part)) {
+                    $parts[] = self::_mapkey($part);
+                } elseif (is_string($part)) {
+                    $parts[] = $part;
+                } else {
+                    return self::undef();
+                }
+            }
+        } elseif (is_string($path)) {
+            $parts = explode('.', $path);
+        } elseif (is_int($path) || is_float($path)) {
+            $parts = [self::_mapkey($path)];
+        } else {
             return self::undef();
         }
 
@@ -2819,12 +2848,16 @@ class Struct
     {
         $isnat = fn(mixed $n): bool => 0 < (self::T_integer & self::typify($n)) && 0 <= $n;
 
+        // JavaScript has one number type, so 2.0 counts as 2.
+        $asint = fn(mixed $n): mixed => is_float($n) && floor($n) === $n && abs($n) < 9.2e18 ? (int) $n : $n;
+
+        $count = $asint($count);
         if ($isnat($count)) {
             return [$count, $count, 0 === $count ? 'none' : 'exactly ' . $count];
         }
 
-        $min = self::_getprop($count, 'min');
-        $max = self::_getprop($count, 'max');
+        $min = $asint(self::_getprop($count, 'min'));
+        $max = $asint(self::_getprop($count, 'max'));
         $nomin = self::undef() === $min;
         $nomax = self::undef() === $max;
 
@@ -3009,17 +3042,12 @@ class Struct
 
             // Get corresponding current object.
             $pkey = self::_getprop($path, count($path) - 2);
-            $tval = self::_getprop($inj->dparent, $pkey);
+            $tval = self::getprop($inj->dparent, $pkey);
 
-            if (self::undef() === $tval) {
+            if (null === $tval) {
                 $tval = new \stdClass();
             } elseif (!self::ismap($tval)) {
-                $inj->errs[] = self::_invalidTypeMsg(
-                    self::slice($inj->path, 0, -1),
-                    self::S_object,
-                    self::typify($tval),
-                    $tval
-                );
+                // _validation reports the mismatch, once.
                 return self::undef();
             }
 
@@ -3046,7 +3074,8 @@ class Struct
 
             $childtm = self::_getprop($parent, 1);
 
-            if (self::undef() === $inj->dparent) {
+            // Group A: a stored null is no data.
+            if (self::undef() === $inj->dparent || null === $inj->dparent) {
                 // Empty list as default. `$parent` may be a ListRef - see the
                 // note on the other array_pop below.
                 if ($parent instanceof ListRef) {
@@ -3060,13 +3089,6 @@ class Struct
             }
 
             if (!self::islist($inj->dparent)) {
-                $msg = self::_invalidTypeMsg(
-                    self::slice($inj->path, 0, -1),
-                    self::S_array,
-                    self::typify($inj->dparent),
-                    $inj->dparent
-                );
-                $inj->errs[] = $msg;
                 $inj->keyI = count($parent);
                 return $inj->dparent;
             }
@@ -3752,18 +3774,11 @@ class Struct
         if (self::islist($val)) {
             $listArr = ($val instanceof ListRef) ? $val->list : $val;
             $listLen = count($listArr);
-            $nkey = -1;
-            if (is_int($key)) {
-                $nkey = 0 > $key ? $listLen + $key : $key;
-            } else {
-                $skey = self::_condenseStr($key);
-                if (1 === preg_match(self::R_INTEGER_KEY, $skey)) {
-                    // Only a negative integer counts from the end; "-0" and "01" read as getprop does.
-                    $nkey = (int) $skey;
-                    $nkey = 0 > $nkey ? $listLen + $nkey : self::_listindex($skey, $listLen);
-                }
+            $nkey = self::_listkey($key);
+            if (null !== $nkey && 0 > $nkey) {
+                $nkey += $listLen;
             }
-            if (0 <= $nkey && $nkey < $listLen) {
+            if (null !== $nkey && 0 <= $nkey && $nkey < $listLen) {
                 $out = $listArr[$nkey];
             }
         }
@@ -3798,11 +3813,8 @@ class Struct
         }
 
         if ($parent instanceof ListRef) {
-            $keyI = (int)$key;
-            if (!is_numeric($key)) {
-                return $parent;
-            }
-            if ($keyI >= 0 && $keyI < count($parent->list)) {
+            $keyI = self::_listindex($key, count($parent->list));
+            if (0 <= $keyI) {
                 array_splice($parent->list, $keyI, 1);
             }
             return $parent;
@@ -3820,14 +3832,10 @@ class Struct
                 unset($parent->$key);
             }
         } elseif (self::islist($parent)) {
-            // Ensure key is an integer
-            $keyI = (int)$key;
-            if (!is_numeric($key) || (string)$keyI !== (string)$key) {
-                return $parent;
-            }
+            $keyI = self::_listindex($key, count($parent));
 
             // Delete list element at position keyI, shifting later elements down
-            if ($keyI >= 0 && $keyI < count($parent)) {
+            if (0 <= $keyI) {
                 for ($pI = $keyI; $pI < count($parent) - 1; $pI++) {
                     $parent[$pI] = $parent[$pI + 1];
                 }
@@ -4175,7 +4183,7 @@ class Struct
     private static function _condenseChild(mixed $cond, mixed $idx, mixed $key): mixed
     {
         $enc = self::_condenseEnc($cond, $idx);
-        if (null === $enc) {
+        if (null === $enc || !(is_string($key) || is_int($key) || is_float($key))) {
             return -1;
         }
 

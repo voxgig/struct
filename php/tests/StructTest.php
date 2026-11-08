@@ -1664,6 +1664,42 @@ class StructTest extends TestCase
         $this->assertCount(0, $inj->errs);
     }
 
+    public function testValidateChildOneErrorPerFailure(): void
+    {
+        $cases = [
+            [(object) ['x' => 1], (object) ['x' => (object) ['`$CHILD`' => '`$NUMBER`']]],
+            [(object) ['x' => 1], (object) ['x' => ['`$CHILD`', '`$NUMBER`']]],
+            [1, (object) ['`$CHILD`' => '`$NUMBER`']],
+            [1, ['`$CHILD`', '`$NUMBER`']],
+        ];
+        foreach ($cases as [$data, $spec]) {
+            $inj = (object) ['errs' => []];
+            Struct::validate($data, $spec, $inj);
+            $this->assertCount(1, $inj->errs, json_encode($inj->errs));
+        }
+    }
+
+    public function testValidateNofIntegralDecimalCount(): void
+    {
+        // A PHP float 2.0 is the JavaScript number 2, so it is a valid count.
+        $specs = ['`$NUMBER`', '`$INTEGER`', '`$STRING`'];
+        $this->assertSame(3, Struct::validate(3, ['`$NOF`', 2.0, ...$specs]));
+        $this->assertSame(3, Struct::validate(3, ['`$NOF`', (object) ['min' => 1.0, 'max' => 2.0], ...$specs]));
+        $this->assertSame('x', Struct::validate('x', ['`$NOF`', 0.0, '`$NUMBER`']));
+
+        $inj = (object) ['errs' => []];
+        Struct::validate('x', ['`$NOF`', 2.0, ...$specs], $inj);
+        $this->assertSame(['Expected exactly 2 of number, integer, string, but found string: x.'], $inj->errs);
+
+        $inj = (object) ['errs' => []];
+        Struct::validate('x', ['`$NOF`', (object) ['min' => 2.0], ...$specs], $inj);
+        $this->assertSame(['Expected at least 2 of number, integer, string, but found string: x.'], $inj->errs);
+
+        $inj = (object) ['errs' => []];
+        Struct::validate(3, ['`$NOF`', 1.5, '`$NUMBER`'], $inj);
+        $this->assertSame(['The $NOF validator at field <root> has an invalid count: 1.5.'], $inj->errs);
+    }
+
     // ——— Transform apply and format ———
 
     public function testTransformApply(): void
