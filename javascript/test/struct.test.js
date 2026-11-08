@@ -202,6 +202,39 @@ describe('struct', async () => {
     )
   })
 
+  test('proto-keys-stay-own-properties', () => {
+    const s = struct
+    // JSON.parse keeps __proto__ as an own key; the corpus compiler cannot.
+    const evil = JSON.parse('{"__proto__":{"polluted":"yes"}}')
+    const out = s.merge([{}, evil])
+    equal(undefined, {}.polluted)
+    deepEqual(Object.keys(out), ['__proto__'])
+    deepEqual(out.__proto__, { polluted: 'yes' })
+    s.merge([{ a: {} }, JSON.parse('{"a":{"__proto__":{"deep":1}}}')])
+    equal(undefined, {}.deep)
+    s.setprop({}, '__proto__', { viaset: 1 })
+    equal(undefined, {}.viaset)
+    deepEqual(Object.keys(s.jm('__proto__', 1)), ['__proto__'])
+    equal(1, s.getprop(JSON.parse('{"__proto__":1}'), '__proto__'))
+    equal(undefined, s.getprop({}, '__proto__'))
+    // A class instance still reads inherited members.
+    class A {
+      get g() {
+        return 7
+      }
+    }
+    equal(7, s.getprop(new A(), 'g'))
+  })
+
+  test('validate-child-one-error-per-failure', () => {
+    const s = struct
+    for (const spec of [{ x: { '`$CHILD`': '`$NUMBER`' } }, { x: ['`$CHILD`', '`$NUMBER`'] }]) {
+      const errs = []
+      s.validate({ x: 1 }, spec, { errs })
+      equal(errs.length, 1, JSON.stringify(errs))
+    }
+  })
+
   test('condense-invalid-key-mutations-stay-no-ops', () => {
     // Both helpers define an invalid key as ignored, so a call that cannot
     // write must not start throwing just because the store is condensed.
