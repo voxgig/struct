@@ -249,30 +249,35 @@ object struct {
     case _ => Seq.empty
   }
 
-  private def isIntKey(s: String): Boolean =
-    s.nonEmpty && s.forall(c => (c >= '0' && c <= '9') || c == '-')
+  private val R_LIST_INDEX = java.util.regex.Pattern.compile("^(0|-?[1-9][0-9]*)$")
 
-  private val R_LIST_INDEX = java.util.regex.Pattern.compile("^(0|[1-9][0-9]*)$")
-
-  // The index a list read takes key to, or -1: only a canonical index, as a
-  // JavaScript array reads one ("01", "+1", "1.0" and "-0" are not).
-  private def listIndex(key: Value): Long = {
-    val k = jsString(key)
-    if (!R_LIST_INDEX.matcher(k).matches()) -1L
-    else if (k.length > 18) Long.MaxValue
-    else k.toLong
+  // A list key's index, or NaN: an integral number, or the string String(n)
+  // prints for one, negative or not ("01", "+1", "1.0" and "-0" are not).
+  private def listIndex(key: Value): Double = key match {
+    case VNum(n) => if (isIntegerF(n)) n else Double.NaN
+    case VStr(s) if R_LIST_INDEX.matcher(s).matches() => s.toDouble
+    case _ => Double.NaN
   }
 
   private def listGet(b: ArrayBuffer[Value], key: Value): Value = {
     val i = listIndex(key)
-    if (i >= 0 && i < b.length) b(i.toInt) else Noval
+    if (0.0 <= i && i < b.length) b(i.toInt) else Noval
   }
+
+  // A string or a number: a read misses at any other key.
+  private def isKeyType(key: Value): Boolean = key match {
+    case VStr(_) | VNum(_) => true
+    case _ => false
+  }
+
+  private def mapGet(m: LinkedHashMap[String, Value], key: Value): Value =
+    if (isKeyType(key)) omapGet(m, jsString(key)).getOrElse(Noval) else Noval
 
   def getprop(v: Value, key: Value, alt: Value = Noval): Value = {
     if (isNoval(v) || isNoval(key)) alt
     else {
       val out = v match {
-        case VMap(m) => omapGet(m, jsString(key)).getOrElse(Noval)
+        case VMap(m) => mapGet(m, key)
         case VList(b) => listGet(b, key)
         case _ => Noval
       }
@@ -284,7 +289,7 @@ object struct {
   def lookup_(v: Value, key: Value): Value = {
     if (isNoval(v) || isNoval(key)) Noval
     else v match {
-      case VMap(m) => omapGet(m, jsString(key)).getOrElse(Noval)
+      case VMap(m) => mapGet(m, key)
       case VList(b) => listGet(b, key)
       case _ => Noval
     }
@@ -301,13 +306,10 @@ object struct {
       var out: Value = Noval
       v match {
         case VList(b) =>
-          val ks = jsString(key)
-          val ci = listIndex(key)
+          val i = listIndex(key)
           // A negative key counts from the end.
-          val nk =
-            if (ci >= 0 || !isIntKey(ks)) ci
-            else ks.toIntOption match { case Some(n) if n < 0 => b.length.toLong + n; case _ => -1L }
-          if (nk >= 0 && nk < b.length) out = b(nk.toInt)
+          val nk = if (i < 0.0) b.length + i else i
+          if (0.0 <= nk && nk < b.length) out = b(nk.toInt)
         case _ =>
       }
       if (isNullish(out)) (alt match {
@@ -361,15 +363,12 @@ object struct {
     if (iskey(key)) parent match {
       case VMap(m) => omapSet(m, jsString(key), v)
       case VList(b) =>
-        val ks = key match { case VStr(s) => s; case VNum(n) => numToString(Math.floor(n)); case _ => "" }
-        try {
-          val ki = ks.toInt
-          val len = b.length
-          if (ki >= 0) {
-            val k2 = if (ki > len) len else ki
-            if (k2 >= len) b.append(v) else b(k2) = v
-          } else b.insert(0, v)
-        } catch { case _: NumberFormatException => }
+        val ki = listIndex(key)
+        if (!ki.isNaN) {
+          if (ki < 0.0) b.insert(0, v)
+          else if (ki < b.length) b(ki.toInt) = v
+          else b.append(v)
+        }
       case _ =>
     }
     parent
@@ -380,11 +379,8 @@ object struct {
     if (iskey(key)) parent match {
       case VMap(m) => omapDel(m, jsString(key))
       case VList(b) =>
-        val ks = key match { case VStr(s) => s; case VNum(n) => numToString(Math.floor(n)); case _ => "" }
-        try {
-          val ki = ks.toInt
-          if (ki >= 0 && ki < b.length) b.remove(ki)
-        } catch { case _: NumberFormatException => }
+        val ki = listIndex(key)
+        if (0.0 <= ki && ki < b.length) b.remove(ki.toInt)
       case _ =>
     }
     parent
@@ -829,10 +825,12 @@ object struct {
   }
 
   def getpath(store: Value, path: Value, inj: InjArg = INone): Value = {
+    // A new array, so the caller's path is never rewritten. A number part reads
+    // as its string; any other non-string part makes the whole path miss.
     val pa: Option[Array[Value]] = path match {
-      case VList(b) => Some(b.toArray)
+      case VList(b) if b.forall(isKeyType) => Some(b.map(p => VStr(jsString(p))).toArray)
       case VStr(s) => Some(s.split("\\.", -1).map(x => VStr(x)).toArray)
-      case VNum(n) => Some(Array(VStr(strkey(VNum(n)))))
+      case VNum(_) => Some(Array(VStr(jsString(path))))
       case _ => None
     }
     pa match {
@@ -1575,7 +1573,8 @@ object struct {
         keysof(emptyMap()).foreach { ckey => setprop(parent, VStr(ckey), clone(childtm)); setprop(keys, VNum(size(keys).toDouble), VStr(ckey)) }
         delprop(parent, key); Noval
       } else if (!ismap(tval)) {
-        pushErr(inj, invalidTypeMsg(slice(path, VNum(0.0), VNum((size(path) - 1).toDouble)), S_object, typify(tval), tval, "V0220")); Noval
+        // _validation reports the mismatch, once.
+        Noval
       } else {
         keysof(tval).foreach { ckey => setprop(parent, VStr(ckey), clone(childtm)); setprop(keys, VNum(size(keys).toDouble), VStr(ckey)) }
         delprop(parent, key); Noval
@@ -1585,7 +1584,6 @@ object struct {
       if (!islist(parent)) { pushErr(inj, "Invalid $CHILD as value"); Noval }
       else if (isNoval(inj.dparent)) { parent match { case VList(b) => b.clear(); case _ => }; Noval }
       else if (!islist(inj.dparent)) {
-        pushErr(inj, invalidTypeMsg(slice(path, VNum(0.0), VNum((size(path) - 1).toDouble)), S_list, typify(inj.dparent), inj.dparent, "V0230"))
         inj.keyi = size(parent); inj.dparent
       } else {
         // Clone children and reset inj key index.
@@ -2148,6 +2146,7 @@ object struct {
   private def condenseChild(cond: Value, idx: Int, key: Value): Int = {
     val enc = condenseEnc(cond, idx)
     enc match {
+      case _ if !isKeyType(key) => -1
       case VList(pairs) if condenseIs(enc, CONDENSE_MAP) =>
         val symid = condenseSymId(cond, jsString(key))
         if (symid < 0) return -1
@@ -2163,7 +2162,7 @@ object struct {
         -1
       case VList(items) if condenseIs(enc, CONDENSE_LIST) =>
         val i = listIndex(key)
-        if (i < 0 || i >= items.length - 1) -1 else condenseIndex(items(1 + i.toInt))
+        if (0.0 <= i && i < items.length - 1) condenseIndex(items(1 + i.toInt)) else -1
       case _ => -1
     }
   }

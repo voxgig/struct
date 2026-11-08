@@ -305,6 +305,23 @@ object Runner {
     }
   }
 
+  // ---------------- validate: what the corpus cannot express ----------------
+
+  def runValidateLocal(): Unit = {
+    runLocal("validate-child-one-error-per-failure") {
+      def errs(data: Value, spec: Value): Value = {
+        val d = new InjDef
+        d.dErrs = emptyList()
+        validate(data, spec, IDef(d))
+        d.dErrs
+      }
+      Seq(jm(VStr("x"), jm(VStr("`$CHILD`"), VStr("`$NUMBER`"))), jm(VStr("x"), jt(VStr("`$CHILD`"), VStr("`$NUMBER`"))))
+        .forall(spec => size(errs(jm(VStr("x"), VNum(1)), spec)) == 1) &&
+        errs(VNum(1), jm(VStr("`$CHILD`"), VStr("`$NUMBER`"))) == jt(VStr("Expected map, but found integer: 1.")) &&
+        errs(VNum(1), jt(VStr("`$CHILD`"), VStr("`$NUMBER`"))) == jt(VStr("Expected list, but found integer: 1."))
+    }
+  }
+
   // ---------------- groups ----------------
 
   def runAll(spec: Value): Unit = {
@@ -434,6 +451,7 @@ object Runner {
     Seq("directive", "nof", "all", "unknown").foreach { gn =>
       runSet("validate." + gn, getprop(validates, VStr(gn)), arg1(vin => validate(vget(vin, "data"), vget(vin, "spec"))), false)
     }
+    runValidateLocal()
 
     Seq("basic", "operators", "edge", "alts").foreach { gn =>
       runSet("select." + gn, getprop(selects, VStr(gn)), arg1(vin => select(vget(vin, "obj"), vget(vin, "query"))))
