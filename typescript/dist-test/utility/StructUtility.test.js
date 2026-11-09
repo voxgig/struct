@@ -208,7 +208,7 @@ const { equal, deepEqual, throws } = node_assert_1.default;
     (0, node_test_1.test)('condense-astral-keys-resolve', () => {
         const s = struct;
         // Code-unit order puts the astral key first; the stored pairs must not.
-        const src = { 'Ａ': 1, '\u{1F600}': 2 };
+        const src = { Ａ: 1, '\u{1F600}': 2 };
         const c = s.condense(src);
         equal(s.getpath(c, ['\u{1F600}']), 2);
         equal(s.getpath(c, ['Ａ']), 1);
