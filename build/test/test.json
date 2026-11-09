@@ -20057,7 +20057,7 @@
             }
           },
           {
-            "err": "/^[^|]*Expected field a45 to be map, but found integer: 1\\.$/",
+            "err": "/^[^|]*Expected field a45 to be map, but found integer: 1\\.[^|]*$/",
             "in": {
               "data": {
                 "a45": 1
@@ -20072,7 +20072,7 @@
             }
           },
           {
-            "err": "/^[^|]*Expected field q to be list, but found string: a26\\.$/",
+            "err": "/^[^|]*Expected field q to be list, but found string: a26\\.[^|]*$/",
             "in": {
               "data": {
                 "q": "a26"

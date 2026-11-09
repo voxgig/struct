@@ -226,11 +226,12 @@ child: {
       }
       out:{x:{a55:1,b55:2}} }
 
-    # One error per failure, in either form.
+    # One error per failure, in either form: no ` | ` join anywhere. The end
+    # stays open, since a host may append to the message it reports.
     { in: { data: {a45:1}, spec: {a45:{'`$CHILD`':{y:1}}} },
-      err: '/^[^|]*Expected field a45 to be map, but found integer: 1\\.$/' }
+      err: '/^[^|]*Expected field a45 to be map, but found integer: 1\\.[^|]*$/' }
     { in: { data: {q:a26}, spec: {q:['`$CHILD`','`$MAP`']} },
-      err: '/^[^|]*Expected field q to be list, but found string: a26\\.$/' }
+      err: '/^[^|]*Expected field q to be list, but found string: a26\\.[^|]*$/' }
   ]
 }
 
