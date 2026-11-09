@@ -1,5 +1,6 @@
 -- Copyright (c) 2025-2026 Voxgig Ltd. MIT LICENSE.
 
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE LambdaCase #-}
 
 -- |
@@ -41,7 +42,7 @@
 -- @
 module VoxgigStruct where
 
-import Control.Exception (Exception, evaluate, throwIO)
+import Control.Exception (Exception (..), evaluate, throwIO)
 import Control.Monad (filterM, foldM, forM_, when)
 import qualified Data.Array as A
 import Data.Bits (shiftL, (.&.), (.|.))
@@ -121,7 +122,12 @@ data InjArg = IInj Inj | IDef InjDef | INone
 -- | The exception thrown on an unrecoverable structure error.
 newtype StructError = StructError String
 instance Show StructError where show (StructError m) = m
+#if __GLASGOW_HASKELL__ >= 910
+-- A backtrace would ride along in displayException; the message is the contract.
+instance Exception StructError where backtraceDesired _ = False
+#else
 instance Exception StructError
+#endif
 
 -- ---------------------------------------------------------------------------
 -- Constants
