@@ -717,7 +717,7 @@ canonical "lists are reference-stable" assumption.
 
 ### Test status
 
-All 123 `TestStruct` subtests pass against the shared corpus.
+123/123 tests pass against the shared corpus.
 
 
 ## Regex

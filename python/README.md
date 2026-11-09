@@ -640,8 +640,8 @@ both map to `None` at the user-facing API.
 needs to disambiguate, the runner uses string sentinels `__NULL__`
 and `__UNDEF__`.
 
-Inside a dict or list, `validate` tells a stored `None` from a missing
-key by the key's presence: `$NULL`, `$NIL` and `$ANY` keep a null the
+Inside a dict or list, `validate` distinguishes a stored `None` from a
+missing key by the key's presence: `$NULL`, `$NIL` and `$ANY` keep a null the
 data holds in the output, and the list directives `$EXACT`, `$NOF` and
 `$ALL` read it as a value. The absent-versus-null rule is in
 [`UNDEF_SPEC.md`](../design/UNDEF_SPEC.md).
