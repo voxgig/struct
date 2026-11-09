@@ -78,7 +78,6 @@ class Struct
     private const S_DTOP = '$TOP';
     private const S_DERRS = '$ERRS';
 
-    private const S_array = 'array';
     private const S_boolean = 'boolean';
     private const S_function = 'function';
     private const S_nil = 'nil';
