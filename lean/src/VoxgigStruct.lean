@@ -837,7 +837,7 @@ def condenseAt (xs : Array Value) (i : Int) : Value :=
 
 /-- The kind of a node encoding: its first element. -/
 def condenseKind (enc : Array Value) : Option Float :=
-  match enc[0]? with
+  match enc[(0 : Nat)]? with
   | some (.num k) => some k
   | _ => none
 
