@@ -4147,6 +4147,27 @@ inline Value CMP_FN(Injection& inj, const Value& val, const std::string& ref, co
   return Value::undef();
 }
 
+// Open every map in a select query, so a child may hold keys the query does
+// not name, but leave a directive's literals as written: what $EXACT
+// compares, and the count or bound of $NOF, $LEN and $RANGE.
+inline void openquery(const Value& q) {
+  if (ismap(q)) {
+    Value cur = getprop(q, Value(S_BOPEN()));
+    setprop(q, Value(S_BOPEN()), cur.is_undef() ? Value(true) : cur);
+    for (const auto& entry : *q.as_map())
+      openquery(entry.second);
+  } else if (islist(q)) {
+    auto l = q.as_list();
+    std::string head = !l->empty() && (*l)[0].is_string() ? (*l)[0].as_string() : "";
+    bool exact = S_BEXACT() == head;
+    bool bounded = "`$NOF`" == head || "`$LEN`" == head || "`$RANGE`" == head;
+    for (size_t i = 0; i < l->size(); i++) {
+      if (0 == i || !(exact || (bounded && 1 == i)))
+        openquery((*l)[i]);
+    }
+  }
+}
+
 } // namespace selectors
 
 inline std::vector<Value> select(const Value& children, const Value& query) {
@@ -4186,14 +4207,8 @@ inline std::vector<Value> select(const Value& children, const Value& query) {
   extra->set("$LIKE", Value(Injector(selectors::CMP_FN)));
 
   Value q = clone(query);
-  walk_v(q,
-         [](const Value&, const Value& v, const Value&, const std::vector<std::string>&) -> Value {
-           if (ismap(v)) {
-             Value cur = getprop(v, Value(S_BOPEN()));
-             setprop(v, Value(S_BOPEN()), cur.is_undef() ? Value(true) : cur);
-           }
-           return v;
-         });
+
+  selectors::openquery(q);
 
   std::vector<Value> results;
   for (const auto& child : childList) {
