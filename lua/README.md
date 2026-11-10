@@ -586,7 +586,7 @@ $MERGE   $EACH    $PACK    $REF     $FORMAT  $APPLY
 ```
 $MAP   $LIST   $STRING   $NUMBER   $INTEGER   $DECIMAL  $BOOLEAN
 $NULL  $NIL    $FUNCTION $INSTANCE $ANY       $CHILD    $EXACT
-$NOF   $ALL
+$NOF   $ALL    $LEN      $RANGE
 ```
 
 `` { '`$NOF`', n, spec, … } `` holds when as many specs admit the value as `n`
@@ -595,6 +595,14 @@ allows, where `n` is an integer or a map with `min`, `max` or both.
 admits a value when validating the value against it finds no error and gives
 back every member of the value unchanged. There is no `$ONE`: write
 `` { '`$ONE`', a, b } `` as `` { '`$NOF`', { min = 1 }, a, b } ``.
+
+`` { '`$LEN`', n, spec? } `` holds when the value's length is within `n`, a
+bound written as for `$NOF`. Strings count code points, lists elements, maps
+keys. `` { '`$RANGE`', bound, spec? } `` holds when the value is a number
+within the bound, a map of `min` or `gt` and `max` or `lt`, such as
+`{ min = 0, lt = 150 }`. `$LEN` and `$RANGE` take at most one spec, which
+must also admit the value. `min` and `max` include their bound, while `gt`
+and `lt` exclude it.
 
 A spec that names a checker `validate` does not define is rejected before
 any data is read, and nothing is validated. The whole-string reference
@@ -657,7 +665,7 @@ reference-stable" assumption holds without a wrapper.
 
 ### Test status
 
-109/109 tests pass against the shared corpus.
+111/111 tests pass against the shared corpus.
 
 
 ## Regex

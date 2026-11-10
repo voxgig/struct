@@ -1260,6 +1260,18 @@ describe("struct", function()
     )
   end)
 
+  test("validate-len", function()
+    runsetflags(validateSpec.len, { null = false }, function(vin)
+      return validate(vin.data, vin.spec)
+    end)
+  end)
+
+  test("validate-range", function()
+    runsetflags(validateSpec.range, { null = false }, function(vin)
+      return validate(vin.data, vin.spec)
+    end)
+  end)
+
   test("validate-unknown", function()
     runsetflags(validateSpec.unknown, { null = false }, function(vin)
       return validate(vin.data, vin.spec)

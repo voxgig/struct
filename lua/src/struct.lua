@@ -3097,6 +3097,195 @@ local function validate_ALL(inj, _val, _ref, store)
   return _validatecount(inj, store, "$ALL", false)
 end
 
+-- The bounds of a $LEN bound, with -1 for no maximum, and the words for it,
+-- which are absent when the bound is invalid.
+local function _lenbound(bound)
+  local lo, hi, countdesc = _nofcount(bound, -1)
+
+  if NONE == countdesc then
+    return 0, 0, NONE
+  end
+
+  local desc
+  if lo == hi then
+    desc = stringify(lo)
+  elseif -1 == hi then
+    desc = "at least " .. stringify(lo)
+  elseif 0 == lo then
+    desc = "at most " .. stringify(hi)
+  else
+    desc = stringify(lo) .. " to " .. stringify(hi)
+  end
+
+  return lo, hi, "of length " .. desc
+end
+
+-- The words for a $RANGE bound, which are absent when the bound is invalid.
+local function _rangedesc(bound)
+  if not ismap(bound) then
+    return NONE
+  end
+
+  local min = getprop(bound, "min")
+  local max = getprop(bound, "max")
+  local gt = getprop(bound, "gt")
+  local lt = getprop(bound, "lt")
+
+  local lower, upper = min, max
+  if NONE == lower then
+    lower = gt
+  end
+  if NONE == upper then
+    upper = lt
+  end
+
+  local function isnum(n)
+    return NONE == n or 0 < (T_number & typify(n))
+  end
+
+  local numkeys = 0
+  for _, key in ipairs({ "min", "max", "gt", "lt" }) do
+    if NONE ~= getprop(bound, key) then
+      numkeys = numkeys + 1
+    end
+  end
+
+  local valid = 0 < size(bound)
+    and size(bound) == numkeys
+    and (NONE == min or NONE == gt)
+    and (NONE == max or NONE == lt)
+    and isnum(min)
+    and isnum(max)
+    and isnum(gt)
+    and isnum(lt)
+    and (NONE == lower or NONE == upper or lower <= upper)
+
+  if not valid then
+    return NONE
+  end
+
+  local parts = {}
+  if NONE ~= min then
+    table.insert(parts, "at least " .. stringify(min))
+  elseif NONE ~= gt then
+    table.insert(parts, "greater than " .. stringify(gt))
+  end
+  if NONE ~= max then
+    table.insert(parts, "at most " .. stringify(max))
+  elseif NONE ~= lt then
+    table.insert(parts, "less than " .. stringify(lt))
+  end
+
+  return table.concat(parts, " and ")
+end
+
+-- A number within a valid $RANGE bound.
+local function _inrange(bound, val)
+  local min = getprop(bound, "min")
+  local max = getprop(bound, "max")
+  local gt = getprop(bound, "gt")
+  local lt = getprop(bound, "lt")
+
+  return (NONE == min or min <= val)
+    and (NONE == max or val <= max)
+    and (NONE == gt or gt < val)
+    and (NONE == lt or val < lt)
+end
+
+-- The bounding list directives: a bound, then at most one spec that must also admit.
+local function _validatebound(inj, store, name)
+  local mode, parent, keyI = inj.mode, inj.parent, inj.keyI
+
+  if M_VAL ~= mode then
+    return NONE
+  end
+
+  if not islist(parent) or 0 ~= keyI then
+    table.insert(
+      inj.errs,
+      "The "
+        .. name
+        .. " validator at field "
+        .. pathify(inj.path, 1, 1)
+        .. " must be the first element of an array."
+    )
+    return NONE
+  end
+
+  local cval = _slotval(inj)
+
+  inj.keyI = size(inj.keys)
+
+  -- As for the counting directives: SKIP keeps inject off the detached list.
+  inj:setval(cval, 2)
+
+  inj.path = slice(inj.path, -1)
+
+  local field = "The " .. name .. " validator at field " .. pathify(inj.path, 1)
+  local nargs = size(parent) - 1
+
+  if nargs < 1 or 2 < nargs then
+    table.insert(inj.errs, field .. " must have a bound and at most one spec.")
+    return SKIP
+  end
+
+  local bound = getprop(parent, 1)
+  local islen = "$LEN" == name
+  local lo, hi, desc = 0, 0, NONE
+  if islen then
+    lo, hi, desc = _lenbound(bound)
+  else
+    desc = _rangedesc(bound)
+  end
+
+  if NONE == desc then
+    table.insert(inj.errs, field .. " has an invalid bound: " .. stringify(bound) .. ".")
+    return SKIP
+  end
+
+  local ctype = typify(cval)
+
+  if 2 == nargs and not _admits(cval, getprop(parent, 2), inj, store) then
+    local specdesc = stringify(getprop(parent, 2)):gsub("`%$([A-Z]+)`", string.lower)
+    table.insert(inj.errs, _invalidTypeMsg(inj.path, specdesc, ctype, cval, "V0410"))
+    return SKIP
+  end
+
+  if 0 == ((islen and (T_string | T_list | T_map) or T_number) & ctype) then
+    local needtype = islen and "string, list or map" or S_number
+    table.insert(inj.errs, _invalidTypeMsg(inj.path, needtype, ctype, cval, "V0420"))
+    return SKIP
+  end
+
+  local inbound
+  if islen then
+    -- utf8.len fails on invalid UTF-8, which then counts its bytes.
+    local len = S_string == type(cval) and utf8.len(cval) or size(cval)
+    inbound = lo <= len and (-1 == hi or len <= hi)
+  else
+    inbound = _inrange(bound, cval)
+  end
+
+  if not inbound then
+    local needtype = (1 < size(inj.path) and "" or "value ") .. desc
+    table.insert(inj.errs, _invalidTypeMsg(inj.path, needtype, ctype, cval, "V0430"))
+  end
+
+  return SKIP
+end
+
+-- The value's length is within a bound: ['`$LEN`', bound, spec?], where the
+-- bound is as for a $NOF count. A string's length is in code points.
+local function validate_LEN(inj, _val, _ref, store)
+  return _validatebound(inj, store, "$LEN")
+end
+
+-- The value is a number within a bound: ['`$RANGE`', bound, spec?], where the
+-- bound holds min or gt, max or lt, or one of each.
+local function validate_RANGE(inj, _val, _ref, store)
+  return _validatebound(inj, store, "$RANGE")
+end
+
 -- This is the "modify" argument to inject. Use this to perform
 -- generic validation. Runs *after* any special commands.
 _validation = function(pval, key, parent, inj)
@@ -3236,6 +3425,8 @@ validate = function(data, spec, injdef)
       ["$EXACT"] = validate_EXACT,
       ["$NOF"] = validate_NOF,
       ["$ALL"] = validate_ALL,
+      ["$LEN"] = validate_LEN,
+      ["$RANGE"] = validate_RANGE,
     },
 
     getdef(extra, {}),
