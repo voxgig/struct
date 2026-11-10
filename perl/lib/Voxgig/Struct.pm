@@ -2377,7 +2377,7 @@ sub transform {
 }
 
 # ============================================================================
-# Validate checkers (15)
+# Validate checkers (18)
 # ============================================================================
 
 sub _invalid_type_msg {
@@ -2790,6 +2790,167 @@ sub _validatecount {
     return SKIP();
 }
 
+# The value's length is within a bound: ['`$LEN`', bound, spec?], where the
+# bound is as for a $NOF count. A string's length is in code points.
+sub validate_LEN {
+    my ($inj, $val, $ref, $store) = @_;
+    return _validatebound($inj, $store, '$LEN');
+}
+
+# The value is a number within a bound: ['`$RANGE`', bound, spec?], where the
+# bound holds min or gt, max or lt, or one of each.
+sub validate_RANGE {
+    my ($inj, $val, $ref, $store) = @_;
+    return _validatebound($inj, $store, '$RANGE');
+}
+
+# The bounding list directives: a bound, then at most one spec that must also admit.
+sub _validatebound {
+    my ($inj, $store, $name) = @_;
+    my $mode = $inj->{mode};
+    my $parent = $inj->{parent};
+    my $keyI = $inj->{keyI};
+
+    return NONE() if $mode != M_VAL;
+
+    if (!islist($parent) || $keyI != 0) {
+        push @{ $inj->{errs} },
+            'The ' . $name . ' validator at field ' . pathify($inj->{path}, 1, 1) .
+            ' must be the first element of an array.';
+        return NONE();
+    }
+
+    my $cval = _slotval($inj);
+
+    $inj->{keyI} = size($inj->{keys});
+
+    # As for the counting directives: SKIP keeps inject off the detached list.
+    _inj_setval($inj, $cval, 2);
+
+    $inj->{path} = slice($inj->{path}, -1);
+
+    my $field = 'The ' . $name . ' validator at field ' . pathify($inj->{path}, 1);
+    my $nargs = size($parent) - 1;
+
+    if ($nargs < 1 || 2 < $nargs) {
+        push @{ $inj->{errs} }, $field . ' must have a bound and at most one spec.';
+        return SKIP();
+    }
+
+    my $bound = _lookup($parent, 1);
+    my $islen = '$LEN' eq $name;
+    my ($lo, $hi, $desc) = $islen ? _lenbound($bound) : (0, 0, _rangedesc($bound));
+
+    if (is_none($desc)) {
+        push @{ $inj->{errs} }, $field . ' has an invalid bound: ' . stringify($bound) . '.';
+        return SKIP();
+    }
+
+    my $ctype = typify($cval);
+
+    if (2 == $nargs && !_admits($cval, _lookup($parent, 2), $inj, $store)) {
+        my $specdesc = stringify(_lookup($parent, 2));
+        $specdesc =~ s/`\$([A-Z]+)`/lc($1)/ge;
+        push @{ $inj->{errs} },
+            _invalid_type_msg($inj->{path}, $specdesc, $ctype, $cval, 'V0410');
+        return SKIP();
+    }
+
+    if (!(($islen ? T_string | T_list | T_map : T_number) & $ctype)) {
+        my $needtype = $islen ? 'string, list or map' : S_number;
+        push @{ $inj->{errs} },
+            _invalid_type_msg($inj->{path}, $needtype, $ctype, $cval, 'V0420');
+        return SKIP();
+    }
+
+    my $len = !$islen ? 0 : (T_string & $ctype) ? _codepoints($cval) : size($cval);
+    my $inbound = $islen
+        ? ($lo <= $len && (-1 == $hi || $len <= $hi))
+        : _inrange($bound, $cval);
+
+    if (!$inbound) {
+        my $needtype = (size($inj->{path}) > 1 ? '' : 'value ') . $desc;
+        push @{ $inj->{errs} },
+            _invalid_type_msg($inj->{path}, $needtype, $ctype, $cval, 'V0430');
+    }
+
+    return SKIP();
+}
+
+# The bounds of a $LEN bound, with -1 for no maximum, and the words for it,
+# which are NONE when the bound is invalid.
+sub _lenbound {
+    my ($bound) = @_;
+    my ($lo, $hi, $countdesc) = _nofcount($bound, -1);
+
+    return (0, 0, NONE()) if is_none($countdesc);
+
+    my $desc = 'of length ' . (
+          $lo == $hi ? $lo
+        : -1 == $hi  ? 'at least ' . $lo
+        : 0 == $lo   ? 'at most ' . $hi
+        :              $lo . ' to ' . $hi
+    );
+
+    return ($lo, $hi, $desc);
+}
+
+# The words for a $RANGE bound, which are NONE when the bound is invalid.
+sub _rangedesc {
+    my ($bound) = @_;
+    return NONE() unless ismap($bound);
+
+    my $min = _lookup($bound, 'min');
+    my $max = _lookup($bound, 'max');
+    my $gt  = _lookup($bound, 'gt');
+    my $lt  = _lookup($bound, 'lt');
+    my $lower = is_none($min) ? $gt : $min;
+    my $upper = is_none($max) ? $lt : $max;
+    my $isnum = sub { my ($n) = @_; return (is_none($n) || (T_number & typify($n))) ? 1 : 0 };
+
+    my $valid = 0 < size($bound)
+        && size($bound) == scalar(grep { !is_none($_) } $min, $max, $gt, $lt)
+        && (is_none($min) || is_none($gt))
+        && (is_none($max) || is_none($lt))
+        && $isnum->($min)
+        && $isnum->($max)
+        && $isnum->($gt)
+        && $isnum->($lt)
+        && (is_none($lower) || is_none($upper) || $lower <= $upper);
+
+    return NONE() unless $valid;
+
+    my @parts;
+    if    (!is_none($min)) { push @parts, 'at least ' . stringify($min) }
+    elsif (!is_none($gt))  { push @parts, 'greater than ' . stringify($gt) }
+    if    (!is_none($max)) { push @parts, 'at most ' . stringify($max) }
+    elsif (!is_none($lt))  { push @parts, 'less than ' . stringify($lt) }
+
+    return CORE::join(' and ', @parts);
+}
+
+# A number within a valid $RANGE bound.
+sub _inrange {
+    my ($bound, $val) = @_;
+    my $min = _lookup($bound, 'min');
+    my $max = _lookup($bound, 'max');
+    my $gt  = _lookup($bound, 'gt');
+    my $lt  = _lookup($bound, 'lt');
+
+    return ((is_none($min) || $min <= $val)
+        && (is_none($max) || $val <= $max)
+        && (is_none($gt) || $gt < $val)
+        && (is_none($lt) || $val < $lt)) ? 1 : 0;
+}
+
+# A string's length in code points. JSON reaches this port as UTF-8 bytes, so
+# a copy is decoded first; one that is not UTF-8 already holds code points.
+sub _codepoints {
+    my ($s) = @_;
+    utf8::decode($s);
+    return length $s;
+}
+
 sub _exact_eq {
     my ($a, $b) = @_;
     # NONE/undef: treat both forms as equivalent.
@@ -2929,6 +3090,8 @@ sub validate {
         '$EXACT',    \&validate_EXACT,
         '$NOF',      \&validate_NOF,
         '$ALL',      \&validate_ALL,
+        '$LEN',      \&validate_LEN,
+        '$RANGE',    \&validate_RANGE,
     );
     my $errsmap = jm(S_DERRS, $errs);
     my $store = merge([$base, getdef($extra, _mkmap()), $errsmap], 1);

@@ -102,10 +102,10 @@ because they don't preserve insertion order.
   `$FORMAT`, `$APPLY` (plus the `FORMATTER` table for $FORMAT:
   `identity`, `upper`, `lower`, `string`, `number`, `integer`,
   `concat`).
-- `validate` and the 16 validate checkers: `$STRING`, `$NUMBER`,
+- `validate` and the 18 validate checkers: `$STRING`, `$NUMBER`,
   `$INTEGER`, `$DECIMAL`, `$BOOLEAN`, `$NULL`, `$NIL`, `$MAP`,
   `$LIST`, `$FUNCTION`, `$INSTANCE`, `$ANY`, `$CHILD`, `$EXACT`,
-  `$NOF`, `$ALL`.
+  `$NOF`, `$ALL`, `$LEN`, `$RANGE`.
 - `select` and the 4 select operators: `$AND`, `$OR`, `$NOT`,
   `$CMP` (with `$GT`, `$LT`, `$GTE`, `$LTE`, `$LIKE`).
 - Type constants (`T_any`, `T_noval`, `T_boolean`, …, `T_node`),
@@ -473,6 +473,16 @@ as `$n` allows, where `$n` is an integer or a map with `min`, `max` or both.
 admits a value when validating the value against it finds no error and gives
 back every member of the value unchanged. There is no `$ONE`: write
 `` jt('`$ONE`', $a, $b) `` as `` jt('`$NOF`', jm(min => 1), $a, $b) ``.
+
+A list led by `$LEN` or `$RANGE` bounds one value.
+`` jt('`$LEN`', $n, $spec?) `` holds when the value's length is within `$n`,
+a bound written as for `$NOF`. Strings count code points, not bytes: a string
+of UTF-8 bytes is decoded before it is counted. Lists count elements, maps
+keys. `` jt('`$RANGE`', $bound, $spec?) `` holds when the value is a number
+within `$bound`, a map of `min` or `gt` and `max` or `lt`, such as
+`jm(min => 0, lt => 150)`. `$LEN` and `$RANGE` take at most one spec, which
+must also admit the value. `min` and `max` include their bound, while `gt`
+and `lt` exclude it.
 
 A spec that names a checker `validate` does not define is rejected before
 any data is read, and nothing is validated. The whole-string reference
