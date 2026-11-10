@@ -401,12 +401,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        # macos-14 is held over from the 0.13 pin, where the macOS 26 SDK on
-        # macos-latest left every libc symbol undefined and macos-14 (arm64,
-        # SDK 14) was the last image that linked. 0.16 is expected to handle
-        # the newer SDK, but that has not been measured on a runner, so the
-        # image moves in its own change rather than inside the version bump.
-        os: [ubuntu-latest, macos-14, windows-latest]
+        # macos-15, not -latest: under the 0.13 pin the macOS 26 SDK on
+        # macos-latest left every libc symbol undefined, and 0.16 has not been
+        # measured against it yet. macos-14, the last image measured, stopped
+        # being assigned runners in November 2026. macos-15 is the same arm64
+        # wheel and the nearest SDK to it.
+        os: [ubuntu-latest, macos-15, windows-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       # ziglang on PyPI rather than a ziglang.org tarball. It is the Zig
@@ -421,7 +421,7 @@ jobs:
         run: |
           set -euo pipefail
           py=python3; command -v python3 >/dev/null 2>&1 || py=python
-          # macos-14's python3 is Homebrew's, and Homebrew marks it externally
+          # On macOS, python3 is Homebrew's, and Homebrew marks it externally
           # managed: `pip install` there does not warn, it exits 1 (PEP 668,
           # "externally-managed-environment") before zig is ever fetched. A
           # venv is the documented answer and needs no extra action. Scoped to
@@ -439,7 +439,7 @@ jobs:
           chmod +x "$bin/zig"
           echo "$bin" >> "$GITHUB_PATH"
           "$bin/zig" version
-      # Held over with the macos-14 pin above: 0.13 could not link against the
+      # Held over from the macos-14 pin: 0.13 could not link against the
       # newer Xcode SDK (undefined libc symbols) and the Command Line Tools SDK
       # still works. Harmless if 0.16 no longer needs it; unmeasured either way.
       - name: Use Command Line Tools SDK (macOS)
@@ -535,7 +535,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # ubuntu-24.04, not -latest: the 6.0.2 toolchain installed below is
+        # the ubuntu2404 build, and its swift-test links libxml2.so.2, which
+        # the ubuntu-26.04 image behind -latest does not ship.
+        os: [ubuntu-24.04, macos-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       # The test runner is voxgig/omni, consumed as a local checkout (it is
