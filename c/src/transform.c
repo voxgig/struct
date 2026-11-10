@@ -2627,21 +2627,35 @@ static voxgig_value* sel_CMP(voxgig_injection* inj, voxgig_value* val, const cha
  * select
  * ===========================================================================*/
 
-/* walk callback to add `$OPEN` to every map in the query. */
-static voxgig_value* set_open_callback(voxgig_value* k, voxgig_value* v, voxgig_value* parent,
-                                       voxgig_value* path, void* ud) {
-  (void)k;
-  (void)parent;
-  (void)path;
-  (void)ud;
-  if (voxgig_is_map(v)) {
+static bool _isstr(voxgig_value* v, const char* s) {
+  return voxgig_is_string(v) && 0 == strcmp(voxgig_as_string(v), s);
+}
+
+/* Open every map in a select query, so a child may hold keys the query does
+   not name, but leave a directive's literals as written: what $EXACT
+   compares, and the count or bound of $NOF, $LEN and $RANGE. */
+static void _openquery(voxgig_value* q) {
+  if (voxgig_is_map(q)) {
     voxgig_value* bk = voxgig_new_string("`$OPEN`");
-    if (!voxgig_haskey(v, bk)) {
-      voxgig_map_set(voxgig_as_map(v), "`$OPEN`", voxgig_new_bool(true));
+    if (!voxgig_haskey(q, bk)) {
+      voxgig_map_set(voxgig_as_map(q), "`$OPEN`", voxgig_new_bool(true));
     }
     voxgig_release(bk);
+    voxgig_map* m = voxgig_as_map(q);
+    for (size_t i = 0; i < m->len; i++) {
+      _openquery(m->entries[i].value);
+    }
+  } else if (voxgig_is_list(q)) {
+    voxgig_list* l = voxgig_as_list(q);
+    voxgig_value* head = 0 < l->len ? l->items[0] : NULL;
+    bool exact = _isstr(head, "`$EXACT`");
+    bool bounded = _isstr(head, "`$NOF`") || _isstr(head, "`$LEN`") || _isstr(head, "`$RANGE`");
+    for (size_t i = 0; i < l->len; i++) {
+      if (0 == i || !(exact || (bounded && 1 == i))) {
+        _openquery(l->items[i]);
+      }
+    }
   }
-  return v ? voxgig_retain(v) : voxgig_new_undef();
 }
 
 voxgig_value* voxgig_select(voxgig_value* children, voxgig_value* query) {
@@ -2685,10 +2699,8 @@ voxgig_value* voxgig_select(voxgig_value* children, voxgig_value* query) {
   voxgig_value* meta = voxgig_new_map();
   voxgig_map_set(voxgig_as_map(meta), "`$EXACT`", voxgig_new_bool(true));
 
-  /* q = clone(query); walk q to set `$OPEN` on every map. */
   voxgig_value* q = voxgig_clone(query);
-  voxgig_value* walked = voxgig_walk(q, set_open_callback, NULL, VOXGIG_MAXDEPTH, NULL);
-  voxgig_release(walked);
+  _openquery(q);
 
   voxgig_value* results = voxgig_new_list();
   voxgig_list* cl = voxgig_as_list(child_list);
