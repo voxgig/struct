@@ -2273,9 +2273,13 @@ object Struct {
             }
         }
 
-    // Lowers every `$NAME` marker in the joined description, nested ones included.
     private fun describeAlternatives(tvals: List<Any?>): String {
-        val mm = R_TRANSFORM_NAME.matcher(join(tvals.map { stringify(it) }, ", ", false))
+        return lowernames(join(tvals.map { stringify(it) }, ", ", false))
+    }
+
+    // Lowers every `$NAME` marker in the description, nested ones included.
+    private fun lowernames(desc: String): String {
+        val mm = R_TRANSFORM_NAME.matcher(desc)
         val out = StringBuilder()
         while (mm.find()) {
             mm.appendReplacement(out, Matcher.quoteReplacement(mm.group(1).lowercase(Locale.ROOT)))
@@ -2400,6 +2404,159 @@ object Struct {
         }
 
         return SKIP
+    }
+
+    /** $LEN: the value's length is within a bound, `[$LEN, bound, spec?]`; the bound is as for a $NOF count, and a string counts code points. */
+    val validate_LEN: Injector = Injector { inj, _, _, store -> _validatebound(inj, store, "\$LEN") }
+
+    /** $RANGE: the value is a number within a bound, `[$RANGE, bound, spec?]`; the bound holds min or gt, max or lt, or one of each. */
+    val validate_RANGE: Injector = Injector { inj, _, _, store -> _validatebound(inj, store, "\$RANGE") }
+
+    // The bounding list directives: a bound, then at most one spec that must also admit.
+    private fun _validatebound(
+        inj: Injection,
+        store: Any?,
+        name: String,
+    ): Any? {
+        if (M_VAL != inj.mode) return UNDEF
+
+        val parent = inj.parent
+
+        if (!islist(parent) || 0 != inj.keyI) {
+            inj.errs.add("The " + name + " validator at field " + pathify(inj.path, 1, 1) + " must be the first element of an array.")
+            return UNDEF
+        }
+
+        val cval = _slotval(inj)
+
+        inj.keyI = size(inj.keys)
+
+        // As for the counting directives: SKIP keeps inject off the detached list.
+        inj.setval(cval, 2)
+
+        @Suppress("UNCHECKED_CAST")
+        inj.path = slice(inj.path, -1, null) as MutableList<String>
+
+        val field = "The " + name + " validator at field " + pathify(inj.path, 1)
+        val nargs = size(parent) - 1
+
+        if (nargs < 1 || 2 < nargs) {
+            inj.errs.add(field + " must have a bound and at most one spec.")
+            return SKIP
+        }
+
+        val bound = lookup(parent, 1)
+        val islen = "\$LEN" == name
+        val (lo, hi, desc) = if (islen) _lenbound(bound) else Triple(0L, 0L, _rangedesc(bound))
+
+        if (null == desc) {
+            inj.errs.add(field + " has an invalid bound: " + stringify(bound) + ".")
+            return SKIP
+        }
+
+        val ctype = typify(cval)
+
+        if (2 == nargs && !_admits(cval, lookup(parent, 2), inj, store)) {
+            val specdesc = lowernames(stringify(lookup(parent, 2)))
+            inj.errs.add(_invalidTypeMsg(inj.path, specdesc, ctype, cval, "V0410"))
+            return SKIP
+        }
+
+        if (0 == ((if (islen) T_STRING or T_LIST or T_MAP else T_NUMBER) and ctype)) {
+            val needtype = if (islen) "string, list or map" else "number"
+            inj.errs.add(_invalidTypeMsg(inj.path, needtype, ctype, cval, "V0420"))
+            return SKIP
+        }
+
+        val inbound =
+            if (islen) {
+                val len = if (cval is String) cval.codePointCount(0, cval.length) else size(cval)
+                lo <= len && (-1L == hi || len <= hi)
+            } else {
+                _inrange(bound, (cval as Number).toDouble())
+            }
+
+        if (!inbound) {
+            val needtype = (if (1 < size(inj.path)) "" else "value ") + desc
+            inj.errs.add(_invalidTypeMsg(inj.path, needtype, ctype, cval, "V0430"))
+        }
+
+        return SKIP
+    }
+
+    // The bounds of a $LEN bound, with -1 for no maximum, and the words for it,
+    // which are null when the bound is invalid.
+    private fun _lenbound(bound: Any?): Triple<Long, Long, String?> {
+        val (lo, hi, countdesc) = _nofcount(bound, -1)
+
+        if (null == countdesc) return Triple(0L, 0L, null)
+
+        val desc =
+            when {
+                lo == hi -> "$lo"
+                -1L == hi -> "at least $lo"
+                0L == lo -> "at most $hi"
+                else -> "$lo to $hi"
+            }
+
+        return Triple(lo, hi, "of length $desc")
+    }
+
+    // The words for a $RANGE bound, which are null when the bound is invalid.
+    private fun _rangedesc(bound: Any?): String? {
+        if (!ismap(bound)) return null
+
+        val min = lookup(bound, "min")
+        val max = lookup(bound, "max")
+        val gt = lookup(bound, "gt")
+        val lt = lookup(bound, "lt")
+        val lower = if (UNDEF === min) gt else min
+        val upper = if (UNDEF === max) lt else max
+        val isnum = { n: Any? -> UNDEF === n || 0 != (T_NUMBER and typify(n)) }
+
+        val valid =
+            0 < size(bound) &&
+                size(bound) == listOf(min, max, gt, lt).count { UNDEF !== it } &&
+                (UNDEF === min || UNDEF === gt) &&
+                (UNDEF === max || UNDEF === lt) &&
+                isnum(min) &&
+                isnum(max) &&
+                isnum(gt) &&
+                isnum(lt) &&
+                (UNDEF === lower || UNDEF === upper || (lower as Number).toDouble() <= (upper as Number).toDouble())
+
+        if (!valid) return null
+
+        val lowerdesc =
+            when {
+                UNDEF !== min -> "at least " + stringify(min)
+                UNDEF !== gt -> "greater than " + stringify(gt)
+                else -> null
+            }
+        val upperdesc =
+            when {
+                UNDEF !== max -> "at most " + stringify(max)
+                UNDEF !== lt -> "less than " + stringify(lt)
+                else -> null
+            }
+
+        return listOfNotNull(lowerdesc, upperdesc).joinToString(" and ")
+    }
+
+    // A number within a valid $RANGE bound.
+    private fun _inrange(
+        bound: Any?,
+        value: Double,
+    ): Boolean {
+        val min = lookup(bound, "min")
+        val max = lookup(bound, "max")
+        val gt = lookup(bound, "gt")
+        val lt = lookup(bound, "lt")
+
+        return (UNDEF === min || (min as Number).toDouble() <= value) &&
+            (UNDEF === max || value <= (max as Number).toDouble()) &&
+            (UNDEF === gt || (gt as Number).toDouble() < value) &&
+            (UNDEF === lt || value < (lt as Number).toDouble())
     }
 
     // Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
@@ -2687,6 +2844,8 @@ object Struct {
         baseStore["\$EXACT"] = validate_EXACT
         baseStore["\$NOF"] = validate_NOF
         baseStore["\$ALL"] = validate_ALL
+        baseStore["\$LEN"] = validate_LEN
+        baseStore["\$RANGE"] = validate_RANGE
 
         val mergeList = mutableListOf<Any?>(baseStore)
         if (extraRaw is Map<*, *>) mergeList.add(extraRaw)
