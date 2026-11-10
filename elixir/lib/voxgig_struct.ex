@@ -2482,6 +2482,145 @@ defmodule Voxgig.Struct do
     end
   end
 
+  # The value's length is within a bound: ['`$LEN`', bound, spec?], where the
+  # bound is as for a $NOF count. A string's length is in code points.
+  defp validate_len(inj, _v, _r, store), do: validatebound_(inj, store, "$LEN")
+
+  # The value is a number within a bound: ['`$RANGE`', bound, spec?], where the
+  # bound holds min or gt, max or lt, or one of each.
+  defp validate_range(inj, _v, _r, store), do: validatebound_(inj, store, "$RANGE")
+
+  # The bounding list directives: a bound, then at most one spec that must also admit.
+  defp validatebound_(inj, store, name) do
+    parent = ig(inj, :parent)
+
+    cond do
+      ig(inj, :mode) != @m_val ->
+        nil
+
+      not islist(parent) or ig(inj, :keyi) != 0 ->
+        push_err(inj, "The " <> name <> " validator at field " <> pathify(ig(inj, :path), 1, 1) <> " must be the first element of an array.")
+        nil
+
+      true ->
+        {cval, held} = slotval_(inj)
+        is_(inj, :keyi, size(ig(inj, :keys)))
+
+        # As for the counting directives: SKIP keeps inject off the detached list.
+        slotset_(inj, cval, held)
+
+        is_(inj, :path, slice(ig(inj, :path), -1))
+        field = "The " <> name <> " validator at field " <> pathify(ig(inj, :path), 1)
+        nargs = size(parent) - 1
+
+        if nargs < 1 or nargs > 2 do
+          push_err(inj, field <> " must have a bound and at most one spec.")
+        else
+          bound = lookup_(parent, 1)
+          islen = name == "$LEN"
+          {lo, hi, desc} = if islen, do: lenbound_(bound), else: {0, 0, rangedesc_(bound)}
+          ctype = typify(cval)
+          needs = if islen, do: Bitwise.bor(Bitwise.bor(@t_string, @t_list), @t_map), else: @t_number
+
+          cond do
+            desc == nil ->
+              push_err(inj, field <> " has an invalid bound: " <> stringify(bound) <> ".")
+
+            nargs == 2 and not admits_(cval, held, lookup_(parent, 2), inj, store) ->
+              specdesc = Regex.replace(@r_transform_name, stringify(lookup_(parent, 2)), fn _w, g1 -> String.downcase(g1) end)
+              push_err(inj, invalid_type_msg(ig(inj, :path), specdesc, ctype, cval, "V0410"))
+
+            Bitwise.band(needs, ctype) == 0 ->
+              needtype = if islen, do: "string, list or map", else: "number"
+              push_err(inj, invalid_type_msg(ig(inj, :path), needtype, ctype, cval, "V0420"))
+
+            not (if islen, do: inlen_(cval, lo, hi), else: inrange_(bound, cval)) ->
+              needtype = (if size(ig(inj, :path)) > 1, do: "", else: "value ") <> desc
+              push_err(inj, invalid_type_msg(ig(inj, :path), needtype, ctype, cval, "V0430"))
+
+            true ->
+              :ok
+          end
+        end
+
+        @skip
+    end
+  end
+
+  # The bounds of a $LEN bound, with -1 for no maximum, and the words for it,
+  # which are absent when the bound is invalid.
+  defp lenbound_(bound) do
+    case nofcount_(bound, -1) do
+      {_, _, nil} ->
+        {0, 0, nil}
+
+      {lo, hi, _} ->
+        words =
+          cond do
+            lo == hi -> num_to_string(lo)
+            hi == -1 -> "at least " <> num_to_string(lo)
+            lo == 0 -> "at most " <> num_to_string(hi)
+            true -> num_to_string(lo) <> " to " <> num_to_string(hi)
+          end
+
+        {lo, hi, "of length " <> words}
+    end
+  end
+
+  # String.length counts graphemes; a string's length here is in code points.
+  defp inlen_(val, lo, hi) do
+    len = if is_binary(val), do: length(String.codepoints(val)), else: size(val)
+    lo <= len and (hi == -1 or len <= hi)
+  end
+
+  # The words for a $RANGE bound, which are absent when the bound is invalid.
+  defp rangedesc_(bound) do
+    if ismap(bound) do
+      min = lookup_(bound, "min")
+      max = lookup_(bound, "max")
+      gt = lookup_(bound, "gt")
+      lt = lookup_(bound, "lt")
+      lower = if min == nil, do: gt, else: min
+      upper = if max == nil, do: lt, else: max
+      isnum = fn n -> n == nil or Bitwise.band(@t_number, typify(n)) > 0 end
+
+      valid =
+        size(bound) > 0 and
+          size(bound) == Enum.count([min, max, gt, lt], &(&1 != nil)) and
+          (min == nil or gt == nil) and
+          (max == nil or lt == nil) and
+          isnum.(min) and isnum.(max) and isnum.(gt) and isnum.(lt) and
+          (lower == nil or upper == nil or lower <= upper)
+
+      if valid do
+        lowerdesc =
+          cond do
+            min != nil -> "at least " <> stringify(min)
+            gt != nil -> "greater than " <> stringify(gt)
+            true -> nil
+          end
+
+        upperdesc =
+          cond do
+            max != nil -> "at most " <> stringify(max)
+            lt != nil -> "less than " <> stringify(lt)
+            true -> nil
+          end
+
+        [lowerdesc, upperdesc] |> Enum.reject(&is_nil/1) |> Enum.join(" and ")
+      end
+    end
+  end
+
+  # A number within a valid $RANGE bound.
+  defp inrange_(bound, val) do
+    min = lookup_(bound, "min")
+    max = lookup_(bound, "max")
+    gt = lookup_(bound, "gt")
+    lt = lookup_(bound, "lt")
+    (min == nil or min <= val) and (max == nil or val <= max) and (gt == nil or gt < val) and (lt == nil or val < lt)
+  end
+
   defp validation(pval, key, parent, inj) do
     if is_skip(pval) do
       :ok
@@ -2574,6 +2713,8 @@ defmodule Voxgig.Struct do
     setprop(base, "$EXACT", &validate_exact/4)
     setprop(base, "$NOF", &validate_nof/4)
     setprop(base, "$ALL", &validate_all/4)
+    setprop(base, "$LEN", &validate_len/4)
+    setprop(base, "$RANGE", &validate_range/4)
     store = merge(vlist_new([base, if(extra == nil, do: empty_map(), else: extra), vmap_new([{@s_derrs, errs}])]), 1)
     meta = getprop(injdef, "meta", empty_map())
     setprop(meta, @s_bexact, getprop(meta, @s_bexact, false))
