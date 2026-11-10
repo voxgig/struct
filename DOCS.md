@@ -302,7 +302,11 @@ expansion.
 ```js
 S.select(users, { role: 'admin' })        // matching maps, each tagged $KEY
 S.select(list,  {})                        // all children (empty query matches all)
+S.select(users, { age: ['`$RANGE`', { min: 18 }] }) // validate checkers work too
 ```
+Every map in a query is open, so a record may hold keys the query does not
+name. A directive's literals are compared as written: the values `$EXACT`
+compares, and the count or bound of `$NOF`, `$LEN` and `$RANGE`.
 
 ### Build a JSON string deterministically
 ```js

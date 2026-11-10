@@ -332,6 +332,18 @@ edge: {
     { in: { query: {c0:{'`$AND`':[{x:1},{y:{'`$OR`':[2,3]}}]}},
             obj: [{c0:{x:1,y:3,z:0}}, {c0:{x:1,y:2,z:1}}, {c0:{x:1,y:1,z:2}}] },
       out: [{c0:{x:1,y:3,z:0},'$KEY':0}, {c0:{x:1,y:2,z:1},'$KEY':1}] }
+
+    # A directive's literals and counts are not opened; the specs it tries are.
+    { in: { query: {age:['`$RANGE`',{min:18}]}, obj: [{age:20}, {age:10}] },
+      out: [{age:20,'$KEY':0}] }
+    { in: { query: {n:['`$LEN`',{max:3}]}, obj: [{n:'ab'}, {n:'abcd'}] },
+      out: [{n:'ab','$KEY':0}] }
+    { in: { query: {a:['`$NOF`',{min:1},'`$NUMBER`','`$BOOLEAN`']}, obj: [{a:1}, {a:'x'}, {a:true}] },
+      out: [{a:1,'$KEY':0}, {a:true,'$KEY':2}] }
+    { in: { query: {a:['`$EXACT`',{x:1}]}, obj: [{a:{x:1}}, {a:{x:1,y:2}}] },
+      out: [{a:{x:1},'$KEY':0}] }
+    { in: { query: {a:['`$NOF`',1,{x:1}]}, obj: [{a:{x:1,y:2}}, {a:{x:2}}] },
+      out: [{a:{x:1,y:2},'$KEY':0}] }
   ]
 }
 
