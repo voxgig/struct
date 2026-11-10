@@ -2293,12 +2293,7 @@ function select(children, query) {
     },
   }
   const q = clone(query)
-  walk(q, (_k, v) => {
-    if (ismap(v)) {
-      setprop(v, '`$OPEN`', getprop(v, '`$OPEN`', true))
-    }
-    return v
-  })
+  _openquery(q)
   for (const child of children) {
     injdef.errs = []
     validate(child, clone(q), injdef)
@@ -2307,6 +2302,26 @@ function select(children, query) {
     }
   }
   return results
+}
+// Open every map in a select query, so a child may hold keys the query does
+// not name, but leave a directive's literals as written: what $EXACT
+// compares, and the count or bound of $NOF, $LEN and $RANGE.
+function _openquery(q) {
+  if (ismap(q)) {
+    setprop(q, '`$OPEN`', getprop(q, '`$OPEN`', true))
+    for (const key of keysof(q)) {
+      _openquery(q[key])
+    }
+  } else if (islist(q)) {
+    const head = q[0]
+    const exact = '`$EXACT`' === head
+    const bounded = '`$NOF`' === head || '`$LEN`' === head || '`$RANGE`' === head
+    for (let i = 0; i < size(q); i++) {
+      if (0 === i || !(exact || (bounded && 1 === i))) {
+        _openquery(q[i])
+      }
+    }
+  }
 }
 // Injection state used for recursive injection into JSON - like data structures.
 class Injection {
