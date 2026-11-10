@@ -2541,11 +2541,7 @@ module VoxgigStruct
     results = []
     q = clone(query)
 
-    # Add $OPEN to all maps in query
-    walk(q, lambda { |_k, v, _p, _t|
-      setprop(v, '`$OPEN`', getprop(v, '`$OPEN`', true)) if ismap(v)
-      v
-    })
+    _openquery(q)
 
     select_extra = {
       '$AND' => method(:select_AND),
@@ -2569,6 +2565,23 @@ module VoxgigStruct
     end
 
     results
+  end
+
+  # Open every map in a select query, so a child may hold keys the query does
+  # not name, but leave a directive's literals as written: what $EXACT
+  # compares, and the count or bound of $NOF, $LEN and $RANGE.
+  def self._openquery(q)
+    if ismap(q)
+      setprop(q, '`$OPEN`', getprop(q, '`$OPEN`', true))
+      keysof(q).each { |key| _openquery(q[key]) }
+    elsif islist(q)
+      head = q[0]
+      exact = head == '`$EXACT`'
+      bounded = ['`$NOF`', '`$LEN`', '`$RANGE`'].include?(head)
+      q.each_with_index do |item, i|
+        _openquery(item) if i.zero? || !(exact || (bounded && i == 1))
+      end
+    end
   end
 
   # --- setpath ---
