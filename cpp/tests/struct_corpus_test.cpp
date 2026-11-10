@@ -532,6 +532,10 @@ int main() {
       [](const Value& in) { return validate(getp(in, "data"), getp(in, "spec")); });
   run("validate", "all", false,
       [](const Value& in) { return validate(getp(in, "data"), getp(in, "spec")); });
+  run("validate", "len", false,
+      [](const Value& in) { return validate(getp(in, "data"), getp(in, "spec")); });
+  run("validate", "range", false,
+      [](const Value& in) { return validate(getp(in, "data"), getp(in, "spec")); });
   run("validate", "unknown", false,
       [](const Value& in) { return validate(getp(in, "data"), getp(in, "spec")); });
 

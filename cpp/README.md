@@ -7,9 +7,9 @@
 > `SKIP`/`DELETE` sentinels (pointer-identity), and the `Injection`
 > state machine.  `inject`/`transform`/`validate`/`select` all
 > dispatch through the canonical injector machinery: 10 transform
-> commands, 7 validate checkers, 4 select operators.
+> commands, 9 validate checkers, 4 select operators.
 >
-> Passes the shared corpus (1602/1602), run on
+> Passes the shared corpus (1666/1666), run on
 > [voxgig/omni](https://github.com/voxgig/omni) — the shared test runner,
 > header-only and consumed as a local checkout. Run it with `make test`
 > from `cpp/`.
@@ -336,6 +336,16 @@ specs admit it as `n` allows, where `n` is an integer or a map with `min`,
 value. A spec admits a value when validating the value against it finds no
 error and gives back every member of the value unchanged. There is no `$ONE`:
 write `` jt({"`$ONE`", a, b}) `` as `` jt({"`$NOF`", jm({"min", 1}), a, b}) ``.
+
+A spec list led by `` `$LEN` `` or `` `$RANGE` `` bounds the value.
+`` jt({"`$LEN`", n, spec?}) `` holds when the value's length is within `n`, a
+bound written as for `$NOF`. Strings count code points, not the bytes
+`std::string::size` reports. Lists count elements, maps keys.
+`` jt({"`$RANGE`", bound, spec?}) `` holds when the value is a number within
+the bound, a map of `min` or `gt` and `max` or `lt`, such as
+`` jm({"min", 0, "lt", 150}) ``. `$LEN` and `$RANGE` take at most one spec,
+which must also admit the value. `min` and `max` include their bound, while
+`gt` and `lt` exclude it.
 
 A spec that names a checker `validate` does not define is rejected before any
 data is read, and nothing is validated. The whole-string reference

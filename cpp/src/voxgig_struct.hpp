@@ -3549,6 +3549,158 @@ inline Value ALL_FN(Injection& inj, const Value& val, const std::string& ref, co
   return validatecount(inj, store, "$ALL", false);
 }
 
+// The bounds of a $LEN bound, with -1 for no maximum, and the words for it.
+// False when the bound is invalid.
+inline bool lenbound(const Value& bound, int64_t& lo, int64_t& hi, std::string& desc) {
+  std::string countdesc;
+  if (!nofcount(bound, -1, lo, hi, countdesc))
+    return false;
+
+  desc = "of length " + (lo == hi   ? std::to_string(lo)
+                         : -1 == hi ? "at least " + std::to_string(lo)
+                         : 0 == lo  ? "at most " + std::to_string(hi)
+                                    : std::to_string(lo) + " to " + std::to_string(hi));
+  return true;
+}
+
+// The words for a $RANGE bound. False when the bound is invalid.
+inline bool rangedesc(const Value& bound, std::string& desc) {
+  if (!bound.is_map())
+    return false;
+
+  Value min = lookup_v(bound, Value("min"));
+  Value max = lookup_v(bound, Value("max"));
+  Value gt = lookup_v(bound, Value("gt"));
+  Value lt = lookup_v(bound, Value("lt"));
+  Value lower = min.is_undef() ? gt : min;
+  Value upper = max.is_undef() ? lt : max;
+  auto isnum = [](const Value& n) { return n.is_undef() || 0 != (T_number & typify(n)); };
+
+  size_t given = 0;
+  for (const Value* n : {&min, &max, &gt, &lt})
+    given += n->is_undef() ? 0 : 1;
+
+  size_t numkeys = bound.as_map()->size();
+  bool valid = 0 < numkeys && numkeys == given && (min.is_undef() || gt.is_undef()) &&
+               (max.is_undef() || lt.is_undef()) && isnum(min) && isnum(max) && isnum(gt) &&
+               isnum(lt) &&
+               (lower.is_undef() || upper.is_undef() || lower.as_double() <= upper.as_double());
+
+  if (!valid)
+    return false;
+
+  std::string lowdesc = !min.is_undef()  ? "at least " + stringify(min)
+                        : !gt.is_undef() ? "greater than " + stringify(gt)
+                                         : "";
+  std::string updesc = !max.is_undef()  ? "at most " + stringify(max)
+                       : !lt.is_undef() ? "less than " + stringify(lt)
+                                        : "";
+  desc = lowdesc + (lowdesc.empty() || updesc.empty() ? "" : " and ") + updesc;
+  return true;
+}
+
+// A number within a valid $RANGE bound, compared as doubles, as JavaScript does.
+inline bool inrange(const Value& bound, const Value& val) {
+  Value min = lookup_v(bound, Value("min"));
+  Value max = lookup_v(bound, Value("max"));
+  Value gt = lookup_v(bound, Value("gt"));
+  Value lt = lookup_v(bound, Value("lt"));
+  double v = val.as_double();
+
+  return (min.is_undef() || min.as_double() <= v) && (max.is_undef() || v <= max.as_double()) &&
+         (gt.is_undef() || gt.as_double() < v) && (lt.is_undef() || v < lt.as_double());
+}
+
+// A string's length in code points: its UTF-8 bytes that do not continue a character.
+inline int64_t codepoints(const std::string& s) {
+  int64_t n = 0;
+  for (unsigned char b : s)
+    n += 0x80 == (b & 0xC0) ? 0 : 1;
+  return n;
+}
+
+// The bounding list directives: a bound, then at most one spec that must also admit.
+inline Value validatebound(Injection& inj, const Value& store, const std::string& name) {
+  if (inj.mode != M_VAL)
+    return Value::undef();
+
+  if (!inj.parent.is_list() || inj.keyI != 0) {
+    inj.errs->push_back(Value("The " + name + " validator at field " +
+                              pathify(pathlist(inj.path), 1, 1) +
+                              " must be the first element of an array."));
+    return Value::undef();
+  }
+
+  Value cval = slotval(inj);
+
+  inj.keyI = static_cast<int>(inj.keys ? inj.keys->size() : 0);
+
+  // As for the counting directives: SKIP keeps inject off the detached list.
+  inj.setval(cval, 2);
+
+  if (!inj.path.empty())
+    inj.path.pop_back();
+
+  std::string field = "The " + name + " validator at field " + pathify(pathlist(inj.path), 1);
+  int64_t nargs = size(inj.parent) - 1;
+
+  if (nargs < 1 || 2 < nargs) {
+    inj.errs->push_back(Value(field + " must have a bound and at most one spec."));
+    return SKIP();
+  }
+
+  Value bound = lookup_v(inj.parent, Value(int64_t(1)));
+  bool islen = "$LEN" == name;
+  int64_t lo = 0;
+  int64_t hi = 0;
+  std::string desc;
+
+  if (!(islen ? lenbound(bound, lo, hi, desc) : rangedesc(bound, desc))) {
+    inj.errs->push_back(Value(field + " has an invalid bound: " + stringify(bound) + "."));
+    return SKIP();
+  }
+
+  int ctype = typify(cval);
+
+  if (2 == nargs) {
+    Value spec = lookup_v(inj.parent, Value(int64_t(2)));
+    if (!admits(cval, spec, inj, store)) {
+      inj.errs->push_back(
+          Value(invalid_type_msg(inj.path, describe_alternatives({spec}), ctype, cval, "V0410")));
+      return SKIP();
+    }
+  }
+
+  if (0 == ((islen ? T_string | T_list | T_map : T_number) & ctype)) {
+    std::string needtype = islen ? "string, list or map" : "number";
+    inj.errs->push_back(Value(invalid_type_msg(inj.path, needtype, ctype, cval, "V0420")));
+    return SKIP();
+  }
+
+  int64_t len = islen ? (cval.is_string() ? codepoints(cval.as_string()) : size(cval)) : 0;
+  bool inbound = islen ? lo <= len && (-1 == hi || len <= hi) : inrange(bound, cval);
+
+  if (!inbound) {
+    std::string needtype = std::string(inj.path.size() > 1 ? "" : "value ") + desc;
+    inj.errs->push_back(Value(invalid_type_msg(inj.path, needtype, ctype, cval, "V0430")));
+  }
+
+  return SKIP();
+}
+
+// The value's length is within a bound: ['`$LEN`', bound, spec?], where the
+// bound is as for a $NOF count. A string's length is in code points.
+inline Value LEN_FN(Injection& inj, const Value& val, const std::string& ref, const Value& store) {
+  return validatebound(inj, store, "$LEN");
+}
+
+// The value is a number within a bound: ['`$RANGE`', bound, spec?], where the
+// bound holds min or gt, max or lt, or one of each.
+inline Value RANGE_FN(Injection& inj, const Value& val, const std::string& ref,
+                      const Value& store) {
+  return validatebound(inj, store, "$RANGE");
+}
+
 // Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
 inline const std::vector<std::string>& VALIDATE_NAMES() {
   static const std::vector<std::string> names = {"$TOP",  "$SPEC", "$BT",     "$DS",    "$WHEN",
@@ -3770,6 +3922,8 @@ inline Value validate(const Value& data, const Value& spec, const Value& options
   baseStore->set("$EXACT", Value(Injector(validators::EXACT_FN)));
   baseStore->set("$NOF", Value(Injector(validators::NOF_FN)));
   baseStore->set("$ALL", Value(Injector(validators::ALL_FN)));
+  baseStore->set("$LEN", Value(Injector(validators::LEN_FN)));
+  baseStore->set("$RANGE", Value(Injector(validators::RANGE_FN)));
 
   auto mergeList = std::make_shared<List>();
   mergeList->push_back(Value(baseStore));
