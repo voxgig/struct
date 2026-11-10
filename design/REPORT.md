@@ -41,28 +41,28 @@ NFA engine in-tree (c/cpp/lua/rust/zig).
 
 | Language | Functions | Type Constants | Sentinels | Tests | Status |
 |----------|-----------|---------------|-----------|-------|--------|
-| **typescript** (canonical) | 52 | 15 | 2 | 122 tests, 0 fail (3 bench skip) | Reference (Group A/B) |
-| **javascript** | 52 | 15 | 2 | 116/116 pass | Group A/B applied |
-| **python** | 52+ | 15 | 2 | 123 tests, OK (3 bench skip) | Group A/B applied |
-| **go** | 54+ | 15 | 2 | 123/123 subtests pass | already Group A |
-| **php** | 52 | 15 | 2 | 120 tests, 0 fail (2 incomplete) | already Group A |
-| **ruby** | 52+ | 15 | 2 | 115 runs, 0 fail | Group A/B + UNDEF setval |
-| **lua** | 52+ | 15 | 2 | 109/109 pass (20 entries dropped) | already Group A |
-| **rust** | 52+ | 15 | 2 | 1608 corpus checks pass | already Group A |
-| **c** | 52 | 15 | 2 | 1602/1602 corpus | Group A/B applied |
-| **java** | 52 | 15 | 2 | 113/113 pass | full TS-canonical parity |
-| **cpp** | 52 | 15 | 2 | 1602/1602 corpus | full TS-canonical parity |
-| **csharp** | 52 | 15 | 2 | 115/115 pass | already Group A |
-| **kotlin** | 52 | 15 | 2 | 115/115 pass | full TS-canonical parity |
+| **typescript** (canonical) | 52 | 15 | 2 | 124 tests, 0 fail (3 bench skip) | Reference (Group A/B) |
+| **javascript** | 52 | 15 | 2 | 118/118 pass | Group A/B applied |
+| **python** | 52+ | 15 | 2 | 126 tests, OK (3 bench skip) | Group A/B applied |
+| **go** | 54+ | 15 | 2 | 125/125 subtests pass | already Group A |
+| **php** | 52 | 15 | 2 | 122 tests, 0 fail (2 incomplete) | already Group A |
+| **ruby** | 52+ | 15 | 2 | 118 runs, 0 fail | Group A/B + UNDEF setval |
+| **lua** | 52+ | 15 | 2 | 111/111 pass (20 entries dropped) | already Group A |
+| **rust** | 52+ | 15 | 2 | 1677 corpus checks pass | already Group A |
+| **c** | 52 | 15 | 2 | 1671/1671 corpus | Group A/B applied |
+| **java** | 52 | 15 | 2 | 115/115 pass | full TS-canonical parity |
+| **cpp** | 52 | 15 | 2 | 1671/1671 corpus | full TS-canonical parity |
+| **csharp** | 52 | 15 | 2 | 117/117 pass | already Group A |
+| **kotlin** | 52 | 15 | 2 | 117/117 pass | full TS-canonical parity |
 | **zig** | 52 | 15 | 2 | unverified on this branch \*1 \*4 | cycle-break + 7 latent-bug fixes |
-| **perl** | 52 | 15 | 2 | 172/172 pass | full TS-canonical parity |
+| **perl** | 52 | 15 | 2 | 174/174 pass | full TS-canonical parity |
 | **swift** | 52 | 15 | 2 | unverified on this branch | full TS-canonical parity |
-| **clojure** | 52 | 15 | 2 | 98 groups, 0 failed | full TS-canonical parity |
-| **ocaml** | 52 | 15 | 2 | 97 groups, 0 failed | full TS-canonical parity |
-| **scala** | 52 | 15 | 2 | 96 groups, 0 failed | full TS-canonical parity |
+| **clojure** | 52 | 15 | 2 | 100 groups, 0 failed | full TS-canonical parity |
+| **ocaml** | 52 | 15 | 2 | 99 groups, 0 failed | full TS-canonical parity |
+| **scala** | 52 | 15 | 2 | 98 groups, 0 failed | full TS-canonical parity |
 | **dart** | 52 | 15 | 2 | unverified on this branch | full TS-canonical parity |
-| **elixir** | 52 | 15 | 2 | 98 groups, 0 failed (9 entries dropped) \*2 | full TS-canonical parity |
-| **haskell** | 52 | 15 | 2 | 97 groups, 0 failed | full TS-canonical parity |
+| **elixir** | 52 | 15 | 2 | 100 groups, 0 failed (9 entries dropped) \*2 | full TS-canonical parity |
+| **haskell** | 52 | 15 | 2 | 99 groups, 0 failed | full TS-canonical parity |
 | **lean** | 52 | 15 | 2 | unverified on this branch | full TS-canonical parity |
 | **boru** | 52 | 15 | 2 | unverified on this branch \*3 | full TS-canonical parity |
 
@@ -129,7 +129,7 @@ still pass their existing corpus.
 union with `voxgig_list` / `voxgig_map` (insertion-ordered, hash-indexed) for
 reference-stable containers. All 52 functions, 15 type bit-flags, 3
 mode constants, `SKIP` / `DELETE` sentinels (pointer identity), and
-the `voxgig_injection` state machine. All 11 transform commands, all 16
+the `voxgig_injection` state machine. All 11 transform commands, all 18
 validate checkers, all 4 select operators, the injection helpers
 (`voxgig_check_placement` / `voxgig_injector_args` / `voxgig_inject_child`) are
 wired. The full corpus runs via the `corpus.out` driver
@@ -191,15 +191,15 @@ not.
 \*\* Rust: full TS-canonical parity. Idiomatic `snake_case` API (`get_path`,
 `is_node`, …; see `rust/README.md` for the name table), `Rc<RefCell>`
 reference-stable nodes via the `indexmap` crate, `Value::Noval` vs `Value::Null`
-kept distinct. All 11 transform commands, all 16 validate checkers, all 4 select
+kept distinct. All 11 transform commands, all 18 validate checkers, all 4 select
 operators, the `Injection` state machine, and the `primary.check` SDK test pass
 (`cargo test` → 1187 corpus checks; `cargo clippy` clean).
 
 \*\* Java, C++ and C#: full TS-canonical parity. Injection state machine,
 `SKIP`/`DELETE` sentinels, mode constants, all 11 transform commands
 (`$DELETE`/`$COPY`/`$KEY`/`$ANNO`/`$MERGE`/`$EACH`/`$PACK`/`$REF`/
-`$FORMAT`/`$APPLY`), all 7 validate checkers (`$STRING`/`$TYPE`/`$ANY`/
-`$CHILD`/`$EXACT`/`$NOF`/`$ALL`), all 4 select operators (`$AND`/`$OR`/`$NOT`/
+`$FORMAT`/`$APPLY`), all 9 validate checkers (`$STRING`/`$TYPE`/`$ANY`/
+`$CHILD`/`$EXACT`/`$NOF`/`$ALL`/`$LEN`/`$RANGE`), all 4 select operators (`$AND`/`$OR`/`$NOT`/
 `$CMP`), and `_validation`/`_validatehandler`/`_injecthandler` internals
 all wired. Per-file: minor 506/506, walk 46/46, merge 133/133, getpath 87/87,
 inject 41/41, transform 187/187, validate 131/131, select 47/47.
@@ -257,10 +257,10 @@ Wraps all functions, constants, and sentinels as instance properties.
 `$DELETE`, `$COPY`, `$KEY`, `$META`, `$ANNO`, `$MERGE`, `$EACH`, `$PACK`,
 `$REF`, `$FORMAT`, `$APPLY`
 
-### Validate Checkers (16)
+### Validate Checkers (18)
 `$MAP`, `$LIST`, `$STRING`, `$NUMBER`, `$INTEGER`, `$DECIMAL`, `$BOOLEAN`,
 `$NULL`, `$NIL`, `$FUNCTION`, `$INSTANCE`, `$ANY`, `$CHILD`, `$EXACT`, `$NOF`,
-`$ALL`
+`$ALL`, `$LEN`, `$RANGE`
 
 
 ---
@@ -283,7 +283,7 @@ Also exports `replace` as a public function (internal-only in TS).
 **Classes:** Injection class and StructUtility class both present.
 
 **Transform commands:** All 11 present.
-**Validate checkers:** All 16 present.
+**Validate checkers:** All 18 present.
 
 **Differences:**
 - `replace()` is exported publicly (not exported in TS canonical).
@@ -308,7 +308,7 @@ Also exports `replace` as a public function (internal-only in TS).
 **Classes:** `Injection` class exported (TS exports as type-only).
 
 **Transform commands:** All 11 present.
-**Validate checkers:** All 16 present.
+**Validate checkers:** All 18 present.
 
 **Language adaptations:**
 - `UNDEF = None` for undefined semantics; tests use `NULLMARK`/`UNDEFMARK` markers.
@@ -337,7 +337,7 @@ Also exports `replace` as a public function (internal-only in TS).
 **Classes/Types:** `Injection` struct, `Injector` func type, `WalkApply` func type, `Modify` func type.
 
 **Transform commands:** All 11 present.
-**Validate checkers:** All 16 present.
+**Validate checkers:** All 18 present.
 
 **Language adaptations:**
 - `nil` represents both undefined and null; tests use `NULLMARK`/`UNDEFMARK`.
@@ -363,7 +363,7 @@ MODENAME present.
 **Transform commands:** All 11 present (`$DELETE`, `$COPY`, `$KEY`, `$META`,
 `$ANNO`, `$MERGE`, `$EACH`, `$PACK`, `$REF`, `$FORMAT`, `$APPLY`).
 
-**Validate checkers:** All 16 present (registered via validate_TYPE).
+**Validate checkers:** All 18 present (registered via validate_TYPE).
 
 **Language adaptations:**
 - `UNDEF = '__UNDEFINED__'` string sentinel for undefined semantics.
@@ -390,9 +390,9 @@ sentinels (SKIP, DELETE), and MODENAME present.
 **Transform commands:** All 11 present (`$DELETE`, `$COPY`, `$KEY`, `$META`,
 `$ANNO`, `$MERGE`, `$EACH`, `$PACK`, `$REF`, `$FORMAT`, `$APPLY`).
 
-**Validate checkers:** All 16 present (`$MAP`, `$LIST`, `$STRING`, `$NUMBER`,
+**Validate checkers:** All 18 present (`$MAP`, `$LIST`, `$STRING`, `$NUMBER`,
 `$INTEGER`, `$DECIMAL`, `$BOOLEAN`, `$NULL`, `$NIL`, `$FUNCTION`, `$INSTANCE`,
-`$ANY`, `$CHILD`, `$EXACT`, `$NOF`, `$ALL`).
+`$ANY`, `$CHILD`, `$EXACT`, `$NOF`, `$ALL`, `$LEN`, `$RANGE`).
 
 **Language adaptations:**
 - `UNDEF = Object.new.freeze` sentinel for absent values (distinct from nil/JSON null).
@@ -418,7 +418,7 @@ typename, validate, walk, checkPlacement, injectorArgs, injectChild.
 **Constants:** All 15 type constants, mode constants, sentinels, MODENAME present.
 
 **Transform commands:** All 11 present (`$DELETE`, `$COPY`, `$KEY`, `$ANNO`, `$MERGE`, `$EACH`, `$PACK`, `$REF`, `$FORMAT`, `$APPLY`, `$META`).
-**Validate checkers:** All 16 present.
+**Validate checkers:** All 18 present.
 
 **Language adaptations:**
 - 1-based indexing internally; external API uses 0-based with translation.
@@ -452,9 +452,9 @@ select dispatchers.
 `$ANNO` / `$MERGE` / `$EACH` / `$PACK` / `$REF` / `$FORMAT` / `$APPLY`) plus
 runtime helpers `$BT` / `$DS` / `$WHEN` / `$SPEC`.
 
-**Validate checkers:** All 16 (`$MAP` / `$LIST` / `$STRING` / `$NUMBER` /
+**Validate checkers:** All 18 (`$MAP` / `$LIST` / `$STRING` / `$NUMBER` /
 `$INTEGER` / `$DECIMAL` / `$BOOLEAN` / `$NULL` / `$NIL` / `$FUNCTION` /
-`$INSTANCE` / `$ANY` / `$CHILD` / `$EXACT` / `$NOF` / `$ALL`).
+`$INSTANCE` / `$ANY` / `$CHILD` / `$EXACT` / `$NOF` / `$ALL` / `$LEN` / `$RANGE`).
 
 **Select operators:** `$AND` / `$OR` / `$NOT` / `$GT` / `$LT` / `$GTE` /
 `$LTE` / `$LIKE`.
@@ -494,7 +494,7 @@ runs under valgrind.
 
 **Status: COMPLETE** -- Full TS-canonical parity. All 52 canonical
 functions, the `Injection` state machine, all 11 transform commands,
-all 16 validate checkers, and all 4 select operators are wired and pass
+all 18 validate checkers, and all 4 select operators are wired and pass
 the corpus.
 
 **Tests:** `make test-java` passes (1300/1300 corpus checks across the
@@ -517,9 +517,9 @@ dispatchers.
 **Transform commands:** All 11 present (`$DELETE`, `$COPY`, `$KEY`,
 `$META`, `$ANNO`, `$MERGE`, `$EACH`, `$PACK`, `$REF`, `$FORMAT`,
 `$APPLY`).
-**Validate checkers:** All 16 present (`$MAP`, `$LIST`, `$STRING`,
+**Validate checkers:** All 18 present (`$MAP`, `$LIST`, `$STRING`,
 `$NUMBER`, `$INTEGER`, `$DECIMAL`, `$BOOLEAN`, `$NULL`, `$NIL`,
-`$FUNCTION`, `$INSTANCE`, `$ANY`, `$CHILD`, `$EXACT`, `$NOF`, `$ALL`).
+`$FUNCTION`, `$INSTANCE`, `$ANY`, `$CHILD`, `$EXACT`, `$NOF`, `$ALL`, `$LEN`, `$RANGE`).
 **Select operators:** `$AND`, `$OR`, `$NOT`, and the `$GT` / `$LT` /
 `$GTE` / `$LTE` / `$LIKE` comparator family.
 
@@ -559,9 +559,9 @@ all pass.
 `$ANNO` / `$MERGE` / `$EACH` / `$PACK` / `$REF` / `$FORMAT` / `$APPLY`)
 plus the runtime helpers `$BT` / `$DS` / `$WHEN` / `$SPEC`.
 
-**Validate checkers:** All 16 (`$MAP` / `$LIST` / `$STRING` / `$NUMBER` /
+**Validate checkers:** All 18 (`$MAP` / `$LIST` / `$STRING` / `$NUMBER` /
 `$INTEGER` / `$DECIMAL` / `$BOOLEAN` / `$NULL` / `$NIL` / `$FUNCTION` /
-`$INSTANCE` / `$ANY` / `$CHILD` / `$EXACT` / `$NOF` / `$ALL`).
+`$INSTANCE` / `$ANY` / `$CHILD` / `$EXACT` / `$NOF` / `$ALL` / `$LEN` / `$RANGE`).
 
 **Select operators:** `$AND` / `$OR` / `$NOT` / `$GT` / `$LT` / `$GTE` /
 `$LTE` / `$LIKE`.
@@ -605,7 +605,7 @@ loads `../build/test/test.json` and exercises every wired set:
 `_validatehandler`; `transform` and the 11 transform commands
 (`$DELETE`, `$COPY`, `$KEY`, `$META`, `$ANNO`, `$MERGE`, `$EACH`,
 `$PACK`, `$REF`, `$FORMAT`, `$APPLY`) plus the `FORMATTER` table;
-`validate` and the 16 validate checkers; `select` and the 4 select
+`validate` and the 18 validate checkers; `select` and the 4 select
 operators (`$AND`, `$OR`, `$NOT`, `$CMP`). All injection helpers
 (`Injection` state, `checkPlacement`, `injectorArgs`,
 `injectChild`, `_inj_child`, `_inj_descend`, `_inj_setval`).
@@ -660,7 +660,7 @@ caller's `handler`, to `setval` branching on `abs(ancestor)`.
 **Wired:** all 52 canonical functions including the `re_*` regex
 wrappers; `Injection` reference class with `child` / `descend` /
 `setval`; all 11 transform commands plus the `$BT` / `$DS` / `$WHEN` /
-`$SPEC` thunks and the `FORMATTER` table; all 16 validate checkers;
+`$SPEC` thunks and the `FORMATTER` table; all 18 validate checkers;
 all 4 select operators (`$AND` / `$OR` / `$NOT` / `$CMP` family).
 Injection helpers `checkPlacement`, `injectorArgs`, `injectChild`.
 Builder helpers `jm`, `jmd`, `jt`. All 15 type constants, 3 mode
@@ -797,6 +797,8 @@ identity holds for maps only.
 | $EXACT | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
 | $NOF | Y | Y | Y | Y | Y | Y* | Y | Y | Y | Y | Y | Y* | Y | Y | Y | Y* |
 | $ALL | Y | Y | Y | Y | Y | Y* | Y | Y | Y | Y | Y | Y* | Y | Y | Y | Y* |
+| $LEN | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y* | Y | Y | Y | Y* |
+| $RANGE | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y* | Y | Y | Y | Y* |
 
 Every port defines `$NOF` and `$ALL`, and none defines `$ONE`: there
 `['$NOF', {min:1}, ...]` is the same check. `validate.nof` and `validate.all`
@@ -807,11 +809,16 @@ and `$ALL` share as list directives: a null at the slot is a value, nothing in
 the directive's own list is checked against list data, and `$EXACT` compares as
 JSON. It also pins `$NIL` accepting null.
 
+`validate.len` and `validate.range` specify `$LEN` and `$RANGE`: the bound
+forms, a string's length in code points (pinned with an accent and an emoji),
+the order of the checks, one error per slot, and the messages. `select.edge`
+pins that a query leaves a directive's literals unopened.
+
 Every port also rejects a spec that names a checker it does not define
 (`Unknown validator $FOO at field a.`), which `validate.unknown` specifies. The
-four groups run with the null flag off.
+validate groups named here run with the null flag off.
 
-`Y*` marks a port whose `$NOF` and `$ALL` differ from the canonical where the
+`Y*` marks a port whose list directives differ from the canonical where the
 corpus does not reach, or that has not run them yet:
 
 - **lua:** 18 entries of `validate.directive`, `validate.nof` and
@@ -868,14 +875,14 @@ reports every port ok against the 52-function canonical API).
 4. **lua** -- 100% parity. All functions and commands present. 75/75 tests passing.
 5. **php** -- 100% parity. All functions, constants, and commands present. 82/82 tests passing.
 6. **ruby** -- 100% parity. All 52 functions, Injection class, all 11 transform commands, all 16 validators, select with operators. 75/75 tests passing.
-7. **cpp** -- 100% parity. All 52 canonical functions, full `Injection` state, all 11 transform commands, 16 validate checkers, 4 select operators. 1268/1268 corpus checks passing.
-8. **swift** -- 100% parity. All 52 canonical functions, `Injection` reference class, all 11 transform commands, 16 validate checkers, 4 select operators. Full corpus passing.
-9. **java** -- 100% parity. All 52 canonical functions, `Injection` state machine, all 11 transform commands, 16 validate checkers, 4 select operators. 1300/1300 corpus checks passing (`make test-java`).
-10. **rust** -- 100% parity. Idiomatic `snake_case` API, all 11 transform commands, 16 validate checkers, 4 select operators. Full corpus passing.
+7. **cpp** -- 100% parity. All 52 canonical functions, full `Injection` state, all 11 transform commands, 18 validate checkers, 4 select operators. 1268/1268 corpus checks passing.
+8. **swift** -- 100% parity. All 52 canonical functions, `Injection` reference class, all 11 transform commands, 18 validate checkers, 4 select operators. Full corpus passing.
+9. **java** -- 100% parity. All 52 canonical functions, `Injection` state machine, all 11 transform commands, 18 validate checkers, 4 select operators. 1300/1300 corpus checks passing (`make test-java`).
+10. **rust** -- 100% parity. Idiomatic `snake_case` API, all 11 transform commands, 18 validate checkers, 4 select operators. Full corpus passing.
 11. **zig** -- API parity: allocator-first, all transform commands, validate checkers and select operators. Its 60/60 is NOT corpus conformance, though - the in-situ runner skips every entry carrying `err:` and never reads a `match:` block, so the error paths and the mutation assertions are untested here. See \*4.
 12. **csharp** -- 100% parity. All 52 canonical functions, full Injection state, all commands/checkers/operators. Corpus passing.
-13. **kotlin** -- 100% parity. All 52 canonical functions, `Injection` class, all 11 transform commands, 16 validate checkers, 4 select operators. Corpus passing.
-14. **perl** -- 100% parity. All 52 canonical functions, all 11 transform commands, 16 validate checkers, 4 select operators. Full corpus passing.
+13. **kotlin** -- 100% parity. All 52 canonical functions, `Injection` class, all 11 transform commands, 18 validate checkers, 4 select operators. Corpus passing.
+14. **perl** -- 100% parity. All 52 canonical functions, all 11 transform commands, 18 validate checkers, 4 select operators. Full corpus passing.
 
 
 ---
