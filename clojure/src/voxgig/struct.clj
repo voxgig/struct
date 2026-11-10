@@ -1999,6 +1999,23 @@
         (.add ^List (ig inj :errs) (str "CMP: " (pathify ppath) "⨯" (stringify point) " fail:" ref " " (stringify term))))))
   nil)
 
+;; Open every map in a select query, so a child may hold keys the query does
+;; not name, but leave a directive's literals as written: what $EXACT
+;; compares, and the count or bound of $NOF, $LEN and $RANGE.
+(defn- _openquery [q]
+  (cond
+    (ismap q)
+    (do (setprop q "`$OPEN`" (getprop q "`$OPEN`" true))
+        (doseq [key (keysof q)] (_openquery (_lookup q key))))
+
+    (islist q)
+    (let [head (_lookup q 0)
+          exact (= "`$EXACT`" head)
+          bounded (contains? #{"`$NOF`" "`$LEN`" "`$RANGE`"} head)]
+      (dotimes [i (size q)]
+        (when (or (= 0 i) (not (or exact (and bounded (= 1 i)))))
+          (_openquery (_lookup q i)))))))
+
 (defn select [children query]
   (if-not (isnode children)
     (alist)
@@ -2011,7 +2028,7 @@
                   (.put "$GT" select_CMP) (.put "$LT" select_CMP) (.put "$GTE" select_CMP)
                   (.put "$LTE" select_CMP) (.put "$LIKE" select_CMP))
           q (clone query)]
-      (walk q (fn [_k v _p _path] (when (ismap v) (setprop v "`$OPEN`" (getprop v "`$OPEN`" true))) v))
+      (_openquery q)
       (doseq [child children]
         (let [errs (alist)
               injdef (doto (lhm) (.put "errs" errs) (.put "meta" (doto (lhm) (.put S-BEXACT true))) (.put "extra" extra))]
