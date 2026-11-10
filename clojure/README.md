@@ -11,7 +11,7 @@ port. The behavioural contract is the shared JSON corpus in
 
 Complete. Every canonical public function is implemented and the shared corpus
 passes in full (`make test`) on [voxgig/omni](https://github.com/voxgig/omni),
-the shared test runner — 1666 entries in 80 groups, plus the two `check`
+the shared test runner — 1671 entries in 80 groups, plus the two `check`
 entries and three single entries that are not part of any set. Zero
 third-party runtime dependencies, and omni is a test-time classpath entry the
 published jar never names.

@@ -3,7 +3,7 @@
 > Kotlin/JVM port of the canonical TypeScript implementation.
 >
 > **Status: complete.** Carries the **full** TS-canonical public API and
-> passes the shared corpus in full (1666/1666). All 52 functions, 15 type
+> passes the shared corpus in full (1671/1671). All 52 functions, 15 type
 > bit-flags, 3 mode constants (`M_KEYPRE`/`M_KEYPOST`/`M_VAL`),
 > `SKIP`/`DELETE` sentinels, and the `Injection` state machine.
 > `inject()`/`transform()`/`validate()`/`select()` all dispatch through
@@ -14,7 +14,7 @@
 > operators (`$AND`/`$OR`/`$NOT`/`$CMP`). `python3 ../tools/check_parity.py`
 > reports it `ok`.
 >
-> Passes the shared corpus (1666/1666), run on
+> Passes the shared corpus (1671/1671), run on
 > [voxgig/omni](https://github.com/voxgig/omni) — the shared test runner,
 > consumed as a local checkout. Run it with `./gradlew test` from `kotlin/`.
 
@@ -601,7 +601,7 @@ any data is read, and nothing is validated. The message is
 
 The Kotlin port is **Complete**: it implements the entire canonical public
 surface, `check_parity.py` reports it `ok`, and it passes the shared corpus
-in full (1666/1666). Treat behavioural authority as resting with the
+in full (1671/1671). Treat behavioural authority as resting with the
 canonical TypeScript and the shared corpus.
 
 ### `null` conventions
@@ -612,7 +612,7 @@ distinct sentinel `Struct.UNDEF` (a private `Any()` identity) represents
 Group A readers (`getprop`, `getelem`, `haskey`, `isempty`, `isnode`)
 treat a stored `null` as no value; Group B processors (`clone`, `merge`,
 `walk`, `transform`, …) preserve it literally. REPORT.md lists Kotlin as
-"already Group A"; the shared corpus passes 1666/1666 assertions here.
+"already Group A"; the shared corpus passes 1671/1671 assertions here.
 
 ### Object model
 
@@ -687,6 +687,6 @@ sources only, since omni has its own source set. Tests live in
 [`src/test/kotlin/voxgig/struct/`](./src/test/kotlin/voxgig/struct/) and run
 the shared corpus from [`../build/test/`](../build/test/) on
 [voxgig/omni](https://github.com/voxgig/omni). `StructCorpusTest` runs every
-group the corpus defines — 1666 entries in 80 groups;
+group the corpus defines — 1671 entries in 80 groups;
 `ClientTest` runs the two `check` entries; `StructTests` holds what the corpus
 shape cannot express. JVM target 17.

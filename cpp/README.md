@@ -9,7 +9,7 @@
 > dispatch through the canonical injector machinery: 10 transform
 > commands, 9 validate checkers, 4 select operators.
 >
-> Passes the shared corpus (1666/1666), run on
+> Passes the shared corpus (1671/1671), run on
 > [voxgig/omni](https://github.com/voxgig/omni) — the shared test runner,
 > header-only and consumed as a local checkout. Run it with `make test`
 > from `cpp/`.

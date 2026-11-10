@@ -151,7 +151,7 @@ prints as `"1.1"`, not `"1.100000"`.
 ## Testing
 
 ```
-make test    # run the shared corpus on voxgig/omni (77 groups)
+make test    # run the shared corpus on voxgig/omni (99 groups)
 make build   # type-check the library alone (no omni)
 make lint    # clean, warnings-free compile = pass
 ```
@@ -159,7 +159,7 @@ make lint    # clean, warnings-free compile = pass
 `make test` runs the shared corpus (`../build/test/test.json`) through the
 port on [voxgig/omni](https://github.com/voxgig/omni), the shared test runner
 — so the entry loop, the comparison and the `err` and `match` handling are
-literally the same code every other port runs. **1602** entries over 78
+literally the same code every other port runs. **1671** entries over 80
 groups. omni is a local checkout the Makefile finds via `$OMNI_HOME` or
 beside this repository and copies into `.omni-build/`; `lakefile.toml`
 declares it as a lean_lib only the runner imports, so `make build` compiles

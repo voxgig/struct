@@ -302,7 +302,7 @@ just says so).
 
 The corpus runs on [voxgig/omni](https://github.com/voxgig/omni), the
 shared test runner, found via `$OMNI_HOME` or beside this repository (see
-`t/OmniBridge.pm`). `t/struct.t` runs every group the corpus defines — 1666
+`t/OmniBridge.pm`). `t/struct.t` runs every group the corpus defines — 1671
 entries in 80 groups — and `t/client.t` runs the two client entries. The full
 suite is 174 tests across 4 files. Tests live in
 [`t/`](./t/): `t/struct.t` (the corpus), `t/client.t` (the client path),
