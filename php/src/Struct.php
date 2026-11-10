@@ -3578,7 +3578,7 @@ class Struct
         } elseif ($exact) {
             if ($cval !== $pval) {
                 $pathmsg = 1 < self::size($inj->path) ? 'at field ' . self::pathify($inj->path, 1) . ': ' : '';
-                $inj->errs[] = 'Value ' . $pathmsg . $cval . ' should equal ' . $pval . '.';
+                $inj->errs[] = 'Value ' . $pathmsg . self::stringify($cval) . ' should equal ' . self::stringify($pval) . '.';
             }
         } else {
             // Spec value was a default, copy over data
@@ -3766,7 +3766,7 @@ class Struct
         ];
 
         $q = self::clone($query);
-        $q = self::_select_add_open($q);
+        $q = self::_openquery($q);
 
         foreach ($children as $child) {
             $injdef->errs = [];
@@ -3780,32 +3780,33 @@ class Struct
         return $results;
     }
 
-    // Recursively add `$OPEN` to all maps in a query for select.
-    // PHP arrays are value types, so walk can't modify in-place.
-    private static function _select_add_open(mixed $val): mixed
+    // Open every map in a select query, so a child may hold keys the query does
+    // not name, but leave a directive's literals as written: what $EXACT
+    // compares, and the count or bound of $NOF, $LEN and $RANGE.
+    // PHP arrays are value types, so the opened query is returned.
+    private static function _openquery(mixed $q): mixed
     {
-        if (self::ismap($val)) {
-            if (is_array($val)) {
-                if (!array_key_exists('`$OPEN`', $val)) {
-                    $val['`$OPEN`'] = true;
-                }
-                foreach ($val as $k => $v) {
-                    $val[$k] = self::_select_add_open($v);
-                }
-            } elseif ($val instanceof \stdClass) {
-                if (!property_exists($val, '`$OPEN`')) {
-                    $val->{'`$OPEN`'} = true;
-                }
-                foreach (get_object_vars($val) as $k => $v) {
-                    $val->$k = self::_select_add_open($v);
-                }
+        if (is_array($q) && self::ismap($q)) {
+            $q['`$OPEN`'] = self::getprop($q, '`$OPEN`', true);
+            foreach ($q as $key => $val) {
+                $q[$key] = self::_openquery($val);
             }
-        } elseif (self::islist($val) && is_array($val)) {
-            foreach ($val as $i => $v) {
-                $val[$i] = self::_select_add_open($v);
+        } elseif ($q instanceof \stdClass) {
+            $q->{'`$OPEN`'} = self::getprop($q, '`$OPEN`', true);
+            foreach (get_object_vars($q) as $key => $val) {
+                $q->$key = self::_openquery($val);
+            }
+        } elseif (self::islist($q)) {
+            $head = $q[0] ?? null;
+            $exact = '`$EXACT`' === $head;
+            $bounded = '`$NOF`' === $head || '`$LEN`' === $head || '`$RANGE`' === $head;
+            foreach ($q as $i => $val) {
+                if (0 === $i || !($exact || ($bounded && 1 === $i))) {
+                    $q[$i] = self::_openquery($val);
+                }
             }
         }
-        return $val;
+        return $q;
     }
 
     /**
