@@ -1054,13 +1054,7 @@ def select(children: Any, query: Any) -> list[Any]:
 
     q = clone(query)
 
-    # Add $OPEN to all maps in the query
-    def add_open(_k, v, _parent, _path):
-        if ismap(v):
-            setprop(v, '`$OPEN`', getprop(v, '`$OPEN`', True))
-        return v
-
-    walk(q, add_open)
+    _openquery(q)
 
     for child in children:
         injdef['errs'] = []
@@ -1070,6 +1064,23 @@ def select(children: Any, query: Any) -> list[Any]:
             results.append(child)
 
     return results
+
+
+# Open every map in a select query, so a child may hold keys the query does
+# not name, but leave a directive's literals as written: what $EXACT
+# compares, and the count or bound of $NOF, $LEN and $RANGE.
+def _openquery(q: Any) -> None:
+    if ismap(q):
+        setprop(q, '`$OPEN`', getprop(q, '`$OPEN`', True))
+        for key in keysof(q):
+            _openquery(q[key])
+    elif islist(q):
+        head = q[0] if q else UNDEF
+        exact = head == '`$EXACT`'
+        bounded = head in ('`$NOF`', '`$LEN`', '`$RANGE`')
+        for i, item in enumerate(q):
+            if i == 0 or not (exact or (bounded and i == 1)):
+                _openquery(item)
 
 
 def stringify(val: Any = _ABSENT, maxlen: int = UNDEF, pretty: Any = None):
