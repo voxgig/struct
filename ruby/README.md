@@ -585,7 +585,7 @@ $MERGE   $EACH    $PACK    $REF     $FORMAT  $APPLY
 ```
 $MAP   $LIST   $STRING   $NUMBER   $INTEGER   $DECIMAL  $BOOLEAN
 $NULL  $NIL    $FUNCTION $INSTANCE $ANY       $CHILD    $EXACT
-$NOF   $ALL
+$NOF   $ALL    $LEN      $RANGE
 ```
 
 `` ['`$NOF`', n, spec, …] `` holds when as many specs admit the value as `n`
@@ -594,6 +594,14 @@ allows, where `n` is an integer or a hash with `'min'`, `'max'` or both.
 admits a value when validating the value against it finds no error and gives
 back every member of the value unchanged. There is no `$ONE`: write
 `` ['`$ONE`', a, b] `` as `` ['`$NOF`', { 'min' => 1 }, a, b] ``.
+
+`` ['`$LEN`', n, spec?] `` holds when the value's length is within `n`, a
+bound written as for `$NOF`: a string counts code points (as `String#length`
+counts a UTF-8 string), an array its elements, and a hash its keys.
+`` ['`$RANGE`', bound, spec?] `` holds when the value is a number within
+`bound`, a hash of `'min'` or `'gt'` and `'max'` or `'lt'`. Each takes at
+most one spec, which must also admit the value. `'min'` and `'max'` include
+their bound, while `'gt'` and `'lt'` exclude it.
 
 A spec that names a checker `validate` does not define is rejected before
 any data is read, and nothing is validated. The whole-string reference
@@ -626,7 +634,7 @@ and a `maxdepth` parameter, matching the canonical algorithm.
 
 ### Test status
 
-81 runs, 159 assertions, 0 failures.
+118 runs, 247 assertions, 0 failures.
 
 
 ## Regex

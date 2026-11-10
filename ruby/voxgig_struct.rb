@@ -2118,6 +2118,153 @@ module VoxgigStruct
     SKIP
   end
 
+  # The value's length is within a bound: ['`$LEN`', bound, spec?], where the
+  # bound is as for a $NOF count. A string's length is in code points.
+  def self.validate_LEN(inj, _val = nil, _ref = nil, store = nil)
+    _validatebound(inj, store, '$LEN')
+  end
+
+  # The value is a number within a bound: ['`$RANGE`', bound, spec?], where the
+  # bound holds min or gt, max or lt, or one of each.
+  def self.validate_RANGE(inj, _val = nil, _ref = nil, store = nil)
+    _validatebound(inj, store, '$RANGE')
+  end
+
+  # The bounding list directives: a bound, then at most one spec that must also admit.
+  def self._validatebound(inj, store, name)
+    parent = inj.parent
+
+    return nil unless inj.mode == S_MVAL
+
+    if !islist(parent) || inj.keyI != 0
+      inj.errs << "The #{name} validator at field #{pathify(inj.path, 1, 1)} must be the first element of an array."
+      return nil
+    end
+
+    cval = _slotval(inj)
+
+    inj.keyI = size(inj.keys)
+
+    # As for the counting directives: SKIP keeps inject off the detached list.
+    _setslot(inj, cval)
+
+    inj.path = slice(inj.path, -1)
+
+    field = "The #{name} validator at field #{pathify(inj.path, 1)}"
+    nargs = size(parent) - 1
+
+    if nargs < 1 || nargs > 2
+      inj.errs << "#{field} must have a bound and at most one spec."
+      return SKIP
+    end
+
+    bound = _getprop(parent, 1)
+    islen = name == '$LEN'
+    lo, hi, desc = islen ? _lenbound(bound) : [0, 0, _rangedesc(bound)]
+
+    if desc.nil?
+      inj.errs << "#{field} has an invalid bound: #{stringify(bound)}."
+      return SKIP
+    end
+
+    ctype = typify(cval)
+
+    if nargs == 2 && !_admits(cval, _getprop(parent, 2), inj, store)
+      specdesc = stringify(_getprop(parent, 2)).gsub(/`\$([A-Z]+)`/) { ::Regexp.last_match(1).downcase }
+      inj.errs << _invalidTypeMsg(inj.path, specdesc, ctype, cval, 'V0410')
+      return SKIP
+    end
+
+    if (islen ? T_string | T_list | T_map : T_number).nobits?(ctype)
+      needtype = islen ? 'string, list or map' : S_number
+      inj.errs << _invalidTypeMsg(inj.path, needtype, ctype, cval, 'V0420')
+      return SKIP
+    end
+
+    length = islen ? size(cval) : 0
+    inbound = islen ? lo <= length && (hi == -1 || length <= hi) : _inrange(bound, cval)
+
+    unless inbound
+      needtype = "#{'value ' unless size(inj.path) > 1}#{desc}"
+      inj.errs << _invalidTypeMsg(inj.path, needtype, ctype, cval, 'V0430')
+    end
+
+    SKIP
+  end
+
+  # The bounds of a $LEN bound, with -1 for no maximum, and the words for it,
+  # which are nil when the bound is invalid.
+  def self._lenbound(bound)
+    lo, hi, countdesc = _nofcount(bound, -1)
+
+    return [0, 0, nil] if countdesc.nil?
+
+    desc =
+      if lo == hi
+        lo.to_s
+      elsif hi == -1
+        "at least #{lo}"
+      elsif lo.zero?
+        "at most #{hi}"
+      else
+        "#{lo} to #{hi}"
+      end
+
+    [lo, hi, "of length #{desc}"]
+  end
+
+  # The words for a $RANGE bound, which are nil when the bound is invalid.
+  def self._rangedesc(bound)
+    return nil unless ismap(bound)
+
+    min = _getprop(bound, 'min')
+    max = _getprop(bound, 'max')
+    gt = _getprop(bound, 'gt')
+    lt = _getprop(bound, 'lt')
+    sides = [min, max, gt, lt].reject { |n| n.equal?(UNDEF) }
+    lower = min.equal?(UNDEF) ? gt : min
+    upper = max.equal?(UNDEF) ? lt : max
+
+    valid =
+      size(bound).positive? &&
+      size(bound) == sides.length &&
+      (min.equal?(UNDEF) || gt.equal?(UNDEF)) &&
+      (max.equal?(UNDEF) || lt.equal?(UNDEF)) &&
+      sides.all? { |n| T_number.anybits?(typify(n)) } &&
+      (lower.equal?(UNDEF) || upper.equal?(UNDEF) || lower <= upper)
+
+    return nil unless valid
+
+    parts = []
+
+    if !min.equal?(UNDEF)
+      parts << "at least #{stringify(min)}"
+    elsif !gt.equal?(UNDEF)
+      parts << "greater than #{stringify(gt)}"
+    end
+
+    if !max.equal?(UNDEF)
+      parts << "at most #{stringify(max)}"
+    elsif !lt.equal?(UNDEF)
+      parts << "less than #{stringify(lt)}"
+    end
+
+    parts.join(' and ')
+  end
+
+  # A number within a valid $RANGE bound.
+  def self._inrange(bound, val)
+    min = _getprop(bound, 'min')
+    max = _getprop(bound, 'max')
+    gt = _getprop(bound, 'gt')
+    lt = _getprop(bound, 'lt')
+
+    (min.equal?(UNDEF) || min <= val) &&
+      (max.equal?(UNDEF) || val <= max) &&
+      (gt.equal?(UNDEF) || gt < val) &&
+      (lt.equal?(UNDEF) || val < lt)
+  end
+
   # --- _validation: Modify callback for validate ---
   def self._validation(pval, key, parent, inj)
     return if inj.nil?
@@ -2225,7 +2372,9 @@ module VoxgigStruct
                       '$CHILD' => method(:validate_CHILD),
                       '$EXACT' => method(:validate_EXACT),
                       '$NOF' => method(:validate_NOF),
-                      '$ALL' => method(:validate_ALL)
+                      '$ALL' => method(:validate_ALL),
+                      '$LEN' => method(:validate_LEN),
+                      '$RANGE' => method(:validate_RANGE)
                     },
                     (extra.nil? ? {} : extra),
                     { S_DERRS => errs }
