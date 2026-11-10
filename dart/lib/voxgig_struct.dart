@@ -2860,10 +2860,7 @@ dynamic select(dynamic children0, dynamic query) {
     '\$LIKE': _selectCmp,
   };
   var q = clone(query);
-  walk(q, after: (k, v, p, pp) {
-    if (ismap(v)) setprop(v, S_BOPEN, getprop(v, S_BOPEN, true));
-    return v;
-  });
+  _openquery(q);
   for (var child in (children as List)) {
     var errs = <dynamic>[];
     var injdef = {
@@ -2875,6 +2872,28 @@ dynamic select(dynamic children0, dynamic query) {
     if (size(errs) == 0) results.add(child);
   }
   return results;
+}
+
+// Open every map in a select query, so a child may hold keys the query does
+// not name, but leave a directive's literals as written: what $EXACT
+// compares, and the count or bound of $NOF, $LEN and $RANGE.
+void _openquery(dynamic q) {
+  if (ismap(q)) {
+    setprop(q, S_BOPEN, getprop(q, S_BOPEN, true));
+    for (var key in keysof(q)) {
+      _openquery(_lookup(q, key));
+    }
+  } else if (islist(q)) {
+    var head = _lookup(q, 0);
+    var exact = S_BEXACT == head;
+    var bounded =
+        '`\$NOF`' == head || '`\$LEN`' == head || '`\$RANGE`' == head;
+    for (var i = 0; i < size(q); i++) {
+      if (0 == i || !(exact || (bounded && 1 == i))) {
+        _openquery(_lookup(q, i));
+      }
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
