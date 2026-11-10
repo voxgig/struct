@@ -325,7 +325,7 @@ runAll c pack spec = do
   rsF "validate.basic" (getpropRaw validates "basic") (arg1 (\vin -> do dat <- vget vin "data"; sp <- vget vin "spec"; validate INone dat sp))
   forM_ ["child", "exact"] $ \gn ->
     rsT ("validate." ++ gn) (getpropRaw validates gn) (arg1 (\vin -> do dat <- vget vin "data"; sp <- vget vin "spec"; validate INone dat sp))
-  forM_ ["invalid", "directive", "nof", "all", "unknown"] $ \gn ->
+  forM_ ["invalid", "directive", "nof", "all", "len", "range", "unknown"] $ \gn ->
     rsF ("validate." ++ gn) (getpropRaw validates gn) (arg1 (\vin -> do dat <- vget vin "data"; sp <- vget vin "spec"; validate INone dat sp))
   rsT "validate.special" (getpropRaw validates "special") (arg1 (\vin -> do
     dat <- vget vin "data"; sp <- vget vin "spec"; injm <- vget vin "inj"

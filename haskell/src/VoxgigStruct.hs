@@ -2177,6 +2177,120 @@ validateCount inj store name counted = do
             pushErr inj m
     return skip
 
+-- | @\`$LEN\`@ validation rule: the value's length is within a bound, as
+-- @[\`$LEN\`, bound, spec?]@, where the bound is as for a @$NOF@ count. A
+-- string's length is in code points.
+validateLen :: Injector
+validateLen inj _ _ store = validateBound inj store "$LEN"
+
+-- | @\`$RANGE\`@ validation rule: the value is a number within a bound, as
+-- @[\`$RANGE\`, bound, spec?]@, where the bound holds min or gt, max or lt, or
+-- one of each.
+validateRange :: Injector
+validateRange inj _ _ store = validateBound inj store "$RANGE"
+
+-- | The bounding list directives: a bound, then at most one spec that must also admit.
+validateBound :: Inj -> Value -> String -> IO Value
+validateBound inj store name = do
+  mode <- readIORef (iMode inj)
+  parent <- readIORef (iParent inj); keyi <- readIORef (iKeyi inj)
+  if mode /= m_val then return VNoval
+  else if not (islist parent) || keyi /= 0 then do
+    path <- readIORef (iPath inj); p <- pathifyFull path (VNum 1) (VNum 1) False
+    pushErr inj ("The " ++ name ++ " validator at field " ++ p ++ " must be the first element of an array.")
+    return VNoval
+  else do
+    cval <- slotVal inj
+    keys <- readIORef (iKeys inj); ksz <- size keys; writeIORef (iKeyi inj) ksz
+    -- As for the counting directives: SKIP keeps inject off the detached list.
+    _ <- injSetval 2 inj cval
+    path <- readIORef (iPath inj); sl <- sliceM path (VNum (-1)) VNoval False; writeIORef (iPath inj) sl
+    p <- pathifyFull sl (VNum 1) VNoval False
+    psz <- size parent
+    let field = "The " ++ name ++ " validator at field " ++ p
+        nargs = psz - 1
+    if nargs < 1 || 2 < nargs then pushErr inj (field ++ " must have a bound and at most one spec.")
+    else do
+      bound <- lookup_ parent (VNum 1)
+      let islen = name == "$LEN"
+      (lo, hi, bdesc) <- if islen then lenBound bound else do { d <- rangeDesc bound; return (0, 0, d) }
+      case bdesc of
+        Nothing -> do bs <- stringify bound; pushErr inj (field ++ " has an invalid bound: " ++ bs ++ ".")
+        Just desc -> do
+          let ctype = typify cval
+          spec <- lookup_ parent (VNum 2)
+          admitted <- if nargs == 2 then admits cval spec inj store else return True
+          path2 <- readIORef (iPath inj)
+          if not admitted then do
+            sd <- stringify spec
+            m <- invalidTypeMsg path2 (replaceTransformNames sd) ctype cval "V0410"
+            pushErr inj m
+          else if (if islen then t_string .|. t_list .|. t_map else t_number) .&. ctype == 0 then do
+            m <- invalidTypeMsg path2 (if islen then "string, list or map" else "number") ctype cval "V0420"
+            pushErr inj m
+          else do
+            -- size counts a String's Chars, which are code points.
+            inbound <- if islen
+              then do len <- fromIntegral <$> size cval; return (lo <= len && (hi == -1 || len <= hi))
+              else inRange bound cval
+            when (not inbound) $ do
+              psz2 <- size path2
+              m <- invalidTypeMsg path2 ((if psz2 > 1 then "" else "value ") ++ desc) ctype cval "V0430"
+              pushErr inj m
+    return skip
+
+-- | The bounds of a @$LEN@ bound, with -1 for no maximum, and the words for
+-- it, which are absent when the bound is invalid.
+lenBound :: Value -> IO (Double, Double, Maybe String)
+lenBound bound = do
+  (lo, hi, countdesc) <- nofCount bound (-1)
+  let desc
+        | lo == hi = numToString lo
+        | hi == -1 = "at least " ++ numToString lo
+        | lo == 0 = "at most " ++ numToString hi
+        | otherwise = numToString lo ++ " to " ++ numToString hi
+  return $ case countdesc of
+    Nothing -> (0, 0, Nothing)
+    Just _ -> (lo, hi, Just ("of length " ++ desc))
+
+-- | The words for a @$RANGE@ bound, which are absent when the bound is invalid.
+rangeDesc :: Value -> IO (Maybe String)
+rangeDesc bound
+  | not (ismap bound) = return Nothing
+  | otherwise = do
+      mn <- lookup_ bound (VStr "min"); mx <- lookup_ bound (VStr "max")
+      gt <- lookup_ bound (VStr "gt"); lt <- lookup_ bound (VStr "lt")
+      bsz <- size bound
+      let lower = if isNoval mn then gt else mn
+          upper = if isNoval mx then lt else mx
+          isnum n = isNoval n || (t_number .&. typify n) > 0
+          num n = case n of VNum x -> x; _ -> 0
+          valid = bsz > 0
+            && bsz == length (L.filter (not . isNoval) [mn, mx, gt, lt])
+            && (isNoval mn || isNoval gt)
+            && (isNoval mx || isNoval lt)
+            && all isnum [mn, mx, gt, lt]
+            && (isNoval lower || isNoval upper || num lower <= num upper)
+          part a awords b bwords
+            | not (isNoval a) = VStr . (awords ++) <$> stringify a
+            | not (isNoval b) = VStr . (bwords ++) <$> stringify b
+            | otherwise = return VNoval
+      if not valid then return Nothing
+      else do
+        parts <- sequence [part mn "at least " gt "greater than ", part mx "at most " lt "less than "]
+        pl <- mkList parts
+        Just <$> join pl (VStr " and ") False
+
+-- | A number within a valid @$RANGE@ bound.
+inRange :: Value -> Value -> IO Bool
+inRange bound val = do
+  mn <- lookup_ bound (VStr "min"); mx <- lookup_ bound (VStr "max")
+  gt <- lookup_ bound (VStr "gt"); lt <- lookup_ bound (VStr "lt")
+  let num n = case n of VNum x -> x; _ -> 0 / 0
+      v = num val
+  return ((isNoval mn || num mn <= v) && (isNoval mx || v <= num mx)
+    && (isNoval gt || num gt < v) && (isNoval lt || v < num lt))
+
 -- | The bounds of a @$NOF@ count, and the words for it, which are absent when
 -- the count is invalid. Without a max, the bound is the number of specs.
 nofCount :: Value -> Double -> IO (Double, Double, Maybe String)
@@ -2370,6 +2484,8 @@ validate injarg dat spec = do
   put "$EXACT" (VFunc validateExact)
   put "$NOF" (VFunc validateNof)
   put "$ALL" (VFunc validateAll)
+  put "$LEN" (VFunc validateLen)
+  put "$RANGE" (VFunc validateRange)
   extraMap <- if isNoval extra then emptyMap else return extra
   errMap <- mkMap [(s_derrs, errs)]
   ls <- mkList [base, extraMap, errMap]; store <- mergeD ls (VNum 1)

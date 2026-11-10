@@ -94,6 +94,14 @@ demo = do
   cnt <- jm [VStr "min", VNum 1]
   nof <- jt [VStr "`$NOF`", cnt, VStr "`$STRING`", VStr "`$NUMBER`"]
   putStrLn =<< stringify =<< validate INone (VNum 1) nof   -- 1
+
+  -- validate: `$LEN` bounds a length, `$RANGE` a number
+  lb <- jm [VStr "min", VNum 1, VStr "max", VNum 64]
+  len <- jt [VStr "`$LEN`", lb, VStr "`$STRING`"]
+  putStrLn =<< stringify =<< validate INone (VStr "abc") len   -- abc
+  rb <- jm [VStr "min", VNum 0, VStr "lt", VNum 150]
+  rng <- jt [VStr "`$RANGE`", rb, VStr "`$INTEGER`"]
+  putStrLn =<< stringify =<< validate INone (VNum 42) rng   -- 42
 ```
 
 The count is a `VNum` or a map of `min` and `max`. `` VStr "`$ALL`" `` leads
@@ -102,6 +110,14 @@ value. There is no `$ONE`; the full checker list is in the
 [language-neutral reference](../DOCS.md#validate-checkers-inside-backticks-in-a-validate-spec).
 A spec that names a checker `validate` does not define is rejected before any
 data is read, with `Unknown validator $FOO at field a.`
+
+`` VStr "`$LEN`" `` takes a bound written as for a `$NOF` count, and holds
+when the value's length is within it: a `VStr` counts code points (the `Char`s
+of its `String`), a `VList` its elements, and a `VMap` its keys, and any other
+value fails. `` VStr "`$RANGE`" `` takes a map of `min` or `gt` with `max` or
+`lt`, and fails on anything but a `VNum`. `min` and `max` include their bound,
+while `gt` and `lt` exclude it. Each takes at most one spec, which must also
+admit the value.
 
 ## Testing
 
@@ -119,7 +135,7 @@ omni's `Json` into the library's `IORef`-backed nodes (`tostruct`) and back
 arguments go back to omni after the call, which is what `match.args` asserts on
 in `minor/setpath` and `merge/integrity`.
 
-Every group the corpus defines runs — 1602 entries in 78 groups —
+Every group the corpus defines runs — 1666 entries in 80 groups —
 plus the two `check` entries (`DEF.client`, client-scoped options,
 `contextify`) and three single entries that are not part of any set. Keep it
 green, keep `python3 ../tools/check_parity.py` green, and add no runtime
