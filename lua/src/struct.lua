@@ -257,6 +257,7 @@ local _deepequal
 local _keeps
 local _admits
 local _nofcount
+local _openquery
 local stringify
 local ismap
 local islist
@@ -3653,12 +3654,7 @@ local function select_fn(children, query)
 
   local q = clone(query)
 
-  walk(q, function(_k, v)
-    if ismap(v) then
-      setprop(v, "`$OPEN`", getprop(v, "`$OPEN`", true))
-    end
-    return v
-  end)
+  _openquery(q)
 
   for _, child in ipairs(children) do
     injdef.errs = {}
@@ -3671,6 +3667,27 @@ local function select_fn(children, query)
   end
 
   return results
+end
+
+-- Open every map in a select query, so a child may hold keys the query does
+-- not name, but leave a directive's literals as written: what $EXACT
+-- compares, and the count or bound of $NOF, $LEN and $RANGE.
+_openquery = function(q)
+  if ismap(q) then
+    setprop(q, "`$OPEN`", getprop(q, "`$OPEN`", true))
+    for _, key in ipairs(keysof(q)) do
+      _openquery(q[key])
+    end
+  elseif islist(q) then
+    local head = q[1]
+    local exact = "`$EXACT`" == head
+    local bounded = "`$NOF`" == head or "`$LEN`" == head or "`$RANGE`" == head
+    for i = 1, size(q) do
+      if 1 == i or not (exact or (bounded and 2 == i)) then
+        _openquery(q[i])
+      end
+    end
+  end
 end
 
 -- Internal utilities
