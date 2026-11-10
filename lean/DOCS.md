@@ -120,7 +120,22 @@ A list led by `` .str "`$NOF`" `` counts the specs that admit the value:
 
 The count is a `.num` or a map of `min` and `max`. `` .str "`$ALL`" `` leads
 a list the same way, without a count, and holds when every spec admits the
-value. There is no `$ONE`; the full checker list is in the
+value.
+
+`` .str "`$LEN`" `` and `` .str "`$RANGE`" `` lead a list with a bound and at
+most one spec, which must also admit the value:
+
+```lean
+    let rng ← jm [.str "min", .num 0.0, .str "lt", .num 150.0]
+    let spec ← jt [.str "`$RANGE`", rng, .str "`$INTEGER`"]
+    IO.println (← stringify (← validate (.num 42.0) spec))   -- "42"
+```
+
+The `$LEN` bound is written as the `$NOF` count is. A string's length counts
+code points (`String.length`), a list's its elements, and a map's its keys.
+The `$RANGE` bound is a map of `min` or `gt` and `max` or `lt`: `min` and
+`max` include their bound, while `gt` and `lt` exclude it. There is no
+`$ONE`; the full checker list is in the
 [language-neutral reference](../DOCS.md#validate-checkers-inside-backticks-in-a-validate-spec).
 A spec that names a checker `validate` does not define is rejected before any
 data is read, with `Unknown validator $FOO at field a.`

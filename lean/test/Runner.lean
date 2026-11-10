@@ -643,7 +643,7 @@ def runAll (spec : Value) : SIO Unit := do
   for gn in ["child", "exact"] do
     runSet ("validate." ++ gn) (← getpropRawPub validates gn)
       (arg1 (fun vin => do validate (← vget vin "data") (← vget vin "spec")))
-  for gn in ["invalid", "directive", "nof", "all", "unknown"] do
+  for gn in ["invalid", "directive", "nof", "all", "len", "range", "unknown"] do
     runSet ("validate." ++ gn) (← getpropRawPub validates gn)
       (arg1 (fun vin => do validate (← vget vin "data") (← vget vin "spec")))
       (flagNull := false)
