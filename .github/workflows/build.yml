@@ -535,7 +535,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # ubuntu-24.04, not -latest: the 6.0.2 toolchain installed below is
+        # the ubuntu2404 build, and its swift-test links libxml2.so.2, which
+        # the ubuntu-26.04 image behind -latest does not ship.
+        os: [ubuntu-24.04, macos-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       # The test runner is voxgig/omni, consumed as a local checkout (it is
