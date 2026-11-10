@@ -1693,6 +1693,105 @@
 ;; Every spec admits the value: ['`$ALL`', spec, ...].
 (defn- validate_ALL [inj _val _ref store] (_validatecount inj store "$ALL" false))
 
+;; The bounds of a $LEN bound, with -1 for no maximum, and the words for it,
+;; which are absent when the bound is invalid.
+(defn- _lenbound [bound]
+  (let [[lo hi countdesc] (_nofcount bound -1)]
+    (if (nil? countdesc)
+      [0 0 nil]
+      [lo hi (str "of length " (cond
+                                 (== lo hi) lo
+                                 (== -1 hi) (str "at least " lo)
+                                 (zero? lo) (str "at most " hi)
+                                 :else (str lo " to " hi)))])))
+
+;; The words for a $RANGE bound, which are absent when the bound is invalid.
+(defn- _rangedesc [bound]
+  (when (ismap bound)
+    (let [bmin (_lookup bound "min")
+          bmax (_lookup bound "max")
+          bgt (_lookup bound "gt")
+          blt (_lookup bound "lt")
+          lower (if (nil? bmin) bgt bmin)
+          upper (if (nil? bmax) blt bmax)
+          isnum (fn [n] (or (nil? n) (pos? (bit-and T_number (typify n)))))
+          valid (and (pos? (size bound))
+                     (= (size bound) (count (remove nil? [bmin bmax bgt blt])))
+                     (or (nil? bmin) (nil? bgt))
+                     (or (nil? bmax) (nil? blt))
+                     (isnum bmin) (isnum bmax) (isnum bgt) (isnum blt)
+                     (or (nil? lower) (nil? upper) (<= lower upper)))]
+      (when valid
+        (clojure.string/join " and "
+                             (remove nil? [(cond (some? bmin) (str "at least " (stringify bmin))
+                                                 (some? bgt) (str "greater than " (stringify bgt)))
+                                           (cond (some? bmax) (str "at most " (stringify bmax))
+                                                 (some? blt) (str "less than " (stringify blt)))]))))))
+
+;; A number within a valid $RANGE bound.
+(defn- _inrange [bound val]
+  (let [bmin (_lookup bound "min")
+        bmax (_lookup bound "max")
+        bgt (_lookup bound "gt")
+        blt (_lookup bound "lt")]
+    (and (or (nil? bmin) (<= bmin val))
+         (or (nil? bmax) (<= val bmax))
+         (or (nil? bgt) (< bgt val))
+         (or (nil? blt) (< val blt)))))
+
+;; The bounding list directives: a bound, then at most one spec that must also admit.
+(defn- _validatebound [inj store name]
+  (let [mode (ig inj :mode) parent (ig inj :parent) keyI (ig inj :keyI)]
+    (cond
+      (not= mode S-MVAL) nil
+
+      (or (not (islist parent)) (not= keyI 0))
+      (do (.add ^List (ig inj :errs) (str "The " name " validator at field " (pathify (ig inj :path) 1 1) " must be the first element of an array.")) nil)
+
+      :else
+      (let [[cval held] (_slotval inj)]
+        (is! inj :keyI (size (ig inj :keys)))
+        ;; As for the counting directives: SKIP keeps inject off the detached list.
+        (_slotset inj cval held)
+        (is! inj :path (slice (ig inj :path) -1))
+        (let [field (str "The " name " validator at field " (pathify (ig inj :path) 1))
+              nargs (dec (size parent))]
+          (if (or (< nargs 1) (< 2 nargs))
+            (.add ^List (ig inj :errs) (str field " must have a bound and at most one spec."))
+            (let [bound (_lookup parent 1)
+                  islen (= "$LEN" name)
+                  [lo hi desc] (if islen (_lenbound bound) [0 0 (_rangedesc bound)])
+                  ctype (typify cval)]
+              (cond
+                (nil? desc)
+                (.add ^List (ig inj :errs) (str field " has an invalid bound: " (stringify bound) "."))
+
+                (and (= 2 nargs) (not (_admits cval held (_lookup parent 2) inj store)))
+                (let [specdesc (re_replace R-TRANSFORM-NAME (stringify (_lookup parent 2))
+                                           (fn [g] (clojure.string/lower-case (nth g 1))))]
+                  (.add ^List (ig inj :errs) (_invalidTypeMsg (ig inj :path) specdesc ctype cval "V0410")))
+
+                (zero? (bit-and (if islen (bit-or T_string T_list T_map) T_number) ctype))
+                (.add ^List (ig inj :errs)
+                      (_invalidTypeMsg (ig inj :path) (if islen "string, list or map" S-number) ctype cval "V0420"))
+
+                ;; size counts a string in UTF-16 units, not code points.
+                (not (if islen
+                       (let [len (if (string? cval) (.codePointCount ^String cval 0 (.length ^String cval)) (size cval))]
+                         (and (<= lo len) (or (== -1 hi) (<= len hi))))
+                       (_inrange bound cval)))
+                (.add ^List (ig inj :errs)
+                      (_invalidTypeMsg (ig inj :path) (str (if (> (size (ig inj :path)) 1) "" "value ") desc) ctype cval "V0430"))))))
+        SKIP))))
+
+;; The value's length is within a bound: ['`$LEN`', bound, spec?], where the
+;; bound is as for a $NOF count. A string's length is in code points.
+(defn- validate_LEN [inj _val _ref store] (_validatebound inj store "$LEN"))
+
+;; The value is a number within a bound: ['`$RANGE`', bound, spec?], where the
+;; bound holds min or gt, max or lt, or one of each.
+(defn- validate_RANGE [inj _val _ref store] (_validatebound inj store "$RANGE"))
+
 (defn- _validation [pval key parent inj]
   (when (and (some? inj) (not (identical? pval SKIP)))
     (let [exact (getprop (ig inj :meta) S-BEXACT false)
@@ -1792,7 +1891,8 @@
                     ["$NIL" validate_TYPE] ["$MAP" validate_TYPE] ["$LIST" validate_TYPE]
                     ["$FUNCTION" validate_TYPE] ["$INSTANCE" validate_TYPE]
                     ["$ANY" validate_ANY] ["$CHILD" validate_CHILD]
-                    ["$EXACT" validate_EXACT] ["$NOF" validate_NOF] ["$ALL" validate_ALL]]]
+                    ["$EXACT" validate_EXACT] ["$NOF" validate_NOF] ["$ALL" validate_ALL]
+                    ["$LEN" validate_LEN] ["$RANGE" validate_RANGE]]]
        (.put base k v))
      (let [store (merge (alist-of [base (if (nil? extra) (lhm) extra) (doto (lhm) (.put "$ERRS" errs))]) 1)
            meta (getprop injdef "meta" (lhm))
