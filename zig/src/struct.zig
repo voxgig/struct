@@ -4704,6 +4704,48 @@ fn selectCount(
     return data_val;
 }
 
+// $LEN and $RANGE in a query: the value matches the spec, if there is one,
+// and has a length or is a number within the bound.
+fn selectBound(
+    allocator: Allocator,
+    spec_val: JsonValue,
+    data_val: JsonValue,
+    errs: *std.array_list.Managed([]const u8),
+    path: []const []const u8,
+    islen: bool,
+) anyerror!JsonValue {
+    const elems = spec_val.array.data.items;
+    const bound: JsonValue = if (1 < elems.len) elems[1] else .null;
+
+    const bounds: NofCount = if (islen) try lenbound(allocator, bound) else .{ .lo = 0, .hi = 0, .desc = try rangedesc(allocator, bound) };
+    if (elems.len < 2 or 3 < elems.len or null == bounds.desc) {
+        try errs.append("Invalid bound.");
+        return data_val;
+    }
+
+    if (3 == elems.len) {
+        var terrs = std.array_list.Managed([]const u8).init(allocator);
+        _ = try validateExactMatch(allocator, elems[2], data_val, &terrs, path);
+        if (0 < terrs.items.len) {
+            try errs.append("Spec not matched.");
+            return data_val;
+        }
+    }
+
+    const tbits: i64 = if (islen) T_string | T_list | T_map else T_number;
+    const len = lenof(data_val);
+    const inbound = if (islen) bounds.lo <= len and (-1 == bounds.hi or len <= bounds.hi) else inrange(bound, data_val);
+
+    if (0 == (tbits & typify(data_val)) or !inbound) {
+        try errs.append(try std.fmt.allocPrint(
+            allocator,
+            "Bound at {s}: {s} should be {s}.",
+            .{ try pathifySlice(allocator, path), try stringify(allocator, data_val, null), bounds.desc.? },
+        ));
+    }
+    return data_val;
+}
+
 /// Canonical `_invalidTypeMsg`:
 ///
 ///   'Expected ' +
@@ -4833,9 +4875,7 @@ pub fn select(allocator: Allocator, children: JsonValue, query: JsonValue) anyer
     for (child_list.items) |child| {
         var terrs = std.array_list.Managed([]const u8).init(allocator);
         const q = try clone(allocator, query);
-
-        // Mark all maps in query as open.
-        _ = try walk(allocator, q, markOpen, null, MAXDEPTH);
+        try openquery(q);
 
         // Validate with exact matching.
         _ = try validateExactMatch(allocator, q, child, &terrs, &[_][]const u8{});
@@ -4848,11 +4888,28 @@ pub fn select(allocator: Allocator, children: JsonValue, query: JsonValue) anyer
     return JsonValue{ .array = result_lr };
 }
 
-fn markOpen(_: Allocator, _: ?[]const u8, val: JsonValue, _: JsonValue, _: []const []const u8) anyerror!JsonValue {
-    if (val == .object) {
-        val.object.put(S_BOPEN, JsonValue{ .bool = true }) catch {};
+// Open every map in a select query, so a child may hold keys the query does
+// not name, but leave a directive's literals as written: what $EXACT
+// compares, and the count or bound of $NOF, $LEN and $RANGE.
+fn openquery(q: JsonValue) anyerror!void {
+    switch (q) {
+        .object => |obj| {
+            const open: JsonValue = obj.get(S_BOPEN) orelse .null;
+            if (open == .null) try obj.put(S_BOPEN, JsonValue{ .bool = true });
+            var it = obj.iterator();
+            while (it.next()) |kv| try openquery(kv.value_ptr.*);
+        },
+        .array => |arr| {
+            const elems = arr.data.items;
+            const head: []const u8 = if (0 < elems.len and elems[0] == .string) elems[0].string else "";
+            const exact = std.mem.eql(u8, head, S_BEXACT);
+            const bounded = std.mem.eql(u8, head, "`$NOF`") or std.mem.eql(u8, head, "`$LEN`") or std.mem.eql(u8, head, "`$RANGE`");
+            for (elems, 0..) |elem, i| {
+                if (0 == i or !(exact or (bounded and 1 == i))) try openquery(elem);
+            }
+        },
+        else => {},
     }
-    return val;
 }
 
 fn validateExactMatch(
@@ -4951,6 +5008,10 @@ fn validateExactMatch(
                     return try selectCount(allocator, spec_val, data_val, errs, path, true);
                 if (std.mem.eql(u8, first.string, "`$ALL`"))
                     return try selectCount(allocator, spec_val, data_val, errs, path, false);
+                if (std.mem.eql(u8, first.string, "`$LEN`"))
+                    return try selectBound(allocator, spec_val, data_val, errs, path, true);
+                if (std.mem.eql(u8, first.string, "`$RANGE`"))
+                    return try selectBound(allocator, spec_val, data_val, errs, path, false);
             }
         }
         // Plain array spec: compare to data element-by-element. Length and
