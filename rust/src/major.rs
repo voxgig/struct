@@ -2236,6 +2236,216 @@ fn validatecount(inj: &Inj, store: &Value, name: &str, counted: bool) -> Value {
     Value::skip()
 }
 
+// The value's length is within a bound: ['`$LEN`', bound, spec?], where the
+// bound is as for a $NOF count. A string's length is in code points.
+fn validate_len(inj: &Inj, _v: &Value, _r: &str, store: &Value) -> Value {
+    validatebound(inj, store, "$LEN")
+}
+
+// The value is a number within a bound: ['`$RANGE`', bound, spec?], where the
+// bound holds min or gt, max or lt, or one of each.
+fn validate_range(inj: &Inj, _v: &Value, _r: &str, store: &Value) -> Value {
+    validatebound(inj, store, "$RANGE")
+}
+
+// The bounding list directives: a bound, then at most one spec that must also admit.
+fn validatebound(inj: &Inj, store: &Value, name: &str) -> Value {
+    let (mode, parent, key_i) = {
+        let b = inj.borrow();
+        (b.mode, b.parent.clone(), b.key_i)
+    };
+    if mode != M_VAL {
+        return Value::Noval;
+    }
+    if !is_list(&parent) || key_i != 0 {
+        let path = inj.borrow().path.clone();
+        errs_push(
+            inj,
+            format!(
+                "The {name} validator at field {} must be the first element of an array.",
+                pathify(&path_value(&path), Some(1), Some(1))
+            ),
+        );
+        return Value::Noval;
+    }
+
+    let cval = slotval(inj);
+
+    let keylen = inj.borrow().keys.borrow().len() as i64;
+    inj.borrow_mut().key_i = keylen;
+
+    // As for the counting directives: SKIP keeps inject off the detached list.
+    Injection::setval(inj, cval.clone(), Some(2));
+
+    {
+        let mut b = inj.borrow_mut();
+        let n = b.path.len();
+        b.path.truncate(n.saturating_sub(1));
+    }
+    let path = inj.borrow().path.clone();
+
+    let field = format!(
+        "The {name} validator at field {}",
+        pathify(&path_value(&path), Some(1), None)
+    );
+    let nargs = size(&parent) - 1;
+
+    if !(1..=2).contains(&nargs) {
+        errs_push(
+            inj,
+            format!("{field} must have a bound and at most one spec."),
+        );
+        return Value::skip();
+    }
+
+    let bound = lookup(&parent, &Value::Num(1.0));
+    let islen = "$LEN" == name;
+    let (lo, hi, desc) = if islen {
+        lenbound(&bound)
+    } else {
+        (0, 0, rangedesc(&bound))
+    };
+
+    let Some(desc) = desc else {
+        errs_push(
+            inj,
+            format!(
+                "{field} has an invalid bound: {}.",
+                stringify(&bound, None, false)
+            ),
+        );
+        return Value::skip();
+    };
+
+    let ctype = typify(&cval);
+
+    if 2 == nargs {
+        let spec = lookup(&parent, &Value::Num(2.0));
+        if !admits(&cval, &spec, inj, store) {
+            errs_push(
+                inj,
+                invalid_type_msg(&path, &tvals_desc(&[spec]), ctype, &cval),
+            );
+            return Value::skip();
+        }
+    }
+
+    let (needtype, needbits) = if islen {
+        ("string, list or map", (T_STRING | T_LIST | T_MAP) as i64)
+    } else {
+        ("number", T_NUMBER as i64)
+    };
+
+    if 0 == needbits & ctype {
+        errs_push(inj, invalid_type_msg(&path, needtype, ctype, &cval));
+        return Value::skip();
+    }
+
+    let inbound = if islen {
+        let len = match &cval {
+            Value::Str(s) => s.chars().count() as i64,
+            _ => size(&cval),
+        };
+        lo <= len && (-1 == hi || len <= hi)
+    } else {
+        inrange(&bound, &cval)
+    };
+
+    if !inbound {
+        let need = format!("{}{desc}", if path.len() > 1 { "" } else { "value " });
+        errs_push(inj, invalid_type_msg(&path, &need, ctype, &cval));
+    }
+
+    Value::skip()
+}
+
+// The bounds of a $LEN bound, with -1 for no maximum, and the words for it,
+// which are absent when the bound is invalid.
+fn lenbound(bound: &Value) -> (i64, i64, Option<String>) {
+    let (lo, hi, countdesc) = nofcount(bound, -1);
+
+    if countdesc.is_none() {
+        return (0, 0, None);
+    }
+
+    let desc = if lo == hi {
+        lo.to_string()
+    } else if -1 == hi {
+        format!("at least {lo}")
+    } else if 0 == lo {
+        format!("at most {hi}")
+    } else {
+        format!("{lo} to {hi}")
+    };
+
+    (lo, hi, Some(format!("of length {desc}")))
+}
+
+// The words for a $RANGE bound, which are absent when the bound is invalid.
+fn rangedesc(bound: &Value) -> Option<String> {
+    if !is_map(bound) {
+        return None;
+    }
+
+    let [min, max, gt, lt] = ["min", "max", "gt", "lt"].map(|k| lookup(bound, &Value::str(k)));
+    let lower = if min.is_noval() { &gt } else { &min };
+    let upper = if max.is_noval() { &lt } else { &max };
+    let given = [&min, &max, &gt, &lt];
+
+    let valid = 0 < size(bound)
+        && size(bound) == given.iter().filter(|n| !n.is_noval()).count() as i64
+        && (min.is_noval() || gt.is_noval())
+        && (max.is_noval() || lt.is_noval())
+        && given
+            .iter()
+            .all(|n| n.is_noval() || 0 != (T_NUMBER as i64 & typify(n)))
+        && match (lower.as_num(), upper.as_num()) {
+            (Some(l), Some(u)) => l <= u,
+            _ => true,
+        };
+
+    if !valid {
+        return None;
+    }
+
+    let words = |word: &str, n: &Value| format!("{word} {}", stringify(n, None, false));
+    let lowerdesc = if !min.is_noval() {
+        Some(words("at least", &min))
+    } else if !gt.is_noval() {
+        Some(words("greater than", &gt))
+    } else {
+        None
+    };
+    let upperdesc = if !max.is_noval() {
+        Some(words("at most", &max))
+    } else if !lt.is_noval() {
+        Some(words("less than", &lt))
+    } else {
+        None
+    };
+
+    Some(
+        [lowerdesc, upperdesc]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" and "),
+    )
+}
+
+// A number within a valid $RANGE bound.
+fn inrange(bound: &Value, val: &Value) -> bool {
+    let Some(v) = val.as_num() else {
+        return false;
+    };
+    let limit = |key: &str| lookup(bound, &Value::str(key)).as_num();
+
+    limit("min").into_iter().all(|b| b <= v)
+        && limit("max").into_iter().all(|b| v <= b)
+        && limit("gt").into_iter().all(|b| b < v)
+        && limit("lt").into_iter().all(|b| v < b)
+}
+
 /// `_validation` — the modify hook installed by `validate` (runs after the
 /// per-key special commands).
 fn validation_modify(pval: &Value, key: &Value, parent: &Value, inj: &Inj, _store: &Value) {
@@ -2401,6 +2611,8 @@ pub fn validate(
     vmap.insert("$EXACT".to_string(), Value::func(validate_exact));
     vmap.insert("$NOF".to_string(), Value::func(validate_nof));
     vmap.insert("$ALL".to_string(), Value::func(validate_all));
+    vmap.insert("$LEN".to_string(), Value::func(validate_len));
+    vmap.insert("$RANGE".to_string(), Value::func(validate_range));
 
     let extra_or_empty = match &extra {
         Some(e) => e.clone(),

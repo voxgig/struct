@@ -294,8 +294,8 @@ stringify(&Value::str("verylongstring"), Some(5), false);
 <!-- => "ve..." -->
 
 For more task recipes (merge configs, rename fields, `$EACH`, `$MERGE`,
-`$FORMAT`, `$NOF`, `$ALL`, `$EXACT`, …) see the language-neutral
-[How-to guides](../DOCS.md#2-how-to-guides) — the spec syntax is identical;
+`$FORMAT`, `$NOF`, `$ALL`, `$LEN`, `$RANGE`, `$EXACT`, …) see the
+language-neutral [How-to guides](../DOCS.md#2-how-to-guides) — the spec syntax is identical;
 only the host literals differ.
 
 ---

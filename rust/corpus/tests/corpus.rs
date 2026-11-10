@@ -732,7 +732,7 @@ fn corpus() {
             |vin| validate(&vget(&vin, "data"), &vget(&vin, "spec"), None).map_err(|e| e.message),
         );
     }
-    for name in ["directive", "nof", "all", "unknown"] {
+    for name in ["directive", "nof", "all", "len", "range", "unknown"] {
         run.run_set_fallible(
             &set!("validate", name),
             false,

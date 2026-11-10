@@ -1,9 +1,9 @@
 # Struct for Rust
 
 > Rust port of the canonical TypeScript implementation.
-> Status: **complete** — the full shared corpus passes (`make test` → 1309
+> Status: **complete** — the full shared corpus passes (`make test` → 1672
 > checks; `cargo clippy` clean): minor utilities, `walk`, `merge`, `getpath`,
-> `setpath`, `inject`, `transform` (all 10 commands), `validate` (all 16
+> `setpath`, `inject`, `transform` (all 10 commands), `validate` (all 18
 > checkers), `select` (all operators), and the `primary.check` SDK test.
 
 For motivation, the language-neutral concepts, and the cross-language parity
@@ -473,6 +473,14 @@ holds when every spec admits it. A spec admits a value when validating the
 value against it finds no error and gives back every member of the value
 unchanged. There is no `$ONE`: write `` ['`$ONE`', a, b] `` as
 `` ['`$NOF`', {min: 1}, a, b] ``.
+
+Two more list checkers set bounds on a value. `` ['`$LEN`', n, spec?] ``
+holds when the value's length is within `n`, a bound written as for `$NOF`.
+Strings count code points, lists elements, maps keys.
+`` ['`$RANGE`', bound, spec?] `` holds when the value is a number within the
+bound, a map of `min` or `gt` and `max` or `lt`. Each takes at most one spec,
+which must also admit the value. `min` and `max` include their bound, while
+`gt` and `lt` exclude it.
 
 A spec that names a checker `validate` does not define is rejected before any
 data is read, with `Unknown validator $FOO at field a.`, and nothing is
