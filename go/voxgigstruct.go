@@ -4747,16 +4747,7 @@ func Select(children any, query any) []any {
 
 	q := Clone(query)
 
-	// Mark all map nodes as open so extra keys don't fail validation.
-	Walk(q, func(key *string, v any, parent any, path []string) any {
-		if IsMap(v) {
-			m := v.(map[string]any)
-			if _, has := m[S_BOPEN]; !has {
-				m[S_BOPEN] = true
-			}
-		}
-		return v
-	})
+	_openquery(q)
 
 	for _, child := range childList {
 		errs := ListRefCreate[any]()
@@ -4767,6 +4758,34 @@ func Select(children any, query any) []any {
 	}
 
 	return results
+}
+
+// Open every map in a select query, so a child may hold keys the query does
+// not name, but leave a directive's literals as written: what $EXACT
+// compares, and the count or bound of $NOF, $LEN and $RANGE.
+func _openquery(q any) {
+	if m, ok := q.(map[string]any); ok {
+		if nil == m[S_BOPEN] {
+			m[S_BOPEN] = true
+		}
+		for _, v := range m {
+			_openquery(v)
+		}
+	} else if IsList(q) {
+		list := _listify(q)
+		head := ""
+		if 0 < len(list) {
+			head, _ = list[0].(string)
+		}
+		exact := S_BEXACT == head
+		bounded := "`$NOF`" == head || "`$LEN`" == head || "`$RANGE`" == head
+		for i, v := range list {
+			literal := 0 < i && (exact || (bounded && 1 == i))
+			if !literal {
+				_openquery(v)
+			}
+		}
+	}
 }
 
 // Condensed structures
