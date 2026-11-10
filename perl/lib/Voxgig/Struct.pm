@@ -3280,14 +3280,7 @@ sub select {
         '$LIKE', \&select_CMP,
     );
     my $q = clone($query);
-    walk($q, sub {
-        my ($k, $v) = @_;
-        if (ismap($v)) {
-            my $existing = getprop($v, '`$OPEN`', $JTRUE);
-            setprop($v, '`$OPEN`', $existing);
-        }
-        return $v;
-    });
+    _openquery($q);
     for my $child (@$children) {
         my $errs = [];
         my $injdef = {
@@ -3301,6 +3294,30 @@ sub select {
         }
     }
     return $results;
+}
+
+# Open every map in a select query, so a child may hold keys the query does
+# not name, but leave a directive's literals as written: what $EXACT
+# compares, and the count or bound of $NOF, $LEN and $RANGE.
+sub _openquery {
+    my ($q) = @_;
+    if (ismap($q)) {
+        setprop($q, '`$OPEN`', getprop($q, '`$OPEN`', $JTRUE));
+        for my $key (@{ keysof($q) }) {
+            _openquery($q->{$key});
+        }
+    }
+    elsif (islist($q)) {
+        my $head = (defined $q->[0] && !ref $q->[0]) ? $q->[0] : S_MT;
+        my $exact = '`$EXACT`' eq $head;
+        my $bounded = '`$NOF`' eq $head || '`$LEN`' eq $head || '`$RANGE`' eq $head;
+        for my $i (0 .. $#$q) {
+            if (0 == $i || !($exact || ($bounded && 1 == $i))) {
+                _openquery($q->[$i]);
+            }
+        }
+    }
+    return;
 }
 
 # ============================================================================
