@@ -4060,18 +4060,7 @@ namespace Voxgig.Struct
             var meta = new Dictionary<string, object?> { [S_BEXACT] = true };
             var q = Clone(query);
 
-            Walk(q, (k, v, p, path) =>
-            {
-                if (IsMap(v))
-                {
-                    object? existing = GetProp(v, "`$OPEN`");
-                    if (existing == null)
-                    {
-                        SetProp(v, "`$OPEN`", true);
-                    }
-                }
-                return v;
-            });
+            _OpenQuery(q);
 
             foreach (object? child in childList)
             {
@@ -4090,6 +4079,34 @@ namespace Voxgig.Struct
             }
 
             return results;
+        }
+
+        // Open every map in a select query, so a child may hold keys the query does
+        // not name, but leave a directive's literals as written: what $EXACT
+        // compares, and the count or bound of $NOF, $LEN and $RANGE.
+        private static void _OpenQuery(object? q)
+        {
+            if (q is Dictionary<string, object?> map)
+            {
+                SetProp(map, "`$OPEN`", GetProp(map, "`$OPEN`", true));
+                foreach (string key in KeysOf(map))
+                {
+                    _OpenQuery(map[key]);
+                }
+            }
+            else if (q is List<object?> list)
+            {
+                object? head = 0 < list.Count ? list[0] : null;
+                bool exact = head is "`$EXACT`";
+                bool bounded = head is "`$NOF`" or "`$LEN`" or "`$RANGE`";
+                for (int i = 0; i < list.Count; i++)
+                {
+                    if (0 == i || !(exact || (bounded && 1 == i)))
+                    {
+                        _OpenQuery(list[i]);
+                    }
+                }
+            }
         }
 
 
