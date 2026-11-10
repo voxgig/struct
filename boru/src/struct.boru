@@ -4056,12 +4056,33 @@ def vgl-select-kids fn [[i:Integer prs:Any intkeys:Boolean acc:Any] [Any] [
   ]
 ]]
 
-def vg-open-cb fn [[k:Any v:Any p:Any pth:Any] [Any] [
-  if (vg-ismap v) [
-    (vg-setprop v "`$OPEN`" (vg-getprop v "`$OPEN`" true)) drop
+# Open every map in a select query, so a child may hold keys the query does
+# not name, but leave a directive's literals as written: what $EXACT
+# compares, and the count or bound of $NOF, $LEN and $RANGE.
+def vgi-openquery fn [[q:Any] [Any] [
+  if (vg-ismap q) [
+    (vg-setprop q "`$OPEN`" (vg-getprop q "`$OPEN`" true)) drop
+    (vgl-openquery 0 (vg-keysof q) q false false) drop
     none
-  ] [none] drop
-  v
+  ] [
+    if (vg-islist q) [
+      def q0 (vgi-lookup q 0)
+      def qhead (if (q0 is String) [q0] [""])
+      def qexact (qhead eq "`$EXACT`")
+      def qbound (((qhead eq "`$NOF`") or (qhead eq "`$LEN`")) or (qhead eq "`$RANGE`"))
+      (vgl-openquery 0 (vg-keysof q) q qexact qbound) drop
+      none
+    ] [none]
+  ] drop
+  none
+]]
+def vgl-openquery fn [[i:Integer ks:Any q:Any qexact:Boolean qbound:Boolean] [Any] [
+  if (i gte (size ks)) [none] [
+    def aslit (if (i eq 0) [false] [if qexact [true] [if qbound [i eq 1] [false]]])
+    if aslit [none] [(vgi-openquery (vgi-raw q (ks get i))) drop none] drop
+    def r (vgl-openquery (i add 1) ks q qexact qbound)
+    r
+  ]
 ]]
 
 def vgl-select-match fn [[i:Integer kids:Any q:Any results:Any] [Any] [
@@ -4096,7 +4117,7 @@ def vg-select fn [[children:Any query:Any] [Any] [
     def prs (vg-items children)
     def kids (vgl-select-kids 0 prs (vg-islist children) (flex []))
     def q (vg-clone query)
-    (vg-walk q vg-noarg [vg-open-cb/v] vg-noarg) drop
+    (vgi-openquery q) drop
     def results (vgl-select-match 0 kids q (flex []))
     results
   ]
