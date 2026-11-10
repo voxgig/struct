@@ -3127,14 +3127,8 @@ pub fn select(children: &Value, query: &Value) -> Value {
     let meta = Value::map_of([(S_BEXACT.to_string(), Value::Bool(true))]);
 
     let q = clone(query);
-    let mut open = |_k: &Value, v: &Value, _p: &Value, _t: &[String]| -> Value {
-        if is_map(v) {
-            let cur = get_prop(v, &Value::str(S_BOPEN), Value::Bool(true));
-            set_prop(v.clone(), &Value::str(S_BOPEN), cur);
-        }
-        v.clone()
-    };
-    walk(q.clone(), Some(&mut open), None, None);
+
+    openquery(&q);
 
     let mut results: Vec<Value> = Vec::new();
     for child in &child_list {
@@ -3155,6 +3149,29 @@ pub fn select(children: &Value, query: &Value) -> Value {
         }
     }
     Value::list(results)
+}
+
+// Open every map in a select query, so a child may hold keys the query does
+// not name, but leave a directive's literals as written: what $EXACT
+// compares, and the count or bound of $NOF, $LEN and $RANGE.
+fn openquery(q: &Value) {
+    if is_map(q) {
+        let cur = get_prop(q, &Value::str(S_BOPEN), Value::Bool(true));
+        set_prop(q.clone(), &Value::str(S_BOPEN), cur);
+        for (_, v) in items_vec(q) {
+            openquery(&v);
+        }
+    } else if let Value::List(l) = q {
+        let elems = l.borrow().clone();
+        let head = elems.first().and_then(Value::as_str);
+        let exact = Some(S_BEXACT) == head;
+        let bounded = matches!(head, Some("`$NOF`" | "`$LEN`" | "`$RANGE`"));
+        for (i, v) in elems.iter().enumerate() {
+            if 0 == i || !(exact || (bounded && 1 == i)) {
+                openquery(v);
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------
