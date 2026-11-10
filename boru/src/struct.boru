@@ -3483,6 +3483,205 @@ def vg-v-all fn [[inj:Any val:Any iref:Any store:Any] [Any] [
   r
 ]]
 
+# A string's length in code points: an RE2 dot matches one code point.
+def vgi-codepoints fn [[s:String] [Integer] [
+  def m (s mini re "(?s)." {all: true})
+  def r (if ((m get "ok") eq true) [size (m get "ms")] [0])
+  r
+]]
+
+# The bounds of a $LEN bound, with -1 for no maximum, and the words for it,
+# which are absent when the bound is invalid.
+def vgi-lenbound fn [[bnd:Any] [Any] [
+  def nc (vgi-nofcount bnd -1)
+  if ((nc get 2) is None) [flex [0 0 none]] [
+    def lo (nc get 0)
+    def hi (nc get 1)
+    def lwords (
+      if (lo eq hi) [vg-num-to-string lo] [
+        if (hi eq -1) [StringUtil.concat ["at least " (vg-num-to-string lo)]] [
+          if (lo eq 0) [StringUtil.concat ["at most " (vg-num-to-string hi)]] [
+            StringUtil.concat [(vg-num-to-string lo) " to " (vg-num-to-string hi)]
+          ]
+        ]
+      ]
+    )
+    def bdesc (StringUtil.concat ["of length " lwords])
+    flex [lo hi bdesc]
+  ]
+]]
+
+# A $RANGE bound value: absent, or a number.
+def vgi-isnumber fn [[n:Any] [Boolean] [
+  if (n is None) [true] [vg-bit vg-t-number (vg-typify n)]
+]]
+
+# A $RANGE bound map: min or gt, max or lt, nothing else, each a number, and
+# the lower no greater than the upper.
+def vgi-rangevalid fn [[bnd:Any rmin:Any rmax:Any rgt:Any rlt:Any] [Boolean] [
+  def wmin (if (rmin is None) [0] [1])
+  def wmax (if (rmax is None) [0] [1])
+  def wgt (if (rgt is None) [0] [1])
+  def wlt (if (rlt is None) [0] [1])
+  def nkeys (((wmin add wmax) add wgt) add wlt)
+  if (((size bnd) gt 0) and ((size bnd) eq nkeys)) [
+    if (((wmin add wgt) lt 2) and ((wmax add wlt) lt 2)) [
+      def numok (((vgi-isnumber rmin) and (vgi-isnumber rmax)) and ((vgi-isnumber rgt) and (vgi-isnumber rlt)))
+      if numok [
+        def lowerv (if (rmin is None) [rgt] [rmin])
+        def upperv (if (rmax is None) [rlt] [rmax])
+        if ((lowerv is None) or (upperv is None)) [true] [(convert Float lowerv) lte (convert Float upperv)]
+      ] [false]
+    ] [false]
+  ] [false]
+]]
+
+# The words for a $RANGE bound, which are absent when the bound is invalid.
+def vgi-rangedesc fn [[bnd:Any] [Any] [
+  def r (
+    if (vg-ismap bnd) [
+      def rmin (vgi-lookup bnd "min")
+      def rmax (vgi-lookup bnd "max")
+      def rgt (vgi-lookup bnd "gt")
+      def rlt (vgi-lookup bnd "lt")
+      if (vgi-rangevalid bnd rmin rmax rgt rlt) [
+        def lowerw (
+          if (rmin is None) [
+            if (rgt is None) [none] [StringUtil.concat ["greater than " (vg-stringify rgt vg-noarg vg-noarg)]]
+          ] [StringUtil.concat ["at least " (vg-stringify rmin vg-noarg vg-noarg)]]
+        )
+        def upperw (
+          if (rmax is None) [
+            if (rlt is None) [none] [StringUtil.concat ["less than " (vg-stringify rlt vg-noarg vg-noarg)]]
+          ] [StringUtil.concat ["at most " (vg-stringify rmax vg-noarg vg-noarg)]]
+        )
+        if (lowerw is None) [upperw] [
+          if (upperw is None) [lowerw] [StringUtil.concat [lowerw " and " upperw]]
+        ]
+      ] [none]
+    ] [none]
+  )
+  r
+]]
+
+# A number within a valid $RANGE bound. Both sides are compared as decimals,
+# so an integer and a decimal compare by value.
+def vgi-inrange fn [[bnd:Any v:Any] [Boolean] [
+  def fv (convert Float v)
+  def rmin (vgi-lookup bnd "min")
+  def rmax (vgi-lookup bnd "max")
+  def rgt (vgi-lookup bnd "gt")
+  def rlt (vgi-lookup bnd "lt")
+  def okmin (if (rmin is None) [true] [(convert Float rmin) lte fv])
+  def okmax (if (rmax is None) [true] [fv lte (convert Float rmax)])
+  def okgt (if (rgt is None) [true] [(convert Float rgt) lt fv])
+  def oklt (if (rlt is None) [true] [fv lt (convert Float rlt)])
+  def r ((okmin and okmax) and (okgt and oklt))
+  r
+]]
+
+# A value of a bounded type within its valid bound.
+def vgi-inbound fn [[cval:Any islen:Boolean bnd:Any bounds:Any] [Boolean] [
+  def r (
+    if islen [
+      def blen (if (cval is String) [vgi-codepoints cval] [vgz cval])
+      def lo (bounds get 0)
+      def hi (bounds get 1)
+      def ok ((lo lte blen) and ((hi eq -1) or (blen lte hi)))
+      ok
+    ] [vgi-inrange bnd cval]
+  )
+  r
+]]
+
+# After a valid bound, the spec's check, the type's, then the bound's: the
+# first to fail reports, and the rest are not tried.
+def vgi-checkbound fn [[inj:Any store:Any cval:Any held:Boolean spec:Any nargs:Integer islen:Boolean bnd:Any bounds:Any] [Any] [
+  def ctype (vg-typify cval)
+  def admitted (if (nargs eq 2) [vgi-admits cval held spec inj store] [true])
+  def needmask (if islen [BinUtil.bor vg-t-string (BinUtil.bor vg-t-list vg-t-map)] [vg-t-number])
+  def msg (
+    if (admitted not) [
+      def specdesc (vg-re-replace "`\\$([A-Z]+)`" (vg-stringify spec vg-noarg vg-noarg) vg-lower-tname-box)
+      def m1 (vgi-invalid-type-msg (inj get "path") specdesc ctype cval)
+      m1
+    ] [
+      if ((vg-bit needmask ctype) not) [
+        def needtype (if islen ["string, list or map"] ["number"])
+        def m2 (vgi-invalid-type-msg (inj get "path") needtype ctype cval)
+        m2
+      ] [
+        if (vgi-inbound cval islen bnd bounds) [none] [
+          def p1 (if ((vgz (inj get "path")) gt 1) [""] ["value "])
+          def need (StringUtil.concat [p1 (bounds get 2)])
+          def m3 (vgi-invalid-type-msg (inj get "path") need ctype cval)
+          m3
+        ]
+      ]
+    ]
+  )
+  if (msg is None) [none] [(append [msg] (inj get "errs")) drop none] drop
+  none
+]]
+
+# The bounding list directives: a bound, then at most one spec that must also admit.
+def vgi-validatebound fn [[inj:Any store:Any vname:String] [Any] [
+  if ((inj get "mode") eq 4) [
+    def parent (inj get "parent")
+    def keyi (inj get "keyi")
+    if (((vg-islist parent) not) or ((keyi eq 0) not)) [
+      (append [(StringUtil.concat ["The " vname " validator at field " (vg-pathify (inj get "path") 1 1) " must be the first element of an array."])] (inj get "errs")) drop
+      none
+    ] [
+      def cval (vgi-slotval inj)
+      def held (vgi-slotheld inj)
+      (inj set "keyi" (vgz (inj get "keys"))) drop
+      # As for the counting directives: SKIP keeps inject off the detached list.
+      (vgi-slotset inj cval held) drop
+      (inj set "path" (vg-slice (inj get "path") -1 vg-noarg vg-noarg)) drop
+      def fieldmsg (StringUtil.concat ["The " vname " validator at field " (vg-pathify (inj get "path") 1 vg-noarg)])
+      def nargs ((vgz parent) sub 1)
+      if ((nargs lt 1) or (2 lt nargs)) [
+        (append [(StringUtil.concat [fieldmsg " must have a bound and at most one spec."])] (inj get "errs")) drop
+        none
+      ] [
+        def bnd (vgi-lookup parent 1)
+        def islen (vname eq "$LEN")
+        def bounds (
+          if islen [vgi-lenbound bnd] [
+            def rdesc (vgi-rangedesc bnd)
+            flex [0 0 rdesc]
+          ]
+        )
+        if ((bounds get 2) is None) [
+          (append [(StringUtil.concat [fieldmsg " has an invalid bound: " (vg-stringify bnd vg-noarg vg-noarg) "."])] (inj get "errs")) drop
+          none
+        ] [
+          def spec (vgi-lookup parent 2)
+          (vgi-checkbound inj store cval held spec nargs islen bnd bounds) drop
+          none
+        ] drop
+        none
+      ] drop
+      vg-skip-marker
+    ]
+  ] [none]
+]]
+
+# The value's length is within a bound: ['`$LEN`', bound, spec?], where the
+# bound is as for a $NOF count. A string's length is in code points.
+def vg-v-len fn [[inj:Any val:Any iref:Any store:Any] [Any] [
+  def r (vgi-validatebound inj store "$LEN")
+  r
+]]
+
+# The value is a number within a bound: ['`$RANGE`', bound, spec?], where the
+# bound holds min or gt, max or lt, or one of each.
+def vg-v-range fn [[inj:Any val:Any iref:Any store:Any] [Any] [
+  def r (vgi-validatebound inj store "$RANGE")
+  r
+]]
+
 # Literal key presence (stored null still counts as declared).
 def vgl-badkeys fn [[i:Integer ckeys:Any pval:Any acc:Any] [Any] [
   if (i gte (size ckeys)) [acc] [
@@ -3595,6 +3794,8 @@ def vg-v-child-box {"`$FN`": vg-v-child/v}
 def vg-v-exact-box {"`$FN`": vg-v-exact/v}
 def vg-v-nof-box {"`$FN`": vg-v-nof/v}
 def vg-v-all-box {"`$FN`": vg-v-all/v}
+def vg-v-len-box {"`$FN`": vg-v-len/v}
+def vg-v-range-box {"`$FN`": vg-v-range/v}
 
 # Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
 def vg-validate-names {"$TOP": true "$SPEC": true "$BT": true "$DS": true "$WHEN": true "$ANNO": true "$REF": true "$FORMAT": true "$APPLY": true "$OPEN": true}
@@ -3687,6 +3888,8 @@ def vg-validate fn [[data:Any spec:Any injdef:Any] [Any] [
     "$EXACT": (vg-v-exact-box)
     "$NOF": (vg-v-nof-box)
     "$ALL": (vg-v-all-box)
+    "$LEN": (vg-v-len-box)
+    "$RANGE": (vg-v-range-box)
   })
   def sl (flex [])
   (append [cmds] sl) drop

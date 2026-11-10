@@ -134,6 +134,22 @@ that count. A spec that names a checker `validate` does not define is
 rejected before any data is read, so a leftover `$ONE` raises
 `Unknown validator $ONE at field a.0.` rather than validating anything.
 
+`$LEN` bounds a length and `$RANGE` a number. Each takes a bound, then at
+most one spec, which must also admit the value:
+
+```boru
+Struct.validate "abc" (flex ["`$LEN`" {max: 3} "`$STRING`"]) Struct.NOARG
+;# "abc"
+
+Struct.validate 42 (flex ["`$RANGE`" {min: 0 lt: 150} "`$INTEGER`"]) Struct.NOARG
+;# 42
+```
+
+The bound `$LEN` takes is written as the `$NOF` count is. A string's length
+counts code points, a list's its elements, and a map's its keys. The bound
+`$RANGE` takes is a map of `min` or `gt` and `max` or `lt`: `min` and `max`
+include their bound, while `gt` and `lt` exclude it.
+
 `select` takes `(children query)` and returns the matching children,
 each annotated with its `$KEY`:
 
