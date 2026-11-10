@@ -226,6 +226,12 @@ let is_checker_name s =
    for i = 1 to n - 1 do if s.[i] < 'A' || s.[i] > 'Z' then ok := false done;
    !ok)
 
+(* Code points in a UTF-8 string: the bytes that do not continue a sequence. *)
+let utf8_length s =
+  let n = ref 0 in
+  String.iter (fun c -> if Char.code c land 0xC0 <> 0x80 then incr n) s;
+  !n
+
 (* Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN. *)
 let validate_names =
   ["$TOP"; "$SPEC"; "$BT"; "$DS"; "$WHEN"; "$ANNO"; "$REF"; "$FORMAT"; "$APPLY"; "$OPEN"]
@@ -1746,6 +1752,104 @@ and validatecount inj store name counted =
     skip
   end
 
+(* The value's length is within a bound: [`$LEN`, bound, spec?], where the
+   bound is as for a $NOF count. A string's length is in code points. *)
+and validate_len inj _v _ref store = validatebound inj store "$LEN"
+
+(* The value is a number within a bound: [`$RANGE`, bound, spec?], where the
+   bound holds min or gt, max or lt, or one of each. *)
+and validate_range inj _v _ref store = validatebound inj store "$RANGE"
+
+(* The bounding list directives: a bound, then at most one spec that must also admit. *)
+and validatebound inj store name =
+  if inj.mode <> m_val then Noval
+  else if not (islist inj.parent) || inj.keyi <> 0 then begin
+    push_err inj ("The " ^ name ^ " validator at field " ^ pathify ~startin:(Num 1.0) ~endin:(Num 1.0) inj.path ^ " must be the first element of an array.");
+    Noval
+  end else begin
+    let parent = inj.parent in
+    let cval = slotval inj in
+    inj.keyi <- size inj.keys;
+    (* As for the counting directives: skip keeps inject off the detached list. *)
+    ignore (inj_setval ~ancestor:2 inj cval);
+    inj.path <- slice ~start:(Num (-1.0)) inj.path;
+    let field = "The " ^ name ^ " validator at field " ^ pathify ~startin:(Num 1.0) inj.path in
+    let nargs = size parent - 1 in
+    (if nargs < 1 || 2 < nargs then push_err inj (field ^ " must have a bound and at most one spec.")
+     else begin
+       let bound = lookup_ parent (Num 1.0) in
+       let islen = (name = "$LEN") in
+       let lo, hi, desc = if islen then lenbound bound else (0.0, 0.0, rangedesc bound) in
+       match desc with
+       | None -> push_err inj (field ^ " has an invalid bound: " ^ stringify bound ^ ".")
+       | Some desc ->
+         let ctype = typify cval in
+         let spec = lookup_ parent (Num 2.0) in
+         if nargs = 2 && not (admits cval spec inj store) then
+           push_err inj (invalid_type_msg inj.path (replace_transform_names (stringify spec)) ctype cval "V0410")
+         else if (if islen then t_string lor t_list lor t_map else t_number) land ctype = 0 then
+           push_err inj (invalid_type_msg inj.path (if islen then "string, list or map" else "number") ctype cval "V0420")
+         else begin
+           let inbound =
+             if islen then
+               let len = float_of_int (match cval with Str s -> utf8_length s | _ -> size cval) in
+               lo <= len && (hi = -1.0 || len <= hi)
+             else inrange bound cval in
+           if not inbound then
+             push_err inj (invalid_type_msg inj.path ((if size inj.path > 1 then "" else "value ") ^ desc) ctype cval "V0430")
+         end
+     end);
+    skip
+  end
+
+(* The bounds of a $LEN bound, with -1 for no maximum, and the words for it,
+   which are absent when the bound is invalid. *)
+and lenbound bound =
+  match nofcount bound (-1.0) with
+  | _, _, None -> (0.0, 0.0, None)
+  | lo, hi, Some _ ->
+    let words =
+      if lo = hi then num_to_string lo
+      else if hi = -1.0 then "at least " ^ num_to_string lo
+      else if lo = 0.0 then "at most " ^ num_to_string hi
+      else num_to_string lo ^ " to " ^ num_to_string hi in
+    (lo, hi, Some ("of length " ^ words))
+
+(* The words for a $RANGE bound, which are absent when the bound is invalid. *)
+and rangedesc bound =
+  if not (ismap bound) then None
+  else begin
+    let mn = lookup_ bound (Str "min") and mx = lookup_ bound (Str "max") in
+    let gt = lookup_ bound (Str "gt") and lt = lookup_ bound (Str "lt") in
+    let lower = if is_noval mn then gt else mn in
+    let upper = if is_noval mx then lt else mx in
+    let isnum n = is_noval n || (t_number land typify n) > 0 in
+    let num n = (match n with Num x -> x | _ -> 0.0) in
+    let valid =
+      size bound > 0
+      && size bound = List.length (List.filter (fun n -> not (is_noval n)) [mn; mx; gt; lt])
+      && (is_noval mn || is_noval gt)
+      && (is_noval mx || is_noval lt)
+      && isnum mn && isnum mx && isnum gt && isnum lt
+      && (is_noval lower || is_noval upper || num lower <= num upper) in
+    let part a awords b bwords =
+      if not (is_noval a) then Str (awords ^ stringify a)
+      else if not (is_noval b) then Str (bwords ^ stringify b)
+      else Noval in
+    if not valid then None
+    else Some (join ~sep:(Str " and ")
+                 (lst [part mn "at least " gt "greater than "; part mx "at most " lt "less than "]))
+  end
+
+(* A number within a valid $RANGE bound. *)
+and inrange bound v =
+  let mn = lookup_ bound (Str "min") and mx = lookup_ bound (Str "max") in
+  let gt = lookup_ bound (Str "gt") and lt = lookup_ bound (Str "lt") in
+  let num n = (match n with Num x -> x | _ -> Float.nan) in
+  let x = num v in
+  (is_noval mn || num mn <= x) && (is_noval mx || x <= num mx)
+  && (is_noval gt || num gt < x) && (is_noval lt || x < num lt)
+
 (* The bounds of a $NOF count, and the words for it, which are absent when
    the count is invalid. Without a max, the bound is the number of specs. *)
 and nofcount count numtvals =
@@ -1905,6 +2009,8 @@ and validate ?(inj = INone) data spec =
   put "$EXACT" (Func validate_exact);
   put "$NOF" (Func validate_nof);
   put "$ALL" (Func validate_all);
+  put "$LEN" (Func validate_len);
+  put "$RANGE" (Func validate_range);
   let store = merge ~maxdepth:(Num 1.0) (lst [base; (if is_noval extra then empty_map () else extra); Map { entries = [(s_derrs, errs)] }]) in
   let meta = (match inj with IDef d when not (is_noval d.d_meta) -> d.d_meta | _ -> empty_map ()) in
   ignore (setprop meta (Str s_bexact) (getprop ~alt:(Bool false) meta (Str s_bexact)));

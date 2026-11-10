@@ -97,6 +97,12 @@ validate (jm [Str "a"; Str "x"]) (jm [Str "a"; Str "`$STRING`"])  (* {a:x} *)
 validate (Num 1.0)
   (jt [Str "`$NOF`"; jm [Str "min"; Num 1.0]; Str "`$STRING`"; Str "`$NUMBER`"])  (* 1 *)
 
+(* validate: `$LEN` bounds a length, `$RANGE` a number *)
+validate (Str "abc")
+  (jt [Str "`$LEN`"; jm [Str "min"; Num 1.0; Str "max"; Num 64.0]; Str "`$STRING`"])  (* abc *)
+validate (Num 42.0)
+  (jt [Str "`$RANGE`"; jm [Str "min"; Num 0.0; Str "lt"; Num 150.0]; Str "`$INTEGER`"])  (* 42 *)
+
 (* select: MongoDB-style query over children *)
 select (jt [jm [Str "a"; Num 1.0]; jm [Str "a"; Num 2.0]])
        (jm [Str "a"; jm [Str "`$GT`"; Num 1.0]])             (* [{$KEY:1,a:2}] *)
@@ -108,6 +114,14 @@ value. There is no `$ONE`; the full checker list is in the
 [language-neutral reference](../DOCS.md#validate-checkers-inside-backticks-in-a-validate-spec).
 A spec that names a checker `validate` does not define is rejected before any
 data is read, with `Unknown validator $FOO at field a.`
+
+`` Str "`$LEN`" `` takes a bound written as for a `$NOF` count, and holds
+when the value's length is within it: a `Str` counts code points rather than
+bytes, a `List` its elements, and a `Map` its keys, and any other value fails.
+`` Str "`$RANGE`" `` takes a map of `min` or `gt` with `max` or `lt`, and
+fails on anything but a `Num`. `min` and `max` include their bound, while `gt`
+and `lt` exclude it. Each takes at most one spec, which must also admit the
+value.
 
 ## Testing
 
@@ -121,7 +135,7 @@ omni is consumed as a local checkout the Makefile finds via `$OMNI_HOME` or
 beside this repository, and is compiled into the TEST binary only: `make lint`
 type-checks `src/` alone and nothing shipped names omni (register 4.13).
 
-`test/runner.ml` runs every group the corpus defines — 1602 entries in 78
+`test/runner.ml` runs every group the corpus defines — 1666 entries in 80
 groups — plus the two `check` entries (`DEF.client`,
 client-scoped options, `contextify`) and four single entries that are not part
 of any set. Keep it green, keep `python3 ../tools/check_parity.py` green, and
