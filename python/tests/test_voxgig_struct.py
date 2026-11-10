@@ -880,6 +880,20 @@ class TestStruct(unittest.TestCase):
             lambda vin: validate(vin.get('data'), vin.get('spec')),
         )
 
+    def test_validate_len(self):
+        runsetflags(
+            spec['validate']['len'],
+            {'null': False},
+            lambda vin: validate(vin.get('data'), vin.get('spec')),
+        )
+
+    def test_validate_range(self):
+        runsetflags(
+            spec['validate']['range'],
+            {'null': False},
+            lambda vin: validate(vin.get('data'), vin.get('spec')),
+        )
+
     def test_validate_unknown(self):
         runsetflags(
             spec['validate']['unknown'],
@@ -946,6 +960,15 @@ class TestStruct(unittest.TestCase):
             validate('x', ['`$NOF`', {'min': 1.0, 'max': 2.0}, *nof])
         with self.assertRaisesRegex(ValueError, 'has an invalid count: 2.5'):
             validate('x', ['`$NOF`', 2.5, *nof])
+
+    def test_validate_len_whole_decimal_bound(self):
+        # A $LEN bound is a $NOF count, so 2.0 is the bound 2 here too.
+        self.assertEqual(validate('ab', ['`$LEN`', 2.0]), 'ab')
+        self.assertEqual(validate('ab', ['`$LEN`', {'min': 1.0, 'max': 2.0}]), 'ab')
+        with self.assertRaisesRegex(ValueError, r'^Expected value of length 3, but'):
+            validate('ab', ['`$LEN`', 3.0])
+        with self.assertRaisesRegex(ValueError, 'has an invalid bound: 2.5'):
+            validate('ab', ['`$LEN`', 2.5])
 
     def test_validate_custom(self):
         errs = []

@@ -2667,6 +2667,162 @@ def _validatecount(inj, store, name, counted):
     return SKIP
 
 
+# The value's length is within a bound: ['`$LEN`', bound, spec?], where the
+# bound is as for a $NOF count. A string's length is in code points.
+def validate_LEN(inj, _val=UNDEF, _ref=UNDEF, store=UNDEF):
+    return _validatebound(inj, store, '$LEN')
+
+
+# The value is a number within a bound: ['`$RANGE`', bound, spec?], where the
+# bound holds min or gt, max or lt, or one of each.
+def validate_RANGE(inj, _val=UNDEF, _ref=UNDEF, store=UNDEF):
+    return _validatebound(inj, store, '$RANGE')
+
+
+# The bounding list directives: a bound, then at most one spec that must also admit.
+def _validatebound(inj, store, name):
+    mode = inj.mode
+    parent = inj.parent
+    keyI = inj.keyI
+
+    if mode != S_MVAL:
+        return UNDEF
+
+    if not islist(parent) or keyI != 0:
+        inj.errs.append(
+            'The '
+            + name
+            + ' validator at field '
+            + pathify(inj.path, 1, 1)
+            + ' must be the first element of an array.'
+        )
+        return UNDEF
+
+    cval, present = _slotval(inj)
+
+    inj.keyI = size(inj.keys)
+
+    # As for the counting directives: SKIP keeps inject off the detached list.
+    _setslot(inj, cval, present)
+
+    inj.path = inj.path[:-1]
+
+    field = 'The ' + name + ' validator at field ' + pathify(inj.path, 1)
+    nargs = size(parent) - 1
+
+    if nargs < 1 or nargs > 2:
+        inj.errs.append(field + ' must have a bound and at most one spec.')
+        return SKIP
+
+    bound = _lookup(parent, 1)
+    islen = name == '$LEN'
+    lo, hi, desc = _lenbound(bound) if islen else (0, 0, _rangedesc(bound))
+
+    if desc is UNDEF:
+        inj.errs.append(field + ' has an invalid bound: ' + stringify(bound) + '.')
+        return SKIP
+
+    ctype = typify(cval)
+
+    if nargs == 2 and not _admits(cval, present, _lookup(parent, 2), inj, store):
+        specdesc = re.sub(
+            r'`\$([A-Z]+)`', lambda m: m.group(1).lower(), stringify(_lookup(parent, 2))
+        )
+        inj.errs.append(_invalidTypeMsg(inj.path, specdesc, ctype, cval, 'V0410'))
+        return SKIP
+
+    if ((T_string | T_list | T_map if islen else T_number) & ctype) == 0:
+        needtype = 'string, list or map' if islen else S_number
+        inj.errs.append(_invalidTypeMsg(inj.path, needtype, ctype, cval, 'V0420'))
+        return SKIP
+
+    length = size(cval) if islen else 0
+    inbound = lo <= length and (hi == -1 or length <= hi) if islen else _inrange(bound, cval)
+
+    if not inbound:
+        needtype = ('' if size(inj.path) > 1 else 'value ') + desc
+        inj.errs.append(_invalidTypeMsg(inj.path, needtype, ctype, cval, 'V0430'))
+
+    return SKIP
+
+
+# The bounds of a $LEN bound, with -1 for no maximum, and the words for it,
+# which are absent when the bound is invalid.
+def _lenbound(bound):
+    lo, hi, countdesc = _nofcount(bound, -1)
+
+    if countdesc is UNDEF:
+        return 0, 0, UNDEF
+
+    if lo == hi:
+        desc = str(lo)
+    elif hi == -1:
+        desc = 'at least ' + str(lo)
+    elif lo == 0:
+        desc = 'at most ' + str(hi)
+    else:
+        desc = str(lo) + ' to ' + str(hi)
+
+    return lo, hi, 'of length ' + desc
+
+
+# The words for a $RANGE bound, which are absent when the bound is invalid.
+def _rangedesc(bound):
+    if not ismap(bound):
+        return UNDEF
+
+    # Every value must be a number, so below a None is a side the bound lacks.
+    valid = size(bound) > 0 and all(
+        k in ('min', 'max', 'gt', 'lt') and (T_number & typify(v)) > 0 for k, v in bound.items()
+    )
+
+    mn = _lookup(bound, 'min')
+    mx = _lookup(bound, 'max')
+    gt = _lookup(bound, 'gt')
+    lt = _lookup(bound, 'lt')
+    lower = gt if mn is UNDEF else mn
+    upper = lt if mx is UNDEF else mx
+
+    valid = (
+        valid
+        and (mn is UNDEF or gt is UNDEF)
+        and (mx is UNDEF or lt is UNDEF)
+        and (lower is UNDEF or upper is UNDEF or lower <= upper)
+    )
+
+    if not valid:
+        return UNDEF
+
+    parts = []
+
+    if mn is not UNDEF:
+        parts.append('at least ' + stringify(mn))
+    elif gt is not UNDEF:
+        parts.append('greater than ' + stringify(gt))
+
+    if mx is not UNDEF:
+        parts.append('at most ' + stringify(mx))
+    elif lt is not UNDEF:
+        parts.append('less than ' + stringify(lt))
+
+    return ' and '.join(parts)
+
+
+# A number within a valid $RANGE bound.
+def _inrange(bound, val):
+    mn = _lookup(bound, 'min')
+    mx = _lookup(bound, 'max')
+    gt = _lookup(bound, 'gt')
+    lt = _lookup(bound, 'lt')
+
+    return (
+        (mn is UNDEF or mn <= val)
+        and (mx is UNDEF or val <= mx)
+        and (gt is UNDEF or gt < val)
+        and (lt is UNDEF or val < lt)
+    )
+
+
 def _validation(pval, key, parent, inj):
     if inj == UNDEF:
         return
@@ -2782,6 +2938,8 @@ def validate(data, spec, injdef=UNDEF):
                 '$EXACT': validate_EXACT,
                 '$NOF': validate_NOF,
                 '$ALL': validate_ALL,
+                '$LEN': validate_LEN,
+                '$RANGE': validate_RANGE,
             },
             ({} if extra is UNDEF or extra is None else extra),
             {
