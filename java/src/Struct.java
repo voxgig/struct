@@ -3541,8 +3541,8 @@ public class Struct {
   }
 
   /**
-   * TS-faithful select: tag each child node with {@code $KEY}, walk the
-   * (cloned) query annotating every map with {@code `$OPEN`}, then run
+   * TS-faithful select: tag each child node with {@code $KEY}, open the
+   * (cloned) query's maps with {@code _openquery}, then run
    * {@link #validate} against each child with the {@code select_*} injectors
    * available as extras and {@code meta.`$EXACT`} = true.
    * Mirrors TS lines 2558–2609.
@@ -3589,16 +3589,8 @@ public class Struct {
     extra.put("$LTE", select_CMP);
     extra.put("$LIKE", select_CMP);
 
-    // Clone query and annotate every map with `$OPEN`=true.
     Object q = clone(query);
-    walk(
-        q,
-        (k, v, p, t) -> {
-          if (ismap(v)) {
-            setprop(v, "`$OPEN`", getprop(v, "`$OPEN`", true));
-          }
-          return v;
-        });
+    _openquery(q);
 
     List<Object> results = new ArrayList<>();
     for (Object child : childList) {
@@ -3617,6 +3609,27 @@ public class Struct {
       }
     }
     return results;
+  }
+
+  // Open every map in a select query, so a child may hold keys the query does
+  // not name, but leave a directive's literals as written: what $EXACT
+  // compares, and the count or bound of $NOF, $LEN and $RANGE.
+  private static void _openquery(Object q) {
+    if (q instanceof Map<?, ?> m) {
+      setprop(q, "`$OPEN`", getprop(q, "`$OPEN`", true));
+      for (String key : keysof(q)) {
+        _openquery(m.get(key));
+      }
+    } else if (q instanceof List<?> l) {
+      Object head = l.isEmpty() ? null : l.get(0);
+      boolean exact = "`$EXACT`".equals(head);
+      boolean bounded = "`$NOF`".equals(head) || "`$LEN`".equals(head) || "`$RANGE`".equals(head);
+      for (int i = 0; i < l.size(); i++) {
+        if (0 == i || !(exact || (bounded && 1 == i))) {
+          _openquery(l.get(i));
+        }
+      }
+    }
   }
 
 
