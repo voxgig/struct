@@ -2116,7 +2116,7 @@ and select children query =
       [("$AND", select_and); ("$OR", select_or); ("$NOT", select_not);
        ("$GT", select_cmp); ("$LT", select_cmp); ("$GTE", select_cmp); ("$LTE", select_cmp); ("$LIKE", select_cmp)];
     let q = clone query in
-    ignore (walk ~before:(fun _k v _p _path -> (if ismap v then ignore (setprop v (Str s_bopen) (getprop ~alt:(Bool true) v (Str s_bopen)))); v) q);
+    openquery q;
     List.iter (fun child ->
         let errs = empty_list () in
         let idef = { (default_injdef ()) with d_errs = errs; d_meta = (let m = empty_map () in ignore (setprop m (Str s_bexact) (Bool true)); m); d_extra = extra } in
@@ -2125,6 +2125,21 @@ and select children query =
       (match children with List r -> !r | _ -> []);
     results
   end
+
+(* Open every map in a select query, so a child may hold keys the query does
+   not name, but leave a directive's literals as written: what $EXACT
+   compares, and the count or bound of $NOF, $LEN and $RANGE. *)
+and openquery q =
+  match q with
+  | Map _ ->
+    ignore (setprop q (Str s_bopen) (getprop ~alt:(Bool true) q (Str s_bopen)));
+    List.iter (fun (_, v) -> openquery v) (items_pairs q)
+  | List r ->
+    let head = lookup_ q (Num 0.0) in
+    let exact = (head = Str s_bexact) in
+    let bounded = List.mem head [Str "`$NOF`"; Str "`$LEN`"; Str "`$RANGE`"] in
+    List.iteri (fun i v -> if i = 0 || not (exact || (bounded && i = 1)) then openquery v) !r
+  | _ -> ()
 
 (* ----- builders ----- *)
 
