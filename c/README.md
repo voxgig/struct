@@ -6,10 +6,10 @@
 > bit-flags, 3 mode constants (`VOXGIG_M_KEYPRE` / `VOXGIG_M_KEYPOST` / `VOXGIG_M_VAL`),
 > `SKIP` / `DELETE` sentinels (pointer-identity), and the `voxgig_injection`
 > state machine. `inject` / `transform` / `validate` / `select` all dispatch
-> through the canonical injector machinery: 13 transform commands, 16
+> through the canonical injector machinery: 13 transform commands, 18
 > validate checkers, 8 select operators.
 >
-> Passes the shared corpus (1602/1602), run on
+> Passes the shared corpus (1666/1666), run on
 > [voxgig/omni](https://github.com/voxgig/omni) — the shared test runner,
 > consumed as a local checkout. Run it with `make test` from `c/`.
 
@@ -536,6 +536,14 @@ admits a value when validating the value against it finds no error and gives
 back every member of the value unchanged. There is no `$ONE`: write
 `` ["`$ONE`", a, b] `` as `` ["`$NOF`", {"min": 1}, a, b] ``.
 
+Two more list checkers set bounds on a value. `` ["`$LEN`", n, spec?] ``
+holds when the value's length is within `n`, a bound written as for `$NOF`.
+Strings count code points, not the bytes `voxgig_size` counts; lists count
+elements and maps keys. `` ["`$RANGE`", bound, spec?] `` holds when the value
+is a number within the bound, a map of `min` or `gt` and `max` or `lt`. Each
+takes at most one spec, which must also admit the value. `min` and `max`
+include their bound, while `gt` and `lt` exclude it.
+
 A spec that names a checker `voxgig_validate` does not define is rejected
 before any data is read, and nothing is validated. The whole-string reference
 `` "`$FOO`" `` names a checker, and so does a misspelling of a defined one in
@@ -631,7 +639,7 @@ voxgig_value
 
 `tests/struct_corpus_test.c` runs `../build/test/test.json` on
 [voxgig/omni](https://github.com/voxgig/omni), the shared test runner. Every
-group the corpus defines runs — **1602 entries in 78 groups**, plus `merge.basic`, `inject.basic` and `transform.basic` (single
+group the corpus defines runs — **1666 entries in 80 groups**, plus `merge.basic`, `inject.basic` and `transform.basic` (single
 entries, not sets) and the two `check` entries in `tests/client_test.c`.
 
 Each group is one assertion: the runner stops at its first failing entry and

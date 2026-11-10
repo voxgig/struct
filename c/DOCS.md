@@ -202,7 +202,7 @@ char* s = voxgig_stringify(m, -1);              /* "{a:1,b:[2,3]}" */
 <!-- => "{a:1,b:[2,3]}" -->
 
 For more task recipes (merge configs, `$EACH`, `$MERGE`, `$FORMAT`, `$NOF`,
-`$EXACT`, …) see the language-neutral
+`$LEN`, `$RANGE`, `$EXACT`, …) see the language-neutral
 [How-to guides](../DOCS.md#2-how-to-guides) — the spec syntax is identical;
 only the host literals differ.
 
@@ -342,7 +342,7 @@ or beside this repository. It is compiled into the test binaries only —
 `omni_json` and this port's `voxgig_value`.
 
 [`tests/struct_corpus_test.c`](./tests/struct_corpus_test.c) runs every group
-the corpus defines: **1602 entries in 78 groups**, plus three single entries that are not sets.
+the corpus defines: **1666 entries in 80 groups**, plus three single entries that are not sets.
 [`tests/client_test.c`](./tests/client_test.c) runs the two `check` entries —
 `DEF.client`, client-scoped options, and `contextify`.
 

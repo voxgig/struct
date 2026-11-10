@@ -1665,6 +1665,196 @@ static voxgig_value* va_ALL(voxgig_injection* inj, voxgig_value* val, const char
   return _validatecount(inj, store, "$ALL", false);
 }
 
+/* A map member that holds a value, or NULL. */
+static voxgig_value* _given(voxgig_value* v) {
+  return v && !voxgig_is_undef(v) ? v : NULL;
+}
+
+/* The bounds of a $LEN bound, with -1 for no maximum, and the words for it.
+   NULL when the bound is invalid. The caller frees the result. */
+static char* _lenbound(voxgig_value* bound, int64_t* lo, int64_t* hi) {
+  char countdesc[64];
+  if (!_nofcount(bound, -1, lo, hi, countdesc, sizeof(countdesc)))
+    return NULL;
+
+  char desc[96];
+  if (*lo == *hi)
+    snprintf(desc, sizeof(desc), "of length %lld", (long long)*lo);
+  else if (-1 == *hi)
+    snprintf(desc, sizeof(desc), "of length at least %lld", (long long)*lo);
+  else if (0 == *lo)
+    snprintf(desc, sizeof(desc), "of length at most %lld", (long long)*hi);
+  else
+    snprintf(desc, sizeof(desc), "of length %lld to %lld", (long long)*lo, (long long)*hi);
+  return xstrdup_t(desc);
+}
+
+/* The words for a $RANGE bound. NULL when the bound is invalid. The caller
+   frees the result. */
+static char* _rangedesc(voxgig_value* bound) {
+  if (!voxgig_is_map(bound))
+    return NULL;
+
+  voxgig_map* bm = voxgig_as_map(bound);
+  voxgig_value* min = _given(voxgig_map_get(bm, "min"));
+  voxgig_value* max = _given(voxgig_map_get(bm, "max"));
+  voxgig_value* gt = _given(voxgig_map_get(bm, "gt"));
+  voxgig_value* lt = _given(voxgig_map_get(bm, "lt"));
+  voxgig_value* lower = min ? min : gt;
+  voxgig_value* upper = max ? max : lt;
+
+  voxgig_value* given[] = {min, max, gt, lt};
+  size_t numgiven = 0;
+  for (size_t i = 0; i < sizeof(given) / sizeof(given[0]); i++) {
+    if (given[i] && 0 == (VOXGIG_T_NUMBER & voxgig_typify(given[i])))
+      return NULL;
+    numgiven += given[i] ? 1 : 0;
+  }
+
+  bool valid = 0 < voxgig_map_len(bm) && voxgig_map_len(bm) == numgiven && (!min || !gt) &&
+               (!max || !lt) &&
+               (!lower || !upper || voxgig_as_double(lower) <= voxgig_as_double(upper));
+  if (!valid)
+    return NULL;
+
+  char* lowerstr = lower ? voxgig_stringify(lower, -1) : NULL;
+  char* upperstr = upper ? voxgig_stringify(upper, -1) : NULL;
+  const char* parts[5];
+  size_t numparts = 0;
+  if (lower) {
+    parts[numparts++] = min ? "at least " : "greater than ";
+    parts[numparts++] = lowerstr;
+  }
+  if (lower && upper)
+    parts[numparts++] = " and ";
+  if (upper) {
+    parts[numparts++] = max ? "at most " : "less than ";
+    parts[numparts++] = upperstr;
+  }
+  char* desc = _concat(numparts, parts);
+  free(lowerstr);
+  free(upperstr);
+  return desc;
+}
+
+/* A string, list or map whose length is within lo and hi, where hi is -1 for
+   no maximum. A string counts the UTF-8 bytes that start a code point. */
+static bool _inlength(voxgig_value* val, int64_t lo, int64_t hi) {
+  int64_t len = voxgig_size(val);
+  if (voxgig_is_string(val)) {
+    const char* s = voxgig_as_string(val);
+    size_t slen = voxgig_string_len(val);
+    len = 0;
+    for (size_t i = 0; i < slen; i++)
+      len += 0x80 != ((unsigned char)s[i] & 0xC0) ? 1 : 0;
+  }
+  return lo <= len && (-1 == hi || len <= hi);
+}
+
+/* A number within a valid $RANGE bound. */
+static bool _inrange(voxgig_value* bound, voxgig_value* val) {
+  voxgig_map* bm = voxgig_as_map(bound);
+  voxgig_value* min = _given(voxgig_map_get(bm, "min"));
+  voxgig_value* max = _given(voxgig_map_get(bm, "max"));
+  voxgig_value* gt = _given(voxgig_map_get(bm, "gt"));
+  voxgig_value* lt = _given(voxgig_map_get(bm, "lt"));
+  double v = voxgig_as_double(val);
+
+  return (!min || voxgig_as_double(min) <= v) && (!max || v <= voxgig_as_double(max)) &&
+         (!gt || voxgig_as_double(gt) < v) && (!lt || v < voxgig_as_double(lt));
+}
+
+/* The bounding list directives: a bound, then at most one spec that must also admit. */
+static voxgig_value* _validatebound(voxgig_injection* inj, voxgig_value* store, const char* name) {
+  if (inj->mode != VOXGIG_M_VAL)
+    return voxgig_new_undef();
+
+  if (!voxgig_is_list(inj->parent) || inj->keyI != 0) {
+    _notfirst(inj, name);
+    return voxgig_new_undef();
+  }
+
+  voxgig_value* cval = _slotval(inj);
+
+  inj->keyI = inj->keys.len;
+
+  /* As for the counting directives: SKIP keeps inject off the detached list. */
+  voxgig_inj_setval(inj, cval, 2);
+
+  _droplast(&inj->path);
+
+  voxgig_list* pl = voxgig_as_list(inj->parent);
+  size_t nargs = 0 < pl->len ? pl->len - 1 : 0;
+  char* field = _fieldpath(inj, 0);
+
+  if (nargs < 1 || 2 < nargs) {
+    _pushmsg(inj, _concat(5, (const char*[]){"The ", name, " validator at field ", field,
+                                             " must have a bound and at most one spec."}));
+    free(field);
+    voxgig_release(cval);
+    return voxgig_new_skip();
+  }
+
+  voxgig_value* bound = pl->items[1];
+  bool islen = 0 == strcmp("$LEN", name);
+  int64_t lo = 0;
+  int64_t hi = 0;
+  char* desc = islen ? _lenbound(bound, &lo, &hi) : _rangedesc(bound);
+
+  if (!desc) {
+    char* boundstr = voxgig_stringify(bound, -1);
+    _pushmsg(inj, _concat(7, (const char*[]){"The ", name, " validator at field ", field,
+                                             " has an invalid bound: ", boundstr, "."}));
+    free(boundstr);
+    free(field);
+    voxgig_release(cval);
+    return voxgig_new_skip();
+  }
+  free(field);
+
+  int ctype = voxgig_typify(cval);
+  int needbits = islen ? VOXGIG_T_STRING | VOXGIG_T_LIST | VOXGIG_T_MAP : VOXGIG_T_NUMBER;
+  char* needtype = NULL;
+
+  /* One error at most: the spec's, then the type's, then the bound's. */
+  if (2 == nargs && !_admits(cval, pl->items[2], inj, store))
+    needtype = _lower_transform_names(pl->items[2]);
+  else if (0 == (needbits & ctype))
+    needtype = xstrdup_t(islen ? "string, list or map" : "number");
+  else if (!(islen ? _inlength(cval, lo, hi) : _inrange(bound, cval)))
+    needtype = _concat(2, (const char*[]){inj->path.len <= 1 ? "value " : "", desc});
+
+  if (needtype) {
+    voxgig_list_push(voxgig_as_list(inj->errs),
+                     _invalid_type_msg(&inj->path, needtype, ctype, cval));
+    free(needtype);
+  }
+
+  free(desc);
+  voxgig_release(cval);
+  return voxgig_new_skip();
+}
+
+/* The value's length is within a bound: ['`$LEN`', bound, spec?], where the
+   bound is as for a $NOF count. A string's length is in code points. */
+static voxgig_value* va_LEN(voxgig_injection* inj, voxgig_value* val, const char* ref,
+                            voxgig_value* store, void* ud) {
+  (void)val;
+  (void)ref;
+  (void)ud;
+  return _validatebound(inj, store, "$LEN");
+}
+
+/* The value is a number within a bound: ['`$RANGE`', bound, spec?], where the
+   bound holds min or gt, max or lt, or one of each. */
+static voxgig_value* va_RANGE(voxgig_injection* inj, voxgig_value* val, const char* ref,
+                              voxgig_value* store, void* ud) {
+  (void)val;
+  (void)ref;
+  (void)ud;
+  return _validatebound(inj, store, "$RANGE");
+}
+
 /* ===========================================================================
  * Validation modifier
  * ===========================================================================*/
@@ -2147,6 +2337,8 @@ voxgig_value* voxgig_validate(voxgig_value* data, voxgig_value* spec, voxgig_inj
   voxgig_map_set(voxgig_as_map(m1), "$EXACT", voxgig_new_injector(va_EXACT, NULL));
   voxgig_map_set(voxgig_as_map(m1), "$NOF", voxgig_new_injector(va_NOF, NULL));
   voxgig_map_set(voxgig_as_map(m1), "$ALL", voxgig_new_injector(va_ALL, NULL));
+  voxgig_map_set(voxgig_as_map(m1), "$LEN", voxgig_new_injector(va_LEN, NULL));
+  voxgig_map_set(voxgig_as_map(m1), "$RANGE", voxgig_new_injector(va_RANGE, NULL));
 
   voxgig_value* ext = extra_in ? voxgig_retain(extra_in) : voxgig_new_map();
   voxgig_value* errwrap = voxgig_new_map();
