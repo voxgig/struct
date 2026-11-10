@@ -9,8 +9,8 @@
 > canonical injector machinery: 11 transform commands, 6 validate
 > checkers, 4 select operators.
 >
-> Passes the full shared corpus (1602/1602). The xUnit suite
-> (`StructTest.cs`, 115 tests) is the green-bar regression baseline;
+> Passes the full shared corpus (1666/1666). The xUnit suite
+> (`StructTest.cs`, 117 tests) is the green-bar regression baseline;
 > the `CorpusScoreboard` test mirrors the Java/C++ runners and writes
 > `corpus-scoreboard.json` after each run with per-`.aon`-file pass
 > counts. The committed baseline lives at `test-baseline.json`.
@@ -518,7 +518,7 @@ $MERGE   $EACH    $PACK    $REF     $FORMAT  $APPLY
 ```
 $MAP   $LIST   $STRING   $NUMBER   $INTEGER   $DECIMAL  $BOOLEAN
 $NULL  $NIL    $FUNCTION $INSTANCE $ANY       $CHILD    $EXACT
-$NOF   $ALL
+$NOF   $ALL    $LEN      $RANGE
 ```
 
 `` StructUtils.Jt("`$NOF`", n, spec, …) `` holds when as many specs admit the
@@ -527,6 +527,14 @@ both. `` StructUtils.Jt("`$ALL`", spec, …) `` holds when every spec admits the
 value. A spec admits a value when validating the value against it finds no
 error and gives back every member of the value unchanged. There is no
 `$ONE`: write `` Jt("`$ONE`", a, b) `` as `` Jt("`$NOF`", Jm("min", 1), a, b) ``.
+
+`` StructUtils.Jt("`$LEN`", n, spec?) `` holds when the value's length is
+within `n`, a bound written as for `$NOF`. A string counts code points rather
+than UTF-16 units, a list its elements, and a map its keys.
+`` StructUtils.Jt("`$RANGE`", bound, spec?) `` holds when the value is a number
+within the bound, a map of `min` or `gt` and `max` or `lt`. Each takes at most
+one spec, which must also admit the value. `min` and `max` include their bound,
+while `gt` and `lt` exclude it.
 
 A spec that names a checker `Validate` does not define is rejected before
 any data is read, and nothing is validated. The whole-string reference

@@ -3144,6 +3144,186 @@ namespace Voxgig.Struct
             return SKIP;
         }
 
+        // The value's length is within a bound: ['`$LEN`', bound, spec?], where the
+        // bound is as for a $NOF count. A string's length is in code points.
+        private static readonly Injector _ValidateLen = (inj, val, refStr, store) =>
+            _ValidateBound(inj, store, "$LEN");
+
+        // The value is a number within a bound: ['`$RANGE`', bound, spec?], where the
+        // bound holds min or gt, max or lt, or one of each.
+        private static readonly Injector _ValidateRange = (inj, val, refStr, store) =>
+            _ValidateBound(inj, store, "$RANGE");
+
+        // The bounding list directives: a bound, then at most one spec that must also admit.
+        private static object? _ValidateBound(InjectState inj, object? store, string name)
+        {
+            if (M_VAL != inj.Mode)
+            {
+                return NONE;
+            }
+
+            if (!IsList(inj.Parent) || 0 != inj.KeyI)
+            {
+                inj.Errs.Add("The " + name + " validator at field " +
+                    Pathify(inj.Path, 1, 1) +
+                    " must be the first element of an array.");
+                return NONE;
+            }
+
+            object? cval = _SlotVal(inj);
+
+            inj.KeyI = Size(inj.Keys);
+
+            // As for the counting directives: SKIP keeps inject off the detached list.
+            _SetSlot(inj, cval);
+
+            inj.Path = (List<object?>)Slice(inj.Path, -1)!;
+
+            string field = "The " + name + " validator at field " + Pathify(inj.Path, 1);
+            int nargs = Size(inj.Parent) - 1;
+
+            if (nargs is < 1 or > 2)
+            {
+                inj.Errs.Add(field + " must have a bound and at most one spec.");
+                return SKIP;
+            }
+
+            object? bound = Lookup(inj.Parent, 1);
+            bool islen = "$LEN" == name;
+            var (lo, hi, desc) = islen ? _LenBound(bound) : (0d, 0d, _RangeDesc(bound));
+
+            if (null == desc)
+            {
+                inj.Errs.Add(field + " has an invalid bound: " + Stringify(bound) + ".");
+                return SKIP;
+            }
+
+            int ctype = Typify(cval);
+
+            if (2 == nargs && !_Admits(cval, Lookup(inj.Parent, 2), inj, store))
+            {
+                string specdesc = R_TRANSFORM_NAME.Replace(
+                    Stringify(Lookup(inj.Parent, 2)),
+                    m => m.Groups[1].Value.ToLowerInvariant());
+
+                inj.Errs.Add(_InvalidTypeMsg(inj.Path, specdesc, ctype, cval));
+                return SKIP;
+            }
+
+            if (0 == ((islen ? T.Str | T.List | T.Map : T.Number) & ctype))
+            {
+                string needtype = islen ? "string, list or map" : S_number;
+                inj.Errs.Add(_InvalidTypeMsg(inj.Path, needtype, ctype, cval));
+                return SKIP;
+            }
+
+            int len = !islen ? 0 : cval is string s ? s.EnumerateRunes().Count() : Size(cval);
+            bool inbound = islen ? lo <= len && (-1 == hi || len <= hi) : _InRange(bound, cval);
+
+            if (!inbound)
+            {
+                string needtype = (1 < Size(inj.Path) ? "" : "value ") + desc;
+                inj.Errs.Add(_InvalidTypeMsg(inj.Path, needtype, ctype, cval));
+            }
+
+            return SKIP;
+        }
+
+        // The bounds of a $LEN bound, with -1 for no maximum, and the words for it,
+        // which are null when the bound is invalid.
+        private static (double lo, double hi, string? desc) _LenBound(object? bound)
+        {
+            var (lo, hi, countdesc) = _NofCount(bound, -1);
+
+            if (null == countdesc)
+            {
+                return (0, 0, null);
+            }
+
+            string desc = "of length " +
+                (lo == hi
+                    ? Stringify(lo)
+                    : -1 == hi
+                        ? "at least " + Stringify(lo)
+                        : 0 == lo
+                            ? "at most " + Stringify(hi)
+                            : Stringify(lo) + " to " + Stringify(hi));
+
+            return (lo, hi, desc);
+        }
+
+        // The words for a $RANGE bound, which are null when the bound is invalid.
+        private static string? _RangeDesc(object? bound)
+        {
+            if (!IsMap(bound))
+            {
+                return null;
+            }
+
+            object? min = Lookup(bound, "min");
+            object? max = Lookup(bound, "max");
+            object? gt = Lookup(bound, "gt");
+            object? lt = Lookup(bound, "lt");
+            object? lower = Has(min) ? min : gt;
+            object? upper = Has(max) ? max : lt;
+
+            static bool Has(object? n)
+            {
+                return !ReferenceEquals(n, NONE);
+            }
+
+            static bool IsNum(object? n)
+            {
+                return !Has(n) || (n is int or long or double or float && 0 < (T.Number & Typify(n)));
+            }
+
+            bool valid =
+                0 < Size(bound) &&
+                Size(bound) == new[] { min, max, gt, lt }.Count(Has) &&
+                (!Has(min) || !Has(gt)) &&
+                (!Has(max) || !Has(lt)) &&
+                IsNum(min) &&
+                IsNum(max) &&
+                IsNum(gt) &&
+                IsNum(lt) &&
+                (!Has(lower) || !Has(upper) || _BoundNum(lower) <= _BoundNum(upper));
+
+            if (!valid)
+            {
+                return null;
+            }
+
+            return Join(
+                [
+                    Has(min) ? "at least " + Stringify(min) : Has(gt) ? "greater than " + Stringify(gt) : NONE,
+                    Has(max) ? "at most " + Stringify(max) : Has(lt) ? "less than " + Stringify(lt) : NONE,
+                ],
+                " and ");
+        }
+
+        // A number within a valid $RANGE bound.
+        private static bool _InRange(object? bound, object? val)
+        {
+            object? min = Lookup(bound, "min");
+            object? max = Lookup(bound, "max");
+            object? gt = Lookup(bound, "gt");
+            object? lt = Lookup(bound, "lt");
+            double v = _BoundNum(val);
+
+            return (ReferenceEquals(min, NONE) || _BoundNum(min) <= v) &&
+                (ReferenceEquals(max, NONE) || v <= _BoundNum(max)) &&
+                (ReferenceEquals(gt, NONE) || _BoundNum(gt) < v) &&
+                (ReferenceEquals(lt, NONE) || v < _BoundNum(lt));
+        }
+
+        // Typify flags a type it does not know as any, number included: NaN puts it out of range.
+        private static double _BoundNum(object? n)
+        {
+            return n is int or long or double or float
+                ? Convert.ToDouble(n, CultureInfo.InvariantCulture)
+                : double.NaN;
+        }
+
         // True if key exists on node (JSON null counts as present); sets value when present.
         private static bool TryGetDataValue(object? node, object? key, out object? value)
         {
@@ -3374,6 +3554,8 @@ namespace Voxgig.Struct
                     ["$EXACT"]    = _ValidateExact,
                     ["$NOF"]      = _ValidateNof,
                     ["$ALL"]      = _ValidateAll,
+                    ["$LEN"]      = _ValidateLen,
+                    ["$RANGE"]    = _ValidateRange,
 
                     [S_DERRS] = errs,
                 },
