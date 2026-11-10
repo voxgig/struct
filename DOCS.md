@@ -266,6 +266,19 @@ S.validate(value, ['`$ALL`', '`$STRING`', ['`$NOF`', 0, ['`$EXACT`', 'admin']]])
 A spec has one node per data node, so `$ALL` is how two checks reach the same
 value.
 
+### Bound a length or a number
+```js
+S.validate(name, ['`$LEN`', { min: 1, max: 64 }, '`$STRING`'])
+S.validate(age, ['`$RANGE`', { min: 0, lt: 150 }, '`$INTEGER`'])
+```
+`$LEN` takes a bound in the same form as a `$NOF` count: an integer for an
+exact length, or a map with `min`, `max` or both. A string's length counts
+code points, a list's its elements, and a map's its keys, and any other value
+fails. `$RANGE` takes a map of `min` (at least) or `gt` (greater than), with
+`max` (at most) or `lt` (less than), and fails on anything but a number. Each
+takes at most one spec, which must also admit the value. A bounded field is
+required; `['`$NOF`', 1, '`$NIL`', ['`$LEN`', { max: 64 }]]` makes it optional.
+
 ### Require an exact literal (no type coercion)
 ```js
 S.validate(value, ['`$EXACT`', 9]) // value must equal 9
@@ -434,7 +447,8 @@ named function from `extra`).
 `$NULL`, `$NIL` (absent or null), `$FUNCTION`, `$INSTANCE`, `$ANY`,
 `$CHILD` (apply a sub-spec to every child), `$EXACT` (equal a literal
 exactly), `$NOF` (a count of specs admits the value), `$ALL` (every spec
-admits the value). A spec that names any other checker fails before any data
+admits the value), `$LEN` (a length within a bound), `$RANGE` (a number
+within a bound). A spec that names any other checker fails before any data
 is read, with `Unknown validator $FOO at field a.`
 
 ### Regex API

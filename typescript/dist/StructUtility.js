@@ -1783,6 +1783,126 @@ function _validatecount(inj, store, name, counted) {
     }
     return SKIP;
 }
+// The value's length is within a bound: ['`$LEN`', bound, spec?], where the
+// bound is as for a $NOF count. A string's length is in code points.
+const validate_LEN = (inj, _val, _ref, store) => _validatebound(inj, store, '$LEN');
+// The value is a number within a bound: ['`$RANGE`', bound, spec?], where the
+// bound holds min or gt, max or lt, or one of each.
+const validate_RANGE = (inj, _val, _ref, store) => _validatebound(inj, store, '$RANGE');
+// The bounding list directives: a bound, then at most one spec that must also admit.
+function _validatebound(inj, store, name) {
+    const { mode, parent, keyI } = inj;
+    if (M_VAL !== mode) {
+        return NONE;
+    }
+    if (!islist(parent) || 0 !== keyI) {
+        inj.errs.push('The ' +
+            name +
+            ' validator at field ' +
+            pathify(inj.path, 1, 1) +
+            ' must be the first element of an array.');
+        return NONE;
+    }
+    const cval = _slotval(inj);
+    inj.keyI = size(inj.keys);
+    // As for the counting directives: SKIP keeps inject off the detached list.
+    inj.setval(cval, 2);
+    inj.path = slice(inj.path, -1);
+    const field = 'The ' + name + ' validator at field ' + pathify(inj.path, 1);
+    const nargs = size(parent) - 1;
+    if (nargs < 1 || 2 < nargs) {
+        inj.errs.push(field + ' must have a bound and at most one spec.');
+        return SKIP;
+    }
+    const bound = _lookup(parent, 1);
+    const islen = '$LEN' === name;
+    const [lo, hi, desc] = islen ? _lenbound(bound) : [0, 0, _rangedesc(bound)];
+    if (NONE === desc) {
+        inj.errs.push(field + ' has an invalid bound: ' + stringify(bound) + '.');
+        return SKIP;
+    }
+    const ctype = typify(cval);
+    if (2 === nargs && !_admits(cval, _lookup(parent, 2), inj, store)) {
+        const specdesc = replace(stringify(_lookup(parent, 2)), R_TRANSFORM_NAME, (_m, p1) => p1.toLowerCase());
+        inj.errs.push(_invalidTypeMsg(inj.path, specdesc, ctype, cval, 'V0410'));
+        return SKIP;
+    }
+    if (0 === ((islen ? T_string | T_list | T_map : T_number) & ctype)) {
+        const needtype = islen ? 'string, list or map' : S_number;
+        inj.errs.push(_invalidTypeMsg(inj.path, needtype, ctype, cval, 'V0420'));
+        return SKIP;
+    }
+    const len = islen
+        ? S_string === typeof cval
+            ? Array.from(cval).length
+            : size(cval)
+        : 0;
+    const inbound = islen ? lo <= len && (-1 === hi || len <= hi) : _inrange(bound, cval);
+    if (!inbound) {
+        const needtype = (1 < size(inj.path) ? '' : 'value ') + desc;
+        inj.errs.push(_invalidTypeMsg(inj.path, needtype, ctype, cval, 'V0430'));
+    }
+    return SKIP;
+}
+// The bounds of a $LEN bound, with -1 for no maximum, and the words for it,
+// which are absent when the bound is invalid.
+function _lenbound(bound) {
+    const [lo, hi, countdesc] = _nofcount(bound, -1);
+    if (NONE === countdesc) {
+        return [0, 0, NONE];
+    }
+    const desc = 'of length ' +
+        (lo === hi ? lo : -1 === hi ? 'at least ' + lo : 0 === lo ? 'at most ' + hi : lo + ' to ' + hi);
+    return [lo, hi, desc];
+}
+// The words for a $RANGE bound, which are absent when the bound is invalid.
+function _rangedesc(bound) {
+    if (!ismap(bound)) {
+        return NONE;
+    }
+    const min = _lookup(bound, 'min');
+    const max = _lookup(bound, 'max');
+    const gt = _lookup(bound, 'gt');
+    const lt = _lookup(bound, 'lt');
+    const lower = NONE === min ? gt : min;
+    const upper = NONE === max ? lt : max;
+    const isnum = (n) => NONE === n || 0 < (T_number & typify(n));
+    const valid = 0 < size(bound) &&
+        size(bound) === [min, max, gt, lt].filter((n) => NONE !== n).length &&
+        (NONE === min || NONE === gt) &&
+        (NONE === max || NONE === lt) &&
+        isnum(min) &&
+        isnum(max) &&
+        isnum(gt) &&
+        isnum(lt) &&
+        (NONE === lower || NONE === upper || lower <= upper);
+    if (!valid) {
+        return NONE;
+    }
+    return join([
+        NONE !== min
+            ? 'at least ' + stringify(min)
+            : NONE !== gt
+                ? 'greater than ' + stringify(gt)
+                : NONE,
+        NONE !== max
+            ? 'at most ' + stringify(max)
+            : NONE !== lt
+                ? 'less than ' + stringify(lt)
+                : NONE,
+    ], ' and ');
+}
+// A number within a valid $RANGE bound.
+function _inrange(bound, val) {
+    const min = _lookup(bound, 'min');
+    const max = _lookup(bound, 'max');
+    const gt = _lookup(bound, 'gt');
+    const lt = _lookup(bound, 'lt');
+    return ((NONE === min || min <= val) &&
+        (NONE === max || val <= max) &&
+        (NONE === gt || gt < val) &&
+        (NONE === lt || val < lt));
+}
 // This is the "modify" argument to inject. Use this to perform
 // generic validation. Runs *after* any special commands.
 const _validation = (pval, key, parent, inj) => {
@@ -1887,6 +2007,8 @@ injdef) {
             $EXACT: validate_EXACT,
             $NOF: validate_NOF,
             $ALL: validate_ALL,
+            $LEN: validate_LEN,
+            $RANGE: validate_RANGE,
         },
         getdef(extra, {}),
         // A special top level value to collect errors.

@@ -21010,6 +21010,480 @@
           }
         ]
       },
+      "len": {
+        "set": [
+          {
+            "in": {
+              "data": "abc",
+              "spec": [
+                "`$LEN`",
+                3
+              ]
+            },
+            "out": "abc"
+          },
+          {
+            "err": "Expected value of length 3, but found string: ab.",
+            "in": {
+              "data": "ab",
+              "spec": [
+                "`$LEN`",
+                3
+              ]
+            }
+          },
+          {
+            "err": "Expected value of length at most 3, but found string: abcd.",
+            "in": {
+              "data": "abcd",
+              "spec": [
+                "`$LEN`",
+                {
+                  "max": 3
+                }
+              ]
+            }
+          },
+          {
+            "err": "Expected value of length at least 1, but found string: .",
+            "in": {
+              "data": "",
+              "spec": [
+                "`$LEN`",
+                {
+                  "min": 1
+                }
+              ]
+            }
+          },
+          {
+            "in": {
+              "data": "ab",
+              "spec": [
+                "`$LEN`",
+                {
+                  "max": 3,
+                  "min": 1
+                }
+              ]
+            },
+            "out": "ab"
+          },
+          {
+            "err": "Expected value of length 1 to 3, but found list: [1,2,3,4].",
+            "in": {
+              "data": [
+                1,
+                2,
+                3,
+                4
+              ],
+              "spec": [
+                "`$LEN`",
+                {
+                  "max": 3,
+                  "min": 1
+                }
+              ]
+            }
+          },
+          {
+            "in": {
+              "data": {
+                "a": 1,
+                "b": 2
+              },
+              "spec": [
+                "`$LEN`",
+                {
+                  "max": 2
+                }
+              ]
+            },
+            "out": {
+              "a": 1,
+              "b": 2
+            }
+          },
+          {
+            "err": "Expected value of length at least 1, but found map: {}.",
+            "in": {
+              "data": {},
+              "spec": [
+                "`$LEN`",
+                {
+                  "min": 1
+                }
+              ]
+            }
+          },
+          {
+            "in": {
+              "data": [],
+              "spec": [
+                "`$LEN`",
+                0
+              ]
+            },
+            "out": []
+          },
+          {
+            "err": "Expected value of length 0, but found list: [1].",
+            "in": {
+              "data": [
+                1
+              ],
+              "spec": [
+                "`$LEN`",
+                {
+                  "max": 0
+                }
+              ]
+            }
+          },
+          {
+            "in": {
+              "data": "aé😀",
+              "spec": [
+                "`$LEN`",
+                3
+              ]
+            },
+            "out": "aé😀"
+          },
+          {
+            "err": "Expected value of length at most 1, but found string: 😀😀.",
+            "in": {
+              "data": "😀😀",
+              "spec": [
+                "`$LEN`",
+                {
+                  "max": 1
+                }
+              ]
+            }
+          },
+          {
+            "in": {
+              "data": {
+                "x": "abc"
+              },
+              "spec": {
+                "x": [
+                  "`$LEN`",
+                  {
+                    "max": 3
+                  },
+                  "`$STRING`"
+                ]
+              }
+            },
+            "out": {
+              "x": "abc"
+            }
+          },
+          {
+            "err": "Expected field x to be of length at most 3, but found string: abcd.",
+            "in": {
+              "data": {
+                "x": "abcd"
+              },
+              "spec": {
+                "x": [
+                  "`$LEN`",
+                  {
+                    "max": 3
+                  },
+                  "`$STRING`"
+                ]
+              }
+            }
+          },
+          {
+            "err": "Expected field x to be string, but found list: [1,2].",
+            "in": {
+              "data": {
+                "x": [
+                  1,
+                  2
+                ]
+              },
+              "spec": {
+                "x": [
+                  "`$LEN`",
+                  {
+                    "max": 3
+                  },
+                  "`$STRING`"
+                ]
+              }
+            }
+          },
+          {
+            "err": "Expected field 1 to be of length at most 2, but found string: abc.",
+            "in": {
+              "data": [
+                "ab",
+                "abc"
+              ],
+              "spec": [
+                "`$CHILD`",
+                [
+                  "`$LEN`",
+                  {
+                    "max": 2
+                  }
+                ]
+              ]
+            }
+          },
+          {
+            "err": "Expected field q to be of length at least 1, but found list: [].",
+            "in": {
+              "data": {
+                "p": [
+                  1
+                ],
+                "q": []
+              },
+              "spec": {
+                "`$CHILD`": [
+                  "`$LEN`",
+                  {
+                    "min": 1
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "in": {
+              "data": [
+                1,
+                2
+              ],
+              "spec": [
+                "`$LEN`",
+                2,
+                [
+                  "`$CHILD`",
+                  "`$NUMBER`"
+                ]
+              ]
+            },
+            "out": [
+              1,
+              2
+            ]
+          },
+          {
+            "err": "Expected [child,number], but found list: [1,a].",
+            "in": {
+              "data": [
+                1,
+                "a"
+              ],
+              "spec": [
+                "`$LEN`",
+                2,
+                [
+                  "`$CHILD`",
+                  "`$NUMBER`"
+                ]
+              ]
+            }
+          },
+          {
+            "err": "Expected exactly 1 of [len,{max:3}], number, but found string: abcd.",
+            "in": {
+              "data": "abcd",
+              "spec": [
+                "`$NOF`",
+                1,
+                [
+                  "`$LEN`",
+                  {
+                    "max": 3
+                  }
+                ],
+                "`$NUMBER`"
+              ]
+            }
+          },
+          {
+            "err": "Expected field x to be string, list or map, but found integer: 5.",
+            "in": {
+              "data": {
+                "x": 5
+              },
+              "spec": {
+                "x": [
+                  "`$LEN`",
+                  {
+                    "min": 1
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "err": "Expected field x to be string, list or map, but found no value.",
+            "in": {
+              "data": {
+                "x": null
+              },
+              "spec": {
+                "x": [
+                  "`$LEN`",
+                  {
+                    "min": 1
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "err": "Expected field x to be string, list or map, but found no value.",
+            "in": {
+              "data": {},
+              "spec": {
+                "x": [
+                  "`$LEN`",
+                  {
+                    "min": 1
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "in": {
+              "data": {},
+              "spec": {
+                "x": [
+                  "`$NOF`",
+                  1,
+                  "`$NIL`",
+                  [
+                    "`$LEN`",
+                    {
+                      "max": 3
+                    }
+                  ]
+                ]
+              }
+            },
+            "out": {}
+          },
+          {
+            "in": {
+              "data": {
+                "x": "ab"
+              },
+              "spec": {
+                "x": [
+                  "`$NOF`",
+                  1,
+                  "`$NIL`",
+                  [
+                    "`$LEN`",
+                    {
+                      "max": 3
+                    }
+                  ]
+                ]
+              }
+            },
+            "out": {
+              "x": "ab"
+            }
+          },
+          {
+            "err": "The $LEN validator at field <root> must have a bound and at most one spec.",
+            "in": {
+              "data": "a",
+              "spec": [
+                "`$LEN`"
+              ]
+            }
+          },
+          {
+            "err": "The $LEN validator at field <root> must have a bound and at most one spec.",
+            "in": {
+              "data": "a",
+              "spec": [
+                "`$LEN`",
+                1,
+                "`$STRING`",
+                "`$STRING`"
+              ]
+            }
+          },
+          {
+            "err": "The $LEN validator at field <root> has an invalid bound: -1.",
+            "in": {
+              "data": "a",
+              "spec": [
+                "`$LEN`",
+                -1
+              ]
+            }
+          },
+          {
+            "err": "The $LEN validator at field <root> has an invalid bound: 1.5.",
+            "in": {
+              "data": "a",
+              "spec": [
+                "`$LEN`",
+                1.5
+              ]
+            }
+          },
+          {
+            "err": "The $LEN validator at field <root> has an invalid bound: {max:1,min:2}.",
+            "in": {
+              "data": "a",
+              "spec": [
+                "`$LEN`",
+                {
+                  "max": 1,
+                  "min": 2
+                }
+              ]
+            }
+          },
+          {
+            "err": "The $LEN validator at field <root> has an invalid bound: {lt:3,min:1}.",
+            "in": {
+              "data": "a",
+              "spec": [
+                "`$LEN`",
+                {
+                  "lt": 3,
+                  "min": 1
+                }
+              ]
+            }
+          },
+          {
+            "err": "The $LEN validator at field a must be the first element of an array.",
+            "in": {
+              "data": {
+                "a": [
+                  1,
+                  2
+                ]
+              },
+              "spec": {
+                "a": [
+                  "`$NUMBER`",
+                  "`$LEN`"
+                ]
+              }
+            }
+          }
+        ]
+      },
       "name": "validate",
       "nof": {
         "set": [
@@ -22445,6 +22919,469 @@
               }
             },
             "out": {}
+          }
+        ]
+      },
+      "range": {
+        "set": [
+          {
+            "in": {
+              "data": 5,
+              "spec": [
+                "`$RANGE`",
+                {
+                  "max": 10,
+                  "min": 0
+                }
+              ]
+            },
+            "out": 5
+          },
+          {
+            "in": {
+              "data": 0,
+              "spec": [
+                "`$RANGE`",
+                {
+                  "max": 10,
+                  "min": 0
+                }
+              ]
+            },
+            "out": 0
+          },
+          {
+            "in": {
+              "data": 10,
+              "spec": [
+                "`$RANGE`",
+                {
+                  "max": 10,
+                  "min": 0
+                }
+              ]
+            },
+            "out": 10
+          },
+          {
+            "err": "Expected value at least 0 and at most 10, but found integer: 11.",
+            "in": {
+              "data": 11,
+              "spec": [
+                "`$RANGE`",
+                {
+                  "max": 10,
+                  "min": 0
+                }
+              ]
+            }
+          },
+          {
+            "err": "Expected value at least 0, but found integer: -1.",
+            "in": {
+              "data": -1,
+              "spec": [
+                "`$RANGE`",
+                {
+                  "min": 0
+                }
+              ]
+            }
+          },
+          {
+            "err": "Expected value greater than 0, but found integer: 0.",
+            "in": {
+              "data": 0,
+              "spec": [
+                "`$RANGE`",
+                {
+                  "gt": 0
+                }
+              ]
+            }
+          },
+          {
+            "in": {
+              "data": 0.5,
+              "spec": [
+                "`$RANGE`",
+                {
+                  "gt": 0,
+                  "lt": 1
+                }
+              ]
+            },
+            "out": 0.5
+          },
+          {
+            "err": "Expected value greater than 0 and less than 1, but found integer: 1.",
+            "in": {
+              "data": 1,
+              "spec": [
+                "`$RANGE`",
+                {
+                  "gt": 0,
+                  "lt": 1
+                }
+              ]
+            }
+          },
+          {
+            "err": "Expected value at most 999.5, but found integer: 1000.",
+            "in": {
+              "data": 1000,
+              "spec": [
+                "`$RANGE`",
+                {
+                  "max": 999.5
+                }
+              ]
+            }
+          },
+          {
+            "in": {
+              "data": -2.5,
+              "spec": [
+                "`$RANGE`",
+                {
+                  "lt": -2,
+                  "min": -3
+                }
+              ]
+            },
+            "out": -2.5
+          },
+          {
+            "in": {
+              "data": 2,
+              "spec": [
+                "`$RANGE`",
+                {
+                  "max": 2,
+                  "min": 2
+                }
+              ]
+            },
+            "out": 2
+          },
+          {
+            "in": {
+              "data": {
+                "x": 3
+              },
+              "spec": {
+                "x": [
+                  "`$RANGE`",
+                  {
+                    "max": 5,
+                    "min": 1
+                  },
+                  "`$INTEGER`"
+                ]
+              }
+            },
+            "out": {
+              "x": 3
+            }
+          },
+          {
+            "err": "Expected field x to be integer, but found decimal: 1.5.",
+            "in": {
+              "data": {
+                "x": 1.5
+              },
+              "spec": {
+                "x": [
+                  "`$RANGE`",
+                  {
+                    "max": 5,
+                    "min": 1
+                  },
+                  "`$INTEGER`"
+                ]
+              }
+            }
+          },
+          {
+            "err": "Expected field x to be at least 1 and at most 5, but found integer: 9.",
+            "in": {
+              "data": {
+                "x": 9
+              },
+              "spec": {
+                "x": [
+                  "`$RANGE`",
+                  {
+                    "max": 5,
+                    "min": 1
+                  },
+                  "`$INTEGER`"
+                ]
+              }
+            }
+          },
+          {
+            "err": "Expected field 1 to be at least 0, but found integer: -1.",
+            "in": {
+              "data": [
+                1,
+                -1
+              ],
+              "spec": [
+                "`$CHILD`",
+                [
+                  "`$RANGE`",
+                  {
+                    "min": 0
+                  }
+                ]
+              ]
+            }
+          },
+          {
+            "err": "Expected field q to be at least 0, but found integer: -2.",
+            "in": {
+              "data": {
+                "p": 1,
+                "q": -2
+              },
+              "spec": {
+                "`$CHILD`": [
+                  "`$RANGE`",
+                  {
+                    "min": 0
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "err": "Expected all of integer, [range,{max:9}], but found integer: 15.",
+            "in": {
+              "data": 15,
+              "spec": [
+                "`$ALL`",
+                "`$INTEGER`",
+                [
+                  "`$RANGE`",
+                  {
+                    "max": 9
+                  }
+                ]
+              ]
+            }
+          },
+          {
+            "in": {
+              "data": 15,
+              "spec": [
+                "`$NOF`",
+                1,
+                [
+                  "`$RANGE`",
+                  {
+                    "max": 9
+                  }
+                ],
+                [
+                  "`$RANGE`",
+                  {
+                    "min": 10
+                  }
+                ]
+              ]
+            },
+            "out": 15
+          },
+          {
+            "err": "Expected field x to be number, but found string: 5.",
+            "in": {
+              "data": {
+                "x": "5"
+              },
+              "spec": {
+                "x": [
+                  "`$RANGE`",
+                  {
+                    "min": 0
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "err": "Expected field x to be number, but found boolean: true.",
+            "in": {
+              "data": {
+                "x": true
+              },
+              "spec": {
+                "x": [
+                  "`$RANGE`",
+                  {
+                    "min": 0
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "err": "Expected field x to be number, but found no value.",
+            "in": {
+              "data": {
+                "x": null
+              },
+              "spec": {
+                "x": [
+                  "`$RANGE`",
+                  {
+                    "min": 0
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "err": "Expected field x to be number, but found no value.",
+            "in": {
+              "data": {},
+              "spec": {
+                "x": [
+                  "`$RANGE`",
+                  {
+                    "min": 0
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "in": {
+              "data": {},
+              "spec": {
+                "x": [
+                  "`$NOF`",
+                  1,
+                  "`$NIL`",
+                  [
+                    "`$RANGE`",
+                    {
+                      "min": 0
+                    }
+                  ]
+                ]
+              }
+            },
+            "out": {}
+          },
+          {
+            "err": "The $RANGE validator at field <root> must have a bound and at most one spec.",
+            "in": {
+              "data": 1,
+              "spec": [
+                "`$RANGE`"
+              ]
+            }
+          },
+          {
+            "err": "The $RANGE validator at field <root> has an invalid bound: 5.",
+            "in": {
+              "data": 1,
+              "spec": [
+                "`$RANGE`",
+                5
+              ]
+            }
+          },
+          {
+            "err": "The $RANGE validator at field <root> has an invalid bound: {}.",
+            "in": {
+              "data": 1,
+              "spec": [
+                "`$RANGE`",
+                {}
+              ]
+            }
+          },
+          {
+            "err": "The $RANGE validator at field <root> has an invalid bound: {gt:0,min:0}.",
+            "in": {
+              "data": 1,
+              "spec": [
+                "`$RANGE`",
+                {
+                  "gt": 0,
+                  "min": 0
+                }
+              ]
+            }
+          },
+          {
+            "err": "The $RANGE validator at field <root> has an invalid bound: {lt:2,max:1}.",
+            "in": {
+              "data": 1,
+              "spec": [
+                "`$RANGE`",
+                {
+                  "lt": 2,
+                  "max": 1
+                }
+              ]
+            }
+          },
+          {
+            "err": "The $RANGE validator at field <root> has an invalid bound: {max:1,min:2}.",
+            "in": {
+              "data": 1,
+              "spec": [
+                "`$RANGE`",
+                {
+                  "max": 1,
+                  "min": 2
+                }
+              ]
+            }
+          },
+          {
+            "err": "The $RANGE validator at field <root> has an invalid bound: {min:zero}.",
+            "in": {
+              "data": 1,
+              "spec": [
+                "`$RANGE`",
+                {
+                  "min": "zero"
+                }
+              ]
+            }
+          },
+          {
+            "err": "The $RANGE validator at field <root> has an invalid bound: {above:0}.",
+            "in": {
+              "data": 1,
+              "spec": [
+                "`$RANGE`",
+                {
+                  "above": 0
+                }
+              ]
+            }
+          },
+          {
+            "err": "The $RANGE validator at field a must be the first element of an array.",
+            "in": {
+              "data": {
+                "a": [
+                  1,
+                  2
+                ]
+              },
+              "spec": {
+                "a": [
+                  "`$NUMBER`",
+                  "`$RANGE`"
+                ]
+              }
+            }
           }
         ]
       },
