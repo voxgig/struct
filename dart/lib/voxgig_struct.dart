@@ -2185,6 +2185,163 @@ dynamic _validatecount(Inj inj, dynamic store, String name, bool counted) {
   return SKIP;
 }
 
+// The value's length is within a bound: ['`$LEN`', bound, spec?], where the
+// bound is as for a $NOF count. A string's length is in code points.
+dynamic _validateLen(dynamic inj0, dynamic val, dynamic ref, dynamic store) =>
+    _validatebound(inj0 as Inj, store, '\$LEN');
+
+// The value is a number within a bound: ['`$RANGE`', bound, spec?], where the
+// bound holds min or gt, max or lt, or one of each.
+dynamic _validateRange(dynamic inj0, dynamic val, dynamic ref, dynamic store) =>
+    _validatebound(inj0 as Inj, store, '\$RANGE');
+
+// The bounding list directives: a bound, then at most one spec that must also
+// admit.
+dynamic _validatebound(Inj inj, dynamic store, String name) {
+  if (inj.mode != S_MVAL) return null;
+  var parent = inj.parent;
+  if (!islist(parent) || inj.keyi != 0) {
+    _pushErr(
+        inj,
+        'The ' +
+            name +
+            ' validator at field ' +
+            pathify(inj.path, 1, 1) +
+            ' must be the first element of an array.');
+    return null;
+  }
+
+  var cval = _slotval(inj);
+  var has = _slothas(inj);
+  inj.keyi = size(inj.keys);
+
+  // As for the counting directives: SKIP keeps inject off the detached list.
+  _setslot(inj, cval, has);
+
+  inj.path = slice(inj.path, 0, size(inj.path) - 1);
+
+  var field = 'The ' + name + ' validator at field ' + pathify(inj.path, 1);
+  var nargs = size(parent) - 1;
+
+  if (nargs < 1 || 2 < nargs) {
+    _pushErr(inj, field + ' must have a bound and at most one spec.');
+    return SKIP;
+  }
+
+  var bound = _lookup(parent, 1);
+  var islen = '\$LEN' == name;
+  List<dynamic> lb =
+      islen ? _lenbound(bound) : <dynamic>[0, 0, _rangedesc(bound)];
+  num lo = lb[0];
+  num hi = lb[1];
+  String? desc = lb[2];
+
+  if (desc == null) {
+    _pushErr(inj, field + ' has an invalid bound: ' + stringify(bound) + '.');
+    return SKIP;
+  }
+
+  var ctype = typify(cval);
+  var spec = _lookup(parent, 2);
+
+  if (nargs == 2 && !_admits(cval, has, spec, inj, store)) {
+    _pushErr(inj,
+        _invalidTypeMsg(inj.path, _valdesc([spec]), ctype, cval, 'V0410'));
+    return SKIP;
+  }
+
+  if (0 == ((islen ? T_string | T_list | T_map : T_number) & ctype)) {
+    var needtype = islen ? 'string, list or map' : 'number';
+    _pushErr(inj, _invalidTypeMsg(inj.path, needtype, ctype, cval, 'V0420'));
+    return SKIP;
+  }
+
+  var len = islen ? (cval is String ? cval.runes.length : size(cval)) : 0;
+  var inbound =
+      islen ? lo <= len && (hi == -1 || len <= hi) : _inrange(bound, cval);
+
+  if (!inbound) {
+    var needtype = (size(inj.path) > 1 ? '' : 'value ') + desc;
+    _pushErr(inj, _invalidTypeMsg(inj.path, needtype, ctype, cval, 'V0430'));
+  }
+
+  return SKIP;
+}
+
+// The bounds of a $LEN bound, with -1 for no maximum, and the words for it,
+// which are null when the bound is invalid.
+List<dynamic> _lenbound(dynamic bound) {
+  var nc = _nofcount(bound, -1);
+  if (nc[2] == null) return <dynamic>[0, 0, null];
+  num lo = nc[0];
+  num hi = nc[1];
+
+  var desc = 'of length ' +
+      (lo == hi
+          ? numToString(lo)
+          : hi == -1
+              ? 'at least ' + numToString(lo)
+              : lo == 0
+                  ? 'at most ' + numToString(hi)
+                  : numToString(lo) + ' to ' + numToString(hi));
+
+  return <dynamic>[lo, hi, desc];
+}
+
+// The words for a $RANGE bound, which are null when the bound is invalid.
+String? _rangedesc(dynamic bound) {
+  if (!ismap(bound)) return null;
+
+  var min = _lookup(bound, 'min');
+  var max = _lookup(bound, 'max');
+  var gt = _lookup(bound, 'gt');
+  var lt = _lookup(bound, 'lt');
+  var hasmin = _has(bound, 'min');
+  var hasmax = _has(bound, 'max');
+  var hasgt = _has(bound, 'gt');
+  var haslt = _has(bound, 'lt');
+  var lower = hasmin ? min : gt;
+  var upper = hasmax ? max : lt;
+  bool isnum(bool has, dynamic n) => !has || 0 < (T_number & typify(n));
+
+  var valid = size(bound) > 0 &&
+      size(bound) == [hasmin, hasmax, hasgt, haslt].where((h) => h).length &&
+      (!hasmin || !hasgt) &&
+      (!hasmax || !haslt) &&
+      isnum(hasmin, min) &&
+      isnum(hasmax, max) &&
+      isnum(hasgt, gt) &&
+      isnum(haslt, lt) &&
+      (!(hasmin || hasgt) || !(hasmax || haslt) || lower <= upper);
+
+  if (!valid) return null;
+
+  return join([
+    hasmin
+        ? 'at least ' + stringify(min)
+        : hasgt
+            ? 'greater than ' + stringify(gt)
+            : null,
+    hasmax
+        ? 'at most ' + stringify(max)
+        : haslt
+            ? 'less than ' + stringify(lt)
+            : null,
+  ], ' and ');
+}
+
+// A number within a valid $RANGE bound.
+bool _inrange(dynamic bound, dynamic val) {
+  var min = _lookup(bound, 'min');
+  var max = _lookup(bound, 'max');
+  var gt = _lookup(bound, 'gt');
+  var lt = _lookup(bound, 'lt');
+  return (min == null || min <= val) &&
+      (max == null || val <= max) &&
+      (gt == null || gt < val) &&
+      (lt == null || val < lt);
+}
+
 // The specs as a message lists them, each `$NAME` as its lower-case name.
 String _valdesc(List tvals) =>
     join(tvals.map((x) => stringify(x)).toList(), ', ').replaceAllMapped(
@@ -2327,6 +2484,8 @@ dynamic validate(dynamic data, dynamic spec, [dynamic injdef]) {
   base['\$EXACT'] = _validateExact;
   base['\$NOF'] = _validateNof;
   base['\$ALL'] = _validateAll;
+  base['\$LEN'] = _validateLen;
+  base['\$RANGE'] = _validateRange;
   var store = merge([
     base,
     extra == null ? <String, dynamic>{} : extra,

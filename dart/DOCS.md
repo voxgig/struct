@@ -97,6 +97,10 @@ s.validate({'a': 'x'}, {'a': '`\$STRING`'});         // {a: x}
 s.validate(2, ['`\$NOF`', {'min': 1}, '`\$STRING`', '`\$NUMBER`']); // 2
 s.validate(2, ['`\$ALL`', '`\$NUMBER`', '`\$INTEGER`']);             // 2
 
+// validate: `$LEN` bounds a length in code points, `$RANGE` bounds a number
+s.validate('ab', ['`\$LEN`', {'max': 3}, '`\$STRING`']);             // ab
+s.validate(5, ['`\$RANGE`', {'min': 0, 'lt': 10}]);                  // 5
+
 // select: MongoDB-style query over children
 s.select([{'a': 1}, {'a': 2}], {'a': {'`\$GT`': 1}}); // [{a: 2, $KEY: 1}]
 ```
