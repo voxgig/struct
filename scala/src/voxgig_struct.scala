@@ -2116,7 +2116,7 @@ object struct {
       Seq(("$AND", selectAnd), ("$OR", selectOr), ("$NOT", selectNot), ("$GT", selectCmp), ("$LT", selectCmp), ("$GTE", selectCmp), ("$LTE", selectCmp), ("$LIKE", selectCmp))
         .foreach { case (k, f) => setprop(extra, VStr(k), VFunc(f)) }
       val q = clone(query)
-      walk(q, before = Some((_k, v, _p, _path) => { if (ismap(v)) setprop(v, VStr(S_BOPEN), getprop(v, VStr(S_BOPEN), VBool(true))); v }))
+      openquery(q)
       (children match { case VList(b) => b.toSeq; case _ => Seq.empty }).foreach { child =>
         val errs = emptyList()
         val d = new InjDef
@@ -2128,6 +2128,23 @@ object struct {
       }
       results
     }
+  }
+
+  // Open every map in a select query, so a child may hold keys the query does
+  // not name, but leave a directive's literals as written: what $EXACT
+  // compares, and the count or bound of $NOF, $LEN and $RANGE.
+  private def openquery(q: Value): Unit = q match {
+    case VMap(_) =>
+      setprop(q, VStr(S_BOPEN), getprop(q, VStr(S_BOPEN), VBool(true)))
+      keysof(q).foreach(key => openquery(lookup_(q, VStr(key))))
+    case VList(b) =>
+      val head = b.headOption.getOrElse(Noval)
+      val exact = head == VStr(S_BEXACT)
+      val bounded = head == VStr("`$NOF`") || head == VStr("`$LEN`") || head == VStr("`$RANGE`")
+      b.indices.foreach { i =>
+        if (0 == i || !(exact || (bounded && 1 == i))) openquery(b(i))
+      }
+    case _ =>
   }
 
   // ---------------------------------------------------------------------------
