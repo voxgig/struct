@@ -2617,7 +2617,7 @@ select children0 query =
     extra <- emptyMap
     forM_ [("$AND", selectAnd), ("$OR", selectOr), ("$NOT", selectNot), ("$GT", selectCmp), ("$LT", selectCmp), ("$GTE", selectCmp), ("$LTE", selectCmp), ("$LIKE", selectCmp)] $ \(k, f) -> setprop extra (VStr k) (VFunc f) >> return ()
     q <- clone query
-    _ <- walk (Just (\_ vv _ _ -> do when (ismap vv) (do bo <- getpropAlt (VBool True) vv (VStr s_bopen); _ <- setprop vv (VStr s_bopen) bo; return ()); return vv)) Nothing VNoval q
+    openQuery q
     citems <- listItems children
     forM_ citems $ \child -> do
       errs <- emptyList
@@ -2628,6 +2628,25 @@ select children0 query =
       esz <- size errs
       when (esz == 0) $ do rsz <- size results; _ <- setprop results (VNum (fromIntegral rsz)) child; return ()
     return results
+
+-- | Open every map in a select query, so a child may hold keys the query does
+-- not name, but leave a directive's literals as written: what @$EXACT@
+-- compares, and the count or bound of @$NOF@, @$LEN@ and @$RANGE@.
+openQuery :: Value -> IO ()
+openQuery q = case q of
+  VMap _ -> do
+    bo <- getpropAlt (VBool True) q (VStr s_bopen)
+    _ <- setprop q (VStr s_bopen) bo
+    ps <- itemsPairs q
+    mapM_ (openQuery . snd) ps
+  VList r -> do
+    elems <- readIORef r
+    let head' = case elems of (VStr s : _) -> s; _ -> ""
+        exact = s_bexact == head'
+        bounded = head' `elem` ["`$NOF`", "`$LEN`", "`$RANGE`"]
+    forM_ (zip [0 :: Int ..] elems) $ \(i, v) ->
+      when (0 == i || not (exact || (bounded && 1 == i))) (openQuery v)
+  _ -> return ()
 
 -- ---------------------------------------------------------------------------
 -- builders
