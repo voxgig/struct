@@ -16,6 +16,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.StringJoiner;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.regex.Matcher;
@@ -2669,13 +2670,17 @@ public class Struct {
         return UNDEF;
       };
 
-  // Lowers every `$NAME` marker in the joined description, nested ones included.
   private static String _describeAlternatives(List<Object> tvals) {
     List<Object> parts = new ArrayList<>(tvals.size());
     for (Object tval : tvals) {
       parts.add(stringify(tval));
     }
-    Matcher m = R_TRANSFORM_NAME.matcher(join(parts, ", ", false));
+    return _lowernames(join(parts, ", ", false));
+  }
+
+  // Lowers every `$NAME` marker in the description, nested ones included.
+  private static String _lowernames(String desc) {
+    Matcher m = R_TRANSFORM_NAME.matcher(desc);
     StringBuilder out = new StringBuilder();
     while (m.find()) {
       m.appendReplacement(out, Matcher.quoteReplacement(m.group(1).toLowerCase(Locale.ROOT)));
@@ -2829,6 +2834,191 @@ public class Struct {
     }
 
     return SKIP;
+  }
+
+  /**
+   * $LEN: the value's length is within a bound. Format:
+   * {@code [`$LEN`, bound, spec?]}, where the bound is as for a $NOF count. A
+   * string's length is in code points. Mirrors TS {@code validate_LEN}.
+   */
+  public static final Injector validate_LEN =
+      (injObj, val, ref, store) ->
+          injObj instanceof Injection inj ? _validatebound(inj, store, "$LEN") : UNDEF;
+
+  /**
+   * $RANGE: the value is a number within a bound. Format:
+   * {@code [`$RANGE`, bound, spec?]}, where the bound holds {@code min} or
+   * {@code gt}, {@code max} or {@code lt}, or one of each. Mirrors TS
+   * {@code validate_RANGE}.
+   */
+  public static final Injector validate_RANGE =
+      (injObj, val, ref, store) ->
+          injObj instanceof Injection inj ? _validatebound(inj, store, "$RANGE") : UNDEF;
+
+  // The bounding list directives: a bound, then at most one spec that must also admit.
+  private static Object _validatebound(Injection inj, Object store, String name) {
+    if (inj.mode != M_VAL) {
+      return UNDEF;
+    }
+
+    Object parent = inj.parent;
+
+    if (!islist(parent) || inj.keyI != 0) {
+      inj.errs.add(
+          "The "
+              + name
+              + " validator at field "
+              + pathify(inj.path, 1, 1)
+              + " must be the first element of an array.");
+      return UNDEF;
+    }
+
+    Object cval = _slotval(inj);
+
+    inj.keyI = size(inj.keys);
+
+    // As for the counting directives: SKIP keeps inject off the detached list.
+    inj.setval(cval, 2);
+
+    inj.path = (List<String>) slice(inj.path, -1, null);
+
+    String field = "The " + name + " validator at field " + pathify(inj.path, 1);
+    int nargs = size(parent) - 1;
+
+    if (nargs < 1 || 2 < nargs) {
+      inj.errs.add(field + " must have a bound and at most one spec.");
+      return SKIP;
+    }
+
+    Object bound = lookup(parent, 1);
+    boolean islen = "$LEN".equals(name);
+    Object[] lenbound = islen ? _lenbound(bound) : null;
+    String desc = islen ? (String) lenbound[2] : _rangedesc(bound);
+
+    if (null == desc) {
+      inj.errs.add(field + " has an invalid bound: " + stringify(bound) + ".");
+      return SKIP;
+    }
+
+    int ctype = typify(cval);
+
+    if (2 == nargs && !_admits(cval, lookup(parent, 2), inj, store)) {
+      String specdesc = _lowernames(stringify(lookup(parent, 2)));
+      inj.errs.add(_invalidTypeMsg(inj.path, specdesc, ctype, cval, "V0410"));
+      return SKIP;
+    }
+
+    if (0 == ((islen ? T_string | T_list | T_map : T_number) & ctype)) {
+      String needtype = islen ? "string, list or map" : "number";
+      inj.errs.add(_invalidTypeMsg(inj.path, needtype, ctype, cval, "V0420"));
+      return SKIP;
+    }
+
+    boolean inbound;
+    if (islen) {
+      long lo = (Long) lenbound[0];
+      long hi = (Long) lenbound[1];
+      int len = cval instanceof String s ? s.codePointCount(0, s.length()) : size(cval);
+      inbound = lo <= len && (-1 == hi || len <= hi);
+    } else {
+      inbound = _inrange(bound, ((Number) cval).doubleValue());
+    }
+
+    if (!inbound) {
+      String needtype = (1 < size(inj.path) ? "" : "value ") + desc;
+      inj.errs.add(_invalidTypeMsg(inj.path, needtype, ctype, cval, "V0430"));
+    }
+
+    return SKIP;
+  }
+
+  // The bounds of a $LEN bound, with -1 for no maximum, and the words for it,
+  // which are null when the bound is invalid.
+  private static Object[] _lenbound(Object bound) {
+    Object[] count = _nofcount(bound, -1);
+
+    if (null == count[2]) {
+      return new Object[] {0L, 0L, null};
+    }
+
+    long lo = (Long) count[0];
+    long hi = (Long) count[1];
+
+    String desc =
+        lo == hi
+            ? String.valueOf(lo)
+            : -1 == hi ? "at least " + lo : 0 == lo ? "at most " + hi : lo + " to " + hi;
+
+    return new Object[] {lo, hi, "of length " + desc};
+  }
+
+  // The words for a $RANGE bound, which are null when the bound is invalid.
+  private static String _rangedesc(Object bound) {
+    if (!ismap(bound)) {
+      return null;
+    }
+
+    Object min = lookup(bound, "min");
+    Object max = lookup(bound, "max");
+    Object gt = lookup(bound, "gt");
+    Object lt = lookup(bound, "lt");
+    Object lower = UNDEF == min ? gt : min;
+    Object upper = UNDEF == max ? lt : max;
+
+    int numkeys = 0;
+    for (Object n : new Object[] {min, max, gt, lt}) {
+      if (UNDEF != n) {
+        numkeys++;
+      }
+    }
+
+    boolean valid =
+        0 < size(bound)
+            && size(bound) == numkeys
+            && (UNDEF == min || UNDEF == gt)
+            && (UNDEF == max || UNDEF == lt)
+            && _isnum(min)
+            && _isnum(max)
+            && _isnum(gt)
+            && _isnum(lt)
+            && (UNDEF == lower
+                || UNDEF == upper
+                || ((Number) lower).doubleValue() <= ((Number) upper).doubleValue());
+
+    if (!valid) {
+      return null;
+    }
+
+    StringJoiner desc = new StringJoiner(" and ");
+    if (UNDEF != min) {
+      desc.add("at least " + stringify(min));
+    } else if (UNDEF != gt) {
+      desc.add("greater than " + stringify(gt));
+    }
+    if (UNDEF != max) {
+      desc.add("at most " + stringify(max));
+    } else if (UNDEF != lt) {
+      desc.add("less than " + stringify(lt));
+    }
+
+    return desc.toString();
+  }
+
+  // A number within a valid $RANGE bound.
+  private static boolean _inrange(Object bound, double val) {
+    Object min = lookup(bound, "min");
+    Object max = lookup(bound, "max");
+    Object gt = lookup(bound, "gt");
+    Object lt = lookup(bound, "lt");
+
+    return (UNDEF == min || ((Number) min).doubleValue() <= val)
+        && (UNDEF == max || val <= ((Number) max).doubleValue())
+        && (UNDEF == gt || ((Number) gt).doubleValue() < val)
+        && (UNDEF == lt || val < ((Number) lt).doubleValue());
+  }
+
+  private static boolean _isnum(Object n) {
+    return UNDEF == n || 0 != (T_number & typify(n));
   }
 
   // Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
@@ -3306,6 +3496,8 @@ public class Struct {
     baseStore.put("$EXACT", validate_EXACT);
     baseStore.put("$NOF", validate_NOF);
     baseStore.put("$ALL", validate_ALL);
+    baseStore.put("$LEN", validate_LEN);
+    baseStore.put("$RANGE", validate_RANGE);
 
     List<Object> mergeList = new ArrayList<>();
     mergeList.add(baseStore);

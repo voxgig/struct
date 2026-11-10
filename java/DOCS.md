@@ -178,7 +178,7 @@ Struct.jsonify(Struct.jm("a", 1, "b", Struct.jt(2, 3)));
 <!-- => "{\n  \"a\": 1,\n  \"b\": [\n    2,\n    3\n  ]\n}" -->
 
 For more task recipes (rename fields, `$EACH`, `$MERGE`, `$FORMAT`, `$NOF`,
-`$ALL`, `$EXACT`, …) see the language-neutral
+`$ALL`, `$LEN`, `$RANGE`, `$EXACT`, …) see the language-neutral
 [How-to guides](../DOCS.md#2-how-to-guides) — the spec syntax is identical;
 only the host literals differ.
 
