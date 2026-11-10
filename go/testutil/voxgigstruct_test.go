@@ -1767,6 +1767,20 @@ func TestStruct(t *testing.T) {
 		})
 	})
 
+	t.Run("validate-len", func(t *testing.T) {
+		runsetFlags(t, validateSpec["len"], map[string]bool{"null": false}, func(v any) (any, error) {
+			m := v.(map[string]any)
+			return voxgigstruct.Validate(m["data"], m["spec"])
+		})
+	})
+
+	t.Run("validate-range", func(t *testing.T) {
+		runsetFlags(t, validateSpec["range"], map[string]bool{"null": false}, func(v any) (any, error) {
+			m := v.(map[string]any)
+			return voxgigstruct.Validate(m["data"], m["spec"])
+		})
+	})
+
 	t.Run("validate-unknown", func(t *testing.T) {
 		runsetFlags(t, validateSpec["unknown"], map[string]bool{"null": false}, func(v any) (any, error) {
 			m := v.(map[string]any)

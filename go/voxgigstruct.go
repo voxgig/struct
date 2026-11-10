@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const Version = "0.1.0"
@@ -3739,6 +3740,8 @@ var validate_CHILD Injector = func(
 // Set after Validate is defined: these validators call Validate.
 var validate_NOF Injector
 var validate_ALL Injector
+var validate_LEN Injector
+var validate_RANGE Injector
 
 // Forward declaration for validate_EXACT
 var validate_EXACT Injector
@@ -3763,6 +3766,28 @@ func init_validate_count() {
 		store any,
 	) any {
 		return _validatecount(inj, store, "$ALL", false)
+	}
+
+	// The value's length is within a bound: ['`$LEN`', bound, spec?], where the
+	// bound is as for a $NOF count. A string's length is in code points.
+	validate_LEN = func(
+		inj *Injection,
+		_val any,
+		ref *string,
+		store any,
+	) any {
+		return _validatebound(inj, store, "$LEN")
+	}
+
+	// The value is a number within a bound: ['`$RANGE`', bound, spec?], where the
+	// bound holds min or gt, max or lt, or one of each.
+	validate_RANGE = func(
+		inj *Injection,
+		_val any,
+		ref *string,
+		store any,
+	) any {
+		return _validatebound(inj, store, "$RANGE")
 	}
 }
 
@@ -3912,6 +3937,193 @@ func _validatecount(inj *Injection, store any, name string, counted bool) any {
 	}
 
 	return SKIP
+}
+
+// The bounding list directives: a bound, then at most one spec that must also admit.
+func _validatebound(inj *Injection, store any, name string) any {
+	if M_VAL != inj.Mode {
+		return nil
+	}
+
+	if !IsList(inj.Parent) || 0 != inj.KeyI {
+		inj.Errs.Append("The " + name + " validator at field " +
+			Pathify(inj.Path.List, 1, 1) +
+			" must be the first element of an array.")
+		return nil
+	}
+
+	cval := _slotval(inj)
+
+	inj.KeyI = len(inj.Keys.List)
+
+	// As for the counting directives: SKIP keeps inject off the detached list.
+	_setslot(inj, cval)
+
+	inj.Path.List = inj.Path.List[:len(inj.Path.List)-1]
+
+	field := "The " + name + " validator at field " + Pathify(inj.Path.List, 1)
+	nargs := Size(inj.Parent) - 1
+
+	if nargs < 1 || 2 < nargs {
+		inj.Errs.Append(field + " must have a bound and at most one spec.")
+		return SKIP
+	}
+
+	bound := _lookup(inj.Parent, 1)
+	islen := "$LEN" == name
+	lo, hi, desc := 0, 0, ""
+	if islen {
+		lo, hi, desc = _lenbound(bound)
+	} else {
+		desc = _rangedesc(bound)
+	}
+
+	if "" == desc {
+		inj.Errs.Append(field + " has an invalid bound: " + Stringify(denoval(bound)) + ".")
+		return SKIP
+	}
+
+	found := denoval(cval)
+	ctypename := Typename(Typify(found))
+
+	if 2 == nargs {
+		spec := _lookup(inj.Parent, 2)
+		if !_admits(cval, spec, inj, store) {
+			inj.Errs.Append(_invalidTypeMsg(inj.Path.List, _valdesc([]any{spec}), ctypename, found, "V0410"))
+			return SKIP
+		}
+	}
+
+	needtype, needbits := S_number, T_number
+	if islen {
+		needtype, needbits = "string, list or map", T_string|T_list|T_map
+	}
+
+	if 0 == (needbits & Typify(cval)) {
+		inj.Errs.Append(_invalidTypeMsg(inj.Path.List, needtype, ctypename, found, "V0420"))
+		return SKIP
+	}
+
+	inbound := false
+	if islen {
+		length := Size(cval)
+		if s, ok := cval.(string); ok {
+			length = utf8.RuneCountInString(s)
+		}
+		inbound = lo <= length && (-1 == hi || length <= hi)
+	} else {
+		inbound = _inrange(bound, cval)
+	}
+
+	if !inbound {
+		prefix := ""
+		if len(inj.Path.List) <= 1 {
+			prefix = "value "
+		}
+		inj.Errs.Append(_invalidTypeMsg(inj.Path.List, prefix+desc, ctypename, found, "V0430"))
+	}
+
+	return SKIP
+}
+
+// The bounds of a $LEN bound, with -1 for no maximum, and the words for it,
+// which are "" when the bound is invalid.
+func _lenbound(bound any) (int, int, string) {
+	lo, hi, countdesc := _nofcount(bound, -1)
+
+	if "" == countdesc {
+		return 0, 0, ""
+	}
+
+	desc := ""
+	if lo == hi {
+		desc = strconv.Itoa(lo)
+	} else if -1 == hi {
+		desc = "at least " + strconv.Itoa(lo)
+	} else if 0 == lo {
+		desc = "at most " + strconv.Itoa(hi)
+	} else {
+		desc = strconv.Itoa(lo) + " to " + strconv.Itoa(hi)
+	}
+
+	return lo, hi, "of length " + desc
+}
+
+// The words for a $RANGE bound, which are "" when the bound is invalid.
+func _rangedesc(bound any) string {
+	if !IsMap(bound) {
+		return ""
+	}
+
+	cmin := _lookup(bound, "min")
+	cmax := _lookup(bound, "max")
+	gt := _lookup(bound, "gt")
+	lt := _lookup(bound, "lt")
+
+	lower := cmin
+	if NOVAL == cmin {
+		lower = gt
+	}
+	upper := cmax
+	if NOVAL == cmax {
+		upper = lt
+	}
+
+	numkeys := 0
+	for _, n := range []any{cmin, cmax, gt, lt} {
+		if NOVAL != n {
+			if 0 == (T_number & Typify(n)) {
+				return ""
+			}
+			numkeys++
+		}
+	}
+
+	lowerf, _ := _toFloat64(lower)
+	upperf, _ := _toFloat64(upper)
+
+	valid := 0 < Size(bound) &&
+		Size(bound) == numkeys &&
+		(NOVAL == cmin || NOVAL == gt) &&
+		(NOVAL == cmax || NOVAL == lt) &&
+		(NOVAL == lower || NOVAL == upper || lowerf <= upperf)
+
+	if !valid {
+		return ""
+	}
+
+	parts := []string{}
+	if NOVAL != cmin {
+		parts = append(parts, "at least "+Stringify(cmin))
+	} else if NOVAL != gt {
+		parts = append(parts, "greater than "+Stringify(gt))
+	}
+	if NOVAL != cmax {
+		parts = append(parts, "at most "+Stringify(cmax))
+	} else if NOVAL != lt {
+		parts = append(parts, "less than "+Stringify(lt))
+	}
+
+	return strings.Join(parts, " and ")
+}
+
+// A number within a valid $RANGE bound.
+func _inrange(bound any, val any) bool {
+	v, _ := _toFloat64(val)
+	limit := func(key string) (float64, bool) {
+		b, err := _toFloat64(_lookup(bound, key))
+		return b, nil == err
+	}
+
+	cmin, hasmin := limit("min")
+	cmax, hasmax := limit("max")
+	gt, hasgt := limit("gt")
+	lt, haslt := limit("lt")
+
+	return (!hasmin || cmin <= v) &&
+		(!hasmax || v <= cmax) &&
+		(!hasgt || gt < v) &&
+		(!haslt || v < lt)
 }
 
 func makeValidation(exact bool) Modify {
@@ -4088,8 +4300,8 @@ func Validate(
 		errs = ListRefCreate[any]()
 	}
 
-	// Initialize validate_NOF and validate_ALL if not already initialized.
-	// This avoids a circular reference error, both call Validate.
+	// Initialize the validators that call Validate if not already initialized.
+	// This avoids a circular reference error.
 	if validate_NOF == nil {
 		init_validate_count()
 	}
@@ -4127,6 +4339,8 @@ func Validate(
 		"$EXACT":    validate_EXACT,
 		"$NOF":      validate_NOF,
 		"$ALL":      validate_ALL,
+		"$LEN":      validate_LEN,
+		"$RANGE":    validate_RANGE,
 	}
 
 	// Add any extra validation commands
@@ -4463,6 +4677,8 @@ func validateCollectExact(
 		"$EXACT":    validate_EXACT,
 		"$NOF":      validate_NOF,
 		"$ALL":      validate_ALL,
+		"$LEN":      validate_LEN,
+		"$RANGE":    validate_RANGE,
 	}
 
 	for k, fn := range extra {
