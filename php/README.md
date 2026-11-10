@@ -603,7 +603,7 @@ $MERGE   $EACH    $PACK    $REF     $FORMAT  $APPLY
 ```
 $MAP   $LIST   $STRING   $NUMBER   $INTEGER   $DECIMAL  $BOOLEAN
 $NULL  $NIL    $FUNCTION $INSTANCE $ANY       $CHILD    $EXACT
-$NOF   $ALL
+$NOF   $ALL    $LEN      $RANGE
 ```
 
 `` ['`$NOF`', $n, $spec, …] `` holds when as many specs admit the value as
@@ -612,6 +612,15 @@ $NOF   $ALL
 admits a value when validating the value against it finds no error and gives
 back every member of the value unchanged. There is no `$ONE`: write
 `` ['`$ONE`', $a, $b] `` as `` ['`$NOF`', ['min' => 1], $a, $b] ``.
+
+`` ['`$LEN`', $n, $spec?] `` holds when the value's length is within `$n`, a
+bound written as for `$NOF`. Strings count UTF-8 code points, not the bytes
+`strlen` reports, and a string that is not valid UTF-8 counts its bytes. Lists
+count elements, maps keys. `` ['`$RANGE`', $bound, $spec?] `` holds when the
+value is a number within `$bound`, a map of `min` or `gt` and `max` or `lt`,
+such as `['min' => 0, 'lt' => 150]`. `$LEN` and `$RANGE` take at most one spec,
+which must also admit the value. `min` and `max` include their bound, while
+`gt` and `lt` exclude it.
 
 A spec that names a checker `validate` does not define is rejected before
 any data is read, and nothing is validated. The whole-string reference
@@ -665,7 +674,7 @@ PHP method names match canonical lowercase: `getpath`, `setpath`,
 
 ### Test status
 
-120 tests and 391 assertions pass, apart from two tests marked incomplete
+122 tests and 395 assertions pass, apart from two tests marked incomplete
 because no corpus group covers them.
 
 
