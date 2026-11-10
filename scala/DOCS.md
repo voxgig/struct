@@ -93,10 +93,23 @@ transform(jm(VStr("name"), VStr("alice")),
 // validate: plain values are typed defaults; `$STRING` etc. are commands
 validate(jm(VStr("a"), VStr("x")), jm(VStr("a"), VStr("`$STRING`"))) // {a:x}
 
+// validate: `$LEN` bounds a length, `$RANGE` bounds a number
+validate(VStr("abc"), jt(VStr("`$LEN`"),
+  jm(VStr("min"), VNum(1.0), VStr("max"), VNum(64.0)), VStr("`$STRING`")))  // abc
+validate(VNum(42.0), jt(VStr("`$RANGE`"),
+  jm(VStr("min"), VNum(0.0), VStr("lt"), VNum(150.0)), VStr("`$INTEGER`"))) // 42
+
 // select: MongoDB-style query over children
 select(jt(jm(VStr("a"), VNum(1.0)), jm(VStr("a"), VNum(2.0))),
        jm(VStr("a"), jm(VStr("`$GT`"), VNum(1.0))))                // [{$KEY:1,a:2}]
 ```
+
+`$LEN` takes a bound written as for a `$NOF` count: an integer for an exact
+length, or a map with `min`, `max` or both. A string's length counts code
+points, a list's its elements, and a map's its keys, and any other value
+fails. `$RANGE` takes a map of `min` or `gt` with `max` or `lt`, and fails on
+anything but a number. `min` and `max` include their bound, while `gt` and
+`lt` exclude it. Each takes at most one spec, which must also admit the value.
 
 ## Testing
 
@@ -113,7 +126,7 @@ omni's immutable `Json` into this port's mutable `ArrayBuffer` /
 node, and the arguments go back to omni after the call, which is what
 `match.args` asserts on in `minor/setpath` and `merge/integrity`.
 
-Every group the corpus defines runs — 1602 entries in 78 groups —
+Every group the corpus defines runs — 1666 entries in 80 groups —
 plus the two `check` entries (`DEF.client`, client-scoped options,
 `contextify`) and three single entries that are not part of any set. Keep it
 green, keep `python3 ../tools/check_parity.py` green, and add no runtime

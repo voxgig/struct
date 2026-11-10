@@ -1695,6 +1695,130 @@ object struct {
     }
   }
 
+  // The value's length is within a bound: ['`$LEN`', bound, spec?], where the
+  // bound is as for a $NOF count. A string's length is in code points.
+  private val validateLen: Injector = (inj, _v, _r, store) => validatebound(inj, store, "$LEN")
+
+  // The value is a number within a bound: ['`$RANGE`', bound, spec?], where the
+  // bound holds min or gt, max or lt, or one of each.
+  private val validateRange: Injector = (inj, _v, _r, store) => validatebound(inj, store, "$RANGE")
+
+  // The bounding list directives: a bound, then at most one spec that must also admit.
+  private def validatebound(inj: Inj, store: Value, name: String): Value = {
+    val parent = inj.parent
+    if (inj.mode != M_VAL) Noval
+    else if (!islist(parent) || inj.keyi != 0) {
+      pushErr(inj, "The " + name + " validator at field " + pathify(inj.path, VNum(1.0), VNum(1.0)) + " must be the first element of an array.")
+      Noval
+    } else {
+      val cval = slotval(inj)
+      inj.keyi = size(inj.keys)
+
+      // As for the counting directives: SKIP keeps inject off the detached list.
+      injSetval(inj, cval, 2)
+
+      inj.path = slice(inj.path, VNum(-1.0))
+
+      val field = "The " + name + " validator at field " + pathify(inj.path, VNum(1.0))
+      val nargs = size(parent) - 1
+
+      if (nargs < 1 || 2 < nargs) pushErr(inj, field + " must have a bound and at most one spec.")
+      else {
+        val bound = lookup_(parent, VNum(1.0))
+        val islen = name == "$LEN"
+        val (lo, hi, desc) = if (islen) lenbound(bound) else (0.0, 0.0, rangedesc(bound))
+        val ctype = typify(cval)
+        desc match {
+          case None => pushErr(inj, field + " has an invalid bound: " + stringify(bound) + ".")
+          case Some(words) =>
+            if (nargs == 2 && !admits(cval, lookup_(parent, VNum(2.0)), inj, store)) {
+              val specdesc = replaceTransformNames(stringify(lookup_(parent, VNum(2.0))))
+              pushErr(inj, invalidTypeMsg(inj.path, specdesc, ctype, cval, "V0410"))
+            } else if (0 == ((if (islen) T_string | T_list | T_map else T_number) & ctype)) {
+              val needtype = if (islen) "string, list or map" else "number"
+              pushErr(inj, invalidTypeMsg(inj.path, needtype, ctype, cval, "V0420"))
+            } else {
+              val inbound =
+                if (!islen) inrange(bound, cval)
+                else {
+                  // size counts a string in UTF-16 units, not code points.
+                  val len = cval match { case VStr(s) => s.codePointCount(0, s.length); case _ => size(cval) }
+                  lo <= len && (hi == -1.0 || len <= hi)
+                }
+              if (!inbound) {
+                val needtype = (if (size(inj.path) > 1) "" else "value ") + words
+                pushErr(inj, invalidTypeMsg(inj.path, needtype, ctype, cval, "V0430"))
+              }
+            }
+        }
+      }
+      SKIP
+    }
+  }
+
+  // The bounds of a $LEN bound, with -1 for no maximum, and the words for it,
+  // which are absent when the bound is invalid.
+  private def lenbound(bound: Value): (Double, Double, Option[String]) =
+    nofcount(bound, -1) match {
+      case (lo, hi, Some(_)) =>
+        val words =
+          if (lo == hi) numToString(lo)
+          else if (hi == -1.0) "at least " + numToString(lo)
+          else if (lo == 0.0) "at most " + numToString(hi)
+          else numToString(lo) + " to " + numToString(hi)
+        (lo, hi, Some("of length " + words))
+      case _ => (0.0, 0.0, None)
+    }
+
+  // The words for a $RANGE bound, which are absent when the bound is invalid.
+  private def rangedesc(bound: Value): Option[String] =
+    if (!ismap(bound)) None
+    else {
+      val min = lookup_(bound, VStr("min"))
+      val max = lookup_(bound, VStr("max"))
+      val gt = lookup_(bound, VStr("gt"))
+      val lt = lookup_(bound, VStr("lt"))
+      val lower = if (isNoval(min)) gt else min
+      val upper = if (isNoval(max)) lt else max
+      def isnum(n: Value): Boolean = isNoval(n) || 0 < (T_number & typify(n))
+
+      val valid =
+        0 < size(bound) &&
+          size(bound) == Seq(min, max, gt, lt).count(n => !isNoval(n)) &&
+          (isNoval(min) || isNoval(gt)) &&
+          (isNoval(max) || isNoval(lt)) &&
+          isnum(min) && isnum(max) && isnum(gt) && isnum(lt) &&
+          (isNoval(lower) || isNoval(upper) || numval(lower) <= numval(upper))
+
+      if (!valid) None
+      else {
+        val lowerdesc =
+          if (!isNoval(min)) "at least " + stringify(min)
+          else if (!isNoval(gt)) "greater than " + stringify(gt)
+          else S_MT
+        val upperdesc =
+          if (!isNoval(max)) "at most " + stringify(max)
+          else if (!isNoval(lt)) "less than " + stringify(lt)
+          else S_MT
+        Some(Seq(lowerdesc, upperdesc).filter(_.nonEmpty).mkString(" and "))
+      }
+    }
+
+  // A number within a valid $RANGE bound.
+  private def inrange(bound: Value, v: Value): Boolean = {
+    val min = lookup_(bound, VStr("min"))
+    val max = lookup_(bound, VStr("max"))
+    val gt = lookup_(bound, VStr("gt"))
+    val lt = lookup_(bound, VStr("lt"))
+    val x = numval(v)
+    (isNoval(min) || numval(min) <= x) &&
+      (isNoval(max) || x <= numval(max)) &&
+      (isNoval(gt) || numval(gt) < x) &&
+      (isNoval(lt) || x < numval(lt))
+  }
+
+  private def numval(n: Value): Double = n match { case VNum(x) => x; case _ => 0.0 }
+
   // Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
   private val VALIDATE_NAMES = Seq("$TOP", "$SPEC", "$BT", "$DS", "$WHEN", "$ANNO", "$REF", "$FORMAT", "$APPLY", "$OPEN")
 
@@ -1876,6 +2000,8 @@ object struct {
     put("$EXACT", VFunc(validateExact))
     put("$NOF", VFunc(validateNof))
     put("$ALL", VFunc(validateAll))
+    put("$LEN", VFunc(validateLen))
+    put("$RANGE", VFunc(validateRange))
     val store = merge(mkList(Seq(base, if (isNoval(extra)) emptyMap() else extra, mkMap(Seq((S_DERRS, errs))))), VNum(1.0))
     val meta = inj match { case IDef(d) if !isNoval(d.dMeta) => d.dMeta; case _ => emptyMap() }
     setprop(meta, VStr(S_BEXACT), getprop(meta, VStr(S_BEXACT), VBool(false)))
