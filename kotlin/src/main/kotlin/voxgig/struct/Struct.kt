@@ -3008,8 +3008,8 @@ object Struct {
         }
 
     /**
-     * Canonical TS-faithful select. Tag each child node with $KEY, walk the
-     * (cloned) query annotating every map with `$OPEN`, then run validate
+     * Canonical TS-faithful select. Tag each child node with $KEY, open the
+     * (cloned) query's maps with _openquery, then run validate
      * against each child with the select_* injectors as extras and
      * meta.`$EXACT` = true. Mirrors Java select (Struct.java:2981).
      */
@@ -3049,13 +3049,7 @@ object Struct {
             )
 
         val q = clone(query)
-        walk(
-            q,
-            WalkApply { _, v, _, _ ->
-                if (ismap(v)) setprop(v, "`\$OPEN`", getprop(v, "`\$OPEN`", true))
-                v
-            },
-        )
+        _openquery(q)
 
         val results = mutableListOf<Any?>()
         for (child in childList) {
@@ -3069,6 +3063,27 @@ object Struct {
             if (errs.isEmpty()) results.add(child)
         }
         return results
+    }
+
+    // Open every map in a select query, so a child may hold keys the query does
+    // not name, but leave a directive's literals as written: what $EXACT
+    // compares, and the count or bound of $NOF, $LEN and $RANGE.
+    private fun _openquery(q: Any?) {
+        if (q is Map<*, *>) {
+            setprop(q, "`\$OPEN`", getprop(q, "`\$OPEN`", true))
+            for (key in keysof(q)) {
+                _openquery(q[key])
+            }
+        } else if (q is List<*>) {
+            val head = q.firstOrNull()
+            val exact = "`\$EXACT`" == head
+            val bounded = "`\$NOF`" == head || "`\$LEN`" == head || "`\$RANGE`" == head
+            for (i in q.indices) {
+                if (0 == i || !(exact || (bounded && 1 == i))) {
+                    _openquery(q[i])
+                }
+            }
+        }
     }
 
     // ===========================================================================
