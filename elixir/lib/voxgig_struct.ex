@@ -3021,11 +3021,7 @@ defmodule Voxgig.Struct do
       setprop(extra, "$LTE", &select_cmp/4)
       setprop(extra, "$LIKE", &select_cmp/4)
       q = clone(query)
-
-      walk(q, after: fn _k, v, _p, _path ->
-        if ismap(v), do: setprop(v, @s_bopen, getprop(v, @s_bopen, true))
-        v
-      end)
+      openquery_(q)
 
       Enum.each(list_items(children), fn child ->
         errs = empty_list()
@@ -3037,6 +3033,32 @@ defmodule Voxgig.Struct do
       end)
 
       results
+    end
+  end
+
+  # Open every map in a select query, so a child may hold keys the query does
+  # not name, but leave a directive's literals as written: what $EXACT
+  # compares, and the count or bound of $NOF, $LEN and $RANGE.
+  defp openquery_(q) do
+    cond do
+      ismap(q) ->
+        setprop(q, @s_bopen, getprop(q, @s_bopen, true))
+        Enum.each(items_pairs(q), fn {_, v} -> openquery_(v) end)
+
+      islist(q) ->
+        elems = list_items(q)
+        head = List.first(elems)
+        exact = head == @s_bexact
+        bounded = head in ["`$NOF`", "`$LEN`", "`$RANGE`"]
+
+        elems
+        |> Enum.with_index()
+        |> Enum.each(fn {v, i} ->
+          if i == 0 or not (exact or (bounded and i == 1)), do: openquery_(v)
+        end)
+
+      true ->
+        nil
     end
   end
 
