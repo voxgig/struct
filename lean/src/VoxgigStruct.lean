@@ -3420,6 +3420,24 @@ partial def selectCmp : InjectorFn := fun inj _v refstr store => do
     pure .noval
   else pure .noval
 
+/-- Open every map in a select query, so a child may hold keys the query does
+    not name, but leave a directive's literals as written: what `$EXACT`
+    compares, and the count or bound of `$NOF`, `$LEN` and `$RANGE`. -/
+partial def openQuery (q : Value) : SIO Unit := do
+  if ismap q then
+    let cur ← getprop q (.str S_BOPEN) (.bool true)
+    let _ ← setprop q (.str S_BOPEN) cur
+    for k in (← keysof q) do
+      openQuery (← lookupRaw q (.str k))
+  else if islist q then
+    let xs ← listItemsOf q
+    let head ← lookupRaw q (.num 0.0)
+    let exact := head == .str S_BEXACT
+    let bounded := head == .str "`$NOF`" || head == .str "`$LEN`" || head == .str "`$RANGE`"
+    for i in [0:xs.size] do
+      if i == 0 || !(exact || (bounded && i == 1)) then
+        openQuery xs[i]!
+
 partial def select (children query : Value) : SIO Value := do
   if !(isnode children) then emptyList
   else do
@@ -3447,12 +3465,7 @@ partial def select (children query : Value) : SIO Value := do
     for k in ["$GT", "$LT", "$GTE", "$LTE", "$LIKE"] do
       let _ ← setprop extra (.str k) (← vFunc selectCmp)
     let q ← clone query
-    let _ ← walk q (before := some (fun _k v _p _path => do
-      if ismap v then do
-        let cur ← getprop v (.str S_BOPEN) (.bool true)
-        let _ ← setprop v (.str S_BOPEN) cur
-        pure v
-      else pure v))
+    openQuery q
     for child in (← listItemsOf children) do
       let errs ← emptyList
       let m ← emptyMap
