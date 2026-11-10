@@ -126,6 +126,138 @@ int main() {
   CHECK(getprop(items, Value(1)) == Value(-2500.0));
   CHECK(getprop(items, Value(4)) == Value("\xc3\xa9"));
 
+  // Condense: what the corpus cannot express - identity, sharing and immutability.
+  const char* csrc = "{\"b\":{\"m\":\"GET\"},\"a\":{\"m\":\"GET\"},\"l\":[1,\"x\",true]}";
+  CHECK(jsonify(condense(parse_json(csrc)), 0) == jsonify(condense(parse_json(csrc)), 0));
+  CHECK(jsonify(condense(parse_json(csrc)), 0) ==
+        jsonify(condense(parse_json(
+                    "{\"l\":[1,\"x\",true],\"a\":{\"m\":\"GET\"},\"b\":{\"m\":\"GET\"}}")),
+                0));
+
+  auto nodes = [](const char* s) { return size(getprop(condense(parse_json(s)), Value("node"))); };
+  int64_t one = nodes("{\"x\":{\"m\":\"GET\",\"p\":\"/1\"}}");
+  int64_t two = nodes("{\"x\":{\"m\":\"GET\",\"p\":\"/1\"},\"y\":{\"m\":\"GET\",\"p\":\"/1\"}}");
+  CHECK(two == one);
+  CHECK(nodes("{\"x\":{\"m\":\"GET\"},\"y\":{\"m\":\"PUT\"},\"z\":{\"m\":\"POST\"}}") > two);
+
+  Value rt = parse_json("{\"a\":{\"b\":[1,\"x\",true,null,{}]},\"c\":\"z\"}");
+  CHECK(expand(condense(rt)) == rt);
+
+  Value deep = parse_json("{\"entity\":{\"p\":{\"op\":{\"list\":{\"method\":\"GET\"}}}}}");
+  Value cdeep = condense(deep);
+  CHECK(getpath_v(cdeep, jt({"entity", "p", "op", "list"})) ==
+        getpath_v(deep, jt({"entity", "p", "op", "list"})));
+  CHECK(getpath_v(cdeep, jt({"entity", "p", "op", "list", "method"})) == Value("GET"));
+  CHECK(getpath_v(cdeep, jt({"entity", "nope"})).is_undef());
+
+  CondenseView v = condenseview(
+      condense(parse_json("{\"entity\":{\"a\":{\"v\":1},\"b\":{\"v\":2}},\"other\":9}")));
+  CHECK(v.keys(Value("entity")) == std::vector<std::string>({"a", "b"}));
+  CHECK(v.at(Value("entity")).at(Value("b")).get(Value("v")) == Value(2));
+  CHECK(v.has(Value("entity.a")));
+  CHECK(!v.has(Value("entity.zz")));
+  CHECK(v.size() == 2);
+  CondenseView vz = v.at(Value("entity.zz"));
+  CHECK(!vz.exists() && 0 == vz.size() && vz.keys().empty() && vz.value().is_undef() &&
+        vz.ref().is_undef());
+
+  CondenseView vs =
+      condenseview(condense(parse_json("{\"a\":{\"m\":\"GET\"},\"b\":{\"m\":\"GET\"}}")));
+  Value x = vs.get(Value("a"));
+  Value y = vs.get(Value("b"));
+  CHECK(x == y && x.as_map() != y.as_map());
+  setprop(x, Value("m"), Value("MUTATED"));
+  CHECK(vs.get(Value("b.m")) == Value("GET"));
+  CHECK(vs.at(Value("a")).ref().as_map() == vs.at(Value("a")).ref().as_map());
+
+  Value pv = parse_json("{\"x\":\"__proto__\"}");
+  CHECK(expand(condense(pv)) == pv);
+  CHECK(jsonify(expand(condense(parse_json("{\"__proto__\":1}"))), 0) == "{\"__proto__\":1}");
+
+  CHECK(getpath_v(condense(parse_json("{\"a\":null}")), Value("a")).is_undef());
+  CHECK(getpath_v(parse_json("{\"a\":null}"), Value("a")).is_undef());
+  Value bstore = parse_json("{\"base\":{\"x\":1}}");
+  Injection binj(Value::undef(), Value::undef());
+  binj.base = "base";
+  CHECK(getpath_v(condense(bstore), Value("x"), &binj) == Value(1));
+  CHECK(getpath_v(bstore, Value("x"), &binj) == Value(1));
+
+  // Unary + would accept these; a plain list read does not, so condensing must not change
+  // which value a path selects.
+  Value pl = parse_json("{\"l\":[10,20]}");
+  Value cl = condense(pl);
+  for (const char* k : {"01", "1e0", " 1", "+1", "1.0", "-0"})
+    CHECK(getpath_v(cl, jt({"l", k})) == getpath_v(pl, jt({"l", k})));
+  CHECK(getpath_v(cl, jt({"l", "1"})) == Value(20));
+
+  Value sym = getprop(condense(parse_json("{\"a\":\"\xF0\x90\x80\x80\",\"b\":\"\xEF\xBF\xBF\"}")),
+                      Value("sym"));
+  CHECK(getprop(sym, Value(2)) == Value("\xEF\xBF\xBF"));
+  CHECK(getprop(sym, Value(3)) == Value("\xF0\x90\x80\x80"));
+
+  Value astral = condense(parse_json("{\"\xEF\xBC\xA1\":1,\"\xF0\x9F\x98\x80\":2}"));
+  CHECK(getpath_v(astral, jt({"\xF0\x9F\x98\x80"})) == Value(2));
+  CHECK(getpath_v(astral, jt({"\xEF\xBC\xA1"})) == Value(1));
+  CHECK(condenseview(astral).get(Value("\xF0\x9F\x98\x80")) == Value(2));
+
+  auto immutable = [](const std::function<void()>& fn) {
+    try {
+      fn();
+    } catch (const std::runtime_error& err) {
+      return std::string(err.what()).find("immutable") != std::string::npos;
+    }
+    return false;
+  };
+  Value cond = condense(parse_json("{\"a\":1}"));
+  CHECK(delprop(cond, Value::undef()).as_map() == cond.as_map());
+  CHECK(setprop(cond, Value::undef(), Value(1)).as_map() == cond.as_map());
+  CHECK(immutable([&] { delprop(cond, Value("sym")); }));
+  CHECK(immutable([&] { setpath_v(cond, Value("a"), Value(2)); }));
+  CHECK(immutable([&] { setprop(cond, Value("a"), Value(2)); }));
+  Value expanded = expand(cond);
+  setpath_v(expanded, Value("a"), Value(2));
+  CHECK(getprop(expanded, Value("a")) == Value(2));
+
+  // A checker that throws inside a $NOF or $ALL trial is not a refusal: the error propagates.
+  auto boomextra = std::shared_ptr<Map>(new Map());
+  boomextra->set("$BOOM",
+                 Value(Injector([](Injection&, const Value&, const std::string&,
+                                   const Value&) -> Value { throw std::runtime_error("boom"); })));
+  auto boomopts = std::shared_ptr<Map>(new Map());
+  boomopts->set("extra", Value(boomextra));
+  for (const Value& trial : {jt({"`$NOF`", 1, "`$BOOM`"}), jt({"`$ALL`", "`$BOOM`"})}) {
+    std::string thrown;
+    try {
+      validate(jm({"a", 1}), jm({"a", trial}), Value(boomopts));
+    } catch (const std::runtime_error& err) {
+      thrown = err.what();
+    }
+    CHECK(thrown == "boom");
+  }
+
+  auto verrs = [](const Value& data, const Value& spec) {
+    auto errs = std::make_shared<List>();
+    auto opts = std::shared_ptr<Map>(new Map());
+    opts->set("errs", Value(errs));
+    validate(data, spec, Value(opts));
+    return errs;
+  };
+
+  // $CHILD over the wrong type is one error, in either form and at the root.
+  for (const Value& spec :
+       {jm({"x", jm({"`$CHILD`", "`$NUMBER`"})}), jm({"x", jt({"`$CHILD`", "`$NUMBER`"})})})
+    CHECK(1 == verrs(jm({"x", 1}), spec)->size());
+  CHECK(1 == verrs(Value(1), jm({"`$CHILD`", "`$NUMBER`"}))->size());
+  CHECK(1 == verrs(Value(1), jt({"`$CHILD`", "`$NUMBER`"}))->size());
+
+  // A $NOF count of 2.0 is 2. The corpus cannot carry one: its compiler writes 2.
+  CHECK(verrs(Value("x"), jt({"`$NOF`", 2.0, "`$STRING`", "`$STRING`"}))->empty());
+  auto nof2 = verrs(Value("x"), jt({"`$NOF`", 2.0, "`$STRING`", "`$NUMBER`"}));
+  CHECK(1 == nof2->size() &&
+        (*nof2)[0] == Value("Expected exactly 2 of string, number, but found string: x."));
+  CHECK(verrs(Value("x"), jt({"`$NOF`", jm({"min", 1.0, "max", 2.0}), "`$STRING`", "`$NUMBER`"}))
+            ->empty());
+
   std::cout << (ok ? "smoke OK" : "smoke FAILED") << "\n";
   return ok ? 0 : 1;
 }

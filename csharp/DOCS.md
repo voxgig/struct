@@ -211,7 +211,7 @@ StructUtils.Stringify(StructUtils.Jm("a", 1, "b", StructUtils.Jt(2, 3)));   // {
 <!-- => "{a:1,b:[2,3]}" -->
 
 For more task recipes (merge configs, rename fields, `$EACH`, `$MERGE`,
-`$FORMAT`, `$ONE`, `$EXACT`, …) see the language-neutral
+`$FORMAT`, `$NOF`, `$ALL`, `$EXACT`, …) see the language-neutral
 [How-to guides](../DOCS.md#2-how-to-guides) — the spec syntax is identical;
 only the host literals differ.
 
@@ -221,7 +221,7 @@ only the host literals differ.
 
 The full C# signatures, with examples for every function, are in
 [`README.md` → Function reference](./README.md#function-reference). The
-canonical public surface (the 48 functions, 15 type flags, 2 sentinels)
+canonical public surface (the 52 functions, 15 type flags, 2 sentinels)
 is checked against the canonical TypeScript by
 [`../tools/check_parity.py`](../tools/check_parity.py), case- and
 underscore-insensitively (`GetPath` ↔ `getpath`).

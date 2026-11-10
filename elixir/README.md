@@ -11,7 +11,7 @@ port. The behavioural contract is the shared JSON corpus in
 
 Complete. Every canonical public function is implemented and the shared corpus
 passes (`make test`) on [voxgig/omni](https://github.com/voxgig/omni), the
-shared test runner — 1358 entries in 72 groups, less five this port cannot
+shared test runner — 1602 entries in 78 groups, less nine this port cannot
 answer because it has one `nil` for both undefined and null (named, with their
 reasons, in `test/runner.exs`). **Zero third-party dependencies** — only
 Elixir / Erlang OTP (ETS and `Regex`/`:re`) is required, and omni is loaded at
@@ -66,7 +66,8 @@ snake_cased names:
 haskey inject isempty isfunc iskey islist ismap isnode items join jsonify
 keysof merge pad pathify select setpath setprop size slice strkey stringify
 transform typify typename validate walk re_compile re_find re_find_all
-re_replace re_test re_escape jm jt check_placement injector_args inject_child`
+re_replace re_test re_escape jm jt check_placement injector_args inject_child
+condense condenseview expand iscondensed`
 
 See [`DOCS.md`](./DOCS.md) for the full guide and
 [the language-neutral docs](../DOCS.md) for concepts and examples.

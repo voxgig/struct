@@ -2,14 +2,14 @@
 
 > C++ port of the canonical TypeScript implementation.
 >
-> **Status: complete.**  Full TS-canonical parity: all 48 functions,
+> **Status: complete.**  Full TS-canonical parity: all 52 functions,
 > 15 type bit-flags, 3 mode constants (`M_KEYPRE`/`M_KEYPOST`/`M_VAL`),
 > `SKIP`/`DELETE` sentinels (pointer-identity), and the `Injection`
 > state machine.  `inject`/`transform`/`validate`/`select` all
 > dispatch through the canonical injector machinery: 10 transform
-> commands, 6 validate checkers, 4 select operators.
+> commands, 7 validate checkers, 4 select operators.
 >
-> Passes the shared corpus (1360/1360), run on
+> Passes the shared corpus (1602/1602), run on
 > [voxgig/omni](https://github.com/voxgig/omni) — the shared test runner,
 > header-only and consumed as a local checkout. Run it with `make test`
 > from `cpp/`.
@@ -329,6 +329,20 @@ validate(jm({"name", "Ada", "age", 36}),
 
 <!-- => {"age": 36, "name": "Ada"} -->
 
+Besides the type checkers, a spec list led by `` `$NOF` `` counts the specs
+that admit the value: `` jt({"`$NOF`", n, spec, …}) `` holds when as many
+specs admit it as `n` allows, where `n` is an integer or a map with `min`,
+`max` or both. `` jt({"`$ALL`", spec, …}) `` holds when every spec admits the
+value. A spec admits a value when validating the value against it finds no
+error and gives back every member of the value unchanged. There is no `$ONE`:
+write `` jt({"`$ONE`", a, b}) `` as `` jt({"`$NOF`", jm({"min", 1}), a, b}) ``.
+
+A spec that names a checker `validate` does not define is rejected before any
+data is read, and nothing is validated. The whole-string reference
+`` "`$FOO`" `` names a checker, and so does a misspelling of a defined one in
+another case, such as `` "`$string`" ``. The message is
+`Unknown validator $FOO at field a.`
+
 <!-- example: select#query -->
 ```cpp
 // Find children matching a query.
@@ -339,6 +353,16 @@ select(jm({"a", jm({"name", "Alice", "age", 30}),
 ```
 
 <!-- => [{"$KEY": "a", "age": 30, "name": "Alice"}] -->
+
+### Condensed structures
+
+```cpp
+Value condense(const Value& val);
+Value expand(const Value& cond);
+bool iscondensed(const Value& val = Value::undef());
+CondenseView condenseview(const Value& cond, const Value& idx = Value::undef(),
+                          const Value& memo = Value::undef());
+```
 
 
 ## Notes

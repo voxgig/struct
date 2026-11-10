@@ -102,8 +102,17 @@ line restores it.
   the partial string-injection path renders a found `"__NULL__"` as
   `"null"` (the single-null way of matching canonical
   `JSON.stringify(null)` for injected nulls). Validation's `$NIL`/`$NULL`
-  recover the absent-vs-stored-null distinction via literal slot
-  presence (`vgi-haslit`).
+  and `$ANY` recover the absent-vs-stored-null distinction via literal
+  slot presence (`vgi-haslit`), and so do the list directives `$EXACT`,
+  `$NOF` and `$ALL` (`vgi-slotval`/`vgi-slotheld`). `vgi-inj-setval`
+  deletes for `none`, so a held null is set directly — by `vgi-slotset`
+  for a list directive, and by `vgi-heldnull` for a checker, which then
+  returns SKIP so that inject does not delete it again; without that, a
+  null slot in list data is deleted and the elements after it shift
+  down. A `$NOF`/`$ALL` trial on an absent slot puts
+  NOARG in its store's `$TOP`, and `vg-transform` turns that into no
+  `$TOP` slot at all, so the nested checkers read "no value" at the root
+  (`'$NULL'` refuses it) rather than a held null.
 - Map literals keep **sorted key order** in boru (a plain `{b:1,a:2}` is
   key-sorted at parse, before any port code runs); `set` on a `flex` node
   appends in insertion order. `jsonify` uses the engine JSON emitter, so it
@@ -175,7 +184,11 @@ Public functions are `vg-<canonicalname>` (e.g. `vg-getpath`); internal
 helpers are `vgi-*`; loop workers are `vgl-*`. The export map at the end
 of `src/struct.boru` binds every canonical name (the parity checker reads
 those keys). `jm`/`jt` take one list argument (boru has no variadics);
-optional canonical parameters are explicit `NOARG` arguments.
+optional canonical parameters are explicit `NOARG` arguments. A
+`condenseview` is a handle map `{cond start memo}` rather than an object
+with methods (a closure returning a map of closures is the nesting the
+engine mishandles); its operations are the `condenseview_<op>` exports,
+each taking the handle first.
 
 ## Making a change
 

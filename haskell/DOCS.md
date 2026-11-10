@@ -61,6 +61,8 @@ to the canonical export list:
   `re_replace`, `re_test`, `re_escape`. Backed by the in-tree `Vregex`.
 - **By-example engine:** `inject`, `transform`, `validate`, `select`, and the
   injector helpers `check_placement`, `injector_args`, `inject_child`.
+- **Condensed structures:** `condense`, `condenseview`, `expand`,
+  `iscondensed`.
 - **Builders / markers:** `jm`, `jt`, `skip`, `delete`, the `t_*` type
   constants and `m_keypre` / `m_keypost` / `m_val`.
 
@@ -87,7 +89,19 @@ demo = do
   dat <- jm [VStr "name", VStr "alice"]
   idsp <- jm [VStr "id", VStr "`name`"]; spec <- jm [VStr "user", idsp]
   putStrLn =<< stringify =<< transform INone dat spec
+
+  -- validate: a list led by `$NOF` counts the specs that admit the value
+  cnt <- jm [VStr "min", VNum 1]
+  nof <- jt [VStr "`$NOF`", cnt, VStr "`$STRING`", VStr "`$NUMBER`"]
+  putStrLn =<< stringify =<< validate INone (VNum 1) nof   -- 1
 ```
+
+The count is a `VNum` or a map of `min` and `max`. `` VStr "`$ALL`" `` leads
+a list the same way, without a count, and holds when every spec admits the
+value. There is no `$ONE`; the full checker list is in the
+[language-neutral reference](../DOCS.md#validate-checkers-inside-backticks-in-a-validate-spec).
+A spec that names a checker `validate` does not define is rejected before any
+data is read, with `Unknown validator $FOO at field a.`
 
 ## Testing
 
@@ -105,11 +119,11 @@ omni's `Json` into the library's `IORef`-backed nodes (`tostruct`) and back
 arguments go back to omni after the call, which is what `match.args` asserts on
 in `minor/setpath` and `merge/integrity`.
 
-Every group the corpus defines runs except the three `condense` ones, which no
-port implements yet — 1358 entries in 72 groups — plus the two `check` entries
-(`DEF.client`, client-scoped options, `contextify`) and three single entries
-that are not part of any set. Keep it green, keep
-`python3 ../tools/check_parity.py` green, and add no runtime dependencies.
+Every group the corpus defines runs — 1602 entries in 78 groups —
+plus the two `check` entries (`DEF.client`, client-scoped options,
+`contextify`) and three single entries that are not part of any set. Keep it
+green, keep `python3 ../tools/check_parity.py` green, and add no runtime
+dependencies.
 
 ## Implementation notes
 

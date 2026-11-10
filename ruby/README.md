@@ -584,8 +584,22 @@ $MERGE   $EACH    $PACK    $REF     $FORMAT  $APPLY
 
 ```
 $MAP   $LIST   $STRING   $NUMBER   $INTEGER   $DECIMAL  $BOOLEAN
-$NULL  $NIL    $FUNCTION $INSTANCE $ANY       $CHILD    $ONE     $EXACT
+$NULL  $NIL    $FUNCTION $INSTANCE $ANY       $CHILD    $EXACT
+$NOF   $ALL
 ```
+
+`` ['`$NOF`', n, spec, …] `` holds when as many specs admit the value as `n`
+allows, where `n` is an integer or a hash with `'min'`, `'max'` or both.
+`` ['`$ALL`', spec, …] `` holds when every spec admits the value. A spec
+admits a value when validating the value against it finds no error and gives
+back every member of the value unchanged. There is no `$ONE`: write
+`` ['`$ONE`', a, b] `` as `` ['`$NOF`', { 'min' => 1 }, a, b] ``.
+
+A spec that names a checker `validate` does not define is rejected before
+any data is read, and nothing is validated. The whole-string reference
+`` '`$FOO`' `` names a checker, and so does a misspelling of a defined one
+in another case, such as `` '`$string`' ``. The message is
+`Unknown validator $FOO at field a.`
 
 
 ## Notes

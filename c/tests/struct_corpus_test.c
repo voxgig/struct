@@ -904,6 +904,20 @@ static voxgig_value* subj_select(voxgig_value* in, char** err, void* ud) {
   return r;
 }
 
+/* condense subjects. */
+static voxgig_value* subj_condense(voxgig_value* in, char** err, void* ud) {
+  (void)ud;
+  return voxgig_condense(in);
+}
+static voxgig_value* subj_expand(voxgig_value* in, char** err, void* ud) {
+  (void)ud;
+  return voxgig_expand(in);
+}
+static voxgig_value* subj_iscondensed(voxgig_value* in, char** err, void* ud) {
+  (void)ud;
+  return voxgig_new_bool(voxgig_iscondensed(in));
+}
+
 /* ---- regex subjects (parity floor: Go stdlib regexp; REGEX_API.md) ---- */
 
 static const char* rx_str(voxgig_value* v) {
@@ -1287,9 +1301,12 @@ int main(void) {
   run("validate", "basic", false, subj_validate, NULL);
   run("validate", "invalid", false, subj_validate, NULL);
   run("validate", "child", true, subj_validate, NULL);
-  run("validate", "one", true, subj_validate, NULL);
   run("validate", "exact", true, subj_validate, NULL);
   run("validate", "special", true, subj_validate_special, NULL);
+  run("validate", "directive", false, subj_validate, NULL);
+  run("validate", "nof", false, subj_validate, NULL);
+  run("validate", "all", false, subj_validate, NULL);
+  run("validate", "unknown", false, subj_validate, NULL);
 
   /* select */
   run("select", "basic", true, subj_select, NULL);
@@ -1298,11 +1315,10 @@ int main(void) {
   run("select", "alts", true, subj_select, NULL);
   run("select", "nullkey", false, subj_select, NULL);
 
-  /* condense / expand / iscondensed exist only in canonical TypeScript so far
-   * - no port implements them, and check_parity.py already lists them as
-   * pending. Named here so the gap is a visible TODO rather than three groups
-   * nobody notices are missing. */
-  printf("  skip condense.condense, condense.expand, condense.iscondensed (not ported)\n");
+  /* condense */
+  run("condense", "condense", false, subj_condense, NULL);
+  run("condense", "expand", false, subj_expand, NULL);
+  run("condense", "iscondensed", false, subj_iscondensed, NULL);
 
   printf("=========================\n%d groups, %d failed\n\n", GROUPS, FAILED);
 

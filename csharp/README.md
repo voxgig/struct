@@ -2,15 +2,15 @@
 
 > C# / .NET port of the canonical TypeScript implementation.
 >
-> **Status: complete.**  Full TS-canonical parity: all 48 functions,
+> **Status: complete.**  Full TS-canonical parity: all 52 functions,
 > 15 type bit-flags, 3 mode constants (`M_KEYPRE`/`M_KEYPOST`/`M_VAL`),
 > `SKIP`/`DELETE` sentinels, and the `InjectState` machinery.
 > `Inject`/`Transform`/`Validate`/`Select` all dispatch through the
 > canonical injector machinery: 11 transform commands, 6 validate
 > checkers, 4 select operators.
 >
-> Passes the full shared corpus (1178/1178). The xUnit suite
-> (`StructTest.cs`, 74 tests) is the green-bar regression baseline;
+> Passes the full shared corpus (1602/1602). The xUnit suite
+> (`StructTest.cs`, 115 tests) is the green-bar regression baseline;
 > the `CorpusScoreboard` test mirrors the Java/C++ runners and writes
 > `corpus-scoreboard.json` after each run with per-`.aon`-file pass
 > counts. The committed baseline lives at `test-baseline.json`.
@@ -459,6 +459,16 @@ StructUtils.Select(
 
 <!-- => [{"$KEY": "a", "age": 30, "name": "Alice"}] -->
 
+### Condensed structures
+
+```csharp
+StructUtils.Condense(object? val)
+StructUtils.Expand(object? cond)
+StructUtils.IsCondensed(object? val = null)        // bool
+StructUtils.CondenseView(object? cond, long? idx = null,
+               Dictionary<string, object?>? memo = null)   // CondenseView
+```
+
 ### Builders
 
 ```csharp
@@ -507,8 +517,22 @@ $MERGE   $EACH    $PACK    $REF     $FORMAT  $APPLY
 
 ```
 $MAP   $LIST   $STRING   $NUMBER   $INTEGER   $DECIMAL  $BOOLEAN
-$NULL  $NIL    $FUNCTION $INSTANCE $ANY       $CHILD    $ONE     $EXACT
+$NULL  $NIL    $FUNCTION $INSTANCE $ANY       $CHILD    $EXACT
+$NOF   $ALL
 ```
+
+`` StructUtils.Jt("`$NOF`", n, spec, …) `` holds when as many specs admit the
+value as `n` allows, where `n` is an integer or a map with `min`, `max` or
+both. `` StructUtils.Jt("`$ALL`", spec, …) `` holds when every spec admits the
+value. A spec admits a value when validating the value against it finds no
+error and gives back every member of the value unchanged. There is no
+`$ONE`: write `` Jt("`$ONE`", a, b) `` as `` Jt("`$NOF`", Jm("min", 1), a, b) ``.
+
+A spec that names a checker `Validate` does not define is rejected before
+any data is read, and nothing is validated. The whole-string reference
+`` "`$FOO`" `` names a checker, and so does a misspelling of a defined one
+in another case, such as `` "`$string`" ``. The message is
+`Unknown validator $FOO at field a.`
 
 
 ## Notes

@@ -1,4 +1,4 @@
-// Validate checkers — 15 injectors plus the top-level `validate`
+// Validate checkers — 16 injectors plus the top-level `validate`
 // driver, the `_validation` modify hook, and the validate-mode
 // `_validatehandler`. Mirrors canonical TS `validate*`.
 
@@ -60,7 +60,9 @@ private let TNAME_TO_BIT: [String: Int] = [
 
 public func validate_TYPE(_ inj: Injection, _ val: Value, _ ref: String, _ store: Value) -> Value {
   let tname = String(ref.dropFirst()).lowercased()
-  let typev = TNAME_TO_BIT[tname] ?? 0
+
+  // $NIL is absent or null.
+  let typev = (TNAME_TO_BIT[tname] ?? 0) | (S_nil == tname ? T_null : 0)
   let out = lookup(inj.dparent, .string(inj.key))
   let t = typify(out)
   if (t & typev) == 0 {
@@ -88,15 +90,12 @@ public func validate_CHILD(_ inj: Injection, _ val: Value, _ ref: String, _ stor
     if tval.isNoval {
       tval = .map(VMap())
     } else if !tval.isMap {
-      inj.errs.items.append(
-        .string(
-          invalidTypeMsg(
-            Array(inj.path.suffix(1)), S_object, typify(tval), tval, "V0220")))
+      // _validation reports the mismatch, once.
       return .noval
     }
     let ckeys = keysof(tval)
     for ck in ckeys {
-      setprop(parent, .string(ck), clone(childtm))
+      _setprop(parent, .string(ck), clone(childtm))
       inj.keys.append(ck)
     }
     inj.setval(.noval)
@@ -113,16 +112,12 @@ public func validate_CHILD(_ inj: Injection, _ val: Value, _ ref: String, _ stor
       return .noval
     }
     if !inj.dparent.isList {
-      let msg = invalidTypeMsg(
-        Array(inj.path.suffix(1)),
-        S_list, typify(inj.dparent), inj.dparent, "V0230")
-      inj.errs.items.append(.string(msg))
       inj.keyI = size(parent)
       return inj.dparent
     }
     if case .list(let dl) = inj.dparent {
       for i in 0..<dl.items.count {
-        setprop(parent, .int(Int64(i)), clone(childtm))
+        _setprop(parent, .int(Int64(i)), clone(childtm))
       }
       slice(parent, 0, dl.items.count, mutate: true)
 
@@ -150,69 +145,6 @@ public func validate_CHILD(_ inj: Injection, _ val: Value, _ ref: String, _ stor
   return .noval
 }
 
-// MARK: - validate_ONE
-
-public func validate_ONE(_ inj: Injection, _ val: Value, _ ref: String, _ store: Value) -> Value {
-  let mode = inj.mode
-  let parent = inj.parent
-  let keyI = inj.keyI
-  if mode == M_VAL {
-    if !parent.isList || keyI != 0 {
-      inj.errs.items.append(
-        .string(
-          "The $ONE validator at field "
-            + pathify(.list(VList(inj.path.map { Value.string($0) })), 1)
-            + " must be the first element of an array."))
-      return .noval
-    }
-    inj.keyI = inj.keys.count
-    inj.setval(inj.dparent, ancestor: 2)
-    // Canonical: `inj.path = slice(inj.path, -1)`. A negative START in this
-    // API means "up to vlen + start", so it drops the LAST element - the
-    // `$ONE` list index - leaving the field the list sits at. This port
-    // dropped the FIRST element instead, so `validate/one#3` reported
-    // "field 0" where the corpus asks for "field x0".
-    if !inj.path.isEmpty {
-      inj.path = Array(inj.path.dropLast())
-    }
-    let tvals = slice(parent, 1)
-    guard case .list(let tl) = tvals else { return .noval }
-    if tl.items.isEmpty {
-      inj.errs.items.append(
-        .string(
-          "The $ONE validator at field "
-            + pathify(.list(VList(inj.path.map { Value.string($0) })), 1)
-            + " must have at least one argument."))
-      return .noval
-    }
-    for tval in tl.items {
-      let terrs = VList()
-      let vstoreBase = VMap()
-      vstoreBase.entries[S_DTOP] = inj.dparent
-      let vstore = merge(.list([.map(VMap()), store, .map(vstoreBase)]), 1)
-      let subInj = Injection(val: .noval, parent: .noval)
-      subInj.extra = vstore
-      subInj.errs = terrs
-      subInj.meta = inj.meta
-      let vcurrent = validateCollect(inj.dparent, tval, subInj, terrs)
-      inj.setval(vcurrent, ancestor: -2)
-      if terrs.items.isEmpty { return .noval }
-    }
-    var valdesc = tl.items.map { stringify($0) }.joined(separator: ", ")
-    // Lower-case any `$NAME` references.
-    valdesc = valdesc.replacingOccurrences(
-      of: "`\\$([A-Z]+)`", with: "$1", options: .regularExpression)
-    valdesc = valdesc.lowercased()
-    inj.errs.items.append(
-      .string(
-        invalidTypeMsg(
-          inj.path,
-          (tl.items.count > 1 ? "one of " : "") + valdesc,
-          typify(inj.dparent), inj.dparent, "V0210")))
-  }
-  return .noval
-}
-
 // MARK: - validate_EXACT
 
 public func validate_EXACT(_ inj: Injection, _ val: Value, _ ref: String, _ store: Value) -> Value {
@@ -225,49 +157,126 @@ public func validate_EXACT(_ inj: Injection, _ val: Value, _ ref: String, _ stor
       inj.errs.items.append(
         .string(
           "The $EXACT validator at field "
-            + pathify(.list(VList(inj.path.map { Value.string($0) })), 1)
+            + pathify(.list(VList(inj.path.map { Value.string($0) })), 1, 1)
             + " must be the first element of an array."))
       return .noval
     }
+    let cval = _slotval(inj)
     inj.keyI = inj.keys.count
-    inj.setval(inj.dparent, ancestor: 2)
+
+    // Replace [$EXACT, ...] with the data value; SKIP keeps inject off the
+    // detached list.
+    inj.setval(cval, ancestor: 2)
+
     if !inj.path.isEmpty { inj.path = Array(inj.path.dropLast()) }
-    inj.key = inj.path.last ?? ""
-    let tvals = slice(parent, 1)
-    guard case .list(let tl) = tvals else { return .noval }
+    guard case .list(let tl) = slice(parent, 1) else { return .sentinel(SKIP) }
     if tl.items.isEmpty {
       inj.errs.items.append(
         .string(
           "The $EXACT validator at field "
-            + pathify(.list(VList(inj.path.map { Value.string($0) })), 1)
+            + pathify(.list(VList(inj.path.map { Value.string($0) })), 1, 1)
             + " must have at least one argument."))
-      return .noval
+      return .sentinel(SKIP)
     }
-    var currentstr: String? = nil
     for tval in tl.items {
-      var exactmatch = tval == inj.dparent
-      if !exactmatch, isnode(tval) {
-        if currentstr == nil { currentstr = stringify(inj.dparent) }
-        let tvalstr = stringify(tval)
-        exactmatch = tvalstr == currentstr
-      }
-      if exactmatch { return .noval }
+      if _deepequal(tval, cval) { return .sentinel(SKIP) }
     }
-    var valdesc = tl.items.map { stringify($0) }.joined(separator: ", ")
-    valdesc = valdesc.replacingOccurrences(
-      of: "`\\$([A-Z]+)`", with: "$1", options: .regularExpression
-    ).lowercased()
     inj.errs.items.append(
       .string(
         invalidTypeMsg(
           inj.path,
           (inj.path.count > 1 ? "" : "value ") + "exactly equal to "
-            + (tl.items.count == 1 ? "" : "one of ") + valdesc,
-          typify(inj.dparent), inj.dparent, "V0110")))
-  } else {
-    delprop(parent, .string(key))
+            + (tl.items.count == 1 ? "" : "one of ") + _valdesc(tl.items),
+          typify(cval), cval, "V0110")))
+    return .sentinel(SKIP)
   }
+  _delprop(parent, .string(key))
   return .noval
+}
+
+// MARK: - validate_NOF / validate_ALL
+
+// Count the specs that admit the value: ['`$NOF`', count, spec, ...], where
+// count is an integer, or a map holding min, max or both.
+public func validate_NOF(_ inj: Injection, _ val: Value, _ ref: String, _ store: Value) -> Value {
+  return _validatecount(inj, store, "$NOF", true)
+}
+
+// Every spec admits the value: ['`$ALL`', spec, ...].
+public func validate_ALL(_ inj: Injection, _ val: Value, _ ref: String, _ store: Value) -> Value {
+  return _validatecount(inj, store, "$ALL", false)
+}
+
+// The counting list directives. Without a count, every spec has to admit.
+private func _validatecount(
+  _ inj: Injection, _ store: Value, _ name: String, _ counted: Bool
+) -> Value {
+  let parent = inj.parent
+  if inj.mode != M_VAL { return .noval }
+
+  if !parent.isList || inj.keyI != 0 {
+    inj.errs.items.append(
+      .string(
+        "The " + name + " validator at field "
+          + pathify(.list(VList(inj.path.map { Value.string($0) })), 1, 1)
+          + " must be the first element of an array."))
+    return .noval
+  }
+
+  let cval = _slotval(inj)
+  inj.keyI = inj.keys.count
+
+  // Replace the directive's list with the data value. Each return is SKIP, so
+  // that inject leaves the detached list alone and validates nothing in it.
+  inj.setval(cval, ancestor: 2)
+
+  if !inj.path.isEmpty { inj.path = Array(inj.path.dropLast()) }
+
+  let count = counted ? lookup(parent, .int(1)) : Value.noval
+  guard case .list(let tl) = slice(parent, counted ? 2 : 1) else { return .sentinel(SKIP) }
+  let tvals = tl.items
+  let field =
+    "The " + name + " validator at field "
+    + pathify(.list(VList(inj.path.map { Value.string($0) })), 1)
+
+  if tvals.isEmpty {
+    inj.errs.items.append(
+      .string(
+        field + (counted ? " must have a count and" : " must have") + " at least one argument."))
+    return .sentinel(SKIP)
+  }
+
+  var lo = tvals.count
+  var hi = tvals.count
+  var countdesc: String? = "all"
+  if counted { (lo, hi, countdesc) = _nofcount(count, tvals.count) }
+
+  guard let words = countdesc else {
+    inj.errs.items.append(.string(field + " has an invalid count: " + stringify(count) + "."))
+    return .sentinel(SKIP)
+  }
+
+  var admitted = 0
+  for tI in 0..<tvals.count {
+    let left = tvals.count - tI
+
+    // Stop once the specs left cannot change the verdict.
+    if hi < admitted || admitted + left < lo || (lo <= admitted && admitted + left <= hi) {
+      break
+    }
+
+    if _admits(cval, tvals[tI], inj, store) {
+      admitted += 1
+    }
+  }
+
+  if admitted < lo || hi < admitted {
+    inj.errs.items.append(
+      .string(
+        invalidTypeMsg(inj.path, words + " of " + _valdesc(tvals), typify(cval), cval, "V0310")))
+  }
+
+  return .sentinel(SKIP)
 }
 
 // MARK: - _validation modify hook
@@ -316,7 +325,7 @@ public func _validation(
         }
       } else {
         _ = merge(.list([.map(pm), .map(cm)]))
-        delprop(.map(pm), .string(S_BOPEN))
+        _delprop(.map(pm), .string(S_BOPEN))
       }
     }
   } else if cval.isList {
@@ -334,7 +343,7 @@ public func _validation(
         .string("Value " + pathmsg + stringify(cval) + " should equal " + stringify(pval) + S_DT))
     }
   } else {
-    setprop(parent, key, cval)
+    _setprop(parent, key, cval)
   }
 }
 
@@ -405,14 +414,21 @@ func validateCollect(
   base.entries["$INSTANCE"] = .function(validate_TYPE)
   base.entries["$ANY"] = .function(validate_ANY)
   base.entries["$CHILD"] = .function(validate_CHILD)
-  base.entries["$ONE"] = .function(validate_ONE)
   base.entries["$EXACT"] = .function(validate_EXACT)
+  base.entries["$NOF"] = .function(validate_NOF)
+  base.entries["$ALL"] = .function(validate_ALL)
   let errsMap = VMap()
   errsMap.entries[S_DERRS] = .list(errs)
   let extraMap = extra.isNoval ? Value.map(VMap()) : extra
   let store = merge(.list([.map(base), extraMap, .map(errsMap)]), 1)
   let meta = (injdef?.meta) ?? VMap()
   if meta.entries[S_BEXACT] == nil { meta.entries[S_BEXACT] = .bool(false) }
+
+  // A spec that names an unknown checker validates nothing.
+  let numerrs = errs.items.count
+  _checknames(spec, store, [], errs)
+  if numerrs < errs.items.count { return clone(data) }
+
   let runInj = Injection(val: .noval, parent: .noval)
   runInj.meta = meta
   runInj.extra = store
@@ -422,4 +438,166 @@ func validateCollect(
   // The core, not the throwing wrapper: this `validate` decides what to do
   // with what transform collects.
   return transformCollect(data, spec, runInj, errs)
+}
+
+// MARK: - Validate helpers
+
+// Names a validate spec may use besides its checkers: transform's that it
+// keeps, and $OPEN.
+private let VALIDATE_NAMES = [
+  "$TOP", "$SPEC", "$BT", "$DS", "$WHEN", "$ANNO", "$REF", "$FORMAT", "$APPLY", "$OPEN",
+]
+
+// Report each checker the spec names that validate lacks; $EXACT's arguments
+// are literals.
+private func _checknames(_ spec: Value, _ store: Value, _ path: [String], _ errs: VList) {
+  if let name = _refname(spec) {
+    if _unknownname(name, store) {
+      errs.items.append(
+        .string(
+          "Unknown validator " + name + " at field "
+            + pathify(.list(VList(path.map { Value.string($0) }))) + "."))
+    }
+    return
+  }
+
+  if case .list(let l) = spec, let first = l.items.first, "$EXACT" == _refname(first) {
+    return
+  }
+
+  for key in keysof(spec) {
+    if ismap(spec) {
+      _checknames(.string(key), store, path, errs)
+    }
+    _checknames(lookup(spec, .string(key)), store, path + [key], errs)
+  }
+}
+
+// The name a whole-string reference gives, when it is a checker name in any
+// case.
+private func _refname(_ val: Value) -> String? {
+  guard case .string(let s) = val else { return nil }
+  let ns = s as NSString
+  let r = NSRange(location: 0, length: ns.length)
+  guard let m = R_INJECTION_FULL.firstMatch(in: s, range: r), m.range == r else { return nil }
+  let name = ns.substring(with: m.range(at: 1))
+  let upper = name.uppercased()
+  let ur = NSRange(location: 0, length: (upper as NSString).length)
+  guard let c = R_CHECKER_NAME.firstMatch(in: upper, range: ur), c.range == ur else { return nil }
+  return name
+}
+
+// Unknown: undefined and upper case, or a defined name in another case. Null
+// disables a name.
+private func _unknownname(_ name: String, _ store: Value) -> Bool {
+  func known(_ n: String) -> Bool {
+    let v = lookup(store, .string(n))
+    return VALIDATE_NAMES.contains(n) || !(v.isNoval || v.isNull)
+  }
+  let upper = name.uppercased()
+  return !known(name) && (upper == name || known(upper))
+}
+
+// The data value at a list directive's slot. The directive's own dparent was
+// read with getprop, which reports a stored null as absent.
+private func _slotval(_ inj: Injection) -> Value {
+  guard let prior = inj.prior else { return inj.dparent }
+  return lookup(prior.dparent, .string(prior.key))
+}
+
+// JSON equality, which is Value's ==: numbers by value, lists in order, maps
+// by key in any order. A function has no identity here, so equals nothing.
+private func _deepequal(_ a: Value, _ b: Value) -> Bool {
+  return a == b
+}
+
+// Every member val has is in out, unchanged. A member only out has is a
+// default the spec supplied, and is ignored.
+private func _keeps(_ val: Value, _ out: Value) -> Bool {
+  if val.isNoval { return true }
+  if 0 == ((T_list | T_map) & typify(val)) || islist(val) != islist(out) || !isnode(out) {
+    return _deepequal(val, out)
+  }
+  for k in keysof(val) {
+    if !_keeps(lookup(val, .string(k)), lookup(out, .string(k))) { return false }
+  }
+  return true
+}
+
+// A spec admits a value when validating the value against it finds no error
+// and gives back the value as it is.
+private func _admits(_ val: Value, _ spec: Value, _ inj: Injection, _ store: Value) -> Bool {
+  let terrs = VList()
+  let vstore = merge(.list([.map(VMap()), store]), 1)
+  if case .map(let vm) = vstore { vm.entries[S_DTOP] = val }
+  let sub = Injection(val: .noval, parent: .noval)
+  sub.extra = vstore
+  sub.errs = terrs
+  sub.meta = inj.meta
+  let out = validateCollect(val, spec, sub, terrs)
+  return terrs.items.isEmpty && _keeps(val, out)
+}
+
+// The bounds of a $NOF count, and the words for it, which are nil when the
+// count is invalid. Without a max, the bound is the number of specs.
+private func _nofcount(_ count: Value, _ numtvals: Int) -> (Int, Int, String?) {
+  // An integral decimal counts too: 2.0 is 2 in JavaScript.
+  func nat(_ n: Value) -> Int? {
+    switch n {
+    case .int(let i): return 0 <= i ? Int(exactly: i) : nil
+    case .double(let d): return 0 <= d && d == d.rounded() ? Int(exactly: d) : nil
+    default: return nil
+    }
+  }
+
+  if let c = nat(count) {
+    return (c, c, 0 == c ? "none" : "exactly " + String(c))
+  }
+
+  let min = lookup(count, .string("min"))
+  let max = lookup(count, .string("max"))
+  let minn = nat(min)
+  let maxn = nat(max)
+
+  let valid =
+    ismap(count) && 0 < size(count)
+    && size(count) == (min.isNoval ? 0 : 1) + (max.isNoval ? 0 : 1)
+    && (min.isNoval || nil != minn)
+    && (max.isNoval || nil != maxn)
+    && (nil == minn || nil == maxn || minn! <= maxn!)
+
+  if !valid { return (0, 0, nil) }
+
+  let lo = minn ?? 0
+  let hi = maxn ?? numtvals
+
+  let desc: String
+  if max.isNoval {
+    desc = "at least " + String(lo)
+  } else if 0 == hi {
+    desc = "none"
+  } else if min.isNoval {
+    desc = "at most " + String(hi)
+  } else if lo == hi {
+    desc = "exactly " + String(lo)
+  } else {
+    desc = String(lo) + " to " + String(hi)
+  }
+
+  return (lo, hi, desc)
+}
+
+// The specs as a message lists them, each `$NAME` as its lower-case name.
+private func _valdesc(_ tvals: [Value]) -> String {
+  let parts: [Value] = tvals.map { Value.string(stringify($0)) }
+  let s = join(.list(parts), ", ")
+  let ns = s as NSString
+  var out = ""
+  var last = 0
+  for m in R_TRANSFORM_NAME.matches(in: s, range: NSRange(location: 0, length: ns.length)) {
+    out += ns.substring(with: NSRange(location: last, length: m.range.location - last))
+    out += ns.substring(with: m.range(at: 1)).lowercased()
+    last = m.range.location + m.range.length
+  }
+  return out + ns.substring(from: last)
 }

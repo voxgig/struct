@@ -49,6 +49,14 @@ class StructCorpusTest {
         def: Any?,
     ): Any? = if (input is Map<*, *> && (input as Map<String, Any?>).containsKey(key)) input[key] else def
 
+    // ===== condense =====
+
+    @Test fun condenseCondense() = runsetnull("condense", "condense", donull = false) { Struct.condense(it) }
+
+    @Test fun condenseExpand() = runsetnull("condense", "expand", donull = false) { Struct.expand(it) }
+
+    @Test fun condenseIscondensed() = runsetnull("condense", "iscondensed", donull = false) { Struct.iscondensed(it) }
+
     // ===== minor =====
 
     @Test fun minorIsnode() = runset("minor", "isnode") { Struct.isnode(it) }
@@ -427,8 +435,6 @@ class StructCorpusTest {
 
     @Test fun validateChild() = runset("validate", "child") { Struct.validate(getp(it, "data"), getp(it, "spec")) }
 
-    @Test fun validateOne() = runset("validate", "one") { Struct.validate(getp(it, "data"), getp(it, "spec")) }
-
     @Test fun validateExact() = runset("validate", "exact") { Struct.validate(getp(it, "data"), getp(it, "spec")) }
 
     @Test
@@ -440,6 +446,18 @@ class StructCorpusTest {
             val inj = (getp(it, "inj") as? Map<String, Any?>)
             Struct.validate(getp(it, "data"), getp(it, "spec"), inj)
         }
+
+    @Test
+    fun validateDirective() = runsetnull("validate", "directive", donull = false) { Struct.validate(getp(it, "data"), getp(it, "spec")) }
+
+    @Test
+    fun validateNof() = runsetnull("validate", "nof", donull = false) { Struct.validate(getp(it, "data"), getp(it, "spec")) }
+
+    @Test
+    fun validateAll() = runsetnull("validate", "all", donull = false) { Struct.validate(getp(it, "data"), getp(it, "spec")) }
+
+    @Test
+    fun validateUnknown() = runsetnull("validate", "unknown", donull = false) { Struct.validate(getp(it, "data"), getp(it, "spec")) }
 
     // ===== select =====
 

@@ -128,6 +128,25 @@ let delete = Sentinel "delete"
 
 let maxdepth = 32
 
+let condense_version = 1.0
+
+(* Encoding kinds: the first element of every node table entry. *)
+let condense_map = 0.0
+let condense_list = 1.0
+let condense_str = 2.0
+let condense_num = 3.0
+let condense_true = 4.0
+let condense_false = 5.0
+let condense_null = 6.0
+
+let s_condense = "$condense"
+let s_condsym = "sym"
+let s_condnode = "node"
+let s_condroot = "root"
+
+let s_condimmutable =
+  "struct: condensed structures are immutable - expand() first, then modify the copy"
+
 (* ---------------------------------------------------------------------------
  * Small helpers
  * ------------------------------------------------------------------------- *)
@@ -147,6 +166,8 @@ let is_integer_f n = Float.is_finite n && Float.rem n 1.0 = 0.0
 
 let num_to_string n =
   if Float.is_nan n then "NaN"
+  (* -0 included: String(-0) is "0". *)
+  else if n = 0.0 then "0"
   else if Float.is_integer n && Float.abs n < 1e16 then Printf.sprintf "%.0f" n
   else begin
     let rec try_prec p =
@@ -171,14 +192,22 @@ let rec js_string v =
   | Func _ -> "function"
   | Sentinel s -> s
 
-let is_int_key s =
+(* A canonical integer key, as String(n) prints one: 0, or digits with no
+   leading zero after an optional minus. *)
+let is_canon_index s =
   let n = String.length s in
-  n > 0 &&
-  (let ok = ref true in
-   String.iteri (fun i c ->
-       if not ((c >= '0' && c <= '9') || (c = '-')) then ok := false;
-       ignore i) s;
-   !ok)
+  let d = if n > 1 && s.[0] = '-' then 1 else 0 in
+  s = "0" ||
+  (n > d && s.[d] >= '1' && s.[d] <= '9'
+   && String.for_all (fun c -> c >= '0' && c <= '9') (String.sub s d (n - d)))
+
+(* The canonical _listkey: a whole number, or a string is_canon_index accepts.
+   A float, so that a key past the end of any list still compares. *)
+let list_key k =
+  match k with
+  | Num n when is_integer_f n -> Some n
+  | Str s when is_canon_index s -> float_of_string_opt s
+  | _ -> None
 
 let clz32 n =
   let n = n land 0xFFFFFFFF in
@@ -188,6 +217,18 @@ let clz32 n =
     while !x land 0x80000000 = 0 do incr r; x := (!x lsl 1) land 0xFFFFFFFF done;
     !r
   end
+
+(* R_CHECKER_NAME: a dollar sign then capitals, nothing else. *)
+let is_checker_name s =
+  let n = String.length s in
+  n > 1 && s.[0] = '$' &&
+  (let ok = ref true in
+   for i = 1 to n - 1 do if s.[i] < 'A' || s.[i] > 'Z' then ok := false done;
+   !ok)
+
+(* Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN. *)
+let validate_names =
+  ["$TOP"; "$SPEC"; "$BT"; "$DS"; "$WHEN"; "$ANNO"; "$REF"; "$FORMAT"; "$APPLY"; "$OPEN"]
 
 (* ----- ordered map ops ----- *)
 let omap_get m k = try Some (List.assoc k m.entries) with Not_found -> None
@@ -262,30 +303,30 @@ and keysof v =
   | List r -> List.mapi (fun i _ -> string_of_int i) !r
   | _ -> []
 
-(* internal: list element by numeric key, no negative wrap, returns Noval if oob *)
+(* internal: a list read as JS reads an array: a list_key from 0, so 01, +1,
+   -0 and -1 miss. Noval if oob. *)
 and list_index lr key =
-  let ks = (match key with Str s -> s | Num n -> num_to_string n | _ -> "") in
-  match int_of_string_opt ks with
-  | Some i when i >= 0 && i < List.length !lr -> List.nth !lr i
+  match list_key key with
+  | Some k when 0.0 <= k && k < float_of_int (List.length !lr) -> List.nth !lr (int_of_float k)
+  | _ -> Noval
+
+(* internal: the stored value at a key, as the canonical _readprop. A map
+   reads only a string or number key. *)
+and readprop v key =
+  match v, key with
+  | List r, _ -> list_index r key
+  | Map m, (Str _ | Num _) -> (match omap_get m (js_string key) with Some x -> x | None -> Noval)
   | _ -> Noval
 
 and getprop ?(alt = Noval) v key =
   if is_noval v || is_noval key then alt
   else
-    let out =
-      match v with
-      | Map m -> (match omap_get m (js_string key) with Some x -> x | None -> Noval)
-      | List r -> list_index r key
-      | _ -> Noval
-    in
+    let out = readprop v key in
     if is_nullish out then alt else out
 
 and lookup_ v key =
   if is_noval v || is_noval key then Noval
-  else match v with
-    | Map m -> (match omap_get m (js_string key) with Some x -> x | None -> Noval)
-    | List r -> list_index r key
-    | _ -> Noval
+  else readprop v key
 
 and haskey v key = not (is_nullish (getprop v key))
 
@@ -295,13 +336,11 @@ and getelem ?(alt = Noval) v key =
     let out = ref Noval in
     (match v with
      | List r ->
-       let ks = (match key with Str s -> s | Num n -> num_to_string n | _ -> "") in
-       if is_int_key ks then begin
-         let len = List.length !r in
-         let nk0 = int_of_string ks in
-         let nk = if nk0 < 0 then len + nk0 else nk0 in
-         if nk >= 0 && nk < len then out := List.nth !r nk
-       end
+       (* A negative key counts from the end; any other reads as getprop does. *)
+       (match list_key key with
+        | Some k when k < 0.0 -> out := list_index r (Num (float_of_int (List.length !r) +. k))
+        | Some _ -> out := list_index r key
+        | None -> ())
      | _ -> ());
     if is_nullish !out then
       (match alt with
@@ -350,18 +389,16 @@ and filter v check =
 and setprop parent key v =
   if not (iskey key) then parent
   else begin
+    condense_guard parent;
     (match parent with
      | Map m -> omap_set m (js_string key) v
      | List r ->
-       let ks = (match key with Str s -> s | Num n -> num_to_string (Float.floor n) | _ -> "") in
-       (match int_of_string_opt ks with
+       (match list_key key with
         | None -> ()
-        | Some ki ->
-          let len = List.length !r in
-          if ki >= 0 then begin
-            let ki = if ki > len then len else ki in
-            if ki >= len then r := !r @ [v]
-            else r := List.mapi (fun i x -> if i = ki then v else x) !r
+        | Some k ->
+          if k >= 0.0 then begin
+            if k >= float_of_int (List.length !r) then r := !r @ [v]
+            else let ki = int_of_float k in r := List.mapi (fun i x -> if i = ki then v else x) !r
           end else r := v :: !r)
      | _ -> ());
     parent
@@ -370,12 +407,13 @@ and setprop parent key v =
 and delprop parent key =
   if not (iskey key) then parent
   else begin
+    condense_guard parent;
     (match parent with
      | Map m -> omap_del m (js_string key)
      | List r ->
-       let ks = (match key with Str s -> s | Num n -> num_to_string (Float.floor n) | _ -> "") in
-       (match int_of_string_opt ks with
-        | Some ki when ki >= 0 && ki < List.length !r ->
+       (match list_key key with
+        | Some k when 0.0 <= k && k < float_of_int (List.length !r) ->
+          let ki = int_of_float k in
           r := List.filteri (fun i _ -> i <> ki) !r
         | _ -> ())
      | _ -> ());
@@ -821,14 +859,25 @@ and ia_is_some = function INone -> false | _ -> true
 and getpath ?(inj = INone) store path =
   let pa =
     match path with
-    | List r -> Some (Array.of_list !r)
+    (* A number part reads as String(n); any other part misses the path. *)
+    | List r when List.for_all (function Str _ | Num _ -> true | _ -> false) !r ->
+      Some (Array.of_list (List.map (function Num n -> Str (num_to_string n) | p -> p) !r))
     | Str s -> Some (Array.of_list (List.map (fun x -> Str x) (String.split_on_char '.' s)))
-    | Num n -> Some [| Str (strkey ~key:(Num n) ()) |]
+    | Num n -> Some [| Str (num_to_string n) |]
     | _ -> None
   in
   match pa with
   | None -> Noval
+  (* A condensed store answers as the node it was built from, touching only
+     the nodes on the path. base would change what the walk resolves against,
+     so with one the store is expanded instead. *)
+  | Some pa when iscondensed store && is_nullish (ia_base inj) ->
+    let found = condense_resolve store (condense_root store) (lst (Array.to_list pa)) in
+    let v = if found < 0 then Noval else condense_materialise store found in
+    (* Group A: an ordinary getpath reads a stored null as absent. *)
+    if is_nullish v then Noval else v
   | Some pa ->
+    let store = expand store in
     let base = ia_base inj in
     let dparent = ia_dparent inj in
     let inj_meta = ia_meta inj in
@@ -900,6 +949,7 @@ and getpath ?(inj = INone) store path =
     !v
 
 and setpath ?(inj = INone) store path v =
+  condense_guard store;
   let ptype = typify path in
   let parts =
     if (t_list land ptype) > 0 then (match path with List r -> lst !r | _ -> empty_list ())
@@ -1585,7 +1635,8 @@ and validate_child inj _v _ref _store =
       List.iter (fun ckey -> ignore (setprop parent (Str ckey) (clone childtm)); ignore (setprop keys (Num (float_of_int (size keys))) (Str ckey))) (keysof (empty_map ()));
       ignore (delprop parent key); Noval
     end else if not (ismap tval) then
-      (push_err inj (invalid_type_msg (slice ~start:(Num 0.0) ~stop:(Num (float_of_int (size path - 1))) path) s_object (typify tval) tval "V0220"); Noval)
+      (* validation reports the mismatch, once. *)
+      Noval
     else begin
       List.iter (fun ckey -> ignore (setprop parent (Str ckey) (clone childtm)); ignore (setprop keys (Num (float_of_int (size keys))) (Str ckey))) (keysof tval);
       ignore (delprop parent key); Noval
@@ -1595,7 +1646,6 @@ and validate_child inj _v _ref _store =
     if not (islist parent) then (push_err inj "Invalid $CHILD as value"; Noval)
     else if is_noval inj.dparent then (match parent with List r -> r := []; Noval | _ -> Noval)
     else if not (islist inj.dparent) then begin
-      push_err inj (invalid_type_msg (slice ~start:(Num 0.0) ~stop:(Num (float_of_int (size path - 1))) path) s_list (typify inj.dparent) inj.dparent "V0230");
       inj.keyi <- size parent; inj.dparent
     end else begin
       List.iter (fun (k, _) -> ignore (setprop parent (Str k) (clone childtm))) (items_pairs inj.dparent);
@@ -1615,82 +1665,187 @@ and validate_child inj _v _ref _store =
     end
   end else Noval
 
-and validate_one inj _v _ref store =
-  if inj.mode = m_val then begin
-    let parent = inj.parent in
-    if not (islist parent) || inj.keyi <> 0 then
-      (push_err inj ("The $ONE validator at field " ^ pathify ~startin:(Num 1.0) ~endin:(Num 1.0) inj.path ^ " must be the first element of an array."); Noval)
-    else begin
-      inj.keyi <- size inj.keys;
-      ignore (inj_setval ~ancestor:2 inj inj.dparent);
-      inj.path <- slice ~start:(Num 0.0) ~stop:(Num (float_of_int (size inj.path - 1))) inj.path;
-      let tvals = slice ~start:(Num 1.0) parent in
-      if size tvals = 0 then
-        (push_err inj ("The $ONE validator at field " ^ pathify ~startin:(Num 1.0) ~endin:(Num 1.0) inj.path ^ " must have at least one argument."); Noval)
-      else begin
-        let matched = ref false in
-        List.iter (fun tval ->
-            if not !matched then begin
-              let terrs = empty_list () in
-              let vstore = merge ~maxdepth:(Num 1.0) (lst [empty_map (); store]) in
-              ignore (setprop vstore (Str s_dtop) inj.dparent);
-              let idef = { (default_injdef ()) with d_extra = vstore; d_errs = terrs; d_meta = inj.meta } in
-              let vcurrent = validate ~inj:(IDef idef) inj.dparent tval in
-              ignore (inj_setval ~ancestor:(-2) inj vcurrent);
-              if size terrs = 0 then matched := true
-            end) (match tvals with List r -> !r | _ -> []);
-        if not !matched then begin
-          let valdesc = String.concat ", " (List.map (fun (_, x) -> stringify x) (items_pairs tvals)) in
-          let valdesc = replace_transform_names valdesc in
-          push_err inj (invalid_type_msg inj.path ((if size tvals > 1 then "one of " else "") ^ valdesc) (typify inj.dparent) inj.dparent "V0210")
-        end;
-        Noval
-      end
-    end
-  end else Noval
-
 and validate_exact inj _v _ref _store =
   if inj.mode = m_val then begin
     let parent = inj.parent in
     if not (islist parent) || inj.keyi <> 0 then
       (push_err inj ("The $EXACT validator at field " ^ pathify ~startin:(Num 1.0) ~endin:(Num 1.0) inj.path ^ " must be the first element of an array."); Noval)
     else begin
+      let cval = slotval inj in
       inj.keyi <- size inj.keys;
-      ignore (inj_setval ~ancestor:2 inj inj.dparent);
+      (* Replace [$EXACT, ...] with the data value; skip keeps inject off the detached list. *)
+      ignore (inj_setval ~ancestor:2 inj cval);
       inj.path <- slice ~start:(Num 0.0) ~stop:(Num (float_of_int (size inj.path - 1))) inj.path;
-      inj.key <- getelem inj.path (Num (-1.0));
       let tvals = slice ~start:(Num 1.0) parent in
       if size tvals = 0 then
-        (push_err inj ("The $EXACT validator at field " ^ pathify ~startin:(Num 1.0) ~endin:(Num 1.0) inj.path ^ " must have at least one argument."); Noval)
+        (push_err inj ("The $EXACT validator at field " ^ pathify ~startin:(Num 1.0) ~endin:(Num 1.0) inj.path ^ " must have at least one argument."); skip)
       else begin
-        let matched = ref false in
-        List.iter (fun tval -> if not !matched && veq tval inj.dparent then matched := true)
-          (match tvals with List r -> !r | _ -> []);
-        if not !matched then begin
+        if not (List.exists (fun tval -> deepequal tval cval) (match tvals with List r -> !r | _ -> [])) then begin
           let valdesc = String.concat ", " (List.map (fun (_, x) -> stringify x) (items_pairs tvals)) in
           let valdesc = replace_transform_names valdesc in
           push_err inj (invalid_type_msg inj.path
                           ((if size inj.path > 1 then "" else "value ") ^ "exactly equal to " ^ (if size tvals = 1 then "" else "one of ") ^ valdesc)
-                          (typify inj.dparent) inj.dparent "V0110")
+                          (typify cval) cval "V0110")
         end;
-        Noval
+        skip
       end
     end
   end else (ignore (delprop inj.parent inj.key); Noval)
 
-and veq a b =
+(* Count the specs that admit the value: [`$NOF`, count, spec, ...], where
+   count is an integer, or a map holding min, max or both. *)
+and validate_nof inj _v _ref store = validatecount inj store "$NOF" true
+
+(* Every spec admits the value: [`$ALL`, spec, ...]. *)
+and validate_all inj _v _ref store = validatecount inj store "$ALL" false
+
+(* The counting list directives. Without a count, every spec has to admit. *)
+and validatecount inj store name counted =
+  if inj.mode <> m_val then Noval
+  else if not (islist inj.parent) || inj.keyi <> 0 then begin
+    push_err inj ("The " ^ name ^ " validator at field " ^ pathify ~startin:(Num 1.0) ~endin:(Num 1.0) inj.path ^ " must be the first element of an array.");
+    Noval
+  end else begin
+    let parent = inj.parent in
+    let cval = slotval inj in
+    inj.keyi <- size inj.keys;
+    (* Replace the directive's list with the data value. Each return is skip, so
+       that inject leaves the detached list alone and validates nothing in it. *)
+    ignore (inj_setval ~ancestor:2 inj cval);
+    inj.path <- slice ~start:(Num (-1.0)) inj.path;
+    let count = if counted then lookup_ parent (Num 1.0) else Noval in
+    let tvals = slice ~start:(Num (if counted then 2.0 else 1.0)) parent in
+    let numtvals = size tvals in
+    let field = "The " ^ name ^ " validator at field " ^ pathify ~startin:(Num 1.0) inj.path in
+    (if numtvals = 0 then
+       push_err inj (field ^ (if counted then " must have a count and" else " must have") ^ " at least one argument.")
+     else begin
+       let lo, hi, countdesc =
+         if counted then nofcount count (float_of_int numtvals)
+         else (float_of_int numtvals, float_of_int numtvals, Some "all") in
+       match countdesc with
+       | None -> push_err inj (field ^ " has an invalid count: " ^ stringify count ^ ".")
+       | Some countdesc ->
+         let tarr = Array.of_list (match tvals with List r -> !r | _ -> []) in
+         let admitted = ref 0.0 in
+         let ti = ref 0 in
+         (* Stop once the specs left cannot change the verdict. *)
+         let decided () =
+           let left = float_of_int (numtvals - !ti) in
+           hi < !admitted || !admitted +. left < lo || (lo <= !admitted && !admitted +. left <= hi) in
+         while !ti < numtvals && not (decided ()) do
+           if admits cval tarr.(!ti) inj store then admitted := !admitted +. 1.0;
+           incr ti
+         done;
+         if !admitted < lo || hi < !admitted then begin
+           let valdesc = String.concat ", " (List.map (fun (_, x) -> stringify x) (items_pairs tvals)) in
+           let valdesc = replace_transform_names valdesc in
+           push_err inj (invalid_type_msg inj.path (countdesc ^ " of " ^ valdesc) (typify cval) cval "V0310")
+         end
+     end);
+    skip
+  end
+
+(* The bounds of a $NOF count, and the words for it, which are absent when
+   the count is invalid. Without a max, the bound is the number of specs. *)
+and nofcount count numtvals =
+  let isnat n = (t_integer land typify n) > 0 && (match n with Num x -> 0.0 <= x | _ -> false) in
+  let num n = (match n with Num x -> x | _ -> 0.0) in
+  if isnat count then
+    let c = num count in
+    (c, c, Some (if c = 0.0 then "none" else "exactly " ^ num_to_string c))
+  else begin
+    let mn = lookup_ count (Str "min") in
+    let mx = lookup_ count (Str "max") in
+    let valid =
+      ismap count && size count > 0
+      && size count = (if is_noval mn then 0 else 1) + (if is_noval mx then 0 else 1)
+      && (is_noval mn || isnat mn)
+      && (is_noval mx || isnat mx)
+      && (is_noval mn || is_noval mx || num mn <= num mx) in
+    if not valid then (0.0, 0.0, None)
+    else begin
+      let lo = if is_noval mn then 0.0 else num mn in
+      let hi = if is_noval mx then numtvals else num mx in
+      let desc =
+        if is_noval mx then "at least " ^ num_to_string lo
+        else if hi = 0.0 then "none"
+        else if is_noval mn then "at most " ^ num_to_string hi
+        else if lo = hi then "exactly " ^ num_to_string lo
+        else num_to_string lo ^ " to " ^ num_to_string hi in
+      (lo, hi, Some desc)
+    end
+  end
+
+(* A spec admits a value when validating the value against it finds no error
+   and gives back the value as it is. *)
+and admits v spec inj store =
+  let terrs = empty_list () in
+  let vstore = merge ~maxdepth:(Num 1.0) (lst [empty_map (); store]) in
+  ignore (setprop vstore (Str s_dtop) v);
+  let idef = { (default_injdef ()) with d_extra = vstore; d_errs = terrs; d_meta = inj.meta } in
+  let out = validate ~inj:(IDef idef) v spec in
+  size terrs = 0 && keeps v out
+
+(* Every member v has is in out, unchanged. A member only out has is a
+   default the spec supplied, and is ignored. *)
+and keeps v out =
+  if is_noval v then true
+  else if (t_list lor t_map) land typify v = 0 || islist v <> islist out || not (isnode out) then
+    deepequal v out
+  else List.for_all (fun k -> keeps (lookup_ v (Str k)) (lookup_ out (Str k))) (keysof v)
+
+(* JSON equality: numbers by value, lists in order, maps by key in any order. *)
+and deepequal a b =
   match a, b with
-  | Noval, Noval -> true
-  | Null, Null -> true
+  | Noval, Noval | Null, Null -> true
   | Bool x, Bool y -> x = y
   | Num x, Num y -> x = y
   | Str x, Str y -> x = y
+  | Func f, Func g -> f == g
   | Sentinel x, Sentinel y -> x = y
-  | List x, List y -> List.length !x = List.length !y && List.for_all2 veq !x !y
+  | List x, List y -> x == y || (List.length !x = List.length !y && List.for_all2 deepequal !x !y)
   | Map x, Map y ->
-    omap_len x = omap_len y &&
-    List.for_all (fun (k, v) -> match omap_get y k with Some w -> veq v w | None -> false) x.entries
+    x == y ||
+    (let ks = keysof a in
+     ks = keysof b && List.for_all (fun k -> deepequal (lookup_ a (Str k)) (lookup_ b (Str k))) ks)
   | _ -> false
+
+(* The data value at a list directive's slot. The directive's own dparent was
+   read with getprop, which reports a stored null as absent. *)
+and slotval inj =
+  match inj.prior with
+  | None -> inj.dparent
+  | Some prior -> lookup_ prior.dparent prior.key
+
+(* Report each checker the spec names that validate lacks; $EXACT's arguments are literals. *)
+and checknames spec store path errs =
+  match refname spec with
+  | Some name ->
+    if unknownname name store then
+      ignore (setprop errs (Num (float_of_int (size errs)))
+                (Str ("Unknown validator " ^ name ^ " at field " ^ pathify (lst path) ^ ".")))
+  | None ->
+    if not (islist spec && refname (lookup_ spec (Num 0.0)) = Some "$EXACT") then
+      List.iter (fun k ->
+          if ismap spec then checknames (Str k) store path errs;
+          checknames (lookup_ spec (Str k)) store (path @ [Str k]) errs)
+        (keysof spec)
+
+(* The name a whole-string reference gives, when it is a checker name in any case. *)
+and refname v =
+  match v with
+  | Str s ->
+    (match injection_full s with
+     | Some name when is_checker_name (String.uppercase_ascii name) -> Some name
+     | _ -> None)
+  | _ -> None
+
+(* Unknown: undefined and upper case, or a defined name in another case. Null disables a name. *)
+and unknownname name store =
+  let known n = List.mem n validate_names || not (is_nullish (lookup_ store (Str n))) in
+  let upper = String.uppercase_ascii name in
+  not (known name) && (upper = name || known upper)
 
 and validation pval key parent inj =
   if not (is_skip pval) then begin
@@ -1720,7 +1875,7 @@ and validation pval key parent inj =
         end else if islist cval then
           (if not (islist pval) then push_err inj (invalid_type_msg inj.path (typename ptype) ctype cval "V0030"))
         else if exact_b then
-          (if not (veq cval pval) then
+          (if not (deepequal cval pval) then
              let pathmsg = if size inj.path > 1 then "at field " ^ pathify ~startin:(Num 1.0) inj.path ^ ": " else "" in
              push_err inj ("Value " ^ pathmsg ^ js_string cval ^ " should equal " ^ js_string pval ^ "."))
         else ignore (setprop parent key cval)
@@ -1747,13 +1902,17 @@ and validate ?(inj = INone) data spec =
     ["$NUMBER"; "$INTEGER"; "$DECIMAL"; "$BOOLEAN"; "$NULL"; "$NIL"; "$MAP"; "$LIST"; "$FUNCTION"; "$INSTANCE"];
   put "$ANY" (Func validate_any);
   put "$CHILD" (Func validate_child);
-  put "$ONE" (Func validate_one);
   put "$EXACT" (Func validate_exact);
+  put "$NOF" (Func validate_nof);
+  put "$ALL" (Func validate_all);
   let store = merge ~maxdepth:(Num 1.0) (lst [base; (if is_noval extra then empty_map () else extra); Map { entries = [(s_derrs, errs)] }]) in
   let meta = (match inj with IDef d when not (is_noval d.d_meta) -> d.d_meta | _ -> empty_map ()) in
   ignore (setprop meta (Str s_bexact) (getprop ~alt:(Bool false) meta (Str s_bexact)));
   let idef = { (default_injdef ()) with d_meta = meta; d_extra = store; d_modify = Some validation; d_handler = Some validate_handler; d_errs = errs } in
-  let out = transform ~inj:(IDef idef) data spec in
+  (* A spec that names an unknown checker validates nothing. *)
+  let numerrs = size errs in
+  checknames spec store [] errs;
+  let out = if numerrs < size errs then clone data else transform ~inj:(IDef idef) data spec in
   if size errs > 0 && not collect then raise (Struct_error (join ~sep:(Str " | ") errs));
   out
 
@@ -1876,6 +2035,249 @@ and jm kv =
   done; m
 
 and jt v = lst v
+
+(* ----- condense ----- *)
+
+and condense_guard v =
+  if iscondensed v then raise (Struct_error s_condimmutable)
+
+(* The version must match, not merely be numeric: a future profile would
+   otherwise be decoded under this one's schema. *)
+and iscondensed v =
+  match v with
+  | Map m ->
+    (match omap_get m s_condense, omap_get m s_condsym, omap_get m s_condnode,
+           omap_get m s_condroot with
+     | Some (Num n), Some (List _), Some (List _), Some (Num _) -> n = condense_version
+     | _ -> false)
+  | _ -> false
+
+(* Pure: the same input gives byte-identical output, on every port. *)
+and condense v =
+  let symset = Hashtbl.create 64 in
+  let rec collect n =
+    match n with
+    | Map m -> List.iter (fun (k, x) -> Hashtbl.replace symset k (); collect x) m.entries
+    | List r -> List.iter collect !r
+    | Str s -> Hashtbl.replace symset s ()
+    | _ -> ()
+  in
+  collect v;
+  let sym = List.sort compare (Hashtbl.fold (fun s () acc -> s :: acc) symset []) in
+  let symid = Hashtbl.create 64 in
+  List.iteri (fun i s -> Hashtbl.replace symid s i) sym;
+  let symref s = vint (Hashtbl.find symid s) in
+  (* Built post-order and interned on the encoding, so identical subtrees are
+     already one node by the time a parent references them. *)
+  let node = ref [] and count = ref 0 and seen = Hashtbl.create 64 in
+  let intern enc =
+    (* -0 is 0: one JS number, so one node. *)
+    let part = function Num n when n = 0.0 -> "0" | x -> js_string x in
+    let key = String.concat "," (List.map part enc) in
+    match Hashtbl.find_opt seen key with
+    | Some i -> i
+    | None ->
+      let i = !count in
+      node := lst enc :: !node;
+      incr count;
+      Hashtbl.replace seen key i;
+      i
+  in
+  let rec build n =
+    match n with
+    | Map m ->
+      let enc = ref [Num condense_map] in
+      List.iter (fun k ->
+          let child = build (match omap_get m k with Some x -> x | None -> Noval) in
+          enc := vint child :: symref k :: !enc) (keysof n);
+      intern (List.rev !enc)
+    | List r ->
+      let enc = ref [Num condense_list] in
+      List.iter (fun x -> let child = build x in enc := vint child :: !enc) !r;
+      intern (List.rev !enc)
+    | Str s -> intern [Num condense_str; symref s]
+    | Num x -> intern [Num condense_num; Num x]
+    | Bool true -> intern [Num condense_true]
+    | Bool false -> intern [Num condense_false]
+    | _ -> intern [Num condense_null]
+  in
+  let root = build v in
+  Map { entries = [ (s_condense, Num condense_version);
+                    (s_condsym, lst (List.map vstr sym));
+                    (s_condnode, lst (List.rev !node));
+                    (s_condroot, vint root) ] }
+
+and condense_field cond name =
+  match cond with
+  | Map m -> (match omap_get m name with Some x -> x | None -> Noval)
+  | _ -> Noval
+
+and condense_items cond name =
+  match condense_field cond name with List r -> Array.of_list !r | _ -> [||]
+
+and condense_item a i = if i >= 0 && i < Array.length a then a.(i) else Noval
+
+(* A node or symbol index read out of the structure; -1 when it is not one. *)
+and condense_index v =
+  match v with
+  | Num n when n >= 0.0 && n < 1e15 && is_integer_f n -> int_of_float n
+  | _ -> -1
+
+and condense_root cond = condense_index (condense_field cond s_condroot)
+
+and condense_enc cond idx =
+  match condense_field cond s_condnode with
+  | List r when idx >= 0 -> (match List.nth_opt !r idx with Some e -> e | None -> Noval)
+  | _ -> Noval
+
+and condense_encoding enc = match enc with List r -> Array.of_list !r | _ -> [||]
+
+and condense_kind enc =
+  match enc with List r -> (match !r with Num k :: _ -> Some k | _ -> None) | _ -> None
+
+(* -1 when the string occurs nowhere in the structure: itself a fast miss. *)
+and condense_symid cond key =
+  let sym = condense_items cond s_condsym in
+  let rec bisect lo hi =
+    if lo > hi then -1
+    else
+      let mid = (lo + hi) / 2 in
+      match sym.(mid) with
+      | Str s when s = key -> mid
+      | Str s when compare s key < 0 -> bisect (mid + 1) hi
+      | _ -> bisect lo (mid - 1)
+  in
+  bisect 0 (Array.length sym - 1)
+
+(* The node index of key inside node idx, or -1. Touches only this node. *)
+and condense_child cond idx key =
+  let enc = condense_enc cond idx in
+  let e = condense_encoding enc in
+  let at j = condense_item e j in
+  let kind = condense_kind enc in
+  if (match key with Str _ | Num _ -> false | _ -> true) then -1
+  else if kind = Some condense_map then begin
+    let symid = condense_symid cond (js_string key) in
+    let target = float_of_int symid in
+    (* Pairs live at [1,2], [3,4], ... with keys ascending: bisect them. *)
+    let rec bisect lo hi =
+      if lo > hi then -1
+      else
+        let mid = (lo + hi) / 2 in
+        match at (1 + mid * 2) with
+        | Num k when k = target -> condense_index (at (2 + mid * 2))
+        | Num k when k < target -> bisect (mid + 1) hi
+        | _ -> bisect lo (mid - 1)
+    in
+    if symid < 0 then -1 else bisect 0 ((Array.length e - 1) / 2 - 1)
+  end
+  else if kind = Some condense_list then begin
+    (* A list_key from 0 only, as a JS list lookup: 01, 1e0, " 1", +1 and -1
+       miss, so condensing never changes which value a path selects. *)
+    match list_key key with
+    | Some k when 0.0 <= k && k < float_of_int (Array.length e - 1) ->
+      condense_index (at (1 + int_of_float k))
+    | _ -> -1
+  end
+  else -1
+
+(* Walk a path from a starting node, returning the node index or -1. *)
+and condense_resolve cond idx path =
+  let parts =
+    match path with
+    | List r -> !r
+    | Str "" | Noval | Null -> []
+    | Str s -> List.map vstr (String.split_on_char '.' s)
+    | p -> [Str (js_string p)]
+  in
+  List.fold_left (fun at part ->
+      if at < 0 then -1
+      else match part with Str "" -> at | _ -> condense_child cond at part) idx parts
+
+and condense_materialise cond idx =
+  let sym = condense_items cond s_condsym in
+  let node = condense_items cond s_condnode in
+  let rec rebuild i =
+    let enc = condense_item node i in
+    let e = condense_encoding enc in
+    let at j = condense_item e j in
+    let kind = condense_kind enc in
+    if is_nullish enc then Noval
+    else if kind = Some condense_map then begin
+      let m = { entries = [] } in
+      let rec pairs j =
+        if j < Array.length e then begin
+          omap_set m (js_string (condense_item sym (condense_index (at j))))
+            (rebuild (condense_index (at (j + 1))));
+          pairs (j + 2)
+        end
+      in
+      pairs 1;
+      Map m
+    end
+    else if kind = Some condense_list then
+      lst (List.init (Array.length e - 1) (fun j -> rebuild (condense_index (at (j + 1)))))
+    else if kind = Some condense_str then condense_item sym (condense_index (at 1))
+    else if kind = Some condense_num then at 1
+    else if kind = Some condense_true then Bool true
+    else if kind = Some condense_false then Bool false
+    else Null
+  in
+  if idx < 0 then Noval else rebuild idx
+
+(* Correct for any caller, but it gives up every benefit of condensing. *)
+and expand cond =
+  if iscondensed cond then condense_materialise cond (condense_root cond) else cond
+
+(* The keys of node idx, decoding none of its values. *)
+and condense_keys cond idx =
+  let enc = condense_enc cond idx in
+  let e = condense_encoding enc in
+  let kind = condense_kind enc in
+  if kind = Some condense_map then begin
+    let sym = condense_items cond s_condsym in
+    let rec pairs j =
+      if j >= Array.length e then []
+      else js_string (condense_item sym (condense_index e.(j))) :: pairs (j + 2)
+    in
+    pairs 1
+  end
+  else if kind = Some condense_list then List.init (Array.length e - 1) string_of_int
+  else []
+
+and condense_size cond idx =
+  let enc = condense_enc cond idx in
+  let n = Array.length (condense_encoding enc) in
+  let kind = condense_kind enc in
+  if kind = Some condense_map then (n - 1) / 2
+  else if kind = Some condense_list then n - 1
+  else 0
+
+(* A cursor: reads resolve by node index and touch only the nodes on the
+   path. ref alone hands out shared materialisations, memoised per node and
+   threaded through at, so every cursor into one structure shares them. *)
+and condenseview ?idx ?memo cond =
+  let start =
+    match idx with Some i -> i | None -> if iscondensed cond then condense_root cond else -1 in
+  let refmemo = match memo with Some m -> m | None -> Hashtbl.create 8 in
+  object
+    method get path = condense_materialise cond (condense_resolve cond start path)
+    method keys path =
+      let at = condense_resolve cond start path in
+      if at < 0 then [] else condense_keys cond at
+    method has path = 0 <= condense_resolve cond start path
+    method at path = condenseview ~idx:(condense_resolve cond start path) ~memo:refmemo cond
+    method value = condense_materialise cond start
+    method size = condense_size cond start
+    method exists = 0 <= start
+    method ref =
+      match Hashtbl.find_opt refmemo start with
+      | Some v -> v
+      | None ->
+        let v = condense_materialise cond start in
+        Hashtbl.replace refmemo start v;
+        v
+  end
 
 (* ---------------------------------------------------------------------------
  * Finish: set the dummy inj for getelem's function-alt path

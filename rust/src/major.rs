@@ -10,12 +10,13 @@
 // `&mut` to the same Vec).
 
 use std::cell::RefCell;
+use std::collections::{BTreeSet, HashMap};
 use std::rc::Rc;
 
 use crate::consts::*;
 use crate::mini::*;
 use crate::ordered_map::OrderedMap;
-use crate::value::{js_string, js_to_int32, js_to_number, Value};
+use crate::value::{is_integer_f64, js_string, js_to_int32, js_to_number, num_to_string, Value};
 use crate::StructError;
 
 // ---------------------------------------------------------------------
@@ -549,18 +550,38 @@ pub fn get_path(store: &Value, path: &Value, injdef: Option<&InjectDef>) -> Valu
 /// machinery and by the public `get_path` wrapper).
 pub fn get_path_inj(store: &Value, path: &Value, injdef: Option<&Inj>) -> Value {
     let mut parts: Vec<String> = match path {
-        Value::List(l) => l
-            .borrow()
-            .iter()
-            .map(|x| match x {
-                Value::Str(s) => s.clone(),
-                other => js_string(other),
-            })
-            .collect(),
+        Value::List(l) => {
+            let mut parts = Vec::new();
+            for part in l.borrow().iter() {
+                match part {
+                    Value::Num(n) => parts.push(num_to_string(*n)),
+                    Value::Str(s) => parts.push(s.clone()),
+                    _ => return Value::Noval,
+                }
+            }
+            parts
+        }
         Value::Str(s) => s.split('.').map(|p| p.to_string()).collect(),
-        Value::Num(n) => vec![str_key(Value::Num(*n))],
+        Value::Num(n) => vec![num_to_string(*n)],
         _ => return Value::Noval,
     };
+
+    // A condensed store answers a path with the value of the node it was built
+    // from, touching only the nodes on the path. A base changes what the walk
+    // below starts from, so a read with one expands the store instead.
+    let expanded = if is_condensed(store) {
+        if injdef.map(|i| i.borrow().base.is_none()).unwrap_or(true) {
+            let partlist = Value::list(parts.iter().cloned().map(Value::Str).collect());
+            let found = condense_resolve(store, condense_root(store), &partlist);
+            let val = condense_materialise(store, found);
+            // Group A: an ordinary getpath reads a stored null as absent.
+            return if val.is_nullish() { Value::Noval } else { val };
+        }
+        Some(expand(store))
+    } else {
+        None
+    };
+    let store = expanded.as_ref().unwrap_or(store);
 
     let base = injdef.and_then(|i| i.borrow().base.clone());
     let src = match &base {
@@ -701,6 +722,11 @@ fn drop_last(s: &str) -> String {
 // ---------------------------------------------------------------------
 
 pub fn set_path(store: &Value, path: &Value, val: Value, injdef: Option<&InjectDef>) -> Value {
+    // Same contract as set_prop and del_prop: a condensed store is immutable.
+    if is_condensed(store) {
+        panic!("{CONDENSE_IMMUTABLE}");
+    }
+
     // Keep parts as Values so a numeric part (only possible when `path` is an
     // array) makes its parent a list, while a string part makes a map.
     let parts: Vec<Value> = match path {
@@ -1896,10 +1922,12 @@ fn validate_string(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
 
 fn validate_type(inj: &Inj, _v: &Value, r: &str, _store: &Value) -> Value {
     let tname: String = r.chars().skip(1).collect::<String>().to_lowercase();
+
+    // $NIL is absent or null.
     let typev: i64 = match TYPENAME.iter().position(|x| *x == tname) {
         Some(idx) => 1i64 << (31 - idx as i64),
         None => 0,
-    };
+    } | if S_nil == tname { T_NULL as i64 } else { 0 };
     let (dparent, key, path) = {
         let b = inj.borrow();
         (b.dparent.clone(), b.key.clone(), b.path.clone())
@@ -1958,15 +1986,7 @@ fn validate_child(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
         if tval.is_noval() {
             tval = Value::empty_map();
         } else if !is_map(&tval) {
-            errs_push(
-                inj,
-                invalid_type_msg(
-                    &path[..path.len().saturating_sub(1)],
-                    S_object,
-                    typify(&tval),
-                    &tval,
-                ),
-            );
+            // validation_modify reports the mismatch, once.
             return Value::Noval;
         }
         let ckeys = keysof_vec(&tval);
@@ -1991,15 +2011,6 @@ fn validate_child(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
             return Value::Noval;
         }
         if !is_list(&dparent) {
-            errs_push(
-                inj,
-                invalid_type_msg(
-                    &path[..path.len().saturating_sub(1)],
-                    S_list,
-                    typify(&dparent),
-                    &dparent,
-                ),
-            );
             let plen = parent.as_list().map(|l| l.borrow().len()).unwrap_or(0) as i64;
             inj.borrow_mut().key_i = plen;
             return dparent;
@@ -2034,92 +2045,6 @@ fn validate_child(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
     Value::Noval
 }
 
-// `$ONE`: value must match exactly one of a list of alternative sub-specs.
-fn validate_one(inj: &Inj, _v: &Value, _r: &str, store: &Value) -> Value {
-    let (mode, parent, key_i) = {
-        let b = inj.borrow();
-        (b.mode, b.parent.clone(), b.key_i)
-    };
-    if mode != M_VAL {
-        return Value::Noval;
-    }
-    if !is_list(&parent) || key_i != 0 {
-        let path = inj.borrow().path.clone();
-        errs_push(
-            inj,
-            format!(
-                "The $ONE validator at field {} must be the first element of an array.",
-                pathify(&path_value(&path), Some(1), Some(1))
-            ),
-        );
-        return Value::Noval;
-    }
-    let keylen = inj.borrow().keys.borrow().len() as i64;
-    inj.borrow_mut().key_i = keylen;
-    let dparent = inj.borrow().dparent.clone();
-    Injection::setval(inj, dparent.clone(), Some(2));
-    {
-        let mut b = inj.borrow_mut();
-        let n = b.path.len();
-        b.path.truncate(n.saturating_sub(1));
-    }
-    let path_after = inj.borrow().path.clone();
-    let meta = inj.borrow().meta.clone();
-    let tvals: Vec<Value> = slice(parent.clone(), Some(1), None, false)
-        .as_list()
-        .map(|l| l.borrow().clone())
-        .unwrap_or_default();
-    if tvals.is_empty() {
-        errs_push(
-            inj,
-            format!(
-                "The $ONE validator at field {} must have at least one argument.",
-                pathify(&path_value(&path_after), Some(1), Some(1))
-            ),
-        );
-        return Value::Noval;
-    }
-    for tval in &tvals {
-        let terrs = Value::empty_list();
-        let mut vstore = match merge(
-            &Value::list(vec![Value::empty_map(), store.clone()]),
-            Some(1),
-        ) {
-            v @ Value::Map(_) => v,
-            _ => Value::empty_map(),
-        };
-        set_prop(vstore.clone(), &Value::str(S_DTOP), dparent.clone());
-        let _ = &mut vstore;
-        let vd = InjectDef {
-            extra: Some(vstore.clone()),
-            errs: Some(terrs.clone()),
-            meta: Some(meta.clone()),
-            ..Default::default()
-        };
-        let vcur = validate(&dparent, tval, Some(&vd)).unwrap_or(Value::Noval);
-        Injection::setval(inj, vcur, Some(-2)); // hmm: ancestor -2 -> handled below
-        let terrlen = terrs.as_list().map(|l| l.borrow().len()).unwrap_or(0);
-        if terrlen == 0 {
-            return Value::Noval;
-        }
-    }
-    let valdesc = tvals_desc(&tvals);
-    errs_push(
-        inj,
-        invalid_type_msg(
-            &path_after,
-            &format!(
-                "{}{}",
-                if tvals.len() > 1 { "one of " } else { "" },
-                valdesc
-            ),
-            typify(&dparent),
-            &dparent,
-        ),
-    );
-    Value::Noval
-}
-
 // `$EXACT`: value must equal a literal exactly (no shape coercion).
 fn validate_exact(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
     let (mode, parent, key, key_i) = {
@@ -2141,15 +2066,16 @@ fn validate_exact(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
         );
         return Value::Noval;
     }
+    let cval = slotval(inj);
     let keylen = inj.borrow().keys.borrow().len() as i64;
     inj.borrow_mut().key_i = keylen;
-    let dparent = inj.borrow().dparent.clone();
-    Injection::setval(inj, dparent.clone(), Some(2));
+
+    // Replace [$EXACT, ...] with the data value; SKIP keeps inject off the detached list.
+    Injection::setval(inj, cval.clone(), Some(2));
     {
         let mut b = inj.borrow_mut();
         let n = b.path.len();
         b.path.truncate(n.saturating_sub(1));
-        b.key = b.path.last().cloned().unwrap_or_default();
     }
     let path_after = inj.borrow().path.clone();
     let tvals: Vec<Value> = slice(parent.clone(), Some(1), None, false)
@@ -2164,19 +2090,11 @@ fn validate_exact(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
                 pathify(&path_value(&path_after), Some(1), Some(1))
             ),
         );
-        return Value::Noval;
+        return Value::skip();
     }
-    let mut currentstr: Option<String> = None;
     for tval in &tvals {
-        let mut exactmatch = tval == &dparent;
-        if !exactmatch && is_node(tval) {
-            let cs = currentstr
-                .get_or_insert_with(|| stringify(&dparent, None, false))
-                .clone();
-            exactmatch = stringify(tval, None, false) == cs;
-        }
-        if exactmatch {
-            return Value::Noval;
+        if deepequal(tval, &cval) {
+            return Value::skip();
         }
     }
     let valdesc = tvals_desc(&tvals);
@@ -2188,9 +2106,134 @@ fn validate_exact(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
     );
     errs_push(
         inj,
-        invalid_type_msg(&path_after, &need, typify(&dparent), &dparent),
+        invalid_type_msg(&path_after, &need, typify(&cval), &cval),
     );
-    Value::Noval
+    Value::skip()
+}
+
+// Count the specs that admit the value: ['`$NOF`', count, spec, ...], where
+// count is an integer, or a map holding min, max or both.
+fn validate_nof(inj: &Inj, _v: &Value, _r: &str, store: &Value) -> Value {
+    validatecount(inj, store, "$NOF", true)
+}
+
+// Every spec admits the value: ['`$ALL`', spec, ...].
+fn validate_all(inj: &Inj, _v: &Value, _r: &str, store: &Value) -> Value {
+    validatecount(inj, store, "$ALL", false)
+}
+
+// The counting list directives. Without a count, every spec has to admit.
+fn validatecount(inj: &Inj, store: &Value, name: &str, counted: bool) -> Value {
+    let (mode, parent, key_i) = {
+        let b = inj.borrow();
+        (b.mode, b.parent.clone(), b.key_i)
+    };
+    if mode != M_VAL {
+        return Value::Noval;
+    }
+    if !is_list(&parent) || key_i != 0 {
+        let path = inj.borrow().path.clone();
+        errs_push(
+            inj,
+            format!(
+                "The {name} validator at field {} must be the first element of an array.",
+                pathify(&path_value(&path), Some(1), Some(1))
+            ),
+        );
+        return Value::Noval;
+    }
+
+    let cval = slotval(inj);
+
+    let keylen = inj.borrow().keys.borrow().len() as i64;
+    inj.borrow_mut().key_i = keylen;
+
+    // Replace the directive's list with the data value. Each return is SKIP, so
+    // that inject leaves the detached list alone and validates nothing in it.
+    Injection::setval(inj, cval.clone(), Some(2));
+
+    {
+        let mut b = inj.borrow_mut();
+        let n = b.path.len();
+        b.path.truncate(n.saturating_sub(1));
+    }
+    let path = inj.borrow().path.clone();
+
+    let count = if counted {
+        lookup(&parent, &Value::Num(1.0))
+    } else {
+        Value::Noval
+    };
+    let argsfrom = if counted { 2 } else { 1 };
+    let tvals: Vec<Value> = slice(parent.clone(), Some(argsfrom), None, false)
+        .as_list()
+        .map(|l| l.borrow().clone())
+        .unwrap_or_default();
+    let numtvals = tvals.len() as i64;
+    let field = format!(
+        "The {name} validator at field {}",
+        pathify(&path_value(&path), Some(1), None)
+    );
+
+    if 0 == numtvals {
+        errs_push(
+            inj,
+            format!(
+                "{field}{} at least one argument.",
+                if counted {
+                    " must have a count and"
+                } else {
+                    " must have"
+                }
+            ),
+        );
+        return Value::skip();
+    }
+
+    let (lo, hi, countdesc) = if counted {
+        nofcount(&count, numtvals)
+    } else {
+        (numtvals, numtvals, Some("all".to_string()))
+    };
+
+    let Some(countdesc) = countdesc else {
+        errs_push(
+            inj,
+            format!(
+                "{field} has an invalid count: {}.",
+                stringify(&count, None, false)
+            ),
+        );
+        return Value::skip();
+    };
+
+    let mut admitted: i64 = 0;
+    for (t_i, tval) in tvals.iter().enumerate() {
+        let left = numtvals - t_i as i64;
+
+        // Stop once the specs left cannot change the verdict.
+        if hi < admitted || admitted + left < lo || (lo <= admitted && admitted + left <= hi) {
+            break;
+        }
+
+        if admits(&cval, tval, inj, store) {
+            admitted += 1;
+        }
+    }
+
+    if admitted < lo || hi < admitted {
+        errs_push(
+            inj,
+            invalid_type_msg(
+                &path,
+                &format!("{countdesc} of {}", tvals_desc(&tvals)),
+                typify(&cval),
+                &cval,
+            ),
+        );
+    }
+
+    Value::skip()
 }
 
 /// `_validation` — the modify hook installed by `validate` (runs after the
@@ -2355,8 +2398,9 @@ pub fn validate(
     }
     vmap.insert("$ANY".to_string(), Value::func(validate_any));
     vmap.insert("$CHILD".to_string(), Value::func(validate_child));
-    vmap.insert("$ONE".to_string(), Value::func(validate_one));
     vmap.insert("$EXACT".to_string(), Value::func(validate_exact));
+    vmap.insert("$NOF".to_string(), Value::func(validate_nof));
+    vmap.insert("$ALL".to_string(), Value::func(validate_all));
 
     let extra_or_empty = match &extra {
         Some(e) => e.clone(),
@@ -2378,16 +2422,24 @@ pub fn validate(
     let exact_cur = get_prop(&meta, &Value::str(S_BEXACT), Value::Bool(false));
     set_prop(meta.clone(), &Value::str(S_BEXACT), exact_cur);
 
-    let td = InjectDef {
-        meta: Some(meta),
-        extra: Some(store),
-        modify: Some(Rc::new(validation_modify) as Modify),
-        handler: Some(Rc::new(validatehandler) as NativeFn),
-        errs: Some(errs.clone()),
-        ..Default::default()
-    };
+    // A spec that names an unknown checker validates nothing.
+    let errcount = |errs: &Value| errs.as_list().map(|l| l.borrow().len()).unwrap_or(0);
+    let numerrs = errcount(&errs);
+    checknames(spec, &store, &[], &errs);
 
-    let out = transform(data, spec, Some(&td)).unwrap_or(Value::Noval);
+    let out = if numerrs < errcount(&errs) {
+        clone(data)
+    } else {
+        let td = InjectDef {
+            meta: Some(meta),
+            extra: Some(store),
+            modify: Some(Rc::new(validation_modify) as Modify),
+            handler: Some(Rc::new(validatehandler) as NativeFn),
+            errs: Some(errs.clone()),
+            ..Default::default()
+        };
+        transform(data, spec, Some(&td)).unwrap_or(Value::Noval)
+    };
 
     let errlen = errs.as_list().map(|l| l.borrow().len()).unwrap_or(0);
     if errlen > 0 && !collect {
@@ -2401,6 +2453,195 @@ pub fn validate(
     }
 
     Ok(out)
+}
+
+// Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
+const VALIDATE_NAMES: [&str; 10] = [
+    "$TOP", "$SPEC", "$BT", "$DS", "$WHEN", "$ANNO", "$REF", "$FORMAT", "$APPLY", "$OPEN",
+];
+
+// Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
+fn checknames(spec: &Value, store: &Value, path: &[String], errs: &Value) {
+    if let Some(name) = refname(spec) {
+        if unknownname(&name, store) {
+            if let Value::List(l) = errs {
+                l.borrow_mut().push(Value::Str(format!(
+                    "Unknown validator {name} at field {}.",
+                    pathify(&path_value(path), None, None)
+                )));
+            }
+        }
+        return;
+    }
+
+    if is_list(spec) && Some("$EXACT") == refname(&lookup(spec, &Value::Num(0.0))).as_deref() {
+        return;
+    }
+
+    for key in keysof_vec(spec) {
+        if is_map(spec) {
+            checknames(&Value::str(key.clone()), store, path, errs);
+        }
+        let mut kpath = path.to_vec();
+        kpath.push(key.clone());
+        checknames(&lookup(spec, &Value::str(key)), store, &kpath, errs);
+    }
+}
+
+// The name a whole-string reference gives, when it is a checker name in any case.
+fn refname(val: &Value) -> Option<String> {
+    let Value::Str(s) = val else {
+        return None;
+    };
+    let caps = R_INJECTION_FULL.captures(s)?;
+    let name = caps[1].to_string();
+    R_CHECKER_NAME
+        .is_match(&name.to_uppercase())
+        .then_some(name)
+}
+
+// Unknown: undefined and upper case, or a defined name in another case. Null disables a name.
+fn unknownname(name: &str, store: &Value) -> bool {
+    let known =
+        |n: &str| VALIDATE_NAMES.contains(&n) || !lookup(store, &Value::str(n)).is_nullish();
+    let upper = name.to_uppercase();
+    !known(name) && (upper == name || known(&upper))
+}
+
+// The data value at a list directive's slot. The directive's own dparent was
+// read with get_prop, which reports a stored null as absent.
+fn slotval(inj: &Inj) -> Value {
+    let prior = inj.borrow().prior.clone();
+    match prior {
+        None => inj.borrow().dparent.clone(),
+        Some(p) => {
+            let b = p.borrow();
+            lookup(&b.dparent, &Value::str(b.key.clone()))
+        }
+    }
+}
+
+// JSON equality: numbers by value, lists in order, maps by key in any order.
+fn deepequal(a: &Value, b: &Value) -> bool {
+    let same = match (a, b) {
+        (Value::List(x), Value::List(y)) => Rc::ptr_eq(x, y),
+        (Value::Map(x), Value::Map(y)) => Rc::ptr_eq(x, y),
+        (Value::Func(x), Value::Func(y)) => Rc::ptr_eq(x, y),
+        _ => a == b,
+    };
+    if same {
+        return true;
+    }
+
+    let atype = typify(a);
+    if atype != typify(b) || 0 == ((T_LIST | T_MAP) as i64 & atype) {
+        return false;
+    }
+
+    let akeys = keysof_vec(a);
+    let bkeys = keysof_vec(b);
+    if akeys.len() != bkeys.len() {
+        return false;
+    }
+
+    akeys.iter().zip(bkeys.iter()).all(|(k, bk)| {
+        let kv = Value::str(k.clone());
+        k == bk && deepequal(&lookup(a, &kv), &lookup(b, &kv))
+    })
+}
+
+// Every member val has is in out, unchanged. A member only out has is a
+// default the spec supplied, and is ignored.
+fn keeps(val: &Value, out: &Value) -> bool {
+    if val.is_noval() {
+        return true;
+    }
+
+    if 0 == ((T_LIST | T_MAP) as i64 & typify(val)) || is_list(val) != is_list(out) || !is_node(out)
+    {
+        return deepequal(val, out);
+    }
+
+    keysof_vec(val).into_iter().all(|k| {
+        let kv = Value::str(k);
+        keeps(&lookup(val, &kv), &lookup(out, &kv))
+    })
+}
+
+// A spec admits a value when validating the value against it finds no error
+// and gives back the value as it is.
+fn admits(val: &Value, spec: &Value, inj: &Inj, store: &Value) -> bool {
+    let terrs = Value::empty_list();
+
+    let vstore = match merge(
+        &Value::list(vec![Value::empty_map(), store.clone()]),
+        Some(1),
+    ) {
+        v @ Value::Map(_) => v,
+        _ => Value::empty_map(),
+    };
+    set_prop(vstore.clone(), &Value::str(S_DTOP), val.clone());
+
+    let meta = inj.borrow().meta.clone();
+    let vd = InjectDef {
+        extra: Some(vstore),
+        errs: Some(terrs.clone()),
+        meta: Some(meta),
+        ..Default::default()
+    };
+    let out = validate(val, spec, Some(&vd)).unwrap_or(Value::Noval);
+
+    let terrlen = terrs.as_list().map(|l| l.borrow().len()).unwrap_or(0);
+    0 == terrlen && keeps(val, &out)
+}
+
+// The bounds of a $NOF count, and the words for it, which are absent when
+// the count is invalid. Without a max, the bound is the number of specs.
+fn nofcount(count: &Value, numtvals: i64) -> (i64, i64, Option<String>) {
+    let isnat =
+        |n: &Value| 0 != (T_INTEGER as i64 & typify(n)) && n.as_num().is_some_and(|x| 0.0 <= x);
+    let nat = |n: &Value| n.as_num().unwrap_or(0.0) as i64;
+
+    if isnat(count) {
+        let n = nat(count);
+        let desc = if 0 == n {
+            "none".to_string()
+        } else {
+            format!("exactly {n}")
+        };
+        return (n, n, Some(desc));
+    }
+
+    let min = lookup(count, &Value::str("min"));
+    let max = lookup(count, &Value::str("max"));
+
+    let valid = is_map(count)
+        && 0 < size(count)
+        && size(count) == i64::from(!min.is_noval()) + i64::from(!max.is_noval())
+        && (min.is_noval() || isnat(&min))
+        && (max.is_noval() || isnat(&max))
+        && (min.is_noval() || max.is_noval() || nat(&min) <= nat(&max));
+
+    if !valid {
+        return (0, 0, None);
+    }
+
+    let lo = if min.is_noval() { 0 } else { nat(&min) };
+    let hi = if max.is_noval() { numtvals } else { nat(&max) };
+
+    let desc = if max.is_noval() {
+        format!("at least {lo}")
+    } else if 0 == hi {
+        "none".to_string()
+    } else if min.is_noval() {
+        format!("at most {hi}")
+    } else if lo == hi {
+        format!("exactly {lo}")
+    } else {
+        format!("{lo} to {hi}")
+    };
+
+    (lo, hi, Some(desc))
 }
 
 // ---- select ----------------------------------------------------------
@@ -2702,6 +2943,434 @@ pub fn select(children: &Value, query: &Value) -> Value {
         }
     }
     Value::list(results)
+}
+
+// ---------------------------------------------------------------------
+// condense
+// ---------------------------------------------------------------------
+
+const CONDENSE_MAP: f64 = 0.0;
+const CONDENSE_LIST: f64 = 1.0;
+const CONDENSE_STR: f64 = 2.0;
+const CONDENSE_NUM: f64 = 3.0;
+const CONDENSE_TRUE: f64 = 4.0;
+const CONDENSE_FALSE: f64 = 5.0;
+const CONDENSE_NULL: f64 = 6.0;
+
+/// `condense(val)` — any JSON-shaped node as a sorted symbol table and a table
+/// of shared nodes. Pure: the same input always produces a byte-identical
+/// result, on every port.
+pub fn condense(val: &Value) -> Value {
+    // Pass one: every distinct map key and string value, once, sorted. Byte
+    // order is code-point order in UTF-8.
+    fn collect(n: &Value, symset: &mut BTreeSet<String>) {
+        match n {
+            Value::Map(m) => {
+                for (k, v) in m.borrow().iter() {
+                    symset.insert(k.clone());
+                    collect(v, symset);
+                }
+            }
+            Value::List(l) => {
+                for v in l.borrow().iter() {
+                    collect(v, symset);
+                }
+            }
+            Value::Str(s) => {
+                symset.insert(s.clone());
+            }
+            _ => {}
+        }
+    }
+
+    // Pass two: build post-order, interning on the encoding. Children are built
+    // first, so identical subtrees are one node by the time a parent refers to
+    // them.
+    fn build(
+        n: &Value,
+        symid: &HashMap<&str, f64>,
+        node: &mut Vec<Value>,
+        seen: &mut HashMap<String, usize>,
+    ) -> usize {
+        let enc: Vec<f64> = match n {
+            Value::Map(m) => {
+                let m = m.borrow();
+                let mut enc = vec![CONDENSE_MAP];
+                // keysof sorts by byte, which is code-point order in UTF-8, so
+                // the key ids ascend and lookup can bisect.
+                for k in keysof_vec(n) {
+                    enc.push(symid[k.as_str()]);
+                    enc.push(build(&m[k.as_str()], symid, node, seen) as f64);
+                }
+                enc
+            }
+            Value::List(l) => {
+                let mut enc = vec![CONDENSE_LIST];
+                for v in l.borrow().iter() {
+                    enc.push(build(v, symid, node, seen) as f64);
+                }
+                enc
+            }
+            Value::Str(s) => vec![CONDENSE_STR, symid[s.as_str()]],
+            Value::Num(x) => vec![CONDENSE_NUM, *x],
+            Value::Bool(true) => vec![CONDENSE_TRUE],
+            Value::Bool(false) => vec![CONDENSE_FALSE],
+            _ => vec![CONDENSE_NULL],
+        };
+
+        // The kind leads every encoding, so a string node and a number node
+        // never share a key.
+        let enckey = enc
+            .iter()
+            .map(|x| num_to_string(*x))
+            .collect::<Vec<_>>()
+            .join(",");
+        if let Some(&hit) = seen.get(&enckey) {
+            return hit;
+        }
+        let idx = node.len();
+        node.push(Value::list(enc.into_iter().map(Value::Num).collect()));
+        seen.insert(enckey, idx);
+        idx
+    }
+
+    let mut symset = BTreeSet::new();
+    collect(val, &mut symset);
+    let sym: Vec<String> = symset.into_iter().collect();
+    let symid: HashMap<&str, f64> = sym
+        .iter()
+        .enumerate()
+        .map(|(i, s)| (s.as_str(), i as f64))
+        .collect();
+
+    let mut node: Vec<Value> = Vec::new();
+    let mut seen: HashMap<String, usize> = HashMap::new();
+    let root = build(val, &symid, &mut node, &mut seen);
+
+    let mut out = OrderedMap::new();
+    out.insert(S_condense.to_string(), Value::Num(CONDENSE_VERSION));
+    out.insert(
+        S_condsym.to_string(),
+        Value::list(sym.iter().cloned().map(Value::Str).collect()),
+    );
+    out.insert(S_condnode.to_string(), Value::list(node));
+    out.insert(S_condroot.to_string(), Value::Num(root as f64));
+    Value::map(out)
+}
+
+/// A kind, symbol id or node index read from an encoding, or -1 for anything
+/// but a non-negative integer.
+fn condense_index(v: &Value) -> i64 {
+    match v {
+        Value::Num(n) if is_integer_f64(*n) && 0.0 <= *n => *n as i64,
+        _ => -1,
+    }
+}
+
+/// Element `i` of a list, or `Noval`. Unlike `lookup`, a negative index
+/// counts from nowhere.
+fn condense_at(list: &Value, i: i64) -> Value {
+    let found = match list {
+        Value::List(l) if 0 <= i => l.borrow().get(i as usize).cloned(),
+        _ => None,
+    };
+    found.unwrap_or(Value::Noval)
+}
+
+fn condense_root(cond: &Value) -> i64 {
+    condense_index(&lookup(cond, &Value::str(S_condroot)))
+}
+
+/// The encoding of node `idx`, or `Noval` when there is no such node.
+fn condense_enc(cond: &Value, idx: i64) -> Value {
+    condense_at(&lookup(cond, &Value::str(S_condnode)), idx)
+}
+
+/// Resolve a symbol to its id by bisecting the sorted symbol table. -1 when
+/// the string occurs nowhere in the structure, which is itself a fast negative
+/// answer for a key lookup.
+fn condense_sym_id(cond: &Value, key: &str) -> i64 {
+    let sym = lookup(cond, &Value::str(S_condsym));
+    let Value::List(sym) = &sym else {
+        return -1;
+    };
+    let sym = sym.borrow();
+    let mut lo: i64 = 0;
+    let mut hi: i64 = sym.len() as i64 - 1;
+    while lo <= hi {
+        let mid = (lo + hi) >> 1;
+        match sym[mid as usize].as_str() {
+            Some(s) if s == key => return mid,
+            Some(s) if s < key => lo = mid + 1,
+            _ => hi = mid - 1,
+        }
+    }
+    -1
+}
+
+/// The node index of `key` inside node `idx`, or -1. Touches only this node.
+fn condense_child(cond: &Value, idx: i64, key: &Value) -> i64 {
+    let enc = condense_enc(cond, idx);
+    let Value::List(enc) = &enc else {
+        return -1;
+    };
+    if !matches!(key, Value::Str(_) | Value::Num(_)) {
+        return -1;
+    }
+    let enc = enc.borrow();
+    let kind = enc.first().and_then(Value::as_num);
+
+    if Some(CONDENSE_MAP) == kind {
+        let symid = condense_sym_id(cond, &js_string(key));
+        if 0 > symid {
+            return -1;
+        }
+        // Pairs live at [1,2], [3,4], ... with keys ascending: bisect the pairs.
+        let mut lo: i64 = 0;
+        let mut hi: i64 = (enc.len() as i64 - 1) / 2 - 1;
+        while lo <= hi {
+            let mid = (lo + hi) >> 1;
+            let k = condense_index(&enc[(1 + mid * 2) as usize]);
+            if k == symid {
+                return condense_index(&enc[(2 + mid * 2) as usize]);
+            }
+            if k < symid {
+                lo = mid + 1;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        return -1;
+    }
+
+    if Some(CONDENSE_LIST) == kind {
+        return match list_key(key).and_then(|i| usize::try_from(i).ok()) {
+            Some(i) if i < enc.len() - 1 => condense_index(&enc[1 + i]),
+            _ => -1,
+        };
+    }
+
+    -1
+}
+
+/// Walk a path from a starting node, returning the node index or -1.
+fn condense_resolve(cond: &Value, idx: i64, path: &Value) -> i64 {
+    let parts: Vec<Value> = match path {
+        Value::List(l) => l.borrow().clone(),
+        Value::Str(s) if s.is_empty() => Vec::new(),
+        Value::Str(s) => s.split('.').map(Value::str).collect(),
+        Value::Noval | Value::Null => Vec::new(),
+        other => vec![Value::str(js_string(other))],
+    };
+
+    let mut at = idx;
+    for part in &parts {
+        if 0 > at {
+            return -1;
+        }
+        if matches!(part, Value::Str(s) if s.is_empty()) {
+            continue;
+        }
+        at = condense_child(cond, at, part);
+    }
+    at
+}
+
+/// Node `idx` as a fresh tree, `Noval` when there is no such node. Every
+/// materialisation is independent, even where the condensed form shares a node.
+fn condense_materialise(cond: &Value, idx: i64) -> Value {
+    fn rebuild(sym: &Value, node: &Value, i: i64) -> Value {
+        let enc = condense_at(node, i);
+        let Value::List(enc) = &enc else {
+            return if enc.is_nullish() {
+                Value::Noval
+            } else {
+                Value::Null
+            };
+        };
+        let enc = enc.borrow();
+        let kind = enc.first().and_then(Value::as_num);
+        let arg = |j: usize| enc.get(j).cloned().unwrap_or(Value::Noval);
+
+        if Some(CONDENSE_MAP) == kind {
+            let mut out = OrderedMap::new();
+            for j in (1..enc.len()).step_by(2) {
+                out.insert(
+                    js_string(&condense_at(sym, condense_index(&enc[j]))),
+                    rebuild(sym, node, condense_index(&arg(j + 1))),
+                );
+            }
+            return Value::map(out);
+        }
+        if Some(CONDENSE_LIST) == kind {
+            return Value::list(
+                enc.iter()
+                    .skip(1)
+                    .map(|e| rebuild(sym, node, condense_index(e)))
+                    .collect(),
+            );
+        }
+        if Some(CONDENSE_STR) == kind {
+            return condense_at(sym, condense_index(&arg(1)));
+        }
+        if Some(CONDENSE_NUM) == kind {
+            return arg(1);
+        }
+        if Some(CONDENSE_TRUE) == kind {
+            return Value::Bool(true);
+        }
+        if Some(CONDENSE_FALSE) == kind {
+            return Value::Bool(false);
+        }
+        Value::Null
+    }
+
+    let sym = lookup(cond, &Value::str(S_condsym));
+    let node = lookup(cond, &Value::str(S_condnode));
+    if 0 > idx {
+        Value::Noval
+    } else {
+        rebuild(&sym, &node, idx)
+    }
+}
+
+/// `expand(cond)` — the value a condensed structure stands for. Any other
+/// value comes back unchanged, so a caller holding either shape can call it.
+pub fn expand(cond: &Value) -> Value {
+    if !is_condensed(cond) {
+        return cond.clone();
+    }
+    condense_materialise(cond, condense_root(cond))
+}
+
+/// The keys of node `idx`, without materialising any of its values.
+fn condense_keys(cond: &Value, idx: i64) -> Value {
+    let enc = condense_enc(cond, idx);
+    let Value::List(enc) = &enc else {
+        return Value::empty_list();
+    };
+    let enc = enc.borrow();
+    let kind = enc.first().and_then(Value::as_num);
+
+    if Some(CONDENSE_MAP) == kind {
+        let sym = lookup(cond, &Value::str(S_condsym));
+        return Value::list(
+            enc.iter()
+                .skip(1)
+                .step_by(2)
+                .map(|k| condense_at(&sym, condense_index(k)))
+                .collect(),
+        );
+    }
+    if Some(CONDENSE_LIST) == kind {
+        return Value::list(
+            (1..enc.len())
+                .map(|j| Value::str((j - 1).to_string()))
+                .collect(),
+        );
+    }
+    Value::empty_list()
+}
+
+/// A cursor into a condensed structure. Reads resolve by integer index and
+/// touch only the nodes on the path, so the cost of a lookup follows path depth
+/// and result size, never total structure size.
+#[derive(Clone)]
+pub struct CondenseView {
+    cond: Value,
+    start: i64,
+    refmemo: Value,
+}
+
+/// `condenseview(cond, idx?, memo?)` — a cursor at node `idx`, else at the
+/// root of `cond`.
+pub fn condense_view(cond: &Value, idx: Option<i64>, memo: Option<&Value>) -> CondenseView {
+    let start = match idx {
+        Some(i) => i,
+        None if is_condensed(cond) => condense_root(cond),
+        None => -1,
+    };
+
+    // Shared materialisations, handed out only by `ref`. Threaded through `at`,
+    // so every cursor into one structure shares one memo.
+    let refmemo = match memo {
+        Some(m) if !m.is_nullish() => m.clone(),
+        _ => Value::empty_map(),
+    };
+
+    CondenseView {
+        cond: cond.clone(),
+        start,
+        refmemo,
+    }
+}
+
+impl CondenseView {
+    /// The value at `path`, materialised: a container comes back as an
+    /// independent copy.
+    pub fn get(&self, path: &Value) -> Value {
+        condense_materialise(&self.cond, condense_resolve(&self.cond, self.start, path))
+    }
+
+    /// The key names at `path`, with no value decoded.
+    pub fn keys(&self, path: &Value) -> Value {
+        let at = condense_resolve(&self.cond, self.start, path);
+        if 0 > at {
+            Value::empty_list()
+        } else {
+            condense_keys(&self.cond, at)
+        }
+    }
+
+    pub fn has(&self, path: &Value) -> bool {
+        0 <= condense_resolve(&self.cond, self.start, path)
+    }
+
+    /// A cursor at `path`, sharing this view's memo. Nothing is decoded.
+    pub fn at(&self, path: &Value) -> CondenseView {
+        let idx = condense_resolve(&self.cond, self.start, path);
+        condense_view(&self.cond, Some(idx), Some(&self.refmemo))
+    }
+
+    pub fn value(&self) -> Value {
+        condense_materialise(&self.cond, self.start)
+    }
+
+    pub fn size(&self) -> i64 {
+        let enc = condense_enc(&self.cond, self.start);
+        let Value::List(enc) = &enc else {
+            return 0;
+        };
+        let enc = enc.borrow();
+        let len = enc.len() as i64;
+        let kind = enc.first().and_then(Value::as_num);
+        if Some(CONDENSE_MAP) == kind {
+            (len - 1) / 2
+        } else if Some(CONDENSE_LIST) == kind {
+            len - 1
+        } else {
+            0
+        }
+    }
+
+    pub fn exists(&self) -> bool {
+        0 <= self.start
+    }
+
+    /// Unlike `value` and `get`, a SHARED materialisation: the same node every
+    /// time for the same index, across views sharing the memo. Mutating it
+    /// changes what every other such reader sees.
+    pub fn r#ref(&self) -> Value {
+        let k = Value::str(self.start.to_string());
+        if lookup(&self.refmemo, &k).is_noval() {
+            set_prop(
+                self.refmemo.clone(),
+                &k,
+                condense_materialise(&self.cond, self.start),
+            );
+        }
+        lookup(&self.refmemo, &k)
+    }
 }
 
 // keep `Injection::has_handler` referenced (used once staging is complete)

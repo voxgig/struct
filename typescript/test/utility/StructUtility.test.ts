@@ -214,6 +214,49 @@ describe('StructUtility', async () => {
     )
   })
 
+  test('proto-keys-stay-own-properties', () => {
+    const s = struct
+    // JSON.parse keeps __proto__ as an own key; the corpus compiler cannot.
+    const evil = JSON.parse('{"__proto__":{"polluted":"yes"}}')
+    const out = s.merge([{}, evil])
+    equal(undefined, ({} as any).polluted)
+    deepEqual(Object.keys(out), ['__proto__'])
+    deepEqual(out.__proto__, { polluted: 'yes' })
+    s.merge([{ a: {} }, JSON.parse('{"a":{"__proto__":{"deep":1}}}')])
+    equal(undefined, ({} as any).deep)
+    s.setprop({}, '__proto__', { viaset: 1 })
+    equal(undefined, ({} as any).viaset)
+    deepEqual(Object.keys(s.jm('__proto__', 1)), ['__proto__'])
+    equal(1, s.getprop(JSON.parse('{"__proto__":1}'), '__proto__'))
+    equal(undefined, s.getprop({}, '__proto__'))
+    // A class instance still reads inherited members.
+    class A {
+      get g() {
+        return 7
+      }
+    }
+    equal(7, s.getprop(new A(), 'g'))
+  })
+
+  test('validate-child-one-error-per-failure', () => {
+    const s = struct
+    for (const spec of [{ x: { '`$CHILD`': '`$NUMBER`' } }, { x: ['`$CHILD`', '`$NUMBER`'] }]) {
+      const errs: any[] = []
+      s.validate({ x: 1 }, spec, { errs })
+      equal(errs.length, 1, JSON.stringify(errs))
+    }
+  })
+
+  test('condense-astral-keys-resolve', () => {
+    const s = struct
+    // Code-unit order puts the astral key first; the stored pairs must not.
+    const src = { Ａ: 1, '\u{1F600}': 2 }
+    const c = s.condense(src)
+    equal(s.getpath(c, ['\u{1F600}']), 2)
+    equal(s.getpath(c, ['Ａ']), 1)
+    equal(s.condenseview(c).get('\u{1F600}'), 2)
+  })
+
   test('condense-invalid-key-mutations-stay-no-ops', () => {
     // Both helpers define an invalid key as ignored, so a call that cannot
     // write must not start throwing just because the store is condensed.
@@ -848,10 +891,6 @@ describe('StructUtility', async () => {
     await runset(spec.validate.child, (vin: any) => struct.validate(vin.data, vin.spec))
   })
 
-  test('validate-one', async () => {
-    await runset(spec.validate.one, (vin: any) => struct.validate(vin.data, vin.spec))
-  })
-
   test('validate-exact', async () => {
     await runset(spec.validate.exact, (vin: any) => struct.validate(vin.data, vin.spec))
   })
@@ -864,6 +903,60 @@ describe('StructUtility', async () => {
 
   test('validate-special', async () => {
     await runset(spec.validate.special, (vin: any) => struct.validate(vin.data, vin.spec, vin.inj))
+  })
+
+  test('validate-directive', async () => {
+    await runsetflags(spec.validate.directive, { null: false }, (vin: any) =>
+      struct.validate(vin.data, vin.spec),
+    )
+  })
+
+  test('validate-nof', async () => {
+    await runsetflags(spec.validate.nof, { null: false }, (vin: any) =>
+      struct.validate(vin.data, vin.spec),
+    )
+  })
+
+  test('validate-all', async () => {
+    await runsetflags(spec.validate.all, { null: false }, (vin: any) =>
+      struct.validate(vin.data, vin.spec),
+    )
+  })
+
+  test('validate-unknown', async () => {
+    await runsetflags(spec.validate.unknown, { null: false }, (vin: any) =>
+      struct.validate(vin.data, vin.spec),
+    )
+  })
+
+  test('validate-unknown-edge', async () => {
+    const { validate, getprop } = struct
+
+    // Only the unknown name is reported, and the data comes back as it is.
+    let errs: any[] = []
+    const data = { a: 'x' }
+    const out = validate(data, { a: ['`$ONE`', '`$STRING`', '`$NIL`'] }, { errs })
+    deepEqual(errs, ['Unknown validator $ONE at field a.0.'])
+    deepEqual(out, data)
+
+    // A checker supplied in extra is defined, in any case.
+    const even = (inj: any) => {
+      const n = getprop(inj.dparent, inj.key)
+      if (0 !== n % 2) {
+        inj.errs.push('Odd at ' + inj.path.slice(1).join('.') + ': ' + n)
+      }
+      return n
+    }
+
+    errs = []
+    deepEqual(validate({ n: 2 }, { n: '`$EVEN`' }, { extra: { $EVEN: even }, errs }), { n: 2 })
+    deepEqual(validate({ n: 3 }, { n: '`$even`' }, { extra: { $even: even }, errs }), { n: 3 })
+    deepEqual(errs, ['Odd at n: 3'])
+
+    // A null in extra takes a checker away.
+    errs = []
+    validate('x', '`$STRING`', { extra: { $STRING: null }, errs })
+    deepEqual(errs, ['Unknown validator $STRING at field <root>.'])
   })
 
   test('validate-edge', async () => {

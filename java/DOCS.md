@@ -20,7 +20,7 @@ Then: [Build, test, extend](#build-test-and-extend).
 
 > **Status nuance.** The top-level [`README.md`](../README.md) lists Java
 > under *Partial*, but the port now defines the **full canonical API** (all
-> 48 functions, the `Injection` state machine, `SKIP`/`DELETE`, the mode
+> 52 functions, the `Injection` state machine, `SKIP`/`DELETE`, the mode
 > constants, all 11 transform commands, the validate checkers and select
 > operators) and `python3 ../tools/check_parity.py` reports it `ok`. Treat
 > "Partial" as a stale label; the parity tool and the source are ground
@@ -177,8 +177,8 @@ Struct.jsonify(Struct.jm("a", 1, "b", Struct.jt(2, 3)));
 ```
 <!-- => "{\n  \"a\": 1,\n  \"b\": [\n    2,\n    3\n  ]\n}" -->
 
-For more task recipes (rename fields, `$EACH`, `$MERGE`, `$FORMAT`, `$ONE`,
-`$EXACT`, …) see the language-neutral
+For more task recipes (rename fields, `$EACH`, `$MERGE`, `$FORMAT`, `$NOF`,
+`$ALL`, `$EXACT`, …) see the language-neutral
 [How-to guides](../DOCS.md#2-how-to-guides) — the spec syntax is identical;
 only the host literals differ.
 
@@ -188,7 +188,7 @@ only the host literals differ.
 
 The Java signatures, with examples, are in
 [`README.md` → Function reference](./README.md#function-reference); the
-canonical public surface (48 names) is the `export { … }` block in
+canonical public surface (52 names) is the `export { … }` block in
 [`../typescript/src/StructUtility.ts`](../typescript/src/StructUtility.ts),
 which `../tools/check_parity.py` checks this port against.
 

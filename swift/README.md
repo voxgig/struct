@@ -3,7 +3,7 @@
 > Swift port of the canonical TypeScript implementation.
 > Status: **complete** — the full shared corpus passes (`make test`) on
 > [voxgig/omni](https://github.com/voxgig/omni), the shared test runner:
-> 1358 entries in 72 groups, plus the two `check` entries and three single
+> 1602 entries in 78 groups, plus the two `check` entries and three single
 > entries that are not part of any set. That covers all 29 minor utilities,
 > `walk`, `merge`, `setpath`, `getpath`, `inject`, `transform` (all 11
 > commands), `validate` (all 15 checkers), `select` (all 5 groups), and the
@@ -49,7 +49,8 @@ let out  = inject(spec, store)
 Source: [`Sources/VoxgigStruct/`](./Sources/VoxgigStruct/), split per
 subsystem (`Value.swift`, `Constants.swift`, `JSON.swift`, `Minor.swift`,
 `Walk.swift`, `Merge.swift`, `Path.swift`, `Inject.swift`,
-`Transform.swift`, `Validate.swift`, `Select.swift`, `Injection.swift`).
+`Transform.swift`, `Validate.swift`, `Select.swift`, `Injection.swift`,
+`Condense.swift`).
 
 Functions live as top-level `public func`s in module `VoxgigStruct`. The
 port keeps the canonical TS names (`isnode`, `getpath`, `keysof`, …)
@@ -102,6 +103,8 @@ order. `JSON.stringify(value, indent: 2)` serialises back.
   `filter`, `escre`, `escurl`, `join`, `jsonify`, `stringify`,
   `pathify`, `clone`, `delprop`, `setprop`, `typename`, `getdef`.
 - Major utilities: `walk`, `merge`, `setpath`, `getpath`.
+- Condensed structures: `condense`, `condenseview`, `expand`,
+  `iscondensed`.
 - `inject` (three-phase key processing) with `_injectstr` (full and
   partial backtick refs) and `_injecthandler` (default command
   dispatcher).
@@ -110,10 +113,12 @@ order. `JSON.stringify(value, indent: 2)` serialises back.
   `$FORMAT`, `$APPLY` (plus the `FORMATTER` table for `$FORMAT`:
   `identity`, `upper`, `lower`, `string`, `number`, `integer`,
   `concat`).
-- `validate` and the 15 validate checkers: `$STRING`, `$NUMBER`,
+- `validate` and the 16 validate checkers: `$STRING`, `$NUMBER`,
   `$INTEGER`, `$DECIMAL`, `$BOOLEAN`, `$NULL`, `$NIL`, `$MAP`,
-  `$LIST`, `$FUNCTION`, `$INSTANCE`, `$ANY`, `$CHILD`, `$ONE`,
-  `$EXACT`.
+  `$LIST`, `$FUNCTION`, `$INSTANCE`, `$ANY`, `$CHILD`, `$EXACT`,
+  `$NOF`, `$ALL`. There is no `$ONE`: write ``["`$ONE`", a, b]`` as
+  ``["`$NOF`", {"min": 1}, a, b]``. A spec that names a checker
+  `validate` does not define is rejected before any data is read.
 - `select` and the 4 select operators: `$AND`, `$OR`, `$NOT`,
   `$CMP` (with `$GT`, `$LT`, `$GTE`, `$LTE`, `$LIKE`).
 - Type constants (`T_any`, `T_noval`, …, `T_node`), mode constants
@@ -195,14 +200,14 @@ getelem(.list([.int(10), .int(20), .int(30)]), .int(-1))   // .int(30)
 
 <!-- example: minor/setprop#set -->
 ```swift
-setprop(.map([("a", .int(1))]), .string("b"), .int(2))   // { a: 1, b: 2 }
+try setprop(.map([("a", .int(1))]), .string("b"), .int(2))   // { a: 1, b: 2 }
 ```
 
 <!-- => {"a": 1, "b": 2} -->
 
 <!-- example: minor/delprop#del -->
 ```swift
-delprop(.map([("a", .int(1)), ("b", .int(2))]), .string("a"))   // { b: 2 }
+try delprop(.map([("a", .int(1)), ("b", .int(2))]), .string("a"))   // { b: 2 }
 ```
 
 <!-- => {"b": 2} -->
@@ -232,7 +237,7 @@ strkey(.double(2.2))   // "2"
 
 <!-- example: minor/setpath#nested -->
 ```swift
-setpath(.map([("a", .int(1)), ("b", .int(2))]), .string("b"), .int(22))   // { a: 1, b: 22 }
+try setpath(.map([("a", .int(1)), ("b", .int(2))]), .string("b"), .int(22))   // { a: 1, b: 22 }
 ```
 
 <!-- => {"a": 1, "b": 22} -->
@@ -403,7 +408,7 @@ make test
 Runs `../build/test/test.json` (the cross-port corpus) through
 [voxgig/omni](https://github.com/voxgig/omni), the shared test runner — so
 the entry loop, the comparison and the `err` and `match` handling are
-literally the same code every other port runs. **1360** entries over 77
+literally the same code every other port runs. **1602** entries over 78
 groups, plus the smoke tests.
 
 `make test` needs an omni checkout, found via `$OMNI_HOME` or beside this

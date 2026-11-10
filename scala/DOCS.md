@@ -64,6 +64,7 @@ Names are the canonical names, lower-smushed or camelCased:
   `isempty`, `typify`, `typename`.
 - **Values:** `clone`, `merge`, `walk`, `size`, `slice`, `pad`, `flatten`,
   `filter`, `getdef`, `strkey`.
+- **Condensed form:** `condense`, `expand`, `iscondensed`, `condenseview`.
 - **Strings / formatting:** `stringify`, `jsonify`, `pathify`, `join`,
   `escre`, `escurl`.
 - **Regex (RE2-subset uniform API):** `re_compile`, `re_find`, `re_find_all`,
@@ -112,11 +113,11 @@ omni's immutable `Json` into this port's mutable `ArrayBuffer` /
 node, and the arguments go back to omni after the call, which is what
 `match.args` asserts on in `minor/setpath` and `merge/integrity`.
 
-Every group the corpus defines runs except the three `condense` ones, which no
-port implements yet — 1358 entries in 72 groups — plus the two `check` entries
-(`DEF.client`, client-scoped options, `contextify`) and three single entries
-that are not part of any set. Keep it green, keep
-`python3 ../tools/check_parity.py` green, and add no runtime dependencies.
+Every group the corpus defines runs — 1602 entries in 78 groups —
+plus the two `check` entries (`DEF.client`, client-scoped options,
+`contextify`) and three single entries that are not part of any set. Keep it
+green, keep `python3 ../tools/check_parity.py` green, and add no runtime
+dependencies.
 
 ## Implementation notes
 

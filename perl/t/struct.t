@@ -511,7 +511,7 @@ my $validate = $spec->{validate};
 runsetflags( 'validate-basic', $validate->{basic}, { null => 0 },
     sub { Voxgig::Struct::validate( $_[0]{data}, $_[0]{spec} ) } );
 
-for my $section (qw(child one exact)) {
+for my $section (qw(child exact)) {
     runset( "validate-$section", $validate->{$section},
         sub { Voxgig::Struct::validate( $_[0]{data}, $_[0]{spec} ) } );
 }
@@ -521,6 +521,39 @@ runsetflags( 'validate-invalid', $validate->{invalid}, { null => 0 },
 
 runset( 'validate-special', $validate->{special},
     sub { Voxgig::Struct::validate( $_[0]{data}, $_[0]{spec}, $_[0]{inj} ) } );
+
+for my $section (qw(directive nof all unknown)) {
+    runsetflags( "validate-$section", $validate->{$section}, { null => 0 },
+        sub { Voxgig::Struct::validate( $_[0]{data}, $_[0]{spec} ) } );
+}
+
+{
+    my $pj = \&Voxgig::Struct::parse_json;
+    for my $case (
+        [ '{"x":1}', '{"x":{"`$CHILD`":"`$NUMBER`"}}' ],
+        [ '{"x":1}', '{"x":["`$CHILD`","`$NUMBER`"]}' ],
+        [ '1',       '{"`$CHILD`":"`$NUMBER`"}' ],
+        [ '1',       '["`$CHILD`","`$NUMBER`"]' ],
+      )
+    {
+        my $errs = [];
+        Voxgig::Struct::validate( $pj->( $case->[0] ), $pj->( $case->[1] ), { errs => $errs } );
+        is( scalar @$errs, 1, "validate-child-one-error-per-failure: $case->[1]" );
+    }
+
+    # A Perl 2.0 is a float; as the JavaScript number 2 it is a valid count.
+    my $jt    = \&Voxgig::Struct::jt;
+    my @specs = ( '`$NUMBER`', '`$INTEGER`', '`$STRING`' );
+    is( Voxgig::Struct::validate( 3, $jt->( '`$NOF`', 2.0, @specs ) ), 3,
+        'validate-nof-integral-decimal-count' );
+    my $minmax = Voxgig::Struct::jm( min => 1.0, max => 2.0 );
+    is( Voxgig::Struct::validate( 3, $jt->( '`$NOF`', $minmax, @specs ) ), 3,
+        'validate-nof-integral-decimal-count: min and max' );
+    my $errs = [];
+    Voxgig::Struct::validate( 'x', $jt->( '`$NOF`', 2.0, @specs ), { errs => $errs } );
+    is_deeply( $errs, ['Expected exactly 2 of number, integer, string, but found string: x.'],
+        'validate-nof-integral-decimal-count: message' );
+}
 
 # ===========================================================================
 # select
@@ -586,14 +619,127 @@ runsetflags( 'sentinels-stringify_null', $sentinels->{stringify_null}, { null =>
 # ===========================================================================
 # condense
 # ===========================================================================
-#
-# `condense`, `expand` and `iscondensed` exist only in canonical TypeScript so
-# far - no other port implements them, and this one does not either. The three
-# groups (37 entries) are named here rather than left silent so the gap is a
-# visible TODO instead of a group nobody notices is missing.
+
+my $condense = $spec->{condense};
+
+runsetflags( 'condense-condense', $condense->{condense}, { null => 0 },
+    sub { Voxgig::Struct::condense( $_[0] ) } );
+
+runsetflags( 'condense-expand', $condense->{expand}, { null => 0 },
+    sub { Voxgig::Struct::expand( $_[0] ) } );
+
+runsetflags( 'condense-iscondensed', $condense->{iscondensed}, { null => 0 },
+    sub { $jbool->( Voxgig::Struct::iscondensed( $_[0] ) ) } );
+
+# What the corpus shape cannot express: identity, sharing, laziness and the
+# immutability contract.
 {
-    my @missing = grep { !Voxgig::Struct->can($_) } qw(condense expand iscondensed);
-    diag( 'condense not ported: skipping ' . scalar(@missing) . ' group(s)' ) if @missing;
+    my $pj       = \&Voxgig::Struct::parse_json;
+    my $flat     = sub { Voxgig::Struct::jsonify( $_[0], { indent => 0 } ) };
+    my $condense = \&Voxgig::Struct::condense;
+    my $expand   = \&Voxgig::Struct::expand;
+    my $getpath  = \&Voxgig::Struct::getpath;
+    my $none     = \&Voxgig::Struct::is_none;
+
+    my $src = $pj->('{"b":{"m":"GET"},"a":{"m":"GET"},"l":[1,"x",true]}');
+    is( $flat->( $condense->($src) ), $flat->( $condense->($src) ), 'condense-deterministic' );
+    my $reordered = $pj->('{"l":[1,"x",true],"a":{"m":"GET"},"b":{"m":"GET"}}');
+    is( $flat->( $condense->($src) ), $flat->( $condense->($reordered) ),
+        'condense-deterministic: insertion order' );
+
+    my $one   = $condense->( $pj->('{"x":{"m":"GET","p":"/1"}}') );
+    my $two   = $condense->( $pj->('{"x":{"m":"GET","p":"/1"},"y":{"m":"GET","p":"/1"}}') );
+    my $three = $condense->( $pj->('{"x":{"m":"GET"},"y":{"m":"PUT"},"z":{"m":"POST"}}') );
+    is( scalar @{ $two->{node} }, scalar @{ $one->{node} }, 'condense-shares-identical-subtrees' );
+    ok( @{ $three->{node} } > @{ $two->{node} }, 'condense-shares-identical-subtrees: distinct grow' );
+
+    my $json = '{"a":{"b":[1,"x",true,null,{}]},"c":"z"}';
+    is( $flat->( $expand->( $condense->( $pj->($json) ) ) ), $json, 'condense-round-trips-by-value' );
+
+    my $deep = $pj->('{"entity":{"p":{"op":{"list":{"method":"GET"}}}}}');
+    my $dc   = $condense->($deep);
+    is( $flat->( $getpath->( $dc, [qw(entity p op list)] ) ),
+        $flat->( $getpath->( $deep, [qw(entity p op list)] ) ),
+        'condense-getpath-is-transparent' );
+    is( $getpath->( $dc, [qw(entity p op list method)] ), 'GET', 'condense-getpath-is-transparent: leaf' );
+    ok( $none->( $getpath->( $dc, [qw(entity nope)] ) ), 'condense-getpath-is-transparent: miss' );
+
+    my $v = Voxgig::Struct::condenseview(
+        $condense->( $pj->('{"entity":{"a":{"v":1},"b":{"v":2}},"other":9}') ) );
+    is_deeply( $v->keys('entity'), [ 'a', 'b' ], 'condense-view: keys' );
+    is( $v->at('entity')->at('b')->get('v'), 2, 'condense-view: at and get' );
+    ok( $v->has('entity.a'),   'condense-view: has' );
+    ok( !$v->has('entity.zz'), 'condense-view: has not' );
+    is( $v->size, 2, 'condense-view: size' );
+    ok( !$v->at('entity.zz')->exists, 'condense-view: a miss does not exist' );
+    is_deeply( Voxgig::Struct::condenseview( $condense->( $pj->('[7,8]') ) )->keys, [ '0', '1' ],
+        'condense-view: list keys' );
+
+    my $sv = Voxgig::Struct::condenseview( $condense->( $pj->('{"a":{"m":"GET"},"b":{"m":"GET"}}') ) );
+    my $x  = $sv->get('a');
+    my $y  = $sv->get('b');
+    is( $flat->($x), $flat->($y), 'condense-value-copies: equal' );
+    isnt( Scalar::Util::refaddr($x), Scalar::Util::refaddr($y), 'condense-value-copies: not shared' );
+    $x->{m} = 'MUTATED';
+    is( $sv->get('b')->{m}, 'GET', 'condense-value-copies: independent' );
+    is( Scalar::Util::refaddr( $sv->at('a')->ref ), Scalar::Util::refaddr( $sv->at('a')->ref ),
+        'condense-ref-shares' );
+
+    is( $flat->( $expand->( $condense->( $pj->('{"x":"__proto__"}') ) ) ), '{"x":"__proto__"}',
+        'condense-preserves-proto-named-values' );
+    is( $flat->( $expand->( $condense->( $pj->('{"__proto__":1}') ) ) ), '{"__proto__":1}',
+        'condense-preserves-proto-named-keys' );
+
+    # Group A: a stored null reads as absent either way; a view reads it as is.
+    ok( $none->( $getpath->( $condense->( $pj->('{"a":null}') ), 'a' ) ), 'condense-getpath-null' );
+    ok( $none->( $getpath->( $pj->('{"a":null}'), 'a' ) ), 'condense-getpath-null: plain' );
+    ok( Voxgig::Struct::is_jnull(
+            Voxgig::Struct::condenseview( $condense->( $pj->('{"a":null}') ) )->get('a') ),
+        'condense-view-null' );
+
+    # A base is honoured, not skipped by the condensed read.
+    my $store = $pj->('{"base":{"x":1}}');
+    is( $getpath->( $condense->($store), 'x', { base => 'base' } ),
+        $getpath->( $store, 'x', { base => 'base' } ), 'condense-getpath-base' );
+
+    # Only a canonical integer selects an element, condensed or not.
+    my $lp = $pj->('{"l":[10,20]}');
+    my $lc = $condense->($lp);
+    for my $k ( '01', '1e0', ' 1', '+1', '1.0', '-0', "1\n" ) {
+        ( my $label = $k ) =~ s/\n/\\n/g;
+        ok( $none->( $getpath->( $lp, [ 'l', $k ] ) ), "condense-list-key: plain '$label'" );
+        ok( $none->( $getpath->( $lc, [ 'l', $k ] ) ), "condense-list-key: '$label'" );
+    }
+    is( $getpath->( $lc, [ 'l', '1' ] ), 20, 'condense-list-key: 1' );
+
+    my $sym = $condense->( { a => "\x{10000}", b => "\x{FFFF}" } )->{sym};
+    is_deeply( $sym, [ 'a', 'b', "\x{FFFF}", "\x{10000}" ], 'condense-symbols-sort-by-code-point' );
+
+    # Code-unit order would put the astral key first; the stored pairs must not.
+    my $astral = $condense->( Voxgig::Struct::jm( "\x{FF21}" => 1, "\x{1F600}" => 2 ) );
+    is( $getpath->( $astral, ["\x{1F600}"] ), 2, 'condense-astral-keys-resolve' );
+    is( $getpath->( $astral, ["\x{FF21}"] ),  1, 'condense-astral-keys-resolve: bmp' );
+    is( Voxgig::Struct::condenseview($astral)->get("\x{1F600}"), 2,
+        'condense-astral-keys-resolve: view' );
+
+    is( $flat->( $condense->( $pj->('[1,1.0,2]') )->{node} ), '[[3,1],[3,2],[1,0,0,1]]',
+        'condense-numbers-intern-by-value' );
+
+    # An invalid key is ignored, so a call that cannot write does not die.
+    my $c = $condense->( $pj->('{"a":1}') );
+    is( Voxgig::Struct::delprop( $c, undef ), $c, 'condense-invalid-key: delprop' );
+    is( Voxgig::Struct::setprop( $c, undef, 1 ), $c, 'condense-invalid-key: setprop' );
+    is( Voxgig::Struct::setprop( $c, '', 1 ), $c, 'condense-invalid-key: setprop empty' );
+
+    like( ( eval { Voxgig::Struct::setpath( $c, 'a', 2 ); 1 } ? '' : $@ ), qr/immutable/,
+        'condense-is-immutable: setpath' );
+    like( ( eval { Voxgig::Struct::setprop( $c, 'a', 2 ); 1 } ? '' : $@ ), qr/immutable/,
+        'condense-is-immutable: setprop' );
+    like( ( eval { Voxgig::Struct::delprop( $c, 'sym' ); 1 } ? '' : $@ ), qr/immutable/,
+        'condense-is-immutable: delprop' );
+    my $e = $expand->($c);
+    Voxgig::Struct::setpath( $e, 'a', 2 );
+    is( $e->{a}, 2, 'condense-is-immutable: the expanded copy is mutable' );
 }
 
 done_testing();

@@ -63,9 +63,8 @@ getpath(.map([("a", .map([("b", .map([("c", .int(42))]))]))]), .string("a.b.c"))
 ```
 <!-- => 42 -->
 
-`JSON.parse(_:)` throws on malformed input (the only throwing function in the
-API). The parser builds `OrderedDictionary`-backed maps so object key order
-survives.
+`JSON.parse(_:)` throws on malformed input. The parser builds
+`OrderedDictionary`-backed maps so object key order survives.
 
 ### Build up the rest of the API
 
@@ -100,12 +99,13 @@ select(
 ## 2. How-to guides
 
 ### Collect validation errors instead of failing silently
-`validate` and `transform` do **not** throw in this port — they accumulate
-messages on the `Injection.errs` list. Pass an `Injection` to read them:
+`validate` and `transform` throw a `StructError` when they find errors.
+Assign an `errs` list to the `Injection` you pass, and they fill it instead:
 
 ```swift
 let inj = Injection(val: .noval, parent: .noval)
-let out = validate(payload, spec, inj)
+inj.errs = VList()
+let out = try validate(payload, spec, inj)
 if !inj.errs.items.isEmpty { /* report inj.errs.items */ }
 ```
 
@@ -153,8 +153,8 @@ getelem(list, .int(-1))                         // last element; -1 counts from 
 
 ### Set a deep value, creating parents
 ```swift
-setpath(store, .string("service.db.host"), .string("db.internal"))
-setpath(store, .list([.string("list"), .int(2)]), .string("x"))  // grows a list
+try setpath(store, .string("service.db.host"), .string("db.internal"))
+try setpath(store, .list([.string("list"), .int(2)]), .string("x"))  // grows a list
 ```
 
 ### Serialise deterministically
@@ -233,8 +233,8 @@ transform(.map([]), try JSON.parse(#"{"x":"`$APPLY`"}"#), inj)
 ```
 <!-- throws: invalid placement in parent map -->
 
-For more task recipes (`$EACH`, `$MERGE`, `$FORMAT`, `$ONE`, `$EXACT`,
-`select` operators, …) see the language-neutral
+For more task recipes (`$EACH`, `$MERGE`, `$FORMAT`, `$NOF`, `$ALL`,
+`$EXACT`, `select` operators, …) see the language-neutral
 [How-to guides](../DOCS.md#2-how-to-guides) — the spec syntax is identical;
 only the host literals differ.
 
@@ -264,9 +264,12 @@ Swift-specific points the signatures don't show:
   `getelem(list, key, alt?)` is list-specific and supports `-1`-from-the-end
   indexing. `lookup(_:_:)` is the Group-B raw reader (returns stored `.null`
   literally) used internally.
-- **No throwing API surface.** Apart from `JSON.parse`, nothing throws.
-  `validate`/`transform` accumulate `inj.errs.items`; bad regex patterns
-  make `re_compile` return `nil` rather than throw.
+- **Throwing functions.** `JSON.parse` throws on malformed input.
+  `validate` and `transform` throw a `StructError` unless the `Injection`
+  supplies `errs`, which they then fill instead. `setprop`, `delprop` and
+  `setpath` throw a `StructError` when asked to write into a condensed
+  structure. Bad regex patterns make `re_compile` return `nil` rather than
+  throw.
 - **`typify` returns one flag per `Value` case** (`T_string`, `T_integer`,
   `T_decimal`, `T_list`, `T_map`, `T_noval`, `T_null`, …) — the enum makes
   the type direct, so it does not OR in `T_scalar`/`T_node`. `typename(_:)`

@@ -152,9 +152,12 @@ VoxgigStruct.stringify({ 'a' => 1, 'b' => [2, 3] })   # '{a:1,b:[2,3]}'
 not a positional indent.
 
 For more task recipes (merge configs, rename fields, `$EACH`, `$MERGE`,
-`$FORMAT`, `$ONE`, `$EXACT`, …) see the language-neutral
+`$FORMAT`, `$EXACT`, …) see the language-neutral
 [How-to guides](../DOCS.md#2-how-to-guides) — the spec syntax is identical;
 only the host literals differ (Ruby hashes with string keys, `->` lambdas).
+The exception is `$ONE`, which this port does not define: write those specs
+with `$NOF`, as the [validate checkers](./README.md#validate-checkers) list
+shows.
 
 ---
 
@@ -186,7 +189,7 @@ Ruby-specific points the signatures don't show:
 - **Type flags** combine bitwise: `typify('hi')` is `T_scalar | T_string`;
   test with `0 < (T_string & t)`. `typify(UNDEF)` is `T_noval` (not a
   scalar); `typify(nil)` is `T_scalar | T_null`.
-- **Extras beyond the canonical 48.** This port also exposes `joinurl`,
+- **Extras beyond the canonical 52.** This port also exposes `joinurl`,
   `replace`, and the `select` operators (`AND`/`OR`/`NOT`/`CMP`).
 
 ---
@@ -214,8 +217,10 @@ Ruby has `nil` but no separate "absent" value, so the port adds one — the
   treat a stored `nil` as absent too.
 - `nil` = the JSON null scalar; `typify(nil)` is `T_scalar | T_null`, and
   Group B processors (`clone`, `merge`, `walk`, …) preserve it literally.
-  Internally `setval` keeps the UNDEF/`nil` distinction so a deliberately
-  stored null is never confused with a vacated slot.
+  Internally `setval` vacates a slot on either `UNDEF` or `nil`, so a
+  checker that accepts a null the data holds writes it back itself:
+  `$NULL`, `$NIL` and `$ANY` keep that null in the output, in a map or a
+  list.
 
 If your data source returns `nil` for "not set", decide which you mean
 before handing it to `struct`.

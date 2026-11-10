@@ -5,11 +5,13 @@
 // helpers from StructUtility.ts. Names are idiomatic snake_case; see the
 // TS->Rust table in README.md.
 
+use std::borrow::Cow;
+
 use crate::ordered_map::OrderedMap;
 use crate::re::{Captures, Regex, RegexError};
 
 use crate::consts::*;
-use crate::value::{is_integer_f64, js_string, js_to_number, num_to_string, Value};
+use crate::value::{is_integer_f64, js_string, num_to_string, Value};
 
 const MIN_SAFE_INTEGER: i64 = -9007199254740991;
 const MAX_SAFE_INTEGER: i64 = 9007199254740991;
@@ -91,6 +93,27 @@ pub fn is_empty(val: &Value) -> bool {
 pub fn is_func(val: &Value) -> bool {
     matches!(val, Value::Func(_))
 }
+
+/// `iscondensed(val)` — a condensed structure of this version. The version
+/// must match, not merely be numeric: a future profile would otherwise be
+/// decoded under this one's schema.
+pub fn is_condensed(val: &Value) -> bool {
+    match val {
+        Value::Map(m) => {
+            let m = m.borrow();
+            matches!(m.get(S_condense), Some(Value::Num(v)) if CONDENSE_VERSION == *v)
+                && matches!(m.get(S_condsym), Some(Value::List(_)))
+                && matches!(m.get(S_condnode), Some(Value::List(_)))
+                && matches!(m.get(S_condroot), Some(Value::Num(_)))
+        }
+        _ => false,
+    }
+}
+
+/// The panic `set_prop`, `del_prop` and `set_path` raise on a condensed
+/// structure.
+pub const CONDENSE_IMMUTABLE: &str =
+    "struct: condensed structures are immutable - expand() first, then modify the copy";
 
 pub fn size(val: &Value) -> i64 {
     match val {
@@ -224,6 +247,44 @@ pub fn pad(s: Value, padding: Option<i64>, padchar: Option<String>) -> String {
 
 // ---- node accessors ---------------------------------------------------
 
+/// A list key's index: an integral number, or the string `String(n)` prints
+/// for one. An index beyond `i64` saturates, so it stays past that end.
+pub fn list_key(key: &Value) -> Option<i64> {
+    match key {
+        Value::Num(n) if is_integer_f64(*n) => Some(*n as i64),
+        Value::Str(s) if R_INTEGER_KEY.is_match(s) => {
+            let past = if s.starts_with('-') {
+                i64::MIN
+            } else {
+                i64::MAX
+            };
+            Some(s.parse::<i64>().unwrap_or(past))
+        }
+        _ => None,
+    }
+}
+
+/// The stored value at `key`, `Noval` when there is none: a list reads a
+/// non-negative list key, anything else a string or number key.
+fn read_prop(val: &Value, key: &Value) -> Value {
+    if let Value::List(l) = val {
+        return list_key(key)
+            .and_then(|i| usize::try_from(i).ok())
+            .and_then(|i| l.borrow().get(i).cloned())
+            .unwrap_or(Value::Noval);
+    }
+    let skey: Cow<'_, str> = match key {
+        Value::Str(s) => Cow::Borrowed(s),
+        Value::Num(n) => Cow::Owned(num_to_string(*n)),
+        _ => return Value::Noval,
+    };
+    match val {
+        Value::Map(m) => m.borrow().get(&skey).cloned().unwrap_or(Value::Noval),
+        Value::Sentinel(s) if skey == s.tag => Value::Bool(true),
+        _ => Value::Noval,
+    }
+}
+
 /// `getelem(list, key, alt?)` — list lookup by integer key, negative counts
 /// from the end. If the element is absent and `alt` is a callable value, it
 /// is invoked (with the uniform `(inj, val, ref, store)` shape — a fresh
@@ -248,25 +309,12 @@ pub fn get_elem_or_else<F: FnOnce() -> Value>(val: &Value, key: &Value, alt: F) 
         return alt();
     }
     let out = if let Value::List(l) = val {
-        let keystr = js_string(key);
-        if R_INTEGER_KEY.is_match(&keystr) {
-            match keystr.parse::<i64>() {
-                Ok(mut n) => {
-                    let lb = l.borrow();
-                    if n < 0 {
-                        n += lb.len() as i64;
-                    }
-                    if n >= 0 && (n as usize) < lb.len() {
-                        lb[n as usize].clone()
-                    } else {
-                        Value::Noval
-                    }
-                }
-                Err(_) => Value::Noval,
-            }
-        } else {
-            Value::Noval
-        }
+        let lb = l.borrow();
+        list_key(key)
+            .map(|i| if i < 0 { lb.len() as i64 + i } else { i })
+            .and_then(|i| usize::try_from(i).ok())
+            .and_then(|i| lb.get(i).cloned())
+            .unwrap_or(Value::Noval)
     } else {
         Value::Noval
     };
@@ -284,30 +332,7 @@ pub fn get_prop(val: &Value, key: &Value, alt: Value) -> Value {
     if val.is_noval() || key.is_noval() {
         return alt;
     }
-    let out = match val {
-        Value::List(l) => {
-            let lb = l.borrow();
-            // Array index: a non-negative integer (string or number).
-            let ks = js_string(key);
-            ks.parse::<usize>()
-                .ok()
-                .and_then(|i| lb.get(i).cloned())
-                .unwrap_or(Value::Noval)
-        }
-        Value::Map(m) => m
-            .borrow()
-            .get(&js_string(key))
-            .cloned()
-            .unwrap_or(Value::Noval),
-        Value::Sentinel(s) => {
-            if js_string(key) == s.tag {
-                Value::Bool(true)
-            } else {
-                Value::Noval
-            }
-        }
-        _ => Value::Noval,
-    };
+    let out = read_prop(val, key);
     // Group A rule: a stored JSON null at a key counts as "no value", same as
     // absent (canonical TS `if (null == out) return alt`).
     if out.is_nullish() {
@@ -321,42 +346,7 @@ pub fn lookup(val: &Value, key: &Value) -> Value {
     if val.is_noval() || key.is_noval() {
         return Value::Noval;
     }
-    match val {
-        Value::List(l) => {
-            let lb = l.borrow();
-            let keystr = js_string(key);
-            if R_INTEGER_KEY.is_match(&keystr) {
-                match keystr.parse::<i64>() {
-                    Ok(mut n) => {
-                        if n < 0 {
-                            n += lb.len() as i64;
-                        }
-                        if n >= 0 && (n as usize) < lb.len() {
-                            lb[n as usize].clone()
-                        } else {
-                            Value::Noval
-                        }
-                    }
-                    Err(_) => Value::Noval,
-                }
-            } else {
-                Value::Noval
-            }
-        }
-        Value::Map(m) => m
-            .borrow()
-            .get(&js_string(key))
-            .cloned()
-            .unwrap_or(Value::Noval),
-        Value::Sentinel(s) => {
-            if js_string(key) == s.tag {
-                Value::Bool(true)
-            } else {
-                Value::Noval
-            }
-        }
-        _ => Value::Noval,
-    }
+    read_prop(val, key)
 }
 
 /// `strkey(key)` — coerce a key to its canonical string form (`""` if invalid).
@@ -985,20 +975,21 @@ pub fn del_prop(parent: Value, key: &Value) -> Value {
     if !is_key(key) {
         return parent;
     }
+    if is_condensed(&parent) {
+        panic!("{CONDENSE_IMMUTABLE}");
+    }
     match &parent {
         Value::Map(m) => {
             let k = str_key(key.clone());
             m.borrow_mut().shift_remove(&k);
         }
         Value::List(l) => {
-            let ki = js_to_number(key);
-            if ki.is_nan() {
+            let Some(ki) = list_key(key) else {
                 return parent;
-            }
-            let ki = ki.floor() as i64;
+            };
             let mut lb = l.borrow_mut();
-            if ki >= 0 && (ki as usize) < lb.len() {
-                lb.remove(ki as usize);
+            if let Some(i) = usize::try_from(ki).ok().filter(|i| *i < lb.len()) {
+                lb.remove(i);
             }
         }
         _ => {}
@@ -1010,17 +1001,18 @@ pub fn set_prop(parent: Value, key: &Value, val: Value) -> Value {
     if !is_key(key) {
         return parent;
     }
+    if is_condensed(&parent) {
+        panic!("{CONDENSE_IMMUTABLE}");
+    }
     match &parent {
         Value::Map(m) => {
             let k = js_string(key);
             m.borrow_mut().insert(k, val);
         }
         Value::List(l) => {
-            let ki = js_to_number(key);
-            if ki.is_nan() {
+            let Some(ki) = list_key(key) else {
                 return parent;
-            }
-            let ki = ki.floor() as i64;
+            };
             let mut lb = l.borrow_mut();
             if ki >= 0 {
                 let len = lb.len() as i64;

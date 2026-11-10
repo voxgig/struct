@@ -10,6 +10,7 @@ import (
 	"math/bits"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -118,11 +119,15 @@ var DELETE = &_sentinel{"DELETE"}
 
 var NOVAL = &_sentinel{"NOVAL"}
 
-// Regex matching integer keys (including negative).
-var reIntegerKey = regexp.MustCompile(`^[-0-9]+$`)
+// A list key as String(n) prints an integer: "01", "+1" and "-0" are not.
+var reIntegerKey = regexp.MustCompile(`^(0|-?[1-9][0-9]*)$`)
 
 // Meta path syntax regex: matches patterns like "q0$=x1" or "q0$~x1"
 var reMetaPath = regexp.MustCompile(`^([^$]+)\$([=~])(.+)$`)
+
+var reInjectionFull = regexp.MustCompile("^`(\\$[A-Z]+|[^`]*)[0-9]*`$")
+var reTransformName = regexp.MustCompile("`\\$([A-Z]+)`")
+var reCheckerName = regexp.MustCompile(`^\$[A-Z]+$`)
 
 // The standard undefined value for this language.
 // NOTE: `nil` must be used directly.
@@ -664,8 +669,7 @@ func Pad(str any, args ...any) string {
 	return s
 }
 
-// Get a list element. The key should be an integer, or a string
-// that parses to an integer. Negative integers count from the end.
+// Get a list element; a negative integer key counts from the end.
 func GetElem(val any, key any, alts ...any) any {
 	var alt any
 	if len(alts) > 0 {
@@ -682,20 +686,16 @@ func GetElem(val any, key any, alts ...any) any {
 	var out any
 
 	if IsList(val) {
-		ks := StrKey(key)
-		if reIntegerKey.MatchString(ks) {
-			nkey, err := strconv.Atoi(ks)
-			if err == nil {
-				list, ok := _asList(val)
-				if !ok {
-					list = _listify(val)
-				}
-				if nkey < 0 {
-					nkey = len(list) + nkey
-				}
-				if nkey >= 0 && nkey < len(list) {
-					out = list[nkey]
-				}
+		list, ok := _asList(val)
+		if !ok {
+			list = _listify(val)
+		}
+		if ki, ok := _listkey(key); ok {
+			if 0 > ki {
+				ki += len(list)
+			}
+			if 0 <= ki && ki < len(list) {
+				out = list[ki]
 			}
 		}
 	}
@@ -732,66 +732,16 @@ func GetProp(val any, key any, alts ...any) any {
 		return alt
 	}
 
-	if IsMap(val) {
-		ks, ok := key.(string)
-		if !ok {
-			ks = StrKey(key)
-		}
+	if IsNode(val) {
+		out = _readprop(val, key)
 
-		v := val.(map[string]any)
-		res, has := v[ks]
-		if has {
-			out = res
-		}
-
-	} else if IsList(val) {
-		ki, ok := key.(int)
-		if !ok {
-			switch kf := key.(type) {
-			case float64:
-				ki = int(kf)
-
-			case string:
-				ki = -1
-				ski, err := strconv.Atoi(key.(string))
-				if nil == err {
-					ki = ski
-				}
-			}
-		}
-
-		if lr, isLR := val.(*ListRef[any]); isLR {
-			if 0 <= ki && ki < len(lr.List) {
-				out = lr.List[ki]
-			}
-		} else {
-			v, ok := val.([]any)
-
-			if !ok {
-				rv := reflect.ValueOf(val)
-				if rv.Kind() == reflect.Slice && 0 <= ki && ki < rv.Len() {
-					out = rv.Index(ki).Interface()
-				}
-
-			} else {
-				if 0 <= ki && ki < len(v) {
-					out = v[ki]
-				}
-			}
-		}
-
-	} else {
+	} else if ks, ok := _keystr(key); ok {
 		valRef := reflect.ValueOf(val)
 		if valRef.Kind() == reflect.Pointer {
 			valRef = valRef.Elem()
 		}
 
 		if valRef.Kind() == reflect.Struct {
-			ks, ok := key.(string)
-			if !ok {
-				ks = StrKey(key)
-			}
-
 			field := valRef.FieldByName(ks)
 			if field.IsValid() {
 				out = field.Interface()
@@ -804,6 +754,120 @@ func GetProp(val any, key any, alts ...any) any {
 	}
 
 	return out
+}
+
+// The value stored at key in a map or list, nil included, or NOVAL. A list
+// reads a non-negative list key, a map a string or number key.
+func _readprop(val any, key any) any {
+	if m, ok := val.(map[string]any); ok {
+		if ks, ok := _keystr(key); ok {
+			if out, has := m[ks]; has {
+				return out
+			}
+		}
+		return NOVAL
+	}
+
+	if !IsList(val) {
+		return NOVAL
+	}
+
+	ki, ok := _listkey(key)
+	if !ok || 0 > ki {
+		return NOVAL
+	}
+
+	switch list := val.(type) {
+	case *ListRef[any]:
+		if ki < len(list.List) {
+			return list.List[ki]
+		}
+	case []any:
+		if ki < len(list) {
+			return list[ki]
+		}
+	default:
+		if rv := reflect.ValueOf(val); ki < rv.Len() {
+			return rv.Index(ki).Interface()
+		}
+	}
+
+	return NOVAL
+}
+
+// A list key's index: an integral number, or the string String(n) prints for
+// one. An index beyond int saturates, so it stays past that end of any list.
+func _listkey(key any) (int, bool) {
+	switch k := key.(type) {
+	case int:
+		return k, true
+	case string:
+		if !reIntegerKey.MatchString(k) {
+			return 0, false
+		}
+		if n, err := strconv.Atoi(k); nil == err {
+			return n, true
+		}
+		if '-' == k[0] {
+			return math.MinInt, true
+		}
+		return math.MaxInt, true
+	}
+
+	f, err := _toFloat64(key)
+	if nil != err || f != math.Trunc(f) || math.IsInf(f, 0) {
+		return 0, false
+	}
+	if f >= math.MaxInt {
+		return math.MaxInt, true
+	}
+	if f <= math.MinInt {
+		return math.MinInt, true
+	}
+	return int(f), true
+}
+
+// The string a key names in a map: a string itself, a number as String(n)
+// prints it. Anything else names no key.
+func _keystr(key any) (string, bool) {
+	switch k := key.(type) {
+	case string:
+		return k, true
+	case *string:
+		if nil != k {
+			return *k, true
+		}
+		return S_MT, false
+	}
+
+	if _, err := _toFloat64(key); nil != err {
+		return S_MT, false
+	}
+	return _numstr(key), true
+}
+
+// The string JavaScript's String(n) prints for a number.
+func _numstr(n any) string {
+	switch n.(type) {
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		return fmt.Sprintf("%d", n)
+	}
+
+	f, _ := _toFloat64(n)
+	switch {
+	case 0 == f:
+		return "0"
+	case math.IsNaN(f):
+		return "NaN"
+	case math.IsInf(f, 1):
+		return "Infinity"
+	case math.IsInf(f, -1):
+		return "-Infinity"
+	}
+
+	// encoding/json writes a float as ES6 Number.prototype.toString does.
+	b, _ := json.Marshal(f)
+	return string(b)
 }
 
 // Sorted keys of a map, or indexes of a list.
@@ -1407,13 +1471,16 @@ func DelProp(parent any, key any) any {
 		return parent
 	}
 
+	if IsCondensed(parent) {
+		panic(errCondensedImmutable)
+	}
+
 	if IsMap(parent) {
 		ks := StrKey(key)
 		delete(parent.(map[string]any), ks)
 	} else if IsList(parent) {
-		ks := StrKey(key)
-		ki, err := _parseInt(ks)
-		if err != nil {
+		ki, ok := _listkey(key)
+		if !ok {
 			return parent
 		}
 		if lr, isLR := parent.(*ListRef[any]); isLR {
@@ -1457,12 +1524,16 @@ func SetProp(parent any, key any, newval any) any {
 		return parent
 	}
 
+	if IsCondensed(parent) {
+		panic(errCondensedImmutable)
+	}
+
 	if IsMap(parent) {
-		m := parent.(map[string]any)
-		m[StrKey(key)] = newval
+		ks, _ := _keystr(key)
+		parent.(map[string]any)[ks] = newval
 
 	} else if IsList(parent) {
-		ki, ok := _listKey(key)
+		ki, ok := _listkey(key)
 		if !ok {
 			return parent
 		}
@@ -1524,20 +1595,6 @@ func SetProp(parent any, key any, newval any) any {
 	}
 
 	return parent
-}
-
-// The list index SetProp reads from key; false when key names no index.
-func _listKey(key any) (int, bool) {
-	switch k := key.(type) {
-	case int:
-		return k, true
-	case float64:
-		return int(k), true
-	case string:
-		ki, err := _parseInt(k)
-		return ki, nil == err
-	}
-	return 0, false
 }
 
 func Walk(
@@ -1860,7 +1917,8 @@ func GetPath(store any, path any, injdefs ...*Injection) any {
 
 	var parts []string
 
-	// Operate on a string array.
+	// Operate on a string array: a number part reads as String(n), and any
+	// other part that is not a string makes the whole path miss.
 	switch pp := path.(type) {
 	case []string:
 		parts = make([]string, len(pp))
@@ -1874,10 +1932,31 @@ func GetPath(store any, path any, injdefs ...*Injection) any {
 		}
 	default:
 		if IsList(path) {
-			parts = _resolveStrings(_listify(path))
+			list := _listify(path)
+			parts = make([]string, len(list))
+			for i, part := range list {
+				ps, ok := _keystr(part)
+				if !ok {
+					return nil
+				}
+				parts[i] = ps
+			}
+		} else if _, err := _toFloat64(path); nil == err {
+			parts = []string{_numstr(path)}
 		} else {
 			return nil
 		}
+	}
+
+	// A condensed store reads as the node it was built from, touching only the
+	// nodes on the path. A base changes what the walk below starts from, so a
+	// read with one expands the store instead.
+	if IsCondensed(store) {
+		if nil == inj || S_MT == inj.Base {
+			root := _condenseInt(store.(map[string]any)[S_condroot])
+			return _condenseMaterialise(store, _condenseResolve(store, root, parts))
+		}
+		store = Expand(store)
 	}
 
 	val := store
@@ -2004,6 +2083,10 @@ func GetPath(store any, path any, injdefs ...*Injection) any {
 // String paths are split on ".". If val is the DELETE sentinel,
 // the final key is deleted instead of set.
 func SetPath(store any, path any, val any, injdefs ...map[string]any) any {
+	if IsCondensed(store) {
+		panic(errCondensedImmutable)
+	}
+
 	pathType := Typify(path)
 
 	var parts []any
@@ -2067,7 +2150,7 @@ func SetPath(store any, path any, val any, injdefs ...map[string]any) any {
 
 // The index where SetProp puts a value written to list under key.
 func _listSlot(list any, key any) any {
-	ki, ok := _listKey(key)
+	ki, ok := _listkey(key)
 	if !ok || !IsList(list) {
 		return key
 	}
@@ -2090,9 +2173,11 @@ func _keepList(holders []any, keys []any, list any, written any) any {
 // SetProp refuses some keys GetProp reads, such as "".
 func _writeBack(holder any, key any, val any) any {
 	if m, ok := holder.(map[string]any); ok {
-		if _, has := m[StrKey(key)]; has {
-			m[StrKey(key)] = val
-			return m
+		if ks, ok := _keystr(key); ok {
+			if _, has := m[ks]; has {
+				m[ks] = val
+				return m
+			}
 		}
 	}
 	return SetProp(holder, key, val)
@@ -3488,51 +3573,17 @@ var validate_STRING Injector = func(
 	return out
 }
 
-var validate_OBJECT Injector = func(
-	inj *Injection,
-	_val any,
-	ref *string,
-	store any,
-) any {
-	out := GetProp(inj.Dparent, inj.Key)
-
-	t := Typify(out)
-
-	if 0 == (T_map & t) {
-		msg := _invalidTypeMsg(inj.Path.List, S_object, Typename(t), out)
-		inj.Errs.Append(msg)
-
-		return nil
-	}
-
-	return out
-}
-
-var validate_ARRAY Injector = func(
-	inj *Injection,
-	_val any,
-	ref *string,
-	store any,
-) any {
-	out := GetProp(inj.Dparent, inj.Key)
-
-	t := Typify(out)
-	if 0 == (T_list & t) {
-		msg := _invalidTypeMsg(inj.Path.List, S_array, Typename(t), out)
-		inj.Errs.Append(msg)
-		return nil
-	}
-
-	return out
-}
-
 var validate_ANY Injector = func(
 	inj *Injection,
 	_val any,
 	ref *string,
 	store any,
 ) any {
-	return GetProp(inj.Dparent, inj.Key)
+	out := GetProp(inj.Dparent, inj.Key)
+	if nil == out {
+		out = _lookup(inj.Dparent, inj.Key)
+	}
+	return _checked(inj, out)
 }
 
 // Generic type validator: handles $INTEGER, $DECIMAL, $NULL, $NIL, $MAP, $LIST, $INSTANCE
@@ -3557,25 +3608,36 @@ var validate_TYPE Injector = func(
 		}
 	}
 
+	// GetProp reads a missing field as nil, and _lookup tells it from a stored
+	// null as NOVAL, which $NULL refuses.
 	out := GetProp(inj.Dparent, inj.Key)
+	if nil == out {
+		out = _lookup(inj.Dparent, inj.Key)
+	}
 	t := Typify(out)
 
-	// In Go, nil represents both null and noval (undefined).
-	// $NIL should match nil values, and $NULL should also match nil.
-	if tname == "nil" && out == nil {
-		return out
-	}
-	if tname == "null" && out == nil {
-		return out
+	// $NIL is absent or null.
+	if tname == "nil" && nil == denoval(out) {
+		return _checked(inj, out)
 	}
 
 	if 0 == (t & typev) {
-		msg := _invalidTypeMsg(inj.Path.List, tname, Typename(t), out)
+		msg := _invalidTypeMsg(inj.Path.List, tname, Typename(t), denoval(out))
 		inj.Errs.Append(msg)
 		return nil
 	}
 
-	return out
+	return _checked(inj, out)
+}
+
+// A checker's result from a _lookup read. setval deletes on nil, so a null
+// the data holds is written into the slot here, and inject skips the slot.
+func _checked(inj *Injection, out any) any {
+	if nil == out && M_VAL == inj.Mode && inj.Full {
+		SetProp(inj.Parent, inj.Key, nil)
+		return SKIP
+	}
+	return denoval(out)
 }
 
 var validate_CHILD Injector = func(
@@ -3595,13 +3657,7 @@ var validate_CHILD Injector = func(
 			tval = map[string]any{}
 
 		} else if !IsMap(tval) {
-			inj.Errs.Append(
-				_invalidTypeMsg(
-					inj.Path.List[:len(inj.Path.List)-1],
-					S_object,
-					Typename(Typify(tval)),
-					tval,
-				))
+			// The validation modify reports the mismatch, once.
 			return nil
 		}
 
@@ -3638,15 +3694,8 @@ var validate_CHILD Injector = func(
 			return nil
 		}
 
-		// If dparent is not a list => error
+		// Not a list: the validation modify reports the mismatch.
 		if !IsList(dparent) {
-			inj.Errs.Append(
-				_invalidTypeMsg(
-					inj.Path.List[:len(inj.Path.List)-1],
-					S_array,
-					Typename(Typify(dparent)),
-					dparent,
-				))
 			parentList := _listify(inj.Parent)
 			inj.KeyI = len(parentList)
 			return dparent
@@ -3687,108 +3736,33 @@ var validate_CHILD Injector = func(
 	return nil
 }
 
-// Forward declaration for validate_ONE
-var validate_ONE Injector
+// Set after Validate is defined: these validators call Validate.
+var validate_NOF Injector
+var validate_ALL Injector
 
 // Forward declaration for validate_EXACT
 var validate_EXACT Injector
 
-// Implementation will be set after Validate is defined
-func init_validate_ONE() {
-	validate_ONE = func(
+func init_validate_count() {
+	// Count the specs that admit the value: ['`$NOF`', count, spec, ...], where
+	// count is an integer, or a map holding min, max or both.
+	validate_NOF = func(
 		inj *Injection,
 		_val any,
 		ref *string,
 		store any,
 	) any {
-		// Only operate in "val mode" (list mode).
-		if inj.Mode == M_VAL {
-			if !IsList(inj.Parent) || inj.KeyI != 0 {
-				inj.Errs.Append("The $ONE validator at field " +
-					Pathify(inj.Path.List, 1, 1) +
-					" must be the first element of an array.")
-				return nil
-			}
+		return _validatecount(inj, store, "$NOF", true)
+	}
 
-			inj.KeyI = len(inj.Keys.List)
-
-			// The parent is assumed to be a slice: ["`$ONE`", alt0, alt1, ...].
-			parentSlice, ok := _asList(inj.Parent)
-			if !ok {
-				return nil
-			}
-
-			// setval, not a hand-held grandparent: setval DELETES on a nil
-			// value where SetProp keeps one, so an optional entry the caller
-			// omitted came back materialised.
-			inj.setval(inj.Dparent, 2)
-
-			// Path shortens for the message only: `modify` reads
-			// getprop(inj.Parent, inj.Key), and inj.Parent is still this list.
-			inj.Path.List = inj.Path.List[:len(inj.Path.List)-1]
-
-			// COPY, not a view: setval below rewrites the node this slice
-			// aliases, which rewrote the alternatives the error message reports.
-			tvals := append([]any(nil), parentSlice[1:]...) // alt0, alt1, ...
-
-			if len(tvals) == 0 {
-				inj.Errs.Append("The $ONE validator at field " +
-					Pathify(inj.Path.List, 1, 1) +
-					" must have at least one argument.")
-				return nil
-			}
-
-			// Try each alternative shape
-			for _, tval := range tvals {
-				// Collect errors in a temporary slice
-				var terrs = ListRefCreate[any]()
-
-				// Create a new store for validation
-				vstore := Clone(store).(map[string]any)
-				vstore["$TOP"] = inj.Dparent
-
-				// Attempt validation of data with shape `tval`
-				vcurrent, err := Validate(inj.Dparent, tval, &Injection{Extra: vstore, Errs: terrs})
-
-				inj.setval(vcurrent, -2)
-
-				if err == nil && len(terrs.List) == 0 {
-					return nil
-				}
-			}
-
-			mapped := make([]string, len(tvals))
-			for i, v := range tvals {
-				mapped[i] = Stringify(v)
-			}
-
-			joined := strings.Join(mapped, ", ")
-
-			re := regexp.MustCompile("`\\$([A-Z]+)`")
-			valdesc := re.ReplaceAllStringFunc(joined, func(match string) string {
-				submatches := re.FindStringSubmatch(match)
-				if len(submatches) == 2 {
-					return strings.ToLower(submatches[1])
-				}
-				return match
-			})
-
-			prefix := ""
-			if len(tvals) > 1 {
-				prefix = "one of "
-			}
-
-			msg := _invalidTypeMsg(
-				inj.Path.List,
-				prefix+valdesc,
-				Typename(Typify(inj.Dparent)),
-				inj.Dparent,
-				"V0210",
-			)
-			inj.Errs.Append(msg)
-		}
-
-		return nil
+	// Every spec admits the value: ['`$ALL`', spec, ...].
+	validate_ALL = func(
+		inj *Injection,
+		_val any,
+		ref *string,
+		store any,
+	) any {
+		return _validatecount(inj, store, "$ALL", false)
 	}
 }
 
@@ -3808,78 +3782,28 @@ func init_validate_EXACT() {
 				return nil
 			}
 
+			cval := _slotval(inj)
+
 			inj.KeyI = len(inj.Keys.List)
 
-			// The parent is assumed to be a slice: ["`$EXACT`", alt0, alt1, ...].
-			parentSlice, ok := _asList(inj.Parent)
-			if !ok {
-				return nil
-			}
+			// Replace [$EXACT, ...] with the data value; SKIP keeps inject off the detached list.
+			_setslot(inj, cval)
 
-			// Get grandparent and grandkey to replace the structure
-			grandparent := inj.Nodes.List[len(inj.Nodes.List)-2]
-			grandkey := inj.Path.List[len(inj.Path.List)-2]
-
-			// Clean up structure by replacing [$EXACT, ...] with current value
-			SetProp(grandparent, grandkey, inj.Dparent)
-			inj.Parent = inj.Dparent
-
-			// Adjust the path
 			inj.Path.List = inj.Path.List[:len(inj.Path.List)-1]
-			inj.Key = inj.Path.List[len(inj.Path.List)-1]
 
-			// The exact values to match are everything after the first element.
-			tvals := parentSlice[1:] // alt0, alt1, ...
-
+			tvals := Slice(inj.Parent, 1).([]any)
 			if len(tvals) == 0 {
 				inj.Errs.Append("The $EXACT validator at field " +
 					Pathify(inj.Path.List, 1, 1) +
 					" must have at least one argument.")
-				return nil
+				return SKIP
 			}
 
-			var currentStr *string
 			for _, tval := range tvals {
-				exactMatch := false
-
-				if !exactMatch {
-					// Unwrap ListRefs for comparison since data and spec may have
-					// different wrapping levels.
-					unwrapFlags := map[string]bool{"unwrap": true}
-					utval := CloneFlags(tval, unwrapFlags)
-					ucurrent := CloneFlags(inj.Dparent, unwrapFlags)
-					exactMatch = reflect.DeepEqual(utval, ucurrent)
-				}
-
-				if !exactMatch && IsNode(tval) {
-					if nil == currentStr {
-						tmpstr := Stringify(inj.Dparent)
-						currentStr = &tmpstr
-					}
-					tvalStr := Stringify(tval)
-					exactMatch = tvalStr == *currentStr
-				}
-
-				if exactMatch {
-					return nil
+				if _deepequal(tval, cval) {
+					return SKIP
 				}
 			}
-
-			mapped := make([]string, len(tvals))
-			for i, v := range tvals {
-				mapped[i] = Stringify(v)
-			}
-
-			joined := strings.Join(mapped, ", ")
-
-			re := regexp.MustCompile("`\\$([A-Z]+)`")
-			valdesc := re.ReplaceAllStringFunc(joined, func(match string) string {
-				submatches := re.FindStringSubmatch(match)
-				if len(submatches) == 2 {
-					return strings.ToLower(submatches[1])
-				}
-				return match
-			})
 
 			prefix := ""
 			if len(inj.Path.List) <= 1 {
@@ -3891,20 +3815,103 @@ func init_validate_EXACT() {
 				oneOf = "one of "
 			}
 
+			found := denoval(cval)
 			msg := _invalidTypeMsg(
 				inj.Path.List,
-				prefix+"exactly equal to "+oneOf+valdesc,
-				Typename(Typify(inj.Dparent)),
-				inj.Dparent,
+				prefix+"exactly equal to "+oneOf+_valdesc(tvals),
+				Typename(Typify(found)),
+				found,
 				"V0110",
 			)
 			inj.Errs.Append(msg)
+
+			return SKIP
 		} else {
 			DelProp(inj.Parent, inj.Key)
 		}
 
 		return nil
 	}
+}
+
+// The counting list directives. Without a count, every spec has to admit.
+func _validatecount(inj *Injection, store any, name string, counted bool) any {
+	if M_VAL != inj.Mode {
+		return nil
+	}
+
+	if !IsList(inj.Parent) || 0 != inj.KeyI {
+		inj.Errs.Append("The " + name + " validator at field " +
+			Pathify(inj.Path.List, 1, 1) +
+			" must be the first element of an array.")
+		return nil
+	}
+
+	cval := _slotval(inj)
+
+	inj.KeyI = len(inj.Keys.List)
+
+	// Replace the directive's list with the data value. Each return is SKIP, so
+	// that inject leaves the detached list alone and validates nothing in it.
+	_setslot(inj, cval)
+
+	inj.Path.List = inj.Path.List[:len(inj.Path.List)-1]
+
+	var count any = NOVAL
+	argsfrom := 1
+	if counted {
+		count = _lookup(inj.Parent, 1)
+		argsfrom = 2
+	}
+	tvals := Slice(inj.Parent, argsfrom).([]any)
+	numtvals := len(tvals)
+	field := "The " + name + " validator at field " + Pathify(inj.Path.List, 1)
+
+	if 0 == numtvals {
+		if counted {
+			inj.Errs.Append(field + " must have a count and at least one argument.")
+		} else {
+			inj.Errs.Append(field + " must have at least one argument.")
+		}
+		return SKIP
+	}
+
+	lo, hi, countdesc := numtvals, numtvals, "all"
+	if counted {
+		lo, hi, countdesc = _nofcount(count, numtvals)
+	}
+
+	if "" == countdesc {
+		inj.Errs.Append(field + " has an invalid count: " + Stringify(denoval(count)) + ".")
+		return SKIP
+	}
+
+	admitted := 0
+	for tI := 0; tI < numtvals; tI++ {
+		left := numtvals - tI
+
+		// Stop once the specs left cannot change the verdict.
+		if hi < admitted || admitted+left < lo || (lo <= admitted && admitted+left <= hi) {
+			break
+		}
+
+		if _admits(cval, tvals[tI], inj, store) {
+			admitted++
+		}
+	}
+
+	if admitted < lo || hi < admitted {
+		found := denoval(cval)
+		inj.Errs.Append(_invalidTypeMsg(
+			inj.Path.List,
+			countdesc+" of "+_valdesc(tvals),
+			Typename(Typify(found)),
+			found,
+			"V0310",
+		))
+	}
+
+	return SKIP
 }
 
 func makeValidation(exact bool) Modify {
@@ -4081,10 +4088,10 @@ func Validate(
 		errs = ListRefCreate[any]()
 	}
 
-	// Initialize validate_ONE if not already initialized.
-	// This avoids a circular reference error, validate_ONE calls Validate.
-	if validate_ONE == nil {
-		init_validate_ONE()
+	// Initialize validate_NOF and validate_ALL if not already initialized.
+	// This avoids a circular reference error, both call Validate.
+	if validate_NOF == nil {
+		init_validate_count()
 	}
 
 	// Initialize validate_EXACT if not already initialized.
@@ -4102,9 +4109,6 @@ func Validate(
 		"$MERGE":  nil,
 		"$EACH":   nil,
 		"$PACK":   nil,
-		"$BT":     nil,
-		"$DS":     nil,
-		"$WHEN":   nil,
 
 		// Add validation commands
 		"$STRING":   validate_STRING,
@@ -4118,12 +4122,11 @@ func Validate(
 		"$LIST":     validate_TYPE,
 		"$FUNCTION": validate_TYPE,
 		"$INSTANCE": validate_TYPE,
-		"$OBJECT":   validate_OBJECT,
-		"$ARRAY":    validate_ARRAY,
 		"$ANY":      validate_ANY,
 		"$CHILD":    validate_CHILD,
-		"$ONE":      validate_ONE,
 		"$EXACT":    validate_EXACT,
+		"$NOF":      validate_NOF,
+		"$ALL":      validate_ALL,
 	}
 
 	// Add any extra validation commands
@@ -4155,8 +4158,16 @@ func Validate(
 		validationFn = makeValidation(true)
 	}
 
-	// Run the transformation with validation and _validatehandler
-	out := TransformModifyHandler(data, spec, store, validationFn, _validatehandler, errs, meta)
+	// A spec that names an unknown checker validates nothing.
+	numerrs := len(errs.List)
+	_checknames(spec, store, []string{}, errs)
+
+	var out any
+	if numerrs < len(errs.List) {
+		out = Clone(data)
+	} else {
+		out = TransformModifyHandler(data, spec, store, validationFn, _validatehandler, errs, meta)
+	}
 
 	var err error
 	generr := 0 < len(errs.List) && collecterrs == nil
@@ -4420,8 +4431,8 @@ func validateCollectExact(
 		errs = ListRefCreate[any]()
 	}
 
-	if validate_ONE == nil {
-		init_validate_ONE()
+	if validate_NOF == nil {
+		init_validate_count()
 	}
 	if validate_EXACT == nil {
 		init_validate_EXACT()
@@ -4435,9 +4446,6 @@ func validateCollectExact(
 		"$MERGE":  nil,
 		"$EACH":   nil,
 		"$PACK":   nil,
-		"$BT":     nil,
-		"$DS":     nil,
-		"$WHEN":   nil,
 
 		"$STRING":   validate_STRING,
 		"$NUMBER":   validate_TYPE,
@@ -4450,12 +4458,11 @@ func validateCollectExact(
 		"$LIST":     validate_TYPE,
 		"$FUNCTION": validate_TYPE,
 		"$INSTANCE": validate_TYPE,
-		"$OBJECT":   validate_OBJECT,
-		"$ARRAY":    validate_ARRAY,
 		"$ANY":      validate_ANY,
 		"$CHILD":    validate_CHILD,
-		"$ONE":      validate_ONE,
 		"$EXACT":    validate_EXACT,
+		"$NOF":      validate_NOF,
+		"$ALL":      validate_ALL,
 	}
 
 	for k, fn := range extra {
@@ -4463,6 +4470,13 @@ func validateCollectExact(
 	}
 
 	store["$ERRS"] = errs
+
+	// A spec that names an unknown checker validates nothing.
+	numerrs := len(errs.List)
+	_checknames(spec, store, []string{}, errs)
+	if numerrs < len(errs.List) {
+		return
+	}
 
 	meta := map[string]any{S_BEXACT: true}
 	TransformModifyHandler(data, spec, store, makeValidation(true), _validatehandler, errs, meta)
@@ -4539,6 +4553,474 @@ func Select(children any, query any) []any {
 	return results
 }
 
+// Condensed structures
+// ====================
+
+const CONDENSE_VERSION = 1
+
+// Node kinds: the first element of every node encoding.
+const (
+	CONDENSE_MAP = iota
+	CONDENSE_LIST
+	CONDENSE_STR
+	CONDENSE_NUM
+	CONDENSE_TRUE
+	CONDENSE_FALSE
+	CONDENSE_NULL
+)
+
+const (
+	S_condense = "$condense"
+	S_condsym  = "sym"
+	S_condnode = "node"
+	S_condroot = "root"
+)
+
+var errCondensedImmutable = errors.New(
+	"struct: condensed structures are immutable - expand() first, then modify the copy")
+
+// The version must match, not merely be numeric: a future profile would
+// otherwise be decoded under this one's schema.
+func IsCondensed(val any) bool {
+	m, ok := val.(map[string]any)
+	if !ok {
+		return false
+	}
+	version, verr := _toFloat64(m[S_condense])
+	_, rerr := _toFloat64(m[S_condroot])
+	return nil == verr && CONDENSE_VERSION == version &&
+		IsList(m[S_condsym]) && IsList(m[S_condnode]) && nil == rerr
+}
+
+// Condense any JSON-shaped node. Pure: the same input always produces the
+// same result, on every port.
+func Condense(val any) any {
+	// Pass one: every distinct map key and string value, once, sorted. Byte
+	// order is code-point order in UTF-8.
+	symset := map[string]bool{}
+	var collect func(n any)
+	collect = func(n any) {
+		if m, ok := n.(map[string]any); ok {
+			for k, v := range m {
+				symset[k] = true
+				collect(v)
+			}
+		} else if IsList(n) {
+			for _, v := range _listify(n) {
+				collect(v)
+			}
+		} else if s, ok := n.(string); ok {
+			symset[s] = true
+		}
+	}
+	collect(val)
+
+	syms := make([]string, 0, len(symset))
+	for s := range symset {
+		syms = append(syms, s)
+	}
+	sort.Strings(syms)
+
+	sym := make([]any, len(syms))
+	symid := make(map[string]int, len(syms))
+	for i, s := range syms {
+		sym[i] = s
+		symid[s] = i
+	}
+
+	// Pass two: build post-order, interning on the encoding, so identical
+	// subtrees are one node by the time a parent refers to them.
+	node := []any{}
+	seen := map[string]int{}
+
+	intern := func(enc []any) int {
+		enckey := _condenseKey(enc)
+		if hit, has := seen[enckey]; has {
+			return hit
+		}
+		idx := len(node)
+		node = append(node, enc)
+		seen[enckey] = idx
+		return idx
+	}
+
+	var build func(n any) int
+	build = func(n any) int {
+		if m, ok := n.(map[string]any); ok {
+			enc := []any{CONDENSE_MAP}
+			// KeysOf sorts by byte, which is code-point order in UTF-8, so the
+			// key ids ascend and lookup can bisect.
+			for _, k := range KeysOf(m) {
+				enc = append(enc, symid[k], build(m[k]))
+			}
+			return intern(enc)
+		}
+		if IsList(n) {
+			enc := []any{CONDENSE_LIST}
+			for _, v := range _listify(n) {
+				enc = append(enc, build(v))
+			}
+			return intern(enc)
+		}
+		if s, ok := n.(string); ok {
+			return intern([]any{CONDENSE_STR, symid[s]})
+		}
+		if _, err := _toFloat64(n); nil == err {
+			return intern([]any{CONDENSE_NUM, n})
+		}
+		if b, ok := n.(bool); ok {
+			if b {
+				return intern([]any{CONDENSE_TRUE})
+			}
+			return intern([]any{CONDENSE_FALSE})
+		}
+		return intern([]any{CONDENSE_NULL})
+	}
+
+	root := build(val)
+
+	return map[string]any{
+		S_condense: CONDENSE_VERSION,
+		S_condsym:  sym,
+		S_condnode: node,
+		S_condroot: root,
+	}
+}
+
+// The value a condensed structure stands for. Any other value comes back
+// unchanged, so a caller holding either shape can call Expand.
+func Expand(cond any) any {
+	if !IsCondensed(cond) {
+		return cond
+	}
+	return _condenseMaterialise(cond, _condenseInt(cond.(map[string]any)[S_condroot]))
+}
+
+// A cursor into a condensed structure. Reads resolve by integer index and
+// touch only the nodes on the path, so the cost of a lookup follows path
+// depth and result size, never total structure size.
+type CondensedView struct {
+	cond  any
+	start int
+	memo  map[int]any
+}
+
+// CondenseView starts at node opts[0] when given, else at the root. Views
+// made with At share opts[1], the memo that Ref reads.
+func CondenseView(cond any, opts ...any) *CondensedView {
+	start := -1
+	if 0 < len(opts) && nil != denoval(opts[0]) {
+		start = _condenseInt(opts[0])
+	} else if IsCondensed(cond) {
+		start = _condenseInt(cond.(map[string]any)[S_condroot])
+	}
+
+	var memo map[int]any
+	if 1 < len(opts) {
+		memo, _ = opts[1].(map[int]any)
+	}
+	if nil == memo {
+		memo = map[int]any{}
+	}
+
+	return &CondensedView{cond: cond, start: start, memo: memo}
+}
+
+// The value at path, materialised: a container comes back as a copy.
+func (v *CondensedView) Get(path ...any) any {
+	return _condenseMaterialise(v.cond, v.resolve(path))
+}
+
+// The key names at path, with no value decoded.
+func (v *CondensedView) Keys(path ...any) []string {
+	at := v.resolve(path)
+	if 0 > at {
+		return []string{}
+	}
+	return _condenseKeys(v.cond, at)
+}
+
+func (v *CondensedView) Has(path ...any) bool {
+	return 0 <= v.resolve(path)
+}
+
+// A cursor at path, sharing this view's memo. Nothing is decoded.
+func (v *CondensedView) At(path ...any) *CondensedView {
+	return CondenseView(v.cond, v.resolve(path), v.memo)
+}
+
+func (v *CondensedView) Value() any {
+	return _condenseMaterialise(v.cond, v.start)
+}
+
+func (v *CondensedView) Size() int {
+	enc, has := _condenseEnc(v.cond, v.start)
+	if !has {
+		return 0
+	}
+	switch _condenseKind(enc) {
+	case CONDENSE_MAP:
+		return (len(enc) - 1) / 2
+	case CONDENSE_LIST:
+		return len(enc) - 1
+	}
+	return 0
+}
+
+func (v *CondensedView) Exists() bool {
+	return 0 <= v.start
+}
+
+// Unlike Value and Get, a shared materialisation: the same container for the
+// same node from every view on the memo, so a change to it reaches them all.
+func (v *CondensedView) Ref() any {
+	if out, has := v.memo[v.start]; has {
+		return out
+	}
+	out := _condenseMaterialise(v.cond, v.start)
+	v.memo[v.start] = out
+	return out
+}
+
+func (v *CondensedView) resolve(path []any) int {
+	var p any
+	if 0 < len(path) {
+		p = path[0]
+	}
+	parts, ok := _condenseParts(p)
+	if !ok {
+		return -1
+	}
+	return _condenseResolve(v.cond, v.start, parts)
+}
+
+// The interning key of a node encoding. Every element is a number, keyed by
+// value, so an integer and a decimal with the same value share a node.
+func _condenseKey(enc []any) string {
+	parts := make([]string, len(enc))
+	for i, e := range enc {
+		f, _ := _toFloat64(e)
+		if 0 == f {
+			f = 0 // Negative zero keys as zero.
+		}
+		parts[i] = strconv.FormatFloat(f, 'g', -1, 64)
+	}
+	return strings.Join(parts, ",")
+}
+
+// A kind, symbol id or node index from an encoding, or -1 for anything but a
+// non-negative integer.
+func _condenseInt(v any) int {
+	f, err := _toFloat64(v)
+	if nil != err || f != math.Trunc(f) || f < 0 || f > math.MaxInt32 {
+		return -1
+	}
+	return int(f)
+}
+
+func _condenseTable(cond any, name string) []any {
+	m, _ := cond.(map[string]any)
+	return _listify(m[name])
+}
+
+// The encoding of node idx, and whether there is such a node.
+func _condenseEnc(cond any, idx int) ([]any, bool) {
+	node := _condenseTable(cond, S_condnode)
+	if idx < 0 || idx >= len(node) || nil == node[idx] {
+		return nil, false
+	}
+	return _listify(node[idx]), true
+}
+
+func _condenseKind(enc []any) int {
+	if 0 == len(enc) {
+		return -1
+	}
+	return _condenseInt(enc[0])
+}
+
+func _condenseSymAt(sym []any, v any) (string, bool) {
+	i := _condenseInt(v)
+	if i < 0 || i >= len(sym) {
+		return S_MT, false
+	}
+	s, ok := sym[i].(string)
+	return s, ok
+}
+
+// Resolve a symbol to its id by bisecting the sorted symbol table. -1 when
+// the string occurs nowhere in the structure, a fast negative for a key.
+func _condenseSymId(cond any, key string) int {
+	sym := _condenseTable(cond, S_condsym)
+	lo, hi := 0, len(sym)-1
+	for lo <= hi {
+		mid := (lo + hi) >> 1
+		s, _ := sym[mid].(string)
+		if s == key {
+			return mid
+		}
+		if s < key {
+			lo = mid + 1
+		} else {
+			hi = mid - 1
+		}
+	}
+	return -1
+}
+
+// The node index of key inside node idx, or -1. Touches only this node.
+func _condenseChild(cond any, idx int, key string) int {
+	enc, has := _condenseEnc(cond, idx)
+	if !has {
+		return -1
+	}
+
+	switch _condenseKind(enc) {
+	case CONDENSE_MAP:
+		symid := _condenseSymId(cond, key)
+		if 0 > symid {
+			return -1
+		}
+		// Pairs live at [1,2], [3,4], ... with keys ascending: bisect the pairs.
+		lo, hi := 0, (len(enc)-1)/2-1
+		for lo <= hi {
+			mid := (lo + hi) >> 1
+			k := _condenseInt(enc[1+mid*2])
+			if k == symid {
+				return _condenseInt(enc[2+mid*2])
+			}
+			if k < symid {
+				lo = mid + 1
+			} else {
+				hi = mid - 1
+			}
+		}
+
+	case CONDENSE_LIST:
+		if i, ok := _listkey(key); ok && 0 <= i && i < len(enc)-1 {
+			return _condenseInt(enc[1+i])
+		}
+	}
+
+	return -1
+}
+
+// A path as parts: a list is its parts, a string splits on dots, no path is
+// no parts, and any other value is one part, its string form. False when a
+// list part is neither a string nor a number, which names no child.
+func _condenseParts(path any) ([]string, bool) {
+	path = denoval(path)
+	if IsList(path) {
+		list := _listify(path)
+		parts := make([]string, len(list))
+		for i, p := range list {
+			ps, ok := _keystr(p)
+			if !ok {
+				return nil, false
+			}
+			parts[i] = ps
+		}
+		return parts, true
+	}
+	if s, ok := path.(string); ok {
+		if S_MT == s {
+			return nil, true
+		}
+		return strings.Split(s, S_DT), true
+	}
+	if nil == path {
+		return nil, true
+	}
+	return []string{Stringify(path)}, true
+}
+
+// Walk path parts from a starting node, returning the node index or -1.
+func _condenseResolve(cond any, idx int, parts []string) int {
+	at := idx
+	for _, part := range parts {
+		if 0 > at {
+			return -1
+		}
+		if S_MT == part {
+			continue
+		}
+		at = _condenseChild(cond, at, part)
+	}
+	return at
+}
+
+// The value of node idx as a fresh tree, nil when there is no such node.
+// Materialisations never share a container, though the condensed form shares
+// nodes.
+func _condenseMaterialise(cond any, idx int) any {
+	sym := _condenseTable(cond, S_condsym)
+	node := _condenseTable(cond, S_condnode)
+
+	var rebuild func(i int) any
+	rebuild = func(i int) any {
+		if i < 0 || i >= len(node) || nil == node[i] {
+			return nil
+		}
+		enc := _listify(node[i])
+		switch _condenseKind(enc) {
+		case CONDENSE_MAP:
+			out := map[string]any{}
+			for j := 1; j+1 < len(enc); j += 2 {
+				if k, ok := _condenseSymAt(sym, enc[j]); ok {
+					out[k] = rebuild(_condenseInt(enc[j+1]))
+				}
+			}
+			return out
+		case CONDENSE_LIST:
+			out := make([]any, 0, len(enc)-1)
+			for _, e := range enc[1:] {
+				out = append(out, rebuild(_condenseInt(e)))
+			}
+			return out
+		case CONDENSE_STR:
+			if 1 < len(enc) {
+				if s, ok := _condenseSymAt(sym, enc[1]); ok {
+					return s
+				}
+			}
+		case CONDENSE_NUM:
+			if 1 < len(enc) {
+				return enc[1]
+			}
+		case CONDENSE_TRUE:
+			return true
+		case CONDENSE_FALSE:
+			return false
+		}
+		return nil
+	}
+
+	return rebuild(idx)
+}
+
+// The keys of node idx, without materialising any of its values.
+func _condenseKeys(cond any, idx int) []string {
+	out := []string{}
+	enc, has := _condenseEnc(cond, idx)
+	if !has {
+		return out
+	}
+	switch _condenseKind(enc) {
+	case CONDENSE_MAP:
+		sym := _condenseTable(cond, S_condsym)
+		for j := 1; j < len(enc); j += 2 {
+			if k, ok := _condenseSymAt(sym, enc[j]); ok {
+				out = append(out, k)
+			}
+		}
+	case CONDENSE_LIST:
+		for j := 1; j < len(enc); j++ {
+			out = append(out, strconv.Itoa(j-1))
+		}
+	}
+	return out
+}
+
 // Internal utilities
 // ==================
 
@@ -4582,6 +5064,257 @@ func _invalidTypeMsg(path []string, needtype string, vt string, v any, whence ..
 	return message + "."
 }
 
+// Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
+var validateNames = []string{
+	"$TOP",
+	"$SPEC",
+	"$BT",
+	"$DS",
+	"$WHEN",
+	"$ANNO",
+	"$REF",
+	"$FORMAT",
+	"$APPLY",
+	"$OPEN",
+}
+
+// Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
+func _checknames(spec any, store map[string]any, path []string, errs *ListRef[any]) {
+	name := _refname(spec)
+	if "" != name {
+		if _unknownname(name, store) {
+			errs.Append("Unknown validator " + name + " at field " + Pathify(path) + ".")
+		}
+		return
+	}
+
+	if IsList(spec) && "$EXACT" == _refname(GetProp(spec, 0)) {
+		return
+	}
+
+	for _, key := range KeysOf(spec) {
+		if IsMap(spec) {
+			_checknames(key, store, path, errs)
+		}
+		kpath := append(append(make([]string, 0, len(path)+1), path...), key)
+		_checknames(GetProp(spec, key), store, kpath, errs)
+	}
+}
+
+// The name a whole-string reference gives, when it is a checker name in any
+// case, else "".
+func _refname(val any) string {
+	if s, ok := val.(string); ok {
+		m := reInjectionFull.FindStringSubmatch(s)
+		if nil != m && reCheckerName.MatchString(strings.ToUpper(m[1])) {
+			return m[1]
+		}
+	}
+	return ""
+}
+
+// Unknown: undefined and upper case, or a defined name in another case. Nil disables a name.
+func _unknownname(name string, store map[string]any) bool {
+	known := func(n string) bool {
+		return slices.Contains(validateNames, n) || nil != store[n]
+	}
+	upper := strings.ToUpper(name)
+	return !known(name) && (upper == name || known(upper))
+}
+
+// The value stored at key, nil included, or NOVAL when val holds no such
+// key. GetProp reads both as nil.
+func _lookup(val any, key any) any {
+	return _readprop(val, key)
+}
+
+// The data value at a list directive's slot: nil when null, NOVAL when
+// absent. The directive's own Dparent was read with GetProp.
+func _slotval(inj *Injection) any {
+	prior := inj.Prior
+	if nil == prior {
+		return inj.Dparent
+	}
+	return _lookup(prior.Dparent, prior.Key)
+}
+
+// Replace a list directive's list with its slot value. setval deletes on
+// nil, so a null is set directly, and NOVAL deletes.
+func _setslot(inj *Injection, cval any) {
+	if nil == cval {
+		SetProp(GetElem(inj.Nodes.List, -2), GetElem(inj.Path.List, -2), nil)
+	} else {
+		inj.setval(denoval(cval), 2)
+	}
+}
+
+// Directive arguments for a message: stringified, with checker names
+// lower-cased.
+func _valdesc(tvals []any) string {
+	descs := make([]string, len(tvals))
+	for i, tval := range tvals {
+		descs[i] = Stringify(tval)
+	}
+	return reTransformName.ReplaceAllStringFunc(strings.Join(descs, ", "),
+		func(m string) string { return strings.ToLower(m[2 : len(m)-1]) })
+}
+
+// JSON equality: numbers by value, lists in order, maps by key in any order.
+func _deepequal(a any, b any) bool {
+	atype := Typify(a)
+	btype := Typify(b)
+
+	if 0 < (T_number&atype) && 0 < (T_number&btype) {
+		af, aerr := _toFloat64(a)
+		bf, berr := _toFloat64(b)
+		return nil == aerr && nil == berr && af == bf
+	}
+
+	if atype != btype {
+		return false
+	}
+
+	if IsNode(a) || IsNode(b) {
+		if !IsNode(a) || !IsNode(b) {
+			return false
+		}
+
+		akeys := KeysOf(a)
+		bkeys := KeysOf(b)
+		if len(akeys) != len(bkeys) {
+			return false
+		}
+
+		for kI, k := range akeys {
+			if k != bkeys[kI] || !_deepequal(_lookup(a, k), _lookup(b, k)) {
+				return false
+			}
+		}
+
+		return true
+	}
+
+	// A function or instance equals only itself; a value Go cannot compare
+	// equals nothing.
+	switch reflect.ValueOf(a).Kind() {
+	case reflect.Func:
+		return reflect.ValueOf(a).Pointer() == reflect.ValueOf(b).Pointer()
+	case reflect.Invalid, reflect.Bool, reflect.String, reflect.Pointer:
+		return a == b
+	}
+
+	return false
+}
+
+// Every member val has is in out, unchanged. A member only out has is a
+// default the spec supplied, and is ignored.
+func _keeps(val any, out any) bool {
+	if NOVAL == val {
+		return true
+	}
+
+	if !IsNode(val) || IsList(val) != IsList(out) || !IsNode(out) {
+		return _deepequal(val, out)
+	}
+
+	for _, k := range KeysOf(val) {
+		if !_keeps(_lookup(val, k), _lookup(out, k)) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// A spec admits a value when validating the value against it finds no error
+// and gives back the value as it is.
+func _admits(val any, spec any, inj *Injection, store any) bool {
+	terrs := ListRefCreate[any]()
+
+	vstore, _ := Merge([]any{map[string]any{}, store}, 1).(map[string]any)
+	if nil == vstore {
+		vstore = map[string]any{}
+	}
+	vstore[S_DTOP] = val
+
+	// Validate reads its meta from extra.
+	if nil != inj.Meta {
+		vstore["meta"] = inj.Meta
+	}
+
+	out, _ := Validate(val, spec, &Injection{Extra: vstore, Errs: terrs})
+
+	return 0 == len(terrs.List) && _keeps(val, out)
+}
+
+// The bounds of a $NOF count, and the words for it, which are "" when the
+// count is invalid. Without a max, the bound is the number of specs.
+func _nofcount(count any, numtvals int) (int, int, string) {
+	isnat := func(n any) bool {
+		f, err := _toFloat64(n)
+		return 0 < (T_integer&Typify(n)) && nil == err && 0 <= f
+	}
+	nat := func(n any) int {
+		f, _ := _toFloat64(n)
+		return int(f)
+	}
+
+	if isnat(count) {
+		n := nat(count)
+		if 0 == n {
+			return n, n, "none"
+		}
+		return n, n, "exactly " + strconv.Itoa(n)
+	}
+
+	cmin := _lookup(count, "min")
+	cmax := _lookup(count, "max")
+
+	numkeys := 0
+	if NOVAL != cmin {
+		numkeys++
+	}
+	if NOVAL != cmax {
+		numkeys++
+	}
+
+	valid := IsMap(count) &&
+		0 < Size(count) &&
+		Size(count) == numkeys &&
+		(NOVAL == cmin || isnat(cmin)) &&
+		(NOVAL == cmax || isnat(cmax)) &&
+		(NOVAL == cmin || NOVAL == cmax || nat(cmin) <= nat(cmax))
+
+	if !valid {
+		return 0, 0, ""
+	}
+
+	lo := 0
+	if NOVAL != cmin {
+		lo = nat(cmin)
+	}
+
+	hi := numtvals
+	if NOVAL != cmax {
+		hi = nat(cmax)
+	}
+
+	desc := ""
+	if NOVAL == cmax {
+		desc = "at least " + strconv.Itoa(lo)
+	} else if 0 == hi {
+		desc = "none"
+	} else if NOVAL == cmin {
+		desc = "at most " + strconv.Itoa(hi)
+	} else if lo == hi {
+		desc = "exactly " + strconv.Itoa(lo)
+	} else {
+		desc = strconv.Itoa(lo) + " to " + strconv.Itoa(hi)
+	}
+
+	return lo, hi, desc
+}
+
 // StrKey converts different types of keys to string representation.
 // String keys are returned as is.
 // Number keys are converted to strings.
@@ -4616,20 +5349,6 @@ func StrKey(key any) string {
 	default:
 		return S_MT
 	}
-}
-
-func _resolveStrings(input []any) []string {
-	var result []string
-
-	for _, v := range input {
-		if str, ok := v.(string); ok {
-			result = append(result, str)
-		} else {
-			result = append(result, StrKey(v))
-		}
-	}
-
-	return result
 }
 
 // Extract a bare []any from either a []any or a *ListRef[any].
@@ -4734,23 +5453,6 @@ func _toFloat64(val any) (float64, error) {
 	default:
 		return 0, fmt.Errorf("not a numeric type")
 	}
-}
-
-// _parseInt is a helper to convert a string to int safely.
-func _parseInt(s string) (int, error) {
-	var x int
-	sign := 1
-	for i, c := range s {
-		if c == '-' && i == 0 {
-			sign = -1
-			continue
-		}
-		if c < '0' || c > '9' {
-			return 0, &ParseIntError{s}
-		}
-		x = 10*x + int(c-'0')
-	}
-	return x * sign, nil
 }
 
 type ParseIntError struct{ input string }

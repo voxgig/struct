@@ -13,6 +13,8 @@
 #include <cctype>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <iomanip>
 #include <regex>
 #include <sstream>
@@ -76,10 +78,6 @@ inline const std::string& S_BOPEN() {
   return s;
 }
 
-inline const std::regex& R_INTEGER_KEY() {
-  static const std::regex r("^[-0-9]+$");
-  return r;
-}
 inline const std::regex& R_META_PATH() {
   static const std::regex r("^([^$]+)\\$([=~])(.+)$");
   return r;
@@ -203,6 +201,13 @@ inline Value inject(const Value& val, const Value& store, Injection* injdef = nu
 inline Value transform(const Value& data, const Value& spec, const Value& options = Value::undef());
 inline Value validate(const Value& data, const Value& spec, const Value& options = Value::undef());
 inline std::vector<Value> select(const Value& children, const Value& query);
+inline bool iscondensed(const Value& val = Value::undef());
+
+inline const std::string& S_IMMUTABLE() {
+  static const std::string s =
+      "struct: condensed structures are immutable - expand() first, then modify the copy";
+  return s;
+}
 
 // ===========================================================================
 // strkey / getprop / setprop / delprop / getelem
@@ -226,12 +231,65 @@ inline std::string strkey(const Value& key) {
   return S_MT();
 }
 
+namespace detail {
+
+// A list key this far from zero is past any list: a write appends or prepends, a read misses.
+constexpr int64_t LISTKEY_HUGE = 1000000000000000000;
+
+// ^(0|-?[1-9][0-9]*)$, the form String(n) gives an integer n, as that integer. So "01",
+// "+1", " 1", "1.0" and "-0" are not list keys.
+inline bool canon_listindex(const std::string& key, int64_t& index) {
+  size_t j = !key.empty() && '-' == key[0] ? 1 : 0;
+  if (j == key.size() || ('0' == key[j] && 1 < key.size()))
+    return false;
+  int64_t i = 0;
+  for (; j < key.size(); j++) {
+    if (key[j] < '0' || '9' < key[j])
+      return false;
+    i = i < LISTKEY_HUGE / 10 ? i * 10 + (key[j] - '0') : LISTKEY_HUGE;
+  }
+  index = '-' == key[0] ? -i : i;
+  return true;
+}
+
+// The canonical _listkey: an integral number, or a string canon_listindex accepts.
+inline bool list_key(const Value& key, int64_t& index) {
+  if (key.is_int()) {
+    index = key.as_int();
+    return true;
+  }
+  if (key.is_double()) {
+    double d = key.as_double();
+    if (!std::isfinite(d) || std::floor(d) != d)
+      return false;
+    if (std::fabs(d) < static_cast<double>(LISTKEY_HUGE))
+      index = static_cast<int64_t>(d);
+    else
+      index = 0 < d ? LISTKEY_HUGE : -LISTKEY_HUGE;
+    return true;
+  }
+  return key.is_string() && canon_listindex(key.as_string(), index);
+}
+
+// The element a list read selects, else -1. Only getelem counts a negative key from the end.
+inline int64_t list_readindex(const Value& key) {
+  int64_t i = -1;
+  return list_key(key, i) && 0 <= i ? i : -1;
+}
+
+// A map reads a string or number key; any other key names no member.
+inline bool map_readkey(const Value& key) {
+  return key.is_string() || key.is_number();
+}
+
+} // namespace detail
+
 inline Value getprop(const Value& val, const Value& key, const Value& alt) {
   if (val.is_undef() || key.is_undef())
     return alt;
   if (val.is_map()) {
     auto m = val.as_map();
-    if (!m)
+    if (!m || !detail::map_readkey(key))
       return alt;
     std::string sk = strkey(key);
     Value* found = m->find(sk);
@@ -247,42 +305,16 @@ inline Value getprop(const Value& val, const Value& key, const Value& alt) {
     auto l = val.as_list();
     if (!l)
       return alt;
-    int idx;
-    if (key.is_int()) {
-      idx = static_cast<int>(key.as_int());
-    } else if (key.is_string()) {
-      // Match TS: only accept strings that match /^[-0-9]+$/ entirely.
-      if (!std::regex_match(key.as_string(), R_INTEGER_KEY()))
-        return alt;
-      try {
-        idx = std::stoi(key.as_string());
-      } catch (...) {
-        return alt;
-      }
-    } else if (key.is_double()) {
-      idx = static_cast<int>(key.as_double());
-    } else {
+    int64_t idx = detail::list_readindex(key);
+    if (idx < 0 || idx >= static_cast<int64_t>(l->size()))
       return alt;
-    }
-    if (idx < 0 || idx >= static_cast<int>(l->size()))
-      return alt;
-    Value v = (*l)[idx];
+    Value v = (*l)[static_cast<size_t>(idx)];
     // Group A: a stored JSON null counts as "no value" — substitute the alt.
     if (v.is_undef() || v.is_null())
       return alt;
     return v;
   }
   return alt;
-}
-
-// Match TS regex /^[-0-9]+$/ check.
-inline bool is_integer_key_string(const Value& key) {
-  if (key.is_int() || key.is_double())
-    return true;
-  if (key.is_string()) {
-    return std::regex_match(key.as_string(), R_INTEGER_KEY());
-  }
-  return false;
 }
 
 inline Value getelem(const Value& val, const Value& key, const Value& alt) {
@@ -294,27 +326,13 @@ inline Value getelem(const Value& val, const Value& key, const Value& alt) {
   }
   if (val.is_list()) {
     auto l = val.as_list();
-    int nkey;
-    if (key.is_int()) {
-      nkey = static_cast<int>(key.as_int());
-    } else if (key.is_string()) {
-      if (!is_integer_key_string(key))
-        return alt;
-      try {
-        nkey = std::stoi(key.as_string());
-      } catch (...) {
-        return alt;
-      }
-    } else if (key.is_double()) {
-      nkey = static_cast<int>(key.as_double());
-    } else {
+    int64_t size = static_cast<int64_t>(l->size());
+    int64_t nkey = -1;
+    if (detail::list_key(key, nkey) && nkey < 0)
+      nkey += size;
+    if (nkey < 0 || nkey >= size)
       return alt;
-    }
-    if (nkey < 0)
-      nkey = static_cast<int>(l->size()) + nkey;
-    if (nkey < 0 || nkey >= static_cast<int>(l->size()))
-      return alt;
-    out = (*l)[nkey];
+    out = (*l)[static_cast<size_t>(nkey)];
   }
   // Group A: a stored JSON null at the slot counts as "no value" (canonical
   // `null == out` is true for both undefined and null) — substitute the alt.
@@ -335,32 +353,15 @@ inline Value lookup_v(const Value& val, const Value& key) {
     auto l = val.as_list();
     if (!l)
       return Value::undef();
-    int idx;
-    if (key.is_int()) {
-      idx = static_cast<int>(key.as_int());
-    } else if (key.is_double()) {
-      idx = static_cast<int>(key.as_double());
-    } else if (key.is_string()) {
-      if (!std::regex_match(key.as_string(), R_INTEGER_KEY()))
-        return Value::undef();
-      try {
-        idx = std::stoi(key.as_string());
-      } catch (...) {
-        return Value::undef();
-      }
-    } else {
+    int64_t idx = detail::list_readindex(key);
+    if (idx < 0 || idx >= static_cast<int64_t>(l->size()))
       return Value::undef();
-    }
-    if (idx < 0)
-      idx = static_cast<int>(l->size()) + idx;
-    if (idx < 0 || idx >= static_cast<int>(l->size()))
-      return Value::undef();
-    Value v = (*l)[idx];
+    Value v = (*l)[static_cast<size_t>(idx)];
     return v.is_undef() ? Value::undef() : v;
   }
   if (val.is_map()) {
     auto m = val.as_map();
-    if (!m)
+    if (!m || !detail::map_readkey(key))
       return Value::undef();
     std::string sk = strkey(key);
     if (sk.empty())
@@ -376,6 +377,8 @@ inline Value lookup_v(const Value& val, const Value& key) {
 inline Value setprop(Value parent, const Value& key, const Value& val) {
   if (!iskey(key))
     return parent;
+  if (iscondensed(parent))
+    throw std::runtime_error(S_IMMUTABLE());
   if (parent.is_map()) {
     auto m = parent.as_map();
     std::string sk = strkey(key);
@@ -384,25 +387,15 @@ inline Value setprop(Value parent, const Value& key, const Value& val) {
   }
   if (parent.is_list()) {
     auto l = parent.as_list();
-    int idx;
-    if (key.is_int())
-      idx = static_cast<int>(key.as_int());
-    else if (key.is_string()) {
-      try {
-        idx = std::stoi(key.as_string());
-      } catch (...) {
-        return parent;
-      }
-    } else if (key.is_double())
-      idx = static_cast<int>(key.as_double());
-    else
+    int64_t idx = 0;
+    if (!detail::list_key(key, idx))
       return parent;
 
     if (idx >= 0) {
-      if (idx >= static_cast<int>(l->size())) {
+      if (idx >= static_cast<int64_t>(l->size())) {
         l->push_back(val);
       } else {
-        (*l)[idx] = val;
+        (*l)[static_cast<size_t>(idx)] = val;
       }
     } else {
       l->insert(l->begin(), val);
@@ -415,28 +408,17 @@ inline Value setprop(Value parent, const Value& key, const Value& val) {
 inline Value delprop(Value parent, const Value& key) {
   if (!iskey(key))
     return parent;
+  if (iscondensed(parent))
+    throw std::runtime_error(S_IMMUTABLE());
   if (parent.is_map()) {
     parent.as_map()->erase(strkey(key));
     return parent;
   }
   if (parent.is_list()) {
     auto l = parent.as_list();
-    int idx;
-    if (key.is_int())
-      idx = static_cast<int>(key.as_int());
-    else if (key.is_string()) {
-      try {
-        idx = std::stoi(key.as_string());
-      } catch (...) {
-        return parent;
-      }
-    } else if (key.is_double())
-      idx = static_cast<int>(key.as_double());
-    else
-      return parent;
-    if (idx >= 0 && idx < static_cast<int>(l->size())) {
+    int64_t idx = -1;
+    if (detail::list_key(key, idx) && 0 <= idx && idx < static_cast<int64_t>(l->size()))
       l->erase(l->begin() + idx);
-    }
     return parent;
   }
   return parent;
@@ -493,7 +475,8 @@ inline std::vector<Value> items(const Value& v) {
   for (const auto& key : keysof(v)) {
     auto pair = std::make_shared<List>();
     pair->push_back(Value(key));
-    pair->push_back(getprop(v, Value(key)));
+    // Canonical reads val[k]: a stored null is a value here (Group B).
+    pair->push_back(lookup_v(v, Value(key)));
     out.push_back(Value(std::move(pair)));
   }
   return out;
@@ -1241,47 +1224,27 @@ inline Value merge_v(const Value& list, int maxdepth) {
 }
 
 // ===========================================================================
-// pathParts — shared helper for getpath / setpath
+// pathParts — a string path's parts, shared by getpath / setpath
 // ===========================================================================
 
 namespace detail {
-inline std::vector<std::string> path_parts(const Value& path) {
+inline std::vector<std::string> path_parts(const std::string& s) {
   std::vector<std::string> out;
-  if (path.is_string()) {
-    const std::string& s = path.as_string();
-    if (s.empty()) {
-      out.push_back("");
-      return out;
-    }
-    size_t pos = 0;
-    while (pos <= s.size()) {
-      size_t dot = s.find('.', pos);
-      if (dot == std::string::npos) {
-        out.push_back(s.substr(pos));
-        break;
-      }
-      out.push_back(s.substr(pos, dot - pos));
-      pos = dot + 1;
-    }
+  if (s.empty()) {
+    out.push_back("");
     return out;
   }
-  if (path.is_list()) {
-    auto l = path.as_list();
-    for (const auto& e : *l) {
-      if (e.is_string())
-        out.push_back(e.as_string());
-      else if (e.is_number())
-        out.push_back(strkey(e));
-      else
-        out.push_back(strkey(e));
+  size_t pos = 0;
+  while (pos <= s.size()) {
+    size_t dot = s.find('.', pos);
+    if (dot == std::string::npos) {
+      out.push_back(s.substr(pos));
+      break;
     }
-    return out;
+    out.push_back(s.substr(pos, dot - pos));
+    pos = dot + 1;
   }
-  if (path.is_number()) {
-    out.push_back(strkey(path));
-    return out;
-  }
-  return {};
+  return out;
 }
 } // namespace detail
 
@@ -1290,44 +1253,39 @@ inline std::vector<std::string> path_parts(const Value& path) {
 // ===========================================================================
 
 inline Value setpath_v(const Value& store, const Value& path, const Value& val) {
-  std::vector<std::string> parts;
-  bool path_is_list = path.is_list();
-  if (path.is_undef() || path.is_null())
+  if (iscondensed(store))
+    throw std::runtime_error(S_IMMUTABLE());
+
+  // The parts stay as given: setprop decides what a number or string key names.
+  std::vector<Value> parts;
+  if (path.is_string()) {
+    for (const auto& part : detail::path_parts(path.as_string()))
+      parts.emplace_back(part);
+  } else if (path.is_list()) {
+    parts.assign(path.as_list()->begin(), path.as_list()->end());
+  } else if (path.is_number()) {
+    parts.push_back(path);
+  } else {
     return Value::undef();
-  if (path.is_string())
-    parts = detail::path_parts(path);
-  else if (path.is_list())
-    parts = detail::path_parts(path);
-  else if (path.is_number())
-    parts.push_back(strkey(path));
-  else
-    return Value::undef();
+  }
   if (parts.empty())
     return Value::undef();
 
-  // String paths only create maps (TS: "Use a string list to create list parts").
-  // For list paths, decide list-vs-map by whether the next part is integer.
+  // A number next part makes a list; string paths only create maps.
   Value parent = store;
   for (size_t i = 0; i + 1 < parts.size(); i++) {
-    Value next = getprop(parent, Value(parts[i]));
+    Value next = getprop(parent, parts[i]);
     if (!isnode(next)) {
-      bool make_list = false;
-      if (path_is_list) {
-        // Check the original list for whether parts[i+1] came from a number.
-        Value el = getprop(path, Value(static_cast<int64_t>(i + 1)));
-        if (el.is_number())
-          make_list = true;
-      }
-      next = make_list ? Value(std::make_shared<List>()) : Value(std::shared_ptr<Map>(new Map()));
-      setprop(parent, Value(parts[i]), next);
+      next = 0 != (T_number & typify(parts[i + 1])) ? Value(std::make_shared<List>())
+                                                    : Value(std::shared_ptr<Map>(new Map()));
+      setprop(parent, parts[i], next);
     }
     parent = next;
   }
-  Value last_key(parts.back());
   if (is_delete(val)) {
-    delprop(parent, last_key);
+    delprop(parent, parts.back());
   } else {
-    setprop(parent, last_key, val);
+    setprop(parent, parts.back(), val);
   }
   return parent;
 }
@@ -1455,6 +1413,501 @@ public:
 };
 
 // ===========================================================================
+// condense / expand / iscondensed / condenseview
+// ===========================================================================
+
+namespace detail {
+
+constexpr int64_t CONDENSE_VERSION = 1;
+
+constexpr int64_t CONDENSE_MAP = 0;
+constexpr int64_t CONDENSE_LIST = 1;
+constexpr int64_t CONDENSE_STR = 2;
+constexpr int64_t CONDENSE_NUM = 3;
+constexpr int64_t CONDENSE_TRUE = 4;
+constexpr int64_t CONDENSE_FALSE = 5;
+constexpr int64_t CONDENSE_NULL = 6;
+
+inline const std::string& S_condense() {
+  static const std::string s = "$condense";
+  return s;
+}
+inline const std::string& S_condsym() {
+  static const std::string s = "sym";
+  return s;
+}
+inline const std::string& S_condnode() {
+  static const std::string s = "node";
+  return s;
+}
+inline const std::string& S_condroot() {
+  static const std::string s = "root";
+  return s;
+}
+
+// The integer a number holds: false for anything else, a fraction included.
+inline bool cond_int(const Value& v, int64_t& out) {
+  if (v.is_int()) {
+    out = v.as_int();
+    return true;
+  }
+  if (v.is_double()) {
+    double d = v.as_double();
+    if (std::floor(d) == d && -0x1p63 <= d && d < 0x1p63) {
+      out = static_cast<int64_t>(d);
+      return true;
+    }
+  }
+  return false;
+}
+
+// An index read from the format, or -1 when the value cannot be one.
+inline int64_t cond_idx(const Value& v) {
+  int64_t i = -1;
+  return cond_int(v, i) ? i : -1;
+}
+
+inline const List* cond_list(const Value& v) {
+  const auto* l = std::get_if<std::shared_ptr<List>>(&v.storage);
+  return l ? l->get() : nullptr;
+}
+
+inline const Value* cond_field(const Value& cond, const std::string& name) {
+  const auto* m = std::get_if<std::shared_ptr<Map>>(&cond.storage);
+  return m && *m ? (*m)->find(name) : nullptr;
+}
+
+inline const List* cond_fieldlist(const Value& cond, const std::string& name) {
+  const Value* f = cond_field(cond, name);
+  return f ? cond_list(*f) : nullptr;
+}
+
+inline int64_t cond_root(const Value& cond) {
+  const Value* root = cond_field(cond, S_condroot());
+  return root ? cond_idx(*root) : -1;
+}
+
+// Node idx's encoding; nullptr when it is absent or null.
+inline const Value* cond_enc(const Value& cond, int64_t idx) {
+  const List* node = cond_fieldlist(cond, S_condnode());
+  if (!node || idx < 0 || static_cast<uint64_t>(idx) >= node->size())
+    return nullptr;
+  const Value& enc = (*node)[static_cast<size_t>(idx)];
+  return enc.is_undef() || enc.is_null() ? nullptr : &enc;
+}
+
+inline int64_t cond_kind(const List* el) {
+  return el && !el->empty() ? cond_idx((*el)[0]) : -1;
+}
+
+// sym[id]; nullptr when id does not index sym.
+inline const Value* cond_sym(const Value& cond, const Value& id) {
+  const List* sym = cond_fieldlist(cond, S_condsym());
+  int64_t i = cond_idx(id);
+  return sym && 0 <= i && static_cast<uint64_t>(i) < sym->size() ? &(*sym)[static_cast<size_t>(i)]
+                                                                 : nullptr;
+}
+
+inline std::string cond_numstr(double d) {
+  char buf[40];
+  if (std::isnan(d))
+    return "NaN";
+  if (std::isinf(d))
+    return d < 0 ? "-Infinity" : "Infinity";
+  if (std::floor(d) == d && std::fabs(d) < 1e21) {
+    std::snprintf(buf, sizeof buf, "%.0f", 0 == d ? 0.0 : d);
+    return buf;
+  }
+  for (int p = 1; p <= 17; p++) {
+    std::snprintf(buf, sizeof buf, "%.*g", p, d);
+    if (std::strtod(buf, nullptr) == d)
+      break;
+  }
+  return buf;
+}
+
+// JS `'' + v`.
+inline std::string cond_str(const Value& v) {
+  if (v.is_string())
+    return v.as_string();
+  if (v.is_int())
+    return std::to_string(v.as_int());
+  if (v.is_double())
+    return cond_numstr(v.as_double());
+  if (v.is_bool())
+    return v.as_bool() ? "true" : "false";
+  if (v.is_null())
+    return "null";
+  if (v.is_undef())
+    return "undefined";
+  if (const List* l = cond_list(v)) {
+    std::string out;
+    for (size_t i = 0; i < l->size(); i++) {
+      if (0 < i)
+        out += ",";
+      if (!(*l)[i].is_undef() && !(*l)[i].is_null())
+        out += cond_str((*l)[i]);
+    }
+    return out;
+  }
+  return "[object Object]";
+}
+
+// sym[id] as a map key: its string form when it is not a string.
+inline std::string cond_keyname(const Value& cond, const Value& id) {
+  const Value* s = cond_sym(cond, id);
+  return s ? cond_str(*s) : "undefined";
+}
+
+// Code-point order: in UTF-8, std::string's unsigned byte order.
+inline int64_t cond_symid(const Value& cond, const std::string& key) {
+  const List* sym = cond_fieldlist(cond, S_condsym());
+  if (!sym)
+    return -1;
+  int64_t lo = 0;
+  int64_t hi = static_cast<int64_t>(sym->size()) - 1;
+  while (lo <= hi) {
+    int64_t mid = (lo + hi) / 2;
+    const Value& s = (*sym)[static_cast<size_t>(mid)];
+    int c = (s.is_string() ? s.as_string() : S_MT()).compare(key);
+    if (0 == c)
+      return mid;
+    if (0 > c)
+      lo = mid + 1;
+    else
+      hi = mid - 1;
+  }
+  return -1;
+}
+
+// The node index of key inside node idx, or -1. Touches only this node.
+inline int64_t cond_child(const Value& cond, int64_t idx, const std::string& key) {
+  const Value* enc = cond_enc(cond, idx);
+  const List* el = enc ? cond_list(*enc) : nullptr;
+  int64_t kind = cond_kind(el);
+
+  if (CONDENSE_MAP == kind) {
+    int64_t symid = cond_symid(cond, key);
+    int64_t lo = 0;
+    int64_t hi = (static_cast<int64_t>(el->size()) - 1) / 2 - 1;
+    while (0 <= symid && lo <= hi) {
+      int64_t mid = (lo + hi) / 2;
+      int64_t k = cond_idx((*el)[static_cast<size_t>(1 + mid * 2)]);
+      if (k == symid)
+        return cond_idx((*el)[static_cast<size_t>(2 + mid * 2)]);
+      if (k < symid)
+        lo = mid + 1;
+      else
+        hi = mid - 1;
+    }
+    return -1;
+  }
+
+  if (CONDENSE_LIST == kind) {
+    int64_t i = -1;
+    return canon_listindex(key, i) && 0 <= i && i < static_cast<int64_t>(el->size()) - 1
+               ? cond_idx((*el)[static_cast<size_t>(1 + i)])
+               : -1;
+  }
+
+  return -1;
+}
+
+// Walk a path from node idx: the node index reached, or -1.
+inline int64_t cond_resolve(const Value& cond, int64_t idx, const Value& path) {
+  int64_t at = idx;
+
+  if (const List* parts = cond_list(path)) {
+    for (const Value& part : *parts) {
+      if (0 > at || (!part.is_string() && !part.is_number()))
+        return -1;
+      if (!part.is_string() || !part.as_string().empty())
+        at = cond_child(cond, at, cond_str(part));
+    }
+  } else if (path.is_string()) {
+    const std::string& s = path.as_string();
+    size_t from = 0;
+    for (size_t j = 0; !s.empty() && j <= s.size(); j++) {
+      if (j < s.size() && '.' != s[j])
+        continue;
+      if (0 > at)
+        return -1;
+      if (from < j)
+        at = cond_child(cond, at, s.substr(from, j - from));
+      from = j + 1;
+    }
+  } else if (!path.is_undef() && !path.is_null()) {
+    if (0 > at)
+      return -1;
+    at = cond_child(cond, at, cond_str(path));
+  }
+
+  return at;
+}
+
+// A fresh, independent tree for node idx; undefined when there is no such node.
+inline Value cond_rebuild(const Value& cond, int64_t idx) {
+  const Value* enc = cond_enc(cond, idx);
+  if (!enc)
+    return Value::undef();
+  const List* el = cond_list(*enc);
+  int64_t kind = cond_kind(el);
+
+  if (CONDENSE_MAP == kind) {
+    auto out = std::shared_ptr<Map>(new Map());
+    for (size_t j = 1; j < el->size(); j += 2) {
+      Value child = cond_rebuild(cond, j + 1 < el->size() ? cond_idx((*el)[j + 1]) : -1);
+      std::string key = cond_keyname(cond, (*el)[j]);
+      // As setprop does for an absent value, the key goes.
+      if (child.is_undef())
+        out->erase(key);
+      else
+        out->set(key, std::move(child));
+    }
+    return Value(out);
+  }
+
+  if (CONDENSE_LIST == kind) {
+    auto out = std::make_shared<List>();
+    out->reserve(el->size() - 1);
+    for (size_t j = 1; j < el->size(); j++)
+      out->push_back(cond_rebuild(cond, cond_idx((*el)[j])));
+    return Value(out);
+  }
+
+  if (CONDENSE_STR == kind) {
+    const Value* s = 1 < el->size() ? cond_sym(cond, (*el)[1]) : nullptr;
+    return s ? clone(*s) : Value::undef();
+  }
+
+  if (CONDENSE_NUM == kind)
+    return 1 < el->size() ? clone((*el)[1]) : Value::undef();
+
+  if (CONDENSE_TRUE == kind || CONDENSE_FALSE == kind)
+    return Value(CONDENSE_TRUE == kind);
+
+  return Value(nullptr);
+}
+
+inline std::vector<std::string> cond_keys(const Value& cond, int64_t idx) {
+  std::vector<std::string> out;
+  const Value* enc = cond_enc(cond, idx);
+  const List* el = enc ? cond_list(*enc) : nullptr;
+  int64_t kind = cond_kind(el);
+
+  if (CONDENSE_MAP == kind) {
+    for (size_t j = 1; j < el->size(); j += 2)
+      out.push_back(cond_keyname(cond, (*el)[j]));
+  } else if (CONDENSE_LIST == kind) {
+    for (size_t j = 1; j < el->size(); j++)
+      out.push_back(std::to_string(j - 1));
+  }
+
+  return out;
+}
+
+// Equal numbers spell the same, so an integer and a decimal of one value share a node.
+inline std::string cond_numkey(const Value& v) {
+  int64_t i = 0;
+  if (cond_int(v, i))
+    return std::to_string(i);
+  char buf[40];
+  std::snprintf(buf, sizeof buf, "%.17g", v.as_double());
+  return buf;
+}
+
+class Condenser {
+public:
+  // Pass one: every distinct map key and string value, sorted.
+  explicit Condenser(const Value& val) {
+    collect(val);
+    std::sort(syms_.begin(), syms_.end(),
+              [](const std::string* a, const std::string* b) { return *a < *b; });
+    syms_.erase(std::unique(syms_.begin(), syms_.end(),
+                            [](const std::string* a, const std::string* b) { return *a == *b; }),
+                syms_.end());
+  }
+
+  Value condense(const Value& val) {
+    int64_t root = build(val);
+
+    auto sym = std::make_shared<List>();
+    sym->reserve(syms_.size());
+    for (const std::string* s : syms_)
+      sym->push_back(Value(*s));
+
+    auto out = std::shared_ptr<Map>(new Map());
+    out->set(S_condense(), Value(CONDENSE_VERSION));
+    out->set(S_condsym(), Value(sym));
+    out->set(S_condnode(), Value(node_));
+    out->set(S_condroot(), Value(root));
+    return Value(out);
+  }
+
+private:
+  std::vector<const std::string*> syms_;
+  std::shared_ptr<List> node_ = std::make_shared<List>();
+  std::unordered_map<std::string, int64_t> seen_;
+
+  void collect(const Value& n) {
+    if (n.is_map()) {
+      for (const auto& [k, v] : *n.as_map()) {
+        syms_.push_back(&k);
+        collect(v);
+      }
+    } else if (const List* l = cond_list(n)) {
+      for (const Value& c : *l)
+        collect(c);
+    } else if (n.is_string()) {
+      syms_.push_back(&n.as_string());
+    }
+  }
+
+  int64_t symid(const std::string& s) const {
+    auto it = std::lower_bound(syms_.begin(), syms_.end(), &s,
+                               [](const std::string* a, const std::string* b) { return *a < *b; });
+    return it != syms_.end() && **it == s ? it - syms_.begin() : -1;
+  }
+
+  // Post-order, so identical subtrees are already interned when a parent names them.
+  int64_t build(const Value& n) {
+    auto enc = std::make_shared<List>();
+
+    if (n.is_map()) {
+      std::vector<std::pair<int64_t, const Value*>> pairs;
+      for (const auto& [k, v] : *n.as_map())
+        pairs.emplace_back(symid(k), &v);
+      std::sort(pairs.begin(), pairs.end(),
+                [](const auto& a, const auto& b) { return a.first < b.first; });
+      enc->push_back(Value(CONDENSE_MAP));
+      for (const auto& [id, v] : pairs) {
+        enc->push_back(Value(id));
+        enc->push_back(Value(build(*v)));
+      }
+    } else if (const List* l = cond_list(n)) {
+      enc->push_back(Value(CONDENSE_LIST));
+      for (const Value& c : *l)
+        enc->push_back(Value(build(c)));
+    } else if (n.is_string()) {
+      enc->push_back(Value(CONDENSE_STR));
+      enc->push_back(Value(symid(n.as_string())));
+    } else if (n.is_number()) {
+      enc->push_back(Value(CONDENSE_NUM));
+      enc->push_back(n);
+    } else if (n.is_bool()) {
+      enc->push_back(Value(n.as_bool() ? CONDENSE_TRUE : CONDENSE_FALSE));
+    } else {
+      enc->push_back(Value(CONDENSE_NULL));
+    }
+
+    return intern(enc);
+  }
+
+  // An encoding equal to one already built reuses that node.
+  int64_t intern(const std::shared_ptr<List>& enc) {
+    std::string key;
+    for (size_t i = 0; i < enc->size(); i++) {
+      if (0 < i)
+        key += ",";
+      key += cond_numkey((*enc)[i]);
+    }
+    auto hit = seen_.find(key);
+    if (hit != seen_.end())
+      return hit->second;
+    int64_t idx = static_cast<int64_t>(node_->size());
+    node_->push_back(Value(enc));
+    seen_.emplace(std::move(key), idx);
+    return idx;
+  }
+};
+
+} // namespace detail
+
+inline bool iscondensed(const Value& val) {
+  int64_t version = -1;
+  const Value* ver = detail::cond_field(val, detail::S_condense());
+  const Value* root = detail::cond_field(val, detail::S_condroot());
+  return ver && detail::cond_int(*ver, version) && detail::CONDENSE_VERSION == version &&
+         detail::cond_fieldlist(val, detail::S_condsym()) &&
+         detail::cond_fieldlist(val, detail::S_condnode()) && root && root->is_number();
+}
+
+// Pure: the same input gives the same bytes, on every port.
+inline Value condense(const Value& val) {
+  return detail::Condenser(val).condense(val);
+}
+
+// A value that is not condensed comes back as itself.
+inline Value expand(const Value& cond) {
+  if (!iscondensed(cond))
+    return cond;
+  return detail::cond_rebuild(cond, detail::cond_root(cond));
+}
+
+// A cursor into a condensed structure. Views made by at() share the memo, so ref()
+// hands every one of them the same node.
+class CondenseView {
+public:
+  CondenseView(Value cond, int64_t start, std::shared_ptr<Map> memo)
+      : cond_(std::move(cond)), start_(start), memo_(std::move(memo)) {}
+
+  Value get(const Value& path = Value::undef()) const {
+    return detail::cond_rebuild(cond_, detail::cond_resolve(cond_, start_, path));
+  }
+
+  std::vector<std::string> keys(const Value& path = Value::undef()) const {
+    return detail::cond_keys(cond_, detail::cond_resolve(cond_, start_, path));
+  }
+
+  bool has(const Value& path = Value::undef()) const {
+    return 0 <= detail::cond_resolve(cond_, start_, path);
+  }
+
+  CondenseView at(const Value& path = Value::undef()) const {
+    return CondenseView(cond_, detail::cond_resolve(cond_, start_, path), memo_);
+  }
+
+  Value value() const { return detail::cond_rebuild(cond_, start_); }
+
+  int64_t size() const {
+    const Value* enc = detail::cond_enc(cond_, start_);
+    const List* el = enc ? detail::cond_list(*enc) : nullptr;
+    int64_t kind = detail::cond_kind(el);
+    if (detail::CONDENSE_MAP == kind)
+      return (static_cast<int64_t>(el->size()) - 1) / 2;
+    if (detail::CONDENSE_LIST == kind)
+      return static_cast<int64_t>(el->size()) - 1;
+    return 0;
+  }
+
+  bool exists() const { return 0 <= start_; }
+
+  // Shared, unlike get() and value(): mutating the result changes every reader of the node.
+  Value ref() const {
+    std::string k = std::to_string(start_);
+    if (const Value* hit = memo_->find(k))
+      return *hit;
+    Value out = detail::cond_rebuild(cond_, start_);
+    if (!out.is_undef())
+      memo_->set(k, out);
+    return out;
+  }
+
+private:
+  Value cond_;
+  int64_t start_;
+  std::shared_ptr<Map> memo_;
+};
+
+inline CondenseView condenseview(const Value& cond, const Value& idx = Value::undef(),
+                                 const Value& memo = Value::undef()) {
+  int64_t start = idx.is_undef() || idx.is_null()
+                      ? (iscondensed(cond) ? detail::cond_root(cond) : -1)
+                      : detail::cond_idx(idx);
+  return CondenseView(cond, start, memo.is_map() ? memo.as_map() : std::shared_ptr<Map>(new Map()));
+}
+
+// ===========================================================================
 // getpath
 // ===========================================================================
 
@@ -1467,20 +1920,35 @@ inline Value getpath_inner(const Value& store, const Value& path, std::vector<st
 
 inline Value getpath_v(const Value& store, const Value& path, Injection* inj) {
   std::vector<std::string> parts;
-  bool valid_path = false;
   if (path.is_string()) {
-    parts = detail::path_parts(path);
-    valid_path = true;
+    parts = detail::path_parts(path.as_string());
   } else if (path.is_list()) {
-    parts = detail::path_parts(path);
-    valid_path = true;
+    // A number part reads as its string form; any other part makes the whole path miss.
+    for (const Value& part : *path.as_list()) {
+      if (part.is_string())
+        parts.push_back(part.as_string());
+      else if (part.is_number())
+        parts.push_back(detail::cond_str(part));
+      else
+        return Value::undef();
+    }
   } else if (path.is_number()) {
-    parts.push_back(strkey(path));
-    valid_path = true;
-  }
-  // Note: undef / null / bool / map paths are invalid (matches TS lines 1147-1153).
-  if (!valid_path)
+    parts.push_back(detail::cond_str(path));
+  } else {
     return Value::undef();
+  }
+
+  // A base changes what the path resolves against, so honour it on the expansion.
+  if (iscondensed(store)) {
+    if (!inj || inj->base.empty()) {
+      Value found =
+          detail::cond_rebuild(store, detail::cond_resolve(store, detail::cond_root(store), path));
+      // Group A, as a plain getpath reads it: a stored null is absent.
+      return found.is_null() ? Value::undef() : found;
+    }
+    return getpath_v(expand(store), path, inj);
+  }
+
   Value val = detail::getpath_inner(store, path, parts, inj);
   if (inj && inj->handler) {
     std::string ref = path.is_undef() ? "" : pathify(path);
@@ -2724,7 +3192,8 @@ inline Value TYPE_FN(Injection& inj, const Value& val, const std::string& ref, c
   }
   if (idx < 0)
     return Value::undef();
-  int typev = 1 << (31 - idx);
+  // $NIL is absent or null.
+  int typev = (1 << (31 - idx)) | (tname == "nil" ? T_null : 0);
   Value out = lookup_v(inj.dparent, Value(inj.key));
   int t = typify(out);
   if ((t & typev) == 0) {
@@ -2748,11 +3217,7 @@ inline Value CHILD_FN(Injection& inj, const Value& val, const std::string& ref,
     if (tval.is_undef() || tval.is_null()) {
       tval = Value(std::shared_ptr<Map>(new Map()));
     } else if (!ismap(tval)) {
-      auto pl = std::make_shared<List>();
-      for (size_t i = 0; i + 1 < inj.path.size(); i++)
-        pl->push_back(Value(inj.path[i]));
-      inj.errs->push_back(
-          Value(invalid_type_msg(Value(pl), "object", typify(tval), tval, "V0220")));
+      // _validation reports the mismatch, once.
       return Value::undef();
     }
     auto ckeys = keysof(tval);
@@ -2775,11 +3240,6 @@ inline Value CHILD_FN(Injection& inj, const Value& val, const std::string& ref,
       return Value::undef();
     }
     if (!inj.dparent.is_list()) {
-      auto pl = std::make_shared<List>();
-      for (size_t i = 0; i + 1 < inj.path.size(); i++)
-        pl->push_back(Value(inj.path[i]));
-      inj.errs->push_back(
-          Value(invalid_type_msg(Value(pl), "list", typify(inj.dparent), inj.dparent, "V0230")));
       inj.keyI = static_cast<int>(size(inj.parent));
       return inj.dparent;
     }
@@ -2835,85 +3295,150 @@ inline std::string describe_alternatives(const std::vector<Value>& tvals) {
   return out;
 }
 
-inline Value ONE_FN(Injection& inj, const Value& val, const std::string& ref, const Value& store) {
-  if (inj.mode != M_VAL)
-    return Value::undef();
-  if (!inj.parent.is_list() || inj.keyI != 0) {
-    auto pl = std::make_shared<List>();
-    for (auto& p : inj.path)
-      pl->push_back(Value(p));
-    inj.errs->push_back(Value("The $ONE validator at field " + pathify(Value(pl), 1, 1) +
-                              " must be the first element of an array."));
-    return Value::undef();
-  }
-  inj.keyI = static_cast<int>(inj.keys ? inj.keys->size() : 0);
-  inj.setval(inj.dparent, 2);
-  if (!inj.path.empty())
-    inj.path.pop_back();
+inline Value pathlist(const std::vector<std::string>& path) {
+  auto pl = std::make_shared<List>();
+  for (const auto& p : path)
+    pl->push_back(Value(p));
+  return Value(pl);
+}
 
-  std::vector<Value> tvals;
-  if (inj.parent.is_list()) {
-    auto pl = inj.parent.as_list();
-    for (size_t i = 1; i < pl->size(); i++)
-      tvals.push_back((*pl)[i]);
+// The data value at a list directive's slot. The directive's own dparent was
+// read with getprop, which reports a stored null as absent.
+inline Value slotval(const Injection& inj) {
+  return inj.prior ? lookup_v(inj.prior->dparent, Value(inj.prior->key)) : inj.dparent;
+}
+
+// JSON equality: numbers by value, lists in order, maps by key in any order.
+inline bool deepequal(const Value& a, const Value& b) {
+  if (a == b)
+    return true;
+
+  int atype = typify(a);
+  if (atype != typify(b) || 0 == ((T_list | T_map) & atype))
+    return false;
+
+  auto akeys = keysof(a);
+  auto bkeys = keysof(b);
+  if (akeys.size() != bkeys.size())
+    return false;
+
+  for (size_t kI = 0; kI < akeys.size(); kI++) {
+    const std::string& k = akeys[kI];
+    if (k != bkeys[kI] || !deepequal(lookup_v(a, Value(k)), lookup_v(b, Value(k))))
+      return false;
   }
-  if (tvals.empty()) {
-    auto pl = std::make_shared<List>();
-    for (auto& p : inj.path)
-      pl->push_back(Value(p));
-    inj.errs->push_back(Value("The $ONE validator at field " + pathify(Value(pl), 1, 1) +
-                              " must have at least one argument."));
-    return Value::undef();
+
+  return true;
+}
+
+// Every member val has is in out, unchanged. A member only out has is a
+// default the spec supplied, and is ignored.
+inline bool keeps(const Value& val, const Value& out) {
+  if (val.is_undef())
+    return true;
+
+  if (0 == ((T_list | T_map) & typify(val)) || val.is_list() != out.is_list() || !isnode(out))
+    return deepequal(val, out);
+
+  for (const auto& k : keysof(val)) {
+    if (!keeps(lookup_v(val, Value(k)), lookup_v(out, Value(k))))
+      return false;
   }
-  for (const auto& tval : tvals) {
-    auto terrs = std::make_shared<std::vector<Value>>();
-    auto vstore = std::shared_ptr<Map>(new Map());
-    if (store.is_map()) {
-      for (const auto& [k, v] : *store.as_map())
-        vstore->set(k, v);
-    }
-    vstore->set(S_DTOP(), inj.dparent);
-    auto opts = std::shared_ptr<Map>(new Map());
-    auto terrs_list = std::make_shared<List>();
-    opts->set("extra", Value(vstore));
-    opts->set("errs", Value(terrs_list));
-    if (inj.meta)
-      opts->set("meta", Value(inj.meta));
-    Value vcurrent;
-    try {
-      vcurrent = validate(inj.dparent, tval, Value(opts));
-    } catch (const std::exception& e) {
-      terrs_list->push_back(Value(std::string(e.what())));
-      vcurrent = inj.dparent;
-    }
-    inj.setval(vcurrent, -2);
-    if (terrs_list->empty())
-      return Value::undef();
+
+  return true;
+}
+
+// A spec admits a value when validating the value against it finds no error
+// and gives back the value as it is.
+inline bool admits(const Value& val, const Value& spec, Injection& inj, const Value& store) {
+  auto vstore = std::shared_ptr<Map>(new Map());
+  if (store.is_map()) {
+    for (const auto& [k, v] : *store.as_map())
+      vstore->set(k, v);
   }
-  // No match.
-  std::string valdesc = describe_alternatives(tvals);
-  inj.errs->push_back(
-      Value(invalid_type_msg(inj.path, (tvals.size() > 1 ? "one of " : "") + valdesc,
-                             typify(inj.dparent), inj.dparent, "V0210")));
-  return Value::undef();
+  vstore->set(S_DTOP(), val);
+
+  auto terrs = std::make_shared<List>();
+  auto opts = std::shared_ptr<Map>(new Map());
+  opts->set("extra", Value(vstore));
+  opts->set("errs", Value(terrs));
+  if (inj.meta)
+    opts->set("meta", Value(inj.meta));
+
+  Value out = validate(val, spec, Value(opts));
+
+  return terrs->empty() && keeps(val, out);
+}
+
+// The bounds of a $NOF count, and the words for it. False when the count is
+// invalid. Without a max, the bound is the number of specs.
+inline bool nofcount(const Value& count, int64_t numtvals, int64_t& lo, int64_t& hi,
+                     std::string& desc) {
+  // A decimal with an integral value counts, as JavaScript does not tell 2.0 from 2.
+  auto isnat = [](const Value& n, int64_t& nat) {
+    double d = n.as_double();
+    if (n.is_int())
+      nat = n.as_int();
+    else if (n.is_double() && 0 <= d && d < static_cast<double>(INT64_MAX) && std::floor(d) == d)
+      nat = static_cast<int64_t>(d);
+    else
+      return false;
+    return 0 <= nat;
+  };
+
+  if (isnat(count, lo)) {
+    hi = lo;
+    desc = 0 == lo ? "none" : "exactly " + std::to_string(lo);
+    return true;
+  }
+
+  Value min = lookup_v(count, Value("min"));
+  Value max = lookup_v(count, Value("max"));
+
+  lo = 0;
+  hi = numtvals;
+  bool valid = count.is_map() && 0 < count.as_map()->size() &&
+               count.as_map()->size() ==
+                   static_cast<size_t>(min.is_undef() ? 0 : 1) + (max.is_undef() ? 0 : 1) &&
+               (min.is_undef() || isnat(min, lo)) && (max.is_undef() || isnat(max, hi)) &&
+               (min.is_undef() || max.is_undef() || lo <= hi);
+
+  if (!valid)
+    return false;
+
+  if (max.is_undef())
+    desc = "at least " + std::to_string(lo);
+  else if (0 == hi)
+    desc = "none";
+  else if (min.is_undef())
+    desc = "at most " + std::to_string(hi);
+  else if (lo == hi)
+    desc = "exactly " + std::to_string(lo);
+  else
+    desc = std::to_string(lo) + " to " + std::to_string(hi);
+
+  return true;
 }
 
 inline Value EXACT_FN(Injection& inj, const Value& val, const std::string& ref,
                       const Value& store) {
   if (inj.mode == M_VAL) {
     if (!inj.parent.is_list() || inj.keyI != 0) {
-      auto pl = std::make_shared<List>();
-      for (auto& p : inj.path)
-        pl->push_back(Value(p));
-      inj.errs->push_back(Value("The $EXACT validator at field " + pathify(Value(pl), 1, 1) +
+      inj.errs->push_back(Value("The $EXACT validator at field " +
+                                pathify(pathlist(inj.path), 1, 1) +
                                 " must be the first element of an array."));
       return Value::undef();
     }
+
+    Value cval = slotval(inj);
+
     inj.keyI = static_cast<int>(inj.keys ? inj.keys->size() : 0);
-    inj.setval(inj.dparent, 2);
+
+    // Replace [$EXACT, ...] with the data value; SKIP keeps inject off the detached list.
+    inj.setval(cval, 2);
+
     if (!inj.path.empty())
       inj.path.pop_back();
-    inj.key = inj.path.empty() ? "" : inj.path.back();
 
     std::vector<Value> tvals;
     if (inj.parent.is_list()) {
@@ -2922,38 +3447,173 @@ inline Value EXACT_FN(Injection& inj, const Value& val, const std::string& ref,
         tvals.push_back((*pl)[i]);
     }
     if (tvals.empty()) {
-      auto pl = std::make_shared<List>();
-      for (auto& p : inj.path)
-        pl->push_back(Value(p));
-      inj.errs->push_back(Value("The $EXACT validator at field " + pathify(Value(pl), 1, 1) +
+      inj.errs->push_back(Value("The $EXACT validator at field " +
+                                pathify(pathlist(inj.path), 1, 1) +
                                 " must have at least one argument."));
-      return Value::undef();
+      return SKIP();
     }
-    std::string currentstr;
-    bool currentstr_set = false;
+
     for (const auto& tval : tvals) {
-      bool exactmatch = (tval == inj.dparent);
-      if (!exactmatch && isnode(tval)) {
-        if (!currentstr_set) {
-          currentstr = stringify(inj.dparent);
-          currentstr_set = true;
-        }
-        std::string ts = stringify(tval);
-        exactmatch = (ts == currentstr);
-      }
-      if (exactmatch)
-        return Value::undef();
+      if (deepequal(tval, cval))
+        return SKIP();
     }
+
     std::string valdesc = describe_alternatives(tvals);
     inj.errs->push_back(Value(invalid_type_msg(inj.path,
                                                std::string(inj.path.size() > 1 ? "" : "value ") +
                                                    "exactly equal to " +
                                                    (tvals.size() == 1 ? "" : "one of ") + valdesc,
-                                               typify(inj.dparent), inj.dparent, "V0110")));
-    return Value::undef();
+                                               typify(cval), cval, "V0110")));
+    return SKIP();
   } else {
     delprop(inj.parent, Value(inj.key));
     return Value::undef();
+  }
+}
+
+// The counting list directives. Without a count, every spec has to admit.
+inline Value validatecount(Injection& inj, const Value& store, const std::string& name,
+                           bool counted) {
+  if (inj.mode != M_VAL)
+    return Value::undef();
+
+  if (!inj.parent.is_list() || inj.keyI != 0) {
+    inj.errs->push_back(Value("The " + name + " validator at field " +
+                              pathify(pathlist(inj.path), 1, 1) +
+                              " must be the first element of an array."));
+    return Value::undef();
+  }
+
+  Value cval = slotval(inj);
+
+  inj.keyI = static_cast<int>(inj.keys ? inj.keys->size() : 0);
+
+  // Replace the directive's list with the data value. Each return is SKIP, so
+  // that inject leaves the detached list alone and validates nothing in it.
+  inj.setval(cval, 2);
+
+  if (!inj.path.empty())
+    inj.path.pop_back();
+
+  auto pl = inj.parent.as_list();
+  size_t first = counted ? 2 : 1;
+  Value count = counted ? lookup_v(inj.parent, Value(int64_t(1))) : Value::undef();
+  std::vector<Value> tvals;
+  for (size_t i = first; i < pl->size(); i++)
+    tvals.push_back((*pl)[i]);
+  int64_t numtvals = static_cast<int64_t>(tvals.size());
+  std::string field = "The " + name + " validator at field " + pathify(pathlist(inj.path), 1);
+
+  if (0 == numtvals) {
+    inj.errs->push_back(Value(field + (counted ? " must have a count and" : " must have") +
+                              " at least one argument."));
+    return SKIP();
+  }
+
+  int64_t lo = numtvals;
+  int64_t hi = numtvals;
+  std::string countdesc = "all";
+  if (counted && !nofcount(count, numtvals, lo, hi, countdesc)) {
+    inj.errs->push_back(Value(field + " has an invalid count: " + stringify(count) + "."));
+    return SKIP();
+  }
+
+  int64_t admitted = 0;
+  for (int64_t tI = 0; tI < numtvals; tI++) {
+    int64_t left = numtvals - tI;
+
+    // Stop once the specs left cannot change the verdict.
+    if (hi < admitted || admitted + left < lo || (lo <= admitted && admitted + left <= hi))
+      break;
+
+    if (admits(cval, tvals[static_cast<size_t>(tI)], inj, store))
+      admitted++;
+  }
+
+  if (admitted < lo || hi < admitted) {
+    inj.errs->push_back(Value(invalid_type_msg(
+        inj.path, countdesc + " of " + describe_alternatives(tvals), typify(cval), cval, "V0310")));
+  }
+
+  return SKIP();
+}
+
+// Count the specs that admit the value: ['`$NOF`', count, spec, ...], where
+// count is an integer, or a map holding min, max or both.
+inline Value NOF_FN(Injection& inj, const Value& val, const std::string& ref, const Value& store) {
+  return validatecount(inj, store, "$NOF", true);
+}
+
+// Every spec admits the value: ['`$ALL`', spec, ...].
+inline Value ALL_FN(Injection& inj, const Value& val, const std::string& ref, const Value& store) {
+  return validatecount(inj, store, "$ALL", false);
+}
+
+// Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
+inline const std::vector<std::string>& VALIDATE_NAMES() {
+  static const std::vector<std::string> names = {"$TOP",  "$SPEC", "$BT",     "$DS",    "$WHEN",
+                                                 "$ANNO", "$REF",  "$FORMAT", "$APPLY", "$OPEN"};
+  return names;
+}
+
+inline const std::regex& R_CHECKER_NAME() {
+  static const std::regex r("^\\$[A-Z]+$");
+  return r;
+}
+
+inline std::string upper(std::string s) {
+  for (auto& c : s)
+    c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+  return s;
+}
+
+// The name a whole-string reference gives, when it is a checker name in any
+// case. Empty when there is none.
+inline std::string refname(const Value& val) {
+  if (!val.is_string())
+    return "";
+  std::smatch m;
+  const std::string& s = val.as_string();
+  if (!std::regex_match(s, m, R_INJECTION_FULL()))
+    return "";
+  std::string name = m[1].str();
+  return std::regex_match(upper(name), R_CHECKER_NAME()) ? name : "";
+}
+
+inline bool knownname(const std::string& n, const Value& store) {
+  const auto& names = VALIDATE_NAMES();
+  if (std::find(names.begin(), names.end(), n) != names.end())
+    return true;
+  Value found = lookup_v(store, Value(n));
+  return !found.is_undef() && !found.is_null();
+}
+
+// Unknown: undefined and upper case, or a defined name in another case. Null disables a name.
+inline bool unknownname(const std::string& name, const Value& store) {
+  std::string uname = upper(name);
+  return !knownname(name, store) && (uname == name || knownname(uname, store));
+}
+
+// Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
+inline void checknames(const Value& spec, const Value& store, std::vector<std::string>& path,
+                       std::vector<Value>& errs) {
+  std::string name = refname(spec);
+  if (!name.empty()) {
+    if (unknownname(name, store))
+      errs.push_back(
+          Value("Unknown validator " + name + " at field " + pathify(pathlist(path)) + "."));
+    return;
+  }
+
+  if (spec.is_list() && !spec.as_list()->empty() && "$EXACT" == refname((*spec.as_list())[0]))
+    return;
+
+  for (const auto& key : keysof(spec)) {
+    if (spec.is_map())
+      checknames(Value(key), store, path, errs);
+    path.push_back(key);
+    checknames(lookup_v(spec, Value(key)), store, path, errs);
+    path.pop_back();
   }
 }
 
@@ -3107,8 +3767,9 @@ inline Value validate(const Value& data, const Value& spec, const Value& options
   baseStore->set("$INSTANCE", Value(Injector(validators::TYPE_FN)));
   baseStore->set("$ANY", Value(Injector(validators::ANY_FN)));
   baseStore->set("$CHILD", Value(Injector(validators::CHILD_FN)));
-  baseStore->set("$ONE", Value(Injector(validators::ONE_FN)));
   baseStore->set("$EXACT", Value(Injector(validators::EXACT_FN)));
+  baseStore->set("$NOF", Value(Injector(validators::NOF_FN)));
+  baseStore->set("$ALL", Value(Injector(validators::ALL_FN)));
 
   auto mergeList = std::make_shared<List>();
   mergeList->push_back(Value(baseStore));
@@ -3131,22 +3792,32 @@ inline Value validate(const Value& data, const Value& spec, const Value& options
   if (!meta->find(S_BEXACT()))
     meta->set(S_BEXACT(), Value(false));
 
-  auto opts = std::shared_ptr<Map>(new Map());
-  opts->set("meta", Value(meta));
-  opts->set("extra", store);
-  opts->set("modify", Value(Modify(_validation)));
-  opts->set("handler", Value(Injector(_validatehandler)));
-  auto opt_errs_list = std::make_shared<List>();
-  for (const auto& e : *errs)
-    opt_errs_list->push_back(e);
-  opts->set("errs", Value(opt_errs_list));
+  // A spec that names an unknown checker validates nothing.
+  size_t numerrs = errs->size();
+  std::vector<std::string> namepath;
+  validators::checknames(spec, store, namepath, *errs);
 
-  Value out = transform(data, spec, Value(opts));
+  Value out;
+  if (numerrs < errs->size()) {
+    out = clone(data);
+  } else {
+    auto opts = std::shared_ptr<Map>(new Map());
+    opts->set("meta", Value(meta));
+    opts->set("extra", store);
+    opts->set("modify", Value(Modify(_validation)));
+    opts->set("handler", Value(Injector(_validatehandler)));
+    auto opt_errs_list = std::make_shared<List>();
+    for (const auto& e : *errs)
+      opt_errs_list->push_back(e);
+    opts->set("errs", Value(opt_errs_list));
 
-  // Sync opt_errs_list back to errs.
-  errs->clear();
-  for (const auto& e : *opt_errs_list)
-    errs->push_back(e);
+    out = transform(data, spec, Value(opts));
+
+    // Sync opt_errs_list back to errs.
+    errs->clear();
+    for (const auto& e : *opt_errs_list)
+      errs->push_back(e);
+  }
 
   if (!errs->empty() && !collect) {
     std::string msg;

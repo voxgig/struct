@@ -118,5 +118,6 @@ public let R_META_PATH = try! NSRegularExpression(pattern: #"^([^$]+)\$([=~])(.+
 public let R_INJECTION_FULL = try! NSRegularExpression(pattern: #"^`(\$[A-Z]+|[^`]*)[0-9]*`$"#)
 public let R_INJECTION_PARTIAL = try! NSRegularExpression(pattern: #"`([^`]+)`"#)
 public let R_TRANSFORM_NAME = try! NSRegularExpression(pattern: #"`\$([A-Z]+)`"#)
+public let R_CHECKER_NAME = try! NSRegularExpression(pattern: #"^\$[A-Z]+$"#)
 
 public let MAXDEPTH = 32

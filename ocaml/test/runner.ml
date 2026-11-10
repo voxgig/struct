@@ -144,6 +144,148 @@ let null_modifier v key parent _inj =
       done; Buffer.contents b)))
    | _ -> ())
 
+(* ---------------- condense: what the corpus cannot express ---------------- *)
+
+(* Identity, sharing and the immutability contract, as canonical's
+   `condense-*` tests check them. *)
+
+let expect ok what = if not ok then failwith what
+
+let run_local group f =
+  match f () with
+  | () -> record group true ""
+  | exception Failure message -> record group false message
+  | exception Struct_error message -> record group false message
+  | exception err -> record group false (Printexc.to_string err)
+
+let contains s sub =
+  let n = String.length s and m = String.length sub in
+  let rec at i = i + m <= n && (String.sub s i m = sub || at (i + 1)) in
+  at 0
+
+let raises_immutable f =
+  match f () with
+  | _ -> false
+  | exception Struct_error message -> contains message "immutable"
+
+let node_count c = size (getprop_raw_pub c "node")
+
+let compact v = jsonify ~flags:(jm [Str "indent"; Num 0.0]) v
+
+let run_condense_local () =
+  run_local "condense.deterministic" (fun () ->
+      let src = jm [Str "b"; jm [Str "m"; Str "GET"]; Str "a"; jm [Str "m"; Str "GET"];
+                    Str "l"; jt [Num 1.0; Str "x"; Bool true]] in
+      expect (compact (condense src) = compact (condense src)) "condense is not deterministic";
+      let reordered = jm [Str "l"; jt [Num 1.0; Str "x"; Bool true]; Str "a"; jm [Str "m"; Str "GET"];
+                          Str "b"; jm [Str "m"; Str "GET"]] in
+      expect (compact (condense src) = compact (condense reordered))
+        "insertion order changed the bytes");
+
+  run_local "condense.shares-identical-subtrees" (fun () ->
+      let one = condense (jm [Str "x"; jm [Str "m"; Str "GET"; Str "p"; Str "/1"]]) in
+      let two = condense (jm [Str "x"; jm [Str "m"; Str "GET"; Str "p"; Str "/1"];
+                              Str "y"; jm [Str "m"; Str "GET"; Str "p"; Str "/1"]]) in
+      expect (node_count two = node_count one) "a second identical subtree added nodes";
+      let three = condense (jm [Str "x"; jm [Str "m"; Str "GET"]; Str "y"; jm [Str "m"; Str "PUT"];
+                                Str "z"; jm [Str "m"; Str "POST"]]) in
+      expect (node_count three > node_count two) "distinct subtrees added no nodes");
+
+  run_local "condense.round-trips-by-value" (fun () ->
+      let src = jm [Str "a"; jm [Str "b"; jt [Num 1.0; Str "x"; Bool true; Null; empty_map ()]];
+                    Str "c"; Str "z"] in
+      expect (eqv (expand (condense src)) src) "expand did not give back the value");
+
+  run_local "condense.getpath-is-transparent" (fun () ->
+      let src = jm [Str "entity"; jm [Str "p"; jm [Str "op"; jm [Str "list"; jm [Str "method"; Str "GET"]]]]] in
+      let c = condense src in
+      let path = jt [Str "entity"; Str "p"; Str "op"; Str "list"] in
+      expect (eqv (getpath c path) (getpath src path)) "a node read differs";
+      expect (getpath c (jt [Str "entity"; Str "p"; Str "op"; Str "list"; Str "method"]) = Str "GET")
+        "a leaf read differs";
+      expect (getpath c (jt [Str "entity"; Str "nope"]) = Noval) "a miss is not absent");
+
+  run_local "condense.view-reads-without-materialising" (fun () ->
+      let c = condense (jm [Str "entity"; jm [Str "a"; jm [Str "v"; Num 1.0]; Str "b"; jm [Str "v"; Num 2.0]];
+                            Str "other"; Num 9.0]) in
+      let v = condenseview c in
+      expect (v#keys (Str "entity") = ["a"; "b"]) "keys";
+      expect (((v#at (Str "entity"))#at (Str "b"))#get (Str "v") = Num 2.0) "at then get";
+      expect (v#has (Str "entity.a")) "has entity.a";
+      expect (not (v#has (Str "entity.zz"))) "has entity.zz";
+      expect (v#size = 2) "size");
+
+  run_local "condense.value-copies-and-ref-shares" (fun () ->
+      let c = condense (jm [Str "a"; jm [Str "m"; Str "GET"]; Str "b"; jm [Str "m"; Str "GET"]]) in
+      let v = condenseview c in
+      (* a and b share one node; get must not let that be observed. *)
+      let x = v#get (Str "a") in
+      let y = v#get (Str "b") in
+      expect (eqv x y) "a and b differ";
+      expect (x != y) "get handed out one node twice";
+      ignore (setprop x (Str "m") (Str "MUTATED"));
+      expect (getprop (v#get (Str "b")) (Str "m") = Str "GET") "a mutation reached another read";
+      expect ((v#at (Str "a"))#ref == (v#at (Str "a"))#ref) "ref did not share");
+
+  run_local "condense.preserves-proto-named-keys-and-values" (fun () ->
+      let as_value = jm [Str "x"; Str "__proto__"] in
+      expect (eqv (expand (condense as_value)) as_value) "a value named __proto__";
+      let as_key = jm [Str "__proto__"; Num 1.0] in
+      expect (compact (expand (condense as_key)) = "{\"__proto__\":1}") "a key named __proto__");
+
+  run_local "condense.getpath-matches-plain-on-null-and-options" (fun () ->
+      expect (getpath (condense (jm [Str "a"; Null])) (Str "a") = getpath (jm [Str "a"; Null]) (Str "a"))
+        "a stored null reads differently";
+      expect (getpath (condense (jm [Str "a"; Null])) (Str "a") = Noval) "a stored null is not absent";
+      let store = jm [Str "base"; jm [Str "x"; Num 1.0]] in
+      let d = { (default_injdef_pub ()) with d_base = Str "base" } in
+      expect (getpath ~inj:(IDef d) (condense store) (Str "x") = getpath ~inj:(IDef d) store (Str "x"))
+        "base was ignored");
+
+  (* Unary + would accept these; an ordinary list lookup does not, so
+     condensing must not change which value a path selects. *)
+  run_local "condense.list-keys-are-canonical-integers" (fun () ->
+      let plain = jm [Str "l"; jt [Num 10.0; Num 20.0]] in
+      let c = condense plain in
+      List.iter (fun k ->
+          let path = jt [Str "l"; Str k] in
+          expect (getpath c path = getpath plain path) ("list key " ^ k))
+        ["01"; "1e0"; " 1"; "+1"; "1.0"; "-0"];
+      expect (getpath c (jt [Str "l"; Str "1"]) = Num 20.0) "list key 1");
+
+  run_local "condense.symbols-sort-by-code-point" (fun () ->
+      let ffff = "\xef\xbf\xbf" and astral = "\xf0\x90\x80\x80" in
+      let sym = getprop_raw_pub (condense (jm [Str "a"; Str astral; Str "b"; Str ffff])) "sym" in
+      let rec position x i = function
+        | [] -> -1
+        | y :: rest -> if y = x then i else position x (i + 1) rest in
+      let syms = (match sym with List r -> !r | _ -> []) in
+      let p_ffff = position (Str ffff) 0 syms and p_astral = position (Str astral) 0 syms in
+      expect (0 <= p_ffff && p_ffff < p_astral)
+        ("symbol table is not in code-point order: " ^ compact sym));
+
+  run_local "condense.astral-keys-resolve" (fun () ->
+      let fullwidth = "\xef\xbc\xa1" and grin = "\xf0\x9f\x98\x80" in
+      let c = condense (jm [Str fullwidth; Num 1.0; Str grin; Num 2.0]) in
+      expect (getpath c (jt [Str grin]) = Num 2.0) "the astral key";
+      expect (getpath c (jt [Str fullwidth]) = Num 1.0) "the BMP key";
+      expect ((condenseview c)#get (Str grin) = Num 2.0) "the astral key through a view");
+
+  run_local "condense.invalid-key-mutations-stay-no-ops" (fun () ->
+      let c = condense (jm [Str "a"; Num 1.0]) in
+      expect (delprop c Noval == c) "delprop with an invalid key";
+      expect (setprop c Noval (Num 1.0) == c) "setprop with an invalid key";
+      expect (raises_immutable (fun () -> delprop c (Str "sym"))) "a valid delprop did not raise");
+
+  run_local "condense.is-immutable" (fun () ->
+      let c = condense (jm [Str "a"; Num 1.0]) in
+      expect (raises_immutable (fun () -> setpath c (Str "a") (Num 2.0))) "setpath";
+      expect (raises_immutable (fun () -> setprop c (Str "a") (Num 2.0))) "setprop";
+      expect (raises_immutable (fun () -> delprop c (Str "sym"))) "delprop";
+      let e = expand c in
+      ignore (setpath e (Str "a") (Num 2.0));
+      expect (getprop e (Str "a") = Num 2.0) "the expanded copy is not mutable")
+
 let rec run_all spec =
   let g k = getprop_raw_pub spec k in
   ignore g;
@@ -151,6 +293,16 @@ let rec run_all spec =
   and getpaths = g "getpath" and injects = g "inject" and transforms = g "transform"
   and validates = g "validate" and selects = g "select" and sentinels = g "sentinels" in
   let mg n = getprop_raw_pub minor n in
+
+  (* condense *)
+  let condenses = g "condense" in
+  run_set "condense.condense" ~flags:["null", false] (getprop_raw_pub condenses "condense")
+    (arg1 condense);
+  run_set "condense.expand" ~flags:["null", false] (getprop_raw_pub condenses "expand")
+    (arg1 expand);
+  run_set "condense.iscondensed" ~flags:["null", false] (getprop_raw_pub condenses "iscondensed")
+    (arg1 (fun v -> Bool (iscondensed v)));
+  run_condense_local ();
 
   (* minor *)
   run_set "minor.isnode" (mg "isnode") (arg1 (fun v -> Bool (isnode v)));
@@ -283,14 +435,26 @@ let rec run_all spec =
   List.iter (fun gn ->
       run_set ("validate." ^ gn) (getprop_raw_pub validates gn)
         (arg1 (fun vin -> validate (vget vin "data") (vget vin "spec"))))
-    ["child"; "one"; "exact"];
-  run_set "validate.invalid" ~flags:["null", false] (getprop_raw_pub validates "invalid")
-    (arg1 (fun vin -> validate (vget vin "data") (vget vin "spec")));
+    ["child"; "exact"];
+  List.iter (fun gn ->
+      run_set ("validate." ^ gn) ~flags:["null", false] (getprop_raw_pub validates gn)
+        (arg1 (fun vin -> validate (vget vin "data") (vget vin "spec"))))
+    ["invalid"; "directive"; "nof"; "all"; "unknown"];
   run_set "validate.special" (getprop_raw_pub validates "special")
     (arg1 (fun vin ->
          let injm = vget vin "inj" in
          let d = { (default_injdef_pub ()) with d_meta = getprop injm (Str "meta") } in
          validate ~inj:(if is_nullish injm then INone else IDef d) (vget vin "data") (vget vin "spec")));
+  (* The corpus pins the message; this counts the errs, root forms included. *)
+  run_local "validate.child-one-error-per-failure" (fun () ->
+      List.iter (fun (dat, sp) ->
+          let errs = empty_list () in
+          ignore (validate ~inj:(IDef { (default_injdef_pub ()) with d_errs = errs }) dat sp);
+          expect (size errs = 1) (compact errs))
+        [jm [Str "x"; Num 1.0], jm [Str "x"; jm [Str "`$CHILD`"; Str "`$NUMBER`"]];
+         jm [Str "x"; Num 1.0], jm [Str "x"; jt [Str "`$CHILD`"; Str "`$NUMBER`"]];
+         Num 1.0, jm [Str "`$CHILD`"; Str "`$NUMBER`"];
+         Num 1.0, jt [Str "`$CHILD`"; Str "`$NUMBER`"]]);
 
   (* select *)
   List.iter (fun gn ->
@@ -428,6 +592,9 @@ let run_client testfile =
 (* ---------------- main ---------------- *)
 
 let () =
+  (* omni reads an error it does not know through Printexc; an `err` pattern
+     anchored at both ends needs the bare message. *)
+  Printexc.register_printer (function Struct_error message -> Some message | _ -> None);
   let testfile = if Array.length Sys.argv > 1 then Sys.argv.(1) else "../build/test/test.json" in
   let resolved = O.make_runner testfile O.empty_provider "struct" None in
   runpack := Some resolved;

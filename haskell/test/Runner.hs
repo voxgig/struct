@@ -18,9 +18,11 @@ module Main where
 import Control.Exception (SomeException, try)
 import Control.Monad (forM_, when)
 import Data.IORef
-import Data.List (intercalate)
+import Data.List (intercalate, isInfixOf)
+import GHC.IO.Encoding (setLocaleEncoding, utf8)
 import System.Environment (getArgs)
 import System.Exit (exitFailure)
+import System.IO (hSetEncoding, stdout)
 
 import VoxgigStruct
 import qualified Omni as O
@@ -137,6 +139,9 @@ vhas vin k = case vin of { VMap m -> do { es <- readIORef m; return (any ((== k)
 
 main :: IO ()
 main = do
+  -- The corpus is UTF-8 whatever the locale says, and a failure may print it.
+  setLocaleEncoding utf8
+  hSetEncoding stdout utf8
   argv <- getArgs
   let testfile = case argv of (f:_) -> f; [] -> "../build/test/test.json"
   pack <- O.makeRunner testfile O.emptyProvider "struct"
@@ -210,10 +215,16 @@ runAll c pack spec = do
   getpaths <- g "getpath"; injects <- g "inject"; transforms <- g "transform"
   validates <- g "validate"; selects <- g "select"; sentinels <- g "sentinels"
   regexs <- g "regex"
+  condenses <- g "condense"
   let mg k = getpropRaw minor k
       rs group nd subj fl = do n <- nd; runSet c pack group n subj fl
       rsT group nd subj = rs group nd subj True
       rsF group nd subj = rs group nd subj False
+
+  rsF "condense.condense" (getpropRaw condenses "condense") (arg1 condense)
+  rsF "condense.expand" (getpropRaw condenses "expand") (arg1 expand)
+  rsF "condense.iscondensed" (getpropRaw condenses "iscondensed") (arg1 (\v -> VBool <$> iscondensed v))
+  runCondenseLocal c
 
   rsT "minor.isnode" (mg "isnode") (arg1 (\v -> return (VBool (isnode v))))
   rsT "minor.ismap" (mg "ismap") (arg1 (\v -> return (VBool (ismap v))))
@@ -312,14 +323,28 @@ runAll c pack spec = do
   rsT "transform.apply" (getpropRaw transforms "apply") (arg1 (\vin -> do dat <- vget vin "data"; sp <- vget vin "spec"; transform INone dat sp))
 
   rsF "validate.basic" (getpropRaw validates "basic") (arg1 (\vin -> do dat <- vget vin "data"; sp <- vget vin "spec"; validate INone dat sp))
-  forM_ ["child", "one", "exact"] $ \gn ->
+  forM_ ["child", "exact"] $ \gn ->
     rsT ("validate." ++ gn) (getpropRaw validates gn) (arg1 (\vin -> do dat <- vget vin "data"; sp <- vget vin "spec"; validate INone dat sp))
-  rsF "validate.invalid" (getpropRaw validates "invalid") (arg1 (\vin -> do dat <- vget vin "data"; sp <- vget vin "spec"; validate INone dat sp))
+  forM_ ["invalid", "directive", "nof", "all", "unknown"] $ \gn ->
+    rsF ("validate." ++ gn) (getpropRaw validates gn) (arg1 (\vin -> do dat <- vget vin "data"; sp <- vget vin "spec"; validate INone dat sp))
   rsT "validate.special" (getpropRaw validates "special") (arg1 (\vin -> do
     dat <- vget vin "data"; sp <- vget vin "spec"; injm <- vget vin "inj"
     mt <- getprop injm (VStr "meta")
     let d = (defaultInjDef VNoval) { dMeta = mt }
     validate (if isNullish injm then INone else IDef d) dat sp))
+  -- The corpus pins the message; this counts the errs, root forms included.
+  runLocal c "validate.child-one-error-per-failure" $ do
+    let x1 = O.JMap [("x", O.Num 1)]
+        child = O.JMap [("`$CHILD`", O.Str "`$NUMBER`")]
+        childl = O.JList [O.Str "`$CHILD`", O.Str "`$NUMBER`"]
+    forM_ [(x1, O.JMap [("x", child)]), (x1, O.JMap [("x", childl)]), (O.Num 1, child), (O.Num 1, childl)] $ \(dj, sj) -> do
+      dat <- tostruct dj
+      sp <- tostruct sj
+      errs <- emptyList
+      _ <- validate (IDef (defaultInjDef errs)) dat sp
+      n <- size errs
+      shown <- compact errs
+      expect (n == 1) shown
 
   forM_ ["basic", "operators", "edge", "alts"] $ \gn ->
     rsT ("select." ++ gn) (getpropRaw selects gn) (arg1 (\vin -> do obj <- vget vin "obj"; qry <- vget vin "query"; select obj qry))
@@ -341,6 +366,193 @@ runAll c pack spec = do
   rsF "sentinels.isempty_unify" (getpropRaw sentinels "isempty_unify") (arg1 (\v -> VBool <$> isempty v))
   rsF "sentinels.isnode_unify" (getpropRaw sentinels "isnode_unify") (arg1 (\v -> return (VBool (isnode v))))
   rsF "sentinels.stringify_null" (getpropRaw sentinels "stringify_null") (arg1 (\vin -> VStr <$> stringify vin))
+
+-- ---------------- condense: what the corpus cannot express ----------------
+
+-- Identity, sharing and the immutability contract, as canonical's
+-- `condense-*` tests check them.
+
+expect :: Bool -> String -> IO ()
+expect ok what = when (not ok) (ioError (userError what))
+
+runLocal :: Counters -> String -> IO () -> IO ()
+runLocal c group action = do
+  outcome <- try action :: IO (Either SomeException ())
+  case outcome of
+    Right () -> record c group True ""
+    Left err -> record c group False (show err)
+
+raisesImmutable :: IO a -> IO Bool
+raisesImmutable action = do
+  outcome <- try action
+  return (case outcome of
+    Left (StructError message) -> "immutable" `isInfixOf` message
+    Right _ -> False)
+
+-- One node, not merely an equal one.
+sameNode :: Value -> Value -> Bool
+sameNode a b = case (a, b) of
+  (VMap x, VMap y) -> x == y
+  (VList x, VList y) -> x == y
+  _ -> False
+
+compact :: Value -> IO String
+compact v = jm [VStr "indent", VNum 0] >>= jsonify v
+
+nodeCount :: Value -> IO Int
+nodeCount cd = getpropRaw cd "node" >>= size
+
+isNum :: Double -> Value -> Bool
+isNum n v = case v of
+  VNum x -> x == n
+  _ -> False
+
+runCondenseLocal :: Counters -> IO ()
+runCondenseLocal c = do
+  let getm = O.JMap [("m", O.Str "GET")]
+      mlist = O.JList [O.Num 1, O.Str "x", O.Bool True]
+      strs = O.JList . map O.Str
+      condensed j = tostruct j >>= condense
+
+  runLocal c "condense.deterministic" $ do
+    s1 <- condensed (O.JMap [("b", getm), ("a", getm), ("l", mlist)]) >>= compact
+    s2 <- condensed (O.JMap [("b", getm), ("a", getm), ("l", mlist)]) >>= compact
+    expect (s1 == s2) "condense is not deterministic"
+    s3 <- condensed (O.JMap [("l", mlist), ("a", getm), ("b", getm)]) >>= compact
+    expect (s1 == s3) "insertion order changed the bytes"
+
+  runLocal c "condense.shares-identical-subtrees" $ do
+    let xm = O.JMap [("m", O.Str "GET"), ("p", O.Str "/1")]
+    one <- condensed (O.JMap [("x", xm)]) >>= nodeCount
+    two <- condensed (O.JMap [("x", xm), ("y", xm)]) >>= nodeCount
+    expect (two == one) "a second identical subtree added nodes"
+    three <- condensed (O.JMap [("x", getm), ("y", O.JMap [("m", O.Str "PUT")]),
+                                ("z", O.JMap [("m", O.Str "POST")])]) >>= nodeCount
+    expect (three > two) "distinct subtrees added no nodes"
+
+  runLocal c "condense.round-trips-by-value" $ do
+    src <- tostruct (O.JMap [("a", O.JMap [("b", O.JList [O.Num 1, O.Str "x", O.Bool True, O.Null, O.JMap []])]),
+                             ("c", O.Str "z")])
+    back <- condense src >>= expand
+    same <- eqv back src
+    expect same "expand did not give back the value"
+
+  runLocal c "condense.getpath-is-transparent" $ do
+    src <- tostruct (O.JMap [("entity", O.JMap [("p", O.JMap [("op", O.JMap [("list",
+             O.JMap [("method", O.Str "GET")])])])])])
+    cd <- condense src
+    path <- tostruct (strs ["entity", "p", "op", "list"])
+    viaCondensed <- getpath INone cd path
+    viaPlain <- getpath INone src path
+    same <- eqv viaCondensed viaPlain
+    expect same "a node read differs"
+    leaf <- tostruct (strs ["entity", "p", "op", "list", "method"]) >>= getpath INone cd
+    expect (vStrEq leaf "GET") "a leaf read differs"
+    miss <- tostruct (strs ["entity", "nope"]) >>= getpath INone cd
+    expect (isNoval miss) "a miss is not absent"
+
+  runLocal c "condense.view-reads-without-materialising" $ do
+    cd <- condensed (O.JMap [("entity", O.JMap [("a", O.JMap [("v", O.Num 1)]), ("b", O.JMap [("v", O.Num 2)])]),
+                             ("other", O.Num 9)])
+    v <- condenseview cd
+    ks <- cvKeys v (VStr "entity")
+    expect (ks == ["a", "b"]) "keys"
+    got <- cvAt v (VStr "entity") >>= \e -> cvAt e (VStr "b") >>= \b -> cvGet b (VStr "v")
+    expect (isNum 2 got) "at then get"
+    hasA <- cvHas v (VStr "entity.a")
+    expect hasA "has entity.a"
+    hasZ <- cvHas v (VStr "entity.zz")
+    expect (not hasZ) "has entity.zz"
+    sz <- cvSize v
+    expect (sz == 2) "size"
+
+  runLocal c "condense.value-copies-and-ref-shares" $ do
+    v <- condensed (O.JMap [("a", getm), ("b", getm)]) >>= condenseview
+    -- a and b share one node; get must not let that be observed.
+    x <- cvGet v (VStr "a")
+    y <- cvGet v (VStr "b")
+    same <- eqv x y
+    expect same "a and b differ"
+    expect (not (sameNode x y)) "get handed out one node twice"
+    _ <- setprop x (VStr "m") (VStr "MUTATED")
+    m <- cvGet v (VStr "b") >>= \b -> getprop b (VStr "m")
+    expect (vStrEq m "GET") "a mutation reached another read"
+    r1 <- cvAt v (VStr "a") >>= cvRef
+    r2 <- cvAt v (VStr "a") >>= cvRef
+    expect (sameNode r1 r2) "ref did not share"
+
+  runLocal c "condense.preserves-proto-named-keys-and-values" $ do
+    asValue <- tostruct (O.JMap [("x", O.Str "__proto__")])
+    back <- condense asValue >>= expand
+    same <- eqv back asValue
+    expect same "a value named __proto__"
+    s <- condensed (O.JMap [("__proto__", O.Num 1)]) >>= expand >>= compact
+    expect (s == "{\"__proto__\":1}") "a key named __proto__"
+
+  runLocal c "condense.getpath-matches-plain-on-null-and-options" $ do
+    plain <- tostruct (O.JMap [("a", O.Null)])
+    viaCondensed <- condense plain >>= \cd -> getpath INone cd (VStr "a")
+    viaPlain <- getpath INone plain (VStr "a")
+    expect (isNoval viaCondensed && isNoval viaPlain) "a stored null is not absent"
+    store <- tostruct (O.JMap [("base", O.JMap [("x", O.Num 1)])])
+    let d = (defaultInjDef VNoval) { dBase = VStr "base" }
+    baseCondensed <- condense store >>= \cd -> getpath (IDef d) cd (VStr "x")
+    basePlain <- getpath (IDef d) store (VStr "x")
+    expect (isNum 1 baseCondensed && isNum 1 basePlain) "base was ignored"
+
+  -- Unary + would accept these; an ordinary list lookup does not, so
+  -- condensing must not change which value a path selects.
+  runLocal c "condense.list-keys-are-canonical-integers" $ do
+    plain <- tostruct (O.JMap [("l", O.JList [O.Num 10, O.Num 20])])
+    cd <- condense plain
+    forM_ ["01", "1e0", " 1", "+1", "1.0", "-0"] $ \k -> do
+      path <- mkList [VStr "l", VStr k]
+      viaCondensed <- getpath INone cd path
+      viaPlain <- getpath INone plain path
+      same <- eqv viaCondensed viaPlain
+      expect same ("list key " ++ k)
+    one <- mkList [VStr "l", VStr "1"] >>= getpath INone cd
+    expect (isNum 20 one) "list key 1"
+
+  runLocal c "condense.symbols-sort-by-code-point" $ do
+    cd <- condensed (O.JMap [("a", O.Str "\x10000"), ("b", O.Str "\xFFFF")])
+    sym <- getpropRaw cd "sym"
+    syms <- listItems sym
+    let position s = length (takeWhile (not . (`vStrEq` s)) syms)
+    shown <- compact sym
+    expect (position "\xFFFF" < position "\x10000")
+      ("symbol table is not in code-point order: " ++ shown)
+
+  runLocal c "condense.astral-keys-resolve" $ do
+    cd <- condensed (O.JMap [("\xFF21", O.Num 1), ("\x1F600", O.Num 2)])
+    astral <- mkList [VStr "\x1F600"] >>= getpath INone cd
+    expect (isNum 2 astral) "the astral key"
+    bmp <- mkList [VStr "\xFF21"] >>= getpath INone cd
+    expect (isNum 1 bmp) "the BMP key"
+    viaView <- condenseview cd >>= \v -> cvGet v (VStr "\x1F600")
+    expect (isNum 2 viaView) "the astral key through a view"
+
+  runLocal c "condense.invalid-key-mutations-stay-no-ops" $ do
+    cd <- condensed (O.JMap [("a", O.Num 1)])
+    d <- delprop cd VNoval
+    expect (sameNode d cd) "delprop with an invalid key"
+    s <- setprop cd VNoval (VNum 1)
+    expect (sameNode s cd) "setprop with an invalid key"
+    raised <- raisesImmutable (delprop cd (VStr "sym"))
+    expect raised "a valid delprop did not raise"
+
+  runLocal c "condense.is-immutable" $ do
+    cd <- condensed (O.JMap [("a", O.Num 1)])
+    viaSetpath <- raisesImmutable (setpath cd (VStr "a") (VNum 2))
+    expect viaSetpath "setpath"
+    viaSetprop <- raisesImmutable (setprop cd (VStr "a") (VNum 2))
+    expect viaSetprop "setprop"
+    viaDelprop <- raisesImmutable (delprop cd (VStr "sym"))
+    expect viaDelprop "delprop"
+    e <- expand cd
+    _ <- setpath e (VStr "a") (VNum 2)
+    a <- getprop e (VStr "a")
+    expect (isNum 2 a) "the expanded copy is not mutable"
 
 runWalkLog :: Counters -> String -> Value -> IO ()
 runWalkLog c group node = do

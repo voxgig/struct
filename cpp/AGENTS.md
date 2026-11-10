@@ -15,11 +15,11 @@ only what is specific to the C++ port.
 cpp/
 ├── src/value.hpp            # Value (std::variant), OrderedMap, Sentinel, flags, predicates
 ├── src/value_io.hpp         # hand-written JSON parser/serialiser (no third-party deps)
-├── src/voxgig_struct.hpp    # main API: all 40 canonical fns + injectors
+├── src/voxgig_struct.hpp    # main API: all 52 canonical fns + injectors
 ├── tests/omni_bridge.hpp    # the bridge to voxgig/omni: both value types, both ways
 ├── tests/struct_corpus_test.cpp  # the shared corpus, run on the shared runner
 ├── tests/client_test.cpp    # the client path (DEF.client, client options, contextify)
-├── tests/smoke.cpp          # smoke test
+├── tests/smoke.cpp          # smoke test, and the condense checks the corpus cannot express
 ├── tests/regex_pathological.cpp  # regex edge-case panel
 ├── overview/                # scratch examples (not part of the suite)
 ├── Makefile · .clang-tidy · .clang-format

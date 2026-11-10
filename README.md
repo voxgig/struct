@@ -377,8 +377,18 @@ Quote the checker in backticks inside a `validate` spec, e.g. `` `$STRING` ``.
 | `$INSTANCE` | The value must be a class instance (non-plain object).                   |
 | `$ANY`      | The value matches anything (placeholder for "no constraint").            |
 | `$CHILD`    | Apply a sub-spec to every direct child of the current node.              |
-| `$ONE`      | The value must match exactly one of a list of alternative sub-specs.     |
 | `$EXACT`    | The value must equal a literal value exactly (no shape coercion).        |
+| `$NOF`      | `` ['`$NOF`', n, spec, …] ``: as many specs must admit the value as `n` allows, where `n` is an integer or a map with `min`, `max` or both. |
+| `$ALL`      | `` ['`$ALL`', spec, …] ``: every spec must admit the value.               |
+
+A spec admits a value when validating the value against it finds no error
+and gives back every member of the value unchanged. A count of `{min: 1}`
+asks for at least one spec, `1` for exactly one, and `0` for none. There is
+no `$ONE`: write `` ['`$ONE`', a, b] `` as `` ['`$NOF`', {min: 1}, a, b] ``.
+
+A spec that names a checker `validate` does not define, such as
+`` `$FOO` `` or the misspelling `` `$string` ``, is rejected before any data
+is read, with `Unknown validator $FOO at field a.`
 
 ### Regex API (6)
 

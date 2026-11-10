@@ -35,7 +35,7 @@ regex engine is an in-tree RE2-subset Thompson NFA in
 
 ```bash
 cd c
-make smoke       # the 13-check API smoke test (no test runner needed)
+make smoke       # the API smoke test (no test runner needed)
 make test        # the shared corpus + the client test (needs voxgig/omni)
 ```
 
@@ -201,7 +201,7 @@ char* s = voxgig_stringify(m, -1);              /* "{a:1,b:[2,3]}" */
 ```
 <!-- => "{a:1,b:[2,3]}" -->
 
-For more task recipes (merge configs, `$EACH`, `$MERGE`, `$FORMAT`, `$ONE`,
+For more task recipes (merge configs, `$EACH`, `$MERGE`, `$FORMAT`, `$NOF`,
 `$EXACT`, …) see the language-neutral
 [How-to guides](../DOCS.md#2-how-to-guides) — the spec syntax is identical;
 only the host literals differ.
@@ -326,7 +326,7 @@ make build       # compile the library alone
 make test        # the corpus driver + the client test
 make corpus      # just the corpus driver
 make client      # just the client test
-make smoke       # 13-check API smoke test
+make smoke       # the API smoke test
 make sanitize    # corpus driver under ASan + UBSan
 make check_leak  # corpus driver under valgrind
 make lint        # clang-format --dry-run + clang-tidy
@@ -342,10 +342,9 @@ or beside this repository. It is compiled into the test binaries only —
 `omni_json` and this port's `voxgig_value`.
 
 [`tests/struct_corpus_test.c`](./tests/struct_corpus_test.c) runs every group
-the corpus defines except the three `condense` ones, which no port implements
-yet: **1358 entries in 72 groups**, plus three single entries that are not
-sets. [`tests/client_test.c`](./tests/client_test.c) runs the two `check`
-entries — `DEF.client`, client-scoped options, and `contextify`.
+the corpus defines: **1602 entries in 78 groups**, plus three single entries that are not sets.
+[`tests/client_test.c`](./tests/client_test.c) runs the two `check` entries —
+`DEF.client`, client-scoped options, and `contextify`.
 
 **To change behaviour:** this is a port, so behaviour changes start in the
 canonical TypeScript, flow to the corpus, then to every port. To fix a C

@@ -71,6 +71,10 @@ tasks.matching { it.name in setOf("compileOmniKotlin", "compileTestKotlin", "tes
 
 tasks.test {
     useJUnitPlatform()
+    // The tests read the shared corpus from outside this project, so Gradle sees
+    // it only as a declared input: without one, a corpus-only change leaves this
+    // task UP-TO-DATE and the old result stands.
+    inputs.file("$rootDir/../build/test/test.json").withPropertyName("corpus")
 }
 
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {

@@ -517,8 +517,6 @@ int main() {
       [](const Value& in) { return validate(getp(in, "data"), getp(in, "spec")); });
   run("validate", "child", true,
       [](const Value& in) { return validate(getp(in, "data"), getp(in, "spec")); });
-  run("validate", "one", true,
-      [](const Value& in) { return validate(getp(in, "data"), getp(in, "spec")); });
   run("validate", "exact", true,
       [](const Value& in) { return validate(getp(in, "data"), getp(in, "spec")); });
   run("validate", "invalid", false,
@@ -528,6 +526,14 @@ int main() {
     return inj_v.is_map() ? validate(getp(in, "data"), getp(in, "spec"), inj_v)
                           : validate(getp(in, "data"), getp(in, "spec"));
   });
+  run("validate", "directive", false,
+      [](const Value& in) { return validate(getp(in, "data"), getp(in, "spec")); });
+  run("validate", "nof", false,
+      [](const Value& in) { return validate(getp(in, "data"), getp(in, "spec")); });
+  run("validate", "all", false,
+      [](const Value& in) { return validate(getp(in, "data"), getp(in, "spec")); });
+  run("validate", "unknown", false,
+      [](const Value& in) { return validate(getp(in, "data"), getp(in, "spec")); });
 
   // ===== select =====
   run("select", "basic", true, [](const Value& in) {
@@ -606,11 +612,10 @@ int main() {
   run("sentinels", "isnode_unify", false, [](const Value& in) { return Value(isnode(in)); });
   run("sentinels", "stringify_null", false, [](const Value& in) { return Value(stringify(in)); });
 
-  // condense / expand / iscondensed exist only in canonical TypeScript so far
-  // - no port implements them, and check_parity.py already lists them as
-  // pending. Named here so the gap is a visible TODO rather than three groups
-  // nobody notices are missing.
-  std::printf("  skip condense.condense, condense.expand, condense.iscondensed (not ported)\n");
+  // ===== condense =====
+  run("condense", "condense", false, [](const Value& in) { return condense(in); });
+  run("condense", "expand", false, [](const Value& in) { return expand(in); });
+  run("condense", "iscondensed", false, [](const Value& in) { return Value(iscondensed(in)); });
 
   std::printf("=========================\n%d groups, %d failed\n\n", GROUPS, FAILED);
 
