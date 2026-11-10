@@ -615,13 +615,20 @@ Used as backtick-quoted strings inside a `validate` spec.
 ```
 $MAP   $LIST   $STRING   $NUMBER   $INTEGER   $DECIMAL  $BOOLEAN
 $NULL  $NIL    $FUNCTION $INSTANCE $ANY       $CHILD    $EXACT
-$NOF   $ALL
+$NOF   $ALL    $LEN      $RANGE
 ```
 
 `` ['`$NOF`', n, spec, …] `` holds when as many specs admit the value as `n`
 allows, where `n` is an integer or an object with `min`, `max` or both;
 `` ['`$ALL`', spec, …] `` holds when every spec admits it. There is no
 `$ONE`: write `` ['`$ONE`', a, b] `` as `` ['`$NOF`', { min: 1 }, a, b] ``.
+`` ['`$LEN`', n, spec?] `` holds when the value's length is within `n`, a
+bound written as for `$NOF`: a string counts code points (not the UTF-16
+units `.length` counts), an array its elements, and an object its keys.
+`` ['`$RANGE`', bound, spec?] `` holds when the value is a number within
+`bound`, an object of `min` or `gt` and `max` or `lt`. Each takes at most
+one spec, which must also admit the value. `min` and `max` include their
+bound, while `gt` and `lt` exclude it.
 A spec that names any other checker, such as the misspelling
 `` '`$string`' ``, is rejected before any data is read. See the
 [top-level README](../README.md) for what each checker accepts.
@@ -656,7 +663,7 @@ V8.
 
 ### Test status
 
-116/116 tests pass against the shared corpus.
+118/118 tests pass against the shared corpus.
 
 
 ## Regex
