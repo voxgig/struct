@@ -2648,6 +2648,8 @@ fn dispatchCmd(allocator: Allocator, cmd: []const u8, store: JsonValue, inj: *In
         if (std.mem.eql(u8, cmd, "$EXACT")) return try cmdValidateExactCmd(allocator, inj);
         if (std.mem.eql(u8, cmd, "$NOF")) return try validateCount(allocator, inj, "$NOF", true);
         if (std.mem.eql(u8, cmd, "$ALL")) return try validateCount(allocator, inj, "$ALL", false);
+        if (std.mem.eql(u8, cmd, "$LEN")) return try validateBound(allocator, inj, "$LEN");
+        if (std.mem.eql(u8, cmd, "$RANGE")) return try validateBound(allocator, inj, "$RANGE");
         if (std.mem.eql(u8, cmd, "$CHILD")) return try cmdValidateChildCmd(allocator, inj, store);
     }
 
@@ -2971,6 +2973,173 @@ fn validateCount(allocator: Allocator, inj: *Injection, name: []const u8, counte
     return .null;
 }
 
+// The bounding list directives, $LEN and $RANGE: a bound, then at most one
+// spec that must also admit.
+fn validateBound(allocator: Allocator, inj: *Injection, name: []const u8) anyerror!JsonValue {
+    if (inj.mode != M_VAL) return .null;
+
+    if (inj.parent != .array or inj.key_i != 0) {
+        try inj.errs.append(try std.fmt.allocPrint(
+            allocator,
+            "The {s} validator at field {s} must be the first element of an array.",
+            .{ name, try pathifySlice(allocator, pathrange(inj.path, 1, 1)) },
+        ));
+        return .null;
+    }
+
+    const cval = slotval(inj);
+
+    inj.key_i = inj.keys.len;
+
+    // As for the counting directives: skip keeps inject off the detached list.
+    try setslot(allocator, inj, cval);
+    inj.skip = true;
+
+    inj.path = inj.path[0 .. inj.path.len - 1];
+
+    const elems = inj.parent.array.data.items;
+    const field = try std.fmt.allocPrint(
+        allocator,
+        "The {s} validator at field {s}",
+        .{ name, try pathifySlice(allocator, pathrange(inj.path, 1, 0)) },
+    );
+
+    if (elems.len < 2 or 3 < elems.len) {
+        try inj.errs.append(try std.fmt.allocPrint(allocator, "{s} must have a bound and at most one spec.", .{field}));
+        return .null;
+    }
+
+    const bound = elems[1];
+    const islen = std.mem.eql(u8, name, "$LEN");
+    const bounds: NofCount = if (islen) try lenbound(allocator, bound) else .{ .lo = 0, .hi = 0, .desc = try rangedesc(allocator, bound) };
+
+    const desc = bounds.desc orelse {
+        try inj.errs.append(try std.fmt.allocPrint(
+            allocator,
+            "{s} has an invalid bound: {s}.",
+            .{ field, try stringify(allocator, bound, null) },
+        ));
+        return .null;
+    };
+
+    const val: JsonValue = cval orelse .null;
+
+    if (3 == elems.len and !(try admits(allocator, cval, elems[2], inj))) {
+        try inj.errs.append(try invalidTypeMsg(allocator, inj.path, try valdesc(allocator, elems[2..]), val));
+        return .null;
+    }
+
+    const tbits: i64 = if (islen) T_string | T_list | T_map else T_number;
+    if (0 == (tbits & typify(val))) {
+        const tname: []const u8 = if (islen) "string, list or map" else S_number;
+        try inj.errs.append(try invalidTypeMsg(allocator, inj.path, tname, val));
+        return .null;
+    }
+
+    const len = lenof(val);
+    const inbound = if (islen) bounds.lo <= len and (-1 == bounds.hi or len <= bounds.hi) else inrange(bound, val);
+
+    if (!inbound) {
+        const root_prefix: []const u8 = if (1 < inj.path.len) "" else "value ";
+        const need = try std.fmt.allocPrint(allocator, "{s}{s}", .{ root_prefix, desc });
+        try inj.errs.append(try invalidTypeMsg(allocator, inj.path, need, val));
+    }
+
+    return .null;
+}
+
+// The length $LEN bounds: a list's elements, a map's keys, and a string's code
+// points, one for each byte that is not a UTF-8 continuation byte.
+fn lenof(val: JsonValue) i64 {
+    return switch (val) {
+        .string => |s| blk: {
+            var n: i64 = 0;
+            for (s) |b| {
+                if ((b & 0xC0) != 0x80) n += 1;
+            }
+            break :blk n;
+        },
+        .array => |a| @intCast(a.data.items.len),
+        .object => |o| @intCast(o.count()),
+        else => 0,
+    };
+}
+
+// The bounds of a $LEN bound, with -1 for no maximum, and the words for it,
+// which are null when the bound is invalid.
+fn lenbound(allocator: Allocator, bound: JsonValue) anyerror!NofCount {
+    const b = try nofcount(allocator, bound, -1);
+    if (null == b.desc) return b;
+
+    var desc: []const u8 = undefined;
+    if (b.lo == b.hi) {
+        desc = try std.fmt.allocPrint(allocator, "of length {d}", .{b.lo});
+    } else if (-1 == b.hi) {
+        desc = try std.fmt.allocPrint(allocator, "of length at least {d}", .{b.lo});
+    } else if (0 == b.lo) {
+        desc = try std.fmt.allocPrint(allocator, "of length at most {d}", .{b.hi});
+    } else {
+        desc = try std.fmt.allocPrint(allocator, "of length {d} to {d}", .{ b.lo, b.hi });
+    }
+
+    return .{ .lo = b.lo, .hi = b.hi, .desc = desc };
+}
+
+// A $RANGE bound's number, or null when it is absent or not a number.
+fn rangenum(n: ?JsonValue) ?f64 {
+    const v = n orelse return null;
+    if (0 == (@as(i64, T_number) & typify(v))) return null;
+    return numval(v);
+}
+
+// The words for a $RANGE bound, which are null when the bound is invalid.
+fn rangedesc(allocator: Allocator, bound: JsonValue) anyerror!?[]const u8 {
+    if (bound != .object) return null;
+
+    const min = bound.object.get("min");
+    const max = bound.object.get("max");
+    const gt = bound.object.get("gt");
+    const lt = bound.object.get("lt");
+
+    var numkeys: usize = 0;
+    for ([_]?JsonValue{ min, max, gt, lt }) |n| {
+        if (n == null) continue;
+        if (null == rangenum(n)) return null;
+        numkeys += 1;
+    }
+
+    if (0 == numkeys or bound.object.count() != numkeys) return null;
+    if ((min != null and gt != null) or (max != null and lt != null)) return null;
+
+    const lower = rangenum(min) orelse rangenum(gt);
+    const upper = rangenum(max) orelse rangenum(lt);
+    if (lower != null and upper != null and upper.? < lower.?) return null;
+
+    var desc = std.array_list.Managed(u8).init(allocator);
+    if (min orelse gt) |n| {
+        const words: []const u8 = if (min != null) "at least " else "greater than ";
+        try desc.appendSlice(words);
+        try desc.appendSlice(try stringify(allocator, n, null));
+    }
+    if (max orelse lt) |n| {
+        const words: []const u8 = if (max != null) "at most " else "less than ";
+        if (0 < desc.items.len) try desc.appendSlice(" and ");
+        try desc.appendSlice(words);
+        try desc.appendSlice(try stringify(allocator, n, null));
+    }
+    return desc.items;
+}
+
+// A number within a valid $RANGE bound.
+fn inrange(bound: JsonValue, val: JsonValue) bool {
+    const v = numval(val) orelse return false;
+    const min = rangenum(bound.object.get("min"));
+    const max = rangenum(bound.object.get("max"));
+    const gt = rangenum(bound.object.get("gt"));
+    const lt = rangenum(bound.object.get("lt"));
+    return (min == null or min.? <= v) and (max == null or v <= max.?) and (gt == null or gt.? < v) and (lt == null or v < lt.?);
+}
+
 // The data value at a list directive's slot: .null for a JSON null, and null
 // when absent. The directive's own dparent was read with getprop.
 fn slotval(inj: *Injection) ?JsonValue {
@@ -3197,6 +3366,8 @@ const VALIDATE_CHECKERS = [_][]const u8{
     "$EXACT",
     "$NOF",
     "$ALL",
+    "$LEN",
+    "$RANGE",
     S_DERRS,
 };
 

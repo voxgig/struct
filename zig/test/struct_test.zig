@@ -1307,6 +1307,16 @@ test "validate-all" {
     try omni.rungroup(&r, "validate", "all", omni.subres(wrap_validate), omni.Flags.nonull());
 }
 
+test "validate-len" {
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "validate", "len", omni.subres(wrap_validate), omni.Flags.nonull());
+}
+
+test "validate-range" {
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "validate", "range", omni.subres(wrap_validate), omni.Flags.nonull());
+}
+
 test "validate-unknown" {
     const r = try omni.makeRunner();
     try omni.rungroup(&r, "validate", "unknown", omni.subres(wrap_validate), omni.Flags.nonull());
