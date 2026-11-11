@@ -198,20 +198,27 @@ def vgi-isindex fn [[s:String] [Boolean] [
   ]
 ]]
 
+# A key that is not a string: the integer it holds, or none.
+def vgi-list-key-num fn [[k:Any] [Any] [
+  def r (
+    if (vg-bit vg-t-integer (vg-typify k)) [
+      if (k is Float) [MathUtil.floor k] [k]
+    ] [none]
+  )
+  r
+]]
+
 # The integer a list key names, read or write: an integral number, or a string
 # vgi-isindex accepts; none for any other key.
 def vgi-list-key fn [[k:Any] [Any] [
   def r (
     if (k is String) [
       if (vgi-isindex k) [vgi-parse-int k] [none]
-    ] [
-      if (vg-bit vg-t-integer (vg-typify k)) [
-        if (k is Float) [MathUtil.floor k] [k]
-      ] [none]
-    ]
+    ] [vgi-list-key-num k]
   )
   r
 ]]
+
 
 # The element a list read selects: a list key that is not negative.
 def vgi-list-index fn [[k:Any] [Any] [
@@ -2968,7 +2975,7 @@ def vg-transform fn [[data:Any spec:Any injdef:Any] [Any] [
   def store (vg-merge sl 1)
   # An extra $TOP of NOARG is canonical undefined: the data is absent, so the
   # slot is too, and a literal-presence read sees no value at the root.
-  if (vg-is-noarg (store get "$TOP")) [(store del "$TOP") drop none] [none] drop
+  if (vg-is-noarg (store get "$TOP")) [(vg-delprop store "$TOP") drop none] [none] drop
   def out (vg-inject spec2 store idf)
   if (((vgz errs) gt 0) and (collect not)) [
     def msg (vg-join errs " | " vg-noarg)
@@ -3361,9 +3368,9 @@ def vgi-nofcount fn [[cnt:Any numtvals:Integer] [Any] [
 def vgl-count-admits fn [[ti:Integer admitted:Integer lo:Any hi:Any tvals:Any cval:Any held:Boolean inj:Any store:Any] [Integer] [
   def numtvals (size tvals)
   if (ti gte numtvals) [admitted] [
-    def reach (admitted add (numtvals sub ti))
+    def admmax (admitted add (numtvals sub ti))
     # Stop once the specs left cannot change the verdict.
-    def decided (((hi lt admitted) or (reach lt lo)) or ((lo lte admitted) and (reach lte hi)))
+    def decided (((hi lt admitted) or (admmax lt lo)) or ((lo lte admitted) and (admmax lte hi)))
     if decided [admitted] [
       def a1 (if (vgi-admits cval held (tvals get ti) inj store) [admitted add 1] [admitted])
       def r (vgl-count-admits (ti add 1) a1 lo hi tvals cval held inj store)
