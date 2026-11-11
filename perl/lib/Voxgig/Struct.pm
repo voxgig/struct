@@ -2863,7 +2863,7 @@ sub _validatebound {
         return SKIP();
     }
 
-    my $len = !$islen ? 0 : (T_string & $ctype) ? _codepoints($cval) : size($cval);
+    my $len = !$islen ? 0 : (T_string & $ctype) ? length($cval) : size($cval);
     my $inbound = $islen
         ? ($lo <= $len && (-1 == $hi || $len <= $hi))
         : _inrange($bound, $cval);
@@ -2943,13 +2943,6 @@ sub _inrange {
         && (is_none($lt) || $val < $lt)) ? 1 : 0;
 }
 
-# A string's length in code points. JSON reaches this port as UTF-8 bytes, so
-# a copy is decoded first; one that is not UTF-8 already holds code points.
-sub _codepoints {
-    my ($s) = @_;
-    utf8::decode($s);
-    return length $s;
-}
 
 sub _exact_eq {
     my ($a, $b) = @_;

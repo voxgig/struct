@@ -476,9 +476,9 @@ back every member of the value unchanged. There is no `$ONE`: write
 
 A list led by `$LEN` or `$RANGE` bounds one value.
 `` jt('`$LEN`', $n, $spec?) `` holds when the value's length is within `$n`,
-a bound written as for `$NOF`. Strings count code points, not bytes: a string
-of UTF-8 bytes is decoded before it is counted. Lists count elements, maps
-keys. `` jt('`$RANGE`', $bound, $spec?) `` holds when the value is a number
+a bound written as for `$NOF`. A character string counts its code points;
+pass decoded text, as the UTF-8 note below asks, since a string of UTF-8
+bytes counts its bytes. Lists count elements, maps keys. `` jt('`$RANGE`', $bound, $spec?) `` holds when the value is a number
 within `$bound`, a map of `min` or `gt` and `max` or `lt`, such as
 `jm(min => 0, lt => 150)`. `$LEN` and `$RANGE` take at most one spec, which
 must also admit the value. `min` and `max` include their bound, while `gt`
