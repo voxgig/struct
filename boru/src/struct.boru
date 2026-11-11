@@ -198,12 +198,21 @@ def vgi-isindex fn [[s:String] [Boolean] [
   ]
 ]]
 
-# A key that is not a string: the integer it holds, or none.
+# A key that is not a string: the integer it holds, or none. This repeats
+# vg-typify's number tests, since vg-typify is defined further down.
 def vgi-list-key-num fn [[k:Any] [Any] [
   def r (
-    if (vg-bit vg-t-integer (vg-typify k)) [
-      if (k is Float) [MathUtil.floor k] [k]
-    ] [none]
+    if (k is Boolean) [none] [
+      if (k is Integer) [k] [
+        if (k is Float) [
+          if (MathUtil.is-nan k) [none] [
+            if (MathUtil.is-inf k) [none] [
+              if ((MathUtil.floor k) eq k) [MathUtil.floor k] [none]
+            ]
+          ]
+        ] [none]
+      ]
+    ]
   )
   r
 ]]
