@@ -54,17 +54,17 @@ NFA engine in-tree (c/cpp/lua/rust/zig).
 | **cpp** | 52 | 15 | 2 | 1671/1671 corpus | full TS-canonical parity |
 | **csharp** | 52 | 15 | 2 | 117/117 pass | already Group A |
 | **kotlin** | 52 | 15 | 2 | 117/117 pass | full TS-canonical parity |
-| **zig** | 52 | 15 | 2 | unverified on this branch \*1 \*4 | cycle-break + 7 latent-bug fixes |
+| **zig** | 52 | 15 | 2 | 94/94 pass in CI \*1 \*4 | cycle-break + 7 latent-bug fixes |
 | **perl** | 52 | 15 | 2 | 174/174 pass | full TS-canonical parity |
-| **swift** | 52 | 15 | 2 | unverified on this branch | full TS-canonical parity |
+| **swift** | 52 | 15 | 2 | 30/30 pass in CI | full TS-canonical parity |
 | **clojure** | 52 | 15 | 2 | 100 groups, 0 failed | full TS-canonical parity |
 | **ocaml** | 52 | 15 | 2 | 99 groups, 0 failed | full TS-canonical parity |
 | **scala** | 52 | 15 | 2 | 98 groups, 0 failed | full TS-canonical parity |
-| **dart** | 52 | 15 | 2 | unverified on this branch | full TS-canonical parity |
+| **dart** | 52 | 15 | 2 | 100 groups, 0 failed in CI | full TS-canonical parity |
 | **elixir** | 52 | 15 | 2 | 100 groups, 0 failed (9 entries dropped) \*2 | full TS-canonical parity |
 | **haskell** | 52 | 15 | 2 | 99 groups, 0 failed | full TS-canonical parity |
-| **lean** | 52 | 15 | 2 | unverified on this branch | full TS-canonical parity |
-| **boru** | 52 | 15 | 2 | unverified on this branch \*3 | full TS-canonical parity |
+| **lean** | 52 | 15 | 2 | 99 groups, 0 failed in CI | full TS-canonical parity |
+| **boru** | 52 | 15 | 2 | 98 pass, 0 fail in CI \*3 | full TS-canonical parity |
 
 \*3 Boru: the only port that CANNOT move onto voxgig/omni, because omni has
 no boru port to move onto — its 22 ports do not include one. Until it does,
@@ -743,10 +743,10 @@ constants, `SKIP` / `DELETE` sentinels.
 | injectorArgs | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
 | injectChild | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
 | **Condensed structures** | | | | | | | | | | | | | | | | |
-| condense | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y* | Y | Y | Y | Y* |
-| condenseview | Y | Y | Y | Y | Y* | Y | Y | Y | Y | Y | Y | Y* | Y | Y | Y | Y* |
-| expand | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y* | Y | Y | Y | Y* |
-| iscondensed | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y* | Y | Y | Y | Y* |
+| condense | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| condenseview | Y | Y | Y | Y | Y* | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| expand | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| iscondensed | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
 
 **Legend:** Y = present and aligned, Y* = present with issues (see notes), - = missing
 
@@ -755,10 +755,8 @@ The condensed-structure functions follow the format the `condense.condense`,
 Where TypeScript throws on a write to a condensed structure, each port raises
 its usual error: C returns NULL (and `setpath` reports through `errs`), Go and
 Rust panic, since those functions have no error channel, and Swift's `setprop`,
-`delprop` and `setpath` now `throws`. `Y*` marks zig and swift, written without
-a toolchain and not yet compiled or run (as are the Lean, Dart and boru ports),
-and PHP's `condenseview`, whose `ref()` on a list node returns a copy, so shared
-identity holds for maps only.
+`delprop` and `setpath` now `throws`. `Y*` marks PHP's `condenseview`, whose
+`ref()` on a list node returns a copy, so shared identity holds for maps only.
 
 
 ## Transform Command Parity
@@ -795,10 +793,10 @@ identity holds for maps only.
 | $ANY | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
 | $CHILD | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
 | $EXACT | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
-| $NOF | Y | Y | Y | Y | Y | Y* | Y | Y | Y | Y | Y | Y* | Y | Y | Y | Y* |
-| $ALL | Y | Y | Y | Y | Y | Y* | Y | Y | Y | Y | Y | Y* | Y | Y | Y | Y* |
-| $LEN | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y* | Y | Y | Y | Y* |
-| $RANGE | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y* | Y | Y | Y | Y* |
+| $NOF | Y | Y | Y | Y | Y | Y* | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| $ALL | Y | Y | Y | Y | Y | Y* | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| $LEN | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| $RANGE | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
 
 Every port defines `$NOF` and `$ALL`, and none defines `$ONE`: there
 `['$NOF', {min:1}, ...]` is the same check. `validate.nof` and `validate.all`
@@ -818,14 +816,10 @@ Every port also rejects a spec that names a checker it does not define
 (`Unknown validator $FOO at field a.`), which `validate.unknown` specifies. The
 validate groups named here run with the null flag off.
 
-`Y*` marks a port whose list directives differ from the canonical where the
-corpus does not reach, or that has not run them yet:
-
-- **lua:** 18 entries of `validate.directive`, `validate.nof` and
-  `validate.all` are dropped, each named in the runner: a Lua table cannot
-  hold a JSON null inside a node.
-- **zig, swift:** written without a toolchain, and not yet compiled or run.
-  So are the Lean, Dart and boru ports, which this table does not list.
+`Y*` marks lua, whose list directives differ from the canonical where the
+corpus does not reach: 18 entries of `validate.directive`, `validate.nof` and
+`validate.all` are dropped, each named in the runner, because a Lua table
+cannot hold a JSON null inside a node.
 
 Elixir drops three `validate.directive` entries, each named in its runner, that
 expect a top-level null its runner reads as absent.
@@ -891,13 +885,10 @@ reports every port ok against the 52-function canonical API).
 ## Recommendations
 
 Every port defines the full 52-function canonical API (`tools/check_parity.py`
-reports every port ok) and runs every corpus group. Parity work still open,
-none of it reached by the corpus yet:
-
-- The Lean, Dart, Swift, Zig and boru ports were last changed without a
-  toolchain; their CI jobs have to confirm them.
-- The smaller edge cases [`NOTES.md`](NOTES.md) lists under its open
-  follow-ups, none of them pinned by the corpus.
+reports every port ok) and runs every corpus group. The Lean, Dart, Swift, Zig
+and boru ports, last changed without a local toolchain, pass in CI. The parity
+work still open lies in the smaller edge cases that [`NOTES.md`](NOTES.md) lists
+under its open follow-ups, none of them pinned by the corpus.
 
 Beyond that, the ports stay in lockstep by changing the canonical first, then
 propagating to every port and re-testing.
