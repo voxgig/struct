@@ -10462,6 +10462,33 @@
               "pattern": "q+"
             },
             "out": null
+          },
+          {
+            "in": {
+              "input": "xbaaa",
+              "pattern": "ba{0,2}"
+            },
+            "out": [
+              "baa"
+            ]
+          },
+          {
+            "in": {
+              "input": "xbaaa",
+              "pattern": "ba{0,2}?"
+            },
+            "out": [
+              "b"
+            ]
+          },
+          {
+            "in": {
+              "input": "zzy",
+              "pattern": "^x|y"
+            },
+            "out": [
+              "y"
+            ]
           }
         ]
       },
@@ -10575,6 +10602,22 @@
               "replacement": "[$1]"
             },
             "out": "a[xx]b"
+          },
+          {
+            "in": {
+              "input": "abab",
+              "pattern": "^a|b",
+              "replacement": "X"
+            },
+            "out": "XXaX"
+          },
+          {
+            "in": {
+              "input": "abbab",
+              "pattern": "a{0,1}b",
+              "replacement": "X"
+            },
+            "out": "XXX"
           }
         ]
       },
@@ -10678,6 +10721,83 @@
               "pattern": "(?:ab)+c"
             },
             "out": true
+          },
+          {
+            "in": {
+              "input": "",
+              "pattern": "^a{0,2}$"
+            },
+            "out": true
+          },
+          {
+            "in": {
+              "input": "aaa",
+              "pattern": "^a{0,2}$"
+            },
+            "out": false
+          },
+          {
+            "in": {
+              "input": "bc",
+              "pattern": "^ba{0}c$"
+            },
+            "out": true
+          },
+          {
+            "in": {
+              "input": "bac",
+              "pattern": "^ba{0}c$"
+            },
+            "out": false
+          },
+          {
+            "in": {
+              "input": "bc",
+              "pattern": "^ba{0,}c$"
+            },
+            "out": true
+          },
+          {
+            "in": {
+              "input": "c",
+              "pattern": "^(?:a|b){0,2}c$"
+            },
+            "out": true
+          },
+          {
+            "in": {
+              "input": "abac",
+              "pattern": "^(?:a|b){0,2}c$"
+            },
+            "out": false
+          },
+          {
+            "in": {
+              "input": "aa",
+              "pattern": "^(?:a|b){2}$"
+            },
+            "out": true
+          },
+          {
+            "in": {
+              "input": "b",
+              "pattern": "^(?:a*){2}b$"
+            },
+            "out": true
+          },
+          {
+            "in": {
+              "input": "xb",
+              "pattern": "^a|b"
+            },
+            "out": true
+          },
+          {
+            "in": {
+              "input": "xa",
+              "pattern": "^a|b"
+            },
+            "out": false
           }
         ]
       }
