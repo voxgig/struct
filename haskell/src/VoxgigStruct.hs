@@ -1756,11 +1756,10 @@ transformPack inj _ _ store = do
 
 -- | @$REF@ transform: resolve a reference within the store.
 transformRef :: Injector
-transformRef inj v _ store = do
+transformRef inj _ _ store = do
   mode <- readIORef (iMode inj)
   if mode /= m_val then return VNoval
   else do
-    nodes <- readIORef (iNodes inj)
     parent <- readIORef (iParent inj)
     refpath <- lookup_ parent (VNum 1)
     keys <- readIORef (iKeys inj); ksz <- size keys; writeIORef (iKeyi inj) ksz
@@ -1771,33 +1770,21 @@ transformRef inj v _ store = do
         refv <- getpath INone spec refpath
         hasSubRef <- newIORef False
         when (isnode refv) $ do _ <- walk (Just (\_ v2 _ _ -> do when (vStrEq v2 "`$REF`") (writeIORef hasSubRef True); return v2)) Nothing VNoval refv; return ()
-        tref <- clone refv
-        ipath <- readIORef (iPath inj); ipsz <- size ipath
-        cpath <- sliceM ipath (VNum 0) (VNum (fromIntegral (ipsz - 3))) False
-        tpath <- sliceM ipath (VNum 0) (VNum (fromIntegral (ipsz - 1))) False
-        tcur <- getpath INone store cpath
-        tval <- getpath INone store tpath
-        rvalRef <- newIORef VNoval
+        -- A recursive reference stops where the data does.
+        ipath <- readIORef (iPath inj)
+        tval <- getpath INone store =<< sliceM ipath (VNum (-1)) VNoval False
         hasSub <- readIORef hasSubRef
-        when (not (isNoval refv) && (not hasSub || not (isNoval tval))) $ do
-          lastT <- getelem tpath (VNum (-1)); cl <- mkList [lastT]
-          cs <- injChild inj 0 cl
-          writeIORef (iPath cs) tpath
-          inodes <- readIORef (iNodes inj); insz <- size inodes
-          nn <- sliceM inodes (VNum 0) (VNum (fromIntegral (insz - 1))) False
-          writeIORef (iNodes cs) nn
-          parent2 <- getelem nodes (VNum (-2)); writeIORef (iParent cs) parent2
-          writeIORef (iIval cs) tref
-          writeIORef (iDparent cs) tcur
-          _ <- inject (IInj cs) tref store
-          iv <- readIORef (iIval cs); writeIORef rvalRef iv
-        rval <- readIORef rvalRef
-        _ <- injSetval 2 inj rval
+        rval <- if not hasSub || not (isNoval tval) then clone refv else return VNoval
+        -- The enclosing loop injects the referenced spec in this list's place, so
+        -- neither this pass nor this element leaves a value for modify to check.
+        grandparent <- injSetval 2 inj rval
         prior <- readIORef (iPrior inj)
         case prior of
-          Just p -> when (islist parent) $ do pk <- readIORef (iKeyi p); writeIORef (iKeyi p) (pk - 1)
+          Just p -> do
+            writeIORef (iModify p) Nothing
+            when (islist grandparent || not (isNoval rval)) $ do pk <- readIORef (iKeyi p); writeIORef (iKeyi p) (pk - 1)
           Nothing -> return ()
-        return v
+        return skip
       _ -> return VNoval
 
 -- ---------------------------------------------------------------------------
