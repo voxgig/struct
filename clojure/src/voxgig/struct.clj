@@ -1267,40 +1267,32 @@
                   (setprop target tkey @rval)
                   nil)))))))))
 
-(defn- transform_REF [inj val _ref store]
-  (let [nodes (ig inj :nodes)]
-    (if (not= (ig inj :mode) S-MVAL)
-      nil
-      (let [refpath (getprop (ig inj :parent) 1)]
-        (is! inj :keyI (size (ig inj :keys)))
-        (let [spec-func (getprop store S-DSPEC)]
-          (if-not (isfunc spec-func)
-            nil
-            (let [spec (spec-func)
-                  ref (getpath spec refpath)
-                  hasSubRef (atom false)]
-              (when (isnode ref)
-                (walk ref (fn [_k v _p _path] (when (= v "`$REF`") (reset! hasSubRef true)) v)))
-              (let [tref (clone ref)
-                    cpath (slice (ig inj :path) 0 (- (size (ig inj :path)) 3))
-                    tpath (slice (ig inj :path) 0 (- (size (ig inj :path)) 1))
-                    tcur (getpath store cpath)
-                    tval (getpath store tpath)
-                    rval (atom nil)]
-                (if (and (some? ref) (or (not @hasSubRef) (some? tval)))
-                  (let [cs (inj-child inj 0 (alist-of [(getelem tpath -1)]))]
-                    (is! cs :path tpath)
-                    (is! cs :nodes (slice (ig inj :nodes) 0 (- (size (ig inj :nodes)) 1)))
-                    (is! cs :parent (getelem nodes -2))
-                    (is! cs :val tref)
-                    (is! cs :dparent tcur)
-                    (inject tref store cs)
-                    (reset! rval (ig cs :val)))
-                  (reset! rval nil))
-                (inj-setval inj @rval 2)
-                (when (and (islist (ig inj :parent)) (ig inj :prior))
-                  (is! (ig inj :prior) :keyI (dec (ig (ig inj :prior) :keyI))))
-                val))))))))
+(defn- transform_REF [inj _val _ref store]
+  (if (not= (ig inj :mode) S-MVAL)
+    nil
+    (let [refpath (getprop (ig inj :parent) 1)]
+      (is! inj :keyI (size (ig inj :keys)))
+      (let [spec-func (getprop store S-DSPEC)]
+        (if-not (isfunc spec-func)
+          nil
+          (let [spec (spec-func)
+                ref (getpath spec refpath)
+                hasSubRef (atom false)]
+            (when (isnode ref)
+              (walk ref (fn [_k v _p _path] (when (= v "`$REF`") (reset! hasSubRef true)) v)))
+            ;; A recursive reference stops where the data does.
+            (let [tpath (slice (ig inj :path) 0 (- (size (ig inj :path)) 1))
+                  tval (getpath store tpath)
+                  rval (when (or (not @hasSubRef) (some? tval)) (clone ref))
+                  ;; The enclosing loop injects the referenced spec in this list's place, so
+                  ;; neither this pass nor this element leaves a value for modify to check.
+                  grandparent (inj-setval inj rval 2)
+                  prior (ig inj :prior)]
+              (when prior
+                (is! prior :modify nil)
+                (when (or (islist grandparent) (some? rval))
+                  (is! prior :keyI (dec (ig prior :keyI)))))
+              SKIP)))))))
 
 ;; FORMATTER
 (defn- jsstr [v]
