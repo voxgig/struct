@@ -2650,6 +2650,7 @@ fn dispatchCmd(allocator: Allocator, cmd: []const u8, store: JsonValue, inj: *In
         if (std.mem.eql(u8, cmd, "$ALL")) return try validateCount(allocator, inj, "$ALL", false);
         if (std.mem.eql(u8, cmd, "$LEN")) return try validateBound(allocator, inj, "$LEN");
         if (std.mem.eql(u8, cmd, "$RANGE")) return try validateBound(allocator, inj, "$RANGE");
+        if (std.mem.eql(u8, cmd, "$LIKE")) return try validateBound(allocator, inj, "$LIKE");
         if (std.mem.eql(u8, cmd, "$CHILD")) return try cmdValidateChildCmd(allocator, inj, store);
     }
 
@@ -2973,8 +2974,8 @@ fn validateCount(allocator: Allocator, inj: *Injection, name: []const u8, counte
     return .null;
 }
 
-// The bounding list directives, $LEN and $RANGE: a bound, then at most one
-// spec that must also admit.
+// The bounding list directives, $LEN, $RANGE and $LIKE: a bound or pattern,
+// then at most one spec that also admits.
 fn validateBound(allocator: Allocator, inj: *Injection, name: []const u8) anyerror!JsonValue {
     if (inj.mode != M_VAL) return .null;
 
@@ -3004,20 +3005,25 @@ fn validateBound(allocator: Allocator, inj: *Injection, name: []const u8) anyerr
         .{ name, try pathifySlice(allocator, pathrange(inj.path, 1, 0)) },
     );
 
+    const islen = std.mem.eql(u8, name, "$LEN");
+    const islike = std.mem.eql(u8, name, "$LIKE");
+    const argname: []const u8 = if (islike) "pattern" else "bound";
+
     if (elems.len < 2 or 3 < elems.len) {
-        try inj.errs.append(try std.fmt.allocPrint(allocator, "{s} must have a bound and at most one spec.", .{field}));
+        try inj.errs.append(try std.fmt.allocPrint(allocator, "{s} must have a {s} and at most one spec.", .{ field, argname }));
         return .null;
     }
 
     const bound = elems[1];
-    const islen = std.mem.eql(u8, name, "$LEN");
-    const bounds: NofCount = if (islen) try lenbound(allocator, bound) else .{ .lo = 0, .hi = 0, .desc = try rangedesc(allocator, bound) };
+    const like: ?[]const u8 = if (islike) likere(bound) else null;
+    const likedesc: ?[]const u8 = if (like) |p| try std.fmt.allocPrint(allocator, "like /{s}/", .{p}) else null;
+    const bounds: NofCount = if (islen) try lenbound(allocator, bound) else .{ .lo = 0, .hi = 0, .desc = if (islike) likedesc else try rangedesc(allocator, bound) };
 
     const desc = bounds.desc orelse {
         try inj.errs.append(try std.fmt.allocPrint(
             allocator,
-            "{s} has an invalid bound: {s}.",
-            .{ field, try stringify(allocator, bound, null) },
+            "{s} has an invalid {s}: {s}.",
+            .{ field, argname, try stringify(allocator, bound, null) },
         ));
         return .null;
     };
@@ -3029,15 +3035,15 @@ fn validateBound(allocator: Allocator, inj: *Injection, name: []const u8) anyerr
         return .null;
     }
 
-    const tbits: i64 = if (islen) T_string | T_list | T_map else T_number;
+    const tbits: i64 = if (islen) T_string | T_list | T_map else if (islike) T_string else T_number;
     if (0 == (tbits & typify(val))) {
-        const tname: []const u8 = if (islen) "string, list or map" else S_number;
+        const tname: []const u8 = if (islen) "string, list or map" else if (islike) S_string else S_number;
         try inj.errs.append(try invalidTypeMsg(allocator, inj.path, tname, val));
         return .null;
     }
 
     const len = lenof(val);
-    const inbound = if (islen) bounds.lo <= len and (-1 == bounds.hi or len <= bounds.hi) else inrange(bound, val);
+    const inbound = if (islen) bounds.lo <= len and (-1 == bounds.hi or len <= bounds.hi) else if (islike) re_test(like.?, val.string) else inrange(bound, val);
 
     if (!inbound) {
         const root_prefix: []const u8 = if (1 < inj.path.len) "" else "value ";
@@ -3083,6 +3089,14 @@ fn lenbound(allocator: Allocator, bound: JsonValue) anyerror!NofCount {
     }
 
     return .{ .lo = b.lo, .hi = b.hi, .desc = desc };
+}
+
+// A $LIKE pattern, null unless the port's own regex engine compiles it.
+fn likere(pattern: JsonValue) ?[]const u8 {
+    if (pattern != .string) return null;
+    var re = re_compile(pattern.string) orelse return null;
+    re.deinit();
+    return pattern.string;
 }
 
 // A $RANGE bound's number, or null when it is absent or not a number.
@@ -3368,6 +3382,7 @@ const VALIDATE_CHECKERS = [_][]const u8{
     "$ALL",
     "$LEN",
     "$RANGE",
+    "$LIKE",
     S_DERRS,
 };
 
@@ -4636,20 +4651,25 @@ fn selectCount(
     return data_val;
 }
 
-// $LEN and $RANGE in a query: the value matches the spec, if there is one,
-// and has a length or is a number within the bound.
+// $LEN, $RANGE and $LIKE in a query: the value matches the spec, if there is
+// one, and has a length or is a number within the bound, or is a string the
+// pattern finds.
 fn selectBound(
     allocator: Allocator,
     spec_val: JsonValue,
     data_val: JsonValue,
     errs: *std.array_list.Managed([]const u8),
     path: []const []const u8,
-    islen: bool,
+    name: []const u8,
 ) anyerror!JsonValue {
     const elems = spec_val.array.data.items;
     const bound: JsonValue = if (1 < elems.len) elems[1] else .null;
+    const islen = std.mem.eql(u8, name, "$LEN");
+    const islike = std.mem.eql(u8, name, "$LIKE");
+    const like: ?[]const u8 = if (islike) likere(bound) else null;
+    const likedesc: ?[]const u8 = if (like) |p| try std.fmt.allocPrint(allocator, "like /{s}/", .{p}) else null;
 
-    const bounds: NofCount = if (islen) try lenbound(allocator, bound) else .{ .lo = 0, .hi = 0, .desc = try rangedesc(allocator, bound) };
+    const bounds: NofCount = if (islen) try lenbound(allocator, bound) else .{ .lo = 0, .hi = 0, .desc = if (islike) likedesc else try rangedesc(allocator, bound) };
     if (elems.len < 2 or 3 < elems.len or null == bounds.desc) {
         try errs.append("Invalid bound.");
         return data_val;
@@ -4664,9 +4684,9 @@ fn selectBound(
         }
     }
 
-    const tbits: i64 = if (islen) T_string | T_list | T_map else T_number;
+    const tbits: i64 = if (islen) T_string | T_list | T_map else if (islike) T_string else T_number;
     const len = lenof(data_val);
-    const inbound = if (islen) bounds.lo <= len and (-1 == bounds.hi or len <= bounds.hi) else inrange(bound, data_val);
+    const inbound = if (islen) bounds.lo <= len and (-1 == bounds.hi or len <= bounds.hi) else if (islike) data_val == .string and re_test(like.?, data_val.string) else inrange(bound, data_val);
 
     if (0 == (tbits & typify(data_val)) or !inbound) {
         try errs.append(try std.fmt.allocPrint(
@@ -4941,9 +4961,11 @@ fn validateExactMatch(
                 if (std.mem.eql(u8, first.string, "`$ALL`"))
                     return try selectCount(allocator, spec_val, data_val, errs, path, false);
                 if (std.mem.eql(u8, first.string, "`$LEN`"))
-                    return try selectBound(allocator, spec_val, data_val, errs, path, true);
+                    return try selectBound(allocator, spec_val, data_val, errs, path, "$LEN");
                 if (std.mem.eql(u8, first.string, "`$RANGE`"))
-                    return try selectBound(allocator, spec_val, data_val, errs, path, false);
+                    return try selectBound(allocator, spec_val, data_val, errs, path, "$RANGE");
+                if (std.mem.eql(u8, first.string, "`$LIKE`"))
+                    return try selectBound(allocator, spec_val, data_val, errs, path, "$LIKE");
             }
         }
         // Plain array spec: compare to data element-by-element. Length and

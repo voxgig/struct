@@ -180,7 +180,7 @@ const human = try S.stringify(allocator, v, null);   // {a:1,b:[2,3]}
 <!-- => "{a:1,b:[2,3]}" -->
 
 For more task recipes (`$EACH`, `$MERGE`, `$FORMAT`, `$NOF`, `$ALL`,
-`$LEN`, `$RANGE`, `$EXACT`, …) see the language-neutral
+`$LEN`, `$RANGE`, `$LIKE`, `$EXACT`, …) see the language-neutral
 [How-to guides](../DOCS.md#2-how-to-guides) — the spec syntax is identical;
 only the host literals and the leading `allocator` differ.
 
