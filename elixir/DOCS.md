@@ -133,7 +133,7 @@ the same code every other port runs. omni is consumed as a local checkout
 `test/runner.exs` finds via `$OMNI_HOME` or beside this repository, and is
 loaded only there: `make lint` compiles `lib/` alone (register 4.13).
 
-Every group the corpus defines runs — 1671 entries in 80 groups —
+Every group the corpus defines runs — 1682 entries in 80 groups —
 plus the two `check` entries (`DEF.client`, client-scoped options,
 `contextify`) and three single entries that are not part of any set.
 

@@ -356,7 +356,7 @@ units only. [`tests/omni_bridge.hpp`](./tests/omni_bridge.hpp) converts
 between `omni::Json` and this port's `Value`.
 
 [`tests/struct_corpus_test.cpp`](./tests/struct_corpus_test.cpp) runs every
-group the corpus defines: **1671 entries in 80 groups**, plus four single entries
+group the corpus defines: **1682 entries in 80 groups**, plus four single entries
 that are not sets - `merge.basic`, `inject.basic`, `transform.basic` and `walk.log`. `walk.log` is driven
 in all three callback configurations (before, after, both), as canonical does.
 [`tests/client_test.cpp`](./tests/client_test.cpp) runs the two `check` entries — `DEF.client`,

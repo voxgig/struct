@@ -57,6 +57,13 @@
   - Zig's `select` has its own matcher: it knows `$EXACT`, `$NOF`, `$ALL`,
     `$LEN`, `$RANGE` and the select operators, but not `$CHILD` or the type
     checkers. The C# runner does not run `select.nullkey`.
+  - A relative `$REF` path such as `.x`: Python, Elixir, Dart, Scala,
+    Clojure, OCaml, Haskell, Lean and Zig look the path up without the data
+    path TypeScript passes, so a relative path names nothing there. A whole
+    spec of `['$REF', 'missing']` gives back that spec in Python and Ruby,
+    where TypeScript gives nothing, and in Go and boru, which hold one null
+    for both, a `$REF` to a null in the spec deletes its field where
+    TypeScript keeps the null.
 
 
 ## Documented JS-fidelity gaps
