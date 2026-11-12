@@ -7,6 +7,7 @@ import java.util.Locale
 import java.util.function.Supplier
 import java.util.regex.Matcher
 import java.util.regex.Pattern
+import java.util.regex.PatternSyntaxException
 import kotlin.math.floor
 
 @Suppress("MemberVisibilityCanBePrivate")
@@ -2395,7 +2396,10 @@ object Struct {
     /** $RANGE: the value is a number within a bound, `[$RANGE, bound, spec?]`; the bound holds min or gt, max or lt, or one of each. */
     val validate_RANGE: Injector = Injector { inj, _, _, store -> _validatebound(inj, store, "\$RANGE") }
 
-    // The bounding list directives: a bound, then at most one spec that must also admit.
+    /** $LIKE: the value is a string the pattern finds, `[$LIKE, pattern, spec?]`; the pattern is a `Regex` that matches anywhere unless anchored. */
+    val validate_LIKE: Injector = Injector { inj, _, _, store -> _validatebound(inj, store, "\$LIKE") }
+
+    // The bounding list directives: a bound or pattern, then at most one spec that also admits.
     private fun _validatebound(
         inj: Injection,
         store: Any?,
@@ -2422,18 +2426,26 @@ object Struct {
 
         val field = "The " + name + " validator at field " + pathify(inj.path, 1)
         val nargs = size(parent) - 1
+        val islen = "\$LEN" == name
+        val islike = "\$LIKE" == name
+        val argname = if (islike) "pattern" else "bound"
 
         if (nargs < 1 || 2 < nargs) {
-            inj.errs.add(field + " must have a bound and at most one spec.")
+            inj.errs.add(field + " must have a " + argname + " and at most one spec.")
             return SKIP
         }
 
         val bound = lookup(parent, 1)
-        val islen = "\$LEN" == name
-        val (lo, hi, desc) = if (islen) _lenbound(bound) else Triple(0L, 0L, _rangedesc(bound))
+        val like = if (islike) _likere(bound) else null
+        val (lo, hi, desc) =
+            when {
+                islen -> _lenbound(bound)
+                islike -> Triple(0L, 0L, if (null == like) null else "like /$like/")
+                else -> Triple(0L, 0L, _rangedesc(bound))
+            }
 
         if (null == desc) {
-            inj.errs.add(field + " has an invalid bound: " + stringify(bound) + ".")
+            inj.errs.add(field + " has an invalid " + argname + ": " + stringify(bound) + ".")
             return SKIP
         }
 
@@ -2445,8 +2457,20 @@ object Struct {
             return SKIP
         }
 
-        if (0 == ((if (islen) T_STRING or T_LIST or T_MAP else T_NUMBER) and ctype)) {
-            val needtype = if (islen) "string, list or map" else "number"
+        val needbits =
+            when {
+                islen -> T_STRING or T_LIST or T_MAP
+                islike -> T_STRING
+                else -> T_NUMBER
+            }
+
+        if (0 == (needbits and ctype)) {
+            val needtype =
+                when {
+                    islen -> "string, list or map"
+                    islike -> "string"
+                    else -> "number"
+                }
             inj.errs.add(_invalidTypeMsg(inj.path, needtype, ctype, cval, "V0420"))
             return SKIP
         }
@@ -2455,6 +2479,8 @@ object Struct {
             if (islen) {
                 val len = if (cval is String) cval.codePointCount(0, cval.length) else size(cval)
                 lo <= len && (-1L == hi || len <= hi)
+            } else if (islike) {
+                reTest(like!!, cval as String)
             } else {
                 _inrange(bound, (cval as Number).toDouble())
             }
@@ -2483,6 +2509,17 @@ object Struct {
             }
 
         return Triple(lo, hi, "of length $desc")
+    }
+
+    // A $LIKE pattern that the port's own regex engine compiles; null unless it does.
+    private fun _likere(pattern: Any?): String? {
+        if (pattern !is String) return null
+        return try {
+            reCompile(pattern)
+            pattern
+        } catch (_: PatternSyntaxException) {
+            null
+        }
     }
 
     // The words for a $RANGE bound, which are null when the bound is invalid.
@@ -2829,6 +2866,7 @@ object Struct {
         baseStore["\$ALL"] = validate_ALL
         baseStore["\$LEN"] = validate_LEN
         baseStore["\$RANGE"] = validate_RANGE
+        baseStore["\$LIKE"] = validate_LIKE
 
         val mergeList = mutableListOf<Any?>(baseStore)
         if (extraRaw is Map<*, *>) mergeList.add(extraRaw)
@@ -2955,7 +2993,9 @@ object Struct {
 
     /** $GT/$LT/$GTE/$LTE/$LIKE comparators dispatched by ref. */
     val select_CMP: Injector =
-        Injector { inj, _, ref, store ->
+        Injector { inj, value, ref, store ->
+            // The list form of $LIKE is validate's checker; the key form is this operator.
+            if (M_VAL == inj.mode && "\$LIKE" == ref) return@Injector validate_LIKE.apply(inj, value, ref, store)
             if (inj.mode != M_KEYPRE) return@Injector UNDEF
             val term = lookup(inj.parent, inj.key)
             val gkey = getelem(inj.path, -2)

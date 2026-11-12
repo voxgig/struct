@@ -9,8 +9,8 @@
 > `inject()`/`transform()`/`validate()`/`select()` all dispatch through
 > the canonical injector machinery: 10 transform commands
 > (`$DELETE`/`$COPY`/`$KEY`/`$ANNO`/`$MERGE`/`$EACH`/`$PACK`/`$REF`/
-> `$FORMAT`/`$APPLY`), 9 validate checkers (`$STRING`/`$TYPE`/`$ANY`/
-> `$CHILD`/`$EXACT`/`$NOF`/`$ALL`/`$LEN`/`$RANGE`), and 4 select
+> `$FORMAT`/`$APPLY`), 10 validate checkers (`$STRING`/`$TYPE`/`$ANY`/
+> `$CHILD`/`$EXACT`/`$NOF`/`$ALL`/`$LEN`/`$RANGE`/`$LIKE`), and 4 select
 > operators (`$AND`/`$OR`/`$NOT`/`$CMP`). `python3 ../tools/check_parity.py`
 > reports it `ok`.
 >
@@ -564,12 +564,13 @@ implemented as `Injector` values (`transform_DELETE`, `transform_COPY`,
 
 Inside backticks in a `validate` spec (implemented as `validate_STRING`,
 `validate_TYPE`, `validate_ANY`, `validate_CHILD`, `validate_EXACT`,
-`validate_NOF`, `validate_ALL`, `validate_LEN`, `validate_RANGE`):
+`validate_NOF`, `validate_ALL`, `validate_LEN`, `validate_RANGE`,
+`validate_LIKE`):
 
 `$STRING`, `$NUMBER`, `$INTEGER`, `$DECIMAL`, `$BOOLEAN`, `$NULL`,
 `$NIL`, `$MAP`, `$LIST`, `$FUNCTION`, `$INSTANCE`, `$ANY`, `$CHILD`,
-`$EXACT`, `$NOF`, `$ALL`, `$LEN`, `$RANGE`. (`$NUMBER`..`$INSTANCE` all share
-`validate_TYPE`.)
+`$EXACT`, `$NOF`, `$ALL`, `$LEN`, `$RANGE`, `$LIKE`. (`$NUMBER`..`$INSTANCE`
+all share `validate_TYPE`.)
 
 `$NOF` and `$ALL` are list directives. `` ['`$NOF`', n, spec, …] `` holds
 when as many specs admit the value as `n` allows, where `n` is an integer
@@ -579,13 +580,15 @@ against it finds no error and gives back every member of the value
 unchanged. This port has no `$ONE`: write `` ['`$ONE`', a, b] `` as
 `` ['`$NOF`', {min: 1}, a, b] ``.
 
-`$LEN` and `$RANGE` are list directives too. `` ['`$LEN`', n, spec?] ``
-holds when the value's length is within `n`, a bound written as for
-`$NOF`. Strings count code points, lists elements, maps keys.
-`` ['`$RANGE`', bound, spec?] `` holds when the value is a number within
-the bound, a map of `min` or `gt` and `max` or `lt`. Each takes at most
-one spec, which must also admit the value. `min` and `max` include their
-bound, while `gt` and `lt` exclude it.
+`$LEN`, `$RANGE`, and `$LIKE` are list directives too.
+`` ['`$LEN`', n, spec?] `` holds when the value's length is within `n`, a
+bound written as for `$NOF`. Strings count code points, lists elements,
+maps keys. `` ['`$RANGE`', bound, spec?] `` holds when the value is a
+number within the bound, a map of `min` or `gt` and `max` or `lt`.
+`` ['`$LIKE`', pattern, spec?] `` holds when the value is a string the
+pattern finds, with Kotlin's `Regex`. Each takes at most one spec, which
+must also admit the value. `min` and `max` include their bound, while `gt`
+and `lt` exclude it. A `$LIKE` pattern matches anywhere unless anchored.
 
 A spec that names a checker this port does not define is rejected before
 any data is read, and nothing is validated. The message is

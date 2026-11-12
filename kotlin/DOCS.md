@@ -150,9 +150,10 @@ S.stringify(linkedMapOf("a" to 1, "b" to listOf(2, 3)))   // {a:1,b:[2,3]}
 <!-- => "{a:1,b:[2,3]}" -->
 
 For more task recipes (rename fields, `$COPY`, `$EACH`, `$MERGE`,
-`$FORMAT`, `$NOF`, `$ALL`, `$LEN`, `$RANGE`, `$EXACT`, …) see the
+`$FORMAT`, `$NOF`, `$ALL`, `$LEN`, `$RANGE`, `$LIKE`, `$EXACT`, …) see the
 language-neutral [How-to guides](../DOCS.md#2-how-to-guides) — the spec
-syntax is identical; only the host literals differ.
+syntax is identical; only the host literals differ. A `$LIKE` pattern is
+matched by Kotlin's `Regex`.
 
 ---
 
