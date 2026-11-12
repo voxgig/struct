@@ -1341,10 +1341,9 @@ object struct {
     }
   }
 
-  private val transformRef: Injector = (inj, v, _r, store) => {
+  private val transformRef: Injector = (inj, _v, _r, store) => {
     if (inj.mode != M_VAL) Noval
     else {
-      val nodes = inj.nodes
       val refpath = lookup_(inj.parent, VNum(1.0))
       inj.keyi = size(inj.keys)
       getprop(store, VStr(S_DSPEC)) match {
@@ -1353,28 +1352,20 @@ object struct {
           val refv = getpath(spec, refpath, INone)
           var hasSub = false
           if (isnode(refv)) walk(refv, before = Some((_k, v2, _p, _path) => { if (v2 == VStr("`$REF`")) hasSub = true; v2 }))
-          val tref = clone(refv)
-          val cpath = slice(inj.path, VNum(0.0), VNum((size(inj.path) - 3).toDouble))
+          // A recursive reference stops where the data does.
           val tpath = slice(inj.path, VNum(0.0), VNum((size(inj.path) - 1).toDouble))
-          val tcur = getpath(store, cpath, INone)
           val tval = getpath(store, tpath, INone)
-          var rval: Value = Noval
-          if (!isNoval(refv) && (!hasSub || !isNoval(tval))) {
-            val cs = injChild(inj, 0, mkList(Seq(getelem(tpath, VNum(-1.0)))))
-            cs.path = tpath
-            cs.nodes = slice(inj.nodes, VNum(0.0), VNum((size(inj.nodes) - 1).toDouble))
-            cs.parent = getelem(nodes, VNum(-2.0))
-            cs.ival = tref
-            cs.dparent = tcur
-            inject(tref, store, IInj(cs))
-            rval = cs.ival
-          }
-          injSetval(inj, rval, 2)
+          val rval = if (!hasSub || !isNoval(tval)) clone(refv) else Noval
+          // The enclosing loop injects the referenced spec in this list's place, so
+          // neither this pass nor this element leaves a value for modify to check.
+          val grandparent = injSetval(inj, rval, 2)
           inj.prior match {
-            case Some(p) if islist(inj.parent) => p.keyi = p.keyi - 1
-            case _ =>
+            case Some(p) =>
+              p.modify = None
+              if (islist(grandparent) || !isNoval(rval)) p.keyi = p.keyi - 1
+            case None =>
           }
-          v
+          SKIP
         case _ => Noval
       }
     }
