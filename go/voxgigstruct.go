@@ -2951,61 +2951,26 @@ var Transform_REF Injector = func(
 		})
 	}
 
-	tref := Clone(refResult)
-
-	cpath := make([]string, 0)
-	if len(inj.Path.List) > 3 {
-		cpath = append(cpath, inj.Path.List[:len(inj.Path.List)-3]...)
-	}
-	tpath := make([]string, 0)
-	if len(inj.Path.List) >= 1 {
-		tpath = append(tpath, inj.Path.List[:len(inj.Path.List)]...)
-	}
-	tpath = tpath[:len(tpath)-1]
-
-	tcur := GetPath(store, cpath)
-	tval := GetPath(store, tpath)
-
+	// A recursive reference stops where the data does.
+	tval := GetPath(store, inj.Path.List[:len(inj.Path.List)-1])
 	var rval any
-
 	if !hasSubRef || tval != nil {
-		lastPath := S_DTOP
-		if len(tpath) > 0 {
-			lastPath = tpath[len(tpath)-1]
-		}
-		tinj := inj.child(0, []string{lastPath})
-		tinj.Path = &ListRef[string]{List: tpath}
-
-		// TS: tinj.nodes = slice(inj.nodes, -1) → nodes[0:len-1] (all except last)
-		nodesLen := len(inj.Nodes.List)
-		if nodesLen > 1 {
-			tnodeslist := make([]any, nodesLen-1)
-			copy(tnodeslist, inj.Nodes.List[:nodesLen-1])
-			tinj.Nodes = &ListRef[any]{List: tnodeslist}
-		} else {
-			tinj.Nodes = &ListRef[any]{List: []any{}}
-		}
-
-		// TS: tinj.parent = getelem(nodes, -2)
-		if nodesLen >= 2 {
-			tinj.Parent = inj.Nodes.List[nodesLen-2]
-		}
-		tinj.Val = tref
-
-		tinj.Dpath = cpath
-		tinj.Dparent = tcur
-
-		Inject(tref, store, tinj)
-		rval = tinj.Val
+		// Wrapped as the injected spec is: a list directive rewrites its list in place.
+		rval = CloneFlags(refResult, map[string]bool{"wrap": true})
 	}
 
+	// The enclosing loop injects the referenced spec in this list's place, so
+	// neither this pass nor this element leaves a value for modify to check.
 	grandparent := inj.setval(rval, 2)
 
-	if IsList(grandparent) && inj.Prior != nil {
-		inj.Prior.KeyI--
+	if prior := inj.Prior; prior != nil {
+		prior.Modify = nil
+		if IsList(grandparent) || rval != nil {
+			prior.KeyI--
+		}
 	}
 
-	return val
+	return SKIP
 }
 
 var Transform_APPLY Injector = func(
