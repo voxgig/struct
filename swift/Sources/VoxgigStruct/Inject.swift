@@ -109,7 +109,7 @@ public func inject(_ val: Value, _ store: Value, _ injdef: Injection? = nil) -> 
     // modify, extra, meta AND handler; this port dropped `handler`, so
     // `validate`'s `_validatehandler` never ran and the meta-path exact form
     // (`\`q0$=x1\``) silently fell through to ordinary literal validation.
-    // `validate/special#8` is the entry that notices.
+    // `validate/special#19` is the entry that notices.
     if let idef = injdef {
       if let m = idef.modify { root.modify = m }
       if !idef.extra.isNoval { root.extra = idef.extra }

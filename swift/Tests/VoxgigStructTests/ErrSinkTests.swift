@@ -17,7 +17,7 @@ final class ErrSinkTests: XCTestCase {
     XCTAssertThrowsError(try validate(data, spec))
   }
 
-  // An injdef that carries no sink is still a throw - `validate/special#7`
+  // An injdef that carries no sink is still a throw - `validate/special#18`
   // depends on it, so "an injdef was passed" cannot stand in for "collect".
   func testValidateThrowsWithSinklessInjection() throws {
     let (data, spec) = try badspec()
