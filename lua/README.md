@@ -586,7 +586,7 @@ $MERGE   $EACH    $PACK    $REF     $FORMAT  $APPLY
 ```
 $MAP   $LIST   $STRING   $NUMBER   $INTEGER   $DECIMAL  $BOOLEAN
 $NULL  $NIL    $FUNCTION $INSTANCE $ANY       $CHILD    $EXACT
-$NOF   $ALL    $LEN      $RANGE
+$NOF   $ALL    $LEN      $RANGE     $LIKE
 ```
 
 `` { '`$NOF`', n, spec, … } `` holds when as many specs admit the value as `n`
@@ -600,9 +600,12 @@ back every member of the value unchanged. There is no `$ONE`: write
 bound written as for `$NOF`. Strings count code points, lists elements, maps
 keys. `` { '`$RANGE`', bound, spec? } `` holds when the value is a number
 within the bound, a map of `min` or `gt` and `max` or `lt`, such as
-`{ min = 0, lt = 150 }`. `$LEN` and `$RANGE` take at most one spec, which
-must also admit the value. `min` and `max` include their bound, while `gt`
-and `lt` exclude it.
+`{ min = 0, lt = 150 }`. `` { '`$LIKE`', pattern, spec? } `` holds when the
+value is a string the pattern finds, with the in-tree engine in
+[`src/regex.lua`](./src/regex.lua), anywhere in it unless the pattern is
+anchored. `$LEN`, `$RANGE` and `$LIKE` take at most one spec, which must also
+admit the value. `min` and `max` include their bound, while `gt` and `lt`
+exclude it.
 
 A spec that names a checker `validate` does not define is rejected before
 any data is read, and nothing is validated. The whole-string reference

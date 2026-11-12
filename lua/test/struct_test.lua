@@ -1272,6 +1272,12 @@ describe("struct", function()
     end)
   end)
 
+  test("validate-like", function()
+    runsetflags(validateSpec.like, { null = false }, function(vin)
+      return validate(vin.data, vin.spec)
+    end)
+  end)
+
   test("validate-unknown", function()
     runsetflags(validateSpec.unknown, { null = false }, function(vin)
       return validate(vin.data, vin.spec)

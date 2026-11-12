@@ -3178,7 +3178,17 @@ local function _inrange(bound, val)
     and (NONE == lt or val < lt)
 end
 
--- The bounding list directives: a bound, then at most one spec that must also admit.
+-- A $LIKE pattern compiled by the in-tree engine in src/regex.lua, which raises
+-- on a bad pattern; absent unless it compiles.
+local function _likere(pattern)
+  if S_string ~= type(pattern) then
+    return NONE
+  end
+  local ok, re = pcall(re_compile, pattern)
+  return ok and re or NONE
+end
+
+-- The bounding list directives: a bound or pattern, then at most one spec that also admits.
 local function _validatebound(inj, store, name)
   local mode, parent, keyI = inj.mode, inj.parent, inj.keyI
 
@@ -3209,23 +3219,33 @@ local function _validatebound(inj, store, name)
 
   local field = "The " .. name .. " validator at field " .. pathify(inj.path, 1)
   local nargs = size(parent) - 1
+  local islen = "$LEN" == name
+  local islike = "$LIKE" == name
+  local argname = islike and "pattern" or "bound"
 
   if nargs < 1 or 2 < nargs then
-    table.insert(inj.errs, field .. " must have a bound and at most one spec.")
+    table.insert(inj.errs, field .. " must have a " .. argname .. " and at most one spec.")
     return SKIP
   end
 
   local bound = getprop(parent, 1)
-  local islen = "$LEN" == name
+  local like = islike and _likere(bound) or NONE
   local lo, hi, desc = 0, 0, NONE
   if islen then
     lo, hi, desc = _lenbound(bound)
+  elseif islike then
+    if NONE ~= like then
+      desc = "like /" .. bound .. "/"
+    end
   else
     desc = _rangedesc(bound)
   end
 
   if NONE == desc then
-    table.insert(inj.errs, field .. " has an invalid bound: " .. stringify(bound) .. ".")
+    table.insert(
+      inj.errs,
+      field .. " has an invalid " .. argname .. ": " .. stringify(bound) .. "."
+    )
     return SKIP
   end
 
@@ -3237,8 +3257,8 @@ local function _validatebound(inj, store, name)
     return SKIP
   end
 
-  if 0 == ((islen and (T_string | T_list | T_map) or T_number) & ctype) then
-    local needtype = islen and "string, list or map" or S_number
+  if 0 == ((islen and (T_string | T_list | T_map) or islike and T_string or T_number) & ctype) then
+    local needtype = islen and "string, list or map" or islike and S_string or S_number
     table.insert(inj.errs, _invalidTypeMsg(inj.path, needtype, ctype, cval, "V0420"))
     return SKIP
   end
@@ -3248,6 +3268,8 @@ local function _validatebound(inj, store, name)
     -- utf8.len fails on invalid UTF-8, which then counts its bytes.
     local len = S_string == type(cval) and utf8.len(cval) or size(cval)
     inbound = lo <= len and (-1 == hi or len <= hi)
+  elseif islike then
+    inbound = re_test(like, cval)
   else
     inbound = _inrange(bound, cval)
   end
@@ -3270,6 +3292,10 @@ end
 -- bound holds min or gt, max or lt, or one of each.
 local function validate_RANGE(inj, _val, _ref, store)
   return _validatebound(inj, store, "$RANGE")
+end
+
+local function validate_LIKE(inj, _val, _ref, store)
+  return _validatebound(inj, store, "$LIKE")
 end
 
 -- This is the "modify" argument to inject. Use this to perform
@@ -3413,6 +3439,7 @@ validate = function(data, spec, injdef)
       ["$ALL"] = validate_ALL,
       ["$LEN"] = validate_LEN,
       ["$RANGE"] = validate_RANGE,
+      ["$LIKE"] = validate_LIKE,
     },
 
     getdef(extra, {}),
@@ -3555,7 +3582,12 @@ local function select_NOT(inj, _val, _ref, store)
   end
 end
 
-local function select_CMP(inj, _val, ref, store)
+local function select_CMP(inj, val, ref, store)
+  -- The list form of $LIKE is validate's checker; the key form is this operator.
+  if M_VAL == inj.mode and "$LIKE" == ref then
+    return validate_LIKE(inj, val, ref, store)
+  end
+
   if M_KEYPRE == inj.mode then
     local term = getprop(inj.parent, inj.key)
     local gkey = getelem(inj.path, -2)
