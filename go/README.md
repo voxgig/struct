@@ -653,7 +653,7 @@ $MERGE   $EACH    $PACK    $REF     $FORMAT  $APPLY
 ```
 $MAP   $LIST   $STRING   $NUMBER   $INTEGER   $DECIMAL  $BOOLEAN
 $NULL  $NIL    $FUNCTION $INSTANCE $ANY       $CHILD    $EXACT
-$NOF   $ALL    $LEN      $RANGE
+$NOF   $ALL    $LEN      $RANGE    $LIKE
 ```
 
 `` []any{"`$NOF`", n, spec, …} `` holds when as many specs admit the value as
@@ -668,9 +668,12 @@ back every member of the value unchanged. There is no `$ONE`: write
 bound written as for `$NOF`. Strings count code points, lists elements, maps
 keys. `` []any{"`$RANGE`", bound, spec?} `` holds when the value is a number
 within the bound, a map of `min` or `gt` and `max` or `lt`, such as
-`` map[string]any{"min": 0, "lt": 150} ``. `$LEN` and `$RANGE` take at most
-one spec, which must also admit the value. `min` and `max` include their
-bound, while `gt` and `lt` exclude it.
+`` map[string]any{"min": 0, "lt": 150} ``. `` []any{"`$LIKE`", pattern, spec?} ``
+holds when the value is a string the pattern finds, with Go's `regexp`.
+`$LEN`, `$RANGE` and `$LIKE` take at most one spec, which must also admit the
+value. `min` and `max` include their bound, while `gt` and `lt` exclude it. A
+`$LIKE` pattern matches anywhere unless anchored, and one that `regexp` cannot
+compile, such as a lookahead, is an invalid pattern rather than a panic.
 
 A spec that names a checker `Validate` does not define is rejected before any
 data is read, and nothing is validated: `Validate` returns a copy of the data

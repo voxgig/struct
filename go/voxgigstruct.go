@@ -3707,6 +3707,7 @@ var validate_NOF Injector
 var validate_ALL Injector
 var validate_LEN Injector
 var validate_RANGE Injector
+var validate_LIKE Injector
 
 // Forward declaration for validate_EXACT
 var validate_EXACT Injector
@@ -3753,6 +3754,15 @@ func init_validate_count() {
 		store any,
 	) any {
 		return _validatebound(inj, store, "$RANGE")
+	}
+
+	validate_LIKE = func(
+		inj *Injection,
+		_val any,
+		ref *string,
+		store any,
+	) any {
+		return _validatebound(inj, store, "$LIKE")
 	}
 }
 
@@ -3904,7 +3914,7 @@ func _validatecount(inj *Injection, store any, name string, counted bool) any {
 	return SKIP
 }
 
-// The bounding list directives: a bound, then at most one spec that must also admit.
+// The bounding list directives: a bound or pattern, then at most one spec that also admits.
 func _validatebound(inj *Injection, store any, name string) any {
 	if M_VAL != inj.Mode {
 		return nil
@@ -3928,23 +3938,31 @@ func _validatebound(inj *Injection, store any, name string) any {
 
 	field := "The " + name + " validator at field " + Pathify(inj.Path.List, 1)
 	nargs := Size(inj.Parent) - 1
+	islen := "$LEN" == name
+	islike := "$LIKE" == name
+	argname := "bound"
+	if islike {
+		argname = "pattern"
+	}
 
 	if nargs < 1 || 2 < nargs {
-		inj.Errs.Append(field + " must have a bound and at most one spec.")
+		inj.Errs.Append(field + " must have a " + argname + " and at most one spec.")
 		return SKIP
 	}
 
 	bound := _lookup(inj.Parent, 1)
-	islen := "$LEN" == name
+	pattern, _ := bound.(string)
 	lo, hi, desc := 0, 0, ""
 	if islen {
 		lo, hi, desc = _lenbound(bound)
-	} else {
+	} else if !islike {
 		desc = _rangedesc(bound)
+	} else if nil != _likere(bound) {
+		desc = "like /" + pattern + "/"
 	}
 
 	if "" == desc {
-		inj.Errs.Append(field + " has an invalid bound: " + Stringify(denoval(bound)) + ".")
+		inj.Errs.Append(field + " has an invalid " + argname + ": " + Stringify(denoval(bound)) + ".")
 		return SKIP
 	}
 
@@ -3962,6 +3980,8 @@ func _validatebound(inj *Injection, store any, name string) any {
 	needtype, needbits := S_number, T_number
 	if islen {
 		needtype, needbits = "string, list or map", T_string|T_list|T_map
+	} else if islike {
+		needtype, needbits = S_string, T_string
 	}
 
 	if 0 == (needbits & Typify(cval)) {
@@ -3976,6 +3996,8 @@ func _validatebound(inj *Injection, store any, name string) any {
 			length = utf8.RuneCountInString(s)
 		}
 		inbound = lo <= length && (-1 == hi || length <= hi)
+	} else if islike {
+		inbound = ReTest(pattern, cval.(string))
 	} else {
 		inbound = _inrange(bound, cval)
 	}
@@ -4012,6 +4034,21 @@ func _lenbound(bound any) (int, int, string) {
 	}
 
 	return lo, hi, "of length " + desc
+}
+
+// A $LIKE pattern compiled by the port's own regex engine; nil unless it
+// compiles. ReCompile panics on a pattern regexp refuses.
+func _likere(pattern any) (like *regexp.Regexp) {
+	s, ok := pattern.(string)
+	if !ok {
+		return nil
+	}
+	defer func() {
+		if nil != recover() {
+			like = nil
+		}
+	}()
+	return ReCompile(s)
 }
 
 // The words for a $RANGE bound, which are "" when the bound is invalid.
@@ -4306,6 +4343,7 @@ func Validate(
 		"$ALL":      validate_ALL,
 		"$LEN":      validate_LEN,
 		"$RANGE":    validate_RANGE,
+		"$LIKE":     validate_LIKE,
 	}
 
 	// Add any extra validation commands
@@ -4541,6 +4579,11 @@ var select_CMP Injector = func(
 	ref *string,
 	store any,
 ) any {
+	// The list form of $LIKE is validate's checker; the key form is this operator.
+	if M_VAL == inj.Mode && nil != ref && "$LIKE" == *ref {
+		return validate_LIKE(inj, val, ref, store)
+	}
+
 	if M_KEYPRE == inj.Mode {
 		term := GetProp(inj.Parent, inj.Key)
 
@@ -4644,6 +4687,7 @@ func validateCollectExact(
 		"$ALL":      validate_ALL,
 		"$LEN":      validate_LEN,
 		"$RANGE":    validate_RANGE,
+		"$LIKE":     validate_LIKE,
 	}
 
 	for k, fn := range extra {
