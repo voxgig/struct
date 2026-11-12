@@ -234,9 +234,9 @@ transform(.map([]), try JSON.parse(#"{"x":"`$APPLY`"}"#), inj)
 <!-- throws: invalid placement in parent map -->
 
 For more task recipes (`$EACH`, `$MERGE`, `$FORMAT`, `$NOF`, `$ALL`,
-`$LEN`, `$RANGE`, `$EXACT`, `select` operators, …) see the language-neutral
-[How-to guides](../DOCS.md#2-how-to-guides) — the spec syntax is identical;
-only the host literals differ.
+`$LEN`, `$RANGE`, `$LIKE`, `$EXACT`, `select` operators, …) see the
+language-neutral [How-to guides](../DOCS.md#2-how-to-guides) — the spec
+syntax is identical; only the host literals differ.
 
 ---
 
@@ -333,6 +333,12 @@ thread results through `Value.list`, not raw arrays. Cross-engine
 pathological inputs (catastrophic backtracking; zero-width replace) are in
 [`README.md` → Regex](./README.md#regex) and
 [`../REGEX_PATHOLOGICAL.md`](../design/REGEX_PATHOLOGICAL.md).
+
+`$LIKE`, as a validate checker and as a select operator, matches with this
+engine and no options. A pattern therefore means what it means to ICU: one
+outside the subset, such as a lookahead, works here and not in every port, and
+the checker reports one that `re_compile` answers with `nil` as an invalid
+pattern.
 
 ---
 

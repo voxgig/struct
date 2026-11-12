@@ -95,6 +95,10 @@ public func select_NOT(_ inj: Injection, _ val: Value, _ ref: String, _ store: V
 // MARK: - $CMP family
 
 public func select_CMP(_ inj: Injection, _ val: Value, _ ref: String, _ store: Value) -> Value {
+  // The list form of $LIKE is validate's checker; the key form is this operator.
+  if inj.mode == M_VAL && "$LIKE" == ref {
+    return validate_LIKE(inj, val, ref, store)
+  }
   guard inj.mode == M_KEYPRE else { return .noval }
   let term = lookup(inj.parent, .string(inj.key))
   let gkey = getelem(.list(VList(inj.path.map { Value.string($0) })), .int(-2))

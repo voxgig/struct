@@ -452,7 +452,7 @@ final class CorpusTests: XCTestCase {
         arg1 { vin in try validate(self.vget(vin, "data"), self.vget(vin, "spec")) })
     }
     // `null: false`, so that a null in these groups reaches validate as a null.
-    for name in ["directive", "nof", "all", "len", "range", "unknown"] {
+    for name in ["directive", "nof", "all", "len", "range", "like", "unknown"] {
       runSet(
         "validate.\(name)", sub(validates, name), false,
         arg1 { vin in try validate(self.vget(vin, "data"), self.vget(vin, "spec")) })

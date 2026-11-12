@@ -1,4 +1,4 @@
-// Validate checkers — 18 injectors plus the top-level `validate`
+// Validate checkers — 19 injectors plus the top-level `validate`
 // driver, the `_validation` modify hook, and the validate-mode
 // `_validatehandler`. Mirrors canonical TS `validate*`.
 
@@ -279,7 +279,7 @@ private func _validatecount(
   return .sentinel(SKIP)
 }
 
-// MARK: - validate_LEN / validate_RANGE
+// MARK: - validate_LEN / validate_RANGE / validate_LIKE
 
 // The value's length is within a bound: ['`$LEN`', bound, spec?], where the
 // bound is as for a $NOF count. A string's length is in code points.
@@ -293,8 +293,12 @@ public func validate_RANGE(_ inj: Injection, _ val: Value, _ ref: String, _ stor
   return _validatebound(inj, store, "$RANGE")
 }
 
-// The bounding list directives: a bound, then at most one spec that must also
-// admit.
+public func validate_LIKE(_ inj: Injection, _ val: Value, _ ref: String, _ store: Value) -> Value {
+  return _validatebound(inj, store, "$LIKE")
+}
+
+// The bounding list directives: a bound or pattern, then at most one spec that
+// also admits.
 private func _validatebound(_ inj: Injection, _ store: Value, _ name: String) -> Value {
   let parent = inj.parent
   if inj.mode != M_VAL { return .noval }
@@ -320,18 +324,23 @@ private func _validatebound(_ inj: Injection, _ store: Value, _ name: String) ->
     "The " + name + " validator at field "
     + pathify(.list(VList(inj.path.map { Value.string($0) })), 1)
   let nargs = size(parent) - 1
+  let islen = "$LEN" == name
+  let islike = "$LIKE" == name
+  let argname = islike ? "pattern" : "bound"
 
   if nargs < 1 || 2 < nargs {
-    inj.errs.items.append(.string(field + " must have a bound and at most one spec."))
+    inj.errs.items.append(.string(field + " must have a " + argname + " and at most one spec."))
     return .sentinel(SKIP)
   }
 
   let bound = lookup(parent, .int(1))
-  let islen = "$LEN" == name
-  let (lo, hi, desc) = islen ? _lenbound(bound) : (0, 0, _rangedesc(bound))
+  let like = islike ? _likere(bound) : nil
+  let likedesc: String? = nil == like ? nil : "like /" + (bound.asString ?? "") + "/"
+  let (lo, hi, desc) = islen ? _lenbound(bound) : (0, 0, islike ? likedesc : _rangedesc(bound))
 
   guard let words = desc else {
-    inj.errs.items.append(.string(field + " has an invalid bound: " + stringify(bound) + "."))
+    inj.errs.items.append(
+      .string(field + " has an invalid " + argname + ": " + stringify(bound) + "."))
     return .sentinel(SKIP)
   }
 
@@ -344,14 +353,17 @@ private func _validatebound(_ inj: Injection, _ store: Value, _ name: String) ->
     return .sentinel(SKIP)
   }
 
-  if 0 == ((islen ? T_string | T_list | T_map : T_number) & ctype) {
-    let needtype = islen ? "string, list or map" : S_number
+  if 0 == ((islen ? T_string | T_list | T_map : islike ? T_string : T_number) & ctype) {
+    let needtype = islen ? "string, list or map" : islike ? S_string : S_number
     inj.errs.items.append(.string(invalidTypeMsg(inj.path, needtype, ctype, cval, "V0420")))
     return .sentinel(SKIP)
   }
 
   let len = islen ? (cval.asString?.unicodeScalars.count ?? size(cval)) : 0
-  let inbound = islen ? lo <= len && (-1 == hi || len <= hi) : _inrange(bound, cval)
+  let inbound =
+    islen
+    ? lo <= len && (-1 == hi || len <= hi)
+    : islike ? re_test(bound, cval.asString ?? "") : _inrange(bound, cval)
 
   if !inbound {
     let needtype = (inj.path.count > 1 ? "" : "value ") + words
@@ -379,6 +391,12 @@ private func _lenbound(_ bound: Value) -> (Int, Int, String?) {
   }
 
   return (lo, hi, "of length " + desc)
+}
+
+// A $LIKE pattern compiled by the port's own regex engine; nil unless it compiles.
+private func _likere(_ pattern: Value) -> NSRegularExpression? {
+  guard case .string(let source) = pattern else { return nil }
+  return re_compile(source)
 }
 
 // The words for a $RANGE bound, which are nil when the bound is invalid.
@@ -568,6 +586,7 @@ func validateCollect(
   base.entries["$ALL"] = .function(validate_ALL)
   base.entries["$LEN"] = .function(validate_LEN)
   base.entries["$RANGE"] = .function(validate_RANGE)
+  base.entries["$LIKE"] = .function(validate_LIKE)
   let errsMap = VMap()
   errsMap.entries[S_DERRS] = .list(errs)
   let extraMap = extra.isNoval ? Value.map(VMap()) : extra
