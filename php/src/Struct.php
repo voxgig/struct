@@ -2293,8 +2293,6 @@ class Struct
     /** @internal */
     public static function transform_REF(object $state, mixed $_val, string $_ref, mixed $store): mixed
     {
-        $nodes = $state->nodes;
-
         if (self::M_VAL !== $state->mode) {
             return self::undef();
         }
@@ -2323,55 +2321,33 @@ class Struct
             });
         }
 
-        $tref = self::cloneWrap($ref);
+        // A recursive reference stops where the data does.
+        $tval = self::getpath($store, self::slice($state->path, -1));
+        $rval = !$hasSubRef || self::undef() !== $tval ? self::cloneWrap($ref) : self::undef();
 
-        $cpath = self::slice($state->path, -3);
-        $tpath = self::slice($state->path, -1);
-        $tcur = self::getpath($store, $cpath);
-        $tval = self::getpath($store, $tpath);
-        $rval = self::undef();
-
-        if (!$hasSubRef || self::undef() !== $tval) {
-            $tinj = $state->child(0, [self::getelem($tpath, -1)]);
-
-            $tinj->path = $tpath;
-            $tinj->nodes = self::slice($state->nodes, -1);
-            $tinj->parent = self::getelem($nodes, -2);
-            $tinj->val = $tref;
-
-            $tinj->dpath = self::flatten([$cpath]);
-            $tinj->dparent = $tcur;
-
-            $injResult = self::inject($tref, $store, $tinj);
-
-            // If inject returned SKIP, use tref (mutated in place) not tinj->val (which may be SKIP)
-            if ($injResult === self::SKIP || $tinj->val === self::SKIP) {
-                $rval = is_object($tref) ? $tref : self::undef();
-            } else {
-                $rval = $tinj->val;
-            }
-        } else {
-            $rval = self::undef();
-        }
-
+        // The enclosing loop injects the referenced spec in this list's place, so
+        // neither this pass nor this element leaves a value for modify to check.
         $grandparent = $state->setval($rval, 2);
 
-        // PHP: arrays in nodes are copies, so ancestor setval on arrays doesn't propagate.
-        // Sync the prior injection's parent if it's an array.
-        if ($state->prior && is_array($state->prior->parent)) {
-            $akey = self::getelem($state->path, -2);
-            if (self::undef() === $rval) {
-                $state->prior->parent = self::delprop($state->prior->parent, $akey);
-            } else {
-                self::setprop($state->prior->parent, $akey, $rval);
+        $prior = $state->prior;
+        if ($prior) {
+            // PHP: arrays in nodes are copies, so ancestor setval on arrays doesn't propagate.
+            if (is_array($prior->parent)) {
+                $akey = self::getelem($state->path, -2);
+                if (self::undef() === $rval) {
+                    $prior->parent = self::delprop($prior->parent, $akey);
+                } else {
+                    self::setprop($prior->parent, $akey, $rval);
+                }
+            }
+
+            $prior->modify = null;
+            if (self::islist($grandparent) || self::undef() !== $rval) {
+                $prior->keyI--;
             }
         }
 
-        if (self::islist($grandparent) && $state->prior) {
-            $state->prior->keyI--;
-        }
-
-        return $_val;
+        return self::SKIP;
     }
 
 
