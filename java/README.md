@@ -21,7 +21,7 @@ explanation), see [`DOCS.md`](./DOCS.md).
 
 > **Status: complete.** The full canonical surface is present, the parity
 > check reports Java `ok`, and the shared `build/test/` corpus passes in
-> full (1682/1682, `make test-java`).
+> full (1714/1714, `make test-java`).
 
 
 ## Install

@@ -11,6 +11,15 @@
 
 ## Open follow-ups
 
+- **Two in-tree regex engines miss the RE2 subset they promise.** `$LIKE`
+  lets user patterns reach both, and no corpus entry covers either yet:
+  - `{0,n}` and `{0}` keep one copy of the atom required in C, Lua, Rust
+    and Zig, so `^a{0,2}$` matches `aaa` but not `""`, and `^ba{0,1}c$`
+    misses `bc`. OCaml's engine and the stdlib engines read them as RE2
+    does.
+  - In C and Lua a pattern that starts with `^` is tried only at the start
+    of the text, so `^a|b` misses `xb`, where `b|^a` finds it.
+
 - **`getpath` trailing-dot ascending path is undocumented in the
   canonical TypeScript.** A path ending in one or more `.` (e.g.
   `.foo..`) ascends to an ancestor data parent; the implementation is
@@ -55,8 +64,14 @@
     `size`. A string that is not valid UTF-8 falls back to its bytes in Lua
     and PHP.
   - Zig's `select` has its own matcher: it knows `$EXACT`, `$NOF`, `$ALL`,
-    `$LEN`, `$RANGE` and the select operators, but not `$CHILD` or the type
-    checkers. The C# runner does not run `select.nullkey`.
+    `$LEN`, `$RANGE`, `$LIKE` and the select operators, but not `$CHILD` or
+    the type checkers. The C# runner does not run `select.nullkey`.
+  - A `$LIKE` pattern an engine cannot read is an invalid pattern only where
+    the engine refuses it. The in-tree engines refuse few: in OCaml, Haskell
+    and Lean an unclosed `(` or `[` runs to the end and a stray `)` ends the
+    pattern, so `a)b` matches `abc`, and C, Lua, Rust and Zig compile
+    constructs outside the subset, reading some, such as `(?=a)` and `\1`,
+    as literal text. There such a pattern is a mismatch or a different match.
   - A relative `$REF` path such as `.x`: Python, Elixir, Dart, Scala,
     Clojure, OCaml, Haskell, Lean and Zig look the path up without the data
     path TypeScript passes, so a relative path names nothing there. A whole

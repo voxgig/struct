@@ -637,7 +637,7 @@ and a `maxdepth` parameter, matching the canonical algorithm.
 
 ### Test status
 
-118 runs, 247 assertions, 0 failures.
+119 runs, 247 assertions, 0 failures.
 
 
 ## Regex

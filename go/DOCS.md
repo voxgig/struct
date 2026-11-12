@@ -324,7 +324,7 @@ make lint                       # gofmt check + go vet + golangci-lint (errcheck
 The runner in
 [`testutil/voxgigstruct_test.go`](./testutil/voxgigstruct_test.go) loads
 the shared corpus from [`../build/test/`](../build/test/) and mirrors the
-reference runner. This port passes 125/125 of the shared corpus suite (see
+reference runner. This port passes 126/126 of the shared corpus suite (see
 [`../REPORT.md`](../design/REPORT.md)).
 
 The corpus tests live in `testutil`, the module that takes voxgig/omni,

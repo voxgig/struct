@@ -41,28 +41,28 @@ NFA engine in-tree (c/cpp/lua/rust/zig).
 
 | Language | Functions | Type Constants | Sentinels | Tests | Status |
 |----------|-----------|---------------|-----------|-------|--------|
-| **typescript** (canonical) | 52 | 15 | 2 | 124 tests, 0 fail (3 bench skip) | Reference (Group A/B) |
-| **javascript** | 52 | 15 | 2 | 118/118 pass | Group A/B applied |
-| **python** | 52+ | 15 | 2 | 126 tests, OK (3 bench skip) | Group A/B applied |
-| **go** | 54+ | 15 | 2 | 125/125 subtests pass | already Group A |
-| **php** | 52 | 15 | 2 | 122 tests, 0 fail (2 incomplete) | already Group A |
-| **ruby** | 52+ | 15 | 2 | 118 runs, 0 fail | Group A/B + UNDEF setval |
-| **lua** | 52+ | 15 | 2 | 111/111 pass (20 entries dropped) | already Group A |
-| **rust** | 52+ | 15 | 2 | 1688 corpus checks pass | already Group A |
-| **c** | 52 | 15 | 2 | 1682/1682 corpus | Group A/B applied |
-| **java** | 52 | 15 | 2 | 115/115 pass | full TS-canonical parity |
-| **cpp** | 52 | 15 | 2 | 1682/1682 corpus | full TS-canonical parity |
-| **csharp** | 52 | 15 | 2 | 117/117 pass | already Group A |
-| **kotlin** | 52 | 15 | 2 | 117/117 pass | full TS-canonical parity |
+| **typescript** (canonical) | 52 | 15 | 2 | 125 tests, 0 fail (3 bench skip) | Reference (Group A/B) |
+| **javascript** | 52 | 15 | 2 | 119/119 pass | Group A/B applied |
+| **python** | 52+ | 15 | 2 | 127 tests, OK (3 bench skip) | Group A/B applied |
+| **go** | 54+ | 15 | 2 | 126/126 subtests pass | already Group A |
+| **php** | 52 | 15 | 2 | 123 tests, 0 fail (2 incomplete) | already Group A |
+| **ruby** | 52+ | 15 | 2 | 119 runs, 0 fail | Group A/B + UNDEF setval |
+| **lua** | 52+ | 15 | 2 | 112/112 pass (20 entries dropped) | already Group A |
+| **rust** | 52+ | 15 | 2 | 1720 corpus checks pass | already Group A |
+| **c** | 52 | 15 | 2 | 1714/1714 corpus | Group A/B applied |
+| **java** | 52 | 15 | 2 | 116/116 pass | full TS-canonical parity |
+| **cpp** | 52 | 15 | 2 | 1714/1714 corpus | full TS-canonical parity |
+| **csharp** | 52 | 15 | 2 | 118/118 pass | already Group A |
+| **kotlin** | 52 | 15 | 2 | 118/118 pass | full TS-canonical parity |
 | **zig** | 52 | 15 | 2 | 94/94 pass in CI \*1 \*4 | cycle-break + 7 latent-bug fixes |
-| **perl** | 52 | 15 | 2 | 174/174 pass | full TS-canonical parity |
+| **perl** | 52 | 15 | 2 | 175/175 pass | full TS-canonical parity |
 | **swift** | 52 | 15 | 2 | 30/30 pass in CI | full TS-canonical parity |
-| **clojure** | 52 | 15 | 2 | 100 groups, 0 failed | full TS-canonical parity |
-| **ocaml** | 52 | 15 | 2 | 99 groups, 0 failed | full TS-canonical parity |
-| **scala** | 52 | 15 | 2 | 98 groups, 0 failed | full TS-canonical parity |
+| **clojure** | 52 | 15 | 2 | 101 groups, 0 failed | full TS-canonical parity |
+| **ocaml** | 52 | 15 | 2 | 100 groups, 0 failed | full TS-canonical parity |
+| **scala** | 52 | 15 | 2 | 99 groups, 0 failed | full TS-canonical parity |
 | **dart** | 52 | 15 | 2 | 100 groups, 0 failed in CI | full TS-canonical parity |
-| **elixir** | 52 | 15 | 2 | 100 groups, 0 failed (9 entries dropped) \*2 | full TS-canonical parity |
-| **haskell** | 52 | 15 | 2 | 99 groups, 0 failed | full TS-canonical parity |
+| **elixir** | 52 | 15 | 2 | 101 groups, 0 failed (9 entries dropped) \*2 | full TS-canonical parity |
+| **haskell** | 52 | 15 | 2 | 100 groups, 0 failed | full TS-canonical parity |
 | **lean** | 52 | 15 | 2 | 99 groups, 0 failed in CI | full TS-canonical parity |
 | **boru** | 52 | 15 | 2 | 98 pass, 0 fail in CI \*3 | full TS-canonical parity |
 

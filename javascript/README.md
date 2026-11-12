@@ -666,7 +666,7 @@ V8.
 
 ### Test status
 
-118/118 tests pass against the shared corpus.
+119/119 tests pass against the shared corpus.
 
 
 ## Regex

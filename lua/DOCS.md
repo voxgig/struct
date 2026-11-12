@@ -286,7 +286,7 @@ make bench           # WALK_BENCH=1 lua test/walk_bench.lua
 make clean           # rm luacov.* .busted
 ```
 
-The corpus suite reports **111/111 cases passing** (per
+The corpus suite reports **112/112 cases passing** (per
 [`../REPORT.md`](../design/REPORT.md)). Tests live in
 [`test/`](./test/); [`test/struct_test.lua`](./test/struct_test.lua) is the
 busted suite and [`test/omni.lua`](./test/omni.lua) is the loader that
