@@ -2227,7 +2227,11 @@ fn validate_range(inj: &Inj, _v: &Value, _r: &str, store: &Value) -> Value {
     validatebound(inj, store, "$RANGE")
 }
 
-// The bounding list directives: a bound, then at most one spec that must also admit.
+fn validate_like(inj: &Inj, _v: &Value, _r: &str, store: &Value) -> Value {
+    validatebound(inj, store, "$LIKE")
+}
+
+// The bounding list directives: a bound or pattern, then at most one spec that also admits.
 fn validatebound(inj: &Inj, store: &Value, name: &str) -> Value {
     let (mode, parent, key_i) = {
         let b = inj.borrow();
@@ -2268,19 +2272,24 @@ fn validatebound(inj: &Inj, store: &Value, name: &str) -> Value {
         pathify(&path_value(&path), Some(1), None)
     );
     let nargs = size(&parent) - 1;
+    let islen = "$LEN" == name;
+    let islike = "$LIKE" == name;
+    let argname = if islike { "pattern" } else { "bound" };
 
     if !(1..=2).contains(&nargs) {
         errs_push(
             inj,
-            format!("{field} must have a bound and at most one spec."),
+            format!("{field} must have a {argname} and at most one spec."),
         );
         return Value::skip();
     }
 
     let bound = lookup(&parent, &Value::Num(1.0));
-    let islen = "$LEN" == name;
+    let like = if islike { likere(&bound) } else { None };
     let (lo, hi, desc) = if islen {
         lenbound(&bound)
+    } else if islike {
+        (0, 0, like.map(|pattern| format!("like /{pattern}/")))
     } else {
         (0, 0, rangedesc(&bound))
     };
@@ -2289,7 +2298,7 @@ fn validatebound(inj: &Inj, store: &Value, name: &str) -> Value {
         errs_push(
             inj,
             format!(
-                "{field} has an invalid bound: {}.",
+                "{field} has an invalid {argname}: {}.",
                 stringify(&bound, None, false)
             ),
         );
@@ -2311,6 +2320,8 @@ fn validatebound(inj: &Inj, store: &Value, name: &str) -> Value {
 
     let (needtype, needbits) = if islen {
         ("string, list or map", (T_STRING | T_LIST | T_MAP) as i64)
+    } else if islike {
+        ("string", T_STRING as i64)
     } else {
         ("number", T_NUMBER as i64)
     };
@@ -2326,6 +2337,8 @@ fn validatebound(inj: &Inj, store: &Value, name: &str) -> Value {
             _ => size(&cval),
         };
         lo <= len && (-1 == hi || len <= hi)
+    } else if islike {
+        re_test(like.unwrap_or_default(), cval.as_str().unwrap_or_default())
     } else {
         inrange(&bound, &cval)
     };
@@ -2358,6 +2371,12 @@ fn lenbound(bound: &Value) -> (i64, i64, Option<String>) {
     };
 
     (lo, hi, Some(format!("of length {desc}")))
+}
+
+// A $LIKE pattern, absent unless the port's own regex engine compiles it.
+fn likere(pattern: &Value) -> Option<&str> {
+    let pattern = pattern.as_str()?;
+    re_compile(pattern).ok().map(|_| pattern)
 }
 
 // The words for a $RANGE bound, which are absent when the bound is invalid.
@@ -2592,6 +2611,7 @@ pub fn validate(
     vmap.insert("$ALL".to_string(), Value::func(validate_all));
     vmap.insert("$LEN".to_string(), Value::func(validate_len));
     vmap.insert("$RANGE".to_string(), Value::func(validate_range));
+    vmap.insert("$LIKE".to_string(), Value::func(validate_like));
 
     let extra_or_empty = match &extra {
         Some(e) => e.clone(),
@@ -3010,7 +3030,12 @@ fn select_not(inj: &Inj, _v: &Value, _r: &str, store: &Value) -> Value {
     Value::Noval
 }
 
-fn select_cmp(inj: &Inj, _v: &Value, r: &str, store: &Value) -> Value {
+fn select_cmp(inj: &Inj, v: &Value, r: &str, store: &Value) -> Value {
+    // The list form of $LIKE is validate's checker; the key form is this operator.
+    if M_VAL == inj.borrow().mode && "$LIKE" == r {
+        return validate_like(inj, v, r, store);
+    }
+
     if inj.borrow().mode != M_KEYPRE {
         return Value::Noval;
     }
