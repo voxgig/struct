@@ -152,9 +152,9 @@ joinurl(['http:', '/foo/', '/bar'])   # 'http:/foo/bar' — collapses repeated '
 canonical set (see [Explanation](#4-explanation--port-specifics)).
 
 For more task recipes (merge configs, rename fields, `$EACH`, `$MERGE`,
-`$FORMAT`, `$NOF`, `$LEN`, `$RANGE`, `$EXACT`, …) see the language-neutral
-[How-to guides](../DOCS.md#2-how-to-guides) — the spec syntax is identical;
-only the host literals differ.
+`$FORMAT`, `$NOF`, `$LEN`, `$RANGE`, `$LIKE`, `$EXACT`, …) see the
+language-neutral [How-to guides](../DOCS.md#2-how-to-guides) — the spec
+syntax is identical; only the host literals differ.
 
 ---
 

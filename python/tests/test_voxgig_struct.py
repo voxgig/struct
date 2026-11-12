@@ -894,6 +894,13 @@ class TestStruct(unittest.TestCase):
             lambda vin: validate(vin.get('data'), vin.get('spec')),
         )
 
+    def test_validate_like(self):
+        runsetflags(
+            spec['validate']['like'],
+            {'null': False},
+            lambda vin: validate(vin.get('data'), vin.get('spec')),
+        )
+
     def test_validate_unknown(self):
         runsetflags(
             spec['validate']['unknown'],

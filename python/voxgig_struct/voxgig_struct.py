@@ -983,6 +983,10 @@ def select_NOT(state, _val, _ref, store):
 
 
 def select_CMP(state, _val, ref, store):
+    # The list form of $LIKE is validate's checker; the key form is this operator.
+    if state.mode == S_MVAL and ref == '$LIKE':
+        return validate_LIKE(state, _val, ref, store)
+
     if state.mode == S_MKEYPRE:
         term = getprop(state.parent, state.key)
         gkey = getelem(state.path, -2)
@@ -2671,7 +2675,11 @@ def validate_RANGE(inj, _val=UNDEF, _ref=UNDEF, store=UNDEF):
     return _validatebound(inj, store, '$RANGE')
 
 
-# The bounding list directives: a bound, then at most one spec that must also admit.
+def validate_LIKE(inj, _val=UNDEF, _ref=UNDEF, store=UNDEF):
+    return _validatebound(inj, store, '$LIKE')
+
+
+# The bounding list directives: a bound or pattern, then at most one spec that also admits.
 def _validatebound(inj, store, name):
     mode = inj.mode
     parent = inj.parent
@@ -2701,17 +2709,26 @@ def _validatebound(inj, store, name):
 
     field = 'The ' + name + ' validator at field ' + pathify(inj.path, 1)
     nargs = size(parent) - 1
+    islen = name == '$LEN'
+    islike = name == '$LIKE'
+    argname = 'pattern' if islike else 'bound'
 
     if nargs < 1 or nargs > 2:
-        inj.errs.append(field + ' must have a bound and at most one spec.')
+        inj.errs.append(field + ' must have a ' + argname + ' and at most one spec.')
         return SKIP
 
     bound = _lookup(parent, 1)
-    islen = name == '$LEN'
-    lo, hi, desc = _lenbound(bound) if islen else (0, 0, _rangedesc(bound))
+    like = _likere(bound) if islike else UNDEF
+
+    if islen:
+        lo, hi, desc = _lenbound(bound)
+    elif islike:
+        lo, hi, desc = 0, 0, UNDEF if like is UNDEF else 'like /' + bound + '/'
+    else:
+        lo, hi, desc = 0, 0, _rangedesc(bound)
 
     if desc is UNDEF:
-        inj.errs.append(field + ' has an invalid bound: ' + stringify(bound) + '.')
+        inj.errs.append(field + ' has an invalid ' + argname + ': ' + stringify(bound) + '.')
         return SKIP
 
     ctype = typify(cval)
@@ -2723,13 +2740,19 @@ def _validatebound(inj, store, name):
         inj.errs.append(_invalidTypeMsg(inj.path, specdesc, ctype, cval, 'V0410'))
         return SKIP
 
-    if ((T_string | T_list | T_map if islen else T_number) & ctype) == 0:
-        needtype = 'string, list or map' if islen else S_number
+    if ((T_string | T_list | T_map if islen else T_string if islike else T_number) & ctype) == 0:
+        needtype = 'string, list or map' if islen else S_string if islike else S_number
         inj.errs.append(_invalidTypeMsg(inj.path, needtype, ctype, cval, 'V0420'))
         return SKIP
 
     length = size(cval) if islen else 0
-    inbound = lo <= length and (hi == -1 or length <= hi) if islen else _inrange(bound, cval)
+
+    if islen:
+        inbound = lo <= length and (hi == -1 or length <= hi)
+    elif islike:
+        inbound = re_test(like, cval)
+    else:
+        inbound = _inrange(bound, cval)
 
     if not inbound:
         needtype = ('' if size(inj.path) > 1 else 'value ') + desc
@@ -2756,6 +2779,16 @@ def _lenbound(bound):
         desc = str(lo) + ' to ' + str(hi)
 
     return lo, hi, 'of length ' + desc
+
+
+# A $LIKE pattern compiled by the port's own regex engine; absent unless it compiles.
+def _likere(pattern):
+    if not isinstance(pattern, str):
+        return UNDEF
+    try:
+        return re_compile(pattern)
+    except Exception:
+        return UNDEF
 
 
 # The words for a $RANGE bound, which are absent when the bound is invalid.
@@ -2932,6 +2965,7 @@ def validate(data, spec, injdef=UNDEF):
                 '$ALL': validate_ALL,
                 '$LEN': validate_LEN,
                 '$RANGE': validate_RANGE,
+                '$LIKE': validate_LIKE,
             },
             ({} if extra is UNDEF or extra is None else extra),
             {
