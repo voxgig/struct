@@ -1987,11 +1987,10 @@ defmodule Voxgig.Struct do
     end
   end
 
-  defp transform_ref(inj, val, _r, store) do
+  defp transform_ref(inj, _val, _r, store) do
     if ig(inj, :mode) != @m_val do
       nil
     else
-      nodes = ig(inj, :nodes)
       refpath = lookup_(ig(inj, :parent), 1)
       is_(inj, :keyi, size(ig(inj, :keys)))
       spec_func = getprop(store, @s_dspec)
@@ -2011,33 +2010,22 @@ defmodule Voxgig.Struct do
         end
 
         has_sub = getelem(flag, 0) == true
-        tref = clone(refv)
-        cpath = slice(ig(inj, :path), 0, size(ig(inj, :path)) - 3)
-        tpath = slice(ig(inj, :path), 0, size(ig(inj, :path)) - 1)
-        tcur = getpath(store, cpath)
-        tval = getpath(store, tpath)
 
-        rval =
-          if refv != nil and (not has_sub or tval != nil) do
-            cs = inj_child(inj, 0, vlist_new([getelem(tpath, -1)]))
-            is_(cs, :path, tpath)
-            is_(cs, :nodes, slice(ig(inj, :nodes), 0, size(ig(inj, :nodes)) - 1))
-            is_(cs, :parent, getelem(nodes, -2))
-            is_(cs, :ival, tref)
-            is_(cs, :dparent, tcur)
-            inject(tref, store, cs)
-            ig(cs, :ival)
-          else
-            nil
-          end
+        # A recursive reference stops where the data does.
+        tval = getpath(store, slice(ig(inj, :path), 0, size(ig(inj, :path)) - 1))
+        rval = if not has_sub or tval != nil, do: clone(refv), else: nil
 
-        inj_setval(inj, rval, 2)
+        # The enclosing loop injects the referenced spec in this list's place, so
+        # neither this pass nor this element leaves a value for modify to check.
+        grandparent = inj_setval(inj, rval, 2)
+        prior = ig(inj, :prior)
 
-        if islist(ig(inj, :parent)) and ig(inj, :prior) != nil do
-          is_(ig(inj, :prior), :keyi, ig(ig(inj, :prior), :keyi) - 1)
+        if prior != nil do
+          is_(prior, :modify, nil)
+          if islist(grandparent) or rval != nil, do: is_(prior, :keyi, ig(prior, :keyi) - 1)
         end
 
-        val
+        @skip
       end
     end
   end
