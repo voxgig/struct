@@ -637,6 +637,10 @@ inline bool re_test(const std::string& pattern, const std::string& input) {
   return std::regex_search(input, std::regex(pattern));
 }
 
+inline bool re_test(const std::regex& re, const std::string& input) {
+  return std::regex_search(input, re);
+}
+
 inline std::vector<std::string> re_find(const std::string& pattern, const std::string& input) {
   std::smatch m;
   if (!std::regex_search(input, m, std::regex(pattern)))
@@ -3593,7 +3597,20 @@ inline int64_t codepoints(const std::string& s) {
   return n;
 }
 
-// The bounding list directives: a bound, then at most one spec that must also admit.
+// A $LIKE pattern compiled by std::regex, through re_compile, which throws on a
+// bad pattern. False unless it compiles.
+inline bool likere(const Value& pattern, std::regex& like) {
+  if (!pattern.is_string())
+    return false;
+  try {
+    like = re_compile(pattern.as_string());
+    return true;
+  } catch (const std::regex_error&) {
+    return false;
+  }
+}
+
+// The bounding list directives: a bound or pattern, then at most one spec that also admits.
 inline Value validatebound(Injection& inj, const Value& store, const std::string& name) {
   if (inj.mode != M_VAL)
     return Value::undef();
@@ -3617,22 +3634,33 @@ inline Value validatebound(Injection& inj, const Value& store, const std::string
 
   std::string field = "The " + name + " validator at field " + pathify(pathlist(inj.path), 1);
   int64_t nargs = size(inj.parent) - 1;
+  bool islen = "$LEN" == name;
+  bool islike = "$LIKE" == name;
+  std::string argname = islike ? "pattern" : "bound";
 
   if (nargs < 1 || 2 < nargs) {
-    inj.errs->push_back(Value(field + " must have a bound and at most one spec."));
+    inj.errs->push_back(Value(field + " must have a " + argname + " and at most one spec."));
     return SKIP();
   }
 
   Value bound = lookup_v(inj.parent, Value(int64_t(1)));
-  bool islen = "$LEN" == name;
+  std::regex like;
   int64_t lo = 0;
   int64_t hi = 0;
   std::string desc;
 
-  if (!(islen ? lenbound(bound, lo, hi, desc) : rangedesc(bound, desc))) {
-    inj.errs->push_back(Value(field + " has an invalid bound: " + stringify(bound) + "."));
+  bool valid = islen    ? lenbound(bound, lo, hi, desc)
+               : islike ? likere(bound, like)
+                        : rangedesc(bound, desc);
+
+  if (!valid) {
+    inj.errs->push_back(
+        Value(field + " has an invalid " + argname + ": " + stringify(bound) + "."));
     return SKIP();
   }
+
+  if (islike)
+    desc = "like /" + bound.as_string() + "/";
 
   int ctype = typify(cval);
 
@@ -3645,14 +3673,16 @@ inline Value validatebound(Injection& inj, const Value& store, const std::string
     }
   }
 
-  if (0 == ((islen ? T_string | T_list | T_map : T_number) & ctype)) {
-    std::string needtype = islen ? "string, list or map" : "number";
+  if (0 == ((islen ? T_string | T_list | T_map : islike ? T_string : T_number) & ctype)) {
+    std::string needtype = islen ? "string, list or map" : islike ? "string" : "number";
     inj.errs->push_back(Value(invalid_type_msg(inj.path, needtype, ctype, cval, "V0420")));
     return SKIP();
   }
 
   int64_t len = islen ? (cval.is_string() ? codepoints(cval.as_string()) : size(cval)) : 0;
-  bool inbound = islen ? lo <= len && (-1 == hi || len <= hi) : inrange(bound, cval);
+  bool inbound = islen    ? lo <= len && (-1 == hi || len <= hi)
+                 : islike ? re_test(like, cval.as_string())
+                          : inrange(bound, cval);
 
   if (!inbound) {
     std::string needtype = std::string(inj.path.size() > 1 ? "" : "value ") + desc;
@@ -3673,6 +3703,10 @@ inline Value LEN_FN(Injection& inj, const Value& val, const std::string& ref, co
 inline Value RANGE_FN(Injection& inj, const Value& val, const std::string& ref,
                       const Value& store) {
   return validatebound(inj, store, "$RANGE");
+}
+
+inline Value LIKE_FN(Injection& inj, const Value& val, const std::string& ref, const Value& store) {
+  return validatebound(inj, store, "$LIKE");
 }
 
 // Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
@@ -3898,6 +3932,7 @@ inline Value validate(const Value& data, const Value& spec, const Value& options
   baseStore->set("$ALL", Value(Injector(validators::ALL_FN)));
   baseStore->set("$LEN", Value(Injector(validators::LEN_FN)));
   baseStore->set("$RANGE", Value(Injector(validators::RANGE_FN)));
+  baseStore->set("$LIKE", Value(Injector(validators::LIKE_FN)));
 
   auto mergeList = std::make_shared<List>();
   mergeList->push_back(Value(baseStore));
@@ -4081,6 +4116,10 @@ inline Value NOT_FN(Injection& inj, const Value& val, const std::string& ref, co
 }
 
 inline Value CMP_FN(Injection& inj, const Value& val, const std::string& ref, const Value& store) {
+  // The list form of $LIKE is validate's checker; the key form is this operator.
+  if (M_VAL == inj.mode && "$LIKE" == ref)
+    return validators::LIKE_FN(inj, val, ref, store);
+
   if (inj.mode != M_KEYPRE)
     return Value::undef();
   Value term = lookup_v(inj.parent, Value(inj.key));
