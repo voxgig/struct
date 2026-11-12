@@ -2916,6 +2916,13 @@ def lenBound (bound : Value) : SIO (Float × Float × Option String) := do
     else numToString lo ++ " to " ++ numToString hi
   return (lo, hi, some ("of length " ++ words))
 
+/-- A `$LIKE` pattern compiled by the port's own regex engine; absent unless
+    it is a string, since that engine reads every string without failing. -/
+def likeRe (pat : Value) : Option Vregex.Re :=
+  match pat with
+  | .str p => some (Vregex.compile p)
+  | _ => none
+
 /-- The words for a `$RANGE` bound, which are absent when the bound is invalid. -/
 def rangeDesc (bound : Value) : SIO (Option String) := do
   if !(ismap bound) then return none
@@ -3181,8 +3188,11 @@ partial def validateLen : InjectorFn := fun inj _v _ref store =>
 partial def validateRange : InjectorFn := fun inj _v _ref store =>
   validateBound inj store "$RANGE"
 
-/-- The bounding list directives: a bound, then at most one spec that must
-    also admit. -/
+partial def validateLike : InjectorFn := fun inj _v _ref store =>
+  validateBound inj store "$LIKE"
+
+/-- The bounding list directives: a bound or pattern, then at most one spec
+    that also admits. -/
 partial def validateBound (inj : InjId) (store : Value) (name : String) : SIO Value := do
   let d ← getInj inj
   if d.mode != M_VAL then return .noval
@@ -3201,15 +3211,23 @@ partial def validateBound (inj : InjId) (store : Value) (name : String) : SIO Va
   modInj inj (fun dd => { dd with path := npath })
   let field := "The " ++ name ++ " validator at field " ++ (← pathify npath (startin := .num 1.0))
   let nargs := (← size parent) - 1
+  let islen := name == "$LEN"
+  let islike := name == "$LIKE"
+  let argname := if islike then "pattern" else "bound"
   if nargs < 1 || 2 < nargs then
-    pushErr inj (field ++ " must have a bound and at most one spec.")
+    pushErr inj (field ++ " must have a " ++ argname ++ " and at most one spec.")
     return SKIP
   let bound ← lookupRaw parent (.num 1.0)
-  let islen := name == "$LEN"
+  let like := if islike then likeRe bound else none
+  let likedesc : Option String := match bound, like with
+    | .str p, some _ => some ("like /" ++ p ++ "/")
+    | _, _ => none
   let (lo, hi, bounddesc) ←
-    if islen then lenBound bound else do pure ((0.0 : Float), (0.0 : Float), ← rangeDesc bound)
+    if islen then lenBound bound
+    else if islike then pure ((0.0 : Float), (0.0 : Float), likedesc)
+    else do pure ((0.0 : Float), (0.0 : Float), ← rangeDesc bound)
   match bounddesc with
-  | none => pushErr inj (field ++ " has an invalid bound: " ++ (← stringify bound) ++ ".")
+  | none => pushErr inj (field ++ " has an invalid " ++ argname ++ ": " ++ (← stringify bound) ++ ".")
   | some desc =>
     let ctype := typify cval
     if nargs == 2 then
@@ -3218,9 +3236,9 @@ partial def validateBound (inj : InjId) (store : Value) (name : String) : SIO Va
         let specdesc := replaceTransformNames (← stringify spec)
         pushErr inj (← invalidTypeMsg npath specdesc (ctype : Int) cval)
         return SKIP
-    let needmask := if islen then T_STRING ||| T_LIST ||| T_MAP else T_NUMBER
+    let needmask := if islen then T_STRING ||| T_LIST ||| T_MAP else if islike then T_STRING else T_NUMBER
     if (needmask &&& ctype) == 0 then
-      let needtype := if islen then "string, list or map" else "number"
+      let needtype := if islen then "string, list or map" else if islike then S_STRING else "number"
       pushErr inj (← invalidTypeMsg npath needtype (ctype : Int) cval)
       return SKIP
     let len : Int ← match islen, cval with
@@ -3228,10 +3246,11 @@ partial def validateBound (inj : InjId) (store : Value) (name : String) : SIO Va
       | true, _ => size cval
       | false, _ => pure 0
     let lenf := intToFloat len
-    let inbound ← match islen, cval with
-      | true, _ => pure (decide (lo <= lenf) && (hi == -1.0 || decide (lenf <= hi)))
-      | false, .num n => inRange bound n
-      | false, _ => pure false
+    let inbound ← match islen, islike, like, cval with
+      | true, _, _, _ => pure (decide (lo <= lenf) && (hi == -1.0 || decide (lenf <= hi)))
+      | false, true, some re, .str s => pure (Vregex.test re s)
+      | false, false, _, .num n => inRange bound n
+      | _, _, _, _ => pure false
     if !inbound then
       let needtype := (if (← size npath) > 1 then "" else "value ") ++ desc
       pushErr inj (← invalidTypeMsg npath needtype (ctype : Int) cval)
@@ -3276,6 +3295,7 @@ partial def validate (data spec : Value) (inj : InjArg := .inone) : SIO Value :=
   put "$ALL" (← vFunc validateAll)
   put "$LEN" (← vFunc validateLen)
   put "$RANGE" (← vFunc validateRange)
+  put "$LIKE" (← vFunc validateLike)
   let extraV ← if isNoval extra then emptyMap else pure extra
   let errsWrap ← newMap #[(S_DERRS, errs)]
   let store ← merge (← newList #[base, extraV, errsWrap]) (maxdepth := .num 1.0)
@@ -3382,8 +3402,11 @@ def numCmp (a b : Value) (op : String) : Bool :=
     | _ => false
   | _, _ => false
 
-partial def selectCmp : InjectorFn := fun inj _v refstr store => do
+partial def selectCmp : InjectorFn := fun inj v refstr store => do
   let d ← getInj inj
+  -- The list form of $LIKE is validate's checker; the key form is this operator.
+  if d.mode == M_VAL && refstr == "$LIKE" then
+    return (← validateLike inj v refstr store)
   if d.mode == M_KEYPRE then do
     let term ← getprop d.parent d.key
     let gkey ← getelem d.path (.num (-2.0))
