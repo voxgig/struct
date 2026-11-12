@@ -289,8 +289,9 @@ value. The value must be a string the pattern finds, anywhere in it unless
 the pattern is anchored with `^` or `$`, and any other value fails. Each port
 matches with its own regex engine, so a pattern means what that language's
 regex means: one inside the RE2 subset ([`REGEX.md`](design/REGEX.md))
-matches the same everywhere, while anything beyond it, or a class such as
-`\w` over text that is not ASCII, can differ from port to port. In a `select`
+matches the same everywhere on single-line ASCII text, while anything beyond
+that can differ from port to port, such as `\w` over other text or `^` and
+`$` around a line break. In a `select`
 query the list form works the same; `select`'s own key form,
 `` { code: { '`$LIKE`': '^A' } } ``, matches the value's text, numbers
 included.

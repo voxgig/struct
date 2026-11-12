@@ -39,9 +39,12 @@ The library uses regular expressions in two places:
 
    The corpus pins only patterns inside the subset below, over ASCII text,
    and `tools/check_corpus_regex.py` checks every `$LIKE` pattern in it, in
-   either form. Outside the subset, or with a class such as `\w`, `\s` or
-   `.` over text that is not ASCII, ports may match differently. That is
-   accepted, not pinned: a pattern is native to the port that runs it.
+   either form. Outside the subset, with a class such as `\w`, `\s` or `.`
+   over text that is not ASCII, or with `^` and `$` around a line break,
+   ports may match differently: Ruby anchors `^` and `$` at every line, and
+   Python and Perl let `$` match before a final newline. Ruby also compiles
+   some patterns the others refuse, such as `a**`. That is accepted, not
+   pinned: a pattern is native to the port that runs it.
 
 **Conclusion:** the corpus is inside the RE2 subset, and every port now
 locks that in — the in-tree engines (rs, zig, c, lua) only implement the
