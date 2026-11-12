@@ -1306,6 +1306,7 @@ def ob-main fn [[av:Any] [Any] [
   (ob-group pack "validate" "all" (subs get "validate") false) drop
   (ob-group pack "validate" "len" (subs get "validate") false) drop
   (ob-group pack "validate" "range" (subs get "validate") false) drop
+  (ob-group pack "validate" "like" (subs get "validate") false) drop
   (ob-group pack "validate" "unknown" (subs get "validate") false) drop
   (ob-local "validate.local.childerrs" [ck-validate-child-errs/v]) drop
   (ob-local "validate.local.nofdecimal" [ck-validate-nof-decimal/v]) drop

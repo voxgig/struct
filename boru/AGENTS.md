@@ -104,7 +104,7 @@ line restores it.
   `JSON.stringify(null)` for injected nulls). Validation's `$NIL`/`$NULL`
   and `$ANY` recover the absent-vs-stored-null distinction via literal
   slot presence (`vgi-haslit`), and so do the list directives `$EXACT`,
-  `$NOF`, `$ALL`, `$LEN` and `$RANGE` (`vgi-slotval`/`vgi-slotheld`).
+  `$NOF`, `$ALL`, `$LEN`, `$RANGE` and `$LIKE` (`vgi-slotval`/`vgi-slotheld`).
   `vgi-inj-setval` deletes for `none`, so a held null is set directly —
   by `vgi-slotset` for a list directive, and by `vgi-heldnull` for a
   checker, which then returns SKIP so that inject does not delete it

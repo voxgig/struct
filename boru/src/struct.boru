@@ -3518,6 +3518,12 @@ def vgi-lenbound fn [[bnd:Any] [Any] [
   ]
 ]]
 
+# A $LIKE pattern compiled by the port's own regex engine; absent unless it compiles.
+def vgi-likere fn [[p:Any] [Any] [
+  def r (if (p is String) [do [vg-re-compile p vg-noarg] error [drop none]] [none])
+  r
+]]
+
 # A $RANGE bound value: absent, or a number.
 def vgi-isnumber fn [[n:Any] [Boolean] [
   if (n is None) [true] [vg-bit vg-t-number (vg-typify n)]
@@ -3587,8 +3593,8 @@ def vgi-inrange fn [[bnd:Any v:Any] [Boolean] [
   r
 ]]
 
-# A value of a bounded type within its valid bound.
-def vgi-inbound fn [[cval:Any islen:Boolean bnd:Any bounds:Any] [Boolean] [
+# A value of a bounded type within its valid bound, or found by its pattern.
+def vgi-inbound fn [[cval:Any islen:Boolean islike:Boolean bnd:Any likere:Any bounds:Any] [Boolean] [
   def r (
     if islen [
       def blen (if (cval is String) [vgi-codepoints cval] [vgz cval])
@@ -3596,17 +3602,19 @@ def vgi-inbound fn [[cval:Any islen:Boolean bnd:Any bounds:Any] [Boolean] [
       def hi (bounds get 1)
       def ok ((lo lte blen) and ((hi eq -1) or (blen lte hi)))
       ok
-    ] [vgi-inrange bnd cval]
+    ] [
+      if islike [vg-re-test likere cval] [vgi-inrange bnd cval]
+    ]
   )
   r
 ]]
 
 # After a valid bound, the spec's check, the type's, then the bound's: the
 # first to fail reports, and the rest are not tried.
-def vgi-checkbound fn [[inj:Any store:Any cval:Any held:Boolean spec:Any nargs:Integer islen:Boolean bnd:Any bounds:Any] [Any] [
+def vgi-checkbound fn [[inj:Any store:Any cval:Any held:Boolean spec:Any nargs:Integer islen:Boolean islike:Boolean bnd:Any likere:Any bounds:Any] [Any] [
   def ctype (vg-typify cval)
   def admitted (if (nargs eq 2) [vgi-admits cval held spec inj store] [true])
-  def needmask (if islen [BinUtil.bor vg-t-string (BinUtil.bor vg-t-list vg-t-map)] [vg-t-number])
+  def needmask (if islen [BinUtil.bor vg-t-string (BinUtil.bor vg-t-list vg-t-map)] [if islike [vg-t-string] [vg-t-number]])
   def msg (
     if (admitted not) [
       def specdesc (vg-re-replace "`\\$([A-Z]+)`" (vg-stringify spec vg-noarg vg-noarg) vg-lower-tname-box)
@@ -3614,11 +3622,11 @@ def vgi-checkbound fn [[inj:Any store:Any cval:Any held:Boolean spec:Any nargs:I
       m1
     ] [
       if ((vg-bit needmask ctype) not) [
-        def needtype (if islen ["string, list or map"] ["number"])
+        def needtype (if islen ["string, list or map"] [if islike ["string"] ["number"]])
         def m2 (vgi-invalid-type-msg (inj get "path") needtype ctype cval)
         m2
       ] [
-        if (vgi-inbound cval islen bnd bounds) [none] [
+        if (vgi-inbound cval islen islike bnd likere bounds) [none] [
           def p1 (if ((vgz (inj get "path")) gt 1) [""] ["value "])
           def need (StringUtil.concat [p1 (bounds get 2)])
           def m3 (vgi-invalid-type-msg (inj get "path") need ctype cval)
@@ -3631,7 +3639,7 @@ def vgi-checkbound fn [[inj:Any store:Any cval:Any held:Boolean spec:Any nargs:I
   none
 ]]
 
-# The bounding list directives: a bound, then at most one spec that must also admit.
+# The bounding list directives: a bound or pattern, then at most one spec that also admits.
 def vgi-validatebound fn [[inj:Any store:Any vname:String] [Any] [
   if ((inj get "mode") eq 4) [
     def parent (inj get "parent")
@@ -3648,24 +3656,32 @@ def vgi-validatebound fn [[inj:Any store:Any vname:String] [Any] [
       (inj set "path" (vg-slice (inj get "path") -1 vg-noarg vg-noarg)) drop
       def fieldmsg (StringUtil.concat ["The " vname " validator at field " (vg-pathify (inj get "path") 1 vg-noarg)])
       def nargs ((vgz parent) sub 1)
+      def islen (vname eq "$LEN")
+      def islike (vname eq "$LIKE")
+      def argname (if islike ["pattern"] ["bound"])
       if ((nargs lt 1) or (2 lt nargs)) [
-        (append [(StringUtil.concat [fieldmsg " must have a bound and at most one spec."])] (inj get "errs")) drop
+        (append [(StringUtil.concat [fieldmsg " must have a " argname " and at most one spec."])] (inj get "errs")) drop
         none
       ] [
         def bnd (vgi-lookup parent 1)
-        def islen (vname eq "$LEN")
+        def likere (if islike [vgi-likere bnd] [none])
         def bounds (
           if islen [vgi-lenbound bnd] [
-            def rdesc (vgi-rangedesc bnd)
-            flex [0 0 rdesc]
+            if islike [
+              def ldesc (if (likere is None) [none] [StringUtil.concat ["like /" bnd "/"]])
+              flex [0 0 ldesc]
+            ] [
+              def rdesc (vgi-rangedesc bnd)
+              flex [0 0 rdesc]
+            ]
           ]
         )
         if ((bounds get 2) is None) [
-          (append [(StringUtil.concat [fieldmsg " has an invalid bound: " (vg-stringify bnd vg-noarg vg-noarg) "."])] (inj get "errs")) drop
+          (append [(StringUtil.concat [fieldmsg " has an invalid " argname ": " (vg-stringify bnd vg-noarg vg-noarg) "."])] (inj get "errs")) drop
           none
         ] [
           def spec (vgi-lookup parent 2)
-          (vgi-checkbound inj store cval held spec nargs islen bnd bounds) drop
+          (vgi-checkbound inj store cval held spec nargs islen islike bnd likere bounds) drop
           none
         ] drop
         none
@@ -3686,6 +3702,11 @@ def vg-v-len fn [[inj:Any val:Any iref:Any store:Any] [Any] [
 # bound holds min or gt, max or lt, or one of each.
 def vg-v-range fn [[inj:Any val:Any iref:Any store:Any] [Any] [
   def r (vgi-validatebound inj store "$RANGE")
+  r
+]]
+
+def vg-v-like fn [[inj:Any val:Any iref:Any store:Any] [Any] [
+  def r (vgi-validatebound inj store "$LIKE")
   r
 ]]
 
@@ -3803,6 +3824,7 @@ def vg-v-nof-box {"`$FN`": vg-v-nof/v}
 def vg-v-all-box {"`$FN`": vg-v-all/v}
 def vg-v-len-box {"`$FN`": vg-v-len/v}
 def vg-v-range-box {"`$FN`": vg-v-range/v}
+def vg-v-like-box {"`$FN`": vg-v-like/v}
 
 # Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
 def vg-validate-names {"$TOP": true "$SPEC": true "$BT": true "$DS": true "$WHEN": true "$ANNO": true "$REF": true "$FORMAT": true "$APPLY": true "$OPEN": true}
@@ -3897,6 +3919,7 @@ def vg-validate fn [[data:Any spec:Any injdef:Any] [Any] [
     "$ALL": (vg-v-all-box)
     "$LEN": (vg-v-len-box)
     "$RANGE": (vg-v-range-box)
+    "$LIKE": (vg-v-like-box)
   })
   def sl (flex [])
   (append [cmds] sl) drop
@@ -4016,31 +4039,37 @@ def vg-s-not fn [[inj:Any val:Any iref:Any store:Any] [Any] [
 ]]
 
 def vg-s-cmp fn [[inj:Any val:Any iref:Any store:Any] [Any] [
-  if ((inj get "mode") eq 1) [
-    def term (vgi-lookup (inj get "parent") (inj get "key"))
-    def gkey (vg-getelem (inj get "path") -2 vg-noarg)
-    def ppath (vg-slice (inj get "path") -1 vg-noarg vg-noarg)
-    def point (vg-getpath store ppath vg-noarg)
-    def pass (
-      if (iref eq "$GT") [do [point gt term] error [var [[e] false]]] [
-        if (iref eq "$LT") [do [point lt term] error [var [[e] false]]] [
-          if (iref eq "$GTE") [do [point gte term] error [var [[e] false]]] [
-            if (iref eq "$LTE") [do [point lte term] error [var [[e] false]]] [
-              if (iref eq "$LIKE") [vg-re-test term (vg-stringify point vg-noarg vg-noarg)] [false]
+  # The list form of $LIKE is validate's checker; the key form is this operator.
+  if (((inj get "mode") eq 4) and (iref eq "$LIKE")) [
+    def r (vg-v-like inj val iref store)
+    r
+  ] [
+    if ((inj get "mode") eq 1) [
+      def term (vgi-lookup (inj get "parent") (inj get "key"))
+      def gkey (vg-getelem (inj get "path") -2 vg-noarg)
+      def ppath (vg-slice (inj get "path") -1 vg-noarg vg-noarg)
+      def point (vg-getpath store ppath vg-noarg)
+      def pass (
+        if (iref eq "$GT") [do [point gt term] error [var [[e] false]]] [
+          if (iref eq "$LT") [do [point lt term] error [var [[e] false]]] [
+            if (iref eq "$GTE") [do [point gte term] error [var [[e] false]]] [
+              if (iref eq "$LTE") [do [point lte term] error [var [[e] false]]] [
+                if (iref eq "$LIKE") [vg-re-test term (vg-stringify point vg-noarg vg-noarg)] [false]
+              ]
             ]
           ]
         ]
+      )
+      if (pass eq true) [
+        def gp (vg-getelem (inj get "nodes") -2 vg-noarg)
+        (vg-setprop gp gkey point) drop
+        none
+      ] [
+        (append [(StringUtil.concat ["CMP: " (vg-pathify ppath vg-noarg vg-noarg) ": " (vg-stringify point vg-noarg vg-noarg) " fail:" iref " " (vg-stringify term vg-noarg vg-noarg)])] (inj get "errs")) drop
+        none
       ]
-    )
-    if (pass eq true) [
-      def gp (vg-getelem (inj get "nodes") -2 vg-noarg)
-      (vg-setprop gp gkey point) drop
-      none
-    ] [
-      (append [(StringUtil.concat ["CMP: " (vg-pathify ppath vg-noarg vg-noarg) ": " (vg-stringify point vg-noarg vg-noarg) " fail:" iref " " (vg-stringify term vg-noarg vg-noarg)])] (inj get "errs")) drop
-      none
-    ]
-  ] [none]
+    ] [none]
+  ]
 ]]
 
 def vgi-istrue fn [[pr:Any] [Boolean] [(pr get 1) eq true]]
