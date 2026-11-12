@@ -3288,8 +3288,13 @@ class Struct
         return self::_validatebound($inj, $store, '$RANGE');
     }
 
+    public static function validate_LIKE(object $inj, mixed $_val, string $_ref, mixed $store): mixed
+    {
+        return self::_validatebound($inj, $store, '$LIKE');
+    }
+
     /**
-     * The bounding list directives: a bound, then at most one spec that must also admit.
+     * The bounding list directives: a bound or pattern, then at most one spec that also admits.
      */
     private static function _validatebound(object $inj, mixed $store, string $name): mixed
     {
@@ -3319,18 +3324,23 @@ class Struct
 
         $field = 'The ' . $name . ' validator at field ' . self::pathify($inj->path, 1);
         $nargs = self::size($parent) - 1;
+        $islen = '$LEN' === $name;
+        $islike = '$LIKE' === $name;
+        $argname = $islike ? 'pattern' : 'bound';
 
         if ($nargs < 1 || 2 < $nargs) {
-            $inj->errs[] = $field . ' must have a bound and at most one spec.';
+            $inj->errs[] = $field . ' must have a ' . $argname . ' and at most one spec.';
             return self::SKIP;
         }
 
         $bound = self::_getprop($parent, 1);
-        $islen = '$LEN' === $name;
-        [$lo, $hi, $desc] = $islen ? self::_lenbound($bound) : [0, 0, self::_rangedesc($bound)];
+        $like = $islike ? self::_likere($bound) : self::undef();
+        [$lo, $hi, $desc] = $islen
+            ? self::_lenbound($bound)
+            : [0, 0, $islike ? (self::undef() === $like ? self::undef() : 'like /' . $bound . '/') : self::_rangedesc($bound)];
 
         if (self::undef() === $desc) {
-            $inj->errs[] = $field . ' has an invalid bound: ' . self::stringify($bound) . '.';
+            $inj->errs[] = $field . ' has an invalid ' . $argname . ': ' . self::stringify($bound) . '.';
             return self::SKIP;
         }
 
@@ -3346,14 +3356,16 @@ class Struct
             return self::SKIP;
         }
 
-        if (0 === (($islen ? self::T_string | self::T_list | self::T_map : self::T_number) & $ctype)) {
-            $needtype = $islen ? 'string, list or map' : self::S_number;
+        if (0 === (($islen ? self::T_string | self::T_list | self::T_map : ($islike ? self::T_string : self::T_number)) & $ctype)) {
+            $needtype = $islen ? 'string, list or map' : ($islike ? self::S_string : self::S_number);
             $inj->errs[] = self::_invalidTypeMsg($inj->path, $needtype, $ctype, $cval);
             return self::SKIP;
         }
 
         $len = $islen ? (is_string($cval) ? self::_codepoints($cval) : self::size($cval)) : 0;
-        $inbound = $islen ? $lo <= $len && (-1 === $hi || $len <= $hi) : self::_inrange($bound, $cval);
+        $inbound = $islen
+            ? $lo <= $len && (-1 === $hi || $len <= $hi)
+            : ($islike ? self::re_test($like, $cval) : self::_inrange($bound, $cval));
 
         if (!$inbound) {
             $needtype = (1 < count($inj->path) ? '' : 'value ') . $desc;
@@ -3383,6 +3395,21 @@ class Struct
                     : (0 === $lo ? 'at most ' . $hi : $lo . ' to ' . $hi)));
 
         return [$lo, $hi, $desc];
+    }
+
+    /**
+     * A $LIKE pattern compiled by re_compile, which is PCRE here; absent unless it compiles.
+     */
+    private static function _likere(mixed $pattern): mixed
+    {
+        if (!is_string($pattern)) {
+            return self::undef();
+        }
+        try {
+            return self::re_compile($pattern);
+        } catch (\InvalidArgumentException) {
+            return self::undef();
+        }
     }
 
     /**
@@ -3651,6 +3678,7 @@ class Struct
                 '$ALL' => [self::class, 'validate_ALL'],
                 '$LEN' => [self::class, 'validate_LEN'],
                 '$RANGE' => [self::class, 'validate_RANGE'],
+                '$LIKE' => [self::class, 'validate_LIKE'],
             ],
             (array) ($extra ?? []),
             [
@@ -3892,6 +3920,11 @@ class Struct
      */
     private static function select_CMP(object $state, mixed $_val, mixed $ref, mixed $store): mixed
     {
+        // The list form of $LIKE is validate's checker; the key form is this operator.
+        if (self::M_VAL === $state->mode && '$LIKE' === $ref) {
+            return self::validate_LIKE($state, $_val, $ref, $store);
+        }
+
         if (self::M_KEYPRE === $state->mode) {
             $term = self::_getprop($state->parent, $state->key);
             $gkey = self::getelem($state->path, -2);

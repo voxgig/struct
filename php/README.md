@@ -603,7 +603,7 @@ $MERGE   $EACH    $PACK    $REF     $FORMAT  $APPLY
 ```
 $MAP   $LIST   $STRING   $NUMBER   $INTEGER   $DECIMAL  $BOOLEAN
 $NULL  $NIL    $FUNCTION $INSTANCE $ANY       $CHILD    $EXACT
-$NOF   $ALL    $LEN      $RANGE
+$NOF   $ALL    $LEN      $RANGE     $LIKE
 ```
 
 `` ['`$NOF`', $n, $spec, …] `` holds when as many specs admit the value as
@@ -618,9 +618,14 @@ bound written as for `$NOF`. Strings count UTF-8 code points, not the bytes
 `strlen` reports, and a string that is not valid UTF-8 counts its bytes. Lists
 count elements, maps keys. `` ['`$RANGE`', $bound, $spec?] `` holds when the
 value is a number within `$bound`, a map of `min` or `gt` and `max` or `lt`,
-such as `['min' => 0, 'lt' => 150]`. `$LEN` and `$RANGE` take at most one spec,
-which must also admit the value. `min` and `max` include their bound, while
-`gt` and `lt` exclude it.
+such as `['min' => 0, 'lt' => 150]`. `` ['`$LIKE`', $pattern, $spec?] `` holds
+when the value is a string that `$pattern` finds, with PHP's PCRE
+(`preg_match`), anywhere in it unless the pattern is anchored. `$LEN`, `$RANGE`
+and `$LIKE` take at most one spec, which must also admit the value. `min` and
+`max` include their bound, while `gt` and `lt` exclude it. A pattern that
+starts with `/` is read as already delimited, as `re_compile` reads it, so
+`'/a/i'` matches `A`, and `'/a'`, with no closing delimiter, is an invalid
+pattern.
 
 A spec that names a checker `validate` does not define is rejected before
 any data is read, and nothing is validated. The whole-string reference
