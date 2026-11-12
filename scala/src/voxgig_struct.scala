@@ -440,7 +440,11 @@ object struct {
 
   private def reStr(p: Value): String = p match { case VStr(s) => s; case _ => jsString(p) }
 
-  def re_compile(p: Value, flags: Value = Noval): Value = p match { case VStr(_) => p; case _ => VStr(jsString(p)) }
+  // Compiles only to reject a bad pattern: the text is what travels.
+  def re_compile(p: Value, flags: Value = Noval): Value = {
+    java.util.regex.Pattern.compile(reStr(p))
+    p match { case VStr(_) => p; case _ => VStr(jsString(p)) }
+  }
   def re_test(p: Value, input: Value): Value =
     VBool(java.util.regex.Pattern.compile(reStr(p)).matcher(reStr(input)).find())
   def re_find(p: Value, input: Value): Value = {
@@ -1694,7 +1698,9 @@ object struct {
   // bound holds min or gt, max or lt, or one of each.
   private val validateRange: Injector = (inj, _v, _r, store) => validatebound(inj, store, "$RANGE")
 
-  // The bounding list directives: a bound, then at most one spec that must also admit.
+  private val validateLike: Injector = (inj, _v, _r, store) => validatebound(inj, store, "$LIKE")
+
+  // The bounding list directives: a bound or pattern, then at most one spec that also admits.
   private def validatebound(inj: Inj, store: Value, name: String): Value = {
     val parent = inj.parent
     if (inj.mode != M_VAL) Noval
@@ -1712,25 +1718,31 @@ object struct {
 
       val field = "The " + name + " validator at field " + pathify(inj.path, VNum(1.0))
       val nargs = size(parent) - 1
+      val islen = name == "$LEN"
+      val islike = name == "$LIKE"
+      val argname = if (islike) "pattern" else "bound"
 
-      if (nargs < 1 || 2 < nargs) pushErr(inj, field + " must have a bound and at most one spec.")
+      if (nargs < 1 || 2 < nargs) pushErr(inj, field + " must have a " + argname + " and at most one spec.")
       else {
         val bound = lookup_(parent, VNum(1.0))
-        val islen = name == "$LEN"
-        val (lo, hi, desc) = if (islen) lenbound(bound) else (0.0, 0.0, rangedesc(bound))
+        val like = if (islike) likere(bound) else None
+        val (lo, hi, desc) =
+          if (islen) lenbound(bound)
+          else (0.0, 0.0, if (islike) like.map(p => "like /" + reStr(p) + "/") else rangedesc(bound))
         val ctype = typify(cval)
         desc match {
-          case None => pushErr(inj, field + " has an invalid bound: " + stringify(bound) + ".")
+          case None => pushErr(inj, field + " has an invalid " + argname + ": " + stringify(bound) + ".")
           case Some(words) =>
             if (nargs == 2 && !admits(cval, lookup_(parent, VNum(2.0)), inj, store)) {
               val specdesc = replaceTransformNames(stringify(lookup_(parent, VNum(2.0))))
               pushErr(inj, invalidTypeMsg(inj.path, specdesc, ctype, cval, "V0410"))
-            } else if (0 == ((if (islen) T_string | T_list | T_map else T_number) & ctype)) {
-              val needtype = if (islen) "string, list or map" else "number"
+            } else if (0 == ((if (islen) T_string | T_list | T_map else if (islike) T_string else T_number) & ctype)) {
+              val needtype = if (islen) "string, list or map" else if (islike) S_string else "number"
               pushErr(inj, invalidTypeMsg(inj.path, needtype, ctype, cval, "V0420"))
             } else {
               val inbound =
-                if (!islen) inrange(bound, cval)
+                if (islike) like.exists(p => re_test(p, cval) == VBool(true))
+                else if (!islen) inrange(bound, cval)
                 else {
                   // size counts a string in UTF-16 units, not code points.
                   val len = cval match { case VStr(s) => s.codePointCount(0, s.length); case _ => size(cval) }
@@ -1760,6 +1772,14 @@ object struct {
         (lo, hi, Some("of length " + words))
       case _ => (0.0, 0.0, None)
     }
+
+  // A $LIKE pattern compiled by the port's own regex engine; absent unless it compiles.
+  private def likere(pattern: Value): Option[Value] = pattern match {
+    case VStr(_) =>
+      try Some(re_compile(pattern))
+      catch { case _: java.util.regex.PatternSyntaxException => None }
+    case _ => None
+  }
 
   // The words for a $RANGE bound, which are absent when the bound is invalid.
   private def rangedesc(bound: Value): Option[String] =
@@ -1993,6 +2013,7 @@ object struct {
     put("$ALL", VFunc(validateAll))
     put("$LEN", VFunc(validateLen))
     put("$RANGE", VFunc(validateRange))
+    put("$LIKE", VFunc(validateLike))
     val store = merge(mkList(Seq(base, if (isNoval(extra)) emptyMap() else extra, mkMap(Seq((S_DERRS, errs))))), VNum(1.0))
     val meta = inj match { case IDef(d) if !isNoval(d.dMeta) => d.dMeta; case _ => emptyMap() }
     setprop(meta, VStr(S_BEXACT), getprop(meta, VStr(S_BEXACT), VBool(false)))
@@ -2077,23 +2098,27 @@ object struct {
     case _ => false
   }
 
-  private val selectCmp: Injector = (inj, _v, refstr, store) => {
-    if (inj.mode == M_KEYPRE) {
-      val term = getprop(inj.parent, inj.key)
-      val gkey = getelem(inj.path, VNum(-2.0))
-      val ppath = slice(inj.path, VNum(-1.0))
-      val point = getpath(store, ppath, INone)
-      val pass =
-        if (refstr == "$GT") numCmp(point, term, "gt")
-        else if (refstr == "$LT") numCmp(point, term, "lt")
-        else if (refstr == "$GTE") numCmp(point, term, "gte")
-        else if (refstr == "$LTE") numCmp(point, term, "lte")
-        else if (refstr == "$LIKE") (term match { case VStr(t) => java.util.regex.Pattern.compile(t).matcher(stringify(point)).find(); case _ => false })
-        else false
-      if (pass) { val gp = getelem(inj.nodes, VNum(-2.0)); setprop(gp, gkey, point) }
-      else pushErr(inj, "CMP: " + pathify(ppath) + "⨯" + stringify(point) + " fail:" + refstr + " " + stringify(term))
+  private val selectCmp: Injector = (inj, v, refstr, store) => {
+    // The list form of $LIKE is validate's checker; the key form is this operator.
+    if (inj.mode == M_VAL && refstr == "$LIKE") validateLike(inj, v, refstr, store)
+    else {
+      if (inj.mode == M_KEYPRE) {
+        val term = getprop(inj.parent, inj.key)
+        val gkey = getelem(inj.path, VNum(-2.0))
+        val ppath = slice(inj.path, VNum(-1.0))
+        val point = getpath(store, ppath, INone)
+        val pass =
+          if (refstr == "$GT") numCmp(point, term, "gt")
+          else if (refstr == "$LT") numCmp(point, term, "lt")
+          else if (refstr == "$GTE") numCmp(point, term, "gte")
+          else if (refstr == "$LTE") numCmp(point, term, "lte")
+          else if (refstr == "$LIKE") (term match { case VStr(t) => java.util.regex.Pattern.compile(t).matcher(stringify(point)).find(); case _ => false })
+          else false
+        if (pass) { val gp = getelem(inj.nodes, VNum(-2.0)); setprop(gp, gkey, point) }
+        else pushErr(inj, "CMP: " + pathify(ppath) + "⨯" + stringify(point) + " fail:" + refstr + " " + stringify(term))
+      }
+      Noval
     }
-    Noval
   }
 
   def select(children0: Value, query: Value): Value = {
