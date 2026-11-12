@@ -103,6 +103,10 @@ validate (Str "abc")
 validate (Num 42.0)
   (jt [Str "`$RANGE`"; jm [Str "min"; Num 0.0; Str "lt"; Num 150.0]; Str "`$INTEGER`"])  (* 42 *)
 
+(* validate: `$LIKE` finds a pattern in a string *)
+validate (Str "ABC-12")
+  (jt [Str "`$LIKE`"; Str "^[A-Z]{3}-[0-9]+$"; Str "`$STRING`"])  (* ABC-12 *)
+
 (* select: MongoDB-style query over children *)
 select (jt [jm [Str "a"; Num 1.0]; jm [Str "a"; Num 2.0]])
        (jm [Str "a"; jm [Str "`$GT`"; Num 1.0]])             (* [{$KEY:1,a:2}] *)
@@ -120,8 +124,15 @@ when the value's length is within it: a `Str` counts code points rather than
 bytes, a `List` its elements, and a `Map` its keys, and any other value fails.
 `` Str "`$RANGE`" `` takes a map of `min` or `gt` with `max` or `lt`, and
 fails on anything but a `Num`. `min` and `max` include their bound, while `gt`
-and `lt` exclude it. Each takes at most one spec, which must also admit the
-value.
+and `lt` exclude it. `` Str "`$LIKE`" `` takes a pattern, and holds when the
+in-tree engine in `src/vregex.ml` finds it in a `Str`, anywhere unless the
+pattern is anchored; any other value fails. Each takes at most one spec,
+which must also admit the value.
+
+That engine reads a malformed pattern leniently rather than rejecting it: an
+unclosed `(` or `[` runs to the end of the pattern, and a stray `)` ends it.
+So a `$LIKE` pattern is invalid only when it is not a `Str`, or when a
+repetition count is too large for an `int`.
 
 ## Testing
 

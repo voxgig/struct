@@ -1750,7 +1750,9 @@ and validate_len inj _v _ref store = validatebound inj store "$LEN"
    bound holds min or gt, max or lt, or one of each. *)
 and validate_range inj _v _ref store = validatebound inj store "$RANGE"
 
-(* The bounding list directives: a bound, then at most one spec that must also admit. *)
+and validate_like inj _v _ref store = validatebound inj store "$LIKE"
+
+(* The bounding list directives: a bound or pattern, then at most one spec that also admits. *)
 and validatebound inj store name =
   if inj.mode <> m_val then Noval
   else if not (islist inj.parent) || inj.keyi <> 0 then begin
@@ -1765,25 +1767,35 @@ and validatebound inj store name =
     inj.path <- slice ~start:(Num (-1.0)) inj.path;
     let field = "The " ^ name ^ " validator at field " ^ pathify ~startin:(Num 1.0) inj.path in
     let nargs = size parent - 1 in
-    (if nargs < 1 || 2 < nargs then push_err inj (field ^ " must have a bound and at most one spec.")
+    let islen = (name = "$LEN") in
+    let islike = (name = "$LIKE") in
+    let argname = if islike then "pattern" else "bound" in
+    (if nargs < 1 || 2 < nargs then push_err inj (field ^ " must have a " ^ argname ^ " and at most one spec.")
      else begin
        let bound = lookup_ parent (Num 1.0) in
-       let islen = (name = "$LEN") in
-       let lo, hi, desc = if islen then lenbound bound else (0.0, 0.0, rangedesc bound) in
+       let like = if islike then likere bound else None in
+       let lo, hi, desc =
+         if islen then lenbound bound
+         else (0.0, 0.0,
+               if islike then (match bound, like with Str p, Some _ -> Some ("like /" ^ p ^ "/") | _ -> None)
+               else rangedesc bound) in
        match desc with
-       | None -> push_err inj (field ^ " has an invalid bound: " ^ stringify bound ^ ".")
+       | None -> push_err inj (field ^ " has an invalid " ^ argname ^ ": " ^ stringify bound ^ ".")
        | Some desc ->
          let ctype = typify cval in
          let spec = lookup_ parent (Num 2.0) in
          if nargs = 2 && not (admits cval spec inj store) then
            push_err inj (invalid_type_msg inj.path (replace_transform_names (stringify spec)) ctype cval "V0410")
-         else if (if islen then t_string lor t_list lor t_map else t_number) land ctype = 0 then
-           push_err inj (invalid_type_msg inj.path (if islen then "string, list or map" else "number") ctype cval "V0420")
+         else if (if islen then t_string lor t_list lor t_map else if islike then t_string else t_number) land ctype = 0 then
+           push_err inj (invalid_type_msg inj.path
+                           (if islen then "string, list or map" else if islike then s_string else "number")
+                           ctype cval "V0420")
          else begin
            let inbound =
              if islen then
                let len = float_of_int (match cval with Str s -> utf8_length s | _ -> size cval) in
                lo <= len && (hi = -1.0 || len <= hi)
+             else if islike then (match like, cval with Some re, Str s -> Vregex.test re s | _ -> false)
              else inrange bound cval in
            if not inbound then
              push_err inj (invalid_type_msg inj.path ((if size inj.path > 1 then "" else "value ") ^ desc) ctype cval "V0430")
@@ -1804,6 +1816,12 @@ and lenbound bound =
       else if lo = 0.0 then "at most " ^ num_to_string hi
       else num_to_string lo ^ " to " ^ num_to_string hi in
     (lo, hi, Some ("of length " ^ words))
+
+(* A $LIKE pattern compiled by the port's own regex engine; absent unless it compiles. *)
+and likere pattern =
+  match pattern with
+  | Str p -> (try Some (Vregex.compile p) with _ -> None)
+  | _ -> None
 
 (* The words for a $RANGE bound, which are absent when the bound is invalid. *)
 and rangedesc bound =
@@ -2001,6 +2019,7 @@ and validate ?(inj = INone) data spec =
   put "$ALL" (Func validate_all);
   put "$LEN" (Func validate_len);
   put "$RANGE" (Func validate_range);
+  put "$LIKE" (Func validate_like);
   let store = merge ~maxdepth:(Num 1.0) (lst [base; (if is_noval extra then empty_map () else extra); Map { entries = [(s_derrs, errs)] }]) in
   let meta = (match inj with IDef d when not (is_noval d.d_meta) -> d.d_meta | _ -> empty_map ()) in
   ignore (setprop meta (Str s_bexact) (getprop ~alt:(Bool false) meta (Str s_bexact)));
@@ -2074,22 +2093,26 @@ and num_cmp a b op =
   | Num x, Num y -> (match op with `Gt -> x > y | `Lt -> x < y | `Gte -> x >= y | `Lte -> x <= y)
   | _ -> false
 
-and select_cmp inj _v refstr store =
-  (if inj.mode = m_keypre then begin
-      let term = getprop inj.parent inj.key in
-      let gkey = getelem inj.path (Num (-2.0)) in
-      let ppath = slice ~start:(Num (-1.0)) inj.path in
-      let point = getpath ~inj:INone store ppath in
-      let pass =
-        if refstr = "$GT" then num_cmp point term `Gt
-        else if refstr = "$LT" then num_cmp point term `Lt
-        else if refstr = "$GTE" then num_cmp point term `Gte
-        else if refstr = "$LTE" then num_cmp point term `Lte
-        else if refstr = "$LIKE" then (match term with Str t -> Vregex.test_str t (stringify point) | _ -> false)
-        else false in
-      if pass then (let gp = getelem inj.nodes (Num (-2.0)) in ignore (setprop gp gkey point))
-      else push_err inj ("CMP: " ^ pathify ppath ^ "\xe2\xa8\xaf" ^ stringify point ^ " fail:" ^ refstr ^ " " ^ stringify term)
-    end); Noval
+and select_cmp inj v refstr store =
+  (* The list form of $LIKE is validate's checker; the key form is this operator. *)
+  if inj.mode = m_val && refstr = "$LIKE" then validate_like inj v refstr store
+  else begin
+    (if inj.mode = m_keypre then begin
+        let term = getprop inj.parent inj.key in
+        let gkey = getelem inj.path (Num (-2.0)) in
+        let ppath = slice ~start:(Num (-1.0)) inj.path in
+        let point = getpath ~inj:INone store ppath in
+        let pass =
+          if refstr = "$GT" then num_cmp point term `Gt
+          else if refstr = "$LT" then num_cmp point term `Lt
+          else if refstr = "$GTE" then num_cmp point term `Gte
+          else if refstr = "$LTE" then num_cmp point term `Lte
+          else if refstr = "$LIKE" then (match term with Str t -> Vregex.test_str t (stringify point) | _ -> false)
+          else false in
+        if pass then (let gp = getelem inj.nodes (Num (-2.0)) in ignore (setprop gp gkey point))
+        else push_err inj ("CMP: " ^ pathify ppath ^ "\xe2\xa8\xaf" ^ stringify point ^ " fail:" ^ refstr ^ " " ^ stringify term)
+      end); Noval
+  end
 
 and select children query =
   if not (isnode children) then empty_list ()

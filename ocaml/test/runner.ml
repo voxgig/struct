@@ -439,7 +439,7 @@ let rec run_all spec =
   List.iter (fun gn ->
       run_set ("validate." ^ gn) ~flags:["null", false] (getprop_raw_pub validates gn)
         (arg1 (fun vin -> validate (vget vin "data") (vget vin "spec"))))
-    ["invalid"; "directive"; "nof"; "all"; "len"; "range"; "unknown"];
+    ["invalid"; "directive"; "nof"; "all"; "len"; "range"; "like"; "unknown"];
   run_set "validate.special" (getprop_raw_pub validates "special")
     (arg1 (fun vin ->
          let injm = vget vin "inj" in
