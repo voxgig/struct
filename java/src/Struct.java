@@ -21,6 +21,7 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 
 @SuppressWarnings({"unchecked", "rawtypes"})
 public class Struct {
@@ -2831,7 +2832,17 @@ public class Struct {
       (injObj, val, ref, store) ->
           injObj instanceof Injection inj ? _validatebound(inj, store, "$RANGE") : UNDEF;
 
-  // The bounding list directives: a bound, then at most one spec that must also admit.
+  /**
+   * $LIKE: the value is a string the pattern finds. Format:
+   * {@code [`$LIKE`, pattern, spec?]}, where the pattern is a
+   * {@code java.util.regex} expression that matches anywhere unless anchored.
+   * Mirrors TS {@code validate_LIKE}.
+   */
+  public static final Injector validate_LIKE =
+      (injObj, val, ref, store) ->
+          injObj instanceof Injection inj ? _validatebound(inj, store, "$LIKE") : UNDEF;
+
+  // The bounding list directives: a bound or pattern, then at most one spec that also admits.
   private static Object _validatebound(Injection inj, Object store, String name) {
     if (inj.mode != M_VAL) {
       return UNDEF;
@@ -2860,19 +2871,25 @@ public class Struct {
 
     String field = "The " + name + " validator at field " + pathify(inj.path, 1);
     int nargs = size(parent) - 1;
+    boolean islen = "$LEN".equals(name);
+    boolean islike = "$LIKE".equals(name);
+    String argname = islike ? "pattern" : "bound";
 
     if (nargs < 1 || 2 < nargs) {
-      inj.errs.add(field + " must have a bound and at most one spec.");
+      inj.errs.add(field + " must have a " + argname + " and at most one spec.");
       return SKIP;
     }
 
     Object bound = lookup(parent, 1);
-    boolean islen = "$LEN".equals(name);
+    String like = islike ? _likere(bound) : null;
     Object[] lenbound = islen ? _lenbound(bound) : null;
-    String desc = islen ? (String) lenbound[2] : _rangedesc(bound);
+    String desc =
+        islen
+            ? (String) lenbound[2]
+            : islike ? (null == like ? null : "like /" + like + "/") : _rangedesc(bound);
 
     if (null == desc) {
-      inj.errs.add(field + " has an invalid bound: " + stringify(bound) + ".");
+      inj.errs.add(field + " has an invalid " + argname + ": " + stringify(bound) + ".");
       return SKIP;
     }
 
@@ -2884,8 +2901,8 @@ public class Struct {
       return SKIP;
     }
 
-    if (0 == ((islen ? T_string | T_list | T_map : T_number) & ctype)) {
-      String needtype = islen ? "string, list or map" : "number";
+    if (0 == ((islen ? T_string | T_list | T_map : islike ? T_string : T_number) & ctype)) {
+      String needtype = islen ? "string, list or map" : islike ? "string" : "number";
       inj.errs.add(_invalidTypeMsg(inj.path, needtype, ctype, cval, "V0420"));
       return SKIP;
     }
@@ -2896,6 +2913,8 @@ public class Struct {
       long hi = (Long) lenbound[1];
       int len = cval instanceof String s ? s.codePointCount(0, s.length()) : size(cval);
       inbound = lo <= len && (-1 == hi || len <= hi);
+    } else if (islike) {
+      inbound = reTest(like, (String) cval);
     } else {
       inbound = _inrange(bound, ((Number) cval).doubleValue());
     }
@@ -2926,6 +2945,19 @@ public class Struct {
             : -1 == hi ? "at least " + lo : 0 == lo ? "at most " + hi : lo + " to " + hi;
 
     return new Object[] {lo, hi, "of length " + desc};
+  }
+
+  // A $LIKE pattern that the port's own regex engine compiles; null unless it does.
+  private static String _likere(Object pattern) {
+    if (!(pattern instanceof String s)) {
+      return null;
+    }
+    try {
+      reCompile(s);
+      return s;
+    } catch (PatternSyntaxException e) {
+      return null;
+    }
   }
 
   // The words for a $RANGE bound, which are null when the bound is invalid.
@@ -3386,6 +3418,8 @@ public class Struct {
   public static final Injector select_CMP =
       (injObj, val, ref, store) -> {
         if (!(injObj instanceof Injection inj)) return UNDEF;
+        // The list form of $LIKE is validate's checker; the key form is this operator.
+        if (inj.mode == M_VAL && "$LIKE".equals(ref)) return validate_LIKE.apply(inj, val, ref, store);
         if (inj.mode != M_KEYPRE) return UNDEF;
         // Group B: select $CMP term is read raw (TS _lookup(parent,key)).
         Object term = lookup(inj.parent, inj.key);
@@ -3474,6 +3508,7 @@ public class Struct {
     baseStore.put("$ALL", validate_ALL);
     baseStore.put("$LEN", validate_LEN);
     baseStore.put("$RANGE", validate_RANGE);
+    baseStore.put("$LIKE", validate_LIKE);
 
     List<Object> mergeList = new ArrayList<>();
     mergeList.add(baseStore);
