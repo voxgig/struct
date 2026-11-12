@@ -2089,13 +2089,11 @@ def transform_PACK(inj, val, ref, store):
     return UNDEF
 
 
-def transform_REF(inj, val, _ref, store):
+def transform_REF(inj, _val, _ref, store):
     """
     Reference original spec (enables recursive transformations)
     Format: ['`$REF`', '`spec-path`']
     """
-    nodes = inj.nodes
-
     if inj.mode != S_MVAL:
         return UNDEF
 
@@ -2122,38 +2120,21 @@ def transform_REF(inj, val, _ref, store):
 
         walk(ref, check_subref)
 
-    tref = clone(ref)
+    # A recursive reference stops where the data does.
+    tval = getpath(store, slice(inj.path, 0, len(inj.path) - 1))
+    rval = clone(ref) if not hasSubRef or tval is not UNDEF else UNDEF
 
-    cpath = slice(inj.path, 0, len(inj.path) - 3)
-    tpath = slice(inj.path, 0, len(inj.path) - 1)
-    tcur = getpath(store, cpath)
-    tval = getpath(store, tpath)
-    rval = UNDEF
+    # The enclosing loop injects the referenced spec in this list's place, so
+    # neither this pass nor this element leaves a value for modify to check.
+    grandparent = inj.setval(rval, 2)
 
-    # When ref target not found, omit the key (setval UNDEF). Do not inject UNDEF.
-    if ref is not UNDEF and (not hasSubRef or tval is not UNDEF):
-        # Create child state for the next level
-        child_state = inj.child(0, [getelem(tpath, -1)])
-        child_state.path = tpath
-        child_state.nodes = slice(inj.nodes, 0, len(inj.nodes) - 1)
-        child_state.parent = getelem(nodes, -2)
-        child_state.val = tref
+    prior = inj.prior
+    if prior is not None:
+        prior.modify = None
+        if islist(grandparent) or rval is not UNDEF:
+            prior.keyI -= 1
 
-        # Inject with child state
-        child_state.dparent = tcur
-        inject(tref, store, child_state)
-        rval = child_state.val
-    else:
-        rval = UNDEF
-
-    # Set the value in grandparent, using setval
-    inj.setval(rval, 2)
-
-    # Handle lists by decrementing keyI
-    if islist(inj.parent) and inj.prior:
-        inj.prior.keyI -= 1
-
-    return val
+    return SKIP
 
 
 def _fmt_number(_k, v, *_args):
