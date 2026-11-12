@@ -279,6 +279,22 @@ fails. `$RANGE` takes a map of `min` (at least) or `gt` (greater than), with
 takes at most one spec, which must also admit the value. A bounded field is
 required; `['`$NOF`', 1, '`$NIL`', ['`$LEN`', { max: 64 }]]` makes it optional.
 
+### Match a string against a pattern
+A code or a slug has a shape that no type can state:
+```js
+S.validate(code, ['`$LIKE`', '^[A-Z]{3}-[0-9]+$', '`$STRING`'])
+```
+`$LIKE` takes a pattern, then at most one spec, which must also admit the
+value. The value must be a string the pattern finds, anywhere in it unless
+the pattern is anchored with `^` or `$`, and any other value fails. Each port
+matches with its own regex engine, so a pattern means what that language's
+regex means: one inside the RE2 subset ([`REGEX.md`](design/REGEX.md))
+matches the same everywhere, while anything beyond it, or a class such as
+`\w` over text that is not ASCII, can differ from port to port. In a `select`
+query the list form works the same; `select`'s own key form,
+`` { code: { '`$LIKE`': '^A' } } ``, matches the value's text, numbers
+included.
+
 ### Reuse a spec, or nest one inside itself
 A tree has the same shape at every level, so its spec has to name itself:
 ```js
@@ -465,8 +481,9 @@ named function from `extra`).
 `$CHILD` (apply a sub-spec to every child), `$EXACT` (equal a literal
 exactly), `$NOF` (a count of specs admits the value), `$ALL` (every spec
 admits the value), `$LEN` (a length within a bound), `$RANGE` (a number
-within a bound). A spec that names any other checker fails before any data
-is read, with `Unknown validator $FOO at field a.`
+within a bound), `$LIKE` (a string a pattern finds). A spec that names any
+other checker fails before any data is read, with `Unknown validator $FOO at
+field a.`
 
 ### Regex API
 

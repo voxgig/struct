@@ -801,6 +801,72 @@ range: set: [
     err: 'The $RANGE validator at field a must be the first element of an array.' }
 ]
 
+
+# ['$LIKE', pattern, spec?]: the value is a string the pattern finds, anywhere
+# unless anchored; a spec, if given, also admits it. Each port matches with its
+# own regex engine, so these patterns stay inside the RE2 subset and the data
+# in ASCII. Run this group with the null flag off, as for directive.
+like: set: [
+
+  { in: { data: abc, spec: ['`$LIKE`','^a'] }, out: abc }
+  { in: { data: xabc, spec: ['`$LIKE`','b'] }, out: xabc }
+  { in: { data: xyz, spec: ['`$LIKE`','^a'] },
+    err: 'Expected value like /^a/, but found string: xyz.' }
+  { in: { data: ABC, spec: ['`$LIKE`','^a'] },
+    err: 'Expected value like /^a/, but found string: ABC.' }
+  { in: { data: hotdog, spec: ['`$LIKE`','cat|dog'] }, out: hotdog }
+  { in: { data: 'a-1', spec: ['`$LIKE`','^[a-z]+-[0-9]+$'] }, out: 'a-1' }
+  { in: { data: 'a-1x', spec: ['`$LIKE`','^[a-z]+-[0-9]+$'] },
+    err: 'Expected value like /^[a-z]+-[0-9]+$/, but found string: a-1x.' }
+  { in: { data: 'ab12', spec: ['`$LIKE`','^\\w+\\d$'] }, out: 'ab12' }
+  { in: { data: 'a b', spec: ['`$LIKE`','\\s'] }, out: 'a b' }
+  { in: { data: aaaa, spec: ['`$LIKE`','^a{2,3}$'] },
+    err: 'Expected value like /^a{2,3}$/, but found string: aaaa.' }
+
+  # The empty string is a string: it passes when the pattern finds it.
+  { in: { data: '', spec: ['`$LIKE`','^$'] }, out: '' }
+  { in: { data: '', spec: ['`$LIKE`','a*'] }, out: '' }
+  { in: { data: '', spec: ['`$LIKE`','a'] },
+    err: 'Expected value like /a/, but found string: .' }
+
+  # At a field, with a spec, under $CHILD, and inside $ALL and a count.
+  { in: { data: {x:'12'}, spec: {x:['`$LIKE`','^[0-9]+$','`$STRING`']} }, out: {x:'12'} }
+  { in: { data: {x:''}, spec: {x:['`$LIKE`','^[0-9]*$','`$STRING`']} },
+    err: 'Expected field x to be string, but found string: .' }
+  { in: { data: {x:'1a'}, spec: {x:['`$LIKE`','^[0-9]+$','`$STRING`']} },
+    err: 'Expected field x to be like /^[0-9]+$/, but found string: 1a.' }
+  { in: { data: [ab,C], spec: ['`$CHILD`',['`$LIKE`','^[a-z]+$']] },
+    err: 'Expected field 1 to be like /^[a-z]+$/, but found string: C.' }
+  { in: { data: {p:ok,q:NO}, spec: {'`$CHILD`':['`$LIKE`','^[a-z]+$']} },
+    err: 'Expected field q to be like /^[a-z]+$/, but found string: NO.' }
+  { in: { data: admin, spec: ['`$ALL`',['`$LIKE`','^[a-z]+$'],['`$NOF`',0,['`$EXACT`',admin]]] },
+    err: 'Expected all of [like,^[a-z]+$], [nof,0,[exact,admin]], but found string: admin.' }
+  { in: { data: 'b2', spec: ['`$NOF`',1,['`$LIKE`','^a'],['`$LIKE`','2$']] }, out: 'b2' }
+
+  # Only a string has a pattern to find, and null and absent values are checked too.
+  { in: { data: {x:5}, spec: {x:['`$LIKE`','5']} },
+    err: 'Expected field x to be string, but found integer: 5.' }
+  { in: { data: {x:[a]}, spec: {x:['`$LIKE`','a']} },
+    err: 'Expected field x to be string, but found list: [a].' }
+  { in: { data: {x:null}, spec: {x:['`$LIKE`','a']} },
+    err: 'Expected field x to be string, but found no value.' }
+  { in: { data: {}, spec: {x:['`$LIKE`','a']} },
+    err: 'Expected field x to be string, but found no value.' }
+  { in: { data: {}, spec: {x:['`$NOF`',1,'`$NIL`',['`$LIKE`','a']]} }, out: {} }
+
+  # Malformed specs.
+  { in: { data: a, spec: ['`$LIKE`'] },
+    err: 'The $LIKE validator at field <root> must have a pattern and at most one spec.' }
+  { in: { data: a, spec: ['`$LIKE`','a','`$STRING`','`$STRING`'] },
+    err: 'The $LIKE validator at field <root> must have a pattern and at most one spec.' }
+  { in: { data: a, spec: ['`$LIKE`',1] },
+    err: 'The $LIKE validator at field <root> has an invalid pattern: 1.' }
+  { in: { data: a, spec: ['`$LIKE`',{p:a}] },
+    err: 'The $LIKE validator at field <root> has an invalid pattern: {p:a}.' }
+  { in: { data: {a:[x,y]}, spec: {a:['`$STRING`','`$LIKE`']} },
+    err: 'The $LIKE validator at field a must be the first element of an array.' }
+]
+
 # A spec that names a checker validate does not define is rejected before any
 # data is read, and nothing is validated. A whole-string reference names a
 # checker when it is upper case, or a defined name in another case. Run this

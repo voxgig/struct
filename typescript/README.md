@@ -774,12 +774,15 @@ Quote inside a `validate` spec, e.g. `` '`$STRING`' ``.
 | `$ALL`      | `` ['`$ALL`', spec, …] ``: every spec admits the value.          |
 | `$LEN`      | `` ['`$LEN`', n, spec?] ``: a length within `n`, a bound written as for `$NOF`. Strings count code points, lists elements, maps keys. |
 | `$RANGE`    | `` ['`$RANGE`', bound, spec?] ``: a number within the bound, a map of `min` or `gt` and `max` or `lt`. |
+| `$LIKE`     | `` ['`$LIKE`', pattern, spec?] ``: a string the pattern finds, with JavaScript's `RegExp`. |
 
 A spec admits a value when validating the value against it finds no error
 and gives back every member of the value unchanged. There is no `$ONE`:
-write `` ['`$ONE`', a, b] `` as `` ['`$NOF`', {min: 1}, a, b] ``. `$LEN` and
-`$RANGE` take at most one spec, which must also admit the value. `min` and
-`max` include their bound, while `gt` and `lt` exclude it.
+write `` ['`$ONE`', a, b] `` as `` ['`$NOF`', {min: 1}, a, b] ``. `$LEN`,
+`$RANGE` and `$LIKE` take at most one spec, which must also admit the value.
+`min` and `max` include their bound, while `gt` and `lt` exclude it. A
+`$LIKE` pattern is compiled with no flags and matches anywhere unless
+anchored.
 
 A spec that names a checker `validate` does not define is rejected before
 any data is read, and nothing is validated. The whole-string reference

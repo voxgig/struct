@@ -191,7 +191,7 @@ not.
 \*\* Rust: full TS-canonical parity. Idiomatic `snake_case` API (`get_path`,
 `is_node`, …; see `rust/README.md` for the name table), `Rc<RefCell>`
 reference-stable nodes via the `indexmap` crate, `Value::Noval` vs `Value::Null`
-kept distinct. All 11 transform commands, all 18 validate checkers, all 4 select
+kept distinct. All 11 transform commands, all 19 validate checkers, all 4 select
 operators, the `Injection` state machine, and the `primary.check` SDK test pass
 (`cargo test` → 1187 corpus checks; `cargo clippy` clean).
 
@@ -199,7 +199,7 @@ operators, the `Injection` state machine, and the `primary.check` SDK test pass
 `SKIP`/`DELETE` sentinels, mode constants, all 11 transform commands
 (`$DELETE`/`$COPY`/`$KEY`/`$ANNO`/`$MERGE`/`$EACH`/`$PACK`/`$REF`/
 `$FORMAT`/`$APPLY`), all 9 validate checkers (`$STRING`/`$TYPE`/`$ANY`/
-`$CHILD`/`$EXACT`/`$NOF`/`$ALL`/`$LEN`/`$RANGE`), all 4 select operators (`$AND`/`$OR`/`$NOT`/
+`$CHILD`/`$EXACT`/`$NOF`/`$ALL`/`$LEN`/`$RANGE`/`$LIKE`), all 4 select operators (`$AND`/`$OR`/`$NOT`/
 `$CMP`), and `_validation`/`_validatehandler`/`_injecthandler` internals
 all wired. Per-file: minor 506/506, walk 46/46, merge 133/133, getpath 87/87,
 inject 41/41, transform 187/187, validate 131/131, select 47/47.
@@ -260,7 +260,7 @@ Wraps all functions, constants, and sentinels as instance properties.
 ### Validate Checkers (18)
 `$MAP`, `$LIST`, `$STRING`, `$NUMBER`, `$INTEGER`, `$DECIMAL`, `$BOOLEAN`,
 `$NULL`, `$NIL`, `$FUNCTION`, `$INSTANCE`, `$ANY`, `$CHILD`, `$EXACT`, `$NOF`,
-`$ALL`, `$LEN`, `$RANGE`
+`$ALL`, `$LEN`, `$RANGE`, `$LIKE`
 
 
 ---
@@ -392,7 +392,7 @@ sentinels (SKIP, DELETE), and MODENAME present.
 
 **Validate checkers:** All 18 present (`$MAP`, `$LIST`, `$STRING`, `$NUMBER`,
 `$INTEGER`, `$DECIMAL`, `$BOOLEAN`, `$NULL`, `$NIL`, `$FUNCTION`, `$INSTANCE`,
-`$ANY`, `$CHILD`, `$EXACT`, `$NOF`, `$ALL`, `$LEN`, `$RANGE`).
+`$ANY`, `$CHILD`, `$EXACT`, `$NOF`, `$ALL`, `$LEN`, `$RANGE`, `$LIKE`).
 
 **Language adaptations:**
 - `UNDEF = Object.new.freeze` sentinel for absent values (distinct from nil/JSON null).
@@ -454,7 +454,7 @@ runtime helpers `$BT` / `$DS` / `$WHEN` / `$SPEC`.
 
 **Validate checkers:** All 18 (`$MAP` / `$LIST` / `$STRING` / `$NUMBER` /
 `$INTEGER` / `$DECIMAL` / `$BOOLEAN` / `$NULL` / `$NIL` / `$FUNCTION` /
-`$INSTANCE` / `$ANY` / `$CHILD` / `$EXACT` / `$NOF` / `$ALL` / `$LEN` / `$RANGE`).
+`$INSTANCE` / `$ANY` / `$CHILD` / `$EXACT` / `$NOF` / `$ALL` / `$LEN` / `$RANGE` / `$LIKE`).
 
 **Select operators:** `$AND` / `$OR` / `$NOT` / `$GT` / `$LT` / `$GTE` /
 `$LTE` / `$LIKE`.
@@ -494,7 +494,7 @@ runs under valgrind.
 
 **Status: COMPLETE** -- Full TS-canonical parity. All 52 canonical
 functions, the `Injection` state machine, all 11 transform commands,
-all 18 validate checkers, and all 4 select operators are wired and pass
+all 19 validate checkers, and all 4 select operators are wired and pass
 the corpus.
 
 **Tests:** `make test-java` passes (1300/1300 corpus checks across the
@@ -519,7 +519,7 @@ dispatchers.
 `$APPLY`).
 **Validate checkers:** All 18 present (`$MAP`, `$LIST`, `$STRING`,
 `$NUMBER`, `$INTEGER`, `$DECIMAL`, `$BOOLEAN`, `$NULL`, `$NIL`,
-`$FUNCTION`, `$INSTANCE`, `$ANY`, `$CHILD`, `$EXACT`, `$NOF`, `$ALL`, `$LEN`, `$RANGE`).
+`$FUNCTION`, `$INSTANCE`, `$ANY`, `$CHILD`, `$EXACT`, `$NOF`, `$ALL`, `$LEN`, `$RANGE`, `$LIKE`).
 **Select operators:** `$AND`, `$OR`, `$NOT`, and the `$GT` / `$LT` /
 `$GTE` / `$LTE` / `$LIKE` comparator family.
 
@@ -561,7 +561,7 @@ plus the runtime helpers `$BT` / `$DS` / `$WHEN` / `$SPEC`.
 
 **Validate checkers:** All 18 (`$MAP` / `$LIST` / `$STRING` / `$NUMBER` /
 `$INTEGER` / `$DECIMAL` / `$BOOLEAN` / `$NULL` / `$NIL` / `$FUNCTION` /
-`$INSTANCE` / `$ANY` / `$CHILD` / `$EXACT` / `$NOF` / `$ALL` / `$LEN` / `$RANGE`).
+`$INSTANCE` / `$ANY` / `$CHILD` / `$EXACT` / `$NOF` / `$ALL` / `$LEN` / `$RANGE` / `$LIKE`).
 
 **Select operators:** `$AND` / `$OR` / `$NOT` / `$GT` / `$LT` / `$GTE` /
 `$LTE` / `$LIKE`.
@@ -605,7 +605,7 @@ loads `../build/test/test.json` and exercises every wired set:
 `_validatehandler`; `transform` and the 11 transform commands
 (`$DELETE`, `$COPY`, `$KEY`, `$META`, `$ANNO`, `$MERGE`, `$EACH`,
 `$PACK`, `$REF`, `$FORMAT`, `$APPLY`) plus the `FORMATTER` table;
-`validate` and the 18 validate checkers; `select` and the 4 select
+`validate` and the 19 validate checkers; `select` and the 4 select
 operators (`$AND`, `$OR`, `$NOT`, `$CMP`). All injection helpers
 (`Injection` state, `checkPlacement`, `injectorArgs`,
 `injectChild`, `_inj_child`, `_inj_descend`, `_inj_setval`).
@@ -660,7 +660,7 @@ caller's `handler`, to `setval` branching on `abs(ancestor)`.
 **Wired:** all 52 canonical functions including the `re_*` regex
 wrappers; `Injection` reference class with `child` / `descend` /
 `setval`; all 11 transform commands plus the `$BT` / `$DS` / `$WHEN` /
-`$SPEC` thunks and the `FORMATTER` table; all 18 validate checkers;
+`$SPEC` thunks and the `FORMATTER` table; all 19 validate checkers;
 all 4 select operators (`$AND` / `$OR` / `$NOT` / `$CMP` family).
 Injection helpers `checkPlacement`, `injectorArgs`, `injectChild`.
 Builder helpers `jm`, `jmd`, `jt`. All 15 type constants, 3 mode
@@ -797,6 +797,7 @@ Rust panic, since those functions have no error channel, and Swift's `setprop`,
 | $ALL | Y | Y | Y | Y | Y | Y* | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
 | $LEN | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
 | $RANGE | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
+| $LIKE | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
 
 Every port defines `$NOF` and `$ALL`, and none defines `$ONE`: there
 `['$NOF', {min:1}, ...]` is the same check. `validate.nof` and `validate.all`
@@ -809,8 +810,12 @@ JSON. It also pins `$NIL` accepting null.
 
 `validate.len` and `validate.range` specify `$LEN` and `$RANGE`: the bound
 forms, a string's length in code points (pinned with an accent and an emoji),
-the order of the checks, one error per slot, and the messages. `select.edge`
-pins that a query leaves a directive's literals unopened.
+the order of the checks, one error per slot, and the messages. `validate.like`
+specifies `$LIKE`: a pattern found anywhere unless anchored, strings only, and
+the messages. Each port matches with its own regex engine, so its patterns
+stay inside the RE2 subset over ASCII text. `select.edge` pins that a query
+leaves a directive's literals unopened, and that `$LIKE`'s list form works in
+a query.
 
 Every port also rejects a spec that names a checker it does not define
 (`Unknown validator $FOO at field a.`), which `validate.unknown` specifies. The
@@ -869,14 +874,14 @@ reports every port ok against the 52-function canonical API).
 4. **lua** -- 100% parity. All functions and commands present. 75/75 tests passing.
 5. **php** -- 100% parity. All functions, constants, and commands present. 82/82 tests passing.
 6. **ruby** -- 100% parity. All 52 functions, Injection class, all 11 transform commands, all 16 validators, select with operators. 75/75 tests passing.
-7. **cpp** -- 100% parity. All 52 canonical functions, full `Injection` state, all 11 transform commands, 18 validate checkers, 4 select operators. 1268/1268 corpus checks passing.
-8. **swift** -- 100% parity. All 52 canonical functions, `Injection` reference class, all 11 transform commands, 18 validate checkers, 4 select operators. Full corpus passing.
-9. **java** -- 100% parity. All 52 canonical functions, `Injection` state machine, all 11 transform commands, 18 validate checkers, 4 select operators. 1300/1300 corpus checks passing (`make test-java`).
-10. **rust** -- 100% parity. Idiomatic `snake_case` API, all 11 transform commands, 18 validate checkers, 4 select operators. Full corpus passing.
+7. **cpp** -- 100% parity. All 52 canonical functions, full `Injection` state, all 11 transform commands, 19 validate checkers, 4 select operators. 1268/1268 corpus checks passing.
+8. **swift** -- 100% parity. All 52 canonical functions, `Injection` reference class, all 11 transform commands, 19 validate checkers, 4 select operators. Full corpus passing.
+9. **java** -- 100% parity. All 52 canonical functions, `Injection` state machine, all 11 transform commands, 19 validate checkers, 4 select operators. 1300/1300 corpus checks passing (`make test-java`).
+10. **rust** -- 100% parity. Idiomatic `snake_case` API, all 11 transform commands, 19 validate checkers, 4 select operators. Full corpus passing.
 11. **zig** -- API parity: allocator-first, all transform commands, validate checkers and select operators. Its 60/60 is NOT corpus conformance, though - the in-situ runner skips every entry carrying `err:` and never reads a `match:` block, so the error paths and the mutation assertions are untested here. See \*4.
 12. **csharp** -- 100% parity. All 52 canonical functions, full Injection state, all commands/checkers/operators. Corpus passing.
-13. **kotlin** -- 100% parity. All 52 canonical functions, `Injection` class, all 11 transform commands, 18 validate checkers, 4 select operators. Corpus passing.
-14. **perl** -- 100% parity. All 52 canonical functions, all 11 transform commands, 18 validate checkers, 4 select operators. Full corpus passing.
+13. **kotlin** -- 100% parity. All 52 canonical functions, `Injection` class, all 11 transform commands, 19 validate checkers, 4 select operators. Corpus passing.
+14. **perl** -- 100% parity. All 52 canonical functions, all 11 transform commands, 19 validate checkers, 4 select operators. Full corpus passing.
 
 
 ---

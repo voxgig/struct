@@ -1776,7 +1776,8 @@ const validate_LEN = (inj, _val, _ref, store) => _validatebound(inj, store, '$LE
 // The value is a number within a bound: ['`$RANGE`', bound, spec?], where the
 // bound holds min or gt, max or lt, or one of each.
 const validate_RANGE = (inj, _val, _ref, store) => _validatebound(inj, store, '$RANGE');
-// The bounding list directives: a bound, then at most one spec that must also admit.
+const validate_LIKE = (inj, _val, _ref, store) => _validatebound(inj, store, '$LIKE');
+// The bounding list directives: a bound or pattern, then at most one spec that also admits.
 function _validatebound(inj, store, name) {
     const { mode, parent, keyI } = inj;
     if (M_VAL !== mode) {
@@ -1797,15 +1798,20 @@ function _validatebound(inj, store, name) {
     inj.path = slice(inj.path, -1);
     const field = 'The ' + name + ' validator at field ' + pathify(inj.path, 1);
     const nargs = size(parent) - 1;
+    const islen = '$LEN' === name;
+    const islike = '$LIKE' === name;
+    const argname = islike ? 'pattern' : 'bound';
     if (nargs < 1 || 2 < nargs) {
-        inj.errs.push(field + ' must have a bound and at most one spec.');
+        inj.errs.push(field + ' must have a ' + argname + ' and at most one spec.');
         return SKIP;
     }
     const bound = _lookup(parent, 1);
-    const islen = '$LEN' === name;
-    const [lo, hi, desc] = islen ? _lenbound(bound) : [0, 0, _rangedesc(bound)];
+    const like = islike ? _likere(bound) : NONE;
+    const [lo, hi, desc] = islen
+        ? _lenbound(bound)
+        : [0, 0, islike ? (NONE === like ? NONE : 'like /' + bound + '/') : _rangedesc(bound)];
     if (NONE === desc) {
-        inj.errs.push(field + ' has an invalid bound: ' + stringify(bound) + '.');
+        inj.errs.push(field + ' has an invalid ' + argname + ': ' + stringify(bound) + '.');
         return SKIP;
     }
     const ctype = typify(cval);
@@ -1814,8 +1820,8 @@ function _validatebound(inj, store, name) {
         inj.errs.push(_invalidTypeMsg(inj.path, specdesc, ctype, cval, 'V0410'));
         return SKIP;
     }
-    if (0 === ((islen ? T_string | T_list | T_map : T_number) & ctype)) {
-        const needtype = islen ? 'string, list or map' : S_number;
+    if (0 === ((islen ? T_string | T_list | T_map : islike ? T_string : T_number) & ctype)) {
+        const needtype = islen ? 'string, list or map' : islike ? S_string : S_number;
         inj.errs.push(_invalidTypeMsg(inj.path, needtype, ctype, cval, 'V0420'));
         return SKIP;
     }
@@ -1824,7 +1830,11 @@ function _validatebound(inj, store, name) {
             ? Array.from(cval).length
             : size(cval)
         : 0;
-    const inbound = islen ? lo <= len && (-1 === hi || len <= hi) : _inrange(bound, cval);
+    const inbound = islen
+        ? lo <= len && (-1 === hi || len <= hi)
+        : islike
+            ? re_test(like, cval)
+            : _inrange(bound, cval);
     if (!inbound) {
         const needtype = (1 < size(inj.path) ? '' : 'value ') + desc;
         inj.errs.push(_invalidTypeMsg(inj.path, needtype, ctype, cval, 'V0430'));
@@ -1841,6 +1851,18 @@ function _lenbound(bound) {
     const desc = 'of length ' +
         (lo === hi ? lo : -1 === hi ? 'at least ' + lo : 0 === lo ? 'at most ' + hi : lo + ' to ' + hi);
     return [lo, hi, desc];
+}
+// A $LIKE pattern compiled by the port's own regex engine; absent unless it compiles.
+function _likere(pattern) {
+    if (S_string !== typeof pattern) {
+        return NONE;
+    }
+    try {
+        return re_compile(pattern);
+    }
+    catch {
+        return NONE;
+    }
 }
 // The words for a $RANGE bound, which are absent when the bound is invalid.
 function _rangedesc(bound) {
@@ -1996,6 +2018,7 @@ injdef) {
             $ALL: validate_ALL,
             $LEN: validate_LEN,
             $RANGE: validate_RANGE,
+            $LIKE: validate_LIKE,
         },
         getdef(extra, {}),
         // A special top level value to collect errors.
@@ -2093,6 +2116,10 @@ const select_NOT = (inj, _val, _ref, store) => {
     }
 };
 const select_CMP = (inj, _val, ref, store) => {
+    // The list form of $LIKE is validate's checker; the key form is this operator.
+    if (M_VAL === inj.mode && '$LIKE' === ref) {
+        return validate_LIKE(inj, _val, ref, store);
+    }
     if (M_KEYPRE === inj.mode) {
         const term = _lookup(inj.parent, inj.key);
         const gkey = getelem(inj.path, -2);

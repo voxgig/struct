@@ -344,6 +344,10 @@ edge: {
       out: [{a:{x:1},'$KEY':0}] }
     { in: { query: {a:['`$NOF`',1,{x:1}]}, obj: [{a:{x:1,y:2}}, {a:{x:2}}] },
       out: [{a:{x:1,y:2},'$KEY':0}] }
+    { in: { query: {s:['`$LIKE`','^a']}, obj: [{s:'abc'}, {s:'xyz'}] },
+      out: [{s:'abc','$KEY':0}] }
+    { in: { query: {s:['`$LIKE`','1']}, obj: [{s:1}, {s:'1'}] },
+      out: [{s:'1','$KEY':1}] }
   ]
 }
 
