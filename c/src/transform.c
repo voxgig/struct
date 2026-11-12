@@ -659,6 +659,7 @@ static voxgig_value* tx_PACK(voxgig_injection* inj, voxgig_value* val, const cha
 
 static voxgig_value* tx_REF(voxgig_injection* inj, voxgig_value* val, const char* ref,
                             voxgig_value* store, void* ud) {
+  (void)val;
   (void)ref;
   (void)ud;
   if (inj->mode != VOXGIG_M_VAL)
@@ -735,88 +736,39 @@ static voxgig_value* tx_REF(voxgig_injection* inj, voxgig_value* val, const char
     voxgig_release(stk);
   }
 
-  voxgig_value* tref = voxgig_clone(refv);
-
-  /* cpath = slice(inj.path, -3), tpath = slice(inj.path, -1) */
-  voxgig_value* cpath = voxgig_new_list();
-  /* slice(path, -3) means keep all but last 3 */
-  if (inj->path.len > 3) {
-    for (size_t i = 0; i + 3 < inj->path.len; i++)
-      voxgig_list_push(voxgig_as_list(cpath), voxgig_new_string(inj->path.data[i]));
-  }
+  /* A recursive reference stops where the data does. */
   voxgig_value* tpath = voxgig_new_list();
-  if (inj->path.len > 1) {
-    for (size_t i = 0; i + 1 < inj->path.len; i++)
-      voxgig_list_push(voxgig_as_list(tpath), voxgig_new_string(inj->path.data[i]));
-  }
-  voxgig_value* tcur = voxgig_getpath(store, cpath, NULL);
+  for (size_t i = 0; i + 1 < inj->path.len; i++)
+    voxgig_list_push(voxgig_as_list(tpath), voxgig_new_string(inj->path.data[i]));
   voxgig_value* tval = voxgig_getpath(store, tpath, NULL);
-  voxgig_value* rval = voxgig_new_undef();
-  if (!hasSubRef || !voxgig_is_undef(tval)) {
-    /* tinj = inj.child(0, [last_of_tpath]) */
-    voxgig_list* tplist = voxgig_as_list(tpath);
-    const char* lastpart =
-        tplist->len > 0 ? voxgig_as_string(voxgig_list_get(tplist, tplist->len - 1)) : "";
-    voxgig_strvec ckeys_one;
-    voxgig_strvec_init(&ckeys_one);
-    voxgig_strvec_push(&ckeys_one, lastpart);
-    voxgig_injection* tinj = voxgig_inj_child(inj, 0, &ckeys_one);
-    voxgig_strvec_free(&ckeys_one);
+  voxgig_value* rval =
+      (!hasSubRef || !voxgig_is_undef(tval)) ? voxgig_clone(refv) : voxgig_new_undef();
 
-    voxgig_strvec_clear(&tinj->path);
-    for (size_t i = 0; i < tplist->len; i++)
-      voxgig_strvec_push(&tinj->path, voxgig_as_string(tplist->items[i]));
-    if (inj->nodes_len > 0) {
-      tinj->nodes_len = inj->nodes_len - 1;
-      if (tinj->nodes_cap < tinj->nodes_len) {
-        tinj->nodes = (voxgig_value**)realloc(tinj->nodes, tinj->nodes_len * sizeof(voxgig_value*));
-        tinj->nodes_cap = tinj->nodes_len;
-      }
-      for (size_t i = 0; i < tinj->nodes_len; i++)
-        tinj->nodes[i] = inj->nodes[i];
-    } else {
-      tinj->nodes_len = 0;
-    }
-    voxgig_release(tinj->parent);
-    tinj->parent =
-        inj->nodes_len >= 2 ? voxgig_retain(inj->nodes[inj->nodes_len - 2]) : voxgig_new_undef();
-    voxgig_release(tinj->val);
-    tinj->val = voxgig_retain(tref);
-
-    voxgig_strvec_clear(&tinj->dpath);
-    voxgig_list* cpl = voxgig_as_list(cpath);
-    for (size_t i = 0; i < cpl->len; i++)
-      voxgig_strvec_push(&tinj->dpath, voxgig_as_string(cpl->items[i]));
-    voxgig_release(tinj->dparent);
-    tinj->dparent = voxgig_retain(tcur);
-
-    voxgig_value* out = voxgig_inject(tref, store, tinj);
-    voxgig_release(out);
-    rval = voxgig_retain(tinj->val);
-    voxgig_inj_free(tinj);
-  }
-
+  /* The enclosing loop injects the referenced spec in this list's place, so
+     neither this pass nor this element leaves a value for modify to check. */
   voxgig_value* grandparent = voxgig_inj_setval(inj, rval, 2);
-  if (voxgig_is_list(grandparent) && inj->prior) {
-    /* TS: `inj.prior.keyI--`. With signed numbers, keyI can go to -1. We use
-       keyI_neg as a flag for "logically -1" (size_t cannot represent it). */
-    if (inj->prior->keyI > 0) {
-      inj->prior->keyI--;
-    } else if (inj->prior->keyI == 0 && !inj->prior->keyI_neg) {
-      inj->prior->keyI_neg = true;
+
+  voxgig_injection* prior = inj->prior;
+  if (prior) {
+    voxgig_release(prior->modify_val);
+    prior->modify_val = NULL;
+    if (voxgig_is_list(grandparent) || !voxgig_is_undef(rval)) {
+      /* keyI is a size_t, so keyI_neg stands for -1. */
+      if (prior->keyI > 0) {
+        prior->keyI--;
+      } else if (prior->keyI == 0 && !prior->keyI_neg) {
+        prior->keyI_neg = true;
+      }
     }
   }
 
   voxgig_release(refpath);
   voxgig_release(dpath_v);
   voxgig_release(refv);
-  voxgig_release(tref);
-  voxgig_release(cpath);
   voxgig_release(tpath);
-  voxgig_release(tcur);
   voxgig_release(tval);
   voxgig_release(rval);
-  return val ? voxgig_retain(val) : voxgig_new_undef();
+  return voxgig_new_skip();
 }
 
 /* FORMATTER table */
