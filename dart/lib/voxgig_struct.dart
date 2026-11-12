@@ -1676,7 +1676,6 @@ dynamic _transformPack(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
 dynamic _transformRef(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
   var inj = inj0 as Inj;
   if (inj.mode != S_MVAL) return null;
-  var nodes = inj.nodes;
   var refpath = _lookup(inj.parent, 1);
   inj.keyi = size(inj.keys);
   var specFunc = getprop(store, S_DSPEC);
@@ -1690,27 +1689,22 @@ dynamic _transformRef(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
       return v;
     });
   }
-  var tref = clone(refv);
-  var cpath = slice(inj.path, 0, size(inj.path) - 3);
-  var tpath = slice(inj.path, 0, size(inj.path) - 1);
-  var tcur = getpath(store, cpath);
-  var tval = getpath(store, tpath);
-  dynamic rval;
-  if (refv != null && (!hasSub || tval != null)) {
-    var cs = _injChild(inj, 0, [getelem(tpath, -1)]);
-    cs.path = tpath;
-    cs.nodes = slice(inj.nodes, 0, size(inj.nodes) - 1);
-    cs.parent = getelem(nodes, -2);
-    cs.ival = tref;
-    cs.dparent = tcur;
-    inject(tref, store, cs);
-    rval = cs.ival;
+
+  // A recursive reference stops where the data does.
+  var tval = getpath(store, slice(inj.path, 0, size(inj.path) - 1));
+  var rval = !hasSub || tval != null ? clone(refv) : null;
+
+  // The enclosing loop injects the referenced spec in this list's place, so
+  // neither this pass nor this element leaves a value for modify to check.
+  var grandparent = _injSetval(inj, rval, 2);
+  var prior = inj.prior;
+  if (prior != null) {
+    prior.modify = null;
+    if (islist(grandparent) || rval != null) {
+      prior.keyi = prior.keyi - 1;
+    }
   }
-  _injSetval(inj, rval, 2);
-  if (islist(inj.parent) && inj.prior != null) {
-    inj.prior!.keyi = inj.prior!.keyi - 1;
-  }
-  return val;
+  return SKIP;
 }
 
 String _jsstr(dynamic v) {
