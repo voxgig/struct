@@ -2476,11 +2476,10 @@ partial def transformPack : InjectorFn := fun inj _v _ref store => do
         let _ ← setprop target tkey (← rvalRef.get)
         pure .noval
 
-partial def transformRef : InjectorFn := fun inj v _ref store => do
+partial def transformRef : InjectorFn := fun inj _v _ref store => do
   let d ← getInj inj
   if d.mode != M_VAL then pure .noval
   else do
-    let nodes := d.nodes
     let refpath ← lookupRaw d.parent (.num 1.0)
     let nkeys ← size d.keys
     modInj inj (fun dd => { dd with keyi := nkeys })
@@ -2494,35 +2493,22 @@ partial def transformRef : InjectorFn := fun inj v _ref store => do
         let _ ← walk refv (before := some (fun _k v2 _p _path => do
           if v2 == .str "`$REF`" then hasSub.set true
           pure v2))
-      let tref ← clone refv
+      -- A recursive reference stops where the data does.
       let d2 ← getInj inj
-      let psize ← size d2.path
-      let cpath ← slice d2.path (start := .num 0.0) (stop := vInt (psize - 3))
-      let tpath ← slice d2.path (start := .num 0.0) (stop := vInt (psize - 1))
-      let tcur ← getpath store cpath
-      let tval ← getpath store tpath
-      let rvalRef ← IO.mkRef Value.noval
+      let tval ← getpath store (← slice d2.path (start := .num (-1.0)))
       let hs ← hasSub.get
-      if !(isNoval refv) && (!hs || !(isNoval tval)) then do
-        let lastp ← getelem tpath (.num (-1.0))
-        let cs ← makeChildInj inj 0 (← newList #[lastp])
-        let nsize ← size d2.nodes
-        let cnodes ← slice d2.nodes (start := .num 0.0) (stop := vInt (nsize - 1))
-        let cparent ← getelem nodes (.num (-2.0))
-        modInj cs (fun dd => { dd with
-          path := tpath, nodes := cnodes, parent := cparent,
-          ival := tref, dparent := tcur })
-        let _ ← inject tref store (.iinj cs)
-        rvalRef.set (← getInj cs).ival
-      injSetval inj (← rvalRef.get) (ancestor := 2)
-      let d3 ← getInj inj
-      (match d3.prior with
-       | some p =>
-         if islist d3.parent then
+      let rval ← if !hs || !(isNoval tval) then clone refv else pure Value.noval
+      -- The enclosing loop injects the referenced spec in this list's place, so
+      -- neither this pass nor this element leaves a value for modify to check.
+      injSetval inj rval (ancestor := 2)
+      let grandparent ← getelem d2.nodes (.num (-2.0))
+      (match d2.prior with
+       | some p => do
+         modInj p (fun dd => { dd with modify := none })
+         if islist grandparent || !(isNoval rval) then
            modInj p (fun dd => { dd with keyi := dd.keyi - 1 })
-         else pure ()
        | none => pure ())
-      pure v
+      pure SKIP
     | _ => pure .noval
 
 -- ---------------------------------------------------------------------------
