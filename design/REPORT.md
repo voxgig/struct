@@ -54,17 +54,17 @@ NFA engine in-tree (c/cpp/lua/rust/zig).
 | **cpp** | 52 | 15 | 2 | 1714/1714 corpus | full TS-canonical parity |
 | **csharp** | 52 | 15 | 2 | 118/118 pass | already Group A |
 | **kotlin** | 52 | 15 | 2 | 118/118 pass | full TS-canonical parity |
-| **zig** | 52 | 15 | 2 | 94/94 pass in CI \*1 \*4 | cycle-break + 7 latent-bug fixes |
+| **zig** | 52 | 15 | 2 | 95/95 pass in CI \*1 \*4 | cycle-break + 7 latent-bug fixes |
 | **perl** | 52 | 15 | 2 | 175/175 pass | full TS-canonical parity |
 | **swift** | 52 | 15 | 2 | 30/30 pass in CI | full TS-canonical parity |
 | **clojure** | 52 | 15 | 2 | 101 groups, 0 failed | full TS-canonical parity |
 | **ocaml** | 52 | 15 | 2 | 100 groups, 0 failed | full TS-canonical parity |
 | **scala** | 52 | 15 | 2 | 99 groups, 0 failed | full TS-canonical parity |
-| **dart** | 52 | 15 | 2 | 100 groups, 0 failed in CI | full TS-canonical parity |
+| **dart** | 52 | 15 | 2 | 101 groups, 0 failed in CI | full TS-canonical parity |
 | **elixir** | 52 | 15 | 2 | 101 groups, 0 failed (9 entries dropped) \*2 | full TS-canonical parity |
 | **haskell** | 52 | 15 | 2 | 100 groups, 0 failed | full TS-canonical parity |
-| **lean** | 52 | 15 | 2 | 99 groups, 0 failed in CI | full TS-canonical parity |
-| **boru** | 52 | 15 | 2 | 98 pass, 0 fail in CI \*3 | full TS-canonical parity |
+| **lean** | 52 | 15 | 2 | 100 groups, 0 failed in CI | full TS-canonical parity |
+| **boru** | 52 | 15 | 2 | 99 pass, 0 fail in CI \*3 | full TS-canonical parity |
 
 \*3 Boru: the only port that CANNOT move onto voxgig/omni, because omni has
 no boru port to move onto — its 22 ports do not include one. Until it does,
