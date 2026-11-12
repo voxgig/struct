@@ -98,9 +98,10 @@ Names are lower-smushed, identical to the canonical export list:
             (s/jm "a" (s/jt "`$NOF`" (s/jm "min" 1) "`$STRING`" "`$NUMBER`"))) ;=> {a 1}
 (s/validate 2 (s/jt "`$ALL`" "`$NUMBER`" "`$INTEGER`"))                      ;=> 2
 
-;; validate: `$LEN` bounds a length, `$RANGE` bounds a number
+;; validate: `$LEN` bounds a length, `$RANGE` bounds a number, `$LIKE` matches a pattern
 (s/validate "abc" (s/jt "`$LEN`" (s/jm "min" 1 "max" 64) "`$STRING`"))       ;=> "abc"
 (s/validate 42 (s/jt "`$RANGE`" (s/jm "min" 0 "lt" 150) "`$INTEGER`"))       ;=> 42
+(s/validate "ABC-12" (s/jt "`$LIKE`" "^[A-Z]{3}-[0-9]+$" "`$STRING`"))       ;=> "ABC-12"
 
 ;; select: MongoDB-style query over children
 (s/select (s/jt (s/jm "a" 1) (s/jm "a" 2))
@@ -117,7 +118,9 @@ rejected before any data is read, so a leftover `$ONE` throws
 code points, a list's its elements, and a map's its keys, and any other value
 fails. `$RANGE` takes a map of `min` or `gt` with `max` or `lt`, and fails on
 anything but a number. `min` and `max` include their bound, while `gt` and
-`lt` exclude it. Each takes at most one spec, which must also admit the value.
+`lt` exclude it. `$LIKE` takes a pattern, matched with `java.util.regex`
+anywhere in the value unless anchored, and fails on anything but a string.
+Each takes at most one spec, which must also admit the value.
 
 ## Testing
 
