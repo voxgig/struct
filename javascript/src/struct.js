@@ -1456,8 +1456,7 @@ const transform_PACK = (inj, _val, _ref, store) => {
 // TODO: not found ref should removed key (setprop NONE)
 // Reference original spec (enables recursice transformations)
 // Format: ['`$REF`', '`spec-path`']
-const transform_REF = (inj, val, _ref, store) => {
-  const { nodes } = inj
+const transform_REF = (inj, _val, _ref, store) => {
   if (M_VAL !== inj.mode) {
     return NONE
   }
@@ -1468,10 +1467,7 @@ const transform_REF = (inj, val, _ref, store) => {
   const spec = getprop(store, S_DSPEC)()
   const dpath = slice(inj.path, 1)
   const ref = getpath(spec, refpath, {
-    // TODO: test relative refs
-    // dpath: inj.path.slice(1),
     dpath,
-    // dparent: getpath(spec, inj.path.slice(1))
     dparent: getpath(spec, dpath),
   })
   let hasSubRef = false
@@ -1483,30 +1479,20 @@ const transform_REF = (inj, val, _ref, store) => {
       return v
     })
   }
-  let tref = clone(ref)
-  const cpath = slice(inj.path, -3)
-  const tpath = slice(inj.path, -1)
-  let tcur = getpath(store, cpath)
-  let tval = getpath(store, tpath)
-  let rval = NONE
-  if (!hasSubRef || NONE !== tval) {
-    const tinj = inj.child(0, [getelem(tpath, -1)])
-    tinj.path = tpath
-    tinj.nodes = slice(inj.nodes, -1)
-    tinj.parent = getelem(nodes, -2)
-    tinj.val = tref
-    tinj.dpath = flatten([cpath])
-    tinj.dparent = tcur
-    inject(tref, store, tinj)
-    rval = tinj.val
-  } else {
-    rval = NONE
-  }
+  // A recursive reference stops where the data does.
+  const tval = getpath(store, slice(inj.path, -1))
+  const rval = !hasSubRef || NONE !== tval ? clone(ref) : NONE
+  // The enclosing loop injects the referenced spec in this list's place, so
+  // neither this pass nor this element leaves a value for modify to check.
   const grandparent = inj.setval(rval, 2)
-  if (islist(grandparent) && inj.prior) {
-    inj.prior.keyI--
+  const prior = inj.prior
+  if (prior) {
+    prior.modify = NONE
+    if (islist(grandparent) || NONE !== rval) {
+      prior.keyI--
+    }
   }
-  return val
+  return SKIP
 }
 const transform_FORMAT = (inj, _val, _ref, store) => {
   // console.log('FORMAT-START', inj, _val)
