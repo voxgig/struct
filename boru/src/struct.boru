@@ -2711,7 +2711,6 @@ def vg-t-pack fn [[inj:Any val:Any iref:Any store:Any] [Any] [
 
 def vg-t-ref fn [[inj:Any val:Any iref:Any store:Any] [Any] [
   if (((inj get "mode") eq 4) not) [none] [
-    def inodes (inj get "nodes")
     def ipath (inj get "path")
     def refpath (vgi-lookup (inj get "parent") 1)
     (inj set "keyi" (vgz (inj get "keys"))) drop
@@ -2733,35 +2732,27 @@ def vg-t-ref fn [[inj:Any val:Any iref:Any store:Any] [Any] [
       none
     ] [none] drop
     def hassubref (subrefbox get 0)
-    def tref (vg-clone refv)
-    def cpath (vg-slice ipath -3 vg-noarg vg-noarg)
-    def tpath (vg-slice ipath -1 vg-noarg vg-noarg)
-    def tcur (vg-getpath store cpath vg-noarg)
-    def tval (vg-getpath store tpath vg-noarg)
-    def rvalbox (flex [none])
-    if ((hassubref not) or ((tval is None) not)) [
-      def lk (flex [])
-      (append [(vg-getelem tpath -1 vg-noarg)] lk) drop
-      def tinj (vgi-inj-child inj 0 lk)
-      (tinj set "path" tpath) drop
-      (tinj set "nodes" (vg-slice inodes -1 vg-noarg vg-noarg)) drop
-      (tinj set "parent" (vg-getelem inodes -2 vg-noarg)) drop
-      (tinj set "val" tref) drop
-      def cp2 (flex [])
-      (append [cpath] cp2) drop
-      (tinj set "dpath" (vg-flatten cp2 1)) drop
-      (tinj set "dparent" tcur) drop
-      (vg-inject tref store tinj) drop
-      (rvalbox set 0 (tinj get "val")) drop
-      none
-    ] [none] drop
-    def grandparent (vgi-inj-setval inj (rvalbox get 0) 2)
+    # A recursive reference stops where the data does.
+    def tval (vg-getpath store (vg-slice ipath -1 vg-noarg vg-noarg) vg-noarg)
+    def rval (
+      if ((hassubref not) or ((tval is None) not)) [
+        def btr28 (vg-clone refv)
+        btr28
+      ] [none]
+    )
+    # The enclosing loop injects the referenced spec in this list's place, so
+    # neither this pass nor this element leaves a value for modify to check.
+    def grandparent (vgi-inj-setval inj rval 2)
     def prior (inj get "prior")
-    if ((vg-islist grandparent) and ((prior is None) not)) [
-      (prior set "keyi" ((prior get "keyi") sub 1)) drop
+    if ((prior is None) not) [
+      (prior set "modify" none) drop
+      if ((vg-islist grandparent) or ((rval is None) not)) [
+        (prior set "keyi" ((prior get "keyi") sub 1)) drop
+        none
+      ] [none] drop
       none
     ] [none] drop
-    val
+    vg-skip-marker
   ]
 ]]
 
