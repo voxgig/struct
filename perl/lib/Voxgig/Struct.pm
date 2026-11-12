@@ -2183,7 +2183,6 @@ sub transform_PACK {
 sub transform_REF {
     my ($inj, $val, $ref, $store) = @_;
     return NONE() if $inj->{mode} != M_VAL;
-    my $nodes = $inj->{nodes};
     my $refpath = _lookup($inj->{parent}, 1);
     $inj->{keyI} = size($inj->{keys});
     my $specfn = getprop($store, S_DSPEC);
@@ -2204,28 +2203,20 @@ sub transform_REF {
             return $v;
         });
     }
-    my $tref = clone($resolved);
-    my $cpath = slice($inj->{path}, -3);
-    my $tpath = slice($inj->{path}, -1);
-    my $tcur = getpath($store, $cpath);
-    my $tval = getpath($store, $tpath);
-    my $rval = NONE();
-    if (!$hasSubRef || !is_none($tval)) {
-        my $tinj = _inj_child($inj, 0, [getelem($tpath, -1)]);
-        $tinj->{path}    = $tpath;
-        $tinj->{nodes}   = slice($inj->{nodes}, -1);
-        $tinj->{parent}  = getelem($nodes, -2);
-        $tinj->{val}     = $tref;
-        $tinj->{dpath}   = flatten([$cpath]);
-        $tinj->{dparent} = $tcur;
-        inject($tref, $store, $tinj);
-        $rval = $tinj->{val};
-    }
+    # A recursive reference stops where the data does.
+    my $tval = getpath($store, slice($inj->{path}, -1));
+    my $rval = (!$hasSubRef || !is_none($tval)) ? clone($resolved) : NONE();
+    # The enclosing loop injects the referenced spec in this list's place, so
+    # neither this pass nor this element leaves a value for modify to check.
     my $grandparent = _inj_setval($inj, $rval, 2);
-    if (islist($grandparent) && $inj->{prior}) {
-        $inj->{prior}{keyI}--;
+    my $prior = $inj->{prior};
+    if ($prior) {
+        $prior->{modify} = undef;
+        if (islist($grandparent) || !is_none($rval)) {
+            $prior->{keyI}--;
+        }
     }
-    return $val;
+    return SKIP();
 }
 
 our %FORMATTER = (
