@@ -2986,50 +2986,24 @@ inline Value REF_FN(Injection& inj, const Value& val, const std::string& ref, co
         });
   }
 
-  std::vector<std::string> cpath_v;
-  if (inj.path.size() >= 3) {
-    cpath_v = std::vector<std::string>(inj.path.begin(), inj.path.begin() + (inj.path.size() - 3));
-  }
-  std::vector<std::string> tpath_v;
-  if (!inj.path.empty()) {
-    tpath_v = std::vector<std::string>(inj.path.begin(), inj.path.end() - 1);
-  }
-  auto cpath_list = std::make_shared<List>();
-  for (auto& p : cpath_v)
-    cpath_list->push_back(Value(p));
+  // A recursive reference stops where the data does.
   auto tpath_list = std::make_shared<List>();
-  for (auto& p : tpath_v)
-    tpath_list->push_back(Value(p));
+  for (size_t i = 0; i + 1 < inj.path.size(); i++)
+    tpath_list->push_back(Value(inj.path[i]));
+  Value tval = getpath_v(store, Value(tpath_list));
+  Value rval = (!hasSubRef || !tval.is_undef()) ? tref : Value::undef();
 
-  Value tval_at = getpath_v(store, Value(tpath_list));
-  Value rval = Value::undef();
-
-  if (!hasSubRef || !tval_at.is_undef()) {
-    std::string lastkey = tpath_v.empty() ? "" : tpath_v.back();
-    auto single_keys = std::make_shared<std::vector<std::string>>();
-    single_keys->push_back(lastkey);
-    auto tinj_owner = inj.child(0, single_keys);
-    Injection* tinj = tinj_owner.get();
-    tinj->path = tpath_v;
-    if (inj.nodes && inj.nodes->size() >= 1) {
-      tinj->nodes = std::make_shared<std::vector<Value>>(inj.nodes->begin(), inj.nodes->end() - 1);
-    }
-    if (inj.nodes && inj.nodes->size() >= 2) {
-      tinj->parent = (*inj.nodes)[inj.nodes->size() - 2];
-    }
-    tinj->val = tref;
-    tinj->dpath = cpath_v;
-    tinj->dparent = getpath_v(store, Value(cpath_list));
-
-    inject(tref, store, tinj);
-    rval = tinj->val;
-  }
-
+  // The enclosing loop injects the referenced spec in this list's place, so
+  // neither this pass nor this element leaves a value for modify to check.
   Value grandparent = inj.setval(rval, 2);
-  if (grandparent.is_list() && inj.prior) {
-    inj.prior->keyI--;
+
+  if (Injection* prior = inj.prior) {
+    prior->modify = nullptr;
+    if (grandparent.is_list() || !rval.is_undef()) {
+      prior->keyI--;
+    }
   }
-  return val;
+  return SKIP();
 }
 
 } // namespace transforms
