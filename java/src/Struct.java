@@ -2402,47 +2402,23 @@ public class Struct {
               });
         }
 
-        Object cpathRaw = slice(inj.path, -3, null);
-        List<String> cpath =
-            cpathRaw instanceof List<?> cl
-                ? new ArrayList<>((List<String>) cl)
-                : new ArrayList<>();
-        Object tpathRaw = slice(inj.path, -1, null);
-        List<String> tpath =
-            tpathRaw instanceof List<?> tpl
-                ? new ArrayList<>((List<String>) tpl)
-                : new ArrayList<>();
-        Object tval = getpath(store, tpath);
-        Object rval = UNDEF;
+        // A recursive reference stops where the data does.
+        Object tval = getpath(store, slice(inj.path, -1, null));
+        Object rval = !hasSubRef[0] || tval != UNDEF ? tref : UNDEF;
 
-        if (!hasSubRef[0] || tval != UNDEF) {
-          Object lastKey = getelem(tpath, -1);
-          List<String> singleKey = new ArrayList<>();
-          singleKey.add(strkey(lastKey));
-          Injection tinj = inj.child(0, singleKey);
-          tinj.path = tpath;
-          Object slicedNodes = slice(inj.nodes, -1, null);
-          tinj.nodes =
-              slicedNodes instanceof List<?> snl
-                  ? new ArrayList<>((List<Object>) snl)
-                  : new ArrayList<>();
-          tinj.parent = getelem(inj.nodes, -2);
-          tinj.val = tref;
-
-          List<String> flatCpath = new ArrayList<>(cpath);
-          tinj.dpath = flatCpath;
-          tinj.dparent = getpath(store, cpath);
-
-          inject(tref, store, tinj);
-          rval = tinj.val;
-        }
-
+        // The enclosing loop injects the referenced spec in this list's place, so
+        // neither this pass nor this element leaves a value for modify to check.
         Object grandparent = inj.setval(rval, 2);
-        if (islist(grandparent) && inj.prior != null) {
-          inj.prior.keyI--;
+
+        Injection prior = inj.prior;
+        if (prior != null) {
+          prior.modify = null;
+          if (islist(grandparent) || rval != UNDEF) {
+            prior.keyI--;
+          }
         }
 
-        return val;
+        return SKIP;
       };
 
   public static Object transform(Object data, Object spec) {
