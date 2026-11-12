@@ -279,6 +279,19 @@ fails. `$RANGE` takes a map of `min` (at least) or `gt` (greater than), with
 takes at most one spec, which must also admit the value. A bounded field is
 required; `['`$NOF`', 1, '`$NIL`', ['`$LEN`', { max: 64 }]]` makes it optional.
 
+### Reuse a spec, or nest one inside itself
+A tree has the same shape at every level, so its spec has to name itself:
+```js
+const spec = { node: { name: '`$STRING`', kids: ['`$CHILD`', ['`$REF`', 'node']] } }
+S.validate({ node: { name: 'a', kids: [{ name: 'b', kids: [] }] } }, spec)
+```
+`['`$REF`', 'node']` checks a value against the spec at `node` as if that spec
+were written in its place, and a path to a sibling reuses its spec the same
+way. The path names a place in the spec, not in the data. A reference that
+reaches itself stops wherever the data does, so the tree ends at its leaves;
+any other reference checks its field like the spec it names, required fields
+included.
+
 ### Require an exact literal (no type coercion)
 ```js
 S.validate(value, ['`$EXACT`', 9]) // value must equal 9

@@ -389,6 +389,9 @@ asks for at least one spec, `1` for exactly one, and `0` for none. There is
 no `$ONE`: write `` ['`$ONE`', a, b] `` as `` ['`$NOF`', {min: 1}, a, b] ``.
 `$LEN` and `$RANGE` take at most one spec, which must also admit the value.
 `min` and `max` include their bound, while `gt` and `lt` exclude it.
+`` ['`$REF`', path] `` works in a validate spec too: it checks a value against
+the spec at `path`, which may contain the reference itself, so a recursive
+shape such as a tree needs no checker of its own.
 
 A spec that names a checker `validate` does not define, such as
 `` `$FOO` `` or the misspelling `` `$string` ``, is rejected before any data

@@ -318,6 +318,32 @@ special: set: [
   { in: { data: {x3:3,y3:3}, spec:{x3:'`$NUMBER`', y3:['`$REF`','x3']} }, out: {x3:3,y3:3} }
   { in: { data: {x4:3,y4:4}, spec:{x4:'`$NUMBER`', y4:['`$REF`','x4']} }, out: {x4:3,y4:4} }
 
+  # A $REF checks as the spec it names, written in place, once per failure.
+  { in: { data: {a5:{n:x},b5:{n:y}}, spec:{a5:{n:'`$STRING`'}, b5:['`$REF`','a5']} },
+    out: {a5:{n:x},b5:{n:y}} }
+  { in: { data: {a6:{n:x},b6:{n:1}}, spec:{a6:{n:'`$STRING`'}, b6:['`$REF`','a6']} },
+    err: '/^[^|]*Expected field b6.n to be string, but found integer: 1\\.[^|]*$/' }
+  { in: { data: {a7:{n:x},b7:{n:y,z:1}}, spec:{a7:{n:'`$STRING`'}, b7:['`$REF`','a7']} },
+    err: '/^[^|]*Unexpected keys at field b7: z[^|]*$/' }
+  { in: { data: {a8:[x],b8:[y]}, spec:{a8:['`$CHILD`','`$STRING`'], b8:['`$REF`','a8']} },
+    out: {a8:[x],b8:[y]} }
+  { in: { data: {a9:[x],b9:[1]}, spec:{a9:['`$CHILD`','`$STRING`'], b9:['`$REF`','a9']} },
+    err: '/^[^|]*Expected field b9.0 to be string, but found integer: 1\\.[^|]*$/' }
+  { in: { data: {a10:{n:x},l10:[{n:y}]}, spec:{a10:{n:'`$STRING`'}, l10:[['`$REF`','a10']]} },
+    out: {a10:{n:x},l10:[{n:y}]} }
+
+  # A spec can name itself; the recursion stops where the data does.
+  { in: { data: {t11:{n:a,p:{n:b,p:{n:c}}}}, spec:{t11:{n:'`$STRING`', p:['`$REF`','t11']}} },
+    out: {t11:{n:a,p:{n:b,p:{n:c}}}} }
+  { in: { data: {t12:{n:a,p:{n:b,p:{n:3}}}}, spec:{t12:{n:'`$STRING`', p:['`$REF`','t12']}} },
+    err: '/^[^|]*Expected field t12.p.p.n to be string, but found integer: 3\\.[^|]*$/' }
+  { in: { data: {t13:{n:a,p:{n:b,z:1}}}, spec:{t13:{n:'`$STRING`', p:['`$REF`','t13']}} },
+    err: '/^[^|]*Unexpected keys at field t13.p: z[^|]*$/' }
+  { in: { data: {t14:{n:a,k:[{n:b,k:[]}]}}, spec:{t14:{n:'`$STRING`', k:['`$CHILD`',['`$REF`','t14']]}} },
+    out: {t14:{n:a,k:[{n:b,k:[]}]}} }
+  { in: { data: {t15:{n:a,k:[{n:1,k:[]}]}}, spec:{t15:{n:'`$STRING`', k:['`$CHILD`',['`$REF`','t15']]}} },
+    err: '/^[^|]*Expected field t15.k.0.n to be string, but found integer: 1\\.[^|]*$/' }
+
 
   { in: { data: {x10:100}, spec:{x10:['`$EXACT`', 100] }, inj:meta:q0:x1:100 }, out: {x10:100}}
   { in: { data: {x11:'s11'}, spec:{x11:['`$EXACT`', 101] }, inj:meta:q0:x1:101 },

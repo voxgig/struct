@@ -1638,9 +1638,7 @@ const transform_PACK: Injector = (inj: Injection, _val: any, _ref: string, store
   return NONE
 }
 
-const transform_REF: Injector = (inj: Injection, val: any, _ref: string, store: any) => {
-  const { nodes } = inj
-
+const transform_REF: Injector = (inj: Injection, _val: any, _ref: string, store: any) => {
   if (M_VAL !== inj.mode) {
     return NONE
   }
@@ -1654,7 +1652,6 @@ const transform_REF: Injector = (inj: Injection, val: any, _ref: string, store: 
   const dpath = slice(inj.path, 1)
   const ref = getpath(spec, refpath, {
     dpath,
-    // dparent: getpath(spec, inj.path.slice(1))
     dparent: getpath(spec, dpath),
   })
 
@@ -1668,39 +1665,23 @@ const transform_REF: Injector = (inj: Injection, val: any, _ref: string, store: 
     })
   }
 
-  const tref = clone(ref)
+  // A recursive reference stops where the data does.
+  const tval = getpath(store, slice(inj.path, -1))
+  const rval = !hasSubRef || NONE !== tval ? clone(ref) : NONE
 
-  const cpath = slice(inj.path, -3)
-  const tpath = slice(inj.path, -1)
-  const tcur = getpath(store, cpath)
-  const tval = getpath(store, tpath)
-  let rval = NONE
-
-  if (!hasSubRef || NONE !== tval) {
-    const tinj = inj.child(0, [getelem(tpath, -1)])
-
-    tinj.path = tpath
-    tinj.nodes = slice(inj.nodes, -1)
-    tinj.parent = getelem(nodes, -2)
-    tinj.val = tref
-
-    tinj.dpath = flatten([cpath])
-    tinj.dparent = tcur
-
-    inject(tref, store, tinj)
-
-    rval = tinj.val
-  } else {
-    rval = NONE
-  }
-
+  // The enclosing loop injects the referenced spec in this list's place, so
+  // neither this pass nor this element leaves a value for modify to check.
   const grandparent = inj.setval(rval, 2)
 
-  if (islist(grandparent) && inj.prior) {
-    inj.prior.keyI--
+  const prior = inj.prior
+  if (prior) {
+    prior.modify = NONE
+    if (islist(grandparent) || NONE !== rval) {
+      prior.keyI--
+    }
   }
 
-  return val
+  return SKIP
 }
 
 const transform_FORMAT: Injector = (inj: Injection, _val: any, _ref: string, store: any) => {
