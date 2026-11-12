@@ -577,7 +577,7 @@ defmodule Runner do
     run_set("validate.special", S.getprop(validates, "special"), arg1(fn vin -> S.validate(vget(vin, "data"), vget(vin, "spec"), vget(vin, "inj")) end))
 
     # null:false, so that a null in these reaches validate as a real nil.
-    Enum.each(["directive", "nof", "all", "len", "range", "unknown"], fn gn ->
+    Enum.each(["directive", "nof", "all", "len", "range", "like", "unknown"], fn gn ->
       run_set("validate.#{gn}", S.getprop(validates, gn), arg1(fn vin -> S.validate(vget(vin, "data"), vget(vin, "spec")) end), false)
     end)
 

@@ -2478,7 +2478,9 @@ defmodule Voxgig.Struct do
   # bound holds min or gt, max or lt, or one of each.
   defp validate_range(inj, _v, _r, store), do: validatebound_(inj, store, "$RANGE")
 
-  # The bounding list directives: a bound, then at most one spec that must also admit.
+  defp validate_like(inj, _v, _r, store), do: validatebound_(inj, store, "$LIKE")
+
+  # The bounding list directives: a bound or pattern, then at most one spec that also admits.
   defp validatebound_(inj, store, name) do
     parent = ig(inj, :parent)
 
@@ -2500,29 +2502,33 @@ defmodule Voxgig.Struct do
         is_(inj, :path, slice(ig(inj, :path), -1))
         field = "The " <> name <> " validator at field " <> pathify(ig(inj, :path), 1)
         nargs = size(parent) - 1
+        islen = name == "$LEN"
+        islike = name == "$LIKE"
+        argname = if islike, do: "pattern", else: "bound"
 
         if nargs < 1 or nargs > 2 do
-          push_err(inj, field <> " must have a bound and at most one spec.")
+          push_err(inj, field <> " must have a " <> argname <> " and at most one spec.")
         else
           bound = lookup_(parent, 1)
-          islen = name == "$LEN"
-          {lo, hi, desc} = if islen, do: lenbound_(bound), else: {0, 0, rangedesc_(bound)}
+          like = if islike, do: likere_(bound), else: nil
+          likedesc = if like == nil, do: nil, else: "like /" <> bound <> "/"
+          {lo, hi, desc} = if islen, do: lenbound_(bound), else: {0, 0, if(islike, do: likedesc, else: rangedesc_(bound))}
           ctype = typify(cval)
-          needs = if islen, do: Bitwise.bor(Bitwise.bor(@t_string, @t_list), @t_map), else: @t_number
+          needs = if islen, do: Bitwise.bor(Bitwise.bor(@t_string, @t_list), @t_map), else: if(islike, do: @t_string, else: @t_number)
 
           cond do
             desc == nil ->
-              push_err(inj, field <> " has an invalid bound: " <> stringify(bound) <> ".")
+              push_err(inj, field <> " has an invalid " <> argname <> ": " <> stringify(bound) <> ".")
 
             nargs == 2 and not admits_(cval, held, lookup_(parent, 2), inj, store) ->
               specdesc = Regex.replace(@r_transform_name, stringify(lookup_(parent, 2)), fn _w, g1 -> String.downcase(g1) end)
               push_err(inj, invalid_type_msg(ig(inj, :path), specdesc, ctype, cval, "V0410"))
 
             Bitwise.band(needs, ctype) == 0 ->
-              needtype = if islen, do: "string, list or map", else: "number"
+              needtype = if islen, do: "string, list or map", else: if(islike, do: "string", else: "number")
               push_err(inj, invalid_type_msg(ig(inj, :path), needtype, ctype, cval, "V0420"))
 
-            not (if islen, do: inlen_(cval, lo, hi), else: inrange_(bound, cval)) ->
+            not (if islen, do: inlen_(cval, lo, hi), else: if(islike, do: re_test(like, cval), else: inrange_(bound, cval))) ->
               needtype = (if size(ig(inj, :path)) > 1, do: "", else: "value ") <> desc
               push_err(inj, invalid_type_msg(ig(inj, :path), needtype, ctype, cval, "V0430"))
 
@@ -2559,6 +2565,17 @@ defmodule Voxgig.Struct do
   defp inlen_(val, lo, hi) do
     len = if is_binary(val), do: length(String.codepoints(val)), else: size(val)
     lo <= len and (hi == -1 or len <= hi)
+  end
+
+  # A $LIKE pattern compiled by the port's own regex engine; absent unless it compiles.
+  defp likere_(pattern) do
+    if is_binary(pattern) do
+      try do
+        re_compile(pattern)
+      rescue
+        Regex.CompileError -> nil
+      end
+    end
   end
 
   # The words for a $RANGE bound, which are absent when the bound is invalid.
@@ -2703,6 +2720,7 @@ defmodule Voxgig.Struct do
     setprop(base, "$ALL", &validate_all/4)
     setprop(base, "$LEN", &validate_len/4)
     setprop(base, "$RANGE", &validate_range/4)
+    setprop(base, "$LIKE", &validate_like/4)
     store = merge(vlist_new([base, if(extra == nil, do: empty_map(), else: extra), vmap_new([{@s_derrs, errs}])]), 1)
     meta = getprop(injdef, "meta", empty_map())
     setprop(meta, @s_bexact, getprop(meta, @s_bexact, false))
@@ -2955,32 +2973,40 @@ defmodule Voxgig.Struct do
     end
   end
 
-  defp select_cmp(inj, _v, ref, store) do
-    if ig(inj, :mode) == @m_keypre do
-      term = getprop(ig(inj, :parent), ig(inj, :key))
-      gkey = getelem(ig(inj, :path), -2)
-      ppath = slice(ig(inj, :path), -1)
-      point = getpath(store, ppath)
+  defp select_cmp(inj, v, ref, store) do
+    cond do
+      # The list form of $LIKE is validate's checker; the key form is this operator.
+      ig(inj, :mode) == @m_val and ref == "$LIKE" ->
+        validate_like(inj, v, ref, store)
 
-      pass =
-        cond do
-          ref == "$GT" -> num_cmp(point, term, :gt)
-          ref == "$LT" -> num_cmp(point, term, :lt)
-          ref == "$GTE" -> num_cmp(point, term, :gte)
-          ref == "$LTE" -> num_cmp(point, term, :lte)
-          ref == "$LIKE" -> is_binary(term) and Regex.match?(Regex.compile!(term), stringify(point))
-          true -> false
+      ig(inj, :mode) == @m_keypre ->
+        term = getprop(ig(inj, :parent), ig(inj, :key))
+        gkey = getelem(ig(inj, :path), -2)
+        ppath = slice(ig(inj, :path), -1)
+        point = getpath(store, ppath)
+
+        pass =
+          cond do
+            ref == "$GT" -> num_cmp(point, term, :gt)
+            ref == "$LT" -> num_cmp(point, term, :lt)
+            ref == "$GTE" -> num_cmp(point, term, :gte)
+            ref == "$LTE" -> num_cmp(point, term, :lte)
+            ref == "$LIKE" -> is_binary(term) and Regex.match?(Regex.compile!(term), stringify(point))
+            true -> false
+          end
+
+        if pass do
+          gp = getelem(ig(inj, :nodes), -2)
+          setprop(gp, gkey, point)
+        else
+          push_err(inj, "CMP: " <> pathify(ppath) <> "⨯" <> stringify(point) <> " fail:" <> js_string(ref) <> " " <> stringify(term))
         end
 
-      if pass do
-        gp = getelem(ig(inj, :nodes), -2)
-        setprop(gp, gkey, point)
-      else
-        push_err(inj, "CMP: " <> pathify(ppath) <> "⨯" <> stringify(point) <> " fail:" <> js_string(ref) <> " " <> stringify(term))
-      end
-    end
+        nil
 
-    nil
+      true ->
+        nil
+    end
   end
 
   def select(children0, query) do
