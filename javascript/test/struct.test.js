@@ -913,6 +913,12 @@ describe('struct', async () => {
     )
   })
 
+  test('validate-like', async () => {
+    await runsetflags(spec.validate.like, { null: false }, (vin) =>
+      struct.validate(vin.data, vin.spec),
+    )
+  })
+
   test('validate-unknown', async () => {
     await runsetflags(spec.validate.unknown, { null: false }, (vin) =>
       struct.validate(vin.data, vin.spec),

@@ -615,7 +615,7 @@ Used as backtick-quoted strings inside a `validate` spec.
 ```
 $MAP   $LIST   $STRING   $NUMBER   $INTEGER   $DECIMAL  $BOOLEAN
 $NULL  $NIL    $FUNCTION $INSTANCE $ANY       $CHILD    $EXACT
-$NOF   $ALL    $LEN      $RANGE
+$NOF   $ALL    $LEN      $RANGE    $LIKE
 ```
 
 `` ['`$NOF`', n, spec, …] `` holds when as many specs admit the value as `n`
@@ -626,9 +626,12 @@ allows, where `n` is an integer or an object with `min`, `max` or both;
 bound written as for `$NOF`: a string counts code points (not the UTF-16
 units `.length` counts), an array its elements, and an object its keys.
 `` ['`$RANGE`', bound, spec?] `` holds when the value is a number within
-`bound`, an object of `min` or `gt` and `max` or `lt`. Each takes at most
-one spec, which must also admit the value. `min` and `max` include their
-bound, while `gt` and `lt` exclude it.
+`bound`, an object of `min` or `gt` and `max` or `lt`.
+`` ['`$LIKE`', pattern, spec?] `` holds when the value is a string the
+pattern finds, with JavaScript's `RegExp`, anywhere in it unless the
+pattern is anchored. `$LEN`, `$RANGE` and `$LIKE` take at most one spec,
+which must also admit the value. `min` and `max` include their bound, while
+`gt` and `lt` exclude it.
 A spec that names any other checker, such as the misspelling
 `` '`$string`' ``, is rejected before any data is read. See the
 [top-level README](../README.md) for what each checker accepts.
@@ -675,7 +678,7 @@ this is the ECMAScript `RegExp` built-in.
 
 | Function | Maps to |
 |---|---|
-| `re_compile(pattern, flags?)`     | `new RegExp(pattern, flags ?? 'g')` |
+| `re_compile(pattern, flags?)`     | `new RegExp(pattern, flags)` |
 | `re_test(pattern, input)`         | `pattern.test(input)` |
 | `re_find(pattern, input)`         | `input.match(pattern)` (non-global pattern) |
 | `re_find_all(pattern, input)`     | `[...input.matchAll(pattern)]` |
