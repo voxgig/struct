@@ -79,7 +79,7 @@ struct voxgig_regex {
   int code_len;
   int code_cap;
   int ngroups; /* including group 0 */
-  /* Pre-computed: does the pattern start with ^? If so we don't try
+  /* Pre-computed: does every path start with ^? If so we don't try
      each input offset as a potential start. */
   bool anchored_start;
 };
@@ -416,17 +416,18 @@ static int code_clone(voxgig_regex* re, int from, int to) {
   code_reserve(re, to - from);
   for (int i = from; i < to; i++) {
     re->code[re->code_len] = re->code[i];
-    /* Patch JMP / SPLIT targets that pointed inside the cloned range. */
+    /* Patch JMP / SPLIT targets inside the cloned range; a target at `to`
+     * leaves the atom, so the copy's leaves the copy. */
     if (re->code[re->code_len].op == OP_JMP) {
       int t = re->code[re->code_len].data.jmp;
-      if (t >= from && t < to)
+      if (t >= from && t <= to)
         re->code[re->code_len].data.jmp = t + delta;
     } else if (re->code[re->code_len].op == OP_SPLIT) {
       int x = re->code[re->code_len].data.split.x;
       int y = re->code[re->code_len].data.split.y;
-      if (x >= from && x < to)
+      if (x >= from && x <= to)
         re->code[re->code_len].data.split.x = x + delta;
-      if (y >= from && y < to)
+      if (y >= from && y <= to)
         re->code[re->code_len].data.split.y = y + delta;
     }
     re->code_len++;
@@ -487,6 +488,20 @@ static void apply_quant(parser* p, int start, char q, int n_lo, int n_hi, bool l
       re->code[spix].data.split.y = lazy ? start : re->code_len;
     }
   } else { /* {n,m} unrolling */
+    /* With no copy required, the atom already written is the first optional
+     * one: {0} drops it and {0,} is a star. */
+    if (n_lo == 0) {
+      if (n_hi == 0) {
+        re->code_len = start;
+        return;
+      }
+      apply_quant(p, start, n_hi == -1 ? '*' : '?', 0, 0, lazy);
+      if (n_hi == -1)
+        return;
+      start++;
+      end++;
+      n_lo = 1;
+    }
     /* Emit n_lo mandatory copies (we have already one — the original atom). */
     /* Use code_clone to duplicate. The original is in [start..end). */
     for (int i = 1; i < n_lo; i++) {
@@ -652,10 +667,6 @@ voxgig_regex* voxgig_regex_compile(const char* pattern, char** err) {
   /* Wrap the whole pattern in an implicit group 0. */
   int s = code_emit(re, OP_SAVE);
   re->code[s].data.slot = 0;
-  /* Detect leading ^ to set anchored_start (allows the matcher to skip
-     scanning starts; ^ is also emitted normally). */
-  if (p.slen > 0 && p.src[0] == '^')
-    re->anchored_start = true;
   parse_alt(&p);
   if (p.err) {
     if (err)
@@ -674,6 +685,12 @@ voxgig_regex* voxgig_regex_compile(const char* pattern, char** err) {
     voxgig_regex_free(re);
     return NULL;
   }
+  /* Only a ^ that every path passes first lets the matcher skip later
+   * starts: ^a|b must still be tried at each one. */
+  int first = 0;
+  while (first < re->code_len && re->code[first].op == OP_SAVE)
+    first++;
+  re->anchored_start = first < re->code_len && re->code[first].op == OP_BOL;
   int e = code_emit(re, OP_SAVE);
   re->code[e].data.slot = 1;
   code_emit(re, OP_MATCH);
