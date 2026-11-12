@@ -102,6 +102,10 @@ demo = do
   rb <- jm [VStr "min", VNum 0, VStr "lt", VNum 150]
   rng <- jt [VStr "`$RANGE`", rb, VStr "`$INTEGER`"]
   putStrLn =<< stringify =<< validate INone (VNum 42) rng   -- 42
+
+  -- validate: `$LIKE` finds a pattern in a string
+  like <- jt [VStr "`$LIKE`", VStr "^[A-Z]{3}-[0-9]+$", VStr "`$STRING`"]
+  putStrLn =<< stringify =<< validate INone (VStr "ABC-12") like   -- ABC-12
 ```
 
 The count is a `VNum` or a map of `min` and `max`. `` VStr "`$ALL`" `` leads
@@ -116,8 +120,14 @@ when the value's length is within it: a `VStr` counts code points (the `Char`s
 of its `String`), a `VList` its elements, and a `VMap` its keys, and any other
 value fails. `` VStr "`$RANGE`" `` takes a map of `min` or `gt` with `max` or
 `lt`, and fails on anything but a `VNum`. `min` and `max` include their bound,
-while `gt` and `lt` exclude it. Each takes at most one spec, which must also
-admit the value.
+while `gt` and `lt` exclude it. `` VStr "`$LIKE`" `` takes a pattern, and holds
+when the in-tree engine in `src/Vregex.hs` finds it in a `VStr`, anywhere
+unless the pattern is anchored; any other value fails. Each takes at most one
+spec, which must also admit the value.
+
+That engine reads every string as a pattern, a malformed one included: an
+unclosed `(` or `[` runs to the end of the pattern, and a stray `)` ends it.
+So a `$LIKE` pattern is invalid only when it is not a `VStr`.
 
 ## Testing
 

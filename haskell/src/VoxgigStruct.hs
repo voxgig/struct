@@ -2176,7 +2176,10 @@ validateLen inj _ _ store = validateBound inj store "$LEN"
 validateRange :: Injector
 validateRange inj _ _ store = validateBound inj store "$RANGE"
 
--- | The bounding list directives: a bound, then at most one spec that must also admit.
+validateLike :: Injector
+validateLike inj _ _ store = validateBound inj store "$LIKE"
+
+-- | The bounding list directives: a bound or pattern, then at most one spec that also admits.
 validateBound :: Inj -> Value -> String -> IO Value
 validateBound inj store name = do
   mode <- readIORef (iMode inj)
@@ -2196,13 +2199,19 @@ validateBound inj store name = do
     psz <- size parent
     let field = "The " ++ name ++ " validator at field " ++ p
         nargs = psz - 1
-    if nargs < 1 || 2 < nargs then pushErr inj (field ++ " must have a bound and at most one spec.")
+        islen = name == "$LEN"
+        islike = name == "$LIKE"
+        argname = if islike then "pattern" else "bound"
+    if nargs < 1 || 2 < nargs then pushErr inj (field ++ " must have a " ++ argname ++ " and at most one spec.")
     else do
       bound <- lookup_ parent (VNum 1)
-      let islen = name == "$LEN"
-      (lo, hi, bdesc) <- if islen then lenBound bound else do { d <- rangeDesc bound; return (0, 0, d) }
+      let like = if islike then likeRe bound else Nothing
+          likedesc = case (bound, like) of { (VStr pat, Just _) -> Just ("like /" ++ pat ++ "/"); _ -> Nothing }
+      (lo, hi, bdesc) <- if islen then lenBound bound
+        else if islike then return (0, 0, likedesc)
+        else do { d <- rangeDesc bound; return (0, 0, d) }
       case bdesc of
-        Nothing -> do bs <- stringify bound; pushErr inj (field ++ " has an invalid bound: " ++ bs ++ ".")
+        Nothing -> do bs <- stringify bound; pushErr inj (field ++ " has an invalid " ++ argname ++ ": " ++ bs ++ ".")
         Just desc -> do
           let ctype = typify cval
           spec <- lookup_ parent (VNum 2)
@@ -2212,13 +2221,14 @@ validateBound inj store name = do
             sd <- stringify spec
             m <- invalidTypeMsg path2 (replaceTransformNames sd) ctype cval "V0410"
             pushErr inj m
-          else if (if islen then t_string .|. t_list .|. t_map else t_number) .&. ctype == 0 then do
-            m <- invalidTypeMsg path2 (if islen then "string, list or map" else "number") ctype cval "V0420"
+          else if (if islen then t_string .|. t_list .|. t_map else if islike then t_string else t_number) .&. ctype == 0 then do
+            m <- invalidTypeMsg path2 (if islen then "string, list or map" else if islike then s_string else "number") ctype cval "V0420"
             pushErr inj m
           else do
             -- size counts a String's Chars, which are code points.
             inbound <- if islen
               then do len <- fromIntegral <$> size cval; return (lo <= len && (hi == -1 || len <= hi))
+              else if islike then return (case (like, cval) of { (Just re, VStr s) -> Vregex.test re s; _ -> False })
               else inRange bound cval
             when (not inbound) $ do
               psz2 <- size path2
@@ -2239,6 +2249,13 @@ lenBound bound = do
   return $ case countdesc of
     Nothing -> (0, 0, Nothing)
     Just _ -> (lo, hi, Just ("of length " ++ desc))
+
+-- | A @$LIKE@ pattern compiled by the port's own regex engine; absent unless
+-- it is a string, since that engine reads every string without failing.
+likeRe :: Value -> Maybe Vregex.Re
+likeRe pattern = case pattern of
+  VStr pat -> Just (Vregex.compile pat)
+  _ -> Nothing
 
 -- | The words for a @$RANGE@ bound, which are absent when the bound is invalid.
 rangeDesc :: Value -> IO (Maybe String)
@@ -2473,6 +2490,7 @@ validate injarg dat spec = do
   put "$ALL" (VFunc validateAll)
   put "$LEN" (VFunc validateLen)
   put "$RANGE" (VFunc validateRange)
+  put "$LIKE" (VFunc validateLike)
   extraMap <- if isNoval extra then emptyMap else return extra
   errMap <- mkMap [(s_derrs, errs)]
   ls <- mkList [base, extraMap, errMap]; store <- mergeD ls (VNum 1)
@@ -2573,24 +2591,27 @@ numCmp a b op = case (a, b) of (VNum x, VNum y) -> op x y; _ -> False
 
 -- | The @$LT@\/@$GT@\/@$LTE@\/@$GTE@\/@$EQ@ comparison query operators.
 selectCmp :: Injector
-selectCmp inj _ refstr store = do
+selectCmp inj v refstr store = do
   mode <- readIORef (iMode inj)
-  when (mode == m_keypre) $ do
-    parent <- readIORef (iParent inj); key <- readIORef (iKey inj)
-    term <- getprop parent key
-    path <- readIORef (iPath inj); gkey <- getelem path (VNum (-2))
-    ppath <- sliceM path (VNum (-1)) VNoval False
-    point <- getpath INone store ppath
-    pass <- case refstr of
-      "$GT" -> return (numCmp point term (>))
-      "$LT" -> return (numCmp point term (<))
-      "$GTE" -> return (numCmp point term (>=))
-      "$LTE" -> return (numCmp point term (<=))
-      "$LIKE" -> case term of { VStr t -> do { sp <- stringify point; return (Vregex.testStr t sp) }; _ -> return False }
-      _ -> return False
-    if pass then do nodes <- readIORef (iNodes inj); gp <- getelem nodes (VNum (-2)); _ <- setprop gp gkey point; return ()
-    else do pp <- pathify ppath; sp <- stringify point; st <- stringify term; pushErr inj ("CMP: " ++ pp ++ cross ++ sp ++ " fail:" ++ refstr ++ " " ++ st)
-  return VNoval
+  -- The list form of $LIKE is validate's checker; the key form is this operator.
+  if mode == m_val && refstr == "$LIKE" then validateLike inj v refstr store
+  else do
+    when (mode == m_keypre) $ do
+      parent <- readIORef (iParent inj); key <- readIORef (iKey inj)
+      term <- getprop parent key
+      path <- readIORef (iPath inj); gkey <- getelem path (VNum (-2))
+      ppath <- sliceM path (VNum (-1)) VNoval False
+      point <- getpath INone store ppath
+      pass <- case refstr of
+        "$GT" -> return (numCmp point term (>))
+        "$LT" -> return (numCmp point term (<))
+        "$GTE" -> return (numCmp point term (>=))
+        "$LTE" -> return (numCmp point term (<=))
+        "$LIKE" -> case term of { VStr t -> do { sp <- stringify point; return (Vregex.testStr t sp) }; _ -> return False }
+        _ -> return False
+      if pass then do nodes <- readIORef (iNodes inj); gp <- getelem nodes (VNum (-2)); _ <- setprop gp gkey point; return ()
+      else do pp <- pathify ppath; sp <- stringify point; st <- stringify term; pushErr inj ("CMP: " ++ pp ++ cross ++ sp ++ " fail:" ++ refstr ++ " " ++ st)
+    return VNoval
 
 -- | Query a data structure with a by-example selection expression.
 select :: Value -> Value -> IO Value
