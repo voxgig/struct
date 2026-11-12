@@ -202,7 +202,7 @@ char* s = voxgig_stringify(m, -1);              /* "{a:1,b:[2,3]}" */
 <!-- => "{a:1,b:[2,3]}" -->
 
 For more task recipes (merge configs, `$EACH`, `$MERGE`, `$FORMAT`, `$NOF`,
-`$LEN`, `$RANGE`, `$EXACT`, …) see the language-neutral
+`$LEN`, `$RANGE`, `$LIKE`, `$EXACT`, …) see the language-neutral
 [How-to guides](../DOCS.md#2-how-to-guides) — the spec syntax is identical;
 only the host literals differ.
 

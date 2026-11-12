@@ -6,7 +6,7 @@
 > bit-flags, 3 mode constants (`VOXGIG_M_KEYPRE` / `VOXGIG_M_KEYPOST` / `VOXGIG_M_VAL`),
 > `SKIP` / `DELETE` sentinels (pointer-identity), and the `voxgig_injection`
 > state machine. `inject` / `transform` / `validate` / `select` all dispatch
-> through the canonical injector machinery: 13 transform commands, 18
+> through the canonical injector machinery: 13 transform commands, 19
 > validate checkers, 8 select operators.
 >
 > Passes the shared corpus (1682/1682), run on
@@ -536,13 +536,15 @@ admits a value when validating the value against it finds no error and gives
 back every member of the value unchanged. There is no `$ONE`: write
 `` ["`$ONE`", a, b] `` as `` ["`$NOF`", {"min": 1}, a, b] ``.
 
-Two more list checkers set bounds on a value. `` ["`$LEN`", n, spec?] ``
+Three more list checkers constrain a value. `` ["`$LEN`", n, spec?] ``
 holds when the value's length is within `n`, a bound written as for `$NOF`.
 Strings count code points, not the bytes `voxgig_size` counts; lists count
 elements and maps keys. `` ["`$RANGE`", bound, spec?] `` holds when the value
-is a number within the bound, a map of `min` or `gt` and `max` or `lt`. Each
-takes at most one spec, which must also admit the value. `min` and `max`
-include their bound, while `gt` and `lt` exclude it.
+is a number within the bound, a map of `min` or `gt` and `max` or `lt`.
+`` ["`$LIKE`", pattern, spec?] `` holds when the value is a string the pattern
+finds, with the in-tree engine in `src/regex.c`, anywhere in it unless the
+pattern is anchored. Each takes at most one spec, which must also admit the
+value. `min` and `max` include their bound, while `gt` and `lt` exclude it.
 
 A spec that names a checker `voxgig_validate` does not define is rejected
 before any data is read, and nothing is validated. The whole-string reference

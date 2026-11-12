@@ -1716,7 +1716,13 @@ static bool _inrange(voxgig_value* bound, voxgig_value* val) {
          (!gt || voxgig_as_double(gt) < v) && (!lt || v < voxgig_as_double(lt));
 }
 
-/* The bounding list directives: a bound, then at most one spec that must also admit. */
+/* A $LIKE pattern compiled by the in-tree engine in regex.c. NULL unless it
+   compiles. The caller frees the result with voxgig_regex_free. */
+static voxgig_regex* _likere(voxgig_value* pattern) {
+  return voxgig_is_string(pattern) ? voxgig_re_compile(voxgig_as_string(pattern)) : NULL;
+}
+
+/* The bounding list directives: a bound or pattern, then at most one spec that also admits. */
 static voxgig_value* _validatebound(voxgig_injection* inj, voxgig_value* store, const char* name) {
   if (inj->mode != VOXGIG_M_VAL)
     return voxgig_new_undef();
@@ -1738,42 +1744,56 @@ static voxgig_value* _validatebound(voxgig_injection* inj, voxgig_value* store, 
   voxgig_list* pl = voxgig_as_list(inj->parent);
   size_t nargs = 0 < pl->len ? pl->len - 1 : 0;
   char* field = _fieldpath(inj, 0);
+  bool islen = 0 == strcmp("$LEN", name);
+  bool islike = 0 == strcmp("$LIKE", name);
+  const char* argname = islike ? "pattern" : "bound";
 
   if (nargs < 1 || 2 < nargs) {
-    _pushmsg(inj, _concat(5, (const char*[]){"The ", name, " validator at field ", field,
-                                             " must have a bound and at most one spec."}));
+    _pushmsg(inj, _concat(7, (const char*[]){"The ", name, " validator at field ", field,
+                                             " must have a ", argname, " and at most one spec."}));
     free(field);
     voxgig_release(cval);
     return voxgig_new_skip();
   }
 
   voxgig_value* bound = pl->items[1];
-  bool islen = 0 == strcmp("$LEN", name);
+  voxgig_regex* like = islike ? _likere(bound) : NULL;
   int64_t lo = 0;
   int64_t hi = 0;
-  char* desc = islen ? _lenbound(bound, &lo, &hi) : _rangedesc(bound);
+  char* desc = NULL;
+  if (islen)
+    desc = _lenbound(bound, &lo, &hi);
+  else if (islike)
+    desc = like ? _concat(3, (const char*[]){"like /", voxgig_as_string(bound), "/"}) : NULL;
+  else
+    desc = _rangedesc(bound);
 
   if (!desc) {
     char* boundstr = voxgig_stringify(bound, -1);
-    _pushmsg(inj, _concat(7, (const char*[]){"The ", name, " validator at field ", field,
-                                             " has an invalid bound: ", boundstr, "."}));
+    _pushmsg(inj, _concat(9, (const char*[]){"The ", name, " validator at field ", field,
+                                             " has an invalid ", argname, ": ", boundstr, "."}));
     free(boundstr);
     free(field);
+    voxgig_regex_free(like);
     voxgig_release(cval);
     return voxgig_new_skip();
   }
   free(field);
 
   int ctype = voxgig_typify(cval);
-  int needbits = islen ? VOXGIG_T_STRING | VOXGIG_T_LIST | VOXGIG_T_MAP : VOXGIG_T_NUMBER;
+  int needbits = islen    ? VOXGIG_T_STRING | VOXGIG_T_LIST | VOXGIG_T_MAP
+                 : islike ? VOXGIG_T_STRING
+                          : VOXGIG_T_NUMBER;
   char* needtype = NULL;
 
   /* One error at most: the spec's, then the type's, then the bound's. */
   if (2 == nargs && !_admits(cval, pl->items[2], inj, store))
     needtype = _lower_transform_names(pl->items[2]);
   else if (0 == (needbits & ctype))
-    needtype = xstrdup_t(islen ? "string, list or map" : "number");
-  else if (!(islen ? _inlength(cval, lo, hi) : _inrange(bound, cval)))
+    needtype = xstrdup_t(islen ? "string, list or map" : islike ? "string" : "number");
+  else if (!(islen    ? _inlength(cval, lo, hi)
+             : islike ? voxgig_re_test_re(like, voxgig_as_string(cval))
+                      : _inrange(bound, cval)))
     needtype = _concat(2, (const char*[]){inj->path.len <= 1 ? "value " : "", desc});
 
   if (needtype) {
@@ -1783,6 +1803,7 @@ static voxgig_value* _validatebound(voxgig_injection* inj, voxgig_value* store, 
   }
 
   free(desc);
+  voxgig_regex_free(like);
   voxgig_release(cval);
   return voxgig_new_skip();
 }
@@ -1805,6 +1826,14 @@ static voxgig_value* va_RANGE(voxgig_injection* inj, voxgig_value* val, const ch
   (void)ref;
   (void)ud;
   return _validatebound(inj, store, "$RANGE");
+}
+
+static voxgig_value* va_LIKE(voxgig_injection* inj, voxgig_value* val, const char* ref,
+                             voxgig_value* store, void* ud) {
+  (void)val;
+  (void)ref;
+  (void)ud;
+  return _validatebound(inj, store, "$LIKE");
 }
 
 /* ===========================================================================
@@ -2291,6 +2320,7 @@ voxgig_value* voxgig_validate(voxgig_value* data, voxgig_value* spec, voxgig_inj
   voxgig_map_set(voxgig_as_map(m1), "$ALL", voxgig_new_injector(va_ALL, NULL));
   voxgig_map_set(voxgig_as_map(m1), "$LEN", voxgig_new_injector(va_LEN, NULL));
   voxgig_map_set(voxgig_as_map(m1), "$RANGE", voxgig_new_injector(va_RANGE, NULL));
+  voxgig_map_set(voxgig_as_map(m1), "$LIKE", voxgig_new_injector(va_LIKE, NULL));
 
   voxgig_value* ext = extra_in ? voxgig_retain(extra_in) : voxgig_new_map();
   voxgig_value* errwrap = voxgig_new_map();
@@ -2529,8 +2559,10 @@ static int cmp_values(voxgig_value* a, voxgig_value* b) {
 
 static voxgig_value* sel_CMP(voxgig_injection* inj, voxgig_value* val, const char* ref,
                              voxgig_value* store, void* ud) {
-  (void)val;
-  (void)ud;
+  /* The list form of $LIKE is validate's checker; the key form is this operator. */
+  if (inj->mode == VOXGIG_M_VAL && ref && 0 == strcmp(ref, "$LIKE"))
+    return va_LIKE(inj, val, ref, store, ud);
+
   if (inj->mode != VOXGIG_M_KEYPRE)
     return voxgig_new_undef();
   voxgig_value* keyv = voxgig_new_string(inj->key);
