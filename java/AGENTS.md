@@ -16,7 +16,7 @@ only what is specific to the Java port.
 functions, the `Injection` state machine, `SKIP`/`DELETE`, mode constants +
 `MODENAME`, all 11 transform commands, the validate checkers, and the 4
 select operators — `python3 ../tools/check_parity.py` reports it `ok`, and
-the shared corpus passes in full - **1714 entries over 81 groups**, plus
+the shared corpus passes in full - **1730 entries over 81 groups**, plus
 `transform.basic` and the two `primary.check` client entries, on the shared
 runner [voxgig/omni](https://github.com/voxgig/omni).
 

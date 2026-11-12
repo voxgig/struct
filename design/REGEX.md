@@ -41,13 +41,15 @@ The library uses regular expressions in two places:
    and `tools/check_corpus_regex.py` checks every `$LIKE` pattern in it, in
    either form. Outside the subset, with a class such as `\w`, `\s` or `.`
    over text that is not ASCII, or with `^` and `$` around a line break,
-   ports may match differently: Ruby, C and Lua anchor `^` and `$` at every
-   line, and Python and Perl let `$` match before a final newline. PHP reads
-   a pattern that starts with `/` as already delimited, flags and all. The
-   engines also differ on which malformed patterns they refuse: Ruby and
-   C++ take `a**`, and the in-tree engines take most such patterns, as
-   [`NOTES.md`](NOTES.md) records. That is accepted, not pinned: a pattern
-   is native to the port that runs it.
+   ports may match differently: Ruby anchors `^` and `$` at every line, and
+   so do the C, Lua, Rust and Zig engines, though they try a pattern that
+   must start with `^` only at the start of the text; Python and Perl let
+   `$` match before a final newline. PHP reads a pattern that starts with
+   `/` as already delimited, flags and all. The engines also differ on
+   which malformed patterns they refuse: Ruby and C++ take `a**`, and the
+   in-tree engines take most such patterns, as [`NOTES.md`](NOTES.md)
+   records. That is accepted, not pinned: a pattern is native to the port
+   that runs it.
 
 **Conclusion:** the corpus is inside the RE2 subset, and every port now
 locks that in — the in-tree engines (rs, zig, c, lua) only implement the

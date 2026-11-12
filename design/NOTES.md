@@ -11,15 +11,6 @@
 
 ## Open follow-ups
 
-- **Two in-tree regex engines miss the RE2 subset they promise.** `$LIKE`
-  lets user patterns reach both, and no corpus entry covers either yet:
-  - `{0,n}` and `{0}` keep one copy of the atom required in C, Lua, Rust
-    and Zig, so `^a{0,2}$` matches `aaa` but not `""`, and `^ba{0,1}c$`
-    misses `bc`. OCaml's engine and the stdlib engines read them as RE2
-    does.
-  - In C and Lua a pattern that starts with `^` is tried only at the start
-    of the text, so `^a|b` misses `xb`, where `b|^a` finds it.
-
 - **`getpath` trailing-dot ascending path is undocumented in the
   canonical TypeScript.** A path ending in one or more `.` (e.g.
   `.foo..`) ascends to an ancestor data parent; the implementation is

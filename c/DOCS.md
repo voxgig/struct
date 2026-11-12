@@ -342,7 +342,7 @@ or beside this repository. It is compiled into the test binaries only —
 `omni_json` and this port's `voxgig_value`.
 
 [`tests/struct_corpus_test.c`](./tests/struct_corpus_test.c) runs every group
-the corpus defines: **1714 entries in 81 groups**, plus three single entries that are not sets.
+the corpus defines: **1730 entries in 81 groups**, plus three single entries that are not sets.
 [`tests/client_test.c`](./tests/client_test.c) runs the two `check` entries —
 `DEF.client`, client-scoped options, and `contextify`.
 

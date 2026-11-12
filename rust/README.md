@@ -1,7 +1,7 @@
 # Struct for Rust
 
 > Rust port of the canonical TypeScript implementation.
-> Status: **complete** — the full shared corpus passes (`make test` → 1720
+> Status: **complete** — the full shared corpus passes (`make test` → 1736
 > checks; `cargo clippy` clean): minor utilities, `walk`, `merge`, `getpath`,
 > `setpath`, `inject`, `transform` (all 10 commands), `validate` (all 19
 > checkers), `select` (all operators), and the `primary.check` SDK test.
