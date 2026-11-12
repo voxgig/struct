@@ -710,6 +710,9 @@ const { equal, deepEqual, throws } = node_assert_1.default;
     (0, node_test_1.test)('validate-range', async () => {
         await runsetflags(spec.validate.range, { null: false }, (vin) => struct.validate(vin.data, vin.spec));
     });
+    (0, node_test_1.test)('validate-like', async () => {
+        await runsetflags(spec.validate.like, { null: false }, (vin) => struct.validate(vin.data, vin.spec));
+    });
     (0, node_test_1.test)('validate-unknown', async () => {
         await runsetflags(spec.validate.unknown, { null: false }, (vin) => struct.validate(vin.data, vin.spec));
     });
