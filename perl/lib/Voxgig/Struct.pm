@@ -2795,7 +2795,12 @@ sub validate_RANGE {
     return _validatebound($inj, $store, '$RANGE');
 }
 
-# The bounding list directives: a bound, then at most one spec that must also admit.
+sub validate_LIKE {
+    my ($inj, $val, $ref, $store) = @_;
+    return _validatebound($inj, $store, '$LIKE');
+}
+
+# The bounding list directives: a bound or pattern, then at most one spec that also admits.
 sub _validatebound {
     my ($inj, $store, $name) = @_;
     my $mode = $inj->{mode};
@@ -2822,18 +2827,26 @@ sub _validatebound {
 
     my $field = 'The ' . $name . ' validator at field ' . pathify($inj->{path}, 1);
     my $nargs = size($parent) - 1;
+    my $islen = '$LEN' eq $name;
+    my $islike = '$LIKE' eq $name;
+    my $argname = $islike ? 'pattern' : 'bound';
 
     if ($nargs < 1 || 2 < $nargs) {
-        push @{ $inj->{errs} }, $field . ' must have a bound and at most one spec.';
+        push @{ $inj->{errs} }, $field . ' must have a ' . $argname . ' and at most one spec.';
         return SKIP();
     }
 
     my $bound = _lookup($parent, 1);
-    my $islen = '$LEN' eq $name;
-    my ($lo, $hi, $desc) = $islen ? _lenbound($bound) : (0, 0, _rangedesc($bound));
+    my $like = $islike ? _likere($bound) : NONE();
+    my ($lo, $hi, $desc) = $islen
+        ? _lenbound($bound)
+        : $islike
+        ? (0, 0, is_none($like) ? NONE() : 'like /' . $bound . '/')
+        : (0, 0, _rangedesc($bound));
 
     if (is_none($desc)) {
-        push @{ $inj->{errs} }, $field . ' has an invalid bound: ' . stringify($bound) . '.';
+        push @{ $inj->{errs} },
+            $field . ' has an invalid ' . $argname . ': ' . stringify($bound) . '.';
         return SKIP();
     }
 
@@ -2847,8 +2860,8 @@ sub _validatebound {
         return SKIP();
     }
 
-    if (!(($islen ? T_string | T_list | T_map : T_number) & $ctype)) {
-        my $needtype = $islen ? 'string, list or map' : S_number;
+    if (!(($islen ? T_string | T_list | T_map : $islike ? T_string : T_number) & $ctype)) {
+        my $needtype = $islen ? 'string, list or map' : $islike ? S_string : S_number;
         push @{ $inj->{errs} },
             _invalid_type_msg($inj->{path}, $needtype, $ctype, $cval, 'V0420');
         return SKIP();
@@ -2857,6 +2870,8 @@ sub _validatebound {
     my $len = !$islen ? 0 : (T_string & $ctype) ? length($cval) : size($cval);
     my $inbound = $islen
         ? ($lo <= $len && (-1 == $hi || $len <= $hi))
+        : $islike
+        ? re_test($like, $cval)
         : _inrange($bound, $cval);
 
     if (!$inbound) {
@@ -2884,6 +2899,14 @@ sub _lenbound {
     );
 
     return ($lo, $hi, $desc);
+}
+
+# A $LIKE pattern compiled by the port's own regex engine; NONE unless it compiles.
+sub _likere {
+    my ($pattern) = @_;
+    return NONE() unless T_string & typify($pattern);
+    my $re = eval { re_compile($pattern) };
+    return defined $re ? $re : NONE();
 }
 
 # The words for a $RANGE bound, which are NONE when the bound is invalid.
@@ -3076,6 +3099,7 @@ sub validate {
         '$ALL',      \&validate_ALL,
         '$LEN',      \&validate_LEN,
         '$RANGE',    \&validate_RANGE,
+        '$LIKE',     \&validate_LIKE,
     );
     my $errsmap = jm(S_DERRS, $errs);
     my $store = merge([$base, getdef($extra, _mkmap()), $errsmap], 1);
@@ -3187,6 +3211,10 @@ sub select_NOT {
 
 sub select_CMP {
     my ($inj, $val, $ref, $store) = @_;
+
+    # The list form of $LIKE is validate's checker; the key form is this operator.
+    return validate_LIKE($inj, $val, $ref, $store) if $inj->{mode} == M_VAL && '$LIKE' eq $ref;
+
     return NONE() unless $inj->{mode} == M_KEYPRE;
     my $term = _lookup($inj->{parent}, $inj->{key});
     my $gkey = getelem($inj->{path}, -2);
