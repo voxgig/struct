@@ -2516,9 +2516,7 @@ end
 
 -- Transform: resolve a reference to another part of the spec.
 -- Format: ['`$REF`', 'ref-path']
-local function transform_REF(inj, val, _ref, store)
-  local nodes = inj.nodes
-
+local function transform_REF(inj, _val, _ref, store)
   if M_VAL ~= inj.mode then
     return NONE
   end
@@ -2547,39 +2545,26 @@ local function transform_REF(inj, val, _ref, store)
     end)
   end
 
-  local tref = clone(ref)
-
-  local cpath = slice(inj.path, -3)
-  local tpath = slice(inj.path, -1)
-  local tcur = getpath(store, cpath)
-  local tval = getpath(store, tpath)
-  local rval
-
+  -- A recursive reference stops where the data does.
+  local tval = getpath(store, slice(inj.path, -1))
+  local rval = NONE
   if not hasSubRef or NONE ~= tval then
-    local tinj = inj:child(0, { getelem(tpath, -1) })
-
-    tinj.path = tpath
-    tinj.nodes = slice(inj.nodes, -1)
-    tinj.parent = getelem(nodes, -2)
-    tinj.val = tref
-
-    tinj.dpath = flatten({ cpath })
-    tinj.dparent = tcur
-
-    inject(tref, store, tinj)
-
-    rval = tinj.val
-  else
-    rval = NONE
+    rval = clone(ref)
   end
 
+  -- The enclosing loop injects the referenced spec in this list's place, so
+  -- neither this pass nor this element leaves a value for modify to check.
   local grandparent = inj:setval(rval, 2)
 
-  if islist(grandparent) and inj.prior then
-    inj.prior.keyI = inj.prior.keyI - 1
+  local prior = inj.prior
+  if prior then
+    prior.modify = NONE
+    if islist(grandparent) or NONE ~= rval then
+      prior.keyI = prior.keyI - 1
+    end
   end
 
-  return val
+  return SKIP
 end
 
 -- Named formatters for transform_FORMAT.
