@@ -1475,7 +1475,6 @@ module VoxgigStruct
   end
 
   def self.transform_REF(inj, _val, _ref, store)
-    nodes_ = inj.nodes
     return nil if inj.mode != S_MVAL
 
     refpath = getprop(inj.parent, 1)
@@ -1490,39 +1489,29 @@ module VoxgigStruct
                     'dparent' => getpath(spec, dpath)
                   })
 
-    tref = clone(ref)
-
-    cpath = slice(inj.path, -3)
-    tpath = slice(inj.path, -1)
-    tcur = getpath(store, cpath)
-    tval = getpath(store, tpath)
-    rval = nil
-
-    if tval || !isnode(ref)
-      tinj = inj.child(0, [getelem(tpath, -1)])
-      tinj.path = tpath
-      tinj.nodes = slice(inj.nodes, -1)
-      tinj.parent = getelem(nodes_, -2)
-      tinj.val = tref
-
-      tinj.dpath = flatten([cpath])
-      tinj.dparent = tcur
-
-      inject(tref, store, tinj)
-      rval = tinj.val
+    hasSubRef = false
+    if isnode(ref)
+      walk(ref, lambda { |_k, v, *_a|
+        hasSubRef = true if v == '`$REF`'
+        v
+      })
     end
 
-    tkey = getelem(inj.path, -2)
-    target = getelem(nodes_, -2, -> { getelem(nodes_, -1) })
-    if rval.nil?
-      delprop(target, tkey)
-    else
-      setprop(target, tkey, rval)
+    # A recursive reference stops where the data does.
+    tval = getpath(store, slice(inj.path, -1))
+    rval = !hasSubRef || !tval.nil? ? clone(ref) : nil
+
+    # The enclosing loop injects the referenced spec in this list's place, so
+    # neither this pass nor this element leaves a value for modify to check.
+    grandparent = inj.setval(rval, 2)
+
+    prior = inj.prior
+    if prior
+      prior.modify = nil
+      prior.keyI -= 1 if islist(grandparent) || !rval.nil?
     end
 
-    inj.prior.keyI -= 1 if islist(target) && inj.prior
-
-    _val
+    SKIP
   end
 
   FORMATTER = {
