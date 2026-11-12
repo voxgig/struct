@@ -2189,8 +2189,11 @@ dynamic _validateLen(dynamic inj0, dynamic val, dynamic ref, dynamic store) =>
 dynamic _validateRange(dynamic inj0, dynamic val, dynamic ref, dynamic store) =>
     _validatebound(inj0 as Inj, store, '\$RANGE');
 
-// The bounding list directives: a bound, then at most one spec that must also
-// admit.
+dynamic _validateLike(dynamic inj0, dynamic val, dynamic ref, dynamic store) =>
+    _validatebound(inj0 as Inj, store, '\$LIKE');
+
+// The bounding list directives: a bound or pattern, then at most one spec that
+// also admits.
 dynamic _validatebound(Inj inj, dynamic store, String name) {
   if (inj.mode != S_MVAL) return null;
   var parent = inj.parent;
@@ -2216,22 +2219,28 @@ dynamic _validatebound(Inj inj, dynamic store, String name) {
 
   var field = 'The ' + name + ' validator at field ' + pathify(inj.path, 1);
   var nargs = size(parent) - 1;
+  var islen = '\$LEN' == name;
+  var islike = '\$LIKE' == name;
+  var argname = islike ? 'pattern' : 'bound';
 
   if (nargs < 1 || 2 < nargs) {
-    _pushErr(inj, field + ' must have a bound and at most one spec.');
+    _pushErr(inj, field + ' must have a ' + argname + ' and at most one spec.');
     return SKIP;
   }
 
   var bound = _lookup(parent, 1);
-  var islen = '\$LEN' == name;
-  List<dynamic> lb =
-      islen ? _lenbound(bound) : <dynamic>[0, 0, _rangedesc(bound)];
+  var like = islike ? _likere(bound) : null;
+  var likedesc = like == null ? null : 'like /' + bound + '/';
+  List<dynamic> lb = islen
+      ? _lenbound(bound)
+      : <dynamic>[0, 0, islike ? likedesc : _rangedesc(bound)];
   num lo = lb[0];
   num hi = lb[1];
   String? desc = lb[2];
 
   if (desc == null) {
-    _pushErr(inj, field + ' has an invalid bound: ' + stringify(bound) + '.');
+    _pushErr(inj,
+        field + ' has an invalid ' + argname + ': ' + stringify(bound) + '.');
     return SKIP;
   }
 
@@ -2244,15 +2253,21 @@ dynamic _validatebound(Inj inj, dynamic store, String name) {
     return SKIP;
   }
 
-  if (0 == ((islen ? T_string | T_list | T_map : T_number) & ctype)) {
-    var needtype = islen ? 'string, list or map' : 'number';
+  if (0 ==
+      ((islen ? T_string | T_list | T_map : islike ? T_string : T_number) &
+          ctype)) {
+    var needtype =
+        islen ? 'string, list or map' : islike ? S_string : 'number';
     _pushErr(inj, _invalidTypeMsg(inj.path, needtype, ctype, cval, 'V0420'));
     return SKIP;
   }
 
   var len = islen ? (cval is String ? cval.runes.length : size(cval)) : 0;
-  var inbound =
-      islen ? lo <= len && (hi == -1 || len <= hi) : _inrange(bound, cval);
+  var inbound = islen
+      ? lo <= len && (hi == -1 || len <= hi)
+      : islike
+          ? re_test(like, cval) as bool
+          : _inrange(bound, cval);
 
   if (!inbound) {
     var needtype = (size(inj.path) > 1 ? '' : 'value ') + desc;
@@ -2280,6 +2295,17 @@ List<dynamic> _lenbound(dynamic bound) {
                   : numToString(lo) + ' to ' + numToString(hi));
 
   return <dynamic>[lo, hi, desc];
+}
+
+// A $LIKE pattern compiled by the port's own regex engine; null unless it
+// compiles.
+RegExp? _likere(dynamic pattern) {
+  if (pattern is! String) return null;
+  try {
+    return re_compile(pattern) as RegExp;
+  } on FormatException {
+    return null;
+  }
 }
 
 // The words for a $RANGE bound, which are null when the bound is invalid.
@@ -2480,6 +2506,7 @@ dynamic validate(dynamic data, dynamic spec, [dynamic injdef]) {
   base['\$ALL'] = _validateAll;
   base['\$LEN'] = _validateLen;
   base['\$RANGE'] = _validateRange;
+  base['\$LIKE'] = _validateLike;
   var store = merge([
     base,
     extra == null ? <String, dynamic>{} : extra,
@@ -2782,6 +2809,11 @@ bool _numCmp(dynamic a, dynamic b, String op) {
 
 dynamic _selectCmp(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
   var inj = inj0 as Inj;
+  // The list form of $LIKE is validate's checker; the key form is this
+  // operator.
+  if (inj.mode == S_MVAL && ref == '\$LIKE') {
+    return _validateLike(inj, val, ref, store);
+  }
   if (inj.mode == S_MKEYPRE) {
     var term = getprop(inj.parent, inj.key);
     var gkey = getelem(inj.path, -2);

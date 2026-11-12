@@ -427,7 +427,15 @@ void runAll(o.RunPack pack, dynamic spec) {
       arg1((vin) =>
           s.validate(vget(vin, 'data'), vget(vin, 'spec'), vget(vin, 'inj'))));
   // `null: false`, so that a null in these groups reaches validate as a null.
-  for (final gn in ['directive', 'nof', 'all', 'len', 'range', 'unknown']) {
+  for (final gn in [
+    'directive',
+    'nof',
+    'all',
+    'len',
+    'range',
+    'like',
+    'unknown'
+  ]) {
     rs('validate.$gn', s.getprop(validates, gn),
         arg1((vin) => s.validate(vget(vin, 'data'), vget(vin, 'spec'))),
         false);

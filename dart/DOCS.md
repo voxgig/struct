@@ -101,6 +101,9 @@ s.validate(2, ['`\$ALL`', '`\$NUMBER`', '`\$INTEGER`']);             // 2
 s.validate('ab', ['`\$LEN`', {'max': 3}, '`\$STRING`']);             // ab
 s.validate(5, ['`\$RANGE`', {'min': 0, 'lt': 10}]);                  // 5
 
+// validate: `$LIKE` finds a pattern in a string, with the core `RegExp`
+s.validate('a-1', ['`\$LIKE`', '^[a-z]+-[0-9]+\$']);                 // a-1
+
 // select: MongoDB-style query over children
 s.select([{'a': 1}, {'a': 2}], {'a': {'`\$GT`': 1}}); // [{a: 2, $KEY: 1}]
 ```
