@@ -500,16 +500,17 @@ const Parser = struct {
         var i = from;
         while (i < to) : (i += 1) {
             var insn = self.code.items[i];
+            // A target at `to` leaves the atom, so the copy's leaves the copy.
             switch (insn.op) {
                 .jmp_op => {
                     const t = insn.jmp_t;
-                    if (@as(usize, @intCast(t)) >= from and @as(usize, @intCast(t)) < to) insn.jmp_t = t + delta;
+                    if (@as(usize, @intCast(t)) >= from and @as(usize, @intCast(t)) <= to) insn.jmp_t = t + delta;
                 },
                 .split_op => {
                     const x = insn.split_x;
                     const y = insn.split_y;
-                    if (@as(usize, @intCast(x)) >= from and @as(usize, @intCast(x)) < to) insn.split_x = x + delta;
-                    if (@as(usize, @intCast(y)) >= from and @as(usize, @intCast(y)) < to) insn.split_y = y + delta;
+                    if (@as(usize, @intCast(x)) >= from and @as(usize, @intCast(x)) <= to) insn.split_x = x + delta;
+                    if (@as(usize, @intCast(y)) >= from and @as(usize, @intCast(y)) <= to) insn.split_y = y + delta;
                 },
                 else => {},
             }
@@ -567,23 +568,40 @@ const Parser = struct {
                 self.code.items[s_ix].split_y = if (lazy) @intCast(start) else after;
             },
             '{' => {
+                // With no copy required, the atom already written is the first
+                // optional one: {0} drops it and {0,} is a star.
+                var a0 = start;
+                var a1 = end;
+                var lo = n_lo;
+                if (lo == 0) {
+                    if (n_hi == 0) {
+                        self.code.items.len = start;
+                        return;
+                    }
+                    const opt: u8 = if (n_hi == -1) '*' else '?';
+                    try self.applyQuant(start, opt, 0, 0, lazy);
+                    if (n_hi == -1) return;
+                    a0 += 1;
+                    a1 += 1;
+                    lo = 1;
+                }
                 var k: i32 = 1;
-                while (k < n_lo) : (k += 1) _ = try self.codeClone(start, end);
+                while (k < lo) : (k += 1) _ = try self.codeClone(a0, a1);
                 if (n_hi == -1) {
                     const split_ix = try self.emit(.split_op);
                     const atom_start = self.code.items.len;
-                    _ = try self.codeClone(start, end);
+                    _ = try self.codeClone(a0, a1);
                     const jmp_ix = try self.emit(.jmp_op);
                     self.code.items[jmp_ix].jmp_t = @intCast(split_ix);
                     const exit_pc: i32 = @intCast(self.code.items.len);
                     self.code.items[split_ix].split_x = if (lazy) exit_pc else @intCast(atom_start);
                     self.code.items[split_ix].split_y = if (lazy) @intCast(atom_start) else exit_pc;
-                } else if (n_hi > n_lo) {
+                } else if (n_hi > lo) {
                     var i: i32 = 0;
-                    while (i < n_hi - n_lo) : (i += 1) {
+                    while (i < n_hi - lo) : (i += 1) {
                         const sp = try self.emit(.split_op);
                         const clone_start = self.code.items.len;
-                        _ = try self.codeClone(start, end);
+                        _ = try self.codeClone(a0, a1);
                         const after: i32 = @intCast(self.code.items.len);
                         self.code.items[sp].split_x = if (lazy) after else @intCast(clone_start);
                         self.code.items[sp].split_y = if (lazy) @intCast(clone_start) else after;
@@ -707,10 +725,14 @@ pub fn compile(allocator: std.mem.Allocator, pattern: []const u8) ?Regex {
     defer p.code.deinit();
     // Wrap whole pattern in implicit group 0.
     p.code.append(.{ .op = .save_op, .slot = 0 }) catch return null;
-    const anchored_start = pattern.len > 0 and pattern[0] == '^';
     _ = p.parseAlt() catch return null;
     if (p.err != null) return null;
     if (p.pos < pattern.len) return null;
+    // Only a ^ that every path passes first lets the matcher skip later
+    // starts: ^a|b must still be tried at each one.
+    var first: usize = 0;
+    while (first < p.code.items.len and p.code.items[first].op == .save_op) first += 1;
+    const anchored_start = first < p.code.items.len and p.code.items[first].op == .bol_op;
     p.code.append(.{ .op = .save_op, .slot = 1 }) catch return null;
     p.code.append(.{ .op = .match_op }) catch return null;
     const owned = allocator.dupe(Insn, p.code.items) catch return null;
