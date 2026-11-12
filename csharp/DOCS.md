@@ -211,7 +211,7 @@ StructUtils.Stringify(StructUtils.Jm("a", 1, "b", StructUtils.Jt(2, 3)));   // {
 <!-- => "{a:1,b:[2,3]}" -->
 
 For more task recipes (merge configs, rename fields, `$EACH`, `$MERGE`,
-`$FORMAT`, `$NOF`, `$ALL`, `$LEN`, `$RANGE`, `$EXACT`, …) see the
+`$FORMAT`, `$NOF`, `$ALL`, `$LEN`, `$RANGE`, `$LIKE`, `$EXACT`, …) see the
 language-neutral [How-to guides](../DOCS.md#2-how-to-guides) — the spec
 syntax is identical; only the host literals differ.
 
@@ -299,6 +299,11 @@ backtracking; zero-width `ReReplace("a*", "abc", "X")` returning
 [`README.md` → Regex](./README.md#regex) and
 [`../REGEX_PATHOLOGICAL.md`](../design/REGEX_PATHOLOGICAL.md). .NET 7+ offers
 `RegexOptions.NonBacktracking` if you must accept untrusted patterns.
+
+`$LIKE`, as a validate checker and as a select operator, matches with this
+engine and no options. A pattern therefore means what it means to .NET: one
+outside the subset, such as a lookahead, works here and not in every port, and
+the checker reports one that `ReCompile` refuses as an invalid pattern.
 
 ---
 

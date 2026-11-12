@@ -3125,7 +3125,10 @@ namespace Voxgig.Struct
         private static readonly Injector _ValidateRange = (inj, val, refStr, store) =>
             _ValidateBound(inj, store, "$RANGE");
 
-        // The bounding list directives: a bound, then at most one spec that must also admit.
+        private static readonly Injector _ValidateLike = (inj, val, refStr, store) =>
+            _ValidateBound(inj, store, "$LIKE");
+
+        // The bounding list directives: a bound or pattern, then at most one spec that also admits.
         private static object? _ValidateBound(InjectState inj, object? store, string name)
         {
             if (M_VAL != inj.Mode)
@@ -3152,20 +3155,25 @@ namespace Voxgig.Struct
 
             string field = "The " + name + " validator at field " + Pathify(inj.Path, 1);
             int nargs = Size(inj.Parent) - 1;
+            bool islen = "$LEN" == name;
+            bool islike = "$LIKE" == name;
+            string argname = islike ? "pattern" : "bound";
 
             if (nargs is < 1 or > 2)
             {
-                inj.Errs.Add(field + " must have a bound and at most one spec.");
+                inj.Errs.Add(field + " must have a " + argname + " and at most one spec.");
                 return SKIP;
             }
 
             object? bound = Lookup(inj.Parent, 1);
-            bool islen = "$LEN" == name;
-            var (lo, hi, desc) = islen ? _LenBound(bound) : (0d, 0d, _RangeDesc(bound));
+            Regex? like = islike ? _LikeRe(bound) : null;
+            var (lo, hi, desc) = islen
+                ? _LenBound(bound)
+                : (0d, 0d, islike ? (null == like ? null : "like /" + bound + "/") : _RangeDesc(bound));
 
             if (null == desc)
             {
-                inj.Errs.Add(field + " has an invalid bound: " + Stringify(bound) + ".");
+                inj.Errs.Add(field + " has an invalid " + argname + ": " + Stringify(bound) + ".");
                 return SKIP;
             }
 
@@ -3181,15 +3189,19 @@ namespace Voxgig.Struct
                 return SKIP;
             }
 
-            if (0 == ((islen ? T.Str | T.List | T.Map : T.Number) & ctype))
+            if (0 == ((islen ? T.Str | T.List | T.Map : islike ? T.Str : T.Number) & ctype))
             {
-                string needtype = islen ? "string, list or map" : S_number;
+                string needtype = islen ? "string, list or map" : islike ? S_string : S_number;
                 inj.Errs.Add(_InvalidTypeMsg(inj.Path, needtype, ctype, cval));
                 return SKIP;
             }
 
             int len = !islen ? 0 : cval is string s ? s.EnumerateRunes().Count() : Size(cval);
-            bool inbound = islen ? lo <= len && (-1 == hi || len <= hi) : _InRange(bound, cval);
+            bool inbound = islen
+                ? lo <= len && (-1 == hi || len <= hi)
+                : islike
+                    ? cval is string text && ReTest((string)bound!, text)
+                    : _InRange(bound, cval);
 
             if (!inbound)
             {
@@ -3221,6 +3233,24 @@ namespace Voxgig.Struct
                             : Stringify(lo) + " to " + Stringify(hi));
 
             return (lo, hi, desc);
+        }
+
+        // A $LIKE pattern compiled by the port's own regex engine; null unless it compiles.
+        private static Regex? _LikeRe(object? pattern)
+        {
+            if (pattern is not string source)
+            {
+                return null;
+            }
+
+            try
+            {
+                return ReCompile(source);
+            }
+            catch (ArgumentException)
+            {
+                return null;
+            }
         }
 
         // The words for a $RANGE bound, which are null when the bound is invalid.
@@ -3527,6 +3557,7 @@ namespace Voxgig.Struct
                     ["$ALL"]      = _ValidateAll,
                     ["$LEN"]      = _ValidateLen,
                     ["$RANGE"]    = _ValidateRange,
+                    ["$LIKE"]     = _ValidateLike,
 
                     [S_DERRS] = errs,
                 },
@@ -3915,6 +3946,12 @@ namespace Voxgig.Struct
         // $GT, $LT, $GTE, $LTE, $LIKE: comparison operators.
         private static readonly Injector _SelectCmp = (inj, val, refStr, store) =>
         {
+            // The list form of $LIKE is validate's checker; the key form is this operator.
+            if (M_VAL == inj.Mode && "$LIKE" == refStr)
+            {
+                return _ValidateLike(inj, val, refStr, store);
+            }
+
             if (M_KEYPRE != inj.Mode)
             {
                 return NONE;

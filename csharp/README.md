@@ -6,11 +6,11 @@
 > 15 type bit-flags, 3 mode constants (`M_KEYPRE`/`M_KEYPOST`/`M_VAL`),
 > `SKIP`/`DELETE` sentinels, and the `InjectState` machinery.
 > `Inject`/`Transform`/`Validate`/`Select` all dispatch through the
-> canonical injector machinery: 11 transform commands, 6 validate
+> canonical injector machinery: 11 transform commands, 10 validate
 > checkers, 4 select operators.
 >
 > Passes the full shared corpus (1682/1682). The xUnit suite
-> (`StructTest.cs`, 117 tests) is the green-bar regression baseline;
+> (`StructTest.cs`, 118 tests) is the green-bar regression baseline;
 > the `CorpusScoreboard` test mirrors the Java/C++ runners and writes
 > `corpus-scoreboard.json` after each run with per-`.aon`-file pass
 > counts. The committed baseline lives at `test-baseline.json`.
@@ -518,7 +518,7 @@ $MERGE   $EACH    $PACK    $REF     $FORMAT  $APPLY
 ```
 $MAP   $LIST   $STRING   $NUMBER   $INTEGER   $DECIMAL  $BOOLEAN
 $NULL  $NIL    $FUNCTION $INSTANCE $ANY       $CHILD    $EXACT
-$NOF   $ALL    $LEN      $RANGE
+$NOF   $ALL    $LEN      $RANGE    $LIKE
 ```
 
 `` StructUtils.Jt("`$NOF`", n, spec, …) `` holds when as many specs admit the
@@ -532,9 +532,12 @@ error and gives back every member of the value unchanged. There is no
 within `n`, a bound written as for `$NOF`. A string counts code points rather
 than UTF-16 units, a list its elements, and a map its keys.
 `` StructUtils.Jt("`$RANGE`", bound, spec?) `` holds when the value is a number
-within the bound, a map of `min` or `gt` and `max` or `lt`. Each takes at most
-one spec, which must also admit the value. `min` and `max` include their bound,
-while `gt` and `lt` exclude it.
+within the bound, a map of `min` or `gt` and `max` or `lt`.
+`` StructUtils.Jt("`$LIKE`", pattern, spec?) `` holds when the value is a
+string the pattern finds, anywhere unless anchored, with .NET's
+`System.Text.RegularExpressions` and no options. Each takes at most one spec,
+which must also admit the value. `min` and `max` include their bound, while
+`gt` and `lt` exclude it.
 
 A spec that names a checker `Validate` does not define is rejected before
 any data is read, and nothing is validated. The whole-string reference

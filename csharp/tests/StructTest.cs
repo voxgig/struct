@@ -1496,6 +1496,18 @@ public class StructTests
     }
 
     [Fact]
+    public void ValidateLike()
+    {
+        var validateSpec = (_spec["validate"] as Dictionary<string,object?>)?["like"] as Dictionary<string, object?>;
+        _pack.RunSetMap(validateSpec, input =>
+        {
+            object? data = input?.GetValueOrDefault("data");
+            object? spec = input?.GetValueOrDefault("spec");
+            return StructUtils.Validate(data, spec);
+        }, flags: Omni.NoNulls);
+    }
+
+    [Fact]
     public void ValidateUnknown()
     {
         var validateSpec = (_spec["validate"] as Dictionary<string,object?>)?["unknown"] as Dictionary<string, object?>;
