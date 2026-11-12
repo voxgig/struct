@@ -364,17 +364,18 @@ impl<'a> Parser<'a> {
         let start = self.code.len();
         for i in from..to {
             let mut insn = self.code[i];
+            // A target at `to` leaves the atom, so the copy's leaves the copy.
             match insn.op {
-                Op::Jmp(t) if (t as usize) >= from && (t as usize) < to => {
+                Op::Jmp(t) if (t as usize) >= from && (t as usize) <= to => {
                     insn.op = Op::Jmp(t + delta);
                 }
                 Op::Split(x, y) => {
-                    let nx = if (x as usize) >= from && (x as usize) < to {
+                    let nx = if (x as usize) >= from && (x as usize) <= to {
                         x + delta
                     } else {
                         x
                     };
-                    let ny = if (y as usize) >= from && (y as usize) < to {
+                    let ny = if (y as usize) >= from && (y as usize) <= to {
                         y + delta
                     } else {
                         y
@@ -450,6 +451,21 @@ impl<'a> Parser<'a> {
                 );
             }
             b'{' => {
+                // With no copy required, the atom already written is the first
+                // optional one: {0} drops it and {0,} is a star.
+                let (start, end, n_lo) = if n_lo == 0 {
+                    if n_hi == 0 {
+                        self.code.truncate(start);
+                        return;
+                    }
+                    self.apply_quant(start, if n_hi == -1 { b'*' } else { b'?' }, 0, 0, lazy);
+                    if n_hi == -1 {
+                        return;
+                    }
+                    (start + 1, end + 1, 1)
+                } else {
+                    (start, end, n_lo)
+                };
                 for _ in 1..n_lo {
                     self.code_clone(start, end);
                 }
@@ -608,7 +624,6 @@ impl Regex {
         };
         // Wrap whole pattern in implicit group 0.
         p.code.push(Insn::new(Op::Save(0)));
-        let anchored_start = !bytes.is_empty() && bytes[0] == b'^';
         p.parse_alt();
         if let Some(e) = p.err {
             return Err(RegexError(e));
@@ -619,6 +634,13 @@ impl Regex {
                 p.pos
             )));
         }
+        // Only a ^ that every path passes first lets the matcher skip later
+        // starts: ^a|b must still be tried at each one.
+        let anchored_start = p
+            .code
+            .iter()
+            .find(|i| !matches!(i.op, Op::Save(_)))
+            .is_some_and(|i| i.op == Op::Bol);
         p.code.push(Insn::new(Op::Save(1)));
         p.code.push(Insn::new(Op::Match));
         Ok(Self {
