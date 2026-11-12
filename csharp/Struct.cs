@@ -2532,58 +2532,29 @@ namespace Voxgig.Struct
                 });
             }
 
-            object? tref = Clone(refResult);
+            // A recursive reference stops where the data does.
             int pathLen = inj.Path.Count;
-
-            var cpath = pathLen > 3
-                ? inj.Path.GetRange(0, pathLen - 3).Cast<object?>().ToList()
-                : [];
             var tpath = pathLen >= 1
                 ? inj.Path.GetRange(0, pathLen - 1).Cast<object?>().ToList()
                 : [];
-
-            object? tcur = GetPath(store, cpath, null, null);
             object? tvalRef = GetPath(store, tpath, null, null);
+            object? rval = !hasSubRef || tvalRef != null ? Clone(refResult) : NONE;
 
-            if (!hasSubRef || tvalRef != null)
+            // The enclosing loop injects the referenced spec in this list's place, so
+            // neither this pass nor this element leaves a value for modify to check.
+            object? grandparent = inj.SetVal(rval, 2);
+
+            InjectState? prior = inj.Prior;
+            if (prior != null)
             {
-                string lastPath = tpath.Count > 0
-                    ? (StrKey(tpath[^1]) ?? S_DTOP)
-                    : S_DTOP;
-
-                var tinj = inj.Child(0, [(object?)lastPath]);
-                tinj.Path = tpath;
-
-                int nodesLen = inj.Nodes.Count;
-                tinj.Nodes = nodesLen > 1
-                    ? inj.Nodes.GetRange(0, nodesLen - 1).Cast<object?>().ToList()
-                    : [];
-                tinj.Parent = nodesLen >= 2 ? inj.Nodes[nodesLen - 2] : null;
-                tinj.Val = tref;
-                tinj.DPath = cpath;
-                tinj.DParent = tcur;
-
-                Inject(tref, store, tinj);
-                object? rval = tinj.Val;
-
-                inj.SetVal(rval, 2);
-
-                if (IsList(GetElem(inj.Nodes, -2)) && inj.Prior != null)
+                prior.ModifyFn = null;
+                if (IsList(grandparent) || (rval != null && !ReferenceEquals(rval, NONE)))
                 {
-                    inj.Prior.KeyI--;
-                }
-            }
-            else
-            {
-                // Circular self-reference with no data: delete the key from the grandparent.
-                inj.SetVal(null, 2);
-                if (IsList(GetElem(inj.Nodes, -2)) && inj.Prior != null)
-                {
-                    inj.Prior.KeyI--;
+                    prior.KeyI--;
                 }
             }
 
-            return val;
+            return SKIP;
         };
 
         // Apply a named format function to a child value.
