@@ -2390,8 +2390,8 @@ pub fn inject(allocator: Allocator, val: JsonValue, store: JsonValue, inj_opt: ?
 
         // nkI is signed so cmdRef's `prior.key_i -%= 1` on a fresh 0 wraps to
         // max-usize and bit-casts back to -1 here — then `nkI += 1` lands on
-        // the same index again, re-visiting the slot that the parent list
-        // just shifted into place. Matches the TS / Rust / Go ports.
+        // the same index again, re-visiting the slot that cmdRef has just
+        // filled, or that the parent list has just shifted into place.
         var nkI: isize = 0;
         while (nkI < @as(isize, @intCast(node_keys.items.len))) {
             const nodekey = node_keys.items[@as(usize, @intCast(nkI))];
@@ -4032,108 +4032,40 @@ fn cmdRef(allocator: Allocator, inj: *Injection, store: JsonValue) !JsonValue {
 
     // Resolve the ref path within the spec.
     const ref_result = try getpath(allocator, JsonValue{ .string = refpath }, spec_val);
-    if (ref_result == .null) {
-        // Ref not found → delete from parent.
-        const tkey = if (inj.path.len >= 2) inj.path[inj.path.len - 2] else S_DTOP;
-        const target = if (inj.nodes.len >= 2) inj.nodes[inj.nodes.len - 2] else .null;
-        if (target != .null) _ = delprop(allocator, target, JsonValue{ .string = tkey }) catch {};
-        return .null;
-    }
 
-    // Cycle break: if the resolved spec contains another `$REF` literal AND
-    // there is no current data at the target slot, do NOT inject. This is the
-    // self-recursive-ref case (e.g. spec {z:{y:["$REF","z"]}} with data {}).
-    // Other ports do the same check; without it the inject loop recurses
-    // infinitely into the same clone and the test process stack-overflows
-    // (manifests as a SIGSEGV during the transform-ref test).
     var has_sub_ref = false;
     if (isnode(ref_result)) scanForRef(ref_result, &has_sub_ref);
 
-    // Clone the referenced spec and inject it with proper data context.
-    const tref = try clone(allocator, ref_result);
-
-    // Compute paths following Go: tpath = path[:-1], cpath = path[:-3]
+    // A recursive reference stops where the data does. getpath reads $TOP
+    // itself, so the slot's path drops its leading "$TOP".
     const tpath = if (inj.path.len > 0) inj.path[0 .. inj.path.len - 1] else inj.path;
-    const cpath = if (inj.path.len > 3) inj.path[0 .. inj.path.len - 3] else &[_][]const u8{};
-
-    // Resolve data at these paths.
-    const tcur = if (cpath.len > 0) blk: {
-        var joined = std.array_list.Managed(u8).init(allocator);
-        for (cpath, 0..) |p, pi| {
-            if (pi > 0) try joined.append('.');
-            try joined.appendSlice(p);
-        }
-        break :blk try getpath(allocator, JsonValue{ .string = joined.items }, store);
-    } else store;
-
-    // Build child injection with proper context.
-    const lastPath = if (tpath.len > 0) tpath[tpath.len - 1] else S_DTOP;
-    const tinj = try allocator.create(Injection);
-    const tinj_nodes_src = if (inj.nodes.len > 1) inj.nodes[0 .. inj.nodes.len - 1] else inj.nodes[0..0];
-    const tinj_nodes = try allocator.alloc(JsonValue, tinj_nodes_src.len);
-    @memcpy(tinj_nodes, tinj_nodes_src);
-    const tinj_dpath = try allocator.alloc([]const u8, cpath.len);
-    @memcpy(tinj_dpath, cpath);
-    tinj.* = Injection{
-        .allocator = allocator,
-        .mode = M_VAL,
-        .key = lastPath,
-        .val = tref,
-        .parent = if (inj.nodes.len >= 2) inj.nodes[inj.nodes.len - 2] else .null,
-        .base = inj.base,
-        .dparent = tcur,
-        .keys = try allocator.alloc([]const u8, 1),
-        .path = tpath,
-        .nodes = tinj_nodes,
-        .dpath = tinj_dpath,
-        .meta = inj.meta,
-        .errs = inj.errs,
-    };
-    tinj.keys[0] = lastPath;
-
-    // Cycle break (matches the Rust / JS / Py / Go ports): if the resolved
-    // ref contains another `$REF` literal AND there is no current data at
-    // the target path, skip injection. Otherwise inject the cloned ref.
-    //
-    // Zig's getpath auto-unwraps store.$TOP, so an absolute path like
-    // ["$TOP", "z", "p"] would re-traverse "$TOP" inside the data and hit
-    // a dead end. Strip the leading "$TOP" before joining.
     const tpath_strip: []const []const u8 = if (tpath.len > 0 and std.mem.eql(u8, tpath[0], S_DTOP))
         tpath[1..]
     else
         tpath;
-    const tval_at: JsonValue = blk2: {
-        if (tpath_strip.len == 0) break :blk2 store;
+    const tval: JsonValue = blk: {
+        if (tpath_strip.len == 0) break :blk store;
         var joined = std.array_list.Managed(u8).init(allocator);
         for (tpath_strip, 0..) |p, pi| {
-            if (pi > 0) joined.append('.') catch break :blk2 .null;
-            joined.appendSlice(p) catch break :blk2 .null;
+            if (pi > 0) joined.append('.') catch break :blk .null;
+            joined.appendSlice(p) catch break :blk .null;
         }
-        break :blk2 getpath(allocator, JsonValue{ .string = joined.items }, store) catch .null;
+        break :blk getpath(allocator, JsonValue{ .string = joined.items }, store) catch .null;
     };
-    const skip_for_cycle = has_sub_ref and tval_at == .null;
-    const rval: JsonValue = if (skip_for_cycle) .null else blk: {
-        _ = try inject(allocator, tref, store, tinj);
-        break :blk tinj.val;
-    };
+    const rval: JsonValue = if (!has_sub_ref or tval != .null) try clone(allocator, ref_result) else .null;
 
-    // Set the result on the grandparent.
-    _ = try inj.setval(rval, 2);
+    // The enclosing loop injects the referenced spec in this list's place, so
+    // neither this pass nor this element leaves a value for modify to check.
+    const grandparent = try inj.setval(rval, 2);
 
-    // Adjust prior key index if grandparent is a list. Wrap on underflow:
-    // setval(rval, 2) above just shrunk the grandparent list at path[-2], so
-    // the caller's loop variable needs to step back one slot to re-visit the
-    // index that the shift moved into the current position. The TS / JS / Py
-    // / Go / Rust ports do `prior.keyI--` on a signed counter; here key_i is
-    // usize, so we wrap with -%= 1 — the consumer loop bit-casts back through
-    // isize so 0 -% 1 reads as -1 and `+ 1` lands back on the same index.
     if (inj.prior) |prior| {
-        const gp = if (inj.nodes.len >= 2) inj.nodes[inj.nodes.len - 2] else .null;
-        if (islist(gp)) {
+        prior.modify = null;
+        if (islist(grandparent) or rval != .null) {
             prior.key_i = prior.key_i -% 1;
         }
     }
 
+    inj.skip = true;
     return .null;
 }
 
