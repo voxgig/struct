@@ -2119,7 +2119,11 @@ module VoxgigStruct
     _validatebound(inj, store, '$RANGE')
   end
 
-  # The bounding list directives: a bound, then at most one spec that must also admit.
+  def self.validate_LIKE(inj, _val = nil, _ref = nil, store = nil)
+    _validatebound(inj, store, '$LIKE')
+  end
+
+  # The bounding list directives: a bound or pattern, then at most one spec that also admits.
   def self._validatebound(inj, store, name)
     parent = inj.parent
 
@@ -2141,18 +2145,28 @@ module VoxgigStruct
 
     field = "The #{name} validator at field #{pathify(inj.path, 1)}"
     nargs = size(parent) - 1
+    islen = name == '$LEN'
+    islike = name == '$LIKE'
+    argname = islike ? 'pattern' : 'bound'
 
     if nargs < 1 || nargs > 2
-      inj.errs << "#{field} must have a bound and at most one spec."
+      inj.errs << "#{field} must have a #{argname} and at most one spec."
       return SKIP
     end
 
     bound = _getprop(parent, 1)
-    islen = name == '$LEN'
-    lo, hi, desc = islen ? _lenbound(bound) : [0, 0, _rangedesc(bound)]
+    like = islike ? _likere(bound) : nil
+    lo, hi, desc =
+      if islen
+        _lenbound(bound)
+      elsif islike
+        [0, 0, like.nil? ? nil : "like /#{bound}/"]
+      else
+        [0, 0, _rangedesc(bound)]
+      end
 
     if desc.nil?
-      inj.errs << "#{field} has an invalid bound: #{stringify(bound)}."
+      inj.errs << "#{field} has an invalid #{argname}: #{stringify(bound)}."
       return SKIP
     end
 
@@ -2164,14 +2178,21 @@ module VoxgigStruct
       return SKIP
     end
 
-    if (islen ? T_string | T_list | T_map : T_number).nobits?(ctype)
-      needtype = islen ? 'string, list or map' : S_number
+    if (islen ? T_string | T_list | T_map : islike ? T_string : T_number).nobits?(ctype)
+      needtype = islen ? 'string, list or map' : islike ? S_string : S_number
       inj.errs << _invalidTypeMsg(inj.path, needtype, ctype, cval, 'V0420')
       return SKIP
     end
 
     length = islen ? size(cval) : 0
-    inbound = islen ? lo <= length && (hi == -1 || length <= hi) : _inrange(bound, cval)
+    inbound =
+      if islen
+        lo <= length && (hi == -1 || length <= hi)
+      elsif islike
+        re_test(like, cval)
+      else
+        _inrange(bound, cval)
+      end
 
     unless inbound
       needtype = "#{'value ' unless size(inj.path) > 1}#{desc}"
@@ -2200,6 +2221,15 @@ module VoxgigStruct
       end
 
     [lo, hi, "of length #{desc}"]
+  end
+
+  # A $LIKE pattern compiled by the port's own regex engine; nil unless it compiles.
+  def self._likere(pattern)
+    return nil unless pattern.is_a?(String)
+
+    re_compile(pattern)
+  rescue RegexpError
+    nil
   end
 
   # The words for a $RANGE bound, which are nil when the bound is invalid.
@@ -2363,7 +2393,8 @@ module VoxgigStruct
                       '$NOF' => method(:validate_NOF),
                       '$ALL' => method(:validate_ALL),
                       '$LEN' => method(:validate_LEN),
-                      '$RANGE' => method(:validate_RANGE)
+                      '$RANGE' => method(:validate_RANGE),
+                      '$LIKE' => method(:validate_LIKE)
                     },
                     (extra.nil? ? {} : extra),
                     { S_DERRS => errs }
@@ -2477,6 +2508,9 @@ module VoxgigStruct
   end
 
   def self.select_CMP(inj, _val, ref, store)
+    # The list form of $LIKE is validate's checker; the key form is this operator.
+    return validate_LIKE(inj, _val, ref, store) if inj.mode == S_MVAL && ref == '$LIKE'
+
     if inj.mode == S_MKEYPRE
       term = getprop(inj.parent, inj.key)
       gkey = getelem(inj.path, -2)
