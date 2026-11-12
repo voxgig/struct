@@ -1410,10 +1410,9 @@ and transform_pack inj _v _ref store =
     end
   end
 
-and transform_ref inj v _ref store =
+and transform_ref inj _v _ref store =
   if inj.mode <> m_val then Noval
   else begin
-    let nodes = inj.nodes in
     let refpath = lookup_ inj.parent (Num 1.0) in
     inj.keyi <- size inj.keys;
     let spec_func = getprop store (Str s_dspec) in
@@ -1423,27 +1422,18 @@ and transform_ref inj v _ref store =
        let refv = getpath ~inj:INone spec refpath in
        let has_sub = ref false in
        (if isnode refv then ignore (walk ~before:(fun _k v2 _p _path -> (if v2 = Str "`$REF`" then has_sub := true); v2) refv));
-       let tref = clone refv in
-       let cpath = slice ~start:(Num 0.0) ~stop:(Num (float_of_int (size inj.path - 3))) inj.path in
-       let tpath = slice ~start:(Num 0.0) ~stop:(Num (float_of_int (size inj.path - 1))) inj.path in
-       let tcur = getpath ~inj:INone store cpath in
-       let tval = getpath ~inj:INone store tpath in
-       let rval = ref Noval in
-       (if not (is_noval refv) && (not !has_sub || not (is_noval tval)) then begin
-           let cs = inj_child inj 0 (lst [getelem tpath (Num (-1.0))]) in
-           cs.path <- tpath;
-           cs.nodes <- slice ~start:(Num 0.0) ~stop:(Num (float_of_int (size inj.nodes - 1))) inj.nodes;
-           cs.parent <- getelem nodes (Num (-2.0));
-           cs.ival <- tref;
-           cs.dparent <- tcur;
-           ignore (inject ~inj:(IInj cs) tref store);
-           rval := cs.ival
-         end);
-       ignore (inj_setval ~ancestor:2 inj !rval);
+       (* A recursive reference stops where the data does. *)
+       let tval = getpath ~inj:INone store (slice ~start:(Num (-1.0)) inj.path) in
+       let rval = if not !has_sub || not (is_noval tval) then clone refv else Noval in
+       (* The enclosing loop injects the referenced spec in this list's place, so
+          neither this pass nor this element leaves a value for modify to check. *)
+       let grandparent = inj_setval ~ancestor:2 inj rval in
        (match inj.prior with
-        | Some p when islist inj.parent -> p.keyi <- p.keyi - 1
-        | _ -> ());
-       v
+        | Some p ->
+          p.modify <- None;
+          if islist grandparent || not (is_noval rval) then p.keyi <- p.keyi - 1
+        | None -> ());
+       skip
      | _ -> Noval)
   end
 
