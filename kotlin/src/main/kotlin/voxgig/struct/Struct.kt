@@ -1858,7 +1858,7 @@ object Struct {
 
     /** $REF: resolve a named reference within the original spec, enabling recursive transformations. */
     val transform_REF: Injector =
-        Injector { inj, value, _, store ->
+        Injector { inj, _, _, store ->
             if (inj.mode != M_VAL) return@Injector UNDEF
 
             val refpath = lookup(inj.parent, 1)
@@ -1895,39 +1895,22 @@ object Struct {
                 )
             }
 
-            val cpathRaw = slice(inj.path, -3, null)
+            // A recursive reference stops where the data does.
+            val tval = getpath(store, slice(inj.path, -1, null))
+            val rval = if (!hasSubRef[0] || tval !== UNDEF) tref else UNDEF
 
-            @Suppress("UNCHECKED_CAST")
-            val cpath: MutableList<String> = if (cpathRaw is List<*>) (cpathRaw as List<String>).toMutableList() else mutableListOf()
-            val tpathRaw = slice(inj.path, -1, null)
-
-            @Suppress("UNCHECKED_CAST")
-            val tpath: MutableList<String> = if (tpathRaw is List<*>) (tpathRaw as List<String>).toMutableList() else mutableListOf()
-            val tval = getpath(store, tpath)
-            var rval: Any? = UNDEF
-
-            if (!hasSubRef[0] || tval !== UNDEF) {
-                val lastKey = getelem(tpath, -1)
-                val singleKey = mutableListOf(strkey(lastKey))
-                val tinj = inj.child(0, singleKey)
-                tinj.path = tpath
-                val slicedNodes = slice(inj.nodes, -1, null)
-                @Suppress("UNCHECKED_CAST")
-                tinj.nodes = if (slicedNodes is List<*>) (slicedNodes as List<Any?>).toMutableList() else mutableListOf()
-                tinj.parent = getelem(inj.nodes, -2)
-                tinj.`val` = tref
-                tinj.dpath = cpath.toMutableList()
-                tinj.dparent = getpath(store, cpath)
-
-                inject(tref, store, tinj)
-                rval = tinj.`val`
-            }
-
+            // The enclosing loop injects the referenced spec in this list's place, so
+            // neither this pass nor this element leaves a value for modify to check.
             val grandparent = inj.setval(rval, 2)
-            if (islist(grandparent) && inj.prior != null) {
-                inj.prior!!.keyI--
+
+            val prior = inj.prior
+            if (prior != null) {
+                prior.modify = null
+                if (islist(grandparent) || rval !== UNDEF) {
+                    prior.keyI--
+                }
             }
-            value
+            SKIP
         }
 
     fun transform(
