@@ -1351,10 +1351,10 @@ fn slice_str_vec(v: &[String], start: Option<i64>, end: Option<i64>) -> Vec<Stri
 }
 
 // `$REF` — reference the original spec (enables recursive transforms).
-fn transform_ref(inj: &Inj, val: &Value, _r: &str, store: &Value) -> Value {
-    let (mode, parent, path, nodes) = {
+fn transform_ref(inj: &Inj, _val: &Value, _r: &str, store: &Value) -> Value {
+    let (mode, parent, path) = {
         let b = inj.borrow();
-        (b.mode, b.parent.clone(), b.path.clone(), b.nodes.clone())
+        (b.mode, b.parent.clone(), b.path.clone())
     };
     if mode != M_VAL {
         return Value::Noval;
@@ -1392,54 +1392,33 @@ fn transform_ref(inj: &Inj, val: &Value, _r: &str, store: &Value) -> Value {
         walk(refval.clone(), Some(&mut probe), None, None);
     }
 
-    let tref = clone(&refval);
-    let cpath = slice_str_vec(&path, Some(-3), None);
-    let tpath = slice_str_vec(&path, Some(-1), None);
-    let tcur = get_path_inj(store, &path_value(&cpath), None);
-    let tval_at = get_path_inj(store, &path_value(&tpath), None);
-
-    let rval = if !has_sub_ref || !tval_at.is_noval() {
-        let tinj = Injection::child(
-            inj,
-            0,
-            Rc::new(RefCell::new(vec![tpath
-                .last()
-                .cloned()
-                .unwrap_or_default()])),
-        );
-        {
-            let mut b = tinj.borrow_mut();
-            b.path = tpath.clone();
-            let nlen = nodes.len();
-            b.nodes = if nlen >= 1 {
-                nodes[..nlen - 1].to_vec()
-            } else {
-                Vec::new()
-            };
-            b.parent = if nlen >= 2 {
-                nodes[nlen - 2].clone()
-            } else {
-                Value::Noval
-            };
-            b.val = tref.clone();
-            b.dpath = cpath.clone();
-            b.dparent = tcur.clone();
-        }
-        let _ = inject_inj(tref.clone(), store, &tinj);
-        let v = tinj.borrow().val.clone();
-        v
+    // A recursive reference stops where the data does.
+    let tval = get_path_inj(
+        store,
+        &path_value(&slice_str_vec(&path, Some(-1), None)),
+        None,
+    );
+    let rval = if !has_sub_ref || !tval.is_noval() {
+        clone(&refval)
     } else {
         Value::Noval
     };
+    let placed = !rval.is_noval();
 
+    // The enclosing loop injects the referenced spec in this list's place, so
+    // neither this pass nor this element leaves a value for modify to check.
     let grandparent = Injection::setval(inj, rval, Some(2));
-    if is_list(&grandparent) {
-        let prior = inj.borrow().prior.clone();
-        if let Some(p) = prior {
-            p.borrow_mut().key_i -= 1;
+
+    let prior = inj.borrow().prior.clone();
+    if let Some(p) = prior {
+        let mut b = p.borrow_mut();
+        b.modify = None;
+        if is_list(&grandparent) || placed {
+            b.key_i -= 1;
         }
     }
-    val.clone()
+
+    Value::skip()
 }
 
 fn srcpath_split(srcpath: &str) -> Vec<String> {
