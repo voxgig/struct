@@ -305,7 +305,8 @@ Dev tooling: PHPUnit ^12, PHPStan ^2.1, PHP_CodeSniffer ^3.13 (config in
 There is no build step. Tests live in [`tests/`](./tests/) (PHPUnit suite
 configured in [`phpunit.xml`](./phpunit.xml)); the runner loads the shared
 corpus from [`../build/test/`](../build/test/). The port passes the shared corpus
-suite (85/85, 1022 assertions — see [`../REPORT.md`](../design/REPORT.md)).
+suite (123 tests and 397 assertions, two tests marked incomplete — see
+[`../REPORT.md`](../design/REPORT.md)).
 
 **To change behaviour:** do it in canonical TypeScript first, adjust the corpus,
 then port the change here, run `make test` and `make lint`, and re-run

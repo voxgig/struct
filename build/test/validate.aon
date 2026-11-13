@@ -318,6 +318,32 @@ special: set: [
   { in: { data: {x3:3,y3:3}, spec:{x3:'`$NUMBER`', y3:['`$REF`','x3']} }, out: {x3:3,y3:3} }
   { in: { data: {x4:3,y4:4}, spec:{x4:'`$NUMBER`', y4:['`$REF`','x4']} }, out: {x4:3,y4:4} }
 
+  # A $REF checks as the spec it names, written in place, once per failure.
+  { in: { data: {a5:{n:x},b5:{n:y}}, spec:{a5:{n:'`$STRING`'}, b5:['`$REF`','a5']} },
+    out: {a5:{n:x},b5:{n:y}} }
+  { in: { data: {a6:{n:x},b6:{n:1}}, spec:{a6:{n:'`$STRING`'}, b6:['`$REF`','a6']} },
+    err: '/^[^|]*Expected field b6.n to be string, but found integer: 1\\.[^|]*$/' }
+  { in: { data: {a7:{n:x},b7:{n:y,z:1}}, spec:{a7:{n:'`$STRING`'}, b7:['`$REF`','a7']} },
+    err: '/^[^|]*Unexpected keys at field b7: z[^|]*$/' }
+  { in: { data: {a8:[x],b8:[y]}, spec:{a8:['`$CHILD`','`$STRING`'], b8:['`$REF`','a8']} },
+    out: {a8:[x],b8:[y]} }
+  { in: { data: {a9:[x],b9:[1]}, spec:{a9:['`$CHILD`','`$STRING`'], b9:['`$REF`','a9']} },
+    err: '/^[^|]*Expected field b9.0 to be string, but found integer: 1\\.[^|]*$/' }
+  { in: { data: {a10:{n:x},l10:[{n:y}]}, spec:{a10:{n:'`$STRING`'}, l10:[['`$REF`','a10']]} },
+    out: {a10:{n:x},l10:[{n:y}]} }
+
+  # A spec can name itself; the recursion stops where the data does.
+  { in: { data: {t11:{n:a,p:{n:b,p:{n:c}}}}, spec:{t11:{n:'`$STRING`', p:['`$REF`','t11']}} },
+    out: {t11:{n:a,p:{n:b,p:{n:c}}}} }
+  { in: { data: {t12:{n:a,p:{n:b,p:{n:3}}}}, spec:{t12:{n:'`$STRING`', p:['`$REF`','t12']}} },
+    err: '/^[^|]*Expected field t12.p.p.n to be string, but found integer: 3\\.[^|]*$/' }
+  { in: { data: {t13:{n:a,p:{n:b,z:1}}}, spec:{t13:{n:'`$STRING`', p:['`$REF`','t13']}} },
+    err: '/^[^|]*Unexpected keys at field t13.p: z[^|]*$/' }
+  { in: { data: {t14:{n:a,k:[{n:b,k:[]}]}}, spec:{t14:{n:'`$STRING`', k:['`$CHILD`',['`$REF`','t14']]}} },
+    out: {t14:{n:a,k:[{n:b,k:[]}]}} }
+  { in: { data: {t15:{n:a,k:[{n:1,k:[]}]}}, spec:{t15:{n:'`$STRING`', k:['`$CHILD`',['`$REF`','t15']]}} },
+    err: '/^[^|]*Expected field t15.k.0.n to be string, but found integer: 1\\.[^|]*$/' }
+
 
   { in: { data: {x10:100}, spec:{x10:['`$EXACT`', 100] }, inj:meta:q0:x1:100 }, out: {x10:100}}
   { in: { data: {x11:'s11'}, spec:{x11:['`$EXACT`', 101] }, inj:meta:q0:x1:101 },
@@ -635,6 +661,211 @@ all: set: [
   { in: { data: {}, spec: {a:['`$ALL`','`$NIL`']} }, out: {} }
 ]
 
+
+# ['$LEN', bound, spec?]: the value's length is within a nof count, and a spec,
+# if given, also admits it. Strings count code points, lists elements, maps
+# keys. Run this group with the null flag off, as for directive.
+len: set: [
+
+  { in: { data: 'abc', spec: ['`$LEN`',3] }, out: 'abc' }
+  { in: { data: 'ab', spec: ['`$LEN`',3] },
+    err: 'Expected value of length 3, but found string: ab.' }
+  { in: { data: 'abcd', spec: ['`$LEN`',{max:3}] },
+    err: 'Expected value of length at most 3, but found string: abcd.' }
+  { in: { data: '', spec: ['`$LEN`',{min:1}] },
+    err: 'Expected value of length at least 1, but found string: .' }
+  { in: { data: 'ab', spec: ['`$LEN`',{min:1,max:3}] }, out: 'ab' }
+  { in: { data: [1,2,3,4], spec: ['`$LEN`',{min:1,max:3}] },
+    err: 'Expected value of length 1 to 3, but found list: [1,2,3,4].' }
+  { in: { data: {a:1,b:2}, spec: ['`$LEN`',{max:2}] }, out: {a:1,b:2} }
+  { in: { data: {}, spec: ['`$LEN`',{min:1}] },
+    err: 'Expected value of length at least 1, but found map: {}.' }
+  { in: { data: [], spec: ['`$LEN`',0] }, out: [] }
+  { in: { data: [1], spec: ['`$LEN`',{max:0}] },
+    err: 'Expected value of length 0, but found list: [1].' }
+
+  # Not bytes, and not the units of UTF-16.
+  { in: { data: 'aé😀', spec: ['`$LEN`',3] }, out: 'aé😀' }
+  { in: { data: '😀😀', spec: ['`$LEN`',{max:1}] },
+    err: 'Expected value of length at most 1, but found string: 😀😀.' }
+
+  # At a field, with a spec, under $CHILD, and inside a count.
+  { in: { data: {x:'abc'}, spec: {x:['`$LEN`',{max:3},'`$STRING`']} }, out: {x:'abc'} }
+  { in: { data: {x:'abcd'}, spec: {x:['`$LEN`',{max:3},'`$STRING`']} },
+    err: 'Expected field x to be of length at most 3, but found string: abcd.' }
+  { in: { data: {x:[1,2]}, spec: {x:['`$LEN`',{max:3},'`$STRING`']} },
+    err: 'Expected field x to be string, but found list: [1,2].' }
+  { in: { data: ['ab','abc'], spec: ['`$CHILD`',['`$LEN`',{max:2}]] },
+    err: 'Expected field 1 to be of length at most 2, but found string: abc.' }
+  { in: { data: {p:[1],q:[]}, spec: {'`$CHILD`':['`$LEN`',{min:1}]} },
+    err: 'Expected field q to be of length at least 1, but found list: [].' }
+  { in: { data: [1,2], spec: ['`$LEN`',2,['`$CHILD`','`$NUMBER`']] }, out: [1,2] }
+  { in: { data: [1,'a'], spec: ['`$LEN`',2,['`$CHILD`','`$NUMBER`']] },
+    err: 'Expected [child,number], but found list: [1,a].' }
+  { in: { data: 'abcd', spec: ['`$NOF`',1,['`$LEN`',{max:3}],'`$NUMBER`'] },
+    err: 'Expected exactly 1 of [len,{max:3}], number, but found string: abcd.' }
+
+  # Only strings, lists and maps have a length; absence needs a count to admit it.
+  { in: { data: {x:5}, spec: {x:['`$LEN`',{min:1}]} },
+    err: 'Expected field x to be string, list or map, but found integer: 5.' }
+  { in: { data: {x:null}, spec: {x:['`$LEN`',{min:1}]} },
+    err: 'Expected field x to be string, list or map, but found no value.' }
+  { in: { data: {}, spec: {x:['`$LEN`',{min:1}]} },
+    err: 'Expected field x to be string, list or map, but found no value.' }
+  { in: { data: {}, spec: {x:['`$NOF`',1,'`$NIL`',['`$LEN`',{max:3}]]} }, out: {} }
+  { in: { data: {x:'ab'}, spec: {x:['`$NOF`',1,'`$NIL`',['`$LEN`',{max:3}]]} }, out: {x:'ab'} }
+
+  # Malformed specs.
+  { in: { data: 'a', spec: ['`$LEN`'] },
+    err: 'The $LEN validator at field <root> must have a bound and at most one spec.' }
+  { in: { data: 'a', spec: ['`$LEN`',1,'`$STRING`','`$STRING`'] },
+    err: 'The $LEN validator at field <root> must have a bound and at most one spec.' }
+  { in: { data: 'a', spec: ['`$LEN`',-1] },
+    err: 'The $LEN validator at field <root> has an invalid bound: -1.' }
+  { in: { data: 'a', spec: ['`$LEN`',1.5] },
+    err: 'The $LEN validator at field <root> has an invalid bound: 1.5.' }
+  { in: { data: 'a', spec: ['`$LEN`',{min:2,max:1}] },
+    err: 'The $LEN validator at field <root> has an invalid bound: {max:1,min:2}.' }
+  { in: { data: 'a', spec: ['`$LEN`',{min:1,lt:3}] },
+    err: 'The $LEN validator at field <root> has an invalid bound: {lt:3,min:1}.' }
+  { in: { data: {a:[1,2]}, spec: {a:['`$NUMBER`','`$LEN`']} },
+    err: 'The $LEN validator at field a must be the first element of an array.' }
+]
+
+
+# ['$RANGE', bound, spec?]: the value is a number within the bound, a map of
+# min or gt, max or lt, or one of each; a spec, if given, also admits it. Run
+# this group with the null flag off, as for directive.
+range: set: [
+
+  { in: { data: 5, spec: ['`$RANGE`',{min:0,max:10}] }, out: 5 }
+  { in: { data: 0, spec: ['`$RANGE`',{min:0,max:10}] }, out: 0 }
+  { in: { data: 10, spec: ['`$RANGE`',{min:0,max:10}] }, out: 10 }
+  { in: { data: 11, spec: ['`$RANGE`',{min:0,max:10}] },
+    err: 'Expected value at least 0 and at most 10, but found integer: 11.' }
+  { in: { data: -1, spec: ['`$RANGE`',{min:0}] },
+    err: 'Expected value at least 0, but found integer: -1.' }
+  { in: { data: 0, spec: ['`$RANGE`',{gt:0}] },
+    err: 'Expected value greater than 0, but found integer: 0.' }
+  { in: { data: 0.5, spec: ['`$RANGE`',{gt:0,lt:1}] }, out: 0.5 }
+  { in: { data: 1, spec: ['`$RANGE`',{gt:0,lt:1}] },
+    err: 'Expected value greater than 0 and less than 1, but found integer: 1.' }
+  { in: { data: 1000, spec: ['`$RANGE`',{max:999.5}] },
+    err: 'Expected value at most 999.5, but found integer: 1000.' }
+  { in: { data: -2.5, spec: ['`$RANGE`',{min:-3,lt:-2}] }, out: -2.5 }
+  { in: { data: 2, spec: ['`$RANGE`',{min:2,max:2}] }, out: 2 }
+
+  # At a field, with a spec, under $CHILD, and inside $ALL and a count.
+  { in: { data: {x:3}, spec: {x:['`$RANGE`',{min:1,max:5},'`$INTEGER`']} }, out: {x:3} }
+  { in: { data: {x:1.5}, spec: {x:['`$RANGE`',{min:1,max:5},'`$INTEGER`']} },
+    err: 'Expected field x to be integer, but found decimal: 1.5.' }
+  { in: { data: {x:9}, spec: {x:['`$RANGE`',{min:1,max:5},'`$INTEGER`']} },
+    err: 'Expected field x to be at least 1 and at most 5, but found integer: 9.' }
+  { in: { data: [1,-1], spec: ['`$CHILD`',['`$RANGE`',{min:0}]] },
+    err: 'Expected field 1 to be at least 0, but found integer: -1.' }
+  { in: { data: {p:1,q:-2}, spec: {'`$CHILD`':['`$RANGE`',{min:0}]} },
+    err: 'Expected field q to be at least 0, but found integer: -2.' }
+  { in: { data: 15, spec: ['`$ALL`','`$INTEGER`',['`$RANGE`',{max:9}]] },
+    err: 'Expected all of integer, [range,{max:9}], but found integer: 15.' }
+  { in: { data: 15, spec: ['`$NOF`',1,['`$RANGE`',{max:9}],['`$RANGE`',{min:10}]] }, out: 15 }
+
+  # Only a number has a range, and null and absent values are checked too.
+  { in: { data: {x:'5'}, spec: {x:['`$RANGE`',{min:0}]} },
+    err: 'Expected field x to be number, but found string: 5.' }
+  { in: { data: {x:true}, spec: {x:['`$RANGE`',{min:0}]} },
+    err: 'Expected field x to be number, but found boolean: true.' }
+  { in: { data: {x:null}, spec: {x:['`$RANGE`',{min:0}]} },
+    err: 'Expected field x to be number, but found no value.' }
+  { in: { data: {}, spec: {x:['`$RANGE`',{min:0}]} },
+    err: 'Expected field x to be number, but found no value.' }
+  { in: { data: {}, spec: {x:['`$NOF`',1,'`$NIL`',['`$RANGE`',{min:0}]]} }, out: {} }
+
+  # Malformed specs.
+  { in: { data: 1, spec: ['`$RANGE`'] },
+    err: 'The $RANGE validator at field <root> must have a bound and at most one spec.' }
+  { in: { data: 1, spec: ['`$RANGE`',5] },
+    err: 'The $RANGE validator at field <root> has an invalid bound: 5.' }
+  { in: { data: 1, spec: ['`$RANGE`',{}] },
+    err: 'The $RANGE validator at field <root> has an invalid bound: {}.' }
+  { in: { data: 1, spec: ['`$RANGE`',{min:0,gt:0}] },
+    err: 'The $RANGE validator at field <root> has an invalid bound: {gt:0,min:0}.' }
+  { in: { data: 1, spec: ['`$RANGE`',{max:1,lt:2}] },
+    err: 'The $RANGE validator at field <root> has an invalid bound: {lt:2,max:1}.' }
+  { in: { data: 1, spec: ['`$RANGE`',{min:2,max:1}] },
+    err: 'The $RANGE validator at field <root> has an invalid bound: {max:1,min:2}.' }
+  { in: { data: 1, spec: ['`$RANGE`',{min:'zero'}] },
+    err: 'The $RANGE validator at field <root> has an invalid bound: {min:zero}.' }
+  { in: { data: 1, spec: ['`$RANGE`',{above:0}] },
+    err: 'The $RANGE validator at field <root> has an invalid bound: {above:0}.' }
+  { in: { data: {a:[1,2]}, spec: {a:['`$NUMBER`','`$RANGE`']} },
+    err: 'The $RANGE validator at field a must be the first element of an array.' }
+]
+
+
+# ['$LIKE', pattern, spec?]: the value is a string the pattern finds, anywhere
+# unless anchored; a spec, if given, also admits it. Each port matches with its
+# own regex engine, so these patterns stay inside the RE2 subset and the data
+# in ASCII. Run this group with the null flag off, as for directive.
+like: set: [
+
+  { in: { data: abc, spec: ['`$LIKE`','^a'] }, out: abc }
+  { in: { data: xabc, spec: ['`$LIKE`','b'] }, out: xabc }
+  { in: { data: xyz, spec: ['`$LIKE`','^a'] },
+    err: 'Expected value like /^a/, but found string: xyz.' }
+  { in: { data: ABC, spec: ['`$LIKE`','^a'] },
+    err: 'Expected value like /^a/, but found string: ABC.' }
+  { in: { data: hotdog, spec: ['`$LIKE`','cat|dog'] }, out: hotdog }
+  { in: { data: 'a-1', spec: ['`$LIKE`','^[a-z]+-[0-9]+$'] }, out: 'a-1' }
+  { in: { data: 'a-1x', spec: ['`$LIKE`','^[a-z]+-[0-9]+$'] },
+    err: 'Expected value like /^[a-z]+-[0-9]+$/, but found string: a-1x.' }
+  { in: { data: 'ab12', spec: ['`$LIKE`','^\\w+\\d$'] }, out: 'ab12' }
+  { in: { data: 'a b', spec: ['`$LIKE`','\\s'] }, out: 'a b' }
+  { in: { data: aaaa, spec: ['`$LIKE`','^a{2,3}$'] },
+    err: 'Expected value like /^a{2,3}$/, but found string: aaaa.' }
+
+  # The empty string is a string: it passes when the pattern finds it.
+  { in: { data: '', spec: ['`$LIKE`','^$'] }, out: '' }
+  { in: { data: '', spec: ['`$LIKE`','a*'] }, out: '' }
+  { in: { data: '', spec: ['`$LIKE`','a'] },
+    err: 'Expected value like /a/, but found string: .' }
+
+  # At a field, with a spec, under $CHILD, and inside $ALL and a count.
+  { in: { data: {x:'12'}, spec: {x:['`$LIKE`','^[0-9]+$','`$STRING`']} }, out: {x:'12'} }
+  { in: { data: {x:''}, spec: {x:['`$LIKE`','^[0-9]*$','`$STRING`']} },
+    err: 'Expected field x to be string, but found string: .' }
+  { in: { data: {x:'1a'}, spec: {x:['`$LIKE`','^[0-9]+$','`$STRING`']} },
+    err: 'Expected field x to be like /^[0-9]+$/, but found string: 1a.' }
+  { in: { data: [ab,C], spec: ['`$CHILD`',['`$LIKE`','^[a-z]+$']] },
+    err: 'Expected field 1 to be like /^[a-z]+$/, but found string: C.' }
+  { in: { data: {p:ok,q:NO}, spec: {'`$CHILD`':['`$LIKE`','^[a-z]+$']} },
+    err: 'Expected field q to be like /^[a-z]+$/, but found string: NO.' }
+  { in: { data: admin, spec: ['`$ALL`',['`$LIKE`','^[a-z]+$'],['`$NOF`',0,['`$EXACT`',admin]]] },
+    err: 'Expected all of [like,^[a-z]+$], [nof,0,[exact,admin]], but found string: admin.' }
+  { in: { data: 'b2', spec: ['`$NOF`',1,['`$LIKE`','^a'],['`$LIKE`','2$']] }, out: 'b2' }
+
+  # Only a string has a pattern to find, and null and absent values are checked too.
+  { in: { data: {x:5}, spec: {x:['`$LIKE`','5']} },
+    err: 'Expected field x to be string, but found integer: 5.' }
+  { in: { data: {x:[a]}, spec: {x:['`$LIKE`','a']} },
+    err: 'Expected field x to be string, but found list: [a].' }
+  { in: { data: {x:null}, spec: {x:['`$LIKE`','a']} },
+    err: 'Expected field x to be string, but found no value.' }
+  { in: { data: {}, spec: {x:['`$LIKE`','a']} },
+    err: 'Expected field x to be string, but found no value.' }
+  { in: { data: {}, spec: {x:['`$NOF`',1,'`$NIL`',['`$LIKE`','a']]} }, out: {} }
+
+  # Malformed specs.
+  { in: { data: a, spec: ['`$LIKE`'] },
+    err: 'The $LIKE validator at field <root> must have a pattern and at most one spec.' }
+  { in: { data: a, spec: ['`$LIKE`','a','`$STRING`','`$STRING`'] },
+    err: 'The $LIKE validator at field <root> must have a pattern and at most one spec.' }
+  { in: { data: a, spec: ['`$LIKE`',1] },
+    err: 'The $LIKE validator at field <root> has an invalid pattern: 1.' }
+  { in: { data: a, spec: ['`$LIKE`',{p:a}] },
+    err: 'The $LIKE validator at field <root> has an invalid pattern: {p:a}.' }
+  { in: { data: {a:[x,y]}, spec: {a:['`$STRING`','`$LIKE`']} },
+    err: 'The $LIKE validator at field a must be the first element of an array.' }
+]
 
 # A spec that names a checker validate does not define is rejected before any
 # data is read, and nothing is validated. A whole-string reference names a

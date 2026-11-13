@@ -104,6 +104,13 @@ S.validate(S.jm(["a", "x"]), S.jm(["a", "`$STRING`"]))    # {a:x}
 S.validate(S.jm(["a", 1]), S.jm(["a", S.jt(["`$NOF`", S.jm(["min", 1]), "`$STRING`", "`$NUMBER`"])]))  # {a:1}
 S.validate(2, S.jt(["`$ALL`", "`$NUMBER`", "`$INTEGER`"]))  # 2
 
+# validate: `$LEN` bounds a length, `$RANGE` bounds a number
+S.validate("abc", S.jt(["`$LEN`", S.jm(["min", 1, "max", 64]), "`$STRING`"]))  # "abc"
+S.validate(42, S.jt(["`$RANGE`", S.jm(["min", 0, "lt", 150]), "`$INTEGER`"]))  # 42
+
+# validate: `$LIKE` finds a pattern in a string, with the core `Regex`
+S.validate("a-1", S.jt(["`$LIKE`", "^[a-z]+-[0-9]+$"]))  # "a-1"
+
 # select: MongoDB-style query over children
 S.select(S.jt([S.jm(["a", 1]), S.jm(["a", 2])]), S.jm(["a", S.jm(["`$GT`", 1])]))
 ```
@@ -114,6 +121,14 @@ it as that count. A spec that names a checker `validate` does not define is
 rejected before any data is read, so a leftover `$ONE` raises
 `Unknown validator $ONE at field a.0.` rather than validating anything.
 
+`$LEN` takes a bound written as for a `$NOF` count. A string's length counts
+code points, a list's its elements, and a map's its keys, and any other value
+fails. `$RANGE` takes a map of `min` or `gt` with `max` or `lt`, and fails on
+anything but a number. `min` and `max` include their bound, while `gt` and
+`lt` exclude it. `$LIKE` takes a pattern, which the core `Regex` compiles with
+no options, and fails on anything but a string the pattern finds. Each takes
+at most one spec, which must also admit the value.
+
 ## Testing
 
 `make test` runs the shared corpus (`../build/test/test.json`) through the port
@@ -123,7 +138,7 @@ the same code every other port runs. omni is consumed as a local checkout
 `test/runner.exs` finds via `$OMNI_HOME` or beside this repository, and is
 loaded only there: `make lint` compiles `lib/` alone (register 4.13).
 
-Every group the corpus defines runs — 1602 entries in 78 groups —
+Every group the corpus defines runs — 1730 entries in 81 groups —
 plus the two `check` entries (`DEF.client`, client-scoped options,
 `contextify`) and three single entries that are not part of any set.
 

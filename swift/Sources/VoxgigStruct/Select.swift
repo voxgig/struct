@@ -95,6 +95,10 @@ public func select_NOT(_ inj: Injection, _ val: Value, _ ref: String, _ store: V
 // MARK: - $CMP family
 
 public func select_CMP(_ inj: Injection, _ val: Value, _ ref: String, _ store: Value) -> Value {
+  // The list form of $LIKE is validate's checker; the key form is this operator.
+  if inj.mode == M_VAL && "$LIKE" == ref {
+    return validate_LIKE(inj, val, ref, store)
+  }
   guard inj.mode == M_KEYPRE else { return .noval }
   let term = lookup(inj.parent, .string(inj.key))
   let gkey = getelem(.list(VList(inj.path.map { Value.string($0) })), .int(-2))
@@ -183,17 +187,8 @@ public func select(_ children: Value, _ query: Value) -> Value {
   extra.entries["$GTE"] = .function(select_CMP)
   extra.entries["$LTE"] = .function(select_CMP)
   extra.entries["$LIKE"] = .function(select_CMP)
-  // Walk the query and add $OPEN flag to every map (allows extra keys).
   let q = clone(query)
-  _ = walk(
-    q,
-    { _, v, _, _ in
-      if case .map(let m) = v {
-        let existing = m.entries[S_BOPEN] ?? .bool(true)
-        m.entries[S_BOPEN] = existing
-      }
-      return v
-    })
+  _openquery(q)
   for child in childList {
     let errs = VList()
     let inj = Injection(val: .noval, parent: .noval)
@@ -204,6 +199,25 @@ public func select(_ children: Value, _ query: Value) -> Value {
     if errs.items.isEmpty { results.append(child) }
   }
   return .list(results)
+}
+
+// Open every map in a select query, so a child may hold keys the query does
+// not name, but leave a directive's literals as written: what $EXACT
+// compares, and the count or bound of $NOF, $LEN and $RANGE.
+private func _openquery(_ q: Value) {
+  if ismap(q) {
+    _setprop(q, .string(S_BOPEN), getprop(q, .string(S_BOPEN), .bool(true)))
+    for key in keysof(q) {
+      _openquery(lookup(q, .string(key)))
+    }
+  } else if case .list(let l) = q {
+    let head = l.items.first?.asString ?? ""
+    let exact = S_BEXACT == head
+    let bounded = ["`$NOF`", "`$LEN`", "`$RANGE`"].contains(head)
+    for (i, item) in l.items.enumerated() where 0 == i || !(exact || (bounded && 1 == i)) {
+      _openquery(item)
+    }
+  }
 }
 
 // MARK: - re_* helper wrappers (uniform API across ports)

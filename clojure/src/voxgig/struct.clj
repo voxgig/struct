@@ -18,7 +18,7 @@
   (:refer-clojure :exclude [merge filter flatten replace]))
 
 (import '(java.util LinkedHashMap ArrayList List Map)
-        '(java.util.regex Pattern Matcher))
+        '(java.util.regex Pattern Matcher PatternSyntaxException))
 
 ;; ---------------------------------------------------------------------------
 ;; String / mode / type constants
@@ -1267,40 +1267,32 @@
                   (setprop target tkey @rval)
                   nil)))))))))
 
-(defn- transform_REF [inj val _ref store]
-  (let [nodes (ig inj :nodes)]
-    (if (not= (ig inj :mode) S-MVAL)
-      nil
-      (let [refpath (getprop (ig inj :parent) 1)]
-        (is! inj :keyI (size (ig inj :keys)))
-        (let [spec-func (getprop store S-DSPEC)]
-          (if-not (isfunc spec-func)
-            nil
-            (let [spec (spec-func)
-                  ref (getpath spec refpath)
-                  hasSubRef (atom false)]
-              (when (isnode ref)
-                (walk ref (fn [_k v _p _path] (when (= v "`$REF`") (reset! hasSubRef true)) v)))
-              (let [tref (clone ref)
-                    cpath (slice (ig inj :path) 0 (- (size (ig inj :path)) 3))
-                    tpath (slice (ig inj :path) 0 (- (size (ig inj :path)) 1))
-                    tcur (getpath store cpath)
-                    tval (getpath store tpath)
-                    rval (atom nil)]
-                (if (and (some? ref) (or (not @hasSubRef) (some? tval)))
-                  (let [cs (inj-child inj 0 (alist-of [(getelem tpath -1)]))]
-                    (is! cs :path tpath)
-                    (is! cs :nodes (slice (ig inj :nodes) 0 (- (size (ig inj :nodes)) 1)))
-                    (is! cs :parent (getelem nodes -2))
-                    (is! cs :val tref)
-                    (is! cs :dparent tcur)
-                    (inject tref store cs)
-                    (reset! rval (ig cs :val)))
-                  (reset! rval nil))
-                (inj-setval inj @rval 2)
-                (when (and (islist (ig inj :parent)) (ig inj :prior))
-                  (is! (ig inj :prior) :keyI (dec (ig (ig inj :prior) :keyI))))
-                val))))))))
+(defn- transform_REF [inj _val _ref store]
+  (if (not= (ig inj :mode) S-MVAL)
+    nil
+    (let [refpath (getprop (ig inj :parent) 1)]
+      (is! inj :keyI (size (ig inj :keys)))
+      (let [spec-func (getprop store S-DSPEC)]
+        (if-not (isfunc spec-func)
+          nil
+          (let [spec (spec-func)
+                ref (getpath spec refpath)
+                hasSubRef (atom false)]
+            (when (isnode ref)
+              (walk ref (fn [_k v _p _path] (when (= v "`$REF`") (reset! hasSubRef true)) v)))
+            ;; A recursive reference stops where the data does.
+            (let [tpath (slice (ig inj :path) 0 (- (size (ig inj :path)) 1))
+                  tval (getpath store tpath)
+                  rval (when (or (not @hasSubRef) (some? tval)) (clone ref))
+                  ;; The enclosing loop injects the referenced spec in this list's place, so
+                  ;; neither this pass nor this element leaves a value for modify to check.
+                  grandparent (inj-setval inj rval 2)
+                  prior (ig inj :prior)]
+              (when prior
+                (is! prior :modify nil)
+                (when (or (islist grandparent) (some? rval))
+                  (is! prior :keyI (dec (ig prior :keyI)))))
+              SKIP)))))))
 
 ;; FORMATTER
 (defn- jsstr [v]
@@ -1693,6 +1685,120 @@
 ;; Every spec admits the value: ['`$ALL`', spec, ...].
 (defn- validate_ALL [inj _val _ref store] (_validatecount inj store "$ALL" false))
 
+;; The bounds of a $LEN bound, with -1 for no maximum, and the words for it,
+;; which are absent when the bound is invalid.
+(defn- _lenbound [bound]
+  (let [[lo hi countdesc] (_nofcount bound -1)]
+    (if (nil? countdesc)
+      [0 0 nil]
+      [lo hi (str "of length " (cond
+                                 (== lo hi) lo
+                                 (== -1 hi) (str "at least " lo)
+                                 (zero? lo) (str "at most " hi)
+                                 :else (str lo " to " hi)))])))
+
+;; A $LIKE pattern compiled by the port's own regex engine; absent unless it compiles.
+(defn- _likere [pattern]
+  (when (string? pattern)
+    (try (re_compile pattern)
+         (catch PatternSyntaxException _ nil))))
+
+;; The words for a $RANGE bound, which are absent when the bound is invalid.
+(defn- _rangedesc [bound]
+  (when (ismap bound)
+    (let [bmin (_lookup bound "min")
+          bmax (_lookup bound "max")
+          bgt (_lookup bound "gt")
+          blt (_lookup bound "lt")
+          lower (if (nil? bmin) bgt bmin)
+          upper (if (nil? bmax) blt bmax)
+          isnum (fn [n] (or (nil? n) (pos? (bit-and T_number (typify n)))))
+          valid (and (pos? (size bound))
+                     (= (size bound) (count (remove nil? [bmin bmax bgt blt])))
+                     (or (nil? bmin) (nil? bgt))
+                     (or (nil? bmax) (nil? blt))
+                     (isnum bmin) (isnum bmax) (isnum bgt) (isnum blt)
+                     (or (nil? lower) (nil? upper) (<= lower upper)))]
+      (when valid
+        (clojure.string/join " and "
+                             (remove nil? [(cond (some? bmin) (str "at least " (stringify bmin))
+                                                 (some? bgt) (str "greater than " (stringify bgt)))
+                                           (cond (some? bmax) (str "at most " (stringify bmax))
+                                                 (some? blt) (str "less than " (stringify blt)))]))))))
+
+;; A number within a valid $RANGE bound.
+(defn- _inrange [bound val]
+  (let [bmin (_lookup bound "min")
+        bmax (_lookup bound "max")
+        bgt (_lookup bound "gt")
+        blt (_lookup bound "lt")]
+    (and (or (nil? bmin) (<= bmin val))
+         (or (nil? bmax) (<= val bmax))
+         (or (nil? bgt) (< bgt val))
+         (or (nil? blt) (< val blt)))))
+
+;; The bounding list directives: a bound or pattern, then at most one spec that also admits.
+(defn- _validatebound [inj store name]
+  (let [mode (ig inj :mode) parent (ig inj :parent) keyI (ig inj :keyI)]
+    (cond
+      (not= mode S-MVAL) nil
+
+      (or (not (islist parent)) (not= keyI 0))
+      (do (.add ^List (ig inj :errs) (str "The " name " validator at field " (pathify (ig inj :path) 1 1) " must be the first element of an array.")) nil)
+
+      :else
+      (let [[cval held] (_slotval inj)]
+        (is! inj :keyI (size (ig inj :keys)))
+        ;; As for the counting directives: SKIP keeps inject off the detached list.
+        (_slotset inj cval held)
+        (is! inj :path (slice (ig inj :path) -1))
+        (let [field (str "The " name " validator at field " (pathify (ig inj :path) 1))
+              nargs (dec (size parent))
+              islen (= "$LEN" name)
+              islike (= "$LIKE" name)
+              argname (if islike "pattern" "bound")]
+          (if (or (< nargs 1) (< 2 nargs))
+            (.add ^List (ig inj :errs) (str field " must have a " argname " and at most one spec."))
+            (let [bound (_lookup parent 1)
+                  like (when islike (_likere bound))
+                  [lo hi desc] (if islen
+                                 (_lenbound bound)
+                                 [0 0 (if islike (when like (str "like /" bound "/")) (_rangedesc bound))])
+                  ctype (typify cval)]
+              (cond
+                (nil? desc)
+                (.add ^List (ig inj :errs) (str field " has an invalid " argname ": " (stringify bound) "."))
+
+                (and (= 2 nargs) (not (_admits cval held (_lookup parent 2) inj store)))
+                (let [specdesc (re_replace R-TRANSFORM-NAME (stringify (_lookup parent 2))
+                                           (fn [g] (clojure.string/lower-case (nth g 1))))]
+                  (.add ^List (ig inj :errs) (_invalidTypeMsg (ig inj :path) specdesc ctype cval "V0410")))
+
+                (zero? (bit-and (cond islen (bit-or T_string T_list T_map) islike T_string :else T_number) ctype))
+                (.add ^List (ig inj :errs)
+                      (_invalidTypeMsg (ig inj :path) (cond islen "string, list or map" islike S-string :else S-number)
+                                       ctype cval "V0420"))
+
+                ;; size counts a string in UTF-16 units, not code points.
+                (not (cond
+                       islen (let [len (if (string? cval) (.codePointCount ^String cval 0 (.length ^String cval)) (size cval))]
+                               (and (<= lo len) (or (== -1 hi) (<= len hi))))
+                       islike (re_test like cval)
+                       :else (_inrange bound cval)))
+                (.add ^List (ig inj :errs)
+                      (_invalidTypeMsg (ig inj :path) (str (if (> (size (ig inj :path)) 1) "" "value ") desc) ctype cval "V0430"))))))
+        SKIP))))
+
+;; The value's length is within a bound: ['`$LEN`', bound, spec?], where the
+;; bound is as for a $NOF count. A string's length is in code points.
+(defn- validate_LEN [inj _val _ref store] (_validatebound inj store "$LEN"))
+
+;; The value is a number within a bound: ['`$RANGE`', bound, spec?], where the
+;; bound holds min or gt, max or lt, or one of each.
+(defn- validate_RANGE [inj _val _ref store] (_validatebound inj store "$RANGE"))
+
+(defn- validate_LIKE [inj _val _ref store] (_validatebound inj store "$LIKE"))
+
 (defn- _validation [pval key parent inj]
   (when (and (some? inj) (not (identical? pval SKIP)))
     (let [exact (getprop (ig inj :meta) S-BEXACT false)
@@ -1792,7 +1898,8 @@
                     ["$NIL" validate_TYPE] ["$MAP" validate_TYPE] ["$LIST" validate_TYPE]
                     ["$FUNCTION" validate_TYPE] ["$INSTANCE" validate_TYPE]
                     ["$ANY" validate_ANY] ["$CHILD" validate_CHILD]
-                    ["$EXACT" validate_EXACT] ["$NOF" validate_NOF] ["$ALL" validate_ALL]]]
+                    ["$EXACT" validate_EXACT] ["$NOF" validate_NOF] ["$ALL" validate_ALL]
+                    ["$LEN" validate_LEN] ["$RANGE" validate_RANGE] ["$LIKE" validate_LIKE]]]
        (.put base k v))
      (let [store (merge (alist-of [base (if (nil? extra) (lhm) extra) (doto (lhm) (.put "$ERRS" errs))]) 1)
            meta (getprop injdef "meta" (lhm))
@@ -1882,22 +1989,43 @@
     (catch Exception _ false)))
 
 (defn- select_CMP [inj _val ref store]
-  (when (= (ig inj :mode) S-MKEYPRE)
-    (let [term (getprop (ig inj :parent) (ig inj :key))
-          gkey (getelem (ig inj :path) -2)
-          ppath (slice (ig inj :path) -1)
-          point (getpath store ppath)
-          pass (cond
-                 (= ref "$GT") (num-cmp point term :gt)
-                 (= ref "$LT") (num-cmp point term :lt)
-                 (= ref "$GTE") (num-cmp point term :gte)
-                 (= ref "$LTE") (num-cmp point term :lte)
-                 (= ref "$LIKE") (boolean (re_test (re_compile term) (stringify point)))
-                 :else false)]
-      (if pass
-        (let [gp (getelem (ig inj :nodes) -2)] (setprop gp gkey point))
-        (.add ^List (ig inj :errs) (str "CMP: " (pathify ppath) "⨯" (stringify point) " fail:" ref " " (stringify term))))))
-  nil)
+  ;; The list form of $LIKE is validate's checker; the key form is this operator.
+  (if (and (= (ig inj :mode) S-MVAL) (= ref "$LIKE"))
+    (validate_LIKE inj _val ref store)
+    (do
+      (when (= (ig inj :mode) S-MKEYPRE)
+        (let [term (getprop (ig inj :parent) (ig inj :key))
+              gkey (getelem (ig inj :path) -2)
+              ppath (slice (ig inj :path) -1)
+              point (getpath store ppath)
+              pass (cond
+                     (= ref "$GT") (num-cmp point term :gt)
+                     (= ref "$LT") (num-cmp point term :lt)
+                     (= ref "$GTE") (num-cmp point term :gte)
+                     (= ref "$LTE") (num-cmp point term :lte)
+                     (= ref "$LIKE") (boolean (re_test (re_compile term) (stringify point)))
+                     :else false)]
+          (if pass
+            (let [gp (getelem (ig inj :nodes) -2)] (setprop gp gkey point))
+            (.add ^List (ig inj :errs) (str "CMP: " (pathify ppath) "⨯" (stringify point) " fail:" ref " " (stringify term))))))
+      nil)))
+
+;; Open every map in a select query, so a child may hold keys the query does
+;; not name, but leave a directive's literals as written: what $EXACT
+;; compares, and the count or bound of $NOF, $LEN and $RANGE.
+(defn- _openquery [q]
+  (cond
+    (ismap q)
+    (do (setprop q "`$OPEN`" (getprop q "`$OPEN`" true))
+        (doseq [key (keysof q)] (_openquery (_lookup q key))))
+
+    (islist q)
+    (let [head (_lookup q 0)
+          exact (= "`$EXACT`" head)
+          bounded (contains? #{"`$NOF`" "`$LEN`" "`$RANGE`"} head)]
+      (dotimes [i (size q)]
+        (when (or (= 0 i) (not (or exact (and bounded (= 1 i)))))
+          (_openquery (_lookup q i)))))))
 
 (defn select [children query]
   (if-not (isnode children)
@@ -1911,7 +2039,7 @@
                   (.put "$GT" select_CMP) (.put "$LT" select_CMP) (.put "$GTE" select_CMP)
                   (.put "$LTE" select_CMP) (.put "$LIKE" select_CMP))
           q (clone query)]
-      (walk q (fn [_k v _p _path] (when (ismap v) (setprop v "`$OPEN`" (getprop v "`$OPEN`" true))) v))
+      (_openquery q)
       (doseq [child children]
         (let [errs (alist)
               injdef (doto (lhm) (.put "errs" errs) (.put "meta" (doto (lhm) (.put S-BEXACT true))) (.put "extra" extra))]

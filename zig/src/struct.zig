@@ -2390,8 +2390,8 @@ pub fn inject(allocator: Allocator, val: JsonValue, store: JsonValue, inj_opt: ?
 
         // nkI is signed so cmdRef's `prior.key_i -%= 1` on a fresh 0 wraps to
         // max-usize and bit-casts back to -1 here — then `nkI += 1` lands on
-        // the same index again, re-visiting the slot that the parent list
-        // just shifted into place. Matches the TS / Rust / Go ports.
+        // the same index again, re-visiting the slot that cmdRef has just
+        // filled, or that the parent list has just shifted into place.
         var nkI: isize = 0;
         while (nkI < @as(isize, @intCast(node_keys.items.len))) {
             const nodekey = node_keys.items[@as(usize, @intCast(nkI))];
@@ -2648,6 +2648,9 @@ fn dispatchCmd(allocator: Allocator, cmd: []const u8, store: JsonValue, inj: *In
         if (std.mem.eql(u8, cmd, "$EXACT")) return try cmdValidateExactCmd(allocator, inj);
         if (std.mem.eql(u8, cmd, "$NOF")) return try validateCount(allocator, inj, "$NOF", true);
         if (std.mem.eql(u8, cmd, "$ALL")) return try validateCount(allocator, inj, "$ALL", false);
+        if (std.mem.eql(u8, cmd, "$LEN")) return try validateBound(allocator, inj, "$LEN");
+        if (std.mem.eql(u8, cmd, "$RANGE")) return try validateBound(allocator, inj, "$RANGE");
+        if (std.mem.eql(u8, cmd, "$LIKE")) return try validateBound(allocator, inj, "$LIKE");
         if (std.mem.eql(u8, cmd, "$CHILD")) return try cmdValidateChildCmd(allocator, inj, store);
     }
 
@@ -2971,6 +2974,186 @@ fn validateCount(allocator: Allocator, inj: *Injection, name: []const u8, counte
     return .null;
 }
 
+// The bounding list directives, $LEN, $RANGE and $LIKE: a bound or pattern,
+// then at most one spec that also admits.
+fn validateBound(allocator: Allocator, inj: *Injection, name: []const u8) anyerror!JsonValue {
+    if (inj.mode != M_VAL) return .null;
+
+    if (inj.parent != .array or inj.key_i != 0) {
+        try inj.errs.append(try std.fmt.allocPrint(
+            allocator,
+            "The {s} validator at field {s} must be the first element of an array.",
+            .{ name, try pathifySlice(allocator, pathrange(inj.path, 1, 1)) },
+        ));
+        return .null;
+    }
+
+    const cval = slotval(inj);
+
+    inj.key_i = inj.keys.len;
+
+    // As for the counting directives: skip keeps inject off the detached list.
+    try setslot(allocator, inj, cval);
+    inj.skip = true;
+
+    inj.path = inj.path[0 .. inj.path.len - 1];
+
+    const elems = inj.parent.array.data.items;
+    const field = try std.fmt.allocPrint(
+        allocator,
+        "The {s} validator at field {s}",
+        .{ name, try pathifySlice(allocator, pathrange(inj.path, 1, 0)) },
+    );
+
+    const islen = std.mem.eql(u8, name, "$LEN");
+    const islike = std.mem.eql(u8, name, "$LIKE");
+    const argname: []const u8 = if (islike) "pattern" else "bound";
+
+    if (elems.len < 2 or 3 < elems.len) {
+        try inj.errs.append(try std.fmt.allocPrint(allocator, "{s} must have a {s} and at most one spec.", .{ field, argname }));
+        return .null;
+    }
+
+    const bound = elems[1];
+    const like: ?[]const u8 = if (islike) likere(bound) else null;
+    const likedesc: ?[]const u8 = if (like) |p| try std.fmt.allocPrint(allocator, "like /{s}/", .{p}) else null;
+    const bounds: NofCount = if (islen) try lenbound(allocator, bound) else .{ .lo = 0, .hi = 0, .desc = if (islike) likedesc else try rangedesc(allocator, bound) };
+
+    const desc = bounds.desc orelse {
+        try inj.errs.append(try std.fmt.allocPrint(
+            allocator,
+            "{s} has an invalid {s}: {s}.",
+            .{ field, argname, try stringify(allocator, bound, null) },
+        ));
+        return .null;
+    };
+
+    const val: JsonValue = cval orelse .null;
+
+    if (3 == elems.len and !(try admits(allocator, cval, elems[2], inj))) {
+        try inj.errs.append(try invalidTypeMsg(allocator, inj.path, try valdesc(allocator, elems[2..]), val));
+        return .null;
+    }
+
+    const tbits: i64 = if (islen) T_string | T_list | T_map else if (islike) T_string else T_number;
+    if (0 == (tbits & typify(val))) {
+        const tname: []const u8 = if (islen) "string, list or map" else if (islike) S_string else S_number;
+        try inj.errs.append(try invalidTypeMsg(allocator, inj.path, tname, val));
+        return .null;
+    }
+
+    const len = lenof(val);
+    const inbound = if (islen) bounds.lo <= len and (-1 == bounds.hi or len <= bounds.hi) else if (islike) re_test(like.?, val.string) else inrange(bound, val);
+
+    if (!inbound) {
+        const root_prefix: []const u8 = if (1 < inj.path.len) "" else "value ";
+        const need = try std.fmt.allocPrint(allocator, "{s}{s}", .{ root_prefix, desc });
+        try inj.errs.append(try invalidTypeMsg(allocator, inj.path, need, val));
+    }
+
+    return .null;
+}
+
+// The length $LEN bounds: a list's elements, a map's keys, and a string's code
+// points, one for each byte that is not a UTF-8 continuation byte.
+fn lenof(val: JsonValue) i64 {
+    return switch (val) {
+        .string => |s| blk: {
+            var n: i64 = 0;
+            for (s) |b| {
+                if ((b & 0xC0) != 0x80) n += 1;
+            }
+            break :blk n;
+        },
+        .array => |a| @intCast(a.data.items.len),
+        .object => |o| @intCast(o.count()),
+        else => 0,
+    };
+}
+
+// The bounds of a $LEN bound, with -1 for no maximum, and the words for it,
+// which are null when the bound is invalid.
+fn lenbound(allocator: Allocator, bound: JsonValue) anyerror!NofCount {
+    const b = try nofcount(allocator, bound, -1);
+    if (null == b.desc) return b;
+
+    var desc: []const u8 = undefined;
+    if (b.lo == b.hi) {
+        desc = try std.fmt.allocPrint(allocator, "of length {d}", .{b.lo});
+    } else if (-1 == b.hi) {
+        desc = try std.fmt.allocPrint(allocator, "of length at least {d}", .{b.lo});
+    } else if (0 == b.lo) {
+        desc = try std.fmt.allocPrint(allocator, "of length at most {d}", .{b.hi});
+    } else {
+        desc = try std.fmt.allocPrint(allocator, "of length {d} to {d}", .{ b.lo, b.hi });
+    }
+
+    return .{ .lo = b.lo, .hi = b.hi, .desc = desc };
+}
+
+// A $LIKE pattern, null unless the port's own regex engine compiles it.
+fn likere(pattern: JsonValue) ?[]const u8 {
+    if (pattern != .string) return null;
+    var re = re_compile(pattern.string) orelse return null;
+    re.deinit();
+    return pattern.string;
+}
+
+// A $RANGE bound's number, or null when it is absent or not a number.
+fn rangenum(n: ?JsonValue) ?f64 {
+    const v = n orelse return null;
+    if (0 == (@as(i64, T_number) & typify(v))) return null;
+    return numval(v);
+}
+
+// The words for a $RANGE bound, which are null when the bound is invalid.
+fn rangedesc(allocator: Allocator, bound: JsonValue) anyerror!?[]const u8 {
+    if (bound != .object) return null;
+
+    const min = bound.object.get("min");
+    const max = bound.object.get("max");
+    const gt = bound.object.get("gt");
+    const lt = bound.object.get("lt");
+
+    var numkeys: usize = 0;
+    for ([_]?JsonValue{ min, max, gt, lt }) |n| {
+        if (n == null) continue;
+        if (null == rangenum(n)) return null;
+        numkeys += 1;
+    }
+
+    if (0 == numkeys or bound.object.count() != numkeys) return null;
+    if ((min != null and gt != null) or (max != null and lt != null)) return null;
+
+    const lower = rangenum(min) orelse rangenum(gt);
+    const upper = rangenum(max) orelse rangenum(lt);
+    if (lower != null and upper != null and upper.? < lower.?) return null;
+
+    var desc = std.array_list.Managed(u8).init(allocator);
+    if (min orelse gt) |n| {
+        const words: []const u8 = if (min != null) "at least " else "greater than ";
+        try desc.appendSlice(words);
+        try desc.appendSlice(try stringify(allocator, n, null));
+    }
+    if (max orelse lt) |n| {
+        const words: []const u8 = if (max != null) "at most " else "less than ";
+        if (0 < desc.items.len) try desc.appendSlice(" and ");
+        try desc.appendSlice(words);
+        try desc.appendSlice(try stringify(allocator, n, null));
+    }
+    return desc.items;
+}
+
+// A number within a valid $RANGE bound.
+fn inrange(bound: JsonValue, val: JsonValue) bool {
+    const v = numval(val) orelse return false;
+    const min = rangenum(bound.object.get("min"));
+    const max = rangenum(bound.object.get("max"));
+    const gt = rangenum(bound.object.get("gt"));
+    const lt = rangenum(bound.object.get("lt"));
+    return (min == null or min.? <= v) and (max == null or v <= max.?) and (gt == null or gt.? < v) and (lt == null or v < lt.?);
+}
+
 // The data value at a list directive's slot: .null for a JSON null, and null
 // when absent. The directive's own dparent was read with getprop.
 fn slotval(inj: *Injection) ?JsonValue {
@@ -3197,6 +3380,9 @@ const VALIDATE_CHECKERS = [_][]const u8{
     "$EXACT",
     "$NOF",
     "$ALL",
+    "$LEN",
+    "$RANGE",
+    "$LIKE",
     S_DERRS,
 };
 
@@ -3861,108 +4047,40 @@ fn cmdRef(allocator: Allocator, inj: *Injection, store: JsonValue) !JsonValue {
 
     // Resolve the ref path within the spec.
     const ref_result = try getpath(allocator, JsonValue{ .string = refpath }, spec_val);
-    if (ref_result == .null) {
-        // Ref not found → delete from parent.
-        const tkey = if (inj.path.len >= 2) inj.path[inj.path.len - 2] else S_DTOP;
-        const target = if (inj.nodes.len >= 2) inj.nodes[inj.nodes.len - 2] else .null;
-        if (target != .null) _ = delprop(allocator, target, JsonValue{ .string = tkey }) catch {};
-        return .null;
-    }
 
-    // Cycle break: if the resolved spec contains another `$REF` literal AND
-    // there is no current data at the target slot, do NOT inject. This is the
-    // self-recursive-ref case (e.g. spec {z:{y:["$REF","z"]}} with data {}).
-    // Other ports do the same check; without it the inject loop recurses
-    // infinitely into the same clone and the test process stack-overflows
-    // (manifests as a SIGSEGV during the transform-ref test).
     var has_sub_ref = false;
     if (isnode(ref_result)) scanForRef(ref_result, &has_sub_ref);
 
-    // Clone the referenced spec and inject it with proper data context.
-    const tref = try clone(allocator, ref_result);
-
-    // Compute paths following Go: tpath = path[:-1], cpath = path[:-3]
+    // A recursive reference stops where the data does. getpath reads $TOP
+    // itself, so the slot's path drops its leading "$TOP".
     const tpath = if (inj.path.len > 0) inj.path[0 .. inj.path.len - 1] else inj.path;
-    const cpath = if (inj.path.len > 3) inj.path[0 .. inj.path.len - 3] else &[_][]const u8{};
-
-    // Resolve data at these paths.
-    const tcur = if (cpath.len > 0) blk: {
-        var joined = std.array_list.Managed(u8).init(allocator);
-        for (cpath, 0..) |p, pi| {
-            if (pi > 0) try joined.append('.');
-            try joined.appendSlice(p);
-        }
-        break :blk try getpath(allocator, JsonValue{ .string = joined.items }, store);
-    } else store;
-
-    // Build child injection with proper context.
-    const lastPath = if (tpath.len > 0) tpath[tpath.len - 1] else S_DTOP;
-    const tinj = try allocator.create(Injection);
-    const tinj_nodes_src = if (inj.nodes.len > 1) inj.nodes[0 .. inj.nodes.len - 1] else inj.nodes[0..0];
-    const tinj_nodes = try allocator.alloc(JsonValue, tinj_nodes_src.len);
-    @memcpy(tinj_nodes, tinj_nodes_src);
-    const tinj_dpath = try allocator.alloc([]const u8, cpath.len);
-    @memcpy(tinj_dpath, cpath);
-    tinj.* = Injection{
-        .allocator = allocator,
-        .mode = M_VAL,
-        .key = lastPath,
-        .val = tref,
-        .parent = if (inj.nodes.len >= 2) inj.nodes[inj.nodes.len - 2] else .null,
-        .base = inj.base,
-        .dparent = tcur,
-        .keys = try allocator.alloc([]const u8, 1),
-        .path = tpath,
-        .nodes = tinj_nodes,
-        .dpath = tinj_dpath,
-        .meta = inj.meta,
-        .errs = inj.errs,
-    };
-    tinj.keys[0] = lastPath;
-
-    // Cycle break (matches the Rust / JS / Py / Go ports): if the resolved
-    // ref contains another `$REF` literal AND there is no current data at
-    // the target path, skip injection. Otherwise inject the cloned ref.
-    //
-    // Zig's getpath auto-unwraps store.$TOP, so an absolute path like
-    // ["$TOP", "z", "p"] would re-traverse "$TOP" inside the data and hit
-    // a dead end. Strip the leading "$TOP" before joining.
     const tpath_strip: []const []const u8 = if (tpath.len > 0 and std.mem.eql(u8, tpath[0], S_DTOP))
         tpath[1..]
     else
         tpath;
-    const tval_at: JsonValue = blk2: {
-        if (tpath_strip.len == 0) break :blk2 store;
+    const tval: JsonValue = blk: {
+        if (tpath_strip.len == 0) break :blk store;
         var joined = std.array_list.Managed(u8).init(allocator);
         for (tpath_strip, 0..) |p, pi| {
-            if (pi > 0) joined.append('.') catch break :blk2 .null;
-            joined.appendSlice(p) catch break :blk2 .null;
+            if (pi > 0) joined.append('.') catch break :blk .null;
+            joined.appendSlice(p) catch break :blk .null;
         }
-        break :blk2 getpath(allocator, JsonValue{ .string = joined.items }, store) catch .null;
+        break :blk getpath(allocator, JsonValue{ .string = joined.items }, store) catch .null;
     };
-    const skip_for_cycle = has_sub_ref and tval_at == .null;
-    const rval: JsonValue = if (skip_for_cycle) .null else blk: {
-        _ = try inject(allocator, tref, store, tinj);
-        break :blk tinj.val;
-    };
+    const rval: JsonValue = if (!has_sub_ref or tval != .null) try clone(allocator, ref_result) else .null;
 
-    // Set the result on the grandparent.
-    _ = try inj.setval(rval, 2);
+    // The enclosing loop injects the referenced spec in this list's place, so
+    // neither this pass nor this element leaves a value for modify to check.
+    const grandparent = try inj.setval(rval, 2);
 
-    // Adjust prior key index if grandparent is a list. Wrap on underflow:
-    // setval(rval, 2) above just shrunk the grandparent list at path[-2], so
-    // the caller's loop variable needs to step back one slot to re-visit the
-    // index that the shift moved into the current position. The TS / JS / Py
-    // / Go / Rust ports do `prior.keyI--` on a signed counter; here key_i is
-    // usize, so we wrap with -%= 1 — the consumer loop bit-casts back through
-    // isize so 0 -% 1 reads as -1 and `+ 1` lands back on the same index.
     if (inj.prior) |prior| {
-        const gp = if (inj.nodes.len >= 2) inj.nodes[inj.nodes.len - 2] else .null;
-        if (islist(gp)) {
+        prior.modify = null;
+        if (islist(grandparent) or rval != .null) {
             prior.key_i = prior.key_i -% 1;
         }
     }
 
+    inj.skip = true;
     return .null;
 }
 
@@ -4533,6 +4651,53 @@ fn selectCount(
     return data_val;
 }
 
+// $LEN, $RANGE and $LIKE in a query: the value matches the spec, if there is
+// one, and has a length or is a number within the bound, or is a string the
+// pattern finds.
+fn selectBound(
+    allocator: Allocator,
+    spec_val: JsonValue,
+    data_val: JsonValue,
+    errs: *std.array_list.Managed([]const u8),
+    path: []const []const u8,
+    name: []const u8,
+) anyerror!JsonValue {
+    const elems = spec_val.array.data.items;
+    const bound: JsonValue = if (1 < elems.len) elems[1] else .null;
+    const islen = std.mem.eql(u8, name, "$LEN");
+    const islike = std.mem.eql(u8, name, "$LIKE");
+    const like: ?[]const u8 = if (islike) likere(bound) else null;
+    const likedesc: ?[]const u8 = if (like) |p| try std.fmt.allocPrint(allocator, "like /{s}/", .{p}) else null;
+
+    const bounds: NofCount = if (islen) try lenbound(allocator, bound) else .{ .lo = 0, .hi = 0, .desc = if (islike) likedesc else try rangedesc(allocator, bound) };
+    if (elems.len < 2 or 3 < elems.len or null == bounds.desc) {
+        try errs.append("Invalid bound.");
+        return data_val;
+    }
+
+    if (3 == elems.len) {
+        var terrs = std.array_list.Managed([]const u8).init(allocator);
+        _ = try validateExactMatch(allocator, elems[2], data_val, &terrs, path);
+        if (0 < terrs.items.len) {
+            try errs.append("Spec not matched.");
+            return data_val;
+        }
+    }
+
+    const tbits: i64 = if (islen) T_string | T_list | T_map else if (islike) T_string else T_number;
+    const len = lenof(data_val);
+    const inbound = if (islen) bounds.lo <= len and (-1 == bounds.hi or len <= bounds.hi) else if (islike) data_val == .string and re_test(like.?, data_val.string) else inrange(bound, data_val);
+
+    if (0 == (tbits & typify(data_val)) or !inbound) {
+        try errs.append(try std.fmt.allocPrint(
+            allocator,
+            "Bound at {s}: {s} should be {s}.",
+            .{ try pathifySlice(allocator, path), try stringify(allocator, data_val, null), bounds.desc.? },
+        ));
+    }
+    return data_val;
+}
+
 /// Canonical `_invalidTypeMsg`:
 ///
 ///   'Expected ' +
@@ -4662,9 +4827,7 @@ pub fn select(allocator: Allocator, children: JsonValue, query: JsonValue) anyer
     for (child_list.items) |child| {
         var terrs = std.array_list.Managed([]const u8).init(allocator);
         const q = try clone(allocator, query);
-
-        // Mark all maps in query as open.
-        _ = try walk(allocator, q, markOpen, null, MAXDEPTH);
+        try openquery(q);
 
         // Validate with exact matching.
         _ = try validateExactMatch(allocator, q, child, &terrs, &[_][]const u8{});
@@ -4677,11 +4840,28 @@ pub fn select(allocator: Allocator, children: JsonValue, query: JsonValue) anyer
     return JsonValue{ .array = result_lr };
 }
 
-fn markOpen(_: Allocator, _: ?[]const u8, val: JsonValue, _: JsonValue, _: []const []const u8) anyerror!JsonValue {
-    if (val == .object) {
-        val.object.put(S_BOPEN, JsonValue{ .bool = true }) catch {};
+// Open every map in a select query, so a child may hold keys the query does
+// not name, but leave a directive's literals as written: what $EXACT
+// compares, and the count or bound of $NOF, $LEN and $RANGE.
+fn openquery(q: JsonValue) anyerror!void {
+    switch (q) {
+        .object => |obj| {
+            const open: JsonValue = obj.get(S_BOPEN) orelse .null;
+            if (open == .null) try obj.put(S_BOPEN, JsonValue{ .bool = true });
+            var it = obj.iterator();
+            while (it.next()) |kv| try openquery(kv.value_ptr.*);
+        },
+        .array => |arr| {
+            const elems = arr.data.items;
+            const head: []const u8 = if (0 < elems.len and elems[0] == .string) elems[0].string else "";
+            const exact = std.mem.eql(u8, head, S_BEXACT);
+            const bounded = std.mem.eql(u8, head, "`$NOF`") or std.mem.eql(u8, head, "`$LEN`") or std.mem.eql(u8, head, "`$RANGE`");
+            for (elems, 0..) |elem, i| {
+                if (0 == i or !(exact or (bounded and 1 == i))) try openquery(elem);
+            }
+        },
+        else => {},
     }
-    return val;
 }
 
 fn validateExactMatch(
@@ -4780,6 +4960,12 @@ fn validateExactMatch(
                     return try selectCount(allocator, spec_val, data_val, errs, path, true);
                 if (std.mem.eql(u8, first.string, "`$ALL`"))
                     return try selectCount(allocator, spec_val, data_val, errs, path, false);
+                if (std.mem.eql(u8, first.string, "`$LEN`"))
+                    return try selectBound(allocator, spec_val, data_val, errs, path, "$LEN");
+                if (std.mem.eql(u8, first.string, "`$RANGE`"))
+                    return try selectBound(allocator, spec_val, data_val, errs, path, "$RANGE");
+                if (std.mem.eql(u8, first.string, "`$LIKE`"))
+                    return try selectBound(allocator, spec_val, data_val, errs, path, "$LIKE");
             }
         }
         // Plain array spec: compare to data element-by-element. Length and

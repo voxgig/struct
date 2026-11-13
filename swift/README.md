@@ -3,10 +3,10 @@
 > Swift port of the canonical TypeScript implementation.
 > Status: **complete** — the full shared corpus passes (`make test`) on
 > [voxgig/omni](https://github.com/voxgig/omni), the shared test runner:
-> 1602 entries in 78 groups, plus the two `check` entries and three single
+> 1730 entries in 81 groups, plus the two `check` entries and three single
 > entries that are not part of any set. That covers all 29 minor utilities,
 > `walk`, `merge`, `setpath`, `getpath`, `inject`, `transform` (all 11
-> commands), `validate` (all 15 checkers), `select` (all 5 groups), and the
+> commands), `validate` (all 19 checkers), `select` (all 5 groups), and the
 > `Injection` state machine.
 
 For motivation, the language-neutral concepts, and the cross-language
@@ -113,11 +113,20 @@ order. `JSON.stringify(value, indent: 2)` serialises back.
   `$FORMAT`, `$APPLY` (plus the `FORMATTER` table for `$FORMAT`:
   `identity`, `upper`, `lower`, `string`, `number`, `integer`,
   `concat`).
-- `validate` and the 16 validate checkers: `$STRING`, `$NUMBER`,
+- `validate` and the 19 validate checkers: `$STRING`, `$NUMBER`,
   `$INTEGER`, `$DECIMAL`, `$BOOLEAN`, `$NULL`, `$NIL`, `$MAP`,
   `$LIST`, `$FUNCTION`, `$INSTANCE`, `$ANY`, `$CHILD`, `$EXACT`,
-  `$NOF`, `$ALL`. There is no `$ONE`: write ``["`$ONE`", a, b]`` as
-  ``["`$NOF`", {"min": 1}, a, b]``. A spec that names a checker
+  `$NOF`, `$ALL`, `$LEN`, `$RANGE`, `$LIKE`. There is no `$ONE`: write
+  ``["`$ONE`", a, b]`` as ``["`$NOF`", {"min": 1}, a, b]``.
+  ``["`$LEN`", n, spec?]`` holds when the value's length is within `n`,
+  a bound written as for `$NOF`. Strings count code points, lists
+  elements, maps keys. ``["`$RANGE`", bound, spec?]`` holds when the
+  value is a number within the bound, a map of `min` or `gt` and `max`
+  or `lt`. ``["`$LIKE`", pattern, spec?]`` holds when the value is a
+  string the pattern finds, anywhere unless anchored, with
+  `NSRegularExpression` and no options. Each takes at most one spec,
+  which must also admit the value. `min` and `max` include their
+  bound, while `gt` and `lt` exclude it. A spec that names a checker
   `validate` does not define is rejected before any data is read.
 - `select` and the 4 select operators: `$AND`, `$OR`, `$NOT`,
   `$CMP` (with `$GT`, `$LT`, `$GTE`, `$LTE`, `$LIKE`).
@@ -408,7 +417,7 @@ make test
 Runs `../build/test/test.json` (the cross-port corpus) through
 [voxgig/omni](https://github.com/voxgig/omni), the shared test runner — so
 the entry loop, the comparison and the `err` and `match` handling are
-literally the same code every other port runs. **1602** entries over 78
+literally the same code every other port runs. **1730** entries over 81
 groups, plus the smoke tests.
 
 `make test` needs an omni checkout, found via `$OMNI_HOME` or beside this

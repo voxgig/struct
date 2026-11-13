@@ -440,7 +440,11 @@ object struct {
 
   private def reStr(p: Value): String = p match { case VStr(s) => s; case _ => jsString(p) }
 
-  def re_compile(p: Value, flags: Value = Noval): Value = p match { case VStr(_) => p; case _ => VStr(jsString(p)) }
+  // Compiles only to reject a bad pattern: the text is what travels.
+  def re_compile(p: Value, flags: Value = Noval): Value = {
+    java.util.regex.Pattern.compile(reStr(p))
+    p match { case VStr(_) => p; case _ => VStr(jsString(p)) }
+  }
   def re_test(p: Value, input: Value): Value =
     VBool(java.util.regex.Pattern.compile(reStr(p)).matcher(reStr(input)).find())
   def re_find(p: Value, input: Value): Value = {
@@ -1341,10 +1345,9 @@ object struct {
     }
   }
 
-  private val transformRef: Injector = (inj, v, _r, store) => {
+  private val transformRef: Injector = (inj, _v, _r, store) => {
     if (inj.mode != M_VAL) Noval
     else {
-      val nodes = inj.nodes
       val refpath = lookup_(inj.parent, VNum(1.0))
       inj.keyi = size(inj.keys)
       getprop(store, VStr(S_DSPEC)) match {
@@ -1353,28 +1356,20 @@ object struct {
           val refv = getpath(spec, refpath, INone)
           var hasSub = false
           if (isnode(refv)) walk(refv, before = Some((_k, v2, _p, _path) => { if (v2 == VStr("`$REF`")) hasSub = true; v2 }))
-          val tref = clone(refv)
-          val cpath = slice(inj.path, VNum(0.0), VNum((size(inj.path) - 3).toDouble))
+          // A recursive reference stops where the data does.
           val tpath = slice(inj.path, VNum(0.0), VNum((size(inj.path) - 1).toDouble))
-          val tcur = getpath(store, cpath, INone)
           val tval = getpath(store, tpath, INone)
-          var rval: Value = Noval
-          if (!isNoval(refv) && (!hasSub || !isNoval(tval))) {
-            val cs = injChild(inj, 0, mkList(Seq(getelem(tpath, VNum(-1.0)))))
-            cs.path = tpath
-            cs.nodes = slice(inj.nodes, VNum(0.0), VNum((size(inj.nodes) - 1).toDouble))
-            cs.parent = getelem(nodes, VNum(-2.0))
-            cs.ival = tref
-            cs.dparent = tcur
-            inject(tref, store, IInj(cs))
-            rval = cs.ival
-          }
-          injSetval(inj, rval, 2)
+          val rval = if (!hasSub || !isNoval(tval)) clone(refv) else Noval
+          // The enclosing loop injects the referenced spec in this list's place, so
+          // neither this pass nor this element leaves a value for modify to check.
+          val grandparent = injSetval(inj, rval, 2)
           inj.prior match {
-            case Some(p) if islist(inj.parent) => p.keyi = p.keyi - 1
-            case _ =>
+            case Some(p) =>
+              p.modify = None
+              if (islist(grandparent) || !isNoval(rval)) p.keyi = p.keyi - 1
+            case None =>
           }
-          v
+          SKIP
         case _ => Noval
       }
     }
@@ -1695,6 +1690,146 @@ object struct {
     }
   }
 
+  // The value's length is within a bound: ['`$LEN`', bound, spec?], where the
+  // bound is as for a $NOF count. A string's length is in code points.
+  private val validateLen: Injector = (inj, _v, _r, store) => validatebound(inj, store, "$LEN")
+
+  // The value is a number within a bound: ['`$RANGE`', bound, spec?], where the
+  // bound holds min or gt, max or lt, or one of each.
+  private val validateRange: Injector = (inj, _v, _r, store) => validatebound(inj, store, "$RANGE")
+
+  private val validateLike: Injector = (inj, _v, _r, store) => validatebound(inj, store, "$LIKE")
+
+  // The bounding list directives: a bound or pattern, then at most one spec that also admits.
+  private def validatebound(inj: Inj, store: Value, name: String): Value = {
+    val parent = inj.parent
+    if (inj.mode != M_VAL) Noval
+    else if (!islist(parent) || inj.keyi != 0) {
+      pushErr(inj, "The " + name + " validator at field " + pathify(inj.path, VNum(1.0), VNum(1.0)) + " must be the first element of an array.")
+      Noval
+    } else {
+      val cval = slotval(inj)
+      inj.keyi = size(inj.keys)
+
+      // As for the counting directives: SKIP keeps inject off the detached list.
+      injSetval(inj, cval, 2)
+
+      inj.path = slice(inj.path, VNum(-1.0))
+
+      val field = "The " + name + " validator at field " + pathify(inj.path, VNum(1.0))
+      val nargs = size(parent) - 1
+      val islen = name == "$LEN"
+      val islike = name == "$LIKE"
+      val argname = if (islike) "pattern" else "bound"
+
+      if (nargs < 1 || 2 < nargs) pushErr(inj, field + " must have a " + argname + " and at most one spec.")
+      else {
+        val bound = lookup_(parent, VNum(1.0))
+        val like = if (islike) likere(bound) else None
+        val (lo, hi, desc) =
+          if (islen) lenbound(bound)
+          else (0.0, 0.0, if (islike) like.map(p => "like /" + reStr(p) + "/") else rangedesc(bound))
+        val ctype = typify(cval)
+        desc match {
+          case None => pushErr(inj, field + " has an invalid " + argname + ": " + stringify(bound) + ".")
+          case Some(words) =>
+            if (nargs == 2 && !admits(cval, lookup_(parent, VNum(2.0)), inj, store)) {
+              val specdesc = replaceTransformNames(stringify(lookup_(parent, VNum(2.0))))
+              pushErr(inj, invalidTypeMsg(inj.path, specdesc, ctype, cval, "V0410"))
+            } else if (0 == ((if (islen) T_string | T_list | T_map else if (islike) T_string else T_number) & ctype)) {
+              val needtype = if (islen) "string, list or map" else if (islike) S_string else "number"
+              pushErr(inj, invalidTypeMsg(inj.path, needtype, ctype, cval, "V0420"))
+            } else {
+              val inbound =
+                if (islike) like.exists(p => re_test(p, cval) == VBool(true))
+                else if (!islen) inrange(bound, cval)
+                else {
+                  // size counts a string in UTF-16 units, not code points.
+                  val len = cval match { case VStr(s) => s.codePointCount(0, s.length); case _ => size(cval) }
+                  lo <= len && (hi == -1.0 || len <= hi)
+                }
+              if (!inbound) {
+                val needtype = (if (size(inj.path) > 1) "" else "value ") + words
+                pushErr(inj, invalidTypeMsg(inj.path, needtype, ctype, cval, "V0430"))
+              }
+            }
+        }
+      }
+      SKIP
+    }
+  }
+
+  // The bounds of a $LEN bound, with -1 for no maximum, and the words for it,
+  // which are absent when the bound is invalid.
+  private def lenbound(bound: Value): (Double, Double, Option[String]) =
+    nofcount(bound, -1) match {
+      case (lo, hi, Some(_)) =>
+        val words =
+          if (lo == hi) numToString(lo)
+          else if (hi == -1.0) "at least " + numToString(lo)
+          else if (lo == 0.0) "at most " + numToString(hi)
+          else numToString(lo) + " to " + numToString(hi)
+        (lo, hi, Some("of length " + words))
+      case _ => (0.0, 0.0, None)
+    }
+
+  // A $LIKE pattern compiled by the port's own regex engine; absent unless it compiles.
+  private def likere(pattern: Value): Option[Value] = pattern match {
+    case VStr(_) =>
+      try Some(re_compile(pattern))
+      catch { case _: java.util.regex.PatternSyntaxException => None }
+    case _ => None
+  }
+
+  // The words for a $RANGE bound, which are absent when the bound is invalid.
+  private def rangedesc(bound: Value): Option[String] =
+    if (!ismap(bound)) None
+    else {
+      val min = lookup_(bound, VStr("min"))
+      val max = lookup_(bound, VStr("max"))
+      val gt = lookup_(bound, VStr("gt"))
+      val lt = lookup_(bound, VStr("lt"))
+      val lower = if (isNoval(min)) gt else min
+      val upper = if (isNoval(max)) lt else max
+      def isnum(n: Value): Boolean = isNoval(n) || 0 < (T_number & typify(n))
+
+      val valid =
+        0 < size(bound) &&
+          size(bound) == Seq(min, max, gt, lt).count(n => !isNoval(n)) &&
+          (isNoval(min) || isNoval(gt)) &&
+          (isNoval(max) || isNoval(lt)) &&
+          isnum(min) && isnum(max) && isnum(gt) && isnum(lt) &&
+          (isNoval(lower) || isNoval(upper) || numval(lower) <= numval(upper))
+
+      if (!valid) None
+      else {
+        val lowerdesc =
+          if (!isNoval(min)) "at least " + stringify(min)
+          else if (!isNoval(gt)) "greater than " + stringify(gt)
+          else S_MT
+        val upperdesc =
+          if (!isNoval(max)) "at most " + stringify(max)
+          else if (!isNoval(lt)) "less than " + stringify(lt)
+          else S_MT
+        Some(Seq(lowerdesc, upperdesc).filter(_.nonEmpty).mkString(" and "))
+      }
+    }
+
+  // A number within a valid $RANGE bound.
+  private def inrange(bound: Value, v: Value): Boolean = {
+    val min = lookup_(bound, VStr("min"))
+    val max = lookup_(bound, VStr("max"))
+    val gt = lookup_(bound, VStr("gt"))
+    val lt = lookup_(bound, VStr("lt"))
+    val x = numval(v)
+    (isNoval(min) || numval(min) <= x) &&
+      (isNoval(max) || x <= numval(max)) &&
+      (isNoval(gt) || numval(gt) < x) &&
+      (isNoval(lt) || x < numval(lt))
+  }
+
+  private def numval(n: Value): Double = n match { case VNum(x) => x; case _ => 0.0 }
+
   // Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
   private val VALIDATE_NAMES = Seq("$TOP", "$SPEC", "$BT", "$DS", "$WHEN", "$ANNO", "$REF", "$FORMAT", "$APPLY", "$OPEN")
 
@@ -1876,6 +2011,9 @@ object struct {
     put("$EXACT", VFunc(validateExact))
     put("$NOF", VFunc(validateNof))
     put("$ALL", VFunc(validateAll))
+    put("$LEN", VFunc(validateLen))
+    put("$RANGE", VFunc(validateRange))
+    put("$LIKE", VFunc(validateLike))
     val store = merge(mkList(Seq(base, if (isNoval(extra)) emptyMap() else extra, mkMap(Seq((S_DERRS, errs))))), VNum(1.0))
     val meta = inj match { case IDef(d) if !isNoval(d.dMeta) => d.dMeta; case _ => emptyMap() }
     setprop(meta, VStr(S_BEXACT), getprop(meta, VStr(S_BEXACT), VBool(false)))
@@ -1960,23 +2098,27 @@ object struct {
     case _ => false
   }
 
-  private val selectCmp: Injector = (inj, _v, refstr, store) => {
-    if (inj.mode == M_KEYPRE) {
-      val term = getprop(inj.parent, inj.key)
-      val gkey = getelem(inj.path, VNum(-2.0))
-      val ppath = slice(inj.path, VNum(-1.0))
-      val point = getpath(store, ppath, INone)
-      val pass =
-        if (refstr == "$GT") numCmp(point, term, "gt")
-        else if (refstr == "$LT") numCmp(point, term, "lt")
-        else if (refstr == "$GTE") numCmp(point, term, "gte")
-        else if (refstr == "$LTE") numCmp(point, term, "lte")
-        else if (refstr == "$LIKE") (term match { case VStr(t) => java.util.regex.Pattern.compile(t).matcher(stringify(point)).find(); case _ => false })
-        else false
-      if (pass) { val gp = getelem(inj.nodes, VNum(-2.0)); setprop(gp, gkey, point) }
-      else pushErr(inj, "CMP: " + pathify(ppath) + "⨯" + stringify(point) + " fail:" + refstr + " " + stringify(term))
+  private val selectCmp: Injector = (inj, v, refstr, store) => {
+    // The list form of $LIKE is validate's checker; the key form is this operator.
+    if (inj.mode == M_VAL && refstr == "$LIKE") validateLike(inj, v, refstr, store)
+    else {
+      if (inj.mode == M_KEYPRE) {
+        val term = getprop(inj.parent, inj.key)
+        val gkey = getelem(inj.path, VNum(-2.0))
+        val ppath = slice(inj.path, VNum(-1.0))
+        val point = getpath(store, ppath, INone)
+        val pass =
+          if (refstr == "$GT") numCmp(point, term, "gt")
+          else if (refstr == "$LT") numCmp(point, term, "lt")
+          else if (refstr == "$GTE") numCmp(point, term, "gte")
+          else if (refstr == "$LTE") numCmp(point, term, "lte")
+          else if (refstr == "$LIKE") (term match { case VStr(t) => java.util.regex.Pattern.compile(t).matcher(stringify(point)).find(); case _ => false })
+          else false
+        if (pass) { val gp = getelem(inj.nodes, VNum(-2.0)); setprop(gp, gkey, point) }
+        else pushErr(inj, "CMP: " + pathify(ppath) + "⨯" + stringify(point) + " fail:" + refstr + " " + stringify(term))
+      }
+      Noval
     }
-    Noval
   }
 
   def select(children0: Value, query: Value): Value = {
@@ -1990,7 +2132,7 @@ object struct {
       Seq(("$AND", selectAnd), ("$OR", selectOr), ("$NOT", selectNot), ("$GT", selectCmp), ("$LT", selectCmp), ("$GTE", selectCmp), ("$LTE", selectCmp), ("$LIKE", selectCmp))
         .foreach { case (k, f) => setprop(extra, VStr(k), VFunc(f)) }
       val q = clone(query)
-      walk(q, before = Some((_k, v, _p, _path) => { if (ismap(v)) setprop(v, VStr(S_BOPEN), getprop(v, VStr(S_BOPEN), VBool(true))); v }))
+      openquery(q)
       (children match { case VList(b) => b.toSeq; case _ => Seq.empty }).foreach { child =>
         val errs = emptyList()
         val d = new InjDef
@@ -2002,6 +2144,23 @@ object struct {
       }
       results
     }
+  }
+
+  // Open every map in a select query, so a child may hold keys the query does
+  // not name, but leave a directive's literals as written: what $EXACT
+  // compares, and the count or bound of $NOF, $LEN and $RANGE.
+  private def openquery(q: Value): Unit = q match {
+    case VMap(_) =>
+      setprop(q, VStr(S_BOPEN), getprop(q, VStr(S_BOPEN), VBool(true)))
+      keysof(q).foreach(key => openquery(lookup_(q, VStr(key))))
+    case VList(b) =>
+      val head = b.headOption.getOrElse(Noval)
+      val exact = head == VStr(S_BEXACT)
+      val bounded = head == VStr("`$NOF`") || head == VStr("`$LEN`") || head == VStr("`$RANGE`")
+      b.indices.foreach { i =>
+        if (0 == i || !(exact || (bounded && 1 == i))) openquery(b(i))
+      }
+    case _ =>
   }
 
   // ---------------------------------------------------------------------------

@@ -637,6 +637,10 @@ inline bool re_test(const std::string& pattern, const std::string& input) {
   return std::regex_search(input, std::regex(pattern));
 }
 
+inline bool re_test(const std::regex& re, const std::string& input) {
+  return std::regex_search(input, re);
+}
+
 inline std::vector<std::string> re_find(const std::string& pattern, const std::string& input) {
   std::smatch m;
   if (!std::regex_search(input, m, std::regex(pattern)))
@@ -2986,50 +2990,24 @@ inline Value REF_FN(Injection& inj, const Value& val, const std::string& ref, co
         });
   }
 
-  std::vector<std::string> cpath_v;
-  if (inj.path.size() >= 3) {
-    cpath_v = std::vector<std::string>(inj.path.begin(), inj.path.begin() + (inj.path.size() - 3));
-  }
-  std::vector<std::string> tpath_v;
-  if (!inj.path.empty()) {
-    tpath_v = std::vector<std::string>(inj.path.begin(), inj.path.end() - 1);
-  }
-  auto cpath_list = std::make_shared<List>();
-  for (auto& p : cpath_v)
-    cpath_list->push_back(Value(p));
+  // A recursive reference stops where the data does.
   auto tpath_list = std::make_shared<List>();
-  for (auto& p : tpath_v)
-    tpath_list->push_back(Value(p));
+  for (size_t i = 0; i + 1 < inj.path.size(); i++)
+    tpath_list->push_back(Value(inj.path[i]));
+  Value tval = getpath_v(store, Value(tpath_list));
+  Value rval = (!hasSubRef || !tval.is_undef()) ? tref : Value::undef();
 
-  Value tval_at = getpath_v(store, Value(tpath_list));
-  Value rval = Value::undef();
-
-  if (!hasSubRef || !tval_at.is_undef()) {
-    std::string lastkey = tpath_v.empty() ? "" : tpath_v.back();
-    auto single_keys = std::make_shared<std::vector<std::string>>();
-    single_keys->push_back(lastkey);
-    auto tinj_owner = inj.child(0, single_keys);
-    Injection* tinj = tinj_owner.get();
-    tinj->path = tpath_v;
-    if (inj.nodes && inj.nodes->size() >= 1) {
-      tinj->nodes = std::make_shared<std::vector<Value>>(inj.nodes->begin(), inj.nodes->end() - 1);
-    }
-    if (inj.nodes && inj.nodes->size() >= 2) {
-      tinj->parent = (*inj.nodes)[inj.nodes->size() - 2];
-    }
-    tinj->val = tref;
-    tinj->dpath = cpath_v;
-    tinj->dparent = getpath_v(store, Value(cpath_list));
-
-    inject(tref, store, tinj);
-    rval = tinj->val;
-  }
-
+  // The enclosing loop injects the referenced spec in this list's place, so
+  // neither this pass nor this element leaves a value for modify to check.
   Value grandparent = inj.setval(rval, 2);
-  if (grandparent.is_list() && inj.prior) {
-    inj.prior->keyI--;
+
+  if (Injection* prior = inj.prior) {
+    prior->modify = nullptr;
+    if (grandparent.is_list() || !rval.is_undef()) {
+      prior->keyI--;
+    }
   }
-  return val;
+  return SKIP();
 }
 
 } // namespace transforms
@@ -3549,6 +3527,188 @@ inline Value ALL_FN(Injection& inj, const Value& val, const std::string& ref, co
   return validatecount(inj, store, "$ALL", false);
 }
 
+// The bounds of a $LEN bound, with -1 for no maximum, and the words for it.
+// False when the bound is invalid.
+inline bool lenbound(const Value& bound, int64_t& lo, int64_t& hi, std::string& desc) {
+  std::string countdesc;
+  if (!nofcount(bound, -1, lo, hi, countdesc))
+    return false;
+
+  desc = "of length " + (lo == hi   ? std::to_string(lo)
+                         : -1 == hi ? "at least " + std::to_string(lo)
+                         : 0 == lo  ? "at most " + std::to_string(hi)
+                                    : std::to_string(lo) + " to " + std::to_string(hi));
+  return true;
+}
+
+// The words for a $RANGE bound. False when the bound is invalid.
+inline bool rangedesc(const Value& bound, std::string& desc) {
+  if (!bound.is_map())
+    return false;
+
+  Value min = lookup_v(bound, Value("min"));
+  Value max = lookup_v(bound, Value("max"));
+  Value gt = lookup_v(bound, Value("gt"));
+  Value lt = lookup_v(bound, Value("lt"));
+  Value lower = min.is_undef() ? gt : min;
+  Value upper = max.is_undef() ? lt : max;
+  auto isnum = [](const Value& n) { return n.is_undef() || 0 != (T_number & typify(n)); };
+
+  size_t given = 0;
+  for (const Value* n : {&min, &max, &gt, &lt})
+    given += n->is_undef() ? 0 : 1;
+
+  size_t numkeys = bound.as_map()->size();
+  bool valid = 0 < numkeys && numkeys == given && (min.is_undef() || gt.is_undef()) &&
+               (max.is_undef() || lt.is_undef()) && isnum(min) && isnum(max) && isnum(gt) &&
+               isnum(lt) &&
+               (lower.is_undef() || upper.is_undef() || lower.as_double() <= upper.as_double());
+
+  if (!valid)
+    return false;
+
+  std::string lowdesc = !min.is_undef()  ? "at least " + stringify(min)
+                        : !gt.is_undef() ? "greater than " + stringify(gt)
+                                         : "";
+  std::string updesc = !max.is_undef()  ? "at most " + stringify(max)
+                       : !lt.is_undef() ? "less than " + stringify(lt)
+                                        : "";
+  desc = lowdesc + (lowdesc.empty() || updesc.empty() ? "" : " and ") + updesc;
+  return true;
+}
+
+// A number within a valid $RANGE bound, compared as doubles, as JavaScript does.
+inline bool inrange(const Value& bound, const Value& val) {
+  Value min = lookup_v(bound, Value("min"));
+  Value max = lookup_v(bound, Value("max"));
+  Value gt = lookup_v(bound, Value("gt"));
+  Value lt = lookup_v(bound, Value("lt"));
+  double v = val.as_double();
+
+  return (min.is_undef() || min.as_double() <= v) && (max.is_undef() || v <= max.as_double()) &&
+         (gt.is_undef() || gt.as_double() < v) && (lt.is_undef() || v < lt.as_double());
+}
+
+// A string's length in code points: its UTF-8 bytes that do not continue a character.
+inline int64_t codepoints(const std::string& s) {
+  int64_t n = 0;
+  for (unsigned char b : s)
+    n += 0x80 == (b & 0xC0) ? 0 : 1;
+  return n;
+}
+
+// A $LIKE pattern compiled by std::regex, through re_compile, which throws on a
+// bad pattern. False unless it compiles.
+inline bool likere(const Value& pattern, std::regex& like) {
+  if (!pattern.is_string())
+    return false;
+  try {
+    like = re_compile(pattern.as_string());
+    return true;
+  } catch (const std::regex_error&) {
+    return false;
+  }
+}
+
+// The bounding list directives: a bound or pattern, then at most one spec that also admits.
+inline Value validatebound(Injection& inj, const Value& store, const std::string& name) {
+  if (inj.mode != M_VAL)
+    return Value::undef();
+
+  if (!inj.parent.is_list() || inj.keyI != 0) {
+    inj.errs->push_back(Value("The " + name + " validator at field " +
+                              pathify(pathlist(inj.path), 1, 1) +
+                              " must be the first element of an array."));
+    return Value::undef();
+  }
+
+  Value cval = slotval(inj);
+
+  inj.keyI = static_cast<int>(inj.keys ? inj.keys->size() : 0);
+
+  // As for the counting directives: SKIP keeps inject off the detached list.
+  inj.setval(cval, 2);
+
+  if (!inj.path.empty())
+    inj.path.pop_back();
+
+  std::string field = "The " + name + " validator at field " + pathify(pathlist(inj.path), 1);
+  int64_t nargs = size(inj.parent) - 1;
+  bool islen = "$LEN" == name;
+  bool islike = "$LIKE" == name;
+  std::string argname = islike ? "pattern" : "bound";
+
+  if (nargs < 1 || 2 < nargs) {
+    inj.errs->push_back(Value(field + " must have a " + argname + " and at most one spec."));
+    return SKIP();
+  }
+
+  Value bound = lookup_v(inj.parent, Value(int64_t(1)));
+  std::regex like;
+  int64_t lo = 0;
+  int64_t hi = 0;
+  std::string desc;
+
+  bool valid = islen    ? lenbound(bound, lo, hi, desc)
+               : islike ? likere(bound, like)
+                        : rangedesc(bound, desc);
+
+  if (!valid) {
+    inj.errs->push_back(
+        Value(field + " has an invalid " + argname + ": " + stringify(bound) + "."));
+    return SKIP();
+  }
+
+  if (islike)
+    desc = "like /" + bound.as_string() + "/";
+
+  int ctype = typify(cval);
+
+  if (2 == nargs) {
+    Value spec = lookup_v(inj.parent, Value(int64_t(2)));
+    if (!admits(cval, spec, inj, store)) {
+      inj.errs->push_back(
+          Value(invalid_type_msg(inj.path, describe_alternatives({spec}), ctype, cval, "V0410")));
+      return SKIP();
+    }
+  }
+
+  if (0 == ((islen ? T_string | T_list | T_map : islike ? T_string : T_number) & ctype)) {
+    std::string needtype = islen ? "string, list or map" : islike ? "string" : "number";
+    inj.errs->push_back(Value(invalid_type_msg(inj.path, needtype, ctype, cval, "V0420")));
+    return SKIP();
+  }
+
+  int64_t len = islen ? (cval.is_string() ? codepoints(cval.as_string()) : size(cval)) : 0;
+  bool inbound = islen    ? lo <= len && (-1 == hi || len <= hi)
+                 : islike ? re_test(like, cval.as_string())
+                          : inrange(bound, cval);
+
+  if (!inbound) {
+    std::string needtype = std::string(inj.path.size() > 1 ? "" : "value ") + desc;
+    inj.errs->push_back(Value(invalid_type_msg(inj.path, needtype, ctype, cval, "V0430")));
+  }
+
+  return SKIP();
+}
+
+// The value's length is within a bound: ['`$LEN`', bound, spec?], where the
+// bound is as for a $NOF count. A string's length is in code points.
+inline Value LEN_FN(Injection& inj, const Value& val, const std::string& ref, const Value& store) {
+  return validatebound(inj, store, "$LEN");
+}
+
+// The value is a number within a bound: ['`$RANGE`', bound, spec?], where the
+// bound holds min or gt, max or lt, or one of each.
+inline Value RANGE_FN(Injection& inj, const Value& val, const std::string& ref,
+                      const Value& store) {
+  return validatebound(inj, store, "$RANGE");
+}
+
+inline Value LIKE_FN(Injection& inj, const Value& val, const std::string& ref, const Value& store) {
+  return validatebound(inj, store, "$LIKE");
+}
+
 // Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
 inline const std::vector<std::string>& VALIDATE_NAMES() {
   static const std::vector<std::string> names = {"$TOP",  "$SPEC", "$BT",     "$DS",    "$WHEN",
@@ -3770,6 +3930,9 @@ inline Value validate(const Value& data, const Value& spec, const Value& options
   baseStore->set("$EXACT", Value(Injector(validators::EXACT_FN)));
   baseStore->set("$NOF", Value(Injector(validators::NOF_FN)));
   baseStore->set("$ALL", Value(Injector(validators::ALL_FN)));
+  baseStore->set("$LEN", Value(Injector(validators::LEN_FN)));
+  baseStore->set("$RANGE", Value(Injector(validators::RANGE_FN)));
+  baseStore->set("$LIKE", Value(Injector(validators::LIKE_FN)));
 
   auto mergeList = std::make_shared<List>();
   mergeList->push_back(Value(baseStore));
@@ -3953,6 +4116,10 @@ inline Value NOT_FN(Injection& inj, const Value& val, const std::string& ref, co
 }
 
 inline Value CMP_FN(Injection& inj, const Value& val, const std::string& ref, const Value& store) {
+  // The list form of $LIKE is validate's checker; the key form is this operator.
+  if (M_VAL == inj.mode && "$LIKE" == ref)
+    return validators::LIKE_FN(inj, val, ref, store);
+
   if (inj.mode != M_KEYPRE)
     return Value::undef();
   Value term = lookup_v(inj.parent, Value(inj.key));
@@ -3991,6 +4158,27 @@ inline Value CMP_FN(Injection& inj, const Value& val, const std::string& ref, co
                               " fail:" + ref + " " + stringify(term)));
   }
   return Value::undef();
+}
+
+// Open every map in a select query, so a child may hold keys the query does
+// not name, but leave a directive's literals as written: what $EXACT
+// compares, and the count or bound of $NOF, $LEN and $RANGE.
+inline void openquery(const Value& q) {
+  if (ismap(q)) {
+    Value cur = getprop(q, Value(S_BOPEN()));
+    setprop(q, Value(S_BOPEN()), cur.is_undef() ? Value(true) : cur);
+    for (const auto& entry : *q.as_map())
+      openquery(entry.second);
+  } else if (islist(q)) {
+    auto l = q.as_list();
+    std::string head = !l->empty() && (*l)[0].is_string() ? (*l)[0].as_string() : "";
+    bool exact = S_BEXACT() == head;
+    bool bounded = "`$NOF`" == head || "`$LEN`" == head || "`$RANGE`" == head;
+    for (size_t i = 0; i < l->size(); i++) {
+      if (0 == i || !(exact || (bounded && 1 == i)))
+        openquery((*l)[i]);
+    }
+  }
 }
 
 } // namespace selectors
@@ -4032,14 +4220,8 @@ inline std::vector<Value> select(const Value& children, const Value& query) {
   extra->set("$LIKE", Value(Injector(selectors::CMP_FN)));
 
   Value q = clone(query);
-  walk_v(q,
-         [](const Value&, const Value& v, const Value&, const std::vector<std::string>&) -> Value {
-           if (ismap(v)) {
-             Value cur = getprop(v, Value(S_BOPEN()));
-             setprop(v, Value(S_BOPEN()), cur.is_undef() ? Value(true) : cur);
-           }
-           return v;
-         });
+
+  selectors::openquery(q);
 
   std::vector<Value> results;
   for (const auto& child : childList) {

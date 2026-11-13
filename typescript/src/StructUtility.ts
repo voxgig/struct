@@ -1638,9 +1638,7 @@ const transform_PACK: Injector = (inj: Injection, _val: any, _ref: string, store
   return NONE
 }
 
-const transform_REF: Injector = (inj: Injection, val: any, _ref: string, store: any) => {
-  const { nodes } = inj
-
+const transform_REF: Injector = (inj: Injection, _val: any, _ref: string, store: any) => {
   if (M_VAL !== inj.mode) {
     return NONE
   }
@@ -1654,7 +1652,6 @@ const transform_REF: Injector = (inj: Injection, val: any, _ref: string, store: 
   const dpath = slice(inj.path, 1)
   const ref = getpath(spec, refpath, {
     dpath,
-    // dparent: getpath(spec, inj.path.slice(1))
     dparent: getpath(spec, dpath),
   })
 
@@ -1668,39 +1665,23 @@ const transform_REF: Injector = (inj: Injection, val: any, _ref: string, store: 
     })
   }
 
-  const tref = clone(ref)
+  // A recursive reference stops where the data does.
+  const tval = getpath(store, slice(inj.path, -1))
+  const rval = !hasSubRef || NONE !== tval ? clone(ref) : NONE
 
-  const cpath = slice(inj.path, -3)
-  const tpath = slice(inj.path, -1)
-  const tcur = getpath(store, cpath)
-  const tval = getpath(store, tpath)
-  let rval = NONE
-
-  if (!hasSubRef || NONE !== tval) {
-    const tinj = inj.child(0, [getelem(tpath, -1)])
-
-    tinj.path = tpath
-    tinj.nodes = slice(inj.nodes, -1)
-    tinj.parent = getelem(nodes, -2)
-    tinj.val = tref
-
-    tinj.dpath = flatten([cpath])
-    tinj.dparent = tcur
-
-    inject(tref, store, tinj)
-
-    rval = tinj.val
-  } else {
-    rval = NONE
-  }
-
+  // The enclosing loop injects the referenced spec in this list's place, so
+  // neither this pass nor this element leaves a value for modify to check.
   const grandparent = inj.setval(rval, 2)
 
-  if (islist(grandparent) && inj.prior) {
-    inj.prior.keyI--
+  const prior = inj.prior
+  if (prior) {
+    prior.modify = NONE
+    if (islist(grandparent) || NONE !== rval) {
+      prior.keyI--
+    }
   }
 
-  return val
+  return SKIP
 }
 
 const transform_FORMAT: Injector = (inj: Injection, _val: any, _ref: string, store: any) => {
@@ -2154,6 +2135,195 @@ function _validatecount(inj: Injection, store: any, name: string, counted: boole
   return SKIP
 }
 
+// The value's length is within a bound: ['`$LEN`', bound, spec?], where the
+// bound is as for a $NOF count. A string's length is in code points.
+const validate_LEN: Injector = (inj: Injection, _val: any, _ref: string, store: any) =>
+  _validatebound(inj, store, '$LEN')
+
+// The value is a number within a bound: ['`$RANGE`', bound, spec?], where the
+// bound holds min or gt, max or lt, or one of each.
+const validate_RANGE: Injector = (inj: Injection, _val: any, _ref: string, store: any) =>
+  _validatebound(inj, store, '$RANGE')
+
+const validate_LIKE: Injector = (inj: Injection, _val: any, _ref: string, store: any) =>
+  _validatebound(inj, store, '$LIKE')
+
+// The bounding list directives: a bound or pattern, then at most one spec that also admits.
+function _validatebound(inj: Injection, store: any, name: string): any {
+  const { mode, parent, keyI } = inj
+
+  if (M_VAL !== mode) {
+    return NONE
+  }
+
+  if (!islist(parent) || 0 !== keyI) {
+    inj.errs.push(
+      'The ' +
+        name +
+        ' validator at field ' +
+        pathify(inj.path, 1, 1) +
+        ' must be the first element of an array.',
+    )
+    return NONE
+  }
+
+  const cval = _slotval(inj)
+
+  inj.keyI = size(inj.keys)
+
+  // As for the counting directives: SKIP keeps inject off the detached list.
+  inj.setval(cval, 2)
+
+  inj.path = slice(inj.path, -1)
+
+  const field = 'The ' + name + ' validator at field ' + pathify(inj.path, 1)
+  const nargs = size(parent) - 1
+  const islen = '$LEN' === name
+  const islike = '$LIKE' === name
+  const argname = islike ? 'pattern' : 'bound'
+
+  if (nargs < 1 || 2 < nargs) {
+    inj.errs.push(field + ' must have a ' + argname + ' and at most one spec.')
+    return SKIP
+  }
+
+  const bound = _lookup(parent, 1)
+  const like = islike ? _likere(bound) : NONE
+  const [lo, hi, desc] = islen
+    ? _lenbound(bound)
+    : [0, 0, islike ? (NONE === like ? NONE : 'like /' + bound + '/') : _rangedesc(bound)]
+
+  if (NONE === desc) {
+    inj.errs.push(field + ' has an invalid ' + argname + ': ' + stringify(bound) + '.')
+    return SKIP
+  }
+
+  const ctype = typify(cval)
+
+  if (2 === nargs && !_admits(cval, _lookup(parent, 2), inj, store)) {
+    const specdesc = replace(
+      stringify(_lookup(parent, 2)),
+      R_TRANSFORM_NAME,
+      (_m: any, p1: string) => p1.toLowerCase(),
+    )
+    inj.errs.push(_invalidTypeMsg(inj.path, specdesc, ctype, cval, 'V0410'))
+    return SKIP
+  }
+
+  if (0 === ((islen ? T_string | T_list | T_map : islike ? T_string : T_number) & ctype)) {
+    const needtype = islen ? 'string, list or map' : islike ? S_string : S_number
+    inj.errs.push(_invalidTypeMsg(inj.path, needtype, ctype, cval, 'V0420'))
+    return SKIP
+  }
+
+  const len = islen
+    ? S_string === typeof cval
+      ? Array.from(cval as string).length
+      : size(cval)
+    : 0
+  const inbound = islen
+    ? lo <= len && (-1 === hi || len <= hi)
+    : islike
+      ? re_test(like as RegExp, cval)
+      : _inrange(bound, cval)
+
+  if (!inbound) {
+    const needtype = (1 < size(inj.path) ? '' : 'value ') + desc
+    inj.errs.push(_invalidTypeMsg(inj.path, needtype, ctype, cval, 'V0430'))
+  }
+
+  return SKIP
+}
+
+// The bounds of a $LEN bound, with -1 for no maximum, and the words for it,
+// which are absent when the bound is invalid.
+function _lenbound(bound: any): [number, number, string | undefined] {
+  const [lo, hi, countdesc] = _nofcount(bound, -1)
+
+  if (NONE === countdesc) {
+    return [0, 0, NONE]
+  }
+
+  const desc =
+    'of length ' +
+    (lo === hi ? lo : -1 === hi ? 'at least ' + lo : 0 === lo ? 'at most ' + hi : lo + ' to ' + hi)
+
+  return [lo, hi, desc]
+}
+
+// A $LIKE pattern compiled by the port's own regex engine; absent unless it compiles.
+function _likere(pattern: any): RegExp | undefined {
+  if (S_string !== typeof pattern) {
+    return NONE
+  }
+  try {
+    return re_compile(pattern)
+  } catch {
+    return NONE
+  }
+}
+
+// The words for a $RANGE bound, which are absent when the bound is invalid.
+function _rangedesc(bound: any): string | undefined {
+  if (!ismap(bound)) {
+    return NONE
+  }
+
+  const min = _lookup(bound, 'min')
+  const max = _lookup(bound, 'max')
+  const gt = _lookup(bound, 'gt')
+  const lt = _lookup(bound, 'lt')
+  const lower = NONE === min ? gt : min
+  const upper = NONE === max ? lt : max
+  const isnum = (n: any) => NONE === n || 0 < (T_number & typify(n))
+
+  const valid =
+    0 < size(bound) &&
+    size(bound) === [min, max, gt, lt].filter((n) => NONE !== n).length &&
+    (NONE === min || NONE === gt) &&
+    (NONE === max || NONE === lt) &&
+    isnum(min) &&
+    isnum(max) &&
+    isnum(gt) &&
+    isnum(lt) &&
+    (NONE === lower || NONE === upper || lower <= upper)
+
+  if (!valid) {
+    return NONE
+  }
+
+  return join(
+    [
+      NONE !== min
+        ? 'at least ' + stringify(min)
+        : NONE !== gt
+          ? 'greater than ' + stringify(gt)
+          : NONE,
+      NONE !== max
+        ? 'at most ' + stringify(max)
+        : NONE !== lt
+          ? 'less than ' + stringify(lt)
+          : NONE,
+    ],
+    ' and ',
+  )
+}
+
+// A number within a valid $RANGE bound.
+function _inrange(bound: any, val: number): boolean {
+  const min = _lookup(bound, 'min')
+  const max = _lookup(bound, 'max')
+  const gt = _lookup(bound, 'gt')
+  const lt = _lookup(bound, 'lt')
+
+  return (
+    (NONE === min || min <= val) &&
+    (NONE === max || val <= max) &&
+    (NONE === gt || gt < val) &&
+    (NONE === lt || val < lt)
+  )
+}
+
 // This is the "modify" argument to inject. Use this to perform
 // generic validation. Runs *after* any special commands.
 const _validation: Modify = (pval: any, key?: any, parent?: any, inj?: Injection) => {
@@ -2274,6 +2444,9 @@ function validate(
         $EXACT: validate_EXACT,
         $NOF: validate_NOF,
         $ALL: validate_ALL,
+        $LEN: validate_LEN,
+        $RANGE: validate_RANGE,
+        $LIKE: validate_LIKE,
       },
 
       getdef(extra, {}),
@@ -2406,6 +2579,11 @@ const select_NOT: Injector = (inj: Injection, _val: any, _ref: string, store: an
 }
 
 const select_CMP: Injector = (inj: Injection, _val: any, ref: string, store: any) => {
+  // The list form of $LIKE is validate's checker; the key form is this operator.
+  if (M_VAL === inj.mode && '$LIKE' === ref) {
+    return validate_LIKE(inj, _val, ref, store)
+  }
+
   if (M_KEYPRE === inj.mode) {
     const term = _lookup(inj.parent, inj.key)
     const gkey = getelem(inj.path, -2)
@@ -2480,12 +2658,7 @@ function select(children: any, query: any): any[] {
 
   const q = clone(query)
 
-  walk(q, (_k: PropKey | undefined, v: any) => {
-    if (ismap(v)) {
-      setprop(v, '`$OPEN`', getprop(v, '`$OPEN`', true))
-    }
-    return v
-  })
+  _openquery(q)
 
   for (const child of children) {
     injdef.errs = []
@@ -2498,6 +2671,27 @@ function select(children: any, query: any): any[] {
   }
 
   return results
+}
+
+// Open every map in a select query, so a child may hold keys the query does
+// not name, but leave a directive's literals as written: what $EXACT
+// compares, and the count or bound of $NOF, $LEN and $RANGE.
+function _openquery(q: any): void {
+  if (ismap(q)) {
+    setprop(q, '`$OPEN`', getprop(q, '`$OPEN`', true))
+    for (const key of keysof(q)) {
+      _openquery(q[key])
+    }
+  } else if (islist(q)) {
+    const head = q[0]
+    const exact = '`$EXACT`' === head
+    const bounded = '`$NOF`' === head || '`$LEN`' === head || '`$RANGE`' === head
+    for (let i = 0; i < size(q); i++) {
+      if (0 === i || !(exact || (bounded && 1 === i))) {
+        _openquery(q[i])
+      }
+    }
+  }
 }
 
 // Injection state used for recursive injection into JSON - like data structures.

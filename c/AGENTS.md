@@ -40,8 +40,9 @@ and the `_v` / `_va` suffixes, then matching against the canonical
 ## Commands
 
 ```bash
-make test         # the corpus driver + the client test
+make test         # smoke, regex, the corpus driver and the client test
 make smoke        # the small API smoke test (no omni needed)
+make regex        # tests/regex_test.c, the engine's own checks (no omni needed)
 make corpus       # just the corpus driver
 make client       # just the client test
 make build        # compile src/ alone - the library build, which omni never enters

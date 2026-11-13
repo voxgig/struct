@@ -150,9 +150,10 @@ S.stringify(linkedMapOf("a" to 1, "b" to listOf(2, 3)))   // {a:1,b:[2,3]}
 <!-- => "{a:1,b:[2,3]}" -->
 
 For more task recipes (rename fields, `$COPY`, `$EACH`, `$MERGE`,
-`$FORMAT`, `$NOF`, `$ALL`, `$EXACT`, …) see the language-neutral
-[How-to guides](../DOCS.md#2-how-to-guides) — the spec syntax is
-identical; only the host literals differ.
+`$FORMAT`, `$NOF`, `$ALL`, `$LEN`, `$RANGE`, `$LIKE`, `$EXACT`, …) see the
+language-neutral [How-to guides](../DOCS.md#2-how-to-guides) — the spec
+syntax is identical; only the host literals differ. A `$LIKE` pattern is
+matched by Kotlin's `Regex`.
 
 ---
 
@@ -219,7 +220,7 @@ language-neutral form:
   `transform`, `validate`, `select`, …) preserve it literally.
 
 [`../REPORT.md`](../design/REPORT.md) records this port as **already Group A**;
-the shared corpus passes 1602/1602 assertions here. If your data source
+the shared corpus passes 1730/1730 assertions here. If your data source
 returns `null` for "not set", decide which
 you mean before handing it to `struct`. The corpus bridges the two with
 the `"__NULL__"` / `"__UNDEF__"` / `"__EXISTS__"` markers (see
@@ -274,7 +275,7 @@ consumed as a local checkout `build.gradle.kts` finds via `$OMNI_HOME` or
 beside this repository, in its own source set so it reaches the tests and
 nothing else.
 
-`StructCorpusTest` runs every group the corpus defines: 1602 entries in 78
+`StructCorpusTest` runs every group the corpus defines: 1730 entries in 81
 groups. `ClientTest` runs the two `check` entries —
 `DEF.client`, client-scoped options, and `contextify`. `StructTests` holds
 what the corpus shape cannot express: identity, presence, and the hand-built

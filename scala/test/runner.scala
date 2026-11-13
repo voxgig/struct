@@ -448,7 +448,7 @@ object Runner {
       val d = new InjDef; d.dMeta = getprop(injm, VStr("meta"))
       validate(vget(vin, "data"), vget(vin, "spec"), if (isNullish(injm)) INone else IDef(d))
     }))
-    Seq("directive", "nof", "all", "unknown").foreach { gn =>
+    Seq("directive", "nof", "all", "len", "range", "like", "unknown").foreach { gn =>
       runSet("validate." + gn, getprop(validates, VStr(gn)), arg1(vin => validate(vget(vin, "data"), vget(vin, "spec"))), false)
     }
     runValidateLocal()

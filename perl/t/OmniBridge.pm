@@ -115,6 +115,12 @@ BEGIN {
 # The shared corpus, relative to the port directory as the tests run.
 sub corpus_path { return File::Spec->catfile( '..', 'build', 'test', 'test.json' ) }
 
+# omni reads the corpus as bytes, so its text is UTF-8 octets. The port takes
+# character strings, as a Perl caller passes, so text is decoded on the way in
+# and encoded on the way back.
+sub _text_in  { my ($s) = @_; utf8::decode($s); return $s }
+sub _text_out { my ($s) = @_; utf8::encode($s); return $s }
+
 # omni's model -> this port's, rewriting containers in place. See the header.
 sub tostruct {
     my ($val) = @_;
@@ -126,7 +132,8 @@ sub tostruct {
 
     if ( ismap($val) ) {
         for my $key ( keys %$val ) {
-            $val->{$key} = tostruct( $val->{$key} );
+            my $item = tostruct( delete $val->{$key} );
+            $val->{ _text_in($key) } = $item;
         }
         return $val;
     }
@@ -138,7 +145,7 @@ sub tostruct {
         return $val;
     }
 
-    return $val;
+    return Voxgig::Struct::_is_string_sv($val) ? _text_in($val) : $val;
 }
 
 # This port's model -> omni's, as a copy. A bare undef reads as absent: a Perl
@@ -155,7 +162,7 @@ sub toomni {
     if ( ismap($val) ) {
         my %out;
         for my $key ( Voxgig::Struct::_map_keys($val) ) {
-            $out{$key} = toomni( $val->{$key} );
+            $out{ _text_out($key) } = toomni( $val->{$key} );
         }
         return \%out;
     }
@@ -164,7 +171,7 @@ sub toomni {
         return [ map { toomni($_) } @$val ];
     }
 
-    return $val;
+    return Voxgig::Struct::_is_string_sv($val) ? _text_out($val) : $val;
 }
 
 # struct's runner API, backed by omni. `$provider` is optional; only the client
@@ -181,7 +188,13 @@ sub make_run {
         my $wrapped = !defined $subject ? undef : sub {
             my (@args) = @_;
             my $in = tostruct( @args ? $args[0] : $ABSENT );
-            return toomni( $subject->($in) );
+            my @out;
+            my $ok = eval { @out = $subject->($in); 1 };
+            if ( !$ok ) {
+                my $err = $@;
+                die( ref $err ? $err : _text_out($err) );
+            }
+            return toomni( $out[0] );
         };
 
         return $runpack->{runsetflags}->( $testspec, $flags || {}, $wrapped );

@@ -1676,7 +1676,6 @@ dynamic _transformPack(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
 dynamic _transformRef(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
   var inj = inj0 as Inj;
   if (inj.mode != S_MVAL) return null;
-  var nodes = inj.nodes;
   var refpath = _lookup(inj.parent, 1);
   inj.keyi = size(inj.keys);
   var specFunc = getprop(store, S_DSPEC);
@@ -1690,27 +1689,22 @@ dynamic _transformRef(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
       return v;
     });
   }
-  var tref = clone(refv);
-  var cpath = slice(inj.path, 0, size(inj.path) - 3);
-  var tpath = slice(inj.path, 0, size(inj.path) - 1);
-  var tcur = getpath(store, cpath);
-  var tval = getpath(store, tpath);
-  dynamic rval;
-  if (refv != null && (!hasSub || tval != null)) {
-    var cs = _injChild(inj, 0, [getelem(tpath, -1)]);
-    cs.path = tpath;
-    cs.nodes = slice(inj.nodes, 0, size(inj.nodes) - 1);
-    cs.parent = getelem(nodes, -2);
-    cs.ival = tref;
-    cs.dparent = tcur;
-    inject(tref, store, cs);
-    rval = cs.ival;
+
+  // A recursive reference stops where the data does.
+  var tval = getpath(store, slice(inj.path, 0, size(inj.path) - 1));
+  var rval = !hasSub || tval != null ? clone(refv) : null;
+
+  // The enclosing loop injects the referenced spec in this list's place, so
+  // neither this pass nor this element leaves a value for modify to check.
+  var grandparent = _injSetval(inj, rval, 2);
+  var prior = inj.prior;
+  if (prior != null) {
+    prior.modify = null;
+    if (islist(grandparent) || rval != null) {
+      prior.keyi = prior.keyi - 1;
+    }
   }
-  _injSetval(inj, rval, 2);
-  if (islist(inj.parent) && inj.prior != null) {
-    inj.prior!.keyi = inj.prior!.keyi - 1;
-  }
-  return val;
+  return SKIP;
 }
 
 String _jsstr(dynamic v) {
@@ -2185,6 +2179,189 @@ dynamic _validatecount(Inj inj, dynamic store, String name, bool counted) {
   return SKIP;
 }
 
+// The value's length is within a bound: ['`$LEN`', bound, spec?], where the
+// bound is as for a $NOF count. A string's length is in code points.
+dynamic _validateLen(dynamic inj0, dynamic val, dynamic ref, dynamic store) =>
+    _validatebound(inj0 as Inj, store, '\$LEN');
+
+// The value is a number within a bound: ['`$RANGE`', bound, spec?], where the
+// bound holds min or gt, max or lt, or one of each.
+dynamic _validateRange(dynamic inj0, dynamic val, dynamic ref, dynamic store) =>
+    _validatebound(inj0 as Inj, store, '\$RANGE');
+
+dynamic _validateLike(dynamic inj0, dynamic val, dynamic ref, dynamic store) =>
+    _validatebound(inj0 as Inj, store, '\$LIKE');
+
+// The bounding list directives: a bound or pattern, then at most one spec that
+// also admits.
+dynamic _validatebound(Inj inj, dynamic store, String name) {
+  if (inj.mode != S_MVAL) return null;
+  var parent = inj.parent;
+  if (!islist(parent) || inj.keyi != 0) {
+    _pushErr(
+        inj,
+        'The ' +
+            name +
+            ' validator at field ' +
+            pathify(inj.path, 1, 1) +
+            ' must be the first element of an array.');
+    return null;
+  }
+
+  var cval = _slotval(inj);
+  var has = _slothas(inj);
+  inj.keyi = size(inj.keys);
+
+  // As for the counting directives: SKIP keeps inject off the detached list.
+  _setslot(inj, cval, has);
+
+  inj.path = slice(inj.path, 0, size(inj.path) - 1);
+
+  var field = 'The ' + name + ' validator at field ' + pathify(inj.path, 1);
+  var nargs = size(parent) - 1;
+  var islen = '\$LEN' == name;
+  var islike = '\$LIKE' == name;
+  var argname = islike ? 'pattern' : 'bound';
+
+  if (nargs < 1 || 2 < nargs) {
+    _pushErr(inj, field + ' must have a ' + argname + ' and at most one spec.');
+    return SKIP;
+  }
+
+  var bound = _lookup(parent, 1);
+  var like = islike ? _likere(bound) : null;
+  var likedesc = like == null ? null : 'like /' + bound + '/';
+  List<dynamic> lb = islen
+      ? _lenbound(bound)
+      : <dynamic>[0, 0, islike ? likedesc : _rangedesc(bound)];
+  num lo = lb[0];
+  num hi = lb[1];
+  String? desc = lb[2];
+
+  if (desc == null) {
+    _pushErr(inj,
+        field + ' has an invalid ' + argname + ': ' + stringify(bound) + '.');
+    return SKIP;
+  }
+
+  var ctype = typify(cval);
+  var spec = _lookup(parent, 2);
+
+  if (nargs == 2 && !_admits(cval, has, spec, inj, store)) {
+    _pushErr(inj,
+        _invalidTypeMsg(inj.path, _valdesc([spec]), ctype, cval, 'V0410'));
+    return SKIP;
+  }
+
+  if (0 ==
+      ((islen ? T_string | T_list | T_map : islike ? T_string : T_number) &
+          ctype)) {
+    var needtype =
+        islen ? 'string, list or map' : islike ? S_string : 'number';
+    _pushErr(inj, _invalidTypeMsg(inj.path, needtype, ctype, cval, 'V0420'));
+    return SKIP;
+  }
+
+  var len = islen ? (cval is String ? cval.runes.length : size(cval)) : 0;
+  var inbound = islen
+      ? lo <= len && (hi == -1 || len <= hi)
+      : islike
+          ? re_test(like, cval) as bool
+          : _inrange(bound, cval);
+
+  if (!inbound) {
+    var needtype = (size(inj.path) > 1 ? '' : 'value ') + desc;
+    _pushErr(inj, _invalidTypeMsg(inj.path, needtype, ctype, cval, 'V0430'));
+  }
+
+  return SKIP;
+}
+
+// The bounds of a $LEN bound, with -1 for no maximum, and the words for it,
+// which are null when the bound is invalid.
+List<dynamic> _lenbound(dynamic bound) {
+  var nc = _nofcount(bound, -1);
+  if (nc[2] == null) return <dynamic>[0, 0, null];
+  num lo = nc[0];
+  num hi = nc[1];
+
+  var desc = 'of length ' +
+      (lo == hi
+          ? numToString(lo)
+          : hi == -1
+              ? 'at least ' + numToString(lo)
+              : lo == 0
+                  ? 'at most ' + numToString(hi)
+                  : numToString(lo) + ' to ' + numToString(hi));
+
+  return <dynamic>[lo, hi, desc];
+}
+
+// A $LIKE pattern compiled by the port's own regex engine; null unless it
+// compiles.
+RegExp? _likere(dynamic pattern) {
+  if (pattern is! String) return null;
+  try {
+    return re_compile(pattern) as RegExp;
+  } on FormatException {
+    return null;
+  }
+}
+
+// The words for a $RANGE bound, which are null when the bound is invalid.
+String? _rangedesc(dynamic bound) {
+  if (!ismap(bound)) return null;
+
+  var min = _lookup(bound, 'min');
+  var max = _lookup(bound, 'max');
+  var gt = _lookup(bound, 'gt');
+  var lt = _lookup(bound, 'lt');
+  var hasmin = _has(bound, 'min');
+  var hasmax = _has(bound, 'max');
+  var hasgt = _has(bound, 'gt');
+  var haslt = _has(bound, 'lt');
+  var lower = hasmin ? min : gt;
+  var upper = hasmax ? max : lt;
+  bool isnum(bool has, dynamic n) => !has || 0 < (T_number & typify(n));
+
+  var valid = size(bound) > 0 &&
+      size(bound) == [hasmin, hasmax, hasgt, haslt].where((h) => h).length &&
+      (!hasmin || !hasgt) &&
+      (!hasmax || !haslt) &&
+      isnum(hasmin, min) &&
+      isnum(hasmax, max) &&
+      isnum(hasgt, gt) &&
+      isnum(haslt, lt) &&
+      (!(hasmin || hasgt) || !(hasmax || haslt) || lower <= upper);
+
+  if (!valid) return null;
+
+  return join([
+    hasmin
+        ? 'at least ' + stringify(min)
+        : hasgt
+            ? 'greater than ' + stringify(gt)
+            : null,
+    hasmax
+        ? 'at most ' + stringify(max)
+        : haslt
+            ? 'less than ' + stringify(lt)
+            : null,
+  ], ' and ');
+}
+
+// A number within a valid $RANGE bound.
+bool _inrange(dynamic bound, dynamic val) {
+  var min = _lookup(bound, 'min');
+  var max = _lookup(bound, 'max');
+  var gt = _lookup(bound, 'gt');
+  var lt = _lookup(bound, 'lt');
+  return (min == null || min <= val) &&
+      (max == null || val <= max) &&
+      (gt == null || gt < val) &&
+      (lt == null || val < lt);
+}
+
 // The specs as a message lists them, each `$NAME` as its lower-case name.
 String _valdesc(List tvals) =>
     join(tvals.map((x) => stringify(x)).toList(), ', ').replaceAllMapped(
@@ -2327,6 +2504,9 @@ dynamic validate(dynamic data, dynamic spec, [dynamic injdef]) {
   base['\$EXACT'] = _validateExact;
   base['\$NOF'] = _validateNof;
   base['\$ALL'] = _validateAll;
+  base['\$LEN'] = _validateLen;
+  base['\$RANGE'] = _validateRange;
+  base['\$LIKE'] = _validateLike;
   var store = merge([
     base,
     extra == null ? <String, dynamic>{} : extra,
@@ -2629,6 +2809,11 @@ bool _numCmp(dynamic a, dynamic b, String op) {
 
 dynamic _selectCmp(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
   var inj = inj0 as Inj;
+  // The list form of $LIKE is validate's checker; the key form is this
+  // operator.
+  if (inj.mode == S_MVAL && ref == '\$LIKE') {
+    return _validateLike(inj, val, ref, store);
+  }
   if (inj.mode == S_MKEYPRE) {
     var term = getprop(inj.parent, inj.key);
     var gkey = getelem(inj.path, -2);
@@ -2701,10 +2886,7 @@ dynamic select(dynamic children0, dynamic query) {
     '\$LIKE': _selectCmp,
   };
   var q = clone(query);
-  walk(q, after: (k, v, p, pp) {
-    if (ismap(v)) setprop(v, S_BOPEN, getprop(v, S_BOPEN, true));
-    return v;
-  });
+  _openquery(q);
   for (var child in (children as List)) {
     var errs = <dynamic>[];
     var injdef = {
@@ -2716,6 +2898,28 @@ dynamic select(dynamic children0, dynamic query) {
     if (size(errs) == 0) results.add(child);
   }
   return results;
+}
+
+// Open every map in a select query, so a child may hold keys the query does
+// not name, but leave a directive's literals as written: what $EXACT
+// compares, and the count or bound of $NOF, $LEN and $RANGE.
+void _openquery(dynamic q) {
+  if (ismap(q)) {
+    setprop(q, S_BOPEN, getprop(q, S_BOPEN, true));
+    for (var key in keysof(q)) {
+      _openquery(_lookup(q, key));
+    }
+  } else if (islist(q)) {
+    var head = _lookup(q, 0);
+    var exact = S_BEXACT == head;
+    var bounded =
+        '`\$NOF`' == head || '`\$LEN`' == head || '`\$RANGE`' == head;
+    for (var i = 0; i < size(q); i++) {
+      if (0 == i || !(exact || (bounded && 1 == i))) {
+        _openquery(_lookup(q, i));
+      }
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

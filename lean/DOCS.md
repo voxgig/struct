@@ -120,7 +120,27 @@ A list led by `` .str "`$NOF`" `` counts the specs that admit the value:
 
 The count is a `.num` or a map of `min` and `max`. `` .str "`$ALL`" `` leads
 a list the same way, without a count, and holds when every spec admits the
-value. There is no `$ONE`; the full checker list is in the
+value.
+
+`` .str "`$LEN`" ``, `` .str "`$RANGE`" `` and `` .str "`$LIKE`" `` lead a
+list with a bound or a pattern and at most one spec, which must also admit
+the value:
+
+```lean
+    let rng ← jm [.str "min", .num 0.0, .str "lt", .num 150.0]
+    let spec ← jt [.str "`$RANGE`", rng, .str "`$INTEGER`"]
+    IO.println (← stringify (← validate (.num 42.0) spec))   -- "42"
+```
+
+The `$LEN` bound is written as the `$NOF` count is. A string's length counts
+code points (`String.length`), a list's its elements, and a map's its keys.
+The `$RANGE` bound is a map of `min` or `gt` and `max` or `lt`: `min` and
+`max` include their bound, while `gt` and `lt` exclude it. The `$LIKE`
+pattern is found by the in-tree engine in `src/Vregex.lean`, anywhere in a
+`.str` unless the pattern is anchored, and any other value fails. That engine
+reads every string as a pattern, a malformed one included, so a `$LIKE`
+pattern is invalid only when it is not a `.str`. There is no `$ONE`; the
+full checker list is in the
 [language-neutral reference](../DOCS.md#validate-checkers-inside-backticks-in-a-validate-spec).
 A spec that names a checker `validate` does not define is rejected before any
 data is read, with `Unknown validator $FOO at field a.`
@@ -136,7 +156,7 @@ prints as `"1.1"`, not `"1.100000"`.
 ## Testing
 
 ```
-make test    # run the shared corpus on voxgig/omni (77 groups)
+make test    # run the shared corpus on voxgig/omni (100 groups)
 make build   # type-check the library alone (no omni)
 make lint    # clean, warnings-free compile = pass
 ```
@@ -144,7 +164,7 @@ make lint    # clean, warnings-free compile = pass
 `make test` runs the shared corpus (`../build/test/test.json`) through the
 port on [voxgig/omni](https://github.com/voxgig/omni), the shared test runner
 — so the entry loop, the comparison and the `err` and `match` handling are
-literally the same code every other port runs. **1602** entries over 78
+literally the same code every other port runs. **1730** entries over 81
 groups. omni is a local checkout the Makefile finds via `$OMNI_HOME` or
 beside this repository and copies into `.omni-build/`; `lakefile.toml`
 declares it as a lean_lib only the runner imports, so `make build` compiles

@@ -593,7 +593,7 @@ $MERGE   $EACH    $PACK    $REF     $FORMAT  $APPLY
 ```
 $MAP   $LIST   $STRING   $NUMBER   $INTEGER   $DECIMAL  $BOOLEAN
 $NULL  $NIL    $FUNCTION $INSTANCE $ANY       $CHILD    $EXACT
-$NOF   $ALL
+$NOF   $ALL    $LEN      $RANGE    $LIKE
 ```
 
 `` ["`$NOF`", n, spec, …] `` holds when as many specs admit the value as `n`
@@ -602,6 +602,17 @@ allows, where `n` is an integer or a map with `min`, `max` or both.
 admits a value when validating the value against it finds no error and gives
 back every member of the value unchanged. There is no `$ONE`: write
 `` ["`$ONE`", a, b] `` as `` ["`$NOF`", { min: 1 }, a, b] ``.
+
+`` ["`$LEN`", n, spec?] `` holds when the value's length is within `n`, a
+bound written as for `$NOF`. Strings count code points, lists elements, maps
+keys. `` ["`$RANGE`", bound, spec?] `` holds when the value is a number within
+the bound, a map of `min` or `gt` and `max` or `lt`.
+`` ["`$LIKE`", pattern, spec?] `` holds when the value is a string the pattern
+finds, with the in-tree engine in `src/regex.zig`. `$LEN`, `$RANGE` and
+`$LIKE` take at most one spec, which must also admit the value. `min` and
+`max` include their bound, while `gt` and `lt` exclude it. A `$LIKE` pattern
+matches anywhere unless anchored, and one the engine refuses, such as an
+unclosed `(`, is an invalid pattern.
 
 A spec that names a checker `validate` does not define is rejected before
 any data is read, and nothing is validated: `out` is a copy of the data and
@@ -660,9 +671,9 @@ earlier `mvzr` dependency. No third-party runtime crates.
 ### Dialect
 
 The in-tree engine implements the RE2 subset documented in `/design/REGEX.md`:
-literals + escapes, `.`, `^`/`$`, `* + ? {n} {n,} {n,m}` (greedy + lazy),
-classes incl. `\d \w \s` and friends, `\b`/`\B`, `(...)` / `(?:...)`,
-alternation.
+literals + escapes, `.`, `^`/`$` (the start and end of the whole text),
+`* + ? {n} {n,} {n,m}` (greedy + lazy), classes incl. `\d \w \s` and
+friends, `\b`/`\B`, `(...)` / `(?:...)`, alternation.
 
 **Not supported** (by design — RE2 doesn't either): backreferences,
 lookaround, possessive quantifiers, atomic groups.

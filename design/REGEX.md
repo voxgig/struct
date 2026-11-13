@@ -30,14 +30,26 @@ The library uses regular expressions in two places:
    | `\`([^\`]+)\`` | partial-string injection | yes |
    | `/+$` / `^/+` / `([^/])/+([^/])` | URL joiner internals | yes |
 
-2. **User-facing**: the `$LIKE` select operator. The shared corpus has
-   **one** `$LIKE` case in `build/test/select.aon`:
+2. **User-facing**: `$LIKE`, in two forms. `select`'s key-form operator,
+   `{name: {'$LIKE': pattern}}`, matches the value's text. `validate`'s
+   checker, `['$LIKE', pattern, spec?]`, takes strings only, and works in a
+   `select` query too. Both call the port's `re_test` on the pattern
+   `re_compile` builds, so each port matches with its own engine, and a
+   pattern means what that language's regex means.
 
-   ```
-   { query: {s0: '`$LIKE`':'[aA][bB][cC]'}, obj: [{s0:'DEf'},{s0:'ABc'}] }
-   ```
-
-   `[aA][bB][cC]` is just character classes — RE2-compatible.
+   The corpus pins only patterns inside the subset below, over ASCII text,
+   and `tools/check_corpus_regex.py` checks every `$LIKE` pattern in it, in
+   either form. Outside the subset, with a class such as `\w`, `\s` or `.`
+   over text that is not ASCII, or with `^` and `$` around a line break,
+   ports may match differently: Ruby anchors `^` and `$` at every line, and
+   Python, Perl and PHP let `$` match before a final newline, where
+   JavaScript, Go and every in-tree engine anchor both to the whole text.
+   PHP reads a pattern that starts with `/` as already delimited, flags and
+   all. The engines also differ on
+   which malformed patterns they refuse: Ruby and C++ take `a**`, and the
+   in-tree engines take most such patterns, as [`NOTES.md`](NOTES.md)
+   records. That is accepted, not pinned: a pattern is native to the port
+   that runs it.
 
 **Conclusion:** the corpus is inside the RE2 subset, and every port now
 locks that in — the in-tree engines (rs, zig, c, lua) only implement the

@@ -5,7 +5,7 @@
  * Dialect:
  *   - Literal chars and escapes (\n \t \\ \. ...)
  *   - Any char (.)
- *   - Anchors (^ $)
+ *   - Anchors (^ $), at the start and end of the whole text
  *   - Quantifiers: * + ? {n} {n,} {n,m}, plus lazy *? +? ?? {..}?
  *   - Character classes: [abc] [^abc] [a-z] (predefined classes inside too)
  *   - Predefined classes: \d \D \s \S \w \W

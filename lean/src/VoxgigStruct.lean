@@ -2476,11 +2476,10 @@ partial def transformPack : InjectorFn := fun inj _v _ref store => do
         let _ ← setprop target tkey (← rvalRef.get)
         pure .noval
 
-partial def transformRef : InjectorFn := fun inj v _ref store => do
+partial def transformRef : InjectorFn := fun inj _v _ref store => do
   let d ← getInj inj
   if d.mode != M_VAL then pure .noval
   else do
-    let nodes := d.nodes
     let refpath ← lookupRaw d.parent (.num 1.0)
     let nkeys ← size d.keys
     modInj inj (fun dd => { dd with keyi := nkeys })
@@ -2494,35 +2493,22 @@ partial def transformRef : InjectorFn := fun inj v _ref store => do
         let _ ← walk refv (before := some (fun _k v2 _p _path => do
           if v2 == .str "`$REF`" then hasSub.set true
           pure v2))
-      let tref ← clone refv
+      -- A recursive reference stops where the data does.
       let d2 ← getInj inj
-      let psize ← size d2.path
-      let cpath ← slice d2.path (start := .num 0.0) (stop := vInt (psize - 3))
-      let tpath ← slice d2.path (start := .num 0.0) (stop := vInt (psize - 1))
-      let tcur ← getpath store cpath
-      let tval ← getpath store tpath
-      let rvalRef ← IO.mkRef Value.noval
+      let tval ← getpath store (← slice d2.path (start := .num (-1.0)))
       let hs ← hasSub.get
-      if !(isNoval refv) && (!hs || !(isNoval tval)) then do
-        let lastp ← getelem tpath (.num (-1.0))
-        let cs ← makeChildInj inj 0 (← newList #[lastp])
-        let nsize ← size d2.nodes
-        let cnodes ← slice d2.nodes (start := .num 0.0) (stop := vInt (nsize - 1))
-        let cparent ← getelem nodes (.num (-2.0))
-        modInj cs (fun dd => { dd with
-          path := tpath, nodes := cnodes, parent := cparent,
-          ival := tref, dparent := tcur })
-        let _ ← inject tref store (.iinj cs)
-        rvalRef.set (← getInj cs).ival
-      injSetval inj (← rvalRef.get) (ancestor := 2)
-      let d3 ← getInj inj
-      (match d3.prior with
-       | some p =>
-         if islist d3.parent then
+      let rval ← if !hs || !(isNoval tval) then clone refv else pure Value.noval
+      -- The enclosing loop injects the referenced spec in this list's place, so
+      -- neither this pass nor this element leaves a value for modify to check.
+      injSetval inj rval (ancestor := 2)
+      let grandparent ← getelem d2.nodes (.num (-2.0))
+      (match d2.prior with
+       | some p => do
+         modInj p (fun dd => { dd with modify := none })
+         if islist grandparent || !(isNoval rval) then
            modInj p (fun dd => { dd with keyi := dd.keyi - 1 })
-         else pure ()
        | none => pure ())
-      pure v
+      pure SKIP
     | _ => pure .noval
 
 -- ---------------------------------------------------------------------------
@@ -2918,6 +2904,69 @@ def nofCount (count : Value) (numtvals : Float) : SIO (Float × Float × Option 
     else numToString lo ++ " to " ++ numToString hi
   return (lo, hi, some desc)
 
+/-- The bounds of a `$LEN` bound, with -1 for no maximum, and the words for it,
+    which are absent when the bound is invalid. -/
+def lenBound (bound : Value) : SIO (Float × Float × Option String) := do
+  let (lo, hi, countdesc) ← nofCount bound (-1.0)
+  if countdesc.isNone then return (0.0, 0.0, none)
+  let words :=
+    if lo == hi then numToString lo
+    else if hi == -1.0 then "at least " ++ numToString lo
+    else if lo == 0.0 then "at most " ++ numToString hi
+    else numToString lo ++ " to " ++ numToString hi
+  return (lo, hi, some ("of length " ++ words))
+
+/-- A `$LIKE` pattern compiled by the port's own regex engine; absent unless
+    it is a string, since that engine reads every string without failing. -/
+def likeRe (pat : Value) : Option Vregex.Re :=
+  match pat with
+  | .str p => some (Vregex.compile p)
+  | _ => none
+
+/-- The words for a `$RANGE` bound, which are absent when the bound is invalid. -/
+def rangeDesc (bound : Value) : SIO (Option String) := do
+  if !(ismap bound) then return none
+  let mn ← lookupRaw bound (.str "min")
+  let mx ← lookupRaw bound (.str "max")
+  let gtv ← lookupRaw bound (.str "gt")
+  let ltv ← lookupRaw bound (.str "lt")
+  let lower := if isNoval mn then gtv else mn
+  let upper := if isNoval mx then ltv else mx
+  let isnum (n : Value) : Bool := isNoval n || (T_NUMBER &&& typify n) > 0
+  let given (n : Value) : Int := if isNoval n then 0 else 1
+  let ordered : Bool :=
+    match lower, upper with
+    | .num l, .num u => decide (l <= u)
+    | _, _ => true
+  let bsz ← size bound
+  let valid := bsz > 0
+    && bsz == given mn + given mx + given gtv + given ltv
+    && (isNoval mn || isNoval gtv)
+    && (isNoval mx || isNoval ltv)
+    && isnum mn && isnum mx && isnum gtv && isnum ltv
+    && ordered
+  if !valid then return none
+  let lowerw : Option String ←
+    if !(isNoval mn) then pure (some ("at least " ++ (← stringify mn)))
+    else if !(isNoval gtv) then pure (some ("greater than " ++ (← stringify gtv)))
+    else pure none
+  let upperw : Option String ←
+    if !(isNoval mx) then pure (some ("at most " ++ (← stringify mx)))
+    else if !(isNoval ltv) then pure (some ("less than " ++ (← stringify ltv)))
+    else pure none
+  return some (String.intercalate " and " ([lowerw, upperw].filterMap id))
+
+/-- A number within a valid `$RANGE` bound. -/
+def inRange (bound : Value) (v : Float) : SIO Bool := do
+  let holds (key : String) (cmp : Float → Bool) : SIO Bool := do
+    match (← lookupRaw bound (.str key)) with
+    | .num n => pure (cmp n)
+    | _ => pure true
+  return (← holds "min" (fun n => decide (n <= v)))
+    && (← holds "max" (fun n => decide (v <= n)))
+    && (← holds "gt" (fun n => decide (n < v)))
+    && (← holds "lt" (fun n => decide (v < n)))
+
 /-- Names a validate spec may use besides its checkers: those of transform that
     it keeps, and `$OPEN`. -/
 def validateNames : List String :=
@@ -3129,6 +3178,84 @@ partial def validateCount (inj : InjId) (store : Value) (name : String) (counted
         ((typify cval : Nat) : Int) cval)
   return SKIP
 
+/-- The value's length is within a bound: `` [`$LEN`, bound, spec?] ``, where
+    the bound is as for a `$NOF` count. A string's length is in code points. -/
+partial def validateLen : InjectorFn := fun inj _v _ref store =>
+  validateBound inj store "$LEN"
+
+/-- The value is a number within a bound: `` [`$RANGE`, bound, spec?] ``, where
+    the bound holds min or gt, max or lt, or one of each. -/
+partial def validateRange : InjectorFn := fun inj _v _ref store =>
+  validateBound inj store "$RANGE"
+
+partial def validateLike : InjectorFn := fun inj _v _ref store =>
+  validateBound inj store "$LIKE"
+
+/-- The bounding list directives: a bound or pattern, then at most one spec
+    that also admits. -/
+partial def validateBound (inj : InjId) (store : Value) (name : String) : SIO Value := do
+  let d ← getInj inj
+  if d.mode != M_VAL then return .noval
+  let parent := d.parent
+  if !(islist parent) || d.keyi != 0 then
+    pushErr inj ("The " ++ name ++ " validator at field "
+      ++ (← pathify d.path (startin := .num 1.0) (endin := .num 1.0))
+      ++ " must be the first element of an array.")
+    return .noval
+  let cval ← slotVal inj
+  let nk ← size d.keys
+  modInj inj (fun dd => { dd with keyi := nk })
+  -- As for the counting directives: SKIP keeps inject off the detached list.
+  injSetval inj cval (ancestor := 2)
+  let npath ← slice d.path (start := .num (-1.0))
+  modInj inj (fun dd => { dd with path := npath })
+  let field := "The " ++ name ++ " validator at field " ++ (← pathify npath (startin := .num 1.0))
+  let nargs := (← size parent) - 1
+  let islen := name == "$LEN"
+  let islike := name == "$LIKE"
+  let argname := if islike then "pattern" else "bound"
+  if nargs < 1 || 2 < nargs then
+    pushErr inj (field ++ " must have a " ++ argname ++ " and at most one spec.")
+    return SKIP
+  let bound ← lookupRaw parent (.num 1.0)
+  let like := if islike then likeRe bound else none
+  let likedesc : Option String := match bound, like with
+    | .str p, some _ => some ("like /" ++ p ++ "/")
+    | _, _ => none
+  let (lo, hi, bounddesc) ←
+    if islen then lenBound bound
+    else if islike then pure ((0.0 : Float), (0.0 : Float), likedesc)
+    else do pure ((0.0 : Float), (0.0 : Float), ← rangeDesc bound)
+  match bounddesc with
+  | none => pushErr inj (field ++ " has an invalid " ++ argname ++ ": " ++ (← stringify bound) ++ ".")
+  | some desc =>
+    let ctype := typify cval
+    if nargs == 2 then
+      let spec ← lookupRaw parent (.num 2.0)
+      if !(← admits cval spec inj store) then
+        let specdesc := replaceTransformNames (← stringify spec)
+        pushErr inj (← invalidTypeMsg npath specdesc (ctype : Int) cval)
+        return SKIP
+    let needmask := if islen then T_STRING ||| T_LIST ||| T_MAP else if islike then T_STRING else T_NUMBER
+    if (needmask &&& ctype) == 0 then
+      let needtype := if islen then "string, list or map" else if islike then S_STRING else "number"
+      pushErr inj (← invalidTypeMsg npath needtype (ctype : Int) cval)
+      return SKIP
+    let len : Int ← match islen, cval with
+      | true, .str s => pure (s.length : Int)
+      | true, _ => size cval
+      | false, _ => pure 0
+    let lenf := intToFloat len
+    let inbound ← match islen, islike, like, cval with
+      | true, _, _, _ => pure (decide (lo <= lenf) && (hi == -1.0 || decide (lenf <= hi)))
+      | false, true, some re, .str s => pure (Vregex.test re s)
+      | false, false, _, .num n => inRange bound n
+      | _, _, _, _ => pure false
+    if !inbound then
+      let needtype := (if (← size npath) > 1 then "" else "value ") ++ desc
+      pushErr inj (← invalidTypeMsg npath needtype (ctype : Int) cval)
+  return SKIP
+
 /-- A spec admits a value when validating the value against it finds no error
     and gives back the value as it is. -/
 partial def admits (val spec : Value) (inj : InjId) (store : Value) : SIO Bool := do
@@ -3166,6 +3293,9 @@ partial def validate (data spec : Value) (inj : InjArg := .inone) : SIO Value :=
   put "$EXACT" (← vFunc validateExact)
   put "$NOF" (← vFunc validateNof)
   put "$ALL" (← vFunc validateAll)
+  put "$LEN" (← vFunc validateLen)
+  put "$RANGE" (← vFunc validateRange)
+  put "$LIKE" (← vFunc validateLike)
   let extraV ← if isNoval extra then emptyMap else pure extra
   let errsWrap ← newMap #[(S_DERRS, errs)]
   let store ← merge (← newList #[base, extraV, errsWrap]) (maxdepth := .num 1.0)
@@ -3272,8 +3402,11 @@ def numCmp (a b : Value) (op : String) : Bool :=
     | _ => false
   | _, _ => false
 
-partial def selectCmp : InjectorFn := fun inj _v refstr store => do
+partial def selectCmp : InjectorFn := fun inj v refstr store => do
   let d ← getInj inj
+  -- The list form of $LIKE is validate's checker; the key form is this operator.
+  if d.mode == M_VAL && refstr == "$LIKE" then
+    return (← validateLike inj v refstr store)
   if d.mode == M_KEYPRE then do
     let term ← getprop d.parent d.key
     let gkey ← getelem d.path (.num (-2.0))
@@ -3295,6 +3428,24 @@ partial def selectCmp : InjectorFn := fun inj _v refstr store => do
         ++ " fail:" ++ refstr ++ " " ++ (← stringify term))
     pure .noval
   else pure .noval
+
+/-- Open every map in a select query, so a child may hold keys the query does
+    not name, but leave a directive's literals as written: what `$EXACT`
+    compares, and the count or bound of `$NOF`, `$LEN` and `$RANGE`. -/
+partial def openQuery (q : Value) : SIO Unit := do
+  if ismap q then
+    let cur ← getprop q (.str S_BOPEN) (.bool true)
+    let _ ← setprop q (.str S_BOPEN) cur
+    for k in (← keysof q) do
+      openQuery (← lookupRaw q (.str k))
+  else if islist q then
+    let xs ← listItemsOf q
+    let head ← lookupRaw q (.num 0.0)
+    let exact := head == .str S_BEXACT
+    let bounded := head == .str "`$NOF`" || head == .str "`$LEN`" || head == .str "`$RANGE`"
+    for i in [0:xs.size] do
+      if i == 0 || !(exact || (bounded && i == 1)) then
+        openQuery xs[i]!
 
 partial def select (children query : Value) : SIO Value := do
   if !(isnode children) then emptyList
@@ -3323,12 +3474,7 @@ partial def select (children query : Value) : SIO Value := do
     for k in ["$GT", "$LT", "$GTE", "$LTE", "$LIKE"] do
       let _ ← setprop extra (.str k) (← vFunc selectCmp)
     let q ← clone query
-    let _ ← walk q (before := some (fun _k v _p _path => do
-      if ismap v then do
-        let cur ← getprop v (.str S_BOPEN) (.bool true)
-        let _ ← setprop v (.str S_BOPEN) cur
-        pure v
-      else pure v))
+    openQuery q
     for child in (← listItemsOf children) do
       let errs ← emptyList
       let m ← emptyMap

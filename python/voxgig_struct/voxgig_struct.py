@@ -983,6 +983,10 @@ def select_NOT(state, _val, _ref, store):
 
 
 def select_CMP(state, _val, ref, store):
+    # The list form of $LIKE is validate's checker; the key form is this operator.
+    if state.mode == S_MVAL and ref == '$LIKE':
+        return validate_LIKE(state, _val, ref, store)
+
     if state.mode == S_MKEYPRE:
         term = getprop(state.parent, state.key)
         gkey = getelem(state.path, -2)
@@ -1054,13 +1058,7 @@ def select(children: Any, query: Any) -> list[Any]:
 
     q = clone(query)
 
-    # Add $OPEN to all maps in the query
-    def add_open(_k, v, _parent, _path):
-        if ismap(v):
-            setprop(v, '`$OPEN`', getprop(v, '`$OPEN`', True))
-        return v
-
-    walk(q, add_open)
+    _openquery(q)
 
     for child in children:
         injdef['errs'] = []
@@ -1070,6 +1068,23 @@ def select(children: Any, query: Any) -> list[Any]:
             results.append(child)
 
     return results
+
+
+# Open every map in a select query, so a child may hold keys the query does
+# not name, but leave a directive's literals as written: what $EXACT
+# compares, and the count or bound of $NOF, $LEN and $RANGE.
+def _openquery(q: Any) -> None:
+    if ismap(q):
+        setprop(q, '`$OPEN`', getprop(q, '`$OPEN`', True))
+        for key in keysof(q):
+            _openquery(q[key])
+    elif islist(q):
+        head = q[0] if q else UNDEF
+        exact = head == '`$EXACT`'
+        bounded = head in ('`$NOF`', '`$LEN`', '`$RANGE`')
+        for i, item in enumerate(q):
+            if i == 0 or not (exact or (bounded and i == 1)):
+                _openquery(item)
 
 
 def stringify(val: Any = _ABSENT, maxlen: int = UNDEF, pretty: Any = None):
@@ -2078,13 +2093,11 @@ def transform_PACK(inj, val, ref, store):
     return UNDEF
 
 
-def transform_REF(inj, val, _ref, store):
+def transform_REF(inj, _val, _ref, store):
     """
     Reference original spec (enables recursive transformations)
     Format: ['`$REF`', '`spec-path`']
     """
-    nodes = inj.nodes
-
     if inj.mode != S_MVAL:
         return UNDEF
 
@@ -2111,38 +2124,21 @@ def transform_REF(inj, val, _ref, store):
 
         walk(ref, check_subref)
 
-    tref = clone(ref)
+    # A recursive reference stops where the data does.
+    tval = getpath(store, slice(inj.path, 0, len(inj.path) - 1))
+    rval = clone(ref) if not hasSubRef or tval is not UNDEF else UNDEF
 
-    cpath = slice(inj.path, 0, len(inj.path) - 3)
-    tpath = slice(inj.path, 0, len(inj.path) - 1)
-    tcur = getpath(store, cpath)
-    tval = getpath(store, tpath)
-    rval = UNDEF
+    # The enclosing loop injects the referenced spec in this list's place, so
+    # neither this pass nor this element leaves a value for modify to check.
+    grandparent = inj.setval(rval, 2)
 
-    # When ref target not found, omit the key (setval UNDEF). Do not inject UNDEF.
-    if ref is not UNDEF and (not hasSubRef or tval is not UNDEF):
-        # Create child state for the next level
-        child_state = inj.child(0, [getelem(tpath, -1)])
-        child_state.path = tpath
-        child_state.nodes = slice(inj.nodes, 0, len(inj.nodes) - 1)
-        child_state.parent = getelem(nodes, -2)
-        child_state.val = tref
+    prior = inj.prior
+    if prior is not None:
+        prior.modify = None
+        if islist(grandparent) or rval is not UNDEF:
+            prior.keyI -= 1
 
-        # Inject with child state
-        child_state.dparent = tcur
-        inject(tref, store, child_state)
-        rval = child_state.val
-    else:
-        rval = UNDEF
-
-    # Set the value in grandparent, using setval
-    inj.setval(rval, 2)
-
-    # Handle lists by decrementing keyI
-    if islist(inj.parent) and inj.prior:
-        inj.prior.keyI -= 1
-
-    return val
+    return SKIP
 
 
 def _fmt_number(_k, v, *_args):
@@ -2667,6 +2663,191 @@ def _validatecount(inj, store, name, counted):
     return SKIP
 
 
+# The value's length is within a bound: ['`$LEN`', bound, spec?], where the
+# bound is as for a $NOF count. A string's length is in code points.
+def validate_LEN(inj, _val=UNDEF, _ref=UNDEF, store=UNDEF):
+    return _validatebound(inj, store, '$LEN')
+
+
+# The value is a number within a bound: ['`$RANGE`', bound, spec?], where the
+# bound holds min or gt, max or lt, or one of each.
+def validate_RANGE(inj, _val=UNDEF, _ref=UNDEF, store=UNDEF):
+    return _validatebound(inj, store, '$RANGE')
+
+
+def validate_LIKE(inj, _val=UNDEF, _ref=UNDEF, store=UNDEF):
+    return _validatebound(inj, store, '$LIKE')
+
+
+# The bounding list directives: a bound or pattern, then at most one spec that also admits.
+def _validatebound(inj, store, name):
+    mode = inj.mode
+    parent = inj.parent
+    keyI = inj.keyI
+
+    if mode != S_MVAL:
+        return UNDEF
+
+    if not islist(parent) or keyI != 0:
+        inj.errs.append(
+            'The '
+            + name
+            + ' validator at field '
+            + pathify(inj.path, 1, 1)
+            + ' must be the first element of an array.'
+        )
+        return UNDEF
+
+    cval, present = _slotval(inj)
+
+    inj.keyI = size(inj.keys)
+
+    # As for the counting directives: SKIP keeps inject off the detached list.
+    _setslot(inj, cval, present)
+
+    inj.path = inj.path[:-1]
+
+    field = 'The ' + name + ' validator at field ' + pathify(inj.path, 1)
+    nargs = size(parent) - 1
+    islen = name == '$LEN'
+    islike = name == '$LIKE'
+    argname = 'pattern' if islike else 'bound'
+
+    if nargs < 1 or nargs > 2:
+        inj.errs.append(field + ' must have a ' + argname + ' and at most one spec.')
+        return SKIP
+
+    bound = _lookup(parent, 1)
+    like = _likere(bound) if islike else UNDEF
+
+    if islen:
+        lo, hi, desc = _lenbound(bound)
+    elif islike:
+        lo, hi, desc = 0, 0, UNDEF if like is UNDEF else 'like /' + bound + '/'
+    else:
+        lo, hi, desc = 0, 0, _rangedesc(bound)
+
+    if desc is UNDEF:
+        inj.errs.append(field + ' has an invalid ' + argname + ': ' + stringify(bound) + '.')
+        return SKIP
+
+    ctype = typify(cval)
+
+    if nargs == 2 and not _admits(cval, present, _lookup(parent, 2), inj, store):
+        specdesc = re.sub(
+            r'`\$([A-Z]+)`', lambda m: m.group(1).lower(), stringify(_lookup(parent, 2))
+        )
+        inj.errs.append(_invalidTypeMsg(inj.path, specdesc, ctype, cval, 'V0410'))
+        return SKIP
+
+    if ((T_string | T_list | T_map if islen else T_string if islike else T_number) & ctype) == 0:
+        needtype = 'string, list or map' if islen else S_string if islike else S_number
+        inj.errs.append(_invalidTypeMsg(inj.path, needtype, ctype, cval, 'V0420'))
+        return SKIP
+
+    length = size(cval) if islen else 0
+
+    if islen:
+        inbound = lo <= length and (hi == -1 or length <= hi)
+    elif islike:
+        inbound = re_test(like, cval)
+    else:
+        inbound = _inrange(bound, cval)
+
+    if not inbound:
+        needtype = ('' if size(inj.path) > 1 else 'value ') + desc
+        inj.errs.append(_invalidTypeMsg(inj.path, needtype, ctype, cval, 'V0430'))
+
+    return SKIP
+
+
+# The bounds of a $LEN bound, with -1 for no maximum, and the words for it,
+# which are absent when the bound is invalid.
+def _lenbound(bound):
+    lo, hi, countdesc = _nofcount(bound, -1)
+
+    if countdesc is UNDEF:
+        return 0, 0, UNDEF
+
+    if lo == hi:
+        desc = str(lo)
+    elif hi == -1:
+        desc = 'at least ' + str(lo)
+    elif lo == 0:
+        desc = 'at most ' + str(hi)
+    else:
+        desc = str(lo) + ' to ' + str(hi)
+
+    return lo, hi, 'of length ' + desc
+
+
+# A $LIKE pattern compiled by the port's own regex engine; absent unless it compiles.
+def _likere(pattern):
+    if not isinstance(pattern, str):
+        return UNDEF
+    try:
+        return re_compile(pattern)
+    except Exception:
+        return UNDEF
+
+
+# The words for a $RANGE bound, which are absent when the bound is invalid.
+def _rangedesc(bound):
+    if not ismap(bound):
+        return UNDEF
+
+    # Every value must be a number, so below a None is a side the bound lacks.
+    valid = size(bound) > 0 and all(
+        k in ('min', 'max', 'gt', 'lt') and (T_number & typify(v)) > 0 for k, v in bound.items()
+    )
+
+    mn = _lookup(bound, 'min')
+    mx = _lookup(bound, 'max')
+    gt = _lookup(bound, 'gt')
+    lt = _lookup(bound, 'lt')
+    lower = gt if mn is UNDEF else mn
+    upper = lt if mx is UNDEF else mx
+
+    valid = (
+        valid
+        and (mn is UNDEF or gt is UNDEF)
+        and (mx is UNDEF or lt is UNDEF)
+        and (lower is UNDEF or upper is UNDEF or lower <= upper)
+    )
+
+    if not valid:
+        return UNDEF
+
+    parts = []
+
+    if mn is not UNDEF:
+        parts.append('at least ' + stringify(mn))
+    elif gt is not UNDEF:
+        parts.append('greater than ' + stringify(gt))
+
+    if mx is not UNDEF:
+        parts.append('at most ' + stringify(mx))
+    elif lt is not UNDEF:
+        parts.append('less than ' + stringify(lt))
+
+    return ' and '.join(parts)
+
+
+# A number within a valid $RANGE bound.
+def _inrange(bound, val):
+    mn = _lookup(bound, 'min')
+    mx = _lookup(bound, 'max')
+    gt = _lookup(bound, 'gt')
+    lt = _lookup(bound, 'lt')
+
+    return (
+        (mn is UNDEF or mn <= val)
+        and (mx is UNDEF or val <= mx)
+        and (gt is UNDEF or gt < val)
+        and (lt is UNDEF or val < lt)
+    )
+
+
 def _validation(pval, key, parent, inj):
     if inj == UNDEF:
         return
@@ -2782,6 +2963,9 @@ def validate(data, spec, injdef=UNDEF):
                 '$EXACT': validate_EXACT,
                 '$NOF': validate_NOF,
                 '$ALL': validate_ALL,
+                '$LEN': validate_LEN,
+                '$RANGE': validate_RANGE,
+                '$LIKE': validate_LIKE,
             },
             ({} if extra is UNDEF or extra is None else extra),
             {

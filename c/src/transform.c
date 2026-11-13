@@ -659,6 +659,7 @@ static voxgig_value* tx_PACK(voxgig_injection* inj, voxgig_value* val, const cha
 
 static voxgig_value* tx_REF(voxgig_injection* inj, voxgig_value* val, const char* ref,
                             voxgig_value* store, void* ud) {
+  (void)val;
   (void)ref;
   (void)ud;
   if (inj->mode != VOXGIG_M_VAL)
@@ -735,88 +736,39 @@ static voxgig_value* tx_REF(voxgig_injection* inj, voxgig_value* val, const char
     voxgig_release(stk);
   }
 
-  voxgig_value* tref = voxgig_clone(refv);
-
-  /* cpath = slice(inj.path, -3), tpath = slice(inj.path, -1) */
-  voxgig_value* cpath = voxgig_new_list();
-  /* slice(path, -3) means keep all but last 3 */
-  if (inj->path.len > 3) {
-    for (size_t i = 0; i + 3 < inj->path.len; i++)
-      voxgig_list_push(voxgig_as_list(cpath), voxgig_new_string(inj->path.data[i]));
-  }
+  /* A recursive reference stops where the data does. */
   voxgig_value* tpath = voxgig_new_list();
-  if (inj->path.len > 1) {
-    for (size_t i = 0; i + 1 < inj->path.len; i++)
-      voxgig_list_push(voxgig_as_list(tpath), voxgig_new_string(inj->path.data[i]));
-  }
-  voxgig_value* tcur = voxgig_getpath(store, cpath, NULL);
+  for (size_t i = 0; i + 1 < inj->path.len; i++)
+    voxgig_list_push(voxgig_as_list(tpath), voxgig_new_string(inj->path.data[i]));
   voxgig_value* tval = voxgig_getpath(store, tpath, NULL);
-  voxgig_value* rval = voxgig_new_undef();
-  if (!hasSubRef || !voxgig_is_undef(tval)) {
-    /* tinj = inj.child(0, [last_of_tpath]) */
-    voxgig_list* tplist = voxgig_as_list(tpath);
-    const char* lastpart =
-        tplist->len > 0 ? voxgig_as_string(voxgig_list_get(tplist, tplist->len - 1)) : "";
-    voxgig_strvec ckeys_one;
-    voxgig_strvec_init(&ckeys_one);
-    voxgig_strvec_push(&ckeys_one, lastpart);
-    voxgig_injection* tinj = voxgig_inj_child(inj, 0, &ckeys_one);
-    voxgig_strvec_free(&ckeys_one);
+  voxgig_value* rval =
+      (!hasSubRef || !voxgig_is_undef(tval)) ? voxgig_clone(refv) : voxgig_new_undef();
 
-    voxgig_strvec_clear(&tinj->path);
-    for (size_t i = 0; i < tplist->len; i++)
-      voxgig_strvec_push(&tinj->path, voxgig_as_string(tplist->items[i]));
-    if (inj->nodes_len > 0) {
-      tinj->nodes_len = inj->nodes_len - 1;
-      if (tinj->nodes_cap < tinj->nodes_len) {
-        tinj->nodes = (voxgig_value**)realloc(tinj->nodes, tinj->nodes_len * sizeof(voxgig_value*));
-        tinj->nodes_cap = tinj->nodes_len;
-      }
-      for (size_t i = 0; i < tinj->nodes_len; i++)
-        tinj->nodes[i] = inj->nodes[i];
-    } else {
-      tinj->nodes_len = 0;
-    }
-    voxgig_release(tinj->parent);
-    tinj->parent =
-        inj->nodes_len >= 2 ? voxgig_retain(inj->nodes[inj->nodes_len - 2]) : voxgig_new_undef();
-    voxgig_release(tinj->val);
-    tinj->val = voxgig_retain(tref);
-
-    voxgig_strvec_clear(&tinj->dpath);
-    voxgig_list* cpl = voxgig_as_list(cpath);
-    for (size_t i = 0; i < cpl->len; i++)
-      voxgig_strvec_push(&tinj->dpath, voxgig_as_string(cpl->items[i]));
-    voxgig_release(tinj->dparent);
-    tinj->dparent = voxgig_retain(tcur);
-
-    voxgig_value* out = voxgig_inject(tref, store, tinj);
-    voxgig_release(out);
-    rval = voxgig_retain(tinj->val);
-    voxgig_inj_free(tinj);
-  }
-
+  /* The enclosing loop injects the referenced spec in this list's place, so
+     neither this pass nor this element leaves a value for modify to check. */
   voxgig_value* grandparent = voxgig_inj_setval(inj, rval, 2);
-  if (voxgig_is_list(grandparent) && inj->prior) {
-    /* TS: `inj.prior.keyI--`. With signed numbers, keyI can go to -1. We use
-       keyI_neg as a flag for "logically -1" (size_t cannot represent it). */
-    if (inj->prior->keyI > 0) {
-      inj->prior->keyI--;
-    } else if (inj->prior->keyI == 0 && !inj->prior->keyI_neg) {
-      inj->prior->keyI_neg = true;
+
+  voxgig_injection* prior = inj->prior;
+  if (prior) {
+    voxgig_release(prior->modify_val);
+    prior->modify_val = NULL;
+    if (voxgig_is_list(grandparent) || !voxgig_is_undef(rval)) {
+      /* keyI is a size_t, so keyI_neg stands for -1. */
+      if (prior->keyI > 0) {
+        prior->keyI--;
+      } else if (prior->keyI == 0 && !prior->keyI_neg) {
+        prior->keyI_neg = true;
+      }
     }
   }
 
   voxgig_release(refpath);
   voxgig_release(dpath_v);
   voxgig_release(refv);
-  voxgig_release(tref);
-  voxgig_release(cpath);
   voxgig_release(tpath);
-  voxgig_release(tcur);
   voxgig_release(tval);
   voxgig_release(rval);
-  return val ? voxgig_retain(val) : voxgig_new_undef();
+  return voxgig_new_skip();
 }
 
 /* FORMATTER table */
@@ -1665,6 +1617,225 @@ static voxgig_value* va_ALL(voxgig_injection* inj, voxgig_value* val, const char
   return _validatecount(inj, store, "$ALL", false);
 }
 
+/* A map member that holds a value, or NULL. */
+static voxgig_value* _given(voxgig_value* v) {
+  return v && !voxgig_is_undef(v) ? v : NULL;
+}
+
+/* The bounds of a $LEN bound, with -1 for no maximum, and the words for it.
+   NULL when the bound is invalid. The caller frees the result. */
+static char* _lenbound(voxgig_value* bound, int64_t* lo, int64_t* hi) {
+  char countdesc[64];
+  if (!_nofcount(bound, -1, lo, hi, countdesc, sizeof(countdesc)))
+    return NULL;
+
+  char desc[96];
+  if (*lo == *hi)
+    snprintf(desc, sizeof(desc), "of length %lld", (long long)*lo);
+  else if (-1 == *hi)
+    snprintf(desc, sizeof(desc), "of length at least %lld", (long long)*lo);
+  else if (0 == *lo)
+    snprintf(desc, sizeof(desc), "of length at most %lld", (long long)*hi);
+  else
+    snprintf(desc, sizeof(desc), "of length %lld to %lld", (long long)*lo, (long long)*hi);
+  return xstrdup_t(desc);
+}
+
+/* The words for a $RANGE bound. NULL when the bound is invalid. The caller
+   frees the result. */
+static char* _rangedesc(voxgig_value* bound) {
+  if (!voxgig_is_map(bound))
+    return NULL;
+
+  voxgig_map* bm = voxgig_as_map(bound);
+  voxgig_value* min = _given(voxgig_map_get(bm, "min"));
+  voxgig_value* max = _given(voxgig_map_get(bm, "max"));
+  voxgig_value* gt = _given(voxgig_map_get(bm, "gt"));
+  voxgig_value* lt = _given(voxgig_map_get(bm, "lt"));
+  voxgig_value* lower = min ? min : gt;
+  voxgig_value* upper = max ? max : lt;
+
+  voxgig_value* given[] = {min, max, gt, lt};
+  size_t numgiven = 0;
+  for (size_t i = 0; i < sizeof(given) / sizeof(given[0]); i++) {
+    if (given[i] && 0 == (VOXGIG_T_NUMBER & voxgig_typify(given[i])))
+      return NULL;
+    numgiven += given[i] ? 1 : 0;
+  }
+
+  bool valid = 0 < voxgig_map_len(bm) && voxgig_map_len(bm) == numgiven && (!min || !gt) &&
+               (!max || !lt) &&
+               (!lower || !upper || voxgig_as_double(lower) <= voxgig_as_double(upper));
+  if (!valid)
+    return NULL;
+
+  char* lowerstr = lower ? voxgig_stringify(lower, -1) : NULL;
+  char* upperstr = upper ? voxgig_stringify(upper, -1) : NULL;
+  const char* parts[5];
+  size_t numparts = 0;
+  if (lower) {
+    parts[numparts++] = min ? "at least " : "greater than ";
+    parts[numparts++] = lowerstr;
+  }
+  if (lower && upper)
+    parts[numparts++] = " and ";
+  if (upper) {
+    parts[numparts++] = max ? "at most " : "less than ";
+    parts[numparts++] = upperstr;
+  }
+  char* desc = _concat(numparts, parts);
+  free(lowerstr);
+  free(upperstr);
+  return desc;
+}
+
+/* A string, list or map whose length is within lo and hi, where hi is -1 for
+   no maximum. A string counts the UTF-8 bytes that start a code point. */
+static bool _inlength(voxgig_value* val, int64_t lo, int64_t hi) {
+  int64_t len = voxgig_size(val);
+  if (voxgig_is_string(val)) {
+    const char* s = voxgig_as_string(val);
+    size_t slen = voxgig_string_len(val);
+    len = 0;
+    for (size_t i = 0; i < slen; i++)
+      len += 0x80 != ((unsigned char)s[i] & 0xC0) ? 1 : 0;
+  }
+  return lo <= len && (-1 == hi || len <= hi);
+}
+
+/* A number within a valid $RANGE bound. */
+static bool _inrange(voxgig_value* bound, voxgig_value* val) {
+  voxgig_map* bm = voxgig_as_map(bound);
+  voxgig_value* min = _given(voxgig_map_get(bm, "min"));
+  voxgig_value* max = _given(voxgig_map_get(bm, "max"));
+  voxgig_value* gt = _given(voxgig_map_get(bm, "gt"));
+  voxgig_value* lt = _given(voxgig_map_get(bm, "lt"));
+  double v = voxgig_as_double(val);
+
+  return (!min || voxgig_as_double(min) <= v) && (!max || v <= voxgig_as_double(max)) &&
+         (!gt || voxgig_as_double(gt) < v) && (!lt || v < voxgig_as_double(lt));
+}
+
+/* A $LIKE pattern compiled by the in-tree engine in regex.c. NULL unless it
+   compiles. The caller frees the result with voxgig_regex_free. */
+static voxgig_regex* _likere(voxgig_value* pattern) {
+  return voxgig_is_string(pattern) ? voxgig_re_compile(voxgig_as_string(pattern)) : NULL;
+}
+
+/* The bounding list directives: a bound or pattern, then at most one spec that also admits. */
+static voxgig_value* _validatebound(voxgig_injection* inj, voxgig_value* store, const char* name) {
+  if (inj->mode != VOXGIG_M_VAL)
+    return voxgig_new_undef();
+
+  if (!voxgig_is_list(inj->parent) || inj->keyI != 0) {
+    _notfirst(inj, name);
+    return voxgig_new_undef();
+  }
+
+  voxgig_value* cval = _slotval(inj);
+
+  inj->keyI = inj->keys.len;
+
+  /* As for the counting directives: SKIP keeps inject off the detached list. */
+  voxgig_inj_setval(inj, cval, 2);
+
+  _droplast(&inj->path);
+
+  voxgig_list* pl = voxgig_as_list(inj->parent);
+  size_t nargs = 0 < pl->len ? pl->len - 1 : 0;
+  char* field = _fieldpath(inj, 0);
+  bool islen = 0 == strcmp("$LEN", name);
+  bool islike = 0 == strcmp("$LIKE", name);
+  const char* argname = islike ? "pattern" : "bound";
+
+  if (nargs < 1 || 2 < nargs) {
+    _pushmsg(inj, _concat(7, (const char*[]){"The ", name, " validator at field ", field,
+                                             " must have a ", argname, " and at most one spec."}));
+    free(field);
+    voxgig_release(cval);
+    return voxgig_new_skip();
+  }
+
+  voxgig_value* bound = pl->items[1];
+  voxgig_regex* like = islike ? _likere(bound) : NULL;
+  int64_t lo = 0;
+  int64_t hi = 0;
+  char* desc = NULL;
+  if (islen)
+    desc = _lenbound(bound, &lo, &hi);
+  else if (islike)
+    desc = like ? _concat(3, (const char*[]){"like /", voxgig_as_string(bound), "/"}) : NULL;
+  else
+    desc = _rangedesc(bound);
+
+  if (!desc) {
+    char* boundstr = voxgig_stringify(bound, -1);
+    _pushmsg(inj, _concat(9, (const char*[]){"The ", name, " validator at field ", field,
+                                             " has an invalid ", argname, ": ", boundstr, "."}));
+    free(boundstr);
+    free(field);
+    voxgig_regex_free(like);
+    voxgig_release(cval);
+    return voxgig_new_skip();
+  }
+  free(field);
+
+  int ctype = voxgig_typify(cval);
+  int needbits = islen    ? VOXGIG_T_STRING | VOXGIG_T_LIST | VOXGIG_T_MAP
+                 : islike ? VOXGIG_T_STRING
+                          : VOXGIG_T_NUMBER;
+  char* needtype = NULL;
+
+  /* One error at most: the spec's, then the type's, then the bound's. */
+  if (2 == nargs && !_admits(cval, pl->items[2], inj, store))
+    needtype = _lower_transform_names(pl->items[2]);
+  else if (0 == (needbits & ctype))
+    needtype = xstrdup_t(islen ? "string, list or map" : islike ? "string" : "number");
+  else if (!(islen    ? _inlength(cval, lo, hi)
+             : islike ? voxgig_re_test_re(like, voxgig_as_string(cval))
+                      : _inrange(bound, cval)))
+    needtype = _concat(2, (const char*[]){inj->path.len <= 1 ? "value " : "", desc});
+
+  if (needtype) {
+    voxgig_list_push(voxgig_as_list(inj->errs),
+                     _invalid_type_msg(&inj->path, needtype, ctype, cval));
+    free(needtype);
+  }
+
+  free(desc);
+  voxgig_regex_free(like);
+  voxgig_release(cval);
+  return voxgig_new_skip();
+}
+
+/* The value's length is within a bound: ['`$LEN`', bound, spec?], where the
+   bound is as for a $NOF count. A string's length is in code points. */
+static voxgig_value* va_LEN(voxgig_injection* inj, voxgig_value* val, const char* ref,
+                            voxgig_value* store, void* ud) {
+  (void)val;
+  (void)ref;
+  (void)ud;
+  return _validatebound(inj, store, "$LEN");
+}
+
+/* The value is a number within a bound: ['`$RANGE`', bound, spec?], where the
+   bound holds min or gt, max or lt, or one of each. */
+static voxgig_value* va_RANGE(voxgig_injection* inj, voxgig_value* val, const char* ref,
+                              voxgig_value* store, void* ud) {
+  (void)val;
+  (void)ref;
+  (void)ud;
+  return _validatebound(inj, store, "$RANGE");
+}
+
+static voxgig_value* va_LIKE(voxgig_injection* inj, voxgig_value* val, const char* ref,
+                             voxgig_value* store, void* ud) {
+  (void)val;
+  (void)ref;
+  (void)ud;
+  return _validatebound(inj, store, "$LIKE");
+}
+
 /* ===========================================================================
  * Validation modifier
  * ===========================================================================*/
@@ -2147,6 +2318,9 @@ voxgig_value* voxgig_validate(voxgig_value* data, voxgig_value* spec, voxgig_inj
   voxgig_map_set(voxgig_as_map(m1), "$EXACT", voxgig_new_injector(va_EXACT, NULL));
   voxgig_map_set(voxgig_as_map(m1), "$NOF", voxgig_new_injector(va_NOF, NULL));
   voxgig_map_set(voxgig_as_map(m1), "$ALL", voxgig_new_injector(va_ALL, NULL));
+  voxgig_map_set(voxgig_as_map(m1), "$LEN", voxgig_new_injector(va_LEN, NULL));
+  voxgig_map_set(voxgig_as_map(m1), "$RANGE", voxgig_new_injector(va_RANGE, NULL));
+  voxgig_map_set(voxgig_as_map(m1), "$LIKE", voxgig_new_injector(va_LIKE, NULL));
 
   voxgig_value* ext = extra_in ? voxgig_retain(extra_in) : voxgig_new_map();
   voxgig_value* errwrap = voxgig_new_map();
@@ -2385,8 +2559,10 @@ static int cmp_values(voxgig_value* a, voxgig_value* b) {
 
 static voxgig_value* sel_CMP(voxgig_injection* inj, voxgig_value* val, const char* ref,
                              voxgig_value* store, void* ud) {
-  (void)val;
-  (void)ud;
+  /* The list form of $LIKE is validate's checker; the key form is this operator. */
+  if (inj->mode == VOXGIG_M_VAL && ref && 0 == strcmp(ref, "$LIKE"))
+    return va_LIKE(inj, val, ref, store, ud);
+
   if (inj->mode != VOXGIG_M_KEYPRE)
     return voxgig_new_undef();
   voxgig_value* keyv = voxgig_new_string(inj->key);
@@ -2435,21 +2611,35 @@ static voxgig_value* sel_CMP(voxgig_injection* inj, voxgig_value* val, const cha
  * select
  * ===========================================================================*/
 
-/* walk callback to add `$OPEN` to every map in the query. */
-static voxgig_value* set_open_callback(voxgig_value* k, voxgig_value* v, voxgig_value* parent,
-                                       voxgig_value* path, void* ud) {
-  (void)k;
-  (void)parent;
-  (void)path;
-  (void)ud;
-  if (voxgig_is_map(v)) {
+static bool _isstr(voxgig_value* v, const char* s) {
+  return voxgig_is_string(v) && 0 == strcmp(voxgig_as_string(v), s);
+}
+
+/* Open every map in a select query, so a child may hold keys the query does
+   not name, but leave a directive's literals as written: what $EXACT
+   compares, and the count or bound of $NOF, $LEN and $RANGE. */
+static void _openquery(voxgig_value* q) {
+  if (voxgig_is_map(q)) {
     voxgig_value* bk = voxgig_new_string("`$OPEN`");
-    if (!voxgig_haskey(v, bk)) {
-      voxgig_map_set(voxgig_as_map(v), "`$OPEN`", voxgig_new_bool(true));
+    if (!voxgig_haskey(q, bk)) {
+      voxgig_map_set(voxgig_as_map(q), "`$OPEN`", voxgig_new_bool(true));
     }
     voxgig_release(bk);
+    voxgig_map* m = voxgig_as_map(q);
+    for (size_t i = 0; i < m->len; i++) {
+      _openquery(m->entries[i].value);
+    }
+  } else if (voxgig_is_list(q)) {
+    voxgig_list* l = voxgig_as_list(q);
+    voxgig_value* head = 0 < l->len ? l->items[0] : NULL;
+    bool exact = _isstr(head, "`$EXACT`");
+    bool bounded = _isstr(head, "`$NOF`") || _isstr(head, "`$LEN`") || _isstr(head, "`$RANGE`");
+    for (size_t i = 0; i < l->len; i++) {
+      if (0 == i || !(exact || (bounded && 1 == i))) {
+        _openquery(l->items[i]);
+      }
+    }
   }
-  return v ? voxgig_retain(v) : voxgig_new_undef();
 }
 
 voxgig_value* voxgig_select(voxgig_value* children, voxgig_value* query) {
@@ -2493,10 +2683,8 @@ voxgig_value* voxgig_select(voxgig_value* children, voxgig_value* query) {
   voxgig_value* meta = voxgig_new_map();
   voxgig_map_set(voxgig_as_map(meta), "`$EXACT`", voxgig_new_bool(true));
 
-  /* q = clone(query); walk q to set `$OPEN` on every map. */
   voxgig_value* q = voxgig_clone(query);
-  voxgig_value* walked = voxgig_walk(q, set_open_callback, NULL, VOXGIG_MAXDEPTH, NULL);
-  voxgig_release(walked);
+  _openquery(q);
 
   voxgig_value* results = voxgig_new_list();
   voxgig_list* cl = voxgig_as_list(child_list);

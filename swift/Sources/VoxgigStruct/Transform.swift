@@ -272,7 +272,6 @@ public func transform_PACK(_ inj: Injection, _ val: Value, _ ref: String, _ stor
 
 public func transform_REF(_ inj: Injection, _ val: Value, _ ref: String, _ store: Value) -> Value {
   if inj.mode != M_VAL { return .noval }
-  let nodes = inj.nodes
   let refpath = lookup(inj.parent, .int(1))
   inj.keyI = inj.keys.count
   let specFn = getprop(store, .string(S_DSPEC))
@@ -299,28 +298,19 @@ public func transform_REF(_ inj: Injection, _ val: Value, _ ref: String, _ store
         return v
       })
   }
-  let tref = clone(resolved)
-  let cpath = slice(.list(VList(inj.path.map { Value.string($0) })), -3)
-  let tpath = slice(.list(VList(inj.path.map { Value.string($0) })), -1)
-  let tcur = getpath(store, cpath)
-  let tval = getpath(store, tpath)
-  var rval: Value = .noval
-  if !hasSubRef || !tval.isNoval {
-    let tinj = inj.child(0, [strkey(getelem(tpath, .int(-1)))])
-    tinj.path = tpath.asList?.items.map { strkey($0) } ?? []
-    tinj.nodes = slice(.list(VList(inj.nodes)), -1).asList?.items ?? []
-    tinj.parent = nodes.count >= 2 ? nodes[nodes.count - 2] : .noval
-    tinj.val = tref
-    tinj.dpath = cpath.asList?.items.map { strkey($0) } ?? []
-    tinj.dparent = tcur
-    inject(tref, store, tinj)
-    rval = tinj.val
-  }
+  // A recursive reference stops where the data does.
+  let tval = getpath(store, slice(.list(VList(inj.path.map { Value.string($0) })), -1))
+  let rval: Value = !hasSubRef || !tval.isNoval ? clone(resolved) : .noval
+  // The enclosing loop injects the referenced spec in this list's place, so
+  // neither this pass nor this element leaves a value for modify to check.
   let grandparent = inj.setval(rval, ancestor: 2)
-  if grandparent.isList, let prior = inj.prior {
-    prior.keyI -= 1
+  if let prior = inj.prior {
+    prior.modify = nil
+    if grandparent.isList || !rval.isNoval {
+      prior.keyI -= 1
+    }
   }
-  return val
+  return .sentinel(SKIP)
 }
 
 // MARK: - $FORMAT

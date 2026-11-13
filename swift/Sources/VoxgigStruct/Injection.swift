@@ -23,7 +23,7 @@ public final class Injection: @unchecked Sendable {
   // Canonical gates throwing on `collect = null != injdef?.errs` - "the caller
   // supplied a sink, so hand the errors back instead of throwing". A plain
   // non-optional `VList` cannot carry that distinction, and reading it off
-  // `errs.items.isEmpty` is wrong too: `validate/special#7` passes an injdef
+  // `errs.items.isEmpty` is wrong too: `validate/special#18` passes an injdef
   // carrying only `meta` and still expects a throw. So keep the sink optional
   // behind a non-optional accessor - ASSIGNING `errs` supplies a sink, while
   // merely reading it (which the collecting internals do constantly) does not.

@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const Version = "0.1.0"
@@ -2950,61 +2951,26 @@ var Transform_REF Injector = func(
 		})
 	}
 
-	tref := Clone(refResult)
-
-	cpath := make([]string, 0)
-	if len(inj.Path.List) > 3 {
-		cpath = append(cpath, inj.Path.List[:len(inj.Path.List)-3]...)
-	}
-	tpath := make([]string, 0)
-	if len(inj.Path.List) >= 1 {
-		tpath = append(tpath, inj.Path.List[:len(inj.Path.List)]...)
-	}
-	tpath = tpath[:len(tpath)-1]
-
-	tcur := GetPath(store, cpath)
-	tval := GetPath(store, tpath)
-
+	// A recursive reference stops where the data does.
+	tval := GetPath(store, inj.Path.List[:len(inj.Path.List)-1])
 	var rval any
-
 	if !hasSubRef || tval != nil {
-		lastPath := S_DTOP
-		if len(tpath) > 0 {
-			lastPath = tpath[len(tpath)-1]
-		}
-		tinj := inj.child(0, []string{lastPath})
-		tinj.Path = &ListRef[string]{List: tpath}
-
-		// TS: tinj.nodes = slice(inj.nodes, -1) → nodes[0:len-1] (all except last)
-		nodesLen := len(inj.Nodes.List)
-		if nodesLen > 1 {
-			tnodeslist := make([]any, nodesLen-1)
-			copy(tnodeslist, inj.Nodes.List[:nodesLen-1])
-			tinj.Nodes = &ListRef[any]{List: tnodeslist}
-		} else {
-			tinj.Nodes = &ListRef[any]{List: []any{}}
-		}
-
-		// TS: tinj.parent = getelem(nodes, -2)
-		if nodesLen >= 2 {
-			tinj.Parent = inj.Nodes.List[nodesLen-2]
-		}
-		tinj.Val = tref
-
-		tinj.Dpath = cpath
-		tinj.Dparent = tcur
-
-		Inject(tref, store, tinj)
-		rval = tinj.Val
+		// Wrapped as the injected spec is: a list directive rewrites its list in place.
+		rval = CloneFlags(refResult, map[string]bool{"wrap": true})
 	}
 
+	// The enclosing loop injects the referenced spec in this list's place, so
+	// neither this pass nor this element leaves a value for modify to check.
 	grandparent := inj.setval(rval, 2)
 
-	if IsList(grandparent) && inj.Prior != nil {
-		inj.Prior.KeyI--
+	if prior := inj.Prior; prior != nil {
+		prior.Modify = nil
+		if IsList(grandparent) || rval != nil {
+			prior.KeyI--
+		}
 	}
 
-	return val
+	return SKIP
 }
 
 var Transform_APPLY Injector = func(
@@ -3739,6 +3705,9 @@ var validate_CHILD Injector = func(
 // Set after Validate is defined: these validators call Validate.
 var validate_NOF Injector
 var validate_ALL Injector
+var validate_LEN Injector
+var validate_RANGE Injector
+var validate_LIKE Injector
 
 // Forward declaration for validate_EXACT
 var validate_EXACT Injector
@@ -3763,6 +3732,37 @@ func init_validate_count() {
 		store any,
 	) any {
 		return _validatecount(inj, store, "$ALL", false)
+	}
+
+	// The value's length is within a bound: ['`$LEN`', bound, spec?], where the
+	// bound is as for a $NOF count. A string's length is in code points.
+	validate_LEN = func(
+		inj *Injection,
+		_val any,
+		ref *string,
+		store any,
+	) any {
+		return _validatebound(inj, store, "$LEN")
+	}
+
+	// The value is a number within a bound: ['`$RANGE`', bound, spec?], where the
+	// bound holds min or gt, max or lt, or one of each.
+	validate_RANGE = func(
+		inj *Injection,
+		_val any,
+		ref *string,
+		store any,
+	) any {
+		return _validatebound(inj, store, "$RANGE")
+	}
+
+	validate_LIKE = func(
+		inj *Injection,
+		_val any,
+		ref *string,
+		store any,
+	) any {
+		return _validatebound(inj, store, "$LIKE")
 	}
 }
 
@@ -3912,6 +3912,220 @@ func _validatecount(inj *Injection, store any, name string, counted bool) any {
 	}
 
 	return SKIP
+}
+
+// The bounding list directives: a bound or pattern, then at most one spec that also admits.
+func _validatebound(inj *Injection, store any, name string) any {
+	if M_VAL != inj.Mode {
+		return nil
+	}
+
+	if !IsList(inj.Parent) || 0 != inj.KeyI {
+		inj.Errs.Append("The " + name + " validator at field " +
+			Pathify(inj.Path.List, 1, 1) +
+			" must be the first element of an array.")
+		return nil
+	}
+
+	cval := _slotval(inj)
+
+	inj.KeyI = len(inj.Keys.List)
+
+	// As for the counting directives: SKIP keeps inject off the detached list.
+	_setslot(inj, cval)
+
+	inj.Path.List = inj.Path.List[:len(inj.Path.List)-1]
+
+	field := "The " + name + " validator at field " + Pathify(inj.Path.List, 1)
+	nargs := Size(inj.Parent) - 1
+	islen := "$LEN" == name
+	islike := "$LIKE" == name
+	argname := "bound"
+	if islike {
+		argname = "pattern"
+	}
+
+	if nargs < 1 || 2 < nargs {
+		inj.Errs.Append(field + " must have a " + argname + " and at most one spec.")
+		return SKIP
+	}
+
+	bound := _lookup(inj.Parent, 1)
+	pattern, _ := bound.(string)
+	lo, hi, desc := 0, 0, ""
+	if islen {
+		lo, hi, desc = _lenbound(bound)
+	} else if !islike {
+		desc = _rangedesc(bound)
+	} else if nil != _likere(bound) {
+		desc = "like /" + pattern + "/"
+	}
+
+	if "" == desc {
+		inj.Errs.Append(field + " has an invalid " + argname + ": " + Stringify(denoval(bound)) + ".")
+		return SKIP
+	}
+
+	found := denoval(cval)
+	ctypename := Typename(Typify(found))
+
+	if 2 == nargs {
+		spec := _lookup(inj.Parent, 2)
+		if !_admits(cval, spec, inj, store) {
+			inj.Errs.Append(_invalidTypeMsg(inj.Path.List, _valdesc([]any{spec}), ctypename, found, "V0410"))
+			return SKIP
+		}
+	}
+
+	needtype, needbits := S_number, T_number
+	if islen {
+		needtype, needbits = "string, list or map", T_string|T_list|T_map
+	} else if islike {
+		needtype, needbits = S_string, T_string
+	}
+
+	if 0 == (needbits & Typify(cval)) {
+		inj.Errs.Append(_invalidTypeMsg(inj.Path.List, needtype, ctypename, found, "V0420"))
+		return SKIP
+	}
+
+	inbound := false
+	if islen {
+		length := Size(cval)
+		if s, ok := cval.(string); ok {
+			length = utf8.RuneCountInString(s)
+		}
+		inbound = lo <= length && (-1 == hi || length <= hi)
+	} else if islike {
+		inbound = ReTest(pattern, cval.(string))
+	} else {
+		inbound = _inrange(bound, cval)
+	}
+
+	if !inbound {
+		prefix := ""
+		if len(inj.Path.List) <= 1 {
+			prefix = "value "
+		}
+		inj.Errs.Append(_invalidTypeMsg(inj.Path.List, prefix+desc, ctypename, found, "V0430"))
+	}
+
+	return SKIP
+}
+
+// The bounds of a $LEN bound, with -1 for no maximum, and the words for it,
+// which are "" when the bound is invalid.
+func _lenbound(bound any) (int, int, string) {
+	lo, hi, countdesc := _nofcount(bound, -1)
+
+	if "" == countdesc {
+		return 0, 0, ""
+	}
+
+	desc := ""
+	if lo == hi {
+		desc = strconv.Itoa(lo)
+	} else if -1 == hi {
+		desc = "at least " + strconv.Itoa(lo)
+	} else if 0 == lo {
+		desc = "at most " + strconv.Itoa(hi)
+	} else {
+		desc = strconv.Itoa(lo) + " to " + strconv.Itoa(hi)
+	}
+
+	return lo, hi, "of length " + desc
+}
+
+// A $LIKE pattern compiled by the port's own regex engine; nil unless it
+// compiles. ReCompile panics on a pattern regexp refuses.
+func _likere(pattern any) (like *regexp.Regexp) {
+	s, ok := pattern.(string)
+	if !ok {
+		return nil
+	}
+	defer func() {
+		if nil != recover() {
+			like = nil
+		}
+	}()
+	return ReCompile(s)
+}
+
+// The words for a $RANGE bound, which are "" when the bound is invalid.
+func _rangedesc(bound any) string {
+	if !IsMap(bound) {
+		return ""
+	}
+
+	cmin := _lookup(bound, "min")
+	cmax := _lookup(bound, "max")
+	gt := _lookup(bound, "gt")
+	lt := _lookup(bound, "lt")
+
+	lower := cmin
+	if NOVAL == cmin {
+		lower = gt
+	}
+	upper := cmax
+	if NOVAL == cmax {
+		upper = lt
+	}
+
+	numkeys := 0
+	for _, n := range []any{cmin, cmax, gt, lt} {
+		if NOVAL != n {
+			if 0 == (T_number & Typify(n)) {
+				return ""
+			}
+			numkeys++
+		}
+	}
+
+	lowerf, _ := _toFloat64(lower)
+	upperf, _ := _toFloat64(upper)
+
+	valid := 0 < Size(bound) &&
+		Size(bound) == numkeys &&
+		(NOVAL == cmin || NOVAL == gt) &&
+		(NOVAL == cmax || NOVAL == lt) &&
+		(NOVAL == lower || NOVAL == upper || lowerf <= upperf)
+
+	if !valid {
+		return ""
+	}
+
+	parts := []string{}
+	if NOVAL != cmin {
+		parts = append(parts, "at least "+Stringify(cmin))
+	} else if NOVAL != gt {
+		parts = append(parts, "greater than "+Stringify(gt))
+	}
+	if NOVAL != cmax {
+		parts = append(parts, "at most "+Stringify(cmax))
+	} else if NOVAL != lt {
+		parts = append(parts, "less than "+Stringify(lt))
+	}
+
+	return strings.Join(parts, " and ")
+}
+
+// A number within a valid $RANGE bound.
+func _inrange(bound any, val any) bool {
+	v, _ := _toFloat64(val)
+	limit := func(key string) (float64, bool) {
+		b, err := _toFloat64(_lookup(bound, key))
+		return b, nil == err
+	}
+
+	cmin, hasmin := limit("min")
+	cmax, hasmax := limit("max")
+	gt, hasgt := limit("gt")
+	lt, haslt := limit("lt")
+
+	return (!hasmin || cmin <= v) &&
+		(!hasmax || v <= cmax) &&
+		(!hasgt || gt < v) &&
+		(!haslt || v < lt)
 }
 
 func makeValidation(exact bool) Modify {
@@ -4088,8 +4302,8 @@ func Validate(
 		errs = ListRefCreate[any]()
 	}
 
-	// Initialize validate_NOF and validate_ALL if not already initialized.
-	// This avoids a circular reference error, both call Validate.
+	// Initialize the validators that call Validate if not already initialized.
+	// This avoids a circular reference error.
 	if validate_NOF == nil {
 		init_validate_count()
 	}
@@ -4127,6 +4341,9 @@ func Validate(
 		"$EXACT":    validate_EXACT,
 		"$NOF":      validate_NOF,
 		"$ALL":      validate_ALL,
+		"$LEN":      validate_LEN,
+		"$RANGE":    validate_RANGE,
+		"$LIKE":     validate_LIKE,
 	}
 
 	// Add any extra validation commands
@@ -4362,6 +4579,11 @@ var select_CMP Injector = func(
 	ref *string,
 	store any,
 ) any {
+	// The list form of $LIKE is validate's checker; the key form is this operator.
+	if M_VAL == inj.Mode && nil != ref && "$LIKE" == *ref {
+		return validate_LIKE(inj, val, ref, store)
+	}
+
 	if M_KEYPRE == inj.Mode {
 		term := GetProp(inj.Parent, inj.Key)
 
@@ -4463,6 +4685,9 @@ func validateCollectExact(
 		"$EXACT":    validate_EXACT,
 		"$NOF":      validate_NOF,
 		"$ALL":      validate_ALL,
+		"$LEN":      validate_LEN,
+		"$RANGE":    validate_RANGE,
+		"$LIKE":     validate_LIKE,
 	}
 
 	for k, fn := range extra {
@@ -4531,16 +4756,7 @@ func Select(children any, query any) []any {
 
 	q := Clone(query)
 
-	// Mark all map nodes as open so extra keys don't fail validation.
-	Walk(q, func(key *string, v any, parent any, path []string) any {
-		if IsMap(v) {
-			m := v.(map[string]any)
-			if _, has := m[S_BOPEN]; !has {
-				m[S_BOPEN] = true
-			}
-		}
-		return v
-	})
+	_openquery(q)
 
 	for _, child := range childList {
 		errs := ListRefCreate[any]()
@@ -4551,6 +4767,34 @@ func Select(children any, query any) []any {
 	}
 
 	return results
+}
+
+// Open every map in a select query, so a child may hold keys the query does
+// not name, but leave a directive's literals as written: what $EXACT
+// compares, and the count or bound of $NOF, $LEN and $RANGE.
+func _openquery(q any) {
+	if m, ok := q.(map[string]any); ok {
+		if nil == m[S_BOPEN] {
+			m[S_BOPEN] = true
+		}
+		for _, v := range m {
+			_openquery(v)
+		}
+	} else if IsList(q) {
+		list := _listify(q)
+		head := ""
+		if 0 < len(list) {
+			head, _ = list[0].(string)
+		}
+		exact := S_BEXACT == head
+		bounded := "`$NOF`" == head || "`$LEN`" == head || "`$RANGE`" == head
+		for i, v := range list {
+			literal := 0 < i && (exact || (bounded && 1 == i))
+			if !literal {
+				_openquery(v)
+			}
+		}
+	}
 }
 
 // Condensed structures

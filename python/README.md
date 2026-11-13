@@ -616,13 +616,23 @@ $MERGE   $EACH    $PACK    $REF     $FORMAT  $APPLY
 ```
 $MAP   $LIST   $STRING   $NUMBER   $INTEGER   $DECIMAL  $BOOLEAN
 $NULL  $NIL    $FUNCTION $INSTANCE $ANY       $CHILD    $EXACT
-$NOF   $ALL
+$NOF   $ALL    $LEN      $RANGE    $LIKE
 ```
 
 `` ['`$NOF`', n, spec, …] `` holds when as many specs admit the value as `n`
 allows, where `n` is an integer or a dict with `'min'`, `'max'` or both;
 `` ['`$ALL`', spec, …] `` holds when every spec admits it. There is no
 `$ONE`: write `` ['`$ONE`', a, b] `` as `` ['`$NOF`', {'min': 1}, a, b] ``.
+`` ['`$LEN`', n, spec?] `` holds when the value's length is within `n`, a
+bound written as for `$NOF`: a `str` counts code points (as `len` does), a
+list its elements, and a dict its keys. `` ['`$RANGE`', bound, spec?] ``
+holds when the value is a number (an `int` or `float`, never a `bool`)
+within `bound`, a dict of `'min'` or `'gt'` and `'max'` or `'lt'`.
+`` ['`$LIKE`', pattern, spec?] `` holds when the value is a `str` the
+pattern finds, with Python's `re`, anywhere in it unless the pattern is
+anchored (`re.search`, not `re.match`). `$LEN`, `$RANGE` and `$LIKE` take
+at most one spec, which must also admit the value. `'min'` and `'max'`
+include their bound, while `'gt'` and `'lt'` exclude it.
 A spec that names any other checker, such as the misspelling
 `` '`$string`' ``, is rejected before any data is read. See the
 [top-level README](../README.md) for what each checker accepts.
@@ -642,9 +652,9 @@ and `__UNDEF__`.
 
 Inside a dict or list, `validate` distinguishes a stored `None` from a
 missing key by the key's presence: `$NULL`, `$NIL` and `$ANY` keep a null the
-data holds in the output, and the list directives `$EXACT`, `$NOF` and
-`$ALL` read it as a value. The absent-versus-null rule is in
-[`UNDEF_SPEC.md`](../design/UNDEF_SPEC.md).
+data holds in the output, and the list directives `$EXACT`, `$NOF`, `$ALL`,
+`$LEN`, `$RANGE`, and `$LIKE` read it as a value. The absent-versus-null rule
+is in [`UNDEF_SPEC.md`](../design/UNDEF_SPEC.md).
 
 ### Walk uses keyword arguments
 
@@ -663,7 +673,7 @@ parity with other ports beats style here.
 
 ### Test status
 
-123 tests pass against the shared corpus (3 skipped).
+127 tests pass against the shared corpus (3 skipped).
 
 
 ## Regex

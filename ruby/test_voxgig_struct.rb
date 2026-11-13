@@ -828,6 +828,24 @@ class TestVoxgigStruct < Minitest::Test
     })
   end
 
+  def test_validate_len
+    @runsetflags.call(@spec['validate']['len'], { 'null' => false }, lambda { |vin|
+      VoxgigStruct.validate(vin['data'], vin['spec'])
+    })
+  end
+
+  def test_validate_range
+    @runsetflags.call(@spec['validate']['range'], { 'null' => false }, lambda { |vin|
+      VoxgigStruct.validate(vin['data'], vin['spec'])
+    })
+  end
+
+  def test_validate_like
+    @runsetflags.call(@spec['validate']['like'], { 'null' => false }, lambda { |vin|
+      VoxgigStruct.validate(vin['data'], vin['spec'])
+    })
+  end
+
   def test_validate_unknown
     @runsetflags.call(@spec['validate']['unknown'], { 'null' => false }, lambda { |vin|
       VoxgigStruct.validate(vin['data'], vin['spec'])
@@ -899,6 +917,16 @@ class TestVoxgigStruct < Minitest::Test
     assert_match(/\AExpected 1 to 2 of number, integer, but/, err.message)
     err = assert_raises(RuntimeError) { VoxgigStruct.validate('x', ['`$NOF`', 2.5, *nof]) }
     assert_match(/has an invalid count: 2\.5/, err.message)
+  end
+
+  def test_validate_len_whole_decimal_bound
+    # A $LEN bound is a $NOF count, so 2.0 is the bound 2 here too.
+    assert_equal 'ab', VoxgigStruct.validate('ab', ['`$LEN`', 2.0])
+    assert_equal 'ab', VoxgigStruct.validate('ab', ['`$LEN`', { 'min' => 1.0, 'max' => 2.0 }])
+    err = assert_raises(RuntimeError) { VoxgigStruct.validate('ab', ['`$LEN`', 3.0]) }
+    assert_match(/\AExpected value of length 3, but/, err.message)
+    err = assert_raises(RuntimeError) { VoxgigStruct.validate('ab', ['`$LEN`', 2.5]) }
+    assert_match(/has an invalid bound: 2\.5/, err.message)
   end
 
   def test_validate_custom

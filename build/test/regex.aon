@@ -15,6 +15,17 @@ test: {
     { in: {pattern:'\\d+\\s\\w+', input:'42 apples'}, out: true }
     { in: {pattern:'[^a-z]+', input:'abc'}, out: false }
     { in: {pattern:'(?:ab)+c', input:'zababcz'}, out: true }
+    { in: {pattern:'^a{0,2}$', input:''}, out: true }
+    { in: {pattern:'^a{0,2}$', input:'aaa'}, out: false }
+    { in: {pattern:'^ba{0}c$', input:'bc'}, out: true }
+    { in: {pattern:'^ba{0}c$', input:'bac'}, out: false }
+    { in: {pattern:'^ba{0,}c$', input:'bc'}, out: true }
+    { in: {pattern:'^(?:a|b){0,2}c$', input:'c'}, out: true }
+    { in: {pattern:'^(?:a|b){0,2}c$', input:'abac'}, out: false }
+    { in: {pattern:'^(?:a|b){2}$', input:'aa'}, out: true }
+    { in: {pattern:'^(?:a*){2}b$', input:'b'}, out: true }
+    { in: {pattern:'^a|b', input:'xb'}, out: true }
+    { in: {pattern:'^a|b', input:'xa'}, out: false }
   ]
 }
 
@@ -25,6 +36,9 @@ find: {
     { in: {pattern:'^(\\w+)\\s', input:'hello world'}, out: ['hello ','hello'] }
     { in: {pattern:'(a|b)(c)', input:'xxbcyy'}, out: ['bc','b','c'] }
     { in: {pattern:'q+', input:'abc'}, out: null }
+    { in: {pattern:'ba{0,2}', input:'xbaaa'}, out: ['baa'] }
+    { in: {pattern:'ba{0,2}?', input:'xbaaa'}, out: ['b'] }
+    { in: {pattern:'^x|y', input:'zzy'}, out: ['y'] }
   ]
 }
 
@@ -44,6 +58,8 @@ replace: {
     { in: {pattern:'\\s+', input:'a  b   c', replacement:'-'}, out: 'a-b-c' }
     { in: {pattern:'q', input:'abc', replacement:'X'}, out: 'abc' }
     { in: {pattern:'(x+)', input:'axxb', replacement:'[$1]'}, out: 'a[xx]b' }
+    { in: {pattern:'^a|b', input:'abab', replacement:'X'}, out: 'XXaX' }
+    { in: {pattern:'a{0,1}b', input:'abbab', replacement:'X'}, out: 'XXX' }
   ]
 }
 

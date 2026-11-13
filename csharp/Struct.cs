@@ -2532,58 +2532,29 @@ namespace Voxgig.Struct
                 });
             }
 
-            object? tref = Clone(refResult);
+            // A recursive reference stops where the data does.
             int pathLen = inj.Path.Count;
-
-            var cpath = pathLen > 3
-                ? inj.Path.GetRange(0, pathLen - 3).Cast<object?>().ToList()
-                : [];
             var tpath = pathLen >= 1
                 ? inj.Path.GetRange(0, pathLen - 1).Cast<object?>().ToList()
                 : [];
-
-            object? tcur = GetPath(store, cpath, null, null);
             object? tvalRef = GetPath(store, tpath, null, null);
+            object? rval = !hasSubRef || tvalRef != null ? Clone(refResult) : NONE;
 
-            if (!hasSubRef || tvalRef != null)
+            // The enclosing loop injects the referenced spec in this list's place, so
+            // neither this pass nor this element leaves a value for modify to check.
+            object? grandparent = inj.SetVal(rval, 2);
+
+            InjectState? prior = inj.Prior;
+            if (prior != null)
             {
-                string lastPath = tpath.Count > 0
-                    ? (StrKey(tpath[^1]) ?? S_DTOP)
-                    : S_DTOP;
-
-                var tinj = inj.Child(0, [(object?)lastPath]);
-                tinj.Path = tpath;
-
-                int nodesLen = inj.Nodes.Count;
-                tinj.Nodes = nodesLen > 1
-                    ? inj.Nodes.GetRange(0, nodesLen - 1).Cast<object?>().ToList()
-                    : [];
-                tinj.Parent = nodesLen >= 2 ? inj.Nodes[nodesLen - 2] : null;
-                tinj.Val = tref;
-                tinj.DPath = cpath;
-                tinj.DParent = tcur;
-
-                Inject(tref, store, tinj);
-                object? rval = tinj.Val;
-
-                inj.SetVal(rval, 2);
-
-                if (IsList(GetElem(inj.Nodes, -2)) && inj.Prior != null)
+                prior.ModifyFn = null;
+                if (IsList(grandparent) || (rval != null && !ReferenceEquals(rval, NONE)))
                 {
-                    inj.Prior.KeyI--;
-                }
-            }
-            else
-            {
-                // Circular self-reference with no data: delete the key from the grandparent.
-                inj.SetVal(null, 2);
-                if (IsList(GetElem(inj.Nodes, -2)) && inj.Prior != null)
-                {
-                    inj.Prior.KeyI--;
+                    prior.KeyI--;
                 }
             }
 
-            return val;
+            return SKIP;
         };
 
         // Apply a named format function to a child value.
@@ -3144,6 +3115,216 @@ namespace Voxgig.Struct
             return SKIP;
         }
 
+        // The value's length is within a bound: ['`$LEN`', bound, spec?], where the
+        // bound is as for a $NOF count. A string's length is in code points.
+        private static readonly Injector _ValidateLen = (inj, val, refStr, store) =>
+            _ValidateBound(inj, store, "$LEN");
+
+        // The value is a number within a bound: ['`$RANGE`', bound, spec?], where the
+        // bound holds min or gt, max or lt, or one of each.
+        private static readonly Injector _ValidateRange = (inj, val, refStr, store) =>
+            _ValidateBound(inj, store, "$RANGE");
+
+        private static readonly Injector _ValidateLike = (inj, val, refStr, store) =>
+            _ValidateBound(inj, store, "$LIKE");
+
+        // The bounding list directives: a bound or pattern, then at most one spec that also admits.
+        private static object? _ValidateBound(InjectState inj, object? store, string name)
+        {
+            if (M_VAL != inj.Mode)
+            {
+                return NONE;
+            }
+
+            if (!IsList(inj.Parent) || 0 != inj.KeyI)
+            {
+                inj.Errs.Add("The " + name + " validator at field " +
+                    Pathify(inj.Path, 1, 1) +
+                    " must be the first element of an array.");
+                return NONE;
+            }
+
+            object? cval = _SlotVal(inj);
+
+            inj.KeyI = Size(inj.Keys);
+
+            // As for the counting directives: SKIP keeps inject off the detached list.
+            _SetSlot(inj, cval);
+
+            inj.Path = (List<object?>)Slice(inj.Path, -1)!;
+
+            string field = "The " + name + " validator at field " + Pathify(inj.Path, 1);
+            int nargs = Size(inj.Parent) - 1;
+            bool islen = "$LEN" == name;
+            bool islike = "$LIKE" == name;
+            string argname = islike ? "pattern" : "bound";
+
+            if (nargs is < 1 or > 2)
+            {
+                inj.Errs.Add(field + " must have a " + argname + " and at most one spec.");
+                return SKIP;
+            }
+
+            object? bound = Lookup(inj.Parent, 1);
+            Regex? like = islike ? _LikeRe(bound) : null;
+            var (lo, hi, desc) = islen
+                ? _LenBound(bound)
+                : (0d, 0d, islike ? (null == like ? null : "like /" + bound + "/") : _RangeDesc(bound));
+
+            if (null == desc)
+            {
+                inj.Errs.Add(field + " has an invalid " + argname + ": " + Stringify(bound) + ".");
+                return SKIP;
+            }
+
+            int ctype = Typify(cval);
+
+            if (2 == nargs && !_Admits(cval, Lookup(inj.Parent, 2), inj, store))
+            {
+                string specdesc = R_TRANSFORM_NAME.Replace(
+                    Stringify(Lookup(inj.Parent, 2)),
+                    m => m.Groups[1].Value.ToLowerInvariant());
+
+                inj.Errs.Add(_InvalidTypeMsg(inj.Path, specdesc, ctype, cval));
+                return SKIP;
+            }
+
+            if (0 == ((islen ? T.Str | T.List | T.Map : islike ? T.Str : T.Number) & ctype))
+            {
+                string needtype = islen ? "string, list or map" : islike ? S_string : S_number;
+                inj.Errs.Add(_InvalidTypeMsg(inj.Path, needtype, ctype, cval));
+                return SKIP;
+            }
+
+            int len = !islen ? 0 : cval is string s ? s.EnumerateRunes().Count() : Size(cval);
+            bool inbound = islen
+                ? lo <= len && (-1 == hi || len <= hi)
+                : islike
+                    ? cval is string text && ReTest((string)bound!, text)
+                    : _InRange(bound, cval);
+
+            if (!inbound)
+            {
+                string needtype = (1 < Size(inj.Path) ? "" : "value ") + desc;
+                inj.Errs.Add(_InvalidTypeMsg(inj.Path, needtype, ctype, cval));
+            }
+
+            return SKIP;
+        }
+
+        // The bounds of a $LEN bound, with -1 for no maximum, and the words for it,
+        // which are null when the bound is invalid.
+        private static (double lo, double hi, string? desc) _LenBound(object? bound)
+        {
+            var (lo, hi, countdesc) = _NofCount(bound, -1);
+
+            if (null == countdesc)
+            {
+                return (0, 0, null);
+            }
+
+            string desc = "of length " +
+                (lo == hi
+                    ? Stringify(lo)
+                    : -1 == hi
+                        ? "at least " + Stringify(lo)
+                        : 0 == lo
+                            ? "at most " + Stringify(hi)
+                            : Stringify(lo) + " to " + Stringify(hi));
+
+            return (lo, hi, desc);
+        }
+
+        // A $LIKE pattern compiled by the port's own regex engine; null unless it compiles.
+        private static Regex? _LikeRe(object? pattern)
+        {
+            if (pattern is not string source)
+            {
+                return null;
+            }
+
+            try
+            {
+                return ReCompile(source);
+            }
+            catch (ArgumentException)
+            {
+                return null;
+            }
+        }
+
+        // The words for a $RANGE bound, which are null when the bound is invalid.
+        private static string? _RangeDesc(object? bound)
+        {
+            if (!IsMap(bound))
+            {
+                return null;
+            }
+
+            object? min = Lookup(bound, "min");
+            object? max = Lookup(bound, "max");
+            object? gt = Lookup(bound, "gt");
+            object? lt = Lookup(bound, "lt");
+            object? lower = Has(min) ? min : gt;
+            object? upper = Has(max) ? max : lt;
+
+            static bool Has(object? n)
+            {
+                return !ReferenceEquals(n, NONE);
+            }
+
+            static bool IsNum(object? n)
+            {
+                return !Has(n) || (n is int or long or double or float && 0 < (T.Number & Typify(n)));
+            }
+
+            bool valid =
+                0 < Size(bound) &&
+                Size(bound) == new[] { min, max, gt, lt }.Count(Has) &&
+                (!Has(min) || !Has(gt)) &&
+                (!Has(max) || !Has(lt)) &&
+                IsNum(min) &&
+                IsNum(max) &&
+                IsNum(gt) &&
+                IsNum(lt) &&
+                (!Has(lower) || !Has(upper) || _BoundNum(lower) <= _BoundNum(upper));
+
+            if (!valid)
+            {
+                return null;
+            }
+
+            return Join(
+                [
+                    Has(min) ? "at least " + Stringify(min) : Has(gt) ? "greater than " + Stringify(gt) : NONE,
+                    Has(max) ? "at most " + Stringify(max) : Has(lt) ? "less than " + Stringify(lt) : NONE,
+                ],
+                " and ");
+        }
+
+        // A number within a valid $RANGE bound.
+        private static bool _InRange(object? bound, object? val)
+        {
+            object? min = Lookup(bound, "min");
+            object? max = Lookup(bound, "max");
+            object? gt = Lookup(bound, "gt");
+            object? lt = Lookup(bound, "lt");
+            double v = _BoundNum(val);
+
+            return (ReferenceEquals(min, NONE) || _BoundNum(min) <= v) &&
+                (ReferenceEquals(max, NONE) || v <= _BoundNum(max)) &&
+                (ReferenceEquals(gt, NONE) || _BoundNum(gt) < v) &&
+                (ReferenceEquals(lt, NONE) || v < _BoundNum(lt));
+        }
+
+        // Typify flags a type it does not know as any, number included: NaN puts it out of range.
+        private static double _BoundNum(object? n)
+        {
+            return n is int or long or double or float
+                ? Convert.ToDouble(n, CultureInfo.InvariantCulture)
+                : double.NaN;
+        }
+
         // True if key exists on node (JSON null counts as present); sets value when present.
         private static bool TryGetDataValue(object? node, object? key, out object? value)
         {
@@ -3374,6 +3555,9 @@ namespace Voxgig.Struct
                     ["$EXACT"]    = _ValidateExact,
                     ["$NOF"]      = _ValidateNof,
                     ["$ALL"]      = _ValidateAll,
+                    ["$LEN"]      = _ValidateLen,
+                    ["$RANGE"]    = _ValidateRange,
+                    ["$LIKE"]     = _ValidateLike,
 
                     [S_DERRS] = errs,
                 },
@@ -3762,6 +3946,12 @@ namespace Voxgig.Struct
         // $GT, $LT, $GTE, $LTE, $LIKE: comparison operators.
         private static readonly Injector _SelectCmp = (inj, val, refStr, store) =>
         {
+            // The list form of $LIKE is validate's checker; the key form is this operator.
+            if (M_VAL == inj.Mode && "$LIKE" == refStr)
+            {
+                return _ValidateLike(inj, val, refStr, store);
+            }
+
             if (M_KEYPRE != inj.Mode)
             {
                 return NONE;
@@ -3878,18 +4068,7 @@ namespace Voxgig.Struct
             var meta = new Dictionary<string, object?> { [S_BEXACT] = true };
             var q = Clone(query);
 
-            Walk(q, (k, v, p, path) =>
-            {
-                if (IsMap(v))
-                {
-                    object? existing = GetProp(v, "`$OPEN`");
-                    if (existing == null)
-                    {
-                        SetProp(v, "`$OPEN`", true);
-                    }
-                }
-                return v;
-            });
+            _OpenQuery(q);
 
             foreach (object? child in childList)
             {
@@ -3908,6 +4087,34 @@ namespace Voxgig.Struct
             }
 
             return results;
+        }
+
+        // Open every map in a select query, so a child may hold keys the query does
+        // not name, but leave a directive's literals as written: what $EXACT
+        // compares, and the count or bound of $NOF, $LEN and $RANGE.
+        private static void _OpenQuery(object? q)
+        {
+            if (q is Dictionary<string, object?> map)
+            {
+                SetProp(map, "`$OPEN`", GetProp(map, "`$OPEN`", true));
+                foreach (string key in KeysOf(map))
+                {
+                    _OpenQuery(map[key]);
+                }
+            }
+            else if (q is List<object?> list)
+            {
+                object? head = 0 < list.Count ? list[0] : null;
+                bool exact = head is "`$EXACT`";
+                bool bounded = head is "`$NOF`" or "`$LEN`" or "`$RANGE`";
+                for (int i = 0; i < list.Count; i++)
+                {
+                    if (0 == i || !(exact || (bounded && 1 == i)))
+                    {
+                        _OpenQuery(list[i]);
+                    }
+                }
+            }
         }
 
 

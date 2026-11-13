@@ -16,10 +16,12 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.StringJoiner;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 
 @SuppressWarnings({"unchecked", "rawtypes"})
 public class Struct {
@@ -2401,47 +2403,23 @@ public class Struct {
               });
         }
 
-        Object cpathRaw = slice(inj.path, -3, null);
-        List<String> cpath =
-            cpathRaw instanceof List<?> cl
-                ? new ArrayList<>((List<String>) cl)
-                : new ArrayList<>();
-        Object tpathRaw = slice(inj.path, -1, null);
-        List<String> tpath =
-            tpathRaw instanceof List<?> tpl
-                ? new ArrayList<>((List<String>) tpl)
-                : new ArrayList<>();
-        Object tval = getpath(store, tpath);
-        Object rval = UNDEF;
+        // A recursive reference stops where the data does.
+        Object tval = getpath(store, slice(inj.path, -1, null));
+        Object rval = !hasSubRef[0] || tval != UNDEF ? tref : UNDEF;
 
-        if (!hasSubRef[0] || tval != UNDEF) {
-          Object lastKey = getelem(tpath, -1);
-          List<String> singleKey = new ArrayList<>();
-          singleKey.add(strkey(lastKey));
-          Injection tinj = inj.child(0, singleKey);
-          tinj.path = tpath;
-          Object slicedNodes = slice(inj.nodes, -1, null);
-          tinj.nodes =
-              slicedNodes instanceof List<?> snl
-                  ? new ArrayList<>((List<Object>) snl)
-                  : new ArrayList<>();
-          tinj.parent = getelem(inj.nodes, -2);
-          tinj.val = tref;
-
-          List<String> flatCpath = new ArrayList<>(cpath);
-          tinj.dpath = flatCpath;
-          tinj.dparent = getpath(store, cpath);
-
-          inject(tref, store, tinj);
-          rval = tinj.val;
-        }
-
+        // The enclosing loop injects the referenced spec in this list's place, so
+        // neither this pass nor this element leaves a value for modify to check.
         Object grandparent = inj.setval(rval, 2);
-        if (islist(grandparent) && inj.prior != null) {
-          inj.prior.keyI--;
+
+        Injection prior = inj.prior;
+        if (prior != null) {
+          prior.modify = null;
+          if (islist(grandparent) || rval != UNDEF) {
+            prior.keyI--;
+          }
         }
 
-        return val;
+        return SKIP;
       };
 
   public static Object transform(Object data, Object spec) {
@@ -2669,13 +2647,17 @@ public class Struct {
         return UNDEF;
       };
 
-  // Lowers every `$NAME` marker in the joined description, nested ones included.
   private static String _describeAlternatives(List<Object> tvals) {
     List<Object> parts = new ArrayList<>(tvals.size());
     for (Object tval : tvals) {
       parts.add(stringify(tval));
     }
-    Matcher m = R_TRANSFORM_NAME.matcher(join(parts, ", ", false));
+    return _lowernames(join(parts, ", ", false));
+  }
+
+  // Lowers every `$NAME` marker in the description, nested ones included.
+  private static String _lowernames(String desc) {
+    Matcher m = R_TRANSFORM_NAME.matcher(desc);
     StringBuilder out = new StringBuilder();
     while (m.find()) {
       m.appendReplacement(out, Matcher.quoteReplacement(m.group(1).toLowerCase(Locale.ROOT)));
@@ -2829,6 +2811,222 @@ public class Struct {
     }
 
     return SKIP;
+  }
+
+  /**
+   * $LEN: the value's length is within a bound. Format:
+   * {@code [`$LEN`, bound, spec?]}, where the bound is as for a $NOF count. A
+   * string's length is in code points. Mirrors TS {@code validate_LEN}.
+   */
+  public static final Injector validate_LEN =
+      (injObj, val, ref, store) ->
+          injObj instanceof Injection inj ? _validatebound(inj, store, "$LEN") : UNDEF;
+
+  /**
+   * $RANGE: the value is a number within a bound. Format:
+   * {@code [`$RANGE`, bound, spec?]}, where the bound holds {@code min} or
+   * {@code gt}, {@code max} or {@code lt}, or one of each. Mirrors TS
+   * {@code validate_RANGE}.
+   */
+  public static final Injector validate_RANGE =
+      (injObj, val, ref, store) ->
+          injObj instanceof Injection inj ? _validatebound(inj, store, "$RANGE") : UNDEF;
+
+  /**
+   * $LIKE: the value is a string the pattern finds. Format:
+   * {@code [`$LIKE`, pattern, spec?]}, where the pattern is a
+   * {@code java.util.regex} expression that matches anywhere unless anchored.
+   * Mirrors TS {@code validate_LIKE}.
+   */
+  public static final Injector validate_LIKE =
+      (injObj, val, ref, store) ->
+          injObj instanceof Injection inj ? _validatebound(inj, store, "$LIKE") : UNDEF;
+
+  // The bounding list directives: a bound or pattern, then at most one spec that also admits.
+  private static Object _validatebound(Injection inj, Object store, String name) {
+    if (inj.mode != M_VAL) {
+      return UNDEF;
+    }
+
+    Object parent = inj.parent;
+
+    if (!islist(parent) || inj.keyI != 0) {
+      inj.errs.add(
+          "The "
+              + name
+              + " validator at field "
+              + pathify(inj.path, 1, 1)
+              + " must be the first element of an array.");
+      return UNDEF;
+    }
+
+    Object cval = _slotval(inj);
+
+    inj.keyI = size(inj.keys);
+
+    // As for the counting directives: SKIP keeps inject off the detached list.
+    inj.setval(cval, 2);
+
+    inj.path = (List<String>) slice(inj.path, -1, null);
+
+    String field = "The " + name + " validator at field " + pathify(inj.path, 1);
+    int nargs = size(parent) - 1;
+    boolean islen = "$LEN".equals(name);
+    boolean islike = "$LIKE".equals(name);
+    String argname = islike ? "pattern" : "bound";
+
+    if (nargs < 1 || 2 < nargs) {
+      inj.errs.add(field + " must have a " + argname + " and at most one spec.");
+      return SKIP;
+    }
+
+    Object bound = lookup(parent, 1);
+    String like = islike ? _likere(bound) : null;
+    Object[] lenbound = islen ? _lenbound(bound) : null;
+    String desc =
+        islen
+            ? (String) lenbound[2]
+            : islike ? (null == like ? null : "like /" + like + "/") : _rangedesc(bound);
+
+    if (null == desc) {
+      inj.errs.add(field + " has an invalid " + argname + ": " + stringify(bound) + ".");
+      return SKIP;
+    }
+
+    int ctype = typify(cval);
+
+    if (2 == nargs && !_admits(cval, lookup(parent, 2), inj, store)) {
+      String specdesc = _lowernames(stringify(lookup(parent, 2)));
+      inj.errs.add(_invalidTypeMsg(inj.path, specdesc, ctype, cval, "V0410"));
+      return SKIP;
+    }
+
+    if (0 == ((islen ? T_string | T_list | T_map : islike ? T_string : T_number) & ctype)) {
+      String needtype = islen ? "string, list or map" : islike ? "string" : "number";
+      inj.errs.add(_invalidTypeMsg(inj.path, needtype, ctype, cval, "V0420"));
+      return SKIP;
+    }
+
+    boolean inbound;
+    if (islen) {
+      long lo = (Long) lenbound[0];
+      long hi = (Long) lenbound[1];
+      int len = cval instanceof String s ? s.codePointCount(0, s.length()) : size(cval);
+      inbound = lo <= len && (-1 == hi || len <= hi);
+    } else if (islike) {
+      inbound = reTest(like, (String) cval);
+    } else {
+      inbound = _inrange(bound, ((Number) cval).doubleValue());
+    }
+
+    if (!inbound) {
+      String needtype = (1 < size(inj.path) ? "" : "value ") + desc;
+      inj.errs.add(_invalidTypeMsg(inj.path, needtype, ctype, cval, "V0430"));
+    }
+
+    return SKIP;
+  }
+
+  // The bounds of a $LEN bound, with -1 for no maximum, and the words for it,
+  // which are null when the bound is invalid.
+  private static Object[] _lenbound(Object bound) {
+    Object[] count = _nofcount(bound, -1);
+
+    if (null == count[2]) {
+      return new Object[] {0L, 0L, null};
+    }
+
+    long lo = (Long) count[0];
+    long hi = (Long) count[1];
+
+    String desc =
+        lo == hi
+            ? String.valueOf(lo)
+            : -1 == hi ? "at least " + lo : 0 == lo ? "at most " + hi : lo + " to " + hi;
+
+    return new Object[] {lo, hi, "of length " + desc};
+  }
+
+  // A $LIKE pattern that the port's own regex engine compiles; null unless it does.
+  private static String _likere(Object pattern) {
+    if (!(pattern instanceof String s)) {
+      return null;
+    }
+    try {
+      reCompile(s);
+      return s;
+    } catch (PatternSyntaxException e) {
+      return null;
+    }
+  }
+
+  // The words for a $RANGE bound, which are null when the bound is invalid.
+  private static String _rangedesc(Object bound) {
+    if (!ismap(bound)) {
+      return null;
+    }
+
+    Object min = lookup(bound, "min");
+    Object max = lookup(bound, "max");
+    Object gt = lookup(bound, "gt");
+    Object lt = lookup(bound, "lt");
+    Object lower = UNDEF == min ? gt : min;
+    Object upper = UNDEF == max ? lt : max;
+
+    int numkeys = 0;
+    for (Object n : new Object[] {min, max, gt, lt}) {
+      if (UNDEF != n) {
+        numkeys++;
+      }
+    }
+
+    boolean valid =
+        0 < size(bound)
+            && size(bound) == numkeys
+            && (UNDEF == min || UNDEF == gt)
+            && (UNDEF == max || UNDEF == lt)
+            && _isnum(min)
+            && _isnum(max)
+            && _isnum(gt)
+            && _isnum(lt)
+            && (UNDEF == lower
+                || UNDEF == upper
+                || ((Number) lower).doubleValue() <= ((Number) upper).doubleValue());
+
+    if (!valid) {
+      return null;
+    }
+
+    StringJoiner desc = new StringJoiner(" and ");
+    if (UNDEF != min) {
+      desc.add("at least " + stringify(min));
+    } else if (UNDEF != gt) {
+      desc.add("greater than " + stringify(gt));
+    }
+    if (UNDEF != max) {
+      desc.add("at most " + stringify(max));
+    } else if (UNDEF != lt) {
+      desc.add("less than " + stringify(lt));
+    }
+
+    return desc.toString();
+  }
+
+  // A number within a valid $RANGE bound.
+  private static boolean _inrange(Object bound, double val) {
+    Object min = lookup(bound, "min");
+    Object max = lookup(bound, "max");
+    Object gt = lookup(bound, "gt");
+    Object lt = lookup(bound, "lt");
+
+    return (UNDEF == min || ((Number) min).doubleValue() <= val)
+        && (UNDEF == max || val <= ((Number) max).doubleValue())
+        && (UNDEF == gt || ((Number) gt).doubleValue() < val)
+        && (UNDEF == lt || val < ((Number) lt).doubleValue());
+  }
+
+  private static boolean _isnum(Object n) {
+    return UNDEF == n || 0 != (T_number & typify(n));
   }
 
   // Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
@@ -3220,6 +3418,8 @@ public class Struct {
   public static final Injector select_CMP =
       (injObj, val, ref, store) -> {
         if (!(injObj instanceof Injection inj)) return UNDEF;
+        // The list form of $LIKE is validate's checker; the key form is this operator.
+        if (inj.mode == M_VAL && "$LIKE".equals(ref)) return validate_LIKE.apply(inj, val, ref, store);
         if (inj.mode != M_KEYPRE) return UNDEF;
         // Group B: select $CMP term is read raw (TS _lookup(parent,key)).
         Object term = lookup(inj.parent, inj.key);
@@ -3306,6 +3506,9 @@ public class Struct {
     baseStore.put("$EXACT", validate_EXACT);
     baseStore.put("$NOF", validate_NOF);
     baseStore.put("$ALL", validate_ALL);
+    baseStore.put("$LEN", validate_LEN);
+    baseStore.put("$RANGE", validate_RANGE);
+    baseStore.put("$LIKE", validate_LIKE);
 
     List<Object> mergeList = new ArrayList<>();
     mergeList.add(baseStore);
@@ -3349,8 +3552,8 @@ public class Struct {
   }
 
   /**
-   * TS-faithful select: tag each child node with {@code $KEY}, walk the
-   * (cloned) query annotating every map with {@code `$OPEN`}, then run
+   * TS-faithful select: tag each child node with {@code $KEY}, open the
+   * (cloned) query's maps with {@code _openquery}, then run
    * {@link #validate} against each child with the {@code select_*} injectors
    * available as extras and {@code meta.`$EXACT`} = true.
    * Mirrors TS lines 2558–2609.
@@ -3397,16 +3600,8 @@ public class Struct {
     extra.put("$LTE", select_CMP);
     extra.put("$LIKE", select_CMP);
 
-    // Clone query and annotate every map with `$OPEN`=true.
     Object q = clone(query);
-    walk(
-        q,
-        (k, v, p, t) -> {
-          if (ismap(v)) {
-            setprop(v, "`$OPEN`", getprop(v, "`$OPEN`", true));
-          }
-          return v;
-        });
+    _openquery(q);
 
     List<Object> results = new ArrayList<>();
     for (Object child : childList) {
@@ -3425,6 +3620,27 @@ public class Struct {
       }
     }
     return results;
+  }
+
+  // Open every map in a select query, so a child may hold keys the query does
+  // not name, but leave a directive's literals as written: what $EXACT
+  // compares, and the count or bound of $NOF, $LEN and $RANGE.
+  private static void _openquery(Object q) {
+    if (q instanceof Map<?, ?> m) {
+      setprop(q, "`$OPEN`", getprop(q, "`$OPEN`", true));
+      for (String key : keysof(q)) {
+        _openquery(m.get(key));
+      }
+    } else if (q instanceof List<?> l) {
+      Object head = l.isEmpty() ? null : l.get(0);
+      boolean exact = "`$EXACT`".equals(head);
+      boolean bounded = "`$NOF`".equals(head) || "`$LEN`".equals(head) || "`$RANGE`".equals(head);
+      for (int i = 0; i < l.size(); i++) {
+        if (0 == i || !(exact || (bounded && 1 == i))) {
+          _openquery(l.get(i));
+        }
+      }
+    }
   }
 
 
