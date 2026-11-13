@@ -27,8 +27,9 @@ git clone https://github.com/voxgig/omni ../../omni   # the test runner
 
 cd c
 make build       # compile the library (no omni)
-make test        # the shared corpus + the client test
+make test        # the smoke and regex tests, the shared corpus, the client test
 make smoke       # just the smoke test
+make regex       # just the regex engine's own checks
 make corpus      # just the corpus driver
 make sanitize    # build + run with ASan + UBSan (memory-only; leaks reported)
 make check_leak  # build + run under valgrind
@@ -675,9 +676,9 @@ The `_re` suffixed variants take an already-compiled `voxgig_regex*`.
 ### Dialect
 
 The in-tree engine implements the RE2 subset documented in `/design/REGEX.md`:
-literals + escapes, `.`, `^`/`$`, `* + ? {n} {n,} {n,m}` (greedy + lazy),
-classes incl. `\d \w \s` and friends, `\b`/`\B`, `(...)` / `(?:...)`,
-alternation.
+literals + escapes, `.`, `^`/`$` (the start and end of the whole text),
+`* + ? {n} {n,} {n,m}` (greedy + lazy), classes incl. `\d \w \s` and
+friends, `\b`/`\B`, `(...)` / `(?:...)`, alternation.
 
 **Not supported** (by design — RE2 doesn't either): backreferences,
 lookaround, possessive quantifiers, atomic groups. Backref patterns
@@ -712,8 +713,9 @@ See `/design/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
 ```bash
 cd c
 make build      # compile the library alone
-make test       # the shared corpus + the client test
+make test       # the smoke and regex tests, the shared corpus, the client test
 make smoke      # the API smoke test
+make regex      # the regex engine's own checks
 make sanitize   # corpus driver with ASan + UBSan
 make check_leak # corpus driver under valgrind
 make lint       # clang-format --dry-run + clang-tidy

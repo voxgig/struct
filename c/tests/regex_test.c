@@ -35,6 +35,18 @@ int main(void) {
   check("^abc$", "abc", true, "both anchors hit");
   check("^abc$", "xabc", false, "both anchors miss");
 
+  /* ^ and $ anchor to the whole text, not to each line */
+  check("^b", "a\nb", false, "^ not after a newline");
+  check("a$", "a\nb", false, "$ not before a newline");
+  check("a$", "a\n", false, "$ not before a final newline");
+  check("x|^b", "a\nb", false, "^ inside an alternation");
+  check("(?:^|,)b", "a\nb", false, "^ inside a group");
+  check("(?:^|,)b", "a,b", true, "group's other branch");
+  check("^a", "a\nb", true, "^ at the start");
+  check("b$", "a\nb", true, "$ at the end");
+  check("^$", "\n", false, "^$ across a newline");
+  check("^$", "", true, "^$ on empty text");
+
   /* Any-char */
   check("^a.c$", "abc", true, ".any hit");
   check("^a.c$", "ac", false, ".any miss");

@@ -757,13 +757,14 @@ static thread_t* tl_add(threadlist* tl, int pc, const int* slots, int nslots, in
     free(ns);
     return NULL;
   }
+  /* ^ and $ anchor to the whole text, as in RE2 without (?m). */
   if (in->op == OP_BOL) {
-    if (sp != 0 && input[sp - 1] != '\n')
+    if (sp != 0)
       return NULL;
     return tl_add(tl, pc + 1, slots, nslots, sp, re, input, ilen);
   }
   if (in->op == OP_EOL) {
-    if ((size_t)sp != ilen && input[sp] != '\n')
+    if ((size_t)sp != ilen)
       return NULL;
     return tl_add(tl, pc + 1, slots, nslots, sp, re, input, ilen);
   }

@@ -36,7 +36,7 @@ regex engine is an in-tree RE2-subset Thompson NFA in
 ```bash
 cd c
 make smoke       # the API smoke test (no test runner needed)
-make test        # the shared corpus + the client test (needs voxgig/omni)
+make test        # smoke, regex, the shared corpus and the client test (needs voxgig/omni)
 ```
 
 To use it from your own code, compile `src/*.c` alongside your program and
@@ -323,10 +323,11 @@ lookaround). Two consequences:
 ```bash
 cd c
 make build       # compile the library alone
-make test        # the corpus driver + the client test
+make test        # smoke, regex, the corpus driver and the client test
 make corpus      # just the corpus driver
 make client      # just the client test
 make smoke       # the API smoke test
+make regex       # the regex engine's own checks
 make sanitize    # corpus driver under ASan + UBSan
 make check_leak  # corpus driver under valgrind
 make lint        # clang-format --dry-run + clang-tidy
