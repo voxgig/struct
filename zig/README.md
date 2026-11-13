@@ -671,9 +671,9 @@ earlier `mvzr` dependency. No third-party runtime crates.
 ### Dialect
 
 The in-tree engine implements the RE2 subset documented in `/design/REGEX.md`:
-literals + escapes, `.`, `^`/`$`, `* + ? {n} {n,} {n,m}` (greedy + lazy),
-classes incl. `\d \w \s` and friends, `\b`/`\B`, `(...)` / `(?:...)`,
-alternation.
+literals + escapes, `.`, `^`/`$` (the start and end of the whole text),
+`* + ? {n} {n,} {n,m}` (greedy + lazy), classes incl. `\d \w \s` and
+friends, `\b`/`\B`, `(...)` / `(?:...)`, alternation.
 
 **Not supported** (by design — RE2 doesn't either): backreferences,
 lookaround, possessive quantifiers, atomic groups.

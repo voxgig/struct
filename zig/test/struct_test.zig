@@ -1451,6 +1451,24 @@ test "regex-escape" {
     try omni.rungroup(&r, "regex", "escape", omni.sub(wrap_re_escape), .{});
 }
 
+// Not in the corpus: Ruby's native ^ and $ match at every line.
+test "regex-anchors-whole-text" {
+    const t = std.testing;
+    try t.expect(!voxgig_struct.re_test("^b", "a\nb"));
+    try t.expect(!voxgig_struct.re_test("a$", "a\nb"));
+    try t.expect(!voxgig_struct.re_test("a$", "a\n"));
+    try t.expect(!voxgig_struct.re_test("x|^b", "a\nb"));
+    try t.expect(!voxgig_struct.re_test("(?:^|,)b", "a\nb"));
+    try t.expect(voxgig_struct.re_test("(?:^|,)b", "a,b"));
+    try t.expect(voxgig_struct.re_test("^a", "a\nb"));
+    try t.expect(voxgig_struct.re_test("b$", "a\nb"));
+    try t.expect(!voxgig_struct.re_test("^$", "\n"));
+    try t.expect(voxgig_struct.re_test("^$", ""));
+    const out = try voxgig_struct.re_replace(t.allocator, "$", "a\nb", "!");
+    defer t.allocator.free(out);
+    try t.expectEqualStrings("a\nb!", out);
+}
+
 // ---- sentinels: Group A null/undefined unification across the readers ----
 
 test "sentinels-getprop_unify" {

@@ -274,16 +274,13 @@ const ThreadList = struct {
                 defer self.allocator.free(ns);
                 return self.add(re, input, pc + 1, ns, sp);
             },
+            // ^ and $ anchor to the whole text, as in RE2 without (?m).
             .bol_op => {
-                if (sp == 0 or (sp > 0 and sp - 1 < input.len and input[sp - 1] == '\n')) {
-                    return self.add(re, input, pc + 1, slots, sp);
-                }
+                if (sp == 0) return self.add(re, input, pc + 1, slots, sp);
                 return;
             },
             .eol_op => {
-                if (sp >= input.len or input[sp] == '\n') {
-                    return self.add(re, input, pc + 1, slots, sp);
-                }
+                if (sp >= input.len) return self.add(re, input, pc + 1, slots, sp);
                 return;
             },
             .wb_op, .nwb_op => {
