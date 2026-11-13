@@ -54,7 +54,7 @@ NFA engine in-tree (c/cpp/lua/rust/zig).
 | **cpp** | 52 | 15 | 2 | 1730/1730 corpus | full TS-canonical parity |
 | **csharp** | 52 | 15 | 2 | 118/118 pass | already Group A |
 | **kotlin** | 52 | 15 | 2 | 118/118 pass | full TS-canonical parity |
-| **zig** | 52 | 15 | 2 | 95/95 pass in CI \*1 \*4 | cycle-break + 7 latent-bug fixes |
+| **zig** | 52 | 15 | 2 | 96/96 pass in CI \*1 \*4 | cycle-break + 7 latent-bug fixes |
 | **perl** | 52 | 15 | 2 | 175/175 pass | full TS-canonical parity |
 | **swift** | 52 | 15 | 2 | 30/30 pass in CI | full TS-canonical parity |
 | **clojure** | 52 | 15 | 2 | 101 groups, 0 failed | full TS-canonical parity |
