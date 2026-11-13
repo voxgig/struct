@@ -692,9 +692,9 @@ regex, so the port vendors one). No LuaRocks dependency, no FFI.
 ### Dialect
 
 The in-tree engine implements the RE2 subset documented in
-`/design/REGEX.md`: literals + escapes, `.`, `^`/`$`, `* + ? {n} {n,} {n,m}`
-(greedy + lazy), classes incl. `\d \w \s` and friends, `\b`/`\B`,
-`(...)` / `(?:...)`, alternation.
+`/design/REGEX.md`: literals + escapes, `.`, `^`/`$` (the start and end of
+the whole text), `* + ? {n} {n,} {n,m}` (greedy + lazy), classes incl.
+`\d \w \s` and friends, `\b`/`\B`, `(...)` / `(?:...)`, alternation.
 
 **Not supported** (by design — RE2 doesn't either): backreferences,
 lookaround, possessive quantifiers, atomic groups. Backref patterns

@@ -457,11 +457,12 @@ local function add_thread(re, list, pc, slots, sp, input, ilen, visited)
     ns[insn.data.slot + 1] = sp
     add_thread(re, list, pc + 1, ns, sp, input, ilen, visited)
   elseif op == OP_BOL then
-    if sp == 0 or input:byte(sp) == 10 then
+    -- ^ and $ anchor to the whole text, as in RE2 without (?m).
+    if sp == 0 then
       add_thread(re, list, pc + 1, slots, sp, input, ilen, visited)
     end
   elseif op == OP_EOL then
-    if sp == ilen or input:byte(sp + 1) == 10 then
+    if sp == ilen then
       add_thread(re, list, pc + 1, slots, sp, input, ilen, visited)
     end
   elseif op == OP_WB or op == OP_NWB then
