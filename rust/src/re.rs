@@ -894,13 +894,14 @@ impl ThreadList {
                     ns[slot] = sp as i32;
                     stack.push((cur_pc + 1, ns));
                 }
+                // ^ and $ anchor to the whole text, as in RE2 without (?m).
                 Op::Bol => {
-                    if sp == 0 || (sp - 1 < input.len() && input[sp - 1] == b'\n') {
+                    if sp == 0 {
                         stack.push((cur_pc + 1, cur_slots));
                     }
                 }
                 Op::Eol => {
-                    if sp >= input.len() || input[sp] == b'\n' {
+                    if sp >= input.len() {
                         stack.push((cur_pc + 1, cur_slots));
                     }
                 }
@@ -1200,6 +1201,23 @@ mod tests {
         let r = Regex::new(r"\bcat\b").unwrap();
         assert!(r.is_match("the cat sat"));
         assert!(!r.is_match("category"));
+    }
+
+    #[test]
+    fn test_anchors_whole_text() {
+        let m = |p: &str, s: &str| Regex::new(p).unwrap().is_match(s);
+        assert!(!m("^b", "a\nb"));
+        assert!(!m("a$", "a\nb"));
+        assert!(!m("a$", "a\n"));
+        assert!(!m("x|^b", "a\nb"));
+        assert!(!m("(?:^|,)b", "a\nb"));
+        assert!(m("(?:^|,)b", "a,b"));
+        assert!(m("^a", "a\nb"));
+        assert!(m("b$", "a\nb"));
+        assert!(!m("^$", "\n"));
+        assert!(m("^$", ""));
+        let r = Regex::new("$").unwrap();
+        assert_eq!(r.replace_all("a\nb", "!"), "a\nb!");
     }
 
     #[test]
