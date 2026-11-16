@@ -171,9 +171,11 @@ Struct::stringify(['a' => 1, 'b' => [2, 3]]);   // '{a:1,b:[2,3]}'
 `jsonify` reads its options off a flags object (`indent`, `offset`).
 
 For more task recipes (merge configs, rename fields, `$EACH`, `$MERGE`,
-`$FORMAT`, `$ONE`, `$EXACT`, …) see the language-neutral
+`$FORMAT`, `$EXACT`, …) see the language-neutral
 [How-to guides](../DOCS.md#2-how-to-guides) — the spec syntax is identical; only
-the host literals differ.
+the host literals differ. The exception is `$ONE`, which this port does not
+define: write those specs with `$NOF`, as the
+[validate checkers](./README.md#validate-checkers) list shows.
 
 ---
 

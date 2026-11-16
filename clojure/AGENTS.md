@@ -95,6 +95,16 @@ Public function names are **lower-smushed, exactly the canonical names**
 - **Numbers.** JSON integers parse to `Long`, decimals to `Double`. `typify`
   splits integer/decimal on that; `stringify`/`jsonify` follow JS number
   formatting (an integral `Double` prints without `.0`).
+- **Validate's list directives keep a held null.** `inj-setval` deletes a key
+  for `nil`, so `$EXACT`, `$NOF` and `$ALL` read whether their slot holds a
+  value (`_slotval`) and set a held null directly (`_slotset`); without that,
+  a null slot in list data is deleted and the elements after it shift down.
+- **A `$NOF` / `$ALL` trial hands an absent value down as `NOARG`.** The
+  checkers read their value raw (`_lookup`), so `typify` gives T_noval there;
+  `getprop` reads a stored `NOARG` as absent, as canonical's does a stored
+  `undefined`; and `_slotval` reads a slot holding it as not held.
+- **JVM strings are UTF-16.** `condense` sorts symbols and a map's keys by
+  code point (`condensecmp`); `compare` on strings orders by code unit.
 - **Keep `make test` and `python3 tools/check_parity.py` green**, and add no
   runtime dependencies. If you change canonical behaviour, change the
   TypeScript + corpus first, then propagate here.

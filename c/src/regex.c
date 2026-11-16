@@ -139,7 +139,7 @@ static void cc_predef(voxgig_charclass* cc, int c) {
   case 'D':
     cc_set_range(cc, 0, 255);
     for (int x = '0'; x <= '9'; x++)
-      cc->bits[x >> 3] &= (uint8_t) ~(1u << (x & 7));
+      cc->bits[x >> 3] &= (uint8_t)(~(1u << (x & 7)));
     break;
   case 's':
     cc_set(cc, ' ');
@@ -151,12 +151,12 @@ static void cc_predef(voxgig_charclass* cc, int c) {
     break;
   case 'S':
     cc_set_range(cc, 0, 255);
-    cc->bits[' ' >> 3] &= (uint8_t) ~(1u << (' ' & 7));
-    cc->bits['\t' >> 3] &= (uint8_t) ~(1u << ('\t' & 7));
-    cc->bits['\n' >> 3] &= (uint8_t) ~(1u << ('\n' & 7));
-    cc->bits['\r' >> 3] &= (uint8_t) ~(1u << ('\r' & 7));
-    cc->bits['\f' >> 3] &= (uint8_t) ~(1u << ('\f' & 7));
-    cc->bits['\v' >> 3] &= (uint8_t) ~(1u << ('\v' & 7));
+    cc->bits[' ' >> 3] &= (uint8_t)(~(1u << (' ' & 7)));
+    cc->bits['\t' >> 3] &= (uint8_t)(~(1u << ('\t' & 7)));
+    cc->bits['\n' >> 3] &= (uint8_t)(~(1u << ('\n' & 7)));
+    cc->bits['\r' >> 3] &= (uint8_t)(~(1u << ('\r' & 7)));
+    cc->bits['\f' >> 3] &= (uint8_t)(~(1u << ('\f' & 7)));
+    cc->bits['\v' >> 3] &= (uint8_t)(~(1u << ('\v' & 7)));
     break;
   case 'w':
     cc_set_range(cc, '0', '9');
@@ -167,12 +167,12 @@ static void cc_predef(voxgig_charclass* cc, int c) {
   case 'W':
     cc_set_range(cc, 0, 255);
     for (int x = '0'; x <= '9'; x++)
-      cc->bits[x >> 3] &= (uint8_t) ~(1u << (x & 7));
+      cc->bits[x >> 3] &= (uint8_t)(~(1u << (x & 7)));
     for (int x = 'A'; x <= 'Z'; x++)
-      cc->bits[x >> 3] &= (uint8_t) ~(1u << (x & 7));
+      cc->bits[x >> 3] &= (uint8_t)(~(1u << (x & 7)));
     for (int x = 'a'; x <= 'z'; x++)
-      cc->bits[x >> 3] &= (uint8_t) ~(1u << (x & 7));
-    cc->bits['_' >> 3] &= (uint8_t) ~(1u << ('_' & 7));
+      cc->bits[x >> 3] &= (uint8_t)(~(1u << (x & 7)));
+    cc->bits['_' >> 3] &= (uint8_t)(~(1u << ('_' & 7)));
     break;
   default:
     break;

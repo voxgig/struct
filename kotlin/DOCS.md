@@ -150,7 +150,7 @@ S.stringify(linkedMapOf("a" to 1, "b" to listOf(2, 3)))   // {a:1,b:[2,3]}
 <!-- => "{a:1,b:[2,3]}" -->
 
 For more task recipes (rename fields, `$COPY`, `$EACH`, `$MERGE`,
-`$FORMAT`, `$ONE`, `$EXACT`, …) see the language-neutral
+`$FORMAT`, `$NOF`, `$ALL`, `$EXACT`, …) see the language-neutral
 [How-to guides](../DOCS.md#2-how-to-guides) — the spec syntax is
 identical; only the host literals differ.
 
@@ -198,7 +198,7 @@ Kotlin-specific points the signatures don't show:
 
 The root [`README.md`](../README.md) classifies Kotlin as a **Partial**
 port (the same bracket as Java), yet it
-already carries the entire canonical public surface — all 48 functions,
+already carries the entire canonical public surface — all 52 functions,
 15 type flags, the three mode constants, the sentinels, and the full
 `Injection` machine — and `check_parity.py` reports it `ok`. "Partial"
 reflects port maturity, not a missing API. Behavioural authority rests
@@ -219,7 +219,7 @@ language-neutral form:
   `transform`, `validate`, `select`, …) preserve it literally.
 
 [`../REPORT.md`](../design/REPORT.md) records this port as **already Group A**;
-the shared corpus passes 1360/1360 assertions here. If your data source
+the shared corpus passes 1602/1602 assertions here. If your data source
 returns `null` for "not set", decide which
 you mean before handing it to `struct`. The corpus bridges the two with
 the `"__NULL__"` / `"__UNDEF__"` / `"__EXISTS__"` markers (see
@@ -274,13 +274,12 @@ consumed as a local checkout `build.gradle.kts` finds via `$OMNI_HOME` or
 beside this repository, in its own source set so it reaches the tests and
 nothing else.
 
-`StructCorpusTest` runs every group the corpus defines except the three
-`condense` ones, which no port implements yet: 1358 entries in 72 groups.
-`ClientTest` runs the two `check` entries — `DEF.client`, client-scoped
-options, and `contextify`. `StructTests` holds what the corpus shape cannot
-express: identity, presence, and the hand-built injectors and modifiers a JSON
-entry has no way to carry. `Omni.kt` is the bridge between omni's sealed
-`Json` and this port's plain `Any?`.
+`StructCorpusTest` runs every group the corpus defines: 1602 entries in 78
+groups. `ClientTest` runs the two `check` entries —
+`DEF.client`, client-scoped options, and `contextify`. `StructTests` holds
+what the corpus shape cannot express: identity, presence, and the hand-built
+injectors and modifiers a JSON entry has no way to carry. `Omni.kt` is the
+bridge between omni's sealed `Json` and this port's plain `Any?`.
 
 **To change behaviour:** this is a *port*, so behaviour changes start in
 the canonical TypeScript, not here. Edit `../typescript/src/StructUtility.ts`,

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -35,6 +36,7 @@ func TestStruct(t *testing.T) {
 	runset := runnerMap.RunSet
 	runsetFlags := runnerMap.RunSetFlags
 
+	var condenseSpec = spec["condense"].(map[string]any)
 	var minorSpec = spec["minor"].(map[string]any)
 	var walkSpec = spec["walk"].(map[string]any)
 	var mergeSpec = spec["merge"].(map[string]any)
@@ -45,6 +47,197 @@ func TestStruct(t *testing.T) {
 	var selectSpec = spec["select"].(map[string]any)
 	var sentinelsSpec = spec["sentinels"].(map[string]any)
 	var regexSpec = spec["regex"].(map[string]any)
+
+	// condense tests
+	// ==============
+
+	t.Run("condense-condense", func(t *testing.T) {
+		runsetFlags(t, condenseSpec["condense"], map[string]bool{"null": false}, voxgigstruct.Condense)
+	})
+
+	t.Run("condense-expand", func(t *testing.T) {
+		runsetFlags(t, condenseSpec["expand"], map[string]bool{"null": false}, voxgigstruct.Expand)
+	})
+
+	t.Run("condense-iscondensed", func(t *testing.T) {
+		runsetFlags(t, condenseSpec["iscondensed"], map[string]bool{"null": false},
+			voxgigstruct.IsCondensed)
+	})
+
+	// Identity, sharing and immutability, which the corpus cannot express.
+
+	jm := voxgigstruct.Jm
+	jt := voxgigstruct.Jt
+	same := func(a, b any) bool {
+		return reflect.ValueOf(a).Pointer() == reflect.ValueOf(b).Pointer()
+	}
+	immutable := func(t *testing.T, name string, fn func()) {
+		t.Helper()
+		defer func() {
+			err, _ := recover().(error)
+			if nil == err || !strings.Contains(err.Error(), "immutable") {
+				t.Errorf("%s: expected the immutable error, got %v", name, err)
+			}
+		}()
+		fn()
+	}
+
+	t.Run("condense-deterministic", func(t *testing.T) {
+		src := jm("b", jm("m", "GET"), "a", jm("m", "GET"), "l", jt(1, "x", true))
+		once := voxgigstruct.Jsonify(voxgigstruct.Condense(src))
+		if once != voxgigstruct.Jsonify(voxgigstruct.Condense(src)) {
+			t.Errorf("condense is not deterministic: %s", once)
+		}
+		reordered := jm("l", jt(1, "x", true), "a", jm("m", "GET"), "b", jm("m", "GET"))
+		if once != voxgigstruct.Jsonify(voxgigstruct.Condense(reordered)) {
+			t.Errorf("condense depends on insertion order: %s", once)
+		}
+	})
+
+	t.Run("condense-shares-identical-subtrees", func(t *testing.T) {
+		nodes := func(src any) int {
+			return len(voxgigstruct.Condense(src).(map[string]any)["node"].([]any))
+		}
+		one := nodes(jm("x", jm("m", "GET", "p", "/1")))
+		two := nodes(jm("x", jm("m", "GET", "p", "/1"), "y", jm("m", "GET", "p", "/1")))
+		if one != two {
+			t.Errorf("a second identical subtree added nodes: %d then %d", one, two)
+		}
+		three := nodes(jm("x", jm("m", "GET"), "y", jm("m", "PUT"), "z", jm("m", "POST")))
+		if three <= two {
+			t.Errorf("distinct subtrees should add nodes: %d, %d", two, three)
+		}
+	})
+
+	t.Run("condense-round-trips-by-value", func(t *testing.T) {
+		src := jm("a", jm("b", []any{1, "x", true, nil, jm()}), "c", "z")
+		out := voxgigstruct.Expand(voxgigstruct.Condense(src))
+		if !reflect.DeepEqual(out, src) {
+			t.Errorf("round trip: %s", voxgigstruct.Stringify(out))
+		}
+	})
+
+	t.Run("condense-getpath-is-transparent", func(t *testing.T) {
+		src := jm("entity", jm("p", jm("op", jm("list", jm("method", "GET")))))
+		c := voxgigstruct.Condense(src)
+		path := []any{"entity", "p", "op", "list"}
+		if !reflect.DeepEqual(voxgigstruct.GetPath(c, path), voxgigstruct.GetPath(src, path)) {
+			t.Errorf("getpath differs: %v", voxgigstruct.GetPath(c, path))
+		}
+		if "GET" != voxgigstruct.GetPath(c, []any{"entity", "p", "op", "list", "method"}) {
+			t.Errorf("getpath method")
+		}
+		if nil != voxgigstruct.GetPath(c, []any{"entity", "nope"}) {
+			t.Errorf("getpath miss")
+		}
+	})
+
+	t.Run("condense-view-reads-without-materialising", func(t *testing.T) {
+		c := voxgigstruct.Condense(jm("entity", jm("a", jm("v", 1), "b", jm("v", 2)), "other", 9))
+		v := voxgigstruct.CondenseView(c)
+		if !reflect.DeepEqual([]string{"a", "b"}, v.Keys("entity")) {
+			t.Errorf("keys: %v", v.Keys("entity"))
+		}
+		if 2 != v.At("entity").At("b").Get("v") {
+			t.Errorf("at/get: %v", v.At("entity").At("b").Get("v"))
+		}
+		if !v.Has("entity.a") || v.Has("entity.zz") {
+			t.Errorf("has")
+		}
+		if 2 != v.Size() || !v.Exists() || v.At("zz").Exists() {
+			t.Errorf("size/exists: %d", v.Size())
+		}
+	})
+
+	t.Run("condense-value-copies-and-ref-shares", func(t *testing.T) {
+		v := voxgigstruct.CondenseView(voxgigstruct.Condense(jm("a", jm("m", "GET"), "b", jm("m", "GET"))))
+		x := v.Get("a").(map[string]any)
+		y := v.Get("b").(map[string]any)
+		if !reflect.DeepEqual(x, y) || same(x, y) {
+			t.Errorf("get should copy a shared node")
+		}
+		x["m"] = "MUTATED"
+		if "GET" != v.Get("b").(map[string]any)["m"] {
+			t.Errorf("get shared a container")
+		}
+		if !same(v.At("a").Ref(), v.At("a").Ref()) {
+			t.Errorf("ref should share")
+		}
+	})
+
+	t.Run("condense-preserves-proto-named-keys-and-values", func(t *testing.T) {
+		for _, src := range []any{jm("x", "__proto__"), jm("__proto__", 1)} {
+			out := voxgigstruct.Expand(voxgigstruct.Condense(src))
+			if !reflect.DeepEqual(out, src) {
+				t.Errorf("round trip: %s", voxgigstruct.Stringify(out))
+			}
+		}
+	})
+
+	t.Run("condense-getpath-matches-plain-on-null-and-options", func(t *testing.T) {
+		if nil != voxgigstruct.GetPath(voxgigstruct.Condense(jm("a", nil)), "a") {
+			t.Errorf("a stored null should read as absent")
+		}
+		store := jm("base", jm("x", 1))
+		inj := &voxgigstruct.Injection{Base: "base"}
+		plain := voxgigstruct.GetPath(store, "x", inj)
+		if 1 != plain || plain != voxgigstruct.GetPath(voxgigstruct.Condense(store), "x", inj) {
+			t.Errorf("base: %v", plain)
+		}
+	})
+
+	t.Run("condense-list-keys-are-canonical-integers", func(t *testing.T) {
+		plain := jm("l", jt(10, 20))
+		c := voxgigstruct.Condense(plain)
+		for _, k := range []string{"01", "1e0", " 1", "+1", "1.0", "-0"} {
+			out := voxgigstruct.GetPath(c, []any{"l", k})
+			if nil != out || nil != voxgigstruct.GetPath(plain, []any{"l", k}) {
+				t.Errorf("list key %q: %v", k, out)
+			}
+		}
+		if 20 != voxgigstruct.GetPath(c, []any{"l", "1"}) {
+			t.Errorf("list key 1")
+		}
+	})
+
+	t.Run("condense-symbols-sort-by-code-point", func(t *testing.T) {
+		sym := voxgigstruct.Condense(jm("a", "\U00010000", "b", "\uFFFF")).(map[string]any)["sym"].([]any)
+		if slices.Index(sym, any("\U00010000")) < slices.Index(sym, any("\uFFFF")) {
+			t.Errorf("symbol table is not in code-point order: %q", sym)
+		}
+	})
+
+	t.Run("condense-astral-keys-resolve", func(t *testing.T) {
+		// Pairs follow code-point order: U+FF21 before U+1F600.
+		c := voxgigstruct.Condense(jm("\uFF21", 1, "\U0001F600", 2))
+		if 2 != voxgigstruct.GetPath(c, []any{"\U0001F600"}) ||
+			1 != voxgigstruct.GetPath(c, []any{"\uFF21"}) {
+			t.Errorf("astral keys: %v", voxgigstruct.Expand(c))
+		}
+		if 2 != voxgigstruct.CondenseView(c).Get("\U0001F600") {
+			t.Errorf("astral view")
+		}
+	})
+
+	t.Run("condense-invalid-key-mutations-stay-no-ops", func(t *testing.T) {
+		c := voxgigstruct.Condense(jm("a", 1))
+		if !same(c, voxgigstruct.DelProp(c, nil)) || !same(c, voxgigstruct.SetProp(c, nil, 1)) {
+			t.Errorf("an invalid key should leave the store as it is")
+		}
+		immutable(t, "delprop", func() { voxgigstruct.DelProp(c, "sym") })
+	})
+
+	t.Run("condense-is-immutable", func(t *testing.T) {
+		c := voxgigstruct.Condense(jm("a", 1))
+		immutable(t, "setpath", func() { voxgigstruct.SetPath(c, "a", 2) })
+		immutable(t, "setprop", func() { voxgigstruct.SetProp(c, "a", 2) })
+		immutable(t, "delprop", func() { voxgigstruct.DelProp(c, "sym") })
+		e := voxgigstruct.Expand(c).(map[string]any)
+		voxgigstruct.SetPath(e, "a", 2)
+		if 2 != e["a"] {
+			t.Errorf("the expanded copy should be mutable: %v", e)
+		}
+	})
 
 	// minor tests
 	// ===========
@@ -1471,13 +1664,29 @@ func TestStruct(t *testing.T) {
 		})
 	})
 
-	t.Run("validate-one", func(t *testing.T) {
-		runset(t, validateSpec["one"], func(v any) (any, error) {
-			m := v.(map[string]any)
-			data := m["data"]
-			spec := m["spec"]
-			return voxgigstruct.Validate(data, spec)
+	t.Run("validate-child-one-error-per-failure", func(t *testing.T) {
+		for _, spec := range []any{
+			map[string]any{"x": map[string]any{"`$CHILD`": "`$NUMBER`"}},
+			map[string]any{"x": []any{"`$CHILD`", "`$NUMBER`"}},
+		} {
+			errs := voxgigstruct.ListRefCreate[any]()
+			_, err := voxgigstruct.Validate(map[string]any{"x": 1}, spec, &voxgigstruct.Injection{Errs: errs})
+			if nil != err || 1 != len(errs.List) {
+				t.Errorf("%s: %v %v", voxgigstruct.Stringify(spec), errs.List, err)
+			}
+		}
+	})
+
+	t.Run("validate-null-stays", func(t *testing.T) {
+		// A null the data holds is written back, in a closed map as in a list.
+		data := map[string]any{"a": nil, "b": []any{1, nil}}
+		out, err := voxgigstruct.Validate(data, map[string]any{
+			"a": "`$NULL`",
+			"b": []any{"`$NUMBER`", "`$NIL`"},
 		})
+		if nil != err || !reflect.DeepEqual(out, data) {
+			t.Errorf("Expected: %v, Got: %v %v", data, out, err)
+		}
 	})
 
 	t.Run("validate-exact", func(t *testing.T) {
@@ -1516,6 +1725,116 @@ func TestStruct(t *testing.T) {
 
 			return voxgigstruct.Validate(data, spec)
 		})
+	})
+
+	t.Run("validate-directive", func(t *testing.T) {
+		runsetFlags(t, validateSpec["directive"], map[string]bool{"null": false}, func(v any) (any, error) {
+			m := v.(map[string]any)
+			return voxgigstruct.Validate(m["data"], m["spec"])
+		})
+	})
+
+	t.Run("validate-nof", func(t *testing.T) {
+		runsetFlags(t, validateSpec["nof"], map[string]bool{"null": false}, func(v any) (any, error) {
+			m := v.(map[string]any)
+			return voxgigstruct.Validate(m["data"], m["spec"])
+		})
+	})
+
+	t.Run("validate-nof-integral-decimal-count", func(t *testing.T) {
+		// The corpus writes 2.0 as 2; a float64 count with an integral value is that integer.
+		data := map[string]any{"a": "x"}
+		spec := func(count any) any {
+			return map[string]any{"a": []any{"`$NOF`", count, "`$STRING`", "`$NUMBER`"}}
+		}
+		for _, count := range []any{1.0, map[string]any{"min": 1.0, "max": 2.0}} {
+			out, err := voxgigstruct.Validate(data, spec(count))
+			if nil != err || !reflect.DeepEqual(out, data) {
+				t.Errorf("count %v: %v %v", count, out, err)
+			}
+		}
+		_, err := voxgigstruct.Validate(data, spec(2.0))
+		if nil == err || !strings.HasSuffix(err.Error(),
+			"Expected field a to be exactly 2 of string, number, but found string: x.") {
+			t.Errorf("count 2.0: %v", err)
+		}
+	})
+
+	t.Run("validate-all", func(t *testing.T) {
+		runsetFlags(t, validateSpec["all"], map[string]bool{"null": false}, func(v any) (any, error) {
+			m := v.(map[string]any)
+			return voxgigstruct.Validate(m["data"], m["spec"])
+		})
+	})
+
+	t.Run("validate-unknown", func(t *testing.T) {
+		runsetFlags(t, validateSpec["unknown"], map[string]bool{"null": false}, func(v any) (any, error) {
+			m := v.(map[string]any)
+			return voxgigstruct.Validate(m["data"], m["spec"])
+		})
+	})
+
+	t.Run("validate-unknown-edge", func(t *testing.T) {
+		// Only the unknown name is reported, and the data comes back as it is.
+		errs := voxgigstruct.ListRefCreate[any]()
+		data := map[string]any{"a": "x"}
+		out, _ := voxgigstruct.Validate(
+			data,
+			map[string]any{"a": []any{"`$ONE`", "`$STRING`", "`$NIL`"}},
+			&voxgigstruct.Injection{Errs: errs},
+		)
+		if !reflect.DeepEqual(errs.List, []any{"Unknown validator $ONE at field a.0."}) {
+			t.Errorf("Expected Error: unknown $ONE, Got: %v", errs.List)
+		}
+		if !reflect.DeepEqual(out, data) {
+			t.Errorf("Expected: %v, Got: %v", data, out)
+		}
+
+		// A checker supplied in extra is defined, in any case.
+		even := voxgigstruct.Injector(func(
+			inj *voxgigstruct.Injection,
+			val any,
+			ref *string,
+			store any,
+		) any {
+			n := voxgigstruct.GetProp(inj.Dparent, inj.Key)
+			if i, ok := n.(int); !ok || 0 != i%2 {
+				inj.Errs.Append(fmt.Sprintf("Odd at %s: %v", strings.Join(inj.Path.List[1:], "."), n))
+			}
+			return n
+		})
+
+		errs = voxgigstruct.ListRefCreate[any]()
+		out, _ = voxgigstruct.Validate(
+			map[string]any{"n": 2},
+			map[string]any{"n": "`$EVEN`"},
+			&voxgigstruct.Injection{Extra: map[string]any{"$EVEN": even}, Errs: errs},
+		)
+		if !reflect.DeepEqual(out, map[string]any{"n": 2}) {
+			t.Errorf("Expected: {n:2}, Got: %v", out)
+		}
+		out, _ = voxgigstruct.Validate(
+			map[string]any{"n": 3},
+			map[string]any{"n": "`$even`"},
+			&voxgigstruct.Injection{Extra: map[string]any{"$even": even}, Errs: errs},
+		)
+		if !reflect.DeepEqual(out, map[string]any{"n": 3}) {
+			t.Errorf("Expected: {n:3}, Got: %v", out)
+		}
+		if !reflect.DeepEqual(errs.List, []any{"Odd at n: 3"}) {
+			t.Errorf("Expected Error: [Odd at n: 3], Got: %v", errs.List)
+		}
+
+		// A nil in extra takes a checker away.
+		errs = voxgigstruct.ListRefCreate[any]()
+		_, _ = voxgigstruct.Validate(
+			"x",
+			"`$STRING`",
+			&voxgigstruct.Injection{Extra: map[string]any{"$STRING": nil}, Errs: errs},
+		)
+		if !reflect.DeepEqual(errs.List, []any{"Unknown validator $STRING at field <root>."}) {
+			t.Errorf("Expected Error: unknown $STRING, Got: %v", errs.List)
+		}
 	})
 
 	t.Run("validate-custom", func(t *testing.T) {

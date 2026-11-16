@@ -11,7 +11,7 @@ JSON `null` as distinct values.
 
 ```
 cd lean
-make test    # the shared corpus, on voxgig/omni (expect 77 groups, 0 failed)
+make test    # the shared corpus, on voxgig/omni (expect 0 failed)
 make build   # lake build VoxgigStruct - the LIBRARY alone (no omni)
 make lint    # type-checks library + runner (a warnings-free compile = pass)
 ```

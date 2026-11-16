@@ -10,7 +10,7 @@ const { SDK } = require('./sdk.js')
 
 const TEST_JSON_FILE = '../../build/test/test.json'
 
-const { equal, deepEqual } = assert
+const { equal, deepEqual, throws } = assert
 
 // NOTE: tests are (mostly) in order of increasing dependence.
 describe('struct', async () => {
@@ -70,6 +70,193 @@ describe('struct', async () => {
 
   // minor tests
   // ===========
+
+  // ===========
+  // CONDENSE
+  // ===========
+
+  test('condense-condense', async () => {
+    await runsetflags(spec.condense.condense, { null: false }, struct.condense)
+  })
+
+  test('condense-expand', async () => {
+    await runsetflags(spec.condense.expand, { null: false }, struct.expand)
+  })
+
+  test('condense-iscondensed', async () => {
+    await runsetflags(spec.condense.iscondensed, { null: false }, struct.iscondensed)
+  })
+
+  // Properties the corpus shape cannot express: identity, sharing, laziness
+  // and the immutability contract.
+
+  test('condense-deterministic', () => {
+    const s = struct
+    const src = { b: { m: 'GET' }, a: { m: 'GET' }, l: [1, 'x', true] }
+    equal(JSON.stringify(s.condense(src)), JSON.stringify(s.condense(src)))
+    // Insertion order must not change the bytes: keys are stored by symbol id.
+    const reordered = { l: [1, 'x', true], a: { m: 'GET' }, b: { m: 'GET' } }
+    equal(JSON.stringify(s.condense(src)), JSON.stringify(s.condense(reordered)))
+  })
+
+  test('condense-shares-identical-subtrees', () => {
+    const s = struct
+    const one = s.condense({ x: { m: 'GET', p: '/1' } })
+    const two = s.condense({ x: { m: 'GET', p: '/1' }, y: { m: 'GET', p: '/1' } })
+    // Adding a SECOND reference to an identical subtree costs nothing: the
+    // subtree interns to the same node and the root simply gains a ref, so
+    // the node count is unchanged.
+    equal(two.node.length, one.node.length)
+    const three = s.condense({ x: { m: 'GET' }, y: { m: 'PUT' }, z: { m: 'POST' } })
+    equal(true, three.node.length > two.node.length)
+  })
+
+  test('condense-round-trips-by-value', () => {
+    const s = struct
+    const src = { a: { b: [1, 'x', true, null, {}] }, c: 'z' }
+    deepEqual(s.expand(s.condense(src)), src)
+  })
+
+  test('condense-getpath-is-transparent', () => {
+    const s = struct
+    const src = { entity: { p: { op: { list: { method: 'GET' } } } } }
+    const c = s.condense(src)
+    deepEqual(
+      s.getpath(c, ['entity', 'p', 'op', 'list']),
+      s.getpath(src, ['entity', 'p', 'op', 'list']),
+    )
+    equal(s.getpath(c, ['entity', 'p', 'op', 'list', 'method']), 'GET')
+    equal(undefined, s.getpath(c, ['entity', 'nope']))
+  })
+
+  test('condense-view-reads-without-materialising', () => {
+    const s = struct
+    const c = s.condense({ entity: { a: { v: 1 }, b: { v: 2 } }, other: 9 })
+    const v = s.condenseview(c)
+    // keys() answers from the node and symbol tables alone.
+    deepEqual(v.keys('entity'), ['a', 'b'])
+    equal(v.at('entity').at('b').get('v'), 2)
+    equal(v.has('entity.a'), true)
+    equal(v.has('entity.zz'), false)
+    equal(v.size(), 2)
+  })
+
+  test('condense-value-copies-and-ref-shares', () => {
+    const s = struct
+    const c = s.condense({ a: { m: 'GET' }, b: { m: 'GET' } })
+    const v = s.condenseview(c)
+    // a and b share one node. value() must not let that be observable.
+    const x = v.get('a')
+    const y = v.get('b')
+    deepEqual(x, y)
+    equal(false, x === y)
+    x.m = 'MUTATED'
+    equal('GET', v.get('b').m)
+    // ref() is the opt-in escape hatch and DOES share.
+    equal(true, v.at('a').ref() === v.at('a').ref())
+  })
+
+  test('condense-preserves-proto-named-keys-and-values', () => {
+    // Valid JSON, and plain assignment to `__proto__` hits the inherited
+    // setter instead of creating an own property - so both the symbol table
+    // and the materialised map need prototype-safe writes.
+    const s = struct
+    const asValue = JSON.parse('{"x":"__proto__"}')
+    deepEqual(s.expand(s.condense(asValue)), asValue)
+    const asKey = JSON.parse('{"__proto__":1}')
+    deepEqual(JSON.stringify(s.expand(s.condense(asKey))), '{"__proto__":1}')
+  })
+
+  test('condense-getpath-matches-plain-on-null-and-options', () => {
+    const s = struct
+    // Group A null-as-absent: a stored null reads as absent either way.
+    equal(s.getpath(s.condense({ a: null }), 'a'), s.getpath({ a: null }, 'a'))
+    equal(undefined, s.getpath(s.condense({ a: null }), 'a'))
+    // injdef.base must not be ignored by the condensed fast path.
+    const store = { base: { x: 1 } }
+    equal(
+      s.getpath(s.condense(store), 'x', { base: 'base' }),
+      s.getpath(store, 'x', { base: 'base' }),
+    )
+  })
+
+  test('condense-list-keys-are-canonical-integers', () => {
+    const s = struct
+    const plain = { l: [10, 20] }
+    const c = s.condense(plain)
+    // Unary + would accept these; an ordinary list lookup does not, so
+    // condensing must not change which value a path selects.
+    for (const k of ['01', '1e0', ' 1', '+1', '1.0', '-0']) {
+      equal(s.getpath(c, ['l', k]), s.getpath(plain, ['l', k]), `list key ${k}`)
+    }
+    equal(s.getpath(c, ['l', '1']), 20)
+  })
+
+  test('condense-symbols-sort-by-code-point', () => {
+    const s = struct
+    const sym = s.condense({ a: '\u{10000}', b: '\uFFFF' }).sym
+    equal(
+      true,
+      sym.indexOf('\uFFFF') < sym.indexOf('\u{10000}'),
+      'symbol table is not in code-point order: ' + JSON.stringify(sym),
+    )
+  })
+
+  test('proto-keys-stay-own-properties', () => {
+    const s = struct
+    // JSON.parse keeps __proto__ as an own key; the corpus compiler cannot.
+    const evil = JSON.parse('{"__proto__":{"polluted":"yes"}}')
+    const out = s.merge([{}, evil])
+    equal(undefined, {}.polluted)
+    deepEqual(Object.keys(out), ['__proto__'])
+    deepEqual(out.__proto__, { polluted: 'yes' })
+    s.merge([{ a: {} }, JSON.parse('{"a":{"__proto__":{"deep":1}}}')])
+    equal(undefined, {}.deep)
+    s.setprop({}, '__proto__', { viaset: 1 })
+    equal(undefined, {}.viaset)
+    deepEqual(Object.keys(s.jm('__proto__', 1)), ['__proto__'])
+    equal(1, s.getprop(JSON.parse('{"__proto__":1}'), '__proto__'))
+    equal(undefined, s.getprop({}, '__proto__'))
+    // A class instance still reads inherited members.
+    class A {
+      get g() {
+        return 7
+      }
+    }
+    equal(7, s.getprop(new A(), 'g'))
+  })
+
+  test('validate-child-one-error-per-failure', () => {
+    const s = struct
+    for (const spec of [{ x: { '`$CHILD`': '`$NUMBER`' } }, { x: ['`$CHILD`', '`$NUMBER`'] }]) {
+      const errs = []
+      s.validate({ x: 1 }, spec, { errs })
+      equal(errs.length, 1, JSON.stringify(errs))
+    }
+  })
+
+  test('condense-invalid-key-mutations-stay-no-ops', () => {
+    // Both helpers define an invalid key as ignored, so a call that cannot
+    // write must not start throwing just because the store is condensed.
+    const s = struct
+    const c = s.condense({ a: 1 })
+    equal(c, s.delprop(c, undefined))
+    equal(c, s.setprop(c, undefined, 1))
+    // A call that COULD write still raises.
+    throws(() => s.delprop(c, 'sym'), /immutable/)
+  })
+
+  test('condense-is-immutable', () => {
+    const s = struct
+    const c = s.condense({ a: 1 })
+    throws(() => s.setpath(c, 'a', 2), /immutable/)
+    throws(() => s.setprop(c, 'a', 2), /immutable/)
+    throws(() => s.delprop(c, 'sym'), /immutable/)
+    // The expanded copy is ordinary and mutable.
+    const e = s.expand(c)
+    s.setpath(e, 'a', 2)
+    equal(e.a, 2)
+  })
 
   test('minor-isnode', async () => {
     await runset(spec.minor.isnode, struct.isnode)
@@ -682,10 +869,6 @@ describe('struct', async () => {
     await runset(spec.validate.child, (vin) => struct.validate(vin.data, vin.spec))
   })
 
-  test('validate-one', async () => {
-    await runset(spec.validate.one, (vin) => struct.validate(vin.data, vin.spec))
-  })
-
   test('validate-exact', async () => {
     await runset(spec.validate.exact, (vin) => struct.validate(vin.data, vin.spec))
   })
@@ -698,6 +881,60 @@ describe('struct', async () => {
 
   test('validate-special', async () => {
     await runset(spec.validate.special, (vin) => struct.validate(vin.data, vin.spec, vin.inj))
+  })
+
+  test('validate-directive', async () => {
+    await runsetflags(spec.validate.directive, { null: false }, (vin) =>
+      struct.validate(vin.data, vin.spec),
+    )
+  })
+
+  test('validate-nof', async () => {
+    await runsetflags(spec.validate.nof, { null: false }, (vin) =>
+      struct.validate(vin.data, vin.spec),
+    )
+  })
+
+  test('validate-all', async () => {
+    await runsetflags(spec.validate.all, { null: false }, (vin) =>
+      struct.validate(vin.data, vin.spec),
+    )
+  })
+
+  test('validate-unknown', async () => {
+    await runsetflags(spec.validate.unknown, { null: false }, (vin) =>
+      struct.validate(vin.data, vin.spec),
+    )
+  })
+
+  test('validate-unknown-edge', async () => {
+    const { validate, getprop } = struct
+
+    // Only the unknown name is reported, and the data comes back as it is.
+    let errs = []
+    const data = { a: 'x' }
+    const out = validate(data, { a: ['`$ONE`', '`$STRING`', '`$NIL`'] }, { errs })
+    deepEqual(errs, ['Unknown validator $ONE at field a.0.'])
+    deepEqual(out, data)
+
+    // A checker supplied in extra is defined, in any case.
+    const even = (inj) => {
+      const n = getprop(inj.dparent, inj.key)
+      if (0 !== n % 2) {
+        inj.errs.push('Odd at ' + inj.path.slice(1).join('.') + ': ' + n)
+      }
+      return n
+    }
+
+    errs = []
+    deepEqual(validate({ n: 2 }, { n: '`$EVEN`' }, { extra: { $EVEN: even }, errs }), { n: 2 })
+    deepEqual(validate({ n: 3 }, { n: '`$even`' }, { extra: { $even: even }, errs }), { n: 3 })
+    deepEqual(errs, ['Odd at n: 3'])
+
+    // A null in extra takes a checker away.
+    errs = []
+    validate('x', '`$STRING`', { extra: { $STRING: null }, errs })
+    deepEqual(errs, ['Unknown validator $STRING at field <root>.'])
   })
 
   test('validate-edge', async () => {

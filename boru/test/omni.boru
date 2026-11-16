@@ -29,7 +29,8 @@ import "../.omni-runner/src/omni.boru"
 
 # --- tallies -----------------------------------------------------------------
 # omni raises on the first failing entry in a set, so the unit of report here
-# is the group, not the entry: 75 checks, one per corpus group.
+# is the group, not the entry: one check per corpus group, and one per
+# hand-written check.
 
 def ob-tally (flex {npass: 0 nfail: 0})
 def ob-failures (flex [])
@@ -138,6 +139,9 @@ def rl-atmod-box {"`$FN`": rs-atmod/v}
 def ob-build fn [[] [Any] [
   # The library under test, captured as values.
   def f-clone (Struct.clone/v)
+  def f-condense (Struct.condense/v)
+  def f-expand (Struct.expand/v)
+  def f-iscondensed (Struct.iscondensed/v)
   def f-delprop (Struct.delprop/v)
   def f-escre (Struct.escre/v)
   def f-escurl (Struct.escurl/v)
@@ -243,6 +247,21 @@ def ob-build fn [[] [Any] [
   ])
 
   # --- the subjects -------------------------------------------------------------
+
+  def s-condense ([av:Any] => [
+    def r (f-condense (h-arg0 av))
+    r
+  ])
+
+  def s-expand ([av:Any] => [
+    def r (f-expand (h-arg0 av))
+    r
+  ])
+
+  def s-iscondensed ([av:Any] => [
+    def r (f-iscondensed (h-arg0 av))
+    r
+  ])
 
   def s-isnode ([av:Any] => [
     def r (f-isnode (h-arg0 av))
@@ -686,6 +705,9 @@ def ob-build fn [[] [Any] [
   ])
 
   def r (flex {
+    "condense": [s-condense/v]
+    "expand": [s-expand/v]
+    "iscondensed": [s-iscondensed/v]
     "isnode": [s-isnode/v]
     "ismap": [s-ismap/v]
     "islist": [s-islist/v]
@@ -747,7 +769,7 @@ def ob-build fn [[] [Any] [
 # --- driving the corpus ----------------------------------------------------------
 
 # Run one corpus group through omni. A failure is a raise, so each group is
-# caught here: the run reports all 75, not just the first that breaks.
+# caught here: the run reports every group, not just the first that breaks.
 def ob-group fn [[pack:Any section:Any name:Any subject:Any flagnull:Boolean] [Any] [
   def sec (Omni.get (pack get "spec") section)
   def nd (Omni.get sec name)
@@ -909,6 +931,284 @@ def ob-walk-log fn [[pack:Any] [Any] [
   r
 ]]
 
+# --- condense: what the corpus shape cannot express ---------------------------
+# Identity, sharing and the immutability contract, after canonical's
+# condense-* tests. ob-local calls each check, so it runs in this registry;
+# a check answers true, or false, or raises.
+
+def ob-local fn [[label:Any chk:Any] [Any] [
+  def r (
+    if ((ob-wanted label) not) [none] [
+    def outcome (do [
+      def f (Omni.unbox chk)
+      def ok (none f/v apply)
+      if (ok eq true) [{ok: true}] [
+        raise {code: check_fail/q message: "check answered false"}
+      ]
+    ] error [var [[e]
+      def o (flex {})
+      (o set "ok" false) drop
+      (o set "msg" (Omni.errmessage e)) drop
+      o
+    ]])
+    if ((outcome get "ok") eq true) [
+      def rr (ob-record label true "")
+      rr
+    ] [
+      def rr (ob-record label false (outcome get "msg"))
+      rr
+    ]
+    ]
+  )
+  r
+]]
+
+def ob-indexof fn [[i:Integer xs:Any s:Any] [Integer] [
+  def r (
+    if (i gte (size xs)) [-1] [
+      if ((xs get i) eq s) [i] [
+        def rr (ob-indexof (i add 1) xs s)
+        rr
+      ]
+    ]
+  )
+  r
+]]
+
+def ob-is-immutable fn [[e:Any] [Boolean] [
+  def r (StringUtil.contains "immutable" (Omni.errmessage e))
+  r
+]]
+
+def ck-cond-deterministic fn [[ig:Any] [Any] [
+  def src (flex {})
+  (src set "b" {m: "GET"}) drop
+  (src set "a" {m: "GET"}) drop
+  (src set "l" [1 "x" true]) drop
+  # Insertion order must not change the bytes: keys are stored by symbol id.
+  def again (flex {})
+  (again set "l" [1 "x" true]) drop
+  (again set "a" {m: "GET"}) drop
+  (again set "b" {m: "GET"}) drop
+  def j1 (Struct.jsonify (Struct.condense src) {indent: 0})
+  def j2 (Struct.jsonify (Struct.condense src) {indent: 0})
+  def j3 (Struct.jsonify (Struct.condense again) {indent: 0})
+  def r ((j1 eq j2) and (j1 eq j3))
+  r
+]]
+
+def ck-cond-shares fn [[ig:Any] [Any] [
+  def one (Struct.condense {x: {m: "GET" p: "/1"}})
+  def two (Struct.condense {x: {m: "GET" p: "/1"} y: {m: "GET" p: "/1"}})
+  def three (Struct.condense {x: {m: "GET"} y: {m: "PUT"} z: {m: "POST"}})
+  def n1 (size (one get "node"))
+  def n2 (size (two get "node"))
+  def n3 (size (three get "node"))
+  def r ((n1 eq n2) and (n3 gt n2))
+  r
+]]
+
+def ck-cond-roundtrip fn [[ig:Any] [Any] [
+  def src {a: {b: [1 "x" true none {}]} c: "z"}
+  def r (src deq (Struct.expand (Struct.condense src)))
+  r
+]]
+
+def ck-cond-getpath fn [[ig:Any] [Any] [
+  def src {entity: {p: {op: {"list": {method: "GET"}}}}}
+  def c (Struct.condense src)
+  def a1 (Struct.getpath c ["entity" "p" "op" "list"] Struct.NOARG)
+  def a2 (Struct.getpath src ["entity" "p" "op" "list"] Struct.NOARG)
+  def mth (Struct.getpath c ["entity" "p" "op" "list" "method"] Struct.NOARG)
+  def miss (Struct.getpath c ["entity" "nope"] Struct.NOARG)
+  def r ((a1 deq a2) and ((mth eq "GET") and (miss is None)))
+  r
+]]
+
+def ck-cond-view fn [[ig:Any] [Any] [
+  def c (Struct.condense {entity: {a: {v: 1} b: {v: 2}} other: 9})
+  def vw (Struct.condenseview c Struct.NOARG Struct.NOARG)
+  def ks (Struct.condenseview_keys vw "entity")
+  def b (Struct.condenseview_at (Struct.condenseview_at vw "entity") "b")
+  def bv (Struct.condenseview_get b "v")
+  def h1 (Struct.condenseview_has vw "entity.a")
+  def h2 (Struct.condenseview_has vw "entity.zz")
+  def sz (Struct.condenseview_size vw)
+  def r ((ks deq ["a" "b"]) and ((bv eq 2) and ((h1 eq true) and ((h2 eq false) and (sz eq 2)))))
+  r
+]]
+
+def ck-cond-ref fn [[ig:Any] [Any] [
+  def c (Struct.condense {a: {m: "GET"} b: {m: "GET"}})
+  def vw (Struct.condenseview c Struct.NOARG Struct.NOARG)
+  # a and b share one node; get must not let that be observable.
+  def x (Struct.condenseview_get vw "a")
+  def y (Struct.condenseview_get vw "b")
+  def same (x deq y)
+  def apart ((x eq y) not)
+  (x set "m" "MUTATED") drop
+  def kept ((Struct.condenseview_get vw "b") get "m")
+  def r1 (Struct.condenseview_ref (Struct.condenseview_at vw "a"))
+  def r2 (Struct.condenseview_ref (Struct.condenseview_at vw "a"))
+  def r ((same and apart) and ((kept eq "GET") and (r1 eq r2)))
+  r
+]]
+
+def ck-cond-proto fn [[ig:Any] [Any] [
+  def asval {x: "__proto__"}
+  def askey (flex {})
+  (askey set "__proto__" 1) drop
+  def ev (Struct.expand (Struct.condense asval))
+  def ek (Struct.jsonify (Struct.expand (Struct.condense askey)) {indent: 0})
+  def r ((asval deq ev) and (ek eq "{\"__proto__\":1}"))
+  r
+]]
+
+def ck-cond-null-base fn [[ig:Any] [Any] [
+  def wn (flex {})
+  (wn set "a" none) drop
+  def g1 (Struct.getpath (Struct.condense wn) "a" Struct.NOARG)
+  def g2 (Struct.getpath wn "a" Struct.NOARG)
+  # A base must not be ignored by the condensed fast read.
+  def st {"base": {x: 1}}
+  def opts {"base": "base"}
+  def g3 (Struct.getpath (Struct.condense st) "x" opts)
+  def g4 (Struct.getpath st "x" opts)
+  def r ((g1 is None) and ((g2 is None) and ((g3 eq 1) and (g4 eq 1))))
+  r
+]]
+
+# A plain list read selects nothing for these, so a condensed one must not.
+def ck-cond-listkeys fn [[ig:Any] [Any] [
+  def src {l: [10 20]}
+  def c (Struct.condense src)
+  def m1 (Struct.getpath c ["l" "01"] Struct.NOARG)
+  def m2 (Struct.getpath c ["l" "1e0"] Struct.NOARG)
+  def m3 (Struct.getpath c ["l" " 1"] Struct.NOARG)
+  def m4 (Struct.getpath c ["l" "+1"] Struct.NOARG)
+  def m5 (Struct.getpath c ["l" "1.0"] Struct.NOARG)
+  def m6 (Struct.getpath c ["l" "-0"] Struct.NOARG)
+  def p1 (Struct.getpath src ["l" "01"] Struct.NOARG)
+  def p2 (Struct.getpath src ["l" "1e0"] Struct.NOARG)
+  def p3 (Struct.getpath src ["l" " 1"] Struct.NOARG)
+  def p4 (Struct.getpath src ["l" "+1"] Struct.NOARG)
+  def p5 (Struct.getpath src ["l" "1.0"] Struct.NOARG)
+  def p6 (Struct.getpath src ["l" "-0"] Struct.NOARG)
+  def hit (Struct.getpath c ["l" "1"] Struct.NOARG)
+  def miss12 ((m1 is None) and (m2 is None))
+  def miss34 ((m3 is None) and (m4 is None))
+  def miss56 ((m5 is None) and (m6 is None))
+  def plain12 ((p1 is None) and (p2 is None))
+  def plain34 ((p3 is None) and (p4 is None))
+  def plain56 ((p5 is None) and (p6 is None))
+  def misses ((miss12 and miss34) and miss56)
+  def plains ((plain12 and plain34) and plain56)
+  def r ((misses and plains) and (hit eq 20))
+  r
+]]
+
+# A part that is neither a string nor a number names nothing, condensed or
+# plain, even where its text is a key.
+def ck-cond-nonkey fn [[ig:Any] [Any] [
+  def src {"true": 1 l: [10 20]}
+  def vw (Struct.condenseview (Struct.condense src) Struct.NOARG Struct.NOARG)
+  def g1 (Struct.condenseview_get vw [true])
+  def g2 (Struct.getpath src ["l" true] Struct.NOARG)
+  def r ((g1 is None) and (g2 is None))
+  r
+]]
+
+# U+FFFF sorts before U+10000 by code point, and after it by UTF-16 unit.
+def ck-cond-codepoint fn [[ig:Any] [Any] [
+  def bmp "\uffff"
+  def astral "𐀀"
+  def src (flex {})
+  (src set "a" astral) drop
+  (src set "b" bmp) drop
+  def syms ((Struct.condense src) get "sym")
+  def ib (ob-indexof 0 syms bmp)
+  def ia (ob-indexof 0 syms astral)
+  def r ((ib gte 0) and (ib lt ia))
+  r
+]]
+
+# An invalid key is ignored, so it must not start raising on a condensed
+# structure; a call that could write still raises.
+def ck-cond-invalidkey fn [[ig:Any] [Any] [
+  def c (Struct.condense {a: 1})
+  def d1 (Struct.delprop c none)
+  def s1 (Struct.setprop c none 1)
+  def raised (do [
+    (Struct.delprop c "sym") drop
+    false
+  ] error [var [[e]
+    def hit (ob-is-immutable e)
+    hit
+  ]])
+  def r (((d1 eq c) and (s1 eq c)) and raised)
+  r
+]]
+
+def ck-cond-immutable fn [[ig:Any] [Any] [
+  def c (Struct.condense {a: 1})
+  def rsp (do [
+    (Struct.setpath c "a" 2 Struct.NOARG) drop
+    false
+  ] error [var [[e]
+    def hit (ob-is-immutable e)
+    hit
+  ]])
+  def rsr (do [
+    (Struct.setprop c "a" 2) drop
+    false
+  ] error [var [[e]
+    def hit (ob-is-immutable e)
+    hit
+  ]])
+  def rdp (do [
+    (Struct.delprop c "sym") drop
+    false
+  ] error [var [[e]
+    def hit (ob-is-immutable e)
+    hit
+  ]])
+  # The expanded copy is ordinary and mutable.
+  def ex (Struct.expand c)
+  (Struct.setpath ex "a" 2 Struct.NOARG) drop
+  def r ((rsp and rsr) and (rdp and ((ex get "a") eq 2)))
+  r
+]]
+
+# A $CHILD over the wrong type is one error, in the map form and the list form
+# alike: the type check reports it and $CHILD adds nothing.
+def ck-validate-child-errs fn [[ig:Any] [Any] [
+  def em (flex [])
+  def im (flex {})
+  (im set "errs" em) drop
+  (Struct.validate {x: 1} {x: {"`$CHILD`": "`$NUMBER`"}} im) drop
+  def el (flex [])
+  def il (flex {})
+  (il set "errs" el) drop
+  (Struct.validate {x: 1} {x: ["`$CHILD`" "`$NUMBER`"]} il) drop
+  def r (((size em) eq 1) and ((size el) eq 1))
+  r
+]]
+
+# The corpus compiler writes 2.0 as 2, so the host decimal is built here: an
+# integral one is a $NOF count, as 2.0 is 2 in JavaScript.
+def ck-validate-nof-decimal fn [[ig:Any] [Any] [
+  def two (Struct.validate 1 ["`$NOF`" 2.0 "`$NUMBER`" "`$INTEGER`"] Struct.NOARG)
+  def rng (Struct.validate 1.5 ["`$NOF`" {min: 1.0 max: 2.0} "`$NUMBER`" "`$INTEGER`"] Struct.NOARG)
+  def errs (flex [])
+  def idf (flex {})
+  (idf set "errs" errs) drop
+  (Struct.validate 1 ["`$NOF`" 2.0 "`$NUMBER`" "`$STRING`"] idf) drop
+  def msg (if ((size errs) eq 1) [errs get 0] [""])
+  def want "Expected exactly 2 of number, string, but found integer: 1."
+  def r (((two eq 1) and (rng eq 1.5)) and (msg eq want))
+  r
+]]
+
 # --- main --------------------------------------------------------------------
 # The null flags are the in-situ runner's, group for group: this change swaps
 # the runner, not what is asserted.
@@ -922,6 +1222,23 @@ def ob-main fn [[av:Any] [Any] [
   def subs (ob-build)
   def rn (Omni.makeRunner "../build/test/test.json" (flex {}))
   def pack (Omni.runner rn "struct" none)
+
+  (ob-group pack "condense" "condense" (subs get "condense") false) drop
+  (ob-group pack "condense" "expand" (subs get "expand") false) drop
+  (ob-group pack "condense" "iscondensed" (subs get "iscondensed") false) drop
+  (ob-local "condense.local.deterministic" [ck-cond-deterministic/v]) drop
+  (ob-local "condense.local.shares" [ck-cond-shares/v]) drop
+  (ob-local "condense.local.roundtrip" [ck-cond-roundtrip/v]) drop
+  (ob-local "condense.local.getpath" [ck-cond-getpath/v]) drop
+  (ob-local "condense.local.view" [ck-cond-view/v]) drop
+  (ob-local "condense.local.ref" [ck-cond-ref/v]) drop
+  (ob-local "condense.local.proto" [ck-cond-proto/v]) drop
+  (ob-local "condense.local.nullbase" [ck-cond-null-base/v]) drop
+  (ob-local "condense.local.listkeys" [ck-cond-listkeys/v]) drop
+  (ob-local "condense.local.nonkey" [ck-cond-nonkey/v]) drop
+  (ob-local "condense.local.codepoint" [ck-cond-codepoint/v]) drop
+  (ob-local "condense.local.invalidkey" [ck-cond-invalidkey/v]) drop
+  (ob-local "condense.local.immutable" [ck-cond-immutable/v]) drop
 
   (ob-group pack "minor" "isnode" (subs get "isnode") true) drop
   (ob-group pack "minor" "ismap" (subs get "ismap") true) drop
@@ -981,10 +1298,15 @@ def ob-main fn [[av:Any] [Any] [
 
   (ob-group pack "validate" "basic" (subs get "validate") false) drop
   (ob-group pack "validate" "child" (subs get "validate") true) drop
-  (ob-group pack "validate" "one" (subs get "validate") true) drop
   (ob-group pack "validate" "exact" (subs get "validate") true) drop
   (ob-group pack "validate" "invalid" (subs get "validate") false) drop
   (ob-group pack "validate" "special" (subs get "validate-inj") true) drop
+  (ob-group pack "validate" "directive" (subs get "validate") false) drop
+  (ob-group pack "validate" "nof" (subs get "validate") false) drop
+  (ob-group pack "validate" "all" (subs get "validate") false) drop
+  (ob-group pack "validate" "unknown" (subs get "validate") false) drop
+  (ob-local "validate.local.childerrs" [ck-validate-child-errs/v]) drop
+  (ob-local "validate.local.nofdecimal" [ck-validate-nof-decimal/v]) drop
 
   (ob-group pack "select" "basic" (subs get "select") true) drop
   (ob-group pack "select" "operators" (subs get "select") true) drop

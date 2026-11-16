@@ -1211,15 +1211,43 @@ public class StructTests
     }
 
     [Fact]
-    public void ValidateOne()
+    public void ValidateChildOneErrorPerFailure()
     {
-        var validateSpec = (_spec["validate"] as Dictionary<string,object?>)?["one"] as Dictionary<string, object?>;
-        _pack.RunSetMap(validateSpec, input =>
+        // $CHILD over the wrong type is one error, in either form and at the root.
+        var cases = new (object? data, object? spec)[]
         {
-            object? data = input?.GetValueOrDefault("data");
-            object? spec = input?.GetValueOrDefault("spec");
-            return StructUtils.Validate(data, spec);
-        }, flags: Omni.Nulls);
+            (new Dictionary<string, object?> { ["x"] = 1L },
+                new Dictionary<string, object?> { ["x"] = new Dictionary<string, object?> { ["`$CHILD`"] = "`$NUMBER`" } }),
+            (new Dictionary<string, object?> { ["x"] = 1L },
+                new Dictionary<string, object?> { ["x"] = new List<object?> { "`$CHILD`", "`$NUMBER`" } }),
+            (1L, new Dictionary<string, object?> { ["`$CHILD`"] = "`$NUMBER`" }),
+            (1L, new List<object?> { "`$CHILD`", "`$NUMBER`" }),
+        };
+        foreach (var (data, spec) in cases)
+        {
+            var errs = new List<object?>();
+            StructUtils.Validate(data, spec, new InjectState { Errs = errs });
+            Assert.Single(errs);
+        }
+    }
+
+    [Fact]
+    public void ValidateNofDecimalCount()
+    {
+        // A $NOF count of 2.0 is 2. The corpus cannot carry one: its compiler writes 2.
+        var errs = new List<object?>();
+        StructUtils.Validate("x", new List<object?> { "`$NOF`", 2.0, "`$STRING`", "`$STRING`" },
+            new InjectState { Errs = errs });
+        Assert.Empty(errs);
+        StructUtils.Validate("x", new List<object?> { "`$NOF`", 2.0, "`$STRING`", "`$NUMBER`" },
+            new InjectState { Errs = errs });
+        Assert.Equal(new List<object?> { "Expected exactly 2 of string, number, but found string: x." }, errs);
+        errs = [];
+        StructUtils.Validate("x", new List<object?>
+        {
+            "`$NOF`", new Dictionary<string, object?> { ["min"] = 1.0, ["max"] = 2.0 }, "`$STRING`", "`$NUMBER`",
+        }, new InjectState { Errs = errs });
+        Assert.Empty(errs);
     }
 
     [Fact]
@@ -1252,9 +1280,10 @@ public class StructTests
         }
         Dictionary<string, object?> AllNull() =>
             Spec().Keys.ToDictionary(k => k, k => (object?)null);
-        object? OneSpec() => new Dictionary<string, object?>
+        object? NofSpec() => new Dictionary<string, object?>
         {
-            ["a"] = new List<object?> { "`$ONE`", 5L, "`$STRING`" },
+            ["a"] = new List<object?> {
+                "`$NOF`", new Dictionary<string, object?> { ["min"] = 1L }, 5L, "`$STRING`" },
         };
 
         var valid = new (string name, Func<object?> data, Func<object?> spec, Func<object?> expected)[]
@@ -1279,17 +1308,11 @@ public class StructTests
             ("null-list", () => new Dictionary<string, object?> { ["tags"] = null },
                 () => new Dictionary<string, object?> { ["tags"] = new List<object?> { "a", "b" } },
                 () => new Dictionary<string, object?> { ["tags"] = new List<object?> { "a", "b" } }),
-            ("one-null", () => new Dictionary<string, object?> { ["a"] = null }, OneSpec,
-                () => new Dictionary<string, object?> { ["a"] = null }),
-            ("one-absent", () => new Dictionary<string, object?>(), OneSpec,
+            ("nof-absent", () => new Dictionary<string, object?>(), NofSpec,
                 () => new Dictionary<string, object?>()),
-            ("one-null-map", () => new Dictionary<string, object?> { ["m"] = null },
-                () => new Dictionary<string, object?> { ["m"] = OneSpec() },
+            ("nof-null-map", () => new Dictionary<string, object?> { ["m"] = null },
+                () => new Dictionary<string, object?> { ["m"] = NofSpec() },
                 () => new Dictionary<string, object?> { ["m"] = new Dictionary<string, object?>() }),
-            ("one-list-null", () => new Dictionary<string, object?> { ["a"] = new List<object?> { null } },
-                () => new Dictionary<string, object?> { ["a"] = new List<object?> {
-                    new List<object?> { "`$ONE`", "`$STRING`", 7L } } },
-                () => new Dictionary<string, object?> { ["a"] = new List<object?>() }),
         };
         var wrong = new List<string>();
         foreach (var (name, data, spec, expected) in valid)
@@ -1318,6 +1341,12 @@ public class StructTests
             new Dictionary<string, object?> { ["value"] = new List<object?> { "`$EXACT`", "yes" } }));
         invalid.Add(("exact-absent", new Dictionary<string, object?>(),
             new Dictionary<string, object?> { ["value"] = new List<object?> { "`$EXACT`", "yes" } }));
+
+        // A $NOF spec admits a null only as it is, so a spec default for it does not.
+        invalid.Add(("nof-null", new Dictionary<string, object?> { ["a"] = null }, NofSpec()));
+        invalid.Add(("nof-list-null", new Dictionary<string, object?> { ["a"] = new List<object?> { null } },
+            new Dictionary<string, object?> { ["a"] = new List<object?> { new List<object?> {
+                "`$NOF`", new Dictionary<string, object?> { ["min"] = 1L }, "`$STRING`", 7L } } }));
         foreach (var (name, data, spec) in invalid)
         {
             Assert.True(Throws(() => StructUtils.Validate(data, spec)), name + " was accepted");
@@ -1325,7 +1354,8 @@ public class StructTests
     }
 
     // The typescript reference reads a null spec value and a null data value
-    // through getprop, so each counts as no value.
+    // through getprop, so each counts as no value. A list directive reads its
+    // slot as it is, so there a null is a value.
     [Fact]
     public void ValidateNullReadsAsNoValue()
     {
@@ -1346,8 +1376,12 @@ public class StructTests
             new Dictionary<string, object?> { ["a"] = null },
             new Dictionary<string, object?> { ["a"] = null }, Exact())));
 
-        var err = Assert.Throws<InvalidOperationException>(() => StructUtils.Validate(
+        Assert.Equal("{\"v\":null}", Canon(StructUtils.Validate(
             new Dictionary<string, object?> { ["v"] = null },
+            new Dictionary<string, object?> { ["v"] = new List<object?> { "`$EXACT`", null } })));
+
+        var err = Assert.Throws<InvalidOperationException>(() => StructUtils.Validate(
+            new Dictionary<string, object?>(),
             new Dictionary<string, object?> { ["v"] = new List<object?> { "`$EXACT`", null } }));
         Assert.Contains("Expected field v to be exactly equal to null, but found no value.", err.Message);
     }
@@ -1399,6 +1433,112 @@ public class StructTests
             }
             return StructUtils.Validate(data, spec, injdef);
         }, flags: Omni.Nulls);
+    }
+
+    [Fact]
+    public void ValidateDirective()
+    {
+        var validateSpec = (_spec["validate"] as Dictionary<string,object?>)?["directive"] as Dictionary<string, object?>;
+        _pack.RunSetMap(validateSpec, input =>
+        {
+            object? data = input?.GetValueOrDefault("data");
+            object? spec = input?.GetValueOrDefault("spec");
+            return StructUtils.Validate(data, spec);
+        }, flags: Omni.NoNulls);
+    }
+
+    [Fact]
+    public void ValidateNof()
+    {
+        var validateSpec = (_spec["validate"] as Dictionary<string,object?>)?["nof"] as Dictionary<string, object?>;
+        _pack.RunSetMap(validateSpec, input =>
+        {
+            object? data = input?.GetValueOrDefault("data");
+            object? spec = input?.GetValueOrDefault("spec");
+            return StructUtils.Validate(data, spec);
+        }, flags: Omni.NoNulls);
+    }
+
+    [Fact]
+    public void ValidateAll()
+    {
+        var validateSpec = (_spec["validate"] as Dictionary<string,object?>)?["all"] as Dictionary<string, object?>;
+        _pack.RunSetMap(validateSpec, input =>
+        {
+            object? data = input?.GetValueOrDefault("data");
+            object? spec = input?.GetValueOrDefault("spec");
+            return StructUtils.Validate(data, spec);
+        }, flags: Omni.NoNulls);
+    }
+
+    [Fact]
+    public void ValidateUnknown()
+    {
+        var validateSpec = (_spec["validate"] as Dictionary<string,object?>)?["unknown"] as Dictionary<string, object?>;
+        _pack.RunSetMap(validateSpec, input =>
+        {
+            object? data = input?.GetValueOrDefault("data");
+            object? spec = input?.GetValueOrDefault("spec");
+            return StructUtils.Validate(data, spec);
+        }, flags: Omni.NoNulls);
+    }
+
+    [Fact]
+    public void ValidateUnknownEdge()
+    {
+        // Only the unknown name is reported, and the data comes back as it is.
+        var errs = new List<object?>();
+        var data = new Dictionary<string, object?> { ["a"] = "x" };
+        object? out_ = StructUtils.Validate(data, new Dictionary<string, object?>
+        {
+            ["a"] = new List<object?> { "`$ONE`", "`$STRING`", "`$NIL`" },
+        }, new InjectState { Errs = errs });
+        Assert.Equal(new List<object?> { "Unknown validator $ONE at field a.0." }, errs);
+        Assert.True(Omni.DeepEqual(data, out_));
+
+        // A checker supplied in extra is defined, in any case.
+        Injector even = (inj, val, refStr, store) =>
+        {
+            object? n = StructUtils.GetProp(inj.DParent, inj.Key);
+            if (0 != Convert.ToInt64(n) % 2)
+            {
+                inj.Errs!.Add("Odd at " + string.Join(".", inj.Path.Skip(1)) + ": " + n);
+            }
+            return n;
+        };
+
+        errs = [];
+        Assert.Equal("{\"n\":2}", Canon(StructUtils.Validate(
+            new Dictionary<string, object?> { ["n"] = 2L },
+            new Dictionary<string, object?> { ["n"] = "`$EVEN`" },
+            new InjectState { Extra = new Dictionary<string, object?> { ["$EVEN"] = even }, Errs = errs })));
+        Assert.Equal("{\"n\":3}", Canon(StructUtils.Validate(
+            new Dictionary<string, object?> { ["n"] = 3L },
+            new Dictionary<string, object?> { ["n"] = "`$even`" },
+            new InjectState { Extra = new Dictionary<string, object?> { ["$even"] = even }, Errs = errs })));
+        Assert.Equal(new List<object?> { "Odd at n: 3" }, errs);
+
+        // A null in extra takes a checker away.
+        errs = [];
+        StructUtils.Validate("x", "`$STRING`",
+            new InjectState { Extra = new Dictionary<string, object?> { ["$STRING"] = null }, Errs = errs });
+        Assert.Equal(new List<object?> { "Unknown validator $STRING at field <root>." }, errs);
+    }
+
+    // A null that $ANY, $NULL or $NIL accepts stays in place, beside other
+    // keys and inside a list, as the typescript reference has it.
+    [Fact]
+    public void ValidateKeepsAcceptedNull()
+    {
+        foreach (var name in new[] { "`$ANY`", "`$NULL`", "`$NIL`" })
+        {
+            Assert.Equal("{\"a\":null,\"b\":\"x\"}", Canon(StructUtils.Validate(
+                new Dictionary<string, object?> { ["a"] = null, ["b"] = "x" },
+                new Dictionary<string, object?> { ["a"] = name, ["b"] = "`$STRING`" })));
+            Assert.Equal("[null,\"x\"]", Canon(StructUtils.Validate(
+                new List<object?> { null, "x" },
+                new List<object?> { name, "`$STRING`" })));
+        }
     }
 
     // ── select ───────────────────────────────────────────────────────────────
@@ -1463,5 +1603,200 @@ public class StructTests
                 object? obj   = m?.GetValueOrDefault("obj");
                 return (object?)StructUtils.Select(obj, query);
             }, flags: Omni.Nulls);
+    }
+
+
+    // ========================================================================
+    // Condense
+    // ========================================================================
+
+    private Dictionary<string, object?> CondenseSpec =>
+        _spec["condense"] as Dictionary<string, object?> ?? [];
+
+    [Fact]
+    public void CondenseCondense()
+    {
+        _pack.RunSet(CondenseSpec["condense"],
+            input => StructUtils.Condense(input), flags: Omni.NoNulls);
+    }
+
+    [Fact]
+    public void CondenseExpand()
+    {
+        _pack.RunSet(CondenseSpec["expand"],
+            input => StructUtils.Expand(input), flags: Omni.NoNulls);
+    }
+
+    [Fact]
+    public void CondenseIsCondensed()
+    {
+        _pack.RunSet(CondenseSpec["iscondensed"],
+            input => StructUtils.IsCondensed(input), flags: Omni.NoNulls);
+    }
+
+    // What the corpus shape cannot express: identity, sharing and the immutability contract.
+
+    private static int CondensedNodes(object? val)
+    {
+        var cond = StructUtils.Condense(val) as Dictionary<string, object?>;
+        return (cond!["node"] as List<object?>)!.Count;
+    }
+
+    [Fact]
+    public void CondenseDeterministic()
+    {
+        var src = StructUtils.Jm("b", StructUtils.Jm("m", "GET"), "a", StructUtils.Jm("m", "GET"),
+            "l", StructUtils.Jt(1, "x", true));
+        var reordered = StructUtils.Jm("l", StructUtils.Jt(1, "x", true), "a", StructUtils.Jm("m", "GET"),
+            "b", StructUtils.Jm("m", "GET"));
+        string once = StructUtils.Jsonify(StructUtils.Condense(src), 0);
+        Assert.Equal(once, StructUtils.Jsonify(StructUtils.Condense(src), 0));
+        Assert.Equal(once, StructUtils.Jsonify(StructUtils.Condense(reordered), 0));
+    }
+
+    [Fact]
+    public void CondenseSharesIdenticalSubtrees()
+    {
+        int one = CondensedNodes(StructUtils.Jm("x", StructUtils.Jm("m", "GET", "p", "/1")));
+        int two = CondensedNodes(StructUtils.Jm("x", StructUtils.Jm("m", "GET", "p", "/1"),
+            "y", StructUtils.Jm("m", "GET", "p", "/1")));
+        Assert.Equal(one, two);
+        Assert.True(CondensedNodes(StructUtils.Jm("x", StructUtils.Jm("m", "GET"),
+            "y", StructUtils.Jm("m", "PUT"), "z", StructUtils.Jm("m", "POST"))) > two);
+    }
+
+    [Fact]
+    public void CondenseRoundTripsByValue()
+    {
+        var src = StructUtils.Jm("a", StructUtils.Jm("b", StructUtils.Jt(1, "x", true, null, StructUtils.Jm())),
+            "c", "z");
+        Assert.True(Omni.DeepEqual(src, StructUtils.Expand(StructUtils.Condense(src))));
+    }
+
+    [Fact]
+    public void CondenseGetPathIsTransparent()
+    {
+        var src = StructUtils.Jm("entity", StructUtils.Jm("p", StructUtils.Jm("op",
+            StructUtils.Jm("list", StructUtils.Jm("method", "GET")))));
+        var cond = StructUtils.Condense(src);
+        Assert.True(Omni.DeepEqual(
+            StructUtils.GetPath(src, StructUtils.Jt("entity", "p", "op", "list")),
+            StructUtils.GetPath(cond, StructUtils.Jt("entity", "p", "op", "list"))));
+        Assert.Equal("GET", StructUtils.GetPath(cond, StructUtils.Jt("entity", "p", "op", "list", "method")));
+        Assert.Null(StructUtils.GetPath(cond, StructUtils.Jt("entity", "nope")));
+    }
+
+    [Fact]
+    public void CondenseViewReadsWithoutMaterialising()
+    {
+        var view = StructUtils.CondenseView(StructUtils.Condense(StructUtils.Jm(
+            "entity", StructUtils.Jm("a", StructUtils.Jm("v", 1), "b", StructUtils.Jm("v", 2)), "other", 9)));
+        Assert.Equal(new List<string> { "a", "b" }, view.Keys("entity"));
+        Assert.Equal(2.0, Omni.ToNum(view.At("entity").At("b").Get("v")));
+        Assert.True(view.Has("entity.a"));
+        Assert.False(view.Has("entity.zz"));
+        Assert.Equal(2, view.Size());
+
+        var miss = view.At("entity.zz");
+        Assert.False(miss.Exists());
+        Assert.Equal(0, miss.Size());
+        Assert.Empty(miss.Keys());
+        Assert.Null(miss.Value());
+        Assert.Null(miss.Ref());
+    }
+
+    [Fact]
+    public void CondenseValueCopiesAndRefShares()
+    {
+        var view = StructUtils.CondenseView(StructUtils.Condense(StructUtils.Jm(
+            "a", StructUtils.Jm("m", "GET"), "b", StructUtils.Jm("m", "GET"))));
+        var x = view.Get("a") as Dictionary<string, object?>;
+        var y = view.Get("b") as Dictionary<string, object?>;
+        Assert.True(Omni.DeepEqual(x, y));
+        Assert.NotSame(x, y);
+        x!["m"] = "MUTATED";
+        Assert.Equal("GET", view.Get("b.m"));
+        Assert.Same(view.At("a").Ref(), view.At("a").Ref());
+    }
+
+    [Fact]
+    public void CondensePreservesProtoNamedKeysAndValues()
+    {
+        var asValue = StructUtils.Jm("x", "__proto__");
+        Assert.True(Omni.DeepEqual(asValue, StructUtils.Expand(StructUtils.Condense(asValue))));
+        Assert.Equal("{\"__proto__\":1}",
+            StructUtils.Jsonify(StructUtils.Expand(StructUtils.Condense(StructUtils.Jm("__proto__", 1))), 0));
+    }
+
+    [Fact]
+    public void CondenseGetPathMatchesPlainOnNullAndOptions()
+    {
+        var withNull = StructUtils.Jm("a", null);
+        Assert.Null(StructUtils.GetPath(StructUtils.Condense(withNull), "a"));
+        Assert.Null(StructUtils.GetPath(withNull, "a"));
+
+        var store = StructUtils.Jm("base", StructUtils.Jm("x", 1));
+        var state = new InjectState { Base = "base" };
+        Assert.Equal(1.0, Omni.ToNum(StructUtils.GetPath(StructUtils.Condense(store), "x", null, state)));
+        Assert.Equal(1.0, Omni.ToNum(StructUtils.GetPath(store, "x", null, state)));
+    }
+
+    [Fact]
+    public void CondenseListKeysAreCanonicalIntegers()
+    {
+        // Unary + would accept these; a plain list read does not, so condensing must not change
+        // which value a path selects.
+        var plain = StructUtils.Jm("l", StructUtils.Jt(10, 20));
+        var cond = StructUtils.Condense(plain);
+        foreach (string key in new[] { "01", "1e0", " 1", "+1", "1.0", "-0" })
+        {
+            Assert.Equal(StructUtils.GetPath(plain, StructUtils.Jt("l", key)),
+                StructUtils.GetPath(cond, StructUtils.Jt("l", key)));
+        }
+        Assert.Equal(20.0, Omni.ToNum(StructUtils.GetPath(cond, StructUtils.Jt("l", "1"))));
+    }
+
+    [Fact]
+    public void CondenseSymbolsSortByCodePoint()
+    {
+        var cond = StructUtils.Condense(StructUtils.Jm("a", "\U00010000", "b", "￿")) as Dictionary<string, object?>;
+        var sym = cond!["sym"] as List<object?>;
+        Assert.True(sym!.IndexOf("￿") < sym.IndexOf("\U00010000"));
+    }
+
+    [Fact]
+    public void CondenseAstralKeysResolve()
+    {
+        // Code-unit order puts the astral key first; the stored pairs must not.
+        var cond = StructUtils.Condense(StructUtils.Jm("Ａ", 1, "\U0001F600", 2));
+        Assert.Equal(2.0, Omni.ToNum(StructUtils.GetPath(cond, StructUtils.Jt("\U0001F600"))));
+        Assert.Equal(1.0, Omni.ToNum(StructUtils.GetPath(cond, StructUtils.Jt("Ａ"))));
+        Assert.Equal(2.0, Omni.ToNum(StructUtils.CondenseView(cond).Get("\U0001F600")));
+    }
+
+    [Fact]
+    public void CondenseInvalidKeyMutationsStayNoOps()
+    {
+        var cond = StructUtils.Condense(StructUtils.Jm("a", 1));
+        Assert.Same(cond, StructUtils.DelProp(cond, null));
+        Assert.Same(cond, StructUtils.SetProp(cond, null, 1));
+        var err = Assert.Throws<InvalidOperationException>(() => StructUtils.DelProp(cond, "sym"));
+        Assert.Contains("immutable", err.Message);
+    }
+
+    [Fact]
+    public void CondenseIsImmutable()
+    {
+        var cond = StructUtils.Condense(StructUtils.Jm("a", 1));
+        Assert.Contains("immutable",
+            Assert.Throws<InvalidOperationException>(() => StructUtils.SetPath(cond, "a", 2)).Message);
+        Assert.Contains("immutable",
+            Assert.Throws<InvalidOperationException>(() => StructUtils.SetProp(cond, "a", 2)).Message);
+        Assert.Contains("immutable",
+            Assert.Throws<InvalidOperationException>(() => StructUtils.DelProp(cond, "sym")).Message);
+
+        var copy = StructUtils.Expand(cond);
+        StructUtils.SetPath(copy, "a", 2);
+        Assert.Equal(2.0, Omni.ToNum(StructUtils.GetProp(copy, "a")));
     }
 }

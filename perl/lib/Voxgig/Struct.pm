@@ -275,7 +275,7 @@ sub _make_sentinel {
 }
 
 # Common regex patterns (precompiled).
-our $R_INTEGER_KEY     = qr/^-?[0-9]+$/;
+our $R_INTEGER_KEY     = qr/^(?:0|-?[1-9][0-9]*)\z/;
 our $R_ESCAPE_REGEXP   = qr/[.*+?^\${}()|\[\]\\]/;
 our $R_QUOTES          = qr/"/;
 our $R_DOT             = qr/\./;
@@ -284,11 +284,30 @@ our $R_META_PATH       = qr/^([^\$]+)\$([=~])(.+)$/;
 our $R_DOUBLE_DOLLAR   = qr/\$\$/;
 our $R_TRANSFORM_NAME  = qr/`\$([A-Z]+)`/;
 our $R_INJECTION_FULL  = qr/^`(\$[A-Z]+|[^`]*)[0-9]*`$/;
+our $R_CHECKER_NAME    = qr/^\$[A-Z]+$/;
 our $R_BT_ESCAPE       = qr/\$BT/;
 our $R_DS_ESCAPE       = qr/\$DS/;
 our $R_INJECTION_PARTIAL = qr/`([^`]+)`/;
 
 use constant MAXDEPTH => 32;
+
+# Condensed structures: the format version, and the kind leading each node.
+use constant CONDENSE_VERSION => 1;
+use constant CONDENSE_MAP     => 0;
+use constant CONDENSE_LIST    => 1;
+use constant CONDENSE_STR     => 2;
+use constant CONDENSE_NUM     => 3;
+use constant CONDENSE_TRUE    => 4;
+use constant CONDENSE_FALSE   => 5;
+use constant CONDENSE_NULL    => 6;
+
+use constant S_condense => '$condense';
+use constant S_condsym  => 'sym';
+use constant S_condnode => 'node';
+use constant S_condroot => 'root';
+
+use constant S_CONDENSE_IMMUTABLE =>
+  'struct: condensed structures are immutable - expand() first, then modify the copy';
 
 # ============================================================================
 # Map helpers (insertion-ordered hashes via Tie::IxHash).
@@ -566,22 +585,45 @@ sub typify {
     return T_scalar | T_string;
 }
 
+# A list key's index, or undef: an integral number, or a string as
+# JavaScript's String(n) prints one, so '1' and '-1' but not '01', '+1',
+# ' 1', '1.0', '-0' or 1.5.
+sub _listkey {
+    my ($key) = @_;
+    return if !defined $key || ref $key;
+    if (_is_number_sv($key)) {
+        # $key - $key is 0 only when $key is finite.
+        return (0 == $key - $key && $key == int($key)) ? int($key) : undef;
+    }
+    return $key =~ $R_INTEGER_KEY ? 0 + $key : undef;
+}
+
+# The index $key reads in a list of $size items, or -1. With $fromend, as
+# getelem reads it, a negative key counts back from the end.
+sub _listindex {
+    my ($key, $size, $fromend) = @_;
+    my $i = _listkey($key);
+    return -1 unless defined $i;
+    $i += $size if $fromend && $i < 0;
+    return (0 <= $i && $i < $size) ? $i : -1;
+}
+
+# A map key, or undef when $key is neither a string nor a number.
+sub _mapkey {
+    my ($key) = @_;
+    return (!defined $key || ref $key) ? undef : "$key";
+}
+
 # Get an element from a list with negative-index support and a fallback.
 # Mirrors TS getelem.
 sub getelem {
     my ($val, $key, $alt) = @_;
     $alt = is_none($_[2]) ? $NONE : (exists $_[2] ? $alt : $NONE);
     return $alt unless islist($val);
-    my $len = scalar @$val;
-    my $k;
-    if (defined $key && !ref($key) && looks_like_number($key)) { $k = int($key) }
-    elsif (ref $key eq 'CODE') {
-        # Fallback callback (TS supports getelem(val, key, () => ...)).
-        return $key->();
-    }
-    else { return $alt }
-    $k = $len + $k if $k < 0;
-    return $alt if $k < 0 || $k >= $len;
+    # Fallback callback (TS supports getelem(val, key, () => ...)).
+    return $key->() if ref $key eq 'CODE';
+    my $k = _listindex($key, scalar @$val, 1);
+    return $alt if $k < 0;
     my $v = $val->[$k];
     # A null (or absent/NONE) slot counts as "no value" → alt, the same
     # Group A rule getprop applies; a function alt is called.
@@ -596,12 +638,15 @@ sub getprop {
     $alt = NONE() unless exists $_[2];
     return $alt unless defined $val && ref $val;
     if (islist($val)) {
-        return getelem($val, $key, $alt);
+        my $k = _listindex($key, scalar @$val);
+        return $alt if $k < 0;
+        my $v = $val->[$k];
+        return $alt if !defined $v || is_jnull($v) || is_none($v);
+        return $v;
     }
     if (ismap($val)) {
-        my $k = strkey($key);
-        return $alt if $k eq '';
-        return $alt unless exists $val->{$k};
+        my $k = _mapkey($key);
+        return $alt unless defined $k && exists $val->{$k};
         my $v = $val->{$k};
         # Group A semantics: stored null counts as absent for getprop.
         return $alt if !defined $v || is_jnull($v) || is_none($v);
@@ -615,18 +660,14 @@ sub _lookup {
     my ($val, $key) = @_;
     return NONE() unless defined $val && ref $val;
     if (islist($val)) {
-        return NONE() unless defined $key && !ref($key) && looks_like_number($key);
-        my $k = int($key);
-        my $len = scalar @$val;
-        $k = $len + $k if $k < 0;
-        return NONE() if $k < 0 || $k >= $len;
+        my $k = _listindex($key, scalar @$val);
+        return NONE() if $k < 0;
         my $v = $val->[$k];
         return is_none($v) ? NONE() : $v;
     }
     if (ismap($val)) {
-        my $k = strkey($key);
-        return NONE() if $k eq '';
-        return NONE() unless exists $val->{$k};
+        my $k = _mapkey($key);
+        return NONE() unless defined $k && exists $val->{$k};
         return $val->{$k};
     }
     return NONE();
@@ -663,18 +704,14 @@ sub haskey {
     my ($val, $key) = @_;
     return 0 unless defined $val && ref $val;
     if (islist($val)) {
-        return 0 unless defined $key && !ref($key) && looks_like_number($key);
-        my $k = int($key);
-        my $len = scalar @$val;
-        $k = $len + $k if $k < 0;
-        return 0 if $k < 0 || $k >= $len;
+        my $k = _listindex($key, scalar @$val);
+        return 0 if $k < 0;
         my $v = $val->[$k];
         return (defined $v && !is_jnull($v) && !is_none($v)) ? 1 : 0;
     }
     if (ismap($val)) {
-        my $k = strkey($key);
-        return 0 if $k eq '';
-        return 0 unless exists $val->{$k};
+        my $k = _mapkey($key);
+        return 0 unless defined $k && exists $val->{$k};
         my $v = $val->{$k};
         return (defined $v && !is_jnull($v) && !is_none($v)) ? 1 : 0;
     }
@@ -1052,13 +1089,11 @@ sub _clone_inner {
 sub delprop {
     my ($val, $key) = @_;
     return $val unless defined $val && ref $val;
+    return $val unless iskey($key);
+    die S_CONDENSE_IMMUTABLE if iscondensed($val);
     if (islist($val)) {
-        return $val unless defined $key && !ref($key) && looks_like_number($key);
-        my $k = int($key);
-        my $len = scalar @$val;
-        # A negative or out-of-bounds index is a no-op (no end-relative delete).
-        return $val if $k < 0 || $k >= $len;
-        splice(@$val, $k, 1);
+        my $k = _listindex($key, scalar @$val);
+        splice(@$val, $k, 1) if 0 <= $k;
         return $val;
     }
     if (ismap($val)) {
@@ -1074,6 +1109,8 @@ sub delprop {
 sub setprop {
     my ($val, $key, $newval) = @_;
     return $val unless defined $val && ref $val;
+    return $val unless iskey($key);
+    die S_CONDENSE_IMMUTABLE if iscondensed($val);
     if (is_sentinel($newval)) {
         my ($mark) = _map_keys($newval);
         if ($mark eq '`$SKIP`')   { return $val }
@@ -1081,8 +1118,8 @@ sub setprop {
     }
     if (is_none($newval)) { return delprop($val, $key) }
     if (islist($val)) {
-        return $val unless defined $key && !ref($key) && looks_like_number($key);
-        my $k = int($key);
+        my $k = _listkey($key);
+        return $val unless defined $k;
         my $len = scalar @$val;
         if ($k >= 0) {
             # Set or append; an out-of-bounds index clamps to the end (append).
@@ -1096,9 +1133,7 @@ sub setprop {
         return $val;
     }
     if (ismap($val)) {
-        my $k = strkey($key);
-        return $val if $k eq '';
-        $val->{$k} = $newval;
+        $val->{ _mapkey($key) } = $newval;
         return $val;
     }
     return $val;
@@ -1415,6 +1450,9 @@ sub _merge_pair {
 sub setpath {
     my ($store, $path_in, $val, $injdef) = @_;
 
+    # Same contract as setprop/delprop: a condensed store is immutable.
+    die S_CONDENSE_IMMUTABLE if iscondensed($store);
+
     # Coerce the path into a parts list via typify, matching canonical:
     # a list path is used as-is, a string path is dot-split, a number path
     # becomes a single-element list; anything else returns NONE.
@@ -1470,14 +1508,19 @@ sub setpath {
 sub getpath {
     my ($store, $path_in, $inj) = @_;
 
-    # Coerce path into a parts list. Anything else returns NONE.
+    # Coerce path into a parts list. Anything else returns NONE, as does a
+    # list holding a part that is neither a string nor a number.
     my @parts;
     if (islist($path_in)) {
-        @parts = @$path_in;
+        for my $part (@$path_in) {
+            my $k = _mapkey($part);
+            return NONE() unless defined $k;
+            push @parts, $k;
+        }
     }
     elsif (defined $path_in && !ref($path_in) && !is_jbool($path_in) && !is_jnull($path_in)) {
         if (_is_number_sv($path_in)) {
-            @parts = (strkey($path_in));
+            @parts = (_mapkey($path_in));
         }
         elsif ("$path_in" eq '') {
             @parts = ('');
@@ -1488,6 +1531,19 @@ sub getpath {
     }
     else {
         return NONE();
+    }
+
+    # A condensed store answers a path as the node it was built from does,
+    # touching only the nodes on the path. A base changes what the path
+    # resolves against, so then it is expanded instead.
+    if (iscondensed($store)) {
+        if (!defined $inj || is_none(getprop($inj, S_base))) {
+            my $at = _condense_resolve($store, $store->{ S_condroot() }, \@parts);
+            my $found = 0 > $at ? NONE() : _condense_materialise($store, $at);
+            # Group A: a stored null reads as absent, as getprop has it.
+            return is_jnull($found) ? NONE() : $found;
+        }
+        $store = expand($store);
     }
 
     my $val = $store;
@@ -2335,6 +2391,154 @@ sub _invalid_type_msg {
     return 'Expected ' . $field . $needtype . ', but found ' . $extra . $vs . '.';
 }
 
+# Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
+our @VALIDATE_NAMES = (
+    '$TOP', '$SPEC', '$BT', '$DS', '$WHEN', '$ANNO', '$REF', '$FORMAT', '$APPLY', '$OPEN',
+);
+
+# Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
+sub _checknames {
+    my ($spec, $store, $path, $errs) = @_;
+    my $name = _refname($spec);
+    if (!is_none($name)) {
+        if (_unknownname($name, $store)) {
+            push @$errs, 'Unknown validator ' . $name . ' at field ' . pathify($path) . '.';
+        }
+        return;
+    }
+
+    if (islist($spec)) {
+        my $first = _refname($spec->[0]);
+        return if !is_none($first) && '$EXACT' eq $first;
+    }
+
+    for my $key (@{ keysof($spec) }) {
+        _checknames($key, $store, $path, $errs) if ismap($spec);
+        _checknames(_lookup($spec, $key), $store, [ @$path, $key ], $errs);
+    }
+    return;
+}
+
+# The name a whole-string reference gives, when it is a checker name in any case.
+sub _refname {
+    my ($val) = @_;
+    return NONE() unless defined $val && !ref($val) && $val =~ $R_INJECTION_FULL;
+    my $name = $1;
+    return uc($name) =~ $R_CHECKER_NAME ? $name : NONE();
+}
+
+# Unknown: undefined and upper case, or a defined name in another case. Null disables a name.
+sub _unknownname {
+    my ($name, $store) = @_;
+    my $known = sub {
+        my ($n) = @_;
+        return 1 if grep { $_ eq $n } @VALIDATE_NAMES;
+        my $v = _lookup($store, $n);
+        return (defined $v && !is_none($v) && !is_jnull($v)) ? 1 : 0;
+    };
+    my $upper = uc $name;
+    return (!$known->($name) && ($upper eq $name || $known->($upper))) ? 1 : 0;
+}
+
+# The data value at a list directive's slot. The directive's own dparent was
+# read with getprop, which reports a stored null as absent.
+sub _slotval {
+    my ($inj) = @_;
+    my $prior = $inj->{prior};
+    return defined $prior ? _lookup($prior->{dparent}, $prior->{key}) : $inj->{dparent};
+}
+
+# JSON equality: numbers by value, lists in order, maps by key in any order.
+sub _deepequal {
+    my ($x, $y) = @_;
+    return 1 if ref($x) && ref($y) && refaddr($x) == refaddr($y);
+
+    my $xtype = typify($x);
+    my $ytype = typify($y);
+    return ($x == $y ? 1 : 0) if ($xtype & T_number) && ($ytype & T_number);
+    return 0 if $xtype != $ytype;
+    return 1 if $xtype & (T_noval | T_null);
+    return ($x eq $y ? 1 : 0) if $xtype & T_string;
+    return ($$x == $$y ? 1 : 0) if $xtype & T_boolean;
+    return 0 unless isnode($x);
+
+    my $xkeys = keysof($x);
+    my $ykeys = keysof($y);
+    return 0 if scalar(@$xkeys) != scalar(@$ykeys);
+
+    for my $kI (0 .. $#$xkeys) {
+        my $k = $xkeys->[$kI];
+        return 0 if $k ne $ykeys->[$kI] || !_deepequal(_lookup($x, $k), _lookup($y, $k));
+    }
+    return 1;
+}
+
+# Every member val has is in out, unchanged. A member only out has is a
+# default the spec supplied, and is ignored.
+sub _keeps {
+    my ($val, $out) = @_;
+    return 1 if !defined $val || is_none($val);
+    if (!isnode($val) || islist($val) != islist($out) || !isnode($out)) {
+        return _deepequal($val, $out);
+    }
+    for my $k (@{ keysof($val) }) {
+        return 0 unless _keeps(_lookup($val, $k), _lookup($out, $k));
+    }
+    return 1;
+}
+
+# A spec admits a value when validating the value against it finds no error
+# and gives back the value as it is.
+sub _admits {
+    my ($val, $spec, $inj, $store) = @_;
+    my $terrs = [];
+    my $vstore = merge([_mkmap(), $store], 1);
+    $vstore->{ S_DTOP() } = $val;
+    my $out = validate($val, $spec, {
+        extra => $vstore,
+        errs  => $terrs,
+        meta  => $inj->{meta},
+    });
+    return (size($terrs) == 0 && _keeps($val, $out)) ? 1 : 0;
+}
+
+# The bounds of a $NOF count, and the words for it, which are NONE when the
+# count is invalid. Without a max, the bound is the number of specs.
+sub _nofcount {
+    my ($count, $numtvals) = @_;
+    my $isnat = sub { my ($n) = @_; return (T_integer & typify($n)) && $n >= 0 ? 1 : 0 };
+
+    if ($isnat->($count)) {
+        return ($count, $count, 0 == $count ? 'none' : 'exactly ' . $count);
+    }
+
+    my $min = _lookup($count, 'min');
+    my $max = _lookup($count, 'max');
+    my $nomin = is_none($min);
+    my $nomax = is_none($max);
+
+    my $valid = ismap($count)
+        && 0 < size($count)
+        && size($count) == ($nomin ? 0 : 1) + ($nomax ? 0 : 1)
+        && ($nomin || $isnat->($min))
+        && ($nomax || $isnat->($max))
+        && ($nomin || $nomax || $min <= $max);
+
+    return (0, 0, NONE()) unless $valid;
+
+    my $lo = $nomin ? 0 : $min;
+    my $hi = $nomax ? $numtvals : $max;
+
+    my $desc =
+          $nomax      ? 'at least ' . $lo
+        : 0 == $hi    ? 'none'
+        : $nomin      ? 'at most ' . $hi
+        : $lo == $hi  ? 'exactly ' . $lo
+        :               $lo . ' to ' . $hi;
+
+    return ($lo, $hi, $desc);
+}
+
 sub validate_STRING {
     my ($inj) = @_;
     my $out = _lookup($inj->{dparent}, $inj->{key});
@@ -2375,6 +2579,10 @@ sub validate_TYPE {
     if ($tname eq S_number) {
         $typev = T_integer | T_decimal | T_number;
     }
+
+    # $NIL is absent or null.
+    $typev |= T_null if $tname eq S_nil;
+
     my $out = _lookup($inj->{dparent}, $inj->{key});
     my $t = typify($out);
     if (!($t & $typev)) {
@@ -2402,7 +2610,7 @@ sub validate_CHILD {
         my $tval = getprop($inj->{dparent}, $pkey);
         if (!defined $tval || is_none($tval)) { $tval = _mkmap() }
         elsif (!ismap($tval)) {
-            push @{ $inj->{errs} }, _invalid_type_msg(slice($inj->{path}, -1), S_object, typify($tval), $tval, 'V0220');
+            # _validation reports the mismatch, once.
             return NONE();
         }
         my $ckeys = keysof($tval);
@@ -2424,8 +2632,6 @@ sub validate_CHILD {
             return NONE();
         }
         if (!islist($inj->{dparent})) {
-            my $msg = _invalid_type_msg(slice($inj->{path}, -1), S_list, typify($inj->{dparent}), $inj->{dparent}, 'V0230');
-            push @{ $inj->{errs} }, $msg;
             $inj->{keyI} = size($parent);
             return $inj->{dparent};
         }
@@ -2453,54 +2659,6 @@ sub validate_CHILD {
     return NONE();
 }
 
-sub validate_ONE {
-    my ($inj, $val, $ref, $store) = @_;
-    my $mode = $inj->{mode};
-    my $parent = $inj->{parent};
-    my $keyI = $inj->{keyI};
-    if ($mode == M_VAL) {
-        if (!islist($parent) || $keyI != 0) {
-            push @{ $inj->{errs} },
-                'The $ONE validator at field ' . pathify($inj->{path}, 1, 1) .
-                ' must be the first element of an array.';
-            return;
-        }
-        $inj->{keyI} = size($inj->{keys});
-        _inj_setval($inj, $inj->{dparent}, 2);
-        $inj->{path} = slice($inj->{path}, -1);
-        my $tvals = slice($parent, 1);
-        if (size($tvals) == 0) {
-            push @{ $inj->{errs} },
-                'The $ONE validator at field ' . pathify($inj->{path}, 1, 1) .
-                ' must have at least one argument.';
-            return;
-        }
-        for my $tval (@$tvals) {
-            my $terrs = [];
-            my $vstore = merge([_mkmap(), $store], 1);
-            $vstore->{ S_DTOP() } = $inj->{dparent};
-            my $vcurrent = validate($inj->{dparent}, $tval, {
-                extra => $vstore,
-                errs  => $terrs,
-                meta  => $inj->{meta},
-            });
-            _inj_setval($inj, $vcurrent, -2);
-            # SKIP: the alternative validated this subtree, so the walker must
-            # not run its generic pass over a slot $ONE has consumed.
-            return SKIP() if size($terrs) == 0;
-        }
-        my $valdesc = CORE::join(', ', map { stringify($_) } @$tvals);
-        $valdesc =~ s/`\$([A-Z]+)`/lc($1)/ge;
-        push @{ $inj->{errs} }, _invalid_type_msg(
-            $inj->{path},
-            (size($tvals) > 1 ? 'one of ' : '') . $valdesc,
-            typify($inj->{dparent}),
-            $inj->{dparent},
-            'V0210',
-        );
-    }
-}
-
 sub validate_EXACT {
     my ($inj) = @_;
     my $mode = $inj->{mode};
@@ -2514,26 +2672,22 @@ sub validate_EXACT {
                 ' must be the first element of an array.';
             return;
         }
+        my $cval = _slotval($inj);
         $inj->{keyI} = size($inj->{keys});
-        _inj_setval($inj, $inj->{dparent}, 2);
+
+        # Replace [$EXACT, ...] with the data value; SKIP keeps inject off the detached list.
+        _inj_setval($inj, $cval, 2);
+
         $inj->{path} = slice($inj->{path}, 0, -1);
-        $inj->{key} = getelem($inj->{path}, -1);
         my $tvals = slice($parent, 1);
         if (size($tvals) == 0) {
             push @{ $inj->{errs} },
                 'The $EXACT validator at field ' . pathify($inj->{path}, 1, 1) .
                 ' must have at least one argument.';
-            return;
+            return SKIP();
         }
-        my $currentstr;
         for my $tval (@$tvals) {
-            my $exactmatch = _exact_eq($tval, $inj->{dparent});
-            if (!$exactmatch && isnode($tval)) {
-                $currentstr //= stringify($inj->{dparent});
-                my $tvalstr = stringify($tval);
-                $exactmatch = ($tvalstr eq $currentstr);
-            }
-            return if $exactmatch;
+            return SKIP() if _deepequal($tval, $cval);
         }
         my $valdesc = CORE::join(', ', map { stringify($_) } @$tvals);
         $valdesc =~ s/`\$([A-Z]+)`/lc($1)/ge;
@@ -2541,14 +2695,99 @@ sub validate_EXACT {
             $inj->{path},
             (size($inj->{path}) > 1 ? '' : 'value ') . 'exactly equal to ' .
                 (size($tvals) == 1 ? '' : 'one of ') . $valdesc,
-            typify($inj->{dparent}),
-            $inj->{dparent},
+            typify($cval),
+            $cval,
             'V0110',
         );
+        return SKIP();
     }
     else {
         delprop($parent, $key);
     }
+}
+
+# Count the specs that admit the value: ['`$NOF`', count, spec, ...], where
+# count is an integer, or a map holding min, max or both.
+sub validate_NOF {
+    my ($inj, $val, $ref, $store) = @_;
+    return _validatecount($inj, $store, '$NOF', 1);
+}
+
+# Every spec admits the value: ['`$ALL`', spec, ...].
+sub validate_ALL {
+    my ($inj, $val, $ref, $store) = @_;
+    return _validatecount($inj, $store, '$ALL', 0);
+}
+
+# The counting list directives. Without a count, every spec has to admit.
+sub _validatecount {
+    my ($inj, $store, $name, $counted) = @_;
+    my $mode = $inj->{mode};
+    my $parent = $inj->{parent};
+    my $keyI = $inj->{keyI};
+
+    return NONE() if $mode != M_VAL;
+
+    if (!islist($parent) || $keyI != 0) {
+        push @{ $inj->{errs} },
+            'The ' . $name . ' validator at field ' . pathify($inj->{path}, 1, 1) .
+            ' must be the first element of an array.';
+        return NONE();
+    }
+
+    my $cval = _slotval($inj);
+
+    $inj->{keyI} = size($inj->{keys});
+
+    # Replace the directive's list with the data value. Each return is SKIP, so
+    # that inject leaves the detached list alone and validates nothing in it.
+    _inj_setval($inj, $cval, 2);
+
+    $inj->{path} = slice($inj->{path}, -1);
+
+    my $count = $counted ? _lookup($parent, 1) : NONE();
+    my $tvals = slice($parent, $counted ? 2 : 1);
+    my $numtvals = size($tvals);
+    my $field = 'The ' . $name . ' validator at field ' . pathify($inj->{path}, 1);
+
+    if (0 == $numtvals) {
+        push @{ $inj->{errs} },
+            $field . ($counted ? ' must have a count and' : ' must have') . ' at least one argument.';
+        return SKIP();
+    }
+
+    my ($lo, $hi, $countdesc) =
+        $counted ? _nofcount($count, $numtvals) : ($numtvals, $numtvals, 'all');
+
+    if (is_none($countdesc)) {
+        push @{ $inj->{errs} }, $field . ' has an invalid count: ' . stringify($count) . '.';
+        return SKIP();
+    }
+
+    my $admitted = 0;
+    for my $tI (0 .. $numtvals - 1) {
+        my $left = $numtvals - $tI;
+
+        # Stop once the specs left cannot change the verdict.
+        last if $hi < $admitted || $admitted + $left < $lo
+            || ($lo <= $admitted && $admitted + $left <= $hi);
+
+        $admitted++ if _admits($cval, $tvals->[$tI], $inj, $store);
+    }
+
+    if ($admitted < $lo || $hi < $admitted) {
+        my $valdesc = CORE::join(', ', map { stringify($_) } @$tvals);
+        $valdesc =~ s/`\$([A-Z]+)`/lc($1)/ge;
+        push @{ $inj->{errs} }, _invalid_type_msg(
+            $inj->{path},
+            $countdesc . ' of ' . $valdesc,
+            typify($cval),
+            $cval,
+            'V0310',
+        );
+    }
+
+    return SKIP();
 }
 
 sub _exact_eq {
@@ -2687,20 +2926,28 @@ sub validate {
         '$INSTANCE', \&validate_TYPE,
         '$ANY',      \&validate_ANY,
         '$CHILD',    \&validate_CHILD,
-        '$ONE',      \&validate_ONE,
         '$EXACT',    \&validate_EXACT,
+        '$NOF',      \&validate_NOF,
+        '$ALL',      \&validate_ALL,
     );
     my $errsmap = jm(S_DERRS, $errs);
     my $store = merge([$base, getdef($extra, _mkmap()), $errsmap], 1);
     my $meta = getprop($injdef, 'meta', _mkmap());
     setprop($meta, S_BEXACT, getprop($meta, S_BEXACT, $JFALSE));
-    my $out = transform($data, $spec, {
-        meta    => $meta,
-        extra   => $store,
-        modify  => \&_validation,
-        handler => \&_validatehandler,
-        errs    => $errs,
-    });
+
+    # A spec that names an unknown checker validates nothing.
+    my $numerrs = size($errs);
+    _checknames($spec, $store, [], $errs);
+
+    my $out = $numerrs < size($errs)
+        ? clone($data)
+        : transform($data, $spec, {
+            meta    => $meta,
+            extra   => $store,
+            modify  => \&_validation,
+            handler => \&_validatehandler,
+            errs    => $errs,
+        });
     if (size($errs) > 0 && !$collect) {
         die CORE::join(' | ', map { defined $_ ? "$_" : '' } @$errs);
     }
@@ -2990,5 +3237,379 @@ sub re_replace {
 }
 
 sub re_escape { return escre($_[0]) }
+
+# ============================================================================
+# Condense: a JSON-shaped tree as a symbol table and a list of shared nodes.
+# ============================================================================
+
+sub iscondensed {
+    my ($val) = @_;
+    return 0 unless ismap($val);
+
+    # The version must MATCH, not merely be numeric: a future profile would
+    # otherwise be decoded under this one's schema.
+    my $version = $val->{ S_condense() };
+    return 0 unless _is_number_sv($version) && CONDENSE_VERSION == $version;
+
+    return ( islist( $val->{ S_condsym() } )
+          && islist( $val->{ S_condnode() } )
+          && _is_number_sv( $val->{ S_condroot() } ) ) ? 1 : 0;
+}
+
+# Pure: the same input always produces a byte-identical result, on every port.
+sub condense {
+    my ($val) = @_;
+
+    my %symset;
+    _condense_collect( $val, \%symset );
+    my @sym = sort keys %symset;
+    my %symid;
+    @symid{@sym} = ( 0 .. $#sym );
+
+    my ( @node, %seen );
+    my $root = _condense_build( $val, \%symid, \@node, \%seen );
+
+    my $out = _mkmap();
+    $out->{ S_condense() } = CONDENSE_VERSION;
+    $out->{ S_condsym() }  = \@sym;
+    $out->{ S_condnode() } = \@node;
+    $out->{ S_condroot() } = $root;
+    return $out;
+}
+
+# A value that is not condensed comes back unchanged.
+sub expand {
+    my ($cond) = @_;
+    return $cond unless iscondensed($cond);
+    return _condense_materialise( $cond, $cond->{ S_condroot() } );
+}
+
+# A cursor into a condensed structure. A memo passed in is shared with every
+# view it reaches.
+sub condenseview {
+    my ( $cond, $idx, $memo ) = @_;
+    my $start =
+      ( !defined $idx || is_none($idx) || is_jnull($idx) )
+      ? ( iscondensed($cond) ? $cond->{ S_condroot() } : -1 )
+      : $idx;
+    return Voxgig::Struct::CondenseView->_new( $cond, $start,
+        ref($memo) eq 'HASH' ? $memo : {} );
+}
+
+sub _condense_isstr {
+    my ($val) = @_;
+    return ( defined $val && !ref $val && !_is_number_sv($val) ) ? 1 : 0;
+}
+
+sub _condense_collect {
+    my ( $n, $symset ) = @_;
+    if ( ismap($n) ) {
+        for my $k ( _map_keys($n) ) {
+            $symset->{$k} = 1;
+            _condense_collect( $n->{$k}, $symset );
+        }
+    }
+    elsif ( islist($n) ) {
+        _condense_collect( $_, $symset ) for @$n;
+    }
+    elsif ( _condense_isstr($n) ) {
+        $symset->{$n} = 1;
+    }
+    return;
+}
+
+# Post-order, so identical subtrees are interned before a parent refers to them.
+sub _condense_build {
+    my ( $n, $symid, $node, $seen ) = @_;
+    my $enc;
+    if ( ismap($n) ) {
+        $enc = [CONDENSE_MAP];
+
+        # keysof sorts by code point, as the symbols are, so the key ids ascend for bisection.
+        for my $k ( @{ keysof($n) } ) {
+            push @$enc, $symid->{$k}, _condense_build( $n->{$k}, $symid, $node, $seen );
+        }
+    }
+    elsif ( islist($n) ) {
+        $enc = [ CONDENSE_LIST, map { _condense_build( $_, $symid, $node, $seen ) } @$n ];
+    }
+    elsif ( _condense_isstr($n) ) {
+        $enc = [ CONDENSE_STR, $symid->{$n} ];
+    }
+    elsif ( defined $n && !ref $n ) {
+        $enc = [ CONDENSE_NUM, $n ];
+    }
+    elsif ( is_jbool($n) ) {
+        $enc = [ $$n ? CONDENSE_TRUE : CONDENSE_FALSE ];
+    }
+    else {
+        $enc = [CONDENSE_NULL];
+    }
+    return _condense_intern( $enc, $node, $seen );
+}
+
+# Numbers key by value, as a JS join spells them: 1 and 1.0 share a node.
+sub _condense_intern {
+    my ( $enc, $node, $seen ) = @_;
+    my $key =
+      CONDENSE_NUM == $enc->[0]
+      ? CONDENSE_NUM . ',' . _condense_numkey( $enc->[1] )
+      : CORE::join( ',', map { sprintf( '%d', $_ ) } @$enc );
+    return $seen->{$key} if exists $seen->{$key};
+    push @$node, $enc;
+    return $seen->{$key} = $#$node;
+}
+
+sub _condense_numkey {
+    my ($n) = @_;
+    return 0 == $n ? '0' : sprintf( '%.17g', $n );
+}
+
+# A path part as JavaScript's String() spells it.
+sub _condense_str {
+    my ($val) = @_;
+    return 'undefined' if !defined $val || is_none($val);
+    return 'null' if is_jnull($val);
+    return ( $$val ? 'true' : 'false' ) if is_jbool($val);
+    return "$val" unless ref $val;
+    return stringify($val);
+}
+
+# The encoding of node $idx, or nothing.
+sub _condense_enc {
+    my ( $cond, $idx ) = @_;
+    my $node = $cond->{ S_condnode() };
+    return unless islist($node) && defined $idx && !ref $idx && looks_like_number($idx);
+    return unless $idx == int($idx) && 0 <= $idx && $idx < @$node;
+    my $enc = $node->[$idx];
+    return unless islist($enc);
+    return $enc;
+}
+
+sub _condense_kind {
+    my ($enc) = @_;
+    my $kind = $enc->[0];
+    return ( _is_number_sv($kind) && $kind == int($kind) ) ? $kind : -1;
+}
+
+# Symbol $id, or NONE when the table has none.
+sub _condense_sym {
+    my ( $sym, $id ) = @_;
+    return NONE()
+      unless islist($sym) && _is_number_sv($id) && $id == int($id) && 0 <= $id && $id < @$sym;
+    return $sym->[$id];
+}
+
+# Bisect the sorted symbol table: -1 when the string occurs nowhere.
+sub _condense_symid {
+    my ( $cond, $key ) = @_;
+    my $sym = $cond->{ S_condsym() };
+    my ( $lo, $hi ) = ( 0, $#$sym );
+    while ( $lo <= $hi ) {
+        my $mid = ( $lo + $hi ) >> 1;
+        my $cmp = _condense_str( $sym->[$mid] ) cmp $key;
+        return $mid if 0 == $cmp;
+        if   ( $cmp < 0 ) { $lo = $mid + 1 }
+        else              { $hi = $mid - 1 }
+    }
+    return -1;
+}
+
+# The node index of $key inside node $idx, or -1. Touches only this node.
+sub _condense_child {
+    my ( $cond, $idx, $key ) = @_;
+    my $enc = _condense_enc( $cond, $idx );
+    return -1 unless defined $enc && defined _mapkey($key);
+
+    my $kind = _condense_kind($enc);
+    my $k    = _condense_str($key);
+
+    if ( CONDENSE_MAP == $kind ) {
+        my $symid = _condense_symid( $cond, $k );
+        return -1 if 0 > $symid;
+
+        # Pairs live at [1,2], [3,4], ... with keys ascending: bisect the pairs.
+        my ( $lo, $hi ) = ( 0, int( ( @$enc - 1 ) / 2 ) - 1 );
+        while ( $lo <= $hi ) {
+            my $mid = ( $lo + $hi ) >> 1;
+            my $pk  = $enc->[ 1 + $mid * 2 ] // -1;
+            return $enc->[ 2 + $mid * 2 ] // -1 if $pk == $symid;
+            if   ( $pk < $symid ) { $lo = $mid + 1 }
+            else                  { $hi = $mid - 1 }
+        }
+        return -1;
+    }
+
+    if ( CONDENSE_LIST == $kind ) {
+
+        # Read as an ordinary list is, so condensing never changes which value a path selects.
+        my $i = _listindex( $key, @$enc - 1 );
+        return 0 > $i ? -1 : $enc->[ 1 + $i ];
+    }
+
+    return -1;
+}
+
+# Walk a path from node $idx, returning the node index or -1.
+sub _condense_resolve {
+    my ( $cond, $idx, $path ) = @_;
+    my @parts;
+    if ( islist($path) ) {
+        @parts = @$path;
+    }
+    elsif ( !defined $path || is_none($path) || is_jnull($path) ) {
+        @parts = ();
+    }
+    elsif ( _condense_isstr($path) ) {
+        @parts = split /\./, $path, -1;
+    }
+    else {
+        @parts = ( _condense_str($path) );
+    }
+
+    my $at = $idx;
+    for my $part (@parts) {
+        return -1 if 0 > $at;
+        next if _condense_isstr($part) && '' eq $part;
+        $at = _condense_child( $cond, $at, $part );
+    }
+    return $at;
+}
+
+# Node $idx as a fresh, independent tree; NONE when there is no such node.
+sub _condense_materialise {
+    my ( $cond, $idx ) = @_;
+    return NONE() unless defined $idx && !ref $idx && looks_like_number($idx) && 0 <= $idx;
+    return _condense_rebuild( $cond, $cond->{ S_condsym() }, $idx );
+}
+
+sub _condense_rebuild {
+    my ( $cond, $sym, $i ) = @_;
+    my $enc = _condense_enc( $cond, $i );
+    return NONE() unless defined $enc;
+    my $kind = _condense_kind($enc);
+
+    if ( CONDENSE_MAP == $kind ) {
+        my $out = _mkmap();
+        for ( my $j = 1 ; $j + 1 < @$enc ; $j += 2 ) {
+            my $key   = _condense_sym( $sym, $enc->[$j] );
+            my $child = _condense_rebuild( $cond, $sym, $enc->[ $j + 1 ] );
+            $out->{ _condense_str($key) } = $child unless is_none($key) || is_none($child);
+        }
+        return $out;
+    }
+    if ( CONDENSE_LIST == $kind ) {
+        my @out;
+        for my $item ( @{$enc}[ 1 .. $#$enc ] ) {
+            my $child = _condense_rebuild( $cond, $sym, $item );
+            push @out, is_none($child) ? $JNULL : $child;
+        }
+        return \@out;
+    }
+    return _condense_sym( $sym, $enc->[1] ) if CONDENSE_STR == $kind;
+    return $enc->[1]                        if CONDENSE_NUM == $kind;
+    return $JTRUE                           if CONDENSE_TRUE == $kind;
+    return $JFALSE                          if CONDENSE_FALSE == $kind;
+    return $JNULL;
+}
+
+# The keys of node $idx, without materialising any of its values.
+sub _condense_keys {
+    my ( $cond, $idx ) = @_;
+    my $enc = _condense_enc( $cond, $idx );
+    return [] unless defined $enc;
+    my $kind = _condense_kind($enc);
+    if ( CONDENSE_MAP == $kind ) {
+        my $sym = $cond->{ S_condsym() };
+        my @out;
+        for ( my $j = 1 ; $j < @$enc ; $j += 2 ) {
+            my $key = _condense_sym( $sym, $enc->[$j] );
+            push @out, _condense_str($key) unless is_none($key);
+        }
+        return \@out;
+    }
+    return [ map { "$_" } 0 .. $#$enc - 1 ] if CONDENSE_LIST == $kind;
+    return [];
+}
+
+# Map pair count, list length, else 0.
+sub _condense_size {
+    my ( $cond, $idx ) = @_;
+    my $enc = _condense_enc( $cond, $idx );
+    return 0 unless defined $enc;
+    my $kind = _condense_kind($enc);
+    return int( ( @$enc - 1 ) / 2 ) if CONDENSE_MAP == $kind;
+    return scalar(@$enc) - 1 if CONDENSE_LIST == $kind;
+    return 0;
+}
+
+# ----------------------------------------------------------------------------
+# A view into a condensed structure. Reads resolve by node index and touch only
+# the nodes on the path; nothing is decoded until a value is asked for.
+# ----------------------------------------------------------------------------
+
+package Voxgig::Struct::CondenseView;
+
+sub _new {
+    my ( $class, $cond, $start, $memo ) = @_;
+    return bless { cond => $cond, start => $start, memo => $memo }, $class;
+}
+
+# The value at a path, materialised: a container comes back as a fresh copy.
+sub get {
+    my ( $self, $path ) = @_;
+    my $at = Voxgig::Struct::_condense_resolve( $self->{cond}, $self->{start}, $path );
+    return Voxgig::Struct::_condense_materialise( $self->{cond}, $at );
+}
+
+sub keys {
+    my ( $self, $path ) = @_;
+    my $at = Voxgig::Struct::_condense_resolve( $self->{cond}, $self->{start}, $path );
+    return 0 > $at ? [] : Voxgig::Struct::_condense_keys( $self->{cond}, $at );
+}
+
+sub has {
+    my ( $self, $path ) = @_;
+    my $at = Voxgig::Struct::_condense_resolve( $self->{cond}, $self->{start}, $path );
+    return 0 <= $at ? 1 : 0;
+}
+
+# A view at a path, sharing this view's memo.
+sub at {
+    my ( $self, $path ) = @_;
+    my $at = Voxgig::Struct::_condense_resolve( $self->{cond}, $self->{start}, $path );
+    return __PACKAGE__->_new( $self->{cond}, $at, $self->{memo} );
+}
+
+sub value {
+    my ($self) = @_;
+    return Voxgig::Struct::_condense_materialise( $self->{cond}, $self->{start} );
+}
+
+sub size {
+    my ($self) = @_;
+    return 0 > $self->{start} ? 0 : Voxgig::Struct::_condense_size( $self->{cond}, $self->{start} );
+}
+
+sub exists {
+    my ($self) = @_;
+    return 0 <= $self->{start} ? 1 : 0;
+}
+
+# A SHARED materialisation: the same node for the same index, in every view
+# sharing the memo. Mutating it changes what every one of them reads.
+sub ref {
+    my ($self) = @_;
+    my $memo  = $self->{memo};
+    my $k     = "$self->{start}";
+    my $found = $memo->{$k};
+    if ( !defined $found || Voxgig::Struct::is_none($found) ) {
+        $found = Voxgig::Struct::_condense_materialise( $self->{cond}, $self->{start} );
+        $memo->{$k} = $found;
+    }
+    return $found;
+}
+
+package Voxgig::Struct;
 
 1;

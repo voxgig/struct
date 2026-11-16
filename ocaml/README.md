@@ -64,12 +64,12 @@ the reference implementation. See [`DOCS.md`](./DOCS.md) and
 ## API
 
 The public surface matches the canonical export list (lower-smushed /
-snake_cased): `clone delprop escre escurl filter flatten getdef getelem
-getpath getprop haskey inject isempty isfunc iskey islist ismap isnode items
-join jsonify keysof merge pad pathify select setpath setprop size slice strkey
-stringify transform typify typename validate walk re_compile re_find
-re_find_all re_replace re_test re_escape jm jt check_placement injector_args
-inject_child`.
+snake_cased): `clone condense condenseview expand iscondensed delprop escre
+escurl filter flatten getdef getelem getpath getprop haskey inject isempty
+isfunc iskey islist ismap isnode items join jsonify keysof merge pad pathify
+select setpath setprop size slice strkey stringify transform typify typename
+validate walk re_compile re_find re_find_all re_replace re_test re_escape jm
+jt check_placement injector_args inject_child`.
 
 ## Develop
 

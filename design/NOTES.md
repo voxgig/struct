@@ -20,6 +20,28 @@
   feature. The Perl, Rust, and other ports replicate the behaviour
   faithfully; the gap is purely in the TS docstring.
 
+- **Edge cases no corpus entry reaches, where ports still differ.** List
+  keys, a numeric `getpath` part, a null written back into a list, a `2.0`
+  count and one `$CHILD` error per failure are pinned and agree in every
+  port. What is left:
+  - A decimal number key on a map: the canonical `setprop` and `getprop`
+    use `String(n)` (`1.5` is `"1.5"`), but `delprop` floors it through
+    `strkey` (`"1"`). The ports split between the two.
+  - Number spelling at the edges: a map key or path part built from an
+    exponent-form or non-finite number follows each host's float formatter
+    (`1.5e-07` against JavaScript's `1.5e-7`; OCaml prints `inf`).
+  - `$COPY` of a null in the single-null ports (Elixir and boru at least):
+    `transform([null,1], ['$COPY','$COPY'])` loses the null that TypeScript
+    keeps.
+  - Go's `select` drops a child that lacks a key checked with `$NIL` or
+    `$ANY`, and a checker injected into part of a string over a null gives
+    `x` where TypeScript gives `xnull`.
+  - Ruby's `getpath(store, ['x', ''])` without injection options returns the
+    store; Haskell's `jm('', v)` drops the empty key; Swift's `setpath`
+    returns nothing for a numeric path; Zig's `delprop` panics on a NaN map
+    key; PHP answers `[]` for some empty-map data where TypeScript answers
+    `{}`.
+
 
 ## Documented JS-fidelity gaps
 

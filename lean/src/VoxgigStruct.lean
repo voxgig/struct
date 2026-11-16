@@ -310,6 +310,25 @@ def DELETE : Value := .sentinel "delete"
 
 def MAXDEPTH : Int := 32
 
+def CONDENSE_VERSION : Float := 1.0
+
+/-- Node encoding kinds: the first element of every entry in a node table. -/
+def CONDENSE_MAP : Float := 0.0
+def CONDENSE_LIST : Float := 1.0
+def CONDENSE_STR : Float := 2.0
+def CONDENSE_NUM : Float := 3.0
+def CONDENSE_TRUE : Float := 4.0
+def CONDENSE_FALSE : Float := 5.0
+def CONDENSE_NULL : Float := 6.0
+
+def S_CONDENSE : String := "$condense"
+def S_CONDSYM : String := "sym"
+def S_CONDNODE : String := "node"
+def S_CONDROOT : String := "root"
+
+def S_CONDIMMUTABLE : String :=
+  "struct: condensed structures are immutable - expand() first, then modify the copy"
+
 -- ---------------------------------------------------------------------------
 -- Small helpers
 -- ---------------------------------------------------------------------------
@@ -386,9 +405,30 @@ def strToInt? (s : String) : Option Int := Id.run do
       return none
   return some (if neg then -(n : Int) else (n : Int))
 
-/-- OCaml `is_int_key`: nonempty and every char is a digit or `-`. -/
-def isIntKey (s : String) : Bool :=
-  s.length > 0 && s.toList.all (fun c => (c >= '0' && c <= '9') || c == '-')
+/-- A canonical integer key, as `String(n)` prints one: `0`, or digits with no
+    leading zero after an optional minus. -/
+def isCanonIndex (s : String) : Bool :=
+  let digits (c : Char) (rest : List Char) : Bool :=
+    c >= '1' && c <= '9' && rest.all (fun d => d >= '0' && d <= '9')
+  match s.toList with
+  | ['0'] => true
+  | '-' :: c :: rest => digits c rest
+  | c :: rest => digits c rest
+  | [] => false
+
+/-- The canonical `_listkey`: a whole number, or a string `isCanonIndex`
+    accepts; none for any other key. -/
+def listKey (key : Value) : Option Int :=
+  match key with
+  | .num n => if isIntegerF n then some (fToInt n) else none
+  | .str s => if isCanonIndex s then strToInt? s else none
+  | _ => none
+
+/-- True for a string or number key; a key of any other type misses a map. -/
+def isPropKey (key : Value) : Bool :=
+  match key with
+  | .str _ | .num _ => true
+  | _ => false
 
 -- ----- JS number formatting (shortest round-trip, ECMA Number::toString) -----
 
@@ -638,37 +678,37 @@ partial def jsString (v : Value) : SIO String := do
   | .func _ => pure "function"
   | .sentinel s => pure s
 
-/-- internal: list element by numeric key, no negative wrap, noval if oob. -/
+/-- internal: a list read as JS reads an array: a `listKey` from 0, so 01, +1,
+    -0 and -1 miss. noval if oob. -/
 def listIndex (id : Nat) (key : Value) : SIO Value := do
-  let ks := match key with
-    | .str s => s
-    | .num n => numToString n
-    | _ => ""
-  match strToInt? ks with
+  let xs ← listItems id
+  match listKey key with
   | some i =>
-    if i >= 0 then
-      let xs ← listItems id
-      if i < (xs.size : Int) then return xs[i.toNat]! else return .noval
-    else return .noval
+    if i >= 0 && i < (xs.size : Int) then return xs[i.toNat]! else return .noval
   | none => return .noval
+
+/-- internal: the stored value at a key, as the canonical `_readprop`: a list
+    reads `listIndex`, a map only a key `isPropKey` accepts. -/
+def readProp (v key : Value) : SIO Value := do
+  match v with
+  | .map id =>
+    if isPropKey key then
+      let es ← mapEntries id
+      let k ← jsString key
+      pure ((omapGet es k).getD .noval)
+    else pure .noval
+  | .list id => listIndex id key
+  | _ => pure .noval
 
 partial def getprop (v key : Value) (alt : Value := .noval) : SIO Value := do
   if isNoval v || isNoval key then return alt
-  let out ←
-    match v with
-    | .map id => do
-      pure ((omapGet (← mapEntries id) (← jsString key)).getD .noval)
-    | .list id => listIndex id key
-    | _ => pure .noval
+  let out ← readProp v key
   if isNullish out then return alt else return out
 
 /-- Raw lookup preserving stored `null` (canonical TS bracket access). -/
 partial def lookupRaw (v key : Value) : SIO Value := do
   if isNoval v || isNoval key then return .noval
-  match v with
-  | .map id => pure ((omapGet (← mapEntries id) (← jsString key)).getD .noval)
-  | .list id => listIndex id key
-  | _ => pure .noval
+  readProp v key
 
 def haskey (v key : Value) : SIO Bool := do
   return !(isNullish (← getprop v key))
@@ -678,19 +718,15 @@ partial def getelem (v key : Value) (alt : Value := .noval) : SIO Value := do
   let out ←
     match v with
     | .list id => do
-      let ks := match key with
-        | .str s => s
-        | .num n => numToString n
-        | _ => ""
-      if isIntKey ks then
-        match strToInt? ks with
-        | some nk0 => do
+      -- A negative key counts from the end; any other reads as getprop does.
+      match listKey key with
+      | some nk => do
+        if nk < 0 then
           let xs ← listItems id
           let len : Int := xs.size
-          let nk := if nk0 < 0 then len + nk0 else nk0
-          if nk >= 0 && nk < len then pure xs[nk.toNat]! else pure .noval
-        | none => pure .noval
-      else pure .noval
+          listIndex id (vInt (len + nk))
+        else listIndex id key
+      | none => pure .noval
     | _ => pure .noval
   if isNullish out then
     match alt with
@@ -754,19 +790,343 @@ def filter (v : Value) (check : (String × Value) → Bool) : SIO Value := do
     if check (k, x) then out := out.push x
   newList out
 
+-- ---------------------------------------------------------------------------
+-- condense: ahead of the setprop, delprop, setpath and getpath hooks that
+-- refuse or read a condensed structure
+-- ---------------------------------------------------------------------------
+
+def condenseField (cond : Value) (name : String) : SIO Value := do
+  match cond with
+  | .map id => pure ((omapGet (← mapEntries id) name).getD .noval)
+  | _ => pure .noval
+
+/-- True for a condensed structure of this format version. The version must
+    match, not merely be numeric: a future profile would otherwise be decoded
+    under this one's schema. -/
+def iscondensed (v : Value) : SIO Bool := do
+  match v with
+  | .map id =>
+    let es ← mapEntries id
+    match omapGet es S_CONDENSE, omapGet es S_CONDSYM, omapGet es S_CONDNODE,
+        omapGet es S_CONDROOT with
+    | some (.num n), some (.list _), some (.list _), some (.num _) =>
+      pure (n == CONDENSE_VERSION)
+    | _, _, _, _ => pure false
+  | _ => pure false
+
+/-- Raise when `v` is a condensed structure, which is immutable. -/
+def condenseGuard (v : Value) : SIO Unit := do
+  if (← iscondensed v) then throw (IO.userError S_CONDIMMUTABLE)
+
+/-- A node or symbol index read out of a condensed structure; -1 when it is
+    not one. -/
+def condenseIndex (v : Value) : Int :=
+  match v with
+  | .num n => if isIntegerF n && decide (n >= 0.0) && decide (n < 1e15) then fToInt n else -1
+  | _ => -1
+
+def condenseRoot (cond : Value) : SIO Int := do
+  return condenseIndex (← condenseField cond S_CONDROOT)
+
+def condenseItems (cond : Value) (name : String) : SIO (Array Value) := do
+  listItemsOf (← condenseField cond name)
+
+/-- Element `i` of an array, or noval out of range. -/
+def condenseAt (xs : Array Value) (i : Int) : Value :=
+  if i >= 0 && i < (xs.size : Int) then xs[i.toNat]! else .noval
+
+/-- The kind of a node encoding: its first element. -/
+def condenseKind (enc : Array Value) : Option Float :=
+  match enc[(0 : Nat)]? with
+  | some (.num k) => some k
+  | _ => none
+
+/-- The encoding of node `idx` (empty when there is none). -/
+def condenseNode (cond : Value) (idx : Int) : SIO (Array Value) := do
+  listItemsOf (condenseAt (← condenseItems cond S_CONDNODE) idx)
+
+/-- Bisect a sorted symbol table: the string's id, or -1 when it occurs nowhere
+    in the structure, which is itself a fast miss. -/
+def condenseBisect (sym : Array Value) (key : String) : Int := Id.run do
+  let mut lo : Int := 0
+  let mut hi : Int := (sym.size : Int) - 1
+  while lo <= hi do
+    let mid := (lo + hi) / 2
+    match condenseAt sym mid with
+    | .str s =>
+      if s == key then return mid
+      if strLtB s key then lo := mid + 1 else hi := mid - 1
+    | _ => hi := mid - 1
+  return (-1)
+
+/-- Bisect the pairs of a map encoding, which hold ascending symbol ids: the
+    node index paired with `symid`, or -1. -/
+def condensePair (enc : Array Value) (symid : Int) : Int := Id.run do
+  let target := intToFloat symid
+  let mut lo : Int := 0
+  let mut hi : Int := ((enc.size : Int) - 1) / 2 - 1
+  while lo <= hi do
+    let mid := (lo + hi) / 2
+    match condenseAt enc (1 + mid * 2) with
+    | .num k =>
+      if k == target then return condenseIndex (condenseAt enc (2 + mid * 2))
+      if k < target then lo := mid + 1 else hi := mid - 1
+    | _ => hi := mid - 1
+  return (-1)
+
+/-- The node index of `key` inside node `idx`, or -1. Touches only this node. -/
+def condenseChild (cond : Value) (idx : Int) (key : Value) : SIO Int := do
+  if !(isPropKey key) then return (-1)
+  let enc ← condenseNode cond idx
+  let k ← jsString key
+  let kind := condenseKind enc
+  if kind == some CONDENSE_MAP then
+    let symid := condenseBisect (← condenseItems cond S_CONDSYM) k
+    return (if symid < 0 then -1 else condensePair enc symid)
+  -- A listKey from 0 only, as a JS list lookup: 01, 1e0, " 1", +1 and -1
+  -- miss, so condensing never changes which value a path selects.
+  if kind == some CONDENSE_LIST then
+    match listKey key with
+    | some i =>
+      return (if i >= 0 && i < (enc.size : Int) - 1 then condenseIndex (condenseAt enc (1 + i)) else -1)
+    | none => return (-1)
+  return (-1)
+
+/-- Walk a path from a starting node, returning the node index or -1. A list
+    path is its parts, a string splits on dots, and no path is no parts. -/
+def condenseResolve (cond : Value) (idx : Int) (path : Value) : SIO Int := do
+  let parts : Array Value ← match path with
+    | .list id => listItems id
+    | .str s => pure (if s == "" then #[] else ((s.splitOn ".").map (fun x => Value.str x)).toArray)
+    | .noval | .null => pure #[]
+    | _ => do pure #[Value.str (← jsString path)]
+  let mut cur := idx
+  for part in parts do
+    if cur < 0 then return (-1)
+    if part == .str S_MT then continue
+    cur := (← condenseChild cond cur part)
+  return cur
+
+/-- Node `i` of a node table as a fresh, independent tree; noval when the node
+    does not exist. Two rebuilds never share a container, even where the
+    condensed form shares a node. -/
+partial def condenseRebuild (sym node : Array Value) (i : Int) : SIO Value := do
+  let enc := condenseAt node i
+  if isNullish enc then return .noval
+  let e ← listItemsOf enc
+  let kind := condenseKind e
+  if kind == some CONDENSE_MAP then
+    let mut out : Array (String × Value) := #[]
+    let mut j : Int := 1
+    while j < (e.size : Int) do
+      let k ← jsString (condenseAt sym (condenseIndex (condenseAt e j)))
+      out := omapSet out k (← condenseRebuild sym node (condenseIndex (condenseAt e (j + 1))))
+      j := j + 2
+    return (← newMap out)
+  if kind == some CONDENSE_LIST then
+    let mut out : Array Value := #[]
+    for j in [1:e.size] do
+      out := out.push (← condenseRebuild sym node (condenseIndex (condenseAt e (j : Int))))
+    return (← newList out)
+  if kind == some CONDENSE_STR then return condenseAt sym (condenseIndex (condenseAt e 1))
+  if kind == some CONDENSE_NUM then return condenseAt e 1
+  if kind == some CONDENSE_TRUE then return .bool true
+  if kind == some CONDENSE_FALSE then return .bool false
+  return .null
+
+/-- Node `idx` of a condensed structure, materialised; noval when it does not
+    exist. -/
+def condenseMaterialise (cond : Value) (idx : Int) : SIO Value := do
+  if idx < 0 then return .noval
+  condenseRebuild (← condenseItems cond S_CONDSYM) (← condenseItems cond S_CONDNODE) idx
+
+/-- The root of a condensed structure, fully materialised; any other value
+    comes back unchanged. It gives up every benefit of condensing, so prefer a
+    view or a path read. -/
+def expand (cond : Value) : SIO Value := do
+  if !(← iscondensed cond) then return cond
+  condenseMaterialise cond (← condenseRoot cond)
+
+/-- The key names of node `idx`, decoding none of its values. -/
+def condenseKeys (cond : Value) (idx : Int) : SIO (Array String) := do
+  let enc ← condenseNode cond idx
+  let kind := condenseKind enc
+  if kind == some CONDENSE_MAP then
+    let sym ← condenseItems cond S_CONDSYM
+    let mut out : Array String := #[]
+    let mut j : Int := 1
+    while j < (enc.size : Int) do
+      out := out.push (← jsString (condenseAt sym (condenseIndex (condenseAt enc j))))
+      j := j + 2
+    return out
+  if kind == some CONDENSE_LIST then
+    return (Array.range (enc.size - 1)).map (fun i => toString i)
+  return #[]
+
+/-- The pair count of map node `idx` or the length of list node `idx`; 0 for
+    anything else. -/
+def condenseSize (cond : Value) (idx : Int) : SIO Int := do
+  let enc ← condenseNode cond idx
+  let kind := condenseKind enc
+  if kind == some CONDENSE_MAP then return ((enc.size : Int) - 1) / 2
+  if kind == some CONDENSE_LIST then return (enc.size : Int) - 1
+  return 0
+
+/-- Every map key and string value in `n`, appended to `acc`. -/
+partial def condenseCollect (n : Value) (acc : Array String) : SIO (Array String) := do
+  match n with
+  | .map id =>
+    let mut out := acc
+    for (k, x) in (← mapEntries id) do
+      out := (← condenseCollect x (out.push k))
+    return out
+  | .list id =>
+    let mut out := acc
+    for x in (← listItems id) do
+      out := (← condenseCollect x out)
+    return out
+  | .str s => return acc.push s
+  | _ => return acc
+
+/-- The interning key of an encoding element: -0 keys as 0, one JS number. -/
+def condenseKey (v : Value) : String :=
+  match v with
+  | .num n => numToString n
+  | _ => ""
+
+/-- The index of an encoding in the node table, appending it when no identical
+    one exists yet. The kind leads every encoding, so kinds never collide on
+    one key. -/
+def condenseIntern (st : IO.Ref (Array Value × Array (String × Nat))) (enc : Array Value) :
+    SIO Nat := do
+  let key := String.intercalate "," (enc.toList.map condenseKey)
+  let (node, seen) ← st.get
+  match seen.find? (fun p => p.1 == key) with
+  | some p => return p.2
+  | none =>
+    st.set (node.push (← newList enc), seen.push (key, node.size))
+    return node.size
+
+/-- Built post-order, so identical subtrees are already one node by the time a
+    parent references them. -/
+partial def condenseBuild (sym : Array Value) (st : IO.Ref (Array Value × Array (String × Nat)))
+    (n : Value) : SIO Nat := do
+  match n with
+  | .map _ =>
+    let mut enc : Array Value := #[.num CONDENSE_MAP]
+    for (k, x) in (← itemsPairs n) do
+      let child ← condenseBuild sym st x
+      enc := (enc.push (vInt (condenseBisect sym k))).push (vInt (child : Int))
+    condenseIntern st enc
+  | .list id =>
+    let mut enc : Array Value := #[.num CONDENSE_LIST]
+    for x in (← listItems id) do
+      let child ← condenseBuild sym st x
+      enc := enc.push (vInt (child : Int))
+    condenseIntern st enc
+  | .str s => condenseIntern st #[.num CONDENSE_STR, vInt (condenseBisect sym s)]
+  | .num x => condenseIntern st #[.num CONDENSE_NUM, .num x]
+  | .bool true => condenseIntern st #[.num CONDENSE_TRUE]
+  | .bool false => condenseIntern st #[.num CONDENSE_FALSE]
+  | _ => condenseIntern st #[.num CONDENSE_NULL]
+
+/-- Condense a JSON-shaped value into a sorted symbol table and a node table.
+    Pure: the same input gives byte-identical output, on every port. -/
+def condense (v : Value) : SIO Value := do
+  let found := (← condenseCollect v #[]).qsort strLtB
+  let mut sym : Array Value := #[]
+  let mut prev : Option String := none
+  for s in found do
+    if prev != some s then
+      sym := sym.push (.str s)
+      prev := some s
+  let st ← IO.mkRef ((#[] : Array Value), (#[] : Array (String × Nat)))
+  let root ← condenseBuild sym st v
+  let (node, _) ← st.get
+  newMap #[(S_CONDENSE, .num CONDENSE_VERSION), (S_CONDSYM, ← newList sym),
+    (S_CONDNODE, ← newList node), (S_CONDROOT, vInt (root : Int))]
+
+/-- A cursor into a condensed structure: reads resolve by node index and touch
+    only the nodes on the path. `at` and `exists` are Lean keywords, so those
+    two operations carry escaped names. -/
+structure CondenseView where
+  cond : Value
+  start : Int
+  memo : IO.Ref (Array (Int × Value))
+
+/-- A cursor at node `idx`, or at the root when `cond` is condensed and no index
+    is given; `memo` holds the materialisations `ref` shares. -/
+def condenseview (cond : Value) (idx : Option Int := none)
+    (memo : Option (IO.Ref (Array (Int × Value))) := none) : SIO CondenseView := do
+  let start ← match idx with
+    | some i => pure i
+    | none => do
+      if (← iscondensed cond) then condenseRoot cond else pure (-1)
+  let refmemo ← match memo with
+    | some m => pure m
+    | none => do
+      let r ← IO.mkRef (#[] : Array (Int × Value))
+      pure r
+  return { cond := cond, start := start, memo := refmemo }
+
+namespace CondenseView
+
+/-- The value at `path`, materialised; noval when the path misses. -/
+def get (v : CondenseView) (path : Value := .noval) : SIO Value := do
+  condenseMaterialise v.cond (← condenseResolve v.cond v.start path)
+
+/-- The key names at `path`, decoding no values. -/
+def keys (v : CondenseView) (path : Value := .noval) : SIO (Array String) := do
+  let pos ← condenseResolve v.cond v.start path
+  if pos < 0 then return #[]
+  condenseKeys v.cond pos
+
+/-- Whether `path` resolves. -/
+def has (v : CondenseView) (path : Value := .noval) : SIO Bool := do
+  return decide ((← condenseResolve v.cond v.start path) >= 0)
+
+/-- A cursor at `path`, sharing this one's `ref` memo. Nothing is decoded. -/
+def «at» (v : CondenseView) (path : Value := .noval) : SIO CondenseView := do
+  condenseview v.cond (some (← condenseResolve v.cond v.start path)) (some v.memo)
+
+/-- The start node, materialised afresh on every call. -/
+def value (v : CondenseView) : SIO Value :=
+  condenseMaterialise v.cond v.start
+
+/-- The pair count of a map start node or the length of a list one; 0 for
+    anything else. -/
+def size (v : CondenseView) : SIO Int :=
+  condenseSize v.cond v.start
+
+/-- Whether the start node index is non-negative. -/
+def «exists» (v : CondenseView) : Bool :=
+  decide (v.start >= 0)
+
+/-- One materialisation per node, shared by every `ref` through the memo:
+    mutating it is seen by every other holder of the node, even one that
+    reached it by another path. -/
+def ref (v : CondenseView) : SIO Value := do
+  match (← v.memo.get).find? (fun p => p.1 == v.start) with
+  | some p => return p.2
+  | none =>
+    let x ← condenseMaterialise v.cond v.start
+    v.memo.modify (fun a => a.push (v.start, x))
+    return x
+
+end CondenseView
+
 partial def setprop (parent key v : Value) : SIO Value := do
   if !(iskey key) then return parent
+  condenseGuard parent
   match parent with
   | .map id => mapSetKV id (← jsString key) v
   | .list id => do
-    let keyF : Float := jsNumber key
-    if keyF.isNaN then pure ()
-    else do
-      let ki0 : Int := fToInt keyF.floor
+    match listKey key with
+    | none => pure ()
+    | some ki => do
       let xs ← listItems id
       let len : Int := xs.size
-      if ki0 >= 0 then
-        let ki := if ki0 > len then len else ki0
+      if ki >= 0 then
         if ki >= len then setListItems id (xs.push v)
         else setListItems id (xs.set! ki.toNat v)
       else
@@ -776,17 +1136,17 @@ partial def setprop (parent key v : Value) : SIO Value := do
 
 partial def delprop (parent key : Value) : SIO Value := do
   if !(iskey key) then return parent
+  condenseGuard parent
   match parent with
   | .map id => mapDelK id (← jsString key)
   | .list id => do
-    let keyF : Float := jsNumber key
-    if keyF.isNaN then pure ()
-    else do
-      let ki : Int := fToInt keyF.floor
+    match listKey key with
+    | some ki => do
       if ki >= 0 then do
         let xs ← listItems id
         if ki < (xs.size : Int) then
           setListItems id ((xs.toList.eraseIdx ki.toNat).toArray)
+    | none => pure ()
   | _ => pure ()
   return parent
 
@@ -1489,16 +1849,36 @@ def iaHandler (a : InjArg) : SIO (Option Nat) := do
   | .idef d => pure d.dHandler
   | .inone => pure none
 
+/-- A list path's part as `getpath` reads it: a number as `String(n)`, a string
+    as itself; none for any other part, which misses the path. -/
+def pathPart (p : Value) : Option Value :=
+  match p with
+  | .num n => some (Value.str (numToString n))
+  | .str _ => some p
+  | _ => none
+
 partial def getpath (store path : Value) (inj : InjArg := .inone) : SIO Value := do
   let pa0 : Option (Array Value) ←
     match path with
-    | .list _ => pure (some (← listItemsOf path))
+    | .list _ => do
+      let ps ← listItemsOf path
+      let parts := ps.filterMap pathPart
+      pure (if parts.size == ps.size then some parts else none)
     | .str s => pure (some ((s.splitOn ".").map (fun x => Value.str x)).toArray)
-    | .num n => pure (some #[.str (strkey (.num n))])
+    | .num n => pure (some #[.str (numToString n)])
     | _ => pure none
   match pa0 with
   | none => return .noval
   | some pa0 => do
+    -- A condensed store answers as the node it was built from, touching only
+    -- the nodes on the path. base would change what the walk resolves
+    -- against, so with one the store is expanded instead.
+    if (← iscondensed store) && isNullish (← iaBase inj) then
+      let found ← condenseResolve store (← condenseRoot store) (← newList pa0)
+      let v ← if found < 0 then pure Value.noval else condenseMaterialise store found
+      -- Group A: an ordinary getpath reads a stored null as absent.
+      return (if isNullish v then .noval else v)
+    let store ← expand store
     let paRef ← IO.mkRef pa0
     let base ← iaBase inj
     let dparent ← iaDparent inj
@@ -1599,6 +1979,7 @@ partial def getpath (store path : Value) (inj : InjArg := .inone) : SIO Value :=
     vRef.get
 
 partial def setpath (store path v : Value) (inj : InjArg := .inone) : SIO Value := do
+  condenseGuard store
   let ptype := typify path
   let parts ←
     if (T_LIST &&& ptype) > 0 then do
@@ -2413,9 +2794,7 @@ partial def validateChild : InjectorFn := fun inj _v _ref _store => do
       let _ ← delprop parent key
       pure .noval
     else if !(ismap tval) then do
-      let psize ← size path
-      let ppath ← slice path (start := .num 0.0) (stop := vInt (psize - 1))
-      pushErr inj (← invalidTypeMsg ppath S_OBJECT ((typify tval : Nat) : Int) tval)
+      -- validation reports the mismatch, once.
       pure .noval
     else do
       for ckey in (← keysof tval) do
@@ -2435,9 +2814,6 @@ partial def validateChild : InjectorFn := fun inj _v _ref _store => do
        | _ => pure ())
       pure .noval
     else if !(islist d.dparent) then do
-      let psize ← size path
-      let ppath ← slice path (start := .num 0.0) (stop := vInt (psize - 1))
-      pushErr inj (← invalidTypeMsg ppath S_LIST ((typify d.dparent : Nat) : Int) d.dparent)
       let np ← size parent
       modInj inj (fun dd => { dd with keyi := np })
       pure d.dparent
@@ -2466,35 +2842,128 @@ partial def validateChild : InjectorFn := fun inj _v _ref _store => do
       pure SKIP
   else pure .noval
 
-/-- Deep structural equality (validate $EXACT). -/
-partial def veq (a b : Value) : SIO Bool := do
+/-- JSON equality: numbers by value, lists in order, maps by key in any order.
+    A node or a function equals itself whatever it holds. -/
+partial def deepEqual (a b : Value) : SIO Bool := do
   match a, b with
   | .noval, .noval => pure true
   | .null, .null => pure true
   | .bool x, .bool y => pure (x == y)
   | .num x, .num y => pure (x == y)
   | .str x, .str y => pure (x == y)
+  | .func x, .func y => pure (x == y)
   | .sentinel x, .sentinel y => pure (x == y)
   | .list x, .list y => do
+    if x == y then return true
     let xs ← listItems x
     let ys ← listItems y
-    if xs.size != ys.size then pure false
-    else do
-      for i in [0:xs.size] do
-        if !(← veq xs[i]! ys[i]!) then return false
-      pure true
+    if xs.size != ys.size then return false
+    for i in [0:xs.size] do
+      if !(← deepEqual xs[i]! ys[i]!) then return false
+    pure true
   | .map x, .map y => do
-    let xes ← mapEntries x
-    let yes ← mapEntries y
-    if xes.size != yes.size then pure false
-    else do
-      for (k, v) in xes do
-        match omapGet yes k with
-        | some w =>
-          if !(← veq v w) then return false
-        | none => return false
-      pure true
+    if x == y then return true
+    let ks ← keysof a
+    if ks != (← keysof b) then return false
+    for k in ks do
+      if !(← deepEqual (← lookupRaw a (.str k)) (← lookupRaw b (.str k))) then return false
+    pure true
   | _, _ => pure false
+
+/-- Every member `val` has is in `out`, unchanged. A member only `out` has is a
+    default the spec supplied, and is ignored. -/
+partial def keeps (val out : Value) : SIO Bool := do
+  if isNoval val then return true
+  if ((T_LIST ||| T_MAP) &&& typify val) == 0 || islist val != islist out || !(isnode out) then
+    return (← deepEqual val out)
+  for k in (← keysof val) do
+    if !(← keeps (← lookupRaw val (.str k)) (← lookupRaw out (.str k))) then return false
+  pure true
+
+/-- The data value at a list directive's slot. The directive's own dparent was
+    read with `getprop`, which reports a stored null as absent. -/
+def slotVal (inj : InjId) : SIO Value := do
+  let d ← getInj inj
+  match d.prior with
+  | none => pure d.dparent
+  | some p => do
+    let pd ← getInj p
+    lookupRaw pd.dparent pd.key
+
+/-- The bounds of a `$NOF` count, and the words for it, which are absent when
+    the count is invalid. Without a max, the bound is the number of specs. -/
+def nofCount (count : Value) (numtvals : Float) : SIO (Float × Float × Option String) := do
+  let isnat (n : Value) : Bool :=
+    (T_INTEGER &&& typify n) > 0 && (match n with | .num x => decide (0.0 <= x) | _ => false)
+  let numOf (n : Value) : Float := match n with | .num x => x | _ => 0.0
+  if isnat count then
+    let c := numOf count
+    return (c, c, some (if c == 0.0 then "none" else "exactly " ++ numToString c))
+  let mn ← lookupRaw count (.str "min")
+  let mx ← lookupRaw count (.str "max")
+  let csz ← size count
+  let valid := ismap count && csz > 0
+    && csz == (if isNoval mn then 0 else 1) + (if isNoval mx then 0 else 1)
+    && (isNoval mn || isnat mn)
+    && (isNoval mx || isnat mx)
+    && (isNoval mn || isNoval mx || decide (numOf mn <= numOf mx))
+  if !valid then return (0.0, 0.0, none)
+  let lo := if isNoval mn then 0.0 else numOf mn
+  let hi := if isNoval mx then numtvals else numOf mx
+  let desc :=
+    if isNoval mx then "at least " ++ numToString lo
+    else if hi == 0.0 then "none"
+    else if isNoval mn then "at most " ++ numToString hi
+    else if lo == hi then "exactly " ++ numToString lo
+    else numToString lo ++ " to " ++ numToString hi
+  return (lo, hi, some desc)
+
+/-- Names a validate spec may use besides its checkers: those of transform that
+    it keeps, and `$OPEN`. -/
+def validateNames : List String :=
+  ["$TOP", "$SPEC", "$BT", "$DS", "$WHEN", "$ANNO", "$REF", "$FORMAT", "$APPLY", "$OPEN"]
+
+/-- R_CHECKER_NAME: a dollar sign then capitals, nothing else. -/
+def isCheckerName (s : String) : Bool :=
+  match s.toList with
+  | '$' :: rest => !rest.isEmpty && rest.all (fun c => c >= 'A' && c <= 'Z')
+  | _ => false
+
+/-- The name a whole-string reference gives, when it is a checker name in any case. -/
+def refName (v : Value) : Option String :=
+  match v with
+  | .str s =>
+    match injectionFull s with
+    | some name => if isCheckerName name.toUpper then some name else none
+    | none => none
+  | _ => none
+
+/-- Unknown: undefined and upper case, or a defined name in another case. A
+    null in the store disables a name. -/
+def unknownName (name : String) (store : Value) : SIO Bool := do
+  let known (n : String) : SIO Bool := do
+    if validateNames.contains n then return true
+    return !(isNullish (← lookupRaw store (.str n)))
+  let upper := name.toUpper
+  if (← known name) then return false
+  if upper == name then return true
+  known upper
+
+/-- Report each checker the spec names that validate lacks. The arguments of
+    `$EXACT` are literals. -/
+partial def checkNames (spec store : Value) (path : Array Value) (errs : Value) : SIO Unit := do
+  match refName spec with
+  | some name =>
+    if (← unknownName name store) then
+      let n ← size errs
+      let p ← pathify (← newList path)
+      let _ ← setprop errs (vInt n) (.str ("Unknown validator " ++ name ++ " at field " ++ p ++ "."))
+  | none =>
+    let first ← lookupRaw spec (.num 0.0)
+    if !(islist spec && refName first == some "$EXACT") then
+      for k in (← keysof spec) do
+        if ismap spec then checkNames (.str k) store path errs
+        checkNames (← lookupRaw spec (.str k)) store (path.push (.str k)) errs
 
 partial def validateExact : InjectorFn := fun inj _v _ref _store => do
   let d ← getInj inj
@@ -2506,24 +2975,25 @@ partial def validateExact : InjectorFn := fun inj _v _ref _store => do
         ++ " must be the first element of an array.")
       pure .noval
     else do
+      let cval ← slotVal inj
       let nk ← size d.keys
       modInj inj (fun dd => { dd with keyi := nk })
-      injSetval inj d.dparent (ancestor := 2)
+      -- Replace [$EXACT, ...] with the data value; SKIP keeps inject off the detached list.
+      injSetval inj cval (ancestor := 2)
       let psize ← size d.path
       let npath ← slice d.path (start := .num 0.0) (stop := vInt (psize - 1))
-      let nkey ← getelem npath (.num (-1.0))
-      modInj inj (fun dd => { dd with path := npath, key := nkey })
+      modInj inj (fun dd => { dd with path := npath })
       let tvals ← slice parent (start := .num 1.0)
       if (← size tvals) == 0 then do
         let d2 ← getInj inj
         pushErr inj ("The $EXACT validator at field "
           ++ (← pathify d2.path (startin := .num 1.0) (endin := .num 1.0))
           ++ " must have at least one argument.")
-        pure .noval
+        pure SKIP
       else do
         let mut matched := false
         for tval in (← listItemsOf tvals) do
-          if !matched && (← veq tval d.dparent) then matched := true
+          if !matched && (← deepEqual tval cval) then matched := true
         if !matched then do
           let d2 ← getInj inj
           let mut descs : List String := []
@@ -2534,8 +3004,8 @@ partial def validateExact : InjectorFn := fun inj _v _ref _store => do
           pushErr inj (← invalidTypeMsg d2.path
             ((if (← size d2.path) > 1 then "" else "value ")
               ++ "exactly equal to " ++ (if ntv == 1 then "" else "one of ") ++ valdesc)
-            ((typify d.dparent : Nat) : Int) d.dparent)
-        pure .noval
+            ((typify cval : Nat) : Int) cval)
+        pure SKIP
   else do
     let _ ← delprop d.parent d.key
     pure .noval
@@ -2579,7 +3049,7 @@ partial def validation : ModifyFn := fun pval key parent inj => do
           if !(islist pval) then
             pushErr inj (← invalidTypeMsg d.path (typename (ptype : Int)) (ctype : Int) cval)
         else if exactB then do
-          if !(← veq cval pval) then do
+          if !(← deepEqual cval pval) then do
             let pathmsg ← if (← size d.path) > 1 then do
                 pure ("at field " ++ (← pathify d.path (startin := .num 1.0)) ++ ": ")
               else pure ""
@@ -2601,53 +3071,76 @@ partial def validateHandler : InjectorFn := fun inj v refstr store => do
 
 mutual
 
-partial def validateOne : InjectorFn := fun inj _v _ref store => do
+/-- Count the specs that admit the value: `` [`$NOF`, count, spec, ...] ``,
+    where count is an integer, or a map holding min, max or both. -/
+partial def validateNof : InjectorFn := fun inj _v _ref store =>
+  validateCount inj store "$NOF" true
+
+/-- Every spec admits the value: `` [`$ALL`, spec, ...] ``. -/
+partial def validateAll : InjectorFn := fun inj _v _ref store =>
+  validateCount inj store "$ALL" false
+
+/-- The counting list directives. Without a count, every spec has to admit. -/
+partial def validateCount (inj : InjId) (store : Value) (name : String) (counted : Bool) :
+    SIO Value := do
   let d ← getInj inj
-  if d.mode == M_VAL then do
-    let parent := d.parent
-    if !(islist parent) || d.keyi != 0 then do
-      pushErr inj ("The $ONE validator at field "
-        ++ (← pathify d.path (startin := .num 1.0) (endin := .num 1.0))
-        ++ " must be the first element of an array.")
-      pure .noval
-    else do
-      let nk ← size d.keys
-      modInj inj (fun dd => { dd with keyi := nk })
-      injSetval inj d.dparent (ancestor := 2)
-      let psize ← size d.path
-      let npath ← slice d.path (start := .num 0.0) (stop := vInt (psize - 1))
-      modInj inj (fun dd => { dd with path := npath })
-      let tvals ← slice parent (start := .num 1.0)
-      if (← size tvals) == 0 then do
-        let d2 ← getInj inj
-        pushErr inj ("The $ONE validator at field "
-          ++ (← pathify d2.path (startin := .num 1.0) (endin := .num 1.0))
-          ++ " must have at least one argument.")
-        pure .noval
-      else do
-        let mut matched := false
-        for tval in (← listItemsOf tvals) do
-          if !matched then do
-            let terrs ← emptyList
-            let em ← emptyMap
-            let vstore ← merge (← newList #[em, store]) (maxdepth := .num 1.0)
-            let _ ← setprop vstore (.str S_DTOP) d.dparent
-            let idef : InjDef := { dExtra := vstore, dErrs := terrs, dMeta := d.imeta }
-            let vcurrent ← validate d.dparent tval (.idef idef)
-            injSetval inj vcurrent (ancestor := -2)
-            if (← size terrs) == 0 then matched := true
-        if !matched then do
-          let d2 ← getInj inj
-          let mut descs : List String := []
-          for (_, x) in (← itemsPairs tvals) do
-            descs := (← stringify x) :: descs
-          let valdesc := replaceTransformNames (String.intercalate ", " descs.reverse)
-          let ntv ← size tvals
-          pushErr inj (← invalidTypeMsg d2.path
-            ((if ntv > 1 then "one of " else "") ++ valdesc)
-            ((typify d.dparent : Nat) : Int) d.dparent)
-        pure .noval
-  else pure .noval
+  if d.mode != M_VAL then return .noval
+  let parent := d.parent
+  if !(islist parent) || d.keyi != 0 then
+    pushErr inj ("The " ++ name ++ " validator at field "
+      ++ (← pathify d.path (startin := .num 1.0) (endin := .num 1.0))
+      ++ " must be the first element of an array.")
+    return .noval
+  let cval ← slotVal inj
+  let nk ← size d.keys
+  modInj inj (fun dd => { dd with keyi := nk })
+  -- Replace the directive's list with the data value. Each return is SKIP, so
+  -- that inject leaves the detached list alone and validates nothing in it.
+  injSetval inj cval (ancestor := 2)
+  let npath ← slice d.path (start := .num (-1.0))
+  modInj inj (fun dd => { dd with path := npath })
+  let count ← if counted then lookupRaw parent (.num 1.0) else pure Value.noval
+  let tvals ← slice parent (start := .num (if counted then 2.0 else 1.0))
+  let titems ← listItemsOf tvals
+  let numtvals := titems.size.toFloat
+  let field := "The " ++ name ++ " validator at field " ++ (← pathify npath (startin := .num 1.0))
+  if titems.size == 0 then
+    pushErr inj (field ++ (if counted then " must have a count and" else " must have")
+      ++ " at least one argument.")
+    return SKIP
+  let (lo, hi, countdesc) ←
+    if counted then nofCount count numtvals else pure (numtvals, numtvals, some "all")
+  match countdesc with
+  | none => pushErr inj (field ++ " has an invalid count: " ++ (← stringify count) ++ ".")
+  | some desc =>
+    let mut admitted : Float := 0.0
+    for i in [0:titems.size] do
+      let left := (titems.size - i).toFloat
+      -- Stop once the specs left cannot change the verdict.
+      if hi < admitted || admitted + left < lo || (lo <= admitted && admitted + left <= hi) then
+        break
+      if (← admits cval titems[i]! inj store) then admitted := admitted + 1.0
+    if admitted < lo || hi < admitted then
+      let mut descs : List String := []
+      for (_, x) in (← itemsPairs tvals) do
+        descs := (← stringify x) :: descs
+      let valdesc := replaceTransformNames (String.intercalate ", " descs.reverse)
+      pushErr inj (← invalidTypeMsg npath (desc ++ " of " ++ valdesc)
+        ((typify cval : Nat) : Int) cval)
+  return SKIP
+
+/-- A spec admits a value when validating the value against it finds no error
+    and gives back the value as it is. -/
+partial def admits (val spec : Value) (inj : InjId) (store : Value) : SIO Bool := do
+  let d ← getInj inj
+  let terrs ← emptyList
+  let em ← emptyMap
+  let vstore ← merge (← newList #[em, store]) (maxdepth := .num 1.0)
+  let _ ← setprop vstore (.str S_DTOP) val
+  let idef : InjDef := { dExtra := vstore, dErrs := terrs, dMeta := d.imeta }
+  let out ← validate val spec (.idef idef)
+  if (← size terrs) != 0 then return false
+  keeps val out
 
 partial def validate (data spec : Value) (inj : InjArg := .inone) : SIO Value := do
   let extra := match inj with
@@ -2670,8 +3163,9 @@ partial def validate (data spec : Value) (inj : InjArg := .inone) : SIO Value :=
     put k (← vFunc validateType)
   put "$ANY" (← vFunc validateAny)
   put "$CHILD" (← vFunc validateChild)
-  put "$ONE" (← vFunc validateOne)
   put "$EXACT" (← vFunc validateExact)
+  put "$NOF" (← vFunc validateNof)
+  put "$ALL" (← vFunc validateAll)
   let extraV ← if isNoval extra then emptyMap else pure extra
   let errsWrap ← newMap #[(S_DERRS, errs)]
   let store ← merge (← newList #[base, extraV, errsWrap]) (maxdepth := .num 1.0)
@@ -2684,7 +3178,10 @@ partial def validate (data spec : Value) (inj : InjArg := .inone) : SIO Value :=
   let handlerId ← registerFunc validateHandler
   let idef : InjDef := { dMeta := meta0, dExtra := store, dModify := some modId,
                          dHandler := some handlerId, dErrs := errs }
-  let out ← transform data spec (.idef idef)
+  -- A spec that names an unknown checker validates nothing.
+  let numerrs ← size errs
+  checkNames spec store #[] errs
+  let out ← if numerrs < (← size errs) then clone data else transform data spec (.idef idef)
   if (← size errs) > 0 && !collect then
     throw (IO.userError (← join errs (sep := .str " | ")))
   pure out

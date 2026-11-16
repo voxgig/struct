@@ -70,6 +70,8 @@ Names are lower-smushed, identical to the canonical export list:
   `re_replace`, `re_test`, `re_escape`.
 - **By-example engine:** `inject`, `transform`, `validate`, `select`, plus the
   injector helpers `checkPlacement`, `injectorArgs`, `injectChild`.
+- **Condensed structures:** `condense`, `condenseview`, `expand`,
+  `iscondensed`.
 - **Builders / markers:** `jm`, `jt`, `SKIP`, `DELETE`, and the `T_*` /
   `M_*` constants.
 
@@ -91,10 +93,21 @@ Names are lower-smushed, identical to the canonical export list:
 ;; validate: plain values are typed defaults; `$STRING` etc. are commands
 (s/validate (s/jm "a" "x") (s/jm "a" "`$STRING`")) ;=> {a x}
 
+;; validate: `$NOF` counts the specs that admit a value, `$ALL` needs every one
+(s/validate (s/jm "a" 1)
+            (s/jm "a" (s/jt "`$NOF`" (s/jm "min" 1) "`$STRING`" "`$NUMBER`"))) ;=> {a 1}
+(s/validate 2 (s/jt "`$ALL`" "`$NUMBER`" "`$INTEGER`"))                      ;=> 2
+
 ;; select: MongoDB-style query over children
 (s/select (s/jt (s/jm "a" 1) (s/jm "a" 2))
           (s/jm "a" (s/jm "`$GT`" 1)))             ;=> ({a 2, $KEY 1})
 ```
+
+The count `$NOF` takes first is an integer, or a map with `min`, `max` or
+both, so `(s/jm "min" 1)` reads "at least one". There is no `$ONE`: write it
+as that count. A spec that names a checker `validate` does not define is
+rejected before any data is read, so a leftover `$ONE` throws
+`Unknown validator $ONE at field a.0.` rather than validating anything.
 
 ## Testing
 
@@ -111,11 +124,11 @@ It converts omni's persistent Clojure data into this port's mutable
 unavoidable, so the arguments go back to omni after the call, which is what
 `match.args` asserts on in `minor/setpath` and `merge/integrity`.
 
-Every group the corpus defines runs except the three `condense` ones, which no
-port implements yet — 1358 entries in 72 groups — plus the two `check` entries
-(`DEF.client`, client-scoped options, `contextify`) and three single entries
-that are not part of any set. Keep it green, keep
-`python3 ../tools/check_parity.py` green, and add no runtime dependencies.
+Every group the corpus defines runs — 1602 entries in 78 groups —
+plus the two `check` entries (`DEF.client`, client-scoped options,
+`contextify`) and three single entries that are not part of any set. Keep it
+green, keep `python3 ../tools/check_parity.py` green, and add no runtime
+dependencies.
 
 ## Implementation notes
 

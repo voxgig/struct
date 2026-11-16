@@ -55,11 +55,12 @@ validate(
 
 ```python
 from voxgig_struct import (
-    # core canonical functions (the full canonical API is 48 names,
+    # core canonical functions (the full canonical API is 52 names,
     # including the builders, re_* helpers, and injection helpers below)
-    clone, delprop, escre, escurl, filter, flatten,
+    clone, condense, condenseview, delprop, escre, escurl,
+    expand, filter, flatten,
     getdef, getelem, getpath, getprop, haskey,
-    inject, isempty, isfunc, iskey, islist, ismap, isnode,
+    inject, iscondensed, isempty, isfunc, iskey, islist, ismap, isnode,
     items, join, jsonify, keysof, merge,
     pad, pathify, select, setpath, setprop,
     size, slice, strkey, stringify, transform,
@@ -614,8 +615,17 @@ $MERGE   $EACH    $PACK    $REF     $FORMAT  $APPLY
 
 ```
 $MAP   $LIST   $STRING   $NUMBER   $INTEGER   $DECIMAL  $BOOLEAN
-$NULL  $NIL    $FUNCTION $INSTANCE $ANY       $CHILD    $ONE     $EXACT
+$NULL  $NIL    $FUNCTION $INSTANCE $ANY       $CHILD    $EXACT
+$NOF   $ALL
 ```
+
+`` ['`$NOF`', n, spec, …] `` holds when as many specs admit the value as `n`
+allows, where `n` is an integer or a dict with `'min'`, `'max'` or both;
+`` ['`$ALL`', spec, …] `` holds when every spec admits it. There is no
+`$ONE`: write `` ['`$ONE`', a, b] `` as `` ['`$NOF`', {'min': 1}, a, b] ``.
+A spec that names any other checker, such as the misspelling
+`` '`$string`' ``, is rejected before any data is read. See the
+[top-level README](../README.md) for what each checker accepts.
 
 
 ## Notes
@@ -629,6 +639,12 @@ both map to `None` at the user-facing API.
 `typify(None)` returns `T_scalar | T_null`.  Where the test corpus
 needs to disambiguate, the runner uses string sentinels `__NULL__`
 and `__UNDEF__`.
+
+Inside a dict or list, `validate` distinguishes a stored `None` from a
+missing key by the key's presence: `$NULL`, `$NIL` and `$ANY` keep a null the
+data holds in the output, and the list directives `$EXACT`, `$NOF` and
+`$ALL` read it as a value. The absent-versus-null rule is in
+[`UNDEF_SPEC.md`](../design/UNDEF_SPEC.md).
 
 ### Walk uses keyword arguments
 
@@ -647,7 +663,7 @@ parity with other ports beats style here.
 
 ### Test status
 
-94 tests pass against the shared corpus (3 skipped).
+123 tests pass against the shared corpus (3 skipped).
 
 
 ## Regex

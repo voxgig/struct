@@ -95,6 +95,8 @@ Names are the canonical names, lower-smushed or camelCased:
 - **Builders:** `jm` (map from alternating key/value list), `jt` (list)
 - **Injection internals (canonical):** `checkPlacement`, `injectorArgs`,
   `injectChild`
+- **Condensed structures:** `condense`, `condenseview`, `expand`,
+  `iscondensed`
 
 Optional arguments use Lean default parameters, e.g.
 `getprop v key (alt := .noval)`, `slice v (start := …) (stop := …)
@@ -107,6 +109,21 @@ loose `Partial<Injection>` options record.
 
 Errors (failed `transform`/`validate`) are thrown as `IO.userError` with the
 canonical joined message; catch with `try … catch`.
+
+A list led by `` .str "`$NOF`" `` counts the specs that admit the value:
+
+```lean
+    let cnt ← jm [.str "min", .num 1.0]
+    let spec ← jt [.str "`$NOF`", cnt, .str "`$STRING`", .str "`$NUMBER`"]
+    IO.println (← stringify (← validate (.num 1.0) spec))   -- "1"
+```
+
+The count is a `.num` or a map of `min` and `max`. `` .str "`$ALL`" `` leads
+a list the same way, without a count, and holds when every spec admits the
+value. There is no `$ONE`; the full checker list is in the
+[language-neutral reference](../DOCS.md#validate-checkers-inside-backticks-in-a-validate-spec).
+A spec that names a checker `validate` does not define is rejected before any
+data is read, with `Unknown validator $FOO at field a.`
 
 ## Numbers
 
@@ -127,7 +144,7 @@ make lint    # clean, warnings-free compile = pass
 `make test` runs the shared corpus (`../build/test/test.json`) through the
 port on [voxgig/omni](https://github.com/voxgig/omni), the shared test runner
 — so the entry loop, the comparison and the `err` and `match` handling are
-literally the same code every other port runs. **1360** entries over 77
+literally the same code every other port runs. **1602** entries over 78
 groups. omni is a local checkout the Makefile finds via `$OMNI_HOME` or
 beside this repository and copies into `.omni-build/`; `lakefile.toml`
 declares it as a lean_lib only the runner imports, so `make build` compiles

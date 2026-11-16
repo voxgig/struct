@@ -118,6 +118,22 @@ Errors raise boru errors whose `message` is the ` | `-joined canonical
 message list, so `do [...] error [var [[e] (e get "message")]]` recovers
 the canonical text.
 
+`$NOF` counts the specs that admit a value, and `$ALL` needs every one:
+
+```boru
+Struct.validate (flex {a: 1}) (flex {a: ["`$NOF`" {min: 1} "`$STRING`" "`$NUMBER`"]}) Struct.NOARG
+;# {a: 1}
+
+Struct.validate 2 (flex ["`$ALL`" "`$NUMBER`" "`$INTEGER`"]) Struct.NOARG
+;# 2
+```
+
+The count `$NOF` takes first is an integer, or a map with `min`, `max` or
+both, so `{min: 1}` reads "at least one". There is no `$ONE`: write it as
+that count. A spec that names a checker `validate` does not define is
+rejected before any data is read, so a leftover `$ONE` raises
+`Unknown validator $ONE at field a.0.` rather than validating anything.
+
 `select` takes `(children query)` and returns the matching children,
 each annotated with its `$KEY`:
 

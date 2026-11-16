@@ -31,7 +31,7 @@ public func select_AND(_ inj: Injection, _ val: Value, _ ref: String, _ store: V
   }
   let gkey = getelem(.list(VList(inj.path.map { Value.string($0) })), .int(-2))
   let gp = inj.nodes.count >= 2 ? inj.nodes[inj.nodes.count - 2] : .noval
-  setprop(gp, gkey, point)
+  _setprop(gp, gkey, point)
   return .noval
 }
 
@@ -56,7 +56,7 @@ public func select_OR(_ inj: Injection, _ val: Value, _ ref: String, _ store: Va
       if terrs.items.isEmpty {
         let gkey = getelem(.list(VList(inj.path.map { Value.string($0) })), .int(-2))
         let gp = inj.nodes.count >= 2 ? inj.nodes[inj.nodes.count - 2] : .noval
-        setprop(gp, gkey, point)
+        _setprop(gp, gkey, point)
         return .noval
       }
     }
@@ -88,7 +88,7 @@ public func select_NOT(_ inj: Injection, _ val: Value, _ ref: String, _ store: V
   }
   let gkey = getelem(.list(VList(inj.path.map { Value.string($0) })), .int(-2))
   let gp = inj.nodes.count >= 2 ? inj.nodes[inj.nodes.count - 2] : .noval
-  setprop(gp, gkey, point)
+  _setprop(gp, gkey, point)
   return .noval
 }
 
@@ -143,7 +143,7 @@ public func select_CMP(_ inj: Injection, _ val: Value, _ ref: String, _ store: V
   }
   if pass {
     let gp = inj.nodes.count >= 2 ? inj.nodes[inj.nodes.count - 2] : .noval
-    setprop(gp, gkey, point)
+    _setprop(gp, gkey, point)
   } else {
     inj.errs.items.append(
       .string(
@@ -161,12 +161,12 @@ public func select(_ children: Value, _ query: Value) -> Value {
   switch children {
   case .map(let m):
     for (k, v) in m.entries {
-      setprop(v, .string(S_DKEY), .string(k))
+      _setprop(v, .string(S_DKEY), .string(k))
       childList.append(v)
     }
   case .list(let l):
     for (i, v) in l.items.enumerated() {
-      setprop(v, .string(S_DKEY), .int(Int64(i)))
+      _setprop(v, .string(S_DKEY), .int(Int64(i)))
       childList.append(v)
     }
   default: break

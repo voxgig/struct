@@ -11,7 +11,7 @@ port. The behavioural contract is the shared JSON corpus in
 
 Complete. Every canonical public function is implemented and the shared corpus
 passes in full (`make test`) on [voxgig/omni](https://github.com/voxgig/omni),
-the shared test runner — 1358 entries in 72 groups, plus the two `check`
+the shared test runner — 1602 entries in 78 groups, plus the two `check`
 entries and three single entries that are not part of any set. **Zero
 third-party dependencies** — only GHC and its boot libraries (`base`, `array`)
 are required, and omni is compiled in at test time, never by the library.
@@ -61,11 +61,12 @@ directly without the Group-A/B `null`-collapsing the single-`null` ports need.
 The public surface matches the canonical export list, in lower-smushed /
 snake_cased names:
 
-`clone delprop escre escurl filter flatten getdef getelem getpath getprop
-haskey inject isempty isfunc iskey islist ismap isnode items join jsonify
-keysof merge pad pathify select setpath setprop size slice strkey stringify
-transform typify typename validate walk re_compile re_find re_find_all
-re_replace re_test re_escape jm jt check_placement injector_args inject_child`
+`clone condense condenseview expand iscondensed delprop escre escurl filter
+flatten getdef getelem getpath getprop haskey inject isempty isfunc iskey
+islist ismap isnode items join jsonify keysof merge pad pathify select setpath
+setprop size slice strkey stringify transform typify typename validate walk
+re_compile re_find re_find_all re_replace re_test re_escape jm jt
+check_placement injector_args inject_child`
 
 See [`DOCS.md`](./DOCS.md) for the full guide and
 [the language-neutral docs](../DOCS.md) for concepts and examples.

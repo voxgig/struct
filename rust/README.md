@@ -3,7 +3,7 @@
 > Rust port of the canonical TypeScript implementation.
 > Status: **complete** — the full shared corpus passes (`make test` → 1309
 > checks; `cargo clippy` clean): minor utilities, `walk`, `merge`, `getpath`,
-> `setpath`, `inject`, `transform` (all 10 commands), `validate` (all 15
+> `setpath`, `inject`, `transform` (all 10 commands), `validate` (all 16
 > checkers), `select` (all operators), and the `primary.check` SDK test.
 
 For motivation, the language-neutral concepts, and the cross-language parity
@@ -102,6 +102,7 @@ Rust convention is `get_path`.
 | `size` / `slice` / `pad` / `typify` | (same) | `clone` / `walk` / `merge` / `inject` | (same) |
 | `items` / `flatten` / `filter` / `join` | (same) | `transform` / `validate` / `select` | (same) |
 | `jsonify` / `stringify` / `pathify` | (same) | `jm` / `jt` | (same) |
+| `condense` / `expand` | (same) | `condenseview` / `iscondensed` | `condense_view` / `is_condensed` |
 
 Type constants are SCREAMING_SNAKE: `T_ANY` … `T_NODE`, `M_KEYPRE` / `M_KEYPOST`
 / `M_VAL`. Sentinels: `SKIP`, `DELETE`.
@@ -464,6 +465,18 @@ validate(
 ```
 
 <!-- => {"age": 36, "name": "Ada"} -->
+
+Two list checkers combine specs on one value. `` ['`$NOF`', n, spec, …] ``
+holds when as many specs admit the value as `n` allows, where `n` is an
+integer or a map with `min`, `max` or both, and `` ['`$ALL`', spec, …] ``
+holds when every spec admits it. A spec admits a value when validating the
+value against it finds no error and gives back every member of the value
+unchanged. There is no `$ONE`: write `` ['`$ONE`', a, b] `` as
+`` ['`$NOF`', {min: 1}, a, b] ``.
+
+A spec that names a checker `validate` does not define is rejected before any
+data is read, with `Unknown validator $FOO at field a.`, and nothing is
+validated.
 
 <!-- example: select#query -->
 ```rust

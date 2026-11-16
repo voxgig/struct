@@ -235,10 +235,10 @@ exact callback signature varies slightly by port — see
 
 ### Validate incoming data, throwing on mismatch
 ```js
-S.validate(payload, { id: '`$INTEGER`', tags: ['`$STRING`'] })
+S.validate(payload, { id: '`$INTEGER`', tags: ['`$CHILD`', '`$STRING`'] })
 ```
-A one-element list spec (`['`$STRING`']`) means "a list whose every element
-matches".
+`['`$CHILD`', '`$STRING`']` means "a list whose every element matches". A
+plain list spec is a tuple: `['`$STRING`']` checks the first element only.
 
 ### Validate and collect *all* errors instead of throwing
 ```js
@@ -249,11 +249,22 @@ if (errs.length) { /* report them */ }
 
 ### Validate "one of several shapes"
 ```js
-S.validate(value, ['`$ONE`', '`$STRING`', '`$NUMBER`'])
+S.validate(value, ['`$NOF`', { min: 1 }, '`$STRING`', '`$NUMBER`'])
 // passes if value is a string OR a number; throws otherwise
 ```
-`$ONE` is a **flat list directive**: the first element is the directive and
-each remaining element is an alternative spec — not a map key over a list.
+`$NOF` is a **flat list directive**: the first element is the directive, the
+second the count, and each remaining element a spec — not a map key over a
+list. A count of `1` asks for exactly one spec to admit the value, `0` for
+none, and `{ min: 1, max: 2 }` for a range. A spec admits the value when
+validating the value against it finds no error and changes nothing in it.
+
+### Put several checks on one value
+```js
+S.validate(value, ['`$ALL`', '`$STRING`', ['`$NOF`', 0, ['`$EXACT`', 'admin']]])
+// passes for any string except "admin"
+```
+A spec has one node per data node, so `$ALL` is how two checks reach the same
+value.
 
 ### Require an exact literal (no type coercion)
 ```js
@@ -421,8 +432,10 @@ named function from `extra`).
 
 `$MAP`, `$LIST`, `$STRING`, `$NUMBER`, `$INTEGER`, `$DECIMAL`, `$BOOLEAN`,
 `$NULL`, `$NIL` (absent or null), `$FUNCTION`, `$INSTANCE`, `$ANY`,
-`$CHILD` (apply a sub-spec to every child), `$ONE` (match exactly one
-alternative), `$EXACT` (equal a literal exactly).
+`$CHILD` (apply a sub-spec to every child), `$EXACT` (equal a literal
+exactly), `$NOF` (a count of specs admits the value), `$ALL` (every spec
+admits the value). A spec that names any other checker fails before any data
+is read, with `Unknown validator $FOO at field a.`
 
 ### Regex API
 

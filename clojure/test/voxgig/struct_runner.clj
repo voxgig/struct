@@ -176,9 +176,15 @@
         selectS (gp spec "select")
         sentinels (gp spec "sentinels")
         regexs (gp spec "regex")
+        condenseS (gp spec "condense")
         rs (fn rs
              ([group node subject] (run-set runpack group node {} subject))
              ([group node flags subject] (run-set runpack group node flags subject)))]
+
+    ;; condense
+    (rs "condense.condense" (gp condenseS "condense") {"null" false} s/condense)
+    (rs "condense.expand" (gp condenseS "expand") {"null" false} s/expand)
+    (rs "condense.iscondensed" (gp condenseS "iscondensed") {"null" false} s/iscondensed)
 
     ;; minor
     (rs "minor.isnode" (gp minor "isnode") s/isnode)
@@ -297,13 +303,17 @@
     ;; validate
     (rs "validate.basic" (gp validateS "basic") {"null" false}
         (fn [vin] (s/validate (vget vin "data") (vget vin "spec"))))
-    (doseq [g ["child" "one" "exact"]]
+    (doseq [g ["child" "exact"]]
       (rs (str "validate." g) (gp validateS g)
           (fn [vin] (s/validate (vget vin "data") (vget vin "spec")))))
     (rs "validate.invalid" (gp validateS "invalid") {"null" false}
         (fn [vin] (s/validate (vget vin "data") (vget vin "spec"))))
     (rs "validate.special" (gp validateS "special")
         (fn [vin] (s/validate (vget vin "data") (vget vin "spec") (vget vin "inj"))))
+    ;; `null: false`, so that a null in these reaches validate as a real nil.
+    (doseq [g ["directive" "nof" "all" "unknown"]]
+      (rs (str "validate." g) (gp validateS g) {"null" false}
+          (fn [vin] (s/validate (vget vin "data") (vget vin "spec")))))
 
     ;; select
     (doseq [g ["basic" "operators" "edge" "alts"]]
@@ -395,6 +405,169 @@
       (:top @state))))
 
 ;; ---------------------------------------------------------------------------
+;; condense: what the corpus shape cannot express
+;; ---------------------------------------------------------------------------
+
+;; Identity, sharing, laziness and the immutability contract, after canonical's
+;; condense-* tests. Each group is a list of named checks, all of which hold.
+(defn- checks [group f]
+  (try
+    (let [failed (vec (for [[label ok] (f) :when (not (true? ok))] label))]
+      (record! group (empty? failed) (str "failed: " (str/join "; " failed))))
+    (catch Throwable err (record! group false (errmsg err)))))
+
+(defn- raises? [f part]
+  (try (f) false
+       (catch Throwable err (str/includes? (errmsg err) part))))
+
+(defn- olist [& xs]
+  (let [a (ArrayList.)]
+    (doseq [x xs] (.add a x))
+    a))
+
+(defn run-condense-local []
+  (let [m omap
+        l olist
+        json (fn [v] (s/jsonify v (omap "indent" 0)))
+        nodes (fn [c] (s/size (s/getprop c "node")))
+        eqv (fn [a b] (ou/deepequal (toomni a) (toomni b)))
+        at (fn [view path] ((:at view) path))]
+
+    (checks "condense-deterministic"
+            (fn []
+              (let [src (m "b" (m "m" "GET") "a" (m "m" "GET") "l" (l 1 "x" true))
+                    reordered (m "l" (l 1 "x" true) "a" (m "m" "GET") "b" (m "m" "GET"))]
+                [["the same input gives the same bytes" (= (json (s/condense src)) (json (s/condense src)))]
+                 ["insertion order does not change the bytes"
+                  (= (json (s/condense src)) (json (s/condense reordered)))]])))
+
+    (checks "condense-shares-identical-subtrees"
+            (fn []
+              (let [one (s/condense (m "x" (m "m" "GET" "p" "/1")))
+                    two (s/condense (m "x" (m "m" "GET" "p" "/1") "y" (m "m" "GET" "p" "/1")))
+                    three (s/condense (m "x" (m "m" "GET") "y" (m "m" "PUT") "z" (m "m" "POST")))]
+                [["a second identical subtree adds no node" (= (nodes two) (nodes one))]
+                 ["distinct subtrees add nodes" (> (nodes three) (nodes two))]])))
+
+    (checks "condense-round-trips-by-value"
+            (fn []
+              (let [src (m "a" (m "b" (l 1 "x" true nil (m))) "c" "z")]
+                [["expand undoes condense" (eqv (s/expand (s/condense src)) src)]])))
+
+    (checks "condense-getpath-is-transparent"
+            (fn []
+              (let [src (m "entity" (m "p" (m "op" (m "list" (m "method" "GET")))))
+                    c (s/condense src)]
+                [["a node reads as the plain one"
+                  (eqv (s/getpath c (l "entity" "p" "op" "list")) (s/getpath src (l "entity" "p" "op" "list")))]
+                 ["a scalar reads" (= "GET" (s/getpath c (l "entity" "p" "op" "list" "method")))]
+                 ["a miss is absent" (nil? (s/getpath c (l "entity" "nope")))]])))
+
+    (checks "condense-view-reads-without-materialising"
+            (fn []
+              (let [v (s/condenseview (s/condense (m "entity" (m "a" (m "v" 1) "b" (m "v" 2)) "other" 9)))]
+                [["keys" (= ["a" "b"] ((:keys v) "entity"))]
+                 ["at and get" (= 2 ((:get (at (at v "entity") "b")) "v"))]
+                 ["has a path" (true? ((:has v) "entity.a"))]
+                 ["has no path" (false? ((:has v) "entity.zz"))]
+                 ["size" (= 2 ((:size v)))]])))
+
+    (checks "condense-value-copies-and-ref-shares"
+            (fn []
+              (let [v (s/condenseview (s/condense (m "a" (m "m" "GET") "b" (m "m" "GET"))))
+                    x ((:get v) "a")
+                    y ((:get v) "b")
+                    same (eqv x y)]
+                (s/setprop x "m" "MUTATED")
+                [["equal by value" same]
+                 ["distinct nodes" (not (identical? x y))]
+                 ["a copy's mutation stays in the copy" (= "GET" (s/getprop ((:get v) "b") "m"))]
+                 ["ref hands out one node" (identical? ((:ref (at v "a"))) ((:ref (at v "a"))))]])))
+
+    (checks "condense-preserves-proto-named-keys-and-values"
+            (fn []
+              (let [asvalue (m "x" "__proto__")]
+                [["as a value" (eqv (s/expand (s/condense asvalue)) asvalue)]
+                 ["as a key" (= "{\"__proto__\":1}" (json (s/expand (s/condense (m "__proto__" 1)))))]])))
+
+    (checks "condense-getpath-matches-plain-on-null-and-options"
+            (fn []
+              (let [store (m "base" (m "x" 1))
+                    opts (m "base" "base")]
+                [["a stored null reads as the plain one"
+                  (= (s/getpath (s/condense (m "a" nil)) "a") (s/getpath (m "a" nil) "a"))]
+                 ["a stored null reads as absent" (nil? (s/getpath (s/condense (m "a" nil)) "a"))]
+                 ["base is honoured" (= (s/getpath (s/condense store) "x" opts) (s/getpath store "x" opts))]
+                 ["base reads the value" (= 1 (s/getpath (s/condense store) "x" opts))]])))
+
+    ;; A plain list read misses each of these, and condensing must not change
+    ;; which value a path selects.
+    (checks "condense-list-keys-are-canonical-integers"
+            (fn []
+              (let [plain (m "l" (l 10 20))
+                    c (s/condense plain)]
+                (conj (vec (for [k ["01" "1e0" " 1" "+1" "1.0" "-0"]]
+                             [(str (pr-str k) " reads as the plain one")
+                              (= (s/getpath c (l "l" k)) (s/getpath plain (l "l" k)))]))
+                      ["\"1\" reads" (= 20 (s/getpath c (l "l" "1")))]))))
+
+    (checks "condense-symbols-sort-by-code-point"
+            (fn []
+              (let [sym (vec (s/getprop (s/condense (m "a" "𐀀" "b" "￿")) "sym"))]
+                [["U+FFFF sorts before U+10000" (< (.indexOf sym "￿") (.indexOf sym "𐀀"))]])))
+
+    (checks "condense-map-pairs-ascend-by-symbol-id"
+            (fn []
+              (let [c (s/condense (m "𐀀" 1 "￿" 2))]
+                [["U+10000 reads" (= 1 (s/getpath c "𐀀"))]
+                 ["U+FFFF reads" (= 2 (s/getpath c "￿"))]])))
+
+    (checks "condense-invalid-key-mutations-stay-no-ops"
+            (fn []
+              (let [c (s/condense (m "a" 1))]
+                [["delprop with no key" (identical? c (s/delprop c nil))]
+                 ["setprop with no key" (identical? c (s/setprop c nil 1))]
+                 ["delprop with a key raises" (raises? #(s/delprop c "sym") "immutable")]])))
+
+    (checks "condense-is-immutable"
+            (fn []
+              (let [c (s/condense (m "a" 1))
+                    e (s/expand c)]
+                (s/setpath e "a" 2)
+                [["setpath raises" (raises? #(s/setpath c "a" 2) "immutable")]
+                 ["setprop raises" (raises? #(s/setprop c "a" 2) "immutable")]
+                 ["delprop raises" (raises? #(s/delprop c "sym") "immutable")]
+                 ["the expanded copy is mutable" (= 2 (s/getprop e "a"))]])))))
+
+;; ---------------------------------------------------------------------------
+;; validate: what the corpus shape cannot express
+;; ---------------------------------------------------------------------------
+
+(defn run-validate-local []
+  (let [m omap
+        l olist
+        errsof (fn [data spec]
+                 (let [errs (ArrayList.)]
+                   (s/validate data spec (omap "errs" errs))
+                   (vec errs)))]
+
+    (checks "validate-child-one-error-per-failure"
+            (fn []
+              (vec (for [spec [(m "x" (m "`$CHILD`" "`$NUMBER`")) (m "x" (l "`$CHILD`" "`$NUMBER`"))]]
+                     [(s/stringify spec) (= 1 (count (errsof (m "x" 1) spec)))]))))
+
+    ;; The corpus cannot carry 2.0, which JavaScript reads as 2.
+    (checks "validate-nof-integral-decimal-count"
+            (fn []
+              (let [nof (fn [cnt] (l "`$NOF`" cnt "`$NUMBER`" "`$INTEGER`"))]
+                [["2.0 admits" (empty? (errsof 1 (nof 2.0)))]
+                 ["2.0 counts as 2"
+                  (= ["Expected exactly 2 of number, integer, but found string: x."] (errsof "x" (nof 2.0)))]
+                 ["min 1.0 and max 2.0 count as 1 and 2"
+                  (= ["Expected 1 to 2 of number, integer, but found string: x."]
+                     (errsof "x" (nof (m "min" 1.0 "max" 2.0))))]])))))
+
+;; ---------------------------------------------------------------------------
 ;; The client path
 ;; ---------------------------------------------------------------------------
 
@@ -443,6 +616,8 @@
         runpack (runner "struct")]
     (binding [*results* (atom {:pass [] :fail []})]
       (run-all runpack (tostruct (:spec runpack)))
+      (run-condense-local)
+      (run-validate-local)
       (run-client testfile)
       (let [r @*results*
             np (count (:pass r))

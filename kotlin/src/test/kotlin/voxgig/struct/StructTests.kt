@@ -6,6 +6,10 @@ import kotlin.math.floor
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertNotSame
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 /**
@@ -191,6 +195,138 @@ class StructTests {
         assertEquals(1L, normalize(Struct.getpath(mapOf("a" to 1), "a")))
     }
 
+    // Condense: identity, sharing, laziness and the immutability contract.
+
+    @Test
+    fun condenseDeterministic() {
+        val src = Struct.jm("b", Struct.jm("m", "GET"), "a", Struct.jm("m", "GET"), "l", Struct.jt(1, "x", true))
+        assertEquals(Struct.jsonify(Struct.condense(src)), Struct.jsonify(Struct.condense(src)))
+        // Insertion order must not change the bytes: keys are stored by symbol id.
+        val reordered = Struct.jm("l", Struct.jt(1, "x", true), "a", Struct.jm("m", "GET"), "b", Struct.jm("m", "GET"))
+        assertEquals(Struct.jsonify(Struct.condense(src)), Struct.jsonify(Struct.condense(reordered)))
+    }
+
+    @Test
+    fun condenseSharesIdenticalSubtrees() {
+        val one = Struct.condense(Struct.jm("x", Struct.jm("m", "GET", "p", "/1")))
+        val two = Struct.condense(Struct.jm("x", Struct.jm("m", "GET", "p", "/1"), "y", Struct.jm("m", "GET", "p", "/1")))
+        // A second reference to an identical subtree adds no node.
+        assertEquals(Struct.size(one["node"]), Struct.size(two["node"]))
+        val three = Struct.condense(Struct.jm("x", Struct.jm("m", "GET"), "y", Struct.jm("m", "PUT"), "z", Struct.jm("m", "POST")))
+        assertTrue(Struct.size(three["node"]) > Struct.size(two["node"]))
+    }
+
+    @Test
+    fun condenseRoundTripsByValue() {
+        val src = Struct.jm("a", Struct.jm("b", Struct.jt(1, "x", true, null, Struct.jm())), "c", "z")
+        assertEquals<Any?>(src, Struct.expand(Struct.condense(src)))
+    }
+
+    @Test
+    fun condenseGetpathIsTransparent() {
+        val src = Struct.jm("entity", Struct.jm("p", Struct.jm("op", Struct.jm("list", Struct.jm("method", "GET")))))
+        val c = Struct.condense(src)
+        assertEquals(
+            Struct.getpath(src, listOf("entity", "p", "op", "list")),
+            Struct.getpath(c, listOf("entity", "p", "op", "list")),
+        )
+        assertEquals<Any?>("GET", Struct.getpath(c, listOf("entity", "p", "op", "list", "method")))
+        assertSame(Struct.UNDEF, Struct.getpath(c, listOf("entity", "nope")))
+    }
+
+    @Test
+    fun condenseViewReadsWithoutMaterialising() {
+        val c = Struct.condense(Struct.jm("entity", Struct.jm("a", Struct.jm("v", 1), "b", Struct.jm("v", 2)), "other", 9))
+        val v = Struct.condenseview(c)
+        // keys() answers from the node and symbol tables alone.
+        assertEquals(listOf("a", "b"), v.keys("entity"))
+        assertEquals<Any?>(2, v.at("entity").at("b").get("v"))
+        assertTrue(v.has("entity.a"))
+        assertFalse(v.has("entity.zz"))
+        assertEquals(2, v.size())
+    }
+
+    @Test
+    fun condenseValueCopiesAndRefShares() {
+        val c = Struct.condense(Struct.jm("a", Struct.jm("m", "GET"), "b", Struct.jm("m", "GET")))
+        val v = Struct.condenseview(c)
+        // a and b share one node; get() must not let that be observable.
+        val x = v.get("a") as MutableMap<String, Any?>
+        val y = v.get("b")
+        assertEquals<Any?>(x, y)
+        assertNotSame<Any?>(x, y)
+        x["m"] = "MUTATED"
+        assertEquals<Any?>("GET", Struct.getprop(v.get("b"), "m"))
+        // ref() is the opt-in escape hatch and does share.
+        assertSame(v.at("a").ref(), v.at("a").ref())
+    }
+
+    @Test
+    fun condensePreservesProtoNamedKeysAndValues() {
+        val asValue = Struct.jm("x", "__proto__")
+        assertEquals<Any?>(asValue, Struct.expand(Struct.condense(asValue)))
+        val asKey = Struct.jm("__proto__", 1)
+        assertEquals("{\"__proto__\":1}", Struct.jsonify(Struct.expand(Struct.condense(asKey)), mapOf("indent" to 0)))
+    }
+
+    @Test
+    fun condenseGetpathMatchesPlainOnNullAndOptions() {
+        // Group A: a stored null reads as absent either way.
+        val nullval = Struct.jm("a", null)
+        assertEquals(Struct.getpath(nullval, "a"), Struct.getpath(Struct.condense(nullval), "a"))
+        assertSame(Struct.UNDEF, Struct.getpath(Struct.condense(nullval), "a"))
+        // A base must not be ignored by the condensed fast path.
+        val store = Struct.jm("base", Struct.jm("x", 1))
+        val inj = Struct.Injection(null, null).apply { base = "base" }
+        assertEquals(Struct.getpath(store, "x", inj), Struct.getpath(Struct.condense(store), "x", inj))
+        assertEquals<Any?>(1, Struct.getpath(Struct.condense(store), "x", inj))
+    }
+
+    @Test
+    fun condenseListKeysAreCanonicalIntegers() {
+        val plain = Struct.jm("l", Struct.jt(10, 20))
+        val c = Struct.condense(plain)
+        // A plain list read misses each of these, and condensing must not change
+        // which value a path selects.
+        for (k in listOf("01", "1e0", " 1", "+1", "1.0", "-0")) {
+            assertEquals(Struct.getpath(plain, listOf("l", k)), Struct.getpath(c, listOf("l", k)), "list key $k")
+        }
+        assertEquals<Any?>(20, Struct.getpath(c, listOf("l", "1")))
+    }
+
+    @Test
+    fun condenseSymbolsSortByCodePoint() {
+        val sym = Struct.condense(Struct.jm("a", "\uD800\uDC00", "b", "\uFFFF"))["sym"] as List<Any?>
+        assertTrue(sym.indexOf("\uFFFF") < sym.indexOf("\uD800\uDC00"), "symbol table is not in code-point order: $sym")
+    }
+
+    @Test
+    fun condenseInvalidKeyMutationsStayNoOps() {
+        // An invalid key is ignored, so a call that cannot write must not raise.
+        val c = Struct.condense(Struct.jm("a", 1))
+        assertSame(c, Struct.delprop(c, Struct.UNDEF))
+        assertSame(c, Struct.setprop(c, Struct.UNDEF, 1))
+        // A call that could write still raises.
+        assertImmutable { Struct.delprop(c, "sym") }
+    }
+
+    @Test
+    fun condenseIsImmutable() {
+        val c = Struct.condense(Struct.jm("a", 1))
+        assertImmutable { Struct.setpath(c, "a", 2) }
+        assertImmutable { Struct.setprop(c, "a", 2) }
+        assertImmutable { Struct.delprop(c, "sym") }
+        // The expanded copy is ordinary and mutable.
+        val e = Struct.expand(c) as Map<*, *>
+        Struct.setpath(e, "a", 2)
+        assertEquals<Any?>(2, e["a"])
+    }
+
+    private fun assertImmutable(call: () -> Unit) {
+        val err = assertFailsWith<IllegalArgumentException> { call() }
+        assertTrue(err.message.orEmpty().contains("immutable"), err.message)
+    }
+
     @Test
     fun injectExists() {
         assertEquals(1L, normalize(Struct.inject("`a`", mapOf("a" to 1))))
@@ -265,6 +401,77 @@ class StructTests {
         out = Struct.validate(mapOf("a" to "A"), shape, opts)
         assertTrue(normalize(mapOf("a" to "A")) == normalize(out))
         assertEquals(listOf<Any?>("Not an integer at a: A"), errs)
+    }
+
+    @Test
+    fun validateUnknownEdge() {
+        // Only the unknown name is reported, and the data comes back as it is.
+        val errs = mutableListOf<Any?>()
+        val data = linkedMapOf<String, Any?>("a" to "x")
+        var out =
+            Struct.validate(
+                data,
+                mapOf("a" to listOf("`\$ONE`", "`\$STRING`", "`\$NIL`")),
+                linkedMapOf<String, Any?>("errs" to errs),
+            )
+        assertEquals(listOf<Any?>("Unknown validator \$ONE at field a.0."), errs)
+        assertEquals(normalize(data), normalize(out))
+
+        // A checker supplied in extra is defined, in any case.
+        val even =
+            Struct.Injector { inj, _, _, _ ->
+                val n = Struct.getprop(inj.dparent, inj.key)
+                if (0L != (n as Number).toLong() % 2) {
+                    inj.errs.add("Odd at " + inj.path.drop(1).joinToString(".") + ": " + Struct.stringify(n))
+                }
+                n
+            }
+
+        errs.clear()
+        var extra = linkedMapOf<String, Any?>("\$EVEN" to even)
+        out = Struct.validate(mapOf("n" to 2), mapOf("n" to "`\$EVEN`"), linkedMapOf("extra" to extra, "errs" to errs))
+        assertEquals(normalize(mapOf("n" to 2)), normalize(out))
+        extra = linkedMapOf("\$even" to even)
+        out = Struct.validate(mapOf("n" to 3), mapOf("n" to "`\$even`"), linkedMapOf("extra" to extra, "errs" to errs))
+        assertEquals(normalize(mapOf("n" to 3)), normalize(out))
+        assertEquals(listOf<Any?>("Odd at n: 3"), errs)
+
+        // A null in extra takes a checker away.
+        errs.clear()
+        Struct.validate("x", "`\$STRING`", linkedMapOf("extra" to linkedMapOf<String, Any?>("\$STRING" to null), "errs" to errs))
+        assertEquals(listOf<Any?>("Unknown validator \$STRING at field <root>."), errs)
+    }
+
+    @Test
+    fun validateChildOneErrorPerFailure() {
+        for (spec in listOf(mapOf("x" to mapOf("`\$CHILD`" to "`\$NUMBER`")), mapOf("x" to listOf("`\$CHILD`", "`\$NUMBER`")))) {
+            val errs = mutableListOf<Any?>()
+            Struct.validate(mapOf("x" to 1), spec, linkedMapOf<String, Any?>("errs" to errs))
+            assertEquals(1, errs.size, errs.toString())
+        }
+
+        val errs = mutableListOf<Any?>()
+        Struct.validate(1, mapOf("`\$CHILD`" to "`\$NUMBER`"), linkedMapOf<String, Any?>("errs" to errs))
+        assertEquals(listOf<Any?>("Expected map, but found integer: 1."), errs)
+        errs.clear()
+        Struct.validate(1, listOf("`\$CHILD`", "`\$NUMBER`"), linkedMapOf<String, Any?>("errs" to errs))
+        assertEquals(listOf<Any?>("Expected list, but found integer: 1."), errs)
+    }
+
+    @Test
+    fun validateNofIntegralDecimalCount() {
+        // A count is the integer it holds, whatever the host number type.
+        for (two in listOf<Any>(2, 2L, 2.0)) {
+            assertEquals(1L, normalize(Struct.validate(1, listOf("`\$NOF`", two, "`\$NUMBER`", "`\$INTEGER`"))))
+            val err = assertFailsWith<Exception> { Struct.validate(1.5, listOf("`\$NOF`", two, "`\$NUMBER`", "`\$INTEGER`")) }
+            assertEquals("Expected exactly 2 of number, integer, but found decimal: 1.5.", err.message)
+        }
+
+        for (range in listOf(mapOf("min" to 1, "max" to 2), mapOf("min" to 1.0, "max" to 2.0))) {
+            assertEquals(1L, normalize(Struct.validate(1, listOf("`\$NOF`", range, "`\$NUMBER`", "`\$INTEGER`"))))
+            val err = assertFailsWith<Exception> { Struct.validate("x", listOf("`\$NOF`", range, "`\$NUMBER`", "`\$INTEGER`")) }
+            assertEquals("Expected 1 to 2 of number, integer, but found string: x.", err.message)
+        }
     }
 
     @Test

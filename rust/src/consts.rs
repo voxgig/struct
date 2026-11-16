@@ -45,6 +45,13 @@ pub const S_SP: &str = " ";
 pub const S_CM: &str = ",";
 pub const S_VIZ: &str = ": ";
 
+pub const S_condense: &str = "$condense";
+pub const S_condsym: &str = "sym";
+pub const S_condnode: &str = "node";
+pub const S_condroot: &str = "root";
+
+pub const CONDENSE_VERSION: f64 = 1.0;
+
 pub const T_ANY: u32 = (1u32 << 31) - 1;
 pub const T_NOVAL: u32 = 1 << 30; // property absent, undefined. NOT a scalar.
 pub const T_BOOLEAN: u32 = 1 << 29;
@@ -73,7 +80,7 @@ pub const TYPENAME: [&str; 26] = [
 
 pub const MAXDEPTH: i64 = 32;
 
-pub static R_INTEGER_KEY: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[-0-9]+$").unwrap());
+pub static R_INTEGER_KEY: Lazy<Regex> = Lazy::new(|| Regex::new(r"^(0|-?[1-9][0-9]*)$").unwrap());
 pub static R_ESCAPE_REGEXP: Lazy<Regex> = Lazy::new(|| Regex::new(r"[.*+?^${}()|\[\]\\]").unwrap());
 pub static R_QUOTES: Lazy<Regex> = Lazy::new(|| Regex::new(r#"""#).unwrap());
 pub static R_DOT: Lazy<Regex> = Lazy::new(|| Regex::new(r"\.").unwrap());
@@ -82,7 +89,9 @@ pub static R_META_PATH: Lazy<Regex> = Lazy::new(|| Regex::new(r"^([^$]+)\$([=~])
 pub static R_TRANSFORM_NAME: Lazy<Regex> = Lazy::new(|| Regex::new(r"`\$([A-Z]+)`").unwrap());
 pub static R_INJECTION_FULL: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^`(\$[A-Z]+|[^`]*)[0-9]*`$").unwrap());
+pub static R_CHECKER_NAME: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\$[A-Z]+$").unwrap());
 pub static R_INJECTION_PARTIAL: Lazy<Regex> = Lazy::new(|| Regex::new(r"`([^`]+)`").unwrap());
+pub static R_CONDENSE_INDEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"^(0|[1-9][0-9]*)$").unwrap());
 
 pub fn mode_name(mode: i64) -> &'static str {
     match mode {

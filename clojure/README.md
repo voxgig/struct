@@ -11,7 +11,7 @@ port. The behavioural contract is the shared JSON corpus in
 
 Complete. Every canonical public function is implemented and the shared corpus
 passes in full (`make test`) on [voxgig/omni](https://github.com/voxgig/omni),
-the shared test runner — 1358 entries in 72 groups, plus the two `check`
+the shared test runner — 1602 entries in 78 groups, plus the two `check`
 entries and three single entries that are not part of any set. Zero
 third-party runtime dependencies, and omni is a test-time classpath entry the
 published jar never names.
@@ -68,7 +68,8 @@ The public surface matches the canonical export list, in lower-smushed names:
 haskey inject isempty isfunc iskey islist ismap isnode items join jsonify
 keysof merge pad pathify select setpath setprop size slice strkey stringify
 transform typify typename validate walk re_compile re_find re_find_all
-re_replace re_test re_escape jm jt checkPlacement injectorArgs injectChild`
+re_replace re_test re_escape jm jt checkPlacement injectorArgs injectChild
+condense condenseview expand iscondensed`
 
 See [`DOCS.md`](./DOCS.md) for the full guide and
 [the language-neutral docs](../DOCS.md) for concepts and examples.

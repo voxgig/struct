@@ -175,9 +175,11 @@ Voxgig::Struct::stringify(Voxgig::Struct::jm(a => 1, b => [2, 3]));   # '{a:1,b:
 <!-- => "{a:1,b:[2,3]}" -->
 
 For more task recipes (merge configs, rename fields, `$EACH`, `$MERGE`,
-`$FORMAT`, `$ONE`, `$EXACT`, …) see the language-neutral
+`$FORMAT`, `$EXACT`, …) see the language-neutral
 [How-to guides](../DOCS.md#2-how-to-guides) — the spec syntax is identical;
-only the host literals differ.
+only the host literals differ. The exception is `$ONE`, which this port does
+not define: write those specs with `$NOF`, as the
+[README](./README.md#injection--validate--select) shows.
 
 ---
 
@@ -300,12 +302,12 @@ just says so).
 
 The corpus runs on [voxgig/omni](https://github.com/voxgig/omni), the
 shared test runner, found via `$OMNI_HOME` or beside this repository (see
-`t/OmniBridge.pm`). `t/struct.t` runs every group the corpus defines except
-the three `condense` ones — 1358 entries in 75 assertions — and `t/client.t`
-runs the two client entries. The full suite is 82 tests across 4 files.
-Tests live in [`t/`](./t/): `t/struct.t` (the corpus), `t/client.t` (the
-client path), `t/regex_pathological.t` (regex panel) and `t/00-load.t`
-(load/sanity), with `t/OmniBridge.pm` holding the runner bridge.
+`t/OmniBridge.pm`). `t/struct.t` runs every group the corpus defines — 1602
+entries in 78 groups — and `t/client.t` runs the two client entries. The full
+suite is 172 tests across 4 files. Tests live in
+[`t/`](./t/): `t/struct.t` (the corpus), `t/client.t` (the client path),
+`t/regex_pathological.t` (regex panel) and `t/00-load.t` (load/sanity), with
+`t/OmniBridge.pm` holding the runner bridge.
 
 **To change behaviour:** this is a port, so behaviour changes start in the
 canonical TypeScript, not here. Edit the canonical source, adjust the

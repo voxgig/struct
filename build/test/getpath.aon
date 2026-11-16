@@ -75,6 +75,15 @@ basic: {
     { in: { path: 'a', store: {a:[]} }, out: [] }
     { in: { path: 'a.b', store: {a:1} } }
     { in: { path: 'x', store: {a:1} } }
+    { in: { path: ['l','01'], store: {l:[10,20]} } }
+    { in: { path: ['l','+1'], store: {l:[10,20]} } }
+    { in: { path: ['l','-0'], store: {l:[10,20]} } }
+    { in: { path: ['l','1'], store: {l:[10,20]} }, out: 20 }
+    { in: { path: ['l',1], store: {l:[10,20]} }, out: 20 }
+    { in: { path: ['l',1.5], store: {l:[10,20]} } }
+    { in: { path: ['l',true], store: {l:[10,20]} } }
+    { in: { path: 1, store: [10,20] }, out: 20 }
+    { in: { path: 1.5, store: [10,20] } }
   ]
 }
 

@@ -364,6 +364,11 @@ pub fn merge(allocator: Allocator, val: JsonValue,
 pub fn clone(allocator: Allocator, val: JsonValue) !JsonValue
 pub fn flatten(allocator: Allocator, val: JsonValue,
                depth: i64) !JsonValue
+pub fn condense(allocator: Allocator, val: JsonValue) !JsonValue
+pub fn expand(allocator: Allocator, cond: JsonValue) !JsonValue
+pub fn iscondensed(val: JsonValue) bool
+pub fn condenseview(allocator: Allocator, cond: JsonValue, idx: ?i64,
+                    memo: ?*MapRef) !CondenseView
 ```
 
 Last input wins; maps deep-merge; lists merge by index:
@@ -587,8 +592,22 @@ $MERGE   $EACH    $PACK    $REF     $FORMAT  $APPLY
 
 ```
 $MAP   $LIST   $STRING   $NUMBER   $INTEGER   $DECIMAL  $BOOLEAN
-$NULL  $NIL    $FUNCTION $INSTANCE $ANY       $CHILD    $ONE     $EXACT
+$NULL  $NIL    $FUNCTION $INSTANCE $ANY       $CHILD    $EXACT
+$NOF   $ALL
 ```
+
+`` ["`$NOF`", n, spec, …] `` holds when as many specs admit the value as `n`
+allows, where `n` is an integer or a map with `min`, `max` or both.
+`` ["`$ALL`", spec, …] `` holds when every spec admits the value. A spec
+admits a value when validating the value against it finds no error and gives
+back every member of the value unchanged. There is no `$ONE`: write
+`` ["`$ONE`", a, b] `` as `` ["`$NOF`", { min: 1 }, a, b] ``.
+
+A spec that names a checker `validate` does not define is rejected before
+any data is read, and nothing is validated: `out` is a copy of the data and
+`err` names the checker. The whole-string reference `` "`$FOO`" `` names a
+checker, and so does a misspelling of a defined one in another case, such as
+`` "`$string`" ``. The message is `Unknown validator $FOO at field a.`
 
 
 ## Notes

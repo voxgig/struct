@@ -4,14 +4,18 @@ package voxgig.struct;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.regex.Matcher;
@@ -75,6 +79,7 @@ public class Struct {
 
   private static final Pattern R_META_PATH = Pattern.compile("^([^$]+)\\$([=~])(.+)$");
   private static final Pattern R_INJECT_FULL = Pattern.compile("^`(\\$[A-Z]+|[^`]*)[0-9]*`$");
+  private static final Pattern R_CHECKER_NAME = Pattern.compile("^\\$[A-Z]+$");
   private static final Pattern R_INJECT_PART = Pattern.compile("`([^`]+)`");
   private static final Pattern R_CMD_KEY = Pattern.compile("^`(\\$[A-Z]+)(\\d*)`$");
   private static final Pattern R_BT_ESCAPE = Pattern.compile("\\$BT");
@@ -82,6 +87,7 @@ public class Struct {
   private static final Pattern R_TRANSFORM_NAME = Pattern.compile("`\\$([A-Z]+)`");
   private static final Pattern R_DOUBLE_DOLLAR = Pattern.compile("\\$\\$");
   private static final Pattern R_CLONE_REF = Pattern.compile("^`\\$REF:([0-9]+)`$");
+  private static final Pattern R_LIST_INDEX = Pattern.compile("^(0|-?[1-9][0-9]*)$");
 
   /**
    * Sentinel returned from a transform/inject step to omit the current key.
@@ -358,25 +364,19 @@ public class Struct {
       return alt;
     }
 
-    Integer idx = parseIntKey(key);
-    if (idx == null || !isIntegerKeyString(key)) {
-      if (alt instanceof Function<?, ?> f) {
-        return ((Function<Object, Object>) f).apply(null);
-      }
-      return alt;
-    }
-
+    double idx = listIndex(key);
     if (idx < 0) {
-      idx = list.size() + idx;
+      // A negative key counts from the end.
+      idx += list.size();
     }
-    if (idx < 0 || idx >= list.size()) {
+    if (!(0 <= idx && idx < list.size())) {
       if (alt instanceof Function<?, ?> f) {
         return ((Function<Object, Object>) f).apply(null);
       }
       return alt;
     }
 
-    Object out = list.get(idx);
+    Object out = list.get((int) idx);
     // Group A null-unification: a JSON null (or absent) slot counts as "no
     // value" — return the alt. Mirrors canonical TS getelem `if (null == out)`.
     if (out == null || out == UNDEF) {
@@ -400,14 +400,14 @@ public class Struct {
     Object out = UNDEF;
 
     if (val instanceof Map<?, ?> m) {
-      String sk = strkey(key);
-      if (m.containsKey(sk)) {
+      String sk = mapKey(key);
+      if (null != sk && m.containsKey(sk)) {
         out = ((Map<Object, Object>) m).get(sk);
       }
     } else if (val instanceof List<?> l) {
-      Integer idx = parseIntKey(key);
-      if (idx != null && idx >= 0 && idx < l.size()) {
-        out = l.get(idx);
+      double idx = listIndex(key);
+      if (0 <= idx && idx < l.size()) {
+        out = l.get((int) idx);
       }
     }
 
@@ -434,26 +434,39 @@ public class Struct {
       return UNDEF;
     }
     if (val instanceof Map<?, ?> m) {
-      String sk = strkey(key);
-      return m.containsKey(sk) ? ((Map<Object, Object>) m).get(sk) : UNDEF;
+      String sk = mapKey(key);
+      return null != sk && m.containsKey(sk) ? ((Map<Object, Object>) m).get(sk) : UNDEF;
     }
     if (val instanceof List<?> l) {
-      Integer idx = parseIntKey(key);
-      if (idx == null) {
-        return UNDEF;
-      }
-      int i = idx < 0 ? l.size() + idx : idx;
-      if (i < 0 || i >= l.size()) {
-        return UNDEF;
-      }
-      return l.get(i);
+      double idx = listIndex(key);
+      return 0 <= idx && idx < l.size() ? l.get((int) idx) : UNDEF;
     }
     return UNDEF;
+  }
+
+  // The key a map read takes, or null for one that is neither a string nor a
+  // number, which misses.
+  private static String mapKey(Object key) {
+    return key instanceof String || key instanceof Number ? strkey(key) : null;
+  }
+
+  // A list key's index, or NaN: an integral number, or the string String(n)
+  // prints for one, negative or not ("01", "+1", "1.0" and "-0" are not).
+  private static double listIndex(Object key) {
+    if (key instanceof Number n) {
+      double d = n.doubleValue();
+      return Double.isFinite(d) && Math.floor(d) == d ? d : Double.NaN;
+    }
+    return key instanceof String s && R_LIST_INDEX.matcher(s).matches() ? Double.parseDouble(s) : Double.NaN;
   }
 
   public static Object setprop(Object parent, Object key, Object val) {
     if (!iskey(key)) {
       return parent;
+    }
+
+    if (iscondensed(parent)) {
+      throw new IllegalArgumentException(CONDENSE_IMMUTABLE);
     }
 
     if (parent instanceof Map<?, ?>) {
@@ -464,16 +477,14 @@ public class Struct {
 
     if (parent instanceof List<?>) {
       List<Object> l = (List<Object>) parent;
-      Integer idx = parseIntKey(key);
-      if (idx == null) {
+      double idx = listIndex(key);
+      if (Double.isNaN(idx)) {
         return parent;
       }
-      idx = (int) Math.floor(idx);
 
       if (idx >= 0) {
-        int target = Math.min(Math.max(idx, 0), l.size());
-        if (target < l.size()) {
-          l.set(target, val);
+        if (idx < l.size()) {
+          l.set((int) idx, val);
         } else {
           l.add(val);
         }
@@ -491,44 +502,24 @@ public class Struct {
       return parent;
     }
 
+    if (iscondensed(parent)) {
+      throw new IllegalArgumentException(CONDENSE_IMMUTABLE);
+    }
+
     if (parent instanceof Map<?, ?> m) {
       ((Map<Object, Object>) m).remove(strkey(key));
       return parent;
     }
 
     if (parent instanceof List<?> l) {
-      Integer idx = parseIntKey(key);
-      if (idx != null && idx >= 0 && idx < l.size()) {
+      double idx = listIndex(key);
+      if (0 <= idx && idx < l.size()) {
         ((List<Object>) l).remove((int) idx);
       }
       return parent;
     }
 
     return parent;
-  }
-
-  public static boolean isIntegerKeyString(Object key) {
-    if (key instanceof Number) {
-      return true;
-    }
-    if (!(key instanceof String s)) {
-      return false;
-    }
-    return s.matches("^[-0-9]+$");
-  }
-
-  private static Integer parseIntKey(Object key) {
-    if (key instanceof Number n) {
-      return (int) Math.floor(n.doubleValue());
-    }
-    if (key instanceof String s) {
-      try {
-        return Integer.parseInt(s);
-      } catch (Exception e) {
-        return null;
-      }
-    }
-    return null;
   }
 
   public static Object clone(Object val) {
@@ -1084,6 +1075,10 @@ public class Struct {
   }
 
   public static Object setpath(Object store, Object path, Object val) {
+    if (iscondensed(store)) {
+      throw new IllegalArgumentException(CONDENSE_IMMUTABLE);
+    }
+
     List<Object> parts;
     if (path instanceof List<?> l) {
       parts = new ArrayList<>(l);
@@ -1264,6 +1259,22 @@ public class Struct {
 
   public static Object getpath(Object store, Object path, Map<String, Object> inj) {
     List<String> parts = pathParts(path);
+    if (null == parts) {
+      return UNDEF;
+    }
+
+    // A condensed store answers as the node it was built from, touching only
+    // the nodes on the path. A base changes what the path resolves against,
+    // so that read needs the materialised store.
+    if (iscondensed(store)) {
+      if (null == inj || UNDEF == getprop(inj, "base")) {
+        Object found = condenseMaterialise(store, condenseResolve(store, condenseRoot(store), parts));
+        // Group A: a stored null reads as absent, as it does through getprop.
+        return null == found ? UNDEF : found;
+      }
+      store = expand(store);
+    }
+
     Object val = getpathInner(store, path, parts, inj);
     if (inj != null) {
       Object handlerObj = inj.get("handler");
@@ -1299,6 +1310,8 @@ public class Struct {
     return pathify(path);
   }
 
+  // A new list, so the caller's path is never rewritten; null when it is no
+  // path, or names a part that is neither a string nor a number.
   private static List<String> pathParts(Object path) {
     if (path instanceof String s) {
       if (s.isEmpty()) {
@@ -1306,15 +1319,18 @@ public class Struct {
       }
       return new ArrayList<>(List.of(s.split("\\.", -1)));
     }
+    if (path instanceof Number n) {
+      return new ArrayList<>(List.of(jsString(n)));
+    }
     if (path instanceof List<?> l) {
       List<String> out = new ArrayList<>();
       for (Object x : l) {
-        if (x instanceof String) {
-          out.add((String) x);
+        if (x instanceof String s) {
+          out.add(s);
         } else if (x instanceof Number n) {
-          out.add(strkey(n));
+          out.add(jsString(n));
         } else {
-          out.add(strkey(x));
+          return null;
         }
       }
       return out;
@@ -1323,10 +1339,6 @@ public class Struct {
   }
 
   private static Object getpathInner(Object store, Object pathOrig, List<String> parts, Map<String, Object> inj) {
-    if (parts == null) {
-      return null;
-    }
-
     Object base = inj != null ? inj.get("base") : null;
     Object src = getprop(store, base, store);
     Object dparent = inj != null ? inj.get("dparent") : null;
@@ -1625,7 +1637,9 @@ public class Struct {
    * can hook command dispatch.
    */
   public static Object getpath(Object store, Object path, Injection inj) {
-    if (inj == null) {
+    // No path, or a condensed read without a base, returns before any handler
+    // runs, as in canonical.
+    if (inj == null || null == pathParts(path) || (inj.base == null && iscondensed(store))) {
       return getpath(store, path, (Map<String, Object>) null);
     }
     Map<String, Object> view = new LinkedHashMap<>();
@@ -2559,7 +2573,8 @@ public class Struct {
           }
         }
         if (idx < 0) return UNDEF;
-        int typev = 1 << (31 - idx);
+        // $NIL is absent or null.
+        int typev = (1 << (31 - idx)) | ("nil".equals(tname) ? T_null : 0);
         // Group B: type-check the raw data value (TS _lookup(dparent,key)).
         Object out = lookup(inj.dparent, inj.key);
         int t = typify(out);
@@ -2597,8 +2612,7 @@ public class Struct {
           if (tval == UNDEF || tval == null) {
             tval = new LinkedHashMap<>();
           } else if (!ismap(tval)) {
-            Object sp = slice(inj.path, -1, null);
-            inj.errs.add(_invalidTypeMsg(sp, "object", typify(tval), tval, "V0220"));
+            // _validation reports the mismatch, once.
             return UNDEF;
           }
 
@@ -2625,9 +2639,6 @@ public class Struct {
           }
 
           if (!islist(inj.dparent)) {
-            Object sp = slice(inj.path, -1, null);
-            inj.errs.add(
-                _invalidTypeMsg(sp, "list", typify(inj.dparent), inj.dparent, "V0230"));
             inj.keyI = size(inj.parent);
             return inj.dparent;
           }
@@ -2658,89 +2669,13 @@ public class Struct {
         return UNDEF;
       };
 
-  /**
-   * $ONE: validate against any one of a list of alternative shapes.
-   * Format: {@code [`$ONE`, alt0, alt1, ...]}. Mirrors TS lines 2109–2175.
-   */
-  public static final Injector validate_ONE =
-      (injObj, val, ref, store) -> {
-        if (!(injObj instanceof Injection inj)) return UNDEF;
-        if (inj.mode != M_VAL) return UNDEF;
-
-        if (!islist(inj.parent) || inj.keyI != 0) {
-          inj.errs.add(
-              "The $ONE validator at field "
-                  + pathify(inj.path, 1, 1)
-                  + " must be the first element of an array.");
-          return UNDEF;
-        }
-
-        inj.keyI = size(inj.keys);
-        inj.setval(inj.dparent, 2);
-
-        Object slicedPath = slice(inj.path, -1, null);
-        inj.path =
-            slicedPath instanceof List<?> spl
-                ? new ArrayList<>((List<String>) spl)
-                : new ArrayList<>();
-
-        Object tvalsRaw = slice(inj.parent, 1, null);
-        List<Object> tvals =
-            tvalsRaw instanceof List<?> tl
-                ? new ArrayList<>((List<Object>) tl)
-                : new ArrayList<>();
-        if (tvals.isEmpty()) {
-          inj.errs.add(
-              "The $ONE validator at field "
-                  + pathify(inj.path, 1, 1)
-                  + " must have at least one argument.");
-          return UNDEF;
-        }
-
-        for (Object tval : tvals) {
-          List<Object> terrs = new ArrayList<>();
-          Map<String, Object> vstore = new LinkedHashMap<>();
-          if (store instanceof Map<?, ?> sm) {
-            for (Map.Entry<?, ?> e : sm.entrySet()) {
-              vstore.put(Objects.toString(e.getKey()), e.getValue());
-            }
-          }
-          vstore.put(S_DTOP, inj.dparent);
-          Map<String, Object> opts = new LinkedHashMap<>();
-          opts.put("extra", vstore);
-          opts.put("errs", terrs);
-          opts.put("meta", inj.meta);
-          Object vcurrent;
-          try {
-            vcurrent = validate(inj.dparent, tval, opts);
-          } catch (Exception e) {
-            terrs.add(e.getMessage());
-            vcurrent = inj.dparent;
-          }
-          inj.setval(vcurrent, -2);
-          if (terrs.isEmpty()) return UNDEF;
-        }
-
-        // No match; describe alternatives.
-        String valdesc = _describeAlternatives(tvals);
-        inj.errs.add(
-            _invalidTypeMsg(
-                inj.path,
-                (size(tvals) > 1 ? "one of " : "") + valdesc,
-                typify(inj.dparent),
-                inj.dparent,
-                "V0210"));
-        return UNDEF;
-      };
-
   // Lowers every `$NAME` marker in the joined description, nested ones included.
   private static String _describeAlternatives(List<Object> tvals) {
-    StringBuilder joined = new StringBuilder();
-    for (int i = 0; i < tvals.size(); i++) {
-      if (i > 0) joined.append(", ");
-      joined.append(stringify(tvals.get(i)));
+    List<Object> parts = new ArrayList<>(tvals.size());
+    for (Object tval : tvals) {
+      parts.add(stringify(tval));
     }
-    Matcher m = R_TRANSFORM_NAME.matcher(joined);
+    Matcher m = R_TRANSFORM_NAME.matcher(join(parts, ", ", false));
     StringBuilder out = new StringBuilder();
     while (m.find()) {
       m.appendReplacement(out, Matcher.quoteReplacement(m.group(1).toLowerCase(Locale.ROOT)));
@@ -2751,7 +2686,7 @@ public class Struct {
 
   /**
    * $EXACT: validate against any one of a list of literal alternatives.
-   * Format: {@code [`$EXACT`, lit0, lit1, ...]}. Mirrors TS lines 2178–2237.
+   * Format: {@code [`$EXACT`, lit0, lit1, ...]}. Mirrors TS {@code validate_EXACT}.
    */
   public static final Injector validate_EXACT =
       (injObj, val, ref, store) -> {
@@ -2766,41 +2701,28 @@ public class Struct {
             return UNDEF;
           }
 
+          Object cval = _slotval(inj);
+
           inj.keyI = size(inj.keys);
-          inj.setval(inj.dparent, 2);
 
-          Object slicedPath = slice(inj.path, 0, -1);
-          inj.path =
-              slicedPath instanceof List<?> spl
-                  ? new ArrayList<>((List<String>) spl)
-                  : new ArrayList<>();
-          inj.key = strkey(getelem(inj.path, -1));
+          // Replace [$EXACT, ...] with the data value; SKIP keeps inject off the detached list.
+          inj.setval(cval, 2);
 
-          Object tvalsRaw = slice(inj.parent, 1, null);
-          List<Object> tvals =
-              tvalsRaw instanceof List<?> tl
-                  ? new ArrayList<>((List<Object>) tl)
-                  : new ArrayList<>();
+          inj.path = (List<String>) slice(inj.path, 0, -1);
+
+          List<Object> tvals = (List<Object>) slice(inj.parent, 1, null);
           if (tvals.isEmpty()) {
             inj.errs.add(
                 "The $EXACT validator at field "
                     + pathify(inj.path, 1, 1)
                     + " must have at least one argument.");
-            return UNDEF;
+            return SKIP;
           }
 
-          String currentstr = null;
           for (Object tval : tvals) {
-            boolean exactmatch = Objects.equals(tval, inj.dparent);
-            if (!exactmatch && isnode(tval)) {
-              if (currentstr == null) currentstr = stringify(inj.dparent);
-              String tvalstr = stringify(tval);
-              exactmatch = tvalstr.equals(currentstr);
-            }
-            if (exactmatch) return UNDEF;
+            if (_deepequal(tval, cval)) return SKIP;
           }
 
-          // No match.
           String valdesc = _describeAlternatives(tvals);
           inj.errs.add(
               _invalidTypeMsg(
@@ -2809,15 +2731,275 @@ public class Struct {
                       + "exactly equal to "
                       + (size(tvals) == 1 ? "" : "one of ")
                       + valdesc,
-                  typify(inj.dparent),
-                  inj.dparent,
+                  typify(cval),
+                  cval,
                   "V0110"));
-          return UNDEF;
+          return SKIP;
         } else {
           delprop(inj.parent, inj.key);
           return UNDEF;
         }
       };
+
+  /**
+   * $NOF: count the specs that admit the value. Format:
+   * {@code [`$NOF`, count, spec, ...]}, where count is an integer, or a map
+   * holding {@code min}, {@code max} or both. Mirrors TS {@code validate_NOF}.
+   */
+  public static final Injector validate_NOF =
+      (injObj, val, ref, store) ->
+          injObj instanceof Injection inj ? _validatecount(inj, store, "$NOF", true) : UNDEF;
+
+  /**
+   * $ALL: every spec admits the value. Format: {@code [`$ALL`, spec, ...]}.
+   * Mirrors TS {@code validate_ALL}.
+   */
+  public static final Injector validate_ALL =
+      (injObj, val, ref, store) ->
+          injObj instanceof Injection inj ? _validatecount(inj, store, "$ALL", false) : UNDEF;
+
+  // The counting list directives. Without a count, every spec has to admit.
+  private static Object _validatecount(Injection inj, Object store, String name, boolean counted) {
+    if (inj.mode != M_VAL) {
+      return UNDEF;
+    }
+
+    Object parent = inj.parent;
+
+    if (!islist(parent) || inj.keyI != 0) {
+      inj.errs.add(
+          "The "
+              + name
+              + " validator at field "
+              + pathify(inj.path, 1, 1)
+              + " must be the first element of an array.");
+      return UNDEF;
+    }
+
+    Object cval = _slotval(inj);
+
+    inj.keyI = size(inj.keys);
+
+    // Replace the directive's list with the data value. Each return is SKIP, so
+    // that inject leaves the detached list alone and validates nothing in it.
+    inj.setval(cval, 2);
+
+    inj.path = (List<String>) slice(inj.path, -1, null);
+
+    Object count = counted ? lookup(parent, 1) : UNDEF;
+    List<Object> tvals = (List<Object>) slice(parent, counted ? 2 : 1, null);
+    int numtvals = tvals.size();
+    String field = "The " + name + " validator at field " + pathify(inj.path, 1);
+
+    if (0 == numtvals) {
+      inj.errs.add(
+          field + (counted ? " must have a count and" : " must have") + " at least one argument.");
+      return SKIP;
+    }
+
+    Object[] bounds =
+        counted ? _nofcount(count, numtvals) : new Object[] {(long) numtvals, (long) numtvals, "all"};
+    long lo = (Long) bounds[0];
+    long hi = (Long) bounds[1];
+    String countdesc = (String) bounds[2];
+
+    if (null == countdesc) {
+      inj.errs.add(field + " has an invalid count: " + stringify(count) + ".");
+      return SKIP;
+    }
+
+    int admitted = 0;
+    for (int tI = 0; tI < numtvals; tI++) {
+      int left = numtvals - tI;
+
+      // Stop once the specs left cannot change the verdict.
+      if (hi < admitted || admitted + left < lo || (lo <= admitted && admitted + left <= hi)) {
+        break;
+      }
+
+      if (_admits(cval, tvals.get(tI), inj, store)) {
+        admitted++;
+      }
+    }
+
+    if (admitted < lo || hi < admitted) {
+      String valdesc = _describeAlternatives(tvals);
+      inj.errs.add(
+          _invalidTypeMsg(inj.path, countdesc + " of " + valdesc, typify(cval), cval, "V0310"));
+    }
+
+    return SKIP;
+  }
+
+  // Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
+  private static final List<String> VALIDATE_NAMES =
+      List.of("$TOP", "$SPEC", "$BT", "$DS", "$WHEN", "$ANNO", "$REF", "$FORMAT", "$APPLY", "$OPEN");
+
+  // Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
+  private static void _checknames(Object spec, Object store, List<String> path, List<Object> errs) {
+    String name = _refname(spec);
+    if (null != name) {
+      if (_unknownname(name, store)) {
+        errs.add("Unknown validator " + name + " at field " + pathify(path) + ".");
+      }
+      return;
+    }
+
+    if (islist(spec) && "$EXACT".equals(_refname(lookup(spec, 0)))) {
+      return;
+    }
+
+    for (String key : keysof(spec)) {
+      if (ismap(spec)) {
+        _checknames(key, store, path, errs);
+      }
+      List<String> kpath = new ArrayList<>(path);
+      kpath.add(key);
+      _checknames(lookup(spec, key), store, kpath, errs);
+    }
+  }
+
+  // The name a whole-string reference gives, when it is a checker name in any case.
+  private static String _refname(Object val) {
+    Matcher m = val instanceof String s ? R_INJECT_FULL.matcher(s) : null;
+    return null != m && m.matches() && R_CHECKER_NAME.matcher(m.group(1).toUpperCase(Locale.ROOT)).matches()
+        ? m.group(1)
+        : null;
+  }
+
+  // Unknown: undefined and upper case, or a defined name in another case. Null disables a name.
+  private static boolean _unknownname(String name, Object store) {
+    String upper = name.toUpperCase(Locale.ROOT);
+    return !_knownname(name, store) && (upper.equals(name) || _knownname(upper, store));
+  }
+
+  private static boolean _knownname(String name, Object store) {
+    Object val = lookup(store, name);
+    return VALIDATE_NAMES.contains(name) || (null != val && UNDEF != val);
+  }
+
+  // The data value at a list directive's slot. The directive's own dparent was
+  // read with getprop, which reports a stored null as absent.
+  private static Object _slotval(Injection inj) {
+    Injection prior = inj.prior;
+    return null == prior ? inj.dparent : lookup(prior.dparent, prior.key);
+  }
+
+  // JSON equality: numbers by value, lists in order, maps by key in any order.
+  private static boolean _deepequal(Object a, Object b) {
+    // TS ===: identity, or value equality for numbers, strings and booleans.
+    if (a == b
+        || (a instanceof Number an && b instanceof Number bn && an.doubleValue() == bn.doubleValue())
+        || ((a instanceof String || a instanceof Boolean) && a.equals(b))) {
+      return true;
+    }
+
+    int atype = typify(a);
+    if (atype != typify(b) || 0 == ((T_list | T_map) & atype)) {
+      return false;
+    }
+
+    List<String> akeys = keysof(a);
+    List<String> bkeys = keysof(b);
+    if (akeys.size() != bkeys.size()) {
+      return false;
+    }
+
+    for (int kI = 0; kI < akeys.size(); kI++) {
+      String k = akeys.get(kI);
+      if (!k.equals(bkeys.get(kI)) || !_deepequal(lookup(a, k), lookup(b, k))) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  // Every member val has is in out, unchanged. A member only out has is a
+  // default the spec supplied, and is ignored.
+  private static boolean _keeps(Object val, Object out) {
+    if (UNDEF == val) {
+      return true;
+    }
+
+    if (0 == ((T_list | T_map) & typify(val)) || islist(val) != islist(out) || !isnode(out)) {
+      return _deepequal(val, out);
+    }
+
+    for (String k : keysof(val)) {
+      if (!_keeps(lookup(val, k), lookup(out, k))) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  // A spec admits a value when validating the value against it finds no error
+  // and gives back the value as it is.
+  private static boolean _admits(Object val, Object spec, Injection inj, Object store) {
+    List<Object> terrs = new ArrayList<>();
+
+    List<Object> mergeList = new ArrayList<>();
+    mergeList.add(new LinkedHashMap<String, Object>());
+    mergeList.add(store);
+    Map<String, Object> vstore = (Map<String, Object>) merge(mergeList, 1);
+    vstore.put(S_DTOP, val);
+
+    Map<String, Object> opts = new LinkedHashMap<>();
+    opts.put("extra", vstore);
+    opts.put("errs", terrs);
+    opts.put("meta", inj.meta);
+    Object out = validate(val, spec, opts);
+
+    return terrs.isEmpty() && _keeps(val, out);
+  }
+
+  // The bounds of a $NOF count, and the words for it, which are null when the
+  // count is invalid. Without a max, the bound is the number of specs.
+  private static Object[] _nofcount(Object count, int numtvals) {
+    if (_isnat(count)) {
+      long n = ((Number) count).longValue();
+      return new Object[] {n, n, 0 == n ? "none" : "exactly " + n};
+    }
+
+    Object min = lookup(count, "min");
+    Object max = lookup(count, "max");
+
+    boolean valid =
+        ismap(count)
+            && 0 < size(count)
+            && size(count) == (UNDEF == min ? 0 : 1) + (UNDEF == max ? 0 : 1)
+            && (UNDEF == min || _isnat(min))
+            && (UNDEF == max || _isnat(max))
+            && (UNDEF == min
+                || UNDEF == max
+                || ((Number) min).doubleValue() <= ((Number) max).doubleValue());
+
+    if (!valid) {
+      return new Object[] {0L, 0L, null};
+    }
+
+    long lo = UNDEF == min ? 0 : ((Number) min).longValue();
+    long hi = UNDEF == max ? numtvals : ((Number) max).longValue();
+
+    String desc =
+        UNDEF == max
+            ? "at least " + lo
+            : 0 == hi
+                ? "none"
+                : UNDEF == min
+                    ? "at most " + hi
+                    : lo == hi
+                        ? "exactly " + lo
+                        : lo + " to " + hi;
+
+    return new Object[] {lo, hi, desc};
+  }
+
+  private static boolean _isnat(Object n) {
+    return 0 != (T_integer & typify(n)) && 0 <= ((Number) n).doubleValue();
+  }
 
   /**
    * Modify hook used by {@link #validate(Object, Object)}: runs after each
@@ -3121,8 +3303,9 @@ public class Struct {
     baseStore.put("$INSTANCE", validate_TYPE);
     baseStore.put("$ANY", validate_ANY);
     baseStore.put("$CHILD", validate_CHILD);
-    baseStore.put("$ONE", validate_ONE);
     baseStore.put("$EXACT", validate_EXACT);
+    baseStore.put("$NOF", validate_NOF);
+    baseStore.put("$ALL", validate_ALL);
 
     List<Object> mergeList = new ArrayList<>();
     mergeList.add(baseStore);
@@ -3153,7 +3336,11 @@ public class Struct {
     opts.put("handler", _validatehandler);
     opts.put("errs", errs);
 
-    Object out = transform(data, spec, opts);
+    // A spec that names an unknown checker validates nothing.
+    int numerrs = errs.size();
+    _checknames(spec, store, new ArrayList<>(), errs);
+
+    Object out = numerrs < errs.size() ? clone(data) : transform(data, spec, opts);
 
     if (!errs.isEmpty() && !collect) {
       throw new IllegalArgumentException(String.join(" | ", errsAsStrings(errs)));
@@ -3238,6 +3425,461 @@ public class Struct {
       }
     }
     return results;
+  }
+
+
+  // ===========================================================================
+  // Condense
+  // ===========================================================================
+
+  private static final int CONDENSE_VERSION = 1;
+
+  private static final int CONDENSE_MAP = 0;
+  private static final int CONDENSE_LIST = 1;
+  private static final int CONDENSE_STR = 2;
+  private static final int CONDENSE_NUM = 3;
+  private static final int CONDENSE_TRUE = 4;
+  private static final int CONDENSE_FALSE = 5;
+  private static final int CONDENSE_NULL = 6;
+
+  private static final String S_condense = "$condense";
+  private static final String S_condsym = "sym";
+  private static final String S_condnode = "node";
+  private static final String S_condroot = "root";
+
+  private static final String CONDENSE_IMMUTABLE =
+      "struct: condensed structures are immutable - expand() first, then modify the copy";
+
+  // Code point order: String.compareTo uses UTF-16 code unit order, which
+  // puts U+FFFF after a supplementary character.
+  private static int condenseCmp(String a, String b) {
+    int i = 0;
+    int j = 0;
+    while (i < a.length() && j < b.length()) {
+      int ca = a.codePointAt(i);
+      int cb = b.codePointAt(j);
+      if (ca != cb) {
+        return ca < cb ? -1 : 1;
+      }
+      i += Character.charCount(ca);
+      j += Character.charCount(cb);
+    }
+    return a.length() - i - (b.length() - j);
+  }
+
+  public static boolean iscondensed(Object val) {
+    // The version must MATCH, not merely be numeric: a future profile would
+    // otherwise be decoded under this one's schema.
+    return val instanceof Map<?, ?> m
+        && m.get(S_condense) instanceof Number version
+        && CONDENSE_VERSION == version.doubleValue()
+        && m.get(S_condsym) instanceof List
+        && m.get(S_condnode) instanceof List
+        && m.get(S_condroot) instanceof Number;
+  }
+
+  /**
+   * Condense any JSON-shaped node. Pure: the same input always produces a
+   * byte-identical result, on every port.
+   */
+  public static Map<String, Object> condense(Object val) {
+    Set<String> symset = new HashSet<>();
+    condenseCollect(val, symset);
+
+    List<String> sym = new ArrayList<>(symset);
+    sym.sort(Struct::condenseCmp);
+    Map<String, Integer> symid = new HashMap<>();
+    for (int i = 0; i < sym.size(); i++) {
+      symid.put(sym.get(i), i);
+    }
+
+    List<Object> node = new ArrayList<>();
+    int root = condenseBuild(val, symid, node, new HashMap<>());
+
+    Map<String, Object> out = new LinkedHashMap<>();
+    out.put(S_condense, CONDENSE_VERSION);
+    out.put(S_condsym, new ArrayList<Object>(sym));
+    out.put(S_condnode, node);
+    out.put(S_condroot, root);
+    return out;
+  }
+
+  private static void condenseCollect(Object n, Set<String> symset) {
+    if (ismap(n)) {
+      for (String key : keysof(n)) {
+        symset.add(key);
+        condenseCollect(((Map<?, ?>) n).get(key), symset);
+      }
+    } else if (n instanceof List<?> l) {
+      for (Object item : l) {
+        condenseCollect(item, symset);
+      }
+    } else if (n instanceof String s) {
+      symset.add(s);
+    }
+  }
+
+  // Post-order, so identical subtrees are already interned when a parent
+  // refers to them.
+  private static int condenseBuild(Object n, Map<String, Integer> symid, List<Object> node,
+                                   Map<String, Integer> seen) {
+    List<Object> enc = new ArrayList<>();
+    if (ismap(n)) {
+      enc.add(CONDENSE_MAP);
+      // Code-point order, not keysof's code-unit order, so the key ids ascend.
+      List<String> keys = new ArrayList<>(keysof(n));
+      keys.sort(Struct::condenseCmp);
+      for (String key : keys) {
+        enc.add(symid.get(key));
+        enc.add(condenseBuild(((Map<?, ?>) n).get(key), symid, node, seen));
+      }
+    } else if (n instanceof List<?> l) {
+      enc.add(CONDENSE_LIST);
+      for (Object item : l) {
+        enc.add(condenseBuild(item, symid, node, seen));
+      }
+    } else if (n instanceof String s) {
+      enc.add(CONDENSE_STR);
+      enc.add(symid.get(s));
+    } else if (n instanceof Number num) {
+      enc.add(CONDENSE_NUM);
+      enc.add(num);
+    } else if (Boolean.TRUE.equals(n)) {
+      enc.add(CONDENSE_TRUE);
+    } else if (Boolean.FALSE.equals(n)) {
+      enc.add(CONDENSE_FALSE);
+    } else {
+      enc.add(CONDENSE_NULL);
+    }
+    return condenseIntern(enc, node, seen);
+  }
+
+  private static int condenseIntern(List<Object> enc, List<Object> node, Map<String, Integer> seen) {
+    StringBuilder key = new StringBuilder();
+    for (Object part : enc) {
+      key.append(condenseNumKey((Number) part)).append(',');
+    }
+    String enckey = key.toString();
+    Integer hit = seen.get(enckey);
+    if (null != hit) {
+      return hit;
+    }
+    int idx = node.size();
+    node.add(enc);
+    seen.put(enckey, idx);
+    return idx;
+  }
+
+  // By value, so an integer and a decimal that are equal share one node.
+  private static String condenseNumKey(Number n) {
+    if (n instanceof Integer || n instanceof Long || n instanceof Short || n instanceof Byte) {
+      return Long.toString(n.longValue());
+    }
+    double d = n.doubleValue();
+    return Math.floor(d) == d && Math.abs(d) < Long.MAX_VALUE ? Long.toString((long) d) : Double.toString(d);
+  }
+
+  private static List<?> condenseList(Object cond, String name) {
+    return cond instanceof Map<?, ?> m && m.get(name) instanceof List<?> l ? l : List.of();
+  }
+
+  private static Object condenseAt(List<?> list, int i) {
+    return 0 <= i && i < list.size() ? list.get(i) : UNDEF;
+  }
+
+  // A stored index: -1 when negative, past every node when not an integer.
+  private static int condenseIndex(Object n) {
+    if (!(n instanceof Number num)) {
+      return -1;
+    }
+    double d = num.doubleValue();
+    if (Double.isNaN(d) || d < 0) {
+      return -1;
+    }
+    return Math.floor(d) == d && d < Integer.MAX_VALUE ? (int) d : Integer.MAX_VALUE;
+  }
+
+  private static int condenseRoot(Object cond) {
+    return condenseIndex(((Map<?, ?>) cond).get(S_condroot));
+  }
+
+  private static Object condenseEnc(Object cond, int idx) {
+    Object enc = condenseAt(condenseList(cond, S_condnode), idx);
+    return UNDEF == enc ? null : enc;
+  }
+
+  private static boolean condenseIs(Object enc, int kind) {
+    return enc instanceof List<?> l && !l.isEmpty() && l.get(0) instanceof Number n && n.doubleValue() == kind;
+  }
+
+  private static String condenseKey(Object key) {
+    if (key instanceof String s) {
+      return s;
+    }
+    return UNDEF == key ? "undefined" : jsString(key);
+  }
+
+  // Bisects the sorted symbol table; -1 when the string occurs nowhere.
+  private static int condenseSymId(Object cond, String key) {
+    List<?> sym = condenseList(cond, S_condsym);
+    int lo = 0;
+    int hi = sym.size() - 1;
+    while (lo <= hi) {
+      int mid = (lo + hi) >>> 1;
+      Object s = sym.get(mid);
+      if (key.equals(s)) {
+        return mid;
+      }
+      if (0 > condenseCmp(condenseKey(s), key)) {
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return -1;
+  }
+
+  // The node index of key inside node idx, or -1. Touches only this node.
+  private static int condenseChild(Object cond, int idx, Object key) {
+    Object enc = condenseEnc(cond, idx);
+    if (null == enc || !(key instanceof String || key instanceof Number)) {
+      return -1;
+    }
+
+    if (condenseIs(enc, CONDENSE_MAP)) {
+      int symid = condenseSymId(cond, condenseKey(key));
+      if (0 > symid) {
+        return -1;
+      }
+      // Pairs live at [1,2], [3,4], ... with keys ascending: bisect the pairs.
+      List<?> pairs = (List<?>) enc;
+      int lo = 0;
+      int hi = (pairs.size() - 1) / 2 - 1;
+      while (lo <= hi) {
+        int mid = (lo + hi) >>> 1;
+        double k = pairs.get(1 + mid * 2) instanceof Number n ? n.doubleValue() : Double.NaN;
+        if (k == symid) {
+          return condenseIndex(pairs.get(2 + mid * 2));
+        }
+        if (k < symid) {
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
+      }
+      return -1;
+    }
+
+    if (condenseIs(enc, CONDENSE_LIST)) {
+      List<?> items = (List<?>) enc;
+      double i = listIndex(key);
+      if (!(0 <= i && i < items.size() - 1)) {
+        return -1;
+      }
+      return condenseIndex(items.get(1 + (int) i));
+    }
+
+    return -1;
+  }
+
+  private static int condenseResolve(Object cond, int idx, Object path) {
+    List<?> parts;
+    if (path instanceof List<?> l) {
+      parts = l;
+    } else if (path instanceof String s) {
+      parts = s.isEmpty() ? List.of() : Arrays.asList(s.split("\\.", -1));
+    } else if (null == path || UNDEF == path) {
+      parts = List.of();
+    } else {
+      parts = List.of(condenseKey(path));
+    }
+
+    int at = idx;
+    for (Object part : parts) {
+      if (0 > at) {
+        return -1;
+      }
+      if (S_MT.equals(part)) {
+        continue;
+      }
+      at = condenseChild(cond, at, part);
+    }
+    return at;
+  }
+
+  private static Object condenseMaterialise(Object cond, int idx) {
+    return 0 > idx
+        ? UNDEF
+        : condenseRebuild(condenseList(cond, S_condsym), condenseList(cond, S_condnode), idx);
+  }
+
+  // Every call builds new containers, so materialisations never share one.
+  private static Object condenseRebuild(List<?> sym, List<?> node, int i) {
+    Object enc = condenseAt(node, i);
+    if (null == enc || UNDEF == enc) {
+      return UNDEF;
+    }
+    if (condenseIs(enc, CONDENSE_MAP)) {
+      List<?> pairs = (List<?>) enc;
+      Map<String, Object> out = new LinkedHashMap<>();
+      for (int j = 1; j < pairs.size(); j += 2) {
+        out.put(condenseKey(condenseAt(sym, condenseIndex(pairs.get(j)))),
+            condenseRebuild(sym, node, condenseIndex(condenseAt(pairs, j + 1))));
+      }
+      return out;
+    }
+    if (condenseIs(enc, CONDENSE_LIST)) {
+      List<?> items = (List<?>) enc;
+      List<Object> out = new ArrayList<>(items.size() - 1);
+      for (int j = 1; j < items.size(); j++) {
+        out.add(condenseRebuild(sym, node, condenseIndex(items.get(j))));
+      }
+      return out;
+    }
+    if (condenseIs(enc, CONDENSE_STR)) {
+      return condenseAt(sym, condenseIndex(condenseAt((List<?>) enc, 1)));
+    }
+    if (condenseIs(enc, CONDENSE_NUM)) {
+      return condenseAt((List<?>) enc, 1);
+    }
+    if (condenseIs(enc, CONDENSE_TRUE)) {
+      return true;
+    }
+    if (condenseIs(enc, CONDENSE_FALSE)) {
+      return false;
+    }
+    return null;
+  }
+
+  /**
+   * Fully materialise a condensed structure; any other value comes back
+   * unchanged. Correct for any caller, but it gives up every benefit of
+   * condensing, so prefer a view or a path read.
+   */
+  public static Object expand(Object cond) {
+    if (!iscondensed(cond)) {
+      return cond;
+    }
+    return condenseMaterialise(cond, condenseRoot(cond));
+  }
+
+  // The keys of node idx, without materialising any of its values.
+  private static List<String> condenseKeys(Object cond, int idx) {
+    Object enc = condenseEnc(cond, idx);
+    List<String> out = new ArrayList<>();
+    if (condenseIs(enc, CONDENSE_MAP)) {
+      List<?> sym = condenseList(cond, S_condsym);
+      List<?> pairs = (List<?>) enc;
+      for (int j = 1; j < pairs.size(); j += 2) {
+        out.add(condenseKey(condenseAt(sym, condenseIndex(pairs.get(j)))));
+      }
+    } else if (condenseIs(enc, CONDENSE_LIST)) {
+      for (int j = 1; j < ((List<?>) enc).size(); j++) {
+        out.add(Integer.toString(j - 1));
+      }
+    }
+    return out;
+  }
+
+  /**
+   * A cursor into a condensed structure. Reads resolve by integer index and
+   * touch only the nodes on the path, so a lookup costs path depth and result
+   * size, never total structure size.
+   */
+  public static final class CondenseView {
+    private final Object cond;
+    private final int start;
+    private final Map<Integer, Object> refmemo;
+
+    private CondenseView(Object cond, int start, Map<Integer, Object> refmemo) {
+      this.cond = cond;
+      this.start = start;
+      this.refmemo = refmemo;
+    }
+
+    /** The value at path, materialised: a container comes back as an independent copy. */
+    public Object get(Object path) {
+      return condenseMaterialise(cond, condenseResolve(cond, start, path));
+    }
+
+    public Object get() {
+      return get(UNDEF);
+    }
+
+    /** Key names at path, with no value decoding at all. */
+    public List<String> keys(Object path) {
+      int at = condenseResolve(cond, start, path);
+      return 0 > at ? new ArrayList<>() : condenseKeys(cond, at);
+    }
+
+    public List<String> keys() {
+      return keys(UNDEF);
+    }
+
+    public boolean has(Object path) {
+      return 0 <= condenseResolve(cond, start, path);
+    }
+
+    public boolean has() {
+      return has(UNDEF);
+    }
+
+    /** A view at path, sharing this view's ref() memo. No decoding happens here. */
+    public CondenseView at(Object path) {
+      return condenseview(cond, condenseResolve(cond, start, path), refmemo);
+    }
+
+    public CondenseView at() {
+      return at(UNDEF);
+    }
+
+    public Object value() {
+      return condenseMaterialise(cond, start);
+    }
+
+    public int size() {
+      Object enc = condenseEnc(cond, start);
+      if (condenseIs(enc, CONDENSE_MAP)) {
+        return (((List<?>) enc).size() - 1) / 2;
+      }
+      if (condenseIs(enc, CONDENSE_LIST)) {
+        return ((List<?>) enc).size() - 1;
+      }
+      return 0;
+    }
+
+    public boolean exists() {
+      return 0 <= start;
+    }
+
+    /**
+     * A SHARED materialisation: the same object for the same node, every time.
+     * Mutating it corrupts every other reader of that node, including ones
+     * reached by a different path, because the structure is a DAG.
+     */
+    public Object ref() {
+      Object got = refmemo.getOrDefault(start, UNDEF);
+      if (UNDEF == got) {
+        got = condenseMaterialise(cond, start);
+        refmemo.put(start, got);
+      }
+      return got;
+    }
+  }
+
+  public static CondenseView condenseview(Object cond) {
+    return condenseview(cond, null, null);
+  }
+
+  public static CondenseView condenseview(Object cond, Integer idx) {
+    return condenseview(cond, idx, null);
+  }
+
+  public static CondenseView condenseview(Object cond, Integer idx, Map<Integer, Object> memo) {
+    int start = null != idx ? idx : iscondensed(cond) ? condenseRoot(cond) : -1;
+    // The memo is threaded through at(), so every view into one structure
+    // hands out the same ref() node.
+    return new CondenseView(cond, start, null == memo ? new HashMap<>() : memo);
   }
 
 
@@ -3538,6 +4180,16 @@ public class Struct {
       return Struct.validate(d, s, o);
     }
     public List<Object> select(Object c, Object q) { return Struct.select(c, q); }
+
+    // Condense
+    public Map<String, Object> condense(Object v) { return Struct.condense(v); }
+    public Object expand(Object c) { return Struct.expand(c); }
+    public boolean iscondensed(Object v) { return Struct.iscondensed(v); }
+    public CondenseView condenseview(Object c) { return Struct.condenseview(c); }
+    public CondenseView condenseview(Object c, Integer i) { return Struct.condenseview(c, i); }
+    public CondenseView condenseview(Object c, Integer i, Map<Integer, Object> m) {
+      return Struct.condenseview(c, i, m);
+    }
 
     // Injection helpers
     public boolean checkPlacement(int m, String n, int pt, Injection i) {

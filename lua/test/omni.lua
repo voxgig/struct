@@ -64,4 +64,10 @@ local home = omnihome()
 
 package.path = package.path .. ';' .. home .. '/lua/?.lua'
 
+-- The other direction collides too: omni's runner loads its regex engine as
+-- `src.regex`, which `./?.lua` resolves to this port's src/regex.lua, an
+-- engine without the `find` that `/pattern/` expectations call. Nothing in
+-- the port requires `src.regex`, so that name can be omni's.
+package.loaded['src.regex'] = dofile(home .. '/lua/src/regex.lua')
+
 return require('compat.struct')

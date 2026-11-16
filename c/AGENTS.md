@@ -25,7 +25,7 @@ c/
 ├── tests/omni_bridge.h   # the bridge to voxgig/omni: both value models, both ways
 ├── tests/struct_corpus_test.c  # the shared corpus, run on the shared runner
 ├── tests/client_test.c   # the client path (DEF.client, client options, contextify)
-├── tests/smoke.c         # 13-check API smoke test
+├── tests/smoke.c         # API smoke test, and the condense checks the corpus cannot express
 ├── tests/regex_test.c    # regex unit checks
 ├── tests/regex_pathological.c  # pathological-input panel
 └── Makefile

@@ -180,6 +180,7 @@ java/target/
 # Kotlin / Gradle
 kotlin/build/
 kotlin/.gradle/
+kotlin/.kotlin/
 
 # C++ build artefacts
 cpp/corpus-scoreboard.json

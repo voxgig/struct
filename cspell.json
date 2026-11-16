@@ -274,6 +274,8 @@
     "ckeys",
     "collecterrs",
     "isabsent",
+    "iscondensed",
+    "cview",
     "toomni",
     "tostruct",
     "OIDC",

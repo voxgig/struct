@@ -75,6 +75,8 @@ to the canonical export list:
   `re_replace`, `re_test`, `re_escape`. Backed by the core `Regex`/`:re`.
 - **By-example engine:** `inject`, `transform`, `validate`, `select`, and the
   injector helpers `check_placement`, `injector_args`, `inject_child`.
+- **Condensed structures:** `condense`, `condenseview`, `expand`,
+  `iscondensed`.
 - **Builders / markers:** `jm`, `jt`, `skip/0`, `delete/0`, `noarg/0`, the
   `t_*` type constants and `m_keypre` / `m_keypost` / `m_val`.
 
@@ -98,9 +100,19 @@ S.transform(S.jm(["name", "alice"]), S.jm(["user", S.jm(["id", "`name`"])]))
 # validate: plain values are typed defaults; `$STRING` etc. are commands
 S.validate(S.jm(["a", "x"]), S.jm(["a", "`$STRING`"]))    # {a:x}
 
+# validate: `$NOF` counts the specs that admit a value, `$ALL` needs every one
+S.validate(S.jm(["a", 1]), S.jm(["a", S.jt(["`$NOF`", S.jm(["min", 1]), "`$STRING`", "`$NUMBER`"])]))  # {a:1}
+S.validate(2, S.jt(["`$ALL`", "`$NUMBER`", "`$INTEGER`"]))  # 2
+
 # select: MongoDB-style query over children
 S.select(S.jt([S.jm(["a", 1]), S.jm(["a", 2])]), S.jm(["a", S.jm(["`$GT`", 1])]))
 ```
+
+The count `$NOF` takes first is an integer, or a map with `min`, `max` or
+both, so `S.jm(["min", 1])` reads "at least one". There is no `$ONE`: write
+it as that count. A spec that names a checker `validate` does not define is
+rejected before any data is read, so a leftover `$ONE` raises
+`Unknown validator $ONE at field a.0.` rather than validating anything.
 
 ## Testing
 
@@ -111,15 +123,14 @@ the same code every other port runs. omni is consumed as a local checkout
 `test/runner.exs` finds via `$OMNI_HOME` or beside this repository, and is
 loaded only there: `make lint` compiles `lib/` alone (register 4.13).
 
-Every group the corpus defines runs except the three `condense` ones, which no
-port implements yet — 1358 entries in 72 groups — plus the two `check` entries
-(`DEF.client`, client-scoped options, `contextify`) and three single entries
-that are not part of any set.
+Every group the corpus defines runs — 1602 entries in 78 groups —
+plus the two `check` entries (`DEF.client`, client-scoped options,
+`contextify`) and three single entries that are not part of any set.
 
-Five entries are dropped, each named with its reason, and guarded so the corpus
+Nine entries are dropped, each named with its reason, and guarded so the corpus
 cannot move under it: this port has one `nil` for both undefined and null, so a
 bare nil coming back from a subject has to be read one way. Measured entry by
-entry, reading it as null costs 42 and reading it as absent costs those 5. Keep
+entry, reading it as null costs 42 and reading it as absent costs those 9. Keep
 it green, keep `python3 ../tools/check_parity.py` green, and add no runtime
 dependencies.
 

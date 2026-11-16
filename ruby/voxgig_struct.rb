@@ -203,6 +203,28 @@ module VoxgigStruct
     URI::DEFAULT_PARSER.escape(s, /[^A-Za-z0-9\-._~!*'()]/)
   end
 
+  R_LIST_KEY = /\A(0|-?[1-9][0-9]*)\z/.freeze
+
+  # A list key's index, or nil. As JavaScript reads list[key], that is an integral
+  # number or the string String(n) prints for one: "1" and "-1", not "01", "+1" or "-0".
+  def self._listkey(key)
+    return key if key.is_a?(Integer)
+    return key.to_i if key.is_a?(Float) && key.finite? && key == key.to_i
+    return key.to_i if key.is_a?(String) && R_LIST_KEY.match?(key)
+
+    nil
+  end
+
+  # The index key reads in a list of size items, or -1. With fromend, as getelem
+  # reads it, a negative key counts back from the end.
+  def self._listindex(key, size, fromend = false)
+    index = _listkey(key)
+    return -1 if index.nil?
+
+    index += size if fromend && index.negative?
+    index >= 0 && index < size ? index : -1
+  end
+
   # --- Internal getprop ---
   # Returns the value if found; otherwise returns alt (default is UNDEF)
   def self._getprop(val, key, alt = UNDEF)
@@ -210,17 +232,21 @@ module VoxgigStruct
     return alt if val.nil? || key.nil?
 
     if islist(val)
-      key = key.to_i if key.to_s =~ /\A\d+\z/
-      unless key.is_a?(Numeric) && key >= 0 && key < val.size
+      index = _listindex(key, val.size)
+      if index.negative?
         log { "(_getprop) index #{key.inspect} out of bounds; returning alt" }
         return alt
       end
-      result = val[key]
+      result = val[index]
       log { "(_getprop) returning #{result.inspect} from array for key #{key}" }
       result
     elsif ismap(val)
       key_str = key.to_s
-      if val.key?(key_str)
+      # As in JavaScript, only a string or a number names a map entry: true and [1] do not.
+      if !key.is_a?(String) && !key.is_a?(Numeric)
+        log { "(_getprop) key #{key.inspect} names no entry; returning alt" }
+        alt
+      elsif val.key?(key_str)
         result = val[key_str]
         log { "(_getprop) found key #{key_str.inspect} in hash, returning #{result.inspect}" }
         result
@@ -286,6 +312,7 @@ module VoxgigStruct
   def self.setprop(parent, key, val = :no_val_provided)
     log { ">>> setprop called with parent=#{parent.inspect}, key=#{key.inspect}, val=#{val.inspect}" }
     return parent unless iskey(key)
+    raise S_CONDENSED_IMMUTABLE if iscondensed(parent)
 
     if ismap(parent)
       key_str = key.to_s
@@ -295,11 +322,9 @@ module VoxgigStruct
         parent[key_str] = val
       end
     elsif islist(parent)
-      begin
-        key_i = Integer(key)
-      rescue ArgumentError
-        return parent
-      end
+      key_i = _listkey(key)
+      return parent if key_i.nil?
+
       if val == :no_val_provided
         parent.delete_at(key_i) if key_i >= 0 && key_i < parent.length
       elsif key_i >= 0
@@ -321,7 +346,7 @@ module VoxgigStruct
       valstr = val
     else
       begin
-        v = val.is_a?(Hash) ? sorted(val) : val
+        v = sorted(val)
         valstr = JSON.generate(v)
         valstr = valstr.gsub('"', '')
       rescue StandardError
@@ -462,15 +487,9 @@ module VoxgigStruct
 
   def self.getelem(val, key, alt = UNDEF)
     out = UNDEF
-    if islist(val) && !key.nil? && !key.equal?(UNDEF)
-      begin
-        nkey = key.to_i
-        if key.to_s.strip.match?(/\A-?\d+\z/)
-          nkey = val.length + nkey if nkey.negative?
-          out = nkey >= 0 && nkey < val.length ? val[nkey] : UNDEF
-        end
-      rescue StandardError
-      end
+    if islist(val)
+      nkey = _listindex(key, val.length, true)
+      out = val[nkey] unless nkey.negative?
     end
     # A null (or absent) slot counts as "no value" — the same Group A rule
     # getprop applies (canonical TS: `if (null == out) return alt`).
@@ -504,18 +523,14 @@ module VoxgigStruct
 
   def self.delprop(parent, key)
     return parent unless iskey(key)
+    raise S_CONDENSED_IMMUTABLE if iscondensed(parent)
 
     if ismap(parent)
       ks = strkey(key)
       parent.delete(ks)
     elsif islist(parent)
-      return parent unless key.to_s.match?(/\A-?\d+\z/)
-
-      begin
-        ki = key.to_i
-        parent.delete_at(ki) if ki >= 0 && ki < parent.length
-      rescue StandardError
-      end
+      ki = _listkey(key)
+      parent.delete_at(ki) if !ki.nil? && ki >= 0 && ki < parent.length
     end
     parent
   end
@@ -881,13 +896,33 @@ module VoxgigStruct
   def self.getpath(store, path, injdef = nil)
     # Operate on a string array.
     if islist(path)
-      parts = path.dup
+      parts = []
+      path.each do |part|
+        if part.is_a?(Numeric)
+          parts << _condensestr(part)
+        elsif part.is_a?(String)
+          parts << part
+        else
+          return nil
+        end
+      end
     elsif path.is_a?(String)
       parts = path.split(S_DT, -1)
     elsif path.is_a?(Numeric)
-      parts = [strkey(path)]
+      parts = [_condensestr(path)]
     else
       return nil
+    end
+
+    # A condensed store answers a path as the node it was built from does,
+    # touching only the nodes on the path. A base needs the whole node.
+    if iscondensed(store)
+      if _injdef_prop(injdef, 'base').nil?
+        # A stored null reads as absent, as through getprop.
+        return condenseMaterialise(store, condenseResolve(store, store[S_condroot], parts))
+      end
+
+      store = expand(store)
     end
 
     val = store
@@ -999,6 +1034,7 @@ module VoxgigStruct
   S_DSPEC = '$SPEC'.freeze
 
   R_FULL_INJECT = /\A`(\$[A-Z]+|[^`]*)[0-9]*`\z/.freeze
+  R_CHECKER_NAME = /\A\$[A-Z]+\z/.freeze
   R_PART_INJECT = /`([^`]*)`/.freeze
   R_META_PATH = /\A([^$]+)\$([=~])(.+)\z/.freeze
   R_DOUBLE_DOLLAR = /\$\$/.freeze
@@ -1144,7 +1180,11 @@ module VoxgigStruct
 
     inj.val = val
 
-    return getprop(inj.root, S_DTOP) if inj.prior.nil? && inj.root && haskey(inj.root, S_DTOP)
+    # Read the top literally: a null stored there is the result.
+    if inj.prior.nil? && ismap(inj.root)
+      top = _getprop(inj.root, S_DTOP)
+      return top unless top.equal?(UNDEF)
+    end
     return getprop(inj.parent, S_DTOP) if inj.key == S_DTOP && inj.parent && haskey(inj.parent, S_DTOP)
 
     val
@@ -1695,6 +1735,142 @@ module VoxgigStruct
                 end}#{needtype}, but found #{typename(vt) + S_VIZ unless v.nil? || v.equal?(UNDEF)}#{vs}."
   end
 
+  # Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
+  VALIDATE_NAMES = %w[$TOP $SPEC $BT $DS $WHEN $ANNO $REF $FORMAT $APPLY $OPEN].freeze
+
+  # Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
+  def self._checknames(spec, store, path, errs)
+    name = _refname(spec)
+    unless name.nil?
+      errs << "Unknown validator #{name} at field #{pathify(path)}." if _unknownname(name, store)
+      return
+    end
+
+    return if islist(spec) && _refname(spec[0]) == '$EXACT'
+
+    keysof(spec).each do |key|
+      _checknames(key, store, path, errs) if ismap(spec)
+      _checknames(_getprop(spec, key), store, flatten([path, key]), errs)
+    end
+  end
+
+  # The name a whole-string reference gives, when it is a checker name in any case.
+  def self._refname(val)
+    m = val.is_a?(String) ? R_FULL_INJECT.match(val) : nil
+    !m.nil? && R_CHECKER_NAME.match?(m[1].upcase) ? m[1] : nil
+  end
+
+  # Unknown: undefined and upper case, or a defined name in another case. Null disables a name.
+  def self._unknownname(name, store)
+    known = ->(n) { VALIDATE_NAMES.include?(n) || !getprop(store, n).nil? }
+    upper = name.upcase
+    !known.call(name) && (upper == name || known.call(upper))
+  end
+
+  # The data value at a list directive's slot. The directive's own dparent was
+  # read with getprop, which reports a stored null as absent.
+  def self._slotval(inj)
+    prior = inj.prior
+    prior.nil? ? inj.dparent : _getprop(prior.dparent, prior.key)
+  end
+
+  # Replace a list directive's list with the data value. setval deletes on
+  # nil, so a null is set as itself.
+  def self._setslot(inj, val)
+    return inj.setval(val, 2) unless val.nil?
+
+    setprop(getelem(inj.nodes, -2), getelem(inj.path, -2), nil)
+  end
+
+  # JSON equality: numbers by value, lists in order, maps by key in any order.
+  def self._deepequal(a, b)
+    return true if a.equal?(b)
+
+    atype = typify(a)
+    btype = typify(b)
+    return a == b if T_number.anybits?(atype) && T_number.anybits?(btype)
+    return a == b if T_string.anybits?(atype) && T_string.anybits?(btype)
+    return false if atype != btype || !isnode(a)
+
+    akeys = keysof(a)
+    bkeys = keysof(b)
+    return false if akeys.length != bkeys.length
+
+    akeys.each_with_index.all? do |k, kI|
+      k == bkeys[kI] && _deepequal(_getprop(a, k), _getprop(b, k))
+    end
+  end
+
+  # Every member val has is in out, unchanged. A member only out has is a
+  # default the spec supplied, and is ignored.
+  def self._keeps(val, out)
+    return true if val.equal?(UNDEF)
+    return _deepequal(val, out) if !isnode(val) || islist(val) != islist(out) || !isnode(out)
+
+    keysof(val).all? { |k| _keeps(_getprop(val, k), _getprop(out, k)) }
+  end
+
+  # A spec admits a value when validating the value against it finds no error
+  # and gives back the value as it is.
+  def self._admits(val, spec, inj, store)
+    terrs = []
+
+    vstore = merge([{}, store], 1)
+    vstore[S_DTOP] = val
+
+    out = validate(val, spec, {
+                     'extra' => vstore,
+                     'errs' => terrs,
+                     'meta' => inj.meta
+                   })
+
+    terrs.empty? && _keeps(val, out)
+  end
+
+  # The bounds of a $NOF count, and the words for it, which are nil when the
+  # count is invalid. Without a max, the bound is the number of specs.
+  def self._nofcount(count, numtvals)
+    isnat = ->(n) { T_integer.anybits?(typify(n)) && n >= 0 }
+    # JavaScript has one number type, so 2.0 is the count 2.
+    whole = ->(n) { n.is_a?(Float) && n.finite? && n == n.to_i ? n.to_i : n }
+
+    count = whole.call(count)
+    return [count, count, count.zero? ? 'none' : "exactly #{count}"] if isnat.call(count)
+
+    min = whole.call(_getprop(count, 'min'))
+    max = whole.call(_getprop(count, 'max'))
+    nomin = min.equal?(UNDEF)
+    nomax = max.equal?(UNDEF)
+
+    valid =
+      ismap(count) &&
+      size(count).positive? &&
+      size(count) == (nomin ? 0 : 1) + (nomax ? 0 : 1) &&
+      (nomin || isnat.call(min)) &&
+      (nomax || isnat.call(max)) &&
+      (nomin || nomax || min <= max)
+
+    return [0, 0, nil] unless valid
+
+    lo = nomin ? 0 : min
+    hi = nomax ? numtvals : max
+
+    desc =
+      if nomax
+        "at least #{lo}"
+      elsif hi.zero?
+        'none'
+      elsif nomin
+        "at most #{hi}"
+      elsif lo == hi
+        "exactly #{lo}"
+      else
+        "#{lo} to #{hi}"
+      end
+
+    [lo, hi, desc]
+  end
+
   def self.validate_STRING(inj, _val = nil, _ref = nil, _store = nil)
     out = getprop(inj.dparent, inj.key)
     t = typify(out)
@@ -1715,7 +1891,7 @@ module VoxgigStruct
     S_decimal => ->(v) { v.is_a?(Float) },
     S_boolean => ->(v) { [true, false].include?(v) },
     S_null => lambda(&:nil?),
-    S_nil => ->(v) { v.equal?(UNDEF) },
+    S_nil => ->(v) { v.nil? || v.equal?(UNDEF) },
     S_map => ->(v) { v.is_a?(Hash) },
     S_list => ->(v) { v.is_a?(Array) },
     S_function => ->(v) { v.respond_to?(:call) },
@@ -1729,20 +1905,32 @@ module VoxgigStruct
     tname = ref.is_a?(String) && ref.length > 1 ? ref[1..].downcase : S_any
     idx = TYPENAME.index(tname)
     typev = idx ? (1 << (31 - idx)) : 0
+
+    # $NIL is absent or null.
     typev |= T_null if tname == S_nil
 
-    out = getprop(inj.dparent, inj.key)
+    # Read literally: a missing field, or a trial's UNDEF root, is no value, not null.
+    out = _getprop(inj.dparent, inj.key)
     t = typify(out)
 
     if t.nobits?(typev)
       inj.errs << _invalidTypeMsg(inj.path, tname, t, out, 'V1001')
       return nil
     end
-    out
+    _keepnull(inj, out)
   end
 
   def self.validate_ANY(inj, _val = nil, _ref = nil, _store = nil)
-    getprop(inj.dparent, inj.key)
+    _keepnull(inj, getprop(inj.dparent, inj.key))
+  end
+
+  # A checker's accepted value, where a null the data holds stays in the output:
+  # returned as nil, inject's setval would delete the slot instead.
+  def self._keepnull(inj, out)
+    return out unless out.nil? && inj.mode == S_MVAL && !_getprop(inj.dparent, inj.key).equal?(UNDEF)
+
+    setprop(inj.parent, inj.key, nil)
+    SKIP
   end
 
   def self.validate_CHILD(inj, _val = nil, _ref = nil, _store = nil)
@@ -1760,7 +1948,7 @@ module VoxgigStruct
       if tval.nil?
         tval = {}
       elsif !ismap(tval)
-        inj.errs << _invalidTypeMsg(path[0...-1], S_object, typify(tval), tval, 'V0220')
+        # _validation reports the mismatch, once.
         return nil
       end
 
@@ -1787,7 +1975,6 @@ module VoxgigStruct
       end
 
       unless islist(inj.dparent)
-        inj.errs << _invalidTypeMsg(path[0...-1], S_list, typify(inj.dparent), inj.dparent, 'V0230')
         inj.keyI = size(parent)
         return inj.dparent
       end
@@ -1816,62 +2003,6 @@ module VoxgigStruct
     nil
   end
 
-  def self.validate_ONE(inj, _val = nil, _ref = nil, store = nil)
-    mode = inj.mode
-    parent = inj.parent
-    keyI = inj.keyI
-
-    return unless mode == S_MVAL
-
-    if !islist(parent) || keyI != 0
-      inj.errs << "The $ONE validator at field #{pathify(inj.path, 1, 1)} must be the first element of an array."
-      return nil
-    end
-
-    inj.keyI = size(inj.keys)
-
-    # DELETE the node when the data has no value there, as ts does: setval's
-    # nil-with-ancestor case preserves the key, so an optional entry the
-    # caller omitted came back as a nil-valued key rather than staying absent.
-    if inj.dparent.nil?
-      delprop(getelem(inj.nodes, -2), getelem(inj.path, -2))
-    else
-      inj.setval(inj.dparent, 2)
-    end
-
-    inj.path = inj.path[0...-1]
-
-    tvals = parent[1..]
-    if size(tvals).zero?
-      inj.errs << "The $ONE validator at field #{pathify(inj.path, 1, 1)} must have at least one argument."
-      return nil
-    end
-
-    tvals.each do |tval|
-      terrs = []
-      vstore = merge([{}, store], 1)
-      vstore[S_DTOP] = inj.dparent
-
-      vcurrent = validate(inj.dparent, tval, {
-                            'extra' => vstore,
-                            'errs' => terrs,
-                            'meta' => inj.meta
-                          })
-
-      inj.setval(vcurrent, -2)
-      return nil if size(terrs).zero?
-    end
-
-    valdesc = items(tvals).map { |n| stringify(n[1]) }.join(', ')
-    valdesc = valdesc.gsub(/`\$([A-Z]+)`/) { ::Regexp.last_match(1).downcase }
-
-    inj.errs << _invalidTypeMsg(
-      inj.path,
-      (size(tvals) > 1 ? 'one of ' : '') + valdesc,
-      typify(inj.dparent), inj.dparent, 'V0210'
-    )
-  end
-
   def self.validate_EXACT(inj, _val = nil, _ref = nil, _store = nil)
     mode = inj.mode
     parent = inj.parent
@@ -1884,25 +2015,23 @@ module VoxgigStruct
         return nil
       end
 
+      cval = _slotval(inj)
+
       inj.keyI = size(inj.keys)
-      inj.setval(inj.dparent, 2)
+
+      # Replace [$EXACT, ...] with the data value; SKIP keeps inject off the detached list.
+      _setslot(inj, cval)
+
       inj.path = inj.path[0...-1]
-      inj.key = getelem(inj.path, -1)
 
       tvals = parent[1..]
       if size(tvals).zero?
         inj.errs << "The $EXACT validator at field #{pathify(inj.path, 1, 1)} must have at least one argument."
-        return nil
+        return SKIP
       end
 
-      currentstr = nil
       tvals.each do |tval|
-        exactmatch = (tval == inj.dparent)
-        if !exactmatch && isnode(tval)
-          currentstr ||= stringify(inj.dparent)
-          exactmatch = stringify(tval) == currentstr
-        end
-        return nil if exactmatch
+        return SKIP if _deepequal(tval, cval)
       end
 
       valdesc = items(tvals).map { |n| stringify(n[1]) }.join(', ')
@@ -1911,11 +2040,82 @@ module VoxgigStruct
       inj.errs << _invalidTypeMsg(
         inj.path,
         "#{'value ' unless size(inj.path) > 1}exactly equal to #{'one of ' unless size(tvals) == 1}#{valdesc}",
-        typify(inj.dparent), inj.dparent, 'V0110'
+        typify(cval), cval, 'V0110'
       )
+
+      SKIP
     else
       delprop(parent, key)
     end
+  end
+
+  # Count the specs that admit the value: ['`$NOF`', count, spec, ...], where
+  # count is an integer, or a map holding min, max or both.
+  def self.validate_NOF(inj, _val = nil, _ref = nil, store = nil)
+    _validatecount(inj, store, '$NOF', true)
+  end
+
+  # Every spec admits the value: ['`$ALL`', spec, ...].
+  def self.validate_ALL(inj, _val = nil, _ref = nil, store = nil)
+    _validatecount(inj, store, '$ALL', false)
+  end
+
+  # The counting list directives. Without a count, every spec has to admit.
+  def self._validatecount(inj, store, name, counted)
+    parent = inj.parent
+
+    return nil unless inj.mode == S_MVAL
+
+    if !islist(parent) || inj.keyI != 0
+      inj.errs << "The #{name} validator at field #{pathify(inj.path, 1, 1)} must be the first element of an array."
+      return nil
+    end
+
+    cval = _slotval(inj)
+
+    inj.keyI = size(inj.keys)
+
+    # Replace the directive's list with the data value. Each return is SKIP, so
+    # that inject leaves the detached list alone and validates nothing in it.
+    _setslot(inj, cval)
+
+    inj.path = slice(inj.path, -1)
+
+    count = counted ? _getprop(parent, 1) : UNDEF
+    tvals = slice(parent, counted ? 2 : 1)
+    numtvals = size(tvals)
+    field = "The #{name} validator at field #{pathify(inj.path, 1)}"
+
+    if numtvals.zero?
+      inj.errs << "#{field}#{counted ? ' must have a count and' : ' must have'} at least one argument."
+      return SKIP
+    end
+
+    lo, hi, countdesc = counted ? _nofcount(count, numtvals) : [numtvals, numtvals, 'all']
+
+    if countdesc.nil?
+      inj.errs << "#{field} has an invalid count: #{stringify(count)}."
+      return SKIP
+    end
+
+    admitted = 0
+    tvals.each_with_index do |tval, tI|
+      left = numtvals - tI
+
+      # Stop once the specs left cannot change the verdict.
+      break if hi < admitted || admitted + left < lo || (lo <= admitted && admitted + left <= hi)
+
+      admitted += 1 if _admits(cval, tval, inj, store)
+    end
+
+    if admitted < lo || hi < admitted
+      valdesc = items(tvals).map { |n| stringify(n[1]) }.join(', ')
+      valdesc = valdesc.gsub(/`\$([A-Z]+)`/) { ::Regexp.last_match(1).downcase }
+
+      inj.errs << _invalidTypeMsg(inj.path, "#{countdesc} of #{valdesc}", typify(cval), cval, 'V0310')
+    end
+
+    SKIP
   end
 
   # --- _validation: Modify callback for validate ---
@@ -2023,8 +2223,9 @@ module VoxgigStruct
                       '$INSTANCE' => method(:validate_TYPE),
                       '$ANY' => method(:validate_ANY),
                       '$CHILD' => method(:validate_CHILD),
-                      '$ONE' => method(:validate_ONE),
-                      '$EXACT' => method(:validate_EXACT)
+                      '$EXACT' => method(:validate_EXACT),
+                      '$NOF' => method(:validate_NOF),
+                      '$ALL' => method(:validate_ALL)
                     },
                     (extra.nil? ? {} : extra),
                     { S_DERRS => errs }
@@ -2033,13 +2234,22 @@ module VoxgigStruct
     meta = _injdef_prop(injdef, 'meta') || {}
     setprop(meta, S_BEXACT, getprop(meta, S_BEXACT, false)) if ismap(meta)
 
-    out = transform(data, spec, {
-                      'meta' => meta,
-                      'extra' => store,
-                      'modify' => method(:_validation),
-                      'handler' => method(:_validatehandler),
-                      'errs' => errs
-                    })
+    # A spec that names an unknown checker validates nothing.
+    numerrs = errs.length
+    _checknames(spec, store, [], errs)
+
+    out =
+      if numerrs < errs.length
+        clone(data)
+      else
+        transform(data, spec, {
+                    'meta' => meta,
+                    'extra' => store,
+                    'modify' => method(:_validation),
+                    'handler' => method(:_validatehandler),
+                    'errs' => errs
+                  })
+      end
 
     raise errs.join(' | ') if !errs.empty? && !collect
 
@@ -2214,6 +2424,9 @@ module VoxgigStruct
 
   # --- setpath ---
   def self.setpath(store, path, val, injdef = nil)
+    # Same contract as setprop/delprop: a condensed store is immutable.
+    raise S_CONDENSED_IMMUTABLE if iscondensed(store)
+
     pt = typify(path)
     if T_list.anybits?(pt)
       parts = path
@@ -2247,6 +2460,337 @@ module VoxgigStruct
     end
 
     parent
+  end
+
+  # --- Condensed structures ---
+
+  CONDENSE_VERSION = 1
+
+  CONDENSE_MAP = 0
+  CONDENSE_LIST = 1
+  CONDENSE_STR = 2
+  CONDENSE_NUM = 3
+  CONDENSE_TRUE = 4
+  CONDENSE_FALSE = 5
+  CONDENSE_NULL = 6
+
+  S_condense = '$condense'.freeze
+  S_condsym = 'sym'.freeze
+  S_condnode = 'node'.freeze
+  S_condroot = 'root'.freeze
+
+  S_CONDENSED_IMMUTABLE =
+    'struct: condensed structures are immutable - expand() first, then modify the copy'.freeze
+
+  # The item at index i, or nil. A negative or fractional i is no item, as in JavaScript.
+  def self._condenseat(list, i)
+    i = i.to_i if i.is_a?(Float) && i.finite? && i == i.to_i
+    return nil unless islist(list) && i.is_a?(Integer) && i >= 0 && i < list.length
+
+    list[i]
+  end
+
+  # A path part's string form, as JavaScript writes it: nil is 'null', 1.0 is '1'.
+  def self._condensestr(key)
+    return key if key.is_a?(String)
+    return 'null' if key.nil?
+    return key.to_i.to_s if key.is_a?(Float) && key.finite? && key == key.to_i
+
+    key.to_s
+  end
+
+  # Reads with fetch, which never runs a Hash default proc.
+  def self.iscondensed(val = UNDEF)
+    return false unless ismap(val)
+
+    # The version must MATCH, not merely be numeric: a future profile would
+    # otherwise be decoded under this one's schema.
+    version = val.fetch(S_condense, nil)
+    version.is_a?(Numeric) && version == CONDENSE_VERSION &&
+      islist(val.fetch(S_condsym, nil)) &&
+      islist(val.fetch(S_condnode, nil)) &&
+      val.fetch(S_condroot, nil).is_a?(Numeric)
+  end
+
+  # Condense any JSON-shaped node. Pure: the same input always produces a
+  # byte-identical result, on every port.
+  def self.condense(val = UNDEF)
+    # Pass one: every distinct map key and string value, once, sorted.
+    symset = {}
+    collect = lambda do |n|
+      if ismap(n)
+        keysof(n).each do |k|
+          symset[k] = true
+          collect.call(n[k])
+        end
+      elsif islist(n)
+        n.each { |item| collect.call(item) }
+      elsif n.is_a?(String)
+        symset[n] = true
+      end
+    end
+    collect.call(val)
+
+    # Ruby sorts strings by byte, which for UTF-8 is code point order.
+    sym = symset.keys.sort
+    symid = {}
+    sym.each_with_index { |s, i| symid[s] = i }
+
+    # Pass two: build post-order, interning on the encoding. Because children
+    # are built first, identical subtrees have already been interned by the
+    # time a parent references them, so sharing costs nothing extra.
+    node = []
+    seen = {}
+    intern = lambda do |enc, enckey = enc|
+      hit = seen[enckey]
+      return hit unless hit.nil?
+
+      idx = node.length
+      node << enc
+      seen[enckey] = idx
+      idx
+    end
+
+    build = lambda do |n|
+      if ismap(n)
+        enc = [CONDENSE_MAP]
+        # keysof sorts, so the key ids ascend and lookup can bisect.
+        keysof(n).each do |k|
+          enc << symid[k]
+          enc << build.call(n[k])
+        end
+        intern.call(enc)
+      elsif islist(n)
+        intern.call([CONDENSE_LIST] + n.map { |item| build.call(item) })
+      elsif n.is_a?(String)
+        intern.call([CONDENSE_STR, symid[n]])
+      elsif n.is_a?(Numeric)
+        # Keyed by value, so 1 and 1.0 are one number.
+        numkey = n.is_a?(Float) && n.finite? && n == n.to_i ? n.to_i : n
+        intern.call([CONDENSE_NUM, n], [CONDENSE_NUM, numkey])
+      elsif n == true
+        intern.call([CONDENSE_TRUE])
+      elsif n == false
+        intern.call([CONDENSE_FALSE])
+      else
+        intern.call([CONDENSE_NULL])
+      end
+    end
+
+    root = build.call(val)
+
+    out = {}
+    out[S_condense] = CONDENSE_VERSION
+    out[S_condsym] = sym
+    out[S_condnode] = node
+    out[S_condroot] = root
+    out
+  end
+
+  # Resolve a symbol to its id by bisecting the sorted symbol table. -1 when
+  # the string does not occur anywhere in the structure, which is itself a fast
+  # negative answer for a key lookup.
+  def self.condenseSymId(cond, key)
+    sym = _getprop(cond, S_condsym, nil)
+    lo = 0
+    hi = islist(sym) ? sym.length - 1 : -1
+    while lo <= hi
+      mid = (lo + hi) >> 1
+      s = sym[mid]
+      return mid if s == key
+
+      if s.is_a?(String) && s < key
+        lo = mid + 1
+      else
+        hi = mid - 1
+      end
+    end
+    -1
+  end
+
+  # The node index of `key` inside node `idx`, or -1. Touches only this node.
+  def self.condenseChild(cond, idx, key)
+    enc = _condenseat(_getprop(cond, S_condnode, nil), idx)
+    kind = _condenseat(enc, 0)
+
+    if kind == CONDENSE_MAP
+      return -1 unless key.is_a?(String) || key.is_a?(Numeric)
+
+      symid = condenseSymId(cond, _condensestr(key))
+      return -1 if symid.negative?
+
+      # Pairs live at [1,2], [3,4], ... with keys ascending: bisect the pairs.
+      lo = 0
+      hi = ((enc.length - 1) / 2) - 1
+      while lo <= hi
+        mid = (lo + hi) >> 1
+        k = enc[1 + (mid * 2)]
+        return enc[2 + (mid * 2)] if k == symid
+
+        if k.is_a?(Numeric) && k < symid
+          lo = mid + 1
+        else
+          hi = mid - 1
+        end
+      end
+      return -1
+    end
+
+    if kind == CONDENSE_LIST
+      # Read as an ordinary list is, so condensing never changes which value a path selects.
+      i = _listindex(key, enc.length - 1)
+      return i.negative? ? -1 : enc[1 + i]
+    end
+
+    -1
+  end
+
+  # Walk a path from a starting node, returning the node index or -1.
+  def self.condenseResolve(cond, idx, path)
+    parts =
+      if islist(path)
+        path
+      elsif path.is_a?(String)
+        path == S_MT ? [] : path.split(S_DT, -1)
+      elsif path.nil? || path.equal?(UNDEF)
+        []
+      else
+        [_condensestr(path)]
+      end
+
+    at = idx
+    parts.each do |part|
+      return -1 unless at.is_a?(Numeric) && !at.negative?
+      next if part == S_MT
+
+      at = condenseChild(cond, at, part)
+    end
+    # A child index that is not a number names no node.
+    at.is_a?(Numeric) ? at : -1
+  end
+
+  # A missing node materialises as nil, so no UNDEF reaches a container.
+  def self.condenseMaterialise(cond, idx)
+    sym = _getprop(cond, S_condsym, nil)
+    node = _getprop(cond, S_condnode, nil)
+
+    rebuild = lambda do |i|
+      enc = _condenseat(node, i)
+      return nil if enc.nil?
+
+      case _condenseat(enc, 0)
+      when CONDENSE_MAP
+        out = {}
+        (1...enc.length).step(2) { |j| out[_condenseat(sym, enc[j])] = rebuild.call(_condenseat(enc, j + 1)) }
+        out
+      when CONDENSE_LIST
+        (1...enc.length).map { |j| rebuild.call(enc[j]) }
+      when CONDENSE_STR
+        _condenseat(sym, _condenseat(enc, 1))
+      when CONDENSE_NUM
+        _condenseat(enc, 1)
+      when CONDENSE_TRUE
+        true
+      when CONDENSE_FALSE
+        false
+      end
+    end
+
+    rebuild.call(idx)
+  end
+
+  # Fully materialise a condensed structure. The escape hatch: correct for any
+  # caller, but it gives up every benefit of condensing, so prefer a view or a
+  # path read.
+  def self.expand(cond = UNDEF)
+    return cond unless iscondensed(cond)
+
+    condenseMaterialise(cond, cond[S_condroot])
+  end
+
+  # The keys of node `idx`, WITHOUT materialising any of its values. This is
+  # the point of the whole exercise for enumeration: listing the names in a
+  # large collection should cost a symbol-table read, not a full decode.
+  def self.condenseKeys(cond, idx)
+    enc = _condenseat(_getprop(cond, S_condnode, nil), idx)
+    case _condenseat(enc, 0)
+    when CONDENSE_MAP
+      sym = _getprop(cond, S_condsym, nil)
+      (1...enc.length).step(2).map { |j| _condenseat(sym, enc[j]) }
+    when CONDENSE_LIST
+      (1...enc.length).map { |j| (j - 1).to_s }
+    else
+      []
+    end
+  end
+
+  # A cursor into a condensed structure. Reads resolve by integer index and
+  # touch only the nodes on the path, so the cost of a lookup is proportional
+  # to path depth and result size, never to total structure size.
+  class CondenseView
+    def initialize(cond, start, refmemo)
+      @cond = cond
+      @start = start
+      # Shared materialisations, handed out ONLY by ref(). Threaded through
+      # at() so every cursor into the same structure shares one memo.
+      @refmemo = refmemo
+    end
+
+    # The value at path, materialised. Scalars come back directly; a
+    # container comes back as an independent copy.
+    def get(path = nil)
+      VoxgigStruct.condenseMaterialise(@cond, VoxgigStruct.condenseResolve(@cond, @start, path))
+    end
+
+    # Key names at path, with no value decoding at all.
+    def keys(path = nil)
+      at = VoxgigStruct.condenseResolve(@cond, @start, path)
+      at.negative? ? [] : VoxgigStruct.condenseKeys(@cond, at)
+    end
+
+    def has(path = nil)
+      !VoxgigStruct.condenseResolve(@cond, @start, path).negative?
+    end
+
+    # Chainable cursor. Cheap: no decoding happens here.
+    def at(path = nil)
+      VoxgigStruct.condenseview(@cond, VoxgigStruct.condenseResolve(@cond, @start, path), @refmemo)
+    end
+
+    def value
+      VoxgigStruct.condenseMaterialise(@cond, @start)
+    end
+
+    def size
+      enc = VoxgigStruct._condenseat(VoxgigStruct._getprop(@cond, S_condnode, nil), @start)
+      case VoxgigStruct._condenseat(enc, 0)
+      when CONDENSE_MAP then (enc.length - 1) / 2
+      when CONDENSE_LIST then enc.length - 1
+      else 0
+      end
+    end
+
+    def exists
+      !@start.negative?
+    end
+
+    # DANGER, and named to say so. Returns a SHARED materialisation: the same
+    # object for the same node, every time. Mutating it corrupts every other
+    # reader of that node, including ones reached by a different path,
+    # because the structure is a DAG. Use value() unless a profile says this
+    # matters.
+    def ref
+      @refmemo[@start] = VoxgigStruct.condenseMaterialise(@cond, @start) unless @refmemo.key?(@start)
+      @refmemo[@start]
+    end
+  end
+
+  private_constant :CondenseView
+
+  def self.condenseview(cond = UNDEF, idx = nil, memo = nil)
+    start = idx.nil? || idx.equal?(UNDEF) ? (iscondensed(cond) ? cond[S_condroot] : -1) : idx
+    # A start that is not a number reads as no node, as it does in JavaScript.
+    CondenseView.new(cond, start.is_a?(Numeric) ? start : -1, memo.nil? ? {} : memo)
   end
 
   # --- Injection class ---

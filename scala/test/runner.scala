@@ -184,6 +184,144 @@ object Runner {
     top
   }
 
+  // ---------------- condense: what the corpus cannot express ----------------
+
+  // Identity, sharing, laziness and the immutability contract, one recorded
+  // check each, named as canonical's port-local tests are.
+  def runLocal(group: String)(ok: => Boolean): Unit =
+    try record(group, ok, "check failed") catch { case e: Throwable => record(group, false, errmsg(e)) }
+
+  def raisesImmutable(call: => Any): Boolean =
+    try { call; false } catch { case StructError(m) => m.contains("immutable") }
+
+  def runCondenseLocal(): Unit = {
+    runLocal("condense-deterministic") {
+      val src = jm(VStr("b"), jm(VStr("m"), VStr("GET")), VStr("a"), jm(VStr("m"), VStr("GET")),
+        VStr("l"), jt(VNum(1), VStr("x"), VBool(true)))
+      // Insertion order must not change the bytes: keys are stored by symbol id.
+      val reordered = jm(VStr("l"), jt(VNum(1), VStr("x"), VBool(true)),
+        VStr("a"), jm(VStr("m"), VStr("GET")), VStr("b"), jm(VStr("m"), VStr("GET")))
+      jsonify(condense(src)) == jsonify(condense(src)) && jsonify(condense(src)) == jsonify(condense(reordered))
+    }
+
+    runLocal("condense-shares-identical-subtrees") {
+      def nodes(c: Value): Int = size(getprop(c, VStr("node")))
+      val one = condense(jm(VStr("x"), jm(VStr("m"), VStr("GET"), VStr("p"), VStr("/1"))))
+      val two = condense(jm(VStr("x"), jm(VStr("m"), VStr("GET"), VStr("p"), VStr("/1")),
+        VStr("y"), jm(VStr("m"), VStr("GET"), VStr("p"), VStr("/1"))))
+      val three = condense(jm(VStr("x"), jm(VStr("m"), VStr("GET")), VStr("y"), jm(VStr("m"), VStr("PUT")),
+        VStr("z"), jm(VStr("m"), VStr("POST"))))
+      // A second reference to an identical subtree adds no node.
+      nodes(two) == nodes(one) && nodes(three) > nodes(two)
+    }
+
+    runLocal("condense-round-trips-by-value") {
+      val src = jm(VStr("a"), jm(VStr("b"), jt(VNum(1), VStr("x"), VBool(true), VNull, jm())), VStr("c"), VStr("z"))
+      expand(condense(src)) == src
+    }
+
+    runLocal("condense-getpath-is-transparent") {
+      val src = jm(VStr("entity"), jm(VStr("p"), jm(VStr("op"), jm(VStr("list"), jm(VStr("method"), VStr("GET"))))))
+      val c = condense(src)
+      val path = jt(VStr("entity"), VStr("p"), VStr("op"), VStr("list"))
+      getpath(c, path) == getpath(src, path) &&
+        getpath(c, jt(VStr("entity"), VStr("p"), VStr("op"), VStr("list"), VStr("method"))) == VStr("GET") &&
+        getpath(c, jt(VStr("entity"), VStr("nope"))) == Noval
+    }
+
+    runLocal("condense-view-reads-without-materialising") {
+      val c = condense(jm(VStr("entity"), jm(VStr("a"), jm(VStr("v"), VNum(1)), VStr("b"), jm(VStr("v"), VNum(2))),
+        VStr("other"), VNum(9)))
+      val v = condenseview(c)
+      // keys() answers from the node and symbol tables alone.
+      v.keys(VStr("entity")) == Seq("a", "b") &&
+        v.at(VStr("entity")).at(VStr("b")).get(VStr("v")) == VNum(2) &&
+        v.has(VStr("entity.a")) && !v.has(VStr("entity.zz")) && v.size() == 2
+    }
+
+    runLocal("condense-value-copies-and-ref-shares") {
+      val v = condenseview(condense(jm(VStr("a"), jm(VStr("m"), VStr("GET")), VStr("b"), jm(VStr("m"), VStr("GET")))))
+      // a and b share one node; get() must not let that be observable.
+      val x = v.get(VStr("a"))
+      val y = v.get(VStr("b"))
+      val copies = x == y && (x ne y)
+      setprop(x, VStr("m"), VStr("MUTATED"))
+      // ref() is the opt-in escape hatch and does share.
+      copies && getprop(v.get(VStr("b")), VStr("m")) == VStr("GET") && (v.at(VStr("a")).ref() eq v.at(VStr("a")).ref())
+    }
+
+    runLocal("condense-preserves-proto-named-keys-and-values") {
+      val asValue = jm(VStr("x"), VStr("__proto__"))
+      val asKey = jm(VStr("__proto__"), VNum(1))
+      expand(condense(asValue)) == asValue &&
+        jsonify(expand(condense(asKey)), jm(VStr("indent"), VNum(0))) == "{\"__proto__\":1}"
+    }
+
+    runLocal("condense-getpath-matches-plain-on-null-and-options") {
+      // Group A: a stored null reads as absent either way.
+      val nullval = jm(VStr("a"), VNull)
+      // A base must not be ignored by the condensed fast path.
+      val store = jm(VStr("base"), jm(VStr("x"), VNum(1)))
+      val d = new InjDef
+      d.dBase = VStr("base")
+      getpath(condense(nullval), VStr("a")) == getpath(nullval, VStr("a")) &&
+        getpath(condense(nullval), VStr("a")) == Noval &&
+        getpath(condense(store), VStr("x"), IDef(d)) == getpath(store, VStr("x"), IDef(d)) &&
+        getpath(condense(store), VStr("x"), IDef(d)) == VNum(1)
+    }
+
+    runLocal("condense-list-keys-are-canonical-integers") {
+      val plain = jm(VStr("l"), jt(VNum(10), VNum(20)))
+      val c = condense(plain)
+      // A plain list read misses each of these, and condensing must not change
+      // which value a path selects.
+      Seq("01", "1e0", " 1", "+1", "1.0", "-0").forall(k =>
+        getpath(c, jt(VStr("l"), VStr(k))) == getpath(plain, jt(VStr("l"), VStr(k)))) &&
+        getpath(c, jt(VStr("l"), VStr("1"))) == VNum(20)
+    }
+
+    runLocal("condense-symbols-sort-by-code-point") {
+      getprop(condense(jm(VStr("a"), VStr("\uD800\uDC00"), VStr("b"), VStr("\uFFFF"))), VStr("sym")) match {
+        case VList(sym) => sym.indexOf(VStr("\uFFFF")) < sym.indexOf(VStr("\uD800\uDC00"))
+        case _ => false
+      }
+    }
+
+    runLocal("condense-invalid-key-mutations-stay-no-ops") {
+      // An invalid key is ignored, so a call that cannot write must not raise.
+      val c = condense(jm(VStr("a"), VNum(1)))
+      (delprop(c, Noval) eq c) && (setprop(c, Noval, VNum(1)) eq c) && raisesImmutable(delprop(c, VStr("sym")))
+    }
+
+    runLocal("condense-is-immutable") {
+      val c = condense(jm(VStr("a"), VNum(1)))
+      val raises = raisesImmutable(setpath(c, VStr("a"), VNum(2))) &&
+        raisesImmutable(setprop(c, VStr("a"), VNum(2))) &&
+        raisesImmutable(delprop(c, VStr("sym")))
+      // The expanded copy is ordinary and mutable.
+      val e = expand(c)
+      setpath(e, VStr("a"), VNum(2))
+      raises && getprop(e, VStr("a")) == VNum(2)
+    }
+  }
+
+  // ---------------- validate: what the corpus cannot express ----------------
+
+  def runValidateLocal(): Unit = {
+    runLocal("validate-child-one-error-per-failure") {
+      def errs(data: Value, spec: Value): Value = {
+        val d = new InjDef
+        d.dErrs = emptyList()
+        validate(data, spec, IDef(d))
+        d.dErrs
+      }
+      Seq(jm(VStr("x"), jm(VStr("`$CHILD`"), VStr("`$NUMBER`"))), jm(VStr("x"), jt(VStr("`$CHILD`"), VStr("`$NUMBER`"))))
+        .forall(spec => size(errs(jm(VStr("x"), VNum(1)), spec)) == 1) &&
+        errs(VNum(1), jm(VStr("`$CHILD`"), VStr("`$NUMBER`"))) == jt(VStr("Expected map, but found integer: 1.")) &&
+        errs(VNum(1), jt(VStr("`$CHILD`"), VStr("`$NUMBER`"))) == jt(VStr("Expected list, but found integer: 1."))
+    }
+  }
+
   // ---------------- groups ----------------
 
   def runAll(spec: Value): Unit = {
@@ -193,6 +331,12 @@ object Runner {
     val validates = g("validate"); val selects = g("select"); val sentinels = g("sentinels")
     val regexs = g("regex")
     def mg(n: String): Value = getprop(minor, VStr(n))
+
+    val condenses = g("condense")
+    runSet("condense.condense", getprop(condenses, VStr("condense")), arg1(condense), false)
+    runSet("condense.expand", getprop(condenses, VStr("expand")), arg1(expand), false)
+    runSet("condense.iscondensed", getprop(condenses, VStr("iscondensed")), arg1(v => VBool(iscondensed(v))), false)
+    runCondenseLocal()
 
     runSet("minor.isnode", mg("isnode"), arg1(v => VBool(isnode(v))))
     runSet("minor.ismap", mg("ismap"), arg1(v => VBool(ismap(v))))
@@ -295,7 +439,7 @@ object Runner {
     runSet("transform.apply", getprop(transforms, VStr("apply")), arg1(vin => transform(vget(vin, "data"), vget(vin, "spec"))))
 
     runSet("validate.basic", getprop(validates, VStr("basic")), arg1(vin => validate(vget(vin, "data"), vget(vin, "spec"))), false)
-    Seq("child", "one", "exact").foreach { gn =>
+    Seq("child", "exact").foreach { gn =>
       runSet("validate." + gn, getprop(validates, VStr(gn)), arg1(vin => validate(vget(vin, "data"), vget(vin, "spec"))))
     }
     runSet("validate.invalid", getprop(validates, VStr("invalid")), arg1(vin => validate(vget(vin, "data"), vget(vin, "spec"))), false)
@@ -304,6 +448,10 @@ object Runner {
       val d = new InjDef; d.dMeta = getprop(injm, VStr("meta"))
       validate(vget(vin, "data"), vget(vin, "spec"), if (isNullish(injm)) INone else IDef(d))
     }))
+    Seq("directive", "nof", "all", "unknown").foreach { gn =>
+      runSet("validate." + gn, getprop(validates, VStr(gn)), arg1(vin => validate(vget(vin, "data"), vget(vin, "spec"))), false)
+    }
+    runValidateLocal()
 
     Seq("basic", "operators", "edge", "alts").foreach { gn =>
       runSet("select." + gn, getprop(selects, VStr(gn)), arg1(vin => select(vget(vin, "obj"), vget(vin, "query"))))

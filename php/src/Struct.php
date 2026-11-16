@@ -78,9 +78,9 @@ class Struct
     private const S_DTOP = '$TOP';
     private const S_DERRS = '$ERRS';
 
-    private const S_array = 'array';
     private const S_boolean = 'boolean';
     private const S_function = 'function';
+    private const S_nil = 'nil';
     private const S_number = 'number';
     private const S_object = 'object';
     private const S_string = 'string';
@@ -168,6 +168,12 @@ class Struct
      */
     private const R_META_PATH = '/^([^$]+)\$([=~])(.+)$/';
     private const R_TRANSFORM_NAME = '/`\$([A-Z]+)`/';
+    private const R_INJECTION_FULL = '/^`(\$[A-Z]+|[^`]*)[0-9]*`$/';
+    private const R_CHECKER_NAME = '/^\$[A-Z]+$/';
+    private const R_INTEGER_KEY = '/^(0|-?[1-9][0-9]*)\z/';
+
+    // Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
+    private const VALIDATE_NAMES = ['$TOP', '$SPEC', '$BT', '$DS', '$WHEN', '$ANNO', '$REF', '$FORMAT', '$APPLY', '$OPEN'];
 
     /* =======================
      * Private Helpers
@@ -347,7 +353,7 @@ class Struct
             }
         }
         if (is_object($value)) {
-            return self::T_node | self::T_map;
+            return self::T_node | (self::_isinstance($value) ? self::T_instance : self::T_map);
         }
         return self::T_noval;
     }
@@ -448,16 +454,20 @@ class Struct
 
         // 2) ListRef branch
         if ($val instanceof ListRef) {
-            $ki = is_numeric($key) ? (int)$key : -1;
-            $out = ($ki >= 0 && $ki < count($val->list)) ? $val->list[$ki] : $alt;
+            $ki = self::_listindex($key, count($val->list));
+            $out = 0 > $ki ? $alt : $val->list[$ki];
         }
-        // 3) array branch
-        elseif (is_array($val) && array_key_exists($key, $val)) {
-            $out = $val[$key];
+        // 3) array branch: array_key_exists would truncate a float key
+        elseif (is_array($val) && is_float($key) && self::islist($val)) {
+            $ki = self::_listindex($key, count($val));
+            $out = 0 > $ki ? $alt : $val[$ki];
+        } elseif (is_array($val)) {
+            $mkey = is_string($key) ? $key : self::_mapkey($key);
+            $out = array_key_exists($mkey, $val) ? $val[$mkey] : $alt;
         }
-        // 4) object branch: cast $key to string
+        // 4) object branch: the key as a string
         elseif (is_object($val)) {
-            $prop = (string) $key;
+            $prop = is_string($key) ? $key : self::_mapkey($key);
             if (property_exists($val, $prop)) {
                 $out = $val->$prop;
             } else {
@@ -471,6 +481,39 @@ class Struct
 
         // 5) JSON‐null‐marker check
         return ($out === self::undef() ? $alt : $out);
+    }
+
+    /**
+     * A list key's index, or null: an integral number, or a string as
+     * JavaScript's String(n) prints one, so "1" and "-1" but not "01", "+1",
+     * " 1", "1.0", "-0" or 1.5.
+     */
+    private static function _listkey(mixed $key): ?int
+    {
+        if (is_int($key)) {
+            return $key;
+        }
+        if (is_float($key)) {
+            if (!is_finite($key) || floor($key) !== $key) {
+                return null;
+            }
+            // Beyond the int range a key can only fall past an end of the list.
+            return abs($key) < 9.2e18 ? (int) $key : (0 < $key ? PHP_INT_MAX : PHP_INT_MIN);
+        }
+        return is_string($key) && 1 === preg_match(self::R_INTEGER_KEY, $key) ? (int) $key : null;
+    }
+
+    /** The index $key reads in a list of $len elements, or -1. */
+    private static function _listindex(mixed $key, int $len): int
+    {
+        $i = self::_listkey($key);
+        return null !== $i && 0 <= $i && $i < $len ? $i : -1;
+    }
+
+    /** A map key: a number as JavaScript's String(n) prints it. */
+    private static function _mapkey(mixed $key): string
+    {
+        return is_string($key) ? $key : self::_condenseStr($key);
     }
 
 
@@ -1191,12 +1234,16 @@ class Struct
             return $parent;
         }
 
+        if (self::iscondensed($parent)) {
+            throw new \Exception(self::S_CONDENSE_IMMUTABLE);
+        }
+
         // ─── LISTREF ────────────────────────────────────────────────
         if ($parent instanceof ListRef) {
-            if (!is_numeric($key)) {
+            $keyI = self::_listkey($key);
+            if (null === $keyI) {
                 return $parent;
             }
-            $keyI = (int) floor((float) $key);
             if ($val === self::undef()) {
                 if ($keyI >= 0 && $keyI < count($parent->list)) {
                     array_splice($parent->list, $keyI, 1);
@@ -1215,7 +1262,7 @@ class Struct
 
         // ─── OBJECT (map) ───────────────────────────────────────────
         if (is_object($parent)) {
-            $keyStr = self::strkey($key);
+            $keyStr = self::_mapkey($key);
             if ($val === self::undef()) {
                 unset($parent->$keyStr);
             } else {
@@ -1228,7 +1275,7 @@ class Struct
         if (is_array($parent)) {
             if (!self::islist($parent)) {
                 // map‐array
-                $keyStr = self::strkey($key);
+                $keyStr = self::_mapkey($key);
                 if ($val === self::undef()) {
                     unset($parent[$keyStr]);
                 } elseif (ctype_digit((string) $key)) {
@@ -1239,10 +1286,10 @@ class Struct
                 }
             } else {
                 // list‐array
-                if (!is_numeric($key)) {
+                $keyI = self::_listkey($key);
+                if (null === $keyI) {
                     return $parent;
                 }
-                $keyI = (int) floor((float) $key);
                 if ($val === self::undef()) {
                     if ($keyI >= 0 && $keyI < count($parent)) {
                         array_splice($parent, $keyI, 1);
@@ -1498,13 +1545,37 @@ class Struct
     ): mixed {
         $injdef = self::_injdef($injdef);
 
-        // Convert path to array of parts
-        $parts = is_array($path) ? $path :
-            (is_string($path) ? explode('.', $path) :
-                (is_numeric($path) ? [self::strkey($path)] : self::undef()));
-
-        if ($parts === self::undef()) {
+        // A number part reads as its string form; any other non-string part misses.
+        if (self::islist($path)) {
+            $parts = [];
+            foreach (($path instanceof ListRef ? $path->list : $path) as $part) {
+                if (is_int($part) || is_float($part)) {
+                    $parts[] = self::_mapkey($part);
+                } elseif (is_string($part)) {
+                    $parts[] = $part;
+                } else {
+                    return self::undef();
+                }
+            }
+        } elseif (is_string($path)) {
+            $parts = explode('.', $path);
+        } elseif (is_int($path) || is_float($path)) {
+            $parts = [self::_mapkey($path)];
+        } else {
             return self::undef();
+        }
+
+        // A condensed store answers a path as the node it was built from does,
+        // touching only the nodes on the path. A base changes what the path
+        // resolves against, so then it is expanded instead.
+        if (self::iscondensed($store)) {
+            if (null === $injdef || null === self::getprop($injdef, self::S_BASE)) {
+                $at = self::_condenseResolve($store, self::_getprop($store, self::S_condroot), $parts);
+                $found = 0 > $at ? self::undef() : self::_condenseMaterialise($store, $at);
+                // Group A: a stored null reads as absent, as getprop has it.
+                return null === $found ? self::undef() : $found;
+            }
+            $store = self::expand($store);
         }
 
         $val = $store;
@@ -2620,6 +2691,200 @@ class Struct
             ($missing ? '' : self::typename($vt) . ': ') . $vs . '.';
     }
 
+    /**
+     * Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
+     */
+    private static function _checknames(mixed $spec, mixed $store, array $path, \ArrayObject $errs): void
+    {
+        $name = self::_refname($spec);
+        if (null !== $name) {
+            if (self::_unknownname($name, $store)) {
+                $errs[] = 'Unknown validator ' . $name . ' at field ' . self::pathify($path) . '.';
+            }
+            return;
+        }
+
+        if (self::islist($spec) && '$EXACT' === self::_refname(self::_getprop($spec, 0))) {
+            return;
+        }
+
+        foreach (self::keysof($spec) as $key) {
+            if (self::ismap($spec)) {
+                self::_checknames($key, $store, $path, $errs);
+            }
+            self::_checknames(self::_getprop($spec, $key), $store, [...$path, $key], $errs);
+        }
+    }
+
+    /**
+     * The name a whole-string reference gives, when it is a checker name in any case.
+     */
+    private static function _refname(mixed $val): ?string
+    {
+        if (
+            is_string($val)
+            && 1 === preg_match(self::R_INJECTION_FULL, $val, $m)
+            && 1 === preg_match(self::R_CHECKER_NAME, strtoupper($m[1]))
+        ) {
+            return $m[1];
+        }
+        return null;
+    }
+
+    /**
+     * Unknown: undefined and upper case, or a defined name in another case. Null disables a name.
+     */
+    private static function _unknownname(string $name, mixed $store): bool
+    {
+        $known = fn(string $n): bool => in_array($n, self::VALIDATE_NAMES, true) || null !== self::getprop($store, $n);
+        $upper = strtoupper($name);
+        return !$known($name) && ($upper === $name || $known($upper));
+    }
+
+    /**
+     * The data value at a list directive's slot, read literally so that a
+     * stored null is a value.
+     */
+    private static function _slotval(object $inj): mixed
+    {
+        $prior = $inj->prior;
+        return null === $prior ? $inj->dparent : self::_getprop($prior->dparent, $prior->key);
+    }
+
+    /**
+     * JSON equality: numbers by value, lists in order, maps by key in any order.
+     */
+    private static function _deepequal(mixed $a, mixed $b): bool
+    {
+        if ($a === $b) {
+            return true;
+        }
+
+        $atype = self::typify($a);
+        $btype = self::typify($b);
+        if (0 < (self::T_number & $atype) && 0 < (self::T_number & $btype)) {
+            return $a == $b;
+        }
+
+        if ($atype !== $btype || 0 === ((self::T_list | self::T_map) & $atype)) {
+            return false;
+        }
+
+        $akeys = self::keysof($a);
+        $bkeys = self::keysof($b);
+        if (count($akeys) !== count($bkeys)) {
+            return false;
+        }
+
+        foreach ($akeys as $kI => $k) {
+            if ($k !== $bkeys[$kI] || !self::_deepequal(self::_getprop($a, $k), self::_getprop($b, $k))) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * A class instance: an object that is not a map (stdClass), a list
+     * (ListRef) or a function (Closure).
+     */
+    private static function _isinstance(mixed $val): bool
+    {
+        return is_object($val) && !($val instanceof \stdClass) && !($val instanceof ListRef)
+            && !($val instanceof \Closure);
+    }
+
+    /**
+     * Every member val has is in out, unchanged. A member only out has is a
+     * default the spec supplied, and is ignored.
+     */
+    private static function _keeps(mixed $val, mixed $out): bool
+    {
+        if (self::undef() === $val) {
+            return true;
+        }
+
+        // out comes from validate as plain arrays, where an empty map is [] too.
+        $samekind = self::islist($val) === self::islist($out) || [] === $out;
+
+        if (0 === ((self::T_list | self::T_map) & self::typify($val)) || !$samekind || !self::isnode($out)) {
+            return self::_deepequal($val, $out);
+        }
+
+        foreach (self::keysof($val) as $k) {
+            if (!self::_keeps(self::_getprop($val, $k), self::_getprop($out, $k))) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * A spec admits a value when validating the value against it finds no error
+     * and gives back the value as it is.
+     */
+    private static function _admits(mixed $val, mixed $spec, object $inj, mixed $store): bool
+    {
+        $vstore = array_merge((array) $store, [self::S_DTOP => $val]);
+
+        $tinj = (object) [
+            'extra' => $vstore,
+            'errs' => [],
+            'meta' => $inj->meta,
+        ];
+        $out = self::validate($val, $spec, $tinj);
+
+        return 0 === count($tinj->errs) && self::_keeps($val, $out);
+    }
+
+    /**
+     * The bounds of a $NOF count, and the words for it, which are absent when
+     * the count is invalid. Without a max, the bound is the number of specs.
+     */
+    private static function _nofcount(mixed $count, int $numtvals): array
+    {
+        $isnat = fn(mixed $n): bool => 0 < (self::T_integer & self::typify($n)) && 0 <= $n;
+
+        // JavaScript has one number type, so 2.0 counts as 2.
+        $asint = fn(mixed $n): mixed => is_float($n) && floor($n) === $n && abs($n) < 9.2e18 ? (int) $n : $n;
+
+        $count = $asint($count);
+        if ($isnat($count)) {
+            return [$count, $count, 0 === $count ? 'none' : 'exactly ' . $count];
+        }
+
+        $min = $asint(self::_getprop($count, 'min'));
+        $max = $asint(self::_getprop($count, 'max'));
+        $nomin = self::undef() === $min;
+        $nomax = self::undef() === $max;
+
+        $valid = self::ismap($count)
+            && 0 < self::size($count)
+            && self::size($count) === ($nomin ? 0 : 1) + ($nomax ? 0 : 1)
+            && ($nomin || $isnat($min))
+            && ($nomax || $isnat($max))
+            && ($nomin || $nomax || $min <= $max);
+
+        if (!$valid) {
+            return [0, 0, self::undef()];
+        }
+
+        $lo = $nomin ? 0 : $min;
+        $hi = $nomax ? $numtvals : $max;
+
+        $desc = $nomax
+            ? 'at least ' . $lo
+            : (0 === $hi
+                ? 'none'
+                : ($nomin
+                    ? 'at most ' . $hi
+                    : ($lo === $hi ? 'exactly ' . $lo : $lo . ' to ' . $hi)));
+
+        return [$lo, $hi, $desc];
+    }
+
     /* =======================
      * Validation Functions
      * =======================
@@ -2734,7 +2999,9 @@ class Struct
     {
         $tname = strtolower(substr($ref ?? '', 1));
         $idx = array_search($tname, self::TYPENAME);
-        $typev = ($idx !== false) ? (1 << (31 - $idx)) : 0;
+
+        // $NIL is absent or null.
+        $typev = (($idx !== false) ? (1 << (31 - $idx)) : 0) | (self::S_nil === $tname ? self::T_null : 0);
         $out = self::_getprop($inj->dparent, $inj->key);
 
         $t = self::typify($out);
@@ -2774,17 +3041,12 @@ class Struct
 
             // Get corresponding current object.
             $pkey = self::_getprop($path, count($path) - 2);
-            $tval = self::_getprop($inj->dparent, $pkey);
+            $tval = self::getprop($inj->dparent, $pkey);
 
-            if (self::undef() === $tval) {
+            if (null === $tval) {
                 $tval = new \stdClass();
             } elseif (!self::ismap($tval)) {
-                $inj->errs[] = self::_invalidTypeMsg(
-                    self::slice($inj->path, 0, -1),
-                    self::S_object,
-                    self::typify($tval),
-                    $tval
-                );
+                // _validation reports the mismatch, once.
                 return self::undef();
             }
 
@@ -2811,7 +3073,8 @@ class Struct
 
             $childtm = self::_getprop($parent, 1);
 
-            if (self::undef() === $inj->dparent) {
+            // Group A: a stored null is no data.
+            if (self::undef() === $inj->dparent || null === $inj->dparent) {
                 // Empty list as default. `$parent` may be a ListRef - see the
                 // note on the other array_pop below.
                 if ($parent instanceof ListRef) {
@@ -2825,13 +3088,6 @@ class Struct
             }
 
             if (!self::islist($inj->dparent)) {
-                $msg = self::_invalidTypeMsg(
-                    self::slice($inj->path, 0, -1),
-                    self::S_array,
-                    self::typify($inj->dparent),
-                    $inj->dparent
-                );
-                $inj->errs[] = $msg;
                 $inj->keyI = count($parent);
                 return $inj->dparent;
             }
@@ -2872,95 +3128,6 @@ class Struct
     }
 
     /**
-     * Match at least one of the specified shapes.
-     * Syntax: ['`$ONE`', alt0, alt1, ...]
-     */
-    public static function validate_ONE(
-        object $inj,
-        mixed $_val,
-        string $_ref,
-        mixed $store
-    ): mixed {
-        $mode = $inj->mode;
-        $parent = $inj->parent;
-        $keyI = $inj->keyI;
-
-        // Only operate in val mode, since parent is a list.
-        if (self::M_VAL === $mode) {
-            if (!self::islist($parent) || 0 !== $keyI) {
-                $inj->errs[] = 'The $ONE validator at field ' .
-                    self::pathify($inj->path, 1, 1) .
-                    ' must be the first element of an array.';
-                return self::undef();
-            }
-
-            $inj->keyI = count($inj->keys ?? []);
-
-            // Clean up structure, replacing [$ONE, ...] with current
-            $inj->setval($inj->dparent, 2);
-
-            $inj->path = self::slice($inj->path, 0, -1);
-
-            $tvals = self::slice($parent, 1);
-            if (0 === count($tvals)) {
-                $inj->errs[] = 'The $ONE validator at field ' .
-                    self::pathify($inj->path, 1, 1) .
-                    ' must have at least one argument.';
-                return self::undef();
-            }
-
-            // See if we can find a match.
-            foreach ($tvals as $tval) {
-                // If match, then errs.length = 0
-                $vstore = array_merge((array) $store, [self::S_DTOP => $inj->dparent]);
-
-                $tinj = (object) [
-                    'extra' => $vstore,
-                    'errs' => [],
-                    'meta' => $inj->meta,
-                ];
-                $vcurrent = self::validate($inj->dparent, $tval, $tinj);
-                $terrs = $tinj->errs;
-
-                // -2, not 2. `setval` branches on `$ancestor < 2`, so a
-                // NEGATIVE ancestor selects the immediate-parent branch;
-                // 2 selects the ancestor branch and writes
-                // setprop(nodes[-2], path[-2], val) - and path[-2] here is
-                // `$TOP`, so the store key landed in the public result.
-                // Canonical passes -2 at this one site (StructUtility.ts:2230)
-                // and +2 at the other three; this port had 2 everywhere.
-                $inj->setval($vcurrent, -2);
-
-                // Accept current value if there was a match
-                if (0 === count($terrs)) {
-                    return self::undef();
-                }
-            }
-
-            // There was no match.
-            $tvArr = ($tvals instanceof ListRef) ? $tvals->list : (is_array($tvals) ? $tvals : []);
-            $valdesc = implode(', ', array_map(fn($v) => self::stringify($v), $tvArr));
-            // Lowercase the NAME, not the whole string. R_TRANSFORM_NAME matches
-            // `$([A-Z]+)`, so lowercasing first made it stop matching and left
-            // the raw `$string` spelling in the message.
-            $valdesc = preg_replace_callback(
-                self::R_TRANSFORM_NAME,
-                fn(array $m): string => strtolower($m[1]),
-                $valdesc
-            );
-
-            $inj->errs[] = self::_invalidTypeMsg(
-                $inj->path,
-                (1 < count($tvals) ? 'one of ' : '') . $valdesc,
-                self::typify($inj->dparent),
-                $inj->dparent
-            );
-        }
-
-        return self::undef();
-    }
-
-    /**
      * Match exactly one of the specified values.
      */
     public static function validate_EXACT(object $inj): mixed
@@ -2979,35 +3146,26 @@ class Struct
                 return self::undef();
             }
 
+            $cval = self::_slotval($inj);
+
             $inj->keyI = count($inj->keys ?? []);
 
-            // Clean up structure, replacing [$EXACT, ...] with current data parent
-            $inj->setval($inj->dparent, 2);
+            // Replace [$EXACT, ...] with the data value; SKIP keeps inject off the detached list.
+            $inj->setval($cval, 2);
 
             $inj->path = self::slice($inj->path, 0, count($inj->path) - 1);
-            $inj->key = self::getelem($inj->path, -1);
 
             $tvals = self::slice($parent, 1);
             if (0 === count($tvals)) {
                 $inj->errs[] = 'The $EXACT validator at field ' .
                     self::pathify($inj->path, 1, 1) .
                     ' must have at least one argument.';
-                return self::undef();
+                return self::SKIP;
             }
 
-            // See if we can find an exact value match.
-            $currentstr = null;
             foreach ($tvals as $tval) {
-                $exactmatch = $tval === $inj->dparent;
-
-                if (!$exactmatch && self::isnode($tval)) {
-                    $currentstr = $currentstr ?? self::stringify($inj->dparent);
-                    $tvalstr = self::stringify($tval);
-                    $exactmatch = $tvalstr === $currentstr;
-                }
-
-                if ($exactmatch) {
-                    return self::undef();
+                if (self::_deepequal($tval, $cval)) {
+                    return self::SKIP;
                 }
             }
 
@@ -3026,14 +3184,114 @@ class Struct
                 $inj->path,
                 (1 < count($inj->path) ? '' : 'value ') .
                 'exactly equal to ' . (1 === count($tvals) ? '' : 'one of ') . $valdesc,
-                self::typify($inj->dparent),
-                $inj->dparent
+                self::typify($cval),
+                $cval
             );
+
+            return self::SKIP;
         } else {
             self::delprop($parent, $key);
         }
 
         return self::undef();
+    }
+
+    /**
+     * Count the specs that admit the value: ['`$NOF`', count, spec, ...], where
+     * count is an integer, or a map holding min, max or both.
+     */
+    public static function validate_NOF(object $inj, mixed $_val, string $_ref, mixed $store): mixed
+    {
+        return self::_validatecount($inj, $store, '$NOF', true);
+    }
+
+    /**
+     * Every spec admits the value: ['`$ALL`', spec, ...].
+     */
+    public static function validate_ALL(object $inj, mixed $_val, string $_ref, mixed $store): mixed
+    {
+        return self::_validatecount($inj, $store, '$ALL', false);
+    }
+
+    /**
+     * The counting list directives. Without a count, every spec has to admit.
+     */
+    private static function _validatecount(object $inj, mixed $store, string $name, bool $counted): mixed
+    {
+        $mode = $inj->mode;
+        $parent = $inj->parent;
+        $keyI = $inj->keyI;
+
+        if (self::M_VAL !== $mode) {
+            return self::undef();
+        }
+
+        if (!self::islist($parent) || 0 !== $keyI) {
+            $inj->errs[] = 'The ' . $name . ' validator at field ' .
+                self::pathify($inj->path, 1, 1) .
+                ' must be the first element of an array.';
+            return self::undef();
+        }
+
+        $cval = self::_slotval($inj);
+
+        $inj->keyI = count($inj->keys ?? []);
+
+        // Replace the directive's list with the data value. Each return is SKIP, so
+        // that inject leaves the detached list alone and validates nothing in it.
+        $inj->setval($cval, 2);
+
+        $inj->path = self::slice($inj->path, -1);
+
+        $count = $counted ? self::_getprop($parent, 1) : self::undef();
+        $tvals = self::slice($parent, $counted ? 2 : 1);
+        $tvArr = ($tvals instanceof ListRef) ? $tvals->list : (is_array($tvals) ? $tvals : []);
+        $numtvals = count($tvArr);
+        $field = 'The ' . $name . ' validator at field ' . self::pathify($inj->path, 1);
+
+        if (0 === $numtvals) {
+            $inj->errs[] = $field . ($counted ? ' must have a count and' : ' must have') . ' at least one argument.';
+            return self::SKIP;
+        }
+
+        [$lo, $hi, $countdesc] = $counted ? self::_nofcount($count, $numtvals) : [$numtvals, $numtvals, 'all'];
+
+        if (self::undef() === $countdesc) {
+            $inj->errs[] = $field . ' has an invalid count: ' . self::stringify($count) . '.';
+            return self::SKIP;
+        }
+
+        $admitted = 0;
+        for ($tI = 0; $tI < $numtvals; $tI++) {
+            $left = $numtvals - $tI;
+
+            // Stop once the specs left cannot change the verdict.
+            if ($hi < $admitted || $admitted + $left < $lo || ($lo <= $admitted && $admitted + $left <= $hi)) {
+                break;
+            }
+
+            if (self::_admits($cval, $tvArr[$tI], $inj, $store)) {
+                $admitted++;
+            }
+        }
+
+        if ($admitted < $lo || $hi < $admitted) {
+            $valdesc = implode(', ', array_map(fn($v) => self::stringify($v), $tvArr));
+            $valdesc = preg_replace_callback(
+                self::R_TRANSFORM_NAME,
+                fn(array $m): string => strtolower($m[1]),
+                $valdesc
+            );
+
+            $inj->errs[] = self::_invalidTypeMsg(
+                $inj->path,
+                $countdesc . ' of ' . $valdesc,
+                self::typify($cval),
+                $cval
+            );
+        }
+
+        return self::SKIP;
     }
 
     /**
@@ -3222,8 +3480,9 @@ class Struct
                 '$INSTANCE' => [self::class, 'validate_TYPE'],
                 '$ANY' => [self::class, 'validate_ANY'],
                 '$CHILD' => [self::class, 'validate_CHILD'],
-                '$ONE' => [self::class, 'validate_ONE'],
                 '$EXACT' => [self::class, 'validate_EXACT'],
+                '$NOF' => [self::class, 'validate_NOF'],
+                '$ALL' => [self::class, 'validate_ALL'],
             ],
             (array) ($extra ?? []),
             [
@@ -3246,7 +3505,14 @@ class Struct
             $transformOpts->meta = $meta;
         }
         $transformOpts->errs = $errs;
-        $out = self::transform($data, $spec, $transformOpts);
+
+        // A spec that names an unknown checker validates nothing.
+        $numerrs = count($errs);
+        self::_checknames($spec, $store, [], $errs);
+
+        $out = $numerrs < count($errs)
+            ? self::_stdClassToArray(self::cloneUnwrap($data))
+            : self::transform($data, $spec, $transformOpts);
 
         // Unwrap shared ArrayObject back to a plain array on the caller's injdef
         // so count()/foreach work as callers (including select) expect.
@@ -3507,22 +3773,12 @@ class Struct
         if (self::islist($val)) {
             $listArr = ($val instanceof ListRef) ? $val->list : $val;
             $listLen = count($listArr);
-            if (is_string($key)) {
-                if (!preg_match('/^[-0-9]+$/', $key)) {
-                    $out = self::undef();
-                } else {
-                    $nkey = (int) $key;
-                    if ($nkey < 0) {
-                        $nkey = $listLen + $nkey;
-                    }
-                    $out = ($nkey >= 0 && $nkey < $listLen) ? $listArr[$nkey] : self::undef();
-                }
-            } elseif (is_int($key)) {
-                $nkey = $key;
-                if ($nkey < 0) {
-                    $nkey = $listLen + $nkey;
-                }
-                $out = ($nkey >= 0 && $nkey < $listLen) ? $listArr[$nkey] : self::undef();
+            $nkey = self::_listkey($key);
+            if (null !== $nkey && 0 > $nkey) {
+                $nkey += $listLen;
+            }
+            if (null !== $nkey && 0 <= $nkey && $nkey < $listLen) {
+                $out = $listArr[$nkey];
             }
         }
 
@@ -3551,12 +3807,13 @@ class Struct
             return $parent;
         }
 
+        if (self::iscondensed($parent)) {
+            throw new \Exception(self::S_CONDENSE_IMMUTABLE);
+        }
+
         if ($parent instanceof ListRef) {
-            $keyI = (int)$key;
-            if (!is_numeric($key)) {
-                return $parent;
-            }
-            if ($keyI >= 0 && $keyI < count($parent->list)) {
+            $keyI = self::_listindex($key, count($parent->list));
+            if (0 <= $keyI) {
                 array_splice($parent->list, $keyI, 1);
             }
             return $parent;
@@ -3574,14 +3831,10 @@ class Struct
                 unset($parent->$key);
             }
         } elseif (self::islist($parent)) {
-            // Ensure key is an integer
-            $keyI = (int)$key;
-            if (!is_numeric($key) || (string)$keyI !== (string)$key) {
-                return $parent;
-            }
+            $keyI = self::_listindex($key, count($parent));
 
             // Delete list element at position keyI, shifting later elements down
-            if ($keyI >= 0 && $keyI < count($parent)) {
+            if (0 <= $keyI) {
                 for ($pI = $keyI; $pI < count($parent) - 1; $pI++) {
                     $parent[$pI] = $parent[$pI + 1];
                 }
@@ -3599,6 +3852,10 @@ class Struct
         mixed $val,
         mixed $injdef = null
     ): mixed {
+        if (self::iscondensed($store)) {
+            throw new \Exception(self::S_CONDENSE_IMMUTABLE);
+        }
+
         $pathType = self::typify($path);
 
         $parts = (0 < (self::T_list & $pathType)) ? $path :
@@ -3669,6 +3926,435 @@ class Struct
             }
         }
         return $fallback;
+    }
+
+
+    /* =======================
+     * Condense
+     * =======================
+     */
+
+    private const CONDENSE_VERSION = 1;
+
+    private const CONDENSE_MAP = 0;
+    private const CONDENSE_LIST = 1;
+    private const CONDENSE_STR = 2;
+    private const CONDENSE_NUM = 3;
+    private const CONDENSE_TRUE = 4;
+    private const CONDENSE_FALSE = 5;
+    private const CONDENSE_NULL = 6;
+
+    private const S_condense = '$condense';
+    private const S_condsym = 'sym';
+    private const S_condnode = 'node';
+    private const S_condroot = 'root';
+
+    private const S_CONDENSE_IMMUTABLE =
+        'struct: condensed structures are immutable - expand() first, then modify the copy';
+
+    public static function iscondensed(mixed $val = null): bool
+    {
+        // The version must MATCH, not merely be numeric: a future profile would
+        // otherwise be decoded under this one's schema.
+        $version = self::_getprop($val, self::S_condense);
+        if (!(is_int($version) || is_float($version)) || self::CONDENSE_VERSION != $version) {
+            return false;
+        }
+        $root = self::_getprop($val, self::S_condroot);
+        return self::ismap($val)
+            && self::islist(self::_getprop($val, self::S_condsym))
+            && self::islist(self::_getprop($val, self::S_condnode))
+            && (is_int($root) || is_float($root));
+    }
+
+    /**
+     * Condense any JSON-shaped node. Pure: the same input always produces a
+     * byte-identical result, on every port.
+     */
+    public static function condense(mixed $val = null): object
+    {
+        $symset = [];
+
+        $collect = function (mixed $n) use (&$collect, &$symset): void {
+            if (self::ismap($n)) {
+                foreach (self::keysof($n) as $k) {
+                    $symset[$k] = true;
+                    $collect(self::_getprop($n, $k));
+                }
+            } elseif (self::islist($n)) {
+                foreach ($n as $item) {
+                    $collect($item);
+                }
+            } elseif (is_string($n)) {
+                $symset[$n] = true;
+            }
+        };
+        $collect($val);
+
+        // Array keys turn integer-like strings into integers; strval undoes it.
+        $sym = array_map('strval', array_keys($symset));
+        sort($sym, SORT_STRING);
+        $symid = array_flip($sym);
+
+        $node = [];
+        $seen = [];
+
+        $intern = function (array $enc) use (&$node, &$seen): int {
+            $enckey = self::CONDENSE_NUM === $enc[0]
+                ? self::CONDENSE_NUM . ',' . self::_condenseNumKey($enc[1])
+                : implode(',', $enc);
+            if (isset($seen[$enckey])) {
+                return $seen[$enckey];
+            }
+            $idx = count($node);
+            $node[] = $enc;
+            $seen[$enckey] = $idx;
+            return $idx;
+        };
+
+        // Post-order, so identical subtrees are interned before a parent refers to them.
+        $build = function (mixed $n) use (&$build, $intern, $symid): int {
+            if (self::ismap($n)) {
+                $enc = [self::CONDENSE_MAP];
+                // keysof sorts bytewise, which is code-point order, so the key ids ascend for bisection.
+                foreach (self::keysof($n) as $k) {
+                    $enc[] = $symid[$k];
+                    $enc[] = $build(self::_getprop($n, $k));
+                }
+                return $intern($enc);
+            }
+            if (self::islist($n)) {
+                $enc = [self::CONDENSE_LIST];
+                foreach ($n as $item) {
+                    $enc[] = $build($item);
+                }
+                return $intern($enc);
+            }
+            if (is_string($n)) {
+                return $intern([self::CONDENSE_STR, $symid[$n]]);
+            }
+            if (is_int($n) || is_float($n)) {
+                return $intern([self::CONDENSE_NUM, $n]);
+            }
+            if (true === $n) {
+                return $intern([self::CONDENSE_TRUE]);
+            }
+            if (false === $n) {
+                return $intern([self::CONDENSE_FALSE]);
+            }
+            return $intern([self::CONDENSE_NULL]);
+        };
+
+        $root = $build($val);
+
+        $out = new \stdClass();
+        $out->{self::S_condense} = self::CONDENSE_VERSION;
+        $out->{self::S_condsym} = $sym;
+        $out->{self::S_condnode} = $node;
+        $out->{self::S_condroot} = $root;
+        return $out;
+    }
+
+    /**
+     * Fully materialise a condensed structure. A value that is not condensed
+     * comes back unchanged.
+     */
+    public static function expand(mixed $cond = null): mixed
+    {
+        if (!self::iscondensed($cond)) {
+            return $cond;
+        }
+        return self::_condenseMaterialise($cond, self::_getprop($cond, self::S_condroot));
+    }
+
+    /**
+     * A cursor into a condensed structure. Its reads touch only the nodes on
+     * the path; a memo passed in is shared with every view it reaches.
+     */
+    public static function condenseview(mixed $cond = null, mixed $idx = null, mixed $memo = null): CondenseView
+    {
+        $start = (null === $idx || self::undef() === $idx)
+            ? (self::iscondensed($cond) ? self::_getprop($cond, self::S_condroot) : -1)
+            : $idx;
+        return new CondenseView($cond, $start, $memo instanceof \ArrayObject ? $memo : new \ArrayObject());
+    }
+
+    /**
+     * One key per number value, as joining a JS number gives: 1 and 1.0 share
+     * a node, and -0 is 0.
+     */
+    private static function _condenseNumKey(int|float $n): string
+    {
+        $f = (float) $n;
+        return 0.0 == $f ? '0' : sprintf('%.17g', $f);
+    }
+
+    /** A path part as JavaScript's String() spells it. */
+    private static function _condenseStr(mixed $v): string
+    {
+        if (is_string($v)) {
+            return $v;
+        }
+        if (is_int($v)) {
+            return (string) $v;
+        }
+        if (is_float($v)) {
+            if (is_finite($v) && floor($v) == $v && abs($v) < 1e21) {
+                return 0.0 == $v ? '0' : sprintf('%.0f', $v);
+            }
+            return (string) json_encode($v);
+        }
+        if (is_bool($v)) {
+            return $v ? 'true' : 'false';
+        }
+        if (null === $v) {
+            return 'null';
+        }
+        return self::stringify($v);
+    }
+
+    /** @return array<mixed> */
+    private static function _condenseList(mixed $v): array
+    {
+        return $v instanceof ListRef ? $v->list : (is_array($v) ? $v : []);
+    }
+
+    /**
+     * The encoding of node $idx, or null when there is none.
+     *
+     * @internal
+     * @return array<mixed>|null
+     */
+    public static function _condenseEnc(mixed $cond, mixed $idx): ?array
+    {
+        $node = self::_condenseList(self::_getprop($cond, self::S_condnode));
+        if (is_float($idx) && floor($idx) == $idx) {
+            $idx = (int) $idx;
+        }
+        if (!is_int($idx) || 0 > $idx || $idx >= count($node)) {
+            return null;
+        }
+        $enc = $node[$idx];
+        return self::islist($enc) ? self::_condenseList($enc) : null;
+    }
+
+    /** The kind leading an encoding, or -1. */
+    private static function _condenseKind(array $enc): int
+    {
+        $kind = $enc[0] ?? null;
+        return (is_int($kind) || (is_float($kind) && floor($kind) == $kind)) ? (int) $kind : -1;
+    }
+
+    /** Symbol $id, or absent when the table has none. */
+    private static function _condenseSym(array $sym, mixed $id): mixed
+    {
+        if (is_float($id) && floor($id) == $id) {
+            $id = (int) $id;
+        }
+        return (is_int($id) && array_key_exists($id, $sym)) ? $sym[$id] : self::undef();
+    }
+
+    /**
+     * The id of a symbol by bisecting the sorted symbol table, or -1 when the
+     * string does not occur anywhere in the structure.
+     */
+    private static function _condenseSymId(mixed $cond, string $key): int
+    {
+        $sym = self::_condenseList(self::_getprop($cond, self::S_condsym));
+        $lo = 0;
+        $hi = count($sym) - 1;
+        while ($lo <= $hi) {
+            $mid = ($lo + $hi) >> 1;
+            $cmp = strcmp(self::_condenseStr($sym[$mid]), $key);
+            if (0 === $cmp) {
+                return $mid;
+            }
+            if (0 > $cmp) {
+                $lo = $mid + 1;
+            } else {
+                $hi = $mid - 1;
+            }
+        }
+        return -1;
+    }
+
+    /** The node index of $key inside node $idx, or -1. Touches only this node. */
+    private static function _condenseChild(mixed $cond, mixed $idx, mixed $key): mixed
+    {
+        $enc = self::_condenseEnc($cond, $idx);
+        if (null === $enc || !(is_string($key) || is_int($key) || is_float($key))) {
+            return -1;
+        }
+
+        $kind = self::_condenseKind($enc);
+        $k = self::_condenseStr($key);
+
+        if (self::CONDENSE_MAP === $kind) {
+            $symid = self::_condenseSymId($cond, $k);
+            if (0 > $symid) {
+                return -1;
+            }
+            // Pairs live at [1,2], [3,4], ... with keys ascending: bisect the pairs.
+            $lo = 0;
+            $hi = intdiv(count($enc) - 1, 2) - 1;
+            while ($lo <= $hi) {
+                $mid = ($lo + $hi) >> 1;
+                $pk = $enc[1 + $mid * 2] ?? -1;
+                if ($pk == $symid) {
+                    return $enc[2 + $mid * 2] ?? -1;
+                }
+                if ($pk < $symid) {
+                    $lo = $mid + 1;
+                } else {
+                    $hi = $mid - 1;
+                }
+            }
+            return -1;
+        }
+
+        if (self::CONDENSE_LIST === $kind) {
+            $i = self::_listindex($k, count($enc) - 1);
+            return 0 > $i ? -1 : $enc[1 + $i];
+        }
+
+        return -1;
+    }
+
+    /**
+     * Walk a path from node $idx, returning the node index or -1.
+     *
+     * @internal
+     */
+    public static function _condenseResolve(mixed $cond, mixed $idx, mixed $path): mixed
+    {
+        if (self::islist($path)) {
+            $parts = self::_condenseList($path);
+        } elseif (is_string($path)) {
+            $parts = self::S_MT === $path ? [] : explode(self::S_DT, $path);
+        } elseif (null === $path || self::undef() === $path) {
+            $parts = [];
+        } else {
+            $parts = [self::_condenseStr($path)];
+        }
+
+        $at = $idx;
+        foreach ($parts as $part) {
+            if (0 > $at) {
+                return -1;
+            }
+            if (self::S_MT === $part) {
+                continue;
+            }
+            $at = self::_condenseChild($cond, $at, $part);
+        }
+        return $at;
+    }
+
+    /**
+     * Node $idx as a fresh, independent tree; absent when there is no such node.
+     *
+     * @internal
+     */
+    public static function _condenseMaterialise(mixed $cond, mixed $idx): mixed
+    {
+        if (!(is_int($idx) || is_float($idx)) || 0 > $idx) {
+            return self::undef();
+        }
+
+        $sym = self::_condenseList(self::_getprop($cond, self::S_condsym));
+
+        $rebuild = function (mixed $i) use (&$rebuild, $cond, $sym): mixed {
+            $enc = self::_condenseEnc($cond, $i);
+            if (null === $enc) {
+                return self::undef();
+            }
+            $kind = self::_condenseKind($enc);
+            if (self::CONDENSE_MAP === $kind) {
+                $out = new \stdClass();
+                for ($j = 1; $j + 1 < count($enc); $j += 2) {
+                    $key = self::_condenseSym($sym, $enc[$j]);
+                    $child = $rebuild($enc[$j + 1]);
+                    if (self::undef() !== $key && self::undef() !== $child) {
+                        $out->{self::_condenseStr($key)} = $child;
+                    }
+                }
+                return $out;
+            }
+            if (self::CONDENSE_LIST === $kind) {
+                $out = [];
+                for ($j = 1; $j < count($enc); $j++) {
+                    $child = $rebuild($enc[$j]);
+                    $out[] = self::undef() === $child ? null : $child;
+                }
+                return $out;
+            }
+            if (self::CONDENSE_STR === $kind) {
+                return self::_condenseSym($sym, $enc[1] ?? null);
+            }
+            if (self::CONDENSE_NUM === $kind) {
+                return $enc[1] ?? null;
+            }
+            if (self::CONDENSE_TRUE === $kind) {
+                return true;
+            }
+            if (self::CONDENSE_FALSE === $kind) {
+                return false;
+            }
+            return null;
+        };
+
+        return $rebuild($idx);
+    }
+
+    /**
+     * The keys of node $idx, without materialising any of its values.
+     *
+     * @internal
+     * @return array<string>
+     */
+    public static function _condenseKeys(mixed $cond, mixed $idx): array
+    {
+        $enc = self::_condenseEnc($cond, $idx);
+        if (null === $enc) {
+            return [];
+        }
+        $out = [];
+        $kind = self::_condenseKind($enc);
+        if (self::CONDENSE_MAP === $kind) {
+            $sym = self::_condenseList(self::_getprop($cond, self::S_condsym));
+            for ($j = 1; $j < count($enc); $j += 2) {
+                $key = self::_condenseSym($sym, $enc[$j]);
+                if (self::undef() !== $key) {
+                    $out[] = self::_condenseStr($key);
+                }
+            }
+        } elseif (self::CONDENSE_LIST === $kind) {
+            for ($j = 1; $j < count($enc); $j++) {
+                $out[] = (string) ($j - 1);
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Map pair count, list length, else 0.
+     *
+     * @internal
+     */
+    public static function _condenseSize(mixed $cond, mixed $idx): int
+    {
+        $enc = self::_condenseEnc($cond, $idx);
+        if (null === $enc) {
+            return 0;
+        }
+        $kind = self::_condenseKind($enc);
+        if (self::CONDENSE_MAP === $kind) {
+            return intdiv(count($enc) - 1, 2);
+        }
+        if (self::CONDENSE_LIST === $kind) {
+            return count($enc) - 1;
+        }
+        return 0;
     }
 
 
@@ -3894,5 +4580,74 @@ class Injection
         }
 
         return $parent;
+    }
+}
+
+
+/**
+ * A cursor into a condensed structure. Reads resolve by node index and touch
+ * only the nodes on the path; nothing is decoded until a value is asked for.
+ */
+final class CondenseView
+{
+    public function __construct(
+        private mixed $cond,
+        private mixed $start,
+        private \ArrayObject $memo
+    ) {
+    }
+
+    /** The value at $path, materialised: a container comes back as a fresh copy. */
+    public function get(mixed $path = null): mixed
+    {
+        return Struct::_condenseMaterialise($this->cond, Struct::_condenseResolve($this->cond, $this->start, $path));
+    }
+
+    /** @return array<string> */
+    public function keys(mixed $path = null): array
+    {
+        $at = Struct::_condenseResolve($this->cond, $this->start, $path);
+        return 0 > $at ? [] : Struct::_condenseKeys($this->cond, $at);
+    }
+
+    public function has(mixed $path = null): bool
+    {
+        return 0 <= Struct::_condenseResolve($this->cond, $this->start, $path);
+    }
+
+    /** A view at $path, sharing this view's memo. */
+    public function at(mixed $path = null): CondenseView
+    {
+        return new CondenseView($this->cond, Struct::_condenseResolve($this->cond, $this->start, $path), $this->memo);
+    }
+
+    public function value(): mixed
+    {
+        return Struct::_condenseMaterialise($this->cond, $this->start);
+    }
+
+    public function size(): int
+    {
+        return 0 > $this->start ? 0 : Struct::_condenseSize($this->cond, $this->start);
+    }
+
+    public function exists(): bool
+    {
+        return 0 <= $this->start;
+    }
+
+    /**
+     * A SHARED materialisation: the same object for the same node, in every
+     * view sharing the memo. Mutating it changes what every one of them reads.
+     */
+    public function ref(): mixed
+    {
+        $k = (string) $this->start;
+        $found = $this->memo->offsetExists($k) ? $this->memo[$k] : Struct::undef();
+        if (Struct::undef() === $found) {
+            $found = Struct::_condenseMaterialise($this->cond, $this->start);
+            $this->memo[$k] = $found;
+        }
+        return $found;
     }
 }

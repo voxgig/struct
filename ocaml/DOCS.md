@@ -69,6 +69,8 @@ Names are the canonical names, lower-smushed or snake_cased:
   `re_replace`, `re_test`, `re_escape`. Backed by the in-tree `Vregex` engine.
 - **By-example engine:** `inject`, `transform`, `validate`, `select`, and the
   injector helpers `check_placement`, `injector_args`, `inject_child`.
+- **Condensed structures:** `condense`, `condenseview`, `expand`,
+  `iscondensed`.
 - **Builders / markers:** `jm`, `jt`, `skip`, `delete`, the `t_*` type
   constants and `m_keypre` / `m_keypost` / `m_val`.
 
@@ -91,10 +93,21 @@ transform (jm [Str "name"; Str "alice"])
 (* validate: plain values are typed defaults; `$STRING` etc. are commands *)
 validate (jm [Str "a"; Str "x"]) (jm [Str "a"; Str "`$STRING`"])  (* {a:x} *)
 
+(* validate: a list led by `$NOF` counts the specs that admit the value *)
+validate (Num 1.0)
+  (jt [Str "`$NOF`"; jm [Str "min"; Num 1.0]; Str "`$STRING`"; Str "`$NUMBER`"])  (* 1 *)
+
 (* select: MongoDB-style query over children *)
 select (jt [jm [Str "a"; Num 1.0]; jm [Str "a"; Num 2.0]])
        (jm [Str "a"; jm [Str "`$GT`"; Num 1.0]])             (* [{$KEY:1,a:2}] *)
 ```
+
+The count is a `Num` or a map of `min` and `max`. `` Str "`$ALL`" `` leads a
+list the same way, without a count, and holds when every spec admits the
+value. There is no `$ONE`; the full checker list is in the
+[language-neutral reference](../DOCS.md#validate-checkers-inside-backticks-in-a-validate-spec).
+A spec that names a checker `validate` does not define is rejected before any
+data is read, with `Unknown validator $FOO at field a.`
 
 ## Testing
 
@@ -108,12 +121,11 @@ omni is consumed as a local checkout the Makefile finds via `$OMNI_HOME` or
 beside this repository, and is compiled into the TEST binary only: `make lint`
 type-checks `src/` alone and nothing shipped names omni (register 4.13).
 
-`test/runner.ml` runs every group the corpus defines except the three
-`condense` ones, which no port implements yet — 1358 entries in 72 groups —
-plus the two `check` entries (`DEF.client`, client-scoped options,
-`contextify`) and four single entries that are not part of any set. Keep it
-green, keep `python3 ../tools/check_parity.py` green, and add no runtime
-dependencies.
+`test/runner.ml` runs every group the corpus defines — 1602 entries in 78
+groups — plus the two `check` entries (`DEF.client`,
+client-scoped options, `contextify`) and four single entries that are not part
+of any set. Keep it green, keep `python3 ../tools/check_parity.py` green, and
+add no runtime dependencies.
 
 ## Implementation notes
 

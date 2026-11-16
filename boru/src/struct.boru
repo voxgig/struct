@@ -189,6 +189,37 @@ def vgi-to-int fn [[k:Any] [Any] [
   ]
 ]]
 
+# "0", or digits with no leading zero after an optional "-": the text
+# JavaScript prints for an integer, so "01", " 1", "+1", "-0" and "1.0" name
+# no element.
+def vgi-isindex fn [[s:String] [Boolean] [
+  if ((size s) eq 0) [false] [
+    (s mini re `^(0|-?[1-9][0-9]*)$` {}).ok
+  ]
+]]
+
+# The integer a list key names, read or write: an integral number, or a string
+# vgi-isindex accepts; none for any other key.
+def vgi-list-key fn [[k:Any] [Any] [
+  def r (
+    if (k is String) [
+      if (vgi-isindex k) [vgi-parse-int k] [none]
+    ] [
+      if (vg-bit vg-t-integer (vg-typify k)) [
+        if (k is Float) [MathUtil.floor k] [k]
+      ] [none]
+    ]
+  )
+  r
+]]
+
+# The element a list read selects: a list key that is not negative.
+def vgi-list-index fn [[k:Any] [Any] [
+  def ki (vgi-list-key k)
+  def r (if (ki is None) [none] [if (ki lt 0) [none] [ki]])
+  r
+]]
+
 # JS truthiness (Boolean(v)): none/false/0/NaN/"" are false, all else true.
 def vgi-js-truthy fn [[v:Any] [Boolean] [
   if ((v is None) or (vg-is-noarg v)) [false] [
@@ -428,9 +459,14 @@ def vg-getprop fn [[v:Any k:Any alt:Any] [Any] [
   def alt2 (if (vg-is-noarg alt) [none] [alt])
   if ((v is None) or (k is None) or (vg-is-noarg v) or (vg-is-noarg k)) [alt2] [
     def found (
-      if (vg-ismap v) [v get (vgi-map-key k)] [
+      if (vg-ismap v) [
+        # A key that is neither a string nor a number names nothing.
+        if (k is Boolean) [none] [
+          if ((k is String) or (k is Number)) [v get (vgi-map-key k)] [none]
+        ]
+      ] [
         if (vg-islist v) [
-          def ki (vgi-to-int k)
+          def ki (vgi-list-index k)
           if (ki is None) [none] [
             if ((ki gte 0) and (ki lt (size v))) [v get ki] [none]
           ]
@@ -453,26 +489,22 @@ def vg-haskey fn [[v:Any k:Any] [Boolean] [
   ((vg-getprop v k none) is None) not
 ]]
 
-# ^[-0-9]+$ — integer-looking key (mirrors R_INTEGER_KEY).
-def vgi-intkey-ok fn [[s:String] [Boolean] [
-  if ((size s) eq 0) [false] [
-    (s mini re `^[-0-9]+$` {}).ok
-  ]
-]]
-
-# Get a list element by integer(ish) key; negative counts from the end.
+# Get a list element by list key; a negative key counts from the end.
 # A function alt is called lazily when the slot is empty.
 def vg-getelem fn [[v:Any k:Any alt:Any] [Any] [
   def alt2 (if (vg-is-noarg alt) [none] [alt])
   if ((v is None) or (k is None) or (vg-is-noarg v) or (vg-is-noarg k)) [alt2] [
     def found (
       if (vg-islist v) [
-        def ks (if (k is String) [k] [if (k is Number) [vg-num-to-string k] [""]])
-        if (vgi-intkey-ok ks) [
-          def n0 (vgi-parse-int ks)
-          def n (if (n0 lt 0) [(size v) add n0] [n0])
+        def n0 (vgi-list-key k)
+        def n (
+          if (n0 is None) [none] [
+            if (n0 lt 0) [(size v) add n0] [n0]
+          ]
+        )
+        if (n is None) [none] [
           if ((n gte 0) and (n lt (size v))) [v get n] [none]
-        ] [none]
+        ]
       ] [none]
     )
     if (found is None) [
@@ -488,7 +520,7 @@ def vg-getelem fn [[v:Any k:Any alt:Any] [Any] [
 def vgi-raw fn [[v:Any k:String] [Any] [
   if (vg-ismap v) [v get (k)] [
     if (vg-islist v) [
-      def ki (vgi-parse-int k)
+      def ki (vgi-list-index k)
       if (ki is None) [none] [
         if ((ki gte 0) and (ki lt (size v))) [v get ki] [none]
       ]
@@ -633,16 +665,19 @@ def vg-clone fn [[v:Any] [Any] [
   ]
 ]]
 
-# Safely set a property in place. Lists: int keys only; above-size appends,
+# Safely set a property in place. Lists: a list key only; above-size appends,
 # negative prepends. Returns the (possibly modified) parent.
 def vg-setprop fn [[parent:Any k:Any v:Any] [Any] [
   if (vg-iskey k) [
+    if (vg-iscondensed parent) [
+      raise {code: struct_error/q message: (vg-cond-immutable)}
+    ] [none] drop
     if (vg-ismap parent) [
       (parent set (vgi-map-key k) v) drop
       none
     ] [
       if (vg-islist parent) [
-        def ki (vgi-to-int k)
+        def ki (vgi-list-key k)
         if (ki is None) [none] [
           def n (size parent)
           if (ki gte 0) [
@@ -670,12 +705,15 @@ def vgl-shift-down fn [[i:Integer n:Integer parent:Any] [Any] [
 ]]
 def vg-delprop fn [[parent:Any k:Any] [Any] [
   if (vg-iskey k) [
+    if (vg-iscondensed parent) [
+      raise {code: struct_error/q message: (vg-cond-immutable)}
+    ] [none] drop
     if (vg-ismap parent) [
       (parent del (vg-strkey k)) drop
       none
     ] [
       if (vg-islist parent) [
-        def ki (vgi-to-int k)
+        def ki (vgi-list-key k)
         if (ki is None) [none] [
           def n (size parent)
           if ((ki gte 0) and (ki lt n)) [
@@ -1578,6 +1616,41 @@ def vgi-idef fn [[injdef:Any k:String] [Any] [
   if (injdef is Map) [injdef get (k)] [none]
 ]]
 
+# A path's parts as a fresh list of strings: a number part reads as JavaScript
+# prints it, and a part that is neither a string nor a number makes the whole
+# path miss (none).
+def vgl-pathparts fn [[i:Integer path:Any acc:Any] [Any] [
+  if (i gte (size path)) [acc] [
+    def p (path get i)
+    def ps (
+      if (p is String) [p] [
+        if (p is Boolean) [none] [
+          if (p is Number) [vg-num-to-string p] [none]
+        ]
+      ]
+    )
+    if (ps is None) [none] [
+      (append [ps] acc) drop
+      def r (vgl-pathparts (i add 1) path acc)
+      r
+    ]
+  ]
+]]
+def vgi-pathparts fn [[path:Any] [Any] [
+  def r (
+    if (vg-islist path) [vgl-pathparts 0 path (flex [])] [
+      if (path is String) [
+        make FlexList (StringUtil.split "." path {keepEmpty: true})
+      ] [
+        if (path is Boolean) [none] [
+          if (path is Number) [flex [(vg-num-to-string path)]] [none]
+        ]
+      ]
+    ]
+  )
+  r
+]]
+
 def vgl-getpath-parts fn [[pi:Integer parts:Any vbox:Any store:Any src:Any injdef:Any dparent:Any dpath:Any contbox:Any] [Any] [
   def numparts (size parts)
   def going (
@@ -1688,16 +1761,40 @@ def vgl-count-ascends fn [[parts:Any pbox:Any abox:Any] [Any] [
 ]]
 
 def vg-getpath fn [[store:Any path:Any injdef:Any] [Any] [
+  if (vg-iscondensed store) [
+    def r (vgi-getpath-condensed store path injdef)
+    r
+  ] [
+    def r (vgi-getpath-plain store path injdef)
+    r
+  ]
+]]
+
+# A condensed store reads like the node it was built from. Injection options
+# change what the plain walk resolves against, so only a call without a base
+# takes the fast read.
+def vgi-getpath-condensed fn [[store:Any path:Any injdef:Any] [Any] [
   def idf (if (vg-is-noarg injdef) [none] [injdef])
-  def parts (
-    if (vg-islist path) [vg-clone path] [
-      if (path is String) [
-        make FlexList (StringUtil.split "." path {keepEmpty: true})
+  def parts (vgi-pathparts path)
+  def r (
+    if (parts is None) [none] [
+      if ((vgi-idef idf "base") is None) [
+        def found (vgl-cond-resolve 0 parts store (vgi-cond-ix (store get "root")))
+        def cv (vgi-cond-rebuild store found)
+        cv
       ] [
-        if (path is Number) [flex [(vg-strkey path)]] [none]
+        def es (vg-expand store)
+        def pv (vgi-getpath-plain es path injdef)
+        pv
       ]
     ]
   )
+  r
+]]
+
+def vgi-getpath-plain fn [[store:Any path:Any injdef:Any] [Any] [
+  def idf (if (vg-is-noarg injdef) [none] [injdef])
+  def parts (vgi-pathparts path)
   if (parts is None) [none] [
     def ibase (vgi-idef idf "base")
     def src (vg-getprop store ibase store)
@@ -1781,6 +1878,9 @@ def vgl-setpath-descend fn [[pi:Integer parts:Any pbox:Any] [Any] [
   ]
 ]]
 def vg-setpath fn [[store:Any path:Any val:Any injdef:Any] [Any] [
+  if (vg-iscondensed store) [
+    raise {code: struct_error/q message: (vg-cond-immutable)}
+  ] [none] drop
   def idf (if (vg-is-noarg injdef) [none] [injdef])
   def ptype (vg-typify path)
   def parts (
@@ -2866,6 +2966,9 @@ def vg-transform fn [[data:Any spec:Any injdef:Any] [Any] [
   (vg-setprop errsm "$ERRS" errs) drop
   (append [errsm] sl) drop
   def store (vg-merge sl 1)
+  # An extra $TOP of NOARG is canonical undefined: the data is absent, so the
+  # slot is too, and a literal-presence read sees no value at the root.
+  if (vg-is-noarg (store get "$TOP")) [(store del "$TOP") drop none] [none] drop
   def out (vg-inject spec2 store idf)
   if (((vgz errs) gt 0) and (collect not)) [
     def msg (vg-join errs " | " vg-noarg)
@@ -2948,15 +3051,30 @@ def vg-v-string fn [[inj:Any val:Any iref:Any store:Any] [Any] [
 def vgi-haslit fn [[v:Any k:Any] [Boolean] [
   if (vg-ismap v) [v has (vgi-map-key k)] [
     if (vg-islist v) [
-      def ki (vgi-to-int k)
+      def ki (vgi-list-index k)
       if (ki is None) [false] [(ki gte 0) and (ki lt (size v))]
     ] [false]
   ]
 ]]
 
+# The null a checker finds in its slot is written back here, as vgi-slotset
+# does for the list directives, and SKIP keeps inject from deleting it again.
+# Only a whole value is written back: a key or a partial string has no slot.
+def vgi-heldnull fn [[inj:Any] [Any] [
+  def r (
+    if (((inj get "full") eq true) and ((inj get "mode") eq 4)) [
+      (vg-setprop (inj get "parent") (inj get "key") none) drop
+      vg-skip-marker
+    ] [none]
+  )
+  r
+]]
+
 def vg-v-type fn [[inj:Any val:Any iref:Any store:Any] [Any] [
   def tname (StringUtil.lower (iref slice 1 (size iref)))
-  def typev (vg-getprop vg-vtype-map tname 0)
+  # $NIL is absent or null.
+  def typev0 (vg-getprop vg-vtype-map tname 0)
+  def typev (if (tname eq "nil") [BinUtil.bor typev0 vg-t-null] [typev0])
   def fout (vgi-lookup (inj get "dparent") (inj get "key"))
   # An ABSENT slot is canonical undefined (nil); a PRESENT null slot is
   # canonical null. Literal presence recovers the distinction none folds.
@@ -2968,12 +3086,25 @@ def vg-v-type fn [[inj:Any val:Any iref:Any store:Any] [Any] [
   if ((BinUtil.band t typev) eq 0) [
     (append [(vgi-invalid-type-msg (inj get "path") tname t fout)] (inj get "errs")) drop
     none
-  ] [fout]
+  ] [
+    if (t eq vg-t-null) [
+      def hn (vgi-heldnull inj)
+      hn
+    ] [fout]
+  ]
 ]]
 
 def vg-v-any fn [[inj:Any val:Any iref:Any store:Any] [Any] [
   def fout (vgi-lookup (inj get "dparent") (inj get "key"))
-  fout
+  def r (
+    if (fout is None) [
+      if (vgi-haslit (inj get "dparent") (inj get "key")) [
+        def hn (vgi-heldnull inj)
+        hn
+      ] [none]
+    ] [fout]
+  )
+  r
 ]]
 
 def vgl-vchild-keys fn [[i:Integer ckeys:Any parent:Any childtm:Any vkeys:Any] [Any] [
@@ -3013,7 +3144,7 @@ def vg-v-child fn [[inj:Any val:Any iref:Any store:Any] [Any] [
     def pkey (vg-getelem path -2 vg-noarg)
     def tval0 (vg-getprop (inj get "dparent") pkey vg-noarg)
     if (((tval0 is None) not) and ((vg-ismap tval0) not)) [
-      (append [(vgi-invalid-type-msg (vg-slice path -1 vg-noarg vg-noarg) "object" (vg-typify tval0) tval0)] (inj get "errs")) drop
+      # vg-validation reports the mismatch, once.
       none
     ] [
       def tval (if (tval0 is None) [flex {}] [tval0])
@@ -3036,8 +3167,6 @@ def vg-v-child fn [[inj:Any val:Any iref:Any store:Any] [Any] [
           none
         ] [
           if ((vg-islist dparent) not) [
-            def msg (vgi-invalid-type-msg (vg-slice (inj get "path") -1 vg-noarg vg-noarg) "list" (vg-typify dparent) dparent)
-            (append [msg] (inj get "errs")) drop
             (inj set "keyi" (vgz parent)) drop
             dparent
           ] [
@@ -3061,69 +3190,241 @@ def vg-v-child fn [[inj:Any val:Any iref:Any store:Any] [Any] [
   ]
 ]]
 
-# Try each $ONE alternative; true as soon as one validates clean.
-def vgl-vone-alts fn [[i:Integer tvals:Any inj:Any store:Any] [Boolean] [
-  if (i gte (size tvals)) [false] [
-    def tval (tvals get i)
-    def terrs (flex [])
-    def ml (flex [])
-    (append [(flex {})] ml) drop
-    (append [store] ml) drop
-    def vstore (vg-merge ml 1)
-    (vg-setprop vstore "$TOP" (inj get "dparent")) drop
-    def idf (flex {})
-    (idf set "extra" vstore) drop
-    (idf set "errs" terrs) drop
-    (idf set "meta" (inj get "meta")) drop
-    def vcurrent (vg-validate (inj get "dparent") tval idf)
-    (vgi-inj-setval inj vcurrent -2) drop
-    if ((vgz terrs) eq 0) [true] [
-      def r (vgl-vone-alts (i add 1) tvals inj store)
+# The data value at a list directive's slot. The directive's own dparent was
+# read with getprop, which reports a stored null as absent.
+def vgi-slotval fn [[inj:Any] [Any] [
+  def prior (inj get "prior")
+  def own (inj get "dparent")
+  if (prior is None) [own] [
+    def r (vgi-lookup (prior get "dparent") (prior get "key"))
+    r
+  ]
+]]
+
+# Whether the slot holds a value: with one none, only the slot tells a null
+# from an absent key.
+def vgi-slotheld fn [[inj:Any] [Boolean] [
+  def prior (inj get "prior")
+  def own (inj get "dparent")
+  if (prior is None) [(own is None) not] [
+    def r (vgi-haslit (prior get "dparent") (prior get "key"))
+    r
+  ]
+]]
+
+# vgi-inj-setval deletes for none, so a null the slot holds is set directly.
+def vgi-slotset fn [[inj:Any cval:Any held:Boolean] [Any] [
+  if ((cval is None) and held) [
+    def tgt (vg-getelem (inj get "nodes") -2 vg-noarg)
+    def tkey (vg-getelem (inj get "path") -2 vg-noarg)
+    def r (vg-setprop tgt tkey none)
+    r
+  ] [
+    def r (vgi-inj-setval inj cval 2)
+    r
+  ]
+]]
+
+# JSON equality: numbers by value, lists in order, maps by key in any order.
+def vgi-deepequal fn [[a:Any b:Any] [Boolean] [
+  def atype (vg-typify a)
+  if ((atype eq (vg-typify b)) not) [false] [
+    if (vg-bit (BinUtil.bor vg-t-list vg-t-map) atype) [
+      def aks (vg-keysof a)
+      def bks (vg-keysof b)
+      if ((size aks) eq (size bks)) [
+        def r (vgl-deepequal 0 aks bks a b)
+        r
+      ] [false]
+    ] [
+      if (vg-bit vg-t-number atype) [a eq b] [
+        def r (vgi-exact-eq a b)
+        r
+      ]
+    ]
+  ]
+]]
+def vgl-deepequal fn [[i:Integer aks:Any bks:Any a:Any b:Any] [Boolean] [
+  if (i gte (size aks)) [true] [
+    def ak (aks get i)
+    if ((ak eq (bks get i)) not) [false] [
+      if (vgi-deepequal (vgi-raw a ak) (vgi-raw b ak)) [
+        def r (vgl-deepequal (i add 1) aks bks a b)
+        r
+      ] [false]
+    ]
+  ]
+]]
+
+# Every member val has is in out, unchanged. A member only out has is a
+# default the spec supplied, and is ignored.
+def vgi-keeps fn [[val:Any vout:Any] [Boolean] [
+  if (vg-bit (BinUtil.bor vg-t-list vg-t-map) (vg-typify val)) [
+    if (((vg-islist val) eq (vg-islist vout)) and (vg-isnode vout)) [
+      def r (vgl-keeps 0 (vg-keysof val) val vout)
+      r
+    ] [
+      def r (vgi-deepequal val vout)
+      r
+    ]
+  ] [
+    def r (vgi-deepequal val vout)
+    r
+  ]
+]]
+def vgl-keeps fn [[i:Integer ks:Any val:Any vout:Any] [Boolean] [
+  if (i gte (size ks)) [true] [
+    def k (ks get i)
+    if (vgi-haslit vout k) [
+      if (vgi-keeps (vgi-raw val k) (vgi-raw vout k)) [
+        def r (vgl-keeps (i add 1) ks val vout)
+        r
+      ] [false]
+    ] [false]
+  ]
+]]
+
+# A spec admits a value when validating the value against it finds no error
+# and gives back the value as it is. Any output keeps an absent value.
+def vgi-admits fn [[val:Any held:Boolean spec:Any inj:Any store:Any] [Boolean] [
+  def terrs (flex [])
+  def ml (flex [])
+  (append [(flex {})] ml) drop
+  (append [store] ml) drop
+  def vstore (vg-merge ml 1)
+  # An absent value is no value in the trial too, not a null: vg-transform
+  # turns a NOARG $TOP into a store with no $TOP slot.
+  def topv (if held [val] [vg-noarg])
+  (vg-setprop vstore "$TOP" topv) drop
+  def idf (flex {})
+  (idf set "extra" vstore) drop
+  (idf set "errs" terrs) drop
+  (idf set "meta" (inj get "meta")) drop
+  def vout (vg-validate val spec idf)
+  if ((vgz terrs) gt 0) [false] [
+    if held [
+      def r (vgi-keeps val vout)
+      r
+    ] [true]
+  ]
+]]
+
+# A $NOF count bound: a non-negative integer.
+def vgi-isnat fn [[n:Any] [Boolean] [
+  if (vg-bit vg-t-integer (vg-typify n)) [n gte 0] [false]
+]]
+
+# A $NOF count map: min, max or both and nothing else, min <= max.
+def vgi-nofvalid fn [[cnt:Any cmin:Any cmax:Any] [Boolean] [
+  if (vg-ismap cnt) [
+    def wmin (if (cmin is None) [0] [1])
+    def wmax (if (cmax is None) [0] [1])
+    if (((size cnt) gt 0) and ((size cnt) eq (wmin add wmax))) [
+      def minok (if (cmin is None) [true] [vgi-isnat cmin])
+      def maxok (if (cmax is None) [true] [vgi-isnat cmax])
+      if (minok and maxok) [
+        if ((cmin is None) or (cmax is None)) [true] [cmin lte cmax]
+      ] [false]
+    ] [false]
+  ] [false]
+]]
+
+# The bounds of a $NOF count, and the words for it, which are absent when
+# the count is invalid. Without a max, the bound is the number of specs.
+def vgi-nofcount fn [[cnt:Any numtvals:Integer] [Any] [
+  if (vgi-isnat cnt) [
+    def cwords (if (cnt eq 0) ["none"] [StringUtil.concat ["exactly " (vg-num-to-string cnt)]])
+    flex [cnt cnt cwords]
+  ] [
+    def cmin (vgi-lookup cnt "min")
+    def cmax (vgi-lookup cnt "max")
+    if (vgi-nofvalid cnt cmin cmax) [
+      def lo (if (cmin is None) [0] [cmin])
+      def hi (if (cmax is None) [numtvals] [cmax])
+      def cwords (
+        if (cmax is None) [StringUtil.concat ["at least " (vg-num-to-string lo)]] [
+          if (hi eq 0) ["none"] [
+            if (cmin is None) [StringUtil.concat ["at most " (vg-num-to-string hi)]] [
+              if (lo eq hi) [StringUtil.concat ["exactly " (vg-num-to-string lo)]] [
+                StringUtil.concat [(vg-num-to-string lo) " to " (vg-num-to-string hi)]
+              ]
+            ]
+          ]
+        ]
+      )
+      flex [lo hi cwords]
+    ] [flex [0 0 none]]
+  ]
+]]
+
+# Count the specs that admit the value, from spec ti on.
+def vgl-count-admits fn [[ti:Integer admitted:Integer lo:Any hi:Any tvals:Any cval:Any held:Boolean inj:Any store:Any] [Integer] [
+  def numtvals (size tvals)
+  if (ti gte numtvals) [admitted] [
+    def reach (admitted add (numtvals sub ti))
+    # Stop once the specs left cannot change the verdict.
+    def decided (((hi lt admitted) or (reach lt lo)) or ((lo lte admitted) and (reach lte hi)))
+    if decided [admitted] [
+      def a1 (if (vgi-admits cval held (tvals get ti) inj store) [admitted add 1] [admitted])
+      def r (vgl-count-admits (ti add 1) a1 lo hi tvals cval held inj store)
       r
     ]
   ]
 ]]
 
-def vg-v-one fn [[inj:Any val:Any iref:Any store:Any] [Any] [
+# The counting list directives. Without a count, every spec has to admit.
+def vgi-validatecount fn [[inj:Any store:Any vname:String counted:Boolean] [Any] [
   if ((inj get "mode") eq 4) [
     def parent (inj get "parent")
     def keyi (inj get "keyi")
     if (((vg-islist parent) not) or ((keyi eq 0) not)) [
-      (append [(StringUtil.concat ["The $ONE validator at field " (vg-pathify (inj get "path") 1 1) " must be the first element of an array."])] (inj get "errs")) drop
+      (append [(StringUtil.concat ["The " vname " validator at field " (vg-pathify (inj get "path") 1 1) " must be the first element of an array."])] (inj get "errs")) drop
       none
     ] [
+      def cval (vgi-slotval inj)
+      def held (vgi-slotheld inj)
       (inj set "keyi" (vgz (inj get "keys"))) drop
-      (vgi-inj-setval inj (inj get "dparent") 2) drop
+      # Replace the directive's list with the data value. Each return is SKIP, so
+      # that inject leaves the detached list alone and validates nothing in it.
+      (vgi-slotset inj cval held) drop
       (inj set "path" (vg-slice (inj get "path") -1 vg-noarg vg-noarg)) drop
-      def tvals (vg-slice parent 1 vg-noarg vg-noarg)
-      if ((vgz tvals) eq 0) [
-        (append [(StringUtil.concat ["The $ONE validator at field " (vg-pathify (inj get "path") 1 1) " must have at least one argument."])] (inj get "errs")) drop
+      def cnt0 (vgi-lookup parent 1)
+      def cnt (if counted [cnt0] [none])
+      def tstart (if counted [2] [1])
+      def tvals (vg-slice parent tstart vg-noarg vg-noarg)
+      def numtvals (vgz tvals)
+      def fieldmsg (StringUtil.concat ["The " vname " validator at field " (vg-pathify (inj get "path") 1 vg-noarg)])
+      if (numtvals eq 0) [
+        def msgtail (if counted [" must have a count and at least one argument."] [" must have at least one argument."])
+        (append [(StringUtil.concat [fieldmsg msgtail])] (inj get "errs")) drop
         none
       ] [
-        def matched (vgl-vone-alts 0 tvals inj store)
-        if (matched eq true) [none] [
-          def valdesc (vgi-valdesc tvals)
-          def pref (if ((vgz tvals) gt 1) ["one of "] [""])
-          def need (StringUtil.concat [pref valdesc])
-          (append [(vgi-invalid-type-msg (inj get "path") need (vg-typify (inj get "dparent")) (inj get "dparent"))] (inj get "errs")) drop
+        def bounds (if counted [vgi-nofcount cnt numtvals] [flex [numtvals numtvals "all"]])
+        def cdesc (bounds get 2)
+        if (cdesc is None) [
+          (append [(StringUtil.concat [fieldmsg " has an invalid count: " (vg-stringify cnt vg-noarg vg-noarg) "."])] (inj get "errs")) drop
           none
-        ]
-      ]
+        ] [
+          def lo (bounds get 0)
+          def hi (bounds get 1)
+          def admitted (vgl-count-admits 0 0 lo hi tvals cval held inj store)
+          if ((admitted lt lo) or (hi lt admitted)) [
+            def need (StringUtil.concat [cdesc " of " (vgi-valdesc tvals)])
+            (append [(vgi-invalid-type-msg (inj get "path") need (vg-typify cval) cval)] (inj get "errs")) drop
+            none
+          ] [none] drop
+          none
+        ] drop
+        none
+      ] drop
+      vg-skip-marker
     ]
   ] [none]
 ]]
 
 def vgl-vexact-alts fn [[i:Integer tvals:Any dp:Any] [Boolean] [
   if (i gte (size tvals)) [false] [
-    def tval (tvals get i)
-    def em (
-      if (vgi-exact-eq tval dp) [true] [
-        if (vg-isnode tval) [
-          (vg-stringify tval vg-noarg vg-noarg) eq (vg-stringify dp vg-noarg vg-noarg)
-        ] [false]
-      ]
-    )
-    if (em eq true) [true] [
+    if (vgi-deepequal (tvals get i) dp) [true] [
       def r (vgl-vexact-alts (i add 1) tvals dp)
       r
     ]
@@ -3138,30 +3439,48 @@ def vg-v-exact fn [[inj:Any val:Any iref:Any store:Any] [Any] [
       (append [(StringUtil.concat ["The $EXACT validator at field " (vg-pathify (inj get "path") 1 1) " must be the first element of an array."])] (inj get "errs")) drop
       none
     ] [
+      def cval (vgi-slotval inj)
+      def held (vgi-slotheld inj)
       (inj set "keyi" (vgz (inj get "keys"))) drop
-      (vgi-inj-setval inj (inj get "dparent") 2) drop
+      # Replace [$EXACT, ...] with the data value; SKIP keeps inject off the detached list.
+      (vgi-slotset inj cval held) drop
       (inj set "path" (vg-slice (inj get "path") 0 -1 vg-noarg)) drop
-      (inj set "key" (vg-getelem (inj get "path") -1 vg-noarg)) drop
       def tvals (vg-slice parent 1 vg-noarg vg-noarg)
       if ((vgz tvals) eq 0) [
         (append [(StringUtil.concat ["The $EXACT validator at field " (vg-pathify (inj get "path") 1 1) " must have at least one argument."])] (inj get "errs")) drop
         none
       ] [
-        def matched (vgl-vexact-alts 0 tvals (inj get "dparent"))
+        # An absent value equals no argument.
+        def matched (if held [vgl-vexact-alts 0 tvals cval] [false])
         if (matched eq true) [none] [
           def valdesc (vgi-valdesc tvals)
           def p1 (if ((vgz (inj get "path")) gt 1) [""] ["value "])
           def p2 (if ((vgz tvals) eq 1) [""] ["one of "])
           def need (StringUtil.concat [p1 "exactly equal to " p2 valdesc])
-          (append [(vgi-invalid-type-msg (inj get "path") need (vg-typify (inj get "dparent")) (inj get "dparent"))] (inj get "errs")) drop
+          (append [(vgi-invalid-type-msg (inj get "path") need (vg-typify cval) cval)] (inj get "errs")) drop
           none
-        ]
-      ]
+        ] drop
+        none
+      ] drop
+      vg-skip-marker
     ]
   ] [
     (vg-delprop (inj get "parent") (inj get "key")) drop
     none
   ]
+]]
+
+# Count the specs that admit the value: ['`$NOF`', count, spec, ...], where
+# count is an integer, or a map holding min, max or both.
+def vg-v-nof fn [[inj:Any val:Any iref:Any store:Any] [Any] [
+  def r (vgi-validatecount inj store "$NOF" true)
+  r
+]]
+
+# Every spec admits the value: ['`$ALL`', spec, ...].
+def vg-v-all fn [[inj:Any val:Any iref:Any store:Any] [Any] [
+  def r (vgi-validatecount inj store "$ALL" false)
+  r
 ]]
 
 # Literal key presence (stored null still counts as declared).
@@ -3273,8 +3592,70 @@ def vg-v-string-box {"`$FN`": vg-v-string/v}
 def vg-v-type-box {"`$FN`": vg-v-type/v}
 def vg-v-any-box {"`$FN`": vg-v-any/v}
 def vg-v-child-box {"`$FN`": vg-v-child/v}
-def vg-v-one-box {"`$FN`": vg-v-one/v}
 def vg-v-exact-box {"`$FN`": vg-v-exact/v}
+def vg-v-nof-box {"`$FN`": vg-v-nof/v}
+def vg-v-all-box {"`$FN`": vg-v-all/v}
+
+# Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
+def vg-validate-names {"$TOP": true "$SPEC": true "$BT": true "$DS": true "$WHEN": true "$ANNO": true "$REF": true "$FORMAT": true "$APPLY": true "$OPEN": true}
+
+# The name a whole-string reference gives, when it is a checker name in any case.
+def vgi-refname fn [[v:Any] [Any] [
+  if (v is String) [
+    def fm (vg-re-find "^`(\\$[A-Z]+|[^`]*)[0-9]*`$" v)
+    if (fm is None) [none] [
+      def nm (fm get 1)
+      if (vg-re-test "^\\$[A-Z]+$" (StringUtil.upper nm)) [nm] [none]
+    ]
+  ] [none]
+]]
+
+# Unknown: undefined and upper case, or a defined name in another case. Null disables a name.
+def vgi-knownname fn [[nm:String store:Any] [Boolean] [
+  if ((vg-getprop vg-validate-names nm false) eq true) [true] [((vgi-lookup store nm) is None) not]
+]]
+def vgi-unknownname fn [[nm:String store:Any] [Boolean] [
+  def unm (StringUtil.upper nm)
+  if (vgi-knownname nm store) [false] [
+    if (unm eq nm) [true] [
+      def r (vgi-knownname unm store)
+      r
+    ]
+  ]
+]]
+
+# Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
+def vgi-checknames fn [[spec:Any store:Any pth:Any errs:Any] [Any] [
+  def nm (vgi-refname spec)
+  if (nm is None) [
+    def exactargs (
+      if (vg-islist spec) [(vgi-refname (vgi-lookup spec 0)) eq "$EXACT"] [false]
+    )
+    if exactargs [none] [
+      (vgl-checknames 0 (vg-keysof spec) spec store pth errs) drop
+      none
+    ] drop
+    none
+  ] [
+    if (vgi-unknownname nm store) [
+      (append [(StringUtil.concat ["Unknown validator " nm " at field " (vg-pathify pth vg-noarg vg-noarg) "."])] errs) drop
+      none
+    ] [none] drop
+    none
+  ] drop
+  none
+]]
+def vgl-checknames fn [[i:Integer ks:Any spec:Any store:Any pth:Any errs:Any] [Any] [
+  if (i gte (size ks)) [none] [
+    def k (ks get i)
+    if (vg-ismap spec) [(vgi-checknames k store pth errs) drop none] [none] drop
+    def cpth (vg-clone pth)
+    (append [k] cpth) drop
+    (vgi-checknames (vgi-raw spec k) store cpth errs) drop
+    def r (vgl-checknames (i add 1) ks spec store pth errs)
+    r
+  ]
+]]
 
 def vg-validate fn [[data:Any spec:Any injdef:Any] [Any] [
   def idf (if (vg-is-noarg injdef) [none] [injdef])
@@ -3303,8 +3684,9 @@ def vg-validate fn [[data:Any spec:Any injdef:Any] [Any] [
     "$INSTANCE": (vg-v-type-box)
     "$ANY": (vg-v-any-box)
     "$CHILD": (vg-v-child-box)
-    "$ONE": (vg-v-one-box)
     "$EXACT": (vg-v-exact-box)
+    "$NOF": (vg-v-nof-box)
+    "$ALL": (vg-v-all-box)
   })
   def sl (flex [])
   (append [cmds] sl) drop
@@ -3316,13 +3698,24 @@ def vg-validate fn [[data:Any spec:Any injdef:Any] [Any] [
   def meta0 (vgi-idef idf "meta")
   def meta (if (meta0 is None) [flex {}] [meta0])
   (vg-setprop meta "`$EXACT`" (vg-getprop meta "`$EXACT`" false)) drop
-  def tidf (flex {})
-  (tidf set "meta" meta) drop
-  (tidf set "extra" store) drop
-  (tidf set "modify" vg-validation-box) drop
-  (tidf set "handler" vg-validatehandler-box) drop
-  (tidf set "errs" errs) drop
-  def vout (vg-transform data spec tidf)
+  # A spec that names an unknown checker validates nothing.
+  def numerrs (vgz errs)
+  (vgi-checknames spec store (flex []) errs) drop
+  def vout (
+    if (numerrs lt (vgz errs)) [
+      def cl (vg-clone data)
+      cl
+    ] [
+      def tidf (flex {})
+      (tidf set "meta" meta) drop
+      (tidf set "extra" store) drop
+      (tidf set "modify" vg-validation-box) drop
+      (tidf set "handler" vg-validatehandler-box) drop
+      (tidf set "errs" errs) drop
+      def tout (vg-transform data spec tidf)
+      tout
+    ]
+  )
   if (((vgz errs) gt 0) and (collect not)) [
     def msg (vg-join errs " | " vg-noarg)
     raise {code: struct_error/q message: (msg)}
@@ -3507,6 +3900,496 @@ def vg-select fn [[children:Any query:Any] [Any] [
 ]]
 
 # ----------------------------------------------------------------------------
+# condense — an interned encoding of a JSON-shaped value: a symbol table
+# sorted by code point, and post-order nodes [kind ...]. A condenseview is a
+# handle {cond start memo}, read through the condenseview_* exports.
+# ----------------------------------------------------------------------------
+def vg-cond-map 0
+def vg-cond-list 1
+def vg-cond-str 2
+def vg-cond-num 3
+def vg-cond-true 4
+def vg-cond-false 5
+def vg-cond-null 6
+def vg-cond-immutable "struct: condensed structures are immutable - expand() first, then modify the copy"
+
+# The version must match, not merely be numeric: a future profile would
+# otherwise be decoded under this one's schema.
+def vg-iscondensed fn [[v:Any] [Boolean] [
+  if (v is Map) [
+    def ver (v get "$condense")
+    def vok (
+      if (ver is Boolean) [false] [
+        if (ver is Integer) [ver eq 1] [if (ver is Float) [ver eq 1.0] [false]]
+      ]
+    )
+    if vok [
+      if (vg-isfunc v) [false] [
+        if (vg-islist (v get "sym")) [
+          if (vg-islist (v get "node")) [
+            def rt (v get "root")
+            if (rt is Boolean) [false] [rt is Number]
+          ] [false]
+        ] [false]
+      ]
+    ] [false]
+  ] [false]
+]]
+
+# An index read from an encoding, or -1 when it is not an integer.
+def vgi-cond-ix fn [[v:Any] [Any] [
+  if (v is Boolean) [-1] [
+    if (v is Integer) [v] [
+      if (v is Float) [
+        if ((MathUtil.is-nan v) or (MathUtil.is-inf v)) [-1] [
+          if ((MathUtil.floor v) eq v) [(convert Integer v)] [-1]
+        ]
+      ] [-1]
+    ]
+  ]
+]]
+
+def vgi-cond-at fn [[xs:Any i:Integer] [Any] [
+  def r (if (i lt (size xs)) [xs get i] [none])
+  r
+]]
+
+def vgi-cond-kind fn [[enc:Any] [Any] [
+  def r (vgi-cond-ix (vgi-cond-at enc 0))
+  r
+]]
+
+def vgl-cond-collect-map fn [[i:Integer ks:Any n:Any symset:Any] [Any] [
+  if (i gte (size ks)) [none] [
+    def k (ks get i)
+    (symset set (k) true) drop
+    (vgi-cond-collect (n get (k)) symset) drop
+    def r (vgl-cond-collect-map (i add 1) ks n symset)
+    r
+  ]
+]]
+def vgl-cond-collect-list fn [[i:Integer n:Any symset:Any] [Any] [
+  if (i gte (size n)) [none] [
+    (vgi-cond-collect (n get i) symset) drop
+    def r (vgl-cond-collect-list (i add 1) n symset)
+    r
+  ]
+]]
+def vgi-cond-collect fn [[n:Any symset:Any] [Any] [
+  if (vg-ismap n) [
+    (vgl-cond-collect-map 0 (keys n) n symset) drop
+    none
+  ] [
+    if (vg-islist n) [
+      (vgl-cond-collect-list 0 n symset) drop
+      none
+    ] [
+      if (n is String) [(symset set (n) true) drop none] [none]
+    ]
+  ]
+]]
+
+def vgl-cond-symids fn [[i:Integer sym:Any symid:Any] [Any] [
+  if (i gte (size sym)) [symid] [
+    def s (sym get i)
+    (symid set (s) i) drop
+    def r (vgl-cond-symids (i add 1) sym symid)
+    r
+  ]
+]]
+
+# The text canonical joins an encoding into. JS prints a negative zero as 0,
+# and an integer and a float of one value as one number.
+def vgl-cond-enckey fn [[i:Integer enc:Any acc:Any] [Any] [
+  if (i gte (size enc)) [acc] [
+    def e (enc get i)
+    def es (if (e is Float) [if (e eq 0.0) ["0"] [vg-num-to-string e]] [vg-num-to-string e])
+    (append [es] acc) drop
+    def r (vgl-cond-enckey (i add 1) enc acc)
+    r
+  ]
+]]
+
+# Interned on that text, so identical subtrees share a node. The kind leads,
+# so kinds never collide.
+def vgi-cond-intern fn [[enc:Any ctx:Any] [Any] [
+  def ek (vgi-join-list (vgl-cond-enckey 0 enc (flex [])) ",")
+  def seen (ctx get "seen")
+  def hit (seen get (ek))
+  if (hit is None) [
+    def nodes (ctx get "nodes")
+    def ix (size nodes)
+    (append [enc] nodes) drop
+    (seen set (ek) ix) drop
+    ix
+  ] [hit]
+]]
+
+def vgl-cond-build-map fn [[i:Integer ks:Any n:Any ctx:Any enc:Any] [Any] [
+  if (i gte (size ks)) [enc] [
+    def k (ks get i)
+    def sid ((ctx get "symid") get (k))
+    (append [sid] enc) drop
+    def cix (vgi-cond-build (n get (k)) ctx)
+    (append [cix] enc) drop
+    def r (vgl-cond-build-map (i add 1) ks n ctx enc)
+    r
+  ]
+]]
+def vgl-cond-build-list fn [[i:Integer n:Any ctx:Any enc:Any] [Any] [
+  if (i gte (size n)) [enc] [
+    def cix (vgi-cond-build (n get i) ctx)
+    (append [cix] enc) drop
+    def r (vgl-cond-build-list (i add 1) n ctx enc)
+    r
+  ]
+]]
+
+# Post-order, so an identical subtree is already interned when its parent
+# refers to it. keysof sorts as the symbol table does, so the symbol ids of a
+# map's pairs ascend and a lookup can bisect them.
+def vgi-cond-build fn [[n:Any ctx:Any] [Any] [
+  def enc (
+    if (vg-ismap n) [
+      def em (vgl-cond-build-map 0 (vg-keysof n) n ctx (flex [vg-cond-map]))
+      em
+    ] [
+      if (vg-islist n) [
+        def el (vgl-cond-build-list 0 n ctx (flex [vg-cond-list]))
+        el
+      ] [
+        if (n is String) [
+          def sid ((ctx get "symid") get (n))
+          flex [vg-cond-str sid]
+        ] [
+          if (n is Boolean) [
+            if n [flex [vg-cond-true]] [flex [vg-cond-false]]
+          ] [
+            if (n is Number) [flex [vg-cond-num n]] [flex [vg-cond-null]]
+          ]
+        ]
+      ]
+    ]
+  )
+  def r (vgi-cond-intern enc ctx)
+  r
+]]
+
+def vg-condense fn [[val:Any] [Any] [
+  def symset (flex {})
+  (vgi-cond-collect val symset) drop
+  def sym (make FlexList (sort (keys symset)))
+  def ctx (flex {})
+  (ctx set "symid" (vgl-cond-symids 0 sym (flex {}))) drop
+  (ctx set "nodes" (flex [])) drop
+  (ctx set "seen" (flex {})) drop
+  def rootix (vgi-cond-build val ctx)
+  def out (flex {})
+  (out set "$condense" 1) drop
+  (out set "sym" sym) drop
+  (out set "node" (ctx get "nodes")) drop
+  (out set "root" rootix) drop
+  out
+]]
+
+# The encoding list of node ix, or none.
+def vgi-cond-enc fn [[cd:Any ix:Any] [Any] [
+  if (vg-ismap cd) [
+    def nodes (cd get "node")
+    if (vg-islist nodes) [
+      if (ix is Integer) [
+        if ((ix lt 0) or (ix gte (size nodes))) [none] [
+          def enc (nodes get ix)
+          if (vg-islist enc) [enc] [none]
+        ]
+      ] [none]
+    ] [none]
+  ] [none]
+]]
+
+def vgi-cond-sym fn [[cd:Any v:Any] [Any] [
+  def ix (vgi-cond-ix v)
+  def syms (if (vg-ismap cd) [cd get "sym"] [none])
+  def r (
+    if (vg-islist syms) [
+      if ((ix lt 0) or (ix gte (size syms))) [none] [syms get ix]
+    ] [none]
+  )
+  r
+]]
+
+# The symbol table sorts by code point, as strings compare here.
+def vgl-cond-bisect-sym fn [[lo:Integer hi:Integer syms:Any key:String] [Any] [
+  if (lo gt hi) [-1] [
+    def mid ((lo add hi) div 2)
+    def s (syms get mid)
+    if (s is String) [
+      if (s eq key) [mid] [
+        if (s lt key) [
+          def r (vgl-cond-bisect-sym (mid add 1) hi syms key)
+          r
+        ] [
+          def r (vgl-cond-bisect-sym lo (mid sub 1) syms key)
+          r
+        ]
+      ]
+    ] [
+      def r (vgl-cond-bisect-sym lo (mid sub 1) syms key)
+      r
+    ]
+  ]
+]]
+def vgi-cond-symid fn [[cd:Any key:String] [Any] [
+  def syms (cd get "sym")
+  if (vg-islist syms) [
+    def r (vgl-cond-bisect-sym 0 ((size syms) sub 1) syms key)
+    r
+  ] [-1]
+]]
+
+# Pairs sit at [1,2], [3,4], ... in ascending symbol id.
+def vgl-cond-bisect-pairs fn [[lo:Integer hi:Integer enc:Any sid:Integer] [Any] [
+  if (lo gt hi) [-1] [
+    def mid ((lo add hi) div 2)
+    def k (vgi-cond-ix (enc get (1 add (mid mul 2))))
+    if (k eq sid) [
+      def r (vgi-cond-ix (enc get (2 add (mid mul 2))))
+      r
+    ] [
+      if (k lt sid) [
+        def r (vgl-cond-bisect-pairs (mid add 1) hi enc sid)
+        r
+      ] [
+        def r (vgl-cond-bisect-pairs lo (mid sub 1) enc sid)
+        r
+      ]
+    ]
+  ]
+]]
+
+def vgi-cond-child fn [[cd:Any ix:Any key:String] [Any] [
+  def enc (vgi-cond-enc cd ix)
+  def r (
+    if (enc is None) [-1] [
+      def kd (vgi-cond-kind enc)
+      if (kd eq vg-cond-map) [
+        def sid (vgi-cond-symid cd key)
+        if (sid lt 0) [-1] [
+          def npairs (((size enc) sub 1) div 2)
+          def found (vgl-cond-bisect-pairs 0 (npairs sub 1) enc sid)
+          found
+        ]
+      ] [
+        # The plain list read's rule: condensing must not change which value
+        # a path selects.
+        if (kd eq vg-cond-list) [
+          def li (vgi-list-index key)
+          if (li is None) [-1] [
+            if (li lt ((size enc) sub 1)) [
+              def found (vgi-cond-ix (enc get (li add 1)))
+              found
+            ] [-1]
+          ]
+        ] [-1]
+      ]
+    ]
+  )
+  r
+]]
+
+# A path as a resolve reads it: a list is its parts, a string splits on dots,
+# no path is no parts, and anything else is one part. An empty part is skipped.
+def vgi-cond-parts fn [[pth:Any] [Any] [
+  if (vg-islist pth) [pth] [
+    if (pth is String) [
+      if (pth eq "") [flex []] [make FlexList (StringUtil.split "." pth {keepEmpty: true})]
+    ] [
+      if ((pth is None) or (vg-is-noarg pth)) [flex []] [flex [(vg-js-string pth)]]
+    ]
+  ]
+]]
+def vgl-cond-resolve fn [[i:Integer parts:Any cd:Any at0:Any] [Any] [
+  if (i gte (size parts)) [at0] [
+    if (at0 lt 0) [-1] [
+      def p (parts get i)
+      # A part that is neither a string nor a number names nothing.
+      def nxt (
+        if (p is String) [
+          if (p eq "") [at0] [vgi-cond-child cd at0 p]
+        ] [
+          if (p is Boolean) [-1] [
+            if (p is Number) [vgi-cond-child cd at0 (vg-num-to-string p)] [-1]
+          ]
+        ]
+      )
+      def r (vgl-cond-resolve (i add 1) parts cd nxt)
+      r
+    ]
+  ]
+]]
+def vgi-cond-resolve fn [[cd:Any ix:Any pth:Any] [Any] [
+  def parts (vgi-cond-parts pth)
+  def r (vgl-cond-resolve 0 parts cd ix)
+  r
+]]
+
+def vgl-cond-mat-map fn [[j:Integer enc:Any cd:Any out:Any] [Any] [
+  if (j gte (size enc)) [out] [
+    def k (vgi-cond-sym cd (enc get j))
+    if (k is String) [
+      def cv (vgi-cond-rebuild cd (vgi-cond-ix (vgi-cond-at enc (j add 1))))
+      (out set (k) cv) drop
+      none
+    ] [none] drop
+    def r (vgl-cond-mat-map (j add 2) enc cd out)
+    r
+  ]
+]]
+def vgl-cond-mat-list fn [[j:Integer enc:Any cd:Any out:Any] [Any] [
+  if (j gte (size enc)) [out] [
+    def cv (vgi-cond-rebuild cd (vgi-cond-ix (enc get j)))
+    (append [cv] out) drop
+    def r (vgl-cond-mat-list (j add 1) enc cd out)
+    r
+  ]
+]]
+
+# A fresh tree on every call: materialisations never share a container, even
+# where the condensed form shares a node.
+def vgi-cond-rebuild fn [[cd:Any ix:Any] [Any] [
+  def enc (vgi-cond-enc cd ix)
+  def r (
+    if (enc is None) [none] [
+      def kd (vgi-cond-kind enc)
+      if (kd eq vg-cond-map) [
+        def mo (vgl-cond-mat-map 1 enc cd (flex {}))
+        mo
+      ] [
+        if (kd eq vg-cond-list) [
+          def lo (vgl-cond-mat-list 1 enc cd (flex []))
+          lo
+        ] [
+          if (kd eq vg-cond-str) [
+            def sv (vgi-cond-sym cd (vgi-cond-at enc 1))
+            sv
+          ] [
+            if (kd eq vg-cond-num) [
+              def nv (vgi-cond-at enc 1)
+              nv
+            ] [
+              if (kd eq vg-cond-true) [true] [
+                if (kd eq vg-cond-false) [false] [none]
+              ]
+            ]
+          ]
+        ]
+      ]
+    ]
+  )
+  r
+]]
+
+def vgl-cond-keys fn [[j:Integer enc:Any cd:Any acc:Any] [Any] [
+  if (j gte (size enc)) [acc] [
+    def k (vgi-cond-sym cd (enc get j))
+    if (k is String) [(append [k] acc) drop none] [none] drop
+    def r (vgl-cond-keys (j add 2) enc cd acc)
+    r
+  ]
+]]
+def vgi-cond-keys fn [[cd:Any ix:Any] [Any] [
+  def enc (vgi-cond-enc cd ix)
+  def r (
+    if (enc is None) [flex []] [
+      def kd (vgi-cond-kind enc)
+      if (kd eq vg-cond-map) [
+        def mk (vgl-cond-keys 1 enc cd (flex []))
+        mk
+      ] [
+        if (kd eq vg-cond-list) [
+          def lk (vgl-idx-keys 0 ((size enc) sub 1) (flex []))
+          lk
+        ] [flex []]
+      ]
+    ]
+  )
+  r
+]]
+
+def vg-expand fn [[cd:Any] [Any] [
+  if (vg-iscondensed cd) [
+    def r (vgi-cond-rebuild cd (vgi-cond-ix (cd get "root")))
+    r
+  ] [cd]
+]]
+
+def vg-condenseview fn [[cd:Any idx:Any memo:Any] [Any] [
+  def stt (
+    if ((idx is None) or (vg-is-noarg idx)) [
+      if (vg-iscondensed cd) [vgi-cond-ix (cd get "root")] [-1]
+    ] [vgi-cond-ix idx]
+  )
+  # Threaded through at(), so every cursor into one structure shares it.
+  def mm (if ((memo is None) or (vg-is-noarg memo)) [flex {}] [memo])
+  def cv (flex {})
+  (cv set "cond" cd) drop
+  (cv set "start" stt) drop
+  (cv set "memo" mm) drop
+  cv
+]]
+def vg-cv-get fn [[cv:Any pth:Any] [Any] [
+  def cd (cv get "cond")
+  def r (vgi-cond-rebuild cd (vgi-cond-resolve cd (cv get "start") pth))
+  r
+]]
+def vg-cv-keys fn [[cv:Any pth:Any] [Any] [
+  def cd (cv get "cond")
+  def found (vgi-cond-resolve cd (cv get "start") pth)
+  def r (if (found lt 0) [flex []] [vgi-cond-keys cd found])
+  r
+]]
+def vg-cv-has fn [[cv:Any pth:Any] [Boolean] [
+  def found (vgi-cond-resolve (cv get "cond") (cv get "start") pth)
+  found gte 0
+]]
+def vg-cv-at fn [[cv:Any pth:Any] [Any] [
+  def cd (cv get "cond")
+  def found (vgi-cond-resolve cd (cv get "start") pth)
+  def r (vg-condenseview cd found (cv get "memo"))
+  r
+]]
+def vg-cv-value fn [[cv:Any] [Any] [
+  def r (vgi-cond-rebuild (cv get "cond") (cv get "start"))
+  r
+]]
+def vg-cv-size fn [[cv:Any] [Integer] [
+  def enc (vgi-cond-enc (cv get "cond") (cv get "start"))
+  if (enc is None) [0] [
+    def kd (vgi-cond-kind enc)
+    if (kd eq vg-cond-map) [((size enc) sub 1) div 2] [
+      if (kd eq vg-cond-list) [(size enc) sub 1] [0]
+    ]
+  ]
+]]
+def vg-cv-exists fn [[cv:Any] [Boolean] [
+  (cv get "start") gte 0
+]]
+# Shared: the same node for the same index, from every view on the memo.
+# Mutating it corrupts every other reader of that node.
+def vg-cv-ref fn [[cv:Any] [Any] [
+  def mm (cv get "memo")
+  def k (vg-num-to-string (cv get "start"))
+  def r (
+    if (mm has (k)) [mm get (k)] [
+      def made (vgi-cond-rebuild (cv get "cond") (cv get "start"))
+      (mm set (k) made) drop
+      made
+    ]
+  )
+  r
+]]
+
+# ----------------------------------------------------------------------------
 # jm / jt — build a JSON map / list from a flat argument list.
 # ----------------------------------------------------------------------------
 def vgl-jm fn [[i:Integer kv:Any o:Any] [Any] [
@@ -3589,6 +4472,18 @@ export "Struct" {
   checkPlacement: vg-checkplacement/v
   injectorArgs: vg-injectorargs/v
   injectChild: vg-injectchild/v
+  condense: vg-condense/v
+  condenseview: vg-condenseview/v
+  condenseview_get: vg-cv-get/v
+  condenseview_keys: vg-cv-keys/v
+  condenseview_has: vg-cv-has/v
+  condenseview_at: vg-cv-at/v
+  condenseview_value: vg-cv-value/v
+  condenseview_size: vg-cv-size/v
+  condenseview_exists: vg-cv-exists/v
+  condenseview_ref: vg-cv-ref/v
+  expand: vg-expand/v
+  iscondensed: vg-iscondensed/v
   NOARG: vg-noarg
   SKIP: vg-skip-marker
   DELETE: vg-delete-marker

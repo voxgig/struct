@@ -2,14 +2,14 @@
 
 > C99/C11 port of the canonical TypeScript implementation.
 >
-> **Status: complete.** Full TS-canonical parity: all 48 functions, 15 type
+> **Status: complete.** Full TS-canonical parity: all 52 functions, 15 type
 > bit-flags, 3 mode constants (`VOXGIG_M_KEYPRE` / `VOXGIG_M_KEYPOST` / `VOXGIG_M_VAL`),
 > `SKIP` / `DELETE` sentinels (pointer-identity), and the `voxgig_injection`
 > state machine. `inject` / `transform` / `validate` / `select` all dispatch
-> through the canonical injector machinery: 13 transform commands, 15
+> through the canonical injector machinery: 13 transform commands, 16
 > validate checkers, 8 select operators.
 >
-> Passes the shared corpus (1360/1360), run on
+> Passes the shared corpus (1602/1602), run on
 > [voxgig/omni](https://github.com/voxgig/omni) — the shared test runner,
 > consumed as a local checkout. Run it with `make test` from `c/`.
 
@@ -528,6 +528,20 @@ voxgig_value* out  = voxgig_validate(data, spec, NULL);   /* {name:"Ada",age:36}
 
 <!-- => {"age": 36, "name": "Ada"} -->
 
+Besides the type checkers, a spec list led by `` `$NOF` `` counts the specs
+that admit the value: `` ["`$NOF`", n, spec, …] `` holds when as many specs
+admit it as `n` allows, where `n` is an integer or a map with `min`, `max` or
+both. `` ["`$ALL`", spec, …] `` holds when every spec admits the value. A spec
+admits a value when validating the value against it finds no error and gives
+back every member of the value unchanged. There is no `$ONE`: write
+`` ["`$ONE`", a, b] `` as `` ["`$NOF`", {"min": 1}, a, b] ``.
+
+A spec that names a checker `voxgig_validate` does not define is rejected
+before any data is read, and nothing is validated. The whole-string reference
+`` "`$FOO`" `` names a checker, and so does a misspelling of a defined one in
+another case, such as `` "`$string`" ``. The message is
+`Unknown validator $FOO at field a.`
+
 `voxgig_select` finds the children matching a query — each match is tagged
 with its `$KEY`:
 
@@ -540,6 +554,16 @@ voxgig_value* hits  = voxgig_select(children, query);   /* [{name:"Alice",age:30
 ```
 
 <!-- => [{"$KEY": "a", "age": 30, "name": "Alice"}] -->
+
+### Condensed structures (4)
+
+```c
+voxgig_value*    voxgig_condense(voxgig_value* val);
+voxgig_value*    voxgig_expand(voxgig_value* cond);
+bool         voxgig_iscondensed(const voxgig_value* val);
+voxgig_cview     voxgig_condenseview(voxgig_value* cond, voxgig_value* idx,
+                         voxgig_value* memo);   /* release with voxgig_cview_free */
+```
 
 ### Builder helpers (2)
 
@@ -607,10 +631,8 @@ voxgig_value
 
 `tests/struct_corpus_test.c` runs `../build/test/test.json` on
 [voxgig/omni](https://github.com/voxgig/omni), the shared test runner. Every
-group the corpus defines runs except the three `condense` ones, which no port
-implements yet — **1358 entries in 72 groups**, plus `merge.basic`,
-`inject.basic` and `transform.basic` (single entries, not sets) and the two
-`check` entries in `tests/client_test.c`.
+group the corpus defines runs — **1602 entries in 78 groups**, plus `merge.basic`, `inject.basic` and `transform.basic` (single
+entries, not sets) and the two `check` entries in `tests/client_test.c`.
 
 Each group is one assertion: the runner stops at its first failing entry and
 names the index, the entry, and both values. `$LIKE` matches via the in-tree
@@ -681,7 +703,7 @@ See `/design/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
 cd c
 make build      # compile the library alone
 make test       # the shared corpus + the client test
-make smoke      # the 13-check API smoke test
+make smoke      # the API smoke test
 make sanitize   # corpus driver with ASan + UBSan
 make check_leak # corpus driver under valgrind
 make lint       # clang-format --dry-run + clang-tidy

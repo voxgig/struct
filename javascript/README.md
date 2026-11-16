@@ -56,8 +56,9 @@ module.exports = {
   // 6 regex functions
   re_compile, re_find, re_find_all, re_replace, re_test, re_escape,
 
-  // 42 utility functions (48 canonical = these 42 + the 6 re_* above)
-  clone, delprop, escre, escurl, filter, flatten, getdef, getelem,
+  // 46 utility functions (52 canonical = these 46 + the 6 re_* above)
+  clone, condense, condenseview, expand, iscondensed, delprop, escre,
+  escurl, filter, flatten, getdef, getelem,
   getpath, getprop, haskey, inject, isempty, isfunc, iskey, islist,
   ismap, isnode, items, join, jsonify, keysof, merge, pad, pathify,
   select, setpath, setprop, size, slice, strkey, stringify,
@@ -613,8 +614,17 @@ Used as backtick-quoted strings inside a `validate` spec.
 
 ```
 $MAP   $LIST   $STRING   $NUMBER   $INTEGER   $DECIMAL  $BOOLEAN
-$NULL  $NIL    $FUNCTION $INSTANCE $ANY       $CHILD    $ONE     $EXACT
+$NULL  $NIL    $FUNCTION $INSTANCE $ANY       $CHILD    $EXACT
+$NOF   $ALL
 ```
+
+`` ['`$NOF`', n, spec, …] `` holds when as many specs admit the value as `n`
+allows, where `n` is an integer or an object with `min`, `max` or both;
+`` ['`$ALL`', spec, …] `` holds when every spec admits it. There is no
+`$ONE`: write `` ['`$ONE`', a, b] `` as `` ['`$NOF`', { min: 1 }, a, b] ``.
+A spec that names any other checker, such as the misspelling
+`` '`$string`' ``, is rejected before any data is read. See the
+[top-level README](../README.md) for what each checker accepts.
 
 
 ## Notes
@@ -638,7 +648,7 @@ JavaScript arrays satisfy this natively.
 
 ### Difference from canonical TypeScript
 
-The exported function surface is identical (48 canonical functions,
+The exported function surface is identical (52 canonical functions,
 including the six `re_*` regex helpers). The only export difference is
 `Injection`: the JS port exports it as a runtime value, whereas TypeScript
 exports it only as a type. Otherwise functionally identical -- both run on
@@ -646,7 +656,7 @@ V8.
 
 ### Test status
 
-90/90 tests pass against the shared corpus.
+116/116 tests pass against the shared corpus.
 
 
 ## Regex

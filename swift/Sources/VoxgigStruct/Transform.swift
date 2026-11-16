@@ -29,7 +29,7 @@ public func transform_KEY(_ inj: Injection, _ val: Value, _ ref: String, _ store
   let parent = inj.parent
   let keyspec = lookup(parent, .string(S_BKEY))
   if !keyspec.isNoval {
-    delprop(parent, .string(S_BKEY))
+    _delprop(parent, .string(S_BKEY))
     return getprop(inj.dparent, keyspec)
   }
   let anno = lookup(parent, .string(S_BANNO))
@@ -43,14 +43,14 @@ public func transform_KEY(_ inj: Injection, _ val: Value, _ ref: String, _ store
 // MARK: - $META
 
 public func transform_META(_ inj: Injection, _ val: Value, _ ref: String, _ store: Value) -> Value {
-  delprop(inj.parent, .string(S_DMETA))
+  _delprop(inj.parent, .string(S_DMETA))
   return .noval
 }
 
 // MARK: - $ANNO
 
 public func transform_ANNO(_ inj: Injection, _ val: Value, _ ref: String, _ store: Value) -> Value {
-  delprop(inj.parent, .string(S_BANNO))
+  _delprop(inj.parent, .string(S_BANNO))
   return .noval
 }
 
@@ -142,14 +142,14 @@ public func transform_EACH(_ inj: Injection, _ val: Value, _ ref: String, _ stor
     tinj.nodes = slice(.list(VList(inj.nodes)), -1).asList?.items ?? []
     tinj.parent = getelem(.list(VList(tinj.nodes)), .int(-1))
     let tvalList = Value.list(VList(tval))
-    setprop(tinj.parent, .string(strkey(ckey)), tvalList)
+    _setprop(tinj.parent, .string(strkey(ckey)), tvalList)
     tinj.val = tvalList
     tinj.dpath = dpathParts.map { strkey($0) }
     tinj.dparent = tcurmap
     inject(tvalList, store, tinj)
     rval = tinj.val
   }
-  setprop(target, tkey, rval)
+  _setprop(target, tkey, rval)
   return getelem(rval, .int(0))
 }
 
@@ -183,7 +183,7 @@ public func transform_PACK(_ inj: Injection, _ val: Value, _ ref: String, _ stor
       for pair in items(src) {
         let k = pair[0]
         let v = pair[1]
-        setprop(v, .string(S_BANNO), jm("KEY", k))
+        _setprop(v, .string(S_BANNO), jm("KEY", k))
         coll.append(v)
       }
       src = .list(coll)
@@ -193,7 +193,7 @@ public func transform_PACK(_ inj: Injection, _ val: Value, _ ref: String, _ stor
   }
   if src.isNoval { return .noval }
   let keypath = getprop(origchildspec, .string(S_BKEY))
-  let childspec = delprop(origchildspec, .string(S_BKEY))
+  let childspec = _delprop(origchildspec, .string(S_BKEY))
   let child = getprop(childspec, .string(S_BVAL), childspec)
   let tval = VMap()
   if case .list(let srcL) = src {
@@ -213,12 +213,12 @@ public func transform_PACK(_ inj: Injection, _ val: Value, _ ref: String, _ stor
         kk = getpath(srcnode, keypath, inj)
       }
       let tchild = clone(child)
-      setprop(.map(tval), kk, tchild)
+      _setprop(.map(tval), kk, tchild)
       let anno = getprop(srcnode, .string(S_BANNO))
       if anno.isNoval {
-        delprop(tchild, .string(S_BANNO))
+        _delprop(tchild, .string(S_BANNO))
       } else {
-        setprop(tchild, .string(S_BANNO), anno)
+        _setprop(tchild, .string(S_BANNO), anno)
       }
     }
   }
@@ -236,7 +236,7 @@ public func transform_PACK(_ inj: Injection, _ val: Value, _ ref: String, _ stor
         } else {
           kn = getpath(n, keypath, inj)
         }
-        setprop(.map(tsrc), kn, n)
+        _setprop(.map(tsrc), kn, n)
       }
     }
     let tpath = slice(.list(VList(inj.path.map { Value.string($0) })), -1)
@@ -264,7 +264,7 @@ public func transform_PACK(_ inj: Injection, _ val: Value, _ ref: String, _ stor
     inject(.map(tval), store, tinj)
     rval = tinj.val
   }
-  setprop(target2, tkey, rval)
+  _setprop(target2, tkey, rval)
   return .noval
 }
 
@@ -378,7 +378,7 @@ public func transform_FORMAT(_ inj: Injection, _ val: Value, _ ref: String, _ st
     return .noval
   }
   let out = walk(resolved, { k, v, _, _ in fmt(k, v) })
-  setprop(target, tkey, out)
+  _setprop(target, tkey, out)
   return out
 }
 
@@ -406,7 +406,7 @@ public func transform_APPLY(_ inj: Injection, _ val: Value, _ ref: String, _ sto
   if case .function(let fn) = apply {
     out = fn(cinj, resolved, "", store)
   }
-  setprop(target, tkey, out)
+  _setprop(target, tkey, out)
   return out
 }
 

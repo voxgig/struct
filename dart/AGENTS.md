@@ -94,5 +94,11 @@ case/underscore-insensitive parity check matches them. (A leading underscore is
   treats a whole `double` as an integer (`Number.isInteger` semantics);
   `stringify`/`jsonify` follow JS formatting (an integral `double` prints
   without `.0`).
+- **A `$NOF` / `$ALL` trial hands an absent value down as `_noarg`.** The
+  checkers read their value raw (`_lookup`), so `typify` gives T_noval there;
+  `getprop` reads a stored `_noarg` as absent, as canonical's does a stored
+  `undefined`; and `_slotval` / `_slothas` read a slot holding it as empty.
+- **Strings are UTF-16.** `condense` sorts symbols and a map's keys by code
+  point (`_condenseCmp`), not with `compareTo`, which compares code units.
 - Keep `make test` and `python3 ../tools/check_parity.py` green, and add no
   runtime dependencies. Change canonical (TS + corpus) first, then propagate.

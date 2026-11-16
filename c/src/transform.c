@@ -1,6 +1,6 @@
 /* Copyright (c) 2025-2026 Voxgig Ltd. MIT LICENSE.
  *
- * Transform, validate, select — and the 11 transform commands, 15 validate
+ * Transform, validate, select — and the 11 transform commands, 16 validate
  * checkers, and 4 select operators.
  *
  * Mirrors ts/src/StructUtility.ts lines 1306–2499.
@@ -1168,6 +1168,9 @@ static voxgig_value* va_TYPE(voxgig_injection* inj, voxgig_value* val, const cha
     tname[i] = (char)tolower((unsigned char)ref[1 + i]);
   tname[cp] = '\0';
   int typev = typename_to_bit(tname);
+  /* $NIL is absent or null. */
+  if (0 == strcmp(tname, "nil"))
+    typev |= VOXGIG_T_NULL;
   voxgig_value* keyv = voxgig_new_string(inj->key);
   voxgig_value* tmp = voxgig_lookup(inj->dparent, keyv);
   voxgig_value* out = tmp ? voxgig_retain(tmp) : voxgig_new_undef();
@@ -1214,9 +1217,7 @@ static voxgig_value* va_CHILD(voxgig_injection* inj, voxgig_value* val, const ch
       voxgig_release(tval);
       tval = voxgig_new_map();
     } else if (!voxgig_is_map(tval)) {
-      /* error */
-      voxgig_value* msg = _invalid_type_msg(&inj->path, "object", voxgig_typify(tval), tval);
-      voxgig_list_push(voxgig_as_list(inj->errs), msg);
+      /* _validation reports the mismatch, once. */
       voxgig_release(tval);
       voxgig_release(childtm);
       return voxgig_new_undef();
@@ -1255,9 +1256,6 @@ static voxgig_value* va_CHILD(voxgig_injection* inj, voxgig_value* val, const ch
       return voxgig_new_undef();
     }
     if (!voxgig_is_list(inj->dparent)) {
-      voxgig_value* msg =
-          _invalid_type_msg(&inj->path, "list", voxgig_typify(inj->dparent), inj->dparent);
-      voxgig_list_push(voxgig_as_list(inj->errs), msg);
       inj->keyI = voxgig_list_len(voxgig_as_list(inj->parent));
       voxgig_release(childtm);
       return inj->dparent ? voxgig_retain(inj->dparent) : voxgig_new_undef();
@@ -1292,8 +1290,36 @@ static voxgig_value* va_CHILD(voxgig_injection* inj, voxgig_value* val, const ch
   return voxgig_new_undef();
 }
 
-/* Forward decl for use in ONE / select. */
+/* Forward decl for use in the counting directives and select. */
 voxgig_value* voxgig_validate(voxgig_value* data, voxgig_value* spec, voxgig_injection* injdef);
+
+/* The n parts joined into a new buffer. The caller frees the result. */
+static char* _concat(size_t n, const char* const* parts) {
+  size_t len = 0;
+  for (size_t i = 0; i < n; i++)
+    len += strlen(parts[i]);
+  char* out = (char*)malloc(len + 1);
+  if (!out)
+    abort();
+  char* at = out;
+  for (size_t i = 0; i < n; i++) {
+    size_t plen = strlen(parts[i]);
+    memcpy(at, parts[i], plen);
+    at += plen;
+  }
+  *at = '\0';
+  return out;
+}
+
+/* pathify(inj.path, 1, endin). The caller frees the result. */
+static char* _fieldpath(voxgig_injection* inj, size_t endin) {
+  voxgig_value* lst = voxgig_new_list();
+  for (size_t i = 1; i + endin < inj->path.len; i++)
+    voxgig_list_push(voxgig_as_list(lst), voxgig_new_string(inj->path.data[i]));
+  char* ps = voxgig_pathify(lst, 0, 0);
+  voxgig_release(lst);
+  return ps;
+}
 
 /* Stringify a validator alternative, lowering each `$NAME` marker in it to
    name (R_TRANSFORM_NAME). The caller frees the result. */
@@ -1321,107 +1347,172 @@ static char* _lower_transform_names(voxgig_value* tval) {
   return ls;
 }
 
-static voxgig_value* va_ONE(voxgig_injection* inj, voxgig_value* val, const char* ref,
-                            voxgig_value* store, void* ud) {
-  (void)val;
-  (void)ref;
-  (void)ud;
-  if (inj->mode != VOXGIG_M_VAL)
-    return voxgig_new_undef();
-  if (!voxgig_is_list(inj->parent) || inj->keyI != 0) {
-    /* Build path string. */
-    voxgig_value* lst = voxgig_new_list();
-    for (size_t i = 1; i + 1 < inj->path.len; i++)
-      voxgig_list_push(voxgig_as_list(lst), voxgig_new_string(inj->path.data[i]));
-    char* ps = voxgig_pathify(lst, 0, 0);
-    voxgig_release(lst);
-    char buf[512];
-    snprintf(buf, sizeof(buf),
-             "The $ONE validator at field %s must be the first element of an array.", ps);
-    free(ps);
-    voxgig_list_push(voxgig_as_list(inj->errs), voxgig_new_string(buf));
-    return voxgig_new_undef();
-  }
-  inj->keyI = inj->keys.len;
-  voxgig_inj_setval(inj, inj->dparent, 2);
-
-  /* slice path to drop last. */
-  if (inj->path.len > 0) {
-    free(inj->path.data[inj->path.len - 1]);
-    inj->path.len--;
-  }
-  voxgig_list* pl = voxgig_as_list(inj->parent);
-  voxgig_value* tvals = voxgig_new_list();
-  for (size_t i = 1; i < pl->len; i++)
-    voxgig_list_push(voxgig_as_list(tvals), voxgig_retain(pl->items[i]));
-  if (voxgig_list_len(voxgig_as_list(tvals)) == 0) {
-    voxgig_value* lst = voxgig_new_list();
-    for (size_t i = 1; i + 1 < inj->path.len; i++)
-      voxgig_list_push(voxgig_as_list(lst), voxgig_new_string(inj->path.data[i]));
-    char* ps = voxgig_pathify(lst, 0, 0);
-    voxgig_release(lst);
-    char buf[512];
-    snprintf(buf, sizeof(buf), "The $ONE validator at field %s must have at least one argument.",
-             ps);
-    free(ps);
-    voxgig_list_push(voxgig_as_list(inj->errs), voxgig_new_string(buf));
-    voxgig_release(tvals);
-    return voxgig_new_undef();
-  }
-
-  voxgig_list* tvl = voxgig_as_list(tvals);
-  for (size_t i = 0; i < tvl->len; i++) {
-    voxgig_value* tval = tvl->items[i];
-    /* vstore = merge([{}, store], 1); vstore.$TOP = inj.dparent */
-    voxgig_value* mlist = voxgig_new_list();
-    voxgig_list_push(voxgig_as_list(mlist), voxgig_new_map());
-    voxgig_list_push(voxgig_as_list(mlist), voxgig_retain(store));
-    voxgig_value* vstore = voxgig_merge(mlist, 1);
-    voxgig_release(mlist);
-    voxgig_map_set(voxgig_as_map(vstore), "$TOP",
-                   inj->dparent ? voxgig_retain(inj->dparent) : voxgig_new_undef());
-
-    voxgig_injection* sub = voxgig_inj_new(NULL, NULL);
-    sub->extra = vstore;
-    sub->errs = voxgig_new_list();
-    sub->meta = voxgig_retain(inj->meta);
-    voxgig_value* vcurrent = voxgig_validate(inj->dparent, tval, sub);
-    voxgig_inj_setval(inj, vcurrent, -2);
-    voxgig_release(vcurrent);
-
-    size_t terrlen = voxgig_list_len(voxgig_as_list(sub->errs));
-    voxgig_inj_free(sub);
-    voxgig_release(vstore);
-    if (terrlen == 0) {
-      voxgig_release(tvals);
-      return voxgig_new_undef();
+/* The alternatives of a list directive from index first, described and joined
+   with ", ". The caller frees the result. */
+static char* _describe(voxgig_list* pl, size_t first) {
+  char* out = xstrdup_t("");
+  size_t len = 0;
+  for (size_t i = first; i < pl->len; i++) {
+    char* s = _lower_transform_names(pl->items[i]);
+    size_t sl = strlen(s);
+    char* grown = (char*)realloc(out, len + sl + 3);
+    if (!grown)
+      abort();
+    out = grown;
+    if (i > first) {
+      memcpy(out + len, ", ", 2);
+      len += 2;
     }
+    memcpy(out + len, s, sl + 1);
+    len += sl;
+    free(s);
   }
-  /* All failed: build "one of <vals>" needtype and push V0210-style msg. */
-  size_t tvc = voxgig_list_len(voxgig_as_list(tvals));
-  char needtype[1024];
-  needtype[0] = '\0';
-  if (tvc > 1)
-    strcat(needtype, "one of ");
-  bool first_tv = true;
-  voxgig_list* tvl_ = voxgig_as_list(tvals);
-  for (size_t i = 0; i < tvl_->len; i++) {
-    char* ls = _lower_transform_names(tvl_->items[i]);
-    size_t lw = strlen(ls);
-    size_t cur = strlen(needtype);
-    if (cur + lw + 4 < sizeof(needtype)) {
-      if (!first_tv)
-        strcat(needtype, ", ");
-      strcat(needtype, ls);
-      first_tv = false;
-    }
-    free(ls);
+  return out;
+}
+
+static void _pushmsg(voxgig_injection* inj, char* msg) {
+  voxgig_list_push(voxgig_as_list(inj->errs), voxgig_new_string(msg));
+  free(msg);
+}
+
+static void _notfirst(voxgig_injection* inj, const char* name) {
+  char* field = _fieldpath(inj, 1);
+  _pushmsg(inj, _concat(5, (const char*[]){"The ", name, " validator at field ", field,
+                                           " must be the first element of an array."}));
+  free(field);
+}
+
+/* Drop the last element of a path: slice(path, 0, -1). */
+static void _droplast(voxgig_strvec* path) {
+  if (path->len > 0) {
+    free(path->data[path->len - 1]);
+    path->len--;
   }
-  voxgig_value* msg =
-      _invalid_type_msg(&inj->path, needtype, voxgig_typify(inj->dparent), inj->dparent);
-  voxgig_list_push(voxgig_as_list(inj->errs), msg);
-  voxgig_release(tvals);
-  return voxgig_new_undef();
+}
+
+/* The data value at a list directive's slot, read literally from the parent
+   injection so that a null stays a value. Owned. */
+static voxgig_value* _slotval(voxgig_injection* inj) {
+  voxgig_value* found = inj->dparent;
+  if (inj->prior) {
+    voxgig_value* key = voxgig_new_string(inj->prior->key);
+    found = voxgig_lookup(inj->prior->dparent, key);
+    voxgig_release(key);
+  }
+  return found ? voxgig_retain(found) : voxgig_new_undef();
+}
+
+/* JSON equality: numbers by value, other scalars by type and value, lists in
+   order, maps by key in any order. voxgig_equals compares exactly so. */
+static bool _deepequal(voxgig_value* a, voxgig_value* b) {
+  return voxgig_equals(a, b);
+}
+
+/* Every member val has is in out, unchanged. A member only out has is a
+   default the spec supplied, and is ignored. */
+static bool _keeps(voxgig_value* val, voxgig_value* out) {
+  if (!val || voxgig_is_undef(val))
+    return true;
+
+  if (0 == ((VOXGIG_T_LIST | VOXGIG_T_MAP) & voxgig_typify(val)) ||
+      voxgig_is_list(val) != voxgig_is_list(out) || !voxgig_is_node(out))
+    return _deepequal(val, out);
+
+  voxgig_strvec keys = voxgig_keysof(val);
+  bool kept = true;
+  for (size_t i = 0; kept && i < keys.len; i++) {
+    voxgig_value* key = voxgig_new_string(keys.data[i]);
+    kept = _keeps(voxgig_lookup(val, key), voxgig_lookup(out, key));
+    voxgig_release(key);
+  }
+  voxgig_strvec_free(&keys);
+  return kept;
+}
+
+/* A spec admits a value when validating the value against it finds no error
+   and gives back the value as it is. */
+static bool _admits(voxgig_value* val, voxgig_value* spec, voxgig_injection* inj,
+                    voxgig_value* store) {
+  voxgig_value* mlist = voxgig_new_list();
+  voxgig_list_push(voxgig_as_list(mlist), voxgig_new_map());
+  voxgig_list_push(voxgig_as_list(mlist), voxgig_retain(store));
+  voxgig_value* vstore = voxgig_merge(mlist, 1);
+  voxgig_release(mlist);
+  voxgig_map_set(voxgig_as_map(vstore), "$TOP", voxgig_retain(val));
+
+  voxgig_injection* sub = voxgig_inj_new(NULL, NULL);
+  sub->extra = vstore;
+  voxgig_release(sub->meta);
+  sub->meta = voxgig_retain(inj->meta);
+
+  voxgig_value* out = voxgig_validate(val, spec, sub);
+  bool admits = 0 == voxgig_list_len(voxgig_as_list(sub->errs)) && _keeps(val, out);
+
+  voxgig_release(out);
+  voxgig_inj_free(sub);
+  voxgig_release(vstore);
+  return admits;
+}
+
+/* A natural number, into *nat. A decimal with an integral value counts, as JavaScript does
+   not tell 2.0 from 2. */
+static bool _isnat(voxgig_value* n, int64_t* nat) {
+  if (voxgig_is_int(n)) {
+    *nat = voxgig_as_int(n);
+    return 0 <= *nat;
+  }
+  if (!voxgig_is_double(n))
+    return false;
+  double d = voxgig_as_double(n);
+  if (d < 0 || (double)INT64_MAX <= d || floor(d) != d)
+    return false;
+  *nat = (int64_t)d;
+  return true;
+}
+
+/* The bounds of a $NOF count, and the words for it. False when the count is
+   invalid. Without a max, the bound is the number of specs. */
+static bool _nofcount(voxgig_value* count, int64_t numtvals, int64_t* lo, int64_t* hi, char* desc,
+                      size_t desclen) {
+  if (_isnat(count, lo)) {
+    *hi = *lo;
+    if (0 == *lo)
+      snprintf(desc, desclen, "none");
+    else
+      snprintf(desc, desclen, "exactly %lld", (long long)*lo);
+    return true;
+  }
+
+  voxgig_value* mink = voxgig_new_string("min");
+  voxgig_value* maxk = voxgig_new_string("max");
+  voxgig_value* min = voxgig_lookup(count, mink);
+  voxgig_value* max = voxgig_lookup(count, maxk);
+  voxgig_release(mink);
+  voxgig_release(maxk);
+  bool hasmin = min && !voxgig_is_undef(min);
+  bool hasmax = max && !voxgig_is_undef(max);
+
+  *lo = 0;
+  *hi = numtvals;
+  bool valid =
+      voxgig_is_map(count) && 0 < voxgig_map_len(voxgig_as_map(count)) &&
+      voxgig_map_len(voxgig_as_map(count)) == (size_t)(hasmin ? 1 : 0) + (hasmax ? 1 : 0) &&
+      (!hasmin || _isnat(min, lo)) && (!hasmax || _isnat(max, hi)) &&
+      (!hasmin || !hasmax || *lo <= *hi);
+  if (!valid)
+    return false;
+
+  if (!hasmax)
+    snprintf(desc, desclen, "at least %lld", (long long)*lo);
+  else if (0 == *hi)
+    snprintf(desc, desclen, "none");
+  else if (!hasmin)
+    snprintf(desc, desclen, "at most %lld", (long long)*hi);
+  else if (*lo == *hi)
+    snprintf(desc, desclen, "exactly %lld", (long long)*lo);
+  else
+    snprintf(desc, desclen, "%lld to %lld", (long long)*lo, (long long)*hi);
+  return true;
 }
 
 static voxgig_value* va_EXACT(voxgig_injection* inj, voxgig_value* val, const char* ref,
@@ -1437,68 +1528,141 @@ static voxgig_value* va_EXACT(voxgig_injection* inj, voxgig_value* val, const ch
     return voxgig_new_undef();
   }
   if (!voxgig_is_list(inj->parent) || inj->keyI != 0) {
-    voxgig_list_push(voxgig_as_list(inj->errs),
-                     voxgig_new_string("$EXACT must be first element of array."));
+    _notfirst(inj, "$EXACT");
     return voxgig_new_undef();
   }
+
+  voxgig_value* cval = _slotval(inj);
+
   inj->keyI = inj->keys.len;
-  voxgig_inj_setval(inj, inj->dparent, 2);
-  if (inj->path.len > 0) {
-    free(inj->path.data[inj->path.len - 1]);
-    inj->path.len--;
-  }
-  free(inj->key);
-  inj->key = inj->path.len > 0 ? xstrdup_t(inj->path.data[inj->path.len - 1]) : xstrdup_t("");
+
+  /* Replace [$EXACT, ...] with the data value; SKIP keeps inject off the detached list. */
+  voxgig_inj_setval(inj, cval, 2);
+
+  _droplast(&inj->path);
+
   voxgig_list* pl = voxgig_as_list(inj->parent);
   if (pl->len <= 1) {
-    voxgig_list_push(voxgig_as_list(inj->errs),
-                     voxgig_new_string("$EXACT must have at least one argument."));
+    char* field = _fieldpath(inj, 1);
+    _pushmsg(inj, _concat(3, (const char*[]){"The $EXACT validator at field ", field,
+                                             " must have at least one argument."}));
+    free(field);
+    voxgig_release(cval);
+    return voxgig_new_skip();
+  }
+
+  for (size_t i = 1; i < pl->len; i++) {
+    if (_deepequal(pl->items[i], cval)) {
+      voxgig_release(cval);
+      return voxgig_new_skip();
+    }
+  }
+
+  char* valdesc = _describe(pl, 1);
+  char* needtype =
+      _concat(4, (const char*[]){inj->path.len <= 1 ? "value " : "", "exactly equal to ",
+                                 2 == pl->len ? "" : "one of ", valdesc});
+  voxgig_list_push(voxgig_as_list(inj->errs),
+                   _invalid_type_msg(&inj->path, needtype, voxgig_typify(cval), cval));
+  free(needtype);
+  free(valdesc);
+  voxgig_release(cval);
+  return voxgig_new_skip();
+}
+
+/* The counting list directives. Without a count, every spec has to admit. */
+static voxgig_value* _validatecount(voxgig_injection* inj, voxgig_value* store, const char* name,
+                                    bool counted) {
+  if (inj->mode != VOXGIG_M_VAL)
+    return voxgig_new_undef();
+
+  if (!voxgig_is_list(inj->parent) || inj->keyI != 0) {
+    _notfirst(inj, name);
     return voxgig_new_undef();
   }
-  char* curstr = NULL;
-  for (size_t i = 1; i < pl->len; i++) {
-    voxgig_value* tval = pl->items[i];
-    bool match = voxgig_equals(tval, inj->dparent);
-    if (!match && voxgig_is_node(tval)) {
-      if (!curstr)
-        curstr = voxgig_stringify(inj->dparent, -1);
-      char* tvs = voxgig_stringify(tval, -1);
-      if (strcmp(tvs, curstr) == 0)
-        match = true;
-      free(tvs);
-    }
-    if (match) {
-      free(curstr);
-      return voxgig_new_undef();
-    }
+
+  voxgig_value* cval = _slotval(inj);
+
+  inj->keyI = inj->keys.len;
+
+  /* Replace the directive's list with the data value. Each return is SKIP, so
+     that inject leaves the detached list alone and validates nothing in it. */
+  voxgig_inj_setval(inj, cval, 2);
+
+  _droplast(&inj->path);
+
+  voxgig_list* pl = voxgig_as_list(inj->parent);
+  size_t first = counted ? 2 : 1;
+  voxgig_value* count = counted && 1 < pl->len ? pl->items[1] : NULL;
+  size_t numtvals = first < pl->len ? pl->len - first : 0;
+  char* field = _fieldpath(inj, 0);
+
+  if (0 == numtvals) {
+    _pushmsg(inj,
+             _concat(5, (const char*[]){"The ", name, " validator at field ", field,
+                                        counted ? " must have a count and at least one argument."
+                                                : " must have at least one argument."}));
+    free(field);
+    voxgig_release(cval);
+    return voxgig_new_skip();
   }
-  free(curstr);
-  /* Build "exactly equal to <vals>" needtype string. */
-  size_t tvc = pl->len > 1 ? pl->len - 1 : 0;
-  char needtype[1024];
-  needtype[0] = '\0';
-  if (inj->path.len <= 1)
-    strcat(needtype, "value ");
-  strcat(needtype, "exactly equal to ");
-  if (tvc > 1)
-    strcat(needtype, "one of ");
-  bool first_tv = true;
-  for (size_t i = 1; i < pl->len; i++) {
-    char* s = _lower_transform_names(pl->items[i]);
-    size_t slen = strlen(s);
-    size_t cur = strlen(needtype);
-    if (cur + slen + 4 < sizeof(needtype)) {
-      if (!first_tv)
-        strcat(needtype, ", ");
-      strcat(needtype, s);
-      first_tv = false;
-    }
-    free(s);
+
+  int64_t lo = (int64_t)numtvals;
+  int64_t hi = (int64_t)numtvals;
+  char countdesc[64] = "all";
+  if (counted && !_nofcount(count, (int64_t)numtvals, &lo, &hi, countdesc, sizeof(countdesc))) {
+    char* countstr = voxgig_stringify(count, -1);
+    _pushmsg(inj, _concat(7, (const char*[]){"The ", name, " validator at field ", field,
+                                             " has an invalid count: ", countstr, "."}));
+    free(countstr);
+    free(field);
+    voxgig_release(cval);
+    return voxgig_new_skip();
   }
-  voxgig_value* msg =
-      _invalid_type_msg(&inj->path, needtype, voxgig_typify(inj->dparent), inj->dparent);
-  voxgig_list_push(voxgig_as_list(inj->errs), msg);
-  return voxgig_new_undef();
+  free(field);
+
+  int64_t admitted = 0;
+  for (size_t tI = 0; tI < numtvals; tI++) {
+    int64_t left = (int64_t)(numtvals - tI);
+
+    /* Stop once the specs left cannot change the verdict. */
+    if (hi < admitted || admitted + left < lo || (lo <= admitted && admitted + left <= hi))
+      break;
+
+    if (_admits(cval, pl->items[first + tI], inj, store))
+      admitted++;
+  }
+
+  if (admitted < lo || hi < admitted) {
+    char* valdesc = _describe(pl, first);
+    char* needtype = _concat(3, (const char*[]){countdesc, " of ", valdesc});
+    voxgig_list_push(voxgig_as_list(inj->errs),
+                     _invalid_type_msg(&inj->path, needtype, voxgig_typify(cval), cval));
+    free(needtype);
+    free(valdesc);
+  }
+
+  voxgig_release(cval);
+  return voxgig_new_skip();
+}
+
+/* Count the specs that admit the value: ['`$NOF`', count, spec, ...], where
+   count is an integer, or a map holding min, max or both. */
+static voxgig_value* va_NOF(voxgig_injection* inj, voxgig_value* val, const char* ref,
+                            voxgig_value* store, void* ud) {
+  (void)val;
+  (void)ref;
+  (void)ud;
+  return _validatecount(inj, store, "$NOF", true);
+}
+
+/* Every spec admits the value: ['`$ALL`', spec, ...]. */
+static voxgig_value* va_ALL(voxgig_injection* inj, voxgig_value* val, const char* ref,
+                            voxgig_value* store, void* ud) {
+  (void)val;
+  (void)ref;
+  (void)ud;
+  return _validatecount(inj, store, "$ALL", false);
 }
 
 /* ===========================================================================
@@ -1831,6 +1995,106 @@ voxgig_value* voxgig_transform(voxgig_value* data, voxgig_value* spec, voxgig_in
  * validate
  * ===========================================================================*/
 
+/* Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN. */
+static const char* const VALIDATE_NAMES[] = {"$TOP",  "$SPEC", "$BT",     "$DS",    "$WHEN",
+                                             "$ANNO", "$REF",  "$FORMAT", "$APPLY", "$OPEN"};
+
+static voxgig_regex* R_INJECTION_FULL_re(void) {
+  static voxgig_regex* re = NULL;
+  if (!re)
+    re = voxgig_re_compile("^`(\\$[A-Z]+|[^`]*)[0-9]*`$");
+  return re;
+}
+
+static voxgig_regex* R_CHECKER_NAME_re(void) {
+  static voxgig_regex* re = NULL;
+  if (!re)
+    re = voxgig_re_compile("^\\$[A-Z]+$");
+  return re;
+}
+
+static char* _upper(const char* s) {
+  char* out = xstrdup_t(s);
+  for (char* c = out; *c; c++)
+    *c = (char)toupper((unsigned char)*c);
+  return out;
+}
+
+/* The name a whole-string reference gives, when it is a checker name in any
+   case. NULL when there is none; the caller frees the result. */
+static char* _refname(voxgig_value* val) {
+  if (!voxgig_is_string(val))
+    return NULL;
+  char* name = NULL;
+  voxgig_strvec m = voxgig_re_find_re(R_INJECTION_FULL_re(), voxgig_as_string(val));
+  if (2 <= m.len) {
+    char* upper = _upper(m.data[1]);
+    if (voxgig_re_test_re(R_CHECKER_NAME_re(), upper))
+      name = xstrdup_t(m.data[1]);
+    free(upper);
+  }
+  voxgig_strvec_free(&m);
+  return name;
+}
+
+static bool _knownname(const char* name, voxgig_value* store) {
+  for (size_t i = 0; i < sizeof(VALIDATE_NAMES) / sizeof(VALIDATE_NAMES[0]); i++) {
+    if (0 == strcmp(VALIDATE_NAMES[i], name))
+      return true;
+  }
+  voxgig_value* found = voxgig_map_get(voxgig_as_map(store), name);
+  return found && !voxgig_is_undef(found) && !voxgig_is_null(found);
+}
+
+/* Unknown: undefined and upper case, or a defined name in another case. Null disables a name. */
+static bool _unknownname(const char* name, voxgig_value* store) {
+  char* upper = _upper(name);
+  bool unknown = !_knownname(name, store) && (0 == strcmp(upper, name) || _knownname(upper, store));
+  free(upper);
+  return unknown;
+}
+
+/* Report each checker the spec names that validate lacks; $EXACT's arguments are literals. */
+static void _checknames(voxgig_value* spec, voxgig_value* store, voxgig_strvec* path,
+                        voxgig_value* errs) {
+  char* name = _refname(spec);
+  if (name) {
+    if (_unknownname(name, store)) {
+      voxgig_value* lst = voxgig_new_list();
+      for (size_t i = 0; i < path->len; i++)
+        voxgig_list_push(voxgig_as_list(lst), voxgig_new_string(path->data[i]));
+      char* field = voxgig_pathify(lst, 0, 0);
+      voxgig_release(lst);
+      char* msg = _concat(5, (const char*[]){"Unknown validator ", name, " at field ", field, "."});
+      voxgig_list_push(voxgig_as_list(errs), voxgig_new_string(msg));
+      free(msg);
+      free(field);
+    }
+    free(name);
+    return;
+  }
+
+  if (voxgig_is_list(spec) && 0 < voxgig_list_len(voxgig_as_list(spec))) {
+    char* head = _refname(voxgig_list_get(voxgig_as_list(spec), 0));
+    bool exact = head && 0 == strcmp(head, "$EXACT");
+    free(head);
+    if (exact)
+      return;
+  }
+
+  voxgig_strvec keys = voxgig_keysof(spec);
+  for (size_t i = 0; i < keys.len; i++) {
+    voxgig_value* key = voxgig_new_string(keys.data[i]);
+    if (voxgig_is_map(spec))
+      _checknames(key, store, path, errs);
+    voxgig_strvec_push(path, keys.data[i]);
+    _checknames(voxgig_lookup(spec, key), store, path, errs);
+    _droplast(path);
+    voxgig_release(key);
+  }
+  voxgig_strvec_free(&keys);
+}
+
 voxgig_value* voxgig_validate(voxgig_value* data, voxgig_value* spec, voxgig_injection* injdef) {
   voxgig_value* errs = NULL;
   bool collect = false;
@@ -1880,8 +2144,9 @@ voxgig_value* voxgig_validate(voxgig_value* data, voxgig_value* spec, voxgig_inj
   voxgig_map_set(voxgig_as_map(m1), "$INSTANCE", voxgig_new_injector(va_TYPE, NULL));
   voxgig_map_set(voxgig_as_map(m1), "$ANY", voxgig_new_injector(va_ANY, NULL));
   voxgig_map_set(voxgig_as_map(m1), "$CHILD", voxgig_new_injector(va_CHILD, NULL));
-  voxgig_map_set(voxgig_as_map(m1), "$ONE", voxgig_new_injector(va_ONE, NULL));
   voxgig_map_set(voxgig_as_map(m1), "$EXACT", voxgig_new_injector(va_EXACT, NULL));
+  voxgig_map_set(voxgig_as_map(m1), "$NOF", voxgig_new_injector(va_NOF, NULL));
+  voxgig_map_set(voxgig_as_map(m1), "$ALL", voxgig_new_injector(va_ALL, NULL));
 
   voxgig_value* ext = extra_in ? voxgig_retain(extra_in) : voxgig_new_map();
   voxgig_value* errwrap = voxgig_new_map();
@@ -1907,7 +2172,16 @@ voxgig_value* voxgig_validate(voxgig_value* data, voxgig_value* spec, voxgig_inj
   voxgig_release(sub->handler_val);
   sub->handler_val = voxgig_new_injector(voxgig_validatehandler, NULL);
 
-  voxgig_value* out = voxgig_transform(data, spec, sub);
+  /* A spec that names an unknown checker validates nothing. */
+  size_t numerrs = voxgig_list_len(voxgig_as_list(errs));
+  voxgig_strvec path;
+  voxgig_strvec_init(&path);
+  _checknames(spec, store, &path, errs);
+  voxgig_strvec_free(&path);
+
+  voxgig_value* out = numerrs < voxgig_list_len(voxgig_as_list(errs))
+                          ? voxgig_clone(data)
+                          : voxgig_transform(data, spec, sub);
 
   bool generr = voxgig_list_len(voxgig_as_list(errs)) > 0 && !collect;
   (void)generr; /* Same as transform: keep errs accessible. */

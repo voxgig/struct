@@ -69,6 +69,8 @@ to the canonical export list:
   `re_replace`, `re_test`, `re_escape`. Backed by the core `RegExp`.
 - **By-example engine:** `inject`, `transform`, `validate`, `select`, and the
   injector helpers `checkPlacement`, `injectorArgs`, `injectChild`.
+- **Condensed structures:** `condense`, `condenseview`, `expand`,
+  `iscondensed`.
 - **Builders / markers:** `jm`, `jt`, `SKIP`, `DELETE`, the `T_*` type
   constants and `M_KEYPRE` / `M_KEYPOST` / `M_VAL`.
 
@@ -91,6 +93,10 @@ s.transform({'name': 'alice'}, {'user': {'id': '`name`'}}); // {user: {id: alice
 // validate: plain values are typed defaults; `$STRING` etc. are commands
 s.validate({'a': 'x'}, {'a': '`\$STRING`'});         // {a: x}
 
+// validate: `$NOF` counts the specs that admit the value, `$ALL` needs all
+s.validate(2, ['`\$NOF`', {'min': 1}, '`\$STRING`', '`\$NUMBER`']); // 2
+s.validate(2, ['`\$ALL`', '`\$NUMBER`', '`\$INTEGER`']);             // 2
+
 // select: MongoDB-style query over children
 s.select([{'a': 1}, {'a': 2}], {'a': {'`\$GT`': 1}}); // [{a: 2, $KEY: 1}]
 ```
@@ -109,11 +115,11 @@ it, and `make build` compiles `lib/` alone.
 omni's value model and this port's are the same plain Dart types, so the only
 conversion there is to make is omni's `ABSENT`, which this port spells `null`.
 
-Every group the corpus defines runs except the three `condense` ones, which no
-port implements yet — 1358 entries in 72 groups — plus the two `check` entries
-(`DEF.client`, client-scoped options, `contextify`) and three single entries
-that are not part of any set. Keep it green, keep
-`python3 ../tools/check_parity.py` green, and add no runtime dependencies.
+Every group the corpus defines runs — 1602 entries in 78 groups —
+plus the two `check` entries (`DEF.client`, client-scoped options,
+`contextify`) and three single entries that are not part of any set. Keep it
+green, keep `python3 ../tools/check_parity.py` green, and add no runtime
+dependencies.
 
 ## Implementation notes
 
