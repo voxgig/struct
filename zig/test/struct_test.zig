@@ -1307,6 +1307,21 @@ test "validate-all" {
     try omni.rungroup(&r, "validate", "all", omni.subres(wrap_validate), omni.Flags.nonull());
 }
 
+test "validate-len" {
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "validate", "len", omni.subres(wrap_validate), omni.Flags.nonull());
+}
+
+test "validate-range" {
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "validate", "range", omni.subres(wrap_validate), omni.Flags.nonull());
+}
+
+test "validate-like" {
+    const r = try omni.makeRunner();
+    try omni.rungroup(&r, "validate", "like", omni.subres(wrap_validate), omni.Flags.nonull());
+}
+
 test "validate-unknown" {
     const r = try omni.makeRunner();
     try omni.rungroup(&r, "validate", "unknown", omni.subres(wrap_validate), omni.Flags.nonull());
@@ -1434,6 +1449,24 @@ test "regex-replace" {
 test "regex-escape" {
     const r = try omni.makeRunner();
     try omni.rungroup(&r, "regex", "escape", omni.sub(wrap_re_escape), .{});
+}
+
+// Not in the corpus: Ruby's native ^ and $ match at every line.
+test "regex-anchors-whole-text" {
+    const t = std.testing;
+    try t.expect(!voxgig_struct.re_test("^b", "a\nb"));
+    try t.expect(!voxgig_struct.re_test("a$", "a\nb"));
+    try t.expect(!voxgig_struct.re_test("a$", "a\n"));
+    try t.expect(!voxgig_struct.re_test("x|^b", "a\nb"));
+    try t.expect(!voxgig_struct.re_test("(?:^|,)b", "a\nb"));
+    try t.expect(voxgig_struct.re_test("(?:^|,)b", "a,b"));
+    try t.expect(voxgig_struct.re_test("^a", "a\nb"));
+    try t.expect(voxgig_struct.re_test("b$", "a\nb"));
+    try t.expect(!voxgig_struct.re_test("^$", "\n"));
+    try t.expect(voxgig_struct.re_test("^$", ""));
+    const out = try voxgig_struct.re_replace(t.allocator, "$", "a\nb", "!");
+    defer t.allocator.free(out);
+    try t.expectEqualStrings("a\nb!", out);
 }
 
 // ---- sentinels: Group A null/undefined unification across the readers ----

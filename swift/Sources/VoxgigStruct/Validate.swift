@@ -1,4 +1,4 @@
-// Validate checkers — 16 injectors plus the top-level `validate`
+// Validate checkers — 19 injectors plus the top-level `validate`
 // driver, the `_validation` modify hook, and the validate-mode
 // `_validatehandler`. Mirrors canonical TS `validate*`.
 
@@ -279,6 +279,173 @@ private func _validatecount(
   return .sentinel(SKIP)
 }
 
+// MARK: - validate_LEN / validate_RANGE / validate_LIKE
+
+// The value's length is within a bound: ['`$LEN`', bound, spec?], where the
+// bound is as for a $NOF count. A string's length is in code points.
+public func validate_LEN(_ inj: Injection, _ val: Value, _ ref: String, _ store: Value) -> Value {
+  return _validatebound(inj, store, "$LEN")
+}
+
+// The value is a number within a bound: ['`$RANGE`', bound, spec?], where the
+// bound holds min or gt, max or lt, or one of each.
+public func validate_RANGE(_ inj: Injection, _ val: Value, _ ref: String, _ store: Value) -> Value {
+  return _validatebound(inj, store, "$RANGE")
+}
+
+public func validate_LIKE(_ inj: Injection, _ val: Value, _ ref: String, _ store: Value) -> Value {
+  return _validatebound(inj, store, "$LIKE")
+}
+
+// The bounding list directives: a bound or pattern, then at most one spec that
+// also admits.
+private func _validatebound(_ inj: Injection, _ store: Value, _ name: String) -> Value {
+  let parent = inj.parent
+  if inj.mode != M_VAL { return .noval }
+
+  if !parent.isList || inj.keyI != 0 {
+    inj.errs.items.append(
+      .string(
+        "The " + name + " validator at field "
+          + pathify(.list(VList(inj.path.map { Value.string($0) })), 1, 1)
+          + " must be the first element of an array."))
+    return .noval
+  }
+
+  let cval = _slotval(inj)
+  inj.keyI = inj.keys.count
+
+  // As for the counting directives: SKIP keeps inject off the detached list.
+  inj.setval(cval, ancestor: 2)
+
+  if !inj.path.isEmpty { inj.path = Array(inj.path.dropLast()) }
+
+  let field =
+    "The " + name + " validator at field "
+    + pathify(.list(VList(inj.path.map { Value.string($0) })), 1)
+  let nargs = size(parent) - 1
+  let islen = "$LEN" == name
+  let islike = "$LIKE" == name
+  let argname = islike ? "pattern" : "bound"
+
+  if nargs < 1 || 2 < nargs {
+    inj.errs.items.append(.string(field + " must have a " + argname + " and at most one spec."))
+    return .sentinel(SKIP)
+  }
+
+  let bound = lookup(parent, .int(1))
+  let like = islike ? _likere(bound) : nil
+  let likedesc: String? = nil == like ? nil : "like /" + (bound.asString ?? "") + "/"
+  let (lo, hi, desc) = islen ? _lenbound(bound) : (0, 0, islike ? likedesc : _rangedesc(bound))
+
+  guard let words = desc else {
+    inj.errs.items.append(
+      .string(field + " has an invalid " + argname + ": " + stringify(bound) + "."))
+    return .sentinel(SKIP)
+  }
+
+  let ctype = typify(cval)
+  let spec = lookup(parent, .int(2))
+
+  if 2 == nargs && !_admits(cval, spec, inj, store) {
+    inj.errs.items.append(
+      .string(invalidTypeMsg(inj.path, _valdesc([spec]), ctype, cval, "V0410")))
+    return .sentinel(SKIP)
+  }
+
+  if 0 == ((islen ? T_string | T_list | T_map : islike ? T_string : T_number) & ctype) {
+    let needtype = islen ? "string, list or map" : islike ? S_string : S_number
+    inj.errs.items.append(.string(invalidTypeMsg(inj.path, needtype, ctype, cval, "V0420")))
+    return .sentinel(SKIP)
+  }
+
+  let len = islen ? (cval.asString?.unicodeScalars.count ?? size(cval)) : 0
+  let inbound =
+    islen
+    ? lo <= len && (-1 == hi || len <= hi)
+    : islike ? re_test(bound, cval.asString ?? "") : _inrange(bound, cval)
+
+  if !inbound {
+    let needtype = (inj.path.count > 1 ? "" : "value ") + words
+    inj.errs.items.append(.string(invalidTypeMsg(inj.path, needtype, ctype, cval, "V0430")))
+  }
+
+  return .sentinel(SKIP)
+}
+
+// The bounds of a $LEN bound, with -1 for no maximum, and the words for it,
+// which are nil when the bound is invalid.
+private func _lenbound(_ bound: Value) -> (Int, Int, String?) {
+  let (lo, hi, countdesc) = _nofcount(bound, -1)
+  if nil == countdesc { return (0, 0, nil) }
+
+  let desc: String
+  if lo == hi {
+    desc = String(lo)
+  } else if -1 == hi {
+    desc = "at least " + String(lo)
+  } else if 0 == lo {
+    desc = "at most " + String(hi)
+  } else {
+    desc = String(lo) + " to " + String(hi)
+  }
+
+  return (lo, hi, "of length " + desc)
+}
+
+// A $LIKE pattern compiled by the port's own regex engine; nil unless it compiles.
+private func _likere(_ pattern: Value) -> NSRegularExpression? {
+  guard case .string(let source) = pattern else { return nil }
+  return re_compile(source)
+}
+
+// The words for a $RANGE bound, which are nil when the bound is invalid.
+private func _rangedesc(_ bound: Value) -> String? {
+  if !ismap(bound) { return nil }
+
+  let min = lookup(bound, .string("min"))
+  let max = lookup(bound, .string("max"))
+  let gt = lookup(bound, .string("gt"))
+  let lt = lookup(bound, .string("lt"))
+  let lower = (min.isNoval ? gt : min).asDouble
+  let upper = (max.isNoval ? lt : max).asDouble
+  let numkeys = [min, max, gt, lt].filter { !$0.isNoval }.count
+  func isnum(_ n: Value) -> Bool { n.isNoval || 0 < (T_number & typify(n)) }
+
+  let valid =
+    0 < numkeys && size(bound) == numkeys
+    && (min.isNoval || gt.isNoval) && (max.isNoval || lt.isNoval)
+    && isnum(min) && isnum(max) && isnum(gt) && isnum(lt)
+    && (nil == lower || nil == upper || lower! <= upper!)
+
+  if !valid { return nil }
+
+  var words: [String] = []
+  if !min.isNoval {
+    words.append("at least " + stringify(min))
+  } else if !gt.isNoval {
+    words.append("greater than " + stringify(gt))
+  }
+  if !max.isNoval {
+    words.append("at most " + stringify(max))
+  } else if !lt.isNoval {
+    words.append("less than " + stringify(lt))
+  }
+
+  return words.joined(separator: " and ")
+}
+
+// A number within a valid $RANGE bound.
+private func _inrange(_ bound: Value, _ val: Value) -> Bool {
+  guard let v = val.asDouble else { return false }
+  let min = lookup(bound, .string("min")).asDouble
+  let max = lookup(bound, .string("max")).asDouble
+  let gt = lookup(bound, .string("gt")).asDouble
+  let lt = lookup(bound, .string("lt")).asDouble
+  return (nil == min || min! <= v) && (nil == max || v <= max!)
+    && (nil == gt || gt! < v) && (nil == lt || v < lt!)
+}
+
 // MARK: - _validation modify hook
 
 public func _validation(
@@ -417,6 +584,9 @@ func validateCollect(
   base.entries["$EXACT"] = .function(validate_EXACT)
   base.entries["$NOF"] = .function(validate_NOF)
   base.entries["$ALL"] = .function(validate_ALL)
+  base.entries["$LEN"] = .function(validate_LEN)
+  base.entries["$RANGE"] = .function(validate_RANGE)
+  base.entries["$LIKE"] = .function(validate_LIKE)
   let errsMap = VMap()
   errsMap.entries[S_DERRS] = .list(errs)
   let extraMap = extra.isNoval ? Value.map(VMap()) : extra

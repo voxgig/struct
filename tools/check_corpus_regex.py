@@ -9,10 +9,11 @@ hand-rolled matchers (C), so the corpus must not use features RE2 itself
 rejects.
 
 This script:
-  1. Scans build/test/*.jsonic for `$LIKE` clauses (the only user-supplied
-     pattern slot in the API).
+  1. Reads `$LIKE` patterns, the only user-supplied pattern slots in the API:
+     the value under select's `$LIKE` key, and the pattern of validate's
+     `['$LIKE', pattern, spec?]` list.
   2. Re-parses build/test/test.json (the compiled corpus) and extracts every
-     `$LIKE` value.
+     one of them.
   3. For each candidate pattern, rejects features that RE2 cannot compile:
        - lookahead/lookbehind: (?=, (?!, (?<=, (?<!
        - backreferences: \1..\9, (?P=name)
@@ -51,7 +52,12 @@ _FORBIDDEN = [
 
 
 def collect_like_patterns(node, into):
-    """Walk `node` and append every value under a `$LIKE` key to `into`."""
+    """Walk `node` and append every `$LIKE` pattern to `into`: the value under
+    a `$LIKE` key (select's operator), and the second element of a list that
+    starts with `$LIKE` (validate's checker)."""
+    if isinstance(node, list) and node and node[0] in ("`$LIKE`", "$LIKE"):
+        if 1 < len(node) and isinstance(node[1], str):
+            into.append(node[1])
     if isinstance(node, dict):
         for k, v in node.items():
             if k == "`$LIKE`" or k == "$LIKE":

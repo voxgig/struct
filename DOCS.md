@@ -266,6 +266,49 @@ S.validate(value, ['`$ALL`', '`$STRING`', ['`$NOF`', 0, ['`$EXACT`', 'admin']]])
 A spec has one node per data node, so `$ALL` is how two checks reach the same
 value.
 
+### Bound a length or a number
+```js
+S.validate(name, ['`$LEN`', { min: 1, max: 64 }, '`$STRING`'])
+S.validate(age, ['`$RANGE`', { min: 0, lt: 150 }, '`$INTEGER`'])
+```
+`$LEN` takes a bound in the same form as a `$NOF` count: an integer for an
+exact length, or a map with `min`, `max` or both. A string's length counts
+code points, a list's its elements, and a map's its keys, and any other value
+fails. `$RANGE` takes a map of `min` (at least) or `gt` (greater than), with
+`max` (at most) or `lt` (less than), and fails on anything but a number. Each
+takes at most one spec, which must also admit the value. A bounded field is
+required; `['`$NOF`', 1, '`$NIL`', ['`$LEN`', { max: 64 }]]` makes it optional.
+
+### Match a string against a pattern
+A code or a slug has a shape that no type can state:
+```js
+S.validate(code, ['`$LIKE`', '^[A-Z]{3}-[0-9]+$', '`$STRING`'])
+```
+`$LIKE` takes a pattern, then at most one spec, which must also admit the
+value. The value must be a string the pattern finds, anywhere in it unless
+the pattern is anchored with `^` or `$`, and any other value fails. Each port
+matches with its own regex engine, so a pattern means what that language's
+regex means: one inside the RE2 subset ([`REGEX.md`](design/REGEX.md))
+matches the same everywhere on single-line ASCII text, while anything beyond
+that can differ from port to port, such as `\w` over other text or `^` and
+`$` around a line break. In a `select`
+query the list form works the same; `select`'s own key form,
+`` { code: { '`$LIKE`': '^A' } } ``, matches the value's text, numbers
+included.
+
+### Reuse a spec, or nest one inside itself
+A tree has the same shape at every level, so its spec has to name itself:
+```js
+const spec = { node: { name: '`$STRING`', kids: ['`$CHILD`', ['`$REF`', 'node']] } }
+S.validate({ node: { name: 'a', kids: [{ name: 'b', kids: [] }] } }, spec)
+```
+`['`$REF`', 'node']` checks a value against the spec at `node` as if that spec
+were written in its place, and a path to a sibling reuses its spec the same
+way. The path names a place in the spec, not in the data. A reference that
+reaches itself stops wherever the data does, so the tree ends at its leaves;
+any other reference checks its field like the spec it names, required fields
+included.
+
 ### Require an exact literal (no type coercion)
 ```js
 S.validate(value, ['`$EXACT`', 9]) // value must equal 9
@@ -289,7 +332,11 @@ expansion.
 ```js
 S.select(users, { role: 'admin' })        // matching maps, each tagged $KEY
 S.select(list,  {})                        // all children (empty query matches all)
+S.select(users, { age: ['`$RANGE`', { min: 18 }] }) // validate checkers work too
 ```
+Every map in a query is open, so a record may hold keys the query does not
+name. A directive's literals are compared as written: the values `$EXACT`
+compares, and the count or bound of `$NOF`, `$LEN` and `$RANGE`.
 
 ### Build a JSON string deterministically
 ```js
@@ -434,8 +481,10 @@ named function from `extra`).
 `$NULL`, `$NIL` (absent or null), `$FUNCTION`, `$INSTANCE`, `$ANY`,
 `$CHILD` (apply a sub-spec to every child), `$EXACT` (equal a literal
 exactly), `$NOF` (a count of specs admits the value), `$ALL` (every spec
-admits the value). A spec that names any other checker fails before any data
-is read, with `Unknown validator $FOO at field a.`
+admits the value), `$LEN` (a length within a bound), `$RANGE` (a number
+within a bound), `$LIKE` (a string a pattern finds). A spec that names any
+other checker fails before any data is read, with `Unknown validator $FOO at
+field a.`
 
 ### Regex API
 

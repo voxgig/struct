@@ -168,8 +168,8 @@ voxgigstruct.Stringify(value, 80)                            // truncated human 
 ```
 
 For more task recipes (merge configs, rename fields, `$EACH`, `$MERGE`,
-`$FORMAT`, `$NOF`, `$ALL`, `$EXACT`, …) see the language-neutral
-[How-to guides](../DOCS.md#2-how-to-guides) — the spec syntax is identical;
+`$FORMAT`, `$NOF`, `$ALL`, `$LEN`, `$RANGE`, `$LIKE`, `$EXACT`, …) see the
+language-neutral [How-to guides](../DOCS.md#2-how-to-guides) — the spec syntax is identical;
 only the host literals differ (`map[string]any{...}`, `[]any{...}`).
 
 ---
@@ -324,7 +324,7 @@ make lint                       # gofmt check + go vet + golangci-lint (errcheck
 The runner in
 [`testutil/voxgigstruct_test.go`](./testutil/voxgigstruct_test.go) loads
 the shared corpus from [`../build/test/`](../build/test/) and mirrors the
-reference runner. This port passes 92/92 of the shared corpus suite (see
+reference runner. This port passes 126/126 of the shared corpus suite (see
 [`../REPORT.md`](../design/REPORT.md)).
 
 The corpus tests live in `testutil`, the module that takes voxgig/omni,

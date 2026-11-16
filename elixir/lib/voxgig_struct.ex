@@ -1987,11 +1987,10 @@ defmodule Voxgig.Struct do
     end
   end
 
-  defp transform_ref(inj, val, _r, store) do
+  defp transform_ref(inj, _val, _r, store) do
     if ig(inj, :mode) != @m_val do
       nil
     else
-      nodes = ig(inj, :nodes)
       refpath = lookup_(ig(inj, :parent), 1)
       is_(inj, :keyi, size(ig(inj, :keys)))
       spec_func = getprop(store, @s_dspec)
@@ -2011,33 +2010,22 @@ defmodule Voxgig.Struct do
         end
 
         has_sub = getelem(flag, 0) == true
-        tref = clone(refv)
-        cpath = slice(ig(inj, :path), 0, size(ig(inj, :path)) - 3)
-        tpath = slice(ig(inj, :path), 0, size(ig(inj, :path)) - 1)
-        tcur = getpath(store, cpath)
-        tval = getpath(store, tpath)
 
-        rval =
-          if refv != nil and (not has_sub or tval != nil) do
-            cs = inj_child(inj, 0, vlist_new([getelem(tpath, -1)]))
-            is_(cs, :path, tpath)
-            is_(cs, :nodes, slice(ig(inj, :nodes), 0, size(ig(inj, :nodes)) - 1))
-            is_(cs, :parent, getelem(nodes, -2))
-            is_(cs, :ival, tref)
-            is_(cs, :dparent, tcur)
-            inject(tref, store, cs)
-            ig(cs, :ival)
-          else
-            nil
-          end
+        # A recursive reference stops where the data does.
+        tval = getpath(store, slice(ig(inj, :path), 0, size(ig(inj, :path)) - 1))
+        rval = if not has_sub or tval != nil, do: clone(refv), else: nil
 
-        inj_setval(inj, rval, 2)
+        # The enclosing loop injects the referenced spec in this list's place, so
+        # neither this pass nor this element leaves a value for modify to check.
+        grandparent = inj_setval(inj, rval, 2)
+        prior = ig(inj, :prior)
 
-        if islist(ig(inj, :parent)) and ig(inj, :prior) != nil do
-          is_(ig(inj, :prior), :keyi, ig(ig(inj, :prior), :keyi) - 1)
+        if prior != nil do
+          is_(prior, :modify, nil)
+          if islist(grandparent) or rval != nil, do: is_(prior, :keyi, ig(prior, :keyi) - 1)
         end
 
-        val
+        @skip
       end
     end
   end
@@ -2482,6 +2470,162 @@ defmodule Voxgig.Struct do
     end
   end
 
+  # The value's length is within a bound: ['`$LEN`', bound, spec?], where the
+  # bound is as for a $NOF count. A string's length is in code points.
+  defp validate_len(inj, _v, _r, store), do: validatebound_(inj, store, "$LEN")
+
+  # The value is a number within a bound: ['`$RANGE`', bound, spec?], where the
+  # bound holds min or gt, max or lt, or one of each.
+  defp validate_range(inj, _v, _r, store), do: validatebound_(inj, store, "$RANGE")
+
+  defp validate_like(inj, _v, _r, store), do: validatebound_(inj, store, "$LIKE")
+
+  # The bounding list directives: a bound or pattern, then at most one spec that also admits.
+  defp validatebound_(inj, store, name) do
+    parent = ig(inj, :parent)
+
+    cond do
+      ig(inj, :mode) != @m_val ->
+        nil
+
+      not islist(parent) or ig(inj, :keyi) != 0 ->
+        push_err(inj, "The " <> name <> " validator at field " <> pathify(ig(inj, :path), 1, 1) <> " must be the first element of an array.")
+        nil
+
+      true ->
+        {cval, held} = slotval_(inj)
+        is_(inj, :keyi, size(ig(inj, :keys)))
+
+        # As for the counting directives: SKIP keeps inject off the detached list.
+        slotset_(inj, cval, held)
+
+        is_(inj, :path, slice(ig(inj, :path), -1))
+        field = "The " <> name <> " validator at field " <> pathify(ig(inj, :path), 1)
+        nargs = size(parent) - 1
+        islen = name == "$LEN"
+        islike = name == "$LIKE"
+        argname = if islike, do: "pattern", else: "bound"
+
+        if nargs < 1 or nargs > 2 do
+          push_err(inj, field <> " must have a " <> argname <> " and at most one spec.")
+        else
+          bound = lookup_(parent, 1)
+          like = if islike, do: likere_(bound), else: nil
+          likedesc = if like == nil, do: nil, else: "like /" <> bound <> "/"
+          {lo, hi, desc} = if islen, do: lenbound_(bound), else: {0, 0, if(islike, do: likedesc, else: rangedesc_(bound))}
+          ctype = typify(cval)
+          needs = if islen, do: Bitwise.bor(Bitwise.bor(@t_string, @t_list), @t_map), else: if(islike, do: @t_string, else: @t_number)
+
+          cond do
+            desc == nil ->
+              push_err(inj, field <> " has an invalid " <> argname <> ": " <> stringify(bound) <> ".")
+
+            nargs == 2 and not admits_(cval, held, lookup_(parent, 2), inj, store) ->
+              specdesc = Regex.replace(@r_transform_name, stringify(lookup_(parent, 2)), fn _w, g1 -> String.downcase(g1) end)
+              push_err(inj, invalid_type_msg(ig(inj, :path), specdesc, ctype, cval, "V0410"))
+
+            Bitwise.band(needs, ctype) == 0 ->
+              needtype = if islen, do: "string, list or map", else: if(islike, do: "string", else: "number")
+              push_err(inj, invalid_type_msg(ig(inj, :path), needtype, ctype, cval, "V0420"))
+
+            not (if islen, do: inlen_(cval, lo, hi), else: if(islike, do: re_test(like, cval), else: inrange_(bound, cval))) ->
+              needtype = (if size(ig(inj, :path)) > 1, do: "", else: "value ") <> desc
+              push_err(inj, invalid_type_msg(ig(inj, :path), needtype, ctype, cval, "V0430"))
+
+            true ->
+              :ok
+          end
+        end
+
+        @skip
+    end
+  end
+
+  # The bounds of a $LEN bound, with -1 for no maximum, and the words for it,
+  # which are absent when the bound is invalid.
+  defp lenbound_(bound) do
+    case nofcount_(bound, -1) do
+      {_, _, nil} ->
+        {0, 0, nil}
+
+      {lo, hi, _} ->
+        words =
+          cond do
+            lo == hi -> num_to_string(lo)
+            hi == -1 -> "at least " <> num_to_string(lo)
+            lo == 0 -> "at most " <> num_to_string(hi)
+            true -> num_to_string(lo) <> " to " <> num_to_string(hi)
+          end
+
+        {lo, hi, "of length " <> words}
+    end
+  end
+
+  # String.length counts graphemes; a string's length here is in code points.
+  defp inlen_(val, lo, hi) do
+    len = if is_binary(val), do: length(String.codepoints(val)), else: size(val)
+    lo <= len and (hi == -1 or len <= hi)
+  end
+
+  # A $LIKE pattern compiled by the port's own regex engine; absent unless it compiles.
+  defp likere_(pattern) do
+    if is_binary(pattern) do
+      try do
+        re_compile(pattern)
+      rescue
+        Regex.CompileError -> nil
+      end
+    end
+  end
+
+  # The words for a $RANGE bound, which are absent when the bound is invalid.
+  defp rangedesc_(bound) do
+    if ismap(bound) do
+      min = lookup_(bound, "min")
+      max = lookup_(bound, "max")
+      gt = lookup_(bound, "gt")
+      lt = lookup_(bound, "lt")
+      lower = if min == nil, do: gt, else: min
+      upper = if max == nil, do: lt, else: max
+      isnum = fn n -> n == nil or Bitwise.band(@t_number, typify(n)) > 0 end
+
+      valid =
+        size(bound) > 0 and
+          size(bound) == Enum.count([min, max, gt, lt], &(&1 != nil)) and
+          (min == nil or gt == nil) and
+          (max == nil or lt == nil) and
+          isnum.(min) and isnum.(max) and isnum.(gt) and isnum.(lt) and
+          (lower == nil or upper == nil or lower <= upper)
+
+      if valid do
+        lowerdesc =
+          cond do
+            min != nil -> "at least " <> stringify(min)
+            gt != nil -> "greater than " <> stringify(gt)
+            true -> nil
+          end
+
+        upperdesc =
+          cond do
+            max != nil -> "at most " <> stringify(max)
+            lt != nil -> "less than " <> stringify(lt)
+            true -> nil
+          end
+
+        [lowerdesc, upperdesc] |> Enum.reject(&is_nil/1) |> Enum.join(" and ")
+      end
+    end
+  end
+
+  # A number within a valid $RANGE bound.
+  defp inrange_(bound, val) do
+    min = lookup_(bound, "min")
+    max = lookup_(bound, "max")
+    gt = lookup_(bound, "gt")
+    lt = lookup_(bound, "lt")
+    (min == nil or min <= val) and (max == nil or val <= max) and (gt == nil or gt < val) and (lt == nil or val < lt)
+  end
+
   defp validation(pval, key, parent, inj) do
     if is_skip(pval) do
       :ok
@@ -2574,6 +2718,9 @@ defmodule Voxgig.Struct do
     setprop(base, "$EXACT", &validate_exact/4)
     setprop(base, "$NOF", &validate_nof/4)
     setprop(base, "$ALL", &validate_all/4)
+    setprop(base, "$LEN", &validate_len/4)
+    setprop(base, "$RANGE", &validate_range/4)
+    setprop(base, "$LIKE", &validate_like/4)
     store = merge(vlist_new([base, if(extra == nil, do: empty_map(), else: extra), vmap_new([{@s_derrs, errs}])]), 1)
     meta = getprop(injdef, "meta", empty_map())
     setprop(meta, @s_bexact, getprop(meta, @s_bexact, false))
@@ -2826,32 +2973,40 @@ defmodule Voxgig.Struct do
     end
   end
 
-  defp select_cmp(inj, _v, ref, store) do
-    if ig(inj, :mode) == @m_keypre do
-      term = getprop(ig(inj, :parent), ig(inj, :key))
-      gkey = getelem(ig(inj, :path), -2)
-      ppath = slice(ig(inj, :path), -1)
-      point = getpath(store, ppath)
+  defp select_cmp(inj, v, ref, store) do
+    cond do
+      # The list form of $LIKE is validate's checker; the key form is this operator.
+      ig(inj, :mode) == @m_val and ref == "$LIKE" ->
+        validate_like(inj, v, ref, store)
 
-      pass =
-        cond do
-          ref == "$GT" -> num_cmp(point, term, :gt)
-          ref == "$LT" -> num_cmp(point, term, :lt)
-          ref == "$GTE" -> num_cmp(point, term, :gte)
-          ref == "$LTE" -> num_cmp(point, term, :lte)
-          ref == "$LIKE" -> is_binary(term) and Regex.match?(Regex.compile!(term), stringify(point))
-          true -> false
+      ig(inj, :mode) == @m_keypre ->
+        term = getprop(ig(inj, :parent), ig(inj, :key))
+        gkey = getelem(ig(inj, :path), -2)
+        ppath = slice(ig(inj, :path), -1)
+        point = getpath(store, ppath)
+
+        pass =
+          cond do
+            ref == "$GT" -> num_cmp(point, term, :gt)
+            ref == "$LT" -> num_cmp(point, term, :lt)
+            ref == "$GTE" -> num_cmp(point, term, :gte)
+            ref == "$LTE" -> num_cmp(point, term, :lte)
+            ref == "$LIKE" -> is_binary(term) and Regex.match?(Regex.compile!(term), stringify(point))
+            true -> false
+          end
+
+        if pass do
+          gp = getelem(ig(inj, :nodes), -2)
+          setprop(gp, gkey, point)
+        else
+          push_err(inj, "CMP: " <> pathify(ppath) <> "⨯" <> stringify(point) <> " fail:" <> js_string(ref) <> " " <> stringify(term))
         end
 
-      if pass do
-        gp = getelem(ig(inj, :nodes), -2)
-        setprop(gp, gkey, point)
-      else
-        push_err(inj, "CMP: " <> pathify(ppath) <> "⨯" <> stringify(point) <> " fail:" <> js_string(ref) <> " " <> stringify(term))
-      end
-    end
+        nil
 
-    nil
+      true ->
+        nil
+    end
   end
 
   def select(children0, query) do
@@ -2880,11 +3035,7 @@ defmodule Voxgig.Struct do
       setprop(extra, "$LTE", &select_cmp/4)
       setprop(extra, "$LIKE", &select_cmp/4)
       q = clone(query)
-
-      walk(q, after: fn _k, v, _p, _path ->
-        if ismap(v), do: setprop(v, @s_bopen, getprop(v, @s_bopen, true))
-        v
-      end)
+      openquery_(q)
 
       Enum.each(list_items(children), fn child ->
         errs = empty_list()
@@ -2896,6 +3047,32 @@ defmodule Voxgig.Struct do
       end)
 
       results
+    end
+  end
+
+  # Open every map in a select query, so a child may hold keys the query does
+  # not name, but leave a directive's literals as written: what $EXACT
+  # compares, and the count or bound of $NOF, $LEN and $RANGE.
+  defp openquery_(q) do
+    cond do
+      ismap(q) ->
+        setprop(q, @s_bopen, getprop(q, @s_bopen, true))
+        Enum.each(items_pairs(q), fn {_, v} -> openquery_(v) end)
+
+      islist(q) ->
+        elems = list_items(q)
+        head = List.first(elems)
+        exact = head == @s_bexact
+        bounded = head in ["`$NOF`", "`$LEN`", "`$RANGE`"]
+
+        elems
+        |> Enum.with_index()
+        |> Enum.each(fn {v, i} ->
+          if i == 0 or not (exact or (bounded and i == 1)), do: openquery_(v)
+        end)
+
+      true ->
+        nil
     end
   end
 

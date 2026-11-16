@@ -165,9 +165,9 @@ stringify({ a: 1, b: [2, 3] })   // '{a:1,b:[2,3]}'
 <!-- => "{a:1,b:[2,3]}" -->
 
 For more task recipes (merge configs, rename fields, `$EACH`, `$MERGE`,
-`$FORMAT`, `$NOF`, `$EXACT`, …) see the language-neutral
-[How-to guides](../DOCS.md#2-how-to-guides) — the spec syntax is identical;
-only the host literals differ.
+`$FORMAT`, `$NOF`, `$LEN`, `$RANGE`, `$LIKE`, `$EXACT`, …) see the
+language-neutral [How-to guides](../DOCS.md#2-how-to-guides) — the spec
+syntax is identical; only the host literals differ.
 
 ---
 

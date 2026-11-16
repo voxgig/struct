@@ -1475,7 +1475,6 @@ module VoxgigStruct
   end
 
   def self.transform_REF(inj, _val, _ref, store)
-    nodes_ = inj.nodes
     return nil if inj.mode != S_MVAL
 
     refpath = getprop(inj.parent, 1)
@@ -1490,39 +1489,29 @@ module VoxgigStruct
                     'dparent' => getpath(spec, dpath)
                   })
 
-    tref = clone(ref)
-
-    cpath = slice(inj.path, -3)
-    tpath = slice(inj.path, -1)
-    tcur = getpath(store, cpath)
-    tval = getpath(store, tpath)
-    rval = nil
-
-    if tval || !isnode(ref)
-      tinj = inj.child(0, [getelem(tpath, -1)])
-      tinj.path = tpath
-      tinj.nodes = slice(inj.nodes, -1)
-      tinj.parent = getelem(nodes_, -2)
-      tinj.val = tref
-
-      tinj.dpath = flatten([cpath])
-      tinj.dparent = tcur
-
-      inject(tref, store, tinj)
-      rval = tinj.val
+    hasSubRef = false
+    if isnode(ref)
+      walk(ref, lambda { |_k, v, *_a|
+        hasSubRef = true if v == '`$REF`'
+        v
+      })
     end
 
-    tkey = getelem(inj.path, -2)
-    target = getelem(nodes_, -2, -> { getelem(nodes_, -1) })
-    if rval.nil?
-      delprop(target, tkey)
-    else
-      setprop(target, tkey, rval)
+    # A recursive reference stops where the data does.
+    tval = getpath(store, slice(inj.path, -1))
+    rval = !hasSubRef || !tval.nil? ? clone(ref) : nil
+
+    # The enclosing loop injects the referenced spec in this list's place, so
+    # neither this pass nor this element leaves a value for modify to check.
+    grandparent = inj.setval(rval, 2)
+
+    prior = inj.prior
+    if prior
+      prior.modify = nil
+      prior.keyI -= 1 if islist(grandparent) || !rval.nil?
     end
 
-    inj.prior.keyI -= 1 if islist(target) && inj.prior
-
-    _val
+    SKIP
   end
 
   FORMATTER = {
@@ -2118,6 +2107,183 @@ module VoxgigStruct
     SKIP
   end
 
+  # The value's length is within a bound: ['`$LEN`', bound, spec?], where the
+  # bound is as for a $NOF count. A string's length is in code points.
+  def self.validate_LEN(inj, _val = nil, _ref = nil, store = nil)
+    _validatebound(inj, store, '$LEN')
+  end
+
+  # The value is a number within a bound: ['`$RANGE`', bound, spec?], where the
+  # bound holds min or gt, max or lt, or one of each.
+  def self.validate_RANGE(inj, _val = nil, _ref = nil, store = nil)
+    _validatebound(inj, store, '$RANGE')
+  end
+
+  def self.validate_LIKE(inj, _val = nil, _ref = nil, store = nil)
+    _validatebound(inj, store, '$LIKE')
+  end
+
+  # The bounding list directives: a bound or pattern, then at most one spec that also admits.
+  def self._validatebound(inj, store, name)
+    parent = inj.parent
+
+    return nil unless inj.mode == S_MVAL
+
+    if !islist(parent) || inj.keyI != 0
+      inj.errs << "The #{name} validator at field #{pathify(inj.path, 1, 1)} must be the first element of an array."
+      return nil
+    end
+
+    cval = _slotval(inj)
+
+    inj.keyI = size(inj.keys)
+
+    # As for the counting directives: SKIP keeps inject off the detached list.
+    _setslot(inj, cval)
+
+    inj.path = slice(inj.path, -1)
+
+    field = "The #{name} validator at field #{pathify(inj.path, 1)}"
+    nargs = size(parent) - 1
+    islen = name == '$LEN'
+    islike = name == '$LIKE'
+    argname = islike ? 'pattern' : 'bound'
+
+    if nargs < 1 || nargs > 2
+      inj.errs << "#{field} must have a #{argname} and at most one spec."
+      return SKIP
+    end
+
+    bound = _getprop(parent, 1)
+    like = islike ? _likere(bound) : nil
+    lo, hi, desc =
+      if islen
+        _lenbound(bound)
+      elsif islike
+        [0, 0, like.nil? ? nil : "like /#{bound}/"]
+      else
+        [0, 0, _rangedesc(bound)]
+      end
+
+    if desc.nil?
+      inj.errs << "#{field} has an invalid #{argname}: #{stringify(bound)}."
+      return SKIP
+    end
+
+    ctype = typify(cval)
+
+    if nargs == 2 && !_admits(cval, _getprop(parent, 2), inj, store)
+      specdesc = stringify(_getprop(parent, 2)).gsub(/`\$([A-Z]+)`/) { ::Regexp.last_match(1).downcase }
+      inj.errs << _invalidTypeMsg(inj.path, specdesc, ctype, cval, 'V0410')
+      return SKIP
+    end
+
+    if (islen ? T_string | T_list | T_map : islike ? T_string : T_number).nobits?(ctype)
+      needtype = islen ? 'string, list or map' : islike ? S_string : S_number
+      inj.errs << _invalidTypeMsg(inj.path, needtype, ctype, cval, 'V0420')
+      return SKIP
+    end
+
+    length = islen ? size(cval) : 0
+    inbound =
+      if islen
+        lo <= length && (hi == -1 || length <= hi)
+      elsif islike
+        re_test(like, cval)
+      else
+        _inrange(bound, cval)
+      end
+
+    unless inbound
+      needtype = "#{'value ' unless size(inj.path) > 1}#{desc}"
+      inj.errs << _invalidTypeMsg(inj.path, needtype, ctype, cval, 'V0430')
+    end
+
+    SKIP
+  end
+
+  # The bounds of a $LEN bound, with -1 for no maximum, and the words for it,
+  # which are nil when the bound is invalid.
+  def self._lenbound(bound)
+    lo, hi, countdesc = _nofcount(bound, -1)
+
+    return [0, 0, nil] if countdesc.nil?
+
+    desc =
+      if lo == hi
+        lo.to_s
+      elsif hi == -1
+        "at least #{lo}"
+      elsif lo.zero?
+        "at most #{hi}"
+      else
+        "#{lo} to #{hi}"
+      end
+
+    [lo, hi, "of length #{desc}"]
+  end
+
+  # A $LIKE pattern compiled by the port's own regex engine; nil unless it compiles.
+  def self._likere(pattern)
+    return nil unless pattern.is_a?(String)
+
+    re_compile(pattern)
+  rescue RegexpError
+    nil
+  end
+
+  # The words for a $RANGE bound, which are nil when the bound is invalid.
+  def self._rangedesc(bound)
+    return nil unless ismap(bound)
+
+    min = _getprop(bound, 'min')
+    max = _getprop(bound, 'max')
+    gt = _getprop(bound, 'gt')
+    lt = _getprop(bound, 'lt')
+    sides = [min, max, gt, lt].reject { |n| n.equal?(UNDEF) }
+    lower = min.equal?(UNDEF) ? gt : min
+    upper = max.equal?(UNDEF) ? lt : max
+
+    valid =
+      size(bound).positive? &&
+      size(bound) == sides.length &&
+      (min.equal?(UNDEF) || gt.equal?(UNDEF)) &&
+      (max.equal?(UNDEF) || lt.equal?(UNDEF)) &&
+      sides.all? { |n| T_number.anybits?(typify(n)) } &&
+      (lower.equal?(UNDEF) || upper.equal?(UNDEF) || lower <= upper)
+
+    return nil unless valid
+
+    parts = []
+
+    if !min.equal?(UNDEF)
+      parts << "at least #{stringify(min)}"
+    elsif !gt.equal?(UNDEF)
+      parts << "greater than #{stringify(gt)}"
+    end
+
+    if !max.equal?(UNDEF)
+      parts << "at most #{stringify(max)}"
+    elsif !lt.equal?(UNDEF)
+      parts << "less than #{stringify(lt)}"
+    end
+
+    parts.join(' and ')
+  end
+
+  # A number within a valid $RANGE bound.
+  def self._inrange(bound, val)
+    min = _getprop(bound, 'min')
+    max = _getprop(bound, 'max')
+    gt = _getprop(bound, 'gt')
+    lt = _getprop(bound, 'lt')
+
+    (min.equal?(UNDEF) || min <= val) &&
+      (max.equal?(UNDEF) || val <= max) &&
+      (gt.equal?(UNDEF) || gt < val) &&
+      (lt.equal?(UNDEF) || val < lt)
+  end
+
   # --- _validation: Modify callback for validate ---
   def self._validation(pval, key, parent, inj)
     return if inj.nil?
@@ -2225,7 +2391,10 @@ module VoxgigStruct
                       '$CHILD' => method(:validate_CHILD),
                       '$EXACT' => method(:validate_EXACT),
                       '$NOF' => method(:validate_NOF),
-                      '$ALL' => method(:validate_ALL)
+                      '$ALL' => method(:validate_ALL),
+                      '$LEN' => method(:validate_LEN),
+                      '$RANGE' => method(:validate_RANGE),
+                      '$LIKE' => method(:validate_LIKE)
                     },
                     (extra.nil? ? {} : extra),
                     { S_DERRS => errs }
@@ -2339,6 +2508,9 @@ module VoxgigStruct
   end
 
   def self.select_CMP(inj, _val, ref, store)
+    # The list form of $LIKE is validate's checker; the key form is this operator.
+    return validate_LIKE(inj, _val, ref, store) if inj.mode == S_MVAL && ref == '$LIKE'
+
     if inj.mode == S_MKEYPRE
       term = getprop(inj.parent, inj.key)
       gkey = getelem(inj.path, -2)
@@ -2392,11 +2564,7 @@ module VoxgigStruct
     results = []
     q = clone(query)
 
-    # Add $OPEN to all maps in query
-    walk(q, lambda { |_k, v, _p, _t|
-      setprop(v, '`$OPEN`', getprop(v, '`$OPEN`', true)) if ismap(v)
-      v
-    })
+    _openquery(q)
 
     select_extra = {
       '$AND' => method(:select_AND),
@@ -2420,6 +2588,23 @@ module VoxgigStruct
     end
 
     results
+  end
+
+  # Open every map in a select query, so a child may hold keys the query does
+  # not name, but leave a directive's literals as written: what $EXACT
+  # compares, and the count or bound of $NOF, $LEN and $RANGE.
+  def self._openquery(q)
+    if ismap(q)
+      setprop(q, '`$OPEN`', getprop(q, '`$OPEN`', true))
+      keysof(q).each { |key| _openquery(q[key]) }
+    elsif islist(q)
+      head = q[0]
+      exact = head == '`$EXACT`'
+      bounded = ['`$NOF`', '`$LEN`', '`$RANGE`'].include?(head)
+      q.each_with_index do |item, i|
+        _openquery(item) if i.zero? || !(exact || (bounded && i == 1))
+      end
+    end
   end
 
   # --- setpath ---

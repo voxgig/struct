@@ -51,6 +51,7 @@ trie
 [Bb]ackref
 [Bb]ackrefs
 backreferences
+lookahead
 lookaround
 lookbehind
 metacharacters?

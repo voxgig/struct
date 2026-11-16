@@ -1756,11 +1756,10 @@ transformPack inj _ _ store = do
 
 -- | @$REF@ transform: resolve a reference within the store.
 transformRef :: Injector
-transformRef inj v _ store = do
+transformRef inj _ _ store = do
   mode <- readIORef (iMode inj)
   if mode /= m_val then return VNoval
   else do
-    nodes <- readIORef (iNodes inj)
     parent <- readIORef (iParent inj)
     refpath <- lookup_ parent (VNum 1)
     keys <- readIORef (iKeys inj); ksz <- size keys; writeIORef (iKeyi inj) ksz
@@ -1771,33 +1770,21 @@ transformRef inj v _ store = do
         refv <- getpath INone spec refpath
         hasSubRef <- newIORef False
         when (isnode refv) $ do _ <- walk (Just (\_ v2 _ _ -> do when (vStrEq v2 "`$REF`") (writeIORef hasSubRef True); return v2)) Nothing VNoval refv; return ()
-        tref <- clone refv
-        ipath <- readIORef (iPath inj); ipsz <- size ipath
-        cpath <- sliceM ipath (VNum 0) (VNum (fromIntegral (ipsz - 3))) False
-        tpath <- sliceM ipath (VNum 0) (VNum (fromIntegral (ipsz - 1))) False
-        tcur <- getpath INone store cpath
-        tval <- getpath INone store tpath
-        rvalRef <- newIORef VNoval
+        -- A recursive reference stops where the data does.
+        ipath <- readIORef (iPath inj)
+        tval <- getpath INone store =<< sliceM ipath (VNum (-1)) VNoval False
         hasSub <- readIORef hasSubRef
-        when (not (isNoval refv) && (not hasSub || not (isNoval tval))) $ do
-          lastT <- getelem tpath (VNum (-1)); cl <- mkList [lastT]
-          cs <- injChild inj 0 cl
-          writeIORef (iPath cs) tpath
-          inodes <- readIORef (iNodes inj); insz <- size inodes
-          nn <- sliceM inodes (VNum 0) (VNum (fromIntegral (insz - 1))) False
-          writeIORef (iNodes cs) nn
-          parent2 <- getelem nodes (VNum (-2)); writeIORef (iParent cs) parent2
-          writeIORef (iIval cs) tref
-          writeIORef (iDparent cs) tcur
-          _ <- inject (IInj cs) tref store
-          iv <- readIORef (iIval cs); writeIORef rvalRef iv
-        rval <- readIORef rvalRef
-        _ <- injSetval 2 inj rval
+        rval <- if not hasSub || not (isNoval tval) then clone refv else return VNoval
+        -- The enclosing loop injects the referenced spec in this list's place, so
+        -- neither this pass nor this element leaves a value for modify to check.
+        grandparent <- injSetval 2 inj rval
         prior <- readIORef (iPrior inj)
         case prior of
-          Just p -> when (islist parent) $ do pk <- readIORef (iKeyi p); writeIORef (iKeyi p) (pk - 1)
+          Just p -> do
+            writeIORef (iModify p) Nothing
+            when (islist grandparent || not (isNoval rval)) $ do pk <- readIORef (iKeyi p); writeIORef (iKeyi p) (pk - 1)
           Nothing -> return ()
-        return v
+        return skip
       _ -> return VNoval
 
 -- ---------------------------------------------------------------------------
@@ -2177,6 +2164,137 @@ validateCount inj store name counted = do
             pushErr inj m
     return skip
 
+-- | @\`$LEN\`@ validation rule: the value's length is within a bound, as
+-- @[\`$LEN\`, bound, spec?]@, where the bound is as for a @$NOF@ count. A
+-- string's length is in code points.
+validateLen :: Injector
+validateLen inj _ _ store = validateBound inj store "$LEN"
+
+-- | @\`$RANGE\`@ validation rule: the value is a number within a bound, as
+-- @[\`$RANGE\`, bound, spec?]@, where the bound holds min or gt, max or lt, or
+-- one of each.
+validateRange :: Injector
+validateRange inj _ _ store = validateBound inj store "$RANGE"
+
+validateLike :: Injector
+validateLike inj _ _ store = validateBound inj store "$LIKE"
+
+-- | The bounding list directives: a bound or pattern, then at most one spec that also admits.
+validateBound :: Inj -> Value -> String -> IO Value
+validateBound inj store name = do
+  mode <- readIORef (iMode inj)
+  parent <- readIORef (iParent inj); keyi <- readIORef (iKeyi inj)
+  if mode /= m_val then return VNoval
+  else if not (islist parent) || keyi /= 0 then do
+    path <- readIORef (iPath inj); p <- pathifyFull path (VNum 1) (VNum 1) False
+    pushErr inj ("The " ++ name ++ " validator at field " ++ p ++ " must be the first element of an array.")
+    return VNoval
+  else do
+    cval <- slotVal inj
+    keys <- readIORef (iKeys inj); ksz <- size keys; writeIORef (iKeyi inj) ksz
+    -- As for the counting directives: SKIP keeps inject off the detached list.
+    _ <- injSetval 2 inj cval
+    path <- readIORef (iPath inj); sl <- sliceM path (VNum (-1)) VNoval False; writeIORef (iPath inj) sl
+    p <- pathifyFull sl (VNum 1) VNoval False
+    psz <- size parent
+    let field = "The " ++ name ++ " validator at field " ++ p
+        nargs = psz - 1
+        islen = name == "$LEN"
+        islike = name == "$LIKE"
+        argname = if islike then "pattern" else "bound"
+    if nargs < 1 || 2 < nargs then pushErr inj (field ++ " must have a " ++ argname ++ " and at most one spec.")
+    else do
+      bound <- lookup_ parent (VNum 1)
+      let like = if islike then likeRe bound else Nothing
+          likedesc = case (bound, like) of { (VStr pat, Just _) -> Just ("like /" ++ pat ++ "/"); _ -> Nothing }
+      (lo, hi, bdesc) <- if islen then lenBound bound
+        else if islike then return (0, 0, likedesc)
+        else do { d <- rangeDesc bound; return (0, 0, d) }
+      case bdesc of
+        Nothing -> do bs <- stringify bound; pushErr inj (field ++ " has an invalid " ++ argname ++ ": " ++ bs ++ ".")
+        Just desc -> do
+          let ctype = typify cval
+          spec <- lookup_ parent (VNum 2)
+          admitted <- if nargs == 2 then admits cval spec inj store else return True
+          path2 <- readIORef (iPath inj)
+          if not admitted then do
+            sd <- stringify spec
+            m <- invalidTypeMsg path2 (replaceTransformNames sd) ctype cval "V0410"
+            pushErr inj m
+          else if (if islen then t_string .|. t_list .|. t_map else if islike then t_string else t_number) .&. ctype == 0 then do
+            m <- invalidTypeMsg path2 (if islen then "string, list or map" else if islike then s_string else "number") ctype cval "V0420"
+            pushErr inj m
+          else do
+            -- size counts a String's Chars, which are code points.
+            inbound <- if islen
+              then do len <- fromIntegral <$> size cval; return (lo <= len && (hi == -1 || len <= hi))
+              else if islike then return (case (like, cval) of { (Just re, VStr s) -> Vregex.test re s; _ -> False })
+              else inRange bound cval
+            when (not inbound) $ do
+              psz2 <- size path2
+              m <- invalidTypeMsg path2 ((if psz2 > 1 then "" else "value ") ++ desc) ctype cval "V0430"
+              pushErr inj m
+    return skip
+
+-- | The bounds of a @$LEN@ bound, with -1 for no maximum, and the words for
+-- it, which are absent when the bound is invalid.
+lenBound :: Value -> IO (Double, Double, Maybe String)
+lenBound bound = do
+  (lo, hi, countdesc) <- nofCount bound (-1)
+  let desc
+        | lo == hi = numToString lo
+        | hi == -1 = "at least " ++ numToString lo
+        | lo == 0 = "at most " ++ numToString hi
+        | otherwise = numToString lo ++ " to " ++ numToString hi
+  return $ case countdesc of
+    Nothing -> (0, 0, Nothing)
+    Just _ -> (lo, hi, Just ("of length " ++ desc))
+
+-- | A @$LIKE@ pattern compiled by the port's own regex engine; absent unless
+-- it is a string, since that engine reads every string without failing.
+likeRe :: Value -> Maybe Vregex.Re
+likeRe pattern = case pattern of
+  VStr pat -> Just (Vregex.compile pat)
+  _ -> Nothing
+
+-- | The words for a @$RANGE@ bound, which are absent when the bound is invalid.
+rangeDesc :: Value -> IO (Maybe String)
+rangeDesc bound
+  | not (ismap bound) = return Nothing
+  | otherwise = do
+      mn <- lookup_ bound (VStr "min"); mx <- lookup_ bound (VStr "max")
+      gt <- lookup_ bound (VStr "gt"); lt <- lookup_ bound (VStr "lt")
+      bsz <- size bound
+      let lower = if isNoval mn then gt else mn
+          upper = if isNoval mx then lt else mx
+          isnum n = isNoval n || (t_number .&. typify n) > 0
+          num n = case n of VNum x -> x; _ -> 0
+          valid = bsz > 0
+            && bsz == length (L.filter (not . isNoval) [mn, mx, gt, lt])
+            && (isNoval mn || isNoval gt)
+            && (isNoval mx || isNoval lt)
+            && all isnum [mn, mx, gt, lt]
+            && (isNoval lower || isNoval upper || num lower <= num upper)
+          part a awords b bwords
+            | not (isNoval a) = VStr . (awords ++) <$> stringify a
+            | not (isNoval b) = VStr . (bwords ++) <$> stringify b
+            | otherwise = return VNoval
+      if not valid then return Nothing
+      else do
+        parts <- sequence [part mn "at least " gt "greater than ", part mx "at most " lt "less than "]
+        pl <- mkList parts
+        Just <$> join pl (VStr " and ") False
+
+-- | A number within a valid @$RANGE@ bound.
+inRange :: Value -> Value -> IO Bool
+inRange bound val = do
+  mn <- lookup_ bound (VStr "min"); mx <- lookup_ bound (VStr "max")
+  gt <- lookup_ bound (VStr "gt"); lt <- lookup_ bound (VStr "lt")
+  let num n = case n of VNum x -> x; _ -> 0 / 0
+      v = num val
+  return ((isNoval mn || num mn <= v) && (isNoval mx || v <= num mx)
+    && (isNoval gt || num gt < v) && (isNoval lt || v < num lt))
+
 -- | The bounds of a @$NOF@ count, and the words for it, which are absent when
 -- the count is invalid. Without a max, the bound is the number of specs.
 nofCount :: Value -> Double -> IO (Double, Double, Maybe String)
@@ -2370,6 +2488,9 @@ validate injarg dat spec = do
   put "$EXACT" (VFunc validateExact)
   put "$NOF" (VFunc validateNof)
   put "$ALL" (VFunc validateAll)
+  put "$LEN" (VFunc validateLen)
+  put "$RANGE" (VFunc validateRange)
+  put "$LIKE" (VFunc validateLike)
   extraMap <- if isNoval extra then emptyMap else return extra
   errMap <- mkMap [(s_derrs, errs)]
   ls <- mkList [base, extraMap, errMap]; store <- mergeD ls (VNum 1)
@@ -2470,24 +2591,27 @@ numCmp a b op = case (a, b) of (VNum x, VNum y) -> op x y; _ -> False
 
 -- | The @$LT@\/@$GT@\/@$LTE@\/@$GTE@\/@$EQ@ comparison query operators.
 selectCmp :: Injector
-selectCmp inj _ refstr store = do
+selectCmp inj v refstr store = do
   mode <- readIORef (iMode inj)
-  when (mode == m_keypre) $ do
-    parent <- readIORef (iParent inj); key <- readIORef (iKey inj)
-    term <- getprop parent key
-    path <- readIORef (iPath inj); gkey <- getelem path (VNum (-2))
-    ppath <- sliceM path (VNum (-1)) VNoval False
-    point <- getpath INone store ppath
-    pass <- case refstr of
-      "$GT" -> return (numCmp point term (>))
-      "$LT" -> return (numCmp point term (<))
-      "$GTE" -> return (numCmp point term (>=))
-      "$LTE" -> return (numCmp point term (<=))
-      "$LIKE" -> case term of { VStr t -> do { sp <- stringify point; return (Vregex.testStr t sp) }; _ -> return False }
-      _ -> return False
-    if pass then do nodes <- readIORef (iNodes inj); gp <- getelem nodes (VNum (-2)); _ <- setprop gp gkey point; return ()
-    else do pp <- pathify ppath; sp <- stringify point; st <- stringify term; pushErr inj ("CMP: " ++ pp ++ cross ++ sp ++ " fail:" ++ refstr ++ " " ++ st)
-  return VNoval
+  -- The list form of $LIKE is validate's checker; the key form is this operator.
+  if mode == m_val && refstr == "$LIKE" then validateLike inj v refstr store
+  else do
+    when (mode == m_keypre) $ do
+      parent <- readIORef (iParent inj); key <- readIORef (iKey inj)
+      term <- getprop parent key
+      path <- readIORef (iPath inj); gkey <- getelem path (VNum (-2))
+      ppath <- sliceM path (VNum (-1)) VNoval False
+      point <- getpath INone store ppath
+      pass <- case refstr of
+        "$GT" -> return (numCmp point term (>))
+        "$LT" -> return (numCmp point term (<))
+        "$GTE" -> return (numCmp point term (>=))
+        "$LTE" -> return (numCmp point term (<=))
+        "$LIKE" -> case term of { VStr t -> do { sp <- stringify point; return (Vregex.testStr t sp) }; _ -> return False }
+        _ -> return False
+      if pass then do nodes <- readIORef (iNodes inj); gp <- getelem nodes (VNum (-2)); _ <- setprop gp gkey point; return ()
+      else do pp <- pathify ppath; sp <- stringify point; st <- stringify term; pushErr inj ("CMP: " ++ pp ++ cross ++ sp ++ " fail:" ++ refstr ++ " " ++ st)
+    return VNoval
 
 -- | Query a data structure with a by-example selection expression.
 select :: Value -> Value -> IO Value
@@ -2501,7 +2625,7 @@ select children0 query =
     extra <- emptyMap
     forM_ [("$AND", selectAnd), ("$OR", selectOr), ("$NOT", selectNot), ("$GT", selectCmp), ("$LT", selectCmp), ("$GTE", selectCmp), ("$LTE", selectCmp), ("$LIKE", selectCmp)] $ \(k, f) -> setprop extra (VStr k) (VFunc f) >> return ()
     q <- clone query
-    _ <- walk (Just (\_ vv _ _ -> do when (ismap vv) (do bo <- getpropAlt (VBool True) vv (VStr s_bopen); _ <- setprop vv (VStr s_bopen) bo; return ()); return vv)) Nothing VNoval q
+    openQuery q
     citems <- listItems children
     forM_ citems $ \child -> do
       errs <- emptyList
@@ -2512,6 +2636,25 @@ select children0 query =
       esz <- size errs
       when (esz == 0) $ do rsz <- size results; _ <- setprop results (VNum (fromIntegral rsz)) child; return ()
     return results
+
+-- | Open every map in a select query, so a child may hold keys the query does
+-- not name, but leave a directive's literals as written: what @$EXACT@
+-- compares, and the count or bound of @$NOF@, @$LEN@ and @$RANGE@.
+openQuery :: Value -> IO ()
+openQuery q = case q of
+  VMap _ -> do
+    bo <- getpropAlt (VBool True) q (VStr s_bopen)
+    _ <- setprop q (VStr s_bopen) bo
+    ps <- itemsPairs q
+    mapM_ (openQuery . snd) ps
+  VList r -> do
+    elems <- readIORef r
+    let head' = case elems of (VStr s : _) -> s; _ -> ""
+        exact = s_bexact == head'
+        bounded = head' `elem` ["`$NOF`", "`$LEN`", "`$RANGE`"]
+    forM_ (zip [0 :: Int ..] elems) $ \(i, v) ->
+      when (0 == i || not (exact || (bounded && 1 == i))) (openQuery v)
+  _ -> return ()
 
 -- ---------------------------------------------------------------------------
 -- builders

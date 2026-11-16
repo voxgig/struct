@@ -6,10 +6,10 @@
 > bit-flags, 3 mode constants (`VOXGIG_M_KEYPRE` / `VOXGIG_M_KEYPOST` / `VOXGIG_M_VAL`),
 > `SKIP` / `DELETE` sentinels (pointer-identity), and the `voxgig_injection`
 > state machine. `inject` / `transform` / `validate` / `select` all dispatch
-> through the canonical injector machinery: 13 transform commands, 16
+> through the canonical injector machinery: 13 transform commands, 19
 > validate checkers, 8 select operators.
 >
-> Passes the shared corpus (1602/1602), run on
+> Passes the shared corpus (1730/1730), run on
 > [voxgig/omni](https://github.com/voxgig/omni) — the shared test runner,
 > consumed as a local checkout. Run it with `make test` from `c/`.
 
@@ -27,8 +27,9 @@ git clone https://github.com/voxgig/omni ../../omni   # the test runner
 
 cd c
 make build       # compile the library (no omni)
-make test        # the shared corpus + the client test
+make test        # the smoke and regex tests, the shared corpus, the client test
 make smoke       # just the smoke test
+make regex       # just the regex engine's own checks
 make corpus      # just the corpus driver
 make sanitize    # build + run with ASan + UBSan (memory-only; leaks reported)
 make check_leak  # build + run under valgrind
@@ -536,6 +537,16 @@ admits a value when validating the value against it finds no error and gives
 back every member of the value unchanged. There is no `$ONE`: write
 `` ["`$ONE`", a, b] `` as `` ["`$NOF`", {"min": 1}, a, b] ``.
 
+Three more list checkers constrain a value. `` ["`$LEN`", n, spec?] ``
+holds when the value's length is within `n`, a bound written as for `$NOF`.
+Strings count code points, not the bytes `voxgig_size` counts; lists count
+elements and maps keys. `` ["`$RANGE`", bound, spec?] `` holds when the value
+is a number within the bound, a map of `min` or `gt` and `max` or `lt`.
+`` ["`$LIKE`", pattern, spec?] `` holds when the value is a string the pattern
+finds, with the in-tree engine in `src/regex.c`, anywhere in it unless the
+pattern is anchored. Each takes at most one spec, which must also admit the
+value. `min` and `max` include their bound, while `gt` and `lt` exclude it.
+
 A spec that names a checker `voxgig_validate` does not define is rejected
 before any data is read, and nothing is validated. The whole-string reference
 `` "`$FOO`" `` names a checker, and so does a misspelling of a defined one in
@@ -631,7 +642,7 @@ voxgig_value
 
 `tests/struct_corpus_test.c` runs `../build/test/test.json` on
 [voxgig/omni](https://github.com/voxgig/omni), the shared test runner. Every
-group the corpus defines runs — **1602 entries in 78 groups**, plus `merge.basic`, `inject.basic` and `transform.basic` (single
+group the corpus defines runs — **1730 entries in 81 groups**, plus `merge.basic`, `inject.basic` and `transform.basic` (single
 entries, not sets) and the two `check` entries in `tests/client_test.c`.
 
 Each group is one assertion: the runner stops at its first failing entry and
@@ -665,9 +676,9 @@ The `_re` suffixed variants take an already-compiled `voxgig_regex*`.
 ### Dialect
 
 The in-tree engine implements the RE2 subset documented in `/design/REGEX.md`:
-literals + escapes, `.`, `^`/`$`, `* + ? {n} {n,} {n,m}` (greedy + lazy),
-classes incl. `\d \w \s` and friends, `\b`/`\B`, `(...)` / `(?:...)`,
-alternation.
+literals + escapes, `.`, `^`/`$` (the start and end of the whole text),
+`* + ? {n} {n,} {n,m}` (greedy + lazy), classes incl. `\d \w \s` and
+friends, `\b`/`\B`, `(...)` / `(?:...)`, alternation.
 
 **Not supported** (by design — RE2 doesn't either): backreferences,
 lookaround, possessive quantifiers, atomic groups. Backref patterns
@@ -702,8 +713,9 @@ See `/design/REGEX_PATHOLOGICAL.md` for the cross-port pathological-input panel.
 ```bash
 cd c
 make build      # compile the library alone
-make test       # the shared corpus + the client test
+make test       # the smoke and regex tests, the shared corpus, the client test
 make smoke      # the API smoke test
+make regex      # the regex engine's own checks
 make sanitize   # corpus driver with ASan + UBSan
 make check_leak # corpus driver under valgrind
 make lint       # clang-format --dry-run + clang-tidy

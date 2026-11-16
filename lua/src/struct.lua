@@ -257,6 +257,7 @@ local _deepequal
 local _keeps
 local _admits
 local _nofcount
+local _openquery
 local stringify
 local ismap
 local islist
@@ -2515,9 +2516,7 @@ end
 
 -- Transform: resolve a reference to another part of the spec.
 -- Format: ['`$REF`', 'ref-path']
-local function transform_REF(inj, val, _ref, store)
-  local nodes = inj.nodes
-
+local function transform_REF(inj, _val, _ref, store)
   if M_VAL ~= inj.mode then
     return NONE
   end
@@ -2546,39 +2545,26 @@ local function transform_REF(inj, val, _ref, store)
     end)
   end
 
-  local tref = clone(ref)
-
-  local cpath = slice(inj.path, -3)
-  local tpath = slice(inj.path, -1)
-  local tcur = getpath(store, cpath)
-  local tval = getpath(store, tpath)
-  local rval
-
+  -- A recursive reference stops where the data does.
+  local tval = getpath(store, slice(inj.path, -1))
+  local rval = NONE
   if not hasSubRef or NONE ~= tval then
-    local tinj = inj:child(0, { getelem(tpath, -1) })
-
-    tinj.path = tpath
-    tinj.nodes = slice(inj.nodes, -1)
-    tinj.parent = getelem(nodes, -2)
-    tinj.val = tref
-
-    tinj.dpath = flatten({ cpath })
-    tinj.dparent = tcur
-
-    inject(tref, store, tinj)
-
-    rval = tinj.val
-  else
-    rval = NONE
+    rval = clone(ref)
   end
 
+  -- The enclosing loop injects the referenced spec in this list's place, so
+  -- neither this pass nor this element leaves a value for modify to check.
   local grandparent = inj:setval(rval, 2)
 
-  if islist(grandparent) and inj.prior then
-    inj.prior.keyI = inj.prior.keyI - 1
+  local prior = inj.prior
+  if prior then
+    prior.modify = NONE
+    if islist(grandparent) or NONE ~= rval then
+      prior.keyI = prior.keyI - 1
+    end
   end
 
-  return val
+  return SKIP
 end
 
 -- Named formatters for transform_FORMAT.
@@ -3097,6 +3083,221 @@ local function validate_ALL(inj, _val, _ref, store)
   return _validatecount(inj, store, "$ALL", false)
 end
 
+-- The bounds of a $LEN bound, with -1 for no maximum, and the words for it,
+-- which are absent when the bound is invalid.
+local function _lenbound(bound)
+  local lo, hi, countdesc = _nofcount(bound, -1)
+
+  if NONE == countdesc then
+    return 0, 0, NONE
+  end
+
+  local desc
+  if lo == hi then
+    desc = stringify(lo)
+  elseif -1 == hi then
+    desc = "at least " .. stringify(lo)
+  elseif 0 == lo then
+    desc = "at most " .. stringify(hi)
+  else
+    desc = stringify(lo) .. " to " .. stringify(hi)
+  end
+
+  return lo, hi, "of length " .. desc
+end
+
+-- The words for a $RANGE bound, which are absent when the bound is invalid.
+local function _rangedesc(bound)
+  if not ismap(bound) then
+    return NONE
+  end
+
+  local min = getprop(bound, "min")
+  local max = getprop(bound, "max")
+  local gt = getprop(bound, "gt")
+  local lt = getprop(bound, "lt")
+
+  local lower, upper = min, max
+  if NONE == lower then
+    lower = gt
+  end
+  if NONE == upper then
+    upper = lt
+  end
+
+  local function isnum(n)
+    return NONE == n or 0 < (T_number & typify(n))
+  end
+
+  local numkeys = 0
+  for _, key in ipairs({ "min", "max", "gt", "lt" }) do
+    if NONE ~= getprop(bound, key) then
+      numkeys = numkeys + 1
+    end
+  end
+
+  local valid = 0 < size(bound)
+    and size(bound) == numkeys
+    and (NONE == min or NONE == gt)
+    and (NONE == max or NONE == lt)
+    and isnum(min)
+    and isnum(max)
+    and isnum(gt)
+    and isnum(lt)
+    and (NONE == lower or NONE == upper or lower <= upper)
+
+  if not valid then
+    return NONE
+  end
+
+  local parts = {}
+  if NONE ~= min then
+    table.insert(parts, "at least " .. stringify(min))
+  elseif NONE ~= gt then
+    table.insert(parts, "greater than " .. stringify(gt))
+  end
+  if NONE ~= max then
+    table.insert(parts, "at most " .. stringify(max))
+  elseif NONE ~= lt then
+    table.insert(parts, "less than " .. stringify(lt))
+  end
+
+  return table.concat(parts, " and ")
+end
+
+-- A number within a valid $RANGE bound.
+local function _inrange(bound, val)
+  local min = getprop(bound, "min")
+  local max = getprop(bound, "max")
+  local gt = getprop(bound, "gt")
+  local lt = getprop(bound, "lt")
+
+  return (NONE == min or min <= val)
+    and (NONE == max or val <= max)
+    and (NONE == gt or gt < val)
+    and (NONE == lt or val < lt)
+end
+
+-- A $LIKE pattern compiled by the in-tree engine in src/regex.lua, which raises
+-- on a bad pattern; absent unless it compiles.
+local function _likere(pattern)
+  if S_string ~= type(pattern) then
+    return NONE
+  end
+  local ok, re = pcall(re_compile, pattern)
+  return ok and re or NONE
+end
+
+-- The bounding list directives: a bound or pattern, then at most one spec that also admits.
+local function _validatebound(inj, store, name)
+  local mode, parent, keyI = inj.mode, inj.parent, inj.keyI
+
+  if M_VAL ~= mode then
+    return NONE
+  end
+
+  if not islist(parent) or 0 ~= keyI then
+    table.insert(
+      inj.errs,
+      "The "
+        .. name
+        .. " validator at field "
+        .. pathify(inj.path, 1, 1)
+        .. " must be the first element of an array."
+    )
+    return NONE
+  end
+
+  local cval = _slotval(inj)
+
+  inj.keyI = size(inj.keys)
+
+  -- As for the counting directives: SKIP keeps inject off the detached list.
+  inj:setval(cval, 2)
+
+  inj.path = slice(inj.path, -1)
+
+  local field = "The " .. name .. " validator at field " .. pathify(inj.path, 1)
+  local nargs = size(parent) - 1
+  local islen = "$LEN" == name
+  local islike = "$LIKE" == name
+  local argname = islike and "pattern" or "bound"
+
+  if nargs < 1 or 2 < nargs then
+    table.insert(inj.errs, field .. " must have a " .. argname .. " and at most one spec.")
+    return SKIP
+  end
+
+  local bound = getprop(parent, 1)
+  local like = islike and _likere(bound) or NONE
+  local lo, hi, desc = 0, 0, NONE
+  if islen then
+    lo, hi, desc = _lenbound(bound)
+  elseif islike then
+    if NONE ~= like then
+      desc = "like /" .. bound .. "/"
+    end
+  else
+    desc = _rangedesc(bound)
+  end
+
+  if NONE == desc then
+    table.insert(
+      inj.errs,
+      field .. " has an invalid " .. argname .. ": " .. stringify(bound) .. "."
+    )
+    return SKIP
+  end
+
+  local ctype = typify(cval)
+
+  if 2 == nargs and not _admits(cval, getprop(parent, 2), inj, store) then
+    local specdesc = stringify(getprop(parent, 2)):gsub("`%$([A-Z]+)`", string.lower)
+    table.insert(inj.errs, _invalidTypeMsg(inj.path, specdesc, ctype, cval, "V0410"))
+    return SKIP
+  end
+
+  if 0 == ((islen and (T_string | T_list | T_map) or islike and T_string or T_number) & ctype) then
+    local needtype = islen and "string, list or map" or islike and S_string or S_number
+    table.insert(inj.errs, _invalidTypeMsg(inj.path, needtype, ctype, cval, "V0420"))
+    return SKIP
+  end
+
+  local inbound
+  if islen then
+    -- utf8.len fails on invalid UTF-8, which then counts its bytes.
+    local len = S_string == type(cval) and utf8.len(cval) or size(cval)
+    inbound = lo <= len and (-1 == hi or len <= hi)
+  elseif islike then
+    inbound = re_test(like, cval)
+  else
+    inbound = _inrange(bound, cval)
+  end
+
+  if not inbound then
+    local needtype = (1 < size(inj.path) and "" or "value ") .. desc
+    table.insert(inj.errs, _invalidTypeMsg(inj.path, needtype, ctype, cval, "V0430"))
+  end
+
+  return SKIP
+end
+
+-- The value's length is within a bound: ['`$LEN`', bound, spec?], where the
+-- bound is as for a $NOF count. A string's length is in code points.
+local function validate_LEN(inj, _val, _ref, store)
+  return _validatebound(inj, store, "$LEN")
+end
+
+-- The value is a number within a bound: ['`$RANGE`', bound, spec?], where the
+-- bound holds min or gt, max or lt, or one of each.
+local function validate_RANGE(inj, _val, _ref, store)
+  return _validatebound(inj, store, "$RANGE")
+end
+
+local function validate_LIKE(inj, _val, _ref, store)
+  return _validatebound(inj, store, "$LIKE")
+end
+
 -- This is the "modify" argument to inject. Use this to perform
 -- generic validation. Runs *after* any special commands.
 _validation = function(pval, key, parent, inj)
@@ -3236,6 +3437,9 @@ validate = function(data, spec, injdef)
       ["$EXACT"] = validate_EXACT,
       ["$NOF"] = validate_NOF,
       ["$ALL"] = validate_ALL,
+      ["$LEN"] = validate_LEN,
+      ["$RANGE"] = validate_RANGE,
+      ["$LIKE"] = validate_LIKE,
     },
 
     getdef(extra, {}),
@@ -3378,7 +3582,12 @@ local function select_NOT(inj, _val, _ref, store)
   end
 end
 
-local function select_CMP(inj, _val, ref, store)
+local function select_CMP(inj, val, ref, store)
+  -- The list form of $LIKE is validate's checker; the key form is this operator.
+  if M_VAL == inj.mode and "$LIKE" == ref then
+    return validate_LIKE(inj, val, ref, store)
+  end
+
   if M_KEYPRE == inj.mode then
     local term = getprop(inj.parent, inj.key)
     local gkey = getelem(inj.path, -2)
@@ -3462,12 +3671,7 @@ local function select_fn(children, query)
 
   local q = clone(query)
 
-  walk(q, function(_k, v)
-    if ismap(v) then
-      setprop(v, "`$OPEN`", getprop(v, "`$OPEN`", true))
-    end
-    return v
-  end)
+  _openquery(q)
 
   for _, child in ipairs(children) do
     injdef.errs = {}
@@ -3480,6 +3684,27 @@ local function select_fn(children, query)
   end
 
   return results
+end
+
+-- Open every map in a select query, so a child may hold keys the query does
+-- not name, but leave a directive's literals as written: what $EXACT
+-- compares, and the count or bound of $NOF, $LEN and $RANGE.
+_openquery = function(q)
+  if ismap(q) then
+    setprop(q, "`$OPEN`", getprop(q, "`$OPEN`", true))
+    for _, key in ipairs(keysof(q)) do
+      _openquery(q[key])
+    end
+  elseif islist(q) then
+    local head = q[1]
+    local exact = "`$EXACT`" == head
+    local bounded = "`$NOF`" == head or "`$LEN`" == head or "`$RANGE`" == head
+    for i = 1, size(q) do
+      if 1 == i or not (exact or (bounded and 2 == i)) then
+        _openquery(q[i])
+      end
+    end
+  end
 end
 
 -- Internal utilities

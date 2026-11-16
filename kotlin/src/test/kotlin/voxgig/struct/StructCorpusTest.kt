@@ -457,6 +457,15 @@ class StructCorpusTest {
     fun validateAll() = runsetnull("validate", "all", donull = false) { Struct.validate(getp(it, "data"), getp(it, "spec")) }
 
     @Test
+    fun validateLen() = runsetnull("validate", "len", donull = false) { Struct.validate(getp(it, "data"), getp(it, "spec")) }
+
+    @Test
+    fun validateRange() = runsetnull("validate", "range", donull = false) { Struct.validate(getp(it, "data"), getp(it, "spec")) }
+
+    @Test
+    fun validateLike() = runsetnull("validate", "like", donull = false) { Struct.validate(getp(it, "data"), getp(it, "spec")) }
+
+    @Test
     fun validateUnknown() = runsetnull("validate", "unknown", donull = false) { Struct.validate(getp(it, "data"), getp(it, "spec")) }
 
     // ===== select =====

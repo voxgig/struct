@@ -311,7 +311,7 @@
     (rs "validate.special" (gp validateS "special")
         (fn [vin] (s/validate (vget vin "data") (vget vin "spec") (vget vin "inj"))))
     ;; `null: false`, so that a null in these reaches validate as a real nil.
-    (doseq [g ["directive" "nof" "all" "unknown"]]
+    (doseq [g ["directive" "nof" "all" "len" "range" "like" "unknown"]]
       (rs (str "validate." g) (gp validateS g) {"null" false}
           (fn [vin] (s/validate (vget vin "data") (vget vin "spec")))))
 

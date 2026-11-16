@@ -7,9 +7,9 @@
 > `SKIP`/`DELETE` sentinels (pointer-identity), and the `Injection`
 > state machine.  `inject`/`transform`/`validate`/`select` all
 > dispatch through the canonical injector machinery: 10 transform
-> commands, 7 validate checkers, 4 select operators.
+> commands, 10 validate checkers, 4 select operators.
 >
-> Passes the shared corpus (1602/1602), run on
+> Passes the shared corpus (1730/1730), run on
 > [voxgig/omni](https://github.com/voxgig/omni) — the shared test runner,
 > header-only and consumed as a local checkout. Run it with `make test`
 > from `cpp/`.
@@ -337,6 +337,18 @@ value. A spec admits a value when validating the value against it finds no
 error and gives back every member of the value unchanged. There is no `$ONE`:
 write `` jt({"`$ONE`", a, b}) `` as `` jt({"`$NOF`", jm({"min", 1}), a, b}) ``.
 
+A spec list led by `` `$LEN` ``, `` `$RANGE` `` or `` `$LIKE` `` constrains
+the value. `` jt({"`$LEN`", n, spec?}) `` holds when the value's length is
+within `n`, a bound written as for `$NOF`. Strings count code points, not the
+bytes `std::string::size` reports. Lists count elements, maps keys.
+`` jt({"`$RANGE`", bound, spec?}) `` holds when the value is a number within
+the bound, a map of `min` or `gt` and `max` or `lt`, such as
+`` jm({"min", 0, "lt", 150}) ``. `` jt({"`$LIKE`", pattern, spec?}) `` holds
+when the value is a string the pattern finds, with `std::regex` in its default
+ECMAScript grammar, anywhere in it unless the pattern is anchored. `$LEN`,
+`$RANGE` and `$LIKE` take at most one spec, which must also admit the value.
+`min` and `max` include their bound, while `gt` and `lt` exclude it.
+
 A spec that names a checker `validate` does not define is rejected before any
 data is read, and nothing is validated. The whole-string reference
 `` "`$FOO`" `` names a checker, and so does a misspelling of a defined one in
@@ -397,7 +409,7 @@ wraps `<regex>` (C++11), which defaults to the ECMAScript dialect.
 | Function | Maps to |
 |---|---|
 | `re_compile(pattern)`             | `std::regex(pattern)` (throws `std::regex_error` on bad pattern) |
-| `re_test(pattern, input)`         | `std::regex_search` → bool |
+| `re_test(pattern, input)`         | `std::regex_search` → bool; `pattern` is a string or a `std::regex` from `re_compile` |
 | `re_find(pattern, input)`         | first match groups as `std::vector<std::string>` (empty if no match) |
 | `re_find_all(pattern, input)`     | `std::vector<std::vector<std::string>>` |
 | `re_replace(pattern, input, rep)` | `std::regex_replace(input, re, rep)` |

@@ -171,12 +171,13 @@ local function clone_range(p, from, to)
     local d = p.code[i].data
     insn.data = {}
     for k, v in pairs(d) do insn.data[k] = v end
-    -- Patch jump targets that pointed within [from..to)
-    if insn.op == OP_JMP and d.jmp >= from and d.jmp < to then
+    -- Patch jump targets within [from..to]; a target at `to` leaves the
+    -- atom, so the copy's leaves the copy.
+    if insn.op == OP_JMP and d.jmp >= from and d.jmp <= to then
       insn.data.jmp = d.jmp + delta
     elseif insn.op == OP_SPLIT then
-      if d.x >= from and d.x < to then insn.data.x = d.x + delta end
-      if d.y >= from and d.y < to then insn.data.y = d.y + delta end
+      if d.x >= from and d.x <= to then insn.data.x = d.x + delta end
+      if d.y >= from and d.y <= to then insn.data.y = d.y + delta end
     end
     p.code[#p.code + 1] = insn
   end
@@ -286,6 +287,17 @@ local function apply_quant(p, atom_start, q, n_lo, n_hi, lazy)
       y = lazy and atom_start or exit_ix,
     }
   elseif q == '{' then
+    -- With no copy required, the atom already written is the first optional
+    -- one: {0} drops it and {0,} is a star.
+    if n_lo == 0 then
+      if n_hi == 0 then
+        for i = #p.code, atom_start, -1 do p.code[i] = nil end
+        return
+      end
+      apply_quant(p, atom_start, n_hi == -1 and '*' or '?', 0, 0, lazy)
+      if n_hi == -1 then return end
+      atom_start, atom_end, n_lo = atom_start + 1, atom_end + 1, 1
+    end
     -- Mandatory n_lo copies (we have 1 already; clone n_lo-1 more)
     for _ = 2, n_lo do
       clone_range(p, atom_start, atom_end)
@@ -400,19 +412,23 @@ function M.compile(pattern)
     pos = 1,
     code = {},
     next_group = 1,
-    anchored = pattern:sub(1, 1) == '^',
   }
   emit(p, OP_SAVE, { slot = 0 })
   parse_alt(p)
   if p.pos <= #p.src then
     parse_error(p, "unexpected " .. p.src:sub(p.pos, p.pos))
   end
+  -- Only a ^ that every path passes first lets the matcher skip later
+  -- starts: ^a|b must still be tried at each one.
+  local first = 1
+  while p.code[first] and p.code[first].op == OP_SAVE do first = first + 1 end
+  local anchored = p.code[first] ~= nil and p.code[first].op == OP_BOL
   emit(p, OP_SAVE, { slot = 1 })
   emit(p, OP_MATCH)
   local re = setmetatable({
     code = p.code,
     ngroups = p.next_group,
-    anchored = p.anchored,
+    anchored = anchored,
     __is_regex = true,
   }, Regex)
   return re
@@ -441,11 +457,12 @@ local function add_thread(re, list, pc, slots, sp, input, ilen, visited)
     ns[insn.data.slot + 1] = sp
     add_thread(re, list, pc + 1, ns, sp, input, ilen, visited)
   elseif op == OP_BOL then
-    if sp == 0 or input:byte(sp) == 10 then
+    -- ^ and $ anchor to the whole text, as in RE2 without (?m).
+    if sp == 0 then
       add_thread(re, list, pc + 1, slots, sp, input, ilen, visited)
     end
   elseif op == OP_EOL then
-    if sp == ilen or input:byte(sp + 1) == 10 then
+    if sp == ilen then
       add_thread(re, list, pc + 1, slots, sp, input, ilen, visited)
     end
   elseif op == OP_WB or op == OP_NWB then

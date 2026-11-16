@@ -1351,10 +1351,10 @@ fn slice_str_vec(v: &[String], start: Option<i64>, end: Option<i64>) -> Vec<Stri
 }
 
 // `$REF` — reference the original spec (enables recursive transforms).
-fn transform_ref(inj: &Inj, val: &Value, _r: &str, store: &Value) -> Value {
-    let (mode, parent, path, nodes) = {
+fn transform_ref(inj: &Inj, _val: &Value, _r: &str, store: &Value) -> Value {
+    let (mode, parent, path) = {
         let b = inj.borrow();
-        (b.mode, b.parent.clone(), b.path.clone(), b.nodes.clone())
+        (b.mode, b.parent.clone(), b.path.clone())
     };
     if mode != M_VAL {
         return Value::Noval;
@@ -1392,54 +1392,33 @@ fn transform_ref(inj: &Inj, val: &Value, _r: &str, store: &Value) -> Value {
         walk(refval.clone(), Some(&mut probe), None, None);
     }
 
-    let tref = clone(&refval);
-    let cpath = slice_str_vec(&path, Some(-3), None);
-    let tpath = slice_str_vec(&path, Some(-1), None);
-    let tcur = get_path_inj(store, &path_value(&cpath), None);
-    let tval_at = get_path_inj(store, &path_value(&tpath), None);
-
-    let rval = if !has_sub_ref || !tval_at.is_noval() {
-        let tinj = Injection::child(
-            inj,
-            0,
-            Rc::new(RefCell::new(vec![tpath
-                .last()
-                .cloned()
-                .unwrap_or_default()])),
-        );
-        {
-            let mut b = tinj.borrow_mut();
-            b.path = tpath.clone();
-            let nlen = nodes.len();
-            b.nodes = if nlen >= 1 {
-                nodes[..nlen - 1].to_vec()
-            } else {
-                Vec::new()
-            };
-            b.parent = if nlen >= 2 {
-                nodes[nlen - 2].clone()
-            } else {
-                Value::Noval
-            };
-            b.val = tref.clone();
-            b.dpath = cpath.clone();
-            b.dparent = tcur.clone();
-        }
-        let _ = inject_inj(tref.clone(), store, &tinj);
-        let v = tinj.borrow().val.clone();
-        v
+    // A recursive reference stops where the data does.
+    let tval = get_path_inj(
+        store,
+        &path_value(&slice_str_vec(&path, Some(-1), None)),
+        None,
+    );
+    let rval = if !has_sub_ref || !tval.is_noval() {
+        clone(&refval)
     } else {
         Value::Noval
     };
+    let placed = !rval.is_noval();
 
+    // The enclosing loop injects the referenced spec in this list's place, so
+    // neither this pass nor this element leaves a value for modify to check.
     let grandparent = Injection::setval(inj, rval, Some(2));
-    if is_list(&grandparent) {
-        let prior = inj.borrow().prior.clone();
-        if let Some(p) = prior {
-            p.borrow_mut().key_i -= 1;
+
+    let prior = inj.borrow().prior.clone();
+    if let Some(p) = prior {
+        let mut b = p.borrow_mut();
+        b.modify = None;
+        if is_list(&grandparent) || placed {
+            b.key_i -= 1;
         }
     }
-    val.clone()
+
+    Value::skip()
 }
 
 fn srcpath_split(srcpath: &str) -> Vec<String> {
@@ -2236,6 +2215,235 @@ fn validatecount(inj: &Inj, store: &Value, name: &str, counted: bool) -> Value {
     Value::skip()
 }
 
+// The value's length is within a bound: ['`$LEN`', bound, spec?], where the
+// bound is as for a $NOF count. A string's length is in code points.
+fn validate_len(inj: &Inj, _v: &Value, _r: &str, store: &Value) -> Value {
+    validatebound(inj, store, "$LEN")
+}
+
+// The value is a number within a bound: ['`$RANGE`', bound, spec?], where the
+// bound holds min or gt, max or lt, or one of each.
+fn validate_range(inj: &Inj, _v: &Value, _r: &str, store: &Value) -> Value {
+    validatebound(inj, store, "$RANGE")
+}
+
+fn validate_like(inj: &Inj, _v: &Value, _r: &str, store: &Value) -> Value {
+    validatebound(inj, store, "$LIKE")
+}
+
+// The bounding list directives: a bound or pattern, then at most one spec that also admits.
+fn validatebound(inj: &Inj, store: &Value, name: &str) -> Value {
+    let (mode, parent, key_i) = {
+        let b = inj.borrow();
+        (b.mode, b.parent.clone(), b.key_i)
+    };
+    if mode != M_VAL {
+        return Value::Noval;
+    }
+    if !is_list(&parent) || key_i != 0 {
+        let path = inj.borrow().path.clone();
+        errs_push(
+            inj,
+            format!(
+                "The {name} validator at field {} must be the first element of an array.",
+                pathify(&path_value(&path), Some(1), Some(1))
+            ),
+        );
+        return Value::Noval;
+    }
+
+    let cval = slotval(inj);
+
+    let keylen = inj.borrow().keys.borrow().len() as i64;
+    inj.borrow_mut().key_i = keylen;
+
+    // As for the counting directives: SKIP keeps inject off the detached list.
+    Injection::setval(inj, cval.clone(), Some(2));
+
+    {
+        let mut b = inj.borrow_mut();
+        let n = b.path.len();
+        b.path.truncate(n.saturating_sub(1));
+    }
+    let path = inj.borrow().path.clone();
+
+    let field = format!(
+        "The {name} validator at field {}",
+        pathify(&path_value(&path), Some(1), None)
+    );
+    let nargs = size(&parent) - 1;
+    let islen = "$LEN" == name;
+    let islike = "$LIKE" == name;
+    let argname = if islike { "pattern" } else { "bound" };
+
+    if !(1..=2).contains(&nargs) {
+        errs_push(
+            inj,
+            format!("{field} must have a {argname} and at most one spec."),
+        );
+        return Value::skip();
+    }
+
+    let bound = lookup(&parent, &Value::Num(1.0));
+    let like = if islike { likere(&bound) } else { None };
+    let (lo, hi, desc) = if islen {
+        lenbound(&bound)
+    } else if islike {
+        (0, 0, like.map(|pattern| format!("like /{pattern}/")))
+    } else {
+        (0, 0, rangedesc(&bound))
+    };
+
+    let Some(desc) = desc else {
+        errs_push(
+            inj,
+            format!(
+                "{field} has an invalid {argname}: {}.",
+                stringify(&bound, None, false)
+            ),
+        );
+        return Value::skip();
+    };
+
+    let ctype = typify(&cval);
+
+    if 2 == nargs {
+        let spec = lookup(&parent, &Value::Num(2.0));
+        if !admits(&cval, &spec, inj, store) {
+            errs_push(
+                inj,
+                invalid_type_msg(&path, &tvals_desc(&[spec]), ctype, &cval),
+            );
+            return Value::skip();
+        }
+    }
+
+    let (needtype, needbits) = if islen {
+        ("string, list or map", (T_STRING | T_LIST | T_MAP) as i64)
+    } else if islike {
+        ("string", T_STRING as i64)
+    } else {
+        ("number", T_NUMBER as i64)
+    };
+
+    if 0 == needbits & ctype {
+        errs_push(inj, invalid_type_msg(&path, needtype, ctype, &cval));
+        return Value::skip();
+    }
+
+    let inbound = if islen {
+        let len = match &cval {
+            Value::Str(s) => s.chars().count() as i64,
+            _ => size(&cval),
+        };
+        lo <= len && (-1 == hi || len <= hi)
+    } else if islike {
+        re_test(like.unwrap_or_default(), cval.as_str().unwrap_or_default())
+    } else {
+        inrange(&bound, &cval)
+    };
+
+    if !inbound {
+        let need = format!("{}{desc}", if path.len() > 1 { "" } else { "value " });
+        errs_push(inj, invalid_type_msg(&path, &need, ctype, &cval));
+    }
+
+    Value::skip()
+}
+
+// The bounds of a $LEN bound, with -1 for no maximum, and the words for it,
+// which are absent when the bound is invalid.
+fn lenbound(bound: &Value) -> (i64, i64, Option<String>) {
+    let (lo, hi, countdesc) = nofcount(bound, -1);
+
+    if countdesc.is_none() {
+        return (0, 0, None);
+    }
+
+    let desc = if lo == hi {
+        lo.to_string()
+    } else if -1 == hi {
+        format!("at least {lo}")
+    } else if 0 == lo {
+        format!("at most {hi}")
+    } else {
+        format!("{lo} to {hi}")
+    };
+
+    (lo, hi, Some(format!("of length {desc}")))
+}
+
+// A $LIKE pattern, absent unless the port's own regex engine compiles it.
+fn likere(pattern: &Value) -> Option<&str> {
+    let pattern = pattern.as_str()?;
+    re_compile(pattern).ok().map(|_| pattern)
+}
+
+// The words for a $RANGE bound, which are absent when the bound is invalid.
+fn rangedesc(bound: &Value) -> Option<String> {
+    if !is_map(bound) {
+        return None;
+    }
+
+    let [min, max, gt, lt] = ["min", "max", "gt", "lt"].map(|k| lookup(bound, &Value::str(k)));
+    let lower = if min.is_noval() { &gt } else { &min };
+    let upper = if max.is_noval() { &lt } else { &max };
+    let given = [&min, &max, &gt, &lt];
+
+    let valid = 0 < size(bound)
+        && size(bound) == given.iter().filter(|n| !n.is_noval()).count() as i64
+        && (min.is_noval() || gt.is_noval())
+        && (max.is_noval() || lt.is_noval())
+        && given
+            .iter()
+            .all(|n| n.is_noval() || 0 != (T_NUMBER as i64 & typify(n)))
+        && match (lower.as_num(), upper.as_num()) {
+            (Some(l), Some(u)) => l <= u,
+            _ => true,
+        };
+
+    if !valid {
+        return None;
+    }
+
+    let words = |word: &str, n: &Value| format!("{word} {}", stringify(n, None, false));
+    let lowerdesc = if !min.is_noval() {
+        Some(words("at least", &min))
+    } else if !gt.is_noval() {
+        Some(words("greater than", &gt))
+    } else {
+        None
+    };
+    let upperdesc = if !max.is_noval() {
+        Some(words("at most", &max))
+    } else if !lt.is_noval() {
+        Some(words("less than", &lt))
+    } else {
+        None
+    };
+
+    Some(
+        [lowerdesc, upperdesc]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" and "),
+    )
+}
+
+// A number within a valid $RANGE bound.
+fn inrange(bound: &Value, val: &Value) -> bool {
+    let Some(v) = val.as_num() else {
+        return false;
+    };
+    let limit = |key: &str| lookup(bound, &Value::str(key)).as_num();
+
+    limit("min").into_iter().all(|b| b <= v)
+        && limit("max").into_iter().all(|b| v <= b)
+        && limit("gt").into_iter().all(|b| b < v)
+        && limit("lt").into_iter().all(|b| v < b)
+}
+
 /// `_validation` — the modify hook installed by `validate` (runs after the
 /// per-key special commands).
 fn validation_modify(pval: &Value, key: &Value, parent: &Value, inj: &Inj, _store: &Value) {
@@ -2401,6 +2609,9 @@ pub fn validate(
     vmap.insert("$EXACT".to_string(), Value::func(validate_exact));
     vmap.insert("$NOF".to_string(), Value::func(validate_nof));
     vmap.insert("$ALL".to_string(), Value::func(validate_all));
+    vmap.insert("$LEN".to_string(), Value::func(validate_len));
+    vmap.insert("$RANGE".to_string(), Value::func(validate_range));
+    vmap.insert("$LIKE".to_string(), Value::func(validate_like));
 
     let extra_or_empty = match &extra {
         Some(e) => e.clone(),
@@ -2819,7 +3030,12 @@ fn select_not(inj: &Inj, _v: &Value, _r: &str, store: &Value) -> Value {
     Value::Noval
 }
 
-fn select_cmp(inj: &Inj, _v: &Value, r: &str, store: &Value) -> Value {
+fn select_cmp(inj: &Inj, v: &Value, r: &str, store: &Value) -> Value {
+    // The list form of $LIKE is validate's checker; the key form is this operator.
+    if M_VAL == inj.borrow().mode && "$LIKE" == r {
+        return validate_like(inj, v, r, store);
+    }
+
     if inj.borrow().mode != M_KEYPRE {
         return Value::Noval;
     }
@@ -2915,14 +3131,8 @@ pub fn select(children: &Value, query: &Value) -> Value {
     let meta = Value::map_of([(S_BEXACT.to_string(), Value::Bool(true))]);
 
     let q = clone(query);
-    let mut open = |_k: &Value, v: &Value, _p: &Value, _t: &[String]| -> Value {
-        if is_map(v) {
-            let cur = get_prop(v, &Value::str(S_BOPEN), Value::Bool(true));
-            set_prop(v.clone(), &Value::str(S_BOPEN), cur);
-        }
-        v.clone()
-    };
-    walk(q.clone(), Some(&mut open), None, None);
+
+    openquery(&q);
 
     let mut results: Vec<Value> = Vec::new();
     for child in &child_list {
@@ -2943,6 +3153,29 @@ pub fn select(children: &Value, query: &Value) -> Value {
         }
     }
     Value::list(results)
+}
+
+// Open every map in a select query, so a child may hold keys the query does
+// not name, but leave a directive's literals as written: what $EXACT
+// compares, and the count or bound of $NOF, $LEN and $RANGE.
+fn openquery(q: &Value) {
+    if is_map(q) {
+        let cur = get_prop(q, &Value::str(S_BOPEN), Value::Bool(true));
+        set_prop(q.clone(), &Value::str(S_BOPEN), cur);
+        for (_, v) in items_vec(q) {
+            openquery(&v);
+        }
+    } else if let Value::List(l) = q {
+        let elems = l.borrow().clone();
+        let head = elems.first().and_then(Value::as_str);
+        let exact = Some(S_BEXACT) == head;
+        let bounded = matches!(head, Some("`$NOF`" | "`$LEN`" | "`$RANGE`"));
+        for (i, v) in elems.iter().enumerate() {
+            if 0 == i || !(exact || (bounded && 1 == i)) {
+                openquery(v);
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------

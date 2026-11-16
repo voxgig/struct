@@ -522,7 +522,7 @@ runsetflags( 'validate-invalid', $validate->{invalid}, { null => 0 },
 runset( 'validate-special', $validate->{special},
     sub { Voxgig::Struct::validate( $_[0]{data}, $_[0]{spec}, $_[0]{inj} ) } );
 
-for my $section (qw(directive nof all unknown)) {
+for my $section (qw(directive nof all len range like unknown)) {
     runsetflags( "validate-$section", $validate->{$section}, { null => 0 },
         sub { Voxgig::Struct::validate( $_[0]{data}, $_[0]{spec} ) } );
 }

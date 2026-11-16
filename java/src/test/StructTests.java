@@ -1041,6 +1041,21 @@ class StructTests {
   }
 
   @Test
+  void validateLen() {
+    runValidateSet((Map<String, Object>) validateSpec.get("len"), false);
+  }
+
+  @Test
+  void validateRange() {
+    runValidateSet((Map<String, Object>) validateSpec.get("range"), false);
+  }
+
+  @Test
+  void validateLike() {
+    runValidateSet((Map<String, Object>) validateSpec.get("like"), false);
+  }
+
+  @Test
   void validateUnknown() {
     runValidateSet((Map<String, Object>) validateSpec.get("unknown"), false);
   }

@@ -7,6 +7,7 @@ import java.util.Locale
 import java.util.function.Supplier
 import java.util.regex.Matcher
 import java.util.regex.Pattern
+import java.util.regex.PatternSyntaxException
 import kotlin.math.floor
 
 @Suppress("MemberVisibilityCanBePrivate")
@@ -1858,7 +1859,7 @@ object Struct {
 
     /** $REF: resolve a named reference within the original spec, enabling recursive transformations. */
     val transform_REF: Injector =
-        Injector { inj, value, _, store ->
+        Injector { inj, _, _, store ->
             if (inj.mode != M_VAL) return@Injector UNDEF
 
             val refpath = lookup(inj.parent, 1)
@@ -1895,39 +1896,22 @@ object Struct {
                 )
             }
 
-            val cpathRaw = slice(inj.path, -3, null)
+            // A recursive reference stops where the data does.
+            val tval = getpath(store, slice(inj.path, -1, null))
+            val rval = if (!hasSubRef[0] || tval !== UNDEF) tref else UNDEF
 
-            @Suppress("UNCHECKED_CAST")
-            val cpath: MutableList<String> = if (cpathRaw is List<*>) (cpathRaw as List<String>).toMutableList() else mutableListOf()
-            val tpathRaw = slice(inj.path, -1, null)
-
-            @Suppress("UNCHECKED_CAST")
-            val tpath: MutableList<String> = if (tpathRaw is List<*>) (tpathRaw as List<String>).toMutableList() else mutableListOf()
-            val tval = getpath(store, tpath)
-            var rval: Any? = UNDEF
-
-            if (!hasSubRef[0] || tval !== UNDEF) {
-                val lastKey = getelem(tpath, -1)
-                val singleKey = mutableListOf(strkey(lastKey))
-                val tinj = inj.child(0, singleKey)
-                tinj.path = tpath
-                val slicedNodes = slice(inj.nodes, -1, null)
-                @Suppress("UNCHECKED_CAST")
-                tinj.nodes = if (slicedNodes is List<*>) (slicedNodes as List<Any?>).toMutableList() else mutableListOf()
-                tinj.parent = getelem(inj.nodes, -2)
-                tinj.`val` = tref
-                tinj.dpath = cpath.toMutableList()
-                tinj.dparent = getpath(store, cpath)
-
-                inject(tref, store, tinj)
-                rval = tinj.`val`
-            }
-
+            // The enclosing loop injects the referenced spec in this list's place, so
+            // neither this pass nor this element leaves a value for modify to check.
             val grandparent = inj.setval(rval, 2)
-            if (islist(grandparent) && inj.prior != null) {
-                inj.prior!!.keyI--
+
+            val prior = inj.prior
+            if (prior != null) {
+                prior.modify = null
+                if (islist(grandparent) || rval !== UNDEF) {
+                    prior.keyI--
+                }
             }
-            value
+            SKIP
         }
 
     fun transform(
@@ -2273,9 +2257,13 @@ object Struct {
             }
         }
 
-    // Lowers every `$NAME` marker in the joined description, nested ones included.
     private fun describeAlternatives(tvals: List<Any?>): String {
-        val mm = R_TRANSFORM_NAME.matcher(join(tvals.map { stringify(it) }, ", ", false))
+        return lowernames(join(tvals.map { stringify(it) }, ", ", false))
+    }
+
+    // Lowers every `$NAME` marker in the description, nested ones included.
+    private fun lowernames(desc: String): String {
+        val mm = R_TRANSFORM_NAME.matcher(desc)
         val out = StringBuilder()
         while (mm.find()) {
             mm.appendReplacement(out, Matcher.quoteReplacement(mm.group(1).lowercase(Locale.ROOT)))
@@ -2400,6 +2388,195 @@ object Struct {
         }
 
         return SKIP
+    }
+
+    /** $LEN: the value's length is within a bound, `[$LEN, bound, spec?]`; the bound is as for a $NOF count, and a string counts code points. */
+    val validate_LEN: Injector = Injector { inj, _, _, store -> _validatebound(inj, store, "\$LEN") }
+
+    /** $RANGE: the value is a number within a bound, `[$RANGE, bound, spec?]`; the bound holds min or gt, max or lt, or one of each. */
+    val validate_RANGE: Injector = Injector { inj, _, _, store -> _validatebound(inj, store, "\$RANGE") }
+
+    /** $LIKE: the value is a string the pattern finds, `[$LIKE, pattern, spec?]`; the pattern is a `Regex` that matches anywhere unless anchored. */
+    val validate_LIKE: Injector = Injector { inj, _, _, store -> _validatebound(inj, store, "\$LIKE") }
+
+    // The bounding list directives: a bound or pattern, then at most one spec that also admits.
+    private fun _validatebound(
+        inj: Injection,
+        store: Any?,
+        name: String,
+    ): Any? {
+        if (M_VAL != inj.mode) return UNDEF
+
+        val parent = inj.parent
+
+        if (!islist(parent) || 0 != inj.keyI) {
+            inj.errs.add("The " + name + " validator at field " + pathify(inj.path, 1, 1) + " must be the first element of an array.")
+            return UNDEF
+        }
+
+        val cval = _slotval(inj)
+
+        inj.keyI = size(inj.keys)
+
+        // As for the counting directives: SKIP keeps inject off the detached list.
+        inj.setval(cval, 2)
+
+        @Suppress("UNCHECKED_CAST")
+        inj.path = slice(inj.path, -1, null) as MutableList<String>
+
+        val field = "The " + name + " validator at field " + pathify(inj.path, 1)
+        val nargs = size(parent) - 1
+        val islen = "\$LEN" == name
+        val islike = "\$LIKE" == name
+        val argname = if (islike) "pattern" else "bound"
+
+        if (nargs < 1 || 2 < nargs) {
+            inj.errs.add(field + " must have a " + argname + " and at most one spec.")
+            return SKIP
+        }
+
+        val bound = lookup(parent, 1)
+        val like = if (islike) _likere(bound) else null
+        val (lo, hi, desc) =
+            when {
+                islen -> _lenbound(bound)
+                islike -> Triple(0L, 0L, if (null == like) null else "like /$like/")
+                else -> Triple(0L, 0L, _rangedesc(bound))
+            }
+
+        if (null == desc) {
+            inj.errs.add(field + " has an invalid " + argname + ": " + stringify(bound) + ".")
+            return SKIP
+        }
+
+        val ctype = typify(cval)
+
+        if (2 == nargs && !_admits(cval, lookup(parent, 2), inj, store)) {
+            val specdesc = lowernames(stringify(lookup(parent, 2)))
+            inj.errs.add(_invalidTypeMsg(inj.path, specdesc, ctype, cval, "V0410"))
+            return SKIP
+        }
+
+        val needbits =
+            when {
+                islen -> T_STRING or T_LIST or T_MAP
+                islike -> T_STRING
+                else -> T_NUMBER
+            }
+
+        if (0 == (needbits and ctype)) {
+            val needtype =
+                when {
+                    islen -> "string, list or map"
+                    islike -> "string"
+                    else -> "number"
+                }
+            inj.errs.add(_invalidTypeMsg(inj.path, needtype, ctype, cval, "V0420"))
+            return SKIP
+        }
+
+        val inbound =
+            if (islen) {
+                val len = if (cval is String) cval.codePointCount(0, cval.length) else size(cval)
+                lo <= len && (-1L == hi || len <= hi)
+            } else if (islike) {
+                reTest(like!!, cval as String)
+            } else {
+                _inrange(bound, (cval as Number).toDouble())
+            }
+
+        if (!inbound) {
+            val needtype = (if (1 < size(inj.path)) "" else "value ") + desc
+            inj.errs.add(_invalidTypeMsg(inj.path, needtype, ctype, cval, "V0430"))
+        }
+
+        return SKIP
+    }
+
+    // The bounds of a $LEN bound, with -1 for no maximum, and the words for it,
+    // which are null when the bound is invalid.
+    private fun _lenbound(bound: Any?): Triple<Long, Long, String?> {
+        val (lo, hi, countdesc) = _nofcount(bound, -1)
+
+        if (null == countdesc) return Triple(0L, 0L, null)
+
+        val desc =
+            when {
+                lo == hi -> "$lo"
+                -1L == hi -> "at least $lo"
+                0L == lo -> "at most $hi"
+                else -> "$lo to $hi"
+            }
+
+        return Triple(lo, hi, "of length $desc")
+    }
+
+    // A $LIKE pattern that the port's own regex engine compiles; null unless it does.
+    private fun _likere(pattern: Any?): String? {
+        if (pattern !is String) return null
+        return try {
+            reCompile(pattern)
+            pattern
+        } catch (_: PatternSyntaxException) {
+            null
+        }
+    }
+
+    // The words for a $RANGE bound, which are null when the bound is invalid.
+    private fun _rangedesc(bound: Any?): String? {
+        if (!ismap(bound)) return null
+
+        val min = lookup(bound, "min")
+        val max = lookup(bound, "max")
+        val gt = lookup(bound, "gt")
+        val lt = lookup(bound, "lt")
+        val lower = if (UNDEF === min) gt else min
+        val upper = if (UNDEF === max) lt else max
+        val isnum = { n: Any? -> UNDEF === n || 0 != (T_NUMBER and typify(n)) }
+
+        val valid =
+            0 < size(bound) &&
+                size(bound) == listOf(min, max, gt, lt).count { UNDEF !== it } &&
+                (UNDEF === min || UNDEF === gt) &&
+                (UNDEF === max || UNDEF === lt) &&
+                isnum(min) &&
+                isnum(max) &&
+                isnum(gt) &&
+                isnum(lt) &&
+                (UNDEF === lower || UNDEF === upper || (lower as Number).toDouble() <= (upper as Number).toDouble())
+
+        if (!valid) return null
+
+        val lowerdesc =
+            when {
+                UNDEF !== min -> "at least " + stringify(min)
+                UNDEF !== gt -> "greater than " + stringify(gt)
+                else -> null
+            }
+        val upperdesc =
+            when {
+                UNDEF !== max -> "at most " + stringify(max)
+                UNDEF !== lt -> "less than " + stringify(lt)
+                else -> null
+            }
+
+        return listOfNotNull(lowerdesc, upperdesc).joinToString(" and ")
+    }
+
+    // A number within a valid $RANGE bound.
+    private fun _inrange(
+        bound: Any?,
+        value: Double,
+    ): Boolean {
+        val min = lookup(bound, "min")
+        val max = lookup(bound, "max")
+        val gt = lookup(bound, "gt")
+        val lt = lookup(bound, "lt")
+
+        return (UNDEF === min || (min as Number).toDouble() <= value) &&
+            (UNDEF === max || value <= (max as Number).toDouble()) &&
+            (UNDEF === gt || (gt as Number).toDouble() < value) &&
+            (UNDEF === lt || value < (lt as Number).toDouble())
     }
 
     // Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
@@ -2687,6 +2864,9 @@ object Struct {
         baseStore["\$EXACT"] = validate_EXACT
         baseStore["\$NOF"] = validate_NOF
         baseStore["\$ALL"] = validate_ALL
+        baseStore["\$LEN"] = validate_LEN
+        baseStore["\$RANGE"] = validate_RANGE
+        baseStore["\$LIKE"] = validate_LIKE
 
         val mergeList = mutableListOf<Any?>(baseStore)
         if (extraRaw is Map<*, *>) mergeList.add(extraRaw)
@@ -2813,7 +2993,9 @@ object Struct {
 
     /** $GT/$LT/$GTE/$LTE/$LIKE comparators dispatched by ref. */
     val select_CMP: Injector =
-        Injector { inj, _, ref, store ->
+        Injector { inj, value, ref, store ->
+            // The list form of $LIKE is validate's checker; the key form is this operator.
+            if (M_VAL == inj.mode && "\$LIKE" == ref) return@Injector validate_LIKE.apply(inj, value, ref, store)
             if (inj.mode != M_KEYPRE) return@Injector UNDEF
             val term = lookup(inj.parent, inj.key)
             val gkey = getelem(inj.path, -2)
@@ -2849,8 +3031,8 @@ object Struct {
         }
 
     /**
-     * Canonical TS-faithful select. Tag each child node with $KEY, walk the
-     * (cloned) query annotating every map with `$OPEN`, then run validate
+     * Canonical TS-faithful select. Tag each child node with $KEY, open the
+     * (cloned) query's maps with _openquery, then run validate
      * against each child with the select_* injectors as extras and
      * meta.`$EXACT` = true. Mirrors Java select (Struct.java:2981).
      */
@@ -2890,13 +3072,7 @@ object Struct {
             )
 
         val q = clone(query)
-        walk(
-            q,
-            WalkApply { _, v, _, _ ->
-                if (ismap(v)) setprop(v, "`\$OPEN`", getprop(v, "`\$OPEN`", true))
-                v
-            },
-        )
+        _openquery(q)
 
         val results = mutableListOf<Any?>()
         for (child in childList) {
@@ -2910,6 +3086,27 @@ object Struct {
             if (errs.isEmpty()) results.add(child)
         }
         return results
+    }
+
+    // Open every map in a select query, so a child may hold keys the query does
+    // not name, but leave a directive's literals as written: what $EXACT
+    // compares, and the count or bound of $NOF, $LEN and $RANGE.
+    private fun _openquery(q: Any?) {
+        if (q is Map<*, *>) {
+            setprop(q, "`\$OPEN`", getprop(q, "`\$OPEN`", true))
+            for (key in keysof(q)) {
+                _openquery(q[key])
+            }
+        } else if (q is List<*>) {
+            val head = q.firstOrNull()
+            val exact = "`\$EXACT`" == head
+            val bounded = "`\$NOF`" == head || "`\$LEN`" == head || "`\$RANGE`" == head
+            for (i in q.indices) {
+                if (0 == i || !(exact || (bounded && 1 == i))) {
+                    _openquery(q[i])
+                }
+            }
+        }
     }
 
     // ===========================================================================

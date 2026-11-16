@@ -97,6 +97,13 @@ s.validate({'a': 'x'}, {'a': '`\$STRING`'});         // {a: x}
 s.validate(2, ['`\$NOF`', {'min': 1}, '`\$STRING`', '`\$NUMBER`']); // 2
 s.validate(2, ['`\$ALL`', '`\$NUMBER`', '`\$INTEGER`']);             // 2
 
+// validate: `$LEN` bounds a length in code points, `$RANGE` bounds a number
+s.validate('ab', ['`\$LEN`', {'max': 3}, '`\$STRING`']);             // ab
+s.validate(5, ['`\$RANGE`', {'min': 0, 'lt': 10}]);                  // 5
+
+// validate: `$LIKE` finds a pattern in a string, with the core `RegExp`
+s.validate('a-1', ['`\$LIKE`', '^[a-z]+-[0-9]+\$']);                 // a-1
+
 // select: MongoDB-style query over children
 s.select([{'a': 1}, {'a': 2}], {'a': {'`\$GT`': 1}}); // [{a: 2, $KEY: 1}]
 ```
@@ -115,7 +122,7 @@ it, and `make build` compiles `lib/` alone.
 omni's value model and this port's are the same plain Dart types, so the only
 conversion there is to make is omni's `ABSENT`, which this port spells `null`.
 
-Every group the corpus defines runs — 1602 entries in 78 groups —
+Every group the corpus defines runs — 1730 entries in 81 groups —
 plus the two `check` entries (`DEF.client`, client-scoped options,
 `contextify`) and three single entries that are not part of any set. Keep it
 green, keep `python3 ../tools/check_parity.py` green, and add no runtime

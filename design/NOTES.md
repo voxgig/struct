@@ -41,6 +41,35 @@
     returns nothing for a numeric path; Zig's `delprop` panics on a NaN map
     key; PHP answers `[]` for some empty-map data where TypeScript answers
     `{}`.
+  - A missing top-level value: Python and Ruby read it as null, so a
+    top-level `$NOF`, `$ALL`, `$LEN` or `$RANGE` with a spec reports the spec
+    where TypeScript reports the type. A field behaves the same everywhere.
+  - Bounds and numbers in messages: Python and Ruby print a `2.0` bound as
+    `2.0` where TypeScript prints `2`; C types every double as a decimal, so
+    data `1e3` is "decimal: 1000" there. NaN and Infinity, which JSON cannot
+    hold, read as no value in TypeScript, while Lua, Java and Kotlin report
+    NaN as nil and take Infinity as a number.
+  - `size` of a string counts UTF-16 units in TypeScript, JavaScript and
+    Rust, bytes in C, code points in Python and Ruby, and graphemes in
+    Elixir. `$LEN` counts code points in every port and does not go through
+    `size`. A string that is not valid UTF-8 falls back to its bytes in Lua
+    and PHP.
+  - Zig's `select` has its own matcher: it knows `$EXACT`, `$NOF`, `$ALL`,
+    `$LEN`, `$RANGE`, `$LIKE` and the select operators, but not `$CHILD` or
+    the type checkers. The C# runner does not run `select.nullkey`.
+  - A `$LIKE` pattern an engine cannot read is an invalid pattern only where
+    the engine refuses it. The in-tree engines refuse few: in OCaml, Haskell
+    and Lean an unclosed `(` or `[` runs to the end and a stray `)` ends the
+    pattern, so `a)b` matches `abc`, and C, Lua, Rust and Zig compile
+    constructs outside the subset, reading some, such as `(?=a)` and `\1`,
+    as literal text. There such a pattern is a mismatch or a different match.
+  - A relative `$REF` path such as `.x`: Python, Elixir, Dart, Scala,
+    Clojure, OCaml, Haskell, Lean and Zig look the path up without the data
+    path TypeScript passes, so a relative path names nothing there. A whole
+    spec of `['$REF', 'missing']` gives back that spec in Python and Ruby,
+    where TypeScript gives nothing, and in Go and boru, which hold one null
+    for both, a `$REF` to a null in the spec deletes its field where
+    TypeScript keeps the null.
 
 
 ## Documented JS-fidelity gaps

@@ -42,7 +42,7 @@ $(OMNI_OBJ_DIR)/%.o: $(OMNI_DIR)/c/src/%.c
 # and failed outright with no checkout. Say the default explicitly.
 .DEFAULT_GOAL := build
 
-.PHONY: build smoke test bench corpus client check_leak sanitize lint tidy format format-check clean reset inspect publish omni-check
+.PHONY: build smoke regex test bench corpus client check_leak sanitize lint tidy format format-check clean reset inspect publish omni-check
 
 # Fail with the reason rather than a page of "omni.h: No such file".
 omni-check:
@@ -61,13 +61,16 @@ build:
 smoke:
 	$(CC) tests/smoke.c $(C_SOURCES) $(CFLAGS_COMMON) $(CFLAGS_DEBUG) -I ./src $(EXTRA_INC) -o smoke.out $(LDLIBS) && ./smoke.out
 
+regex:
+	$(CC) tests/regex_test.c src/regex.c $(CFLAGS_COMMON) $(CFLAGS_DEBUG) -I ./src $(EXTRA_INC) -o regex.out $(LDLIBS) && ./regex.out
+
 corpus: omni-check $(OMNI_OBJS)
 	$(CC) tests/struct_corpus_test.c $(C_SOURCES) $(OMNI_OBJS) $(CFLAGS_COMMON) $(CFLAGS_DEBUG) -I ./src $(OMNI_INC) $(EXTRA_INC) -o corpus.out $(LDLIBS) && ./corpus.out
 
 client: omni-check $(OMNI_OBJS)
 	$(CC) tests/client_test.c $(C_SOURCES) $(OMNI_OBJS) $(CFLAGS_COMMON) $(CFLAGS_DEBUG) -I ./src $(OMNI_INC) $(EXTRA_INC) -o client.out $(LDLIBS) && ./client.out
 
-test: smoke corpus client
+test: smoke regex corpus client
 
 # Cross-port performance harness (JSON contract; see build/bench/README.md).
 # Release-optimised; build log to stderr so stdout is only the JSON line.
@@ -95,7 +98,7 @@ format-check:
 	clang-format --dry-run --Werror $(ALL_SOURCES)
 
 clean:
-	rm -rf smoke.out corpus.out client.out sanitize.out corpus-scoreboard.json $(OMNI_OBJ_DIR)
+	rm -rf smoke.out regex.out corpus.out client.out sanitize.out corpus-scoreboard.json $(OMNI_OBJ_DIR)
 
 reset: clean
 

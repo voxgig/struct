@@ -2293,8 +2293,6 @@ class Struct
     /** @internal */
     public static function transform_REF(object $state, mixed $_val, string $_ref, mixed $store): mixed
     {
-        $nodes = $state->nodes;
-
         if (self::M_VAL !== $state->mode) {
             return self::undef();
         }
@@ -2323,55 +2321,33 @@ class Struct
             });
         }
 
-        $tref = self::cloneWrap($ref);
+        // A recursive reference stops where the data does.
+        $tval = self::getpath($store, self::slice($state->path, -1));
+        $rval = !$hasSubRef || self::undef() !== $tval ? self::cloneWrap($ref) : self::undef();
 
-        $cpath = self::slice($state->path, -3);
-        $tpath = self::slice($state->path, -1);
-        $tcur = self::getpath($store, $cpath);
-        $tval = self::getpath($store, $tpath);
-        $rval = self::undef();
-
-        if (!$hasSubRef || self::undef() !== $tval) {
-            $tinj = $state->child(0, [self::getelem($tpath, -1)]);
-
-            $tinj->path = $tpath;
-            $tinj->nodes = self::slice($state->nodes, -1);
-            $tinj->parent = self::getelem($nodes, -2);
-            $tinj->val = $tref;
-
-            $tinj->dpath = self::flatten([$cpath]);
-            $tinj->dparent = $tcur;
-
-            $injResult = self::inject($tref, $store, $tinj);
-
-            // If inject returned SKIP, use tref (mutated in place) not tinj->val (which may be SKIP)
-            if ($injResult === self::SKIP || $tinj->val === self::SKIP) {
-                $rval = is_object($tref) ? $tref : self::undef();
-            } else {
-                $rval = $tinj->val;
-            }
-        } else {
-            $rval = self::undef();
-        }
-
+        // The enclosing loop injects the referenced spec in this list's place, so
+        // neither this pass nor this element leaves a value for modify to check.
         $grandparent = $state->setval($rval, 2);
 
-        // PHP: arrays in nodes are copies, so ancestor setval on arrays doesn't propagate.
-        // Sync the prior injection's parent if it's an array.
-        if ($state->prior && is_array($state->prior->parent)) {
-            $akey = self::getelem($state->path, -2);
-            if (self::undef() === $rval) {
-                $state->prior->parent = self::delprop($state->prior->parent, $akey);
-            } else {
-                self::setprop($state->prior->parent, $akey, $rval);
+        $prior = $state->prior;
+        if ($prior) {
+            // PHP: arrays in nodes are copies, so ancestor setval on arrays doesn't propagate.
+            if (is_array($prior->parent)) {
+                $akey = self::getelem($state->path, -2);
+                if (self::undef() === $rval) {
+                    $prior->parent = self::delprop($prior->parent, $akey);
+                } else {
+                    self::setprop($prior->parent, $akey, $rval);
+                }
+            }
+
+            $prior->modify = null;
+            if (self::islist($grandparent) || self::undef() !== $rval) {
+                $prior->keyI--;
             }
         }
 
-        if (self::islist($grandparent) && $state->prior) {
-            $state->prior->keyI--;
-        }
-
-        return $_val;
+        return self::SKIP;
     }
 
 
@@ -3295,6 +3271,223 @@ class Struct
     }
 
     /**
+     * The value's length is within a bound: ['`$LEN`', bound, spec?], where the
+     * bound is as for a $NOF count. A string's length is in code points.
+     */
+    public static function validate_LEN(object $inj, mixed $_val, string $_ref, mixed $store): mixed
+    {
+        return self::_validatebound($inj, $store, '$LEN');
+    }
+
+    /**
+     * The value is a number within a bound: ['`$RANGE`', bound, spec?], where the
+     * bound holds min or gt, max or lt, or one of each.
+     */
+    public static function validate_RANGE(object $inj, mixed $_val, string $_ref, mixed $store): mixed
+    {
+        return self::_validatebound($inj, $store, '$RANGE');
+    }
+
+    public static function validate_LIKE(object $inj, mixed $_val, string $_ref, mixed $store): mixed
+    {
+        return self::_validatebound($inj, $store, '$LIKE');
+    }
+
+    /**
+     * The bounding list directives: a bound or pattern, then at most one spec that also admits.
+     */
+    private static function _validatebound(object $inj, mixed $store, string $name): mixed
+    {
+        $mode = $inj->mode;
+        $parent = $inj->parent;
+        $keyI = $inj->keyI;
+
+        if (self::M_VAL !== $mode) {
+            return self::undef();
+        }
+
+        if (!self::islist($parent) || 0 !== $keyI) {
+            $inj->errs[] = 'The ' . $name . ' validator at field ' .
+                self::pathify($inj->path, 1, 1) .
+                ' must be the first element of an array.';
+            return self::undef();
+        }
+
+        $cval = self::_slotval($inj);
+
+        $inj->keyI = count($inj->keys ?? []);
+
+        // As for the counting directives: SKIP keeps inject off the detached list.
+        $inj->setval($cval, 2);
+
+        $inj->path = self::slice($inj->path, -1);
+
+        $field = 'The ' . $name . ' validator at field ' . self::pathify($inj->path, 1);
+        $nargs = self::size($parent) - 1;
+        $islen = '$LEN' === $name;
+        $islike = '$LIKE' === $name;
+        $argname = $islike ? 'pattern' : 'bound';
+
+        if ($nargs < 1 || 2 < $nargs) {
+            $inj->errs[] = $field . ' must have a ' . $argname . ' and at most one spec.';
+            return self::SKIP;
+        }
+
+        $bound = self::_getprop($parent, 1);
+        $like = $islike ? self::_likere($bound) : self::undef();
+        [$lo, $hi, $desc] = $islen
+            ? self::_lenbound($bound)
+            : [0, 0, $islike ? (self::undef() === $like ? self::undef() : 'like /' . $bound . '/') : self::_rangedesc($bound)];
+
+        if (self::undef() === $desc) {
+            $inj->errs[] = $field . ' has an invalid ' . $argname . ': ' . self::stringify($bound) . '.';
+            return self::SKIP;
+        }
+
+        $ctype = self::typify($cval);
+
+        if (2 === $nargs && !self::_admits($cval, self::_getprop($parent, 2), $inj, $store)) {
+            $specdesc = preg_replace_callback(
+                self::R_TRANSFORM_NAME,
+                fn(array $m): string => strtolower($m[1]),
+                self::stringify(self::_getprop($parent, 2))
+            );
+            $inj->errs[] = self::_invalidTypeMsg($inj->path, $specdesc, $ctype, $cval);
+            return self::SKIP;
+        }
+
+        if (0 === (($islen ? self::T_string | self::T_list | self::T_map : ($islike ? self::T_string : self::T_number)) & $ctype)) {
+            $needtype = $islen ? 'string, list or map' : ($islike ? self::S_string : self::S_number);
+            $inj->errs[] = self::_invalidTypeMsg($inj->path, $needtype, $ctype, $cval);
+            return self::SKIP;
+        }
+
+        $len = $islen ? (is_string($cval) ? self::_codepoints($cval) : self::size($cval)) : 0;
+        $inbound = $islen
+            ? $lo <= $len && (-1 === $hi || $len <= $hi)
+            : ($islike ? self::re_test($like, $cval) : self::_inrange($bound, $cval));
+
+        if (!$inbound) {
+            $needtype = (1 < count($inj->path) ? '' : 'value ') . $desc;
+            $inj->errs[] = self::_invalidTypeMsg($inj->path, $needtype, $ctype, $cval);
+        }
+
+        return self::SKIP;
+    }
+
+    /**
+     * The bounds of a $LEN bound, with -1 for no maximum, and the words for it,
+     * which are absent when the bound is invalid.
+     */
+    private static function _lenbound(mixed $bound): array
+    {
+        [$lo, $hi, $countdesc] = self::_nofcount($bound, -1);
+
+        if (self::undef() === $countdesc) {
+            return [0, 0, self::undef()];
+        }
+
+        $desc = 'of length ' .
+            ($lo === $hi
+                ? $lo
+                : (-1 === $hi
+                    ? 'at least ' . $lo
+                    : (0 === $lo ? 'at most ' . $hi : $lo . ' to ' . $hi)));
+
+        return [$lo, $hi, $desc];
+    }
+
+    /**
+     * A $LIKE pattern compiled by re_compile, which is PCRE here; absent unless it compiles.
+     */
+    private static function _likere(mixed $pattern): mixed
+    {
+        if (!is_string($pattern)) {
+            return self::undef();
+        }
+        try {
+            return self::re_compile($pattern);
+        } catch (\InvalidArgumentException) {
+            return self::undef();
+        }
+    }
+
+    /**
+     * The words for a $RANGE bound, which are absent when the bound is invalid.
+     */
+    private static function _rangedesc(mixed $bound): mixed
+    {
+        $none = self::undef();
+
+        if (!self::ismap($bound)) {
+            return $none;
+        }
+
+        $min = self::_getprop($bound, 'min');
+        $max = self::_getprop($bound, 'max');
+        $gt = self::_getprop($bound, 'gt');
+        $lt = self::_getprop($bound, 'lt');
+        $lower = $none === $min ? $gt : $min;
+        $upper = $none === $max ? $lt : $max;
+        $isnum = fn(mixed $n): bool => $none === $n || 0 < (self::T_number & self::typify($n));
+
+        $valid = 0 < self::size($bound)
+            && self::size($bound) === count(array_filter([$min, $max, $gt, $lt], fn($n) => $none !== $n))
+            && ($none === $min || $none === $gt)
+            && ($none === $max || $none === $lt)
+            && $isnum($min)
+            && $isnum($max)
+            && $isnum($gt)
+            && $isnum($lt)
+            && ($none === $lower || $none === $upper || $lower <= $upper);
+
+        if (!$valid) {
+            return $none;
+        }
+
+        $parts = [];
+        if ($none !== $min) {
+            $parts[] = 'at least ' . self::stringify($min);
+        } elseif ($none !== $gt) {
+            $parts[] = 'greater than ' . self::stringify($gt);
+        }
+        if ($none !== $max) {
+            $parts[] = 'at most ' . self::stringify($max);
+        } elseif ($none !== $lt) {
+            $parts[] = 'less than ' . self::stringify($lt);
+        }
+
+        return implode(' and ', $parts);
+    }
+
+    /**
+     * A number within a valid $RANGE bound.
+     */
+    private static function _inrange(mixed $bound, mixed $val): bool
+    {
+        $none = self::undef();
+        $min = self::_getprop($bound, 'min');
+        $max = self::_getprop($bound, 'max');
+        $gt = self::_getprop($bound, 'gt');
+        $lt = self::_getprop($bound, 'lt');
+
+        return ($none === $min || $min <= $val)
+            && ($none === $max || $val <= $max)
+            && ($none === $gt || $gt < $val)
+            && ($none === $lt || $val < $lt);
+    }
+
+    /**
+     * A string's length in code points, without mbstring. A string that is not
+     * UTF-8 counts its bytes.
+     */
+    private static function _codepoints(string $s): int
+    {
+        $n = preg_match_all('/./su', $s);
+        return false === $n ? strlen($s) : $n;
+    }
+
+    /**
      * This is the "modify" argument to inject. Use this to perform
      * generic validation. Runs *after* any special commands.
      */
@@ -3388,7 +3581,7 @@ class Struct
         } elseif ($exact) {
             if ($cval !== $pval) {
                 $pathmsg = 1 < self::size($inj->path) ? 'at field ' . self::pathify($inj->path, 1) . ': ' : '';
-                $inj->errs[] = 'Value ' . $pathmsg . $cval . ' should equal ' . $pval . '.';
+                $inj->errs[] = 'Value ' . $pathmsg . self::stringify($cval) . ' should equal ' . self::stringify($pval) . '.';
             }
         } else {
             // Spec value was a default, copy over data
@@ -3483,6 +3676,9 @@ class Struct
                 '$EXACT' => [self::class, 'validate_EXACT'],
                 '$NOF' => [self::class, 'validate_NOF'],
                 '$ALL' => [self::class, 'validate_ALL'],
+                '$LEN' => [self::class, 'validate_LEN'],
+                '$RANGE' => [self::class, 'validate_RANGE'],
+                '$LIKE' => [self::class, 'validate_LIKE'],
             ],
             (array) ($extra ?? []),
             [
@@ -3574,7 +3770,7 @@ class Struct
         ];
 
         $q = self::clone($query);
-        $q = self::_select_add_open($q);
+        $q = self::_openquery($q);
 
         foreach ($children as $child) {
             $injdef->errs = [];
@@ -3588,32 +3784,33 @@ class Struct
         return $results;
     }
 
-    // Recursively add `$OPEN` to all maps in a query for select.
-    // PHP arrays are value types, so walk can't modify in-place.
-    private static function _select_add_open(mixed $val): mixed
+    // Open every map in a select query, so a child may hold keys the query does
+    // not name, but leave a directive's literals as written: what $EXACT
+    // compares, and the count or bound of $NOF, $LEN and $RANGE.
+    // PHP arrays are value types, so the opened query is returned.
+    private static function _openquery(mixed $q): mixed
     {
-        if (self::ismap($val)) {
-            if (is_array($val)) {
-                if (!array_key_exists('`$OPEN`', $val)) {
-                    $val['`$OPEN`'] = true;
-                }
-                foreach ($val as $k => $v) {
-                    $val[$k] = self::_select_add_open($v);
-                }
-            } elseif ($val instanceof \stdClass) {
-                if (!property_exists($val, '`$OPEN`')) {
-                    $val->{'`$OPEN`'} = true;
-                }
-                foreach (get_object_vars($val) as $k => $v) {
-                    $val->$k = self::_select_add_open($v);
-                }
+        if (is_array($q) && self::ismap($q)) {
+            $q['`$OPEN`'] = self::getprop($q, '`$OPEN`', true);
+            foreach ($q as $key => $val) {
+                $q[$key] = self::_openquery($val);
             }
-        } elseif (self::islist($val) && is_array($val)) {
-            foreach ($val as $i => $v) {
-                $val[$i] = self::_select_add_open($v);
+        } elseif ($q instanceof \stdClass) {
+            $q->{'`$OPEN`'} = self::getprop($q, '`$OPEN`', true);
+            foreach (get_object_vars($q) as $key => $val) {
+                $q->$key = self::_openquery($val);
+            }
+        } elseif (self::islist($q)) {
+            $head = $q[0] ?? null;
+            $exact = '`$EXACT`' === $head;
+            $bounded = '`$NOF`' === $head || '`$LEN`' === $head || '`$RANGE`' === $head;
+            foreach ($q as $i => $val) {
+                if (0 === $i || !($exact || ($bounded && 1 === $i))) {
+                    $q[$i] = self::_openquery($val);
+                }
             }
         }
-        return $val;
+        return $q;
     }
 
     /**
@@ -3723,6 +3920,11 @@ class Struct
      */
     private static function select_CMP(object $state, mixed $_val, mixed $ref, mixed $store): mixed
     {
+        // The list form of $LIKE is validate's checker; the key form is this operator.
+        if (self::M_VAL === $state->mode && '$LIKE' === $ref) {
+            return self::validate_LIKE($state, $_val, $ref, $store);
+        }
+
         if (self::M_KEYPRE === $state->mode) {
             $term = self::_getprop($state->parent, $state->key);
             $gkey = self::getelem($state->path, -2);

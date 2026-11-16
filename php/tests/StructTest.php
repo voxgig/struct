@@ -1233,6 +1233,33 @@ class StructTest extends TestCase
         );
     }
 
+    public function testValidateLen(): void
+    {
+        $this->testSet(
+            $this->testSpec->validate->len,
+            fn($vin) => Struct::validate(self::vin($vin, 'data'), self::vin($vin, 'spec')),
+            ['null' => false]
+        );
+    }
+
+    public function testValidateRange(): void
+    {
+        $this->testSet(
+            $this->testSpec->validate->range,
+            fn($vin) => Struct::validate(self::vin($vin, 'data'), self::vin($vin, 'spec')),
+            ['null' => false]
+        );
+    }
+
+    public function testValidateLike(): void
+    {
+        $this->testSet(
+            $this->testSpec->validate->like,
+            fn($vin) => Struct::validate(self::vin($vin, 'data'), self::vin($vin, 'spec')),
+            ['null' => false]
+        );
+    }
+
     public function testValidateUnknown(): void
     {
         $this->testSet(
