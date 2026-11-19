@@ -3315,6 +3315,10 @@ inline bool keeps(const Value& val, const Value& out) {
   if (val.is_undef())
     return true;
 
+  // No two cpp functions compare equal, so one given back as its own kind is kept.
+  if (val.is_func())
+    return out.is_func() && val.is_injector() == out.is_injector();
+
   if (0 == ((T_list | T_map) & typify(val)) || val.is_list() != out.is_list() || !isnode(out))
     return deepequal(val, out);
 
