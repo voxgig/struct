@@ -197,22 +197,27 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      # On macOS setup-php installs PHP 8.3 with Homebrew, which can stall with
-      # no output for half an hour on any image; a pass takes about 4 minutes.
-      # So the step is capped, and tried once more if it does not finish.
       - name: Setup PHP
-        id: setup-php
+        if: runner.os != 'macOS'
         uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
-        timeout-minutes: 10
-        continue-on-error: true
         with:
           php-version: '8.3'
-      - name: Setup PHP (retry)
-        if: steps.setup-php.outcome != 'success'
-        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+      # setup-php's macOS install drives Homebrew from git checkouts with its
+      # output hidden, and stalls or fails there. Homebrew's own bottles avoid
+      # that path. composer brings Homebrew's newest php along with it, so
+      # php@8.3 goes first on PATH for the steps after this one.
+      - name: Setup PHP (macOS)
+        if: runner.os == 'macOS'
         timeout-minutes: 10
-        with:
-          php-version: '8.3'
+        env:
+          HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: '1'
+        run: |
+          brew install php@8.3 composer
+          php_bin="$(brew --prefix php@8.3)/bin"
+          echo "$php_bin" >> "$GITHUB_PATH"
+          export PATH="$php_bin:$PATH"
+          php --version
+          composer --version
       - name: Install dependencies
         working-directory: ./php
         # setup-php intermittently writes a malformed github-oauth token to its
