@@ -2519,9 +2519,8 @@ voxgig_value* voxgig_getpath(voxgig_value* store, voxgig_value* path, voxgig_inj
           }
         } else {
           voxgig_value* k = voxgig_new_string(part);
-          voxgig_value* nv = voxgig_lookup(val, k);
+          voxgig_value* tv = voxgig_getprop(val, k, NULL);
           voxgig_release(k);
-          voxgig_value* tv = nv ? voxgig_retain(nv) : voxgig_new_undef();
           voxgig_release(val);
           val = tv;
         }

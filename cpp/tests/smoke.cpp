@@ -258,6 +258,13 @@ int main() {
   CHECK(verrs(Value("x"), jt({"`$NOF`", jm({"min", 1.0, "max", 2.0}), "`$STRING`", "`$NUMBER`"}))
             ->empty());
 
+  // An alternative that takes a function admits it, though no two cpp functions compare equal.
+  Value fn(
+      Injector([](Injection&, const Value& v, const std::string&, const Value&) { return v; }));
+  Value fnspec = jm({"f", jt({"`$NOF`", jm({"min", 1.0}), "`$FUNCTION`", "`$MAP`"})});
+  CHECK(verrs(jm({"f", fn}), fnspec)->empty());
+  CHECK(1 == verrs(jm({"f", Value(1)}), fnspec)->size());
+
   std::cout << (ok ? "smoke OK" : "smoke FAILED") << "\n";
   return ok ? 0 : 1;
 }
