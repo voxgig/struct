@@ -140,9 +140,13 @@ static void condense_checks(void) {
   CHECK(pk && 0 == strcmp(pk, "{\"__proto__\":1}"), "condense: a __proto__ key round-trips");
   free(pk);
 
-  /* Canonical reads a stored null as absent; this port's plain getpath returns the null. */
+  /* A stored null reads as absent (Group A), condensed or not. */
   CHECK(voxgig_is_undef(hold(voxgig_getpath(C("{\"a\":null}"), S("a"), NULL))),
         "condense: getpath reads a stored null as absent");
+  CHECK(voxgig_is_undef(hold(voxgig_getpath(J("{\"a\":null}"), S("a"), NULL))),
+        "getpath reads a stored null as absent");
+  CHECK(voxgig_is_undef(hold(voxgig_getpath(J("{\"a\":{\"b\":null}}"), S("a.b"), NULL))),
+        "getpath reads a stored null as absent at depth");
   voxgig_injection binj;
   memset(&binj, 0, sizeof binj);
   binj.base = "base";
