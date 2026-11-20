@@ -357,6 +357,12 @@ other port uses; only the credential and the operator changed. Typescript
 and rust have a trusted publisher registered against `publish.yml`;
 javascript does not yet, which is the paragraph after next.
 
+**go can be released from CI too**, by a `target: go` dispatch. It runs the
+build, `vet` and the tests `make publish-go` runs, then writes the same
+annotated `go/v<version>` tag. Go has no registry, so no credential is
+involved and the tag is the whole release; the dispatch exists so that a Go
+release needs no workstation. `make publish-go` still works.
+
 Typescript joined that shape late. It released under a bare `v<version>`
 up to `v0.3.4`, and those 16 tags stay — they are what those releases went
 out under. Everything from the next release on is `typescript/v<version>`,
@@ -446,7 +452,8 @@ know what it does and does not do:
 ### The three OIDC ports go through CI, not the Makefile
 
 **Actions → publish → Run workflow** on `main`, picking `target:
-typescript`, `javascript` or `rust`; or push the matching tag by hand
+typescript`, `javascript` or `rust` (or `go`, for a tag-only Go release);
+or push the matching tag by hand
 (`typescript/v<version>`, `javascript/v<version>`, `rust/v<version>`). One
 target per run: the three packages version independently and every publish is
 irreversible. `make publish-all` drives exactly this tag-push path for all
