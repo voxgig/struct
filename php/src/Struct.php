@@ -3577,6 +3577,19 @@ class Struct
         } elseif (self::islist($cval)) {
             if (!self::islist($pval)) {
                 $inj->errs[] = self::_invalidTypeMsg($inj->path, self::typename($ptype), $ctype, $cval);
+            } elseif (0 < self::size($pval)) {
+                // Closed list, so reject items past the end of the shape.
+                $badkeys = [];
+                for ($i = self::size($pval); $i < self::size($cval); $i++) {
+                    $badkeys[] = self::strkey($i);
+                }
+                if (0 < count($badkeys)) {
+                    $msg = 'Unexpected keys at field ' . self::pathify($inj->path, 1) . ': ' . implode(', ', $badkeys);
+                    $inj->errs[] = $msg;
+                }
+            } else {
+                // Empty spec list [] means list can be open (any items).
+                self::merge([$pval, $cval]);
             }
         } elseif ($exact) {
             if ($cval !== $pval) {
