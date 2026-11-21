@@ -1831,8 +1831,19 @@
                           (when (isnode pval) (delprop pval "`$OPEN`"))))))
 
                 (islist cval)
-                (when-not (islist pval)
-                  (.add ^List (ig inj :errs) (_invalidTypeMsg (ig inj :path) (typename ptype) ctype cval "V0030")))
+                (cond
+                  (not (islist pval))
+                  (.add ^List (ig inj :errs) (_invalidTypeMsg (ig inj :path) (typename ptype) ctype cval "V0030"))
+
+                  ;; Closed list, so reject items past the end of the shape.
+                  (> (size pval) 0)
+                  (let [badkeys (alist-of (map strkey (range (size pval) (size cval))))]
+                    (when (> (size badkeys) 0)
+                      (.add ^List (ig inj :errs)
+                            (str "Unexpected keys at field " (pathify (ig inj :path) 1) S-VIZ (join badkeys ", ")))))
+
+                  ;; Empty spec list [] means list can be open (any items).
+                  :else (merge (alist-of [pval cval])))
 
                 exact
                 (when (not= cval pval)
