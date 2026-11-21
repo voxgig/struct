@@ -2433,6 +2433,23 @@ void _validation(dynamic pval, dynamic key, dynamic parent, dynamic inj0) {
     if (!islist(pval)) {
       _pushErr(inj,
           _invalidTypeMsg(inj.path, typename(ptype), ctype, cval, 'V0030'));
+    } else if (size(pval) > 0) {
+      // Closed list, so reject items past the end of the shape.
+      var badkeys = <String>[];
+      for (var i = size(pval); i < size(cval); i++) {
+        badkeys.add(strkey(i));
+      }
+      if (badkeys.isNotEmpty) {
+        _pushErr(
+            inj,
+            'Unexpected keys at field ' +
+                pathify(inj.path, 1) +
+                S_VIZ +
+                badkeys.join(', '));
+      }
+    } else {
+      // Empty spec list [] means list can be open (any items).
+      merge([pval, cval]);
     }
   } else if (exactB) {
     if (!veq(cval, pval)) {
