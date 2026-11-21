@@ -366,7 +366,7 @@ Quote the checker in backticks inside a `validate` spec, e.g. `` `$STRING` ``.
 |-------------|--------------------------------------------------------------------------|
 | `$MAP`      | The value must be a map.                                                 |
 | `$LIST`     | The value must be a list.                                                |
-| `$STRING`   | The value must be a string.                                              |
+| `$STRING`   | The value must be a string other than `''`.                              |
 | `$NUMBER`   | The value must be a number (integer or decimal).                         |
 | `$INTEGER`  | The value must be an integer.                                            |
 | `$DECIMAL`  | The value must be a non-integer number.                                  |

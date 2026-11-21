@@ -238,7 +238,11 @@ exact callback signature varies slightly by port — see
 S.validate(payload, { id: '`$INTEGER`', tags: ['`$CHILD`', '`$STRING`'] })
 ```
 `['`$CHILD`', '`$STRING`']` means "a list whose every element matches". A
-plain list spec is a tuple: `['`$STRING`']` checks the first element only.
+plain list spec is a tuple: `['`$STRING`']` matches a list of exactly one
+string. A spec is closed, so `['a', 'b']` fails against it with
+`Unexpected keys at field <root>: 1`, just as a map fails on a key its spec
+does not name. `'`$OPEN`': true` opens a map spec, and an empty spec, `[]` or
+`{}`, accepts any list or map.
 
 ### Validate and collect *all* errors instead of throwing
 ```js
@@ -477,7 +481,8 @@ named function from `extra`).
 
 ### Validate checkers (inside backticks in a `validate` spec)
 
-`$MAP`, `$LIST`, `$STRING`, `$NUMBER`, `$INTEGER`, `$DECIMAL`, `$BOOLEAN`,
+`$MAP`, `$LIST`, `$STRING` (a string other than `''`, which fails with
+`Empty string at a`), `$NUMBER`, `$INTEGER`, `$DECIMAL`, `$BOOLEAN`,
 `$NULL`, `$NIL` (absent or null), `$FUNCTION`, `$INSTANCE`, `$ANY`,
 `$CHILD` (apply a sub-spec to every child), `$EXACT` (equal a literal
 exactly), `$NOF` (a count of specs admits the value), `$ALL` (every spec

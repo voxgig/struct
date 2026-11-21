@@ -2393,6 +2393,19 @@ const _validation: Modify = (pval: any, key?: any, parent?: any, inj?: Injection
   } else if (islist(cval)) {
     if (!islist(pval)) {
       inj.errs.push(_invalidTypeMsg(inj.path, typename(ptype), ctype, cval, 'V0030'))
+    } else if (0 < size(pval)) {
+      // Closed list, so reject items past the end of the shape.
+      const badkeys = []
+      for (let i = size(pval); i < size(cval); i++) {
+        badkeys.push(strkey(i))
+      }
+      if (0 < size(badkeys)) {
+        const msg = 'Unexpected keys at field ' + pathify(inj.path, 1) + S_VIZ + join(badkeys, ', ')
+        inj.errs.push(msg)
+      }
+    } else {
+      // Empty spec list [] means list can be open (any items).
+      merge([pval, cval])
     }
   } else if (exact) {
     if (cval !== pval) {
