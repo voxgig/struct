@@ -2783,6 +2783,17 @@ object Struct {
             } else if (islist(cval)) {
                 if (!islist(pval)) {
                     inj.errs.add(_invalidTypeMsg(inj.path, typename(ptype), ctype, cval, "V0030"))
+                } else if (size(pval) > 0) {
+                    // Closed list, so reject items past the end of the shape.
+                    val badkeys = mutableListOf<String>()
+                    for (i in size(pval) until size(cval)) badkeys.add(strkey(i))
+                    if (badkeys.isNotEmpty()) {
+                        inj.errs.add("Unexpected keys at field " + pathify(inj.path, 1) + ": " + badkeys.joinToString(", "))
+                    }
+                } else {
+                    // Empty spec list [] means list can be open (any items).
+                    val mergeArgs = mutableListOf<Any?>(pval, cval)
+                    merge(mergeArgs)
                 }
             } else if (exact) {
                 if (cval != pval) {
