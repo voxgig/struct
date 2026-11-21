@@ -2673,7 +2673,19 @@ defmodule Voxgig.Struct do
               end
 
             islist(cval) ->
-              if not islist(pval), do: push_err(inj, invalid_type_msg(ig(inj, :path), typename(ptype), ctype, cval, "V0030"))
+              cond do
+                not islist(pval) ->
+                  push_err(inj, invalid_type_msg(ig(inj, :path), typename(ptype), ctype, cval, "V0030"))
+
+                size(pval) > 0 ->
+                  # Closed list, so reject items past the end of the shape.
+                  badkeys = Enum.map(size(pval)..(size(cval) - 1)//1, &strkey/1)
+                  if badkeys != [], do: push_err(inj, "Unexpected keys at field " <> pathify(ig(inj, :path), 1) <> @s_viz <> Enum.join(badkeys, ", "))
+
+                true ->
+                  # Empty spec list [] means list can be open (any items).
+                  merge(vlist_new([pval, cval]))
+              end
 
             exact_b ->
               if not deepequal_(cval, pval) do
