@@ -3764,7 +3764,23 @@ def vg-validation fn [[pval:Any key:Any parent:Any inj:Any store:Any] [Any] [
                 if ((vg-islist pval) not) [
                   (append [(vgi-invalid-type-msg (inj get "path") (vg-typename ptype) ctype cval)] (inj get "errs")) drop
                   none
-                ] [none]
+                ] [
+                  if ((vgz pval) gt 0) [
+                    # Closed list, so reject items past the end of the shape.
+                    def badkeys (vgl-idx-keys (vgz pval) (vgz cval) (flex []))
+                    if ((vgz badkeys) gt 0) [
+                      (append [(StringUtil.concat ["Unexpected keys at field " (vg-pathify (inj get "path") 1 vg-noarg) ": " (vg-join badkeys ", " vg-noarg)])] (inj get "errs")) drop
+                      none
+                    ] [none]
+                  ] [
+                    # Empty spec list [] means list can be open (any items).
+                    def ml (flex [])
+                    (append [pval] ml) drop
+                    (append [cval] ml) drop
+                    (vg-merge ml vg-noarg) drop
+                    none
+                  ]
+                ]
               ] [
                 if (exact eq true) [
                   if (vgi-exact-eq cval pval) [none] [
