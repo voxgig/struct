@@ -3371,6 +3371,22 @@ _validation = function(pval, key, parent, inj)
   elseif islist(cval) then
     if not islist(pval) then
       table.insert(inj.errs, _invalidTypeMsg(inj.path, typename(ptype), ctype, cval, "V0030"))
+    elseif 0 < size(pval) then
+      -- Closed list, so reject items past the end of the shape.
+      local badkeys = {}
+      for i = size(pval), size(cval) - 1 do
+        table.insert(badkeys, strkey(i))
+      end
+      if 0 < size(badkeys) then
+        local msg = "Unexpected keys at field "
+          .. pathify(inj.path, 1)
+          .. S_VIZ
+          .. table.concat(badkeys, ", ")
+        table.insert(inj.errs, msg)
+      end
+    else
+      -- Empty spec list [] means list can be open (any items).
+      merge({ pval, cval })
     end
   elseif exact then
     if cval ~= pval then
