@@ -3035,6 +3035,18 @@ sub _validation {
             push @{ $inj->{errs} },
                 _invalid_type_msg($inj->{path}, typename($ptype), $ctype, $cval, 'V0030');
         }
+        elsif (size($pval) > 0) {
+            # Closed list, so reject items past the end of the shape.
+            my @badkeys = map { strkey($_) } size($pval) .. size($cval) - 1;
+            if (@badkeys) {
+                push @{ $inj->{errs} },
+                    'Unexpected keys at field ' . pathify($inj->{path}, 1) . S_VIZ . CORE::join(', ', @badkeys);
+            }
+        }
+        else {
+            # Empty spec list [] means list can be open (any items).
+            merge([$pval, $cval]);
+        }
     }
     elsif ($exact_bool) {
         my $eq = _exact_eq($cval, $pval);
