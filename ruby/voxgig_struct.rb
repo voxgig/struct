@@ -2327,7 +2327,18 @@ module VoxgigStruct
       end
 
     elsif islist(cval)
-      inj.errs << _invalidTypeMsg(inj.path, typename(ptype), ctype, cval, 'V0030') unless islist(pval)
+      if !islist(pval)
+        inj.errs << _invalidTypeMsg(inj.path, typename(ptype), ctype, cval, 'V0030')
+      elsif size(pval).positive?
+        # Closed list, so reject items past the end of the shape.
+        badkeys = (size(pval)...size(cval)).map { |i| strkey(i) }
+        if badkeys.length.positive?
+          inj.errs << "Unexpected keys at field #{pathify(inj.path, 1)}#{S_VIZ}#{join(badkeys, ', ')}"
+        end
+      else
+        # Empty spec list [] means list can be open (any items).
+        merge([pval, cval])
+      end
 
     elsif exact
       # In exact mode, check key existence for nil values
