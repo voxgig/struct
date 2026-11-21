@@ -3456,6 +3456,27 @@ namespace Voxgig.Struct
                 {
                     inj.Errs.Add(_InvalidTypeMsg(inj.Path, TypeName(ptype), ctype, cval));
                 }
+                else if (0 < Size(pval))
+                {
+                    // Closed list, so reject items past the end of the shape.
+                    var badkeys = new List<object?>();
+                    for (int i = Size(pval); i < Size(cval); i++)
+                    {
+                        badkeys.Add(StrKey(i));
+                    }
+
+                    if (0 < badkeys.Count)
+                    {
+                        string msg = "Unexpected keys at field " + Pathify(inj.Path, 1) +
+                            S_VIZ + Join(badkeys, ", ");
+                        inj.Errs.Add(msg);
+                    }
+                }
+                else
+                {
+                    // Empty spec list [] means list can be open (any items).
+                    Merge(new List<object?> { pval, cval });
+                }
             }
             else if (exact)
             {
