@@ -2525,6 +2525,25 @@ fn validation_modify(pval: &Value, key: &Value, parent: &Value, inj: &Inj, _stor
                 inj,
                 invalid_type_msg(&path, &type_name(ptype), ctype, &cval),
             );
+        } else if 0 < size(pval) {
+            // Closed list, so reject items past the end of the shape.
+            let badkeys: Vec<String> = (size(pval)..size(&cval))
+                .map(|i| str_key(Value::Num(i as f64)))
+                .collect();
+            if !badkeys.is_empty() {
+                errs_push(
+                    inj,
+                    format!(
+                        "Unexpected keys at field {}{}{}",
+                        pathify(&path_value(&path), Some(1), None),
+                        S_VIZ,
+                        badkeys.join(", ")
+                    ),
+                );
+            }
+        } else {
+            // Empty spec list [] means list can be open (any items).
+            merge(&Value::list(vec![pval.clone(), cval.clone()]), None);
         }
     } else if exact {
         if &cval != pval {
