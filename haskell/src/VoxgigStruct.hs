@@ -2453,7 +2453,18 @@ validation pval key parent inj = do
             else do
               ls <- mkList [pval, cval]; _ <- merge ls
               when (isnode pval) (delprop pval (VStr s_bopen) >> return ())
-        else if islist cval then when (not (islist pval)) $ do m <- invalidTypeMsg path (typename ptype) ctype cval "V0030"; pushErr inj m
+        else if islist cval then
+          if not (islist pval) then do m <- invalidTypeMsg path (typename ptype) ctype cval "V0030"; pushErr inj m
+          else do
+            psz <- size pval
+            csz <- size cval
+            if 0 < psz then do
+              -- Closed list, so reject items past the end of the shape.
+              let badkeys = [strkey (VNum (fromIntegral i)) | i <- [psz .. csz - 1]]
+              when (not (null badkeys)) $ do p <- pathifyFull path (VNum 1) VNoval False; pushErr inj ("Unexpected keys at field " ++ p ++ s_viz ++ intercalate ", " badkeys)
+            else do
+              -- Empty spec list [] means list can be open (any items).
+              ls <- mkList [pval, cval]; _ <- merge ls; return ()
         else if exactB then do
           eqb <- deepEqual cval pval
           when (not eqb) $ do
