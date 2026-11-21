@@ -3,14 +3,15 @@
 `0001-ci-publish-a-go-target.patch` adds a `go` target to
 `.github/workflows/publish.yml`, and says so in `AGENTS.md`. A session's push
 access refuses any change under `.github/workflows/`, so the change arrives
-as a patch. It applies to `main` at `d47ba41`.
+as a patch. It was made from `main` at `d47ba41`, and applies to `main` with
+this folder on it.
 
-Apply it on `main`, push, and then this folder can go:
+Apply it on `main`, remove this folder, and push:
 
 ```sh
 git checkout main && git pull
-git fetch origin claude/bold-newton-4of9bo
-git show FETCH_HEAD:patch/0001-ci-publish-a-go-target.patch | git am
+git am < patch/0001-ci-publish-a-go-target.patch
+git rm -rq patch && git commit -qm "patch: remove the applied go target patch"
 git push origin main
 ```
 
