@@ -48,7 +48,7 @@ NFA engine in-tree (c/cpp/lua/rust/zig).
 | **php** | 52 | 15 | 2 | 123 tests, 0 fail (2 incomplete) | already Group A |
 | **ruby** | 52+ | 15 | 2 | 119 runs, 0 fail | Group A/B + UNDEF setval |
 | **lua** | 52+ | 15 | 2 | 112/112 pass (20 entries dropped) | already Group A |
-| **rust** | 52+ | 15 | 2 | 1736 corpus checks pass | already Group A |
+| **rust** | 52+ | 15 | 2 | 1747 corpus checks pass | already Group A |
 | **c** | 52 | 15 | 2 | 1741/1741 corpus | Group A/B applied |
 | **java** | 52 | 15 | 2 | 116/116 pass | full TS-canonical parity |
 | **cpp** | 52 | 15 | 2 | 1741/1741 corpus | full TS-canonical parity |
