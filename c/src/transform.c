@@ -1941,6 +1941,32 @@ static void _validation(voxgig_value* pval, voxgig_value* key, voxgig_value* par
     if (!voxgig_is_list(pval)) {
       voxgig_value* msg = _invalid_type_msg(&inj->path, voxgig_typename(ptype), ctype, cval);
       voxgig_list_push(voxgig_as_list(inj->errs), msg);
+    } else if (0 < voxgig_size(pval)) {
+      /* Closed list, so reject items past the end of the shape. */
+      voxgig_value* badkeys = voxgig_new_list();
+      for (int64_t i = voxgig_size(pval); i < voxgig_size(cval); i++) {
+        char kbuf[32];
+        snprintf(kbuf, sizeof(kbuf), "%lld", (long long)i);
+        voxgig_list_push(voxgig_as_list(badkeys), voxgig_new_string(kbuf));
+      }
+      if (0 < voxgig_size(badkeys)) {
+        voxgig_value* sep = voxgig_new_string(", ");
+        char* keys = voxgig_join_v(badkeys, sep, NULL);
+        voxgig_release(sep);
+        char* field = _fieldpath(inj, 0);
+        _pushmsg(inj, _concat(4, (const char*[]){"Unexpected keys at field ", field, ": ", keys}));
+        free(field);
+        free(keys);
+      }
+      voxgig_release(badkeys);
+    } else {
+      /* Empty spec list [] means list can be open (any items). */
+      voxgig_value* ml = voxgig_new_list();
+      voxgig_list_push(voxgig_as_list(ml), voxgig_retain(pval));
+      voxgig_list_push(voxgig_as_list(ml), voxgig_retain(cval));
+      voxgig_value* m = voxgig_merge(ml, VOXGIG_MAXDEPTH);
+      voxgig_release(ml);
+      voxgig_release(m);
     }
   } else if (exact) {
     if (pnone ? !cval_undef : !voxgig_equals(cval, pval)) {
