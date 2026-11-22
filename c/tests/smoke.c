@@ -224,8 +224,8 @@ static voxgig_value* verrs(voxgig_value* data, voxgig_value* spec) {
   return inj.errs;
 }
 
-/* What the corpus cannot express: the number of $CHILD errors, and a decimal $NOF count,
-   which the corpus compiler writes as an integer. */
+/* What the corpus cannot express: the number of $CHILD errors, a decimal $NOF count,
+   which the corpus compiler writes as an integer, and a key too long to keep in it. */
 static void validate_checks(void) {
   const char* child[][2] = {
       {"{\"x\":1}", "{\"x\":{\"`$CHILD`\":\"`$NUMBER`\"}}"},
@@ -249,6 +249,17 @@ static void validate_checks(void) {
                  verrs(J("\"x\""),
                        J("[\"`$NOF`\",{\"min\":1.0,\"max\":2.0},\"`$STRING`\",\"`$NUMBER`\"]"))),
         "nof: a decimal min and max");
+
+  char lkey[5001];
+  memset(lkey, 'k', sizeof lkey - 1);
+  lkey[sizeof lkey - 1] = '\0';
+  char ljson[5100];
+  snprintf(ljson, sizeof ljson, "{\"a\":1,\"%s\":2}", lkey);
+  char lmsg[5100];
+  snprintf(lmsg, sizeof lmsg, "Unexpected keys at field <root>: %s", lkey);
+  voxgig_value* lerrs = verrs(J(ljson), J("{\"a\":\"`$NUMBER`\"}"));
+  CHECK(1 == voxgig_size(lerrs) && is_str(voxgig_list_get(voxgig_as_list(lerrs), 0), lmsg),
+        "validate: a closed map's message holds a 5000-byte key");
   release_held();
 }
 
