@@ -241,8 +241,8 @@ S.validate(payload, { id: '`$INTEGER`', tags: ['`$CHILD`', '`$STRING`'] })
 plain list spec is a tuple: `['`$STRING`']` matches a list of exactly one
 string. A spec is closed, so `['a', 'b']` fails against it with
 `Unexpected keys at field <root>: 1`, just as a map fails on a key its spec
-does not name. `'`$OPEN`': true` opens a map spec, and an empty spec, `[]` or
-`{}`, accepts any list or map.
+does not name. `'`$OPEN`': true` opens a map spec. An empty spec is open too:
+`[]` accepts any list, and `{}` accepts any map.
 
 ### Validate and collect *all* errors instead of throwing
 ```js
