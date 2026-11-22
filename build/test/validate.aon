@@ -149,6 +149,10 @@ basic: {
     { in: { data: {l4:[1]}, spec: {l4:[0,9]} }, out: {l4:[1,9]} }
     { in: { data: [1,{a:2}], spec: [] }, out: [1,{a:2}] }
     { in: { data: {l1:[x,y]}, spec: {l1:[]} }, out: {l1:[x,y]} }
+
+    # Several unexpected keys are joined with ", ".
+    { in: { data: {a7:1,b7:2,c7:3}, spec: {a7:'`$NUMBER`'}},
+      err: 'Unexpected keys at field <root>: b7, c7' }
   ]
 }
 

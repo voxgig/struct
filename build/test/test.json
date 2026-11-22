@@ -19995,6 +19995,19 @@
                 "y"
               ]
             }
+          },
+          {
+            "err": "Unexpected keys at field <root>: b7, c7",
+            "in": {
+              "data": {
+                "a7": 1,
+                "b7": 2,
+                "c7": 3
+              },
+              "spec": {
+                "a7": "`$NUMBER`"
+              }
+            }
           }
         ]
       },
