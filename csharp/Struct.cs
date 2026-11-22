@@ -3436,7 +3436,7 @@ namespace Voxgig.Struct
                     if (0 < badkeys.Count)
                     {
                         string msg = "Unexpected keys at field " + Pathify(inj.Path, 1) +
-                            S_VIZ + Join(badkeys.Cast<object?>().ToList());
+                            S_VIZ + Join(badkeys.Cast<object?>().ToList(), ", ");
                         inj.Errs.Add(msg);
                         return null;
                     }
