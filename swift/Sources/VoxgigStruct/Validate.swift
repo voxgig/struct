@@ -499,6 +499,22 @@ public func _validation(
     if !pval.isList {
       inj.errs.items.append(
         .string(invalidTypeMsg(inj.path, typename(ptype), ctype, cval, "V0030")))
+    } else if 0 < size(pval) {
+      // Closed list, so reject items past the end of the shape.
+      var badkeys: [String] = []
+      for i in stride(from: size(pval), to: size(cval), by: 1) {
+        badkeys.append(strkey(.int(Int64(i))))
+      }
+      if !badkeys.isEmpty {
+        inj.errs.items.append(
+          .string(
+            "Unexpected keys at field "
+              + pathify(.list(VList(inj.path.map { Value.string($0) })), 1) + S_VIZ
+              + badkeys.joined(separator: ", ")))
+      }
+    } else {
+      // Empty spec list [] means list can be open (any items).
+      _ = merge(.list([pval, cval]))
     }
   } else if exact {
     if cval != pval {

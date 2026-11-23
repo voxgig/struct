@@ -30,6 +30,12 @@ basic: {
 
     { in: { query: {tags:['a','b']}, obj: {a:{tags:['a','b']}, b:{tags:['a','c']}} },
       out: [{tags:['a','b'],'$KEY':'a'}] }
+
+    # A list in a query is closed, so a longer list does not match; [] matches any list.
+    { in: { query: {tags:['a','b']}, obj: {a:{tags:['a','b']}, b:{tags:['a','b','c']}} },
+      out: [{tags:['a','b'],'$KEY':'a'}] }
+    { in: { query: {tags:[]}, obj: {a:{tags:['a']}, b:{tags:[]}, c:{x:1}} },
+      out: [{tags:['a'],'$KEY':'a'},{tags:[],'$KEY':'b'}] }
   ]
 }
 

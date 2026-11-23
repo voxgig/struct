@@ -11346,6 +11346,72 @@
                 ]
               }
             ]
+          },
+          {
+            "in": {
+              "obj": {
+                "a": {
+                  "tags": [
+                    "a",
+                    "b"
+                  ]
+                },
+                "b": {
+                  "tags": [
+                    "a",
+                    "b",
+                    "c"
+                  ]
+                }
+              },
+              "query": {
+                "tags": [
+                  "a",
+                  "b"
+                ]
+              }
+            },
+            "out": [
+              {
+                "$KEY": "a",
+                "tags": [
+                  "a",
+                  "b"
+                ]
+              }
+            ]
+          },
+          {
+            "in": {
+              "obj": {
+                "a": {
+                  "tags": [
+                    "a"
+                  ]
+                },
+                "b": {
+                  "tags": []
+                },
+                "c": {
+                  "x": 1
+                }
+              },
+              "query": {
+                "tags": []
+              }
+            },
+            "out": [
+              {
+                "$KEY": "a",
+                "tags": [
+                  "a"
+                ]
+              },
+              {
+                "$KEY": "b",
+                "tags": []
+              }
+            ]
           }
         ]
       },
@@ -19767,6 +19833,181 @@
               null,
               2
             ]
+          },
+          {
+            "err": "Unexpected keys at field <root>: 1, 2",
+            "in": {
+              "data": [
+                1,
+                2,
+                3
+              ],
+              "spec": [
+                "`$NUMBER`"
+              ]
+            }
+          },
+          {
+            "err": "Unexpected keys at field <root>: 2",
+            "in": {
+              "data": [
+                5,
+                6,
+                7
+              ],
+              "spec": [
+                1,
+                2
+              ]
+            }
+          },
+          {
+            "err": "Unexpected keys at field l0: 2",
+            "in": {
+              "data": {
+                "l0": [
+                  1,
+                  "a",
+                  true
+                ]
+              },
+              "spec": {
+                "l0": [
+                  "`$NUMBER`",
+                  "`$STRING`"
+                ]
+              }
+            }
+          },
+          {
+            "err": "Unexpected keys at field <root>: 1",
+            "in": {
+              "data": [
+                [
+                  1,
+                  2
+                ],
+                [
+                  3
+                ]
+              ],
+              "spec": [
+                [
+                  "`$CHILD`",
+                  "`$NUMBER`"
+                ]
+              ]
+            }
+          },
+          {
+            "err": "Unexpected keys at field l2.b: 1",
+            "in": {
+              "data": {
+                "l2": {
+                  "a": [
+                    1
+                  ],
+                  "b": [
+                    2,
+                    3
+                  ]
+                }
+              },
+              "spec": {
+                "l2": {
+                  "`$CHILD`": [
+                    "`$NUMBER`"
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "err": "Unexpected keys at field l3: 1, 2",
+            "in": {
+              "data": {
+                "l3": [
+                  1,
+                  2,
+                  3
+                ]
+              },
+              "spec": {
+                "l3": [
+                  0
+                ]
+              }
+            }
+          },
+          {
+            "in": {
+              "data": {
+                "l4": [
+                  1
+                ]
+              },
+              "spec": {
+                "l4": [
+                  0,
+                  9
+                ]
+              }
+            },
+            "out": {
+              "l4": [
+                1,
+                9
+              ]
+            }
+          },
+          {
+            "in": {
+              "data": [
+                1,
+                {
+                  "a": 2
+                }
+              ],
+              "spec": []
+            },
+            "out": [
+              1,
+              {
+                "a": 2
+              }
+            ]
+          },
+          {
+            "in": {
+              "data": {
+                "l1": [
+                  "x",
+                  "y"
+                ]
+              },
+              "spec": {
+                "l1": []
+              }
+            },
+            "out": {
+              "l1": [
+                "x",
+                "y"
+              ]
+            }
+          },
+          {
+            "err": "Unexpected keys at field <root>: b7, c7",
+            "in": {
+              "data": {
+                "a7": 1,
+                "b7": 2,
+                "c7": 3
+              },
+              "spec": {
+                "a7": "`$NUMBER`"
+              }
+            }
           }
         ]
       },

@@ -1177,7 +1177,9 @@ static voxgig_value* va_CHILD(voxgig_injection* inj, voxgig_value* val, const ch
     voxgig_strvec ckeys = voxgig_keysof(tval);
     for (size_t i = 0; i < ckeys.len; i++) {
       voxgig_value* ckv = voxgig_new_string(ckeys.data[i]);
-      voxgig_setprop(inj->parent, ckv, voxgig_clone(childtm));
+      voxgig_value* ctm = voxgig_clone(childtm);
+      voxgig_setprop(inj->parent, ckv, ctm);
+      voxgig_release(ctm);
       voxgig_release(ckv);
       voxgig_strvec_push(&inj->keys, ckeys.data[i]);
     }
@@ -1895,9 +1897,7 @@ static void _validation(voxgig_value* pval, voxgig_value* key, voxgig_value* par
     voxgig_release(openv);
     if (pkeys.len > 0 && !is_open) {
       /* Closed object: gather badkeys. */
-      char buf[4096];
-      buf[0] = '\0';
-      bool first = true;
+      voxgig_value* badkeys = voxgig_new_list();
       for (size_t i = 0; i < ckeys.len; i++) {
         voxgig_value* kv = voxgig_new_string(ckeys.data[i]);
         /* Literal presence: _validation needs to know if the SHAPE declares
@@ -1905,24 +1905,19 @@ static void _validation(voxgig_value* pval, voxgig_value* key, voxgig_value* par
            Group A's haskey would miss null-valued slots. */
         bool has = voxgig_lookup(pval, kv) != NULL;
         voxgig_release(kv);
-        if (!has) {
-          if (!first)
-            strcat(buf, ", ");
-          strcat(buf, ckeys.data[i]);
-          first = false;
-        }
+        if (!has)
+          voxgig_list_push(voxgig_as_list(badkeys), voxgig_new_string(ckeys.data[i]));
       }
-      if (buf[0] != '\0') {
-        voxgig_value* lst = voxgig_new_list();
-        for (size_t i = 1; i < inj->path.len; i++)
-          voxgig_list_push(voxgig_as_list(lst), voxgig_new_string(inj->path.data[i]));
-        char* ps = voxgig_pathify(lst, 0, 0);
-        voxgig_release(lst);
-        char full[4500];
-        snprintf(full, sizeof(full), "Unexpected keys at field %s: %s", ps, buf);
-        free(ps);
-        voxgig_list_push(voxgig_as_list(inj->errs), voxgig_new_string(full));
+      if (0 < voxgig_size(badkeys)) {
+        voxgig_value* sep = voxgig_new_string(", ");
+        char* keys = voxgig_join_v(badkeys, sep, NULL);
+        voxgig_release(sep);
+        char* field = _fieldpath(inj, 0);
+        _pushmsg(inj, _concat(4, (const char*[]){"Unexpected keys at field ", field, ": ", keys}));
+        free(field);
+        free(keys);
       }
+      voxgig_release(badkeys);
     } else {
       /* Open: merge cval into pval. */
       voxgig_value* ml = voxgig_new_list();
@@ -1941,6 +1936,32 @@ static void _validation(voxgig_value* pval, voxgig_value* key, voxgig_value* par
     if (!voxgig_is_list(pval)) {
       voxgig_value* msg = _invalid_type_msg(&inj->path, voxgig_typename(ptype), ctype, cval);
       voxgig_list_push(voxgig_as_list(inj->errs), msg);
+    } else if (0 < voxgig_size(pval)) {
+      /* Closed list, so reject items past the end of the shape. */
+      voxgig_value* badkeys = voxgig_new_list();
+      for (int64_t i = voxgig_size(pval); i < voxgig_size(cval); i++) {
+        char kbuf[32];
+        snprintf(kbuf, sizeof(kbuf), "%lld", (long long)i);
+        voxgig_list_push(voxgig_as_list(badkeys), voxgig_new_string(kbuf));
+      }
+      if (0 < voxgig_size(badkeys)) {
+        voxgig_value* sep = voxgig_new_string(", ");
+        char* keys = voxgig_join_v(badkeys, sep, NULL);
+        voxgig_release(sep);
+        char* field = _fieldpath(inj, 0);
+        _pushmsg(inj, _concat(4, (const char*[]){"Unexpected keys at field ", field, ": ", keys}));
+        free(field);
+        free(keys);
+      }
+      voxgig_release(badkeys);
+    } else {
+      /* Empty spec list [] means list can be open (any items). */
+      voxgig_value* ml = voxgig_new_list();
+      voxgig_list_push(voxgig_as_list(ml), voxgig_retain(pval));
+      voxgig_list_push(voxgig_as_list(ml), voxgig_retain(cval));
+      voxgig_value* m = voxgig_merge(ml, VOXGIG_MAXDEPTH);
+      voxgig_release(ml);
+      voxgig_release(m);
     }
   } else if (exact) {
     if (pnone ? !cval_undef : !voxgig_equals(cval, pval)) {

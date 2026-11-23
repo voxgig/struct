@@ -2908,6 +2908,17 @@ def _validation(pval, key, parent, inj):
     elif islist(cval):
         if not islist(pval):
             inj.errs.append(_invalidTypeMsg(inj.path, typename(ptype), ctype, cval, 'V0030'))
+        elif size(pval) > 0:
+            # Closed list, so reject items past the end of the shape.
+            badkeys = [strkey(i) for i in range(size(pval), size(cval))]
+            if size(badkeys) > 0:
+                msg = (
+                    'Unexpected keys at field ' + pathify(inj.path, 1) + S_VIZ + join(badkeys, ', ')
+                )
+                inj.errs.append(msg)
+        else:
+            # Empty spec list [] means list can be open (any items).
+            merge([pval, cval])
 
     elif exact:
         if cval != pval:

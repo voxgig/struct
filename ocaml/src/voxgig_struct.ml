@@ -1984,9 +1984,19 @@ and validation pval key parent inj =
               if isnode pval then ignore (delprop pval (Str s_bopen))
             end
           end
-        end else if islist cval then
-          (if not (islist pval) then push_err inj (invalid_type_msg inj.path (typename ptype) ctype cval "V0030"))
-        else if exact_b then
+        end else if islist cval then begin
+          if not (islist pval) then push_err inj (invalid_type_msg inj.path (typename ptype) ctype cval "V0030")
+          else if size pval > 0 then begin
+            (* Closed list, so reject items past the end of the shape. *)
+            let psz = size pval in
+            let badkeys = List.init (max 0 (size cval - psz))
+                (fun i -> strkey ~key:(Num (float_of_int (psz + i))) ()) in
+            if List.length badkeys > 0 then
+              push_err inj ("Unexpected keys at field " ^ pathify ~startin:(Num 1.0) inj.path ^ s_viz ^ String.concat ", " badkeys)
+          end else
+            (* Empty spec list [] means list can be open (any items). *)
+            ignore (merge (lst [pval; cval]))
+        end else if exact_b then
           (if not (deepequal cval pval) then
              let pathmsg = if size inj.path > 1 then "at field " ^ pathify ~startin:(Num 1.0) inj.path ^ ": " else "" in
              push_err inj ("Value " ^ pathmsg ^ js_string cval ^ " should equal " ^ js_string pval ^ "."))

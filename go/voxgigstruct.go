@@ -4213,6 +4213,19 @@ func makeValidation(exact bool) Modify {
 		} else if IsList(cval) {
 			if !IsList(val) {
 				inj.Errs.Append(_invalidTypeMsg(inj.Path.List, Typename(ptype), Typename(ctype), cval))
+			} else if 0 < Size(pval) {
+				// Closed list, so reject items past the end of the shape.
+				badkeys := []string{}
+				for i := Size(pval); i < Size(cval); i++ {
+					badkeys = append(badkeys, StrKey(i))
+				}
+				if len(badkeys) > 0 {
+					inj.Errs.Append("Unexpected keys at field " + Pathify(inj.Path.List, 1) +
+						": " + strings.Join(badkeys, ", "))
+				}
+			} else {
+				// Empty spec list [] means list can be open (any items).
+				Merge([]any{pval, cval})
 			}
 		} else if exact {
 			// Select needs exact matches for scalar values.

@@ -3097,6 +3097,21 @@ partial def validation : ModifyFn := fun pval key parent inj => do
         else if islist cval then do
           if !(islist pval) then
             pushErr inj (← invalidTypeMsg d.path (typename (ptype : Int)) (ctype : Int) cval)
+          else do
+            let psz ← size pval
+            let csz ← size cval
+            if psz > 0 then do
+              -- Closed list, so reject items past the end of the shape.
+              let mut badkeys : List String := []
+              for i in [psz.toNat:csz.toNat] do
+                badkeys := strkey (vInt i) :: badkeys
+              if badkeys.length > 0 then
+                pushErr inj ("Unexpected keys at field "
+                  ++ (← pathify d.path (startin := .num 1.0)) ++ S_VIZ
+                  ++ String.intercalate ", " badkeys.reverse)
+            else do
+              -- Empty spec list [] means list can be open (any items).
+              let _ ← merge (← newList #[pval, cval])
         else if exactB then do
           if !(← deepEqual cval pval) then do
             let pathmsg ← if (← size d.path) > 1 then do

@@ -1977,6 +1977,14 @@ object struct {
             }
           } else if (islist(cval)) {
             if (!islist(pval)) pushErr(inj, invalidTypeMsg(inj.path, typename(ptype), ctype, cval, "V0030"))
+            else if (size(pval) > 0) {
+              // Closed list, so reject items past the end of the shape.
+              val badkeys = (size(pval) until size(cval)).map(i => strkey(VNum(i.toDouble)))
+              if (badkeys.nonEmpty) pushErr(inj, "Unexpected keys at field " + pathify(inj.path, VNum(1.0)) + S_VIZ + badkeys.mkString(", "))
+            } else {
+              // Empty spec list [] means list can be open (any items).
+              merge(mkList(Seq(pval, cval)))
+            }
           } else if (exactB) {
             if (!veq(cval, pval)) {
               val pathmsg = if (size(inj.path) > 1) "at field " + pathify(inj.path, VNum(1.0)) + ": " else ""

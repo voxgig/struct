@@ -3856,6 +3856,30 @@ inline void _validation(const Value& pval, const Value& key, const Value& parent
     if (!islist(pval)) {
       inj.errs->push_back(
           Value(invalid_type_msg(inj.path, typename_str(ptype), ctype, cval, "V0030")));
+    } else if (0 < size(pval)) {
+      // Closed list, so reject items past the end of the shape.
+      std::vector<std::string> badkeys;
+      for (int64_t i = size(pval); i < size(cval); i++)
+        badkeys.push_back(strkey(Value(i)));
+      if (!badkeys.empty()) {
+        auto pl = std::make_shared<List>();
+        for (auto& p : inj.path)
+          pl->push_back(Value(p));
+        std::string joined;
+        for (size_t i = 0; i < badkeys.size(); i++) {
+          if (i > 0)
+            joined += ", ";
+          joined += badkeys[i];
+        }
+        inj.errs->push_back(
+            Value("Unexpected keys at field " + pathify(Value(pl), 1, 0) + ": " + joined));
+      }
+    } else {
+      // Empty spec list [] means list can be open (any items).
+      auto args_l = std::make_shared<List>();
+      args_l->push_back(pval);
+      args_l->push_back(cval);
+      merge_v(Value(args_l));
     }
   } else if (exact) {
     if (cval != pval) {

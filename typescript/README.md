@@ -758,7 +758,7 @@ Quote inside a `validate` spec, e.g. `` '`$STRING`' ``.
 |-------------|-----------------------------------------------------------------|
 | `$MAP`      | A map.                                                          |
 | `$LIST`     | A list.                                                         |
-| `$STRING`   | A string.                                                       |
+| `$STRING`   | A string other than `''`.                                       |
 | `$NUMBER`   | A number (integer or decimal).                                  |
 | `$INTEGER`  | An integer.                                                     |
 | `$DECIMAL`  | A non-integer number.                                           |

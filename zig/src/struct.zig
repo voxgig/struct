@@ -4494,6 +4494,33 @@ fn validationModify(allocator: Allocator, _: JsonValue, key: []const u8, parent:
             // returns) sees the data.
             mergeIntoMap(pval, cval) catch {};
         }
+    } else if (islist(cval)) {
+        if (!islist(pval)) return;
+
+        const plen = pval.array.data.items.len;
+        if (0 < plen) {
+            // Closed list, so reject items past the end of the shape.
+            var bad = std.array_list.Managed([]const u8).init(allocator);
+            var i = plen;
+            while (i < cval.array.data.items.len) : (i += 1) {
+                const bk = strkey(allocator, JsonValue{ .integer = @intCast(i) }) catch continue;
+                bad.append(bk) catch {};
+            }
+            if (bad.items.len > 0) {
+                var badmsg = std.array_list.Managed(u8).init(allocator);
+                badmsg.appendSlice("Unexpected keys at field ") catch {};
+                badmsg.appendSlice(pathifySlice(allocator, inj.path[1..]) catch "<root>") catch {};
+                badmsg.appendSlice(": ") catch {};
+                for (bad.items, 0..) |bk, bi| {
+                    if (bi > 0) badmsg.appendSlice(", ") catch {};
+                    badmsg.appendSlice(bk) catch {};
+                }
+                inj.errs.append(badmsg.items) catch {};
+            }
+        } else {
+            // Empty spec list [] means list can be open (any items).
+            for (cval.array.data.items) |item| pval.array.append(item) catch {};
+        }
     } else if (!isnode(cval)) {
         if (inj.exact_mode) {
             // Exact matching for select.
@@ -4980,6 +5007,8 @@ fn validateExactMatch(
             ));
             return data_val;
         }
+        // Empty spec list [] means list can be open (any items).
+        if (0 == spec_val.array.data.items.len) return data_val;
         if (spec_val.array.data.items.len != data_val.array.data.items.len) {
             const p = try pathifySlice(allocator, path);
             try errs.append(try std.fmt.allocPrint(

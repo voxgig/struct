@@ -3201,9 +3201,9 @@ public class Struct {
 
   /**
    * Modify hook used by {@link #validate(Object, Object)}: runs after each
-   * inject step; performs type-mismatch checks, open-vs-closed map handling
-   * via {@code `$OPEN`}, exact-mode comparison, and default-value copy-over.
-   * Mirrors TS {@code _validation} (lines 2242–2333).
+   * inject step; performs type-mismatch checks, open-vs-closed map and list
+   * handling, exact-mode comparison, and default-value copy-over. Mirrors TS
+   * {@code _validation}.
    */
   public static final Modify _validation =
       (pval, key, parent, injObj, store) -> {
@@ -3261,6 +3261,25 @@ public class Struct {
         } else if (islist(cval)) {
           if (!islist(pval)) {
             inj.errs.add(_invalidTypeMsg(inj.path, typename(ptype), ctype, cval, "V0030"));
+          } else if (size(pval) > 0) {
+            // Closed list, so reject items past the end of the shape.
+            List<String> badkeys = new ArrayList<>();
+            for (int i = size(pval); i < size(cval); i++) {
+              badkeys.add(strkey(i));
+            }
+            if (!badkeys.isEmpty()) {
+              inj.errs.add(
+                  "Unexpected keys at field "
+                      + pathify(inj.path, 1)
+                      + ": "
+                      + String.join(", ", badkeys));
+            }
+          } else {
+            // Empty spec list [] means list can be open (any items).
+            List<Object> mergeArgs = new ArrayList<>();
+            mergeArgs.add(pval);
+            mergeArgs.add(cval);
+            merge(mergeArgs);
           }
         } else if (exact) {
           if (!Objects.equals(cval, pval)) {
