@@ -166,6 +166,7 @@ type Injection struct {
 	Modify  Modify           // Modify injection output.
 	Prior   *Injection       // Parent (aka prior) injection.
 	Extra   any              // Extra data.
+	Named   bool             // Current map node names keys of its own (not $ commands).
 }
 
 // Apply a custom modification to injections.
@@ -2328,6 +2329,8 @@ func Inject(
 
 	inj.descend()
 
+	inj.Named = false
+
 	// Descend into node
 	if IsNode(val) {
 		childkeys := KeysOf(val)
@@ -2347,6 +2350,7 @@ func Inject(
 		sort.Strings(normalKeys)
 		sort.Strings(transformKeys)
 		nodekeys := append(normalKeys, transformKeys...)
+		inj.Named = IsMap(val) && 0 < len(normalKeys)
 
 		nkI := 0
 		for nkI < len(nodekeys) {
@@ -2916,7 +2920,7 @@ var Transform_REF Injector = func(
 		return nil
 	}
 
-	// Get arguments: ['`$REF`', 'ref-path'].
+	// ['`$REF`', 'ref-path']: a relative path starts where this slot is, so .x is a sibling.
 	refpath := GetProp(inj.Parent, 1)
 	inj.KeyI = len(inj.Keys.List)
 
@@ -2933,8 +2937,8 @@ var Transform_REF Injector = func(
 	}
 
 	dpath := make([]string, 0)
-	if len(inj.Path.List) > 1 {
-		dpath = append(dpath, inj.Path.List[1:]...)
+	if n := len(inj.Path.List); n > 3 {
+		dpath = append(dpath, inj.Path.List[1:n-2]...)
 	}
 	refResult := GetPath(spec, refpath, &Injection{
 		Dpath:   dpath,
@@ -4183,8 +4187,8 @@ func makeValidation(exact bool) Modify {
 			ckeys := KeysOf(cval)
 			pkeys := KeysOf(pval)
 
-			// Empty spec object {} means object can be open (any keys).
-			if len(pkeys) > 0 && GetProp(pval, "`$OPEN`") != true {
+			// Only a spec written as {} is open, even if named keys resolved away.
+			if (len(pkeys) > 0 || inj.Named) && GetProp(pval, "`$OPEN`") != true {
 				// Literal presence: the shape DECLARES ckey even when its value
 				// is nil. Canonical uses `NONE === _lookup`; HasKey is Group A
 				// (value-based) and would drop records with a nil field from an

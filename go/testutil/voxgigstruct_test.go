@@ -1489,8 +1489,6 @@ func TestStruct(t *testing.T) {
 		})
 	})
 
-	// NOTE: transform-ref has some edge case failures in $REF handling
-	// (cyclic refs, nested self-refs). Kept as opt-in for now.
 	t.Run("transform-ref", func(t *testing.T) {
 		runset(t, transformSpec["ref"], func(v any) (any, error) {
 			m := v.(map[string]any)
