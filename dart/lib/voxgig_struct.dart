@@ -1212,6 +1212,8 @@ class Inj {
   Inj? prior;
   dynamic extra;
   dynamic root;
+  // Current map node names keys of its own (not $ commands).
+  bool named = false;
 }
 
 Inj? _dummy;
@@ -1241,6 +1243,7 @@ Inj _newInj(dynamic val, dynamic parent) {
   i.prior = null;
   i.extra = null;
   i.root = null;
+  i.named = false;
   return i;
 }
 
@@ -1335,6 +1338,8 @@ dynamic inject(dynamic val, dynamic store, [dynamic injdef]) {
 
   _injDescend(inj);
 
+  inj.named = false;
+
   dynamic rv;
   if (isnode(val)) {
     List<dynamic> nodekeys;
@@ -1343,6 +1348,7 @@ dynamic inject(dynamic val, dynamic store, [dynamic injdef]) {
       var normal = ks.where((k) => !k.contains(S_DS)).toList()..sort();
       var trans = ks.where((k) => k.contains(S_DS)).toList()..sort();
       nodekeys = [...normal, ...trans];
+      inj.named = normal.isNotEmpty;
     } else {
       nodekeys = List.generate((val as List).length, (i) => i.toString());
     }
@@ -1384,9 +1390,10 @@ dynamic inject(dynamic val, dynamic store, [dynamic injdef]) {
 
   inj.ival = rv;
 
-  // Literal presence: a list directive at the root can leave a null there.
-  if (inj.prior == null && _has(inj.root, S_DTOP)) {
-    return inj.root[S_DTOP];
+  // Literal presence: a root list directive can leave a null there, and a root
+  // a transform removed, such as a $REF that names nothing, gives no value.
+  if (inj.prior == null && inj.root != null) {
+    return _lookup(inj.root, S_DTOP);
   }
   if (inj.key == S_DTOP && inj.parent != null && haskey(inj.parent, S_DTOP)) {
     return getprop(inj.parent, S_DTOP);
@@ -1676,12 +1683,18 @@ dynamic _transformPack(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
 dynamic _transformRef(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
   var inj = inj0 as Inj;
   if (inj.mode != S_MVAL) return null;
+  // ['`$REF`', 'ref-path']: a relative path starts where this slot is, so .x
+  // is a sibling.
   var refpath = _lookup(inj.parent, 1);
   inj.keyi = size(inj.keys);
   var specFunc = getprop(store, S_DSPEC);
   if (!isfunc(specFunc)) return null;
   var spec = specFunc();
-  var refv = getpath(spec, refpath);
+  var dpath = slice(inj.path, 1, -2);
+  var refv = getpath(spec, refpath, <String, dynamic>{
+    'dpath': dpath,
+    'dparent': getpath(spec, dpath),
+  });
   var hasSub = false;
   if (isnode(refv)) {
     walk(refv, after: (k, v, p, pp) {
@@ -2409,7 +2422,8 @@ void _validation(dynamic pval, dynamic key, dynamic parent, dynamic inj0) {
     } else {
       var ckeys = keysof(cval);
       var pkeys = keysof(pval);
-      if (pkeys.isNotEmpty && getprop(pval, S_BOPEN) != true) {
+      // Only a spec written as {} is open, even if named keys resolved away.
+      if ((pkeys.isNotEmpty || inj.named) && getprop(pval, S_BOPEN) != true) {
         // Literal presence: the shape declares ck even when its value is null.
         // Canonical uses `NONE === _lookup`; `_lookup(...) == null` conflates
         // present-null with absent and drops null-field records from open selects.
