@@ -100,6 +100,7 @@ data Inj = Inj
   , iModify :: IORef (Maybe ModifyFn) -- ^ post-injection mutation hook
   , iPrior :: IORef (Maybe Inj)     -- ^ the enclosing injection state, if any
   , iExtra :: IORef Value           -- ^ extra store merged into lookups
+  , iNamed :: IORef Bool            -- ^ whether the current map node names keys of its own (not @$@ commands)
   }
 
 -- | The loose @Partial<Injection>@ record the public API accepts.
@@ -1354,6 +1355,7 @@ newInj v parent = do
       <*> newIORef injectHandler <*> newIORef errs <*> newIORef meta
       <*> newIORef VNoval <*> newIORef dpath <*> newIORef (VStr s_dtop)
       <*> newIORef Nothing <*> newIORef Nothing <*> newIORef VNoval
+      <*> newIORef False
 
 -- | Recurse the injection engine into a node's children.
 injDescend :: Inj -> IO Value
@@ -1401,6 +1403,7 @@ injChild inj keyi keys = do
       <*> newIORef handler <*> newIORef errs <*> newIORef meta
       <*> newIORef dparent <*> newIORef ndpath <*> newIORef base
       <*> newIORef modify <*> newIORef (Just inj) <*> newIORef extra
+      <*> newIORef False
 
 -- | Write a value into an ancestor of the current injection target.
 injSetval :: Int -> Inj -> Value -> IO Value
@@ -1451,12 +1454,14 @@ inject injarg v store = do
         _ -> return ()
       return i
   _ <- injDescend state
+  writeIORef (iNamed state) False
   v' <- if isnode v then do
           nodekeys0 <- case v of
             VMap m -> do es <- readIORef m
                          let ks = map fst es
                              normal = sort (L.filter (notElem '$') ks)
                              trans = sort (L.filter (elem '$') ks)
+                         writeIORef (iNamed state) (not (null normal))
                          return (normal ++ trans)
             VList r -> do its <- readIORef r; return [show i | i <- [0 .. length its - 1]]
             _ -> return []
@@ -1767,11 +1772,14 @@ transformRef inj _ _ store = do
     case specFunc of
       VFunc f -> do
         spec <- f inj VNoval "" VNoval
-        refv <- getpath INone spec refpath
+        ipath <- readIORef (iPath inj)
+        -- A relative path starts where this slot is, so .x is a sibling.
+        dpath <- slice ipath (VNum 1) (VNum (-2))
+        dparent <- getpath INone spec dpath
+        refv <- getpath (IDef ((defaultInjDef VNoval) { dDpath = dpath, dDparent = dparent })) spec refpath
         hasSubRef <- newIORef False
         when (isnode refv) $ do _ <- walk (Just (\_ v2 _ _ -> do when (vStrEq v2 "`$REF`") (writeIORef hasSubRef True); return v2)) Nothing VNoval refv; return ()
         -- A recursive reference stops where the data does.
-        ipath <- readIORef (iPath inj)
         tval <- getpath INone store =<< sliceM ipath (VNum (-1)) VNoval False
         hasSub <- readIORef hasSubRef
         rval <- if not hasSub || not (isNoval tval) then clone refv else return VNoval
@@ -2447,7 +2455,9 @@ validation pval key parent inj = do
             ckeys <- keysof cval
             pkeys <- keysof pval
             bopenV <- getprop pval (VStr s_bopen)
-            if not (null pkeys) && not (vIsTrue bopenV) then do
+            named <- readIORef (iNamed inj)
+            -- Only a spec written as {} is open, even if named keys resolved away.
+            if (not (null pkeys) || named) && not (vIsTrue bopenV) then do
               badkeys <- filterM (\ck -> do lk <- lookup_ pval (VStr ck); return (isNoval lk)) ckeys
               when (not (null badkeys)) $ do p <- pathifyFull path (VNum 1) VNoval False; pushErr inj ("Unexpected keys at field " ++ p ++ s_viz ++ intercalate ", " badkeys)
             else do
