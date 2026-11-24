@@ -657,6 +657,13 @@ static voxgig_value* tx_PACK(voxgig_injection* inj, voxgig_value* val, const cha
   return voxgig_new_undef();
 }
 
+static bool _isrefcmd(voxgig_value* v) {
+  if (!voxgig_is_list(v) || 0 == voxgig_list_len(voxgig_as_list(v)))
+    return false;
+  voxgig_value* head = voxgig_list_get(voxgig_as_list(v), 0);
+  return voxgig_is_string(head) && 0 == strcmp(voxgig_as_string(head), "`$REF`");
+}
+
 static voxgig_value* tx_REF(voxgig_injection* inj, voxgig_value* val, const char* ref,
                             voxgig_value* store, void* ud) {
   (void)val;
@@ -696,6 +703,32 @@ static voxgig_value* tx_REF(voxgig_injection* inj, voxgig_value* val, const char
   voxgig_value* dparent = voxgig_getpath(spec, dpath_v, NULL);
   tmp_inj->dparent = dparent;
   voxgig_value* refv = voxgig_getpath(spec, refpath, tmp_inj);
+
+  /* A chain of references that comes back to a path it has named names nothing. */
+  voxgig_value* seen = voxgig_new_list();
+  voxgig_list_push(voxgig_as_list(seen), voxgig_retain(refpath));
+  voxgig_value* next = voxgig_retain(refv);
+  while (_isrefcmd(next)) {
+    voxgig_list* nl = voxgig_as_list(next);
+    voxgig_value* nextpath = 1 < nl->len ? voxgig_retain(nl->items[1]) : voxgig_new_undef();
+    bool cycle = false;
+    voxgig_list* sl = voxgig_as_list(seen);
+    for (size_t i = 0; !cycle && i < sl->len; i++)
+      cycle = voxgig_equals(sl->items[i], nextpath);
+    if (cycle) {
+      voxgig_release(nextpath);
+      voxgig_release(refv);
+      refv = voxgig_new_undef();
+      break;
+    }
+    voxgig_list_push(sl, nextpath);
+    voxgig_value* found = voxgig_getpath(spec, nextpath, tmp_inj);
+    voxgig_release(next);
+    next = found;
+  }
+  voxgig_release(next);
+  voxgig_release(seen);
+
   voxgig_inj_free(tmp_inj);
   voxgig_release(dparent);
   voxgig_release(spec);
@@ -1084,8 +1117,7 @@ static voxgig_value* va_STRING(voxgig_injection* inj, voxgig_value* val, const c
   if ((t & VOXGIG_T_STRING) == 0) {
     voxgig_value* msg = _invalid_type_msg(&inj->path, "string", t, out);
     voxgig_list_push(voxgig_as_list(inj->errs), msg);
-    voxgig_release(out);
-    return voxgig_new_undef();
+    return out;
   }
   if (voxgig_string_len(out) == 0) {
     /* Build "Empty string at <path>" message. */
@@ -1098,8 +1130,7 @@ static voxgig_value* va_STRING(voxgig_injection* inj, voxgig_value* val, const c
     snprintf(buf, sizeof(buf), "Empty string at %s", p);
     free(p);
     voxgig_list_push(voxgig_as_list(inj->errs), voxgig_new_string(buf));
-    voxgig_release(out);
-    return voxgig_new_undef();
+    return out;
   }
   return out;
 }
@@ -1132,8 +1163,7 @@ static voxgig_value* va_TYPE(voxgig_injection* inj, voxgig_value* val, const cha
   if ((t & typev) == 0) {
     voxgig_value* msg = _invalid_type_msg(&inj->path, tname, t, out);
     voxgig_list_push(voxgig_as_list(inj->errs), msg);
-    voxgig_release(out);
-    return voxgig_new_undef();
+    return out;
   }
   return out;
 }
