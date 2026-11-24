@@ -9,10 +9,10 @@
 > `inject()`/`transform()`/`validate()`/`select()` all dispatch through
 > the canonical injector machinery: 10 transform commands
 > (`$DELETE`/`$COPY`/`$KEY`/`$ANNO`/`$MERGE`/`$EACH`/`$PACK`/`$REF`/
-> `$FORMAT`/`$APPLY`), 10 validate checkers (`$STRING`/`$TYPE`/`$ANY`/
-> `$CHILD`/`$EXACT`/`$NOF`/`$ALL`/`$LEN`/`$RANGE`/`$LIKE`), and 4 select
-> operators (`$AND`/`$OR`/`$NOT`/`$CMP`). `python3 ../tools/check_parity.py`
-> reports it `ok`.
+> `$FORMAT`/`$APPLY`), 11 validate checkers (`$STRING`/`$TYPE`/`$ANY`/
+> `$CHILD`/`$EXACT`/`$NOF`/`$ALL`/`$LEN`/`$RANGE`/`$LIKE`/`$REST`), and 4
+> select operators (`$AND`/`$OR`/`$NOT`/`$CMP`).
+> `python3 ../tools/check_parity.py` reports it `ok`.
 >
 > Passes the shared corpus (1742/1742), run on
 > [voxgig/omni](https://github.com/voxgig/omni) — the shared test runner,
@@ -565,12 +565,12 @@ implemented as `Injector` values (`transform_DELETE`, `transform_COPY`,
 Inside backticks in a `validate` spec (implemented as `validate_STRING`,
 `validate_TYPE`, `validate_ANY`, `validate_CHILD`, `validate_EXACT`,
 `validate_NOF`, `validate_ALL`, `validate_LEN`, `validate_RANGE`,
-`validate_LIKE`):
+`validate_LIKE`, `validate_REST`):
 
 `$STRING`, `$NUMBER`, `$INTEGER`, `$DECIMAL`, `$BOOLEAN`, `$NULL`,
 `$NIL`, `$MAP`, `$LIST`, `$FUNCTION`, `$INSTANCE`, `$ANY`, `$CHILD`,
-`$EXACT`, `$NOF`, `$ALL`, `$LEN`, `$RANGE`, `$LIKE`. (`$NUMBER`..`$INSTANCE`
-all share `validate_TYPE`.)
+`$EXACT`, `$NOF`, `$ALL`, `$LEN`, `$RANGE`, `$LIKE`, `$REST`.
+(`$NUMBER`..`$INSTANCE` all share `validate_TYPE`.)
 
 `$NOF` and `$ALL` are list directives. `` ['`$NOF`', n, spec, …] `` holds
 when as many specs admit the value as `n` allows, where `n` is an integer
@@ -589,6 +589,10 @@ number within the bound, a map of `min` or `gt` and `max` or `lt`.
 pattern finds, with Kotlin's `Regex`. Each takes at most one spec, which
 must also admit the value. `min` and `max` include their bound, while `gt`
 and `lt` exclude it. A `$LIKE` pattern matches anywhere unless anchored.
+
+`` '`$REST`': spec `` in a map spec checks each key the spec does not name;
+`` ['`$REST`', spec] `` as a list spec's last item checks each item after
+the named ones.
 
 A spec that names a checker this port does not define is rejected before
 any data is read, and nothing is validated. The message is

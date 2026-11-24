@@ -2267,6 +2267,57 @@ object Struct {
             }
         }
 
+    // The members a spec does not name: the map form is a key, the list form a
+    // tuple's last item. Each places clones of its spec for the loop to check.
+    val validate_REST: Injector =
+        Injector { inj, _, _, _ ->
+            if (M_KEYPRE == inj.mode) {
+                val resttm = getprop(inj.parent, inj.key)
+                val tval = getprop(inj.dparent, getelem(inj.path, -2))
+                if (ismap(tval)) {
+                    for (ckey in keysof(tval)) {
+                        if (ckey !in inj.keys) {
+                            setprop(inj.parent, ckey, clone(resttm))
+                            inj.keys.add(ckey)
+                        }
+                    }
+                }
+                inj.setval(UNDEF)
+                return@Injector UNDEF
+            }
+
+            val prior = inj.prior
+            if (M_VAL != inj.mode || prior == null || !islist(prior.parent) || 0 != inj.keyI) {
+                inj.errs.add(_restmsg(slice(inj.path, 1, null), " must be the last element of an array."))
+                return@Injector UNDEF
+            }
+
+            inj.keyI = size(inj.keys)
+            prior.modify = null
+
+            val tuple = prior.parent
+            val slot = listIndex(prior.key).toInt()
+            val dlist = prior.dparent
+            val numitems = if (islist(dlist)) size(dlist) else 0
+
+            if (numitems <= slot) {
+                inj.setval(UNDEF, 2)
+                return@Injector SKIP
+            }
+
+            val resttm = lookup(inj.parent, 1)
+            for (i in slot until numitems) setprop(tuple, i, clone(resttm))
+            for (i in size(prior.keys) until numitems) prior.keys.add(strkey(i))
+
+            prior.keyI--
+            SKIP
+        }
+
+    private fun _restmsg(
+        path: Any?,
+        problem: String,
+    ): String = "The \$REST validator at field " + pathify(path) + problem
+
     private fun describeAlternatives(tvals: List<Any?>): String {
         return lowernames(join(tvals.map { stringify(it) }, ", ", false))
     }
@@ -2593,26 +2644,47 @@ object Struct {
     private val VALIDATE_NAMES =
         listOf("\$TOP", "\$SPEC", "\$BT", "\$DS", "\$WHEN", "\$ANNO", "\$REF", "\$FORMAT", "\$APPLY", "\$OPEN")
 
-    // Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
+    // Report each checker the spec names that validate lacks, and each misplaced
+    // $REST; $EXACT's arguments are literals. Last: spec is a list's last item.
     private fun _checknames(
         spec: Any?,
         store: Any?,
         path: List<String>,
         errs: MutableList<Any?>,
+        last: Boolean = false,
     ) {
         val name = _refname(spec)
         if (null != name) {
             if (_unknownname(name, store)) {
                 errs.add("Unknown validator " + name + " at field " + pathify(path) + ".")
+            } else if ("\$REST" == name) {
+                errs.add(_restmsg(path, " must be the last element of an array."))
             }
             return
         }
 
-        if (islist(spec) && "\$EXACT" == _refname(lookup(spec, 0))) return
+        val head = if (islist(spec)) _refname(lookup(spec, 0)) else null
+        if ("\$EXACT" == head) return
 
+        if ("\$REST" == head) {
+            if (!last) {
+                errs.add(_restmsg(path, " must be the last element of an array."))
+            } else if (2 != size(spec)) {
+                errs.add(_restmsg(path, " must have exactly one spec."))
+            }
+            _checknames(lookup(spec, 1), store, path + "1", errs)
+            return
+        }
+
+        val restkey = "`\$REST`"
+        if (ismap(spec) && UNDEF !== lookup(spec, restkey) && UNDEF !== lookup(spec, "`\$CHILD`")) {
+            errs.add(_restmsg(path, " cannot be used with \$CHILD."))
+        }
+
+        val lastkey = if (islist(spec)) strkey(size(spec) - 1) else null
         for (key in keysof(spec)) {
-            if (ismap(spec)) _checknames(key, store, path, errs)
-            _checknames(lookup(spec, key), store, path + key, errs)
+            if (ismap(spec) && restkey != key) _checknames(key, store, path, errs)
+            _checknames(lookup(spec, key), store, path + key, errs, lastkey == key)
         }
     }
 
@@ -2889,6 +2961,7 @@ object Struct {
         baseStore["\$LEN"] = validate_LEN
         baseStore["\$RANGE"] = validate_RANGE
         baseStore["\$LIKE"] = validate_LIKE
+        baseStore["\$REST"] = validate_REST
 
         val mergeList = mutableListOf<Any?>(baseStore)
         if (extraRaw is Map<*, *>) mergeList.add(extraRaw)
