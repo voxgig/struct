@@ -2006,7 +2006,9 @@ defmodule Voxgig.Struct do
         spec = spec_func.(inj, nil, "", store)
         # A relative path starts where this slot is, so .x is a sibling.
         dpath = slice(ig(inj, :path), 1, -2)
-        refv = getpath(spec, refpath, vmap_new([{"dpath", dpath}, {"dparent", getpath(spec, dpath)}]))
+        refinj = vmap_new([{"dpath", dpath}, {"dparent", getpath(spec, dpath)}])
+        ref = getpath(spec, refpath, refinj)
+        refv = refchain_(spec, refinj, ref, ref, [refpath])
         flag = vlist_new([false])
 
         if isnode(refv) do
@@ -2034,6 +2036,19 @@ defmodule Voxgig.Struct do
 
         @skip
       end
+    end
+  end
+
+  # A chain of references that comes back to a path it has named names nothing.
+  defp refchain_(spec, refinj, ref, next, seen) do
+    if islist(next) and lookup_(next, 0) == "`$REF`" do
+      nextpath = lookup_(next, 1)
+
+      if nextpath in seen,
+        do: nil,
+        else: refchain_(spec, refinj, ref, getpath(spec, nextpath, refinj), [nextpath | seen])
+    else
+      ref
     end
   end
 
@@ -2262,8 +2277,8 @@ defmodule Voxgig.Struct do
     t = typify(out)
 
     cond do
-      Bitwise.band(@t_string, t) == 0 -> push_err(inj, invalid_type_msg(ig(inj, :path), "string", t, out, "V1010")); nil
-      out == @s_mt -> push_err(inj, "Empty string at " <> pathify(ig(inj, :path), 1)); nil
+      Bitwise.band(@t_string, t) == 0 -> push_err(inj, invalid_type_msg(ig(inj, :path), "string", t, out, "V1010")); keepnull_(inj, out)
+      out == @s_mt -> push_err(inj, "Empty string at " <> pathify(ig(inj, :path), 1)); out
       true -> out
     end
   end
@@ -2281,10 +2296,9 @@ defmodule Voxgig.Struct do
 
     if Bitwise.band(t, typev) == 0 do
       push_err(inj, invalid_type_msg(ig(inj, :path), tname, t, out, "V1001"))
-      nil
-    else
-      keepnull_(inj, out)
     end
+
+    keepnull_(inj, out)
   end
 
   defp type_index(tname) do
