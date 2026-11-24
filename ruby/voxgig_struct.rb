@@ -1008,7 +1008,7 @@ module VoxgigStruct
                 break
               end
             else
-              val = dparent || src
+              val = dparent
             end
           else
             val = _getprop(val, part, UNDEF)
@@ -1488,10 +1488,20 @@ module VoxgigStruct
     spec = isfunc(specFn) ? specFn.call : nil
 
     dpath = slice(inj.path, 1, -2)
-    ref = getpath(spec, refpath, {
-                    'dpath' => dpath,
-                    'dparent' => getpath(spec, dpath)
-                  })
+    refinj = { 'dpath' => dpath, 'dparent' => getpath(spec, dpath) }
+    ref = getpath(spec, refpath, refinj)
+
+    # A chain of references that comes back to a path it has named names nothing.
+    seen = [refpath]
+    nxt = ref
+    while islist(nxt) && nxt[0] == '`$REF`'
+      if seen.include?(nxt[1])
+        ref = nil
+        break
+      end
+      seen << nxt[1]
+      nxt = getpath(spec, nxt[1], refinj)
+    end
 
     hasSubRef = false
     if isnode(ref)
@@ -1869,11 +1879,11 @@ module VoxgigStruct
     t = typify(out)
     if T_string.nobits?(t)
       inj.errs << _invalidTypeMsg(inj.path, S_string, t, out, 'V1010')
-      return nil
+      return _keepnull(inj, out)
     end
     if out == S_MT
       inj.errs << "Empty string at #{pathify(inj.path, 1)}"
-      return nil
+      return out
     end
     out
   end
@@ -1908,7 +1918,7 @@ module VoxgigStruct
 
     if t.nobits?(typev)
       inj.errs << _invalidTypeMsg(inj.path, tname, t, out, 'V1001')
-      return nil
+      return _keepnull(inj, out)
     end
     _keepnull(inj, out)
   end
@@ -1917,7 +1927,7 @@ module VoxgigStruct
     _keepnull(inj, getprop(inj.dparent, inj.key))
   end
 
-  # A checker's accepted value, where a null the data holds stays in the output:
+  # The value a checker read, where a null the data holds keeps its slot:
   # returned as nil, inject's setval would delete the slot instead.
   def self._keepnull(inj, out)
     return out unless out.nil? && inj.mode == S_MVAL && !_getprop(inj.dparent, inj.key).equal?(UNDEF)
