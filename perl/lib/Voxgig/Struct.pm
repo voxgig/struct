@@ -1647,6 +1647,7 @@ sub _new_injection {
     return {
         mode    => M_VAL,
         full    => 0,
+        named   => 0,
         keyI    => 0,
         keys    => [S_DTOP],
         key     => S_DTOP,
@@ -1821,6 +1822,8 @@ sub inject {
     }
     _inj_descend($inj);
 
+    $inj->{named} = 0;
+
     if (isnode($val)) {
         my @nodekeys;
         if (ismap($val)) {
@@ -1829,6 +1832,7 @@ sub inject {
             my @plain   = grep { index($_, S_DS) < 0 } @raw;
             my @cmd     = grep { index($_, S_DS) >= 0 } @raw;
             @nodekeys = (@plain, @cmd);
+            $inj->{named} = @plain ? 1 : 0;
         }
         else {
             @nodekeys = map { "$_" } 0 .. $#$val;
@@ -2183,11 +2187,12 @@ sub transform_PACK {
 sub transform_REF {
     my ($inj, $val, $ref, $store) = @_;
     return NONE() if $inj->{mode} != M_VAL;
+    # A relative path starts where this slot is, so .x is a sibling.
     my $refpath = _lookup($inj->{parent}, 1);
     $inj->{keyI} = size($inj->{keys});
     my $specfn = getprop($store, S_DSPEC);
     my $spec = isfunc($specfn) ? $specfn->() : $specfn;
-    my $dpath = slice($inj->{path}, 1);
+    my $dpath = slice($inj->{path}, 1, -2);
     my $sub_inj = {
         dpath   => $dpath,
         dparent => getpath($spec, $dpath),
@@ -3013,7 +3018,8 @@ sub _validation {
         # which is itself truthy in Perl) leaves the map closed.
         my $open_flag = getprop($pval, '`$OPEN`');
         my $is_open = (is_jbool($open_flag) && ${$open_flag}) ? 1 : 0;
-        if (size($pkeys) > 0 && !$is_open) {
+        # Only a spec written as {} is open, even if named keys resolved away.
+        if ((size($pkeys) > 0 || $inj->{named}) && !$is_open) {
             my @badkeys;
             for my $ck (@$ckeys) {
                 if (is_none(_lookup($pval, $ck))) {
