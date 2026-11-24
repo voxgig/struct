@@ -2100,6 +2100,60 @@ validateChild inj _ _ _ = do
         return skip
   else return VNoval
 
+-- | @$REST@ validation rule: the members a spec does not name. The map form is
+-- a key, the list form a tuple's last item; each places clones of its spec for
+-- the loop to check.
+validateRest :: Injector
+validateRest inj _ _ _ = do
+  parent <- readIORef (iParent inj); key <- readIORef (iKey inj); path <- readIORef (iPath inj); keys <- readIORef (iKeys inj)
+  mode <- readIORef (iMode inj)
+  if mode == m_keypre then do
+    resttm <- getprop parent key
+    pkey <- getelem path (VNum (-2))
+    dp <- readIORef (iDparent inj)
+    tval <- getprop dp pkey
+    when (ismap tval) $ do
+      tks <- keysof tval
+      forM_ tks $ \ckey -> do
+        present <- listItems keys
+        when (not (any (`vStrEq` ckey) present)) $ do
+          cc <- clone resttm; _ <- setprop parent (VStr ckey) cc
+          ksz <- size keys; _ <- setprop keys (VNum (fromIntegral ksz)) (VStr ckey); return ()
+    _ <- injSetval1 inj VNoval
+    return VNoval
+  else do
+    prior <- readIORef (iPrior inj)
+    keyi <- readIORef (iKeyi inj)
+    tuple <- maybe (return VNoval) (readIORef . iParent) prior
+    case prior of
+      Just p | mode == m_val && islist tuple && keyi == 0 -> do
+        ksz <- size keys; writeIORef (iKeyi inj) ksz
+        writeIORef (iModify p) Nothing
+        pkey <- readIORef (iKey p)
+        dlist <- readIORef (iDparent p)
+        numitems <- if islist dlist then size dlist else return 0
+        case listKey pkey of
+          Just slot | fromIntegral numitems <= slot -> do _ <- injSetval 2 inj VNoval; return ()
+          slot -> do
+            resttm <- lookup_ parent (VNum 1)
+            forM_ (maybe [] (\s -> [fromIntegral s .. numitems - 1]) slot) $ \i -> do
+              cc <- clone resttm; _ <- setprop tuple (VNum (fromIntegral i)) cc; return ()
+            pkeys <- readIORef (iKeys p)
+            pksz <- size pkeys
+            forM_ [pksz .. numitems - 1] $ \i -> do
+              n <- size pkeys; _ <- setprop pkeys (VNum (fromIntegral n)) (VStr (strkey (VNum (fromIntegral i)))); return ()
+            pk <- readIORef (iKeyi p); writeIORef (iKeyi p) (pk - 1)
+        return skip
+      _ -> do
+        sl <- slice path (VNum 1) VNoval
+        m <- restmsg sl " must be the last element of an array."
+        pushErr inj m
+        return VNoval
+
+-- | The message for a misplaced @$REST@ at a path.
+restmsg :: Value -> String -> IO String
+restmsg path problem = do p <- pathify path; return ("The $REST validator at field " ++ p ++ problem)
+
 -- | @\`$EXACT\`@ validation rule (value must equal exactly).
 validateExact :: Injector
 validateExact inj _ _ _ = do
@@ -2408,25 +2462,41 @@ isCheckerName :: String -> Bool
 isCheckerName ('$' : rest) = not (null rest) && all (\c -> c >= 'A' && c <= 'Z') rest
 isCheckerName _ = False
 
--- | Report each checker the spec names that validate lacks. The arguments of
--- @$EXACT@ are literals.
-checkNames :: Value -> Value -> [Value] -> Value -> IO ()
-checkNames spec store path errs = case refName spec of
+-- | Report each checker the spec names that validate lacks, and each misplaced
+-- @$REST@. The arguments of @$EXACT@ are literals. The flag: the spec is a
+-- list's last item.
+checkNames :: Value -> Value -> [Value] -> Value -> Bool -> IO ()
+checkNames spec store path errs isLast = case refName spec of
   Just name -> do
     unknown <- unknownName name store
-    when unknown $ do
+    if unknown then do
       p <- pathify =<< mkList path
-      esz <- size errs
-      _ <- setprop errs (VNum (fromIntegral esz)) (VStr ("Unknown validator " ++ name ++ " at field " ++ p ++ "."))
-      return ()
+      push ("Unknown validator " ++ name ++ " at field " ++ p ++ ".")
+    else when (name == "$REST") $ restAt " must be the last element of an array."
   Nothing -> do
     first <- lookup_ spec (VNum 0)
-    when (not (islist spec && refName first == Just "$EXACT")) $ do
+    let hd = if islist spec then refName first else Nothing
+    if hd == Just "$EXACT" then return ()
+    else if hd == Just "$REST" then do
+      ssz <- size spec
+      if not isLast then restAt " must be the last element of an array."
+      else when (ssz /= 2) $ restAt " must have exactly one spec."
+      sp1 <- lookup_ spec (VNum 1)
+      checkNames sp1 store (path ++ [VNum 1]) errs False
+    else do
+      rest <- lookup_ spec (VStr restkey)
+      child0 <- lookup_ spec (VStr "`$CHILD`")
+      when (ismap spec && not (isNoval rest) && not (isNoval child0)) $ restAt " cannot be used with $CHILD."
+      lastkey <- if islist spec then do ssz <- size spec; return (Just (strkey (VNum (fromIntegral (ssz - 1))))) else return Nothing
       ks <- keysof spec
       forM_ ks $ \k -> do
-        when (ismap spec) $ checkNames (VStr k) store path errs
+        when (ismap spec && k /= restkey) $ checkNames (VStr k) store path errs False
         child <- lookup_ spec (VStr k)
-        checkNames child store (path ++ [VStr k]) errs
+        checkNames child store (path ++ [VStr k]) errs (lastkey == Just k)
+  where
+    restkey = "`$REST`"
+    push msg = do esz <- size errs; _ <- setprop errs (VNum (fromIntegral esz)) (VStr msg); return ()
+    restAt problem = do p <- mkList path; m <- restmsg p problem; push m
 
 -- | The name a whole-string reference gives, when it is a checker name in any case.
 refName :: Value -> Maybe String
@@ -2525,6 +2595,7 @@ validate injarg dat spec = do
   put "$LEN" (VFunc validateLen)
   put "$RANGE" (VFunc validateRange)
   put "$LIKE" (VFunc validateLike)
+  put "$REST" (VFunc validateRest)
   extraMap <- if isNoval extra then emptyMap else return extra
   errMap <- mkMap [(s_derrs, errs)]
   ls <- mkList [base, extraMap, errMap]; store <- mergeD ls (VNum 1)
@@ -2533,7 +2604,7 @@ validate injarg dat spec = do
   let idef = (defaultInjDef errs) { dMeta = meta, dExtra = store, dModify = Just validation, dHandler = Just validateHandler }
   -- A spec that names an unknown checker validates nothing.
   numerrs <- size errs
-  checkNames spec store [] errs
+  checkNames spec store [] errs False
   esz0 <- size errs
   out <- if numerrs < esz0 then clone dat else transform (IDef idef) dat spec
   esz <- size errs
