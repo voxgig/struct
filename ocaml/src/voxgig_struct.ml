@@ -1675,6 +1675,51 @@ and validate_child inj _v _ref _store =
     end
   end else Noval
 
+(* The members a spec does not name: the map form is a key, the list form a
+   tuple's last item. Each places clones of its spec for the loop to check. *)
+and validate_rest inj _v _ref _store =
+  let parent = inj.parent in let key = inj.key in let path = inj.path in let keys = inj.keys in
+  if inj.mode = m_keypre then begin
+    let resttm = getprop parent key in
+    let tval = getprop inj.dparent (getelem path (Num (-2.0))) in
+    (if ismap tval then
+       List.iter (fun ckey ->
+           if not (List.mem (Str ckey) (match keys with List r -> !r | _ -> [])) then begin
+             ignore (setprop parent (Str ckey) (clone resttm));
+             ignore (setprop keys (Num (float_of_int (size keys))) (Str ckey))
+           end) (keysof tval));
+    ignore (inj_setval inj Noval);
+    Noval
+  end else
+    match inj.prior with
+    | Some prior when inj.mode = m_val && islist prior.parent && inj.keyi = 0 ->
+      inj.keyi <- size keys;
+      prior.modify <- None;
+      let tuple = prior.parent in
+      let dlist = prior.dparent in
+      let numitems = if islist dlist then size dlist else 0 in
+      (match list_key prior.key with
+       | Some slot when float_of_int numitems <= slot -> ignore (inj_setval ~ancestor:2 inj Noval)
+       | slot ->
+         let resttm = lookup_ parent (Num 1.0) in
+         (match slot with
+          | Some s ->
+            for i = int_of_float s to numitems - 1 do
+              ignore (setprop tuple (Num (float_of_int i)) (clone resttm))
+            done
+          | None -> ());
+         for i = size prior.keys to numitems - 1 do
+           ignore (setprop prior.keys (Num (float_of_int (size prior.keys)))
+                     (Str (strkey ~key:(Num (float_of_int i)) ())))
+         done;
+         prior.keyi <- prior.keyi - 1);
+      skip
+    | _ ->
+      push_err inj (restmsg (slice ~start:(Num 1.0) path) " must be the last element of an array.");
+      Noval
+
+and restmsg path problem = "The $REST validator at field " ^ pathify path ^ problem
+
 and validate_exact inj _v _ref _store =
   if inj.mode = m_val then begin
     let parent = inj.parent in
@@ -1944,19 +1989,34 @@ and slotval inj =
   | None -> inj.dparent
   | Some prior -> lookup_ prior.dparent prior.key
 
-(* Report each checker the spec names that validate lacks; $EXACT's arguments are literals. *)
-and checknames spec store path errs =
+(* Report each checker the spec names that validate lacks, and each misplaced
+   $REST; $EXACT's arguments are literals. Last: spec is a list's last item. *)
+and checknames ?(last = false) spec store path errs =
+  let push msg = ignore (setprop errs (Num (float_of_int (size errs))) (Str msg)) in
   match refname spec with
   | Some name ->
     if unknownname name store then
-      ignore (setprop errs (Num (float_of_int (size errs)))
-                (Str ("Unknown validator " ^ name ^ " at field " ^ pathify (lst path) ^ ".")))
+      push ("Unknown validator " ^ name ^ " at field " ^ pathify (lst path) ^ ".")
+    else if name = "$REST" then
+      push (restmsg (lst path) " must be the last element of an array.")
   | None ->
-    if not (islist spec && refname (lookup_ spec (Num 0.0)) = Some "$EXACT") then
+    let head = if islist spec then refname (lookup_ spec (Num 0.0)) else None in
+    if head = Some "$EXACT" then ()
+    else if head = Some "$REST" then begin
+      if not last then push (restmsg (lst path) " must be the last element of an array.")
+      else if size spec <> 2 then push (restmsg (lst path) " must have exactly one spec.");
+      checknames (lookup_ spec (Num 1.0)) store (path @ [Num 1.0]) errs
+    end else begin
+      let restkey = "`$REST`" in
+      if ismap spec && not (is_noval (lookup_ spec (Str restkey)))
+         && not (is_noval (lookup_ spec (Str "`$CHILD`"))) then
+        push (restmsg (lst path) " cannot be used with $CHILD.");
+      let lastkey = if islist spec then Some (strkey ~key:(Num (float_of_int (size spec - 1))) ()) else None in
       List.iter (fun k ->
-          if ismap spec then checknames (Str k) store path errs;
-          checknames (lookup_ spec (Str k)) store (path @ [Str k]) errs)
+          if ismap spec && k <> restkey then checknames (Str k) store path errs;
+          checknames ~last:(lastkey = Some k) (lookup_ spec (Str k)) store (path @ [Str k]) errs)
         (keysof spec)
+    end
 
 (* The name a whole-string reference gives, when it is a checker name in any case. *)
 and refname v =
@@ -2045,6 +2105,7 @@ and validate ?(inj = INone) data spec =
   put "$LEN" (Func validate_len);
   put "$RANGE" (Func validate_range);
   put "$LIKE" (Func validate_like);
+  put "$REST" (Func validate_rest);
   let store = merge ~maxdepth:(Num 1.0) (lst [base; (if is_noval extra then empty_map () else extra); Map { entries = [(s_derrs, errs)] }]) in
   let meta = (match inj with IDef d when not (is_noval d.d_meta) -> d.d_meta | _ -> empty_map ()) in
   ignore (setprop meta (Str s_bexact) (getprop ~alt:(Bool false) meta (Str s_bexact)));
