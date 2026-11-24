@@ -123,6 +123,7 @@ public func inject(_ val: Value, _ store: Value, _ injdef: Injection? = nil) -> 
     inj = injdef!
   }
   _ = inj.descend()
+  inj.named = false
   var out = val
   if isnode(val) {
     var nodekeys: [String] = []
@@ -132,6 +133,7 @@ public func inject(_ val: Value, _ store: Value, _ injdef: Injection? = nil) -> 
       let plain = allSorted.filter { !$0.contains(S_DS) }
       let cmd = allSorted.filter { $0.contains(S_DS) }
       nodekeys = plain + cmd
+      inj.named = !plain.isEmpty
     } else if case .list(let l) = val {
       nodekeys = (0..<l.items.count).map { String($0) }
     }

@@ -51,6 +51,8 @@ public final class Injection: @unchecked Sendable {
   public var modify: Modify? = nil
   public var prior: Injection? = nil
   public var extra: Value = .noval
+  // Current map node names keys of its own (not $ commands).
+  public var named: Bool = false
 
   public init(val: Value, parent: Value) {
     self.val = val

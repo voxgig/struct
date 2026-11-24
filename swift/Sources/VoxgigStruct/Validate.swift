@@ -478,7 +478,7 @@ public func _validation(
       let pkeys = keysof(.map(pm))
       let openV = getprop(.map(pm), .string(S_BOPEN))
       let isOpen: Bool = openV.asBool ?? false
-      if pkeys.count > 0 && !isOpen {
+      if (pkeys.count > 0 || inj.named) && !isOpen {
         var badkeys: [String] = []
         for ck in ckeys {
           if lookup(.map(pm), .string(ck)).isNoval { badkeys.append(ck) }
