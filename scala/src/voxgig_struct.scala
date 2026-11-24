@@ -1360,7 +1360,15 @@ object struct {
           val spec = f(inj, Noval, "", Noval)
           val dpath = slice(inj.path, VNum(1.0), VNum(-2.0))
           val refdef = new InjDef; refdef.dPath = dpath; refdef.dParent = getpath(spec, dpath, INone)
-          val refv = getpath(spec, refpath, IDef(refdef))
+          var refv = getpath(spec, refpath, IDef(refdef))
+          // A chain of references that comes back to a path it has named names nothing.
+          val seen = ArrayBuffer(refpath)
+          var next = refv
+          while (islist(next) && lookup_(next, VNum(0.0)) == VStr("`$REF`")) {
+            val nextpath = lookup_(next, VNum(1.0))
+            if (seen.contains(nextpath)) { refv = Noval; next = Noval }
+            else { seen += nextpath; next = getpath(spec, nextpath, IDef(refdef)) }
+          }
           var hasSub = false
           if (isnode(refv)) walk(refv, before = Some((_k, v2, _p, _path) => { if (v2 == VStr("`$REF`")) hasSub = true; v2 }))
           // A recursive reference stops where the data does.
@@ -1547,9 +1555,9 @@ object struct {
   private val validateString: Injector = (inj, _v, _r, _s) => {
     val out = lookup_(inj.dparent, inj.key)
     val t = typify(out)
-    if ((T_string & t) == 0) { pushErr(inj, invalidTypeMsg(inj.path, S_string, t, out, "V1010")); Noval }
-    else if (out == VStr(S_MT)) { pushErr(inj, "Empty string at " + pathify(inj.path, VNum(1.0))); Noval }
-    else out
+    if ((T_string & t) == 0) pushErr(inj, invalidTypeMsg(inj.path, S_string, t, out, "V1010"))
+    else if (out == VStr(S_MT)) pushErr(inj, "Empty string at " + pathify(inj.path, VNum(1.0)))
+    out
   }
 
   private val validateType: Injector = (inj, _v, refstr, _s) => {
@@ -1559,8 +1567,8 @@ object struct {
     val typev = if (tname == S_nil) typev0 | T_null else typev0
     val out = lookup_(inj.dparent, inj.key)
     val t = typify(out)
-    if ((t & typev) == 0) { pushErr(inj, invalidTypeMsg(inj.path, tname, t, out, "V1001")); Noval }
-    else out
+    if ((t & typev) == 0) pushErr(inj, invalidTypeMsg(inj.path, tname, t, out, "V1001"))
+    out
   }
 
   private val validateAny: Injector = (inj, _v, _r, _s) => lookup_(inj.dparent, inj.key)
