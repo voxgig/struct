@@ -1424,11 +1424,11 @@ const transform_REF = (inj, _val, _ref, store) => {
     if (M_VAL !== inj.mode) {
         return NONE;
     }
-    // Get arguments: ['`$REF`', 'ref-path'].
+    // ['`$REF`', 'ref-path']: a relative path starts where this slot is, so .x is a sibling.
     const refpath = _lookup(inj.parent, 1);
     inj.keyI = size(inj.keys);
     const spec = getprop(store, S_DSPEC)();
-    const dpath = slice(inj.path, 1);
+    const dpath = slice(inj.path, 1, -2);
     const ref = getpath(spec, refpath, {
         dpath,
         dparent: getpath(spec, dpath),

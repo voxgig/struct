@@ -405,6 +405,23 @@ special: set: [
   { in: { data: a:b:c:4001, spec:a:b:c:4002, inj:meta:'`$EXACT`':true }
     err: 'Value at field a.b.c: 4001 should equal 4002.' }
 
+  # A relative $REF path counts from the node holding the $REF.
+  { in: { data: {a20:{x:1,y:2}}, spec: {a20:{x:'`$NUMBER`',y:['`$REF`','.x']}} },
+    out: {a20:{x:1,y:2}} }
+  { in: { data: {a21:{x:1,y:s}}, spec: {a21:{x:'`$NUMBER`',y:['`$REF`','.x']}} },
+    err: 'Expected field a21.y to be number, but found string: s.' }
+  { in: { data: {x22:1,a22:{y:s}}, spec: {x22:'`$NUMBER`',a22:{y:['`$REF`','..x22']}} },
+    err: 'Expected field a22.y to be number, but found string: s.' }
+  { in: { data: {a23:[1,s]}, spec: {a23:['`$NUMBER`',['`$REF`','.0']]} },
+    err: 'Expected field a23.1 to be number, but found string: s.' }
+
+  # A $REF that names nothing leaves its key undeclared.
+  { in: { data: {a24:{y:2}}, spec: {a24:{y:['`$REF`','...x']}} },
+    err: 'Unexpected keys at field a24: y' }
+  { in: { data: {a25:1}, spec: {a25:['`$REF`','missing']} },
+    err: 'Unexpected keys at field <root>: a25' }
+  { in: { data: {}, spec: {a26:['`$REF`','missing']} }, out: {} }
+
 
 ]
 

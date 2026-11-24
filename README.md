@@ -395,7 +395,9 @@ port's regex means; one inside the RE2 subset matches the same everywhere on
 single-line ASCII text.
 `` ['`$REF`', path] `` works in a validate spec too: it checks a value against
 the spec at `path`, which may contain the reference itself, so a recursive
-shape such as a tree needs no checker of its own.
+shape such as a tree needs no checker of its own. A path that starts with a
+dot counts from the map or list holding the reference, so `'.x'` names a
+sibling.
 
 A spec that names a checker `validate` does not define, such as
 `` `$FOO` `` or the misspelling `` `$string` ``, is rejected before any data

@@ -312,7 +312,10 @@ were written in its place, and a path to a sibling reuses its spec the same
 way. The path names a place in the spec, not in the data. A reference that
 reaches itself stops wherever the data does, so the tree ends at its leaves;
 any other reference checks its field like the spec it names, required fields
-included.
+included. A path that starts with a dot counts from the map or list holding
+the reference: `'.x'` names a sibling, and `'..x'` a sibling of that map. A
+path that names nothing, such as one that climbs past the top of the spec,
+leaves its field with no spec, which a closed map refuses.
 
 ### Require an exact literal (no type coercion)
 ```js
