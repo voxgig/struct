@@ -2111,7 +2111,18 @@ def transform_REF(inj, _val, _ref, store):
         return UNDEF
     spec = spec_func()
     dpath = slice(inj.path, 1, -2)
-    ref = getpath(spec, refpath, {'dpath': dpath, 'dparent': getpath(spec, dpath)})
+    refinj = {'dpath': dpath, 'dparent': getpath(spec, dpath)}
+    ref = getpath(spec, refpath, refinj)
+
+    # A chain of references that comes back to a path it has named names nothing.
+    seen = [refpath]
+    nxt = ref
+    while islist(nxt) and _lookup(nxt, 0) == '`$REF`':
+        if _lookup(nxt, 1) in seen:
+            ref = UNDEF
+            break
+        seen.append(_lookup(nxt, 1))
+        nxt = getpath(spec, _lookup(nxt, 1), refinj)
 
     # Check if ref has another $REF inside
     hasSubRef = False
@@ -2405,11 +2416,11 @@ def validate_STRING(inj, _val=UNDEF, _ref=UNDEF, _store=UNDEF):
 
     if (T_string & t) == 0:
         inj.errs.append(_invalidTypeMsg(inj.path, S_string, t, out, 'V1010'))
-        return UNDEF
+        return _keepnull(inj, out)
 
     if out == S_MT:
         inj.errs.append('Empty string at ' + pathify(inj.path, 1))
-        return UNDEF
+        return out
 
     return out
 
@@ -2441,7 +2452,7 @@ def validate_TYPE(inj, _val=UNDEF, ref=UNDEF, _store=UNDEF):
 
     if (t & typev) == 0:
         inj.errs.append(_invalidTypeMsg(inj.path, tname, t, out, 'V1001'))
-        return UNDEF
+        return _keepnull(inj, out)
 
     return _keepnull(inj, out)
 
