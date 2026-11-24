@@ -214,6 +214,7 @@ class Injection:
         self.modify = modify
         self.extra = extra
         self.prior: Injection | None = None
+        self.named = False  # Current map node names keys of its own (not $ commands).
         self.dparent = UNDEF
         self.dpath = [S_DTOP]
         self.root = (
@@ -1655,6 +1656,8 @@ def inject(val, store, injdef=UNDEF):
 
     inj.descend()
 
+    inj.named = False
+
     # Descend into node.
     if isnode(val):
         # Keys are sorted alphanumerically to ensure determinism.
@@ -1665,6 +1668,7 @@ def inject(val, store, injdef=UNDEF):
             transform_keys = [k for k in val if S_DS in k]
             transform_keys.sort()
             nodekeys = normal_keys + transform_keys
+            inj.named = len(normal_keys) > 0
         else:
             nodekeys = list(range(len(val)))
 
@@ -1725,12 +1729,8 @@ def inject(val, store, injdef=UNDEF):
     inj.val = val
 
     # Return the (possibly transform-replaced) root only at top level (prior is None).
-    # Presence, not haskey, so that a root replaced by a null returns None.
-    if (
-        getattr(inj, 'prior', None) is None
-        and getattr(inj, 'root', None) is not None
-        and _present(inj.root, S_DTOP)
-    ):
+    # A transform that removed the root, such as a $REF that names nothing, leaves no value.
+    if getattr(inj, 'prior', None) is None and getattr(inj, 'root', None) is not None:
         return _lookup(inj.root, S_DTOP)
     if inj.key == S_DTOP and inj.parent is not UNDEF and haskey(inj.parent, S_DTOP):
         return getprop(inj.parent, S_DTOP)
@@ -2101,7 +2101,7 @@ def transform_REF(inj, _val, _ref, store):
     if inj.mode != S_MVAL:
         return UNDEF
 
-    # Get arguments: ['`$REF`', 'ref-path']
+    # ['`$REF`', 'ref-path']: a relative path starts where this slot is, so .x is a sibling.
     refpath = getprop(inj.parent, 1)
     inj.keyI = len(inj.keys)
 
@@ -2110,7 +2110,8 @@ def transform_REF(inj, _val, _ref, store):
     if not callable(spec_func):
         return UNDEF
     spec = spec_func()
-    ref = getpath(spec, refpath)
+    dpath = slice(inj.path, 1, -2)
+    ref = getpath(spec, refpath, {'dpath': dpath, 'dparent': getpath(spec, dpath)})
 
     # Check if ref has another $REF inside
     hasSubRef = False
@@ -2883,8 +2884,8 @@ def _validation(pval, key, parent, inj):
         ckeys = keysof(cval)
         pkeys = keysof(pval)
 
-        # Empty spec object {} means object can be open (any keys).
-        if len(pkeys) > 0 and getprop(pval, '`$OPEN`') is not True:
+        # Only a spec written as {} is open, even if named keys resolved away.
+        if (len(pkeys) > 0 or inj.named) and getprop(pval, '`$OPEN`') is not True:
             badkeys = []
             for ckey in ckeys:
                 # Literal presence: the shape DECLARES ckey even when its value
