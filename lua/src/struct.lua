@@ -1889,6 +1889,7 @@ function Injection:new(val, parent)
     modify = NONE,
     prior = NONE,
     extra = NONE,
+    named = false,
   }
   setmetatable(o, self)
   return o
@@ -2023,6 +2024,8 @@ local function inject(val, store, injdef)
 
   inj:descend()
 
+  inj.named = false
+
   -- Descend into node.
   if isnode(val) then
     local nodekeys
@@ -2040,6 +2043,7 @@ local function inject(val, store, injdef)
       table.sort(regular_keys)
       table.sort(ds_keys)
       nodekeys = flatten({ regular_keys, ds_keys })
+      inj.named = 0 < #regular_keys
     else
       nodekeys = {}
       for i = 1, #val do
@@ -2521,7 +2525,7 @@ local function transform_REF(inj, _val, _ref, store)
     return NONE
   end
 
-  -- Get arguments: ['`$REF`', 'ref-path'].
+  -- ['`$REF`', 'ref-path']: a relative path starts where this slot is, so .x is a sibling.
   local refpath = getprop(inj.parent, 1)
   inj.keyI = size(inj.keys)
 
@@ -2529,7 +2533,7 @@ local function transform_REF(inj, _val, _ref, store)
   local specfn = getprop(store, S_DSPEC)
   local spec = specfn()
 
-  local dpath = slice(inj.path, 1)
+  local dpath = slice(inj.path, 1, -2)
   local ref = getpath(spec, refpath, {
     dpath = dpath,
     dparent = getpath(spec, dpath),
@@ -3343,8 +3347,8 @@ _validation = function(pval, key, parent, inj)
     local ckeys = keysof(cval)
     local pkeys = keysof(pval)
 
-    -- Empty spec object {} means object can be open (any keys).
-    if 0 < size(pkeys) and true ~= getprop(pval, "`$OPEN`") then
+    -- Only a spec written as {} is open, even if named keys resolved away.
+    if (0 < size(pkeys) or inj.named) and true ~= getprop(pval, "`$OPEN`") then
       local badkeys = {}
 
       for _, ckey in ipairs(ckeys) do
