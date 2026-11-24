@@ -1484,7 +1484,8 @@ defmodule Voxgig.Struct do
       modify: nil,
       prior: nil,
       extra: nil,
-      root: nil
+      root: nil,
+      named: false
     })
   end
 
@@ -1544,7 +1545,8 @@ defmodule Voxgig.Struct do
       dpath: vlist_new(list_items(ig(inj, :dpath))),
       dparent: ig(inj, :dparent),
       extra: ig(inj, :extra),
-      root: ig(inj, :root)
+      root: ig(inj, :root),
+      named: false
     })
   end
 
@@ -1590,6 +1592,7 @@ defmodule Voxgig.Struct do
       end
 
     inj_descend(inj)
+    is_(inj, :named, false)
 
     rv =
       cond do
@@ -1599,6 +1602,7 @@ defmodule Voxgig.Struct do
               ks = Enum.map(map_pairs(val), &elem(&1, 0))
               normal = ks |> Enum.filter(fn k -> not String.contains?(k, @s_ds) end) |> Enum.sort()
               trans = ks |> Enum.filter(fn k -> String.contains?(k, @s_ds) end) |> Enum.sort()
+              is_(inj, :named, normal != [])
               normal ++ trans
             else
               n = length(list_items(val))
@@ -1628,8 +1632,9 @@ defmodule Voxgig.Struct do
     is_(inj, :ival, rv)
 
     cond do
-      # Read literally: a null a list directive set at $TOP is the result.
-      ig(inj, :prior) == nil and holds_(ig(inj, :root), @s_dtop) ->
+      # Read literally: a null a list directive set at $TOP is the result,
+      # and a $TOP a directive removed leaves no value.
+      ig(inj, :prior) == nil and ig(inj, :root) != nil ->
         lookup_(ig(inj, :root), @s_dtop)
 
       ig(inj, :key) == @s_dtop and ig(inj, :parent) != nil and haskey(ig(inj, :parent), @s_dtop) ->
@@ -1999,7 +2004,9 @@ defmodule Voxgig.Struct do
         nil
       else
         spec = spec_func.(inj, nil, "", store)
-        refv = getpath(spec, refpath)
+        # A relative path starts where this slot is, so .x is a sibling.
+        dpath = slice(ig(inj, :path), 1, -2)
+        refv = getpath(spec, refpath, vmap_new([{"dpath", dpath}, {"dparent", getpath(spec, dpath)}]))
         flag = vlist_new([false])
 
         if isnode(refv) do
@@ -2655,7 +2662,8 @@ defmodule Voxgig.Struct do
                 ckeys = keysof(cval)
                 pkeys = keysof(pval)
 
-                if pkeys != [] and getprop(pval, @s_bopen) != true do
+                # Only a spec written as {} is open, even if named keys resolved away.
+                if (pkeys != [] or ig(inj, :named)) and getprop(pval, @s_bopen) != true do
                   # Literal presence: the shape DECLARES ck even when its value
                   # is nil. Canonical uses `NONE === _lookup`; `lookup_` here
                   # returns nil for BOTH absent and present-nil, so testing
