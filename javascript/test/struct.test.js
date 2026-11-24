@@ -919,6 +919,12 @@ describe('struct', async () => {
     )
   })
 
+  test('validate-rest', async () => {
+    await runsetflags(spec.validate.rest, { null: false }, (vin) =>
+      struct.validate(vin.data, vin.spec),
+    )
+  })
+
   test('validate-unknown', async () => {
     await runsetflags(spec.validate.unknown, { null: false }, (vin) =>
       struct.validate(vin.data, vin.spec),
