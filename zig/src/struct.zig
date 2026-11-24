@@ -1858,12 +1858,9 @@ pub fn getpathInj(allocator: Allocator, path_val: JsonValue, store_in: JsonValue
         store = try expand(allocator, store);
     }
 
-    // Single empty part (empty string path) → return source/dparent.
-    // But NOT for multiple empty parts (.. ancestor paths).
-    if (numparts == 1 and parts[0].len == 0) {
-        if (inj) |ij| return ij.dparent;
-        return getpropFromStore(store);
-    }
+    // An empty path finds the source, with an injection or without; "." is
+    // the one that finds dparent.
+    if (numparts == 1 and parts[0].len == 0) return getpropFromStore(store);
     // Single "." (splits to ["",""]) → return dparent.
     if (numparts == 2 and parts[0].len == 0 and parts[1].len == 0) {
         if (inj) |ij| return ij.dparent;
@@ -2785,11 +2782,10 @@ fn cmdValidateType(allocator: Allocator, inj: *Injection, tname: []const u8, tbi
     if (tbit == T_string) {
         if (0 == (@as(i64, T_string) & t)) {
             try inj.errs.append(try invalidTypeMsg(allocator, inj.path, tname, out));
-            return .null;
+            return try setchecked(allocator, inj, out);
         }
         if (out == .string and out.string.len == 0) {
             try inj.errs.append(try std.fmt.allocPrint(allocator, "Empty string at {s}", .{try pathifySlice(allocator, inj.path[1..])}));
-            return .null;
         }
         _ = try inj.setval(out, 0);
         return out;
@@ -2797,7 +2793,6 @@ fn cmdValidateType(allocator: Allocator, inj: *Injection, tname: []const u8, tbi
 
     if (0 == (@as(i64, tbit) & t)) {
         try inj.errs.append(try invalidTypeMsg(allocator, inj.path, tname, out));
-        return .null;
     }
     return try setchecked(allocator, inj, out);
 }
@@ -4034,6 +4029,14 @@ fn scanForRef(val: JsonValue, found: *bool) void {
     }
 }
 
+// The path a $REF list names, when val is one.
+fn refnext(val: JsonValue) ?JsonValue {
+    if (val != .array) return null;
+    const elems = val.array.data.items;
+    if (0 == elems.len or elems[0] != .string or !std.mem.eql(u8, elems[0].string, "`$REF`")) return null;
+    return if (1 < elems.len) elems[1] else JsonValue{ .null = {} };
+}
+
 fn cmdRef(allocator: Allocator, inj: *Injection, store: JsonValue) !JsonValue {
     if (inj.mode != M_VAL) return .null;
 
@@ -4066,7 +4069,23 @@ fn cmdRef(allocator: Allocator, inj: *Injection, store: JsonValue) !JsonValue {
     };
 
     // Resolve the ref path within the spec.
-    const ref_result = try getpathInj(allocator, JsonValue{ .string = refpath }, spec_val, ref_inj);
+    var ref_result = try getpathInj(allocator, JsonValue{ .string = refpath }, spec_val, ref_inj);
+
+    // A chain of references that comes back to a path it has named names nothing.
+    var seen = std.array_list.Managed(JsonValue).init(allocator);
+    try seen.append(refpath_val);
+    var next = ref_result;
+    while (refnext(next)) |nextpath| {
+        const looped = for (seen.items) |p| {
+            if (deepequal(p, nextpath)) break true;
+        } else false;
+        if (looped) {
+            ref_result = .null;
+            break;
+        }
+        try seen.append(nextpath);
+        next = try getpathInj(allocator, nextpath, spec_val, ref_inj);
+    }
 
     var has_sub_ref = false;
     if (isnode(ref_result)) scanForRef(ref_result, &has_sub_ref);
