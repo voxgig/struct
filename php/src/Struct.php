@@ -2309,10 +2309,23 @@ class Struct
         $spec = is_callable($specFn) ? $specFn() : self::undef();
 
         $dpath = self::slice($state->path, 1, -2);
-        $ref = self::getpath($spec, $refpath, (object) [
+        $refinj = (object) [
             'dpath' => $dpath,
             'dparent' => self::getpath($spec, $dpath),
-        ]);
+        ];
+        $ref = self::getpath($spec, $refpath, $refinj);
+
+        // A chain of references that comes back to a path it has named names nothing.
+        $seen = [$refpath];
+        for ($next = $ref; self::islist($next) && '`$REF`' === self::_getprop($next, 0);) {
+            $nextpath = self::_getprop($next, 1);
+            if (in_array($nextpath, $seen, true)) {
+                $ref = self::undef();
+                break;
+            }
+            $seen[] = $nextpath;
+            $next = self::getpath($spec, $nextpath, $refinj);
+        }
 
         $hasSubRef = false;
         if (self::isnode($ref)) {
@@ -2879,13 +2892,13 @@ class Struct
         if (0 === (self::T_string & $t)) {
             $msg = self::_invalidTypeMsg($inj->path, self::S_string, $t, $out);
             $inj->errs[] = $msg;
-            return self::undef();
+            return $out;
         }
 
         if (self::S_MT === $out) {
             $msg = 'Empty string at ' . self::pathify($inj->path, 1);
             $inj->errs[] = $msg;
-            return self::undef();
+            return $out;
         }
 
         return $out;
@@ -2986,7 +2999,7 @@ class Struct
         $t = self::typify($out);
         if (0 === ($t & $typev)) {
             $inj->errs[] = self::_invalidTypeMsg($inj->path, $tname, $t, $out);
-            return self::undef();
+            return $out;
         }
 
         return $out;
