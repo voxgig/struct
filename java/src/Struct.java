@@ -1427,7 +1427,7 @@ public class Struct {
                 if (ascends <= size(dpath)) {
                   val = getpath(store, fullpath);
                 } else {
-                  val = null;
+                  val = UNDEF;
                 }
                 break;
               }
@@ -1517,6 +1517,8 @@ public class Struct {
 
     inj.descend();
 
+    inj.named = false;
+
     if (isnode(val)) {
       List<String> nodekeys = keysof(val);
 
@@ -1535,6 +1537,7 @@ public class Struct {
         nodekeys = new ArrayList<>(nonDollar.size() + dollar.size());
         nodekeys.addAll(nonDollar);
         nodekeys.addAll(dollar);
+        inj.named = !nonDollar.isEmpty();
       }
 
       for (int nkI = 0; nkI < nodekeys.size(); nkI++) {
@@ -2367,7 +2370,7 @@ public class Struct {
         if (!(injObj instanceof Injection inj)) return UNDEF;
         if (inj.mode != M_VAL) return UNDEF;
 
-        // Group B: $REF arg ['`$REF`','ref-path'] read raw (TS _lookup(parent,1)).
+        // Group B: ['`$REF`','ref-path'] read raw; a relative path starts where this slot is, so .x is a sibling.
         Object refpath = lookup(inj.parent, 1);
         inj.keyI = size(inj.keys);
 
@@ -2380,7 +2383,7 @@ public class Struct {
           spec = specHolder;
         }
 
-        Object dpathRaw = slice(inj.path, 1, null);
+        Object dpathRaw = slice(inj.path, 1, -2);
         List<String> dpath =
             dpathRaw instanceof List<?> dl
                 ? new ArrayList<>((List<String>) dl)
@@ -3234,7 +3237,8 @@ public class Struct {
           List<String> ckeys = keysof(cval);
           List<String> pkeys = keysof(pval);
 
-          if (size(pkeys) > 0 && !Boolean.TRUE.equals(getprop(pval, "`$OPEN`"))) {
+          // Only a spec written as {} is open, even if named keys resolved away.
+          if ((size(pkeys) > 0 || inj.named) && !Boolean.TRUE.equals(getprop(pval, "`$OPEN`"))) {
             List<String> badkeys = new ArrayList<>();
             for (String ck : ckeys) {
               // Group B literal presence: a key the SHAPE declares is allowed
@@ -4160,12 +4164,14 @@ public class Struct {
     public Modify modify;                    // optional value-mutation hook
     public Injection prior;                  // calling injection (chain upwards)
     public Object extra;                     // free-form passthrough
+    public boolean named;                    // current map node names keys of its own (not $ commands)
 
     /** Top-level constructor: mirrors {@code new Injection(val, parent)} in TS. */
     public Injection(Object val, Object parent) {
       this.val = val;
       this.parent = parent;
       this.errs = new ArrayList<>();
+      this.named = false;
       this.dparent = UNDEF;
       this.dpath = new ArrayList<>(List.of(S_DTOP));
       this.mode = M_VAL;
