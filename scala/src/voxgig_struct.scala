@@ -54,6 +54,7 @@ object struct {
     var modify: Option[Modify] = None
     var prior: Option[Inj] = None
     var extra: Value = Noval
+    var named: Boolean = false // current map node names keys of its own (not $ commands)
   }
 
   final class InjDef {
@@ -1014,7 +1015,7 @@ object struct {
     i.keys = mkList(Seq(VStr(S_DTOP))); i.key = VStr(S_DTOP); i.ival = v; i.parent = parent
     i.path = mkList(Seq(VStr(S_DTOP))); i.nodes = mkList(Seq(parent)); i.handler = injectHandler
     i.errs = emptyList(); i.meta = emptyMap(); i.dparent = Noval; i.dpath = mkList(Seq(VStr(S_DTOP)))
-    i.base = VStr(S_DTOP); i.modify = None; i.prior = None; i.extra = Noval
+    i.base = VStr(S_DTOP); i.modify = None; i.prior = None; i.extra = Noval; i.named = false
     i
   }
 
@@ -1084,6 +1085,8 @@ object struct {
     }
     injDescend(state)
 
+    state.named = false
+
     val rv: Value =
       if (isnode(v)) {
         var nodekeys: Seq[String] = v match {
@@ -1091,6 +1094,7 @@ object struct {
             val ks = m.keysIterator.toSeq
             val normal = ks.filter(k => k.indexOf('$') < 0).sorted
             val trans = ks.filter(k => k.indexOf('$') >= 0).sorted
+            state.named = normal.nonEmpty
             normal ++ trans
           case VList(b) => b.indices.map(_.toString)
           case _ => Seq.empty
@@ -1348,12 +1352,15 @@ object struct {
   private val transformRef: Injector = (inj, _v, _r, store) => {
     if (inj.mode != M_VAL) Noval
     else {
+      // ['`$REF`', 'ref-path']: a relative path starts where this slot is, so .x is a sibling.
       val refpath = lookup_(inj.parent, VNum(1.0))
       inj.keyi = size(inj.keys)
       getprop(store, VStr(S_DSPEC)) match {
         case VFunc(f) =>
           val spec = f(inj, Noval, "", Noval)
-          val refv = getpath(spec, refpath, INone)
+          val dpath = slice(inj.path, VNum(1.0), VNum(-2.0))
+          val refdef = new InjDef; refdef.dPath = dpath; refdef.dParent = getpath(spec, dpath, INone)
+          val refv = getpath(spec, refpath, IDef(refdef))
           var hasSub = false
           if (isnode(refv)) walk(refv, before = Some((_k, v2, _p, _path) => { if (v2 == VStr("`$REF`")) hasSub = true; v2 }))
           // A recursive reference stops where the data does.
@@ -1967,7 +1974,8 @@ object struct {
             else {
               val ckeys = keysof(cval)
               val pkeys = keysof(pval)
-              if (pkeys.nonEmpty && !(getprop(pval, VStr(S_BOPEN)) == VBool(true))) {
+              // Only a spec written as {} is open, even if named keys resolved away.
+              if ((pkeys.nonEmpty || inj.named) && !(getprop(pval, VStr(S_BOPEN)) == VBool(true))) {
                 val badkeys = ckeys.filter(ck => isNoval(lookup_(pval, VStr(ck))))
                 if (badkeys.nonEmpty) pushErr(inj, "Unexpected keys at field " + pathify(inj.path, VNum(1.0)) + S_VIZ + badkeys.mkString(", "))
               } else {
