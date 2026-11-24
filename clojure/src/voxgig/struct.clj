@@ -953,7 +953,7 @@
                :path (alist-of (concat (ig inj :path) [key]))
                :nodes (alist-of (concat (ig inj :nodes) [val]))
                :handler (ig inj :handler) :errs (ig inj :errs) :meta (ig inj :meta)
-               :base (ig inj :base) :modify (ig inj :modify)})]
+               :base (ig inj :base) :modify (ig inj :modify) :named false})]
     (is! cinj :prior inj)
     (is! cinj :dpath (alist-of (ig inj :dpath)))
     (is! cinj :dparent (ig inj :dparent))
@@ -986,7 +986,7 @@
                  inj (new-inj
                       {:mode S-MVAL :full false :keyI 0 :keys (alist-of [S-DTOP]) :key S-DTOP
                        :val val :parent parent :path (alist-of [S-DTOP]) :nodes (alist-of [parent])
-                       :handler _injecthandler :base S-DTOP
+                       :handler _injecthandler :base S-DTOP :named false
                        :modify (when injdef (getprop injdef "modify"))
                        :meta (getprop injdef "meta" (lhm))
                        :errs (getprop store S-DERRS (alist))})]
@@ -1000,6 +1000,7 @@
                (when (getprop injdef "dpath") (is! inj :dpath (getprop injdef "dpath"))))
              inj))]
      (inj-descend inj)
+     (is! inj :named false)
 
      (let [val
            (cond
@@ -1009,6 +1010,7 @@
                                (let [ks (vec (map str (map-keys val)))
                                      normal (sort (clojure.core/filter #(not (.contains ^String % S-DS)) ks))
                                      trans (sort (clojure.core/filter #(.contains ^String % S-DS) ks))]
+                                 (is! inj :named (> (count normal) 0))
                                  (alist-of (concat normal trans)))
                                (alist-of (map str (range (.size ^List val))))))]
                (loop [nkI 0]
@@ -1046,8 +1048,9 @@
        (is! inj :val val)
 
        (cond
-         ;; Read literally: a null a list directive set at $TOP is the result.
-         (and (nil? (ig inj :prior)) (_holds (ig inj :root) S-DTOP))
+         ;; Read literally: a null a list directive set at $TOP is the result,
+         ;; and a $TOP a directive removed leaves no value.
+         (and (nil? (ig inj :prior)) (some? (ig inj :root)))
          (_lookup (ig inj :root) S-DTOP)
          (and (= (ig inj :key) S-DTOP) (some? (ig inj :parent)) (haskey (ig inj :parent) S-DTOP))
          (getprop (ig inj :parent) S-DTOP)
@@ -1276,7 +1279,9 @@
         (if-not (isfunc spec-func)
           nil
           (let [spec (spec-func)
-                ref (getpath spec refpath)
+                ;; A relative path starts where this slot is, so .x is a sibling.
+                dpath (slice (ig inj :path) 1 -2)
+                ref (getpath spec refpath (doto (lhm) (.put "dpath" dpath) (.put "dparent" (getpath spec dpath))))
                 hasSubRef (atom false)]
             (when (isnode ref)
               (walk ref (fn [_k v _p _path] (when (= v "`$REF`") (reset! hasSubRef true)) v)))
@@ -1815,7 +1820,8 @@
                 (if-not (ismap pval)
                   (.add ^List (ig inj :errs) (_invalidTypeMsg (ig inj :path) (typename ptype) ctype cval "V0020"))
                   (let [ckeys (keysof cval) pkeys (keysof pval)]
-                    (if (and (> (count pkeys) 0) (not (true? (getprop pval "`$OPEN`"))))
+                    ;; Only a spec written as {} is open, even if named keys resolved away.
+                    (if (and (or (> (count pkeys) 0) (ig inj :named)) (not (true? (getprop pval "`$OPEN`"))))
                       ;; Literal presence: the shape DECLARES the key even when
                       ;; its value is nil. Canonical uses `NONE === _lookup`;
                       ;; `haskey` is Group A (value-based) and would drop records
