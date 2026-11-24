@@ -72,6 +72,7 @@ voxgig_injection* voxgig_inj_new(voxgig_value* val, voxgig_value* parent) {
   inj->modify_val = NULL;
   inj->prior = NULL;
   inj->extra = NULL;
+  inj->named = false;
   return inj;
 }
 
@@ -193,6 +194,7 @@ voxgig_injection* voxgig_inj_child(voxgig_injection* parent, size_t keyI,
   cinj->modify_val = parent->modify_val ? voxgig_retain(parent->modify_val) : NULL;
   cinj->prior = parent;
   cinj->extra = parent->extra;
+  cinj->named = false;
   return cinj;
 }
 
@@ -597,6 +599,8 @@ voxgig_value* voxgig_inject(voxgig_value* val, voxgig_value* store, voxgig_injec
 
   voxgig_inj_descend(inj);
 
+  inj->named = false;
+
   if (voxgig_is_node(val)) {
     /* Get keys; if map, partition non-$ then $. */
     voxgig_strvec nodekeys = voxgig_keysof(val);
@@ -612,6 +616,7 @@ voxgig_value* voxgig_inject(voxgig_value* val, voxgig_value* store, voxgig_injec
         else
           voxgig_strvec_push(&part1, k);
       }
+      inj->named = 0 < part1.len;
       voxgig_strvec_clear(&nodekeys);
       for (size_t i = 0; i < part1.len; i++)
         voxgig_strvec_push(&nodekeys, part1.data[i]);

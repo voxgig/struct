@@ -681,9 +681,9 @@ static voxgig_value* tx_REF(voxgig_injection* inj, voxgig_value* val, const char
     spec = voxgig_new_undef();
   }
 
-  /* dpath = slice(inj.path, 1) */
+  /* dpath = slice(inj.path, 1, -2): the node holding this slot, so .x is a sibling. */
   voxgig_value* dpath_v = voxgig_new_list();
-  for (size_t i = 1; i < inj->path.len; i++)
+  for (size_t i = 1; i + 2 < inj->path.len; i++)
     voxgig_list_push(voxgig_as_list(dpath_v), voxgig_new_string(inj->path.data[i]));
 
   /* Build child injection state for the inner getpath. */
@@ -697,6 +697,7 @@ static voxgig_value* tx_REF(voxgig_injection* inj, voxgig_value* val, const char
   tmp_inj->dparent = dparent;
   voxgig_value* refv = voxgig_getpath(spec, refpath, tmp_inj);
   voxgig_inj_free(tmp_inj);
+  voxgig_release(dparent);
   voxgig_release(spec);
 
   /* Walk refv for sub-refs. */
@@ -1895,7 +1896,8 @@ static void _validation(voxgig_value* pval, voxgig_value* key, voxgig_value* par
     voxgig_value* openv = voxgig_getprop(pval, bopen, NULL);
     bool is_open = voxgig_is_bool(openv) && voxgig_as_bool(openv);
     voxgig_release(openv);
-    if (pkeys.len > 0 && !is_open) {
+    /* Only a spec written as {} is open, even if named keys resolved away. */
+    if ((pkeys.len > 0 || inj->named) && !is_open) {
       /* Closed object: gather badkeys. */
       voxgig_value* badkeys = voxgig_new_list();
       for (size_t i = 0; i < ckeys.len; i++) {
