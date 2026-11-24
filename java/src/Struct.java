@@ -2663,6 +2663,65 @@ public class Struct {
         return UNDEF;
       };
 
+  // The members a spec does not name: the map form is a key, the list form a
+  // tuple's last item. Each places clones of its spec for the loop to check.
+  public static final Injector validate_REST =
+      (injObj, val, ref, store) -> {
+        if (!(injObj instanceof Injection inj)) return UNDEF;
+
+        if (inj.mode == M_KEYPRE) {
+          Object resttm = getprop(inj.parent, inj.key);
+          Object tval = getprop(inj.dparent, getelem(inj.path, -2));
+
+          if (ismap(tval)) {
+            for (String ckey : keysof(tval)) {
+              if (!inj.keys.contains(ckey)) {
+                setprop(inj.parent, ckey, clone(resttm));
+                inj.keys.add(ckey);
+              }
+            }
+          }
+
+          inj.setval(UNDEF);
+          return UNDEF;
+        }
+
+        Injection prior = inj.prior;
+        if (inj.mode != M_VAL || prior == null || !islist(prior.parent) || inj.keyI != 0) {
+          inj.errs.add(_restmsg(slice(inj.path, 1, null), " must be the last element of an array."));
+          return UNDEF;
+        }
+
+        inj.keyI = size(inj.keys);
+        prior.modify = null;
+
+        Object tuple = prior.parent;
+        int slot = (int) listIndex(prior.key);
+        Object dlist = prior.dparent;
+        int numitems = islist(dlist) ? size(dlist) : 0;
+
+        if (numitems <= slot) {
+          inj.setval(UNDEF, 2);
+          return SKIP;
+        }
+
+        // Group B: the $REST spec is read raw (TS _lookup(parent,1)).
+        Object resttm = lookup(inj.parent, 1);
+        for (int i = slot; i < numitems; i++) {
+          setprop(tuple, i, clone(resttm));
+        }
+        for (int i = size(prior.keys); i < numitems; i++) {
+          prior.keys.add(strkey(i));
+        }
+
+        prior.keyI--;
+        return SKIP;
+      };
+
+  private static String _restmsg(Object path, String problem) {
+    return "The $REST validator at field " + pathify(path) + problem;
+  }
+
   private static String _describeAlternatives(List<Object> tvals) {
     List<Object> parts = new ArrayList<>(tvals.size());
     for (Object tval : tvals) {
@@ -3049,27 +3108,50 @@ public class Struct {
   private static final List<String> VALIDATE_NAMES =
       List.of("$TOP", "$SPEC", "$BT", "$DS", "$WHEN", "$ANNO", "$REF", "$FORMAT", "$APPLY", "$OPEN");
 
-  // Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
-  private static void _checknames(Object spec, Object store, List<String> path, List<Object> errs) {
+  // Report each checker the spec names that validate lacks, and each misplaced
+  // $REST; $EXACT's arguments are literals. Last: spec is a list's last item.
+  private static void _checknames(
+      Object spec, Object store, List<String> path, List<Object> errs, boolean last) {
     String name = _refname(spec);
     if (null != name) {
       if (_unknownname(name, store)) {
         errs.add("Unknown validator " + name + " at field " + pathify(path) + ".");
+      } else if ("$REST".equals(name)) {
+        errs.add(_restmsg(path, " must be the last element of an array."));
       }
       return;
     }
 
-    if (islist(spec) && "$EXACT".equals(_refname(lookup(spec, 0)))) {
+    String head = islist(spec) ? _refname(lookup(spec, 0)) : null;
+    if ("$EXACT".equals(head)) {
       return;
     }
 
+    if ("$REST".equals(head)) {
+      if (!last) {
+        errs.add(_restmsg(path, " must be the last element of an array."));
+      } else if (2 != size(spec)) {
+        errs.add(_restmsg(path, " must have exactly one spec."));
+      }
+      List<String> spath = new ArrayList<>(path);
+      spath.add("1");
+      _checknames(lookup(spec, 1), store, spath, errs, false);
+      return;
+    }
+
+    String restkey = "`$REST`";
+    if (ismap(spec) && UNDEF != lookup(spec, restkey) && UNDEF != lookup(spec, "`$CHILD`")) {
+      errs.add(_restmsg(path, " cannot be used with $CHILD."));
+    }
+
+    String lastkey = islist(spec) ? strkey(size(spec) - 1) : null;
     for (String key : keysof(spec)) {
-      if (ismap(spec)) {
-        _checknames(key, store, path, errs);
+      if (ismap(spec) && !restkey.equals(key)) {
+        _checknames(key, store, path, errs, false);
       }
       List<String> kpath = new ArrayList<>(path);
       kpath.add(key);
-      _checknames(lookup(spec, key), store, kpath, errs);
+      _checknames(lookup(spec, key), store, kpath, errs, key.equals(lastkey));
     }
   }
 
@@ -3545,6 +3627,7 @@ public class Struct {
     baseStore.put("$LEN", validate_LEN);
     baseStore.put("$RANGE", validate_RANGE);
     baseStore.put("$LIKE", validate_LIKE);
+    baseStore.put("$REST", validate_REST);
 
     List<Object> mergeList = new ArrayList<>();
     mergeList.add(baseStore);
@@ -3577,7 +3660,7 @@ public class Struct {
 
     // A spec that names an unknown checker validates nothing.
     int numerrs = errs.size();
-    _checknames(spec, store, new ArrayList<>(), errs);
+    _checknames(spec, store, new ArrayList<>(), errs, false);
 
     Object out = numerrs < errs.size() ? clone(data) : transform(data, spec, opts);
 
