@@ -153,6 +153,19 @@ basic: {
     # Several unexpected keys are joined with ", ".
     { in: { data: {a7:1,b7:2,c7:3}, spec: {a7:'`$NUMBER`'}},
       err: 'Unexpected keys at field <root>: b7, c7' }
+
+    # A spec that names keys stays closed when the data gives none of them.
+    { in: { data: {b8:1}, spec: {a8:['`$NOF`',1,'`$NUMBER`','`$NIL`']} },
+      err: 'Unexpected keys at field <root>: b8' }
+    { in: { data: {a9:1,b9:1}, spec: {a9:['`$NOF`',1,'`$NUMBER`','`$NIL`']} },
+      err: 'Unexpected keys at field <root>: b9' }
+    { in: { data: {b10:1}, spec: {a10:'`$ANY`'} }, err: 'Unexpected keys at field <root>: b10' }
+    { in: { data: {b11:1}, spec: {a11:'`$NUMBER`'} },
+      err: 'Expected field a11 to be number, but found no value. | Unexpected keys at field <root>: b11' }
+    { in: { data: {x12:{b12:1}}, spec: {x12:{a12:['`$NOF`',1,'`$NUMBER`','`$NIL`']}} },
+      err: 'Unexpected keys at field x12: b12' }
+    { in: { data: {}, spec: {a13:['`$NOF`',1,'`$NUMBER`','`$NIL`']} }, out: {} }
+    { in: { data: {b14:1}, spec: {} }, out: {b14:1} }
   ]
 }
 

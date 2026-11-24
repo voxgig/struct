@@ -1150,14 +1150,14 @@ function inject(val, store, injdef) {
     inj.descend();
     // console.log('INJ-START', val, inj.mode, inj.key, inj.val,
     //  't=', inj.path, 'P=', inj.parent, 'dp=', inj.dparent, 'ST=', store.$TOP)
+    inj.named = false;
     if (isnode(val)) {
         let nodekeys;
         nodekeys = keysof(val);
         if (ismap(val)) {
-            nodekeys = flatten([
-                filter(nodekeys, (n) => !n[1].includes(S_DS)),
-                filter(nodekeys, (n) => n[1].includes(S_DS)),
-            ]);
+            const named = filter(nodekeys, (n) => !n[1].includes(S_DS));
+            nodekeys = flatten([named, filter(nodekeys, (n) => n[1].includes(S_DS))]);
+            inj.named = 0 < size(named);
         }
         else {
             nodekeys = keysof(val);
@@ -1943,8 +1943,8 @@ const _validation = (pval, key, parent, inj) => {
         }
         const ckeys = keysof(cval);
         const pkeys = keysof(pval);
-        // Empty spec object {} means object can be open (any keys).
-        if (0 < size(pkeys) && true !== getprop(pval, '`$OPEN`')) {
+        // Only a spec written as {} is open, even if named keys resolved away.
+        if ((0 < size(pkeys) || inj.named) && true !== getprop(pval, '`$OPEN`')) {
             const badkeys = [];
             for (const ckey of ckeys) {
                 // Literal presence: _validation needs to know if the SHAPE declares
@@ -2240,6 +2240,7 @@ class Injection {
         this.val = val;
         this.parent = parent;
         this.errs = [];
+        this.named = false;
         this.dparent = NONE;
         this.dpath = [S_DTOP];
         this.mode = M_VAL;

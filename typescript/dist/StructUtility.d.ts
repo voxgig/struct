@@ -107,6 +107,7 @@ declare class Injection {
     modify?: Modify;
     prior?: Injection;
     extra?: any;
+    named: boolean;
     constructor(val: any, parent: any);
     toString(prefix?: string): string;
     descend(): any;
