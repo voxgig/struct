@@ -2069,6 +2069,69 @@ dynamic _validateChild(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
   return null;
 }
 
+// The members a spec does not name: the map form is a key, the list form a
+// tuple's last item. Each places clones of its spec for the loop to check.
+dynamic _validateRest(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
+  var inj = inj0 as Inj;
+  var parent = inj.parent;
+  var keys = inj.keys;
+  var path = inj.path;
+
+  if (inj.mode == S_MKEYPRE) {
+    var resttm = getprop(parent, inj.key);
+    var tval = getprop(inj.dparent, getelem(path, -2));
+
+    if (ismap(tval)) {
+      for (var ckey in keysof(tval)) {
+        if (!(keys as List).contains(ckey)) {
+          setprop(parent, ckey, clone(resttm));
+          setprop(keys, size(keys), ckey);
+        }
+      }
+    }
+
+    _injSetval(inj, null);
+    return null;
+  }
+
+  var prior = inj.prior;
+  if (inj.mode != S_MVAL ||
+      prior == null ||
+      !islist(prior.parent) ||
+      inj.keyi != 0) {
+    _pushErr(inj,
+        _restmsg(slice(path, 1), ' must be the last element of an array.'));
+    return null;
+  }
+
+  inj.keyi = size(keys);
+  prior.modify = null;
+
+  var tuple = prior.parent;
+  var slot = _listIndex(prior.key) ?? -1;
+  var dlist = prior.dparent;
+  var numitems = islist(dlist) ? size(dlist) : 0;
+
+  if (numitems <= slot) {
+    _injSetval(inj, null, 2);
+    return SKIP;
+  }
+
+  var itemtm = _lookup(parent, 1);
+  for (var i = slot; i < numitems; i++) {
+    setprop(tuple, i, clone(itemtm));
+  }
+  for (var i = size(prior.keys); i < numitems; i++) {
+    setprop(prior.keys, size(prior.keys), strkey(i));
+  }
+
+  prior.keyi = prior.keyi - 1;
+  return SKIP;
+}
+
+String _restmsg(dynamic path, String problem) =>
+    'The \$REST validator at field ' + pathify(path) + problem;
+
 dynamic _validateExact(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
   var inj = inj0 as Inj;
   if (inj.mode != S_MVAL) {
@@ -2551,6 +2614,7 @@ dynamic validate(dynamic data, dynamic spec, [dynamic injdef]) {
   base['\$LEN'] = _validateLen;
   base['\$RANGE'] = _validateRange;
   base['\$LIKE'] = _validateLike;
+  base['\$REST'] = _validateRest;
   var store = merge([
     base,
     extra == null ? <String, dynamic>{} : extra,
@@ -2593,24 +2657,46 @@ const _VALIDATE_NAMES = [
   '\$OPEN',
 ];
 
-// Report each checker the spec names that validate lacks; $EXACT's arguments
-// are literals.
-void _checknames(
-    dynamic spec, dynamic store, List<dynamic> path, dynamic errs) {
+// Report each checker the spec names that validate lacks, and each misplaced
+// $REST; $EXACT's arguments are literals. Last: spec is a list's last item.
+void _checknames(dynamic spec, dynamic store, List<dynamic> path, dynamic errs,
+    [bool last = false]) {
   var name = _refname(spec);
   if (name != null) {
     if (_unknownname(name, store)) {
       setprop(errs, size(errs),
           'Unknown validator ' + name + ' at field ' + pathify(path) + '.');
+    } else if (name == '\$REST') {
+      setprop(errs, size(errs),
+          _restmsg(path, ' must be the last element of an array.'));
     }
     return;
   }
 
-  if (islist(spec) && _refname(_lookup(spec, 0)) == '\$EXACT') return;
+  var head = islist(spec) ? _refname(_lookup(spec, 0)) : null;
+  if (head == '\$EXACT') return;
 
+  if (head == '\$REST') {
+    if (!last) {
+      setprop(errs, size(errs),
+          _restmsg(path, ' must be the last element of an array.'));
+    } else if (size(spec) != 2) {
+      setprop(errs, size(errs), _restmsg(path, ' must have exactly one spec.'));
+    }
+    _checknames(_lookup(spec, 1), store, [...path, 1], errs);
+    return;
+  }
+
+  const restkey = '`\$REST`';
+  if (ismap(spec) && _has(spec, restkey) && _has(spec, '`\$CHILD`')) {
+    setprop(errs, size(errs), _restmsg(path, ' cannot be used with \$CHILD.'));
+  }
+
+  var lastkey = islist(spec) ? strkey(size(spec) - 1) : null;
   for (var key in keysof(spec)) {
-    if (ismap(spec)) _checknames(key, store, path, errs);
-    _checknames(_lookup(spec, key), store, [...path, key], errs);
+    if (ismap(spec) && key != restkey) _checknames(key, store, path, errs);
+    _checknames(
+        _lookup(spec, key), store, [...path, key], errs, key == lastkey);
   }
 }
 
