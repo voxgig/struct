@@ -2518,6 +2518,15 @@ injectorArgs = function(argTypes, args)
   return found
 end
 
+local function _includes(list, val)
+  for _, item in ipairs(list) do
+    if item == val then
+      return true
+    end
+  end
+  return false
+end
+
 -- Transform: resolve a reference to another part of the spec.
 -- Format: ['`$REF`', 'ref-path']
 local function transform_REF(inj, _val, _ref, store)
@@ -2534,10 +2543,21 @@ local function transform_REF(inj, _val, _ref, store)
   local spec = specfn()
 
   local dpath = slice(inj.path, 1, -2)
-  local ref = getpath(spec, refpath, {
-    dpath = dpath,
-    dparent = getpath(spec, dpath),
-  })
+  local refinj = { dpath = dpath, dparent = getpath(spec, dpath) }
+  local ref = getpath(spec, refpath, refinj)
+
+  -- A chain of references that comes back to a path it has named names nothing.
+  local seen = { refpath }
+  local nextref = ref
+  while islist(nextref) and "`$REF`" == getprop(nextref, 0) do
+    local nextpath = getprop(nextref, 1)
+    if _includes(seen, nextpath) then
+      ref = NONE
+      break
+    end
+    table.insert(seen, nextpath)
+    nextref = getpath(spec, nextpath, refinj)
+  end
 
   local hasSubRef = false
   if isnode(ref) then
@@ -2780,13 +2800,13 @@ local function validate_STRING(inj)
   if 0 == (T_string & t) then
     local msg = _invalidTypeMsg(inj.path, S_string, t, out, "V1010")
     table.insert(inj.errs, msg)
-    return NONE
+    return out
   end
 
   if S_MT == out then
     local msg = "Empty string at " .. pathify(inj.path, 1)
     table.insert(inj.errs, msg)
-    return NONE
+    return out
   end
 
   return out
@@ -2816,7 +2836,7 @@ local function validate_TYPE(inj, _val, ref)
   local t = typify(nil == out and 1 < #inj.path and NOVAL or out)
   if 0 == (t & typev) then
     table.insert(inj.errs, _invalidTypeMsg(inj.path, tname, t, out, "V1001"))
-    return NONE
+    return out
   end
 
   return out
