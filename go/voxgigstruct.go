@@ -3717,6 +3717,69 @@ var validate_CHILD Injector = func(
 	return nil
 }
 
+// The members a spec does not name: the map form is a key, the list form a
+// tuple's last item. Each places clones of its spec for the loop to check.
+var validate_REST Injector = func(
+	inj *Injection,
+	_val any,
+	ref *string,
+	store any,
+) any {
+	if M_KEYPRE == inj.Mode {
+		resttm := GetProp(inj.Parent, inj.Key)
+		tval := GetProp(inj.Dparent, inj.Path.List[len(inj.Path.List)-2])
+
+		if IsMap(tval) {
+			for _, ckey := range KeysOf(tval) {
+				if !slices.Contains(inj.Keys.List, ckey) {
+					SetProp(inj.Parent, ckey, Clone(resttm))
+					inj.Keys.Append(ckey)
+				}
+			}
+		}
+
+		inj.setval(nil)
+		return nil
+	}
+
+	prior := inj.Prior
+	if M_VAL != inj.Mode || nil == prior || !IsList(prior.Parent) || 0 != inj.KeyI {
+		inj.Errs.Append(_restmsg(inj.Path.List[1:], " must be the last element of an array."))
+		return nil
+	}
+
+	inj.KeyI = len(inj.Keys.List)
+	prior.Modify = nil
+
+	tuple := prior.Parent
+	slot, _ := _listkey(prior.Key)
+	dlist := prior.Dparent
+	numitems := 0
+	if IsList(dlist) {
+		numitems = Size(dlist)
+	}
+
+	if numitems <= slot {
+		inj.setval(nil, 2)
+		return SKIP
+	}
+
+	resttm := denoval(_lookup(inj.Parent, 1))
+	for i := slot; i < numitems; i++ {
+		SetProp(tuple, i, Clone(resttm))
+	}
+	for i := len(prior.Keys.List); i < numitems; i++ {
+		prior.Keys.Append(StrKey(i))
+	}
+
+	prior.KeyI--
+	return SKIP
+}
+
+func _restmsg(path []string, problem string) string {
+	return "The $REST validator at field " + Pathify(path) + problem
+}
+
 // Set after Validate is defined: these validators call Validate.
 var validate_NOF Injector
 var validate_ALL Injector
@@ -4372,6 +4435,7 @@ func Validate(
 		"$LEN":      validate_LEN,
 		"$RANGE":    validate_RANGE,
 		"$LIKE":     validate_LIKE,
+		"$REST":     validate_REST,
 	}
 
 	// Add any extra validation commands
@@ -4405,7 +4469,7 @@ func Validate(
 
 	// A spec that names an unknown checker validates nothing.
 	numerrs := len(errs.List)
-	_checknames(spec, store, []string{}, errs)
+	_checknames(spec, store, []string{}, errs, false)
 
 	var out any
 	if numerrs < len(errs.List) {
@@ -4716,6 +4780,7 @@ func validateCollectExact(
 		"$LEN":      validate_LEN,
 		"$RANGE":    validate_RANGE,
 		"$LIKE":     validate_LIKE,
+		"$REST":     validate_REST,
 	}
 
 	for k, fn := range extra {
@@ -4726,7 +4791,7 @@ func validateCollectExact(
 
 	// A spec that names an unknown checker validates nothing.
 	numerrs := len(errs.List)
-	_checknames(spec, store, []string{}, errs)
+	_checknames(spec, store, []string{}, errs, false)
 	if numerrs < len(errs.List) {
 		return
 	}
@@ -5350,26 +5415,49 @@ var validateNames = []string{
 	"$OPEN",
 }
 
-// Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
-func _checknames(spec any, store map[string]any, path []string, errs *ListRef[any]) {
+// Report each checker the spec names that validate lacks, and each misplaced
+// $REST; $EXACT's arguments are literals. Last: spec is a list's last item.
+func _checknames(spec any, store map[string]any, path []string, errs *ListRef[any], last bool) {
 	name := _refname(spec)
 	if "" != name {
 		if _unknownname(name, store) {
 			errs.Append("Unknown validator " + name + " at field " + Pathify(path) + ".")
+		} else if "$REST" == name {
+			errs.Append(_restmsg(path, " must be the last element of an array."))
 		}
 		return
 	}
 
-	if IsList(spec) && "$EXACT" == _refname(GetProp(spec, 0)) {
+	head := ""
+	if IsList(spec) {
+		head = _refname(GetProp(spec, 0))
+	}
+	if "$EXACT" == head {
 		return
 	}
 
+	if "$REST" == head {
+		if !last {
+			errs.Append(_restmsg(path, " must be the last element of an array."))
+		} else if 2 != Size(spec) {
+			errs.Append(_restmsg(path, " must have exactly one spec."))
+		}
+		_checknames(GetProp(spec, 1), store, append(append(make([]string, 0, len(path)+1), path...), "1"), errs, false)
+		return
+	}
+
+	restkey := "`$REST`"
+	if IsMap(spec) && NOVAL != _lookup(spec, restkey) && NOVAL != _lookup(spec, "`$CHILD`") {
+		errs.Append(_restmsg(path, " cannot be used with $CHILD."))
+	}
+
+	lastkey := StrKey(Size(spec) - 1)
 	for _, key := range KeysOf(spec) {
-		if IsMap(spec) {
-			_checknames(key, store, path, errs)
+		if IsMap(spec) && restkey != key {
+			_checknames(key, store, path, errs, false)
 		}
 		kpath := append(append(make([]string, 0, len(path)+1), path...), key)
-		_checknames(GetProp(spec, key), store, kpath, errs)
+		_checknames(GetProp(spec, key), store, kpath, errs, IsList(spec) && lastkey == key)
 	}
 }
 
