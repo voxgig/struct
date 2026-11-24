@@ -2519,6 +2519,22 @@ namespace Voxgig.Struct
 
             object? refResult = GetPath(spec, refpath, null, dpathInj);
 
+            // A chain of references that comes back to a path it has named names nothing.
+            var seen = new List<object?> { refpath };
+            object? next = refResult;
+            while (IsList(next) && Lookup(next, 0) is string head && head == "`$REF`")
+            {
+                object? nextpath = GetProp(next, 1);
+                if (seen.Contains(nextpath))
+                {
+                    refResult = null;
+                    break;
+                }
+
+                seen.Add(nextpath);
+                next = GetPath(spec, nextpath, null, dpathInj);
+            }
+
             // Check if refResult contains sub-references.
             bool hasSubRef = false;
             if (IsNode(refResult))
@@ -2843,13 +2859,12 @@ namespace Voxgig.Struct
             if (0 == (T.Str & t))
             {
                 inj.Errs.Add(_InvalidTypeMsg(inj.Path, S_string, t, keyExists ? out_ : NONE));
-                return NONE;
+                return keyExists && null == out_ ? _KeepNull(inj) : out_;
             }
 
             if (S_MT == (out_ as string))
             {
                 inj.Errs.Add("Empty string at " + Pathify(inj.Path, 1));
-                return NONE;
             }
 
             return out_;
@@ -2870,7 +2885,6 @@ namespace Voxgig.Struct
             if (0 == (t & typev))
             {
                 inj.Errs.Add(_InvalidTypeMsg(inj.Path, tname, t, keyExists ? out_ : NONE));
-                return NONE;
             }
 
             return keyExists && null == out_ ? _KeepNull(inj) : out_;
