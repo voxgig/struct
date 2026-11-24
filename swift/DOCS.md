@@ -234,7 +234,7 @@ transform(.map([]), try JSON.parse(#"{"x":"`$APPLY`"}"#), inj)
 <!-- throws: invalid placement in parent map -->
 
 For more task recipes (`$EACH`, `$MERGE`, `$FORMAT`, `$NOF`, `$ALL`,
-`$LEN`, `$RANGE`, `$LIKE`, `$EXACT`, `select` operators, …) see the
+`$LEN`, `$RANGE`, `$LIKE`, `$REST`, `$EXACT`, `select` operators, …) see the
 language-neutral [How-to guides](../DOCS.md#2-how-to-guides) — the spec
 syntax is identical; only the host literals differ.
 
