@@ -1886,7 +1886,20 @@ object Struct {
             refInj.dpath = dpath
             refInj.dparent = getpath(spec, dpath)
             refInj.handler = _injecthandler
-            val refResolved = getpath(spec, refpath, refInj)
+            var refResolved = getpath(spec, refpath, refInj)
+
+            // A chain of references that comes back to a path it has named names nothing.
+            val seen = mutableListOf(refpath)
+            var next = refResolved
+            while (islist(next) && "`\$REF`" == lookup(next, 0)) {
+                val nextpath = lookup(next, 1)
+                if (nextpath in seen) {
+                    refResolved = UNDEF
+                    break
+                }
+                seen.add(nextpath)
+                next = getpath(spec, nextpath, refInj)
+            }
 
             val tref = clone(refResolved)
 
@@ -2156,16 +2169,10 @@ object Struct {
             val out = lookup(inj.dparent, inj.key)
             val t = typify(out)
             when {
-                (T_STRING and t) == 0 -> {
-                    inj.errs.add(_invalidTypeMsg(inj.path, "string", t, out, "V1010"))
-                    UNDEF
-                }
-                "" == out -> {
-                    inj.errs.add("Empty string at " + pathify(inj.path, 1))
-                    UNDEF
-                }
-                else -> out
+                (T_STRING and t) == 0 -> inj.errs.add(_invalidTypeMsg(inj.path, "string", t, out, "V1010"))
+                "" == out -> inj.errs.add("Empty string at " + pathify(inj.path, 1))
             }
+            out
         }
 
     /** Generic $TYPE handler. */
@@ -2188,10 +2195,8 @@ object Struct {
                 val t = typify(out)
                 if ((t and typev) == 0) {
                     inj.errs.add(_invalidTypeMsg(inj.path, tname, t, out, "V1001"))
-                    UNDEF
-                } else {
-                    out
                 }
+                out
             }
         }
 
