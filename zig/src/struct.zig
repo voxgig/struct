@@ -2165,6 +2165,7 @@ pub const Injection = struct {
     skip: bool = false, // Set by handlers to suppress setval.
     validate_mode: bool = false, // Enables $STRING/$NUMBER/etc validation commands.
     exact_mode: bool = false, // Exact matching mode for select.
+    named: bool = false, // Current map node names keys of its own (not $ commands).
     key_i: usize = 0,
     key: []const u8 = S_DTOP,
     val: JsonValue = .null,
@@ -2366,6 +2367,8 @@ pub fn inject(allocator: Allocator, val: JsonValue, store: JsonValue, inj_opt: ?
     inj.descend();
     var current = val;
 
+    inj.named = false;
+
     if (isnode(val)) {
         // Get sorted keys: normal first, then $ transform keys.
         var normal_keys = std.array_list.Managed([]const u8).init(allocator);
@@ -2387,6 +2390,7 @@ pub fn inject(allocator: Allocator, val: JsonValue, store: JsonValue, inj_opt: ?
         var node_keys = std.array_list.Managed([]const u8).init(allocator);
         for (normal_keys.items) |k| try node_keys.append(k);
         for (transform_keys.items) |k| try node_keys.append(k);
+        inj.named = ismap(val) and 0 < normal_keys.items.len;
 
         // nkI is signed so cmdRef's `prior.key_i -%= 1` on a fresh 0 wraps to
         // max-usize and bit-casts back to -1 here — then `nkI += 1` lands on
@@ -4045,8 +4049,24 @@ fn cmdRef(allocator: Allocator, inj: *Injection, store: JsonValue) !JsonValue {
     const spec_val = if (store == .object) store.object.get(S_DSPEC) orelse .null else .null;
     if (spec_val == .null) return .null;
 
+    // A relative path starts at the node holding this slot, so .x is a sibling.
+    const dpath = try allocator.dupe([]const u8, pathrange(inj.path, 1, 2));
+    const dpath_val = try JsonValue.makeList(allocator);
+    for (dpath) |part| try dpath_val.array.append(JsonValue{ .string = part });
+    const ref_inj = try allocator.create(Injection);
+    ref_inj.* = Injection{
+        .allocator = allocator,
+        .base = S_MT,
+        .dparent = try getpath(allocator, dpath_val, spec_val),
+        .keys = try allocator.alloc([]const u8, 0),
+        .path = try allocator.alloc([]const u8, 0),
+        .nodes = try allocator.alloc(JsonValue, 0),
+        .dpath = dpath,
+        .errs = inj.errs,
+    };
+
     // Resolve the ref path within the spec.
-    const ref_result = try getpath(allocator, JsonValue{ .string = refpath }, spec_val);
+    const ref_result = try getpathInj(allocator, JsonValue{ .string = refpath }, spec_val, ref_inj);
 
     var has_sub_ref = false;
     if (isnode(ref_result)) scanForRef(ref_result, &has_sub_ref);
@@ -4445,9 +4465,9 @@ fn validationModify(allocator: Allocator, _: JsonValue, key: []const u8, parent:
     if (ismap(cval)) {
         if (!ismap(pval)) return;
 
-        // Check for unexpected keys (closed-world assumption).
+        // Only a spec written as {} is open, even if named keys resolved away.
         const pkeys = keysof(allocator, pval) catch return;
-        if (pkeys == .array and pkeys.array.data.items.len > 0) {
+        if (inj.named or (pkeys == .array and pkeys.array.data.items.len > 0)) {
             // Check for $OPEN flag.
             if (pval == .object) {
                 if (pval.object.get(S_BOPEN)) |ov| {
