@@ -275,6 +275,7 @@ pub struct Injection {
     pub modify: Option<Modify>,
     pub extra: Option<Value>,
     pub prior: Option<Inj>,
+    pub named: bool, // Current map node names keys of its own (not $ commands).
 }
 
 /// Public `injdef` argument — the subset of `Partial<Injection>` callers set.
@@ -314,6 +315,7 @@ impl Injection {
             modify: None,
             extra: None,
             prior: None,
+            named: false,
         };
         let inj = Rc::new(RefCell::new(inj));
         if let Some(d) = def {
@@ -375,6 +377,7 @@ impl Injection {
             modify: None,
             extra: None,
             prior: None,
+            named: false,
         }))
     }
 
@@ -494,6 +497,7 @@ impl Injection {
             modify,
             extra: None,
             prior: Some(Rc::clone(this)),
+            named: false,
         }))
     }
 
@@ -899,6 +903,8 @@ fn make_root_injection(val: Value, store: &Value, injdef: Option<&InjectDef>) ->
 fn inject_inj(mut val: Value, store: &Value, inj: &Inj) -> Value {
     Injection::descend(inj);
 
+    inj.borrow_mut().named = false;
+
     if is_node(&val) {
         // node keys: sorted, then `$`-bearing keys last (for maps).
         let nodekeys: SVec = {
@@ -906,6 +912,7 @@ fn inject_inj(mut val: Value, store: &Value, inj: &Inj) -> Value {
             if is_map(&val) {
                 let (mut plain, dollar): (Vec<String>, Vec<String>) =
                     ks.into_iter().partition(|k| !k.contains(S_DS));
+                inj.borrow_mut().named = !plain.is_empty();
                 plain.extend(dollar);
                 Rc::new(RefCell::new(plain))
             } else {
@@ -1372,7 +1379,8 @@ fn transform_ref(inj: &Inj, _val: &Value, _r: &str, store: &Value) -> Value {
             _ => Value::Noval,
         }
     };
-    let dpath = slice_str_vec(&path, Some(1), None);
+    // A relative path starts at the node holding this slot, so .x is a sibling.
+    let dpath = slice_str_vec(&path, Some(1), Some(-2));
     let dparent_for_ref = get_path_inj(&spec, &path_value(&dpath), None);
     let ref_def = InjectDef {
         dpath: Some(dpath.clone()),
@@ -2450,9 +2458,9 @@ fn validation_modify(pval: &Value, key: &Value, parent: &Value, inj: &Inj, _stor
     if pval.is_skip() {
         return;
     }
-    let (meta, dparent, path) = {
+    let (meta, dparent, path, named) = {
         let b = inj.borrow();
-        (b.meta.clone(), b.dparent.clone(), b.path.clone())
+        (b.meta.clone(), b.dparent.clone(), b.path.clone(), b.named)
     };
     let exact = matches!(
         get_prop(&meta, &Value::str(S_BEXACT), Value::Bool(false)),
@@ -2493,7 +2501,8 @@ fn validation_modify(pval: &Value, key: &Value, parent: &Value, inj: &Inj, _stor
             get_prop(pval, &Value::str(S_BOPEN), Value::Noval),
             Value::Bool(true)
         );
-        if !pkeys.is_empty() && !open {
+        // Only a spec written as {} is open, even if named keys resolved away.
+        if (!pkeys.is_empty() || named) && !open {
             // Literal presence: the shape must be checked with a raw lookup
             // (canonical TS `NONE === _lookup(pval, ckey)`); the Group A
             // has_key would treat a null-valued shape slot as absent.
