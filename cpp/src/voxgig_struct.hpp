@@ -3269,6 +3269,64 @@ inline Value CHILD_FN(Injection& inj, const Value& val, const std::string& ref,
   return Value::undef();
 }
 
+inline std::string restmsg(const Value& path, const std::string& problem) {
+  return "The $REST validator at field " + pathify(path) + problem;
+}
+
+// The members a spec does not name: the map form is a key, the list form a
+// tuple's last item. Each places clones of its spec for the loop to check.
+inline Value REST_FN(Injection& inj, const Value& val, const std::string& ref, const Value& store) {
+  if (inj.mode == M_KEYPRE) {
+    Value resttm = getprop(inj.parent, Value(inj.key));
+    Value pkey = inj.path.size() >= 2 ? Value(inj.path[inj.path.size() - 2]) : Value::undef();
+    Value tval = getprop(inj.dparent, pkey);
+
+    if (ismap(tval) && inj.keys) {
+      for (const auto& ck : keysof(tval)) {
+        if (std::find(inj.keys->begin(), inj.keys->end(), ck) == inj.keys->end()) {
+          setprop(inj.parent, Value(ck), clone(resttm));
+          inj.keys->push_back(ck);
+        }
+      }
+    }
+
+    inj.setval(Value::undef());
+    return Value::undef();
+  }
+
+  Injection* prior = inj.prior;
+  if (inj.mode != M_VAL || !prior || !prior->parent.is_list() || 0 != inj.keyI) {
+    auto pl = std::make_shared<List>();
+    for (size_t i = 1; i < inj.path.size(); i++)
+      pl->push_back(Value(inj.path[i]));
+    inj.errs->push_back(Value(restmsg(Value(pl), " must be the last element of an array.")));
+    return Value::undef();
+  }
+
+  inj.keyI = static_cast<int>(inj.keys ? inj.keys->size() : 0);
+  prior->modify = nullptr;
+
+  Value tuple = prior->parent;
+  int64_t slot = 0;
+  detail::list_key(Value(prior->key), slot);
+  Value dlist = prior->dparent;
+  int64_t numitems = dlist.is_list() ? size(dlist) : 0;
+
+  if (numitems <= slot) {
+    inj.setval(Value::undef(), 2);
+    return SKIP();
+  }
+
+  Value resttm = lookup_v(inj.parent, Value(int64_t(1)));
+  for (int64_t i = slot; i < numitems; i++)
+    setprop(tuple, Value(i), clone(resttm));
+  for (auto i = static_cast<int64_t>(prior->keys->size()); i < numitems; i++)
+    prior->keys->push_back(strkey(Value(i)));
+
+  prior->keyI--;
+  return SKIP();
+}
+
 // Lowers every `$NAME` marker in the joined description, nested ones included.
 inline std::string describe_alternatives(const std::vector<Value>& tvals) {
   std::string joined;
@@ -3778,25 +3836,48 @@ inline bool unknownname(const std::string& name, const Value& store) {
   return !knownname(name, store) && (uname == name || knownname(uname, store));
 }
 
-// Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
+// Report each checker the spec names that validate lacks, and each misplaced
+// $REST; $EXACT's arguments are literals. Last: spec is a list's last item.
 inline void checknames(const Value& spec, const Value& store, std::vector<std::string>& path,
-                       std::vector<Value>& errs) {
+                       std::vector<Value>& errs, bool last = false) {
   std::string name = refname(spec);
   if (!name.empty()) {
     if (unknownname(name, store))
       errs.push_back(
           Value("Unknown validator " + name + " at field " + pathify(pathlist(path)) + "."));
+    else if ("$REST" == name)
+      errs.push_back(Value(restmsg(pathlist(path), " must be the last element of an array.")));
     return;
   }
 
-  if (spec.is_list() && !spec.as_list()->empty() && "$EXACT" == refname((*spec.as_list())[0]))
+  std::string head =
+      spec.is_list() && !spec.as_list()->empty() ? refname((*spec.as_list())[0]) : "";
+  if ("$EXACT" == head)
     return;
 
-  for (const auto& key : keysof(spec)) {
-    if (spec.is_map())
-      checknames(Value(key), store, path, errs);
-    path.push_back(key);
-    checknames(lookup_v(spec, Value(key)), store, path, errs);
+  if ("$REST" == head) {
+    if (!last)
+      errs.push_back(Value(restmsg(pathlist(path), " must be the last element of an array.")));
+    else if (2 != size(spec))
+      errs.push_back(Value(restmsg(pathlist(path), " must have exactly one spec.")));
+    path.push_back("1");
+    checknames(lookup_v(spec, Value(int64_t(1))), store, path, errs);
+    path.pop_back();
+    return;
+  }
+
+  const std::string restkey = "`$REST`";
+  if (spec.is_map() && !lookup_v(spec, Value(restkey)).is_undef() &&
+      !lookup_v(spec, Value("`$CHILD`")).is_undef())
+    errs.push_back(Value(restmsg(pathlist(path), " cannot be used with $CHILD.")));
+
+  auto keys = keysof(spec);
+  for (size_t i = 0; i < keys.size(); i++) {
+    if (spec.is_map() && restkey != keys[i])
+      checknames(Value(keys[i]), store, path, errs);
+    path.push_back(keys[i]);
+    checknames(lookup_v(spec, Value(keys[i])), store, path, errs,
+               spec.is_list() && i + 1 == keys.size());
     path.pop_back();
   }
 }
@@ -3982,6 +4063,7 @@ inline Value validate(const Value& data, const Value& spec, const Value& options
   baseStore->set("$LEN", Value(Injector(validators::LEN_FN)));
   baseStore->set("$RANGE", Value(Injector(validators::RANGE_FN)));
   baseStore->set("$LIKE", Value(Injector(validators::LIKE_FN)));
+  baseStore->set("$REST", Value(Injector(validators::REST_FN)));
 
   auto mergeList = std::make_shared<List>();
   mergeList->push_back(Value(baseStore));
