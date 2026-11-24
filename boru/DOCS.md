@@ -156,6 +156,20 @@ include their bound, while `gt` and `lt` exclude it. The pattern `$LIKE`
 takes is matched by `mini re`, the RE2 matcher in `boru:minilang`, anywhere
 in the string unless the pattern is anchored, and any other value fails.
 
+`$REST` takes exactly one spec. As a key in a map spec it checks each key the
+spec does not name, and as a list spec's last item it checks each item after
+the named ones:
+
+```boru
+Struct.validate (flex {name: "Ada" age: 36}) (flex {name: "`$STRING`" "`$REST`": "`$INTEGER`"}) Struct.NOARG
+;# {name: "Ada", age: 36}
+
+Struct.validate (flex ["a" 1 2]) (flex ["`$STRING`" ["`$REST`" "`$INTEGER`"]]) Struct.NOARG
+;# ["a", 1, 2]
+```
+
+Anywhere else, or beside `$CHILD`, it fails before any data is read.
+
 `select` takes `(children query)` and returns the matching children,
 each annotated with its `$KEY`:
 

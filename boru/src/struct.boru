@@ -3231,6 +3231,83 @@ def vg-v-child fn [[inj:Any val:Any iref:Any store:Any] [Any] [
   ]
 ]]
 
+def vgi-restmsg fn [[pth:Any problem:String] [String] [
+  def msg (StringUtil.concat ["The $REST validator at field " (vg-pathify pth vg-noarg vg-noarg) problem])
+  msg
+]]
+
+def vgl-vrest-keys fn [[i:Integer ckeys:Any parent:Any resttm:Any vkeys:Any] [Any] [
+  if (i gte (size ckeys)) [none] [
+    def ckey (ckeys get i)
+    if (vgl-includes 0 vkeys ckey) [none] [
+      (vg-setprop parent ckey (vg-clone resttm)) drop
+      (append [ckey] vkeys) drop
+      none
+    ] drop
+    def r (vgl-vrest-keys (i add 1) ckeys parent resttm vkeys)
+    r
+  ]
+]]
+
+# The members a spec does not name: the map form is a key, the list form a
+# tuple's last item. Each places clones of its spec for the loop to check.
+def vg-v-rest fn [[inj:Any val:Any iref:Any store:Any] [Any] [
+  def parent (inj get "parent")
+  def vkeys (inj get "keys")
+  def path (inj get "path")
+  def r (
+    if ((inj get "mode") eq 1) [
+      def resttm (vg-getprop parent (inj get "key") vg-noarg)
+      def tval (vg-getprop (inj get "dparent") (vg-getelem path -2 vg-noarg) vg-noarg)
+      if (vg-ismap tval) [
+        (vgl-vrest-keys 0 (vg-keysof tval) parent resttm vkeys) drop
+        none
+      ] [none] drop
+      (vgi-inj-setval inj none 1) drop
+      none
+    ] [
+      def btr (vgi-vrest-list inj parent vkeys path)
+      btr
+    ]
+  )
+  r
+]]
+
+# The list form: clones of the spec from this slot on, one per remaining item.
+def vgi-vrest-list fn [[inj:Any parent:Any vkeys:Any path:Any] [Any] [
+  def prior (inj get "prior")
+  def misplaced (
+    if (((inj get "mode") eq 4) not) [true] [
+      if (prior is None) [true] [
+        if ((vg-islist (prior get "parent")) not) [true] [((inj get "keyi") eq 0) not]
+      ]
+    ]
+  )
+  if (misplaced eq true) [
+    (append [(vgi-restmsg (vg-slice path 1 vg-noarg vg-noarg) " must be the last element of an array.")] (inj get "errs")) drop
+    none
+  ] [
+    (inj set "keyi" (vgz vkeys)) drop
+    (prior set "modify" none) drop
+    def tup (prior get "parent")
+    def slot (vgi-list-index (prior get "key"))
+    def dlist (prior get "dparent")
+    def numitems (if (vg-islist dlist) [vgz dlist] [0])
+    if (numitems lte slot) [
+      (vgi-inj-setval inj none 2) drop
+      none
+    ] [
+      def resttm (vgi-lookup parent 1)
+      (vgl-vchild-elems slot numitems tup resttm) drop
+      def pkeys (prior get "keys")
+      (vgl-vchild-extkeys (vgz pkeys) numitems pkeys) drop
+      (prior set "keyi" ((prior get "keyi") sub 1)) drop
+      none
+    ] drop
+    vg-skip-marker
+  ]
+]]
+
 # The data value at a list directive's slot. The directive's own dparent was
 # read with getprop, which reports a stored null as absent.
 def vgi-slotval fn [[inj:Any] [Any] [
@@ -3876,6 +3953,7 @@ def vg-v-all-box {"`$FN`": vg-v-all/v}
 def vg-v-len-box {"`$FN`": vg-v-len/v}
 def vg-v-range-box {"`$FN`": vg-v-range/v}
 def vg-v-like-box {"`$FN`": vg-v-like/v}
+def vg-v-rest-box {"`$FN`": vg-v-rest/v}
 
 # Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
 def vg-validate-names {"$TOP": true "$SPEC": true "$BT": true "$DS": true "$WHEN": true "$ANNO": true "$REF": true "$FORMAT": true "$APPLY": true "$OPEN": true}
@@ -3905,15 +3983,38 @@ def vgi-unknownname fn [[nm:String store:Any] [Boolean] [
   ]
 ]]
 
-# Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
-def vgi-checknames fn [[spec:Any store:Any pth:Any errs:Any] [Any] [
+# Report each checker the spec names that validate lacks, and each misplaced
+# $REST; $EXACT's arguments are literals. islast: spec is a list's last item.
+def vgi-checknames fn [[spec:Any store:Any pth:Any errs:Any islast:Boolean] [Any] [
   def nm (vgi-refname spec)
   if (nm is None) [
-    def exactargs (
-      if (vg-islist spec) [(vgi-refname (vgi-lookup spec 0)) eq "$EXACT"] [false]
+    def hname (
+      if (vg-islist spec) [
+        def btr (vgi-refname (vgi-lookup spec 0))
+        btr
+      ] [none]
     )
-    if exactargs [none] [
-      (vgl-checknames 0 (vg-keysof spec) spec store pth errs) drop
+    if (hname eq "$EXACT") [none] [
+      if (hname eq "$REST") [
+        (vgi-checkrest spec store pth errs islast) drop
+        none
+      ] [
+        if (vg-ismap spec) [
+          if ((vgi-haslit spec "`$REST`") and (vgi-haslit spec "`$CHILD`")) [
+            (append [(vgi-restmsg pth " cannot be used with $CHILD.")] errs) drop
+            none
+          ] [none] drop
+          none
+        ] [none] drop
+        def lastkey (
+          if (vg-islist spec) [
+            def btr2 (vg-strkey ((vgz spec) sub 1))
+            btr2
+          ] [none]
+        )
+        (vgl-checknames 0 (vg-keysof spec) spec store pth errs lastkey) drop
+        none
+      ] drop
       none
     ] drop
     none
@@ -3921,21 +4022,48 @@ def vgi-checknames fn [[spec:Any store:Any pth:Any errs:Any] [Any] [
     if (vgi-unknownname nm store) [
       (append [(StringUtil.concat ["Unknown validator " nm " at field " (vg-pathify pth vg-noarg vg-noarg) "."])] errs) drop
       none
-    ] [none] drop
+    ] [
+      if (nm eq "$REST") [
+        (append [(vgi-restmsg pth " must be the last element of an array.")] errs) drop
+        none
+      ] [none] drop
+      none
+    ] drop
     none
   ] drop
   none
 ]]
-def vgl-checknames fn [[i:Integer ks:Any spec:Any store:Any pth:Any errs:Any] [Any] [
+def vgl-checknames fn [[i:Integer ks:Any spec:Any store:Any pth:Any errs:Any lastkey:Any] [Any] [
   if (i gte (size ks)) [none] [
     def k (ks get i)
-    if (vg-ismap spec) [(vgi-checknames k store pth errs) drop none] [none] drop
+    if (vg-ismap spec) [
+      if ((k eq "`$REST`") not) [(vgi-checknames k store pth errs false) drop none] [none] drop
+      none
+    ] [none] drop
     def cpth (vg-clone pth)
     (append [k] cpth) drop
-    (vgi-checknames (vgi-raw spec k) store cpth errs) drop
-    def r (vgl-checknames (i add 1) ks spec store pth errs)
+    (vgi-checknames (vgi-raw spec k) store cpth errs (k eq lastkey)) drop
+    def r (vgl-checknames (i add 1) ks spec store pth errs lastkey)
     r
   ]
+]]
+
+# A list headed by $REST: a list spec's last item, holding exactly one spec.
+def vgi-checkrest fn [[spec:Any store:Any pth:Any errs:Any islast:Boolean] [Any] [
+  if (islast eq true) [
+    if (((vgz spec) eq 2) not) [
+      (append [(vgi-restmsg pth " must have exactly one spec.")] errs) drop
+      none
+    ] [none] drop
+    none
+  ] [
+    (append [(vgi-restmsg pth " must be the last element of an array.")] errs) drop
+    none
+  ] drop
+  def cpth (vg-clone pth)
+  (append ["1"] cpth) drop
+  (vgi-checknames (vgi-raw spec "1") store cpth errs false) drop
+  none
 ]]
 
 def vg-validate fn [[data:Any spec:Any injdef:Any] [Any] [
@@ -3971,6 +4099,7 @@ def vg-validate fn [[data:Any spec:Any injdef:Any] [Any] [
     "$LEN": (vg-v-len-box)
     "$RANGE": (vg-v-range-box)
     "$LIKE": (vg-v-like-box)
+    "$REST": (vg-v-rest-box)
   })
   def sl (flex [])
   (append [cmds] sl) drop
@@ -3984,7 +4113,7 @@ def vg-validate fn [[data:Any spec:Any injdef:Any] [Any] [
   (vg-setprop meta "`$EXACT`" (vg-getprop meta "`$EXACT`" false)) drop
   # A spec that names an unknown checker validates nothing.
   def numerrs (vgz errs)
-  (vgi-checknames spec store (flex []) errs) drop
+  (vgi-checknames spec store (flex []) errs false) drop
   def vout (
     if (numerrs lt (vgz errs)) [
       def cl (vg-clone data)
