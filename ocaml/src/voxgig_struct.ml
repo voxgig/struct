@@ -1425,7 +1425,15 @@ and transform_ref inj _v _ref store =
        (* A relative path starts where this slot is, so .x is a sibling. *)
        let dpath = slice ~start:(Num 1.0) ~stop:(Num (-2.0)) inj.path in
        let dparent = getpath ~inj:INone spec dpath in
-       let refv = getpath ~inj:(IDef { (default_injdef ()) with d_dpath = dpath; d_dparent = dparent }) spec refpath in
+       let refinj = IDef { (default_injdef ()) with d_dpath = dpath; d_dparent = dparent } in
+       let found = getpath ~inj:refinj spec refpath in
+       (* A chain of references that comes back to a path it has named names nothing. *)
+       let rec cycles seen next =
+         islist next && lookup_ next (Num 0.0) = Str "`$REF`"
+         && (let np = lookup_ next (Num 1.0) in
+             List.exists (deepequal np) seen || cycles (np :: seen) (getpath ~inj:refinj spec np))
+       in
+       let refv = if cycles [refpath] found then Noval else found in
        let has_sub = ref false in
        (if isnode refv then ignore (walk ~before:(fun _k v2 _p _path -> (if v2 = Str "`$REF`" then has_sub := true); v2) refv));
        (* A recursive reference stops where the data does. *)
@@ -1609,8 +1617,8 @@ and invalid_type_msg path needtype vt v _whence =
 and validate_string inj _v _ref _store =
   let out = lookup_ inj.dparent inj.key in
   let t = typify out in
-  if (t_string land t) = 0 then (push_err inj (invalid_type_msg inj.path s_string t out "V1010"); Noval)
-  else if out = Str s_mt then (push_err inj ("Empty string at " ^ pathify ~startin:(Num 1.0) inj.path); Noval)
+  if (t_string land t) = 0 then (push_err inj (invalid_type_msg inj.path s_string t out "V1010"); out)
+  else if out = Str s_mt then (push_err inj ("Empty string at " ^ pathify ~startin:(Num 1.0) inj.path); out)
   else out
 
 and push_err inj msg = ignore (setprop inj.errs (Num (float_of_int (size inj.errs))) (Str msg))
@@ -1622,7 +1630,7 @@ and validate_type inj _v refstr _store =
   let typev = if tname = s_nil then typev0 lor t_null else typev0 in
   let out = lookup_ inj.dparent inj.key in
   let t = typify out in
-  if (t land typev) = 0 then (push_err inj (invalid_type_msg inj.path tname t out "V1001"); Noval)
+  if (t land typev) = 0 then (push_err inj (invalid_type_msg inj.path tname t out "V1001"); out)
   else out
 
 and validate_any inj _v _ref _store = lookup_ inj.dparent inj.key
