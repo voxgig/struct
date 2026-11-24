@@ -1544,6 +1544,46 @@
               SKIP)))
       :else nil)))
 
+(defn- _restmsg [path problem]
+  (str "The $REST validator at field " (pathify path) problem))
+
+;; The members a spec does not name: the map form is a key, the list form a
+;; tuple's last item. Each places clones of its spec for the loop to check.
+(defn- validate_REST [inj _val _ref _store]
+  (let [mode (ig inj :mode) parent (ig inj :parent) keys (ig inj :keys)
+        path (ig inj :path) prior (ig inj :prior)]
+    (cond
+      (= mode S-MKEYPRE)
+      (let [resttm (getprop parent (ig inj :key))
+            tval (getprop (ig inj :dparent) (getelem path -2))]
+        (when (ismap tval)
+          (doseq [ckey (keysof tval)]
+            (when-not (.contains ^List keys ckey)
+              (setprop parent ckey (clone resttm))
+              (.add ^List keys ckey))))
+        (inj-setval inj nil)
+        nil)
+
+      (or (not= mode S-MVAL) (nil? prior) (not (islist (ig prior :parent))) (not= 0 (ig inj :keyI)))
+      (do (.add ^List (ig inj :errs) (_restmsg (slice path 1) " must be the last element of an array."))
+          nil)
+
+      :else
+      (let [tuple (ig prior :parent)
+            slot (listindex (ig prior :key))
+            dlist (ig prior :dparent)
+            numitems (if (islist dlist) (size dlist) 0)]
+        (is! inj :keyI (size keys))
+        (is! prior :modify nil)
+        (if (<= numitems slot)
+          (inj-setval inj nil 2)
+          (let [resttm (_lookup parent 1)
+                ^List pkeys (ig prior :keys)]
+            (doseq [i (range slot numitems)] (setprop tuple i (clone resttm)))
+            (doseq [i (range (size pkeys) numitems)] (.add pkeys (strkey i)))
+            (is! prior :keyI (dec (ig prior :keyI)))))
+        SKIP))))
+
 ;; The data value at a list directive's slot, and whether the slot holds one.
 ;; The directive's own dparent was read with getprop, which reports a stored
 ;; null as absent, and with one nil only the slot can tell them apart.
@@ -1896,21 +1936,42 @@
         upper (.toUpperCase ^String name java.util.Locale/ROOT)]
     (and (not (known name)) (or (= upper name) (known upper)))))
 
-;; Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
-(defn- _checknames [spec store path errs]
-  (let [name (_refname spec)]
-    (cond
-      (some? name)
-      (when (_unknownname name store)
-        (.add ^List errs (str "Unknown validator " name " at field " (pathify (alist-of path)) ".")))
+;; Report each checker the spec names that validate lacks, and each misplaced
+;; $REST; $EXACT's arguments are literals. islast: spec is a list's last item.
+(defn- _checknames
+  ([spec store path errs] (_checknames spec store path errs false))
+  ([spec store path errs islast]
+   (let [name (_refname spec)
+         head (when (islist spec) (_refname (_lookup spec 0)))
+         restkey "`$REST`"]
+     (cond
+       (some? name)
+       (cond
+         (_unknownname name store)
+         (.add ^List errs (str "Unknown validator " name " at field " (pathify (alist-of path)) "."))
+         (= "$REST" name)
+         (.add ^List errs (_restmsg (alist-of path) " must be the last element of an array.")))
 
-      (and (islist spec) (= "$EXACT" (_refname (_lookup spec 0))))
-      nil
+       (= "$EXACT" head)
+       nil
 
-      :else
-      (doseq [key (keysof spec)]
-        (when (ismap spec) (_checknames key store path errs))
-        (_checknames (_lookup spec key) store (conj path key) errs)))))
+       (= "$REST" head)
+       (do
+         (cond
+           (not (true? islast))
+           (.add ^List errs (_restmsg (alist-of path) " must be the last element of an array."))
+           (not= 2 (size spec))
+           (.add ^List errs (_restmsg (alist-of path) " must have exactly one spec.")))
+         (_checknames (_lookup spec 1) store (conj path 1) errs))
+
+       :else
+       (do
+         (when (and (ismap spec) (_holds spec restkey) (_holds spec "`$CHILD`"))
+           (.add ^List errs (_restmsg (alist-of path) " cannot be used with $CHILD.")))
+         (let [lastkey (when (islist spec) (strkey (dec (size spec))))]
+           (doseq [key (keysof spec)]
+             (when (and (ismap spec) (not= restkey key)) (_checknames key store path errs))
+             (_checknames (_lookup spec key) store (conj path key) errs (= lastkey key)))))))))
 
 (defn validate
   ([data spec] (validate data spec nil))
@@ -1927,7 +1988,8 @@
                     ["$FUNCTION" validate_TYPE] ["$INSTANCE" validate_TYPE]
                     ["$ANY" validate_ANY] ["$CHILD" validate_CHILD]
                     ["$EXACT" validate_EXACT] ["$NOF" validate_NOF] ["$ALL" validate_ALL]
-                    ["$LEN" validate_LEN] ["$RANGE" validate_RANGE] ["$LIKE" validate_LIKE]]]
+                    ["$LEN" validate_LEN] ["$RANGE" validate_RANGE] ["$LIKE" validate_LIKE]
+                    ["$REST" validate_REST]]]
        (.put base k v))
      (let [store (merge (alist-of [base (if (nil? extra) (lhm) extra) (doto (lhm) (.put "$ERRS" errs))]) 1)
            meta (getprop injdef "meta" (lhm))

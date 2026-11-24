@@ -103,6 +103,11 @@ Names are lower-smushed, identical to the canonical export list:
 (s/validate 42 (s/jt "`$RANGE`" (s/jm "min" 0 "lt" 150) "`$INTEGER`"))       ;=> 42
 (s/validate "ABC-12" (s/jt "`$LIKE`" "^[A-Z]{3}-[0-9]+$" "`$STRING`"))       ;=> "ABC-12"
 
+;; validate: `$REST` checks the keys or items a spec does not name
+(s/validate (s/jm "name" "Ada" "age" 36)
+            (s/jm "name" "`$STRING`" "`$REST`" "`$INTEGER`"))   ;=> {name Ada, age 36}
+(s/validate (s/jt "a" 1 2) (s/jt "`$STRING`" (s/jt "`$REST`" "`$INTEGER`")))  ;=> [a 1 2]
+
 ;; select: MongoDB-style query over children
 (s/select (s/jt (s/jm "a" 1) (s/jm "a" 2))
           (s/jm "a" (s/jm "`$GT`" 1)))             ;=> ({a 2, $KEY 1})
@@ -121,6 +126,11 @@ anything but a number. `min` and `max` include their bound, while `gt` and
 `lt` exclude it. `$LIKE` takes a pattern, matched with `java.util.regex`
 anywhere in the value unless anchored, and fails on anything but a string.
 Each takes at most one spec, which must also admit the value.
+
+`$REST` takes exactly one spec. As a key in a map spec it checks each key the
+spec does not name, and as a list spec's last item it checks each item after
+the named ones. Anywhere else, or beside `$CHILD`, it fails before any data
+is read.
 
 ## Testing
 
