@@ -1619,6 +1619,43 @@ object struct {
     } else Noval
   }
 
+  // The members a spec does not name: the map form is a key, the list form a
+  // tuple's last item. Each places clones of its spec for the loop to check.
+  private val validateRest: Injector = (inj, _v, _r, _s) => {
+    val parent = inj.parent; val key = inj.key; val path = inj.path; val keys = inj.keys
+    if (inj.mode == M_KEYPRE) {
+      val resttm = getprop(parent, key)
+      val tval = getprop(inj.dparent, getelem(path, VNum(-2.0)))
+      if (ismap(tval)) keysof(tval).foreach { ckey =>
+        val named = keys match { case VList(b) => b.contains(VStr(ckey)); case _ => false }
+        if (!named) { setprop(parent, VStr(ckey), clone(resttm)); setprop(keys, VNum(size(keys).toDouble), VStr(ckey)) }
+      }
+      injSetval(inj, Noval)
+      Noval
+    } else inj.prior match {
+      case Some(prior) if inj.mode == M_VAL && islist(prior.parent) && inj.keyi == 0 =>
+        inj.keyi = size(keys)
+        prior.modify = None
+        val tuple = prior.parent
+        val slot = listIndex(prior.key).toInt
+        val dlist = prior.dparent
+        val numitems = if (islist(dlist)) size(dlist) else 0
+        if (numitems <= slot) { injSetval(inj, Noval, 2); SKIP }
+        else {
+          val resttm = lookup_(parent, VNum(1.0))
+          for (i <- slot until numitems) setprop(tuple, VNum(i.toDouble), clone(resttm))
+          for (i <- size(prior.keys) until numitems) setprop(prior.keys, VNum(size(prior.keys).toDouble), VStr(strkey(VNum(i.toDouble))))
+          prior.keyi = prior.keyi - 1
+          SKIP
+        }
+      case _ =>
+        pushErr(inj, restmsg(slice(path, VNum(1.0)), " must be the last element of an array."))
+        Noval
+    }
+  }
+
+  private def restmsg(path: Value, problem: String): String = "The $REST validator at field " + pathify(path) + problem
+
   // Lowers every `$NAME` marker in the joined description, nested ones included.
   private def describeAlternatives(tvals: Value): String =
     replaceTransformNames(join(itemsV(tvals, { case (_, x) => VStr(stringify(x)) }), VStr(", ")))
@@ -1848,19 +1885,32 @@ object struct {
   // Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
   private val VALIDATE_NAMES = Seq("$TOP", "$SPEC", "$BT", "$DS", "$WHEN", "$ANNO", "$REF", "$FORMAT", "$APPLY", "$OPEN")
 
-  // Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
-  private def checknames(spec: Value, store: Value, path: Seq[Value], errs: Value): Unit =
+  // Report each checker the spec names that validate lacks, and each misplaced
+  // $REST; $EXACT's arguments are literals. Last: spec is a list's last item.
+  private def checknames(spec: Value, store: Value, path: Seq[Value], errs: Value, last: Boolean = false): Unit = {
+    def push(msg: String): Unit = setprop(errs, VNum(size(errs).toDouble), VStr(msg))
+    val restkey = "`$REST`"
     refname(spec) match {
       case Some(name) =>
-        if (unknownname(name, store))
-          setprop(errs, VNum(size(errs).toDouble), VStr("Unknown validator " + name + " at field " + pathify(mkList(path)) + "."))
+        if (unknownname(name, store)) push("Unknown validator " + name + " at field " + pathify(mkList(path)) + ".")
+        else if (name == "$REST") push(restmsg(mkList(path), " must be the last element of an array."))
       case None =>
-        if (!(islist(spec) && refname(lookup_(spec, VNum(0.0))).contains("$EXACT")))
+        val head = if (islist(spec)) refname(lookup_(spec, VNum(0.0))) else None
+        if (head.contains("$REST")) {
+          if (!last) push(restmsg(mkList(path), " must be the last element of an array."))
+          else if (size(spec) != 2) push(restmsg(mkList(path), " must have exactly one spec."))
+          checknames(lookup_(spec, VNum(1.0)), store, path :+ VNum(1.0), errs)
+        } else if (!head.contains("$EXACT")) {
+          if (ismap(spec) && !isNoval(lookup_(spec, VStr(restkey))) && !isNoval(lookup_(spec, VStr("`$CHILD`"))))
+            push(restmsg(mkList(path), " cannot be used with $CHILD."))
+          val lastkey = if (islist(spec)) Some(strkey(VNum((size(spec) - 1).toDouble))) else None
           keysof(spec).foreach { key =>
-            if (ismap(spec)) checknames(VStr(key), store, path, errs)
-            checknames(lookup_(spec, VStr(key)), store, path :+ VStr(key), errs)
+            if (ismap(spec) && key != restkey) checknames(VStr(key), store, path, errs)
+            checknames(lookup_(spec, VStr(key)), store, path :+ VStr(key), errs, lastkey.contains(key))
           }
+        }
     }
+  }
 
   // R_CHECKER_NAME = ^\$[A-Z]+$
   private def checkerName(s: String): Boolean =
@@ -2038,6 +2088,7 @@ object struct {
     put("$LEN", VFunc(validateLen))
     put("$RANGE", VFunc(validateRange))
     put("$LIKE", VFunc(validateLike))
+    put("$REST", VFunc(validateRest))
     val store = merge(mkList(Seq(base, if (isNoval(extra)) emptyMap() else extra, mkMap(Seq((S_DERRS, errs))))), VNum(1.0))
     val meta = inj match { case IDef(d) if !isNoval(d.dMeta) => d.dMeta; case _ => emptyMap() }
     setprop(meta, VStr(S_BEXACT), getprop(meta, VStr(S_BEXACT), VBool(false)))
