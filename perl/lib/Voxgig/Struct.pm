@@ -2412,25 +2412,45 @@ our @VALIDATE_NAMES = (
     '$TOP', '$SPEC', '$BT', '$DS', '$WHEN', '$ANNO', '$REF', '$FORMAT', '$APPLY', '$OPEN',
 );
 
-# Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
+# Report each checker the spec names that validate lacks, and each misplaced
+# $REST; $EXACT's arguments are literals. Last: spec is a list's last item.
 sub _checknames {
-    my ($spec, $store, $path, $errs) = @_;
+    my ($spec, $store, $path, $errs, $last) = @_;
     my $name = _refname($spec);
     if (!is_none($name)) {
         if (_unknownname($name, $store)) {
             push @$errs, 'Unknown validator ' . $name . ' at field ' . pathify($path) . '.';
         }
+        elsif ('$REST' eq $name) {
+            push @$errs, _restmsg($path, ' must be the last element of an array.');
+        }
         return;
     }
 
-    if (islist($spec)) {
-        my $first = _refname($spec->[0]);
-        return if !is_none($first) && '$EXACT' eq $first;
+    my $head = islist($spec) ? _refname($spec->[0]) : NONE();
+    return if !is_none($head) && '$EXACT' eq $head;
+
+    if (!is_none($head) && '$REST' eq $head) {
+        if (!$last) {
+            push @$errs, _restmsg($path, ' must be the last element of an array.');
+        }
+        elsif (2 != size($spec)) {
+            push @$errs, _restmsg($path, ' must have exactly one spec.');
+        }
+        _checknames($spec->[1], $store, [ @$path, 1 ], $errs);
+        return;
     }
 
+    my $restkey = '`$REST`';
+    if (ismap($spec) && !is_none(_lookup($spec, $restkey)) && !is_none(_lookup($spec, '`$CHILD`'))) {
+        push @$errs, _restmsg($path, ' cannot be used with $CHILD.');
+    }
+
+    my $lastkey = islist($spec) ? strkey(size($spec) - 1) : undef;
     for my $key (@{ keysof($spec) }) {
-        _checknames($key, $store, $path, $errs) if ismap($spec);
-        _checknames(_lookup($spec, $key), $store, [ @$path, $key ], $errs);
+        _checknames($key, $store, $path, $errs) if ismap($spec) && $restkey ne $key;
+        _checknames(_lookup($spec, $key), $store, [ @$path, $key ], $errs,
+            defined $lastkey && $lastkey eq $key);
     }
     return;
 }
@@ -2673,6 +2693,59 @@ sub validate_CHILD {
         return SKIP();
     }
     return NONE();
+}
+
+# The members a spec does not name: the map form is a key, the list form a
+# tuple's last item. Each places clones of its spec for the loop to check.
+sub validate_REST {
+    my ($inj) = @_;
+    my $mode = $inj->{mode};
+    my $key = $inj->{key};
+    my $parent = $inj->{parent};
+    my $keys = $inj->{keys};
+    my $path = $inj->{path};
+    if ($mode == M_KEYPRE) {
+        my $resttm = getprop($parent, $key);
+        my $tval = getprop($inj->{dparent}, getelem($path, -2));
+        if (ismap($tval)) {
+            for my $ckey (@{ keysof($tval) }) {
+                next if grep { $_ eq $ckey } @$keys;
+                setprop($parent, $ckey, clone($resttm));
+                push @$keys, $ckey;
+            }
+        }
+        _inj_setval($inj, NONE());
+        return NONE();
+    }
+    my $prior = $inj->{prior};
+    if ($mode != M_VAL || !defined $prior || !islist($prior->{parent}) || 0 != $inj->{keyI}) {
+        push @{ $inj->{errs} }, _restmsg(slice($path, 1), ' must be the last element of an array.');
+        return NONE();
+    }
+    $inj->{keyI} = size($keys);
+    $prior->{modify} = undef;
+    my $tuple = $prior->{parent};
+    my $slot = _listkey($prior->{key});
+    my $dlist = $prior->{dparent};
+    my $numitems = islist($dlist) ? size($dlist) : 0;
+    if ($numitems <= $slot) {
+        _inj_setval($inj, NONE(), 2);
+        return SKIP();
+    }
+    my $resttm = _lookup($parent, 1);
+    for my $i ($slot .. $numitems - 1) {
+        setprop($tuple, $i, clone($resttm));
+    }
+    for my $i (size($prior->{keys}) .. $numitems - 1) {
+        push @{ $prior->{keys} }, strkey($i);
+    }
+    $prior->{keyI}--;
+    return SKIP();
+}
+
+sub _restmsg {
+    my ($path, $problem) = @_;
+    return 'The $REST validator at field ' . pathify($path) . $problem;
 }
 
 sub validate_EXACT {
@@ -3138,6 +3211,7 @@ sub validate {
         '$LEN',      \&validate_LEN,
         '$RANGE',    \&validate_RANGE,
         '$LIKE',     \&validate_LIKE,
+        '$REST',     \&validate_REST,
     );
     my $errsmap = jm(S_DERRS, $errs);
     my $store = merge([$base, getdef($extra, _mkmap()), $errsmap], 1);

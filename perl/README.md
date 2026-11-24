@@ -102,10 +102,10 @@ because they don't preserve insertion order.
   `$FORMAT`, `$APPLY` (plus the `FORMATTER` table for $FORMAT:
   `identity`, `upper`, `lower`, `string`, `number`, `integer`,
   `concat`).
-- `validate` and the 19 validate checkers: `$STRING`, `$NUMBER`,
+- `validate` and the 20 validate checkers: `$STRING`, `$NUMBER`,
   `$INTEGER`, `$DECIMAL`, `$BOOLEAN`, `$NULL`, `$NIL`, `$MAP`,
   `$LIST`, `$FUNCTION`, `$INSTANCE`, `$ANY`, `$CHILD`, `$EXACT`,
-  `$NOF`, `$ALL`, `$LEN`, `$RANGE`, `$LIKE`.
+  `$NOF`, `$ALL`, `$LEN`, `$RANGE`, `$LIKE`, `$REST`.
 - `select` and the 4 select operators: `$AND`, `$OR`, `$NOT`,
   `$CMP` (with `$GT`, `$LT`, `$GTE`, `$LTE`, `$LIKE`).
 - Type constants (`T_any`, `T_noval`, `T_boolean`, …, `T_node`),
@@ -485,6 +485,10 @@ when the value is a string the pattern finds, with Perl's built-in regex
 engine (`qr//`), anywhere in it unless the pattern is anchored. `$LEN`,
 `$RANGE` and `$LIKE` take at most one spec, which must also admit the
 value. `min` and `max` include their bound, while `gt` and `lt` exclude it.
+
+`` '`$REST`' => $spec `` in a map spec checks each key the spec does not
+name, and `` jt('`$REST`', $spec) `` as a list spec's last item checks each
+item after the named ones.
 
 A spec that names a checker `validate` does not define is rejected before
 any data is read, and nothing is validated. The whole-string reference
