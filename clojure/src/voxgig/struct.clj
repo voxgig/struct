@@ -1270,6 +1270,16 @@
                   (setprop target tkey @rval)
                   nil)))))))))
 
+;; A chain of references that comes back to a path it has named names nothing.
+(defn- _refchain [spec refinj ref refpath]
+  (loop [nxt ref seen #{refpath}]
+    (if (and (islist nxt) (= "`$REF`" (_lookup nxt 0)))
+      (let [nextpath (_lookup nxt 1)]
+        (if (contains? seen nextpath)
+          nil
+          (recur (getpath spec nextpath refinj) (conj seen nextpath))))
+      ref)))
+
 (defn- transform_REF [inj _val _ref store]
   (if (not= (ig inj :mode) S-MVAL)
     nil
@@ -1281,7 +1291,8 @@
           (let [spec (spec-func)
                 ;; A relative path starts where this slot is, so .x is a sibling.
                 dpath (slice (ig inj :path) 1 -2)
-                ref (getpath spec refpath (doto (lhm) (.put "dpath" dpath) (.put "dparent" (getpath spec dpath))))
+                refinj (doto (lhm) (.put "dpath" dpath) (.put "dparent" (getpath spec dpath)))
+                ref (_refchain spec refinj (getpath spec refpath refinj) refpath)
                 hasSubRef (atom false)]
             (when (isnode ref)
               (walk ref (fn [_k v _p _path] (when (= v "`$REF`") (reset! hasSubRef true)) v)))
@@ -1462,19 +1473,19 @@
 ;; validate
 ;; ---------------------------------------------------------------------------
 
-(defn- validate_STRING [inj _val _ref _store]
-  (let [out (_lookup (ig inj :dparent) (ig inj :key)) t (typify out)]
-    (cond
-      (zero? (bit-and T_string t)) (do (.add ^List (ig inj :errs) (_invalidTypeMsg (ig inj :path) S-string t out "V1010")) nil)
-      (= out S-MT) (do (.add ^List (ig inj :errs) (str "Empty string at " (pathify (ig inj :path) 1))) nil)
-      :else out)))
-
 ;; A null the data holds comes back as HELDNULL, which inj-setval writes:
 ;; it deletes the slot for nil, and a list would shift down.
 (defn- _keepnull [inj out]
   (if (and (nil? out) (= (ig inj :mode) S-MVAL) (true? (ig inj :full)) (_holds (ig inj :dparent) (ig inj :key)))
     HELDNULL
     out))
+
+(defn- validate_STRING [inj _val _ref _store]
+  (let [out (_lookup (ig inj :dparent) (ig inj :key)) t (typify out)]
+    (cond
+      (zero? (bit-and T_string t)) (do (.add ^List (ig inj :errs) (_invalidTypeMsg (ig inj :path) S-string t out "V1010")) (_keepnull inj out))
+      (= out S-MT) (do (.add ^List (ig inj :errs) (str "Empty string at " (pathify (ig inj :path) 1))) out)
+      :else out)))
 
 (defn- validate_TYPE [inj _val ref _store]
   (let [tname (if (and (string? ref) (> (count ref) 1)) (clojure.string/lower-case (slice ref 1)) S-any)
@@ -1486,9 +1497,9 @@
         out (_lookup dparent key)
         ;; One nil: only the slot tells a missing field (no value) from a held null.
         t (if (or (some? out) (_holds dparent key)) (typify out) T_noval)]
-    (if (zero? (bit-and t typev))
-      (do (.add ^List (ig inj :errs) (_invalidTypeMsg (ig inj :path) tname t out "V1001")) nil)
-      (_keepnull inj out))))
+    (when (zero? (bit-and t typev))
+      (.add ^List (ig inj :errs) (_invalidTypeMsg (ig inj :path) tname t out "V1001")))
+    (_keepnull inj out)))
 
 (defn- validate_ANY [inj _val _ref _store]
   (_keepnull inj (_lookup (ig inj :dparent) (ig inj :key))))
