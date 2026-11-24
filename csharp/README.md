@@ -518,7 +518,7 @@ $MERGE   $EACH    $PACK    $REF     $FORMAT  $APPLY
 ```
 $MAP   $LIST   $STRING   $NUMBER   $INTEGER   $DECIMAL  $BOOLEAN
 $NULL  $NIL    $FUNCTION $INSTANCE $ANY       $CHILD    $EXACT
-$NOF   $ALL    $LEN      $RANGE    $LIKE
+$NOF   $ALL    $LEN      $RANGE    $LIKE      $REST
 ```
 
 `` StructUtils.Jt("`$NOF`", n, spec, …) `` holds when as many specs admit the
@@ -538,6 +538,11 @@ string the pattern finds, anywhere unless anchored, with .NET's
 `System.Text.RegularExpressions` and no options. Each takes at most one spec,
 which must also admit the value. `min` and `max` include their bound, while
 `gt` and `lt` exclude it.
+
+A `` "`$REST`" `` key in a map spec checks each key the spec does not name,
+as in `` StructUtils.Jm("name", "`$STRING`", "`$REST`", "`$INTEGER`") ``.
+`` StructUtils.Jt("`$REST`", spec) `` as a list spec's last item checks each
+item after the named ones.
 
 A spec that names a checker `Validate` does not define is rejected before
 any data is read, and nothing is validated. The whole-string reference

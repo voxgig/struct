@@ -2989,6 +2989,72 @@ namespace Voxgig.Struct
             return NONE;
         };
 
+        // The members a spec does not name: the map form is a key, the list form a
+        // tuple's last item. Each places clones of its spec for the loop to check.
+        private static readonly Injector _ValidateRest = (inj, val, refStr, store) =>
+        {
+            if (M_KEYPRE == inj.Mode)
+            {
+                object? resttm = GetProp(inj.Parent, inj.Key);
+                object? tval = GetProp(inj.DParent, GetElem(inj.Path, -2));
+
+                if (IsMap(tval))
+                {
+                    foreach (string ckey in KeysOf(tval))
+                    {
+                        if (!inj.Keys.Contains(ckey))
+                        {
+                            SetProp(inj.Parent, ckey, Clone(resttm));
+                            inj.Keys.Add(ckey);
+                        }
+                    }
+                }
+
+                inj.SetVal(NONE);
+                return NONE;
+            }
+
+            InjectState? prior = inj.Prior;
+            if (M_VAL != inj.Mode || null == prior || !IsList(prior.Parent) || 0 != inj.KeyI)
+            {
+                inj.Errs.Add(_RestMsg(Slice(inj.Path, 1), " must be the last element of an array."));
+                return NONE;
+            }
+
+            inj.KeyI = Size(inj.Keys);
+            prior.ModifyFn = null;
+
+            object? tuple = prior.Parent;
+            long slot = ListIndex(prior.Key);
+            object? dlist = prior.DParent;
+            int numitems = IsList(dlist) ? Size(dlist) : 0;
+
+            if (numitems <= slot)
+            {
+                inj.SetVal(NONE, 2);
+                return SKIP;
+            }
+
+            object? itemtm = Lookup(inj.Parent, 1);
+            for (long i = slot; i < numitems; i++)
+            {
+                SetProp(tuple, i, Clone(itemtm));
+            }
+
+            for (int i = Size(prior.Keys); i < numitems; i++)
+            {
+                prior.Keys.Add(StrKey(i));
+            }
+
+            prior.KeyI--;
+            return SKIP;
+        };
+
+        private static string _RestMsg(object? path, string problem)
+        {
+            return "The $REST validator at field " + Pathify(path) + problem;
+        }
+
         // Match one of the provided exact values.
         private static readonly Injector _ValidateExact = (inj, val, refStr, store) =>
         {
@@ -3595,6 +3661,7 @@ namespace Voxgig.Struct
                     ["$LEN"]      = _ValidateLen,
                     ["$RANGE"]    = _ValidateRange,
                     ["$LIKE"]     = _ValidateLike,
+                    ["$REST"]     = _ValidateRest,
 
                     [S_DERRS] = errs,
                 },
@@ -3644,8 +3711,10 @@ namespace Voxgig.Struct
             "$OPEN",
         ];
 
-        // Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
-        private static void _CheckNames(object? spec, object? store, List<object?> path, List<object?> errs)
+        // Report each checker the spec names that validate lacks, and each misplaced
+        // $REST; $EXACT's arguments are literals. Last: spec is a list's last item.
+        private static void _CheckNames(
+            object? spec, object? store, List<object?> path, List<object?> errs, bool last = false)
         {
             string? name = _RefName(spec);
             if (null != name)
@@ -3654,21 +3723,48 @@ namespace Voxgig.Struct
                 {
                     errs.Add("Unknown validator " + name + " at field " + Pathify(path) + ".");
                 }
+                else if ("$REST" == name)
+                {
+                    errs.Add(_RestMsg(path, " must be the last element of an array."));
+                }
                 return;
             }
 
-            if (IsList(spec) && "$EXACT" == _RefName(Lookup(spec, 0)))
+            string? head = IsList(spec) ? _RefName(Lookup(spec, 0)) : null;
+            if ("$EXACT" == head)
             {
                 return;
             }
 
+            if ("$REST" == head)
+            {
+                if (!last)
+                {
+                    errs.Add(_RestMsg(path, " must be the last element of an array."));
+                }
+                else if (2 != Size(spec))
+                {
+                    errs.Add(_RestMsg(path, " must have exactly one spec."));
+                }
+                _CheckNames(Lookup(spec, 1), store, [.. path, 1], errs);
+                return;
+            }
+
+            const string restkey = "`$REST`";
+            if (IsMap(spec) && !ReferenceEquals(NONE, Lookup(spec, restkey)) &&
+                !ReferenceEquals(NONE, Lookup(spec, "`$CHILD`")))
+            {
+                errs.Add(_RestMsg(path, " cannot be used with $CHILD."));
+            }
+
+            string? lastkey = IsList(spec) ? StrKey(Size(spec) - 1) : null;
             foreach (string key in KeysOf(spec))
             {
-                if (IsMap(spec))
+                if (IsMap(spec) && restkey != key)
                 {
                     _CheckNames(key, store, path, errs);
                 }
-                _CheckNames(Lookup(spec, key), store, [.. path, key], errs);
+                _CheckNames(Lookup(spec, key), store, [.. path, key], errs, lastkey == key);
             }
         }
 
@@ -4081,20 +4177,12 @@ namespace Voxgig.Struct
                 });
             var results = new List<object?>();
 
+            // Bare names only: Transform reads a key without a leading $ as data.
             var selectExtra = new Dictionary<string, object?>
             {
-                ["`$AND`"] = _SelectAnd,
-                ["`$OR`"] = _SelectOr,
-                ["`$NOT`"] = _SelectNot,
                 ["$AND"] = _SelectAnd,
                 ["$OR"] = _SelectOr,
                 ["$NOT"] = _SelectNot,
-                // JSON/test fixtures use backtick-wrapped keys (`$GT`, etc.); GetPath resolves bare $NAME.
-                ["`$GT`"] = _SelectCmp,
-                ["`$LT`"] = _SelectCmp,
-                ["`$GTE`"] = _SelectCmp,
-                ["`$LTE`"] = _SelectCmp,
-                ["`$LIKE`"] = _SelectCmp,
                 ["$GT"] = _SelectCmp,
                 ["$LT"] = _SelectCmp,
                 ["$GTE"] = _SelectCmp,
