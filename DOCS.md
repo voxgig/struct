@@ -301,6 +301,21 @@ query the list form works the same; `select`'s own key form,
 `` { code: { '`$LIKE`': '^A' } } ``, matches the value's text, numbers
 included.
 
+### Type the keys a spec does not name
+A record often has a few fixed fields and any number of others of one type:
+```js
+S.validate(user, { name: '`$STRING`', '`$REST`': '`$INTEGER`' })
+S.validate(row, ['`$STRING`', ['`$REST`', '`$INTEGER`']])
+```
+In a map spec, `'`$REST`': spec` checks each key the spec does not name, so
+`{ name: 'Ada', age: 36 }` passes and `{ name: 'Ada', nick: 'A' }` fails with
+`Expected field nick to be integer, but found string: A.` As the last item of
+a list spec, `['`$REST`', spec]` checks every item after the named ones, so
+the second spec accepts `['a']` and `['a', 1, 2]`. A map spec with `$REST`
+never reports an unexpected key, and a null in the data is a value like any
+other. `$REST` anywhere but a list spec's last item, or beside `$CHILD`, fails
+before any data is read.
+
 ### Reuse a spec, or nest one inside itself
 A tree has the same shape at every level, so its spec has to name itself:
 ```js
@@ -491,7 +506,8 @@ named function from `extra`).
 `$CHILD` (apply a sub-spec to every child), `$EXACT` (equal a literal
 exactly), `$NOF` (a count of specs admits the value), `$ALL` (every spec
 admits the value), `$LEN` (a length within a bound), `$RANGE` (a number
-within a bound), `$LIKE` (a string a pattern finds). A spec that names any
+within a bound), `$LIKE` (a string a pattern finds), `$REST` (the keys or
+items a spec does not name). A spec that names any
 other checker fails before any data is read, with `Unknown validator $FOO at
 field a.`
 

@@ -1677,6 +1677,52 @@ const validate_CHILD = (inj) => {
     }
     return NONE;
 };
+// The members a spec does not name: the map form is a key, the list form a
+// tuple's last item. Each places clones of its spec for the loop to check.
+const validate_REST = (inj) => {
+    const { mode, key, parent, keys, path } = inj;
+    if (M_KEYPRE === mode) {
+        const resttm = getprop(parent, key);
+        const tval = getprop(inj.dparent, getelem(path, -2));
+        if (ismap(tval)) {
+            for (const ckey of keysof(tval)) {
+                if (!keys.includes(ckey)) {
+                    setprop(parent, ckey, clone(resttm));
+                    keys.push(ckey);
+                }
+            }
+        }
+        inj.setval(NONE);
+        return NONE;
+    }
+    const prior = inj.prior;
+    if (M_VAL !== mode || NONE === prior || !islist(prior.parent) || 0 !== inj.keyI) {
+        inj.errs.push(_restmsg(slice(path, 1), ' must be the last element of an array.'));
+        return NONE;
+    }
+    inj.keyI = size(keys);
+    prior.modify = NONE;
+    const tuple = prior.parent;
+    const slot = _listkey(prior.key);
+    const dlist = prior.dparent;
+    const numitems = islist(dlist) ? size(dlist) : 0;
+    if (numitems <= slot) {
+        inj.setval(NONE, 2);
+        return SKIP;
+    }
+    const resttm = _lookup(parent, 1);
+    for (let i = slot; i < numitems; i++) {
+        setprop(tuple, i, clone(resttm));
+    }
+    for (let i = size(prior.keys); i < numitems; i++) {
+        prior.keys.push(strkey(i));
+    }
+    prior.keyI--;
+    return SKIP;
+};
+function _restmsg(path, problem) {
+    return 'The $REST validator at field ' + pathify(path) + problem;
+}
 const validate_EXACT = (inj) => {
     const { mode, parent, key, keyI } = inj;
     // Only operate in val mode, since parent is a list.
@@ -2034,6 +2080,7 @@ injdef) {
             $LEN: validate_LEN,
             $RANGE: validate_RANGE,
             $LIKE: validate_LIKE,
+            $REST: validate_REST,
         },
         getdef(extra, {}),
         // A special top level value to collect errors.
@@ -2371,23 +2418,43 @@ const VALIDATE_NAMES = [
     '$APPLY',
     '$OPEN',
 ];
-// Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
-function _checknames(spec, store, path, errs) {
+// Report each checker the spec names that validate lacks, and each misplaced
+// $REST; $EXACT's arguments are literals. Last: spec is a list's last item.
+function _checknames(spec, store, path, errs, last) {
     const name = _refname(spec);
     if (NONE !== name) {
         if (_unknownname(name, store)) {
             errs.push('Unknown validator ' + name + ' at field ' + pathify(path) + '.');
         }
+        else if ('$REST' === name) {
+            errs.push(_restmsg(path, ' must be the last element of an array.'));
+        }
         return;
     }
-    if (islist(spec) && '$EXACT' === _refname(spec[0])) {
+    const head = islist(spec) ? _refname(spec[0]) : NONE;
+    if ('$EXACT' === head) {
         return;
     }
+    if ('$REST' === head) {
+        if (true !== last) {
+            errs.push(_restmsg(path, ' must be the last element of an array.'));
+        }
+        else if (2 !== size(spec)) {
+            errs.push(_restmsg(path, ' must have exactly one spec.'));
+        }
+        _checknames(spec[1], store, flatten([path, 1]), errs);
+        return;
+    }
+    const restkey = '`$REST`';
+    if (ismap(spec) && NONE !== _lookup(spec, restkey) && NONE !== _lookup(spec, '`$CHILD`')) {
+        errs.push(_restmsg(path, ' cannot be used with $CHILD.'));
+    }
+    const lastkey = islist(spec) ? strkey(size(spec) - 1) : NONE;
     for (const key of keysof(spec)) {
-        if (ismap(spec)) {
+        if (ismap(spec) && restkey !== key) {
             _checknames(key, store, path, errs);
         }
-        _checknames(spec[key], store, flatten([path, key]), errs);
+        _checknames(spec[key], store, flatten([path, key]), errs, lastkey === key);
     }
 }
 // The name a whole-string reference gives, when it is a checker name in any case.
