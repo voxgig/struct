@@ -30,12 +30,12 @@ public func validate_STRING(_ inj: Injection, _ val: Value, _ ref: String, _ sto
   let t = typify(out)
   if (t & T_string) == 0 {
     inj.errs.items.append(.string(invalidTypeMsg(inj.path, S_string, t, out, "V1010")))
-    return .noval
+    return out
   }
   if case .string(let s) = out, s.isEmpty {
     inj.errs.items.append(
       .string("Empty string at " + pathify(.list(VList(inj.path.map { Value.string($0) })), 1)))
-    return .noval
+    return out
   }
   return out
 }
@@ -67,7 +67,7 @@ public func validate_TYPE(_ inj: Injection, _ val: Value, _ ref: String, _ store
   let t = typify(out)
   if (t & typev) == 0 {
     inj.errs.items.append(.string(invalidTypeMsg(inj.path, tname, t, out, "V1001")))
-    return .noval
+    return out
   }
   return out
 }

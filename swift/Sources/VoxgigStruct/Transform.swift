@@ -289,7 +289,19 @@ public func transform_REF(_ inj: Injection, _ val: Value, _ ref: String, _ store
   subInj.dparent = getpath(spec, dpath)
   subInj.base = S_DTOP
   subInj.meta = inj.meta
-  let resolved = getpath(spec, refpath, subInj)
+  var resolved = getpath(spec, refpath, subInj)
+  // A chain of references that comes back to a path it has named names nothing.
+  var seen = [refpath]
+  var next = resolved
+  while next.isList && lookup(next, .int(0)) == .string("`$REF`") {
+    let nextpath = lookup(next, .int(1))
+    if seen.contains(nextpath) {
+      resolved = .noval
+      break
+    }
+    seen.append(nextpath)
+    next = getpath(spec, nextpath, subInj)
+  }
   var hasSubRef = false
   if isnode(resolved) {
     _ = walk(
