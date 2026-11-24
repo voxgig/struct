@@ -2684,27 +2684,56 @@ class Struct
     }
 
     /**
-     * Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
+     * Report each checker the spec names that validate lacks, and each misplaced
+     * $REST; $EXACT's arguments are literals. Last: spec is a list's last item.
      */
-    private static function _checknames(mixed $spec, mixed $store, array $path, \ArrayObject $errs): void
-    {
+    private static function _checknames(
+        mixed $spec,
+        mixed $store,
+        array $path,
+        \ArrayObject $errs,
+        bool $last = false
+    ): void {
         $name = self::_refname($spec);
         if (null !== $name) {
             if (self::_unknownname($name, $store)) {
                 $errs[] = 'Unknown validator ' . $name . ' at field ' . self::pathify($path) . '.';
+            } elseif ('$REST' === $name) {
+                $errs[] = self::_restmsg($path, ' must be the last element of an array.');
             }
             return;
         }
 
-        if (self::islist($spec) && '$EXACT' === self::_refname(self::_getprop($spec, 0))) {
+        $head = self::islist($spec) ? self::_refname(self::_getprop($spec, 0)) : null;
+        if ('$EXACT' === $head) {
             return;
         }
 
+        if ('$REST' === $head) {
+            if (true !== $last) {
+                $errs[] = self::_restmsg($path, ' must be the last element of an array.');
+            } elseif (2 !== self::size($spec)) {
+                $errs[] = self::_restmsg($path, ' must have exactly one spec.');
+            }
+            self::_checknames(self::_getprop($spec, 1), $store, [...$path, 1], $errs);
+            return;
+        }
+
+        $restkey = '`$REST`';
+        if (
+            self::ismap($spec)
+            && self::undef() !== self::_getprop($spec, $restkey)
+            && self::undef() !== self::_getprop($spec, '`$CHILD`')
+        ) {
+            $errs[] = self::_restmsg($path, ' cannot be used with $CHILD.');
+        }
+
+        $lastkey = self::islist($spec) ? self::strkey(self::size($spec) - 1) : null;
         foreach (self::keysof($spec) as $key) {
-            if (self::ismap($spec)) {
+            if (self::ismap($spec) && $restkey !== $key) {
                 self::_checknames($key, $store, $path, $errs);
             }
-            self::_checknames(self::_getprop($spec, $key), $store, [...$path, $key], $errs);
+            self::_checknames(self::_getprop($spec, $key), $store, [...$path, $key], $errs, $lastkey === $key);
         }
     }
 
@@ -3117,6 +3146,72 @@ class Struct
         }
 
         return self::undef();
+    }
+
+    /**
+     * The members a spec does not name: the map form is a key, the list form a
+     * tuple's last item. Each places clones of its spec for the loop to check.
+     */
+    public static function validate_REST(object $inj): mixed
+    {
+        $mode = $inj->mode;
+        $key = $inj->key;
+        $parent = $inj->parent;
+        $keys = $inj->keys ?? [];
+        $path = $inj->path;
+
+        if (self::M_KEYPRE === $mode) {
+            $resttm = self::getprop($parent, $key);
+            $tval = self::getprop($inj->dparent, self::getelem($path, -2));
+
+            if (self::ismap($tval)) {
+                foreach (self::keysof($tval) as $ckey) {
+                    if (!in_array($ckey, $keys, true)) {
+                        self::setprop($parent, $ckey, self::clone($resttm));
+                        $keys[] = $ckey;
+                    }
+                }
+                $inj->keys = $keys;
+            }
+
+            $inj->setval(self::undef());
+            return self::undef();
+        }
+
+        $prior = $inj->prior;
+        if (self::M_VAL !== $mode || null === $prior || !self::islist($prior->parent) || 0 !== $inj->keyI) {
+            $inj->errs[] = self::_restmsg(self::slice($path, 1), ' must be the last element of an array.');
+            return self::undef();
+        }
+
+        $inj->keyI = self::size($keys);
+        $prior->modify = null;
+
+        $tuple = $prior->parent;
+        $slot = self::_listkey($prior->key);
+        $dlist = $prior->dparent;
+        $numitems = self::islist($dlist) ? self::size($dlist) : 0;
+
+        if ($numitems <= $slot) {
+            $inj->setval(self::undef(), 2);
+            return self::SKIP;
+        }
+
+        $resttm = self::_getprop($parent, 1);
+        for ($i = $slot; $i < $numitems; $i++) {
+            self::setprop($tuple, $i, self::clone($resttm));
+        }
+        for ($i = self::size($prior->keys); $i < $numitems; $i++) {
+            $prior->keys[] = self::strkey($i);
+        }
+
+        $prior->keyI--;
+        return self::SKIP;
+    }
+
+    private static function _restmsg(mixed $path, string $problem): string
+    {
+        return 'The $REST validator at field ' . self::pathify($path) . $problem;
     }
 
     /**
@@ -3708,6 +3803,7 @@ class Struct
                 '$LEN' => [self::class, 'validate_LEN'],
                 '$RANGE' => [self::class, 'validate_RANGE'],
                 '$LIKE' => [self::class, 'validate_LIKE'],
+                '$REST' => [self::class, 'validate_REST'],
             ],
             (array) ($extra ?? []),
             [

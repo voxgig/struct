@@ -1260,6 +1260,15 @@ class StructTest extends TestCase
         );
     }
 
+    public function testValidateRest(): void
+    {
+        $this->testSet(
+            $this->testSpec->validate->rest,
+            fn($vin) => Struct::validate(self::vin($vin, 'data'), self::vin($vin, 'spec')),
+            ['null' => false]
+        );
+    }
+
     public function testValidateUnknown(): void
     {
         $this->testSet(
