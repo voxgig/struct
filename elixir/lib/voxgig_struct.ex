@@ -2385,6 +2385,60 @@ defmodule Voxgig.Struct do
     end
   end
 
+  # The members a spec does not name: the map form is a key, the list form a
+  # tuple's last item. Each places clones of its spec for the loop to check.
+  defp validate_rest(inj, _v, _r, _s) do
+    parent = ig(inj, :parent)
+    keys = ig(inj, :keys)
+    path = ig(inj, :path)
+    prior = ig(inj, :prior)
+
+    cond do
+      ig(inj, :mode) == @m_keypre ->
+        resttm = getprop(parent, ig(inj, :key))
+        tval = getprop(ig(inj, :dparent), getelem(path, -2))
+
+        if ismap(tval) do
+          Enum.each(keysof(tval), fn ckey ->
+            if ckey not in list_items(keys) do
+              setprop(parent, ckey, clone(resttm))
+              setprop(keys, size(keys), ckey)
+            end
+          end)
+        end
+
+        inj_setval(inj, nil)
+        nil
+
+      ig(inj, :mode) != @m_val or prior == nil or not islist(ig(prior, :parent)) or ig(inj, :keyi) != 0 ->
+        push_err(inj, restmsg_(slice(path, 1), " must be the last element of an array."))
+        nil
+
+      true ->
+        is_(inj, :keyi, size(keys))
+        is_(prior, :modify, nil)
+
+        tuple = ig(prior, :parent)
+        slot = listidx_(ig(prior, :key))
+        dlist = ig(prior, :dparent)
+        numitems = if islist(dlist), do: size(dlist), else: 0
+
+        if numitems <= slot do
+          inj_setval(inj, nil, 2)
+        else
+          resttm = lookup_(parent, 1)
+          Enum.each(slot..(numitems - 1)//1, fn i -> setprop(tuple, i, clone(resttm)) end)
+          pkeys = ig(prior, :keys)
+          Enum.each(size(pkeys)..(numitems - 1)//1, fn i -> setprop(pkeys, size(pkeys), strkey(i)) end)
+          is_(prior, :keyi, ig(prior, :keyi) - 1)
+        end
+
+        @skip
+    end
+  end
+
+  defp restmsg_(path, problem), do: "The $REST validator at field " <> pathify(path) <> problem
+
   defp validate_exact(inj, _v, _r, _s) do
     if ig(inj, :mode) != @m_val do
       delprop(ig(inj, :parent), ig(inj, :key))
@@ -2755,6 +2809,7 @@ defmodule Voxgig.Struct do
     setprop(base, "$LEN", &validate_len/4)
     setprop(base, "$RANGE", &validate_range/4)
     setprop(base, "$LIKE", &validate_like/4)
+    setprop(base, "$REST", &validate_rest/4)
     store = merge(vlist_new([base, if(extra == nil, do: empty_map(), else: extra), vmap_new([{@s_derrs, errs}])]), 1)
     meta = getprop(injdef, "meta", empty_map())
     setprop(meta, @s_bexact, getprop(meta, @s_bexact, false))
@@ -2778,23 +2833,48 @@ defmodule Voxgig.Struct do
   # Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
   @validate_names ["$TOP", "$SPEC", "$BT", "$DS", "$WHEN", "$ANNO", "$REF", "$FORMAT", "$APPLY", "$OPEN"]
 
-  # Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
-  defp checknames_(spec, store, path, errs) do
+  # Report each checker the spec names that validate lacks, and each misplaced
+  # $REST; $EXACT's arguments are literals. Last: spec is a list's last item.
+  defp checknames_(spec, store, path, errs, last \\ false) do
     name = refname_(spec)
+    head = if islist(spec), do: refname_(lookup_(spec, 0)), else: nil
+    restkey = "`$REST`"
 
     cond do
       name != nil ->
-        if unknownname_(name, store) do
-          setprop(errs, size(errs), "Unknown validator " <> name <> " at field " <> pathify(vlist_new(path)) <> ".")
+        cond do
+          unknownname_(name, store) ->
+            setprop(errs, size(errs), "Unknown validator " <> name <> " at field " <> pathify(vlist_new(path)) <> ".")
+
+          name == "$REST" ->
+            setprop(errs, size(errs), restmsg_(vlist_new(path), " must be the last element of an array."))
+
+          true ->
+            :ok
         end
 
-      islist(spec) and refname_(lookup_(spec, 0)) == "$EXACT" ->
+      head == "$EXACT" ->
         :ok
 
+      head == "$REST" ->
+        cond do
+          last != true -> setprop(errs, size(errs), restmsg_(vlist_new(path), " must be the last element of an array."))
+          size(spec) != 2 -> setprop(errs, size(errs), restmsg_(vlist_new(path), " must have exactly one spec."))
+          true -> :ok
+        end
+
+        checknames_(lookup_(spec, 1), store, path ++ [1], errs)
+
       true ->
+        if ismap(spec) and holds_(spec, restkey) and holds_(spec, "`$CHILD`") do
+          setprop(errs, size(errs), restmsg_(vlist_new(path), " cannot be used with $CHILD."))
+        end
+
+        lastkey = if islist(spec), do: strkey(size(spec) - 1), else: nil
+
         Enum.each(keysof(spec), fn key ->
-          if ismap(spec), do: checknames_(key, store, path, errs)
-          checknames_(lookup_(spec, key), store, path ++ [key], errs)
+          if ismap(spec) and key != restkey, do: checknames_(key, store, path, errs)
+          checknames_(lookup_(spec, key), store, path ++ [key], errs, lastkey == key)
         end)
     end
   end

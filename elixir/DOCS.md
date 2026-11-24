@@ -111,6 +111,10 @@ S.validate(42, S.jt(["`$RANGE`", S.jm(["min", 0, "lt", 150]), "`$INTEGER`"]))  #
 # validate: `$LIKE` finds a pattern in a string, with the core `Regex`
 S.validate("a-1", S.jt(["`$LIKE`", "^[a-z]+-[0-9]+$"]))  # "a-1"
 
+# validate: `$REST` checks the keys or items a spec does not name
+S.validate(S.jm(["name", "Ada", "age", 36]), S.jm(["name", "`$STRING`", "`$REST`", "`$INTEGER`"]))  # {age:36,name:Ada}
+S.validate(S.jt(["a", 1, 2]), S.jt(["`$STRING`", S.jt(["`$REST`", "`$INTEGER`"])]))  # [a,1,2]
+
 # select: MongoDB-style query over children
 S.select(S.jt([S.jm(["a", 1]), S.jm(["a", 2])]), S.jm(["a", S.jm(["`$GT`", 1])]))
 ```
@@ -128,6 +132,11 @@ anything but a number. `min` and `max` include their bound, while `gt` and
 `lt` exclude it. `$LIKE` takes a pattern, which the core `Regex` compiles with
 no options, and fails on anything but a string the pattern finds. Each takes
 at most one spec, which must also admit the value.
+
+`$REST` takes exactly one spec. As a key in a map spec it checks each key the
+spec does not name, and as a list spec's last item it checks each item after
+the named ones. Anywhere else, or beside `$CHILD`, it fails before any data
+is read.
 
 ## Testing
 
