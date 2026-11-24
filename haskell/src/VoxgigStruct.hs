@@ -1776,7 +1776,20 @@ transformRef inj _ _ store = do
         -- A relative path starts where this slot is, so .x is a sibling.
         dpath <- slice ipath (VNum 1) (VNum (-2))
         dparent <- getpath INone spec dpath
-        refv <- getpath (IDef ((defaultInjDef VNoval) { dDpath = dpath, dDparent = dparent })) spec refpath
+        let refinj = IDef ((defaultInjDef VNoval) { dDpath = dpath, dDparent = dparent })
+        found <- getpath refinj spec refpath
+        -- A chain of references that comes back to a path it has named names nothing.
+        let cycles seen next
+              | not (islist next) = return False
+              | otherwise = do
+                  hd <- lookup_ next (VNum 0)
+                  if not (vStrEq hd "`$REF`") then return False
+                  else do
+                    np <- lookup_ next (VNum 1)
+                    hit <- or <$> mapM (deepEqual np) seen
+                    if hit then return True else getpath refinj spec np >>= cycles (np : seen)
+        cyclic <- cycles [refpath] found
+        let refv = if cyclic then VNoval else found
         hasSubRef <- newIORef False
         when (isnode refv) $ do _ <- walk (Just (\_ v2 _ _ -> do when (vStrEq v2 "`$REF`") (writeIORef hasSubRef True); return v2)) Nothing VNoval refv; return ()
         -- A recursive reference stops where the data does.
@@ -2019,8 +2032,8 @@ validateString inj _ _ _ = do
   dp <- readIORef (iDparent inj); k <- readIORef (iKey inj)
   out <- lookup_ dp k
   let t = typify out
-  if (t_string .&. t) == 0 then do path <- readIORef (iPath inj); m <- invalidTypeMsg path s_string t out "V1010"; pushErr inj m; return VNoval
-  else if vStrEq out s_mt then do path <- readIORef (iPath inj); p <- pathifyFull path (VNum 1) VNoval False; pushErr inj ("Empty string at " ++ p); return VNoval
+  if (t_string .&. t) == 0 then do path <- readIORef (iPath inj); m <- invalidTypeMsg path s_string t out "V1010"; pushErr inj m; return out
+  else if vStrEq out s_mt then do path <- readIORef (iPath inj); p <- pathifyFull path (VNum 1) VNoval False; pushErr inj ("Empty string at " ++ p); return out
   else return out
 
 -- | Type-checking validation rule (@$NUMBER@, @$BOOLEAN@, ...).
@@ -2033,7 +2046,7 @@ validateType inj _ refstr _ = do
   dp <- readIORef (iDparent inj); k <- readIORef (iKey inj)
   out <- lookup_ dp k
   let t = typify out
-  if (t .&. typev) == 0 then do path <- readIORef (iPath inj); m <- invalidTypeMsg path tname t out "V1001"; pushErr inj m; return VNoval
+  if (t .&. typev) == 0 then do path <- readIORef (iPath inj); m <- invalidTypeMsg path tname t out "V1001"; pushErr inj m; return out
   else return out
 
 -- | @$ANY@ validation rule (accept any value).
