@@ -2394,6 +2394,19 @@ public class Struct {
         refInj.handler = _injecthandler;
         Object refResolved = getpath(spec, refpath, refInj);
 
+        // A chain of references that comes back to a path it has named names nothing.
+        List<Object> seen = new ArrayList<>();
+        seen.add(refpath);
+        for (Object next = refResolved; islist(next) && "`$REF`".equals(lookup(next, 0)); ) {
+          Object nextpath = lookup(next, 1);
+          if (seen.contains(nextpath)) {
+            refResolved = UNDEF;
+            break;
+          }
+          seen.add(nextpath);
+          next = getpath(spec, nextpath, refInj);
+        }
+
         Object tref = clone(refResolved);
 
         boolean[] hasSubRef = {false};
@@ -2532,11 +2545,11 @@ public class Struct {
         int t = typify(out);
         if ((T_string & t) == 0) {
           inj.errs.add(_invalidTypeMsg(inj.path, "string", t, out, "V1010"));
-          return UNDEF;
+          return out;
         }
         if ("".equals(out)) {
           inj.errs.add("Empty string at " + pathify(inj.path, 1));
-          return UNDEF;
+          return out;
         }
         return out;
       };
@@ -2561,7 +2574,7 @@ public class Struct {
         int t = typify(out);
         if ((t & typev) == 0) {
           inj.errs.add(_invalidTypeMsg(inj.path, tname, t, out, "V1001"));
-          return UNDEF;
+          return out;
         }
         return out;
       };
