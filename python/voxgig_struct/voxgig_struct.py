@@ -2538,6 +2538,59 @@ def validate_CHILD(inj, _val=UNDEF, _ref=UNDEF, _store=UNDEF):
     return UNDEF
 
 
+# The members a spec does not name: the map form is a key, the list form a
+# tuple's last item. Each places clones of its spec for the loop to check.
+def validate_REST(inj, _val=UNDEF, _ref=UNDEF, _store=UNDEF):
+    mode = inj.mode
+    key = inj.key
+    parent = inj.parent
+    keys = inj.keys
+    path = inj.path
+
+    if mode == S_MKEYPRE:
+        resttm = getprop(parent, key)
+        tval = getprop(inj.dparent, getelem(path, -2))
+
+        if ismap(tval):
+            for ckey in keysof(tval):
+                if ckey not in keys:
+                    setprop(parent, ckey, clone(resttm))
+                    keys.append(ckey)
+
+        inj.setval(UNDEF)
+        return UNDEF
+
+    prior = inj.prior
+    if mode != S_MVAL or prior is None or not islist(prior.parent) or inj.keyI != 0:
+        inj.errs.append(_restmsg(slice(path, 1), ' must be the last element of an array.'))
+        return UNDEF
+
+    inj.keyI = size(keys)
+    prior.modify = None
+
+    tuple_ = prior.parent
+    slot = _listkey(prior.key)
+    dlist = prior.dparent
+    numitems = size(dlist) if islist(dlist) else 0
+
+    if numitems <= slot:
+        inj.setval(UNDEF, 2)
+        return SKIP
+
+    resttm = _lookup(parent, 1)
+    for i in range(slot, numitems):
+        setprop(tuple_, i, clone(resttm))
+    for i in range(size(prior.keys), numitems):
+        prior.keys.append(strkey(i))
+
+    prior.keyI -= 1
+    return SKIP
+
+
+def _restmsg(path, problem):
+    return 'The $REST validator at field ' + pathify(path) + problem
+
+
 def validate_EXACT(inj, _val=UNDEF, _ref=UNDEF, _store=UNDEF):
     mode = inj.mode
     parent = inj.parent
@@ -2992,6 +3045,7 @@ def validate(data, spec, injdef=UNDEF):
                 '$LEN': validate_LEN,
                 '$RANGE': validate_RANGE,
                 '$LIKE': validate_LIKE,
+                '$REST': validate_REST,
             },
             ({} if extra is UNDEF or extra is None else extra),
             {
@@ -3173,21 +3227,38 @@ VALIDATE_NAMES = [
 ]
 
 
-# Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
-def _checknames(spec, store, path, errs):
+# Report each checker the spec names that validate lacks, and each misplaced
+# $REST; $EXACT's arguments are literals. Last: spec is a list's last item.
+def _checknames(spec, store, path, errs, last=False):
     name = _refname(spec)
     if name is not UNDEF:
         if _unknownname(name, store):
             errs.append('Unknown validator ' + name + ' at field ' + pathify(path) + '.')
+        elif name == '$REST':
+            errs.append(_restmsg(path, ' must be the last element of an array.'))
         return
 
-    if islist(spec) and _refname(_lookup(spec, 0)) == '$EXACT':
+    head = _refname(_lookup(spec, 0)) if islist(spec) else UNDEF
+    if head == '$EXACT':
         return
 
+    if head == '$REST':
+        if not last:
+            errs.append(_restmsg(path, ' must be the last element of an array.'))
+        elif size(spec) != 2:
+            errs.append(_restmsg(path, ' must have exactly one spec.'))
+        _checknames(_lookup(spec, 1), store, [*path, 1], errs)
+        return
+
+    restkey = '`$REST`'
+    if ismap(spec) and _present(spec, restkey) and _present(spec, '`$CHILD`'):
+        errs.append(_restmsg(path, ' cannot be used with $CHILD.'))
+
+    lastkey = strkey(size(spec) - 1) if islist(spec) else UNDEF
     for key in keysof(spec):
-        if ismap(spec):
+        if ismap(spec) and key != restkey:
             _checknames(key, store, path, errs)
-        _checknames(_lookup(spec, key), store, [*path, key], errs)
+        _checknames(_lookup(spec, key), store, [*path, key], errs, key == lastkey)
 
 
 # The name a whole-string reference gives, when it is a checker name in any case.
