@@ -50,6 +50,7 @@ and inj = {
   mutable modify : modifyfn option;
   mutable prior : inj option;
   mutable extra : value;
+  mutable named : bool;            (* map node names keys of its own, not $ commands *)
 }
 
 (* injdef: the loose Partial<Injection> the public API accepts. *)
@@ -1076,7 +1077,7 @@ and new_inj v parent =
     keys = lst [Str s_dtop]; key = Str s_dtop; ival = v; parent;
     path = lst [Str s_dtop]; nodes = lst [parent]; handler = inject_handler;
     errs = empty_list (); meta = empty_map (); dparent = Noval; dpath = lst [Str s_dtop];
-    base = Str s_dtop; modify = None; prior = None; extra = Noval }
+    base = Str s_dtop; modify = None; prior = None; extra = Noval; named = false }
 
 and inj_descend inj =
   (match inj.meta with Map m ->
@@ -1106,7 +1107,7 @@ and inj_child inj keyi keys =
     handler = inj.handler; errs = inj.errs; meta = inj.meta; base = inj.base;
     modify = inj.modify; prior = Some inj;
     dpath = (match inj.dpath with List r -> lst !r | _ -> inj.dpath);
-    dparent = inj.dparent; extra = inj.extra;
+    dparent = inj.dparent; extra = inj.extra; named = false;
   } in
   cinj
 
@@ -1139,6 +1140,7 @@ and inject ?(inj = INone) v store =
       i
   in
   ignore (inj_descend state);
+  state.named <- false;
   let v =
     if isnode v then begin
       let nodekeys = ref (
@@ -1147,6 +1149,7 @@ and inject ?(inj = INone) v store =
           let ks = List.map fst m.entries in
           let normal = List.sort compare (List.filter (fun k -> not (String.contains k '$')) ks) in
           let trans = List.sort compare (List.filter (fun k -> String.contains k '$') ks) in
+          state.named <- normal <> [];
           normal @ trans
         | List r -> List.mapi (fun i _ -> string_of_int i) !r
         | _ -> [])
@@ -1419,7 +1422,10 @@ and transform_ref inj _v _ref store =
     (match spec_func with
      | Func f ->
        let spec = f inj Noval "" Noval in
-       let refv = getpath ~inj:INone spec refpath in
+       (* A relative path starts where this slot is, so .x is a sibling. *)
+       let dpath = slice ~start:(Num 1.0) ~stop:(Num (-2.0)) inj.path in
+       let dparent = getpath ~inj:INone spec dpath in
+       let refv = getpath ~inj:(IDef { (default_injdef ()) with d_dpath = dpath; d_dparent = dparent }) spec refpath in
        let has_sub = ref false in
        (if isnode refv then ignore (walk ~before:(fun _k v2 _p _path -> (if v2 = Str "`$REF`" then has_sub := true); v2) refv));
        (* A recursive reference stops where the data does. *)
@@ -1975,7 +1981,8 @@ and validation pval key parent inj =
           else begin
             let ckeys = keysof cval in
             let pkeys = keysof pval in
-            if List.length pkeys > 0 && not (getprop pval (Str s_bopen) = Bool true) then begin
+            (* Only a spec written as {} is open, even if named keys resolved away. *)
+            if (List.length pkeys > 0 || inj.named) && not (getprop pval (Str s_bopen) = Bool true) then begin
               let badkeys = List.filter (fun ck -> is_noval (lookup_ pval (Str ck))) ckeys in
               if List.length badkeys > 0 then
                 push_err inj ("Unexpected keys at field " ^ pathify ~startin:(Num 1.0) inj.path ^ s_viz ^ String.concat ", " badkeys)
