@@ -1149,6 +1149,7 @@ function inject(val, store, injdef) {
   inj.descend()
   // console.log('INJ-START', val, inj.mode, inj.key, inj.val,
   //  't=', inj.path, 'P=', inj.parent, 'dp=', inj.dparent, 'ST=', store.$TOP)
+  inj.named = false
   // Descend into node.
   if (isnode(val)) {
     // Keys are sorted alphanumerically to ensure determinism.
@@ -1158,10 +1159,9 @@ function inject(val, store, injdef) {
     let nodekeys
     nodekeys = keysof(val)
     if (ismap(val)) {
-      nodekeys = flatten([
-        filter(nodekeys, (n) => !n[1].includes(S_DS)),
-        filter(nodekeys, (n) => n[1].includes(S_DS)),
-      ])
+      const named = filter(nodekeys, (n) => !n[1].includes(S_DS))
+      nodekeys = flatten([named, filter(nodekeys, (n) => n[1].includes(S_DS))])
+      inj.named = 0 < size(named)
     } else {
       nodekeys = keysof(val)
     }
@@ -1453,19 +1453,18 @@ const transform_PACK = (inj, _val, _ref, store) => {
   // Drop transform key.
   return NONE
 }
-// TODO: not found ref should removed key (setprop NONE)
 // Reference original spec (enables recursice transformations)
 // Format: ['`$REF`', '`spec-path`']
 const transform_REF = (inj, _val, _ref, store) => {
   if (M_VAL !== inj.mode) {
     return NONE
   }
-  // Get arguments: ['`$REF`', 'ref-path'].
+  // ['`$REF`', 'ref-path']: a relative path starts where this slot is, so .x is a sibling.
   const refpath = _lookup(inj.parent, 1)
   inj.keyI = size(inj.keys)
   // Spec reference.
   const spec = getprop(store, S_DSPEC)()
-  const dpath = slice(inj.path, 1)
+  const dpath = slice(inj.path, 1, -2)
   const ref = getpath(spec, refpath, {
     dpath,
     dparent: getpath(spec, dpath),
@@ -2046,8 +2045,8 @@ const _validation = (pval, key, parent, inj) => {
     }
     const ckeys = keysof(cval)
     const pkeys = keysof(pval)
-    // Empty spec object {} means object can be open (any keys).
-    if (0 < size(pkeys) && true !== getprop(pval, '`$OPEN`')) {
+    // Only a spec written as {} is open, even if named keys resolved away.
+    if ((0 < size(pkeys) || inj.named) && true !== getprop(pval, '`$OPEN`')) {
       const badkeys = []
       for (let ckey of ckeys) {
         if (NONE === _lookup(pval, ckey)) {
@@ -2354,6 +2353,7 @@ class Injection {
     this.val = val
     this.parent = parent
     this.errs = []
+    this.named = false // Current map node names keys of its own (not $ commands).
     this.dparent = NONE
     this.dpath = [S_DTOP]
     this.mode = M_VAL
