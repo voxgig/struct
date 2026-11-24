@@ -1934,7 +1934,7 @@ def vg-setpath fn [[store:Any path:Any val:Any injdef:Any] [Any] [
 # Injection state — the recursive engine behind inject / transform /
 # validate / select. An Injection is a flex map with the canonical
 # fields (mode full keyi keys key val parent path nodes handler errs
-# meta dparent dpath base modify prior root). Command functions and
+# meta dparent dpath base modify prior root named). Command functions and
 # handlers are fn boxes (see vgi-fnarg).
 # ----------------------------------------------------------------------------
 def vgi-inj-new fn [[val:Any parent:Any] [Any] [
@@ -1965,6 +1965,7 @@ def vgi-inj-new fn [[val:Any parent:Any] [Any] [
   (inj set "modify" none) drop
   (inj set "prior" none) drop
   (inj set "root" none) drop
+  (inj set "named" false) drop
   inj
 ]]
 
@@ -2038,6 +2039,7 @@ def vgi-inj-child fn [[inj:Any keyi:Integer ikeys:Any] [Any] [
   (c set "dpath" (vg-clone (inj get "dpath"))) drop
   (c set "dparent" (inj get "dparent")) drop
   (c set "root" (inj get "root")) drop
+  (c set "named" false) drop
   c
 ]]
 
@@ -2177,12 +2179,13 @@ def vgl-part-keys fn [[i:Integer ks:Any nodollar:Any dollar:Any] [Any] [
     r
   ]
 ]]
-def vgi-inject-nodekeys fn [[val:Any] [Any] [
+def vgi-inject-nodekeys fn [[val:Any inj:Any] [Any] [
   if (vg-ismap val) [
     def ks (sort (keys val))
     def nodollar (flex [])
     def dollar (flex [])
     (vgl-part-keys 0 ks nodollar dollar) drop
+    (inj set "named" ((size nodollar) gt 0)) drop
     (vgl-shallow 0 dollar nodollar) drop
     nodollar
   ] [
@@ -2246,9 +2249,10 @@ def vg-inject fn [[val:Any store:Any injdef:Any] [Any] [
     ]
   )
   (vgi-inj-descend inj) drop
+  (inj set "named" false) drop
   def rv (
     if (vg-isnode val) [
-      def nodekeys (vgi-inject-nodekeys val)
+      def nodekeys (vgi-inject-nodekeys val inj)
       (vgl-inject-children 0 nodekeys val store inj) drop
       val
     ] [
@@ -2717,7 +2721,8 @@ def vg-t-ref fn [[inj:Any val:Any iref:Any store:Any] [Any] [
     def specbox (vg-getprop store "$SPEC" vg-noarg)
     def sf (vgi-fnarg specbox)
     def spec (none sf/v apply)
-    def dpath (vg-slice ipath 1 vg-noarg vg-noarg)
+    # A relative path starts where this slot is, so .x is a sibling.
+    def dpath (vg-slice ipath 1 -2 vg-noarg)
     def rinj (flex {})
     (rinj set "dpath" dpath) drop
     (rinj set "dparent" (vg-getpath spec dpath vg-noarg)) drop
@@ -3744,7 +3749,8 @@ def vg-validation fn [[pval:Any key:Any parent:Any inj:Any store:Any] [Any] [
               ] [
                 def ckeys (vg-keysof cval)
                 def pkeys (vg-keysof pval)
-                if (((vgz pkeys) gt 0) and (((vg-getprop pval "`$OPEN`" vg-noarg) eq true) not)) [
+                # Only a spec written as {} is open, even if named keys resolved away.
+                if ((((vgz pkeys) gt 0) or ((inj get "named") eq true)) and (((vg-getprop pval "`$OPEN`" vg-noarg) eq true) not)) [
                   def badkeys (vgl-badkeys 0 ckeys pval (flex []))
                   if ((vgz badkeys) gt 0) [
                     (append [(StringUtil.concat ["Unexpected keys at field " (vg-pathify (inj get "path") 1 vg-noarg) ": " (vg-join badkeys ", " vg-noarg)])] (inj get "errs")) drop
