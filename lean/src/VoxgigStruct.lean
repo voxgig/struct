@@ -87,6 +87,7 @@ structure InjData where
   modify : Option Nat := none      -- modify registry id
   prior : Option InjId := none
   extra : Value := .noval
+  named : Bool := false            -- map node names keys of its own, not $ commands
   deriving Inhabited
 
 
@@ -2032,7 +2033,8 @@ def newInj (v parent : Value) : SIO InjId := do
   newInjData {
     mode := M_VAL, full := false, keyi := 0, keys, key := .str S_DTOP, ival := v,
     parent, path, nodes, handler := h, errs, imeta := meta0, dparent := .noval,
-    dpath, base := .str S_DTOP, modify := none, prior := none, extra := .noval }
+    dpath, base := .str S_DTOP, modify := none, prior := none, extra := .noval,
+    named := false }
 
 partial def injDescend (i : InjId) : SIO Value := do
   let d ← getInj i
@@ -2090,7 +2092,7 @@ partial def makeChildInj (i : InjId) (keyi : Int) (keys : Value) : SIO InjId := 
     | _ => pure d.dpath
   newInjData { d with
     keyi, keys, key := .str key, ival, parent := v, path, nodes,
-    prior := some i, dpath }
+    prior := some i, dpath, named := false }
 
 partial def injSetval (i : InjId) (v : Value) (ancestor : Int := 1) : SIO Unit := do
   let d ← getInj i
@@ -2139,6 +2141,7 @@ partial def inject (v : Value) (store : Value) (inj : InjArg := .inone) : SIO Va
        | _ => pure ())
       pure i
   let _ ← injDescend state
+  modInj state (fun d => { d with named := false })
   let v ←
     if isnode v then do
       let nodekeys0 : Array String ←
@@ -2148,6 +2151,7 @@ partial def inject (v : Value) (store : Value) (inj : InjArg := .inone) : SIO Va
           let ks := es.map (·.1)
           let normal := (ks.filter (fun k => !(strContains k '$'))).qsort strLtB
           let trans := (ks.filter (fun k => strContains k '$')).qsort strLtB
+          modInj state (fun d => { d with named := !normal.isEmpty })
           pure (normal ++ trans)
         | .list lid => do
           let xs ← listItems lid
@@ -2487,7 +2491,11 @@ partial def transformRef : InjectorFn := fun inj _v _ref store => do
     match specFunc with
     | .func fid => do
       let spec ← callFunc fid inj .noval "" .noval
-      let refv ← getpath spec refpath
+      -- A relative path starts where this slot is, so .x is a sibling.
+      let dpath ← slice d.path (start := .num 1.0) (stop := .num (-2.0))
+      let dparent ← getpath spec dpath
+      let rdef : InjDef := { dDpath := dpath, dDparent := dparent }
+      let refv ← getpath spec refpath (.idef rdef)
       let hasSub ← IO.mkRef false
       if isnode refv then
         let _ ← walk refv (before := some (fun _k v2 _p _path => do
@@ -3082,7 +3090,8 @@ partial def validation : ModifyFn := fun pval key parent inj => do
             let ckeys ← keysof cval
             let pkeys ← keysof pval
             let bopen ← getprop pval (.str S_BOPEN)
-            if pkeys.size > 0 && !(bopen == .bool true) then do
+            -- Only a spec written as {} is open, even if named keys resolved away.
+            if (pkeys.size > 0 || d.named) && !(bopen == .bool true) then do
               let mut badkeys : List String := []
               for ck in ckeys do
                 if isNoval (← lookupRaw pval (.str ck)) then badkeys := ck :: badkeys
