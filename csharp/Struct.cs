@@ -107,6 +107,7 @@ namespace Voxgig.Struct
         public Dictionary<string, object?> Meta { get; set; } = [];
         public object? Extra { get; set; }
         public object? Root { get; set; }
+        public bool Named { get; set; }  // Current map node names keys of its own (not $ commands).
 
         public object? Descend()
         {
@@ -1917,6 +1918,8 @@ namespace Voxgig.Struct
 
             state.Descend();
 
+            state.Named = false;
+
             // ── Node: recurse into children ──────────────────────────────────────
             if (IsNode(val))
             {
@@ -1928,6 +1931,7 @@ namespace Voxgig.Struct
                     var normal = allKeys.Where(k => !k.Contains(S_DS)).ToList();
                     var transform = allKeys.Where(k => k.Contains(S_DS)).ToList();
                     keys = [.. normal.Cast<object?>(), .. transform.Cast<object?>()];
+                    state.Named = 0 < normal.Count;
                 }
                 else
                 {
@@ -2488,7 +2492,7 @@ namespace Voxgig.Struct
                 return null;
             }
 
-            // Get refpath from parent list element 1.
+            // ['`$REF`', 'ref-path']: a relative path starts where this slot is, so .x is a sibling.
             object? refpath = GetProp(inj.Parent, 1);
             inj.KeyI = inj.Keys.Count;   // skip remaining keys
 
@@ -2505,10 +2509,8 @@ namespace Voxgig.Struct
                 return null;
             }
 
-            // Build dpath from current path (skip first element "$TOP").
-            var dpath = inj.Path.Count > 1
-                ? inj.Path.GetRange(1, inj.Path.Count - 1).Select(p => (object?)(StrKey(p) ?? S_MT)).ToList()
-                : [];
+            var dpath = ((Slice(inj.Path, 1, -2) as List<object?>) ?? [])
+                .Select(p => (object?)(StrKey(p) ?? S_MT)).ToList();
             var dpathInj = new InjectState
             {
                 DPath = dpath,
@@ -3417,8 +3419,8 @@ namespace Voxgig.Struct
                 object? openFlag = GetProp(pval, "`$OPEN`");
                 bool isOpen = true == (openFlag as bool?);
 
-                // Empty spec map means open (accepts any keys).
-                if (0 < Size(pkeys) && !isOpen)
+                // Only a spec written as {} is open, even if named keys resolved away.
+                if ((0 < Size(pkeys) || inj.Named) && !isOpen)
                 {
                     var badkeys = new List<string>();
                     foreach (string ck in ckeys)
