@@ -2652,6 +2652,7 @@ fn dispatchCmd(allocator: Allocator, cmd: []const u8, store: JsonValue, inj: *In
         if (std.mem.eql(u8, cmd, "$LEN")) return try validateBound(allocator, inj, "$LEN");
         if (std.mem.eql(u8, cmd, "$RANGE")) return try validateBound(allocator, inj, "$RANGE");
         if (std.mem.eql(u8, cmd, "$LIKE")) return try validateBound(allocator, inj, "$LIKE");
+        if (std.mem.eql(u8, cmd, "$REST")) return try cmdValidateRest(allocator, inj);
         if (std.mem.eql(u8, cmd, "$CHILD")) return try cmdValidateChildCmd(allocator, inj, store);
     }
 
@@ -3382,6 +3383,7 @@ const VALIDATE_CHECKERS = [_][]const u8{
     "$LEN",
     "$RANGE",
     "$LIKE",
+    "$REST",
     S_DERRS,
 };
 
@@ -3397,13 +3399,15 @@ const SELECT_NAMES = [_][]const u8{
     "$LIKE",
 };
 
-// Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
+// Report each checker the spec names that validate lacks, and each misplaced
+// $REST; $EXACT's arguments are literals. Last: spec is a list's last item.
 fn checknames(
     allocator: Allocator,
     spec: JsonValue,
     path: []const []const u8,
     errs: *std.array_list.Managed([]const u8),
     extra: []const []const u8,
+    last: bool,
 ) anyerror!void {
     if (refname(spec)) |name| {
         if (try unknownname(allocator, name, extra)) {
@@ -3412,33 +3416,53 @@ fn checknames(
                 "Unknown validator {s} at field {s}.",
                 .{ name, try pathifySlice(allocator, path) },
             ));
+        } else if (std.mem.eql(u8, name, "$REST")) {
+            try errs.append(try restmsg(allocator, path, " must be the last element of an array."));
         }
         return;
     }
 
+    const restkey = "`$REST`";
     switch (spec) {
         .array => |arr| {
             const elems = arr.data.items;
             if (0 < elems.len) {
                 if (refname(elems[0])) |first| {
                     if (std.mem.eql(u8, first, "$EXACT")) return;
+                    if (std.mem.eql(u8, first, "$REST")) {
+                        if (!last) {
+                            try errs.append(try restmsg(allocator, path, " must be the last element of an array."));
+                        } else if (2 != elems.len) {
+                            try errs.append(try restmsg(allocator, path, " must have exactly one spec."));
+                        }
+                        const rest: JsonValue = if (1 < elems.len) elems[1] else .null;
+                        try checknames(allocator, rest, try appendSlice(allocator, []const u8, path, "1"), errs, extra, false);
+                        return;
+                    }
                 }
             }
             for (elems, 0..) |elem, i| {
                 const key = try std.fmt.allocPrint(allocator, "{d}", .{i});
-                try checknames(allocator, elem, try appendSlice(allocator, []const u8, path, key), errs, extra);
+                try checknames(allocator, elem, try appendSlice(allocator, []const u8, path, key), errs, extra, i + 1 == elems.len);
             }
         },
         .object => |obj| {
+            if (obj.get(restkey) != null and obj.get("`$CHILD`") != null) {
+                try errs.append(try restmsg(allocator, path, " cannot be used with $CHILD."));
+            }
             const keys = try keysof(allocator, spec);
             for (keys.array.data.items) |k| {
-                try checknames(allocator, k, path, errs, extra);
+                if (!std.mem.eql(u8, k.string, restkey)) try checknames(allocator, k, path, errs, extra, false);
                 const child = obj.get(k.string) orelse .null;
-                try checknames(allocator, child, try appendSlice(allocator, []const u8, path, k.string), errs, extra);
+                try checknames(allocator, child, try appendSlice(allocator, []const u8, path, k.string), errs, extra, false);
             }
         },
         else => {},
     }
+}
+
+fn restmsg(allocator: Allocator, path: []const []const u8, problem: []const u8) anyerror![]const u8 {
+    return try std.fmt.allocPrint(allocator, "The $REST validator at field {s}{s}", .{ try pathifySlice(allocator, path), problem });
 }
 
 // The name a whole-string reference gives, when it is a checker name in any case.
@@ -3565,6 +3589,67 @@ fn cmdValidateChildCmd(allocator: Allocator, inj: *Injection, store: JsonValue) 
         return .null;
     }
 
+    return .null;
+}
+
+// The members a spec does not name: the map form is a key, the list form a
+// tuple's last item. Each places clones of its spec for the loop to check.
+fn cmdValidateRest(allocator: Allocator, inj: *Injection) anyerror!JsonValue {
+    if (inj.mode == M_KEYPRE) {
+        const resttm = getprop(allocator, inj.parent, JsonValue{ .string = inj.key }, .null) catch .null;
+        const pkey = if (inj.path.len >= 2) inj.path[inj.path.len - 2] else S_DTOP;
+        const tval = getprop(allocator, inj.dparent, JsonValue{ .string = pkey }, .null) catch .null;
+
+        if (tval == .object) {
+            const ckeys = try keysof(allocator, tval);
+            for (ckeys.array.data.items) |ck| {
+                const named = for (inj.keys) |k| {
+                    if (std.mem.eql(u8, k, ck.string)) break true;
+                } else false;
+                if (!named) {
+                    _ = try setprop(allocator, inj.parent, ck, try clone(allocator, resttm));
+                    inj.keys = try appendSlice(allocator, []const u8, inj.keys, ck.string);
+                }
+            }
+        }
+
+        _ = try inj.setval(.null, 0);
+        return .null;
+    }
+
+    const prior = inj.prior;
+    if (inj.mode != M_VAL or prior == null or prior.?.parent != .array or inj.key_i != 0) {
+        try inj.errs.append(try restmsg(allocator, pathrange(inj.path, 1, 0), " must be the last element of an array."));
+        return .null;
+    }
+    const p = prior.?;
+
+    inj.key_i = inj.keys.len;
+    p.modify = null;
+
+    const tuple = p.parent;
+    const slot = listIndex(JsonValue{ .string = p.key }) orelse 0;
+    const numitems: usize = if (p.dparent == .array) p.dparent.array.data.items.len else 0;
+
+    // The zig spelling of the canonical `return SKIP`, on both paths below.
+    inj.skip = true;
+    if (numitems <= slot) {
+        _ = try inj.setval(.null, 2);
+        return .null;
+    }
+
+    const restlist = inj.parent;
+    const resttm: JsonValue = if (restlist == .array and 1 < restlist.array.data.items.len) restlist.array.data.items[1] else .null;
+    var i = slot;
+    while (i < numitems) : (i += 1) {
+        _ = try setprop(allocator, tuple, JsonValue{ .integer = @intCast(i) }, try clone(allocator, resttm));
+    }
+    i = p.keys.len;
+    while (i < numitems) : (i += 1) {
+        p.keys = try appendSlice(allocator, []const u8, p.keys, try strkey(allocator, JsonValue{ .integer = @intCast(i) }));
+    }
+
+    p.key_i = p.key_i -% 1;
     return .null;
 }
 
@@ -4029,11 +4114,12 @@ fn scanForRef(val: JsonValue, found: *bool) void {
     }
 }
 
-// The path a $REF list names, when val is one.
-fn refnext(val: JsonValue) ?JsonValue {
+// Element 1 of a list whose element 0 is head, when val is one: the path of
+// a $REF list, the spec of a $REST list.
+fn headarg(val: JsonValue, head: []const u8) ?JsonValue {
     if (val != .array) return null;
     const elems = val.array.data.items;
-    if (0 == elems.len or elems[0] != .string or !std.mem.eql(u8, elems[0].string, "`$REF`")) return null;
+    if (0 == elems.len or elems[0] != .string or !std.mem.eql(u8, elems[0].string, head)) return null;
     return if (1 < elems.len) elems[1] else JsonValue{ .null = {} };
 }
 
@@ -4075,7 +4161,7 @@ fn cmdRef(allocator: Allocator, inj: *Injection, store: JsonValue) !JsonValue {
     var seen = std.array_list.Managed(JsonValue).init(allocator);
     try seen.append(refpath_val);
     var next = ref_result;
-    while (refnext(next)) |nextpath| {
+    while (headarg(next, "`$REF`")) |nextpath| {
         const looped = for (seen.items) |p| {
             if (deepequal(p, nextpath)) break true;
         } else false;
@@ -4440,7 +4526,7 @@ fn validateValue(allocator: Allocator, data: ?JsonValue, spec: JsonValue, injdef
     }
 
     // A spec that names an unknown checker validates nothing.
-    try checknames(allocator, spec, &[_][]const u8{}, errs, &[_][]const u8{});
+    try checknames(allocator, spec, &[_][]const u8{}, errs, &[_][]const u8{}, false);
     const result = if (0 < errs.items.len) try clone(allocator, data orelse .null) else try inject(allocator, spec_clone, store_val, inj_init);
 
     if (errs.items.len > 0) {
@@ -4887,7 +4973,7 @@ pub fn select(allocator: Allocator, children: JsonValue, query: JsonValue) anyer
 
     // A query that names an unknown checker selects nothing.
     var qerrs = std.array_list.Managed([]const u8).init(allocator);
-    try checknames(allocator, query, &[_][]const u8{}, &qerrs, &SELECT_NAMES);
+    try checknames(allocator, query, &[_][]const u8{}, &qerrs, &SELECT_NAMES, false);
     if (0 < qerrs.items.len) return JsonValue{ .array = result_lr };
 
     for (child_list.items) |child| {
@@ -4980,7 +5066,8 @@ fn validateExactMatch(
             _ = try selectCmp(allocator, "$LIKE", term, data_val, errs, path);
         }
 
-        if (!has_plain_key) return data_val;
+        const rest = spec_val.object.get("`$REST`");
+        if (!has_plain_key and rest == null) return data_val;
 
         if (data_val != .object) {
             try errs.append("type mismatch: expected object");
@@ -5011,6 +5098,16 @@ fn validateExactMatch(
                     "Missing key at {s}.",
                     .{p},
                 ));
+            }
+        }
+
+        // $REST checks each data key the query does not name.
+        if (rest) |rspec| {
+            var dit = data_val.object.iterator();
+            while (dit.next()) |kv| {
+                const k = kv.key_ptr.*;
+                if (spec_val.object.get(k) != null) continue;
+                _ = try validateExactMatch(allocator, rspec, kv.value_ptr.*, errs, try appendSlice(allocator, []const u8, path, k));
             }
         }
         return data_val;
@@ -5048,6 +5145,21 @@ fn validateExactMatch(
         }
         // Empty spec list [] means list can be open (any items).
         if (0 == spec_val.array.data.items.len) return data_val;
+
+        // A trailing ['$REST', spec] checks each item after the named ones.
+        const sitems = spec_val.array.data.items;
+        if (headarg(sitems[sitems.len - 1], "`$REST`")) |rspec| {
+            const ditems = data_val.array.data.items;
+            const named = sitems.len - 1;
+            for (0..@max(named, ditems.len)) |i| {
+                const sv = if (i < named) sitems[i] else rspec;
+                const dv: JsonValue = if (i < ditems.len) ditems[i] else .null;
+                const key = try std.fmt.allocPrint(allocator, "{d}", .{i});
+                _ = try validateExactMatch(allocator, sv, dv, errs, try appendSlice(allocator, []const u8, path, key));
+            }
+            return data_val;
+        }
+
         if (spec_val.array.data.items.len != data_val.array.data.items.len) {
             const p = try pathifySlice(allocator, path);
             try errs.append(try std.fmt.allocPrint(
