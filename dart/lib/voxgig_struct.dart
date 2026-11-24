@@ -1691,10 +1691,25 @@ dynamic _transformRef(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
   if (!isfunc(specFunc)) return null;
   var spec = specFunc();
   var dpath = slice(inj.path, 1, -2);
-  var refv = getpath(spec, refpath, <String, dynamic>{
+  var refinj = <String, dynamic>{
     'dpath': dpath,
     'dparent': getpath(spec, dpath),
-  });
+  };
+  var refv = getpath(spec, refpath, refinj);
+
+  // A reference chain that comes back to a path it has named names nothing.
+  var seen = <dynamic>[refpath];
+  var next = refv;
+  while (islist(next) && _lookup(next, 0) == '`\$REF`') {
+    var nextpath = _lookup(next, 1);
+    if (seen.contains(nextpath)) {
+      refv = null;
+      break;
+    }
+    seen.add(nextpath);
+    next = getpath(spec, nextpath, refinj);
+  }
+
   var hasSub = false;
   if (isnode(refv)) {
     walk(refv, after: (k, v, p, pp) {
@@ -1944,11 +1959,10 @@ dynamic _validateString(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
   var t = typify(out);
   if ((T_string & t) == 0) {
     _pushErr(inj, _invalidTypeMsg(inj.path, S_string, t, out, 'V1010'));
-    return null;
+    return _keepnull(inj, out);
   }
   if (out == S_MT) {
     _pushErr(inj, 'Empty string at ' + pathify(inj.path, 1));
-    return null;
   }
   return out;
 }
@@ -1966,7 +1980,6 @@ dynamic _validateType(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
   var t = _has(inj.dparent, inj.key) ? typify(out) : T_noval;
   if ((t & typev) == 0) {
     _pushErr(inj, _invalidTypeMsg(inj.path, tname, t, out, 'V1001'));
-    return null;
   }
   return _keepnull(inj, out);
 }
