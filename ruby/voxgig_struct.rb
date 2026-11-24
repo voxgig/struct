@@ -1741,19 +1741,41 @@ module VoxgigStruct
   # Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
   VALIDATE_NAMES = %w[$TOP $SPEC $BT $DS $WHEN $ANNO $REF $FORMAT $APPLY $OPEN].freeze
 
-  # Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
-  def self._checknames(spec, store, path, errs)
+  # Report each checker the spec names that validate lacks, and each misplaced
+  # $REST; $EXACT's arguments are literals. Last: spec is a list's last item.
+  def self._checknames(spec, store, path, errs, last = false)
     name = _refname(spec)
     unless name.nil?
-      errs << "Unknown validator #{name} at field #{pathify(path)}." if _unknownname(name, store)
+      if _unknownname(name, store)
+        errs << "Unknown validator #{name} at field #{pathify(path)}."
+      elsif name == '$REST'
+        errs << _restmsg(path, ' must be the last element of an array.')
+      end
       return
     end
 
-    return if islist(spec) && _refname(spec[0]) == '$EXACT'
+    head = islist(spec) ? _refname(spec[0]) : nil
+    return if head == '$EXACT'
 
+    if head == '$REST'
+      if last != true
+        errs << _restmsg(path, ' must be the last element of an array.')
+      elsif size(spec) != 2
+        errs << _restmsg(path, ' must have exactly one spec.')
+      end
+      _checknames(spec[1], store, flatten([path, 1]), errs)
+      return
+    end
+
+    restkey = '`$REST`'
+    if ismap(spec) && !_getprop(spec, restkey).equal?(UNDEF) && !_getprop(spec, '`$CHILD`').equal?(UNDEF)
+      errs << _restmsg(path, ' cannot be used with $CHILD.')
+    end
+
+    lastkey = islist(spec) ? strkey(size(spec) - 1) : nil
     keysof(spec).each do |key|
-      _checknames(key, store, path, errs) if ismap(spec)
-      _checknames(_getprop(spec, key), store, flatten([path, key]), errs)
+      _checknames(key, store, path, errs) if ismap(spec) && key != restkey
+      _checknames(_getprop(spec, key), store, flatten([path, key]), errs, lastkey == key)
     end
   end
 
@@ -2004,6 +2026,63 @@ module VoxgigStruct
     end
 
     nil
+  end
+
+  # The members a spec does not name: the map form is a key, the list form a
+  # tuple's last item. Each places clones of its spec for the loop to check.
+  def self.validate_REST(inj, _val = nil, _ref = nil, _store = nil)
+    mode = inj.mode
+    key = inj.key
+    parent = inj.parent
+    keys = inj.keys
+    path = inj.path
+
+    if mode == S_MKEYPRE
+      resttm = getprop(parent, key)
+      tval = getprop(inj.dparent, getelem(path, -2))
+
+      if ismap(tval)
+        keysof(tval).each do |ckey|
+          next if keys.include?(ckey)
+
+          setprop(parent, ckey, clone(resttm))
+          keys << ckey
+        end
+      end
+
+      inj.setval(UNDEF)
+      return nil
+    end
+
+    prior = inj.prior
+    if mode != S_MVAL || prior.nil? || !islist(prior.parent) || inj.keyI != 0
+      inj.errs << _restmsg(slice(path, 1), ' must be the last element of an array.')
+      return nil
+    end
+
+    inj.keyI = size(keys)
+    prior.modify = nil
+
+    tuple = prior.parent
+    slot = _listkey(prior.key)
+    dlist = prior.dparent
+    numitems = islist(dlist) ? size(dlist) : 0
+
+    if numitems <= slot
+      inj.setval(UNDEF, 2)
+      return SKIP
+    end
+
+    resttm = _getprop(parent, 1)
+    (slot...numitems).each { |i| setprop(tuple, i, clone(resttm)) }
+    (size(prior.keys)...numitems).each { |i| prior.keys << strkey(i) }
+
+    prior.keyI -= 1
+    SKIP
+  end
+
+  def self._restmsg(path, problem)
+    "The $REST validator at field #{pathify(path)}#{problem}"
   end
 
   def self.validate_EXACT(inj, _val = nil, _ref = nil, _store = nil)
@@ -2420,7 +2499,8 @@ module VoxgigStruct
                       '$ALL' => method(:validate_ALL),
                       '$LEN' => method(:validate_LEN),
                       '$RANGE' => method(:validate_RANGE),
-                      '$LIKE' => method(:validate_LIKE)
+                      '$LIKE' => method(:validate_LIKE),
+                      '$REST' => method(:validate_REST)
                     },
                     (extra.nil? ? {} : extra),
                     { S_DERRS => errs }
