@@ -1124,12 +1124,15 @@ module VoxgigStruct
 
     inj.descend
 
+    inj.named = false
+
     # Descend into node.
     if isnode(val)
       if ismap(val)
         normal = val.keys.reject { |k| k.include?(S_DS) }.sort
         transforms = val.keys.select { |k| k.include?(S_DS) }.sort
         nodekeys = normal + transforms
+        inj.named = !normal.empty?
       else
         nodekeys = (0...val.length).to_a
       end
@@ -1180,10 +1183,10 @@ module VoxgigStruct
 
     inj.val = val
 
-    # Read the top literally: a null stored there is the result.
+    # Read the top literally: a null stored there is the result, a removed top is no value.
     if inj.prior.nil? && ismap(inj.root)
       top = _getprop(inj.root, S_DTOP)
-      return top unless top.equal?(UNDEF)
+      return top.equal?(UNDEF) ? nil : top
     end
     return getprop(inj.parent, S_DTOP) if inj.key == S_DTOP && inj.parent && haskey(inj.parent, S_DTOP)
 
@@ -1477,13 +1480,14 @@ module VoxgigStruct
   def self.transform_REF(inj, _val, _ref, store)
     return nil if inj.mode != S_MVAL
 
+    # A relative path starts where this slot is, so .x is a sibling.
     refpath = getprop(inj.parent, 1)
     inj.keyI = size(inj.keys)
 
     specFn = getprop(store, S_DSPEC)
     spec = isfunc(specFn) ? specFn.call : nil
 
-    dpath = slice(inj.path, 1)
+    dpath = slice(inj.path, 1, -2)
     ref = getpath(spec, refpath, {
                     'dpath' => dpath,
                     'dparent' => getpath(spec, dpath)
@@ -2313,7 +2317,8 @@ module VoxgigStruct
       ckeys = keysof(cval)
       pkeys = keysof(pval)
 
-      if pkeys.length.positive? && getprop(pval, '`$OPEN`') != true
+      # Only a spec written as {} is open, even if named keys resolved away.
+      if (pkeys.length.positive? || inj.named) && getprop(pval, '`$OPEN`') != true
         # Literal presence: the shape DECLARES ck even when its value is nil.
         # Canonical uses `NONE === _lookup`; `haskey` is Group A (value-based)
         # and would drop records with a nil field from an open ($AND) select.
@@ -2993,11 +2998,12 @@ module VoxgigStruct
   class Injection
     attr_accessor :mode, :full, :keyI, :keys, :key, :val, :parent,
                   :path, :nodes, :handler, :errs, :meta, :base,
-                  :modify, :extra, :prior, :dparent, :dpath, :root
+                  :modify, :extra, :prior, :dparent, :dpath, :root, :named
 
     def initialize(val, parent)
       @mode = VoxgigStruct::S_MVAL
       @full = false
+      @named = false
       @keyI = 0
       @keys = [VoxgigStruct::S_DTOP]
       @key = VoxgigStruct::S_DTOP
