@@ -2940,10 +2940,20 @@ var Transform_REF Injector = func(
 	if n := len(inj.Path.List); n > 3 {
 		dpath = append(dpath, inj.Path.List[1:n-2]...)
 	}
-	refResult := GetPath(spec, refpath, &Injection{
-		Dpath:   dpath,
-		Dparent: GetPath(spec, dpath),
-	})
+	refinj := &Injection{Dpath: dpath, Dparent: GetPath(spec, dpath)}
+	refResult := GetPath(spec, refpath, refinj)
+
+	// A chain of references that comes back to a path it has named names nothing.
+	seen := []any{refpath}
+	for next := refResult; IsList(next) && "`$REF`" == GetProp(next, 0); {
+		nextpath := GetProp(next, 1)
+		if slices.ContainsFunc(seen, func(p any) bool { return _deepequal(p, nextpath) }) {
+			refResult = nil
+			break
+		}
+		seen = append(seen, nextpath)
+		next = GetPath(spec, nextpath, refinj)
+	}
 
 	hasSubRef := false
 	if IsNode(refResult) {
@@ -3526,18 +3536,20 @@ var validate_STRING Injector = func(
 	store any,
 ) any {
 	out := GetProp(inj.Dparent, inj.Key)
+	if nil == out {
+		out = _lookup(inj.Dparent, inj.Key)
+	}
 
 	t := Typify(out)
 	if 0 == (T_string & t) {
-		msg := _invalidTypeMsg(inj.Path.List, S_string, Typename(t), out)
+		msg := _invalidTypeMsg(inj.Path.List, S_string, Typename(t), denoval(out))
 		inj.Errs.Append(msg)
-		return nil
+		return _checked(inj, out)
 	}
 
 	if S_MT == out.(string) {
 		msg := "Empty string at " + Pathify(inj.Path.List, 1)
 		inj.Errs.Append(msg)
-		return nil
 	}
 
 	return out
@@ -3594,7 +3606,6 @@ var validate_TYPE Injector = func(
 	if 0 == (t & typev) {
 		msg := _invalidTypeMsg(inj.Path.List, tname, Typename(t), denoval(out))
 		inj.Errs.Append(msg)
-		return nil
 	}
 
 	return _checked(inj, out)
