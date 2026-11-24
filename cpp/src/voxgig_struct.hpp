@@ -1318,6 +1318,7 @@ public:
   Modify modify;
   Injection* prior = nullptr;
   Value extra;
+  bool named = false; // Current map node names keys of its own (not $ commands).
 
   Injection(const Value& val_in, const Value& parent_in) : val(val_in), parent(parent_in) {
     keys = std::make_shared<std::vector<std::string>>();
@@ -2339,6 +2340,8 @@ inline Value inject(const Value& val, const Value& store, Injection* injdef) {
 
   inj->descend();
 
+  inj->named = false;
+
   Value cur = val;
 
   if (isnode(cur) && !cur.is_sentinel()) {
@@ -2351,6 +2354,7 @@ inline Value inject(const Value& val, const Value& store, Injection* injdef) {
         if (k.find('$') == std::string::npos)
           nodekeys->push_back(k);
       }
+      inj->named = !nodekeys->empty();
       for (const auto& k : node_keys_vec) {
         if (k.find('$') != std::string::npos)
           nodekeys->push_back(k);
@@ -2968,7 +2972,10 @@ inline Value REF_FN(Injection& inj, const Value& val, const std::string& ref, co
     spec = spec_holder.as_injector()(synth, Value::undef(), "$SPEC", store);
   }
 
-  std::vector<std::string> dpath_slice(inj.path.begin() + 1, inj.path.end());
+  // slice(inj.path, 1, -2): the node holding this slot, so .x is a sibling.
+  std::vector<std::string> dpath_slice;
+  for (size_t i = 1; i + 2 < inj.path.size(); i++)
+    dpath_slice.push_back(inj.path[i]);
   Injection refInj(Value::undef(), Value::undef());
   refInj.dpath = dpath_slice;
   auto fp = std::make_shared<List>();
@@ -3822,7 +3829,8 @@ inline void _validation(const Value& pval, const Value& key, const Value& parent
     auto pkeys = keysof(pval);
     Value open_v = getprop(pval, Value(S_BOPEN()));
     bool is_open = open_v.is_bool() && open_v.as_bool();
-    if (!pkeys.empty() && !is_open) {
+    // Only a spec written as {} is open, even if named keys resolved away.
+    if ((!pkeys.empty() || inj.named) && !is_open) {
       std::vector<std::string> badkeys;
       for (auto& ck : ckeys) {
         // Canonical uses `NONE === _lookup(pval, ckey)`: the shape's literal
