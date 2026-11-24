@@ -3,7 +3,7 @@
 > Rust port of the canonical TypeScript implementation.
 > Status: **complete** — the full shared corpus passes (`make test` → 1770
 > checks; `cargo clippy` clean): minor utilities, `walk`, `merge`, `getpath`,
-> `setpath`, `inject`, `transform` (all 10 commands), `validate` (all 19
+> `setpath`, `inject`, `transform` (all 10 commands), `validate` (all 20
 > checkers), `select` (all operators), and the `primary.check` SDK test.
 
 For motivation, the language-neutral concepts, and the cross-language parity
@@ -485,6 +485,10 @@ takes at most one spec, which must also admit the value. `min` and `max`
 include their bound, while `gt` and `lt` exclude it. A `$LIKE` pattern
 matches anywhere unless anchored, and one the engine refuses, such as an
 unclosed `(`, is an invalid pattern.
+
+`` '`$REST`': spec `` in a map spec checks each key the spec does not name;
+`` ['`$REST`', spec] `` as a list spec's last item checks each item after
+the named ones.
 
 A spec that names a checker `validate` does not define is rejected before any
 data is read, with `Unknown validator $FOO at field a.`, and nothing is
