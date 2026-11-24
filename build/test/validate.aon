@@ -431,6 +431,7 @@ special: set: [
   { in: { data: {a25:1}, spec: {a25:['`$REF`','missing']} },
     err: 'Unexpected keys at field <root>: a25' }
   { in: { data: {}, spec: {a26:['`$REF`','missing']} }, out: {} }
+  { in: { data: {a27:2}, spec: {a27:['`$REF`','a27']} }, err: 'Unexpected keys at field <root>: a27' }
 
 
 ]

@@ -1651,10 +1651,19 @@ const transform_REF: Injector = (inj: Injection, _val: any, _ref: string, store:
   const spec = getprop(store, S_DSPEC)()
 
   const dpath = slice(inj.path, 1, -2)
-  const ref = getpath(spec, refpath, {
-    dpath,
-    dparent: getpath(spec, dpath),
-  })
+  const refinj = { dpath, dparent: getpath(spec, dpath) }
+  let ref = getpath(spec, refpath, refinj)
+
+  // A chain of references that comes back to a path it has named names nothing.
+  const seen = [refpath]
+  for (let next = ref; islist(next) && '`$REF`' === next[0];) {
+    if (seen.includes(next[1])) {
+      ref = NONE
+      break
+    }
+    seen.push(next[1])
+    next = getpath(spec, next[1], refinj)
+  }
 
   let hasSubRef = false
   if (isnode(ref)) {
