@@ -2713,6 +2713,30 @@ def vg-t-pack fn [[inj:Any val:Any iref:Any store:Any] [Any] [
   ] [none]
 ]]
 
+# Whether list xs holds v.
+def vgl-includes fn [[i:Integer xs:Any v:Any] [Boolean] [
+  if (i gte (size xs)) [false] [
+    if ((xs get i) eq v) [true] [
+      def r (vgl-includes (i add 1) xs v)
+      r
+    ]
+  ]
+]]
+
+# A chain of references that comes back to a path it has named names nothing.
+def vgl-refchain fn [[spec:Any rinj:Any ref0:Any nxt:Any seen:Any] [Any] [
+  def isref (if (vg-islist nxt) [(vgi-lookup nxt 0) eq "`$REF`"] [false])
+  if (isref eq true) [
+    def np (vgi-lookup nxt 1)
+    if (vgl-includes 0 seen np) [none] [
+      (append [np] seen) drop
+      def nv (vg-getpath spec np rinj)
+      def r (vgl-refchain spec rinj ref0 nv seen)
+      r
+    ]
+  ] [ref0]
+]]
+
 def vg-t-ref fn [[inj:Any val:Any iref:Any store:Any] [Any] [
   if (((inj get "mode") eq 4) not) [none] [
     def ipath (inj get "path")
@@ -2726,7 +2750,10 @@ def vg-t-ref fn [[inj:Any val:Any iref:Any store:Any] [Any] [
     def rinj (flex {})
     (rinj set "dpath" dpath) drop
     (rinj set "dparent" (vg-getpath spec dpath vg-noarg)) drop
-    def refv (vg-getpath spec refpath rinj)
+    def ref0 (vg-getpath spec refpath rinj)
+    def seen (flex [])
+    (append [refpath] seen) drop
+    def refv (vgl-refchain spec rinj ref0 ref0 seen)
     def subrefbox (flex [false])
     if (vg-isnode refv) [
       def cb ([k2:Any v2:Any p2:Any pth2:Any] => [
@@ -3049,11 +3076,14 @@ def vg-v-string fn [[inj:Any val:Any iref:Any store:Any] [Any] [
   def t (vg-typify fout)
   if ((BinUtil.band vg-t-string t) eq 0) [
     (append [(vgi-invalid-type-msg (inj get "path") "string" t fout)] (inj get "errs")) drop
-    none
+    if ((fout is None) and (vgi-haslit (inj get "dparent") (inj get "key"))) [
+      def hn (vgi-heldnull inj)
+      hn
+    ] [fout]
   ] [
     if (fout eq "") [
       (append [(StringUtil.concat ["Empty string at " (vg-pathify (inj get "path") 1 vg-noarg)])] (inj get "errs")) drop
-      none
+      fout
     ] [fout]
   ]
 ]]
@@ -3098,12 +3128,11 @@ def vg-v-type fn [[inj:Any val:Any iref:Any store:Any] [Any] [
   if ((BinUtil.band t typev) eq 0) [
     (append [(vgi-invalid-type-msg (inj get "path") tname t fout)] (inj get "errs")) drop
     none
-  ] [
-    if (t eq vg-t-null) [
-      def hn (vgi-heldnull inj)
-      hn
-    ] [fout]
-  ]
+  ] [none] drop
+  if (t eq vg-t-null) [
+    def hn (vgi-heldnull inj)
+    hn
+  ] [fout]
 ]]
 
 def vg-v-any fn [[inj:Any val:Any iref:Any store:Any] [Any] [
