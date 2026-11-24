@@ -2184,6 +2184,14 @@ sub transform_PACK {
     return NONE();
 }
 
+# Equal as JavaScript's includes has it: a scalar by value, a reference by identity.
+sub _samepath {
+    my ($x, $y) = @_;
+    return !defined $y unless defined $x;
+    return 0 unless defined $y;
+    return ref($x) || ref($y) ? ref($x) && ref($y) && refaddr($x) == refaddr($y) : $x eq $y;
+}
+
 sub transform_REF {
     my ($inj, $val, $ref, $store) = @_;
     return NONE() if $inj->{mode} != M_VAL;
@@ -2200,6 +2208,18 @@ sub transform_REF {
         meta    => $inj->{meta},
     };
     my $resolved = getpath($spec, $refpath, $sub_inj);
+    # A chain of references that comes back to a path it has named names nothing.
+    my @seen = ($refpath);
+    my $next = $resolved;
+    while (islist($next) && defined $next->[0] && !ref($next->[0]) && $next->[0] eq '`$REF`') {
+        my $np = $next->[1];
+        if (grep { _samepath($_, $np) } @seen) {
+            $resolved = NONE();
+            last;
+        }
+        push @seen, $np;
+        $next = getpath($spec, $np, $sub_inj);
+    }
     my $hasSubRef = 0;
     if (isnode($resolved)) {
         walk($resolved, sub {
@@ -2541,11 +2561,11 @@ sub validate_STRING {
     my $t = typify($out);
     if (!($t & T_string)) {
         push @{ $inj->{errs} }, _invalid_type_msg($inj->{path}, S_string, $t, $out, 'V1010');
-        return NONE();
+        return $out;
     }
     if (defined $out && !ref($out) && $out eq '') {
         push @{ $inj->{errs} }, 'Empty string at ' . pathify($inj->{path}, 1);
-        return NONE();
+        return $out;
     }
     return $out;
 }
@@ -2583,7 +2603,7 @@ sub validate_TYPE {
     my $t = typify($out);
     if (!($t & $typev)) {
         push @{ $inj->{errs} }, _invalid_type_msg($inj->{path}, $tname, $t, $out, 'V1001');
-        return NONE();
+        return $out;
     }
     return $out;
 }
