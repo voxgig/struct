@@ -2985,6 +2985,19 @@ inline Value REF_FN(Injection& inj, const Value& val, const std::string& ref, co
   refInj.handler = injecthandler;
   Value refResolved = getpath_v(spec, refpath, &refInj);
 
+  // A chain of references that comes back to a path it has named names nothing.
+  std::vector<Value> seen{refpath};
+  for (Value next = refResolved;
+       next.is_list() && Value("`$REF`") == lookup_v(next, Value(int64_t(0)));) {
+    Value nextpath = lookup_v(next, Value(int64_t(1)));
+    if (std::find(seen.begin(), seen.end(), nextpath) != seen.end()) {
+      refResolved = Value::undef();
+      break;
+    }
+    seen.push_back(nextpath);
+    next = getpath_v(spec, nextpath, &refInj);
+  }
+
   Value tref = clone(refResolved);
   bool hasSubRef = false;
   if (isnode(tref)) {
@@ -3152,14 +3165,14 @@ inline Value STRING_FN(Injection& inj, const Value& val, const std::string& ref,
   int t = typify(out);
   if ((T_string & t) == 0) {
     inj.errs->push_back(Value(invalid_type_msg(inj.path, "string", t, out, "V1010")));
-    return Value::undef();
+    return out;
   }
   if (out.as_string().empty()) {
     auto pl = std::make_shared<List>();
     for (auto& p : inj.path)
       pl->push_back(Value(p));
     inj.errs->push_back(Value("Empty string at " + pathify(Value(pl), 1, 0)));
-    return Value::undef();
+    return out;
   }
   return out;
 }
@@ -3183,7 +3196,7 @@ inline Value TYPE_FN(Injection& inj, const Value& val, const std::string& ref, c
   int t = typify(out);
   if ((t & typev) == 0) {
     inj.errs->push_back(Value(invalid_type_msg(inj.path, tname, t, out, "V1001")));
-    return Value::undef();
+    return out;
   }
   return out;
 }
