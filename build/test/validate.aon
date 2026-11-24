@@ -166,6 +166,16 @@ basic: {
       err: 'Unexpected keys at field x12: b12' }
     { in: { data: {}, spec: {a13:['`$NOF`',1,'`$NUMBER`','`$NIL`']} }, out: {} }
     { in: { data: {b14:1}, spec: {} }, out: {b14:1} }
+
+    # A value that fails its check keeps its place, so later items are still checked.
+    { in: { data: [x,y], spec: ['`$CHILD`','`$INTEGER`'] },
+      err: 'Expected field 0 to be integer, but found string: x. | Expected field 1 to be integer, but found string: y.' }
+    { in: { data: [x,y], spec: ['`$INTEGER`','`$INTEGER`'] },
+      err: 'Expected field 0 to be integer, but found string: x. | Expected field 1 to be integer, but found string: y.' }
+    { in: { data: {x15:null}, spec: {x15:'`$STRING`'} },
+      err: '/^[^|]*Expected field x15 to be string, but found no value\\.[^|]*$/' }
+    { in: { data: {x16:null,y16:1}, spec: {x16:'`$STRING`',y16:'`$NUMBER`'} },
+      err: '/^[^|]*Expected field x16 to be string, but found no value\\.[^|]*$/' }
   ]
 }
 

@@ -1591,12 +1591,12 @@ const validate_STRING = (inj) => {
     if (0 === (T_string & t)) {
         const msg = _invalidTypeMsg(inj.path, S_string, t, out, 'V1010');
         inj.errs.push(msg);
-        return NONE;
+        return out;
     }
     if (S_MT === out) {
         const msg = 'Empty string at ' + pathify(inj.path, 1);
         inj.errs.push(msg);
-        return NONE;
+        return out;
     }
     return out;
 };
@@ -1609,7 +1609,7 @@ const validate_TYPE = (inj, _val, ref) => {
     // console.log('TYPE', tname, typev, tn(typev), 'O=', t, tn(t), out, 'C=', t & typev)
     if (0 === (t & typev)) {
         inj.errs.push(_invalidTypeMsg(inj.path, tname, t, out, 'V1001'));
-        return NONE;
+        return out;
     }
     return out;
 };
