@@ -2495,7 +2495,21 @@ partial def transformRef : InjectorFn := fun inj _v _ref store => do
       let dpath ← slice d.path (start := .num 1.0) (stop := .num (-2.0))
       let dparent ← getpath spec dpath
       let rdef : InjDef := { dDpath := dpath, dDparent := dparent }
-      let refv ← getpath spec refpath (.idef rdef)
+      let found ← getpath spec refpath (.idef rdef)
+      -- A chain of references that comes back to a path it has named names nothing.
+      let mut seen : Array Value := #[refpath]
+      let mut tgt := found
+      let mut cyclic := false
+      repeat do
+        if !(islist tgt) then break
+        if (← lookupRaw tgt (.num 0.0)) != .str "`$REF`" then break
+        let np ← lookupRaw tgt (.num 1.0)
+        if seen.contains np then
+          cyclic := true
+          break
+        seen := seen.push np
+        tgt ← getpath spec np (.idef rdef)
+      let refv := if cyclic then Value.noval else found
       let hasSub ← IO.mkRef false
       if isnode refv then
         let _ ← walk refv (before := some (fun _k v2 _p _path => do
@@ -2747,10 +2761,10 @@ partial def validateString : InjectorFn := fun inj _v _ref _store => do
   let t := typify out
   if (T_STRING &&& t) == 0 then do
     pushErr inj (← invalidTypeMsg d.path S_STRING (t : Int) out)
-    pure .noval
+    pure out
   else if out == .str S_MT then do
     pushErr inj ("Empty string at " ++ (← pathify d.path (startin := .num 1.0)))
-    pure .noval
+    pure out
   else pure out
 
 partial def validateType : InjectorFn := fun inj _v refstr _store => do
@@ -2767,7 +2781,7 @@ partial def validateType : InjectorFn := fun inj _v refstr _store => do
   let t := typify out
   if (t &&& typev) == 0 then do
     pushErr inj (← invalidTypeMsg d.path tname (t : Int) out)
-    pure .noval
+    pure out
   else pure out
 
 partial def validateAny : InjectorFn := fun inj _v _ref _store => do
