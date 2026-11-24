@@ -324,7 +324,7 @@ all tests pass — `*MapRef`/`*ListRef` cross-references confuse arena
 teardown. The [`Makefile`](./Makefile) `test` target filters this: if the
 output reports `N/N tests passed` with `N == total`, the run is treated as
 successful. `zig build test` runs the suite as 60 `test` blocks, currently
-60/60 (see [`../REPORT.md`](../design/REPORT.md)).
+61/61 (see [`../REPORT.md`](../design/REPORT.md)).
 
 Tests live in [`test/`](./test/); the runner
 ([`test/runner.zig`](./test/runner.zig)) loads the shared corpus from

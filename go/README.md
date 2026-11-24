@@ -732,7 +732,7 @@ canonical "lists are reference-stable" assumption.
 
 ### Test status
 
-126/126 tests pass against the shared corpus.
+127/127 tests pass against the shared corpus.
 
 
 ## Regex

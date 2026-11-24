@@ -17,7 +17,7 @@ zig/
 ├── src/struct.zig    # the port: JsonValue, all public functions, constants
 ├── src/regex.zig     # in-tree RE2-subset Thompson NFA engine (no third-party dep)
 ├── test/runner.zig   # loads ../build/test/*.aon and asserts equality
-├── test/struct_test.zig        # the 60 corpus `test` blocks (the suite)
+├── test/struct_test.zig        # the 61 corpus `test` blocks (the suite)
 ├── test/regex_pathological.zig # regex edge-case panel
 ├── test/walk_bench.zig         # optional walk benchmark (zig build bench, WALK_BENCH=1)
 ├── build.zig         # module "voxgig-struct", test + bench steps
