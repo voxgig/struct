@@ -114,6 +114,7 @@ object Struct {
         var modify: Modify? = null // optional value-mutation hook
         var prior: Injection? = null // calling injection (chain upwards)
         var extra: Any? = null // free-form passthrough
+        var named: Boolean = false // current map node names keys of its own (not $ commands)
 
         init {
             this.`val` = value
@@ -1220,6 +1221,8 @@ object Struct {
 
         inj.descend()
 
+        inj.named = false
+
         if (isnode(v)) {
             var nodekeys: MutableList<String> = keysof(v).toMutableList()
             if (ismap(v)) {
@@ -1232,6 +1235,7 @@ object Struct {
                         it.addAll(nonDollar)
                         it.addAll(dollar)
                     }
+                inj.named = nonDollar.isNotEmpty()
             }
             var nkI = 0
             while (nkI < nodekeys.size) {
@@ -1862,6 +1866,7 @@ object Struct {
         Injector { inj, _, _, store ->
             if (inj.mode != M_VAL) return@Injector UNDEF
 
+            // ['`$REF`', 'ref-path']: a relative path starts where this slot is, so .x is a sibling.
             val refpath = lookup(inj.parent, 1)
             inj.keyI = size(inj.keys)
 
@@ -1873,7 +1878,7 @@ object Struct {
                     else -> specHolder
                 }
 
-            val dpathRaw = slice(inj.path, 1, null)
+            val dpathRaw = slice(inj.path, 1, -2)
 
             @Suppress("UNCHECKED_CAST")
             val dpath: MutableList<String> = if (dpathRaw is List<*>) (dpathRaw as List<String>).toMutableList() else mutableListOf()
@@ -2081,7 +2086,7 @@ object Struct {
                                 val fullpath = mutableListOf<String>()
                                 for (i in 0 until cutLen) fullpath.add(dpath[i])
                                 if (pI + 1 < numparts) for (j in pI + 1 until numparts) fullpath.add(parts[j])
-                                value = if (ascends <= size(dpath)) getpath(store, fullpath) else null
+                                value = if (ascends <= size(dpath)) getpath(store, fullpath) else UNDEF
                                 break
                             }
                         } else {
@@ -2767,7 +2772,8 @@ object Struct {
                 }
                 val ckeys = keysof(cval)
                 val pkeys = keysof(pval)
-                if (size(pkeys) > 0 && getprop(pval, "`\$OPEN`") != true) {
+                // Only a spec written as {} is open, even if named keys resolved away.
+                if ((size(pkeys) > 0 || inj.named) && getprop(pval, "`\$OPEN`") != true) {
                     val badkeys = mutableListOf<String>()
                     // Group B: a key present with a JSON null value is NOT a bad
                     // key, so test raw presence (TS _lookup(pval,ck) === UNDEF).
