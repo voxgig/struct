@@ -2850,6 +2850,66 @@ partial def validateChild : InjectorFn := fun inj _v _ref _store => do
       pure SKIP
   else pure .noval
 
+/-- The message for a misplaced `$REST` at a path. -/
+def restMsg (path : Value) (problem : String) : SIO String := do
+  pure ("The $REST validator at field " ++ (← pathify path) ++ problem)
+
+/-- The members a spec does not name: the map form is a key, the list form a
+    tuple's last item. Each places clones of its spec for the loop to check. -/
+partial def validateRest : InjectorFn := fun inj _v _ref _store => do
+  let d ← getInj inj
+  let parent := d.parent
+  let keys := d.keys
+  if d.mode == M_KEYPRE then do
+    let resttm ← getprop parent d.key
+    let tval ← getprop d.dparent (← getelem d.path (.num (-2.0)))
+    if ismap tval then
+      for ckey in (← keysof tval) do
+        let present ← listItemsOf keys
+        if !(present.contains (.str ckey)) then
+          let _ ← setprop parent (.str ckey) (← clone resttm)
+          let n ← size keys
+          let _ ← setprop keys (vInt n) (.str ckey)
+    injSetval inj .noval
+    pure .noval
+  else do
+    let misplaced : SIO Value := do
+      pushErr inj (← restMsg (← slice d.path (start := .num 1.0)) " must be the last element of an array.")
+      pure .noval
+    match d.prior with
+    | none => misplaced
+    | some p => do
+      let pd ← getInj p
+      if d.mode != M_VAL || !(islist pd.parent) || d.keyi != 0 then misplaced
+      else do
+        let nkeys ← size keys
+        modInj inj (fun dd => { dd with keyi := nkeys })
+        modInj p (fun dd => { dd with modify := none })
+        let tuple := pd.parent
+        let dlist := pd.dparent
+        let numitems ← if islist dlist then size dlist else pure 0
+        let slot := listKey pd.key
+        let short : Bool := match slot with
+          | some s => decide (numitems <= s)
+          | none => false
+        if short then do
+          injSetval inj .noval (ancestor := 2)
+          pure SKIP
+        else do
+          let resttm ← lookupRaw parent (.num 1.0)
+          match slot with
+          | some s =>
+            for i in [s.toNat:numitems.toNat] do
+              let _ ← setprop tuple (vInt (i : Int)) (← clone resttm)
+          | none => pure ()
+          let pkeys := pd.keys
+          let npkeys ← size pkeys
+          for i in [npkeys.toNat:numitems.toNat] do
+            let n ← size pkeys
+            let _ ← setprop pkeys (vInt n) (.str (strkey (vInt (i : Int))))
+          modInj p (fun dd => { dd with keyi := dd.keyi - 1 })
+          pure SKIP
+
 /-- JSON equality: numbers by value, lists in order, maps by key in any order.
     A node or a function equals itself whatever it holds. -/
 partial def deepEqual (a b : Value) : SIO Bool := do
@@ -3020,21 +3080,43 @@ def unknownName (name : String) (store : Value) : SIO Bool := do
   if upper == name then return true
   known upper
 
-/-- Report each checker the spec names that validate lacks. The arguments of
-    `$EXACT` are literals. -/
-partial def checkNames (spec store : Value) (path : Array Value) (errs : Value) : SIO Unit := do
+/-- Report each checker the spec names that validate lacks, and each misplaced
+    `$REST`. The arguments of `$EXACT` are literals. `isLast`: the spec is a
+    list's last item. -/
+partial def checkNames (spec store : Value) (path : Array Value) (errs : Value)
+    (isLast : Bool := false) : SIO Unit := do
+  let restkey := "`$REST`"
+  let push (msg : String) : SIO Unit := do
+    let n ← size errs
+    let _ ← setprop errs (vInt n) (.str msg)
+  let restAt (problem : String) : SIO Unit := do
+    push (← restMsg (← newList path) problem)
   match refName spec with
   | some name =>
     if (← unknownName name store) then
-      let n ← size errs
       let p ← pathify (← newList path)
-      let _ ← setprop errs (vInt n) (.str ("Unknown validator " ++ name ++ " at field " ++ p ++ "."))
+      push ("Unknown validator " ++ name ++ " at field " ++ p ++ ".")
+    else if name == "$REST" then
+      restAt " must be the last element of an array."
   | none =>
     let first ← lookupRaw spec (.num 0.0)
-    if !(islist spec && refName first == some "$EXACT") then
+    let head := if islist spec then refName first else none
+    if head == some "$EXACT" then pure ()
+    else if head == some "$REST" then
+      let ssz ← size spec
+      if !isLast then restAt " must be the last element of an array."
+      else if ssz != 2 then restAt " must have exactly one spec."
+      checkNames (← lookupRaw spec (.num 1.0)) store (path.push (.num 1.0)) errs
+    else
+      let rest ← lookupRaw spec (.str restkey)
+      let child ← lookupRaw spec (.str "`$CHILD`")
+      if ismap spec && !(isNoval rest) && !(isNoval child) then
+        restAt " cannot be used with $CHILD."
+      let ssz ← size spec
+      let lastkey : Option String := if islist spec then some (strkey (vInt (ssz - 1))) else none
       for k in (← keysof spec) do
-        if ismap spec then checkNames (.str k) store path errs
-        checkNames (← lookupRaw spec (.str k)) store (path.push (.str k)) errs
+        if ismap spec && k != restkey then checkNames (.str k) store path errs
+        checkNames (← lookupRaw spec (.str k)) store (path.push (.str k)) errs (lastkey == some k)
 
 partial def validateExact : InjectorFn := fun inj _v _ref _store => do
   let d ← getInj inj
@@ -3334,6 +3416,7 @@ partial def validate (data spec : Value) (inj : InjArg := .inone) : SIO Value :=
   put "$LEN" (← vFunc validateLen)
   put "$RANGE" (← vFunc validateRange)
   put "$LIKE" (← vFunc validateLike)
+  put "$REST" (← vFunc validateRest)
   let extraV ← if isNoval extra then emptyMap else pure extra
   let errsWrap ← newMap #[(S_DERRS, errs)]
   let store ← merge (← newList #[base, extraV, errsWrap]) (maxdepth := .num 1.0)
