@@ -1729,9 +1729,12 @@ def inject(val, store, injdef=UNDEF):
     inj.val = val
 
     # Return the (possibly transform-replaced) root only at top level (prior is None).
-    # A transform that removed the root, such as a $REF that names nothing, leaves no value.
+    # A transform that removed the root, such as a $REF that names nothing, leaves no
+    # value: UNDEF, or the injdef's _noval for a caller that must tell it from a null.
     if getattr(inj, 'prior', None) is None and getattr(inj, 'root', None) is not None:
-        return _lookup(inj.root, S_DTOP)
+        if _present(inj.root, S_DTOP):
+            return _lookup(inj.root, S_DTOP)
+        return getprop(injdef, '_noval')
     if inj.key == S_DTOP and inj.parent is not UNDEF and haskey(inj.parent, S_DTOP):
         return getprop(inj.parent, S_DTOP)
     return val
@@ -3017,6 +3020,7 @@ def validate(data, spec, injdef=UNDEF):
                 'modify': _validation,
                 'handler': _validatehandler,
                 'errs': errs,
+                '_noval': getprop(injdef, '_noval'),
             },
         )
 
@@ -3285,6 +3289,7 @@ def _admits(val, present, spec, inj, store):
             'extra': vstore,
             'errs': terrs,
             'meta': inj.meta,
+            '_noval': _ABSENT,
         },
     )
 
