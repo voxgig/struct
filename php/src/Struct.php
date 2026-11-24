@@ -1712,6 +1712,8 @@ class Struct
 
         $inj->descend();
 
+        $inj->named = false;
+
         // Descend into node.
         if (self::isnode($val)) {
             $nodekeys = self::keysof($val);
@@ -1727,6 +1729,7 @@ class Struct
                     }
                 }
                 $nodekeys = array_merge($nonDollar, $dollar);
+                $inj->named = 0 < count($nonDollar);
             } else {
                 $nodekeys = self::keysof($val);
             }
@@ -2297,7 +2300,7 @@ class Struct
             return self::undef();
         }
 
-        // Get arguments: ['`$REF`', 'ref-path'].
+        // ['`$REF`', 'ref-path']: a relative path starts where this slot is, so .x is a sibling.
         $refpath = self::_getprop($state->parent, 1);
         $state->keyI = self::size($state->keys);
 
@@ -2305,7 +2308,7 @@ class Struct
         $specFn = self::_getprop($store, '$SPEC');
         $spec = is_callable($specFn) ? $specFn() : self::undef();
 
-        $dpath = self::slice($state->path, 1);
+        $dpath = self::slice($state->path, 1, -2);
         $ref = self::getpath($spec, $refpath, (object) [
             'dpath' => $dpath,
             'dparent' => self::getpath($spec, $dpath),
@@ -3545,8 +3548,8 @@ class Struct
             $ckeys = self::keysof($cval);
             $pkeys = self::keysof($pval);
 
-            // Empty spec object {} means object can be open (any keys).
-            if (0 < count($pkeys) && true !== self::_getprop($pval, '`$OPEN`')) {
+            // Only a spec written as {} is open, even if named keys resolved away.
+            if ((0 < count($pkeys) || $inj->named) && true !== self::_getprop($pval, '`$OPEN`')) {
                 // Literal presence: the shape DECLARES $ckey even when its value
                 // is null. Canonical uses `NONE === _lookup`; `haskey` is Group A
                 // (value-based) and would drop records with a null field from an
@@ -4669,12 +4672,14 @@ class Injection
     public mixed $modify;
     public ?Injection $prior;
     public mixed $extra;
+    public bool $named; // Current map node names keys of its own (not $ commands).
 
     public function __construct(mixed $val, mixed $parent)
     {
         $this->val = $val;
         $this->parent = $parent;
         $this->errs = [];
+        $this->named = false;
 
         $this->dparent = Struct::UNDEF;
         $this->dpath = ['$TOP'];
