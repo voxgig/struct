@@ -2930,6 +2930,63 @@ local function validate_CHILD(inj)
   return NONE
 end
 
+local function _restmsg(path, problem)
+  return "The $REST validator at field " .. pathify(path) .. problem
+end
+
+-- The members a spec does not name: the map form is a key, the list form a
+-- tuple's last item. Each places clones of its spec for the loop to check.
+local function validate_REST(inj)
+  local mode, key, parent, keys, path = inj.mode, inj.key, inj.parent, inj.keys, inj.path
+
+  if M_KEYPRE == mode then
+    local resttm = getprop(parent, key)
+    local tval = denoval(getprop(inj.dparent, getelem(path, -2)))
+
+    if ismap(tval) then
+      for _, ckey in ipairs(keysof(tval)) do
+        if not _includes(keys, ckey) then
+          setprop(parent, ckey, clone(resttm))
+          table.insert(keys, ckey)
+        end
+      end
+    end
+
+    inj:setval(NONE)
+    return NONE
+  end
+
+  local prior = inj.prior
+  if M_VAL ~= mode or NONE == prior or not islist(prior.parent) or 0 ~= inj.keyI then
+    table.insert(inj.errs, _restmsg(slice(path, 1), " must be the last element of an array."))
+    return NONE
+  end
+
+  inj.keyI = size(keys)
+  prior.modify = NONE
+
+  local tuple = prior.parent
+  local slot = listkey(prior.key)
+  local dlist = prior.dparent
+  local numitems = islist(dlist) and size(dlist) or 0
+
+  if numitems <= slot then
+    inj:setval(NONE, 2)
+    return SKIP
+  end
+
+  local resttm = getprop(parent, 1)
+  for i = slot, numitems - 1 do
+    setprop(tuple, i, clone(resttm))
+  end
+  for i = size(prior.keys), numitems - 1 do
+    table.insert(prior.keys, i)
+  end
+
+  prior.keyI = prior.keyI - 1
+  return SKIP
+end
+
 ----------------------------------------------------------
 -- Forward declaration for validate to resolve lack of function hoisting
 ----------------------------------------------------------
@@ -3480,6 +3537,7 @@ validate = function(data, spec, injdef)
       ["$LEN"] = validate_LEN,
       ["$RANGE"] = validate_RANGE,
       ["$LIKE"] = validate_LIKE,
+      ["$REST"] = validate_REST,
     },
 
     getdef(extra, {}),
@@ -3781,25 +3839,45 @@ local VALIDATE_NAMES = {
   "$OPEN",
 }
 
--- Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
-_checknames = function(spec, store, path, errs)
+-- Report each checker the spec names that validate lacks, and each misplaced
+-- $REST; $EXACT's arguments are literals. Last: spec is a list's last item.
+_checknames = function(spec, store, path, errs, last)
   local name = _refname(spec)
   if NONE ~= name then
     if _unknownname(name, store) then
       table.insert(errs, "Unknown validator " .. name .. " at field " .. pathify(path) .. ".")
+    elseif "$REST" == name then
+      table.insert(errs, _restmsg(path, " must be the last element of an array."))
     end
     return
   end
 
-  if islist(spec) and "$EXACT" == _refname(spec[1]) then
+  local head = islist(spec) and _refname(spec[1]) or NONE
+  if "$EXACT" == head then
     return
   end
 
+  if "$REST" == head then
+    if true ~= last then
+      table.insert(errs, _restmsg(path, " must be the last element of an array."))
+    elseif 2 ~= size(spec) then
+      table.insert(errs, _restmsg(path, " must have exactly one spec."))
+    end
+    _checknames(spec[2], store, flatten({ path, 1 }), errs)
+    return
+  end
+
+  local restkey = "`$REST`"
+  if ismap(spec) and NONE ~= getprop(spec, restkey) and NONE ~= getprop(spec, "`$CHILD`") then
+    table.insert(errs, _restmsg(path, " cannot be used with $CHILD."))
+  end
+
+  local lastkey = islist(spec) and strkey(size(spec) - 1) or NONE
   for _, key in ipairs(keysof(spec)) do
-    if ismap(spec) then
+    if ismap(spec) and restkey ~= key then
       _checknames(key, store, path, errs)
     end
-    _checknames(getprop(spec, key), store, flatten({ path, key }), errs)
+    _checknames(getprop(spec, key), store, flatten({ path, key }), errs, lastkey == key)
   end
 end
 

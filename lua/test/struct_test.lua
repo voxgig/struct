@@ -1278,6 +1278,42 @@ describe("struct", function()
     end)
   end)
 
+  test("validate-rest", function()
+    runsetflags(
+      dropentries(validateSpec.rest, {
+        -- A null map member arrives absent, as in validate-basic: `$NIL`
+        -- cannot give it back, and `$STRING` never meets it.
+        {
+          at = 8,
+          why = "$REST admitting a null map member",
+          is = function(entry)
+            return "`$NIL`" == entryin(entry, "spec.`$REST`") and isnull(entryin(entry, "data.x"))
+          end,
+        },
+        {
+          at = 9,
+          why = "$REST refusing a null map member",
+          is = function(entry)
+            return "`$STRING`" == entryin(entry, "spec.`$REST`")
+              and isnull(entryin(entry, "data.x"))
+          end,
+        },
+        -- A null list element arrives as the string "null", so `$NIL` meets a string.
+        {
+          at = 17,
+          why = "$REST admitting a null list element",
+          is = function(entry)
+            return "`$NIL`" == entryin(entry, "spec.1.1") and isnull(entryin(entry, "data.1"))
+          end,
+        },
+      }),
+      { null = false },
+      function(vin)
+        return validate(vin.data, vin.spec)
+      end
+    )
+  end)
+
   test("validate-unknown", function()
     runsetflags(validateSpec.unknown, { null = false }, function(vin)
       return validate(vin.data, vin.spec)
