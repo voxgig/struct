@@ -1387,7 +1387,20 @@ fn transform_ref(inj: &Inj, _val: &Value, _r: &str, store: &Value) -> Value {
         dparent: Some(dparent_for_ref),
         ..Default::default()
     };
-    let refval = get_path(&spec, &refpath, Some(&ref_def));
+    let mut refval = get_path(&spec, &refpath, Some(&ref_def));
+
+    // A chain of references that comes back to a path it has named names nothing.
+    let mut seen = vec![refpath.clone()];
+    let mut next = refval.clone();
+    while is_list(&next) && lookup(&next, &Value::Num(0.0)) == Value::str("`$REF`") {
+        let nextpath = lookup(&next, &Value::Num(1.0));
+        if seen.contains(&nextpath) {
+            refval = Value::Noval;
+            break;
+        }
+        seen.push(nextpath.clone());
+        next = get_path(&spec, &nextpath, Some(&ref_def));
+    }
 
     let mut has_sub_ref = false;
     if is_node(&refval) {
@@ -1892,7 +1905,7 @@ fn validate_string(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
     let t = typify(&out);
     if t & (T_STRING as i64) == 0 {
         errs_push(inj, invalid_type_msg(&path, "string", t, &out));
-        return Value::Noval;
+        return out;
     }
     if matches!(&out, Value::Str(s) if s.is_empty()) {
         errs_push(
@@ -1902,7 +1915,6 @@ fn validate_string(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
                 pathify(&path_value(&path), Some(1), None)
             ),
         );
-        return Value::Noval;
     }
     out
 }
@@ -1923,7 +1935,6 @@ fn validate_type(inj: &Inj, _v: &Value, r: &str, _store: &Value) -> Value {
     let t = typify(&out);
     if t & typev == 0 {
         errs_push(inj, invalid_type_msg(&path, &tname, t, &out));
-        return Value::Noval;
     }
     out
 }
