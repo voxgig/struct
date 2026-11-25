@@ -603,7 +603,7 @@ $MERGE   $EACH    $PACK    $REF     $FORMAT  $APPLY
 ```
 $MAP   $LIST   $STRING   $NUMBER   $INTEGER   $DECIMAL  $BOOLEAN
 $NULL  $NIL    $FUNCTION $INSTANCE $ANY       $CHILD    $EXACT
-$NOF   $ALL    $LEN      $RANGE     $LIKE
+$NOF   $ALL    $LEN      $RANGE     $LIKE     $REST
 ```
 
 `` ['`$NOF`', $n, $spec, …] `` holds when as many specs admit the value as
@@ -626,6 +626,10 @@ and `$LIKE` take at most one spec, which must also admit the value. `min` and
 starts with `/` is read as already delimited, as `re_compile` reads it, so
 `'/a/i'` matches `A`, and `'/a'`, with no closing delimiter, is an invalid
 pattern.
+
+`` '`$REST`' => $spec `` in a map spec checks each key the spec does not
+name, and `` ['`$REST`', $spec] `` as a list spec's last item checks each
+item after the named ones.
 
 A spec that names a checker `validate` does not define is rejected before
 any data is read, and nothing is validated. The whole-string reference

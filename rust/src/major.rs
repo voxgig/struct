@@ -275,6 +275,7 @@ pub struct Injection {
     pub modify: Option<Modify>,
     pub extra: Option<Value>,
     pub prior: Option<Inj>,
+    pub named: bool, // Current map node names keys of its own (not $ commands).
 }
 
 /// Public `injdef` argument — the subset of `Partial<Injection>` callers set.
@@ -314,6 +315,7 @@ impl Injection {
             modify: None,
             extra: None,
             prior: None,
+            named: false,
         };
         let inj = Rc::new(RefCell::new(inj));
         if let Some(d) = def {
@@ -375,6 +377,7 @@ impl Injection {
             modify: None,
             extra: None,
             prior: None,
+            named: false,
         }))
     }
 
@@ -494,6 +497,7 @@ impl Injection {
             modify,
             extra: None,
             prior: Some(Rc::clone(this)),
+            named: false,
         }))
     }
 
@@ -504,7 +508,10 @@ impl Injection {
                 let b = this.borrow();
                 (b.parent.clone(), b.key.clone())
             };
-            if val.is_noval() {
+            // A list keeps the removed slot as a hole until inject's loop ends.
+            if val.is_noval() && is_list(&parent) {
+                set_prop(parent, &Value::str(key), Value::skip())
+            } else if val.is_noval() {
                 let np = del_prop(parent, &Value::str(key));
                 this.borrow_mut().parent = np.clone();
                 np
@@ -899,6 +906,8 @@ fn make_root_injection(val: Value, store: &Value, injdef: Option<&InjectDef>) ->
 fn inject_inj(mut val: Value, store: &Value, inj: &Inj) -> Value {
     Injection::descend(inj);
 
+    inj.borrow_mut().named = false;
+
     if is_node(&val) {
         // node keys: sorted, then `$`-bearing keys last (for maps).
         let nodekeys: SVec = {
@@ -906,6 +915,7 @@ fn inject_inj(mut val: Value, store: &Value, inj: &Inj) -> Value {
             if is_map(&val) {
                 let (mut plain, dollar): (Vec<String>, Vec<String>) =
                     ks.into_iter().partition(|k| !k.contains(S_DS));
+                inj.borrow_mut().named = !plain.is_empty();
                 plain.extend(dollar);
                 Rc::new(RefCell::new(plain))
             } else {
@@ -949,6 +959,10 @@ fn inject_inj(mut val: Value, store: &Value, inj: &Inj) -> Value {
 
             nk_i += 1;
         }
+
+        if let Value::List(l) = &val {
+            l.borrow_mut().retain(|v| !v.is_skip());
+        }
     } else if let Value::Str(s) = val.clone() {
         inj.borrow_mut().mode = M_VAL;
         let r = injectstr(&s, store, Some(inj));
@@ -966,7 +980,10 @@ fn inject_inj(mut val: Value, store: &Value, inj: &Inj) -> Value {
                 let b = inj.borrow();
                 (b.key.clone(), b.parent.clone())
             };
-            let mval = get_prop(&mparent, &Value::str(mkey.clone()), Value::Noval);
+            let mval = match get_prop(&mparent, &Value::str(mkey.clone()), Value::Noval) {
+                hole if hole.is_skip() => Value::Noval,
+                mval => mval,
+            };
             m(&mval, &Value::str(mkey), &mparent, inj, store);
         }
     }
@@ -1372,14 +1389,28 @@ fn transform_ref(inj: &Inj, _val: &Value, _r: &str, store: &Value) -> Value {
             _ => Value::Noval,
         }
     };
-    let dpath = slice_str_vec(&path, Some(1), None);
+    // A relative path starts at the node holding this slot, so .x is a sibling.
+    let dpath = slice_str_vec(&path, Some(1), Some(-2));
     let dparent_for_ref = get_path_inj(&spec, &path_value(&dpath), None);
     let ref_def = InjectDef {
         dpath: Some(dpath.clone()),
         dparent: Some(dparent_for_ref),
         ..Default::default()
     };
-    let refval = get_path(&spec, &refpath, Some(&ref_def));
+    let mut refval = get_path(&spec, &refpath, Some(&ref_def));
+
+    // A chain of references that comes back to a path it has named names nothing.
+    let mut seen = vec![refpath.clone()];
+    let mut next = refval.clone();
+    while is_list(&next) && lookup(&next, &Value::Num(0.0)) == Value::str("`$REF`") {
+        let nextpath = lookup(&next, &Value::Num(1.0));
+        if seen.contains(&nextpath) {
+            refval = Value::Noval;
+            break;
+        }
+        seen.push(nextpath.clone());
+        next = get_path(&spec, &nextpath, Some(&ref_def));
+    }
 
     let mut has_sub_ref = false;
     if is_node(&refval) {
@@ -1884,7 +1915,7 @@ fn validate_string(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
     let t = typify(&out);
     if t & (T_STRING as i64) == 0 {
         errs_push(inj, invalid_type_msg(&path, "string", t, &out));
-        return Value::Noval;
+        return out;
     }
     if matches!(&out, Value::Str(s) if s.is_empty()) {
         errs_push(
@@ -1894,7 +1925,6 @@ fn validate_string(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
                 pathify(&path_value(&path), Some(1), None)
             ),
         );
-        return Value::Noval;
     }
     out
 }
@@ -1915,7 +1945,6 @@ fn validate_type(inj: &Inj, _v: &Value, r: &str, _store: &Value) -> Value {
     let t = typify(&out);
     if t & typev == 0 {
         errs_push(inj, invalid_type_msg(&path, &tname, t, &out));
-        return Value::Noval;
     }
     out
 }
@@ -2022,6 +2051,91 @@ fn validate_child(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
     }
 
     Value::Noval
+}
+
+// The members a spec does not name: the map form is a key, the list form a
+// tuple's last item. Each places clones of its spec for the loop to check.
+fn validate_rest(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
+    let (mode, key, parent, path, dparent, key_i, keys, prior) = {
+        let b = inj.borrow();
+        (
+            b.mode,
+            b.key.clone(),
+            b.parent.clone(),
+            b.path.clone(),
+            b.dparent.clone(),
+            b.key_i,
+            b.keys.clone(),
+            b.prior.clone(),
+        )
+    };
+
+    if mode == M_KEYPRE {
+        let resttm = lookup(&parent, &Value::str(key));
+        let pkey = path
+            .get(path.len().saturating_sub(2))
+            .cloned()
+            .unwrap_or_default();
+        let tval = get_prop(&dparent, &Value::str(pkey), Value::Noval);
+        if is_map(&tval) {
+            for ckey in keysof_vec(&tval) {
+                if !keys.borrow().contains(&ckey) {
+                    set_prop(parent.clone(), &Value::str(ckey.clone()), clone(&resttm));
+                    keys.borrow_mut().push(ckey);
+                }
+            }
+        }
+        Injection::setval(inj, Value::Noval, None);
+        return Value::Noval;
+    }
+
+    let prior = match prior {
+        Some(p) if M_VAL == mode && 0 == key_i && is_list(&p.borrow().parent) => p,
+        _ => {
+            let fpath = path.get(1..).unwrap_or_default();
+            errs_push(
+                inj,
+                restmsg(fpath, " must be the last element of an array."),
+            );
+            return Value::Noval;
+        }
+    };
+
+    inj.borrow_mut().key_i = keys.borrow().len() as i64;
+
+    let (tuple, slot, dlist, pkeys) = {
+        let mut p = prior.borrow_mut();
+        p.modify = None;
+        let slot = list_key(&Value::str(p.key.clone())).unwrap_or(0);
+        (p.parent.clone(), slot, p.dparent.clone(), p.keys.clone())
+    };
+    let numitems = if is_list(&dlist) { size(&dlist) } else { 0 };
+
+    if numitems <= slot {
+        Injection::setval(inj, Value::Noval, Some(2));
+        return Value::skip();
+    }
+
+    let resttm = lookup(&parent, &Value::Num(1.0));
+    for i in slot..numitems {
+        set_prop(tuple.clone(), &Value::Num(i as f64), clone(&resttm));
+    }
+    {
+        let mut ks = pkeys.borrow_mut();
+        for i in ks.len() as i64..numitems {
+            ks.push(str_key(Value::Num(i as f64)));
+        }
+    }
+
+    prior.borrow_mut().key_i -= 1;
+    Value::skip()
+}
+
+fn restmsg(path: &[String], problem: &str) -> String {
+    format!(
+        "The $REST validator at field {}{problem}",
+        pathify(&path_value(path), None, None)
+    )
 }
 
 // `$EXACT`: value must equal a literal exactly (no shape coercion).
@@ -2450,9 +2564,9 @@ fn validation_modify(pval: &Value, key: &Value, parent: &Value, inj: &Inj, _stor
     if pval.is_skip() {
         return;
     }
-    let (meta, dparent, path) = {
+    let (meta, dparent, path, named) = {
         let b = inj.borrow();
-        (b.meta.clone(), b.dparent.clone(), b.path.clone())
+        (b.meta.clone(), b.dparent.clone(), b.path.clone(), b.named)
     };
     let exact = matches!(
         get_prop(&meta, &Value::str(S_BEXACT), Value::Bool(false)),
@@ -2493,7 +2607,8 @@ fn validation_modify(pval: &Value, key: &Value, parent: &Value, inj: &Inj, _stor
             get_prop(pval, &Value::str(S_BOPEN), Value::Noval),
             Value::Bool(true)
         );
-        if !pkeys.is_empty() && !open {
+        // Only a spec written as {} is open, even if named keys resolved away.
+        if (!pkeys.is_empty() || named) && !open {
             // Literal presence: the shape must be checked with a raw lookup
             // (canonical TS `NONE === _lookup(pval, ckey)`); the Group A
             // has_key would treat a null-valued shape slot as absent.
@@ -2631,6 +2746,7 @@ pub fn validate(
     vmap.insert("$LEN".to_string(), Value::func(validate_len));
     vmap.insert("$RANGE".to_string(), Value::func(validate_range));
     vmap.insert("$LIKE".to_string(), Value::func(validate_like));
+    vmap.insert("$REST".to_string(), Value::func(validate_rest));
 
     let extra_or_empty = match &extra {
         Some(e) => e.clone(),
@@ -2655,7 +2771,7 @@ pub fn validate(
     // A spec that names an unknown checker validates nothing.
     let errcount = |errs: &Value| errs.as_list().map(|l| l.borrow().len()).unwrap_or(0);
     let numerrs = errcount(&errs);
-    checknames(spec, &store, &[], &errs);
+    checknames(spec, &store, &[], &errs, false);
 
     let out = if numerrs < errcount(&errs) {
         clone(data)
@@ -2690,31 +2806,65 @@ const VALIDATE_NAMES: [&str; 10] = [
     "$TOP", "$SPEC", "$BT", "$DS", "$WHEN", "$ANNO", "$REF", "$FORMAT", "$APPLY", "$OPEN",
 ];
 
-// Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
-fn checknames(spec: &Value, store: &Value, path: &[String], errs: &Value) {
+// Report each checker the spec names that validate lacks, and each misplaced
+// $REST; $EXACT's arguments are literals. Last: spec is a list's last item.
+fn checknames(spec: &Value, store: &Value, path: &[String], errs: &Value, last: bool) {
+    let push = |msg: String| {
+        if let Value::List(l) = errs {
+            l.borrow_mut().push(Value::Str(msg));
+        }
+    };
+
     if let Some(name) = refname(spec) {
         if unknownname(&name, store) {
-            if let Value::List(l) = errs {
-                l.borrow_mut().push(Value::Str(format!(
-                    "Unknown validator {name} at field {}.",
-                    pathify(&path_value(path), None, None)
-                )));
-            }
+            push(format!(
+                "Unknown validator {name} at field {}.",
+                pathify(&path_value(path), None, None)
+            ));
+        } else if "$REST" == name {
+            push(restmsg(path, " must be the last element of an array."));
         }
         return;
     }
 
-    if is_list(spec) && Some("$EXACT") == refname(&lookup(spec, &Value::Num(0.0))).as_deref() {
+    let head = if is_list(spec) {
+        refname(&lookup(spec, &Value::Num(0.0)))
+    } else {
+        None
+    };
+    if Some("$EXACT") == head.as_deref() {
         return;
     }
 
-    for key in keysof_vec(spec) {
-        if is_map(spec) {
-            checknames(&Value::str(key.clone()), store, path, errs);
+    if Some("$REST") == head.as_deref() {
+        if !last {
+            push(restmsg(path, " must be the last element of an array."));
+        } else if 2 != size(spec) {
+            push(restmsg(path, " must have exactly one spec."));
         }
         let mut kpath = path.to_vec();
+        kpath.push("1".to_string());
+        checknames(&lookup(spec, &Value::Num(1.0)), store, &kpath, errs, false);
+        return;
+    }
+
+    let restkey = "`$REST`";
+    if is_map(spec)
+        && !lookup(spec, &Value::str(restkey)).is_noval()
+        && !lookup(spec, &Value::str("`$CHILD`")).is_noval()
+    {
+        push(restmsg(path, " cannot be used with $CHILD."));
+    }
+
+    let lastkey = is_list(spec).then(|| str_key(Value::Num((size(spec) - 1) as f64)));
+    for key in keysof_vec(spec) {
+        if is_map(spec) && restkey != key {
+            checknames(&Value::str(key.clone()), store, path, errs, false);
+        }
+        let islast = lastkey.as_deref() == Some(key.as_str());
+        let mut kpath = path.to_vec();
         kpath.push(key.clone());
-        checknames(&lookup(spec, &Value::str(key)), store, &kpath, errs);
+        checknames(&lookup(spec, &Value::str(key)), store, &kpath, errs, islast);
     }
 }
 

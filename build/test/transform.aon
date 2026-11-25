@@ -61,6 +61,9 @@ paths: {
     { in: { data: {a:1,b:2}, spec: {c:'`a`',d:'`b`'} }, out: {c:1,d:2} }
     { in: { data: {}, spec: {a:99} }, out: {a:99} }
     { in: { data: {a:1}, spec: {} }, out: {} }
+
+    # A list item that names nothing leaves no slot, and later items keep theirs.
+    { in: { data: {a:1,b:2}, spec: ['`a`','`missing`','`b`'] }, out: [1,2] }
   ]
 }
 
@@ -124,6 +127,7 @@ cmds: {
     { in: { data: {q:2}, spec: null }, out: null }
     { in: { data: {q:2} } }
     { in: { } }
+    { in: { data: {b:2}, spec: ['`$DELETE`','`b`'] }, out: [2] }
   ]
 }
 
@@ -509,6 +513,24 @@ ref: {
       out: {z33:{x33:90,y33:90,p:[{x33:91,y33:91,p:[]},
                                   {x33:92,y33:92,p:[{x33:93,y33:93,p:[]}]}]}}
     }
+
+    # A relative path counts from the node holding the $REF, as a relative
+    # path in a transform does: .x is a sibling, ..x a sibling of the parent.
+    { in: { data: {}, spec: {a40:{x:1,y:['`$REF`','.x']}} }, out: {a40:{x:1,y:1}} }
+    { in: { data: {}, spec: {x:5,a41:{y:['`$REF`','..x']}} }, out: {x:5,a41:{y:5}} }
+    { in: { data: {}, spec: {a42:{x:2,b:{y:['`$REF`','..x']}}} }, out: {a42:{x:2,b:{y:2}}} }
+    { in: { data: {}, spec: {a43:[1,['`$REF`','.0']]} }, out: {a43:[1,1]} }
+
+    # A path that climbs past the root, or names nothing, gives no value.
+    { in: { data: {}, spec: {x:5,a44:{y:['`$REF`','...x']}} }, out: {x:5,a44:{}} }
+    { in: { data: {}, spec: {a45:{x:1,y:['`$REF`','..0']}} }, out: {a45:{x:1}} }
+    { in: { data: {}, spec: {a46:['`$REF`','missing']} }, out: {} }
+    { in: { data: {}, spec: ['`$REF`','missing'] } }
+
+    # A reference that leads back to itself names nothing.
+    { in: { data: {a48:2}, spec: {a48:['`$REF`','a48']} }, out: {} }
+    { in: { data: {a49:2}, spec: {a49:['`$REF`','.a49']} }, out: {} }
+    { in: { data: {a50:1,b50:1}, spec: {a50:['`$REF`','b50'],b50:['`$REF`','a50']} }, out: {} }
 
   ]
 }

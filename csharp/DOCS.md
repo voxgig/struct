@@ -211,7 +211,7 @@ StructUtils.Stringify(StructUtils.Jm("a", 1, "b", StructUtils.Jt(2, 3)));   // {
 <!-- => "{a:1,b:[2,3]}" -->
 
 For more task recipes (merge configs, rename fields, `$EACH`, `$MERGE`,
-`$FORMAT`, `$NOF`, `$ALL`, `$LEN`, `$RANGE`, `$LIKE`, `$EXACT`, …) see the
+`$FORMAT`, `$NOF`, `$ALL`, `$LEN`, `$RANGE`, `$LIKE`, `$REST`, `$EXACT`, …) see the
 language-neutral [How-to guides](../DOCS.md#2-how-to-guides) — the spec
 syntax is identical; only the host literals differ.
 

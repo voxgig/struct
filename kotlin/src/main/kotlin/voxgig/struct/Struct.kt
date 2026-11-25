@@ -114,6 +114,7 @@ object Struct {
         var modify: Modify? = null // optional value-mutation hook
         var prior: Injection? = null // calling injection (chain upwards)
         var extra: Any? = null // free-form passthrough
+        var named: Boolean = false // current map node names keys of its own (not $ commands)
 
         init {
             this.`val` = value
@@ -201,7 +202,10 @@ object Struct {
             val out: Any?
             if (ancestor < 2) {
                 out =
-                    if (value === UNDEF) {
+                    if (value === UNDEF && islist(this.parent)) {
+                        // A list keeps the removed slot as a hole until inject's loop ends.
+                        setprop(this.parent, this.key, SKIP)
+                    } else if (value === UNDEF) {
                         val p = delprop(this.parent, this.key)
                         this.parent = p
                         p
@@ -1220,6 +1224,8 @@ object Struct {
 
         inj.descend()
 
+        inj.named = false
+
         if (isnode(v)) {
             var nodekeys: MutableList<String> = keysof(v).toMutableList()
             if (ismap(v)) {
@@ -1232,6 +1238,7 @@ object Struct {
                         it.addAll(nonDollar)
                         it.addAll(dollar)
                     }
+                inj.named = nonDollar.isNotEmpty()
             }
             var nkI = 0
             while (nkI < nodekeys.size) {
@@ -1254,6 +1261,20 @@ object Struct {
                 }
                 nkI++
             }
+
+            if (v is MutableList<*>) {
+                @Suppress("UNCHECKED_CAST")
+                val list = v as MutableList<Any?>
+                var kept = 0
+                for (i in list.indices) {
+                    val item = list[i]
+                    if (item !== SKIP) {
+                        if (kept != i) list[kept] = item
+                        kept++
+                    }
+                }
+                while (list.size > kept) list.removeAt(list.size - 1)
+            }
         } else if (v is String) {
             inj.mode = M_VAL
             val newVal = _injectstr(v, store, inj)
@@ -1265,7 +1286,7 @@ object Struct {
             val mkey = inj.key
             val mparent = inj.parent
             val mval = getprop(mparent, mkey)
-            inj.modify!!.apply(mval, mkey, mparent, inj, store)
+            inj.modify!!.apply(if (SKIP === mval) UNDEF else mval, mkey, mparent, inj, store)
         }
 
         inj.`val` = v
@@ -1862,6 +1883,7 @@ object Struct {
         Injector { inj, _, _, store ->
             if (inj.mode != M_VAL) return@Injector UNDEF
 
+            // ['`$REF`', 'ref-path']: a relative path starts where this slot is, so .x is a sibling.
             val refpath = lookup(inj.parent, 1)
             inj.keyI = size(inj.keys)
 
@@ -1873,7 +1895,7 @@ object Struct {
                     else -> specHolder
                 }
 
-            val dpathRaw = slice(inj.path, 1, null)
+            val dpathRaw = slice(inj.path, 1, -2)
 
             @Suppress("UNCHECKED_CAST")
             val dpath: MutableList<String> = if (dpathRaw is List<*>) (dpathRaw as List<String>).toMutableList() else mutableListOf()
@@ -1881,7 +1903,20 @@ object Struct {
             refInj.dpath = dpath
             refInj.dparent = getpath(spec, dpath)
             refInj.handler = _injecthandler
-            val refResolved = getpath(spec, refpath, refInj)
+            var refResolved = getpath(spec, refpath, refInj)
+
+            // A chain of references that comes back to a path it has named names nothing.
+            val seen = mutableListOf(refpath)
+            var next = refResolved
+            while (islist(next) && "`\$REF`" == lookup(next, 0)) {
+                val nextpath = lookup(next, 1)
+                if (nextpath in seen) {
+                    refResolved = UNDEF
+                    break
+                }
+                seen.add(nextpath)
+                next = getpath(spec, nextpath, refInj)
+            }
 
             val tref = clone(refResolved)
 
@@ -2081,7 +2116,7 @@ object Struct {
                                 val fullpath = mutableListOf<String>()
                                 for (i in 0 until cutLen) fullpath.add(dpath[i])
                                 if (pI + 1 < numparts) for (j in pI + 1 until numparts) fullpath.add(parts[j])
-                                value = if (ascends <= size(dpath)) getpath(store, fullpath) else null
+                                value = if (ascends <= size(dpath)) getpath(store, fullpath) else UNDEF
                                 break
                             }
                         } else {
@@ -2151,16 +2186,10 @@ object Struct {
             val out = lookup(inj.dparent, inj.key)
             val t = typify(out)
             when {
-                (T_STRING and t) == 0 -> {
-                    inj.errs.add(_invalidTypeMsg(inj.path, "string", t, out, "V1010"))
-                    UNDEF
-                }
-                "" == out -> {
-                    inj.errs.add("Empty string at " + pathify(inj.path, 1))
-                    UNDEF
-                }
-                else -> out
+                (T_STRING and t) == 0 -> inj.errs.add(_invalidTypeMsg(inj.path, "string", t, out, "V1010"))
+                "" == out -> inj.errs.add("Empty string at " + pathify(inj.path, 1))
             }
+            out
         }
 
     /** Generic $TYPE handler. */
@@ -2183,10 +2212,8 @@ object Struct {
                 val t = typify(out)
                 if ((t and typev) == 0) {
                     inj.errs.add(_invalidTypeMsg(inj.path, tname, t, out, "V1001"))
-                    UNDEF
-                } else {
-                    out
                 }
+                out
             }
         }
 
@@ -2256,6 +2283,58 @@ object Struct {
                 else -> UNDEF
             }
         }
+
+    // The members a spec does not name: the map form is a key, the list form a
+    // tuple's last item. Each places clones of its spec for the loop to check.
+    val validate_REST: Injector =
+        Injector { inj, _, _, _ ->
+            if (M_KEYPRE == inj.mode) {
+                // Group B: a null template is a spec, so it is read raw (TS _lookup(parent,key)).
+                val resttm = lookup(inj.parent, inj.key)
+                val tval = getprop(inj.dparent, getelem(inj.path, -2))
+                if (ismap(tval)) {
+                    for (ckey in keysof(tval)) {
+                        if (ckey !in inj.keys) {
+                            setprop(inj.parent, ckey, clone(resttm))
+                            inj.keys.add(ckey)
+                        }
+                    }
+                }
+                inj.setval(UNDEF)
+                return@Injector UNDEF
+            }
+
+            val prior = inj.prior
+            if (M_VAL != inj.mode || prior == null || !islist(prior.parent) || 0 != inj.keyI) {
+                inj.errs.add(_restmsg(slice(inj.path, 1, null), " must be the last element of an array."))
+                return@Injector UNDEF
+            }
+
+            inj.keyI = size(inj.keys)
+            prior.modify = null
+
+            val tuple = prior.parent
+            val slot = listIndex(prior.key).toInt()
+            val dlist = prior.dparent
+            val numitems = if (islist(dlist)) size(dlist) else 0
+
+            if (numitems <= slot) {
+                inj.setval(UNDEF, 2)
+                return@Injector SKIP
+            }
+
+            val resttm = lookup(inj.parent, 1)
+            for (i in slot until numitems) setprop(tuple, i, clone(resttm))
+            for (i in size(prior.keys) until numitems) prior.keys.add(strkey(i))
+
+            prior.keyI--
+            SKIP
+        }
+
+    private fun _restmsg(
+        path: Any?,
+        problem: String,
+    ): String = "The \$REST validator at field " + pathify(path) + problem
 
     private fun describeAlternatives(tvals: List<Any?>): String {
         return lowernames(join(tvals.map { stringify(it) }, ", ", false))
@@ -2583,26 +2662,47 @@ object Struct {
     private val VALIDATE_NAMES =
         listOf("\$TOP", "\$SPEC", "\$BT", "\$DS", "\$WHEN", "\$ANNO", "\$REF", "\$FORMAT", "\$APPLY", "\$OPEN")
 
-    // Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
+    // Report each checker the spec names that validate lacks, and each misplaced
+    // $REST; $EXACT's arguments are literals. Last: spec is a list's last item.
     private fun _checknames(
         spec: Any?,
         store: Any?,
         path: List<String>,
         errs: MutableList<Any?>,
+        last: Boolean = false,
     ) {
         val name = _refname(spec)
         if (null != name) {
             if (_unknownname(name, store)) {
                 errs.add("Unknown validator " + name + " at field " + pathify(path) + ".")
+            } else if ("\$REST" == name) {
+                errs.add(_restmsg(path, " must be the last element of an array."))
             }
             return
         }
 
-        if (islist(spec) && "\$EXACT" == _refname(lookup(spec, 0))) return
+        val head = if (islist(spec)) _refname(lookup(spec, 0)) else null
+        if ("\$EXACT" == head) return
 
+        if ("\$REST" == head) {
+            if (!last) {
+                errs.add(_restmsg(path, " must be the last element of an array."))
+            } else if (2 != size(spec)) {
+                errs.add(_restmsg(path, " must have exactly one spec."))
+            }
+            _checknames(lookup(spec, 1), store, path + "1", errs)
+            return
+        }
+
+        val restkey = "`\$REST`"
+        if (ismap(spec) && UNDEF !== lookup(spec, restkey) && UNDEF !== lookup(spec, "`\$CHILD`")) {
+            errs.add(_restmsg(path, " cannot be used with \$CHILD."))
+        }
+
+        val lastkey = if (islist(spec)) strkey(size(spec) - 1) else null
         for (key in keysof(spec)) {
-            if (ismap(spec)) _checknames(key, store, path, errs)
-            _checknames(lookup(spec, key), store, path + key, errs)
+            if (ismap(spec) && restkey != key) _checknames(key, store, path, errs)
+            _checknames(lookup(spec, key), store, path + key, errs, lastkey == key)
         }
     }
 
@@ -2767,7 +2867,8 @@ object Struct {
                 }
                 val ckeys = keysof(cval)
                 val pkeys = keysof(pval)
-                if (size(pkeys) > 0 && getprop(pval, "`\$OPEN`") != true) {
+                // Only a spec written as {} is open, even if named keys resolved away.
+                if ((size(pkeys) > 0 || inj.named) && getprop(pval, "`\$OPEN`") != true) {
                     val badkeys = mutableListOf<String>()
                     // Group B: a key present with a JSON null value is NOT a bad
                     // key, so test raw presence (TS _lookup(pval,ck) === UNDEF).
@@ -2878,6 +2979,7 @@ object Struct {
         baseStore["\$LEN"] = validate_LEN
         baseStore["\$RANGE"] = validate_RANGE
         baseStore["\$LIKE"] = validate_LIKE
+        baseStore["\$REST"] = validate_REST
 
         val mergeList = mutableListOf<Any?>(baseStore)
         if (extraRaw is Map<*, *>) mergeList.add(extraRaw)

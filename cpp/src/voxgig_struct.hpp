@@ -1318,6 +1318,7 @@ public:
   Modify modify;
   Injection* prior = nullptr;
   Value extra;
+  bool named = false; // Current map node names keys of its own (not $ commands).
 
   Injection(const Value& val_in, const Value& parent_in) : val(val_in), parent(parent_in) {
     keys = std::make_shared<std::vector<std::string>>();
@@ -1392,7 +1393,10 @@ public:
   Value setval(const Value& v, int ancestor) {
     Value pp;
     if (ancestor < 2) {
-      if (v.is_undef()) {
+      // A list keeps the removed slot as a hole until inject's loop ends.
+      if (v.is_undef() && parent.is_list()) {
+        pp = setprop(parent, Value(key), SKIP());
+      } else if (v.is_undef()) {
         pp = delprop(parent, Value(key));
         parent = pp;
       } else {
@@ -2339,6 +2343,8 @@ inline Value inject(const Value& val, const Value& store, Injection* injdef) {
 
   inj->descend();
 
+  inj->named = false;
+
   Value cur = val;
 
   if (isnode(cur) && !cur.is_sentinel()) {
@@ -2351,6 +2357,7 @@ inline Value inject(const Value& val, const Value& store, Injection* injdef) {
         if (k.find('$') == std::string::npos)
           nodekeys->push_back(k);
       }
+      inj->named = !nodekeys->empty();
       for (const auto& k : node_keys_vec) {
         if (k.find('$') != std::string::npos)
           nodekeys->push_back(k);
@@ -2383,6 +2390,11 @@ inline Value inject(const Value& val, const Value& store, Injection* injdef) {
         nodekeys = cinj->keys;
       }
     }
+
+    if (cur.is_list()) {
+      auto& items = *cur.as_list();
+      items.erase(std::remove_if(items.begin(), items.end(), is_skip), items.end());
+    }
   } else if (cur.is_string()) {
     inj->mode = M_VAL;
     Value newVal = injectstr(cur.as_string(), store, inj);
@@ -2396,7 +2408,7 @@ inline Value inject(const Value& val, const Value& store, Injection* injdef) {
     Value mkey(inj->key);
     Value mparent = inj->parent;
     Value mval = getprop(mparent, mkey);
-    inj->modify(mval, mkey, mparent, *inj, store);
+    inj->modify(is_skip(mval) ? Value::undef() : mval, mkey, mparent, *inj, store);
   }
 
   inj->val = cur;
@@ -2968,7 +2980,10 @@ inline Value REF_FN(Injection& inj, const Value& val, const std::string& ref, co
     spec = spec_holder.as_injector()(synth, Value::undef(), "$SPEC", store);
   }
 
-  std::vector<std::string> dpath_slice(inj.path.begin() + 1, inj.path.end());
+  // slice(inj.path, 1, -2): the node holding this slot, so .x is a sibling.
+  std::vector<std::string> dpath_slice;
+  for (size_t i = 1; i + 2 < inj.path.size(); i++)
+    dpath_slice.push_back(inj.path[i]);
   Injection refInj(Value::undef(), Value::undef());
   refInj.dpath = dpath_slice;
   auto fp = std::make_shared<List>();
@@ -2977,6 +2992,19 @@ inline Value REF_FN(Injection& inj, const Value& val, const std::string& ref, co
   refInj.dparent = getpath_v(spec, Value(fp));
   refInj.handler = injecthandler;
   Value refResolved = getpath_v(spec, refpath, &refInj);
+
+  // A chain of references that comes back to a path it has named names nothing.
+  std::vector<Value> seen{refpath};
+  for (Value next = refResolved;
+       next.is_list() && Value("`$REF`") == lookup_v(next, Value(int64_t(0)));) {
+    Value nextpath = lookup_v(next, Value(int64_t(1)));
+    if (std::find(seen.begin(), seen.end(), nextpath) != seen.end()) {
+      refResolved = Value::undef();
+      break;
+    }
+    seen.push_back(nextpath);
+    next = getpath_v(spec, nextpath, &refInj);
+  }
 
   Value tref = clone(refResolved);
   bool hasSubRef = false;
@@ -3145,14 +3173,14 @@ inline Value STRING_FN(Injection& inj, const Value& val, const std::string& ref,
   int t = typify(out);
   if ((T_string & t) == 0) {
     inj.errs->push_back(Value(invalid_type_msg(inj.path, "string", t, out, "V1010")));
-    return Value::undef();
+    return out;
   }
   if (out.as_string().empty()) {
     auto pl = std::make_shared<List>();
     for (auto& p : inj.path)
       pl->push_back(Value(p));
     inj.errs->push_back(Value("Empty string at " + pathify(Value(pl), 1, 0)));
-    return Value::undef();
+    return out;
   }
   return out;
 }
@@ -3176,7 +3204,7 @@ inline Value TYPE_FN(Injection& inj, const Value& val, const std::string& ref, c
   int t = typify(out);
   if ((t & typev) == 0) {
     inj.errs->push_back(Value(invalid_type_msg(inj.path, tname, t, out, "V1001")));
-    return Value::undef();
+    return out;
   }
   return out;
 }
@@ -3247,6 +3275,64 @@ inline Value CHILD_FN(Injection& inj, const Value& val, const std::string& ref,
     return SKIP();
   }
   return Value::undef();
+}
+
+inline std::string restmsg(const Value& path, const std::string& problem) {
+  return "The $REST validator at field " + pathify(path) + problem;
+}
+
+// The members a spec does not name: the map form is a key, the list form a
+// tuple's last item. Each places clones of its spec for the loop to check.
+inline Value REST_FN(Injection& inj, const Value& val, const std::string& ref, const Value& store) {
+  if (inj.mode == M_KEYPRE) {
+    Value resttm = lookup_v(inj.parent, Value(inj.key));
+    Value pkey = inj.path.size() >= 2 ? Value(inj.path[inj.path.size() - 2]) : Value::undef();
+    Value tval = getprop(inj.dparent, pkey);
+
+    if (ismap(tval) && inj.keys) {
+      for (const auto& ck : keysof(tval)) {
+        if (std::find(inj.keys->begin(), inj.keys->end(), ck) == inj.keys->end()) {
+          setprop(inj.parent, Value(ck), clone(resttm));
+          inj.keys->push_back(ck);
+        }
+      }
+    }
+
+    inj.setval(Value::undef());
+    return Value::undef();
+  }
+
+  Injection* prior = inj.prior;
+  if (inj.mode != M_VAL || !prior || !prior->parent.is_list() || 0 != inj.keyI) {
+    auto pl = std::make_shared<List>();
+    for (size_t i = 1; i < inj.path.size(); i++)
+      pl->push_back(Value(inj.path[i]));
+    inj.errs->push_back(Value(restmsg(Value(pl), " must be the last element of an array.")));
+    return Value::undef();
+  }
+
+  inj.keyI = static_cast<int>(inj.keys ? inj.keys->size() : 0);
+  prior->modify = nullptr;
+
+  Value tuple = prior->parent;
+  int64_t slot = 0;
+  detail::list_key(Value(prior->key), slot);
+  Value dlist = prior->dparent;
+  int64_t numitems = dlist.is_list() ? size(dlist) : 0;
+
+  if (numitems <= slot) {
+    inj.setval(Value::undef(), 2);
+    return SKIP();
+  }
+
+  Value resttm = lookup_v(inj.parent, Value(int64_t(1)));
+  for (int64_t i = slot; i < numitems; i++)
+    setprop(tuple, Value(i), clone(resttm));
+  for (auto i = static_cast<int64_t>(prior->keys->size()); i < numitems; i++)
+    prior->keys->push_back(strkey(Value(i)));
+
+  prior->keyI--;
+  return SKIP();
 }
 
 // Lowers every `$NAME` marker in the joined description, nested ones included.
@@ -3758,25 +3844,48 @@ inline bool unknownname(const std::string& name, const Value& store) {
   return !knownname(name, store) && (uname == name || knownname(uname, store));
 }
 
-// Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
+// Report each checker the spec names that validate lacks, and each misplaced
+// $REST; $EXACT's arguments are literals. Last: spec is a list's last item.
 inline void checknames(const Value& spec, const Value& store, std::vector<std::string>& path,
-                       std::vector<Value>& errs) {
+                       std::vector<Value>& errs, bool last = false) {
   std::string name = refname(spec);
   if (!name.empty()) {
     if (unknownname(name, store))
       errs.push_back(
           Value("Unknown validator " + name + " at field " + pathify(pathlist(path)) + "."));
+    else if ("$REST" == name)
+      errs.push_back(Value(restmsg(pathlist(path), " must be the last element of an array.")));
     return;
   }
 
-  if (spec.is_list() && !spec.as_list()->empty() && "$EXACT" == refname((*spec.as_list())[0]))
+  std::string head =
+      spec.is_list() && !spec.as_list()->empty() ? refname((*spec.as_list())[0]) : "";
+  if ("$EXACT" == head)
     return;
 
-  for (const auto& key : keysof(spec)) {
-    if (spec.is_map())
-      checknames(Value(key), store, path, errs);
-    path.push_back(key);
-    checknames(lookup_v(spec, Value(key)), store, path, errs);
+  if ("$REST" == head) {
+    if (!last)
+      errs.push_back(Value(restmsg(pathlist(path), " must be the last element of an array.")));
+    else if (2 != size(spec))
+      errs.push_back(Value(restmsg(pathlist(path), " must have exactly one spec.")));
+    path.push_back("1");
+    checknames(lookup_v(spec, Value(int64_t(1))), store, path, errs);
+    path.pop_back();
+    return;
+  }
+
+  const std::string restkey = "`$REST`";
+  if (spec.is_map() && !lookup_v(spec, Value(restkey)).is_undef() &&
+      !lookup_v(spec, Value("`$CHILD`")).is_undef())
+    errs.push_back(Value(restmsg(pathlist(path), " cannot be used with $CHILD.")));
+
+  auto keys = keysof(spec);
+  for (size_t i = 0; i < keys.size(); i++) {
+    if (spec.is_map() && restkey != keys[i])
+      checknames(Value(keys[i]), store, path, errs);
+    path.push_back(keys[i]);
+    checknames(lookup_v(spec, Value(keys[i])), store, path, errs,
+               spec.is_list() && i + 1 == keys.size());
     path.pop_back();
   }
 }
@@ -3822,7 +3931,8 @@ inline void _validation(const Value& pval, const Value& key, const Value& parent
     auto pkeys = keysof(pval);
     Value open_v = getprop(pval, Value(S_BOPEN()));
     bool is_open = open_v.is_bool() && open_v.as_bool();
-    if (!pkeys.empty() && !is_open) {
+    // Only a spec written as {} is open, even if named keys resolved away.
+    if ((!pkeys.empty() || inj.named) && !is_open) {
       std::vector<std::string> badkeys;
       for (auto& ck : ckeys) {
         // Canonical uses `NONE === _lookup(pval, ckey)`: the shape's literal
@@ -3961,6 +4071,7 @@ inline Value validate(const Value& data, const Value& spec, const Value& options
   baseStore->set("$LEN", Value(Injector(validators::LEN_FN)));
   baseStore->set("$RANGE", Value(Injector(validators::RANGE_FN)));
   baseStore->set("$LIKE", Value(Injector(validators::LIKE_FN)));
+  baseStore->set("$REST", Value(Injector(validators::REST_FN)));
 
   auto mergeList = std::make_shared<List>();
   mergeList->push_back(Value(baseStore));

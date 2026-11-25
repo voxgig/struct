@@ -55,21 +55,19 @@
     `size`. A string that is not valid UTF-8 falls back to its bytes in Lua
     and PHP.
   - Zig's `select` has its own matcher: it knows `$EXACT`, `$NOF`, `$ALL`,
-    `$LEN`, `$RANGE`, `$LIKE` and the select operators, but not `$CHILD` or
-    the type checkers. The C# runner does not run `select.nullkey`.
+    `$LEN`, `$RANGE`, `$LIKE`, `$REST`, the type checkers and the select
+    operators, but not `$CHILD`. The C# runner does not run `select.nullkey`.
   - A `$LIKE` pattern an engine cannot read is an invalid pattern only where
     the engine refuses it. The in-tree engines refuse few: in OCaml, Haskell
     and Lean an unclosed `(` or `[` runs to the end and a stray `)` ends the
     pattern, so `a)b` matches `abc`, and C, Lua, Rust and Zig compile
     constructs outside the subset, reading some, such as `(?=a)` and `\1`,
     as literal text. There such a pattern is a mismatch or a different match.
-  - A relative `$REF` path such as `.x`: Python, Elixir, Dart, Scala,
-    Clojure, OCaml, Haskell, Lean and Zig look the path up without the data
-    path TypeScript passes, so a relative path names nothing there. A whole
-    spec of `['$REF', 'missing']` gives back that spec in Python and Ruby,
-    where TypeScript gives nothing, and in Go and boru, which hold one null
-    for both, a `$REF` to a null in the spec deletes its field where
-    TypeScript keeps the null.
+  - A `$REF` to a null in the spec: TypeScript reads the path as `getpath`
+    reads any path, so the null is no value and the field is dropped, as in
+    every other port but PHP, which reads the null literally and keeps it.
+    No corpus entry pins this, because `transform.ref` runs with the null
+    flag on, which turns a null in a spec into text.
 
 
 ## Documented JS-fidelity gaps

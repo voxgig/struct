@@ -1858,12 +1858,9 @@ pub fn getpathInj(allocator: Allocator, path_val: JsonValue, store_in: JsonValue
         store = try expand(allocator, store);
     }
 
-    // Single empty part (empty string path) → return source/dparent.
-    // But NOT for multiple empty parts (.. ancestor paths).
-    if (numparts == 1 and parts[0].len == 0) {
-        if (inj) |ij| return ij.dparent;
-        return getpropFromStore(store);
-    }
+    // An empty path finds the source, with an injection or without; "." is
+    // the one that finds dparent.
+    if (numparts == 1 and parts[0].len == 0) return getpropFromStore(store);
     // Single "." (splits to ["",""]) → return dparent.
     if (numparts == 2 and parts[0].len == 0 and parts[1].len == 0) {
         if (inj) |ij| return ij.dparent;
@@ -2165,6 +2162,7 @@ pub const Injection = struct {
     skip: bool = false, // Set by handlers to suppress setval.
     validate_mode: bool = false, // Enables $STRING/$NUMBER/etc validation commands.
     exact_mode: bool = false, // Exact matching mode for select.
+    named: bool = false, // Current map node names keys of its own (not $ commands).
     key_i: usize = 0,
     key: []const u8 = S_DTOP,
     val: JsonValue = .null,
@@ -2240,7 +2238,10 @@ pub const Injection = struct {
     pub fn setval(self: *Injection, val: JsonValue, ancestor: usize) !JsonValue {
         const a = self.allocator;
         if (ancestor < 2) {
-            if (val == .null) {
+            // A list keeps the removed slot as a hole until inject's loop ends.
+            if (val == .null and self.parent == .array) {
+                self.parent = setprop(a, self.parent, JsonValue{ .string = self.key }, HOLE) catch self.parent;
+            } else if (val == .null) {
                 self.parent = delprop(a, self.parent, JsonValue{ .string = self.key }) catch self.parent;
             } else {
                 self.parent = setprop(a, self.parent, JsonValue{ .string = self.key }, val) catch self.parent;
@@ -2295,6 +2296,18 @@ pub const Injection = struct {
         }
     }
 };
+
+// The marker setval leaves in a list slot it removes, until inject's loop for
+// the list ends: a function, so no data value can equal it.
+fn holeFn(_: Allocator) anyerror!JsonValue {
+    return .null;
+}
+
+const HOLE = JsonValue{ .function = &holeFn };
+
+fn ishole(val: JsonValue) bool {
+    return val == .function and val.function == &holeFn;
+}
 
 fn appendSlice(allocator: Allocator, comptime T: type, existing: []const T, item: T) ![]T {
     var new = try allocator.alloc(T, existing.len + 1);
@@ -2366,6 +2379,8 @@ pub fn inject(allocator: Allocator, val: JsonValue, store: JsonValue, inj_opt: ?
     inj.descend();
     var current = val;
 
+    inj.named = false;
+
     if (isnode(val)) {
         // Get sorted keys: normal first, then $ transform keys.
         var normal_keys = std.array_list.Managed([]const u8).init(allocator);
@@ -2387,6 +2402,7 @@ pub fn inject(allocator: Allocator, val: JsonValue, store: JsonValue, inj_opt: ?
         var node_keys = std.array_list.Managed([]const u8).init(allocator);
         for (normal_keys.items) |k| try node_keys.append(k);
         for (transform_keys.items) |k| try node_keys.append(k);
+        inj.named = ismap(val) and 0 < normal_keys.items.len;
 
         // nkI is signed so cmdRef's `prior.key_i -%= 1` on a fresh 0 wraps to
         // max-usize and bit-casts back to -1 here — then `nkI += 1` lands on
@@ -2443,6 +2459,17 @@ pub fn inject(allocator: Allocator, val: JsonValue, store: JsonValue, inj_opt: ?
 
             nkI += 1;
         }
+
+        if (current == .array) {
+            const elems = current.array.data.items;
+            var kept: usize = 0;
+            for (elems) |elem| {
+                if (ishole(elem)) continue;
+                elems[kept] = elem;
+                kept += 1;
+            }
+            current.array.data.items.len = kept;
+        }
     } else if (val == .string) {
         // Inject paths into string scalars.
         inj.mode = M_VAL;
@@ -2460,7 +2487,8 @@ pub fn inject(allocator: Allocator, val: JsonValue, store: JsonValue, inj_opt: ?
     // and modify). Reset skip only after both checks have seen it.
     if (!inj.skip) {
         if (inj.modify) |modify_fn| {
-            const mval = getprop(allocator, inj.parent, JsonValue{ .string = inj.key }, .null) catch .null;
+            const stored: JsonValue = getprop(allocator, inj.parent, JsonValue{ .string = inj.key }, .null) catch .null;
+            const mval: JsonValue = if (ishole(stored)) .null else stored;
             modify_fn(allocator, mval, inj.key, inj.parent, inj, store);
         }
     }
@@ -2651,6 +2679,7 @@ fn dispatchCmd(allocator: Allocator, cmd: []const u8, store: JsonValue, inj: *In
         if (std.mem.eql(u8, cmd, "$LEN")) return try validateBound(allocator, inj, "$LEN");
         if (std.mem.eql(u8, cmd, "$RANGE")) return try validateBound(allocator, inj, "$RANGE");
         if (std.mem.eql(u8, cmd, "$LIKE")) return try validateBound(allocator, inj, "$LIKE");
+        if (std.mem.eql(u8, cmd, "$REST")) return try cmdValidateRest(allocator, inj);
         if (std.mem.eql(u8, cmd, "$CHILD")) return try cmdValidateChildCmd(allocator, inj, store);
     }
 
@@ -2781,11 +2810,10 @@ fn cmdValidateType(allocator: Allocator, inj: *Injection, tname: []const u8, tbi
     if (tbit == T_string) {
         if (0 == (@as(i64, T_string) & t)) {
             try inj.errs.append(try invalidTypeMsg(allocator, inj.path, tname, out));
-            return .null;
+            return try setchecked(allocator, inj, out);
         }
         if (out == .string and out.string.len == 0) {
             try inj.errs.append(try std.fmt.allocPrint(allocator, "Empty string at {s}", .{try pathifySlice(allocator, inj.path[1..])}));
-            return .null;
         }
         _ = try inj.setval(out, 0);
         return out;
@@ -2793,7 +2821,6 @@ fn cmdValidateType(allocator: Allocator, inj: *Injection, tname: []const u8, tbi
 
     if (0 == (@as(i64, tbit) & t)) {
         try inj.errs.append(try invalidTypeMsg(allocator, inj.path, tname, out));
-        return .null;
     }
     return try setchecked(allocator, inj, out);
 }
@@ -3383,6 +3410,7 @@ const VALIDATE_CHECKERS = [_][]const u8{
     "$LEN",
     "$RANGE",
     "$LIKE",
+    "$REST",
     S_DERRS,
 };
 
@@ -3398,13 +3426,15 @@ const SELECT_NAMES = [_][]const u8{
     "$LIKE",
 };
 
-// Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
+// Report each checker the spec names that validate lacks, and each misplaced
+// $REST; $EXACT's arguments are literals. Last: spec is a list's last item.
 fn checknames(
     allocator: Allocator,
     spec: JsonValue,
     path: []const []const u8,
     errs: *std.array_list.Managed([]const u8),
     extra: []const []const u8,
+    last: bool,
 ) anyerror!void {
     if (refname(spec)) |name| {
         if (try unknownname(allocator, name, extra)) {
@@ -3413,33 +3443,53 @@ fn checknames(
                 "Unknown validator {s} at field {s}.",
                 .{ name, try pathifySlice(allocator, path) },
             ));
+        } else if (std.mem.eql(u8, name, "$REST")) {
+            try errs.append(try restmsg(allocator, path, " must be the last element of an array."));
         }
         return;
     }
 
+    const restkey = "`$REST`";
     switch (spec) {
         .array => |arr| {
             const elems = arr.data.items;
             if (0 < elems.len) {
                 if (refname(elems[0])) |first| {
                     if (std.mem.eql(u8, first, "$EXACT")) return;
+                    if (std.mem.eql(u8, first, "$REST")) {
+                        if (!last) {
+                            try errs.append(try restmsg(allocator, path, " must be the last element of an array."));
+                        } else if (2 != elems.len) {
+                            try errs.append(try restmsg(allocator, path, " must have exactly one spec."));
+                        }
+                        const rest: JsonValue = if (1 < elems.len) elems[1] else .null;
+                        try checknames(allocator, rest, try appendSlice(allocator, []const u8, path, "1"), errs, extra, false);
+                        return;
+                    }
                 }
             }
             for (elems, 0..) |elem, i| {
                 const key = try std.fmt.allocPrint(allocator, "{d}", .{i});
-                try checknames(allocator, elem, try appendSlice(allocator, []const u8, path, key), errs, extra);
+                try checknames(allocator, elem, try appendSlice(allocator, []const u8, path, key), errs, extra, i + 1 == elems.len);
             }
         },
         .object => |obj| {
+            if (obj.get(restkey) != null and obj.get("`$CHILD`") != null) {
+                try errs.append(try restmsg(allocator, path, " cannot be used with $CHILD."));
+            }
             const keys = try keysof(allocator, spec);
             for (keys.array.data.items) |k| {
-                try checknames(allocator, k, path, errs, extra);
+                if (!std.mem.eql(u8, k.string, restkey)) try checknames(allocator, k, path, errs, extra, false);
                 const child = obj.get(k.string) orelse .null;
-                try checknames(allocator, child, try appendSlice(allocator, []const u8, path, k.string), errs, extra);
+                try checknames(allocator, child, try appendSlice(allocator, []const u8, path, k.string), errs, extra, false);
             }
         },
         else => {},
     }
+}
+
+fn restmsg(allocator: Allocator, path: []const []const u8, problem: []const u8) anyerror![]const u8 {
+    return try std.fmt.allocPrint(allocator, "The $REST validator at field {s}{s}", .{ try pathifySlice(allocator, path), problem });
 }
 
 // The name a whole-string reference gives, when it is a checker name in any case.
@@ -3566,6 +3616,67 @@ fn cmdValidateChildCmd(allocator: Allocator, inj: *Injection, store: JsonValue) 
         return .null;
     }
 
+    return .null;
+}
+
+// The members a spec does not name: the map form is a key, the list form a
+// tuple's last item. Each places clones of its spec for the loop to check.
+fn cmdValidateRest(allocator: Allocator, inj: *Injection) anyerror!JsonValue {
+    if (inj.mode == M_KEYPRE) {
+        const resttm = lookupLiteral(inj.parent, inj.key) orelse .null;
+        const pkey = if (inj.path.len >= 2) inj.path[inj.path.len - 2] else S_DTOP;
+        const tval = getprop(allocator, inj.dparent, JsonValue{ .string = pkey }, .null) catch .null;
+
+        if (tval == .object) {
+            const ckeys = try keysof(allocator, tval);
+            for (ckeys.array.data.items) |ck| {
+                const named = for (inj.keys) |k| {
+                    if (std.mem.eql(u8, k, ck.string)) break true;
+                } else false;
+                if (!named) {
+                    _ = try setprop(allocator, inj.parent, ck, try clone(allocator, resttm));
+                    inj.keys = try appendSlice(allocator, []const u8, inj.keys, ck.string);
+                }
+            }
+        }
+
+        _ = try inj.setval(.null, 0);
+        return .null;
+    }
+
+    const prior = inj.prior;
+    if (inj.mode != M_VAL or prior == null or prior.?.parent != .array or inj.key_i != 0) {
+        try inj.errs.append(try restmsg(allocator, pathrange(inj.path, 1, 0), " must be the last element of an array."));
+        return .null;
+    }
+    const p = prior.?;
+
+    inj.key_i = inj.keys.len;
+    p.modify = null;
+
+    const tuple = p.parent;
+    const slot = listIndex(JsonValue{ .string = p.key }) orelse 0;
+    const numitems: usize = if (p.dparent == .array) p.dparent.array.data.items.len else 0;
+
+    // The zig spelling of the canonical `return SKIP`, on both paths below.
+    inj.skip = true;
+    if (numitems <= slot) {
+        _ = try inj.setval(.null, 2);
+        return .null;
+    }
+
+    const restlist = inj.parent;
+    const resttm: JsonValue = if (restlist == .array and 1 < restlist.array.data.items.len) restlist.array.data.items[1] else .null;
+    var i = slot;
+    while (i < numitems) : (i += 1) {
+        _ = try setprop(allocator, tuple, JsonValue{ .integer = @intCast(i) }, try clone(allocator, resttm));
+    }
+    i = p.keys.len;
+    while (i < numitems) : (i += 1) {
+        p.keys = try appendSlice(allocator, []const u8, p.keys, try strkey(allocator, JsonValue{ .integer = @intCast(i) }));
+    }
+
+    p.key_i = p.key_i -% 1;
     return .null;
 }
 
@@ -4030,6 +4141,15 @@ fn scanForRef(val: JsonValue, found: *bool) void {
     }
 }
 
+// Element 1 of a list whose element 0 is head, when val is one: the path of
+// a $REF list, the spec of a $REST list.
+fn headarg(val: JsonValue, head: []const u8) ?JsonValue {
+    if (val != .array) return null;
+    const elems = val.array.data.items;
+    if (0 == elems.len or elems[0] != .string or !std.mem.eql(u8, elems[0].string, head)) return null;
+    return if (1 < elems.len) elems[1] else JsonValue{ .null = {} };
+}
+
 fn cmdRef(allocator: Allocator, inj: *Injection, store: JsonValue) !JsonValue {
     if (inj.mode != M_VAL) return .null;
 
@@ -4045,8 +4165,40 @@ fn cmdRef(allocator: Allocator, inj: *Injection, store: JsonValue) !JsonValue {
     const spec_val = if (store == .object) store.object.get(S_DSPEC) orelse .null else .null;
     if (spec_val == .null) return .null;
 
+    // A relative path starts at the node holding this slot, so .x is a sibling.
+    const dpath = try allocator.dupe([]const u8, pathrange(inj.path, 1, 2));
+    const dpath_val = try JsonValue.makeList(allocator);
+    for (dpath) |part| try dpath_val.array.append(JsonValue{ .string = part });
+    const ref_inj = try allocator.create(Injection);
+    ref_inj.* = Injection{
+        .allocator = allocator,
+        .base = S_MT,
+        .dparent = try getpath(allocator, dpath_val, spec_val),
+        .keys = try allocator.alloc([]const u8, 0),
+        .path = try allocator.alloc([]const u8, 0),
+        .nodes = try allocator.alloc(JsonValue, 0),
+        .dpath = dpath,
+        .errs = inj.errs,
+    };
+
     // Resolve the ref path within the spec.
-    const ref_result = try getpath(allocator, JsonValue{ .string = refpath }, spec_val);
+    var ref_result = try getpathInj(allocator, JsonValue{ .string = refpath }, spec_val, ref_inj);
+
+    // A chain of references that comes back to a path it has named names nothing.
+    var seen = std.array_list.Managed(JsonValue).init(allocator);
+    try seen.append(refpath_val);
+    var next = ref_result;
+    while (headarg(next, "`$REF`")) |nextpath| {
+        const looped = for (seen.items) |p| {
+            if (deepequal(p, nextpath)) break true;
+        } else false;
+        if (looped) {
+            ref_result = .null;
+            break;
+        }
+        try seen.append(nextpath);
+        next = try getpathInj(allocator, nextpath, spec_val, ref_inj);
+    }
 
     var has_sub_ref = false;
     if (isnode(ref_result)) scanForRef(ref_result, &has_sub_ref);
@@ -4401,7 +4553,7 @@ fn validateValue(allocator: Allocator, data: ?JsonValue, spec: JsonValue, injdef
     }
 
     // A spec that names an unknown checker validates nothing.
-    try checknames(allocator, spec, &[_][]const u8{}, errs, &[_][]const u8{});
+    try checknames(allocator, spec, &[_][]const u8{}, errs, &[_][]const u8{}, false);
     const result = if (0 < errs.items.len) try clone(allocator, data orelse .null) else try inject(allocator, spec_clone, store_val, inj_init);
 
     if (errs.items.len > 0) {
@@ -4421,12 +4573,11 @@ fn validateValue(allocator: Allocator, data: ?JsonValue, spec: JsonValue, injdef
 
 // Validation modify callback — runs after each injection step.
 // Matches TS's makeValidation(false) behavior.
-fn validationModify(allocator: Allocator, _: JsonValue, key: []const u8, parent: JsonValue, inj: *Injection, _: JsonValue) void {
+fn validationModify(allocator: Allocator, pval: JsonValue, key: []const u8, parent: JsonValue, inj: *Injection, _: JsonValue) void {
     // Get the actual data value at this path.
     const cval = getprop(allocator, inj.dparent, JsonValue{ .string = key }, .null) catch .null;
     if (cval == .null and !inj.exact_mode) return;
 
-    const pval = getprop(allocator, parent, JsonValue{ .string = key }, .null) catch .null;
     const ptype = typify(pval);
 
     // Skip remaining $ command strings.
@@ -4445,9 +4596,9 @@ fn validationModify(allocator: Allocator, _: JsonValue, key: []const u8, parent:
     if (ismap(cval)) {
         if (!ismap(pval)) return;
 
-        // Check for unexpected keys (closed-world assumption).
+        // Only a spec written as {} is open, even if named keys resolved away.
         const pkeys = keysof(allocator, pval) catch return;
-        if (pkeys == .array and pkeys.array.data.items.len > 0) {
+        if (inj.named or (pkeys == .array and pkeys.array.data.items.len > 0)) {
             // Check for $OPEN flag.
             if (pval == .object) {
                 if (pval.object.get(S_BOPEN)) |ov| {
@@ -4848,7 +4999,7 @@ pub fn select(allocator: Allocator, children: JsonValue, query: JsonValue) anyer
 
     // A query that names an unknown checker selects nothing.
     var qerrs = std.array_list.Managed([]const u8).init(allocator);
-    try checknames(allocator, query, &[_][]const u8{}, &qerrs, &SELECT_NAMES);
+    try checknames(allocator, query, &[_][]const u8{}, &qerrs, &SELECT_NAMES, false);
     if (0 < qerrs.items.len) return JsonValue{ .array = result_lr };
 
     for (child_list.items) |child| {
@@ -4941,7 +5092,8 @@ fn validateExactMatch(
             _ = try selectCmp(allocator, "$LIKE", term, data_val, errs, path);
         }
 
-        if (!has_plain_key) return data_val;
+        const rest = spec_val.object.get("`$REST`");
+        if (!has_plain_key and rest == null) return data_val;
 
         if (data_val != .object) {
             try errs.append("type mismatch: expected object");
@@ -4972,6 +5124,16 @@ fn validateExactMatch(
                     "Missing key at {s}.",
                     .{p},
                 ));
+            }
+        }
+
+        // $REST checks each data key the query does not name.
+        if (rest) |rspec| {
+            var dit = data_val.object.iterator();
+            while (dit.next()) |kv| {
+                const k = kv.key_ptr.*;
+                if (spec_val.object.get(k) != null) continue;
+                _ = try validateExactMatch(allocator, rspec, kv.value_ptr.*, errs, try appendSlice(allocator, []const u8, path, k));
             }
         }
         return data_val;
@@ -5009,6 +5171,21 @@ fn validateExactMatch(
         }
         // Empty spec list [] means list can be open (any items).
         if (0 == spec_val.array.data.items.len) return data_val;
+
+        // A trailing ['$REST', spec] checks each item after the named ones.
+        const sitems = spec_val.array.data.items;
+        if (headarg(sitems[sitems.len - 1], "`$REST`")) |rspec| {
+            const ditems = data_val.array.data.items;
+            const named = sitems.len - 1;
+            for (0..@max(named, ditems.len)) |i| {
+                const sv = if (i < named) sitems[i] else rspec;
+                const dv: JsonValue = if (i < ditems.len) ditems[i] else .null;
+                const key = try std.fmt.allocPrint(allocator, "{d}", .{i});
+                _ = try validateExactMatch(allocator, sv, dv, errs, try appendSlice(allocator, []const u8, path, key));
+            }
+            return data_val;
+        }
+
         if (spec_val.array.data.items.len != data_val.array.data.items.len) {
             const p = try pathifySlice(allocator, path);
             try errs.append(try std.fmt.allocPrint(

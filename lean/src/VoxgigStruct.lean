@@ -87,6 +87,7 @@ structure InjData where
   modify : Option Nat := none      -- modify registry id
   prior : Option InjId := none
   extra : Value := .noval
+  named : Bool := false            -- map node names keys of its own, not $ commands
   deriving Inhabited
 
 
@@ -2032,7 +2033,8 @@ def newInj (v parent : Value) : SIO InjId := do
   newInjData {
     mode := M_VAL, full := false, keyi := 0, keys, key := .str S_DTOP, ival := v,
     parent, path, nodes, handler := h, errs, imeta := meta0, dparent := .noval,
-    dpath, base := .str S_DTOP, modify := none, prior := none, extra := .noval }
+    dpath, base := .str S_DTOP, modify := none, prior := none, extra := .noval,
+    named := false }
 
 partial def injDescend (i : InjId) : SIO Value := do
   let d ← getInj i
@@ -2090,7 +2092,7 @@ partial def makeChildInj (i : InjId) (keyi : Int) (keys : Value) : SIO InjId := 
     | _ => pure d.dpath
   newInjData { d with
     keyi, keys, key := .str key, ival, parent := v, path, nodes,
-    prior := some i, dpath }
+    prior := some i, dpath, named := false }
 
 partial def injSetval (i : InjId) (v : Value) (ancestor : Int := 1) : SIO Unit := do
   let d ← getInj i
@@ -2100,7 +2102,10 @@ partial def injSetval (i : InjId) (v : Value) (ancestor : Int := 1) : SIO Unit :
       let t ← getelem d.nodes (vInt (-ancestor))
       let k ← getelem d.path (vInt (-ancestor))
       pure (t, k)
-  if isNoval v then
+  -- A list keeps the removed slot as a hole until inject's loop ends.
+  if isNoval v && ancestor < 2 && islist target then
+    let _ ← setprop target key SKIP
+  else if isNoval v then
     let _ ← delprop target key
   else
     let _ ← setprop target key v
@@ -2139,6 +2144,7 @@ partial def inject (v : Value) (store : Value) (inj : InjArg := .inone) : SIO Va
        | _ => pure ())
       pure i
   let _ ← injDescend state
+  modInj state (fun d => { d with named := false })
   let v ←
     if isnode v then do
       let nodekeys0 : Array String ←
@@ -2148,6 +2154,7 @@ partial def inject (v : Value) (store : Value) (inj : InjArg := .inone) : SIO Va
           let ks := es.map (·.1)
           let normal := (ks.filter (fun k => !(strContains k '$'))).qsort strLtB
           let trans := (ks.filter (fun k => strContains k '$')).qsort strLtB
+          modInj state (fun d => { d with named := !normal.isEmpty })
           pure (normal ++ trans)
         | .list lid => do
           let xs ← listItems lid
@@ -2182,6 +2189,11 @@ partial def inject (v : Value) (store : Value) (inj : InjArg := .inone) : SIO Va
           let _ ← injectstr (← jsString nodekey) store (some ci)
           rereadKeys ci
         nki := (← getInj ci).keyi + 1
+      match v with
+      | .list lid => do
+        let xs ← listItems lid
+        setListItems lid (xs.filter (fun x => !(isSkip x)))
+      | _ => pure ()
       pure v
     else if (match v with | .str _ => true | _ => false) then do
       modInj state (fun d => { d with mode := M_VAL })
@@ -2196,7 +2208,7 @@ partial def inject (v : Value) (store : Value) (inj : InjArg := .inone) : SIO Va
        let mkey := d.key
        let mparent := d.parent
        let mval ← getprop mparent mkey
-       callModify mid mval mkey mparent state
+       callModify mid (if isSkip mval then Value.noval else mval) mkey mparent state
      else pure ()
    | none => pure ())
   modInj state (fun dd => { dd with ival := v })
@@ -2259,8 +2271,7 @@ end
 -- ---------------------------------------------------------------------------
 
 partial def transformDelete : InjectorFn := fun inj _v _ref _store => do
-  let d ← getInj inj
-  let _ ← delprop d.parent d.key
+  injSetval inj .noval
   pure .noval
 
 partial def transformCopy : InjectorFn := fun inj _v _ref _store => do
@@ -2487,7 +2498,25 @@ partial def transformRef : InjectorFn := fun inj _v _ref store => do
     match specFunc with
     | .func fid => do
       let spec ← callFunc fid inj .noval "" .noval
-      let refv ← getpath spec refpath
+      -- A relative path starts where this slot is, so .x is a sibling.
+      let dpath ← slice d.path (start := .num 1.0) (stop := .num (-2.0))
+      let dparent ← getpath spec dpath
+      let rdef : InjDef := { dDpath := dpath, dDparent := dparent }
+      let found ← getpath spec refpath (.idef rdef)
+      -- A chain of references that comes back to a path it has named names nothing.
+      let mut seen : Array Value := #[refpath]
+      let mut tgt := found
+      let mut cyclic := false
+      repeat do
+        if !(islist tgt) then break
+        if (← lookupRaw tgt (.num 0.0)) != .str "`$REF`" then break
+        let np ← lookupRaw tgt (.num 1.0)
+        if seen.contains np then
+          cyclic := true
+          break
+        seen := seen.push np
+        tgt ← getpath spec np (.idef rdef)
+      let refv := if cyclic then Value.noval else found
       let hasSub ← IO.mkRef false
       if isnode refv then
         let _ ← walk refv (before := some (fun _k v2 _p _path => do
@@ -2739,10 +2768,10 @@ partial def validateString : InjectorFn := fun inj _v _ref _store => do
   let t := typify out
   if (T_STRING &&& t) == 0 then do
     pushErr inj (← invalidTypeMsg d.path S_STRING (t : Int) out)
-    pure .noval
+    pure out
   else if out == .str S_MT then do
     pushErr inj ("Empty string at " ++ (← pathify d.path (startin := .num 1.0)))
-    pure .noval
+    pure out
   else pure out
 
 partial def validateType : InjectorFn := fun inj _v refstr _store => do
@@ -2759,7 +2788,7 @@ partial def validateType : InjectorFn := fun inj _v refstr _store => do
   let t := typify out
   if (t &&& typev) == 0 then do
     pushErr inj (← invalidTypeMsg d.path tname (t : Int) out)
-    pure .noval
+    pure out
   else pure out
 
 partial def validateAny : InjectorFn := fun inj _v _ref _store => do
@@ -2827,6 +2856,66 @@ partial def validateChild : InjectorFn := fun inj _v _ref _store => do
       -- element so the resumed loop can validate it.
       pure SKIP
   else pure .noval
+
+/-- The message for a misplaced `$REST` at a path. -/
+def restMsg (path : Value) (problem : String) : SIO String := do
+  pure ("The $REST validator at field " ++ (← pathify path) ++ problem)
+
+/-- The members a spec does not name: the map form is a key, the list form a
+    tuple's last item. Each places clones of its spec for the loop to check. -/
+partial def validateRest : InjectorFn := fun inj _v _ref _store => do
+  let d ← getInj inj
+  let parent := d.parent
+  let keys := d.keys
+  if d.mode == M_KEYPRE then do
+    let resttm ← lookupRaw parent d.key
+    let tval ← getprop d.dparent (← getelem d.path (.num (-2.0)))
+    if ismap tval then
+      for ckey in (← keysof tval) do
+        let present ← listItemsOf keys
+        if !(present.contains (.str ckey)) then
+          let _ ← setprop parent (.str ckey) (← clone resttm)
+          let n ← size keys
+          let _ ← setprop keys (vInt n) (.str ckey)
+    injSetval inj .noval
+    pure .noval
+  else do
+    let misplaced : SIO Value := do
+      pushErr inj (← restMsg (← slice d.path (start := .num 1.0)) " must be the last element of an array.")
+      pure .noval
+    match d.prior with
+    | none => misplaced
+    | some p => do
+      let pd ← getInj p
+      if d.mode != M_VAL || !(islist pd.parent) || d.keyi != 0 then misplaced
+      else do
+        let nkeys ← size keys
+        modInj inj (fun dd => { dd with keyi := nkeys })
+        modInj p (fun dd => { dd with modify := none })
+        let tuple := pd.parent
+        let dlist := pd.dparent
+        let numitems ← if islist dlist then size dlist else pure 0
+        let slot := listKey pd.key
+        let short : Bool := match slot with
+          | some s => decide (numitems <= s)
+          | none => false
+        if short then do
+          injSetval inj .noval (ancestor := 2)
+          pure SKIP
+        else do
+          let resttm ← lookupRaw parent (.num 1.0)
+          match slot with
+          | some s =>
+            for i in [s.toNat:numitems.toNat] do
+              let _ ← setprop tuple (vInt (i : Int)) (← clone resttm)
+          | none => pure ()
+          let pkeys := pd.keys
+          let npkeys ← size pkeys
+          for i in [npkeys.toNat:numitems.toNat] do
+            let n ← size pkeys
+            let _ ← setprop pkeys (vInt n) (.str (strkey (vInt (i : Int))))
+          modInj p (fun dd => { dd with keyi := dd.keyi - 1 })
+          pure SKIP
 
 /-- JSON equality: numbers by value, lists in order, maps by key in any order.
     A node or a function equals itself whatever it holds. -/
@@ -2998,21 +3087,43 @@ def unknownName (name : String) (store : Value) : SIO Bool := do
   if upper == name then return true
   known upper
 
-/-- Report each checker the spec names that validate lacks. The arguments of
-    `$EXACT` are literals. -/
-partial def checkNames (spec store : Value) (path : Array Value) (errs : Value) : SIO Unit := do
+/-- Report each checker the spec names that validate lacks, and each misplaced
+    `$REST`. The arguments of `$EXACT` are literals. `isLast`: the spec is a
+    list's last item. -/
+partial def checkNames (spec store : Value) (path : Array Value) (errs : Value)
+    (isLast : Bool := false) : SIO Unit := do
+  let restkey := "`$REST`"
+  let push (msg : String) : SIO Unit := do
+    let n ← size errs
+    let _ ← setprop errs (vInt n) (.str msg)
+  let restAt (problem : String) : SIO Unit := do
+    push (← restMsg (← newList path) problem)
   match refName spec with
   | some name =>
     if (← unknownName name store) then
-      let n ← size errs
       let p ← pathify (← newList path)
-      let _ ← setprop errs (vInt n) (.str ("Unknown validator " ++ name ++ " at field " ++ p ++ "."))
+      push ("Unknown validator " ++ name ++ " at field " ++ p ++ ".")
+    else if name == "$REST" then
+      restAt " must be the last element of an array."
   | none =>
     let first ← lookupRaw spec (.num 0.0)
-    if !(islist spec && refName first == some "$EXACT") then
+    let head := if islist spec then refName first else none
+    if head == some "$EXACT" then pure ()
+    else if head == some "$REST" then
+      let ssz ← size spec
+      if !isLast then restAt " must be the last element of an array."
+      else if ssz != 2 then restAt " must have exactly one spec."
+      checkNames (← lookupRaw spec (.num 1.0)) store (path.push (.num 1.0)) errs
+    else
+      let rest ← lookupRaw spec (.str restkey)
+      let child ← lookupRaw spec (.str "`$CHILD`")
+      if ismap spec && !(isNoval rest) && !(isNoval child) then
+        restAt " cannot be used with $CHILD."
+      let ssz ← size spec
+      let lastkey : Option String := if islist spec then some (strkey (vInt (ssz - 1))) else none
       for k in (← keysof spec) do
-        if ismap spec then checkNames (.str k) store path errs
-        checkNames (← lookupRaw spec (.str k)) store (path.push (.str k)) errs
+        if ismap spec && k != restkey then checkNames (.str k) store path errs
+        checkNames (← lookupRaw spec (.str k)) store (path.push (.str k)) errs (lastkey == some k)
 
 partial def validateExact : InjectorFn := fun inj _v _ref _store => do
   let d ← getInj inj
@@ -3082,7 +3193,8 @@ partial def validation : ModifyFn := fun pval key parent inj => do
             let ckeys ← keysof cval
             let pkeys ← keysof pval
             let bopen ← getprop pval (.str S_BOPEN)
-            if pkeys.size > 0 && !(bopen == .bool true) then do
+            -- Only a spec written as {} is open, even if named keys resolved away.
+            if (pkeys.size > 0 || d.named) && !(bopen == .bool true) then do
               let mut badkeys : List String := []
               for ck in ckeys do
                 if isNoval (← lookupRaw pval (.str ck)) then badkeys := ck :: badkeys
@@ -3311,6 +3423,7 @@ partial def validate (data spec : Value) (inj : InjArg := .inone) : SIO Value :=
   put "$LEN" (← vFunc validateLen)
   put "$RANGE" (← vFunc validateRange)
   put "$LIKE" (← vFunc validateLike)
+  put "$REST" (← vFunc validateRest)
   let extraV ← if isNoval extra then emptyMap else pure extra
   let errsWrap ← newMap #[(S_DERRS, errs)]
   let store ← merge (← newList #[base, extraV, errsWrap]) (maxdepth := .num 1.0)

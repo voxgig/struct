@@ -30,12 +30,12 @@ public func validate_STRING(_ inj: Injection, _ val: Value, _ ref: String, _ sto
   let t = typify(out)
   if (t & T_string) == 0 {
     inj.errs.items.append(.string(invalidTypeMsg(inj.path, S_string, t, out, "V1010")))
-    return .noval
+    return out
   }
   if case .string(let s) = out, s.isEmpty {
     inj.errs.items.append(
       .string("Empty string at " + pathify(.list(VList(inj.path.map { Value.string($0) })), 1)))
-    return .noval
+    return out
   }
   return out
 }
@@ -67,7 +67,7 @@ public func validate_TYPE(_ inj: Injection, _ val: Value, _ ref: String, _ store
   let t = typify(out)
   if (t & typev) == 0 {
     inj.errs.items.append(.string(invalidTypeMsg(inj.path, tname, t, out, "V1001")))
-    return .noval
+    return out
   }
   return out
 }
@@ -143,6 +143,71 @@ public func validate_CHILD(_ inj: Injection, _ val: Value, _ ref: String, _ stor
     }
   }
   return .noval
+}
+
+// MARK: - validate_REST
+
+// The members a spec does not name: the map form is a key, the list form a
+// tuple's last item. Each places clones of its spec for the loop to check.
+public func validate_REST(_ inj: Injection, _ val: Value, _ ref: String, _ store: Value) -> Value {
+  let mode = inj.mode
+  let parent = inj.parent
+  let path = inj.path
+
+  if mode == M_KEYPRE {
+    let resttm = lookup(parent, .string(inj.key))
+    let pkey = path.count >= 2 ? path[path.count - 2] : ""
+    let tval = getprop(inj.dparent, .string(pkey))
+
+    if tval.isMap {
+      for ckey in keysof(tval) where !inj.keys.contains(ckey) {
+        _setprop(parent, .string(ckey), clone(resttm))
+        inj.keys.append(ckey)
+      }
+    }
+
+    inj.setval(.noval)
+    return .noval
+  }
+
+  guard mode == M_VAL, let prior = inj.prior, prior.parent.isList, inj.keyI == 0 else {
+    inj.errs.items.append(
+      .string(_restmsg(Array(path.dropFirst()), " must be the last element of an array.")))
+    return .noval
+  }
+
+  inj.keyI = inj.keys.count
+  prior.modify = nil
+
+  let tuple = prior.parent
+  let slot = listIndex(.string(prior.key)) ?? -1
+  let dlist = prior.dparent
+  let numitems = dlist.isList ? size(dlist) : 0
+
+  if numitems <= slot {
+    inj.setval(.noval, ancestor: 2)
+    return .sentinel(SKIP)
+  }
+
+  let itemtm = lookup(parent, .int(1))
+  var i = slot
+  while i < numitems {
+    _setprop(tuple, .int(Int64(i)), clone(itemtm))
+    i += 1
+  }
+  var ki = prior.keys.count
+  while ki < numitems {
+    prior.keys.append(strkey(.int(Int64(ki))))
+    ki += 1
+  }
+
+  prior.keyI -= 1
+  return .sentinel(SKIP)
+}
+
+private func _restmsg(_ path: [String], _ problem: String) -> String {
+  return "The $REST validator at field "
+    + pathify(.list(VList(path.map { Value.string($0) }))) + problem
 }
 
 // MARK: - validate_EXACT
@@ -478,7 +543,7 @@ public func _validation(
       let pkeys = keysof(.map(pm))
       let openV = getprop(.map(pm), .string(S_BOPEN))
       let isOpen: Bool = openV.asBool ?? false
-      if pkeys.count > 0 && !isOpen {
+      if (pkeys.count > 0 || inj.named) && !isOpen {
         var badkeys: [String] = []
         for ck in ckeys {
           if lookup(.map(pm), .string(ck)).isNoval { badkeys.append(ck) }
@@ -603,6 +668,7 @@ func validateCollect(
   base.entries["$LEN"] = .function(validate_LEN)
   base.entries["$RANGE"] = .function(validate_RANGE)
   base.entries["$LIKE"] = .function(validate_LIKE)
+  base.entries["$REST"] = .function(validate_REST)
   let errsMap = VMap()
   errsMap.entries[S_DERRS] = .list(errs)
   let extraMap = extra.isNoval ? Value.map(VMap()) : extra
@@ -634,28 +700,50 @@ private let VALIDATE_NAMES = [
   "$TOP", "$SPEC", "$BT", "$DS", "$WHEN", "$ANNO", "$REF", "$FORMAT", "$APPLY", "$OPEN",
 ]
 
-// Report each checker the spec names that validate lacks; $EXACT's arguments
-// are literals.
-private func _checknames(_ spec: Value, _ store: Value, _ path: [String], _ errs: VList) {
+// Report each checker the spec names that validate lacks, and each misplaced
+// $REST; $EXACT's arguments are literals. Last: spec is a list's last item.
+private func _checknames(
+  _ spec: Value, _ store: Value, _ path: [String], _ errs: VList, _ last: Bool = false
+) {
   if let name = _refname(spec) {
     if _unknownname(name, store) {
       errs.items.append(
         .string(
           "Unknown validator " + name + " at field "
             + pathify(.list(VList(path.map { Value.string($0) }))) + "."))
+    } else if "$REST" == name {
+      errs.items.append(.string(_restmsg(path, " must be the last element of an array.")))
     }
     return
   }
 
-  if case .list(let l) = spec, let first = l.items.first, "$EXACT" == _refname(first) {
+  let head = spec.isList ? _refname(lookup(spec, .int(0))) : nil
+  if "$EXACT" == head {
     return
   }
 
+  if "$REST" == head {
+    if !last {
+      errs.items.append(.string(_restmsg(path, " must be the last element of an array.")))
+    } else if 2 != size(spec) {
+      errs.items.append(.string(_restmsg(path, " must have exactly one spec.")))
+    }
+    _checknames(lookup(spec, .int(1)), store, path + ["1"], errs)
+    return
+  }
+
+  let restkey = "`$REST`"
+  let hasrest = !lookup(spec, .string(restkey)).isNoval
+  if ismap(spec) && hasrest && !lookup(spec, .string("`$CHILD`")).isNoval {
+    errs.items.append(.string(_restmsg(path, " cannot be used with $CHILD.")))
+  }
+
+  let lastkey = spec.isList ? strkey(.int(Int64(size(spec) - 1))) : nil
   for key in keysof(spec) {
-    if ismap(spec) {
+    if ismap(spec) && restkey != key {
       _checknames(.string(key), store, path, errs)
     }
-    _checknames(lookup(spec, .string(key)), store, path + [key], errs)
+    _checknames(lookup(spec, .string(key)), store, path + [key], errs, lastkey == key)
   }
 }
 

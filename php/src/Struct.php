@@ -1712,6 +1712,8 @@ class Struct
 
         $inj->descend();
 
+        $inj->named = false;
+
         // Descend into node.
         if (self::isnode($val)) {
             $nodekeys = self::keysof($val);
@@ -1727,6 +1729,7 @@ class Struct
                     }
                 }
                 $nodekeys = array_merge($nonDollar, $dollar);
+                $inj->named = 0 < count($nonDollar);
             } else {
                 $nodekeys = self::keysof($val);
             }
@@ -1778,6 +1781,17 @@ class Struct
                     }
                 }
             }
+
+            $nohole = fn($v) => self::SKIP !== $v;
+            if ($val instanceof ListRef) {
+                $val->list = array_values(array_filter($val->list, $nohole));
+            } elseif (is_array($val) && self::islist($val)) {
+                $val = array_values(array_filter($val, $nohole));
+                if (is_array(self::_getprop($inj->parent, $inj->key))) {
+                    $inj->val = $val;
+                    self::setprop($inj->parent, $inj->key, $val);
+                }
+            }
         }
         // Inject paths into string scalars.
         elseif ($valtype === 'string') {
@@ -1796,7 +1810,7 @@ class Struct
 
             call_user_func(
                 $inj->modify,
-                $mval,
+                self::SKIP === $mval ? self::undef() : $mval,
                 $mkey,
                 $mparent,
                 $inj,
@@ -2297,7 +2311,7 @@ class Struct
             return self::undef();
         }
 
-        // Get arguments: ['`$REF`', 'ref-path'].
+        // ['`$REF`', 'ref-path']: a relative path starts where this slot is, so .x is a sibling.
         $refpath = self::_getprop($state->parent, 1);
         $state->keyI = self::size($state->keys);
 
@@ -2305,11 +2319,24 @@ class Struct
         $specFn = self::_getprop($store, '$SPEC');
         $spec = is_callable($specFn) ? $specFn() : self::undef();
 
-        $dpath = self::slice($state->path, 1);
-        $ref = self::getpath($spec, $refpath, (object) [
+        $dpath = self::slice($state->path, 1, -2);
+        $refinj = (object) [
             'dpath' => $dpath,
             'dparent' => self::getpath($spec, $dpath),
-        ]);
+        ];
+        $ref = self::getpath($spec, $refpath, $refinj);
+
+        // A chain of references that comes back to a path it has named names nothing.
+        $seen = [$refpath];
+        for ($next = $ref; self::islist($next) && '`$REF`' === self::_getprop($next, 0);) {
+            $nextpath = self::_getprop($next, 1);
+            if (in_array($nextpath, $seen, true)) {
+                $ref = self::undef();
+                break;
+            }
+            $seen[] = $nextpath;
+            $next = self::getpath($spec, $nextpath, $refinj);
+        }
 
         $hasSubRef = false;
         if (self::isnode($ref)) {
@@ -2668,27 +2695,56 @@ class Struct
     }
 
     /**
-     * Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
+     * Report each checker the spec names that validate lacks, and each misplaced
+     * $REST; $EXACT's arguments are literals. Last: spec is a list's last item.
      */
-    private static function _checknames(mixed $spec, mixed $store, array $path, \ArrayObject $errs): void
-    {
+    private static function _checknames(
+        mixed $spec,
+        mixed $store,
+        array $path,
+        \ArrayObject $errs,
+        bool $last = false
+    ): void {
         $name = self::_refname($spec);
         if (null !== $name) {
             if (self::_unknownname($name, $store)) {
                 $errs[] = 'Unknown validator ' . $name . ' at field ' . self::pathify($path) . '.';
+            } elseif ('$REST' === $name) {
+                $errs[] = self::_restmsg($path, ' must be the last element of an array.');
             }
             return;
         }
 
-        if (self::islist($spec) && '$EXACT' === self::_refname(self::_getprop($spec, 0))) {
+        $head = self::islist($spec) ? self::_refname(self::_getprop($spec, 0)) : null;
+        if ('$EXACT' === $head) {
             return;
         }
 
+        if ('$REST' === $head) {
+            if (true !== $last) {
+                $errs[] = self::_restmsg($path, ' must be the last element of an array.');
+            } elseif (2 !== self::size($spec)) {
+                $errs[] = self::_restmsg($path, ' must have exactly one spec.');
+            }
+            self::_checknames(self::_getprop($spec, 1), $store, [...$path, 1], $errs);
+            return;
+        }
+
+        $restkey = '`$REST`';
+        if (
+            self::ismap($spec)
+            && self::undef() !== self::_getprop($spec, $restkey)
+            && self::undef() !== self::_getprop($spec, '`$CHILD`')
+        ) {
+            $errs[] = self::_restmsg($path, ' cannot be used with $CHILD.');
+        }
+
+        $lastkey = self::islist($spec) ? self::strkey(self::size($spec) - 1) : null;
         foreach (self::keysof($spec) as $key) {
-            if (self::ismap($spec)) {
+            if (self::ismap($spec) && $restkey !== $key) {
                 self::_checknames($key, $store, $path, $errs);
             }
-            self::_checknames(self::_getprop($spec, $key), $store, [...$path, $key], $errs);
+            self::_checknames(self::_getprop($spec, $key), $store, [...$path, $key], $errs, $lastkey === $key);
         }
     }
 
@@ -2876,13 +2932,13 @@ class Struct
         if (0 === (self::T_string & $t)) {
             $msg = self::_invalidTypeMsg($inj->path, self::S_string, $t, $out);
             $inj->errs[] = $msg;
-            return self::undef();
+            return $out;
         }
 
         if (self::S_MT === $out) {
             $msg = 'Empty string at ' . self::pathify($inj->path, 1);
             $inj->errs[] = $msg;
-            return self::undef();
+            return $out;
         }
 
         return $out;
@@ -2983,7 +3039,7 @@ class Struct
         $t = self::typify($out);
         if (0 === ($t & $typev)) {
             $inj->errs[] = self::_invalidTypeMsg($inj->path, $tname, $t, $out);
-            return self::undef();
+            return $out;
         }
 
         return $out;
@@ -3101,6 +3157,72 @@ class Struct
         }
 
         return self::undef();
+    }
+
+    /**
+     * The members a spec does not name: the map form is a key, the list form a
+     * tuple's last item. Each places clones of its spec for the loop to check.
+     */
+    public static function validate_REST(object $inj): mixed
+    {
+        $mode = $inj->mode;
+        $key = $inj->key;
+        $parent = $inj->parent;
+        $keys = $inj->keys ?? [];
+        $path = $inj->path;
+
+        if (self::M_KEYPRE === $mode) {
+            $resttm = self::_getprop($parent, $key);
+            $tval = self::getprop($inj->dparent, self::getelem($path, -2));
+
+            if (self::ismap($tval)) {
+                foreach (self::keysof($tval) as $ckey) {
+                    if (!in_array($ckey, $keys, true)) {
+                        self::setprop($parent, $ckey, self::clone($resttm));
+                        $keys[] = $ckey;
+                    }
+                }
+                $inj->keys = $keys;
+            }
+
+            $inj->setval(self::undef());
+            return self::undef();
+        }
+
+        $prior = $inj->prior;
+        if (self::M_VAL !== $mode || null === $prior || !self::islist($prior->parent) || 0 !== $inj->keyI) {
+            $inj->errs[] = self::_restmsg(self::slice($path, 1), ' must be the last element of an array.');
+            return self::undef();
+        }
+
+        $inj->keyI = self::size($keys);
+        $prior->modify = null;
+
+        $tuple = $prior->parent;
+        $slot = self::_listkey($prior->key);
+        $dlist = $prior->dparent;
+        $numitems = self::islist($dlist) ? self::size($dlist) : 0;
+
+        if ($numitems <= $slot) {
+            $inj->setval(self::undef(), 2);
+            return self::SKIP;
+        }
+
+        $resttm = self::_getprop($parent, 1);
+        for ($i = $slot; $i < $numitems; $i++) {
+            self::setprop($tuple, $i, self::clone($resttm));
+        }
+        for ($i = self::size($prior->keys); $i < $numitems; $i++) {
+            $prior->keys[] = self::strkey($i);
+        }
+
+        $prior->keyI--;
+        return self::SKIP;
+    }
+
+    private static function _restmsg(mixed $path, string $problem): string
+    {
+        return 'The $REST validator at field ' . self::pathify($path) . $problem;
     }
 
     /**
@@ -3545,8 +3667,8 @@ class Struct
             $ckeys = self::keysof($cval);
             $pkeys = self::keysof($pval);
 
-            // Empty spec object {} means object can be open (any keys).
-            if (0 < count($pkeys) && true !== self::_getprop($pval, '`$OPEN`')) {
+            // Only a spec written as {} is open, even if named keys resolved away.
+            if ((0 < count($pkeys) || $inj->named) && true !== self::_getprop($pval, '`$OPEN`')) {
                 // Literal presence: the shape DECLARES $ckey even when its value
                 // is null. Canonical uses `NONE === _lookup`; `haskey` is Group A
                 // (value-based) and would drop records with a null field from an
@@ -3692,6 +3814,7 @@ class Struct
                 '$LEN' => [self::class, 'validate_LEN'],
                 '$RANGE' => [self::class, 'validate_RANGE'],
                 '$LIKE' => [self::class, 'validate_LIKE'],
+                '$REST' => [self::class, 'validate_REST'],
             ],
             (array) ($extra ?? []),
             [
@@ -4669,12 +4792,14 @@ class Injection
     public mixed $modify;
     public ?Injection $prior;
     public mixed $extra;
+    public bool $named; // Current map node names keys of its own (not $ commands).
 
     public function __construct(mixed $val, mixed $parent)
     {
         $this->val = $val;
         $this->parent = $parent;
         $this->errs = [];
+        $this->named = false;
 
         $this->dparent = Struct::UNDEF;
         $this->dpath = ['$TOP'];
@@ -4778,7 +4903,11 @@ class Injection
     {
         $parent = Struct::UNDEF;
         if (null === $ancestor || $ancestor < 2) {
-            if (Struct::UNDEF === $val) {
+            $none = Struct::UNDEF === $val || Struct::undef() === $val;
+            if ($none && Struct::islist($this->parent)) {
+                // A list keeps the removed slot as a hole until inject's loop ends.
+                $parent = Struct::setprop($this->parent, $this->key, Struct::SKIP);
+            } elseif (Struct::UNDEF === $val) {
                 $this->parent = Struct::delprop($this->parent, $this->key);
                 $parent = $this->parent;
             } else {

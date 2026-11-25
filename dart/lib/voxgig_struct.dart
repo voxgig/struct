@@ -1212,6 +1212,8 @@ class Inj {
   Inj? prior;
   dynamic extra;
   dynamic root;
+  // Current map node names keys of its own (not $ commands).
+  bool named = false;
 }
 
 Inj? _dummy;
@@ -1241,6 +1243,7 @@ Inj _newInj(dynamic val, dynamic parent) {
   i.prior = null;
   i.extra = null;
   i.root = null;
+  i.named = false;
   return i;
 }
 
@@ -1302,7 +1305,11 @@ dynamic _injSetval(Inj inj, dynamic val, [int ancestor = 1]) {
     target = getelem(inj.nodes, -ancestor);
     key = getelem(inj.path, -ancestor);
   }
-  if (val == null) return delprop(target, key);
+  if (val == null) {
+    // A list keeps the removed slot as a hole until inject's loop ends.
+    if (ancestor < 2 && islist(target)) return setprop(target, key, SKIP);
+    return delprop(target, key);
+  }
   if (identical(val, _heldnull)) return setprop(target, key, null);
   return setprop(target, key, val);
 }
@@ -1335,6 +1342,8 @@ dynamic inject(dynamic val, dynamic store, [dynamic injdef]) {
 
   _injDescend(inj);
 
+  inj.named = false;
+
   dynamic rv;
   if (isnode(val)) {
     List<dynamic> nodekeys;
@@ -1343,6 +1352,7 @@ dynamic inject(dynamic val, dynamic store, [dynamic injdef]) {
       var normal = ks.where((k) => !k.contains(S_DS)).toList()..sort();
       var trans = ks.where((k) => k.contains(S_DS)).toList()..sort();
       nodekeys = [...normal, ...trans];
+      inj.named = normal.isNotEmpty;
     } else {
       nodekeys = List.generate((val as List).length, (i) => i.toString());
     }
@@ -1365,6 +1375,7 @@ dynamic inject(dynamic val, dynamic store, [dynamic injdef]) {
       }
       nki = childinj.keyi + 1;
     }
+    if (val is List && val.any(isSkip)) val.removeWhere(isSkip);
     rv = val;
   } else if (val is String) {
     inj.mode = S_MVAL;
@@ -1379,14 +1390,15 @@ dynamic inject(dynamic val, dynamic store, [dynamic injdef]) {
     var mkey = inj.key;
     var mparent = inj.parent;
     var mval = getprop(mparent, mkey);
-    inj.modify!(mval, mkey, mparent, inj);
+    inj.modify!(isSkip(mval) ? null : mval, mkey, mparent, inj);
   }
 
   inj.ival = rv;
 
-  // Literal presence: a list directive at the root can leave a null there.
-  if (inj.prior == null && _has(inj.root, S_DTOP)) {
-    return inj.root[S_DTOP];
+  // Literal presence: a root list directive can leave a null there, and a root
+  // a transform removed, such as a $REF that names nothing, gives no value.
+  if (inj.prior == null && inj.root != null) {
+    return _lookup(inj.root, S_DTOP);
   }
   if (inj.key == S_DTOP && inj.parent != null && haskey(inj.parent, S_DTOP)) {
     return getprop(inj.parent, S_DTOP);
@@ -1445,7 +1457,7 @@ dynamic _injectstr(String val, dynamic store, [Inj? inj]) {
 // ---------------------------------------------------------------------------
 
 dynamic _transformDelete(dynamic inj, dynamic val, dynamic ref, dynamic store) {
-  delprop((inj as Inj).parent, inj.key);
+  _injSetval(inj as Inj, null);
   return null;
 }
 
@@ -1676,12 +1688,33 @@ dynamic _transformPack(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
 dynamic _transformRef(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
   var inj = inj0 as Inj;
   if (inj.mode != S_MVAL) return null;
+  // ['`$REF`', 'ref-path']: a relative path starts where this slot is, so .x
+  // is a sibling.
   var refpath = _lookup(inj.parent, 1);
   inj.keyi = size(inj.keys);
   var specFunc = getprop(store, S_DSPEC);
   if (!isfunc(specFunc)) return null;
   var spec = specFunc();
-  var refv = getpath(spec, refpath);
+  var dpath = slice(inj.path, 1, -2);
+  var refinj = <String, dynamic>{
+    'dpath': dpath,
+    'dparent': getpath(spec, dpath),
+  };
+  var refv = getpath(spec, refpath, refinj);
+
+  // A reference chain that comes back to a path it has named names nothing.
+  var seen = <dynamic>[refpath];
+  var next = refv;
+  while (islist(next) && _lookup(next, 0) == '`\$REF`') {
+    var nextpath = _lookup(next, 1);
+    if (seen.contains(nextpath)) {
+      refv = null;
+      break;
+    }
+    seen.add(nextpath);
+    next = getpath(spec, nextpath, refinj);
+  }
+
   var hasSub = false;
   if (isnode(refv)) {
     walk(refv, after: (k, v, p, pp) {
@@ -1931,11 +1964,10 @@ dynamic _validateString(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
   var t = typify(out);
   if ((T_string & t) == 0) {
     _pushErr(inj, _invalidTypeMsg(inj.path, S_string, t, out, 'V1010'));
-    return null;
+    return _keepnull(inj, out);
   }
   if (out == S_MT) {
     _pushErr(inj, 'Empty string at ' + pathify(inj.path, 1));
-    return null;
   }
   return out;
 }
@@ -1953,7 +1985,6 @@ dynamic _validateType(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
   var t = _has(inj.dparent, inj.key) ? typify(out) : T_noval;
   if ((t & typev) == 0) {
     _pushErr(inj, _invalidTypeMsg(inj.path, tname, t, out, 'V1001'));
-    return null;
   }
   return _keepnull(inj, out);
 }
@@ -2042,6 +2073,69 @@ dynamic _validateChild(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
   }
   return null;
 }
+
+// The members a spec does not name: the map form is a key, the list form a
+// tuple's last item. Each places clones of its spec for the loop to check.
+dynamic _validateRest(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
+  var inj = inj0 as Inj;
+  var parent = inj.parent;
+  var keys = inj.keys;
+  var path = inj.path;
+
+  if (inj.mode == S_MKEYPRE) {
+    var resttm = _lookup(parent, inj.key);
+    var tval = getprop(inj.dparent, getelem(path, -2));
+
+    if (ismap(tval)) {
+      for (var ckey in keysof(tval)) {
+        if (!(keys as List).contains(ckey)) {
+          setprop(parent, ckey, clone(resttm));
+          setprop(keys, size(keys), ckey);
+        }
+      }
+    }
+
+    _injSetval(inj, null);
+    return null;
+  }
+
+  var prior = inj.prior;
+  if (inj.mode != S_MVAL ||
+      prior == null ||
+      !islist(prior.parent) ||
+      inj.keyi != 0) {
+    _pushErr(inj,
+        _restmsg(slice(path, 1), ' must be the last element of an array.'));
+    return null;
+  }
+
+  inj.keyi = size(keys);
+  prior.modify = null;
+
+  var tuple = prior.parent;
+  var slot = _listIndex(prior.key) ?? -1;
+  var dlist = prior.dparent;
+  var numitems = islist(dlist) ? size(dlist) : 0;
+
+  if (numitems <= slot) {
+    _injSetval(inj, null, 2);
+    return SKIP;
+  }
+
+  var itemtm = _lookup(parent, 1);
+  for (var i = slot; i < numitems; i++) {
+    setprop(tuple, i, clone(itemtm));
+  }
+  for (var i = size(prior.keys); i < numitems; i++) {
+    setprop(prior.keys, size(prior.keys), strkey(i));
+  }
+
+  prior.keyi = prior.keyi - 1;
+  return SKIP;
+}
+
+String _restmsg(dynamic path, String problem) =>
+    'The \$REST validator at field ' + pathify(path) + problem;
 
 dynamic _validateExact(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
   var inj = inj0 as Inj;
@@ -2409,7 +2503,8 @@ void _validation(dynamic pval, dynamic key, dynamic parent, dynamic inj0) {
     } else {
       var ckeys = keysof(cval);
       var pkeys = keysof(pval);
-      if (pkeys.isNotEmpty && getprop(pval, S_BOPEN) != true) {
+      // Only a spec written as {} is open, even if named keys resolved away.
+      if ((pkeys.isNotEmpty || inj.named) && getprop(pval, S_BOPEN) != true) {
         // Literal presence: the shape declares ck even when its value is null.
         // Canonical uses `NONE === _lookup`; `_lookup(...) == null` conflates
         // present-null with absent and drops null-field records from open selects.
@@ -2524,6 +2619,7 @@ dynamic validate(dynamic data, dynamic spec, [dynamic injdef]) {
   base['\$LEN'] = _validateLen;
   base['\$RANGE'] = _validateRange;
   base['\$LIKE'] = _validateLike;
+  base['\$REST'] = _validateRest;
   var store = merge([
     base,
     extra == null ? <String, dynamic>{} : extra,
@@ -2566,24 +2662,46 @@ const _VALIDATE_NAMES = [
   '\$OPEN',
 ];
 
-// Report each checker the spec names that validate lacks; $EXACT's arguments
-// are literals.
-void _checknames(
-    dynamic spec, dynamic store, List<dynamic> path, dynamic errs) {
+// Report each checker the spec names that validate lacks, and each misplaced
+// $REST; $EXACT's arguments are literals. Last: spec is a list's last item.
+void _checknames(dynamic spec, dynamic store, List<dynamic> path, dynamic errs,
+    [bool last = false]) {
   var name = _refname(spec);
   if (name != null) {
     if (_unknownname(name, store)) {
       setprop(errs, size(errs),
           'Unknown validator ' + name + ' at field ' + pathify(path) + '.');
+    } else if (name == '\$REST') {
+      setprop(errs, size(errs),
+          _restmsg(path, ' must be the last element of an array.'));
     }
     return;
   }
 
-  if (islist(spec) && _refname(_lookup(spec, 0)) == '\$EXACT') return;
+  var head = islist(spec) ? _refname(_lookup(spec, 0)) : null;
+  if (head == '\$EXACT') return;
 
+  if (head == '\$REST') {
+    if (!last) {
+      setprop(errs, size(errs),
+          _restmsg(path, ' must be the last element of an array.'));
+    } else if (size(spec) != 2) {
+      setprop(errs, size(errs), _restmsg(path, ' must have exactly one spec.'));
+    }
+    _checknames(_lookup(spec, 1), store, [...path, 1], errs);
+    return;
+  }
+
+  const restkey = '`\$REST`';
+  if (ismap(spec) && _has(spec, restkey) && _has(spec, '`\$CHILD`')) {
+    setprop(errs, size(errs), _restmsg(path, ' cannot be used with \$CHILD.'));
+  }
+
+  var lastkey = islist(spec) ? strkey(size(spec) - 1) : null;
   for (var key in keysof(spec)) {
-    if (ismap(spec)) _checknames(key, store, path, errs);
-    _checknames(_lookup(spec, key), store, [...path, key], errs);
+    if (ismap(spec) && key != restkey) _checknames(key, store, path, errs);
+    _checknames(
+        _lookup(spec, key), store, [...path, key], errs, key == lastkey);
   }
 }
 

@@ -214,6 +214,7 @@ class Injection:
         self.modify = modify
         self.extra = extra
         self.prior: Injection | None = None
+        self.named = False  # Current map node names keys of its own (not $ commands).
         self.dparent = UNDEF
         self.dpath = [S_DTOP]
         self.root = (
@@ -274,7 +275,8 @@ class Injection:
     def setval(self, val: Any, ancestor: int | None = None) -> Any:
         """Inject-state setter. Mirrors the canonical TS Injection.setval:
         val of UNDEF (= None in Python — distinguishability is impossible
-        in any of the dynamic-typed ports anyway) deletes the slot, any
+        in any of the dynamic-typed ports anyway) deletes the slot (in a
+        list, a SKIP hole that inject compacts after its loop), any
         other value sets it. setprop itself remains a pure assignment per
         the Group B rule — this delete-on-undef shortcut lives only here
         so transform/validate injectors can signal "no value at this slot"
@@ -287,6 +289,8 @@ class Injection:
             target = getelem(self.nodes, 0 - ancestor)
             key = getelem(self.path, 0 - ancestor)
         if val is None:
+            if (ancestor is None or ancestor < 2) and islist(target):
+                return setprop(target, key, SKIP)
             return delprop(target, key)
         return setprop(target, key, val)
 
@@ -1655,6 +1659,8 @@ def inject(val, store, injdef=UNDEF):
 
     inj.descend()
 
+    inj.named = False
+
     # Descend into node.
     if isnode(val):
         # Keys are sorted alphanumerically to ensure determinism.
@@ -1665,6 +1671,7 @@ def inject(val, store, injdef=UNDEF):
             transform_keys = [k for k in val if S_DS in k]
             transform_keys.sort()
             nodekeys = normal_keys + transform_keys
+            inj.named = len(normal_keys) > 0
         else:
             nodekeys = list(range(len(val)))
 
@@ -1707,6 +1714,9 @@ def inject(val, store, injdef=UNDEF):
 
             nkI += 1
 
+        if islist(val):
+            val[:] = [v for v in val if v is not SKIP]
+
     # Inject paths into string scalars.
     elif isinstance(val, str):
         inj.mode = S_MVAL
@@ -1720,18 +1730,17 @@ def inject(val, store, injdef=UNDEF):
         mparent = inj.parent
         mval = getprop(mparent, mkey)
 
-        inj.modify(mval, mkey, mparent, inj)
+        inj.modify(UNDEF if mval is SKIP else mval, mkey, mparent, inj)
 
     inj.val = val
 
     # Return the (possibly transform-replaced) root only at top level (prior is None).
-    # Presence, not haskey, so that a root replaced by a null returns None.
-    if (
-        getattr(inj, 'prior', None) is None
-        and getattr(inj, 'root', None) is not None
-        and _present(inj.root, S_DTOP)
-    ):
-        return _lookup(inj.root, S_DTOP)
+    # A transform that removed the root, such as a $REF that names nothing, leaves no
+    # value: UNDEF, or the injdef's _noval for a caller that must tell it from a null.
+    if getattr(inj, 'prior', None) is None and getattr(inj, 'root', None) is not None:
+        if _present(inj.root, S_DTOP):
+            return _lookup(inj.root, S_DTOP)
+        return getprop(injdef, '_noval')
     if inj.key == S_DTOP and inj.parent is not UNDEF and haskey(inj.parent, S_DTOP):
         return getprop(inj.parent, S_DTOP)
     return val
@@ -1770,7 +1779,7 @@ def transform_DELETE(inj, val, ref, store):
     """
     Injection handler to delete a key from a map/list.
     """
-    delprop(inj.parent, inj.key)
+    inj.setval(UNDEF)
     return UNDEF
 
 
@@ -1799,16 +1808,6 @@ def transform_COPY(inj, val, ref, store):
                     out = UNDEF
         else:
             out = getprop(inj.dparent, key)
-            # If getprop returned UNDEF and key looks like a list index,
-            # we might be at the item level already - return dparent itself
-            if out is UNDEF and key is not None:
-                try:
-                    int(key)  # key is a list index
-                    # We're at the item level, key is the list index
-                    # This shouldn't happen normally, but handle it
-                    out = inj.dparent
-                except (ValueError, TypeError):
-                    pass
         inj.setval(out)
 
     return out
@@ -2101,7 +2100,7 @@ def transform_REF(inj, _val, _ref, store):
     if inj.mode != S_MVAL:
         return UNDEF
 
-    # Get arguments: ['`$REF`', 'ref-path']
+    # ['`$REF`', 'ref-path']: a relative path starts where this slot is, so .x is a sibling.
     refpath = getprop(inj.parent, 1)
     inj.keyI = len(inj.keys)
 
@@ -2110,7 +2109,19 @@ def transform_REF(inj, _val, _ref, store):
     if not callable(spec_func):
         return UNDEF
     spec = spec_func()
-    ref = getpath(spec, refpath)
+    dpath = slice(inj.path, 1, -2)
+    refinj = {'dpath': dpath, 'dparent': getpath(spec, dpath)}
+    ref = getpath(spec, refpath, refinj)
+
+    # A chain of references that comes back to a path it has named names nothing.
+    seen = [refpath]
+    nxt = ref
+    while islist(nxt) and _lookup(nxt, 0) == '`$REF`':
+        if _lookup(nxt, 1) in seen:
+            ref = UNDEF
+            break
+        seen.append(_lookup(nxt, 1))
+        nxt = getpath(spec, _lookup(nxt, 1), refinj)
 
     # Check if ref has another $REF inside
     hasSubRef = False
@@ -2404,11 +2415,11 @@ def validate_STRING(inj, _val=UNDEF, _ref=UNDEF, _store=UNDEF):
 
     if (T_string & t) == 0:
         inj.errs.append(_invalidTypeMsg(inj.path, S_string, t, out, 'V1010'))
-        return UNDEF
+        return _keepnull(inj, out)
 
     if out == S_MT:
         inj.errs.append('Empty string at ' + pathify(inj.path, 1))
-        return UNDEF
+        return out
 
     return out
 
@@ -2440,7 +2451,7 @@ def validate_TYPE(inj, _val=UNDEF, ref=UNDEF, _store=UNDEF):
 
     if (t & typev) == 0:
         inj.errs.append(_invalidTypeMsg(inj.path, tname, t, out, 'V1001'))
-        return UNDEF
+        return _keepnull(inj, out)
 
     return _keepnull(inj, out)
 
@@ -2521,6 +2532,59 @@ def validate_CHILD(inj, _val=UNDEF, _ref=UNDEF, _store=UNDEF):
         return SKIP
 
     return UNDEF
+
+
+# The members a spec does not name: the map form is a key, the list form a
+# tuple's last item. Each places clones of its spec for the loop to check.
+def validate_REST(inj, _val=UNDEF, _ref=UNDEF, _store=UNDEF):
+    mode = inj.mode
+    key = inj.key
+    parent = inj.parent
+    keys = inj.keys
+    path = inj.path
+
+    if mode == S_MKEYPRE:
+        resttm = _lookup(parent, key)
+        tval = getprop(inj.dparent, getelem(path, -2))
+
+        if ismap(tval):
+            for ckey in keysof(tval):
+                if ckey not in keys:
+                    setprop(parent, ckey, clone(resttm))
+                    keys.append(ckey)
+
+        inj.setval(UNDEF)
+        return UNDEF
+
+    prior = inj.prior
+    if mode != S_MVAL or prior is None or not islist(prior.parent) or inj.keyI != 0:
+        inj.errs.append(_restmsg(slice(path, 1), ' must be the last element of an array.'))
+        return UNDEF
+
+    inj.keyI = size(keys)
+    prior.modify = None
+
+    tuple_ = prior.parent
+    slot = _listkey(prior.key)
+    dlist = prior.dparent
+    numitems = size(dlist) if islist(dlist) else 0
+
+    if numitems <= slot:
+        inj.setval(UNDEF, 2)
+        return SKIP
+
+    resttm = _lookup(parent, 1)
+    for i in range(slot, numitems):
+        setprop(tuple_, i, clone(resttm))
+    for i in range(size(prior.keys), numitems):
+        prior.keys.append(strkey(i))
+
+    prior.keyI -= 1
+    return SKIP
+
+
+def _restmsg(path, problem):
+    return 'The $REST validator at field ' + pathify(path) + problem
 
 
 def validate_EXACT(inj, _val=UNDEF, _ref=UNDEF, _store=UNDEF):
@@ -2883,8 +2947,8 @@ def _validation(pval, key, parent, inj):
         ckeys = keysof(cval)
         pkeys = keysof(pval)
 
-        # Empty spec object {} means object can be open (any keys).
-        if len(pkeys) > 0 and getprop(pval, '`$OPEN`') is not True:
+        # Only a spec written as {} is open, even if named keys resolved away.
+        if (len(pkeys) > 0 or inj.named) and getprop(pval, '`$OPEN`') is not True:
             badkeys = []
             for ckey in ckeys:
                 # Literal presence: the shape DECLARES ckey even when its value
@@ -2977,6 +3041,7 @@ def validate(data, spec, injdef=UNDEF):
                 '$LEN': validate_LEN,
                 '$RANGE': validate_RANGE,
                 '$LIKE': validate_LIKE,
+                '$REST': validate_REST,
             },
             ({} if extra is UNDEF or extra is None else extra),
             {
@@ -3005,6 +3070,7 @@ def validate(data, spec, injdef=UNDEF):
                 'modify': _validation,
                 'handler': _validatehandler,
                 'errs': errs,
+                '_noval': getprop(injdef, '_noval'),
             },
         )
 
@@ -3157,21 +3223,38 @@ VALIDATE_NAMES = [
 ]
 
 
-# Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
-def _checknames(spec, store, path, errs):
+# Report each checker the spec names that validate lacks, and each misplaced
+# $REST; $EXACT's arguments are literals. Last: spec is a list's last item.
+def _checknames(spec, store, path, errs, last=False):
     name = _refname(spec)
     if name is not UNDEF:
         if _unknownname(name, store):
             errs.append('Unknown validator ' + name + ' at field ' + pathify(path) + '.')
+        elif name == '$REST':
+            errs.append(_restmsg(path, ' must be the last element of an array.'))
         return
 
-    if islist(spec) and _refname(_lookup(spec, 0)) == '$EXACT':
+    head = _refname(_lookup(spec, 0)) if islist(spec) else UNDEF
+    if head == '$EXACT':
         return
 
+    if head == '$REST':
+        if not last:
+            errs.append(_restmsg(path, ' must be the last element of an array.'))
+        elif size(spec) != 2:
+            errs.append(_restmsg(path, ' must have exactly one spec.'))
+        _checknames(_lookup(spec, 1), store, [*path, 1], errs)
+        return
+
+    restkey = '`$REST`'
+    if ismap(spec) and _present(spec, restkey) and _present(spec, '`$CHILD`'):
+        errs.append(_restmsg(path, ' cannot be used with $CHILD.'))
+
+    lastkey = strkey(size(spec) - 1) if islist(spec) else UNDEF
     for key in keysof(spec):
-        if ismap(spec):
+        if ismap(spec) and key != restkey:
             _checknames(key, store, path, errs)
-        _checknames(_lookup(spec, key), store, [*path, key], errs)
+        _checknames(_lookup(spec, key), store, [*path, key], errs, key == lastkey)
 
 
 # The name a whole-string reference gives, when it is a checker name in any case.
@@ -3273,6 +3356,7 @@ def _admits(val, present, spec, inj, store):
             'extra': vstore,
             'errs': terrs,
             'meta': inj.meta,
+            '_noval': _ABSENT,
         },
     )
 

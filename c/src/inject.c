@@ -72,6 +72,7 @@ voxgig_injection* voxgig_inj_new(voxgig_value* val, voxgig_value* parent) {
   inj->modify_val = NULL;
   inj->prior = NULL;
   inj->extra = NULL;
+  inj->named = false;
   return inj;
 }
 
@@ -193,6 +194,7 @@ voxgig_injection* voxgig_inj_child(voxgig_injection* parent, size_t keyI,
   cinj->modify_val = parent->modify_val ? voxgig_retain(parent->modify_val) : NULL;
   cinj->prior = parent;
   cinj->extra = parent->extra;
+  cinj->named = false;
   return cinj;
 }
 
@@ -212,7 +214,12 @@ voxgig_value* voxgig_inj_setval(voxgig_injection* inj, voxgig_value* val, int an
     tkey = inj->path.data[inj->path.len - ancestor];
   }
   voxgig_value* keyv = voxgig_new_string(tkey ? tkey : "");
-  if (!val || voxgig_is_undef(val)) {
+  if ((!val || voxgig_is_undef(val)) && ancestor < 2 && voxgig_is_list(target)) {
+    /* A list keeps the removed slot as a hole until inject's loop ends. */
+    voxgig_value* hole = voxgig_new_skip();
+    voxgig_setprop(target, keyv, hole);
+    voxgig_release(hole);
+  } else if (!val || voxgig_is_undef(val)) {
     voxgig_delprop(target, keyv);
   } else {
     voxgig_setprop(target, keyv, val);
@@ -597,6 +604,8 @@ voxgig_value* voxgig_inject(voxgig_value* val, voxgig_value* store, voxgig_injec
 
   voxgig_inj_descend(inj);
 
+  inj->named = false;
+
   if (voxgig_is_node(val)) {
     /* Get keys; if map, partition non-$ then $. */
     voxgig_strvec nodekeys = voxgig_keysof(val);
@@ -612,6 +621,7 @@ voxgig_value* voxgig_inject(voxgig_value* val, voxgig_value* store, voxgig_injec
         else
           voxgig_strvec_push(&part1, k);
       }
+      inj->named = 0 < part1.len;
       voxgig_strvec_clear(&nodekeys);
       for (size_t i = 0; i < part1.len; i++)
         voxgig_strvec_push(&nodekeys, part1.data[i]);
@@ -668,6 +678,14 @@ voxgig_value* voxgig_inject(voxgig_value* val, voxgig_value* store, voxgig_injec
       voxgig_inj_free(childinj);
     }
     voxgig_strvec_free(&nodekeys);
+
+    if (voxgig_is_list(val)) {
+      voxgig_list* l = voxgig_as_list(val);
+      for (size_t i = l->len; 0 < i--;) {
+        if (voxgig_is_skip(l->items[i]))
+          voxgig_list_erase(l, i);
+      }
+    }
   } else if (voxgig_is_string(val)) {
     inj->mode = VOXGIG_M_VAL;
     voxgig_value* nv =
@@ -686,7 +704,7 @@ voxgig_value* voxgig_inject(voxgig_value* val, voxgig_value* store, voxgig_injec
   if (inj->modify_val && voxgig_is_modify(inj->modify_val) && !voxgig_is_skip(val)) {
     voxgig_value* keyv = voxgig_new_string(inj->key);
     voxgig_value* mvp = voxgig_lookup(inj->parent, keyv);
-    voxgig_value* mval = mvp ? voxgig_retain(mvp) : voxgig_new_undef();
+    voxgig_value* mval = mvp && !voxgig_is_skip(mvp) ? voxgig_retain(mvp) : voxgig_new_undef();
     inj->modify_val->as.fn.fn.mod(mval, keyv, inj->parent, inj, store, inj->modify_val->as.fn.ud);
     voxgig_release(mval);
     voxgig_release(keyv);

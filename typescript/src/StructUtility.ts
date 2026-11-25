@@ -1285,15 +1285,16 @@ function inject(val: any, store: any, injdef?: Partial<Injection>) {
   // console.log('INJ-START', val, inj.mode, inj.key, inj.val,
   //  't=', inj.path, 'P=', inj.parent, 'dp=', inj.dparent, 'ST=', store.$TOP)
 
+  inj.named = false
+
   if (isnode(val)) {
     let nodekeys: any[]
     nodekeys = keysof(val)
 
     if (ismap(val)) {
-      nodekeys = flatten([
-        filter(nodekeys, (n) => !n[1].includes(S_DS)),
-        filter(nodekeys, (n) => n[1].includes(S_DS)),
-      ])
+      const named = filter(nodekeys, (n) => !n[1].includes(S_DS))
+      nodekeys = flatten([named, filter(nodekeys, (n) => n[1].includes(S_DS))])
+      inj.named = 0 < size(named)
     } else {
       nodekeys = keysof(val)
     }
@@ -1332,6 +1333,16 @@ function inject(val: any, store: any, injdef?: Partial<Injection>) {
         nodekeys = childinj.keys
       }
     }
+
+    if (islist(val)) {
+      let kept = 0
+      for (let i = 0; i < val.length; i++) {
+        if (SKIP !== val[i]) {
+          val[kept++] = val[i]
+        }
+      }
+      val.length = kept
+    }
   } else if (S_string === valtype) {
     inj.mode = M_VAL
     val = _injectstr(val, store, inj)
@@ -1345,7 +1356,7 @@ function inject(val: any, store: any, injdef?: Partial<Injection>) {
     const mparent = inj.parent
     const mval = getprop(mparent, mkey)
 
-    inj.modify(mval, mkey, mparent, inj, store)
+    inj.modify(SKIP === mval ? NONE : mval, mkey, mparent, inj, store)
   }
 
   inj.val = val
@@ -1643,17 +1654,26 @@ const transform_REF: Injector = (inj: Injection, _val: any, _ref: string, store:
     return NONE
   }
 
-  // Get arguments: ['`$REF`', 'ref-path'].
+  // ['`$REF`', 'ref-path']: a relative path starts where this slot is, so .x is a sibling.
   const refpath = _lookup(inj.parent, 1)
   inj.keyI = size(inj.keys)
 
   const spec = getprop(store, S_DSPEC)()
 
-  const dpath = slice(inj.path, 1)
-  const ref = getpath(spec, refpath, {
-    dpath,
-    dparent: getpath(spec, dpath),
-  })
+  const dpath = slice(inj.path, 1, -2)
+  const refinj = { dpath, dparent: getpath(spec, dpath) }
+  let ref = getpath(spec, refpath, refinj)
+
+  // A chain of references that comes back to a path it has named names nothing.
+  const seen = [refpath]
+  for (let next = ref; islist(next) && '`$REF`' === next[0];) {
+    if (seen.includes(next[1])) {
+      ref = NONE
+      break
+    }
+    seen.push(next[1])
+    next = getpath(spec, next[1], refinj)
+  }
 
   let hasSubRef = false
   if (isnode(ref)) {
@@ -1867,13 +1887,13 @@ const validate_STRING: Injector = (inj: Injection) => {
   if (0 === (T_string & t)) {
     const msg = _invalidTypeMsg(inj.path, S_string, t, out, 'V1010')
     inj.errs.push(msg)
-    return NONE
+    return out
   }
 
   if (S_MT === out) {
     const msg = 'Empty string at ' + pathify(inj.path, 1)
     inj.errs.push(msg)
-    return NONE
+    return out
   }
 
   return out
@@ -1892,7 +1912,7 @@ const validate_TYPE: Injector = (inj: Injection, _val: any, ref: string) => {
 
   if (0 === (t & typev)) {
     inj.errs.push(_invalidTypeMsg(inj.path, tname, t, out, 'V1001'))
-    return NONE
+    return out
   }
 
   return out
@@ -1977,6 +1997,63 @@ const validate_CHILD: Injector = (inj: Injection) => {
   }
 
   return NONE
+}
+
+// The members a spec does not name: the map form is a key, the list form a
+// tuple's last item. Each places clones of its spec for the loop to check.
+const validate_REST: Injector = (inj: Injection) => {
+  const { mode, key, parent, keys, path } = inj
+
+  if (M_KEYPRE === mode) {
+    const resttm = _lookup(parent, key)
+    const tval = getprop(inj.dparent, getelem(path, -2))
+
+    if (ismap(tval)) {
+      for (const ckey of keysof(tval)) {
+        if (!keys.includes(ckey)) {
+          setprop(parent, ckey, clone(resttm))
+          keys.push(ckey)
+        }
+      }
+    }
+
+    inj.setval(NONE)
+    return NONE
+  }
+
+  const prior = inj.prior
+  if (M_VAL !== mode || NONE === prior || !islist(prior.parent) || 0 !== inj.keyI) {
+    inj.errs.push(_restmsg(slice(path, 1), ' must be the last element of an array.'))
+    return NONE
+  }
+
+  inj.keyI = size(keys)
+  prior.modify = NONE
+
+  const tuple = prior.parent
+  const slot = _listkey(prior.key)
+  const dlist = prior.dparent
+  const numitems = islist(dlist) ? size(dlist) : 0
+
+  if (numitems <= slot) {
+    inj.setval(NONE, 2)
+    return SKIP
+  }
+
+  const resttm = _lookup(parent, 1)
+  for (let i = slot; i < numitems; i++) {
+    setprop(tuple, i, clone(resttm))
+  }
+  for (let i = size(prior.keys); i < numitems; i++) {
+    prior.keys.push(strkey(i))
+  }
+
+  prior.keyI--
+  return SKIP
+}
+
+function _restmsg(path: any, problem: string): string {
+  return 'The $REST validator at field ' + pathify(path) + problem
 }
 
 const validate_EXACT: Injector = (inj: Injection) => {
@@ -2366,8 +2443,8 @@ const _validation: Modify = (pval: any, key?: any, parent?: any, inj?: Injection
     const ckeys = keysof(cval)
     const pkeys = keysof(pval)
 
-    // Empty spec object {} means object can be open (any keys).
-    if (0 < size(pkeys) && true !== getprop(pval, '`$OPEN`')) {
+    // Only a spec written as {} is open, even if named keys resolved away.
+    if ((0 < size(pkeys) || inj.named) && true !== getprop(pval, '`$OPEN`')) {
       const badkeys = []
       for (const ckey of ckeys) {
         // Literal presence: _validation needs to know if the SHAPE declares
@@ -2460,6 +2537,7 @@ function validate(
         $LEN: validate_LEN,
         $RANGE: validate_RANGE,
         $LIKE: validate_LIKE,
+        $REST: validate_REST,
       },
 
       getdef(extra, {}),
@@ -2727,11 +2805,13 @@ class Injection {
   modify?: Modify
   prior?: Injection
   extra?: any
+  named: boolean // Current map node names keys of its own (not $ commands).
 
   constructor(val: any, parent: any) {
     this.val = val
     this.parent = parent
     this.errs = []
+    this.named = false
 
     this.dparent = NONE
     this.dpath = [S_DTOP]
@@ -2835,9 +2915,12 @@ class Injection {
   setval(val: any, ancestor?: number) {
     let parent = NONE
     if (null == ancestor || ancestor < 2) {
+      // A list keeps the removed slot as a hole until inject's loop ends.
       parent =
         NONE === val
-          ? (this.parent = delprop(this.parent, this.key))
+          ? islist(this.parent)
+            ? setprop(this.parent, this.key, SKIP)
+            : (this.parent = delprop(this.parent, this.key))
           : setprop(this.parent, this.key, val)
     } else {
       const aval = getelem(this.nodes, 0 - ancestor)
@@ -2884,25 +2967,45 @@ const VALIDATE_NAMES = [
   '$OPEN',
 ]
 
-// Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
-function _checknames(spec: any, store: any, path: string[], errs: any[]): void {
+// Report each checker the spec names that validate lacks, and each misplaced
+// $REST; $EXACT's arguments are literals. Last: spec is a list's last item.
+function _checknames(spec: any, store: any, path: string[], errs: any[], last?: boolean): void {
   const name = _refname(spec)
   if (NONE !== name) {
     if (_unknownname(name, store)) {
       errs.push('Unknown validator ' + name + ' at field ' + pathify(path) + '.')
+    } else if ('$REST' === name) {
+      errs.push(_restmsg(path, ' must be the last element of an array.'))
     }
     return
   }
 
-  if (islist(spec) && '$EXACT' === _refname(spec[0])) {
+  const head = islist(spec) ? _refname(spec[0]) : NONE
+  if ('$EXACT' === head) {
     return
   }
 
+  if ('$REST' === head) {
+    if (true !== last) {
+      errs.push(_restmsg(path, ' must be the last element of an array.'))
+    } else if (2 !== size(spec)) {
+      errs.push(_restmsg(path, ' must have exactly one spec.'))
+    }
+    _checknames(spec[1], store, flatten([path, 1]), errs)
+    return
+  }
+
+  const restkey = '`$REST`'
+  if (ismap(spec) && NONE !== _lookup(spec, restkey) && NONE !== _lookup(spec, '`$CHILD`')) {
+    errs.push(_restmsg(path, ' cannot be used with $CHILD.'))
+  }
+
+  const lastkey = islist(spec) ? strkey(size(spec) - 1) : NONE
   for (const key of keysof(spec)) {
-    if (ismap(spec)) {
+    if (ismap(spec) && restkey !== key) {
       _checknames(key, store, path, errs)
     }
-    _checknames(spec[key], store, flatten([path, key]), errs)
+    _checknames(spec[key], store, flatten([path, key]), errs, lastkey === key)
   }
 }
 

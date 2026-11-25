@@ -1309,6 +1309,7 @@ int main(void) {
   run("validate", "len", false, subj_validate, NULL);
   run("validate", "range", false, subj_validate, NULL);
   run("validate", "like", false, subj_validate, NULL);
+  run("validate", "rest", false, subj_validate, NULL);
   run("validate", "unknown", false, subj_validate, NULL);
 
   /* select */

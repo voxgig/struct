@@ -100,6 +100,7 @@ data Inj = Inj
   , iModify :: IORef (Maybe ModifyFn) -- ^ post-injection mutation hook
   , iPrior :: IORef (Maybe Inj)     -- ^ the enclosing injection state, if any
   , iExtra :: IORef Value           -- ^ extra store merged into lookups
+  , iNamed :: IORef Bool            -- ^ whether the current map node names keys of its own (not @$@ commands)
   }
 
 -- | The loose @Partial<Injection>@ record the public API accepts.
@@ -1354,6 +1355,7 @@ newInj v parent = do
       <*> newIORef injectHandler <*> newIORef errs <*> newIORef meta
       <*> newIORef VNoval <*> newIORef dpath <*> newIORef (VStr s_dtop)
       <*> newIORef Nothing <*> newIORef Nothing <*> newIORef VNoval
+      <*> newIORef False
 
 -- | Recurse the injection engine into a node's children.
 injDescend :: Inj -> IO Value
@@ -1401,6 +1403,7 @@ injChild inj keyi keys = do
       <*> newIORef handler <*> newIORef errs <*> newIORef meta
       <*> newIORef dparent <*> newIORef ndpath <*> newIORef base
       <*> newIORef modify <*> newIORef (Just inj) <*> newIORef extra
+      <*> newIORef False
 
 -- | Write a value into an ancestor of the current injection target.
 injSetval :: Int -> Inj -> Value -> IO Value
@@ -1411,7 +1414,9 @@ injSetval ancestor inj v = do
             t <- getelem ns (VNum (fromIntegral (negate ancestor)))
             k <- getelem ps (VNum (fromIntegral (negate ancestor)))
             return (t, k)
-  if isNoval v then delprop target key else setprop target key v
+  -- A list keeps the removed slot as a hole until inject's loop ends.
+  if isNoval v then (if ancestor < 2 && islist target then setprop target key skip else delprop target key)
+  else setprop target key v
 
 -- | Write a value into the immediate parent of the injection target.
 injSetval1 :: Inj -> Value -> IO Value
@@ -1451,12 +1456,14 @@ inject injarg v store = do
         _ -> return ()
       return i
   _ <- injDescend state
+  writeIORef (iNamed state) False
   v' <- if isnode v then do
           nodekeys0 <- case v of
             VMap m -> do es <- readIORef m
                          let ks = map fst es
                              normal = sort (L.filter (notElem '$') ks)
                              trans = sort (L.filter (elem '$') ks)
+                         writeIORef (iNamed state) (not (null normal))
                          return (normal ++ trans)
             VList r -> do its <- readIORef r; return [show i | i <- [0 .. length its - 1]]
             _ -> return []
@@ -1490,6 +1497,7 @@ inject injarg v store = do
                   writeIORef nkiRef (cki + 1)
                   loop
           loop
+          case v of VList r -> modifyIORef' r (L.filter (not . is_skip)); _ -> return ()
           return v
         else case v of
           VStr _ -> do
@@ -1503,7 +1511,7 @@ inject injarg v store = do
   case modify of
     Just f | not (is_skip v') -> do
       mkey <- readIORef (iKey state); mparent <- readIORef (iParent state); mval <- getprop mparent mkey
-      f mval mkey mparent state
+      f (if is_skip mval then VNoval else mval) mkey mparent state
     _ -> return ()
   writeIORef (iIval state) v'
   parentS <- readIORef (iParent state)
@@ -1549,7 +1557,7 @@ injectstr v store injOpt =
 
 -- | @$DELETE@ transform: remove the target key.
 transformDelete :: Injector
-transformDelete inj _ _ _ = do p <- readIORef (iParent inj); k <- readIORef (iKey inj); _ <- delprop p k; return VNoval
+transformDelete inj _ _ _ = do _ <- injSetval1 inj VNoval; return VNoval
 
 -- | @$COPY@ transform: copy the same-named value from the data.
 transformCopy :: Injector
@@ -1767,11 +1775,27 @@ transformRef inj _ _ store = do
     case specFunc of
       VFunc f -> do
         spec <- f inj VNoval "" VNoval
-        refv <- getpath INone spec refpath
+        ipath <- readIORef (iPath inj)
+        -- A relative path starts where this slot is, so .x is a sibling.
+        dpath <- slice ipath (VNum 1) (VNum (-2))
+        dparent <- getpath INone spec dpath
+        let refinj = IDef ((defaultInjDef VNoval) { dDpath = dpath, dDparent = dparent })
+        found <- getpath refinj spec refpath
+        -- A chain of references that comes back to a path it has named names nothing.
+        let cycles seen next
+              | not (islist next) = return False
+              | otherwise = do
+                  hd <- lookup_ next (VNum 0)
+                  if not (vStrEq hd "`$REF`") then return False
+                  else do
+                    np <- lookup_ next (VNum 1)
+                    hit <- or <$> mapM (deepEqual np) seen
+                    if hit then return True else getpath refinj spec np >>= cycles (np : seen)
+        cyclic <- cycles [refpath] found
+        let refv = if cyclic then VNoval else found
         hasSubRef <- newIORef False
         when (isnode refv) $ do _ <- walk (Just (\_ v2 _ _ -> do when (vStrEq v2 "`$REF`") (writeIORef hasSubRef True); return v2)) Nothing VNoval refv; return ()
         -- A recursive reference stops where the data does.
-        ipath <- readIORef (iPath inj)
         tval <- getpath INone store =<< sliceM ipath (VNum (-1)) VNoval False
         hasSub <- readIORef hasSubRef
         rval <- if not hasSub || not (isNoval tval) then clone refv else return VNoval
@@ -2011,8 +2035,8 @@ validateString inj _ _ _ = do
   dp <- readIORef (iDparent inj); k <- readIORef (iKey inj)
   out <- lookup_ dp k
   let t = typify out
-  if (t_string .&. t) == 0 then do path <- readIORef (iPath inj); m <- invalidTypeMsg path s_string t out "V1010"; pushErr inj m; return VNoval
-  else if vStrEq out s_mt then do path <- readIORef (iPath inj); p <- pathifyFull path (VNum 1) VNoval False; pushErr inj ("Empty string at " ++ p); return VNoval
+  if (t_string .&. t) == 0 then do path <- readIORef (iPath inj); m <- invalidTypeMsg path s_string t out "V1010"; pushErr inj m; return out
+  else if vStrEq out s_mt then do path <- readIORef (iPath inj); p <- pathifyFull path (VNum 1) VNoval False; pushErr inj ("Empty string at " ++ p); return out
   else return out
 
 -- | Type-checking validation rule (@$NUMBER@, @$BOOLEAN@, ...).
@@ -2025,7 +2049,7 @@ validateType inj _ refstr _ = do
   dp <- readIORef (iDparent inj); k <- readIORef (iKey inj)
   out <- lookup_ dp k
   let t = typify out
-  if (t .&. typev) == 0 then do path <- readIORef (iPath inj); m <- invalidTypeMsg path tname t out "V1001"; pushErr inj m; return VNoval
+  if (t .&. typev) == 0 then do path <- readIORef (iPath inj); m <- invalidTypeMsg path tname t out "V1001"; pushErr inj m; return out
   else return out
 
 -- | @$ANY@ validation rule (accept any value).
@@ -2078,6 +2102,60 @@ validateChild inj _ _ _ = do
         -- element so the resumed loop can validate it.
         return skip
   else return VNoval
+
+-- | @$REST@ validation rule: the members a spec does not name. The map form is
+-- a key, the list form a tuple's last item; each places clones of its spec for
+-- the loop to check.
+validateRest :: Injector
+validateRest inj _ _ _ = do
+  parent <- readIORef (iParent inj); key <- readIORef (iKey inj); path <- readIORef (iPath inj); keys <- readIORef (iKeys inj)
+  mode <- readIORef (iMode inj)
+  if mode == m_keypre then do
+    resttm <- lookup_ parent key
+    pkey <- getelem path (VNum (-2))
+    dp <- readIORef (iDparent inj)
+    tval <- getprop dp pkey
+    when (ismap tval) $ do
+      tks <- keysof tval
+      forM_ tks $ \ckey -> do
+        present <- listItems keys
+        when (not (any (`vStrEq` ckey) present)) $ do
+          cc <- clone resttm; _ <- setprop parent (VStr ckey) cc
+          ksz <- size keys; _ <- setprop keys (VNum (fromIntegral ksz)) (VStr ckey); return ()
+    _ <- injSetval1 inj VNoval
+    return VNoval
+  else do
+    prior <- readIORef (iPrior inj)
+    keyi <- readIORef (iKeyi inj)
+    tuple <- maybe (return VNoval) (readIORef . iParent) prior
+    case prior of
+      Just p | mode == m_val && islist tuple && keyi == 0 -> do
+        ksz <- size keys; writeIORef (iKeyi inj) ksz
+        writeIORef (iModify p) Nothing
+        pkey <- readIORef (iKey p)
+        dlist <- readIORef (iDparent p)
+        numitems <- if islist dlist then size dlist else return 0
+        case listKey pkey of
+          Just slot | fromIntegral numitems <= slot -> do _ <- injSetval 2 inj VNoval; return ()
+          slot -> do
+            resttm <- lookup_ parent (VNum 1)
+            forM_ (maybe [] (\s -> [fromIntegral s .. numitems - 1]) slot) $ \i -> do
+              cc <- clone resttm; _ <- setprop tuple (VNum (fromIntegral i)) cc; return ()
+            pkeys <- readIORef (iKeys p)
+            pksz <- size pkeys
+            forM_ [pksz .. numitems - 1] $ \i -> do
+              n <- size pkeys; _ <- setprop pkeys (VNum (fromIntegral n)) (VStr (strkey (VNum (fromIntegral i)))); return ()
+            pk <- readIORef (iKeyi p); writeIORef (iKeyi p) (pk - 1)
+        return skip
+      _ -> do
+        sl <- slice path (VNum 1) VNoval
+        m <- restmsg sl " must be the last element of an array."
+        pushErr inj m
+        return VNoval
+
+-- | The message for a misplaced @$REST@ at a path.
+restmsg :: Value -> String -> IO String
+restmsg path problem = do p <- pathify path; return ("The $REST validator at field " ++ p ++ problem)
 
 -- | @\`$EXACT\`@ validation rule (value must equal exactly).
 validateExact :: Injector
@@ -2387,25 +2465,41 @@ isCheckerName :: String -> Bool
 isCheckerName ('$' : rest) = not (null rest) && all (\c -> c >= 'A' && c <= 'Z') rest
 isCheckerName _ = False
 
--- | Report each checker the spec names that validate lacks. The arguments of
--- @$EXACT@ are literals.
-checkNames :: Value -> Value -> [Value] -> Value -> IO ()
-checkNames spec store path errs = case refName spec of
+-- | Report each checker the spec names that validate lacks, and each misplaced
+-- @$REST@. The arguments of @$EXACT@ are literals. The flag: the spec is a
+-- list's last item.
+checkNames :: Value -> Value -> [Value] -> Value -> Bool -> IO ()
+checkNames spec store path errs isLast = case refName spec of
   Just name -> do
     unknown <- unknownName name store
-    when unknown $ do
+    if unknown then do
       p <- pathify =<< mkList path
-      esz <- size errs
-      _ <- setprop errs (VNum (fromIntegral esz)) (VStr ("Unknown validator " ++ name ++ " at field " ++ p ++ "."))
-      return ()
+      push ("Unknown validator " ++ name ++ " at field " ++ p ++ ".")
+    else when (name == "$REST") $ restAt " must be the last element of an array."
   Nothing -> do
     first <- lookup_ spec (VNum 0)
-    when (not (islist spec && refName first == Just "$EXACT")) $ do
+    let hd = if islist spec then refName first else Nothing
+    if hd == Just "$EXACT" then return ()
+    else if hd == Just "$REST" then do
+      ssz <- size spec
+      if not isLast then restAt " must be the last element of an array."
+      else when (ssz /= 2) $ restAt " must have exactly one spec."
+      sp1 <- lookup_ spec (VNum 1)
+      checkNames sp1 store (path ++ [VNum 1]) errs False
+    else do
+      rest <- lookup_ spec (VStr restkey)
+      child0 <- lookup_ spec (VStr "`$CHILD`")
+      when (ismap spec && not (isNoval rest) && not (isNoval child0)) $ restAt " cannot be used with $CHILD."
+      lastkey <- if islist spec then do ssz <- size spec; return (Just (strkey (VNum (fromIntegral (ssz - 1))))) else return Nothing
       ks <- keysof spec
       forM_ ks $ \k -> do
-        when (ismap spec) $ checkNames (VStr k) store path errs
+        when (ismap spec && k /= restkey) $ checkNames (VStr k) store path errs False
         child <- lookup_ spec (VStr k)
-        checkNames child store (path ++ [VStr k]) errs
+        checkNames child store (path ++ [VStr k]) errs (lastkey == Just k)
+  where
+    restkey = "`$REST`"
+    push msg = do esz <- size errs; _ <- setprop errs (VNum (fromIntegral esz)) (VStr msg); return ()
+    restAt problem = do p <- mkList path; m <- restmsg p problem; push m
 
 -- | The name a whole-string reference gives, when it is a checker name in any case.
 refName :: Value -> Maybe String
@@ -2447,7 +2541,9 @@ validation pval key parent inj = do
             ckeys <- keysof cval
             pkeys <- keysof pval
             bopenV <- getprop pval (VStr s_bopen)
-            if not (null pkeys) && not (vIsTrue bopenV) then do
+            named <- readIORef (iNamed inj)
+            -- Only a spec written as {} is open, even if named keys resolved away.
+            if (not (null pkeys) || named) && not (vIsTrue bopenV) then do
               badkeys <- filterM (\ck -> do lk <- lookup_ pval (VStr ck); return (isNoval lk)) ckeys
               when (not (null badkeys)) $ do p <- pathifyFull path (VNum 1) VNoval False; pushErr inj ("Unexpected keys at field " ++ p ++ s_viz ++ intercalate ", " badkeys)
             else do
@@ -2502,6 +2598,7 @@ validate injarg dat spec = do
   put "$LEN" (VFunc validateLen)
   put "$RANGE" (VFunc validateRange)
   put "$LIKE" (VFunc validateLike)
+  put "$REST" (VFunc validateRest)
   extraMap <- if isNoval extra then emptyMap else return extra
   errMap <- mkMap [(s_derrs, errs)]
   ls <- mkList [base, extraMap, errMap]; store <- mergeD ls (VNum 1)
@@ -2510,7 +2607,7 @@ validate injarg dat spec = do
   let idef = (defaultInjDef errs) { dMeta = meta, dExtra = store, dModify = Just validation, dHandler = Just validateHandler }
   -- A spec that names an unknown checker validates nothing.
   numerrs <- size errs
-  checkNames spec store [] errs
+  checkNames spec store [] errs False
   esz0 <- size errs
   out <- if numerrs < esz0 then clone dat else transform (IDef idef) dat spec
   esz <- size errs

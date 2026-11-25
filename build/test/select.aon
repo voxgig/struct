@@ -291,6 +291,12 @@ operators: {
             obj: [{x:1,y:3},{x:2,y:2},{x:3,y:1}] },
       out: [{x:3,y:1,'$KEY':2}] }
 
+
+    { in: { query: {r0:'`$STRING`','`$REST`':'`$NUMBER`'}, obj: [{r0:a,n:1},{r0:b,n:x}] },
+      out: [{r0:a,n:1,'$KEY':0}] }
+    { in: { query: ['`$STRING`',['`$REST`','`$NUMBER`']], obj: [[a,1,2],[a,b],[a]] },
+      out: [[a,1,2],[a]] }
+
   ]
 }
 

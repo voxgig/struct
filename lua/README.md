@@ -586,7 +586,7 @@ $MERGE   $EACH    $PACK    $REF     $FORMAT  $APPLY
 ```
 $MAP   $LIST   $STRING   $NUMBER   $INTEGER   $DECIMAL  $BOOLEAN
 $NULL  $NIL    $FUNCTION $INSTANCE $ANY       $CHILD    $EXACT
-$NOF   $ALL    $LEN      $RANGE     $LIKE
+$NOF   $ALL    $LEN      $RANGE     $LIKE     $REST
 ```
 
 `` { '`$NOF`', n, spec, … } `` holds when as many specs admit the value as `n`

@@ -3,18 +3,18 @@
 > Kotlin/JVM port of the canonical TypeScript implementation.
 >
 > **Status: complete.** Carries the **full** TS-canonical public API and
-> passes the shared corpus in full (1742/1742). All 52 functions, 15 type
+> passes the shared corpus in full (1808/1808). All 52 functions, 15 type
 > bit-flags, 3 mode constants (`M_KEYPRE`/`M_KEYPOST`/`M_VAL`),
 > `SKIP`/`DELETE` sentinels, and the `Injection` state machine.
 > `inject()`/`transform()`/`validate()`/`select()` all dispatch through
 > the canonical injector machinery: 10 transform commands
 > (`$DELETE`/`$COPY`/`$KEY`/`$ANNO`/`$MERGE`/`$EACH`/`$PACK`/`$REF`/
-> `$FORMAT`/`$APPLY`), 10 validate checkers (`$STRING`/`$TYPE`/`$ANY`/
-> `$CHILD`/`$EXACT`/`$NOF`/`$ALL`/`$LEN`/`$RANGE`/`$LIKE`), and 4 select
-> operators (`$AND`/`$OR`/`$NOT`/`$CMP`). `python3 ../tools/check_parity.py`
-> reports it `ok`.
+> `$FORMAT`/`$APPLY`), 11 validate checkers (`$STRING`/`$TYPE`/`$ANY`/
+> `$CHILD`/`$EXACT`/`$NOF`/`$ALL`/`$LEN`/`$RANGE`/`$LIKE`/`$REST`), and 4
+> select operators (`$AND`/`$OR`/`$NOT`/`$CMP`).
+> `python3 ../tools/check_parity.py` reports it `ok`.
 >
-> Passes the shared corpus (1742/1742), run on
+> Passes the shared corpus (1808/1808), run on
 > [voxgig/omni](https://github.com/voxgig/omni) — the shared test runner,
 > consumed as a local checkout. Run it with `./gradlew test` from `kotlin/`.
 
@@ -565,12 +565,12 @@ implemented as `Injector` values (`transform_DELETE`, `transform_COPY`,
 Inside backticks in a `validate` spec (implemented as `validate_STRING`,
 `validate_TYPE`, `validate_ANY`, `validate_CHILD`, `validate_EXACT`,
 `validate_NOF`, `validate_ALL`, `validate_LEN`, `validate_RANGE`,
-`validate_LIKE`):
+`validate_LIKE`, `validate_REST`):
 
 `$STRING`, `$NUMBER`, `$INTEGER`, `$DECIMAL`, `$BOOLEAN`, `$NULL`,
 `$NIL`, `$MAP`, `$LIST`, `$FUNCTION`, `$INSTANCE`, `$ANY`, `$CHILD`,
-`$EXACT`, `$NOF`, `$ALL`, `$LEN`, `$RANGE`, `$LIKE`. (`$NUMBER`..`$INSTANCE`
-all share `validate_TYPE`.)
+`$EXACT`, `$NOF`, `$ALL`, `$LEN`, `$RANGE`, `$LIKE`, `$REST`.
+(`$NUMBER`..`$INSTANCE` all share `validate_TYPE`.)
 
 `$NOF` and `$ALL` are list directives. `` ['`$NOF`', n, spec, …] `` holds
 when as many specs admit the value as `n` allows, where `n` is an integer
@@ -590,6 +590,10 @@ pattern finds, with Kotlin's `Regex`. Each takes at most one spec, which
 must also admit the value. `min` and `max` include their bound, while `gt`
 and `lt` exclude it. A `$LIKE` pattern matches anywhere unless anchored.
 
+`` '`$REST`': spec `` in a map spec checks each key the spec does not name;
+`` ['`$REST`', spec] `` as a list spec's last item checks each item after
+the named ones.
+
 A spec that names a checker this port does not define is rejected before
 any data is read, and nothing is validated. The message is
 `Unknown validator $FOO at field a.`
@@ -604,7 +608,7 @@ any data is read, and nothing is validated. The message is
 
 The Kotlin port is **Complete**: it implements the entire canonical public
 surface, `check_parity.py` reports it `ok`, and it passes the shared corpus
-in full (1742/1742). Treat behavioural authority as resting with the
+in full (1808/1808). Treat behavioural authority as resting with the
 canonical TypeScript and the shared corpus.
 
 ### `null` conventions
@@ -615,7 +619,7 @@ distinct sentinel `Struct.UNDEF` (a private `Any()` identity) represents
 Group A readers (`getprop`, `getelem`, `haskey`, `isempty`, `isnode`)
 treat a stored `null` as no value; Group B processors (`clone`, `merge`,
 `walk`, `transform`, …) preserve it literally. REPORT.md lists Kotlin as
-"already Group A"; the shared corpus passes 1742/1742 assertions here.
+"already Group A"; the shared corpus passes 1808/1808 assertions here.
 
 ### Object model
 
@@ -690,6 +694,6 @@ sources only, since omni has its own source set. Tests live in
 [`src/test/kotlin/voxgig/struct/`](./src/test/kotlin/voxgig/struct/) and run
 the shared corpus from [`../build/test/`](../build/test/) on
 [voxgig/omni](https://github.com/voxgig/omni). `StructCorpusTest` runs every
-group the corpus defines — 1742 entries in 81 groups;
+group the corpus defines — 1808 entries in 82 groups;
 `ClientTest` runs the two `check` entries; `StructTests` holds what the corpus
 shape cannot express. JVM target 17.

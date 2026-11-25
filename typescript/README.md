@@ -775,6 +775,7 @@ Quote inside a `validate` spec, e.g. `` '`$STRING`' ``.
 | `$LEN`      | `` ['`$LEN`', n, spec?] ``: a length within `n`, a bound written as for `$NOF`. Strings count code points, lists elements, maps keys. |
 | `$RANGE`    | `` ['`$RANGE`', bound, spec?] ``: a number within the bound, a map of `min` or `gt` and `max` or `lt`. |
 | `$LIKE`     | `` ['`$LIKE`', pattern, spec?] ``: a string the pattern finds, with JavaScript's `RegExp`. |
+| `$REST`     | `` '`$REST`': spec `` in a map spec checks each key it does not name; `` ['`$REST`', spec] `` as a list spec's last item checks each item after the named ones. |
 
 A spec admits a value when validating the value against it finds no error
 and gives back every member of the value unchanged. There is no `$ONE`:

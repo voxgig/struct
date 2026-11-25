@@ -846,6 +846,12 @@ class TestVoxgigStruct < Minitest::Test
     })
   end
 
+  def test_validate_rest
+    @runsetflags.call(@spec['validate']['rest'], { 'null' => false }, lambda { |vin|
+      VoxgigStruct.validate(vin['data'], vin['spec'])
+    })
+  end
+
   def test_validate_unknown
     @runsetflags.call(@spec['validate']['unknown'], { 'null' => false }, lambda { |vin|
       VoxgigStruct.validate(vin['data'], vin['spec'])

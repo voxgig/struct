@@ -1008,7 +1008,7 @@ module VoxgigStruct
                 break
               end
             else
-              val = dparent || src
+              val = dparent
             end
           else
             val = _getprop(val, part, UNDEF)
@@ -1124,12 +1124,15 @@ module VoxgigStruct
 
     inj.descend
 
+    inj.named = false
+
     # Descend into node.
     if isnode(val)
       if ismap(val)
         normal = val.keys.reject { |k| k.include?(S_DS) }.sort
         transforms = val.keys.select { |k| k.include?(S_DS) }.sort
         nodekeys = normal + transforms
+        inj.named = !normal.empty?
       else
         nodekeys = (0...val.length).to_a
       end
@@ -1164,6 +1167,8 @@ module VoxgigStruct
         nkI += 1
       end
 
+      val.reject! { |v| v.equal?(SKIP) } if islist(val)
+
     elsif val.is_a?(String)
       inj.mode = S_MVAL
       val = _injectstr(val, store, inj)
@@ -1175,15 +1180,15 @@ module VoxgigStruct
       mkey = inj.key
       mparent = inj.parent
       mval = getprop(mparent, mkey)
-      inj.modify.call(mval, mkey, mparent, inj)
+      inj.modify.call(mval.equal?(SKIP) ? nil : mval, mkey, mparent, inj)
     end
 
     inj.val = val
 
-    # Read the top literally: a null stored there is the result.
+    # Read the top literally: a null stored there is the result, a removed top is no value.
     if inj.prior.nil? && ismap(inj.root)
       top = _getprop(inj.root, S_DTOP)
-      return top unless top.equal?(UNDEF)
+      return top.equal?(UNDEF) ? nil : top
     end
     return getprop(inj.parent, S_DTOP) if inj.key == S_DTOP && inj.parent && haskey(inj.parent, S_DTOP)
 
@@ -1477,17 +1482,28 @@ module VoxgigStruct
   def self.transform_REF(inj, _val, _ref, store)
     return nil if inj.mode != S_MVAL
 
+    # A relative path starts where this slot is, so .x is a sibling.
     refpath = getprop(inj.parent, 1)
     inj.keyI = size(inj.keys)
 
     specFn = getprop(store, S_DSPEC)
     spec = isfunc(specFn) ? specFn.call : nil
 
-    dpath = slice(inj.path, 1)
-    ref = getpath(spec, refpath, {
-                    'dpath' => dpath,
-                    'dparent' => getpath(spec, dpath)
-                  })
+    dpath = slice(inj.path, 1, -2)
+    refinj = { 'dpath' => dpath, 'dparent' => getpath(spec, dpath) }
+    ref = getpath(spec, refpath, refinj)
+
+    # A chain of references that comes back to a path it has named names nothing.
+    seen = [refpath]
+    nxt = ref
+    while islist(nxt) && nxt[0] == '`$REF`'
+      if seen.include?(nxt[1])
+        ref = nil
+        break
+      end
+      seen << nxt[1]
+      nxt = getpath(spec, nxt[1], refinj)
+    end
 
     hasSubRef = false
     if isnode(ref)
@@ -1727,19 +1743,41 @@ module VoxgigStruct
   # Names a validate spec may use besides its checkers: transform's that it keeps, and $OPEN.
   VALIDATE_NAMES = %w[$TOP $SPEC $BT $DS $WHEN $ANNO $REF $FORMAT $APPLY $OPEN].freeze
 
-  # Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
-  def self._checknames(spec, store, path, errs)
+  # Report each checker the spec names that validate lacks, and each misplaced
+  # $REST; $EXACT's arguments are literals. Last: spec is a list's last item.
+  def self._checknames(spec, store, path, errs, last = false)
     name = _refname(spec)
     unless name.nil?
-      errs << "Unknown validator #{name} at field #{pathify(path)}." if _unknownname(name, store)
+      if _unknownname(name, store)
+        errs << "Unknown validator #{name} at field #{pathify(path)}."
+      elsif name == '$REST'
+        errs << _restmsg(path, ' must be the last element of an array.')
+      end
       return
     end
 
-    return if islist(spec) && _refname(spec[0]) == '$EXACT'
+    head = islist(spec) ? _refname(spec[0]) : nil
+    return if head == '$EXACT'
 
+    if head == '$REST'
+      if last != true
+        errs << _restmsg(path, ' must be the last element of an array.')
+      elsif size(spec) != 2
+        errs << _restmsg(path, ' must have exactly one spec.')
+      end
+      _checknames(spec[1], store, flatten([path, 1]), errs)
+      return
+    end
+
+    restkey = '`$REST`'
+    if ismap(spec) && !_getprop(spec, restkey).equal?(UNDEF) && !_getprop(spec, '`$CHILD`').equal?(UNDEF)
+      errs << _restmsg(path, ' cannot be used with $CHILD.')
+    end
+
+    lastkey = islist(spec) ? strkey(size(spec) - 1) : nil
     keysof(spec).each do |key|
-      _checknames(key, store, path, errs) if ismap(spec)
-      _checknames(_getprop(spec, key), store, flatten([path, key]), errs)
+      _checknames(key, store, path, errs) if ismap(spec) && key != restkey
+      _checknames(_getprop(spec, key), store, flatten([path, key]), errs, lastkey == key)
     end
   end
 
@@ -1865,11 +1903,11 @@ module VoxgigStruct
     t = typify(out)
     if T_string.nobits?(t)
       inj.errs << _invalidTypeMsg(inj.path, S_string, t, out, 'V1010')
-      return nil
+      return _keepnull(inj, out)
     end
     if out == S_MT
       inj.errs << "Empty string at #{pathify(inj.path, 1)}"
-      return nil
+      return out
     end
     out
   end
@@ -1904,7 +1942,7 @@ module VoxgigStruct
 
     if t.nobits?(typev)
       inj.errs << _invalidTypeMsg(inj.path, tname, t, out, 'V1001')
-      return nil
+      return _keepnull(inj, out)
     end
     _keepnull(inj, out)
   end
@@ -1913,7 +1951,7 @@ module VoxgigStruct
     _keepnull(inj, getprop(inj.dparent, inj.key))
   end
 
-  # A checker's accepted value, where a null the data holds stays in the output:
+  # The value a checker read, where a null the data holds keeps its slot:
   # returned as nil, inject's setval would delete the slot instead.
   def self._keepnull(inj, out)
     return out unless out.nil? && inj.mode == S_MVAL && !_getprop(inj.dparent, inj.key).equal?(UNDEF)
@@ -1990,6 +2028,63 @@ module VoxgigStruct
     end
 
     nil
+  end
+
+  # The members a spec does not name: the map form is a key, the list form a
+  # tuple's last item. Each places clones of its spec for the loop to check.
+  def self.validate_REST(inj, _val = nil, _ref = nil, _store = nil)
+    mode = inj.mode
+    key = inj.key
+    parent = inj.parent
+    keys = inj.keys
+    path = inj.path
+
+    if mode == S_MKEYPRE
+      resttm = _getprop(parent, key)
+      tval = getprop(inj.dparent, getelem(path, -2))
+
+      if ismap(tval)
+        keysof(tval).each do |ckey|
+          next if keys.include?(ckey)
+
+          setprop(parent, ckey, clone(resttm))
+          keys << ckey
+        end
+      end
+
+      inj.setval(UNDEF)
+      return nil
+    end
+
+    prior = inj.prior
+    if mode != S_MVAL || prior.nil? || !islist(prior.parent) || inj.keyI != 0
+      inj.errs << _restmsg(slice(path, 1), ' must be the last element of an array.')
+      return nil
+    end
+
+    inj.keyI = size(keys)
+    prior.modify = nil
+
+    tuple = prior.parent
+    slot = _listkey(prior.key)
+    dlist = prior.dparent
+    numitems = islist(dlist) ? size(dlist) : 0
+
+    if numitems <= slot
+      inj.setval(UNDEF, 2)
+      return SKIP
+    end
+
+    resttm = _getprop(parent, 1)
+    (slot...numitems).each { |i| setprop(tuple, i, clone(resttm)) }
+    (size(prior.keys)...numitems).each { |i| prior.keys << strkey(i) }
+
+    prior.keyI -= 1
+    SKIP
+  end
+
+  def self._restmsg(path, problem)
+    "The $REST validator at field #{pathify(path)}#{problem}"
   end
 
   def self.validate_EXACT(inj, _val = nil, _ref = nil, _store = nil)
@@ -2313,7 +2408,8 @@ module VoxgigStruct
       ckeys = keysof(cval)
       pkeys = keysof(pval)
 
-      if pkeys.length.positive? && getprop(pval, '`$OPEN`') != true
+      # Only a spec written as {} is open, even if named keys resolved away.
+      if (pkeys.length.positive? || inj.named) && getprop(pval, '`$OPEN`') != true
         # Literal presence: the shape DECLARES ck even when its value is nil.
         # Canonical uses `NONE === _lookup`; `haskey` is Group A (value-based)
         # and would drop records with a nil field from an open ($AND) select.
@@ -2405,7 +2501,8 @@ module VoxgigStruct
                       '$ALL' => method(:validate_ALL),
                       '$LEN' => method(:validate_LEN),
                       '$RANGE' => method(:validate_RANGE),
-                      '$LIKE' => method(:validate_LIKE)
+                      '$LIKE' => method(:validate_LIKE),
+                      '$REST' => method(:validate_REST)
                     },
                     (extra.nil? ? {} : extra),
                     { S_DERRS => errs }
@@ -2993,11 +3090,12 @@ module VoxgigStruct
   class Injection
     attr_accessor :mode, :full, :keyI, :keys, :key, :val, :parent,
                   :path, :nodes, :handler, :errs, :meta, :base,
-                  :modify, :extra, :prior, :dparent, :dpath, :root
+                  :modify, :extra, :prior, :dparent, :dpath, :root, :named
 
     def initialize(val, parent)
       @mode = VoxgigStruct::S_MVAL
       @full = false
+      @named = false
       @keyI = 0
       @keys = [VoxgigStruct::S_DTOP]
       @key = VoxgigStruct::S_DTOP
@@ -3064,13 +3162,9 @@ module VoxgigStruct
     end
 
     def setval(val, ancestor = nil)
-      # Mirrors the canonical TS Injection.setval: UNDEF (sentinel) and
-      # nil (Ruby collapses both onto the same "no value" slot) delete
-      # the slot at every ancestor level; any other value sets it. The
-      # delete-on-undef shortcut is used by injectors (transform_DELETE,
-      # transform_MERGE, validate_CHILD) to signal "drop this slot" via
-      # their return value rather than calling delprop explicitly.
-      if ancestor.nil? || (ancestor.is_a?(Numeric) && ancestor < 2)
+      # UNDEF and nil (Ruby collapses both onto one "no value") remove the slot.
+      near = ancestor.nil? || (ancestor.is_a?(Numeric) && ancestor < 2)
+      if near
         target = @parent
         key = @key
       else
@@ -3078,10 +3172,13 @@ module VoxgigStruct
         key = VoxgigStruct.getelem(@path, 0 - ancestor)
       end
 
-      if val.nil? || val.equal?(VoxgigStruct::UNDEF)
-        VoxgigStruct.delprop(target, key)
-      else
+      if !val.nil? && !val.equal?(VoxgigStruct::UNDEF)
         VoxgigStruct.setprop(target, key, val)
+      elsif near && VoxgigStruct.islist(target)
+        # A list keeps the removed slot as a hole until inject's loop ends.
+        VoxgigStruct.setprop(target, key, VoxgigStruct::SKIP)
+      else
+        VoxgigStruct.delprop(target, key)
       end
     end
 

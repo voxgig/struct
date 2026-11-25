@@ -1647,6 +1647,7 @@ sub _new_injection {
     return {
         mode    => M_VAL,
         full    => 0,
+        named   => 0,
         keyI    => 0,
         keys    => [S_DTOP],
         key     => S_DTOP,
@@ -1732,8 +1733,14 @@ sub _inj_setval {
         $target = $inj->{nodes}[ $nlen - $ancestor ];
         $tkey   = $inj->{path}[  $plen - $ancestor ];
     }
-    if (is_none($val)) { delprop($target, $tkey) }
-    else               { setprop($target, $tkey, $val) }
+    if (!is_none($val)) { setprop($target, $tkey, $val) }
+    elsif ((!defined $ancestor || $ancestor < 2) && islist($target)) {
+        # A list keeps the removed slot as a hole until inject's loop ends;
+        # setprop ignores SKIP, so the hole is written directly.
+        my $k = _listkey($tkey);
+        $target->[$k] = $SKIP if defined $k && $k >= 0 && $k < @$target;
+    }
+    else { delprop($target, $tkey) }
     return $target;
 }
 
@@ -1821,6 +1828,8 @@ sub inject {
     }
     _inj_descend($inj);
 
+    $inj->{named} = 0;
+
     if (isnode($val)) {
         my @nodekeys;
         if (ismap($val)) {
@@ -1829,6 +1838,7 @@ sub inject {
             my @plain   = grep { index($_, S_DS) < 0 } @raw;
             my @cmd     = grep { index($_, S_DS) >= 0 } @raw;
             @nodekeys = (@plain, @cmd);
+            $inj->{named} = @plain ? 1 : 0;
         }
         else {
             @nodekeys = map { "$_" } 0 .. $#$val;
@@ -1854,6 +1864,7 @@ sub inject {
             }
             $nkI++;
         }
+        @$val = grep { !(ref $_ && refaddr($_) == refaddr($SKIP)) } @$val if islist($val);
     }
     elsif (defined $val && !ref($val) && _is_string_sv($val)) {
         $inj->{mode} = M_VAL;
@@ -1867,6 +1878,7 @@ sub inject {
         my $mkey = $inj->{key};
         my $mparent = $inj->{parent};
         my $mval = getprop($mparent, $mkey);
+        $mval = NONE() if ref $mval && refaddr($mval) == refaddr($SKIP);
         $inj->{modify}->($mval, $mkey, $mparent, $inj, $store);
     }
 
@@ -2180,14 +2192,23 @@ sub transform_PACK {
     return NONE();
 }
 
+# Equal as JavaScript's includes has it: a scalar by value, a reference by identity.
+sub _samepath {
+    my ($x, $y) = @_;
+    return !defined $y unless defined $x;
+    return 0 unless defined $y;
+    return ref($x) || ref($y) ? ref($x) && ref($y) && refaddr($x) == refaddr($y) : $x eq $y;
+}
+
 sub transform_REF {
     my ($inj, $val, $ref, $store) = @_;
     return NONE() if $inj->{mode} != M_VAL;
+    # A relative path starts where this slot is, so .x is a sibling.
     my $refpath = _lookup($inj->{parent}, 1);
     $inj->{keyI} = size($inj->{keys});
     my $specfn = getprop($store, S_DSPEC);
     my $spec = isfunc($specfn) ? $specfn->() : $specfn;
-    my $dpath = slice($inj->{path}, 1);
+    my $dpath = slice($inj->{path}, 1, -2);
     my $sub_inj = {
         dpath   => $dpath,
         dparent => getpath($spec, $dpath),
@@ -2195,6 +2216,18 @@ sub transform_REF {
         meta    => $inj->{meta},
     };
     my $resolved = getpath($spec, $refpath, $sub_inj);
+    # A chain of references that comes back to a path it has named names nothing.
+    my @seen = ($refpath);
+    my $next = $resolved;
+    while (islist($next) && defined $next->[0] && !ref($next->[0]) && $next->[0] eq '`$REF`') {
+        my $np = $next->[1];
+        if (grep { _samepath($_, $np) } @seen) {
+            $resolved = NONE();
+            last;
+        }
+        push @seen, $np;
+        $next = getpath($spec, $np, $sub_inj);
+    }
     my $hasSubRef = 0;
     if (isnode($resolved)) {
         walk($resolved, sub {
@@ -2387,25 +2420,45 @@ our @VALIDATE_NAMES = (
     '$TOP', '$SPEC', '$BT', '$DS', '$WHEN', '$ANNO', '$REF', '$FORMAT', '$APPLY', '$OPEN',
 );
 
-# Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
+# Report each checker the spec names that validate lacks, and each misplaced
+# $REST; $EXACT's arguments are literals. Last: spec is a list's last item.
 sub _checknames {
-    my ($spec, $store, $path, $errs) = @_;
+    my ($spec, $store, $path, $errs, $last) = @_;
     my $name = _refname($spec);
     if (!is_none($name)) {
         if (_unknownname($name, $store)) {
             push @$errs, 'Unknown validator ' . $name . ' at field ' . pathify($path) . '.';
         }
+        elsif ('$REST' eq $name) {
+            push @$errs, _restmsg($path, ' must be the last element of an array.');
+        }
         return;
     }
 
-    if (islist($spec)) {
-        my $first = _refname($spec->[0]);
-        return if !is_none($first) && '$EXACT' eq $first;
+    my $head = islist($spec) ? _refname($spec->[0]) : NONE();
+    return if !is_none($head) && '$EXACT' eq $head;
+
+    if (!is_none($head) && '$REST' eq $head) {
+        if (!$last) {
+            push @$errs, _restmsg($path, ' must be the last element of an array.');
+        }
+        elsif (2 != size($spec)) {
+            push @$errs, _restmsg($path, ' must have exactly one spec.');
+        }
+        _checknames($spec->[1], $store, [ @$path, 1 ], $errs);
+        return;
     }
 
+    my $restkey = '`$REST`';
+    if (ismap($spec) && !is_none(_lookup($spec, $restkey)) && !is_none(_lookup($spec, '`$CHILD`'))) {
+        push @$errs, _restmsg($path, ' cannot be used with $CHILD.');
+    }
+
+    my $lastkey = islist($spec) ? strkey(size($spec) - 1) : undef;
     for my $key (@{ keysof($spec) }) {
-        _checknames($key, $store, $path, $errs) if ismap($spec);
-        _checknames(_lookup($spec, $key), $store, [ @$path, $key ], $errs);
+        _checknames($key, $store, $path, $errs) if ismap($spec) && $restkey ne $key;
+        _checknames(_lookup($spec, $key), $store, [ @$path, $key ], $errs,
+            defined $lastkey && $lastkey eq $key);
     }
     return;
 }
@@ -2536,11 +2589,11 @@ sub validate_STRING {
     my $t = typify($out);
     if (!($t & T_string)) {
         push @{ $inj->{errs} }, _invalid_type_msg($inj->{path}, S_string, $t, $out, 'V1010');
-        return NONE();
+        return $out;
     }
     if (defined $out && !ref($out) && $out eq '') {
         push @{ $inj->{errs} }, 'Empty string at ' . pathify($inj->{path}, 1);
-        return NONE();
+        return $out;
     }
     return $out;
 }
@@ -2578,7 +2631,7 @@ sub validate_TYPE {
     my $t = typify($out);
     if (!($t & $typev)) {
         push @{ $inj->{errs} }, _invalid_type_msg($inj->{path}, $tname, $t, $out, 'V1001');
-        return NONE();
+        return $out;
     }
     return $out;
 }
@@ -2648,6 +2701,59 @@ sub validate_CHILD {
         return SKIP();
     }
     return NONE();
+}
+
+# The members a spec does not name: the map form is a key, the list form a
+# tuple's last item. Each places clones of its spec for the loop to check.
+sub validate_REST {
+    my ($inj) = @_;
+    my $mode = $inj->{mode};
+    my $key = $inj->{key};
+    my $parent = $inj->{parent};
+    my $keys = $inj->{keys};
+    my $path = $inj->{path};
+    if ($mode == M_KEYPRE) {
+        my $resttm = _lookup($parent, $key);
+        my $tval = getprop($inj->{dparent}, getelem($path, -2));
+        if (ismap($tval)) {
+            for my $ckey (@{ keysof($tval) }) {
+                next if grep { $_ eq $ckey } @$keys;
+                setprop($parent, $ckey, clone($resttm));
+                push @$keys, $ckey;
+            }
+        }
+        _inj_setval($inj, NONE());
+        return NONE();
+    }
+    my $prior = $inj->{prior};
+    if ($mode != M_VAL || !defined $prior || !islist($prior->{parent}) || 0 != $inj->{keyI}) {
+        push @{ $inj->{errs} }, _restmsg(slice($path, 1), ' must be the last element of an array.');
+        return NONE();
+    }
+    $inj->{keyI} = size($keys);
+    $prior->{modify} = undef;
+    my $tuple = $prior->{parent};
+    my $slot = _listkey($prior->{key});
+    my $dlist = $prior->{dparent};
+    my $numitems = islist($dlist) ? size($dlist) : 0;
+    if ($numitems <= $slot) {
+        _inj_setval($inj, NONE(), 2);
+        return SKIP();
+    }
+    my $resttm = _lookup($parent, 1);
+    for my $i ($slot .. $numitems - 1) {
+        setprop($tuple, $i, clone($resttm));
+    }
+    for my $i (size($prior->{keys}) .. $numitems - 1) {
+        push @{ $prior->{keys} }, strkey($i);
+    }
+    $prior->{keyI}--;
+    return SKIP();
+}
+
+sub _restmsg {
+    my ($path, $problem) = @_;
+    return 'The $REST validator at field ' . pathify($path) . $problem;
 }
 
 sub validate_EXACT {
@@ -3013,7 +3119,8 @@ sub _validation {
         # which is itself truthy in Perl) leaves the map closed.
         my $open_flag = getprop($pval, '`$OPEN`');
         my $is_open = (is_jbool($open_flag) && ${$open_flag}) ? 1 : 0;
-        if (size($pkeys) > 0 && !$is_open) {
+        # Only a spec written as {} is open, even if named keys resolved away.
+        if ((size($pkeys) > 0 || $inj->{named}) && !$is_open) {
             my @badkeys;
             for my $ck (@$ckeys) {
                 if (is_none(_lookup($pval, $ck))) {
@@ -3112,6 +3219,7 @@ sub validate {
         '$LEN',      \&validate_LEN,
         '$RANGE',    \&validate_RANGE,
         '$LIKE',     \&validate_LIKE,
+        '$REST',     \&validate_REST,
     );
     my $errsmap = jm(S_DERRS, $errs);
     my $store = merge([$base, getdef($extra, _mkmap()), $errsmap], 1);

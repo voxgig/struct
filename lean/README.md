@@ -5,7 +5,7 @@ small, fixed API for manipulating JSON-shaped data: lookups, deep merge,
 by-example transform, by-example validate, tree walk, path get/set,
 selection. The behaviour is defined by the canonical TypeScript
 implementation and the shared `build/test/*.aon` corpus; this port runs
-the full corpus (1742 entries in 81 groups).
+the full corpus (1808 entries in 82 groups).
 
 ## Requirements
 

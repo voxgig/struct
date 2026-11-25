@@ -112,6 +112,7 @@ struct voxgig_injection {
   voxgig_value* modify_val; /* owned */
   voxgig_injection* prior;  /* not owned */
   voxgig_value* extra;      /* borrowed */
+  bool named;               /* current map node names keys of its own (not $ commands) */
 };
 
 voxgig_injection* voxgig_inj_new(voxgig_value* val, voxgig_value* parent);

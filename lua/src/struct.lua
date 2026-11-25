@@ -1889,6 +1889,7 @@ function Injection:new(val, parent)
     modify = NONE,
     prior = NONE,
     extra = NONE,
+    named = false,
   }
   setmetatable(o, self)
   return o
@@ -1978,7 +1979,10 @@ end
 function Injection:setval(val, ancestor)
   local parent
   if ancestor == nil or ancestor < 2 then
-    if NONE == val then
+    -- A list keeps the removed slot as a hole until inject's loop ends.
+    if NONE == val and islist(self.parent) then
+      parent = setprop(self.parent, self.key, SKIP)
+    elseif NONE == val then
       self.parent = delprop(self.parent, self.key)
       parent = self.parent
     else
@@ -2023,6 +2027,8 @@ local function inject(val, store, injdef)
 
   inj:descend()
 
+  inj.named = false
+
   -- Descend into node.
   if isnode(val) then
     local nodekeys
@@ -2040,6 +2046,7 @@ local function inject(val, store, injdef)
       table.sort(regular_keys)
       table.sort(ds_keys)
       nodekeys = flatten({ regular_keys, ds_keys })
+      inj.named = 0 < #regular_keys
     else
       nodekeys = {}
       for i = 1, #val do
@@ -2078,6 +2085,17 @@ local function inject(val, store, injdef)
 
       nkI = nkI + 1
     end
+
+    if islist(val) then
+      local kept = 0
+      for i = 1, #val do
+        if SKIP ~= val[i] then
+          kept = kept + 1
+          val[kept] = val[i]
+        end
+      end
+      slice(val, 0, kept, true)
+    end
   elseif S_string == valtype then
     inj.mode = M_VAL
     val = _injectstr(val, store, inj)
@@ -2091,6 +2109,9 @@ local function inject(val, store, injdef)
     local mkey = inj.key
     local mparent = inj.parent
     local mval = getprop(mparent, mkey)
+    if SKIP == mval then
+      mval = NONE
+    end
     inj.modify(mval, mkey, mparent, inj, store)
   end
 
@@ -2514,6 +2535,15 @@ injectorArgs = function(argTypes, args)
   return found
 end
 
+local function _includes(list, val)
+  for _, item in ipairs(list) do
+    if item == val then
+      return true
+    end
+  end
+  return false
+end
+
 -- Transform: resolve a reference to another part of the spec.
 -- Format: ['`$REF`', 'ref-path']
 local function transform_REF(inj, _val, _ref, store)
@@ -2521,7 +2551,7 @@ local function transform_REF(inj, _val, _ref, store)
     return NONE
   end
 
-  -- Get arguments: ['`$REF`', 'ref-path'].
+  -- ['`$REF`', 'ref-path']: a relative path starts where this slot is, so .x is a sibling.
   local refpath = getprop(inj.parent, 1)
   inj.keyI = size(inj.keys)
 
@@ -2529,11 +2559,22 @@ local function transform_REF(inj, _val, _ref, store)
   local specfn = getprop(store, S_DSPEC)
   local spec = specfn()
 
-  local dpath = slice(inj.path, 1)
-  local ref = getpath(spec, refpath, {
-    dpath = dpath,
-    dparent = getpath(spec, dpath),
-  })
+  local dpath = slice(inj.path, 1, -2)
+  local refinj = { dpath = dpath, dparent = getpath(spec, dpath) }
+  local ref = getpath(spec, refpath, refinj)
+
+  -- A chain of references that comes back to a path it has named names nothing.
+  local seen = { refpath }
+  local nextref = ref
+  while islist(nextref) and "`$REF`" == getprop(nextref, 0) do
+    local nextpath = getprop(nextref, 1)
+    if _includes(seen, nextpath) then
+      ref = NONE
+      break
+    end
+    table.insert(seen, nextpath)
+    nextref = getpath(spec, nextpath, refinj)
+  end
 
   local hasSubRef = false
   if isnode(ref) then
@@ -2776,13 +2817,13 @@ local function validate_STRING(inj)
   if 0 == (T_string & t) then
     local msg = _invalidTypeMsg(inj.path, S_string, t, out, "V1010")
     table.insert(inj.errs, msg)
-    return NONE
+    return out
   end
 
   if S_MT == out then
     local msg = "Empty string at " .. pathify(inj.path, 1)
     table.insert(inj.errs, msg)
-    return NONE
+    return out
   end
 
   return out
@@ -2812,7 +2853,7 @@ local function validate_TYPE(inj, _val, ref)
   local t = typify(nil == out and 1 < #inj.path and NOVAL or out)
   if 0 == (t & typev) then
     table.insert(inj.errs, _invalidTypeMsg(inj.path, tname, t, out, "V1001"))
-    return NONE
+    return out
   end
 
   return out
@@ -2904,6 +2945,63 @@ local function validate_CHILD(inj)
   end
 
   return NONE
+end
+
+local function _restmsg(path, problem)
+  return "The $REST validator at field " .. pathify(path) .. problem
+end
+
+-- The members a spec does not name: the map form is a key, the list form a
+-- tuple's last item. Each places clones of its spec for the loop to check.
+local function validate_REST(inj)
+  local mode, key, parent, keys, path = inj.mode, inj.key, inj.parent, inj.keys, inj.path
+
+  if M_KEYPRE == mode then
+    local resttm = getprop(parent, key)
+    local tval = denoval(getprop(inj.dparent, getelem(path, -2)))
+
+    if ismap(tval) then
+      for _, ckey in ipairs(keysof(tval)) do
+        if not _includes(keys, ckey) then
+          setprop(parent, ckey, clone(resttm))
+          table.insert(keys, ckey)
+        end
+      end
+    end
+
+    inj:setval(NONE)
+    return NONE
+  end
+
+  local prior = inj.prior
+  if M_VAL ~= mode or NONE == prior or not islist(prior.parent) or 0 ~= inj.keyI then
+    table.insert(inj.errs, _restmsg(slice(path, 1), " must be the last element of an array."))
+    return NONE
+  end
+
+  inj.keyI = size(keys)
+  prior.modify = NONE
+
+  local tuple = prior.parent
+  local slot = listkey(prior.key)
+  local dlist = prior.dparent
+  local numitems = islist(dlist) and size(dlist) or 0
+
+  if numitems <= slot then
+    inj:setval(NONE, 2)
+    return SKIP
+  end
+
+  local resttm = getprop(parent, 1)
+  for i = slot, numitems - 1 do
+    setprop(tuple, i, clone(resttm))
+  end
+  for i = size(prior.keys), numitems - 1 do
+    table.insert(prior.keys, i)
+  end
+
+  prior.keyI = prior.keyI - 1
+  return SKIP
 end
 
 ----------------------------------------------------------
@@ -3343,8 +3441,8 @@ _validation = function(pval, key, parent, inj)
     local ckeys = keysof(cval)
     local pkeys = keysof(pval)
 
-    -- Empty spec object {} means object can be open (any keys).
-    if 0 < size(pkeys) and true ~= getprop(pval, "`$OPEN`") then
+    -- Only a spec written as {} is open, even if named keys resolved away.
+    if (0 < size(pkeys) or inj.named) and true ~= getprop(pval, "`$OPEN`") then
       local badkeys = {}
 
       for _, ckey in ipairs(ckeys) do
@@ -3456,6 +3554,7 @@ validate = function(data, spec, injdef)
       ["$LEN"] = validate_LEN,
       ["$RANGE"] = validate_RANGE,
       ["$LIKE"] = validate_LIKE,
+      ["$REST"] = validate_REST,
     },
 
     getdef(extra, {}),
@@ -3757,25 +3856,45 @@ local VALIDATE_NAMES = {
   "$OPEN",
 }
 
--- Report each checker the spec names that validate lacks; $EXACT's arguments are literals.
-_checknames = function(spec, store, path, errs)
+-- Report each checker the spec names that validate lacks, and each misplaced
+-- $REST; $EXACT's arguments are literals. Last: spec is a list's last item.
+_checknames = function(spec, store, path, errs, last)
   local name = _refname(spec)
   if NONE ~= name then
     if _unknownname(name, store) then
       table.insert(errs, "Unknown validator " .. name .. " at field " .. pathify(path) .. ".")
+    elseif "$REST" == name then
+      table.insert(errs, _restmsg(path, " must be the last element of an array."))
     end
     return
   end
 
-  if islist(spec) and "$EXACT" == _refname(spec[1]) then
+  local head = islist(spec) and _refname(spec[1]) or NONE
+  if "$EXACT" == head then
     return
   end
 
+  if "$REST" == head then
+    if true ~= last then
+      table.insert(errs, _restmsg(path, " must be the last element of an array."))
+    elseif 2 ~= size(spec) then
+      table.insert(errs, _restmsg(path, " must have exactly one spec."))
+    end
+    _checknames(spec[2], store, flatten({ path, 1 }), errs)
+    return
+  end
+
+  local restkey = "`$REST`"
+  if ismap(spec) and NONE ~= getprop(spec, restkey) and NONE ~= getprop(spec, "`$CHILD`") then
+    table.insert(errs, _restmsg(path, " cannot be used with $CHILD."))
+  end
+
+  local lastkey = islist(spec) and strkey(size(spec) - 1) or NONE
   for _, key in ipairs(keysof(spec)) do
-    if ismap(spec) then
+    if ismap(spec) and restkey ~= key then
       _checknames(key, store, path, errs)
     end
-    _checknames(getprop(spec, key), store, flatten({ path, key }), errs)
+    _checknames(getprop(spec, key), store, flatten({ path, key }), errs, lastkey == key)
   end
 end
 

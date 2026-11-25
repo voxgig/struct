@@ -242,7 +242,8 @@ plain list spec is a tuple: `['`$STRING`']` matches a list of exactly one
 string. A spec is closed, so `['a', 'b']` fails against it with
 `Unexpected keys at field <root>: 1`, just as a map fails on a key its spec
 does not name. `'`$OPEN`': true` opens a map spec. An empty spec is open too:
-`[]` accepts any list, and `{}` accepts any map.
+`[]` accepts any list, and `{}` accepts any map. Only a spec written empty is
+open, so `{ a: '`$ANY`' }` still refuses `{ b: 1 }` when the data has no `a`.
 
 ### Validate and collect *all* errors instead of throwing
 ```js
@@ -300,6 +301,21 @@ query the list form works the same; `select`'s own key form,
 `` { code: { '`$LIKE`': '^A' } } ``, matches the value's text, numbers
 included.
 
+### Type the keys a spec does not name
+A record often has a few fixed fields and any number of others of one type:
+```js
+S.validate(user, { name: '`$STRING`', '`$REST`': '`$INTEGER`' })
+S.validate(row, ['`$STRING`', ['`$REST`', '`$INTEGER`']])
+```
+In a map spec, `'`$REST`': spec` checks each key the spec does not name, so
+`{ name: 'Ada', age: 36 }` passes and `{ name: 'Ada', nick: 'A' }` fails with
+`Expected field nick to be integer, but found string: A.` As the last item of
+a list spec, `['`$REST`', spec]` checks every item after the named ones, so
+the second spec accepts `['a']` and `['a', 1, 2]`. A map spec with `$REST`
+never reports an unexpected key, and a null in the data is a value like any
+other. `$REST` anywhere but a list spec's last item, or beside `$CHILD`, fails
+before any data is read.
+
 ### Reuse a spec, or nest one inside itself
 A tree has the same shape at every level, so its spec has to name itself:
 ```js
@@ -311,7 +327,10 @@ were written in its place, and a path to a sibling reuses its spec the same
 way. The path names a place in the spec, not in the data. A reference that
 reaches itself stops wherever the data does, so the tree ends at its leaves;
 any other reference checks its field like the spec it names, required fields
-included.
+included. A path that starts with a dot counts from the map or list holding
+the reference: `'.x'` names a sibling, and `'..x'` a sibling of that map. A
+path that names nothing, such as one that climbs past the top of the spec,
+leaves its field with no spec, which a closed map refuses.
 
 ### Require an exact literal (no type coercion)
 ```js
@@ -487,7 +506,8 @@ named function from `extra`).
 `$CHILD` (apply a sub-spec to every child), `$EXACT` (equal a literal
 exactly), `$NOF` (a count of specs admits the value), `$ALL` (every spec
 admits the value), `$LEN` (a length within a bound), `$RANGE` (a number
-within a bound), `$LIKE` (a string a pattern finds). A spec that names any
+within a bound), `$LIKE` (a string a pattern finds), `$REST` (the keys or
+items a spec does not name). A spec that names any
 other checker fails before any data is read, with `Unknown validator $FOO at
 field a.`
 

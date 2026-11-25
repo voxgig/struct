@@ -50,6 +50,7 @@ and inj = {
   mutable modify : modifyfn option;
   mutable prior : inj option;
   mutable extra : value;
+  mutable named : bool;            (* map node names keys of its own, not $ commands *)
 }
 
 (* injdef: the loose Partial<Injection> the public API accepts. *)
@@ -1076,7 +1077,7 @@ and new_inj v parent =
     keys = lst [Str s_dtop]; key = Str s_dtop; ival = v; parent;
     path = lst [Str s_dtop]; nodes = lst [parent]; handler = inject_handler;
     errs = empty_list (); meta = empty_map (); dparent = Noval; dpath = lst [Str s_dtop];
-    base = Str s_dtop; modify = None; prior = None; extra = Noval }
+    base = Str s_dtop; modify = None; prior = None; extra = Noval; named = false }
 
 and inj_descend inj =
   (match inj.meta with Map m ->
@@ -1106,7 +1107,7 @@ and inj_child inj keyi keys =
     handler = inj.handler; errs = inj.errs; meta = inj.meta; base = inj.base;
     modify = inj.modify; prior = Some inj;
     dpath = (match inj.dpath with List r -> lst !r | _ -> inj.dpath);
-    dparent = inj.dparent; extra = inj.extra;
+    dparent = inj.dparent; extra = inj.extra; named = false;
   } in
   cinj
 
@@ -1115,7 +1116,9 @@ and inj_setval ?(ancestor = 1) inj v =
     if ancestor < 2 then inj.parent, inj.key
     else getelem inj.nodes (Num (float_of_int (- ancestor))), getelem inj.path (Num (float_of_int (- ancestor)))
   in
-  if is_noval v then delprop target key else setprop target key v
+  (* A list keeps the removed slot as a hole until inject's loop ends. *)
+  if is_noval v then (if ancestor < 2 && islist target then setprop target key skip else delprop target key)
+  else setprop target key v
 
 (* ----- inject ----- *)
 
@@ -1139,6 +1142,7 @@ and inject ?(inj = INone) v store =
       i
   in
   ignore (inj_descend state);
+  state.named <- false;
   let v =
     if isnode v then begin
       let nodekeys = ref (
@@ -1147,6 +1151,7 @@ and inject ?(inj = INone) v store =
           let ks = List.map fst m.entries in
           let normal = List.sort compare (List.filter (fun k -> not (String.contains k '$')) ks) in
           let trans = List.sort compare (List.filter (fun k -> String.contains k '$') ks) in
+          state.named <- normal <> [];
           normal @ trans
         | List r -> List.mapi (fun i _ -> string_of_int i) !r
         | _ -> [])
@@ -1171,6 +1176,7 @@ and inject ?(inj = INone) v store =
         nki := childinj.keyi + 1;
         ignore continue
       done;
+      (match v with List r -> r := List.filter (fun x -> not (is_skip x)) !r | _ -> ());
       v
     end else if (match v with Str _ -> true | _ -> false) then begin
       state.mode <- m_val;
@@ -1182,7 +1188,7 @@ and inject ?(inj = INone) v store =
   (match state.modify with
    | Some f when not (is_skip v) ->
      let mkey = state.key in let mparent = state.parent in let mval = getprop mparent mkey in
-     f mval mkey mparent state
+     f (if is_skip mval then Noval else mval) mkey mparent state
    | _ -> ());
   state.ival <- v;
   lookup_ state.parent (Str s_dtop)
@@ -1231,7 +1237,7 @@ and isfunc_handler _i = true
 
 (* ----- transform commands ----- *)
 
-and transform_delete inj _v _ref _store = ignore (delprop inj.parent inj.key); Noval
+and transform_delete inj _v _ref _store = ignore (inj_setval inj Noval); Noval
 
 and transform_copy inj _v _ref _store =
   if inj.mode = m_keypre || inj.mode = m_keypost then inj.key
@@ -1419,7 +1425,18 @@ and transform_ref inj _v _ref store =
     (match spec_func with
      | Func f ->
        let spec = f inj Noval "" Noval in
-       let refv = getpath ~inj:INone spec refpath in
+       (* A relative path starts where this slot is, so .x is a sibling. *)
+       let dpath = slice ~start:(Num 1.0) ~stop:(Num (-2.0)) inj.path in
+       let dparent = getpath ~inj:INone spec dpath in
+       let refinj = IDef { (default_injdef ()) with d_dpath = dpath; d_dparent = dparent } in
+       let found = getpath ~inj:refinj spec refpath in
+       (* A chain of references that comes back to a path it has named names nothing. *)
+       let rec cycles seen next =
+         islist next && lookup_ next (Num 0.0) = Str "`$REF`"
+         && (let np = lookup_ next (Num 1.0) in
+             List.exists (deepequal np) seen || cycles (np :: seen) (getpath ~inj:refinj spec np))
+       in
+       let refv = if cycles [refpath] found then Noval else found in
        let has_sub = ref false in
        (if isnode refv then ignore (walk ~before:(fun _k v2 _p _path -> (if v2 = Str "`$REF`" then has_sub := true); v2) refv));
        (* A recursive reference stops where the data does. *)
@@ -1603,8 +1620,8 @@ and invalid_type_msg path needtype vt v _whence =
 and validate_string inj _v _ref _store =
   let out = lookup_ inj.dparent inj.key in
   let t = typify out in
-  if (t_string land t) = 0 then (push_err inj (invalid_type_msg inj.path s_string t out "V1010"); Noval)
-  else if out = Str s_mt then (push_err inj ("Empty string at " ^ pathify ~startin:(Num 1.0) inj.path); Noval)
+  if (t_string land t) = 0 then (push_err inj (invalid_type_msg inj.path s_string t out "V1010"); out)
+  else if out = Str s_mt then (push_err inj ("Empty string at " ^ pathify ~startin:(Num 1.0) inj.path); out)
   else out
 
 and push_err inj msg = ignore (setprop inj.errs (Num (float_of_int (size inj.errs))) (Str msg))
@@ -1616,7 +1633,7 @@ and validate_type inj _v refstr _store =
   let typev = if tname = s_nil then typev0 lor t_null else typev0 in
   let out = lookup_ inj.dparent inj.key in
   let t = typify out in
-  if (t land typev) = 0 then (push_err inj (invalid_type_msg inj.path tname t out "V1001"); Noval)
+  if (t land typev) = 0 then (push_err inj (invalid_type_msg inj.path tname t out "V1001"); out)
   else out
 
 and validate_any inj _v _ref _store = lookup_ inj.dparent inj.key
@@ -1660,6 +1677,51 @@ and validate_child inj _v _ref _store =
       skip
     end
   end else Noval
+
+(* The members a spec does not name: the map form is a key, the list form a
+   tuple's last item. Each places clones of its spec for the loop to check. *)
+and validate_rest inj _v _ref _store =
+  let parent = inj.parent in let key = inj.key in let path = inj.path in let keys = inj.keys in
+  if inj.mode = m_keypre then begin
+    let resttm = lookup_ parent key in
+    let tval = getprop inj.dparent (getelem path (Num (-2.0))) in
+    (if ismap tval then
+       List.iter (fun ckey ->
+           if not (List.mem (Str ckey) (match keys with List r -> !r | _ -> [])) then begin
+             ignore (setprop parent (Str ckey) (clone resttm));
+             ignore (setprop keys (Num (float_of_int (size keys))) (Str ckey))
+           end) (keysof tval));
+    ignore (inj_setval inj Noval);
+    Noval
+  end else
+    match inj.prior with
+    | Some prior when inj.mode = m_val && islist prior.parent && inj.keyi = 0 ->
+      inj.keyi <- size keys;
+      prior.modify <- None;
+      let tuple = prior.parent in
+      let dlist = prior.dparent in
+      let numitems = if islist dlist then size dlist else 0 in
+      (match list_key prior.key with
+       | Some slot when float_of_int numitems <= slot -> ignore (inj_setval ~ancestor:2 inj Noval)
+       | slot ->
+         let resttm = lookup_ parent (Num 1.0) in
+         (match slot with
+          | Some s ->
+            for i = int_of_float s to numitems - 1 do
+              ignore (setprop tuple (Num (float_of_int i)) (clone resttm))
+            done
+          | None -> ());
+         for i = size prior.keys to numitems - 1 do
+           ignore (setprop prior.keys (Num (float_of_int (size prior.keys)))
+                     (Str (strkey ~key:(Num (float_of_int i)) ())))
+         done;
+         prior.keyi <- prior.keyi - 1);
+      skip
+    | _ ->
+      push_err inj (restmsg (slice ~start:(Num 1.0) path) " must be the last element of an array.");
+      Noval
+
+and restmsg path problem = "The $REST validator at field " ^ pathify path ^ problem
 
 and validate_exact inj _v _ref _store =
   if inj.mode = m_val then begin
@@ -1930,19 +1992,34 @@ and slotval inj =
   | None -> inj.dparent
   | Some prior -> lookup_ prior.dparent prior.key
 
-(* Report each checker the spec names that validate lacks; $EXACT's arguments are literals. *)
-and checknames spec store path errs =
+(* Report each checker the spec names that validate lacks, and each misplaced
+   $REST; $EXACT's arguments are literals. Last: spec is a list's last item. *)
+and checknames ?(last = false) spec store path errs =
+  let push msg = ignore (setprop errs (Num (float_of_int (size errs))) (Str msg)) in
   match refname spec with
   | Some name ->
     if unknownname name store then
-      ignore (setprop errs (Num (float_of_int (size errs)))
-                (Str ("Unknown validator " ^ name ^ " at field " ^ pathify (lst path) ^ ".")))
+      push ("Unknown validator " ^ name ^ " at field " ^ pathify (lst path) ^ ".")
+    else if name = "$REST" then
+      push (restmsg (lst path) " must be the last element of an array.")
   | None ->
-    if not (islist spec && refname (lookup_ spec (Num 0.0)) = Some "$EXACT") then
+    let head = if islist spec then refname (lookup_ spec (Num 0.0)) else None in
+    if head = Some "$EXACT" then ()
+    else if head = Some "$REST" then begin
+      if not last then push (restmsg (lst path) " must be the last element of an array.")
+      else if size spec <> 2 then push (restmsg (lst path) " must have exactly one spec.");
+      checknames (lookup_ spec (Num 1.0)) store (path @ [Num 1.0]) errs
+    end else begin
+      let restkey = "`$REST`" in
+      if ismap spec && not (is_noval (lookup_ spec (Str restkey)))
+         && not (is_noval (lookup_ spec (Str "`$CHILD`"))) then
+        push (restmsg (lst path) " cannot be used with $CHILD.");
+      let lastkey = if islist spec then Some (strkey ~key:(Num (float_of_int (size spec - 1))) ()) else None in
       List.iter (fun k ->
-          if ismap spec then checknames (Str k) store path errs;
-          checknames (lookup_ spec (Str k)) store (path @ [Str k]) errs)
+          if ismap spec && k <> restkey then checknames (Str k) store path errs;
+          checknames ~last:(lastkey = Some k) (lookup_ spec (Str k)) store (path @ [Str k]) errs)
         (keysof spec)
+    end
 
 (* The name a whole-string reference gives, when it is a checker name in any case. *)
 and refname v =
@@ -1975,7 +2052,8 @@ and validation pval key parent inj =
           else begin
             let ckeys = keysof cval in
             let pkeys = keysof pval in
-            if List.length pkeys > 0 && not (getprop pval (Str s_bopen) = Bool true) then begin
+            (* Only a spec written as {} is open, even if named keys resolved away. *)
+            if (List.length pkeys > 0 || inj.named) && not (getprop pval (Str s_bopen) = Bool true) then begin
               let badkeys = List.filter (fun ck -> is_noval (lookup_ pval (Str ck))) ckeys in
               if List.length badkeys > 0 then
                 push_err inj ("Unexpected keys at field " ^ pathify ~startin:(Num 1.0) inj.path ^ s_viz ^ String.concat ", " badkeys)
@@ -2030,6 +2108,7 @@ and validate ?(inj = INone) data spec =
   put "$LEN" (Func validate_len);
   put "$RANGE" (Func validate_range);
   put "$LIKE" (Func validate_like);
+  put "$REST" (Func validate_rest);
   let store = merge ~maxdepth:(Num 1.0) (lst [base; (if is_noval extra then empty_map () else extra); Map { entries = [(s_derrs, errs)] }]) in
   let meta = (match inj with IDef d when not (is_noval d.d_meta) -> d.d_meta | _ -> empty_map ()) in
   ignore (setprop meta (Str s_bexact) (getprop ~alt:(Bool false) meta (Str s_bexact)));

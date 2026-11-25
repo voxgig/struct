@@ -383,6 +383,7 @@ Quote the checker in backticks inside a `validate` spec, e.g. `` `$STRING` ``.
 | `$LEN`      | `` ['`$LEN`', n, spec?] ``: the value's length must be within `n`, a bound written as for `$NOF`. Strings count code points, lists elements, maps keys. |
 | `$RANGE`    | `` ['`$RANGE`', bound, spec?] ``: the value must be a number within the bound, a map of `min` or `gt` and `max` or `lt`. |
 | `$LIKE`     | `` ['`$LIKE`', pattern, spec?] ``: the value must be a string the pattern finds, with the port's own regex engine. |
+| `$REST`     | `` '`$REST`': spec `` in a map spec checks each key the spec does not name; `` ['`$REST`', spec] `` as a list spec's last item checks each item after the named ones. |
 
 A spec admits a value when validating the value against it finds no error
 and gives back every member of the value unchanged. A count of `{min: 1}`
@@ -395,7 +396,9 @@ port's regex means; one inside the RE2 subset matches the same everywhere on
 single-line ASCII text.
 `` ['`$REF`', path] `` works in a validate spec too: it checks a value against
 the spec at `path`, which may contain the reference itself, so a recursive
-shape such as a tree needs no checker of its own.
+shape such as a tree needs no checker of its own. A path that starts with a
+dot counts from the map or list holding the reference, so `'.x'` names a
+sibling.
 
 A spec that names a checker `validate` does not define, such as
 `` `$FOO` `` or the misspelling `` `$string` ``, is rejected before any data

@@ -180,7 +180,7 @@ const human = try S.stringify(allocator, v, null);   // {a:1,b:[2,3]}
 <!-- => "{a:1,b:[2,3]}" -->
 
 For more task recipes (`$EACH`, `$MERGE`, `$FORMAT`, `$NOF`, `$ALL`,
-`$LEN`, `$RANGE`, `$LIKE`, `$EXACT`, …) see the language-neutral
+`$LEN`, `$RANGE`, `$LIKE`, `$REST`, `$EXACT`, …) see the language-neutral
 [How-to guides](../DOCS.md#2-how-to-guides) — the spec syntax is identical;
 only the host literals and the leading `allocator` differ.
 
@@ -324,7 +324,7 @@ all tests pass — `*MapRef`/`*ListRef` cross-references confuse arena
 teardown. The [`Makefile`](./Makefile) `test` target filters this: if the
 output reports `N/N tests passed` with `N == total`, the run is treated as
 successful. `zig build test` runs the suite as 60 `test` blocks, currently
-60/60 (see [`../REPORT.md`](../design/REPORT.md)).
+61/61 (see [`../REPORT.md`](../design/REPORT.md)).
 
 Tests live in [`test/`](./test/); the runner
 ([`test/runner.zig`](./test/runner.zig)) loads the shared corpus from

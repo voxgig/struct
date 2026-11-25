@@ -272,6 +272,7 @@ public func transform_PACK(_ inj: Injection, _ val: Value, _ ref: String, _ stor
 
 public func transform_REF(_ inj: Injection, _ val: Value, _ ref: String, _ store: Value) -> Value {
   if inj.mode != M_VAL { return .noval }
+  // ['`$REF`', 'ref-path']: a relative path starts where this slot is, so .x is a sibling.
   let refpath = lookup(inj.parent, .int(1))
   inj.keyI = inj.keys.count
   let specFn = getprop(store, .string(S_DSPEC))
@@ -281,14 +282,26 @@ public func transform_REF(_ inj: Injection, _ val: Value, _ ref: String, _ store
   } else {
     spec = specFn
   }
-  let dpath = slice(.list(VList(inj.path.map { Value.string($0) })), 1)
+  let dpath = slice(.list(VList(inj.path.map { Value.string($0) })), 1, -2)
   let dpathList = dpath.asList?.items.map { strkey($0) } ?? []
   let subInj = Injection(val: spec, parent: spec)
   subInj.dpath = dpathList
   subInj.dparent = getpath(spec, dpath)
   subInj.base = S_DTOP
   subInj.meta = inj.meta
-  let resolved = getpath(spec, refpath, subInj)
+  var resolved = getpath(spec, refpath, subInj)
+  // A chain of references that comes back to a path it has named names nothing.
+  var seen = [refpath]
+  var next = resolved
+  while next.isList && lookup(next, .int(0)) == .string("`$REF`") {
+    let nextpath = lookup(next, .int(1))
+    if seen.contains(nextpath) {
+      resolved = .noval
+      break
+    }
+    seen.append(nextpath)
+    next = getpath(spec, nextpath, subInj)
+  }
   var hasSubRef = false
   if isnode(resolved) {
     _ = walk(

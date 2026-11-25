@@ -1056,6 +1056,11 @@ class StructTests {
   }
 
   @Test
+  void validateRest() {
+    runValidateSet((Map<String, Object>) validateSpec.get("rest"), false);
+  }
+
+  @Test
   void validateUnknown() {
     runValidateSet((Map<String, Object>) validateSpec.get("unknown"), false);
   }

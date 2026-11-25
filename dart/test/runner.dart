@@ -434,6 +434,7 @@ void runAll(o.RunPack pack, dynamic spec) {
     'len',
     'range',
     'like',
+    'rest',
     'unknown'
   ]) {
     rs('validate.$gn', s.getprop(validates, gn),

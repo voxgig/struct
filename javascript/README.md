@@ -615,7 +615,7 @@ Used as backtick-quoted strings inside a `validate` spec.
 ```
 $MAP   $LIST   $STRING   $NUMBER   $INTEGER   $DECIMAL  $BOOLEAN
 $NULL  $NIL    $FUNCTION $INSTANCE $ANY       $CHILD    $EXACT
-$NOF   $ALL    $LEN      $RANGE    $LIKE
+$NOF   $ALL    $LEN      $RANGE    $LIKE      $REST
 ```
 
 `` ['`$NOF`', n, spec, …] `` holds when as many specs admit the value as `n`
@@ -632,6 +632,9 @@ pattern finds, with JavaScript's `RegExp`, anywhere in it unless the
 pattern is anchored. `$LEN`, `$RANGE` and `$LIKE` take at most one spec,
 which must also admit the value. `min` and `max` include their bound, while
 `gt` and `lt` exclude it.
+`` '`$REST`': spec `` in a map spec checks each key the spec does not name;
+`` ['`$REST`', spec] `` as a list spec's last item checks each item after
+the named ones.
 A spec that names any other checker, such as the misspelling
 `` '`$string`' ``, is rejected before any data is read. See the
 [top-level README](../README.md) for what each checker accepts.
