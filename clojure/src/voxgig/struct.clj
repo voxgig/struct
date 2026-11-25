@@ -964,10 +964,13 @@
 (defn- inj-setval
   ([^Inj inj val] (inj-setval inj val nil))
   ([^Inj inj val ancestor]
-   (let [[target key] (if (or (nil? ancestor) (< ancestor 2))
+   (let [near (or (nil? ancestor) (< ancestor 2))
+         [target key] (if near
                         [(ig inj :parent) (ig inj :key)]
                         [(getelem (ig inj :nodes) (- ancestor)) (getelem (ig inj :path) (- ancestor))])]
      (cond
+       ;; A list keeps the removed slot as a hole until inject's loop ends.
+       (and (nil? val) near (islist target)) (setprop target key SKIP)
        (nil? val) (delprop target key)
        (identical? val HELDNULL) (setprop target key nil)
        :else (setprop target key val)))))
@@ -1029,6 +1032,8 @@
                          (_injectstr nodekey store childinj)
                          (reset! nodekeys (ig childinj :keys)))
                        (recur (inc (ig childinj :keyI)))))))
+               (when (islist val)
+                 (.removeIf ^List val (reify java.util.function.Predicate (test [_ x] (identical? x SKIP)))))
                val)
 
              (string? val)
@@ -1043,7 +1048,7 @@
        ;; Custom modification (runs after special commands).
        (when (and (ig inj :modify) (not (identical? val SKIP)))
          (let [mkey (ig inj :key) mparent (ig inj :parent) mval (getprop mparent mkey)]
-           ((ig inj :modify) mval mkey mparent inj)))
+           ((ig inj :modify) (when-not (identical? mval SKIP) mval) mkey mparent inj)))
 
        (is! inj :val val)
 
@@ -1098,7 +1103,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- transform_DELETE [inj _val _ref _store]
-  (delprop (ig inj :parent) (ig inj :key)) nil)
+  (inj-setval inj nil) nil)
 
 (defn- transform_COPY [inj _val _ref _store]
   (let [mode (ig inj :mode) key (ig inj :key)]
@@ -1554,7 +1559,7 @@
         path (ig inj :path) prior (ig inj :prior)]
     (cond
       (= mode S-MKEYPRE)
-      (let [resttm (getprop parent (ig inj :key))
+      (let [resttm (_lookup parent (ig inj :key))
             tval (getprop (ig inj :dparent) (getelem path -2))]
         (when (ismap tval)
           (doseq [ckey (keysof tval)]
