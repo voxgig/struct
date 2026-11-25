@@ -2074,8 +2074,14 @@ def vgi-inj-setval fn [[inj:Any val:Any ancestor:Integer] [Any] [
     ]
   )
   if (val is None) [
-    def r (vg-delprop tgt tkey)
-    r
+    if ((ancestor lt 2) and (vg-islist tgt)) [
+      # A list keeps the removed slot as a hole until inject's loop ends.
+      def r (vg-setprop tgt tkey vg-skip-marker)
+      r
+    ] [
+      def r (vg-delprop tgt tkey)
+      r
+    ]
   ] [
     def r (vg-setprop tgt tkey val)
     r
@@ -2217,6 +2223,21 @@ def vgl-inject-children fn [[nki:Integer nodekeys:Any val:Any store:Any inj:Any]
   ]
 ]]
 
+# Move a list's filled slots down over its holes; the count kept.
+def vgl-compact fn [[i:Integer kept:Integer xs:Any] [Integer] [
+  if (i gte (size xs)) [kept] [
+    def e (xs get i)
+    def k1 (
+      if (vg-is-skip e) [kept] [
+        (xs set kept e) drop
+        kept add 1
+      ]
+    )
+    def r (vgl-compact (i add 1) k1 xs)
+    r
+  ]
+]]
+
 def vg-inject fn [[val:Any store:Any injdef:Any] [Any] [
   def idf (if (vg-is-noarg injdef) [none] [injdef])
   def isinj (
@@ -2254,6 +2275,11 @@ def vg-inject fn [[val:Any store:Any injdef:Any] [Any] [
     if (vg-isnode val) [
       def nodekeys (vgi-inject-nodekeys val inj)
       (vgl-inject-children 0 nodekeys val store inj) drop
+      if (vg-islist val) [
+        def kept (vgl-compact 0 0 val)
+        (vgl-slice-shrink val kept) drop
+        none
+      ] [none] drop
       val
     ] [
       if (val is String) [
@@ -2272,7 +2298,8 @@ def vg-inject fn [[val:Any store:Any injdef:Any] [Any] [
   if ((vg-isfunc imod) and (skiprv not)) [
     def mkey (inj get "key")
     def mparent (inj get "parent")
-    def mval (vg-getprop mparent mkey vg-noarg)
+    def mval0 (vg-getprop mparent mkey vg-noarg)
+    def mval (if (vg-is-skip mval0) [none] [mval0])
     def mf (vgi-fnarg imod)
     (vgi-call5 mval mkey mparent inj store (mf/v)) drop
     none
@@ -3257,7 +3284,7 @@ def vg-v-rest fn [[inj:Any val:Any iref:Any store:Any] [Any] [
   def path (inj get "path")
   def r (
     if ((inj get "mode") eq 1) [
-      def resttm (vg-getprop parent (inj get "key") vg-noarg)
+      def resttm (vgi-lookup parent (inj get "key"))
       def tval (vg-getprop (inj get "dparent") (vg-getelem path -2 vg-noarg) vg-noarg)
       if (vg-ismap tval) [
         (vgl-vrest-keys 0 (vg-keysof tval) parent resttm vkeys) drop
