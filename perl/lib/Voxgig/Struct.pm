@@ -1733,8 +1733,14 @@ sub _inj_setval {
         $target = $inj->{nodes}[ $nlen - $ancestor ];
         $tkey   = $inj->{path}[  $plen - $ancestor ];
     }
-    if (is_none($val)) { delprop($target, $tkey) }
-    else               { setprop($target, $tkey, $val) }
+    if (!is_none($val)) { setprop($target, $tkey, $val) }
+    elsif ((!defined $ancestor || $ancestor < 2) && islist($target)) {
+        # A list keeps the removed slot as a hole until inject's loop ends;
+        # setprop ignores SKIP, so the hole is written directly.
+        my $k = _listkey($tkey);
+        $target->[$k] = $SKIP if defined $k && $k >= 0 && $k < @$target;
+    }
+    else { delprop($target, $tkey) }
     return $target;
 }
 
@@ -1858,6 +1864,7 @@ sub inject {
             }
             $nkI++;
         }
+        @$val = grep { !(ref $_ && refaddr($_) == refaddr($SKIP)) } @$val if islist($val);
     }
     elsif (defined $val && !ref($val) && _is_string_sv($val)) {
         $inj->{mode} = M_VAL;
@@ -1871,6 +1878,7 @@ sub inject {
         my $mkey = $inj->{key};
         my $mparent = $inj->{parent};
         my $mval = getprop($mparent, $mkey);
+        $mval = NONE() if ref $mval && refaddr($mval) == refaddr($SKIP);
         $inj->{modify}->($mval, $mkey, $mparent, $inj, $store);
     }
 
@@ -2705,7 +2713,7 @@ sub validate_REST {
     my $keys = $inj->{keys};
     my $path = $inj->{path};
     if ($mode == M_KEYPRE) {
-        my $resttm = getprop($parent, $key);
+        my $resttm = _lookup($parent, $key);
         my $tval = getprop($inj->{dparent}, getelem($path, -2));
         if (ismap($tval)) {
             for my $ckey (@{ keysof($tval) }) {
