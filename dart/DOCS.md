@@ -122,7 +122,7 @@ it, and `make build` compiles `lib/` alone.
 omni's value model and this port's are the same plain Dart types, so the only
 conversion there is to make is omni's `ABSENT`, which this port spells `null`.
 
-Every group the corpus defines runs — 1801 entries in 82 groups —
+Every group the corpus defines runs — 1808 entries in 82 groups —
 plus the two `check` entries (`DEF.client`, client-scoped options,
 `contextify`) and three single entries that are not part of any set. Keep it
 green, keep `python3 ../tools/check_parity.py` green, and add no runtime

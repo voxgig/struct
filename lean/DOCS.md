@@ -164,7 +164,7 @@ make lint    # clean, warnings-free compile = pass
 `make test` runs the shared corpus (`../build/test/test.json`) through the
 port on [voxgig/omni](https://github.com/voxgig/omni), the shared test runner
 — so the entry loop, the comparison and the `err` and `match` handling are
-literally the same code every other port runs. **1801** entries over 82
+literally the same code every other port runs. **1808** entries over 82
 groups. omni is a local checkout the Makefile finds via `$OMNI_HOME` or
 beside this repository and copies into `.omni-build/`; `lakefile.toml`
 declares it as a lean_lib only the runner imports, so `make build` compiles

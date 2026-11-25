@@ -220,7 +220,7 @@ language-neutral form:
   `transform`, `validate`, `select`, …) preserve it literally.
 
 [`../REPORT.md`](../design/REPORT.md) records this port as **already Group A**;
-the shared corpus passes 1801/1801 assertions here. If your data source
+the shared corpus passes 1808/1808 assertions here. If your data source
 returns `null` for "not set", decide which
 you mean before handing it to `struct`. The corpus bridges the two with
 the `"__NULL__"` / `"__UNDEF__"` / `"__EXISTS__"` markers (see
@@ -275,7 +275,7 @@ consumed as a local checkout `build.gradle.kts` finds via `$OMNI_HOME` or
 beside this repository, in its own source set so it reaches the tests and
 nothing else.
 
-`StructCorpusTest` runs every group the corpus defines: 1801 entries in 82
+`StructCorpusTest` runs every group the corpus defines: 1808 entries in 82
 groups. `ClientTest` runs the two `check` entries —
 `DEF.client`, client-scoped options, and `contextify`. `StructTests` holds
 what the corpus shape cannot express: identity, presence, and the hand-built
