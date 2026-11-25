@@ -1523,7 +1523,8 @@ static voxgig_value* va_REST(voxgig_injection* inj, voxgig_value* val, const cha
   (void)ud;
   if (inj->mode == VOXGIG_M_KEYPRE) {
     voxgig_value* keyv = voxgig_new_string(inj->key);
-    voxgig_value* resttm = voxgig_getprop(inj->parent, keyv, NULL);
+    voxgig_value* stored = voxgig_lookup(inj->parent, keyv);
+    voxgig_value* resttm = stored ? voxgig_retain(stored) : voxgig_new_undef();
     voxgig_release(keyv);
     const char* pkey = inj->path.len >= 2 ? inj->path.data[inj->path.len - 2] : "";
     voxgig_value* pkv = voxgig_new_string(pkey);
