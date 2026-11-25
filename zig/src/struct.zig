@@ -2238,7 +2238,10 @@ pub const Injection = struct {
     pub fn setval(self: *Injection, val: JsonValue, ancestor: usize) !JsonValue {
         const a = self.allocator;
         if (ancestor < 2) {
-            if (val == .null) {
+            // A list keeps the removed slot as a hole until inject's loop ends.
+            if (val == .null and self.parent == .array) {
+                self.parent = setprop(a, self.parent, JsonValue{ .string = self.key }, HOLE) catch self.parent;
+            } else if (val == .null) {
                 self.parent = delprop(a, self.parent, JsonValue{ .string = self.key }) catch self.parent;
             } else {
                 self.parent = setprop(a, self.parent, JsonValue{ .string = self.key }, val) catch self.parent;
@@ -2293,6 +2296,18 @@ pub const Injection = struct {
         }
     }
 };
+
+// The marker setval leaves in a list slot it removes, until inject's loop for
+// the list ends: a function, so no data value can equal it.
+fn holeFn(_: Allocator) anyerror!JsonValue {
+    return .null;
+}
+
+const HOLE = JsonValue{ .function = &holeFn };
+
+fn ishole(val: JsonValue) bool {
+    return val == .function and val.function == &holeFn;
+}
 
 fn appendSlice(allocator: Allocator, comptime T: type, existing: []const T, item: T) ![]T {
     var new = try allocator.alloc(T, existing.len + 1);
@@ -2444,6 +2459,17 @@ pub fn inject(allocator: Allocator, val: JsonValue, store: JsonValue, inj_opt: ?
 
             nkI += 1;
         }
+
+        if (current == .array) {
+            const elems = current.array.data.items;
+            var kept: usize = 0;
+            for (elems) |elem| {
+                if (ishole(elem)) continue;
+                elems[kept] = elem;
+                kept += 1;
+            }
+            current.array.data.items.len = kept;
+        }
     } else if (val == .string) {
         // Inject paths into string scalars.
         inj.mode = M_VAL;
@@ -2461,7 +2487,8 @@ pub fn inject(allocator: Allocator, val: JsonValue, store: JsonValue, inj_opt: ?
     // and modify). Reset skip only after both checks have seen it.
     if (!inj.skip) {
         if (inj.modify) |modify_fn| {
-            const mval = getprop(allocator, inj.parent, JsonValue{ .string = inj.key }, .null) catch .null;
+            const stored: JsonValue = getprop(allocator, inj.parent, JsonValue{ .string = inj.key }, .null) catch .null;
+            const mval: JsonValue = if (ishole(stored)) .null else stored;
             modify_fn(allocator, mval, inj.key, inj.parent, inj, store);
         }
     }
@@ -3596,7 +3623,7 @@ fn cmdValidateChildCmd(allocator: Allocator, inj: *Injection, store: JsonValue) 
 // tuple's last item. Each places clones of its spec for the loop to check.
 fn cmdValidateRest(allocator: Allocator, inj: *Injection) anyerror!JsonValue {
     if (inj.mode == M_KEYPRE) {
-        const resttm = getprop(allocator, inj.parent, JsonValue{ .string = inj.key }, .null) catch .null;
+        const resttm = lookupLiteral(inj.parent, inj.key) orelse .null;
         const pkey = if (inj.path.len >= 2) inj.path[inj.path.len - 2] else S_DTOP;
         const tval = getprop(allocator, inj.dparent, JsonValue{ .string = pkey }, .null) catch .null;
 
@@ -4546,12 +4573,11 @@ fn validateValue(allocator: Allocator, data: ?JsonValue, spec: JsonValue, injdef
 
 // Validation modify callback — runs after each injection step.
 // Matches TS's makeValidation(false) behavior.
-fn validationModify(allocator: Allocator, _: JsonValue, key: []const u8, parent: JsonValue, inj: *Injection, _: JsonValue) void {
+fn validationModify(allocator: Allocator, pval: JsonValue, key: []const u8, parent: JsonValue, inj: *Injection, _: JsonValue) void {
     // Get the actual data value at this path.
     const cval = getprop(allocator, inj.dparent, JsonValue{ .string = key }, .null) catch .null;
     if (cval == .null and !inj.exact_mode) return;
 
-    const pval = getprop(allocator, parent, JsonValue{ .string = key }, .null) catch .null;
     const ptype = typify(pval);
 
     // Skip remaining $ command strings.
