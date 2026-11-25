@@ -225,7 +225,10 @@ func (inj *Injection) setval(val any, ancestor ...int) any {
 	}
 
 	if anc < 2 {
-		if val == nil {
+		// A list keeps the removed slot as a hole until Inject's loop ends.
+		if val == nil && IsList(inj.Parent) {
+			SetProp(inj.Parent, inj.Key, SKIP)
+		} else if val == nil {
 			inj.Parent = DelProp(inj.Parent, inj.Key)
 		} else {
 			SetProp(inj.Parent, inj.Key, val)
@@ -386,6 +389,11 @@ func denoval(val any) any {
 		return nil
 	}
 	return val
+}
+
+// A list slot setval removed, left until Inject's loop for the list ends.
+func _ishole(val any) bool {
+	return SKIP == val
 }
 
 func IsEmpty(val any) bool {
@@ -2388,6 +2396,13 @@ func Inject(
 			nkI = nkI + 1
 		}
 
+		if lr, ok := val.(*ListRef[any]); ok {
+			lr.List = slices.DeleteFunc(lr.List, _ishole)
+		} else if list, ok := val.([]any); ok && slices.ContainsFunc(list, _ishole) {
+			val = slices.DeleteFunc(list, _ishole)
+			SetProp(inj.Parent, inj.Key, val)
+		}
+
 	} else if 0 < (T_string & valType) {
 
 		// Inject paths into string scalars.
@@ -2406,6 +2421,9 @@ func Inject(
 		mkey := inj.Key
 		mparent := inj.Parent
 		mval := GetProp(mparent, mkey)
+		if _ishole(mval) {
+			mval = nil
+		}
 		inj.Modify(
 			mval,
 			mkey,
@@ -3726,7 +3744,7 @@ var validate_REST Injector = func(
 	store any,
 ) any {
 	if M_KEYPRE == inj.Mode {
-		resttm := GetProp(inj.Parent, inj.Key)
+		resttm := denoval(_lookup(inj.Parent, inj.Key))
 		tval := GetProp(inj.Dparent, inj.Path.List[len(inj.Path.List)-2])
 
 		if IsMap(tval) {
@@ -4228,7 +4246,7 @@ func makeValidation(exact bool) Modify {
 			return
 		}
 
-		pval := GetProp(parent, key)
+		pval := val
 		ptype := Typify(pval)
 
 		// Delete any special commands remaining.
