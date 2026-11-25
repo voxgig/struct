@@ -202,7 +202,10 @@ object Struct {
             val out: Any?
             if (ancestor < 2) {
                 out =
-                    if (value === UNDEF) {
+                    if (value === UNDEF && islist(this.parent)) {
+                        // A list keeps the removed slot as a hole until inject's loop ends.
+                        setprop(this.parent, this.key, SKIP)
+                    } else if (value === UNDEF) {
                         val p = delprop(this.parent, this.key)
                         this.parent = p
                         p
@@ -1258,6 +1261,20 @@ object Struct {
                 }
                 nkI++
             }
+
+            if (v is MutableList<*>) {
+                @Suppress("UNCHECKED_CAST")
+                val list = v as MutableList<Any?>
+                var kept = 0
+                for (i in list.indices) {
+                    val item = list[i]
+                    if (item !== SKIP) {
+                        if (kept != i) list[kept] = item
+                        kept++
+                    }
+                }
+                while (list.size > kept) list.removeAt(list.size - 1)
+            }
         } else if (v is String) {
             inj.mode = M_VAL
             val newVal = _injectstr(v, store, inj)
@@ -1269,7 +1286,7 @@ object Struct {
             val mkey = inj.key
             val mparent = inj.parent
             val mval = getprop(mparent, mkey)
-            inj.modify!!.apply(mval, mkey, mparent, inj, store)
+            inj.modify!!.apply(if (SKIP === mval) UNDEF else mval, mkey, mparent, inj, store)
         }
 
         inj.`val` = v
@@ -2272,7 +2289,8 @@ object Struct {
     val validate_REST: Injector =
         Injector { inj, _, _, _ ->
             if (M_KEYPRE == inj.mode) {
-                val resttm = getprop(inj.parent, inj.key)
+                // Group B: a null template is a spec, so it is read raw (TS _lookup(parent,key)).
+                val resttm = lookup(inj.parent, inj.key)
                 val tval = getprop(inj.dparent, getelem(inj.path, -2))
                 if (ismap(tval)) {
                     for (ckey in keysof(tval)) {
