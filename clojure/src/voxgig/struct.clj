@@ -165,16 +165,6 @@
 (defn- jdouble? [v] (or (instance? Double v) (instance? Float v)))
 (defn- jint? [v] (and (number? v) (not (jbool? v)) (not (jdouble? v))))
 
-(defn- parse-long-strict
-  "Mirror Python int(key): coerce numbers (floor), parse integer strings."
-  [k]
-  (cond
-    (jbool? k) nil
-    (jint? k) (long k)
-    (jdouble? k) (long (Math/floor (double k)))
-    (string? k) (try (Long/parseLong (.trim ^String k)) (catch Exception _ nil))
-    :else nil))
-
 ;; A list key's index, possibly negative, or nil: an integral number, or the
 ;; string String(n) prints for one ("01", " 1", "+1", "1.0" and "-0" are not).
 (defn- listindex [key]
@@ -1109,13 +1099,7 @@
   (let [mode (ig inj :mode) key (ig inj :key)]
     (if (.startsWith ^String mode "key")
       key
-      (let [dparent (ig inj :dparent) path (ig inj :path)
-            out (if-not (isnode dparent)
-                  (if (not= (size path) 2)
-                    dparent
-                    (if (parse-long-strict key) dparent nil))
-                  (let [o (getprop dparent key)]
-                    (if (and (nil? o) (some? key) (parse-long-strict key)) dparent o)))]
+      (let [out (_lookup (ig inj :dparent) key)]
         (inj-setval inj out)
         out))))
 
