@@ -1196,6 +1196,15 @@ function inject(val, store, injdef) {
         nodekeys = childinj.keys
       }
     }
+    if (islist(val)) {
+      let kept = 0
+      for (let i = 0; i < val.length; i++) {
+        if (SKIP !== val[i]) {
+          val[kept++] = val[i]
+        }
+      }
+      val.length = kept
+    }
   }
   // Inject paths into string scalars.
   else if (S_string === valtype) {
@@ -1210,7 +1219,7 @@ function inject(val, store, injdef) {
     let mkey = inj.key
     let mparent = inj.parent
     let mval = getprop(mparent, mkey)
-    inj.modify(mval, mkey, mparent, inj, store)
+    inj.modify(SKIP === mval ? NONE : mval, mkey, mparent, inj, store)
   }
   // console.log('INJ-VAL', val)
   inj.val = val
@@ -1750,7 +1759,7 @@ const validate_CHILD = (inj) => {
 const validate_REST = (inj) => {
   const { mode, key, parent, keys, path } = inj
   if (M_KEYPRE === mode) {
-    const resttm = getprop(parent, key)
+    const resttm = _lookup(parent, key)
     const tval = getprop(inj.dparent, getelem(path, -2))
     if (ismap(tval)) {
       for (const ckey of keysof(tval)) {
@@ -2499,9 +2508,12 @@ class Injection {
   setval(val, ancestor) {
     let parent = NONE
     if (null == ancestor || ancestor < 2) {
+      // A list keeps the removed slot as a hole until inject's loop ends.
       parent =
         NONE === val
-          ? (this.parent = delprop(this.parent, this.key))
+          ? islist(this.parent)
+            ? setprop(this.parent, this.key, SKIP)
+            : (this.parent = delprop(this.parent, this.key))
           : setprop(this.parent, this.key, val)
     } else {
       const aval = getelem(this.nodes, 0 - ancestor)
