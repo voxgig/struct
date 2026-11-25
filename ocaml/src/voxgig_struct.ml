@@ -1116,7 +1116,9 @@ and inj_setval ?(ancestor = 1) inj v =
     if ancestor < 2 then inj.parent, inj.key
     else getelem inj.nodes (Num (float_of_int (- ancestor))), getelem inj.path (Num (float_of_int (- ancestor)))
   in
-  if is_noval v then delprop target key else setprop target key v
+  (* A list keeps the removed slot as a hole until inject's loop ends. *)
+  if is_noval v then (if ancestor < 2 && islist target then setprop target key skip else delprop target key)
+  else setprop target key v
 
 (* ----- inject ----- *)
 
@@ -1174,6 +1176,7 @@ and inject ?(inj = INone) v store =
         nki := childinj.keyi + 1;
         ignore continue
       done;
+      (match v with List r -> r := List.filter (fun x -> not (is_skip x)) !r | _ -> ());
       v
     end else if (match v with Str _ -> true | _ -> false) then begin
       state.mode <- m_val;
@@ -1185,7 +1188,7 @@ and inject ?(inj = INone) v store =
   (match state.modify with
    | Some f when not (is_skip v) ->
      let mkey = state.key in let mparent = state.parent in let mval = getprop mparent mkey in
-     f mval mkey mparent state
+     f (if is_skip mval then Noval else mval) mkey mparent state
    | _ -> ());
   state.ival <- v;
   lookup_ state.parent (Str s_dtop)
@@ -1234,7 +1237,7 @@ and isfunc_handler _i = true
 
 (* ----- transform commands ----- *)
 
-and transform_delete inj _v _ref _store = ignore (delprop inj.parent inj.key); Noval
+and transform_delete inj _v _ref _store = ignore (inj_setval inj Noval); Noval
 
 and transform_copy inj _v _ref _store =
   if inj.mode = m_keypre || inj.mode = m_keypost then inj.key
@@ -1680,7 +1683,7 @@ and validate_child inj _v _ref _store =
 and validate_rest inj _v _ref _store =
   let parent = inj.parent in let key = inj.key in let path = inj.path in let keys = inj.keys in
   if inj.mode = m_keypre then begin
-    let resttm = getprop parent key in
+    let resttm = lookup_ parent key in
     let tval = getprop inj.dparent (getelem path (Num (-2.0))) in
     (if ismap tval then
        List.iter (fun ckey ->
