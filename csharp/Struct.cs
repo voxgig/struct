@@ -181,7 +181,12 @@ namespace Voxgig.Struct
             bool del = val == null || ReferenceEquals(val, StructUtils.NONE);
             if (ancestor < 2)
             {
-                if (del)
+                if (del && Parent is List<object?>)
+                {
+                    // A list keeps the removed slot as a hole until Inject's loop ends.
+                    StructUtils.SetProp(Parent, Key, StructUtils.SKIP);
+                }
+                else if (del)
                 {
                     StructUtils.DelProp(Parent, Key);
                 }
@@ -1975,6 +1980,11 @@ namespace Voxgig.Struct
 
                     nkI++;
                 }
+
+                if (val is List<object?> nodelist)
+                {
+                    nodelist.RemoveAll(item => ReferenceEquals(item, SKIP));
+                }
             }
 
             // ── String scalar: resolve backtick references ──────────────────────
@@ -1999,7 +2009,7 @@ namespace Voxgig.Struct
                 {
                     object? mparent = state.Parent;
                     object? mval = GetProp(mparent, state.Key);
-                    state.ModifyFn(mval, state.Key, mparent, state, store);
+                    state.ModifyFn(ReferenceEquals(SKIP, mval) ? NONE : mval, state.Key, mparent, state, store);
                 }
             }
 
@@ -2995,7 +3005,7 @@ namespace Voxgig.Struct
         {
             if (M_KEYPRE == inj.Mode)
             {
-                object? resttm = GetProp(inj.Parent, inj.Key);
+                object? resttm = Lookup(inj.Parent, inj.Key);
                 object? tval = GetProp(inj.DParent, GetElem(inj.Path, -2));
 
                 if (IsMap(tval))
