@@ -275,7 +275,8 @@ class Injection:
     def setval(self, val: Any, ancestor: int | None = None) -> Any:
         """Inject-state setter. Mirrors the canonical TS Injection.setval:
         val of UNDEF (= None in Python — distinguishability is impossible
-        in any of the dynamic-typed ports anyway) deletes the slot, any
+        in any of the dynamic-typed ports anyway) deletes the slot (in a
+        list, a SKIP hole that inject compacts after its loop), any
         other value sets it. setprop itself remains a pure assignment per
         the Group B rule — this delete-on-undef shortcut lives only here
         so transform/validate injectors can signal "no value at this slot"
@@ -288,6 +289,8 @@ class Injection:
             target = getelem(self.nodes, 0 - ancestor)
             key = getelem(self.path, 0 - ancestor)
         if val is None:
+            if (ancestor is None or ancestor < 2) and islist(target):
+                return setprop(target, key, SKIP)
             return delprop(target, key)
         return setprop(target, key, val)
 
@@ -1711,6 +1714,9 @@ def inject(val, store, injdef=UNDEF):
 
             nkI += 1
 
+        if islist(val):
+            val[:] = [v for v in val if v is not SKIP]
+
     # Inject paths into string scalars.
     elif isinstance(val, str):
         inj.mode = S_MVAL
@@ -1724,7 +1730,7 @@ def inject(val, store, injdef=UNDEF):
         mparent = inj.parent
         mval = getprop(mparent, mkey)
 
-        inj.modify(mval, mkey, mparent, inj)
+        inj.modify(UNDEF if mval is SKIP else mval, mkey, mparent, inj)
 
     inj.val = val
 
@@ -1773,7 +1779,7 @@ def transform_DELETE(inj, val, ref, store):
     """
     Injection handler to delete a key from a map/list.
     """
-    delprop(inj.parent, inj.key)
+    inj.setval(UNDEF)
     return UNDEF
 
 
@@ -2548,7 +2554,7 @@ def validate_REST(inj, _val=UNDEF, _ref=UNDEF, _store=UNDEF):
     path = inj.path
 
     if mode == S_MKEYPRE:
-        resttm = getprop(parent, key)
+        resttm = _lookup(parent, key)
         tval = getprop(inj.dparent, getelem(path, -2))
 
         if ismap(tval):
