@@ -1393,7 +1393,10 @@ public:
   Value setval(const Value& v, int ancestor) {
     Value pp;
     if (ancestor < 2) {
-      if (v.is_undef()) {
+      // A list keeps the removed slot as a hole until inject's loop ends.
+      if (v.is_undef() && parent.is_list()) {
+        pp = setprop(parent, Value(key), SKIP());
+      } else if (v.is_undef()) {
         pp = delprop(parent, Value(key));
         parent = pp;
       } else {
@@ -2387,6 +2390,11 @@ inline Value inject(const Value& val, const Value& store, Injection* injdef) {
         nodekeys = cinj->keys;
       }
     }
+
+    if (cur.is_list()) {
+      auto& items = *cur.as_list();
+      items.erase(std::remove_if(items.begin(), items.end(), is_skip), items.end());
+    }
   } else if (cur.is_string()) {
     inj->mode = M_VAL;
     Value newVal = injectstr(cur.as_string(), store, inj);
@@ -2400,7 +2408,7 @@ inline Value inject(const Value& val, const Value& store, Injection* injdef) {
     Value mkey(inj->key);
     Value mparent = inj->parent;
     Value mval = getprop(mparent, mkey);
-    inj->modify(mval, mkey, mparent, *inj, store);
+    inj->modify(is_skip(mval) ? Value::undef() : mval, mkey, mparent, *inj, store);
   }
 
   inj->val = cur;
@@ -3277,7 +3285,7 @@ inline std::string restmsg(const Value& path, const std::string& problem) {
 // tuple's last item. Each places clones of its spec for the loop to check.
 inline Value REST_FN(Injection& inj, const Value& val, const std::string& ref, const Value& store) {
   if (inj.mode == M_KEYPRE) {
-    Value resttm = getprop(inj.parent, Value(inj.key));
+    Value resttm = lookup_v(inj.parent, Value(inj.key));
     Value pkey = inj.path.size() >= 2 ? Value(inj.path[inj.path.size() - 2]) : Value::undef();
     Value tval = getprop(inj.dparent, pkey);
 
