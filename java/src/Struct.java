@@ -1564,6 +1564,23 @@ public class Struct {
           nodekeys = childinj.keys;
         }
       }
+
+      if (val instanceof List<?> l) {
+        List<Object> list = (List<Object>) l;
+        int kept = 0;
+        for (int i = 0; i < list.size(); i++) {
+          Object item = list.get(i);
+          if (item != SKIP) {
+            if (kept != i) {
+              list.set(kept, item);
+            }
+            kept++;
+          }
+        }
+        while (list.size() > kept) {
+          list.remove(list.size() - 1);
+        }
+      }
     } else if (val instanceof String s) {
       inj.mode = M_VAL;
       Object newVal = _injectstr(s, store, inj);
@@ -1577,7 +1594,7 @@ public class Struct {
       Object mkey = inj.key;
       Object mparent = inj.parent;
       Object mval = getprop(mparent, mkey);
-      inj.modify.apply(mval, mkey, mparent, inj, store);
+      inj.modify.apply(SKIP == mval ? UNDEF : mval, mkey, mparent, inj, store);
     }
 
     inj.val = val;
@@ -2670,7 +2687,8 @@ public class Struct {
         if (!(injObj instanceof Injection inj)) return UNDEF;
 
         if (inj.mode == M_KEYPRE) {
-          Object resttm = getprop(inj.parent, inj.key);
+          // Group B: a null template is a spec, so it is read raw (TS _lookup(parent,key)).
+          Object resttm = lookup(inj.parent, inj.key);
           Object tval = getprop(inj.dparent, getelem(inj.path, -2));
 
           if (ismap(tval)) {
@@ -4370,7 +4388,10 @@ public class Struct {
     public Object setval(Object val, int ancestor) {
       Object parent;
       if (ancestor < 2) {
-        if (val == UNDEF) {
+        if (val == UNDEF && islist(this.parent)) {
+          // A list keeps the removed slot as a hole until inject's loop ends.
+          parent = setprop(this.parent, this.key, SKIP);
+        } else if (val == UNDEF) {
           parent = delprop(this.parent, this.key);
           this.parent = parent;
         } else {
