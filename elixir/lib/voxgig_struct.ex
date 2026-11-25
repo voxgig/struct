@@ -1559,6 +1559,8 @@ defmodule Voxgig.Struct do
       end
 
     cond do
+      # A list keeps the removed slot as a hole until inject's loop ends.
+      val == nil and ancestor < 2 and islist(target) -> setprop(target, key, @skip)
       val == nil -> delprop(target, key)
       val == @heldnull -> setprop(target, key, nil)
       true -> setprop(target, key, val)
@@ -1610,6 +1612,7 @@ defmodule Voxgig.Struct do
             end
 
           inject_loop(inj, val, store, nodekeys, 0)
+          if islist(val), do: list_set_items(val, Enum.reject(list_items(val), &is_skip/1))
           val
 
         is_binary(val) ->
@@ -1626,7 +1629,7 @@ defmodule Voxgig.Struct do
       mkey = ig(inj, :key)
       mparent = ig(inj, :parent)
       mval = getprop(mparent, mkey)
-      ig(inj, :modify).(mval, mkey, mparent, inj)
+      ig(inj, :modify).(if(is_skip(mval), do: nil, else: mval), mkey, mparent, inj)
     end
 
     is_(inj, :ival, rv)
@@ -1737,7 +1740,7 @@ defmodule Voxgig.Struct do
   # ---------------------------------------------------------------------------
 
   defp transform_delete(inj, _v, _r, _s) do
-    delprop(ig(inj, :parent), ig(inj, :key))
+    inj_setval(inj, nil)
     nil
   end
 
@@ -2395,7 +2398,7 @@ defmodule Voxgig.Struct do
 
     cond do
       ig(inj, :mode) == @m_keypre ->
-        resttm = getprop(parent, ig(inj, :key))
+        resttm = lookup_(parent, ig(inj, :key))
         tval = getprop(ig(inj, :dparent), getelem(path, -2))
 
         if ismap(tval) do
