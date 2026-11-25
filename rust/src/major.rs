@@ -508,7 +508,10 @@ impl Injection {
                 let b = this.borrow();
                 (b.parent.clone(), b.key.clone())
             };
-            if val.is_noval() {
+            // A list keeps the removed slot as a hole until inject's loop ends.
+            if val.is_noval() && is_list(&parent) {
+                set_prop(parent, &Value::str(key), Value::skip())
+            } else if val.is_noval() {
                 let np = del_prop(parent, &Value::str(key));
                 this.borrow_mut().parent = np.clone();
                 np
@@ -956,6 +959,10 @@ fn inject_inj(mut val: Value, store: &Value, inj: &Inj) -> Value {
 
             nk_i += 1;
         }
+
+        if let Value::List(l) = &val {
+            l.borrow_mut().retain(|v| !v.is_skip());
+        }
     } else if let Value::Str(s) = val.clone() {
         inj.borrow_mut().mode = M_VAL;
         let r = injectstr(&s, store, Some(inj));
@@ -973,7 +980,10 @@ fn inject_inj(mut val: Value, store: &Value, inj: &Inj) -> Value {
                 let b = inj.borrow();
                 (b.key.clone(), b.parent.clone())
             };
-            let mval = get_prop(&mparent, &Value::str(mkey.clone()), Value::Noval);
+            let mval = match get_prop(&mparent, &Value::str(mkey.clone()), Value::Noval) {
+                hole if hole.is_skip() => Value::Noval,
+                mval => mval,
+            };
             m(&mval, &Value::str(mkey), &mparent, inj, store);
         }
     }
@@ -2061,7 +2071,7 @@ fn validate_rest(inj: &Inj, _v: &Value, _r: &str, _store: &Value) -> Value {
     };
 
     if mode == M_KEYPRE {
-        let resttm = get_prop(&parent, &Value::str(key), Value::Noval);
+        let resttm = lookup(&parent, &Value::str(key));
         let pkey = path
             .get(path.len().saturating_sub(2))
             .cloned()
