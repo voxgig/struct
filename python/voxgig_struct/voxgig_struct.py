@@ -1808,16 +1808,6 @@ def transform_COPY(inj, val, ref, store):
                     out = UNDEF
         else:
             out = getprop(inj.dparent, key)
-            # If getprop returned UNDEF and key looks like a list index,
-            # we might be at the item level already - return dparent itself
-            if out is UNDEF and key is not None:
-                try:
-                    int(key)  # key is a list index
-                    # We're at the item level, key is the list index
-                    # This shouldn't happen normally, but handle it
-                    out = inj.dparent
-                except (ValueError, TypeError):
-                    pass
         inj.setval(out)
 
     return out
