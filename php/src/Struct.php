@@ -1781,6 +1781,17 @@ class Struct
                     }
                 }
             }
+
+            $nohole = fn($v) => self::SKIP !== $v;
+            if ($val instanceof ListRef) {
+                $val->list = array_values(array_filter($val->list, $nohole));
+            } elseif (is_array($val) && self::islist($val)) {
+                $val = array_values(array_filter($val, $nohole));
+                if (is_array(self::_getprop($inj->parent, $inj->key))) {
+                    $inj->val = $val;
+                    self::setprop($inj->parent, $inj->key, $val);
+                }
+            }
         }
         // Inject paths into string scalars.
         elseif ($valtype === 'string') {
@@ -1799,7 +1810,7 @@ class Struct
 
             call_user_func(
                 $inj->modify,
-                $mval,
+                self::SKIP === $mval ? self::undef() : $mval,
                 $mkey,
                 $mparent,
                 $inj,
@@ -3161,7 +3172,7 @@ class Struct
         $path = $inj->path;
 
         if (self::M_KEYPRE === $mode) {
-            $resttm = self::getprop($parent, $key);
+            $resttm = self::_getprop($parent, $key);
             $tval = self::getprop($inj->dparent, self::getelem($path, -2));
 
             if (self::ismap($tval)) {
@@ -4892,7 +4903,11 @@ class Injection
     {
         $parent = Struct::UNDEF;
         if (null === $ancestor || $ancestor < 2) {
-            if (Struct::UNDEF === $val) {
+            $none = Struct::UNDEF === $val || Struct::undef() === $val;
+            if ($none && Struct::islist($this->parent)) {
+                // A list keeps the removed slot as a hole until inject's loop ends.
+                $parent = Struct::setprop($this->parent, $this->key, Struct::SKIP);
+            } elseif (Struct::UNDEF === $val) {
                 $this->parent = Struct::delprop($this->parent, $this->key);
                 $parent = $this->parent;
             } else {
