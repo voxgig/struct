@@ -2102,7 +2102,10 @@ partial def injSetval (i : InjId) (v : Value) (ancestor : Int := 1) : SIO Unit :
       let t ← getelem d.nodes (vInt (-ancestor))
       let k ← getelem d.path (vInt (-ancestor))
       pure (t, k)
-  if isNoval v then
+  -- A list keeps the removed slot as a hole until inject's loop ends.
+  if isNoval v && ancestor < 2 && islist target then
+    let _ ← setprop target key SKIP
+  else if isNoval v then
     let _ ← delprop target key
   else
     let _ ← setprop target key v
@@ -2186,6 +2189,11 @@ partial def inject (v : Value) (store : Value) (inj : InjArg := .inone) : SIO Va
           let _ ← injectstr (← jsString nodekey) store (some ci)
           rereadKeys ci
         nki := (← getInj ci).keyi + 1
+      match v with
+      | .list lid => do
+        let xs ← listItems lid
+        setListItems lid (xs.filter (fun x => !(isSkip x)))
+      | _ => pure ()
       pure v
     else if (match v with | .str _ => true | _ => false) then do
       modInj state (fun d => { d with mode := M_VAL })
@@ -2200,7 +2208,7 @@ partial def inject (v : Value) (store : Value) (inj : InjArg := .inone) : SIO Va
        let mkey := d.key
        let mparent := d.parent
        let mval ← getprop mparent mkey
-       callModify mid mval mkey mparent state
+       callModify mid (if isSkip mval then Value.noval else mval) mkey mparent state
      else pure ()
    | none => pure ())
   modInj state (fun dd => { dd with ival := v })
@@ -2263,8 +2271,7 @@ end
 -- ---------------------------------------------------------------------------
 
 partial def transformDelete : InjectorFn := fun inj _v _ref _store => do
-  let d ← getInj inj
-  let _ ← delprop d.parent d.key
+  injSetval inj .noval
   pure .noval
 
 partial def transformCopy : InjectorFn := fun inj _v _ref _store => do
@@ -2861,7 +2868,7 @@ partial def validateRest : InjectorFn := fun inj _v _ref _store => do
   let parent := d.parent
   let keys := d.keys
   if d.mode == M_KEYPRE then do
-    let resttm ← getprop parent d.key
+    let resttm ← lookupRaw parent d.key
     let tval ← getprop d.dparent (← getelem d.path (.num (-2.0)))
     if ismap tval then
       for ckey in (← keysof tval) do
