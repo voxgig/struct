@@ -1414,7 +1414,9 @@ injSetval ancestor inj v = do
             t <- getelem ns (VNum (fromIntegral (negate ancestor)))
             k <- getelem ps (VNum (fromIntegral (negate ancestor)))
             return (t, k)
-  if isNoval v then delprop target key else setprop target key v
+  -- A list keeps the removed slot as a hole until inject's loop ends.
+  if isNoval v then (if ancestor < 2 && islist target then setprop target key skip else delprop target key)
+  else setprop target key v
 
 -- | Write a value into the immediate parent of the injection target.
 injSetval1 :: Inj -> Value -> IO Value
@@ -1495,6 +1497,7 @@ inject injarg v store = do
                   writeIORef nkiRef (cki + 1)
                   loop
           loop
+          case v of VList r -> modifyIORef' r (L.filter (not . is_skip)); _ -> return ()
           return v
         else case v of
           VStr _ -> do
@@ -1508,7 +1511,7 @@ inject injarg v store = do
   case modify of
     Just f | not (is_skip v') -> do
       mkey <- readIORef (iKey state); mparent <- readIORef (iParent state); mval <- getprop mparent mkey
-      f mval mkey mparent state
+      f (if is_skip mval then VNoval else mval) mkey mparent state
     _ -> return ()
   writeIORef (iIval state) v'
   parentS <- readIORef (iParent state)
@@ -1554,7 +1557,7 @@ injectstr v store injOpt =
 
 -- | @$DELETE@ transform: remove the target key.
 transformDelete :: Injector
-transformDelete inj _ _ _ = do p <- readIORef (iParent inj); k <- readIORef (iKey inj); _ <- delprop p k; return VNoval
+transformDelete inj _ _ _ = do _ <- injSetval1 inj VNoval; return VNoval
 
 -- | @$COPY@ transform: copy the same-named value from the data.
 transformCopy :: Injector
@@ -2108,7 +2111,7 @@ validateRest inj _ _ _ = do
   parent <- readIORef (iParent inj); key <- readIORef (iKey inj); path <- readIORef (iPath inj); keys <- readIORef (iKeys inj)
   mode <- readIORef (iMode inj)
   if mode == m_keypre then do
-    resttm <- getprop parent key
+    resttm <- lookup_ parent key
     pkey <- getelem path (VNum (-2))
     dp <- readIORef (iDparent inj)
     tval <- getprop dp pkey
