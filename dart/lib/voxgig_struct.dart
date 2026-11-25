@@ -1305,7 +1305,11 @@ dynamic _injSetval(Inj inj, dynamic val, [int ancestor = 1]) {
     target = getelem(inj.nodes, -ancestor);
     key = getelem(inj.path, -ancestor);
   }
-  if (val == null) return delprop(target, key);
+  if (val == null) {
+    // A list keeps the removed slot as a hole until inject's loop ends.
+    if (ancestor < 2 && islist(target)) return setprop(target, key, SKIP);
+    return delprop(target, key);
+  }
   if (identical(val, _heldnull)) return setprop(target, key, null);
   return setprop(target, key, val);
 }
@@ -1371,6 +1375,7 @@ dynamic inject(dynamic val, dynamic store, [dynamic injdef]) {
       }
       nki = childinj.keyi + 1;
     }
+    if (val is List && val.any(isSkip)) val.removeWhere(isSkip);
     rv = val;
   } else if (val is String) {
     inj.mode = S_MVAL;
@@ -1385,7 +1390,7 @@ dynamic inject(dynamic val, dynamic store, [dynamic injdef]) {
     var mkey = inj.key;
     var mparent = inj.parent;
     var mval = getprop(mparent, mkey);
-    inj.modify!(mval, mkey, mparent, inj);
+    inj.modify!(isSkip(mval) ? null : mval, mkey, mparent, inj);
   }
 
   inj.ival = rv;
@@ -1452,7 +1457,7 @@ dynamic _injectstr(String val, dynamic store, [Inj? inj]) {
 // ---------------------------------------------------------------------------
 
 dynamic _transformDelete(dynamic inj, dynamic val, dynamic ref, dynamic store) {
-  delprop((inj as Inj).parent, inj.key);
+  _injSetval(inj as Inj, null);
   return null;
 }
 
@@ -2078,7 +2083,7 @@ dynamic _validateRest(dynamic inj0, dynamic val, dynamic ref, dynamic store) {
   var path = inj.path;
 
   if (inj.mode == S_MKEYPRE) {
-    var resttm = getprop(parent, inj.key);
+    var resttm = _lookup(parent, inj.key);
     var tval = getprop(inj.dparent, getelem(path, -2));
 
     if (ismap(tval)) {
