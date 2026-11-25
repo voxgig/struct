@@ -176,6 +176,12 @@ basic: {
       err: '/^[^|]*Expected field x15 to be string, but found no value\\.[^|]*$/' }
     { in: { data: {x16:null,y16:1}, spec: {x16:'`$STRING`',y16:'`$NUMBER`'} },
       err: '/^[^|]*Expected field x16 to be string, but found no value\\.[^|]*$/' }
+
+    # An absent optional item in a list spec leaves later items in their places.
+    { in: { data: [a], spec: ['`$STRING`','`$ANY`','`$NUMBER`'] },
+      err: '/^[^|]*Expected field 2 to be number, but found no value\\.[^|]*$/' }
+    { in: { data: [], spec: ['`$ANY`','`$STRING`'] },
+      err: '/^[^|]*Expected field 1 to be string, but found no value\\.[^|]*$/' }
   ]
 }
 
@@ -1016,4 +1022,7 @@ rest: set: [
     err: 'The $REST validator at field 0 must have exactly one spec.' }
   { in: { data: {a:1}, spec: {'`$CHILD`':'`$NUMBER`','`$REST`':'`$NUMBER`'} },
     err: 'The $REST validator at field <root> cannot be used with $CHILD.' }
+  { in: { data: {a:null}, spec: {'`$REST`':null} }, out: {a:null} }
+  { in: { data: [], spec: ['`$ANY`',['`$REST`','`$INTEGER`']] }, out: [] }
+  { in: { data: [x,1], spec: ['`$ANY`',['`$REST`','`$INTEGER`']] }, out: [x,1] }
 ]

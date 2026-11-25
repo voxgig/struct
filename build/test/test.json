@@ -14979,6 +14979,20 @@
           },
           {
             "in": {}
+          },
+          {
+            "in": {
+              "data": {
+                "b": 2
+              },
+              "spec": [
+                "`$DELETE`",
+                "`b`"
+              ]
+            },
+            "out": [
+              2
+            ]
           }
         ]
       },
@@ -18020,6 +18034,23 @@
               "spec": {}
             },
             "out": {}
+          },
+          {
+            "in": {
+              "data": {
+                "a": 1,
+                "b": 2
+              },
+              "spec": [
+                "`a`",
+                "`missing`",
+                "`b`"
+              ]
+            },
+            "out": [
+              1,
+              2
+            ]
           }
         ]
       },
@@ -20406,6 +20437,29 @@
                 "x16": "`$STRING`",
                 "y16": "`$NUMBER`"
               }
+            }
+          },
+          {
+            "err": "/^[^|]*Expected field 2 to be number, but found no value\\.[^|]*$/",
+            "in": {
+              "data": [
+                "a"
+              ],
+              "spec": [
+                "`$STRING`",
+                "`$ANY`",
+                "`$NUMBER`"
+              ]
+            }
+          },
+          {
+            "err": "/^[^|]*Expected field 1 to be string, but found no value\\.[^|]*$/",
+            "in": {
+              "data": [],
+              "spec": [
+                "`$ANY`",
+                "`$STRING`"
+              ]
             }
           }
         ]
@@ -25206,6 +25260,51 @@
                 "`$REST`": "`$NUMBER`"
               }
             }
+          },
+          {
+            "in": {
+              "data": {
+                "a": null
+              },
+              "spec": {
+                "`$REST`": null
+              }
+            },
+            "out": {
+              "a": null
+            }
+          },
+          {
+            "in": {
+              "data": [],
+              "spec": [
+                "`$ANY`",
+                [
+                  "`$REST`",
+                  "`$INTEGER`"
+                ]
+              ]
+            },
+            "out": []
+          },
+          {
+            "in": {
+              "data": [
+                "x",
+                1
+              ],
+              "spec": [
+                "`$ANY`",
+                [
+                  "`$REST`",
+                  "`$INTEGER`"
+                ]
+              ]
+            },
+            "out": [
+              "x",
+              1
+            ]
           }
         ]
       },
