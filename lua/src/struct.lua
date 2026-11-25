@@ -1979,7 +1979,10 @@ end
 function Injection:setval(val, ancestor)
   local parent
   if ancestor == nil or ancestor < 2 then
-    if NONE == val then
+    -- A list keeps the removed slot as a hole until inject's loop ends.
+    if NONE == val and islist(self.parent) then
+      parent = setprop(self.parent, self.key, SKIP)
+    elseif NONE == val then
       self.parent = delprop(self.parent, self.key)
       parent = self.parent
     else
@@ -2082,6 +2085,17 @@ local function inject(val, store, injdef)
 
       nkI = nkI + 1
     end
+
+    if islist(val) then
+      local kept = 0
+      for i = 1, #val do
+        if SKIP ~= val[i] then
+          kept = kept + 1
+          val[kept] = val[i]
+        end
+      end
+      slice(val, 0, kept, true)
+    end
   elseif S_string == valtype then
     inj.mode = M_VAL
     val = _injectstr(val, store, inj)
@@ -2095,6 +2109,9 @@ local function inject(val, store, injdef)
     local mkey = inj.key
     local mparent = inj.parent
     local mval = getprop(mparent, mkey)
+    if SKIP == mval then
+      mval = NONE
+    end
     inj.modify(mval, mkey, mparent, inj, store)
   end
 

@@ -1306,6 +1306,14 @@ describe("struct", function()
             return "`$NIL`" == entryin(entry, "spec.1.1") and isnull(entryin(entry, "data.1"))
           end,
         },
+        -- A null template is a null map member too, so neither it nor the data's arrives.
+        {
+          at = 27,
+          why = "a null $REST template",
+          is = function(entry)
+            return isnull(entryin(entry, "spec.`$REST`")) and isnull(entryin(entry, "data.a"))
+          end,
+        },
       }),
       { null = false },
       function(vin)
