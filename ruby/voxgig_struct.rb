@@ -1167,6 +1167,8 @@ module VoxgigStruct
         nkI += 1
       end
 
+      val.reject! { |v| v.equal?(SKIP) } if islist(val)
+
     elsif val.is_a?(String)
       inj.mode = S_MVAL
       val = _injectstr(val, store, inj)
@@ -1178,7 +1180,7 @@ module VoxgigStruct
       mkey = inj.key
       mparent = inj.parent
       mval = getprop(mparent, mkey)
-      inj.modify.call(mval, mkey, mparent, inj)
+      inj.modify.call(mval.equal?(SKIP) ? nil : mval, mkey, mparent, inj)
     end
 
     inj.val = val
@@ -2038,7 +2040,7 @@ module VoxgigStruct
     path = inj.path
 
     if mode == S_MKEYPRE
-      resttm = getprop(parent, key)
+      resttm = _getprop(parent, key)
       tval = getprop(inj.dparent, getelem(path, -2))
 
       if ismap(tval)
@@ -3160,13 +3162,9 @@ module VoxgigStruct
     end
 
     def setval(val, ancestor = nil)
-      # Mirrors the canonical TS Injection.setval: UNDEF (sentinel) and
-      # nil (Ruby collapses both onto the same "no value" slot) delete
-      # the slot at every ancestor level; any other value sets it. The
-      # delete-on-undef shortcut is used by injectors (transform_DELETE,
-      # transform_MERGE, validate_CHILD) to signal "drop this slot" via
-      # their return value rather than calling delprop explicitly.
-      if ancestor.nil? || (ancestor.is_a?(Numeric) && ancestor < 2)
+      # UNDEF and nil (Ruby collapses both onto one "no value") remove the slot.
+      near = ancestor.nil? || (ancestor.is_a?(Numeric) && ancestor < 2)
+      if near
         target = @parent
         key = @key
       else
@@ -3174,10 +3172,13 @@ module VoxgigStruct
         key = VoxgigStruct.getelem(@path, 0 - ancestor)
       end
 
-      if val.nil? || val.equal?(VoxgigStruct::UNDEF)
-        VoxgigStruct.delprop(target, key)
-      else
+      if !val.nil? && !val.equal?(VoxgigStruct::UNDEF)
         VoxgigStruct.setprop(target, key, val)
+      elsif near && VoxgigStruct.islist(target)
+        # A list keeps the removed slot as a hole until inject's loop ends.
+        VoxgigStruct.setprop(target, key, VoxgigStruct::SKIP)
+      else
+        VoxgigStruct.delprop(target, key)
       end
     end
 
