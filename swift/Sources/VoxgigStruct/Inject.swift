@@ -158,6 +158,12 @@ public func inject(_ val: Value, _ store: Value, _ injdef: Injection? = nil) -> 
       }
       nkI += 1
     }
+    if case .list(let l) = val {
+      l.items.removeAll { item in
+        if case .sentinel(let sn) = item { return sn === SKIP }
+        return false
+      }
+    }
   } else if case .string(let s) = val {
     inj.mode = M_VAL
     out = _injectstr(s, store, inj)
@@ -179,7 +185,11 @@ public func inject(_ val: Value, _ store: Value, _ injdef: Injection? = nil) -> 
       let mkey = inj.key
       let mparent = inj.parent
       let mval = getprop(mparent, .string(mkey))
-      mod(mval, .string(mkey), mparent, inj, store)
+      let hole: Bool = {
+        if case .sentinel(let sn) = mval { return sn === SKIP }
+        return false
+      }()
+      mod(hole ? .noval : mval, .string(mkey), mparent, inj, store)
     }
   }
   inj.val = out

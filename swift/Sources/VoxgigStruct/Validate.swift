@@ -155,7 +155,7 @@ public func validate_REST(_ inj: Injection, _ val: Value, _ ref: String, _ store
   let path = inj.path
 
   if mode == M_KEYPRE {
-    let resttm = getprop(parent, .string(inj.key))
+    let resttm = lookup(parent, .string(inj.key))
     let pkey = path.count >= 2 ? path[path.count - 2] : ""
     let tval = getprop(inj.dparent, .string(pkey))
 

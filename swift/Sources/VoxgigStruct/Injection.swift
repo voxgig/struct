@@ -110,8 +110,8 @@ public final class Injection: @unchecked Sendable {
     return dparent
   }
 
-  // setval(val, ancestor?): write a value into the parent (or a
-  // higher ancestor when |ancestor| >= 2). NONE deletes the slot.
+  // setval(val, ancestor?): write into the parent (or the ancestor when |ancestor| >= 2). NONE
+  // deletes the slot, except a list keeps a SKIP hole for inject's loop (_setprop drops SKIP).
   @discardableResult
   public func setval(_ v: Value, ancestor: Int = 0) -> Value {
     // Canonical branches on the RAW ancestor (`null == ancestor || ancestor <
@@ -121,7 +121,15 @@ public final class Injection: @unchecked Sendable {
     // `err:` entry was skipped.
     let absAnc = abs(ancestor)
     if ancestor < 2 {
-      if v.isNoval {
+      if v.isNoval, case .list(let l) = parent {
+        if let idx = listIndex(.string(key)) {
+          if idx < l.items.count {
+            l.items[idx] = .sentinel(SKIP)
+          } else {
+            l.items.append(.sentinel(SKIP))
+          }
+        }
+      } else if v.isNoval {
         parent = _delprop(parent, .string(key))
       } else {
         parent = _setprop(parent, .string(key), v)
