@@ -1057,7 +1057,10 @@ object struct {
     val (target, key) =
       if (ancestor < 2) (inj.parent, inj.key)
       else (getelem(inj.nodes, VNum((-ancestor).toDouble)), getelem(inj.path, VNum((-ancestor).toDouble)))
-    if (isNoval(v)) delprop(target, key) else setprop(target, key, v)
+    // A list keeps the removed slot as a hole until inject's loop ends.
+    if (isNoval(v) && ancestor < 2 && islist(target)) setprop(target, key, SKIP)
+    else if (isNoval(v)) delprop(target, key)
+    else setprop(target, key, v)
   }
 
   // ---------------------------------------------------------------------------
@@ -1117,6 +1120,7 @@ object struct {
           }
           nki = childinj.keyi + 1
         }
+        v match { case VList(b) => b.filterInPlace(x => !isSkip(x)); case _ => }
         v
       } else v match {
         case VStr(_) =>
@@ -1130,7 +1134,7 @@ object struct {
     state.modify match {
       case Some(f) if !isSkip(rv) =>
         val mkey = state.key; val mparent = state.parent; val mval = getprop(mparent, mkey)
-        f(mval, mkey, mparent, state)
+        f(if (isSkip(mval)) Noval else mval, mkey, mparent, state)
       case _ =>
     }
     state.ival = rv
@@ -1175,7 +1179,7 @@ object struct {
   // transform commands
   // ---------------------------------------------------------------------------
 
-  private val transformDelete: Injector = (inj, _v, _r, _s) => { delprop(inj.parent, inj.key); Noval }
+  private val transformDelete: Injector = (inj, _v, _r, _s) => { injSetval(inj, Noval); Noval }
 
   private val transformCopy: Injector = (inj, _v, _r, _s) => {
     if (inj.mode == M_KEYPRE || inj.mode == M_KEYPOST) inj.key
@@ -1624,7 +1628,7 @@ object struct {
   private val validateRest: Injector = (inj, _v, _r, _s) => {
     val parent = inj.parent; val key = inj.key; val path = inj.path; val keys = inj.keys
     if (inj.mode == M_KEYPRE) {
-      val resttm = getprop(parent, key)
+      val resttm = lookup_(parent, key)
       val tval = getprop(inj.dparent, getelem(path, VNum(-2.0)))
       if (ismap(tval)) keysof(tval).foreach { ckey =>
         val named = keys match { case VList(b) => b.contains(VStr(ckey)); case _ => false }
