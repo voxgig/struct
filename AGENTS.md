@@ -357,11 +357,13 @@ other port uses; only the credential and the operator changed. All three
 have a trusted publisher registered against `publish.yml`, so each release
 from CI carries a provenance attestation.
 
-**go can be released from CI too**, by a `target: go` dispatch. It runs the
-build, `vet` and the tests `make publish-go` runs, then writes the same
-annotated `go/v<version>` tag. Go has no registry, so no credential is
-involved and the tag is the whole release; the dispatch exists so that a Go
-release needs no workstation. `make publish-go` still works.
+**The seven registry-less ports can be released from CI too**, by a
+`target:` dispatch of `go`, `php`, `c`, `cpp`, `swift`, `zig` or `lean`.
+Each runs the tests its `make publish-<lang>` runs (go's also builds and
+runs `vet`), then writes the same annotated `<lang>/v<version>` tag. None
+has a registry, so no credential is involved and the tag is the whole
+release; the dispatch exists so that such a release needs no workstation.
+`make publish-<lang>` still works.
 
 Typescript joined that shape late. It released under a bare `v<version>`
 up to `v0.3.4`, and those 16 tags stay — they are what those releases went
@@ -430,6 +432,11 @@ missing, so a run that stops half way — a failing test, a refused push, a
 missing credential — picks up the ports it has not released yet rather than
 skipping them and bumping the rest twice.
 
+**Leave ports already released by dispatch out of `make publish-all`.**
+Its bump step finds them tagged, patch-bumps them and releases them a second
+time. `PUBLISH_ALL_TAGONLY=` and `PUBLISH_ALL_OIDC=` on the command line
+empty those two groups, leaving the thirteen registry ports.
+
 `make status` (`tools/release_status.py`) is the dashboard. Start there — but
 know what it does and does not do:
 
@@ -452,7 +459,8 @@ know what it does and does not do:
 ### The three OIDC ports go through CI, not the Makefile
 
 **Actions → publish → Run workflow** on `main`, picking `target:
-typescript`, `javascript` or `rust` (or `go`, for a tag-only Go release);
+typescript`, `javascript` or `rust` (or a registry-less port, for a
+tag-only release);
 or push the matching tag by hand
 (`typescript/v<version>`, `javascript/v<version>`, `rust/v<version>`). One
 target per run: the three packages version independently and every publish is

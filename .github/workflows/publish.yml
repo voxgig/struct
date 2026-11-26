@@ -1,8 +1,9 @@
 # Releases the three voxgig/struct packages that publish over OIDC, and
 # writes their git tags: `@voxgig/struct` on npm (from `typescript/`),
 # `@voxgig/struct-js` on npm (from `javascript/`), and `voxgig-struct` on
-# crates.io (from `rust/`). It also releases the Go module (from `go/`),
-# which has no registry: its release is the tag alone. See GO below.
+# crates.io (from `rust/`). It also releases the seven ports that have no
+# registry, whose release is the tag alone: the Go module (from `go/`), and
+# php, c, cpp, swift, zig and lean. See GO and REGISTRY-LESS below.
 #
 # Adapted from voxgig/sdkgen's publish.yml, which carries the reasoning for
 # every guard below. BOTH registries' trusted publishers are registered
@@ -25,11 +26,12 @@
 # fails earlier and more plainly: the token exchange in
 # `rust-lang/crates-io-auth-action` fails and `cargo publish` never runs.
 #
-# ONE TARGET PER RUN. The four ports version independently and every
-# release is irreversible, so a dispatch releases exactly ONE of them.
+# ONE TARGET PER RUN. The ports version independently and every release
+# is irreversible, so a dispatch releases exactly ONE of them.
 #
 # TARGETS ARE NAMED BY PORT, not by registry: `typescript`, `javascript`,
-# `rust`, `go`. Two of them publish to npm, so the old `npm` name stopped
+# `rust`, `go`, and the six other registry-less ports. Two of them publish
+# to npm, so the old `npm` name stopped
 # identifying anything the moment the second one arrived. That is also how
 # the rest of the repository names them -- PUBLISH_LANGS, `make
 # publish-<lang>`, and the `<lang>/v*` tags.
@@ -40,9 +42,10 @@
 #                          id-token: write, contents: READ. Run the install,
 #                          the build and the tests — i.e. dependency lifecycle
 #                          scripts and project code.
-#   verify-go              contents: READ. The build and the tests. Go has
-#                          no registry, so nothing here needs id-token.
-#   tag, tag-javascript, tag-rust, tag-go
+#   verify-go, verify-registryless
+#                          contents: READ. The build and the tests. These
+#                          ports have no registry, so nothing needs id-token.
+#   tag, tag-javascript, tag-rust, tag-go, tag-registryless
 #                          contents: write. Run git and nothing else.
 #
 # Keeping them in one job would hand a repository-write credential to every
@@ -64,9 +67,9 @@
 #   push: tags rust/v*       the same, for the crate.
 #
 # A `*` in a ref filter does not cross `/`, so the three push paths never
-# overlap. The tag jobs do not run on a push. go has no push path: a
-# `go/v*` tag pushed by hand is already the release, and leaves a run on it
-# nothing to do.
+# overlap. The tag jobs do not run on a push. The registry-less ports have
+# no push path: a `go/v*` or `php/v*` tag pushed by hand is already the
+# release, and leaves a run on it nothing to do.
 #
 # EVERY PORT TAGS AS `<lang>/v<version>`, TYPESCRIPT INCLUDED. It released
 # under a BARE `v<version>` up to 0.3.4, and the 16 bare tags in this repo are
@@ -115,6 +118,15 @@
 # `retract` in a later one. A dry run runs every guard and test and writes
 # no tag.
 #
+# REGISTRY-LESS: php, c, cpp, swift, zig and lean release the same way.
+# verify-registryless sets up the target's toolchain as build.yml's Linux
+# lane does, checks every copy of its version agrees, and runs `make test`,
+# which is what that port's `make publish` runs before it tags.
+# tag-registryless then writes the annotated `<lang>/v<version>` the
+# Makefile writes, named by `tools/bump.py --plan` as `make publish-all`
+# names it. These tags are as permanent as Go's: Packagist and SwiftPM read
+# a tag as the release.
+#
 # VERSION BUMPS ARE NOT AUTOMATED, deliberately. Nothing here commits. It
 # reads the version already on the branch and releases exactly that, so the
 # bump stays a reviewable diff and the release stays a button.
@@ -123,6 +135,8 @@
 #   javascript/package.json "version" -> tag javascript/v<version>
 #   rust/Cargo.toml         version   -> tag rust/v<version>
 #   go/VERSION                        -> tag go/v<version>
+#   tools/bump.py's table, for php, c, cpp, swift, zig and lean
+#                                     -> tag <lang>/v<version>
 #
 # Renaming this file breaks publishing until BOTH registries' trusted
 # publishers are updated to match. Do NOT publish locally over a token: that
@@ -156,7 +170,7 @@ on:
       target:
         description: 'Which port to release'
         type: choice
-        options: [typescript, javascript, rust, go]
+        options: [typescript, javascript, rust, go, php, c, cpp, swift, zig, lean]
         default: typescript
       expect_sha:
         description: 'Optional: refuse unless main is still at this commit (set by `make publish`)'
@@ -1074,5 +1088,189 @@ jobs:
           git -c user.name='github-actions[bot]' \
               -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
               tag -a "$TAG" -m "go v$GO_VERSION"
+          git push origin "refs/tags/$TAG"
+          echo "pushed $TAG" >> "$GITHUB_STEP_SUMMARY"
+
+  verify-registryless:
+    name: verify (${{ inputs.target }})
+    # Swift's Linux toolchain needs the image build.yml pins it to.
+    runs-on: ${{ inputs.target == 'swift' && 'ubuntu-24.04' || 'ubuntu-latest' }}
+    timeout-minutes: 30
+
+    if: ${{ github.event_name == 'workflow_dispatch' && contains(fromJSON('["php","c","cpp","swift","zig","lean"]'), inputs.target) }}
+
+    permissions:
+      contents: read
+
+    outputs:
+      tag: ${{ steps.versions.outputs.tag }}
+      version: ${{ steps.versions.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Resolve the version being released
+        id: versions
+        env:
+          TARGET: ${{ inputs.target }}
+        run: |
+          set -euo pipefail
+          python3 tools/bump.py --ports "$TARGET" --check
+          IFS=$'\t' read -r port tag version < <(python3 tools/bump.py --ports "$TARGET" --plan)
+          if [ "$port" != "$TARGET" ] || [ -z "$tag" ] || [ -z "$version" ]; then
+            echo "::error::bump.py planned '$port' '$tag' '$version' for $TARGET"
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "$version -> tag $tag"
+
+      - name: Dispatches must come from main
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF_NAME" != "main" ]; then
+            echo "::error::dispatch ref is $GITHUB_REF_NAME; releases must come from main"
+            exit 1
+          fi
+
+      - name: main must still be the commit we intended to release
+        if: ${{ inputs.expect_sha != '' }}
+        env:
+          EXPECT_SHA: ${{ inputs.expect_sha }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_SHA" != "$EXPECT_SHA" ]; then
+            echo "::error::main has moved: expected $EXPECT_SHA, got $GITHUB_SHA"
+            exit 1
+          fi
+
+      - name: Refuse a tag that points at a different commit
+        env:
+          TAG: ${{ steps.versions.outputs.tag }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          HEAD_SHA="$(git rev-parse HEAD)"
+          AT="$(git rev-parse -q --verify "refs/tags/$TAG^{commit}" 2>/dev/null || true)"
+          if [ -n "$AT" ] && [ "$AT" != "$HEAD_SHA" ]; then
+            MSG="tag $TAG already exists on $AT, not this commit — bump the version first"
+            if [ "${DRY_RUN:-false}" = "true" ]; then
+              echo "::warning::$MSG (rehearsal: a real release stops here)"
+            else
+              echo "::error::$MSG"
+              exit 1
+            fi
+          fi
+          if [ -n "$AT" ]; then echo "$TAG already points here; nothing to create"; fi
+
+      # lean fetches its own pinned runner; every other port reads OMNI_HOME.
+      - name: Checkout voxgig/omni (test runner)
+        if: ${{ inputs.target != 'lean' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: voxgig/omni
+          path: .omni
+          ref: ${{ env.OMNI_REF }}
+
+      - name: Setup PHP
+        if: ${{ inputs.target == 'php' }}
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+        with:
+          php-version: '8.3'
+
+      - name: Install PHP dependencies
+        if: ${{ inputs.target == 'php' }}
+        working-directory: php
+        run: composer install
+        env:
+          COMPOSER_HOME: ${{ runner.temp }}/composer-home
+
+      - name: Install nlohmann/json
+        if: ${{ inputs.target == 'cpp' }}
+        run: |
+          sudo apt-get update || true
+          sudo apt-get install -y nlohmann-json3-dev
+
+      - name: Setup Swift
+        if: ${{ inputs.target == 'swift' }}
+        uses: SwiftyLab/setup-swift@38f54a76b70d989321de9dc7c840618c08cf56e9 # v1.14.0
+        with:
+          swift-version: '6.0.2'
+
+      - name: Setup Zig
+        if: ${{ inputs.target == 'zig' }}
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check --quiet \
+            --require-hashes -r "$GITHUB_WORKSPACE/.github/zig-requirements.txt"
+          bin="$RUNNER_TEMP/zigbin"; mkdir -p "$bin"
+          printf '#!/bin/sh\nexec %s -m ziglang "$@"\n' python3 > "$bin/zig"
+          chmod +x "$bin/zig"
+          echo "$bin" >> "$GITHUB_PATH"
+          "$bin/zig" version
+
+      - name: Install Lean toolchain (elan)
+        if: ${{ inputs.target == 'lean' }}
+        env:
+          ELAN_VERSION: 'v4.2.3'
+          ELAN_SHA256_LINUX: 'df0b2b3a439961ffcbb3985214365ffe40f49bc871df04dff268c7d8e21ca8b2'
+        run: |
+          set -euo pipefail
+          asset=elan-x86_64-unknown-linux-gnu.tar.gz
+          archive="$RUNNER_TEMP/$asset"
+          curl -sSfL --retry 5 --retry-delay 5 --retry-all-errors \
+            -o "$archive" \
+            "https://github.com/leanprover/elan/releases/download/$ELAN_VERSION/$asset"
+          echo "$ELAN_SHA256_LINUX  $archive" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/elan"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/elan"
+          "$RUNNER_TEMP/elan/elan-init" -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Test
+        working-directory: ${{ inputs.target }}
+        env:
+          OMNI_HOME: ${{ github.workspace }}/.omni
+        run: make test
+
+  tag-registryless:
+    name: tag (${{ inputs.target }})
+    needs: verify-registryless
+    if: ${{ github.event_name == 'workflow_dispatch' && contains(fromJSON('["php","c","cpp","swift","zig","lean"]'), inputs.target) && !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Tag the release
+        env:
+          TARGET: ${{ inputs.target }}
+          TAG: ${{ needs.verify-registryless.outputs.tag }}
+          VERSION: ${{ needs.verify-registryless.outputs.version }}
+        run: |
+          set -euo pipefail
+          HEAD_SHA="$(git rev-parse HEAD)"
+          AT="$(git rev-parse -q --verify "refs/tags/$TAG^{commit}" 2>/dev/null || true)"
+          if [ -n "$AT" ]; then
+            if [ "$AT" != "$HEAD_SHA" ]; then
+              echo "::error::$TAG exists on $AT, not this commit ($HEAD_SHA)"
+              exit 1
+            fi
+            echo "$TAG already points here — nothing to do" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # Annotated, with the message the port's Makefile writes.
+          git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              tag -a "$TAG" -m "$TARGET v$VERSION"
           git push origin "refs/tags/$TAG"
           echo "pushed $TAG" >> "$GITHUB_STEP_SUMMARY"
