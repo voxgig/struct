@@ -39,7 +39,7 @@ the registry side, keyed to this repository and this workflow filename.
 |---|---|---|---|---|
 | typescript | npm `@voxgig/struct` | live | OIDC | done |
 | rust | crates.io `voxgig-struct` | live | OIDC | done |
-| javascript | npm `@voxgig/struct-js` | OIDC | OIDC | register publisher — outstanding |
+| javascript | npm `@voxgig/struct-js` | live | OIDC | done |
 | python | PyPI `voxgig-struct` | OIDC | `pypa/gh-action-pypi-publish` | add trusted publisher |
 | ruby | RubyGems `voxgig_struct` | OIDC | `rubygems/release-gem` | add trusted publisher |
 | csharp | NuGet `Voxgig.Struct` | OIDC | `NuGet/login@v1` | add publishing policy |
@@ -109,11 +109,11 @@ tag-python:
 Ordered by dependency rather than by size.
 
 1. **Finish what is outstanding.** The npm trusted publisher for
-   `@voxgig/struct-js` is still not registered: a `target: javascript`
-   dispatch on 2026-09-03 failed the OIDC exchange, and npm still serves
+   `@voxgig/struct-js` was the missing piece: a `target: javascript`
+   dispatch on 2026-09-03 failed the OIDC exchange, and npm served only
    0.1.2 — the token publish that created the package, carrying no
-   provenance. `javascript/package.json` is at 0.1.4, so the port is one
-   registration away from a release. (0.1.3 was tagged but never published;
+   provenance. It was registered the next day, and 0.1.4 was the port's
+   first release from CI. (0.1.3 was tagged but never published;
    the guard against tagging a commit the registry does not carry is what
    sent it forward to 0.1.4 rather than back.) Typescript's tag scheme is
    unified with the rest here too: it released under a bare `v<version>` up
