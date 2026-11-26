@@ -353,9 +353,9 @@ Two tag namespaces, because there are two kinds of thing to release.
 **Three ports are on the CI path**: typescript and javascript on npm, rust
 on crates.io — released by dispatching `publish.yml` rather than by
 `make publish-<lang>`. All three use the `<lang>/v<version>` tag shape every
-other port uses; only the credential and the operator changed. Typescript
-and rust have a trusted publisher registered against `publish.yml`;
-javascript does not yet, which is the paragraph after next.
+other port uses; only the credential and the operator changed. All three
+have a trusted publisher registered against `publish.yml`, so each release
+from CI carries a provenance attestation.
 
 **go can be released from CI too**, by a `target: go` dispatch. It runs the
 build, `vet` and the tests `make publish-go` runs, then writes the same
@@ -368,16 +368,16 @@ up to `v0.3.4`, and those 16 tags stay — they are what those releases went
 out under. Everything from the next release on is `typescript/v<version>`,
 which is the only shape `tools/release_status.py` can read.
 
-**`@voxgig/struct-js` has no working trusted publisher.** npm registers one
-only on a package that already exists, so 0.1.2 went out as one plain token
-publish — it sits on npm under a person's name with no provenance
-attestation, where `@voxgig/struct@0.3.4` carries one. A `target:
-javascript` dispatch on 2026-09-03 failed the OIDC exchange all the same,
-which npm reports as a 404 on the `PUT` of `@voxgig/struct-js`: the tests
-passed and the tarball packed, the upload was refused. Register a publisher
-for the package against this repository and the filename `publish.yml` on
-its npm settings page. Until that is done javascript cannot be released from
-CI, and `javascript/package.json` sits at 0.1.4 unreleased.
+**`@voxgig/struct-js` got its trusted publisher after its first release.**
+npm registers one only on a package that already exists, so 0.1.2 went out
+as one plain token publish — it sits on npm under a person's name with no
+provenance attestation. A `target: javascript` dispatch on 2026-09-03 then
+failed the OIDC exchange, which npm reports as a 404 on the `PUT` of
+`@voxgig/struct-js`: the tests passed and the tarball packed, the upload was
+refused. The publisher was registered against this repository and the
+filename `publish.yml` by the next day, and every release since, 0.1.4 to
+0.3.0, went out from `publish.yml` with provenance. If a dispatch fails that
+way again, check that registration on the package's npm settings page first.
 
 **A first release under a NEW package name is one plain `npm publish`, not
 `make publish`** — the case `@voxgig/struct-js` was in at 0.1.2, and the
@@ -485,19 +485,11 @@ publish-rust`, also exist — **prefer the workflow**:
   11.19.1). Older npm answers `Unknown command: "stage"`, which reads like
   a typo and is not one.
 
-**The two namespaces are already out of step, and `make status` is the one
-thing that cannot see it.** The dashboard reads only `<lang>/v*`, so for
-typescript it tracks the abandoned `typescript/v0.2.1` and ignores every bare
-`v*` tag — including the current `v0.3.2`. It therefore reports:
-
-```
-typescript  0.3.2  typescript/v0.2.1  0.3.2  publish-pending
-```
-
-publish-pending for a version that is on npm. That is not a stale row waiting
-on a release; it is what the dashboard will keep saying after every successful
-CI release, until it learns about bare tags. Treat typescript's row as
-unreliable, and read `git ls-remote --tags origin 'v*'` for the truth.
+**`make status` reads typescript correctly from 0.3.5 on**, the first
+release cut under `typescript/v<version>`. Before that the dashboard tracked
+the abandoned `typescript/v0.2.1` and reported publish-pending for versions
+that were live on npm. The bare `v*` tags up to `v0.3.4` stay invisible to
+it, so for those releases read `git ls-remote --tags origin 'v*'`.
 
 **`make publish-rust` cuts the same `rust/v<version>` tag the workflow does**,
 so unlike typescript there is no split namespace to reconcile — the only
